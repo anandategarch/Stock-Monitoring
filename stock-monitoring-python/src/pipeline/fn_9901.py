@@ -18,11 +18,12 @@ from .helpers import (
 )
 
 
-def _find_column(df_cols, candidates, contains_any=None):
-    """Find column by exact match (case-insensitive) or by substring.
+def _find_column(df_cols, candidates, contains_any=None, exclude=None):
+    """Find column by priority: exact match > substring > exact-short match.
 
-    candidates: list of preferred exact names (case-insensitive).
+    candidates: list of preferred exact names (case-insensitive, trimmed).
     contains_any: list of substrings to match if no exact match found.
+    exclude: list of substrings — if a matched column contains any of these, skip it.
     Returns column name or None.
     """
     if df_cols is None or len(df_cols) == 0:
@@ -30,19 +31,29 @@ def _find_column(df_cols, candidates, contains_any=None):
     # Normalize for case-insensitive comparison
     cols_lower = {str(c).strip().lower(): c for c in df_cols}
 
+    def _is_excluded(col_name_lower):
+        if not exclude:
+            return False
+        return any(ex.lower() in col_name_lower for ex in exclude)
+
     # 1) Exact match (case-insensitive, trimmed)
     for cand in candidates or []:
         key = str(cand).strip().lower()
-        if key in cols_lower:
+        if key in cols_lower and not _is_excluded(key):
             return cols_lower[key]
 
-    # 2) Substring match
+    # 2) Substring match (prefer SHORTEST column name to avoid false positives)
     if contains_any:
         for substr in contains_any:
             substr_l = str(substr).lower()
+            # Collect all matching columns, then pick shortest (most specific)
+            matches = []
             for clow, corig in cols_lower.items():
-                if substr_l in clow:
-                    return corig
+                if substr_l in clow and not _is_excluded(clow):
+                    matches.append((len(clow), corig))
+            if matches:
+                matches.sort(key=lambda x: x[0])  # shortest first
+                return matches[0][1]
 
     return None
 
@@ -94,9 +105,11 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
     # --- Locate columns (flexible matching) ---
+    # Per screenshot from user: actual headers seen = 'Nomor # Penerimaan' (no 'Barang' suffix), 'Barang'
     col_nomor_penerimaan = _find_column(
         prom.columns,
-        candidates=["Nomor # Penerimaan Barang", "Nomor Penerimaan Barang"],
+        candidates=["Nomor # Penerimaan Barang", "Nomor # Penerimaan",
+                    "Nomor Penerimaan Barang", "Nomor Penerimaan"],
         contains_any=["penerimaan"]
     )
     col_jenis = _find_column(
@@ -109,11 +122,21 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         candidates=["#Prime.Qty", "Prime.Qty", "Prime Qty", "#Prime Qty"],
         contains_any=["prime", "qty", "kuantiti", "kuantitas", "jumlah"]
     )
+    # Nama Barang: exclude Jenis column to avoid collision. Also accept 'Barang' alone.
     col_nama_barang = _find_column(
         prom.columns,
-        candidates=["Nama barang", "Nama Barang", "NAMA BARANG"],
-        contains_any=["nama barang"]
+        candidates=["Nama barang", "Nama Barang", "NAMA BARANG", "Barang"],
+        contains_any=["nama barang"],
+        exclude=["jenis"]
     )
+    # Fallback: if still not found, look for column containing 'barang' but not 'jenis'
+    if col_nama_barang is None:
+        col_nama_barang = _find_column(
+            prom.columns,
+            candidates=[],
+            contains_any=["barang"],
+            exclude=["jenis", "penerimaan", "kirim", "masuk", "keluar"]
+        )
     col_nama_cabang = _find_column(
         prom.columns,
         candidates=["Nama cabang", "Nama Cabang", "Cabang"],
