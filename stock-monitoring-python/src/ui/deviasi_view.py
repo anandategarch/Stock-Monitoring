@@ -186,10 +186,15 @@ class DeviasiView(ttk.Frame):
                 return "Beda Tanggal"
 
         # 3. KondisiHitungManual → "Hitung Manual"
-        #    Skip jika data kosong
-        if stok_seharusnya != 0:
-            if so_h != 0 and stok_seharusnya == 0:
+        #    FIX: restructure dead-code branch — old code had unreachable inner
+        #    `if so_h != 0 and stok_seharusnya == 0` inside `if stok_seharusnya != 0`
+        #    New logic: handle stok_seharusnya == 0 case FIRST (top-level), then ratio.
+        if stok_seharusnya == 0:
+            # System reckons 0 but SO says non-zero → manual count suspected
+            if so_h != 0:
                 return "Hitung Manual"
+        else:
+            # Stok seharusnya non-zero — check ratio
             ratio = abs(so_h - stok_seharusnya) / abs(stok_seharusnya)
             if ratio > threshold:
                 return "Hitung Manual"
@@ -231,7 +236,12 @@ class DeviasiView(ttk.Frame):
     # DATA LOADING
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
+        """Load new data from pipeline. FIX: invalidate cached pivot so stale
+        data isn't served after a re-run with the same tanggal_h."""
         self.data = data
+        self._cached_pivot = None  # FIX: invalidate cache (was missing → stale data)
+        self._cached_h = None
+        self._aktif_lookup = {}
         self._populate_filters()
         self._refresh()
 

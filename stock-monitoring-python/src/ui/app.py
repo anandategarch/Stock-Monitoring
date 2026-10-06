@@ -36,9 +36,10 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 from src.config import Config
-from src.main import run_pipeline
+from src.main import run_pipeline, PipelineStopped
 from src.ui.pivot_view import PivotTableView
 from src.ui.deviasi_view import DeviasiView
+from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.rincian_po_view import RincianPoView
 
 # --- Konstanta UI -----------------------------------------------------------
@@ -77,6 +78,8 @@ class StockMonitorApp:
         self.log_queue: queue.Queue = queue.Queue()
         self.worker_thread: threading.Thread | None = None
         self.is_running = False
+        # FIX: stop_event actually interrupts pipeline at checkpoints (was placebo)
+        self.stop_event = threading.Event()
         self.append1_df = None
         self.rincian_po_df = None
 
@@ -138,6 +141,7 @@ class StockMonitorApp:
         self.tab_pivot = ttk.Frame(self.notebook)
         self.tab_deviasi_gr = ttk.Frame(self.notebook)
         self.tab_deviasi_pcs = ttk.Frame(self.notebook)
+        self.tab_laporan = ttk.Frame(self.notebook)  # NEW: LAPORAN DEVIASI tab
         self.tab_rincian = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_config, text="Config")
@@ -145,6 +149,7 @@ class StockMonitorApp:
         self.notebook.add(self.tab_pivot, text="Pivot Table")
         self.notebook.add(self.tab_deviasi_gr, text="DEVIASI GR")
         self.notebook.add(self.tab_deviasi_pcs, text="DEVIASI PCS")
+        self.notebook.add(self.tab_laporan, text="LAPORAN DEVIASI")
         self.notebook.add(self.tab_rincian, text="Rincian PO")
 
         self._build_config_tab()
@@ -152,6 +157,7 @@ class StockMonitorApp:
         self._build_pivot_tab()
         self._build_deviasi_gr_tab()
         self._build_deviasi_pcs_tab()
+        self._build_laporan_tab()  # NEW
         self._build_rincian_tab()
 
     # --- TAB: Config --------------------------------------------------------
@@ -359,6 +365,7 @@ class StockMonitorApp:
 
         self.notebook.select(self.tab_proses)
         self.is_running = True
+        self.stop_event.clear()  # FIX: reset stop flag (was placebo before)
         self.btn_mulai.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.btn_export.configure(state="disabled")
@@ -373,12 +380,18 @@ class StockMonitorApp:
         self.worker_thread.start()
 
     def _run_pipeline_worker(self):
-        """Worker thread: jalankan run_pipeline, tangkap error."""
+        """Worker thread: jalankan run_pipeline, tangkap error.
+        FIX: pass stop_event to run_pipeline (was placebo before — button set
+        is_running=False but worker never checked it)."""
         try:
-            append1_df, rincian_po_df = run_pipeline(verbose=True)
+            append1_df, rincian_po_df = run_pipeline(
+                verbose=True, stop_event=self.stop_event)
             self.append1_df = append1_df
             self.rincian_po_df = rincian_po_df
             self.root.after(0, lambda: self._on_pipeline_done(append1_df, rincian_po_df, None))
+        except PipelineStopped as e:
+            # User-initiated stop — not an error
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, (e, None)))
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -391,12 +404,19 @@ class StockMonitorApp:
         self.btn_mulai.configure(state="normal")
         self.btn_stop.configure(state="disabled")
 
+        # FIX: handle PipelineStopped (user-initiated) gracefully — not an error
         if error is not None:
             exc, tb = error
+            if isinstance(exc, PipelineStopped):
+                self.status_var.set("Status: DIHENTIKAN oleh user.")
+                self._append_log(f"\n[STOP] {exc}\n")
+                # Don't show error popup for user-initiated stop
+                return
             self.status_var.set("Status: ERROR.")
             self._append_log("\n[ERROR] Pipeline gagal:\n")
             self._append_log(str(exc) + "\n")
-            self._append_log("\n" + tb + "\n")
+            if tb:
+                self._append_log("\n" + tb + "\n")
             messagebox.showerror("Pipeline Gagal",
                 f"Terjadi error:\n{exc}\n\nLihat log di tab Proses untuk detail.",
                 parent=self.root)
@@ -411,6 +431,7 @@ class StockMonitorApp:
         self.pivot_view.load_data(append1_df)
         self.deviasi_gr_view.load_data(append1_df)
         self.deviasi_pcs_view.load_data(append1_df)
+        self.laporan_view.load_data(append1_df)  # NEW: LAPORAN DEVIASI
         self.rincian_view.load_data(rincian_po_df)
         self.btn_export.configure(state="normal")
 
@@ -419,13 +440,16 @@ class StockMonitorApp:
 
         messagebox.showinfo("Selesai",
             f"Pipeline selesai.\n\nAppend1: {len(append1_df)} rows\nRincian PO: {len(rincian_po_df)} rows\n\n"
-            f"Lihat data di tab Pivot Table, DEVIASI GR, DEVIASI PCS & Rincian PO.",
+            f"Lihat data di tab Pivot Table, DEVIASI GR, DEVIASI PCS, LAPORAN DEVIASI & Rincian PO.",
             parent=self.root)
 
     def _stop_pipeline(self):
-        """Stop the pipeline (graceful — sets flag, thread checks it)."""
+        """Stop the pipeline (graceful — sets stop_event, pipeline checks it
+        at major checkpoints and raises PipelineStopped).
+        FIX: was placebo before — only set is_running=False, worker never checked."""
         if not self.is_running:
             return
+        self.stop_event.set()  # FIX: signal worker thread to stop at next checkpoint
         self.is_running = False
         self.btn_stop.configure(state="disabled")
         self.status_var.set("Status: menghentikan pipeline...")
@@ -468,6 +492,19 @@ class StockMonitorApp:
     def _build_deviasi_pcs_tab(self):
         self.deviasi_pcs_view = DeviasiView(self.tab_deviasi_pcs, satuan_mode="PCS")
         self.deviasi_pcs_view.pack(fill="both", expand=True)
+
+    # --- TAB: LAPORAN DEVIASI (NEW) ------------------------------------------
+    def _build_laporan_tab(self):
+        """NEW: Long-format daily audit with 6-way Status Audit classification.
+
+        Inspired by sample Excel sheet 'LAPORAN_DEVIASI' which provides per-day
+        audit per (Resto, Nama Barang, Tanggal) with cumulative Saldo Kumulatif
+        and Status Analisis Audit classification:
+          - OK (Matching) / OK (Dalam Cut-off) / DEVIASI MURNI /
+            VALID (Sistem Masuk) / CUT-OFF RESOLVED / REVIEW
+        """
+        self.laporan_view = LaporanDeviasiView(self.tab_laporan)
+        self.laporan_view.pack(fill="both", expand=True)
 
     # --- TAB: Rincian PO ----------------------------------------------------
     def _build_rincian_tab(self):

@@ -460,7 +460,7 @@ def run_test():
     # Check JENIS values
     jenis_values = set(append1_df["JENIS"].unique())
     print(f"    JENIS values: {jenis_values}")
-    expected_jenis = {"1.SO", "2.SALDO AKHIR", "3.DEVIASI", "4.IN", "5.BARANG MASUK", "6.Selisih IN", "7.OUT", "SALDO AWAL"}
+    expected_jenis = {"1.SO", "2.SALDO AKHIR", "3.DEVIASI", "4.IN", "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.OUT", "SALDO AWAL"}
     assert jenis_values == expected_jenis, f"JENIS mismatch: expected {expected_jenis}, got {jenis_values}"
 
     # Check KATEGORI

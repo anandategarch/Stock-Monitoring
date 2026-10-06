@@ -22,13 +22,20 @@ from src.pipeline.append1 import build_append1
 from src.pipeline.rincian_po import build_rincian_po
 
 
-def run_pipeline(config_path: str = None, verbose: bool = True):
+class PipelineStopped(Exception):
+    """Raised when user requests stop via UI Stop button."""
+    pass
+
+
+def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None):
     """
     Jalankan pipeline lengkap. Return DataFrames (no Excel output).
 
     Args:
         config_path: Path ke config.json (default: config.json di root project)
         verbose: Print progress
+        stop_event: threading.Event — jika set, pipeline akan berhenti di checkpoint
+                    berikutnya dengan raise PipelineStopped
 
     Returns:
         Tuple (append1_df, rincian_po_df)
@@ -53,7 +60,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True):
         print("  [1/2] Building Append1 (main pipeline)...")
         print("-" * 60)
 
-    append1_df = build_append1(config)
+    append1_df = build_append1(config, stop_event=stop_event)
+
+    # FIX: check stop_event after Append1 build
+    if stop_event is not None and stop_event.is_set():
+        raise PipelineStopped("Pipeline dihentikan oleh user setelah Append1")
 
     if verbose:
         print(f"\n  Append1 result: {len(append1_df)} rows")
@@ -67,6 +78,10 @@ def run_pipeline(config_path: str = None, verbose: bool = True):
         print("-" * 60)
 
     rincian_po_df = build_rincian_po(config)
+
+    # FIX: check stop_event after Rincian PO build
+    if stop_event is not None and stop_event.is_set():
+        raise PipelineStopped("Pipeline dihentikan oleh user setelah Rincian PO")
 
     if verbose:
         print(f"\n  Rincian PO result: {len(rincian_po_df)} rows")

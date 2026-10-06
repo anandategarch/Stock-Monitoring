@@ -47,4 +47,13 @@ def fn_dbs_kategori(folder_path: str) -> pd.DataFrame:
     for col in keep.columns:
         keep[col] = safe_to_str(keep[col])
 
+    # FIX: drop duplicates on NAMA BARANG (was missing → duplicates caused
+    # doubled values in pivot when merged via LeftOuter join).
+    # Keep first occurrence per NAMA BARANG.
+    if "NAMA BARANG" in keep.columns:
+        before = len(keep)
+        keep = keep.drop_duplicates(subset=["NAMA BARANG"], keep="first").reset_index(drop=True)
+        if before != len(keep):
+            print(f"  [fn_dbs_kategori] Dropped {before - len(keep)} duplicate rows")
+
     return keep.reset_index(drop=True)

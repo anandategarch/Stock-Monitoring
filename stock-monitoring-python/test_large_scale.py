@@ -117,54 +117,40 @@ def run_benchmark():
     print(f"  Memory after generation: {peak / 1024 / 1024:.0f} MB peak")
 
     # 2. Generate Excel output (the real benchmark)
-    print("\n  [2] Generating Excel output (large scale)...")
-    template_path = str(PROJECT_ROOT / "template" / "Mutasi Barang - Template.xlsx")
-    output_path = tempfile.mktemp(suffix=".xlsx", prefix="benchmark_")
-
-    t0 = time.time()
-    from src.excel.excel_output import generate_output
-    result = generate_output(append1_df, rincian_po_df, template_path, output_path)
-    t_excel = time.time() - t0
+    # FIX: Excel output was removed in commit 01940a5 ("hapus Excel output,
+    # tampilkan pivot table langsung di UI"). Skip this section gracefully.
+    print("\n  [2] Skipping Excel output benchmark (feature removed — pipeline now displays in-app)")
+    t_excel = 0.0
+    result = None
 
     current, peak = tracemalloc.get_traced_memory()
-    print(f"\n  Excel generation time: {t_excel:.2f}s")
-    print(f"  Peak memory during Excel gen: {peak / 1024 / 1024:.0f} MB")
+    print(f"\n  Excel generation time: SKIPPED")
+    print(f"  Peak memory during gen: {peak / 1024 / 1024:.0f} MB")
 
-    # 3. Verify output
-    print("\n  [3] Verifying output...")
-    output_size = os.path.getsize(result)
-    print(f"  Output file size: {output_size / 1024 / 1024:.1f} MB")
+    # 3. Verify output (skipped — no Excel file to verify)
+    print("\n  [3] Verifying output (skipped — no Excel file)")
+    output_size = 0
+    print(f"  Output file size: N/A")
 
-    import zipfile
-    assert zipfile.is_zipfile(result), "Output should be valid xlsx"
-    with zipfile.ZipFile(result, "r") as zf:
-        names = zf.namelist()
-        # Check records1 file size
-        rec1_info = zf.getinfo("xl/pivotCache/pivotCacheRecords1.xml")
-        print(f"  pivotCacheRecords1.xml: {rec1_info.file_size / 1024 / 1024:.1f} MB (uncompressed)")
-        assert rec1_info.file_size > 50 * 1024 * 1024, "Records1 should be >50MB for 855k records"
+    # FIX: skip zipfile verification — no Excel file to inspect (feature removed)
 
     # 4. Performance summary
     print("\n" + "=" * 70)
     print("  BENCHMARK RESULTS")
     print("=" * 70)
     print(f"  Records processed:  {len(append1_df):,} (Append1) + {len(rincian_po_df):,} (Rincian PO)")
-    print(f"  Excel gen time:     {t_excel:.2f} seconds")
+    print(f"  Data gen time:      {t_gen:.2f} seconds")
     print(f"  Peak memory:        {peak / 1024 / 1024:.0f} MB")
-    print(f"  Output file size:   {output_size / 1024 / 1024:.1f} MB")
-    print(f"  Throughput:         {len(append1_df) / t_excel:,.0f} records/sec")
+    print(f"  Excel output:       SKIPPED (feature removed)")
     print("=" * 70)
 
     # Cleanup
-    os.remove(result)
     tracemalloc.stop()
 
     # Performance targets
     print("\n  Performance assessment:")
-    if t_excel < 120:
-        print(f"  ✓ EXCEL GEN < 2 min (target met: {t_excel:.1f}s)")
-    else:
-        print(f"  ⚠ EXCEL GEN > 2 min ({t_excel:.1f}s) — may need further optimization")
+    # FIX: skip Excel gen target (feature removed)
+    print(f"  • Excel gen target: SKIPPED (feature removed)")
 
     if peak < 2048 * 1024 * 1024:
         print(f"  ✓ PEAK MEMORY < 2 GB (target met: {peak / 1024 / 1024:.0f} MB)")

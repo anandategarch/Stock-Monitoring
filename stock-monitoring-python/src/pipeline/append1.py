@@ -110,7 +110,7 @@ def _concat_valid_values(series: pd.Series) -> str:
     return ", ".join(distinct) if distinct else None
 
 
-def build_append1(config) -> pd.DataFrame:
+def build_append1(config, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
@@ -118,6 +118,8 @@ def build_append1(config) -> pd.DataFrame:
     LightMode (config.LightMode=True):
     - Skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam) — hemat kolom & grouping time
     - Pre-filter KATEGORI=DEVIASI di awal — hemat ~60% data
+
+    stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
     """
     print(f"  [Append1] Mode: {'LIGHT' if config.LightMode else 'FULL'}")
     print("  [Append1] Loading master data...")
@@ -134,6 +136,11 @@ def build_append1(config) -> pd.DataFrame:
     q4217 = query_4217(config)
     print(f"    4217 (Saldo Awal): {len(q4217)} rows")
 
+    # FIX: Stop checkpoint after 4217 load
+    if stop_event is not None and stop_event.is_set():
+        from src.main import PipelineStopped
+        raise PipelineStopped("Dihentikan setelah load 4217")
+
     full_rekap_so = query_full_rekap_mentah_so(config)
     print(f"    Full Rekap Mentah SO: {len(full_rekap_so)} rows")
 
@@ -145,6 +152,11 @@ def build_append1(config) -> pd.DataFrame:
 
     in_df = query_in(config, konversi)
     print(f"    IN: {len(in_df)} rows")
+
+    # FIX: Stop checkpoint after IN load
+    if stop_event is not None and stop_event.is_set():
+        from src.main import PipelineStopped
+        raise PipelineStopped("Dihentikan setelah load IN")
 
     # Combine all 5 sources
     parts = []
