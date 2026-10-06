@@ -1,6 +1,7 @@
 """
 main.py — Pipeline runner (orchestrator).
-Menjalankan seluruh pipeline: build Append1 + Rincian PO → generate Excel output.
+Menjalankan pipeline: build Append1 + Rincian PO → return DataFrames.
+Tidak ada Excel output — data ditampilkan langsung di UI.
 
 Bisa dipanggil langsung (CLI) atau dari UI Tkinter.
 """
@@ -19,20 +20,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import Config
 from src.pipeline.append1 import build_append1
 from src.pipeline.rincian_po import build_rincian_po
-from src.excel.excel_output import generate_output
 
 
-def run_pipeline(config_path: str = None, output_path: str = None, verbose: bool = True) -> str:
+def run_pipeline(config_path: str = None, verbose: bool = True):
     """
-    Jalankan pipeline lengkap.
+    Jalankan pipeline lengkap. Return DataFrames (no Excel output).
 
     Args:
         config_path: Path ke config.json (default: config.json di root project)
-        output_path: Path output xlsx (default: dari config)
         verbose: Print progress
 
     Returns:
-        Path ke output file.
+        Tuple (append1_df, rincian_po_df)
     """
     start_time = time.time()
 
@@ -46,12 +45,12 @@ def run_pipeline(config_path: str = None, output_path: str = None, verbose: bool
 
     if verbose:
         print(f"\n  RootPath: {config.RootPath}")
-        print(f"  Output: {output_path or config.default_output()}")
+        print(f"  Mode: {'LIGHT' if config.LightMode else 'FULL'}")
 
     # 2. Build Append1
     if verbose:
         print("\n" + "-" * 60)
-        print("  [1/3] Building Append1 (main pipeline)...")
+        print("  [1/2] Building Append1 (main pipeline)...")
         print("-" * 60)
 
     append1_df = build_append1(config)
@@ -64,7 +63,7 @@ def run_pipeline(config_path: str = None, output_path: str = None, verbose: bool
     # 3. Build Rincian PO
     if verbose:
         print("\n" + "-" * 60)
-        print("  [2/3] Building Rincian PO...")
+        print("  [2/2] Building Rincian PO...")
         print("-" * 60)
 
     rincian_po_df = build_rincian_po(config)
@@ -72,38 +71,27 @@ def run_pipeline(config_path: str = None, output_path: str = None, verbose: bool
     if verbose:
         print(f"\n  Rincian PO result: {len(rincian_po_df)} rows")
 
-    # 4. Generate Excel output
-    if verbose:
-        print("\n" + "-" * 60)
-        print("  [3/3] Generating Excel output...")
-        print("-" * 60)
-
-    if output_path is None:
-        output_path = config.default_output()
-
-    result_path = generate_output(append1_df, rincian_po_df, config.template_path(),
-                                   output_path, light_mode=config.LightMode)
-
     elapsed = time.time() - start_time
     if verbose:
         print(f"\n{'=' * 60}")
         print(f"  SELESAI dalam {elapsed:.1f} detik")
-        print(f"  Output: {result_path}")
+        print(f"  Append1: {len(append1_df)} rows | Rincian PO: {len(rincian_po_df)} rows")
         print(f"{'=' * 60}")
 
-    return result_path
+    return append1_df, rincian_po_df
 
 
 if __name__ == "__main__":
-    # CLI mode
+    # CLI mode — just run pipeline and print summary
     import argparse
     parser = argparse.ArgumentParser(description="Stock Monitoring Pipeline")
     parser.add_argument("--config", default=None, help="Path ke config.json")
-    parser.add_argument("--output", default=None, help="Path output xlsx")
     args = parser.parse_args()
 
     try:
-        run_pipeline(config_path=args.config, output_path=args.output)
+        append1_df, rincian_po_df = run_pipeline(config_path=args.config)
+        print(f"\nAppend1: {len(append1_df)} rows")
+        print(f"Rincian PO: {len(rincian_po_df)} rows")
     except Exception as e:
         print(f"\n[ERROR] {e}")
         import traceback

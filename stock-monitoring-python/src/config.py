@@ -24,7 +24,6 @@ class Config:
         self.LightMode = data.get("LightMode", True)  # Default: True (ringan)
         self.Folders = data["Folders"]
         self.Sheets = data["Sheets"]
-        self.Output = data.get("Output", {})
 
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:
@@ -34,13 +33,3 @@ class Config:
     def sheet(self, key: str) -> str:
         """Return sheet name untuk key (e.g., 'Penjualan2205')."""
         return self.Sheets[key]
-
-    def template_path(self) -> str:
-        """Return full path ke template xlsx."""
-        base = Path(__file__).resolve().parent.parent
-        return str(base / self.Output.get("TemplateFile", "template/Mutasi Barang - Template.xlsx"))
-
-    def default_output(self) -> str:
-        """Return full path default output."""
-        base = Path(__file__).resolve().parent.parent
-        return str(base / self.Output.get("DefaultOutput", "output/Mutasi Barang.xlsx"))
