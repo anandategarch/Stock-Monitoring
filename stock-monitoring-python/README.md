@@ -5,7 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
-> UI: Tkinter 4-tab (Config / Proses / Pivot Table / Rincian PO).
+> UI: Tkinter 7-tab (Config / Proses / Pivot Table / DEVIASI GR / DEVIASI PCS / LAPORAN DEVIASI / Rincian PO).
 
 ---
 
@@ -63,20 +63,24 @@ stock-monitoring-python/
     │   ├── fn_rekap_mentah.py    # SO + BARANG MASUK (NAMA RESTO dari file name)
     │   ├── fn_2205.py            # Penjualan (OUT)
     │   ├── fn_3224.py            # Penerimaan (IN)
-    │   ├── fn_4215.py            # Pemindahan kirim (OUT)
+    │   ├── fn_9901.py            # Mutasi tanpa nomor penerimaan (IN tambahan)
+    │   ├── fn_4215.py            # Pemindahan kirim (BARANG KELUAR)
     │   ├── fn_4205.py            # Pemindahan barang (IN)
     │   ├── fn_4217.py            # Saldo awal
     │   ├── fn_pi.py              # Faktur pembelian (IN + konversi satuan)
     │   ├── fn_konversi_satuan.py # Master konversi
-    │   ├── fn_dbs_kategori.py    # Master kategori
+    │   ├── fn_dbs_kategori.py    # Master kategori (incl. AKTIF/NON)
     │   ├── fn_running_stock.py   # Algoritma running balance (vectorized cumsum)
     │   ├── queries.py            # OUT, IN, Full Rekap SO (LightMode: skip bulan lalu)
     │   ├── append1.py            # Pipeline utama (LightMode: pre-filter DEVIASI)
     │   └── rincian_po.py         # Query Rincian PO
     └── ui/
         ├── __init__.py
-        ├── app.py                # Tkinter 4-tab UI
+        ├── app.py                # Tkinter 7-tab UI
         ├── pivot_view.py         # Excel-like pivot table widget
+        ├── deviasi_view.py       # DEVIASI GR/PCS view + CEK anomaly detection
+        ├── laporan_deviasi_view.py # LAPORAN DEVIASI view + 6-way Status Audit
+        ├── details_popup.py      # Double-click source data popup
         └── rincian_po_view.py    # Rincian PO table widget
 ```
 

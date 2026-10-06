@@ -104,6 +104,19 @@ class DeviasiView(ttk.Frame):
         ttk.Button(filter_frame, text="Reset Filter", command=self._reset_filter).grid(
             row=1, column=3, padx=4, pady=4, sticky="w")
 
+        # Row 2: Search box for Nama Barang (FIX: substring search)
+        ttk.Label(filter_frame, text="CARI BARANG:").grid(
+            row=2, column=0, padx=(8, 4), pady=4, sticky="w")
+        self.search_var = tk.StringVar(value="")
+        search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=30)
+        search_entry.grid(row=2, column=1, columnspan=3, padx=(0, 12), pady=4, sticky="ew")
+        # FIX: bind KeyRelease for live substring filter
+        search_entry.bind("<KeyRelease>", lambda e: self._refresh())
+        ttk.Label(filter_frame,
+            text="(substring match — kosongkan untuk lihat semua)",
+            font=("Segoe UI", 8, "italic"), foreground="#666"
+        ).grid(row=2, column=4, padx=4, pady=4, sticky="w")
+
         # --- Treeview ---
         tree_frame = ttk.Frame(self)
         tree_frame.pack(fill="both", expand=True)
@@ -130,11 +143,12 @@ class DeviasiView(ttk.Frame):
         tree_frame.grid_columnconfigure(0, weight=1)
 
         # --- Hint + Status ---
+        # FIX: contrast #888 → #666 (WCAG AA)
         ttk.Label(
             self,
             text="Double-click baris untuk melihat detail source data",
             font=("Segoe UI", 9, "italic"),
-            foreground="#888",
+            foreground="#666",
         ).pack(anchor="w", pady=(2, 0))
 
         self.status_var = tk.StringVar(value="Belum ada data. Jalankan pipeline di tab Proses.")
@@ -149,7 +163,8 @@ class DeviasiView(ttk.Frame):
         # Negative Deviasi → red font
         self.tree.tag_configure("negative", foreground="#CC0000")
         # Zero Deviasi → gray font
-        self.tree.tag_configure("zero_dev", foreground="#999999")
+        # FIX: contrast #999999 → #777777 (WCAG AA)
+        self.tree.tag_configure("zero_dev", foreground="#777777")
         # CEK categories — color-coded for quick visual scan
         self.tree.tag_configure("cek_kosong", foreground="#996633")       # brown — Kosong/Non Aktif
         self.tree.tag_configure("cek_tanggal", foreground="#0066CC")       # blue — Beda Tanggal

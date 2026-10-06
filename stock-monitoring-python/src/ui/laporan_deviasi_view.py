@@ -101,15 +101,31 @@ class LaporanDeviasiView(ttk.Frame):
             row=1, column=0, padx=(8, 4), pady=4, sticky="w")
         self.tgl_start_var = tk.StringVar(value="1")
         self.tgl_end_var = tk.StringVar(value="31")
-        ttk.Entry(filter_frame, textvariable=self.tgl_start_var, width=5).grid(
-            row=1, column=1, padx=(0, 2), pady=4, sticky="w")
+        # FIX: bind <Return> on both entries + add validation message
+        tgl_start_entry = ttk.Entry(filter_frame, textvariable=self.tgl_start_var, width=5)
+        tgl_start_entry.grid(row=1, column=1, padx=(0, 2), pady=4, sticky="w")
+        tgl_start_entry.bind("<Return>", lambda e: self._on_tanggal_change())
         ttk.Label(filter_frame, text="-").grid(row=1, column=1, padx=(35, 0))
-        ttk.Entry(filter_frame, textvariable=self.tgl_end_var, width=5).grid(
-            row=1, column=1, padx=(55, 12), pady=4, sticky="w")
-        ttk.Button(filter_frame, text="Apply", command=self._refresh).grid(
+        tgl_end_entry = ttk.Entry(filter_frame, textvariable=self.tgl_end_var, width=5)
+        tgl_end_entry.grid(row=1, column=1, padx=(55, 12), pady=4, sticky="w")
+        tgl_end_entry.bind("<Return>", lambda e: self._on_tanggal_change())
+        ttk.Button(filter_frame, text="Apply", command=self._on_tanggal_change).grid(
             row=1, column=2, padx=4, pady=4, sticky="w")
         ttk.Button(filter_frame, text="Reset Filter", command=self._reset_filter).grid(
             row=1, column=3, padx=4, pady=4, sticky="w")
+
+        # Row 2: Search box for Nama Barang (FIX: substring search)
+        ttk.Label(filter_frame, text="CARI BARANG:").grid(
+            row=2, column=0, padx=(8, 4), pady=4, sticky="w")
+        self.search_var = tk.StringVar(value="")
+        search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=30)
+        search_entry.grid(row=2, column=1, columnspan=2, padx=(0, 12), pady=4, sticky="ew")
+        # FIX: bind KeyRelease for live substring filter
+        search_entry.bind("<KeyRelease>", lambda e: self._refresh())
+        ttk.Label(filter_frame,
+            text="(substring match — kosongkan untuk lihat semua)",
+            font=("Segoe UI", 8, "italic"), foreground="#666"
+        ).grid(row=2, column=3, columnspan=2, padx=4, pady=4, sticky="w")
 
         # --- Treeview ---
         tree_frame = ttk.Frame(self)
@@ -135,11 +151,12 @@ class LaporanDeviasiView(ttk.Frame):
         tree_frame.grid_columnconfigure(0, weight=1)
 
         # --- Hint + Status ---
+        # FIX: contrast #888 → #666 (WCAG AA)
         ttk.Label(
             self,
             text="Double-click baris untuk melihat detail source data",
             font=("Segoe UI", 9, "italic"),
-            foreground="#888",
+            foreground="#666",
         ).pack(anchor="w", pady=(2, 0))
 
         self.status_var_label = tk.StringVar(
@@ -364,7 +381,7 @@ class LaporanDeviasiView(ttk.Frame):
     # =========================================================================
     def _refresh(self):
         if self.data is None or self.data.empty:
-            self.status_var_label.set("Belum ada data.")
+            self.status_var_label.set("Belum ada data. Jalankan pipeline di tab Proses.")
             return
 
         # Compute (cache by signature)
@@ -372,7 +389,13 @@ class LaporanDeviasiView(ttk.Frame):
             tgl_start = int(self.tgl_start_var.get())
             tgl_end = int(self.tgl_end_var.get())
         except ValueError:
-            messagebox.showwarning("Invalid", "Tanggal harus angka", parent=self.winfo_toplevel())
+            # FIX: validation message instead of silent popup
+            self.status_var_label.set("Tanggal harus angka. Contoh: 1-31.")
+            return
+
+        # FIX: validate range
+        if tgl_start < 1 or tgl_end < 1 or tgl_start > tgl_end:
+            self.status_var_label.set("Range tanggal tidak valid. Contoh: 1-31.")
             return
 
         sig = (len(self.data), tgl_start, tgl_end)
@@ -399,6 +422,13 @@ class LaporanDeviasiView(ttk.Frame):
         if barang_val and barang_val != "(All)":
             filtered = filtered[filtered["Nama Barang"].astype(str) == barang_val]
 
+        # FIX: apply substring search (case-insensitive)
+        search_val = self.search_var.get().strip().lower()
+        if search_val:
+            filtered = filtered[
+                filtered["Nama Barang"].astype(str).str.lower().str.contains(search_val, regex=False)
+            ]
+
         status_val = self.status_var.get()
         if status_val and status_val != "(All)":
             filtered = filtered[filtered["Status Audit"].astype(str) == status_val]
@@ -407,7 +437,10 @@ class LaporanDeviasiView(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
 
         if filtered.empty:
-            self.status_var_label.set("Tidak ada data setelah filter.")
+            # FIX: actionable empty state
+            self.status_var_label.set(
+                "Tidak ada data setelah filter. Klik 'Reset Filter' atau ubah filter."
+            )
             return
 
         # Sort by |Deviasi| descending (biggest issues first)
@@ -467,7 +500,17 @@ class LaporanDeviasiView(ttk.Frame):
         self.status_var.set("(All)")
         self.tgl_start_var.set("1")
         self.tgl_end_var.set("31")
+        self.search_var.set("")  # FIX: reset search box too
         self._refresh()
+
+    def _on_tanggal_change(self):
+        """FIX: handle Apply button / Return key — validate then refresh."""
+        try:
+            int(self.tgl_start_var.get())
+            int(self.tgl_end_var.get())
+            self._refresh()
+        except ValueError:
+            self.status_var_label.set("Tanggal harus angka. Contoh: 1-31.")
 
     def _sort_by(self, col: str):
         """Sort treeview by column (handles accounting-style negatives)."""

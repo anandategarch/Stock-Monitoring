@@ -77,7 +77,8 @@ class DetailsPopup(tk.Toplevel):
                 header,
                 text=f"Filter aktif: {filter_info}",
                 font=("Segoe UI", 9),
-                foreground="#666",
+                # FIX: contrast #666 → #555 (still acceptable, slightly darker)
+                foreground="#555",
             ).pack(anchor="w", pady=(2, 0))
 
         ttk.Separator(self, orient="horizontal").pack(fill=tk.X, padx=8, pady=4)
@@ -116,7 +117,8 @@ class DetailsPopup(tk.Toplevel):
             self,
             textvariable=self.status_var,
             font=("Segoe UI", 9),
-            foreground="#666",
+            # FIX: contrast #666 → #555
+            foreground="#555",
         ).pack(anchor="w", padx=8, pady=(4, 2))
 
         # --- Button frame ---

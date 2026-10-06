@@ -1,11 +1,14 @@
 """
 app.py — Tkinter UI untuk Stock Monitoring - Python Edition.
 
-4 tab:
-  1. Config      : lihat & ubah RootPath, simpan ke config.json
-  2. Proses      : tombol MULAI PROSES, log real-time, progress
-  3. Pivot Table : visualisasi pivot matrix Append1 (Excel-like)
-  4. Rincian PO  : tabel Rincian PO dengan search + sort
+7 tab:
+  1. Config           : lihat & ubah RootPath, simpan ke config.json
+  2. Proses           : tombol MULAI PROSES + Stop, log real-time, progress
+  3. Pivot Table      : visualisasi pivot matrix Append1 (Excel-like)
+  4. DEVIASI GR       : wide matrix + CEK anomaly detection (satuan GR)
+  5. DEVIASI PCS      : wide matrix + CEK anomaly detection (satuan non-GR)
+  6. LAPORAN DEVIASI  : long-format daily audit + 6-way Status Audit
+  7. Rincian PO       : tabel Rincian PO dengan search + sort
 
 Tidak ada Excel output — data ditampilkan langsung di UI.
 
@@ -14,6 +17,8 @@ Jalankan dengan:
 
 Pipeline dijalankan di thread terpisah supaya UI tidak freeze.
 Log stdout dipipakan ke Text widget lewat queue (thread-safe).
+Stop button benar-benar functional — mengirim stop_event yang dicek di
+checkpoint major (4217, IN, Append1, Rincian PO) dan raise PipelineStopped.
 """
 import os
 import sys
@@ -44,7 +49,7 @@ from src.ui.rincian_po_view import RincianPoView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring - Python Edition"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"  # bumped from 2.0.0 — LAPORAN DEVIASI tab + UI/UX fixes
 WINDOW_SIZE = "1200x700"
 
 # Path config.json di root project
@@ -127,11 +132,11 @@ class StockMonitorApp:
         ttk.Separator(footer, orient="horizontal").pack(fill=tk.X)
         ttk.Label(
             footer,
-            text=f"Stock Monitoring - Python Edition  |  v{APP_VERSION}  |  Pipeline → In-App Pivot View",
+            text=f"Stock Monitoring - Python Edition  |  v{APP_VERSION}  |  7 tabs: Config • Proses • Pivot • DEVIASI GR • DEVIASI PCS • LAPORAN DEVIASI • Rincian PO",
             style="Footer.TLabel",
         ).pack(anchor="w", padx=8, pady=4)
 
-    # --- Notebook + 4 tab ---------------------------------------------------
+    # --- Notebook + 7 tab ---------------------------------------------------
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(expand=True, fill="both", padx=6, pady=6)

@@ -211,15 +211,27 @@ class RincianPoView(ttk.Frame):
     # =========================================================================
     @staticmethod
     def _fmt_num(val) -> str:
+        """FIX: format numbers consistently with other views.
+        - Negative in parentheses (accounting style): (5) not -5
+        - Zero shown as '-'
+        - Whole numbers no decimal, others 1 decimal
+        - Thousand separators
+        """
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
         try:
             v = float(val)
-            if v == int(v):
-                return f"{int(v):,}"
-            return f"{v:,.1f}"
         except (TypeError, ValueError):
             return str(val)
+        if v == 0:
+            return "-"
+        if v == int(v):
+            s = f"{v:,.0f}"
+        else:
+            s = f"{v:,.1f}"
+        if v < 0:
+            return f"({s[1:]})"  # accounting style: (5)
+        return s
 
     @staticmethod
     def _fmt_date(val) -> str:

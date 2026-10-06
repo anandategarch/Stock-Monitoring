@@ -106,6 +106,19 @@ class PivotTableView(ttk.Frame):
         ttk.Button(filter_frame, text="Reset Filter", command=self._reset_filter).grid(
             row=1, column=4, padx=4, pady=4, sticky="w")
 
+        # Row 2: Search box for Nama Barang (FIX: substring search)
+        ttk.Label(filter_frame, text="CARI BARANG:").grid(
+            row=2, column=0, padx=(8, 4), pady=4, sticky="w")
+        self.search_var = tk.StringVar(value="")
+        search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=30)
+        search_entry.grid(row=2, column=1, columnspan=3, padx=(0, 12), pady=4, sticky="ew")
+        # FIX: bind KeyRelease for live substring filter (matches parent rows only)
+        search_entry.bind("<KeyRelease>", lambda e: self._refresh_pivot())
+        ttk.Label(filter_frame,
+            text="(substring match — kosongkan untuk lihat semua)",
+            font=("Segoe UI", 8, "italic"), foreground="#666"
+        ).grid(row=2, column=4, padx=4, pady=4, sticky="w")
+
         # --- Pivot table (Treeview) ---
         tree_frame = ttk.Frame(self)
         tree_frame.pack(fill="both", expand=True)
@@ -127,11 +140,12 @@ class PivotTableView(ttk.Frame):
         ttk.Label(self, textvariable=self.status_var).pack(anchor="w", pady=(2, 0))
 
         # --- Hint bar (above status) ---
+        # FIX: contrast #888 → #666 (WCAG AA)
         ttk.Label(
             self,
             text="Double-click cell/baris untuk melihat detail source data",
             font=("Segoe UI", 9, "italic"),
-            foreground="#888",
+            foreground="#666",
         ).pack(anchor="w", pady=(2, 0))
 
         # --- Bind double-click ---
@@ -213,9 +227,14 @@ class PivotTableView(ttk.Frame):
             if val and val != "(All)" and col in df.columns:
                 df = df[df[col].astype(str) == val]
 
+        # FIX: apply substring search for Nama Barang (case-insensitive)
+        search_val = self.search_var.get().strip().lower()
+        if search_val and "Nama Barang" in df.columns:
+            df = df[df["Nama Barang"].astype(str).str.lower().str.contains(search_val, regex=False)]
+
         if df.empty:
             self.tree.delete(*self.tree.get_children())
-            self.status_var.set("Tidak ada data setelah filter.")
+            self.status_var.set("Tidak ada data setelah filter. Klik 'Reset Filter' atau ubah filter.")
             return
 
         # Compute pivot
@@ -244,8 +263,10 @@ class PivotTableView(ttk.Frame):
 
         # Configure columns
         self.tree["columns"] = [str(t) for t in tanggals]
-        self.tree.column("#0", width=200, minwidth=150)
-        self.tree.heading("#0", text="Row Labels")
+        # FIX: widen tree col #0 from 200 → 280 to fit long Nama Barang
+        self.tree.column("#0", width=280, minwidth=180)
+        # FIX: header text "Row Labels" → "Nama Barang" (Excel jargon removed)
+        self.tree.heading("#0", text="Nama Barang")
         for t in tanggals:
             self.tree.column(str(t), width=70, minwidth=50, anchor="e")
             self.tree.heading(str(t), text=str(t))
@@ -341,6 +362,7 @@ class PivotTableView(ttk.Frame):
         self.barang_var.set("(All)")
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
+        self.search_var.set("")  # FIX: reset search box too
         self._refresh_pivot()
 
     # =========================================================================
