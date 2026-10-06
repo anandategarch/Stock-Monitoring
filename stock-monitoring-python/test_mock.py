@@ -6,6 +6,8 @@ import os
 import sys
 import shutil
 import tempfile
+import zipfile
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -349,6 +351,11 @@ def run_test():
     # Load config
     config = Config(config_path)
 
+    # Force FULL pipeline mode for the mock test so all 10 InfoColumns
+    # (Nomor, Nomor PO, #Tgl/Jam) are produced — needed for existing
+    # column assertions. The Excel LightMode vs FullMode is tested below.
+    config.LightMode = False
+
     # Test individual fn modules
     print("\n  [2] Testing individual fn modules...")
 
@@ -470,26 +477,132 @@ def run_test():
     # All rows should be DEVIASI
     assert all(rincian_po_df["DBS_Kategori.KATEGORI"] == "DEVIASI")
 
-    # Test Excel output
-    print("\n  [6] Testing Excel output generation...")
-    output_path = os.path.join(test_dir, "output", "Mutasi Barang.xlsx")
+    # Test Excel output — BOTH modes (Full + Light)
+    print("\n  [6] Testing Excel output generation (BOTH modes)...")
+
     template_path = str(PROJECT_ROOT / "template" / "Mutasi Barang - Template.xlsx")
 
-    result = generate_output(append1_df, rincian_po_df, template_path, output_path)
-    print(f"    Output: {result}")
-    assert os.path.exists(result), "Output file should exist"
-    assert os.path.getsize(result) > 0, "Output file should not be empty"
+    # ---- 6a. Full mode (pivot cache records approach) ----
+    print("\n  [6a] Full mode (light_mode=False)...")
+    output_full = os.path.join(test_dir, "output", "Mutasi Barang - Full.xlsx")
+    result_full = generate_output(append1_df, rincian_po_df, template_path,
+                                   output_full, light_mode=False)
+    print(f"    Output: {result_full}")
+    assert os.path.exists(result_full), "Full-mode output file should exist"
+    assert os.path.getsize(result_full) > 0, "Full-mode output should not be empty"
+    assert zipfile.is_zipfile(result_full), "Full-mode output should be valid xlsx (zip)"
+    with zipfile.ZipFile(result_full, "r") as zf:
+        names_full = zf.namelist()
+        assert "xl/pivotCache/pivotCacheRecords1.xml" in names_full, \
+            "Full mode should keep pivotCacheRecords1"
+        assert "xl/pivotCache/pivotCacheDefinition1.xml" in names_full, \
+            "Should have pivotCacheDefinition1"
+        assert "xl/pivotTables/pivotTable1.xml" in names_full, "Should have pivotTable1"
+        assert "xl/pivotTables/pivotTable2.xml" in names_full, "Should have pivotTable2"
+        assert "xl/slicerCaches/slicerCache1.xml" in names_full, "Should have slicerCache1"
+        # Full mode should NOT add source data sheets
+        assert "xl/worksheets/sheet3.xml" not in names_full, \
+            "Full mode should not add sheet3.xml"
+    print("    ✓ Full mode artifacts verified")
 
-    # Verify output is valid xlsx (can be unzipped)
-    import zipfile
-    assert zipfile.is_zipfile(result), "Output should be valid xlsx (zip)"
-    with zipfile.ZipFile(result, "r") as zf:
-        names = zf.namelist()
-        assert "xl/pivotCache/pivotCacheRecords1.xml" in names, "Should have pivotCacheRecords1"
-        assert "xl/pivotCache/pivotCacheDefinition1.xml" in names, "Should have pivotCacheDefinition1"
-        assert "xl/pivotTables/pivotTable1.xml" in names, "Should have pivotTable1"
-        assert "xl/pivotTables/pivotTable2.xml" in names, "Should have pivotTable2"
-        assert "xl/slicerCaches/slicerCache1.xml" in names, "Should have slicerCache1"
+    # ---- 6b. Light mode (worksheet source approach) ----
+    print("\n  [6b] Light mode (light_mode=True)...")
+    output_light = os.path.join(test_dir, "output", "Mutasi Barang - Light.xlsx")
+    result_light = generate_output(append1_df, rincian_po_df, template_path,
+                                    output_light, light_mode=True)
+    print(f"    Output: {result_light}")
+    assert os.path.exists(result_light), "Light-mode output file should exist"
+    assert os.path.getsize(result_light) > 0, "Light-mode output should not be empty"
+    assert zipfile.is_zipfile(result_light), "Light-mode output should be valid xlsx (zip)"
+
+    with zipfile.ZipFile(result_light, "r") as zf:
+        names_light = zf.namelist()
+        # Light mode should add source data sheets
+        assert "xl/worksheets/sheet3.xml" in names_light, \
+            "Light mode should add sheet3.xml (SourceData1)"
+        assert "xl/worksheets/sheet4.xml" in names_light, \
+            "Light mode should add sheet4.xml (SourceData2)"
+        # Light mode should DELETE pivotCacheRecords files
+        assert "xl/pivotCache/pivotCacheRecords1.xml" not in names_light, \
+            "Light mode should delete pivotCacheRecords1.xml"
+        assert "xl/pivotCache/pivotCacheRecords2.xml" not in names_light, \
+            "Light mode should delete pivotCacheRecords2.xml"
+        # Should still have pivotCacheDefinition + pivotTables + slicerCaches
+        assert "xl/pivotCache/pivotCacheDefinition1.xml" in names_light
+        assert "xl/pivotCache/pivotCacheDefinition2.xml" in names_light
+        assert "xl/pivotTables/pivotTable1.xml" in names_light
+        assert "xl/pivotTables/pivotTable2.xml" in names_light
+
+        # Verify pivotCacheDefinition1 has worksheet source (not external)
+        def1 = zf.read("xl/pivotCache/pivotCacheDefinition1.xml").decode("utf-8")
+        assert 'cacheSource type="worksheet"' in def1, \
+            "pivotCacheDefinition1 should use worksheet source"
+        assert 'sheet="SourceData1"' in def1, \
+            "pivotCacheDefinition1 should reference SourceData1 sheet"
+        assert 'cacheSource type="external"' not in def1, \
+            "pivotCacheDefinition1 should NOT use external source"
+        # Verify empty sharedItems (Excel will rebuild)
+        assert '<sharedItems/>' in def1, \
+            "pivotCacheDefinition1 should have empty sharedItems"
+
+        # Verify pivotCacheDefinition2 also has worksheet source
+        def2 = zf.read("xl/pivotCache/pivotCacheDefinition2.xml").decode("utf-8")
+        assert 'cacheSource type="worksheet"' in def2
+        assert 'sheet="SourceData2"' in def2
+
+        # Verify pivotTables have refreshOnLoad + empty rowItems/colItems
+        for pt in ["xl/pivotTables/pivotTable1.xml", "xl/pivotTables/pivotTable2.xml"]:
+            pt_xml = zf.read(pt).decode("utf-8")
+            assert 'refreshOnLoad="1"' in pt_xml, \
+                f"{pt} should have refreshOnLoad='1'"
+            # rowItems should be empty (just open-close)
+            m = re.search(r'<rowItems\b[^>]*>(.*?)</rowItems>', pt_xml, re.DOTALL)
+            assert m is not None, f"{pt} should have <rowItems> element"
+            assert m.group(1).strip() == "", \
+                f"{pt} rowItems should be empty (got: {m.group(1)[:80]})"
+            m = re.search(r'<colItems\b[^>]*>(.*?)</colItems>', pt_xml, re.DOTALL)
+            assert m is not None, f"{pt} should have <colItems> element"
+            assert m.group(1).strip() == "", \
+                f"{pt} colItems should be empty (got: {m.group(1)[:80]})"
+
+        # Verify workbook.xml has SourceData1 + SourceData2 sheet entries
+        wb_xml = zf.read("xl/workbook.xml").decode("utf-8")
+        assert 'name="SourceData1"' in wb_xml, \
+            "workbook.xml should register SourceData1 sheet"
+        assert 'name="SourceData2"' in wb_xml, \
+            "workbook.xml should register SourceData2 sheet"
+
+        # Verify workbook.xml.rels has relationships for sheet3 + sheet4
+        rels_xml = zf.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        assert 'Target="worksheets/sheet3.xml"' in rels_xml, \
+            "workbook.xml.rels should have relationship for sheet3.xml"
+        assert 'Target="worksheets/sheet4.xml"' in rels_xml, \
+            "workbook.xml.rels should have relationship for sheet4.xml"
+
+        # Verify [Content_Types].xml has Override entries for sheet3 + sheet4
+        ct_xml = zf.read("[Content_Types].xml").decode("utf-8")
+        assert 'PartName="/xl/worksheets/sheet3.xml"' in ct_xml, \
+            "[Content_Types].xml should have Override for sheet3.xml"
+        assert 'PartName="/xl/worksheets/sheet4.xml"' in ct_xml, \
+            "[Content_Types].xml should have Override for sheet4.xml"
+
+        # Verify sheet3.xml + sheet4.xml have proper structure
+        sheet3_xml = zf.read("xl/worksheets/sheet3.xml").decode("utf-8")
+        assert sheet3_xml.startswith('<?xml'), "sheet3.xml should be valid XML"
+        assert '<worksheet' in sheet3_xml, "sheet3.xml should have <worksheet> root"
+        assert '<sheetData>' in sheet3_xml, "sheet3.xml should have <sheetData>"
+        # Header row should have 10 columns (Append1: A..J)
+        assert '<c r="A1"' in sheet3_xml, "sheet3.xml should have header cell A1"
+        assert '<c r="J1"' in sheet3_xml, "sheet3.xml should have header cell J1 (10th col)"
+
+        sheet4_xml = zf.read("xl/worksheets/sheet4.xml").decode("utf-8")
+        assert sheet4_xml.startswith('<?xml'), "sheet4.xml should be valid XML"
+        assert '<worksheet' in sheet4_xml, "sheet4.xml should have <worksheet> root"
+        # 13 columns: A..M
+        assert '<c r="A1"' in sheet4_xml, "sheet4.xml should have header cell A1"
+        assert '<c r="M1"' in sheet4_xml, "sheet4.xml should have header cell M1 (13th col)"
+
+    print("    ✓ Light mode artifacts verified (sheets, worksheet source, refreshOnLoad, empty rowItems/colItems)")
 
     print("\n  [7] Excel output PASSED!")
 

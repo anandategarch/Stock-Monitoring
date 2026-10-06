@@ -21,6 +21,7 @@ class Config:
             data = json.load(f)
 
         self.RootPath = data["RootPath"]
+        self.LightMode = data.get("LightMode", True)  # Default: True (ringan)
         self.Folders = data["Folders"]
         self.Sheets = data["Sheets"]
         self.Output = data.get("Output", {})

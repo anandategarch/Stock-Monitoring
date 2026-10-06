@@ -81,7 +81,8 @@ def run_pipeline(config_path: str = None, output_path: str = None, verbose: bool
     if output_path is None:
         output_path = config.default_output()
 
-    result_path = generate_output(append1_df, rincian_po_df, config.template_path(), output_path)
+    result_path = generate_output(append1_df, rincian_po_df, config.template_path(),
+                                   output_path, light_mode=config.LightMode)
 
     elapsed = time.time() - start_time
     if verbose:

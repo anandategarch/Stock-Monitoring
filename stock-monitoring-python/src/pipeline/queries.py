@@ -123,9 +123,12 @@ def query_in(config, konversi: pd.DataFrame) -> pd.DataFrame:
     Mirror M: shared IN = let
         Source = Table.Combine({#"3224", #"3224_Bulan Lalu", PI, #"4205"}),
         Added Custom JENIS = "IN"
+
+    LightMode: skip #"3224_Bulan Lalu" (hemat ~50% data IN).
     """
     q3224 = query_3224(config)
-    q3224_lalu = query_3224_bulan_lalu(config)
+    # LightMode: skip bulan lalu
+    q3224_lalu = pd.DataFrame() if config.LightMode else query_3224_bulan_lalu(config)
     qpi = query_pi(config, konversi)
     q4205 = query_4205(config)
 
@@ -155,11 +158,14 @@ def query_full_rekap_mentah_so(config) -> pd.DataFrame:
         d = rename Attribute→Tanggal, NAMA BARANG→Nama Barang,
         e = select {NAMA RESTO, Nama Barang, JENIS, Tanggal, Value},
         f = Tanggal → Int64
+
+    LightMode: skip b (RekapLalu) — hemat ~50% data.
     """
     jenis_filter = ["BARANG MASUK", "SO"]
 
     a = fn_rekap_mentah(config.folder("RekapBerjalan"), "berjalan", jenis_filter=jenis_filter)
-    b = fn_rekap_mentah(config.folder("RekapLalu"), "lalu", jenis_filter=jenis_filter)
+    # LightMode: skip bulan lalu
+    b = pd.DataFrame() if config.LightMode else fn_rekap_mentah(config.folder("RekapLalu"), "lalu", jenis_filter=jenis_filter)
 
     # c = Table.Combine({b, a}) — b first
     parts = []

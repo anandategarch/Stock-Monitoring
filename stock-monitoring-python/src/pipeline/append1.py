@@ -114,7 +114,12 @@ def build_append1(config) -> pd.DataFrame:
     """
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
+
+    LightMode (config.LightMode=True):
+    - Skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam) — hemat kolom & grouping time
+    - Pre-filter KATEGORI=DEVIASI di awal — hemat ~60% data
     """
+    print(f"  [Append1] Mode: {'LIGHT' if config.LightMode else 'FULL'}")
     print("  [Append1] Loading master data...")
     # Pre-load master queries (dipakai multiple times)
     konversi = query_27_konversi_satuan(config)
@@ -156,11 +161,33 @@ def build_append1(config) -> pd.DataFrame:
     print(f"    Combined source: {len(source)} rows")
 
     # =========================================================================
+    # 1.5 LightMode: Pre-filter KATEGORI=DEVIASI
+    # =========================================================================
+    if config.LightMode and len(dbs_kategori) > 0 and "Nama Barang" in source.columns:
+        # Merge kategori dulu untuk filter
+        kat_filter = dbs_kategori[["NAMA BARANG", "KATEGORI"]].copy()
+        kat_filter = kat_filter.rename(columns={"NAMA BARANG": "Nama Barang"})
+        kat_filter = kat_filter[kat_filter["KATEGORI"] == "DEVIASI"]
+        # Get set of barang with KATEGORI=DEVIASI
+        deviasi_barang = set(kat_filter["Nama Barang"].astype(str).unique())
+        # Filter source
+        before = len(source)
+        source["Nama Barang"] = source["Nama Barang"].astype(str)
+        source = source[source["Nama Barang"].isin(deviasi_barang)].reset_index(drop=True)
+        print(f"    LightMode pre-filter KATEGORI=DEVIASI: {before} → {len(source)} rows")
+
+    # =========================================================================
     # 2. KONFIGURASI
     # =========================================================================
     InfoColumns = ["Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT"]
     KeyColumns = ["Nama Barang", "NAMA RESTO", "Tanggal"]
-    AvailableInfoColumns = [c for c in InfoColumns if c in source.columns]
+    # LightMode: skip InfoColumns (hemat grouping time)
+    if config.LightMode:
+        AvailableInfoColumns = []
+        print("    LightMode: skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam)")
+    else:
+        AvailableInfoColumns = [c for c in InfoColumns if c in source.columns]
+
 
     # =========================================================================
     # 3. INFORMATION — group by KeyColumns, concat valid values for InfoColumns

@@ -1,6 +1,7 @@
 {
-  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berbeda. Struktur folder & sheet name HARUS sama dengan export Accurate Online.",
+  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berubah. LightMode=true = pipeline ringan (skip bulan lalu, pre-filter KATEGORI=DEVIASI, skip InfoColumns, worksheet source Excel). LightMode=false = mode penuh (semua data, pivot cache records).",
   "RootPath": "C:\\KERJA\\1. RESTO\\9.NEW QUERY\\",
+  "LightMode": true,
   "Folders": {
     "RekapBerjalan":  "1. DEVIASI WEEKLY",
     "RekapLalu":      "1.12 Rekap Mentah Bulan Lalu",
