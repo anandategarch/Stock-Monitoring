@@ -25,10 +25,16 @@ from typing import Optional
 class PivotTableView(ttk.Frame):
     """Excel-like pivot table in Tkinter."""
 
-    # Metric order (same as Excel sample + COM)
+    # Metric order — fixed per user request:
+    #   4.IN = BARANG MASUK (from query_in: 3224+PI+4205)
+    #   5.BARANG MASUK = from Rekap Mentah (SO report)
+    #   7.Selisih IN = computed
+    #   8.BARANG KELUAR = from 42.15 Kirim (separated from OUT)
+    #   9.OUT = from 22.05 sales (ACR)
     METRICS = [
         "SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
-        "4.IN", "5.BARANG MASUK", "6.PEMAKAIAN (COM)", "6.Selisih IN", "7.OUT",
+        "4.IN", "5.BARANG MASUK", "6.PEMAKAIAN (COM)",
+        "7.Selisih IN", "8.BARANG KELUAR", "9.OUT",
     ]
 
     # Soft pastel background colors per metric (subtle, not jarring)
@@ -41,8 +47,9 @@ class PivotTableView(ttk.Frame):
         "4.IN": "#FFFBE6",                 # light yellow (per sample conditional fmt)
         "5.BARANG MASUK": "#EEF7EC",       # light green (per sample conditional fmt)
         "6.PEMAKAIAN (COM)": "#E8E0F0",    # light purple — COM is a calculated metric
-        "6.Selisih IN": "#FCEEE8",         # light pink
-        "7.OUT": "#F8F0F0",                # very light red
+        "7.Selisih IN": "#FCEEE8",         # light pink
+        "8.BARANG KELUAR": "#FFF0E0",      # light orange — goods sent to other branches
+        "9.OUT": "#F8F0F0",                # very light red — sales (22.05)
     }
 
     def __init__(self, parent, data: pd.DataFrame = None):
@@ -454,8 +461,8 @@ class PivotTableView(ttk.Frame):
                 return pd.Series({t: 0 for t in tanggals})
 
         so = get_series("1.SO")
-        bm = get_series("5.BARANG MASUK")
-        bk = get_series("7.OUT")
+        bm = get_series("4.IN")           # BARANG MASUK = IN (from 3224+PI+4205)
+        bk = get_series("8.BARANG KELUAR") # BARANG KELUAR = 42.15 Kirim only
         sa = get_series("SALDO AWAL")
 
         com_values = {}

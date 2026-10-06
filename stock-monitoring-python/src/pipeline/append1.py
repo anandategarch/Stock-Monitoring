@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 from typing import List
 from .queries import (
-    query_4217, query_full_rekap_mentah_so, query_out, query_in,
+    query_4217, query_full_rekap_mentah_so, query_out, query_barang_keluar, query_in,
     query_27_konversi_satuan, query_dbs_kategori
 )
 from .fn_running_stock import fn_running_stock, fn_running_stock_grouped
@@ -128,7 +128,7 @@ def build_append1(config) -> pd.DataFrame:
     print(f"    DBS Kategori: {len(dbs_kategori)} rows")
 
     # =========================================================================
-    # 1. SOURCE — Table.Combine({4217, Full Rekap Mentah SO, OUT, IN})
+    # 1. SOURCE — Table.Combine({4217, Full Rekap Mentah SO, OUT, BARANG KELUAR, IN})
     # =========================================================================
     print("  [Append1] Loading transaction data...")
     q4217 = query_4217(config)
@@ -138,14 +138,17 @@ def build_append1(config) -> pd.DataFrame:
     print(f"    Full Rekap Mentah SO: {len(full_rekap_so)} rows")
 
     out_df = query_out(config)
-    print(f"    OUT: {len(out_df)} rows")
+    print(f"    OUT (22.05 sales): {len(out_df)} rows")
+
+    keluar_df = query_barang_keluar(config)
+    print(f"    BARANG KELUAR (42.15 Kirim): {len(keluar_df)} rows")
 
     in_df = query_in(config, konversi)
     print(f"    IN: {len(in_df)} rows")
 
-    # Combine all 4 sources
+    # Combine all 5 sources
     parts = []
-    for df in [q4217, full_rekap_so, out_df, in_df]:
+    for df in [q4217, full_rekap_so, out_df, keluar_df, in_df]:
         if not df.empty:
             parts.append(df)
 

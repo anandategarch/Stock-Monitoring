@@ -95,27 +95,28 @@ def query_pi(config, konversi: pd.DataFrame) -> pd.DataFrame:
 
 def query_out(config) -> pd.DataFrame:
     """
-    Mirror M: shared OUT = let
-        Source = Table.Combine({#"2205", #"4215_Gudang Kirim"}),
-        Added Custom JENIS = "OUT"
+    22.05 sales (ACR) only. JENIS = "OUT".
+
+    Previously combined with 4215 Kirim. Split per user request:
+    COM formula needs BK = 42.15 Kirim only (separate from sales).
     """
     q2205 = query_2205(config)
-    q4215_kirim = query_4215_gudang_kirim(config)
-
-    # Combine — align by column name
-    parts = []
     if not q2205.empty:
-        parts.append(q2205)
-    if not q4215_kirim.empty:
-        parts.append(q4215_kirim)
+        q2205 = q2205.copy()
+        q2205["JENIS"] = "OUT"
+    return q2205 if not q2205.empty else pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
-    if not parts:
-        return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
-    source = pd.concat(parts, ignore_index=True, sort=False)
-    # Added Custom: JENIS = "OUT"
-    source["JENIS"] = "OUT"
-    return source
+def query_barang_keluar(config) -> pd.DataFrame:
+    """
+    42.15 Kirim (goods sent to other branches). JENIS = "BARANG KELUAR".
+    Separated from OUT per user request.
+    """
+    result = query_4215_gudang_kirim(config)
+    if not result.empty:
+        result = result.copy()
+        result["JENIS"] = "BARANG KELUAR"
+    return result if not result.empty else pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
 
 def query_in(config, konversi: pd.DataFrame) -> pd.DataFrame:

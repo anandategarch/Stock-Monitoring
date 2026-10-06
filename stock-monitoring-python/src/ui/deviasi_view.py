@@ -37,7 +37,8 @@ class DeviasiView(ttk.Frame):
         ("In_H-1", 70, "e"),
         ("SO_H", 70, "e"),
         ("In_H", 70, "e"),
-        ("Out_H", 70, "e"),
+        ("Out_H", 70, "e"),      # OUT Tanggal H (22.05 sales)
+        ("BK_H", 70, "e"),       # BARANG KELUAR Tanggal H (42.15 Kirim)
         ("SO_H+1", 70, "e"),
         ("In_H+1", 70, "e"),
         ("SO_H+2", 70, "e"),
@@ -254,7 +255,7 @@ class DeviasiView(ttk.Frame):
 
         # Filter to relevant JENIS + tanggal range (H-2 s/d H+2)
         tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
-        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "5.BARANG MASUK", "7.OUT"]
+        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "7.OUT", "8.BARANG KELUAR"]
 
         # Ensure Tanggal is numeric
         df = df.copy()
@@ -315,18 +316,20 @@ class DeviasiView(ttk.Frame):
 
             so_h_minus_2 = get_val(row, "1.SO", h - 2)
             so_h_minus_1 = get_val(row, "1.SO", h - 1)
-            in_h_minus_1 = get_val(row, "5.BARANG MASUK", h - 1)
+            in_h_minus_1 = get_val(row, "4.IN", h - 1)
             so_h = get_val(row, "1.SO", h)
-            in_h = get_val(row, "5.BARANG MASUK", h)
+            in_h = get_val(row, "4.IN", h)
             out_h = get_val(row, "7.OUT", h)
+            bk_h = get_val(row, "8.BARANG KELUAR", h)
             so_h_plus_1 = get_val(row, "1.SO", h + 1)
-            in_h_plus_1 = get_val(row, "5.BARANG MASUK", h + 1)
+            in_h_plus_1 = get_val(row, "4.IN", h + 1)
             so_h_plus_2 = get_val(row, "1.SO", h + 2)
             sistem = get_val(row, "2.SALDO AKHIR", h)
 
             deviasi = so_h - sistem
             abs_dev = abs(deviasi)
-            stok_seharusnya = sistem + in_h - out_h
+            # Stok Seharusnya = Sistem + IN_H - OUT_H - BK_H (IN + Kirim out)
+            stok_seharusnya = sistem + in_h - out_h - bk_h
 
             # CEK formula (ported from Excel LET formula — 4 of 5 conditions)
             # ACR condition (KondisiACR) skipped — needs BOM data from 22.05 (TODO)
@@ -346,6 +349,7 @@ class DeviasiView(ttk.Frame):
                 "SO_H": so_h,
                 "In_H": in_h,
                 "Out_H": out_h,
+                "BK_H": bk_h,
                 "SO_H+1": so_h_plus_1,
                 "In_H+1": in_h_plus_1,
                 "SO_H+2": so_h_plus_2,
