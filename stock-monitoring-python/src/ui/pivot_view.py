@@ -118,6 +118,17 @@ class PivotTableView(ttk.Frame):
         self.status_var = tk.StringVar(value="Belum ada data. Jalankan pipeline di tab Proses.")
         ttk.Label(self, textvariable=self.status_var).pack(anchor="w", pady=(2, 0))
 
+        # --- Hint bar (above status) ---
+        ttk.Label(
+            self,
+            text="💡 Double-click cell/baris untuk melihat detail source data",
+            font=("Segoe UI", 9, "italic"),
+            foreground="#888",
+        ).pack(anchor="w", pady=(2, 0))
+
+        # --- Bind double-click ---
+        self.tree.bind("<Double-1>", self._on_double_click)
+
     def _setup_tags(self):
         """Configure Treeview tags for metric colors + conditional formatting."""
         # 1. Soft pastel background per metric
@@ -316,6 +327,74 @@ class PivotTableView(ttk.Frame):
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
         self._refresh_pivot()
+
+    # =========================================================================
+    # DOUBLE-CLICK → POPUP DETAILS
+    # =========================================================================
+    def _on_double_click(self, event):
+        """Handle double-click: identify cell + show source data popup."""
+        if self.data is None or self.data.empty:
+            return
+
+        # Identify row + column from click position
+        row_iid = self.tree.identify_row(event.y)
+        col_id = self.tree.identify_column(event.x)
+
+        if not row_iid:
+            return  # clicked empty area
+
+        # Determine: is this a parent (item header) or child (metric row)?
+        parent_iid = self.tree.parent(row_iid)
+
+        if parent_iid:
+            # This is a child (metric row)
+            # Nama Barang = parent's text
+            # JENIS = this row's text
+            nama_barang = self.tree.item(parent_iid, "text")
+            jenis = self.tree.item(row_iid, "text")
+        else:
+            # This is a parent (item header)
+            # Nama Barang = this row's text
+            # JENIS = all
+            nama_barang = self.tree.item(row_iid, "text")
+            jenis = None
+
+        # Determine Tanggal from column
+        tanggal = None
+        if col_id and col_id != "#0":
+            # col_id format: "#1", "#2", ...
+            try:
+                col_idx = int(col_id.replace("#", "")) - 1  # 0-indexed
+                # Treeview columns are tanggal strings
+                tree_cols = list(self.tree["columns"])
+                if 0 <= col_idx < len(tree_cols):
+                    tanggal_str = tree_cols[col_idx]
+                    tanggal = int(tanggal_str)
+            except (ValueError, IndexError):
+                pass
+
+        # Get active filters (exclude Nama Barang since we filter by it explicitly)
+        active_filters = {}
+        for col, var in [
+            ("NAMA RESTO", self.resto_var),
+            ("SOURCE KIRIMAN", self.source_var),
+            ("KATEGORI", self.kategori_var),
+        ]:
+            val = var.get()
+            if val and val != "(All)":
+                active_filters[col] = val
+
+        # Show popup
+        from src.ui.details_popup import show_details_popup
+        # Find root Tk for popup parent
+        root = self.winfo_toplevel()
+        show_details_popup(
+            root, self.data,
+            nama_barang=nama_barang,
+            jenis=jenis,
+            tanggal=tanggal,
+            filters=active_filters,
+        )
 
     # =========================================================================
     # HELPERS
