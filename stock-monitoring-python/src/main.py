@@ -7,7 +7,11 @@ Bisa dipanggil langsung (CLI) atau dari UI Tkinter.
 import sys
 import os
 import time
+import warnings
 from pathlib import Path
+
+# Suppress openpyxl noise warnings (no default style, etc.)
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 # Tambah parent dir ke sys.path untuk import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

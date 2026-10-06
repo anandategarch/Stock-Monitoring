@@ -344,9 +344,11 @@ def _generate_cache_records(df: pd.DataFrame, fields: list, shared_data: list,
 
         elif ftype == "inline_num":
             nums = pd.to_numeric(col, errors="coerce")
-            # Split into 3 categories: NaN, integer, float
+            # Split into 3 categories: NaN, integer-valued, float
+            # FIX BUG: jangan pakai .astype('Int64') — crash kalau ada float non-integer (e.g., 0.5)
+            # Gunakan modulo check: 5.0 % 1 == 0 (int), 5.5 % 1 == 0.5 (float)
             is_nan = nums.isna()
-            is_int = ~is_nan & (nums == nums.astype('Int64'))
+            is_int = ~is_nan & (nums % 1 == 0)
             is_float = ~is_nan & ~is_int
 
             xml = pd.Series('<m/>', index=col.index, dtype=object)

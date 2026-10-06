@@ -46,6 +46,34 @@ def _value_to_text(val) -> str:
     return str(val).strip()
 
 
+def _value_to_text_series(series: pd.Series) -> pd.Series:
+    """Vectorized version of _value_to_text untuk pandas Series.
+    OPTIMIZED: dtype-specific fast paths, no .apply().
+    """
+    # Fast path: datetime dtype
+    if pd.api.types.is_datetime64_any_dtype(series):
+        result = series.dt.strftime("%d/%m/%Y %H:%M:%S")
+        return result.where(series.notna(), other=None)
+    # Fast path: numeric dtype
+    if pd.api.types.is_numeric_dtype(series):
+        # Whole numbers → int string, others → float string
+        is_nan = series.isna()
+        # Use modulo to check integer-valued floats (avoid astype crash)
+        is_int = ~is_nan & (series % 1 == 0)
+        result = pd.Series(None, index=series.index, dtype=object)
+        int_vals = series[is_int].astype('Int64').astype(str)
+        result[is_int] = int_vals
+        float_vals = series[~is_nan & ~is_int].astype(str)
+        result[~is_nan & ~is_int] = float_vals
+        return result
+    # Object/mixed dtype: convert to str, preserve None
+    is_null = series.isna()
+    result = series.astype(str).where(~is_null, other=None)
+    # Strip whitespace
+    result = result.str.strip() if hasattr(result, 'str') else result
+    return result
+
+
 def _concat_valid_values(series: pd.Series) -> str:
     """
     Mirror M: untuk setiap InfoColumn di InformationGrouped.
@@ -143,9 +171,35 @@ def build_append1(config) -> pd.DataFrame:
     information = source[info_available].copy()
 
     if AvailableInfoColumns and len(information) > 0:
-        # Group by KeyColumns, agg each InfoColumn with concat_valid_values
-        agg_dict = {col: _concat_valid_values for col in AvailableInfoColumns if col in information.columns}
-        information_grouped = information.groupby(KeyColumns, as_index=False, dropna=False).agg(agg_dict)
+        # OPTIMIZED: pre-convert InfoColumns to text + filter invalid, THEN groupby + join
+        # Old approach: groupby.agg(_concat_valid_values) — slow because .apply() per group
+        # New approach: vectorized pre-processing + groupby.agg(', '.join)
+        info_prep = information.copy()
+
+        # Pre-process each InfoColumn: convert to text, replace invalid values with None
+        for col in AvailableInfoColumns:
+            if col in info_prep.columns:
+                info_prep[col] = _value_to_text_series(info_prep[col])
+                # Set invalid values (None, "", "0", "0.0") to None
+                mask_valid = info_prep[col].notna() & (info_prep[col] != "") & (info_prep[col] != "0")
+                info_prep[col] = info_prep[col].where(mask_valid, other=None)
+
+        # Group by KeyColumns, aggregate each InfoColumn:
+        # - drop None values
+        # - distinct (preserve order)
+        # - join with ", "
+        def _smart_join(series):
+            """Fast join: drop None, dedupe preserving order, join with ', '.
+            OPTIMIZED: use pd.unique (C-level) instead of Python set+loop."""
+            vals = series.dropna()
+            if vals.empty:
+                return None
+            # pd.unique is C-level, preserves order of first appearance
+            distinct = pd.unique(vals)
+            return ", ".join(str(v) for v in distinct)
+
+        agg_dict = {col: _smart_join for col in AvailableInfoColumns if col in info_prep.columns}
+        information_grouped = info_prep.groupby(KeyColumns, as_index=False, dropna=False).agg(agg_dict)
     else:
         information_grouped = information[KeyColumns].drop_duplicates().reset_index(drop=True) if KeyColumns else information.copy()
 

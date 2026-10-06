@@ -120,11 +120,29 @@ def _list_excel_files(folder_path: str) -> List[str]:
     return sorted(files)
 
 
+def _get_excel_engine() -> str:
+    """Detect best available Excel engine.
+    Priority: calamine (Rust, 10-20x faster) > openpyxl (default).
+    """
+    try:
+        import python_calamine  # noqa: F401
+        return "calamine"
+    except ImportError:
+        return None  # default to openpyxl
+
+
+# Cache engine detection (only check once)
+_EXCEL_ENGINE = _get_excel_engine()
+
+
 def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
                    raw: bool = False) -> pd.DataFrame:
     """
     Mirror M: fnBukaSheet(binary, sheetName, doPromote).
     Baca sheet tertentu dari file Excel.
+
+    OPTIMIZED: gunakan calamine engine (Rust) jika tersedia — 10-20x faster.
+    Fallback ke openpyxl jika calamine tidak terinstall.
 
     raw=True: baca tanpa header (header=None), kolom = Column1, Column2, ...
               Mirror M doPromote=null/false.
@@ -132,11 +150,23 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
               Mirror M doPromote=true + Skip(N) + PromoteHeaders.
               header_row=4 = skip rows 0-3, row 4 jadi header.
     """
-    if raw:
-        df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=object)
-    else:
-        df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row, dtype=object)
-    return df
+    engine_kwargs = {"engine": _EXCEL_ENGINE} if _EXCEL_ENGINE else {}
+    try:
+        if raw:
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None,
+                                dtype=object, **engine_kwargs)
+        else:
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row,
+                                dtype=object, **engine_kwargs)
+        return df
+    except Exception as e:
+        # Fallback to openpyxl if calamine fails (e.g., unsupported format)
+        if _EXCEL_ENGINE:
+            if raw:
+                return pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=object)
+            else:
+                return pd.read_excel(file_path, sheet_name=sheet_name, header=header_row, dtype=object)
+        raise e
 
 
 def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,

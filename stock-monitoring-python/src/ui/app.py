@@ -18,7 +18,11 @@ import json
 import queue
 import threading
 import subprocess
+import warnings
 from pathlib import Path
+
+# Suppress openpyxl noise warnings (no default style, etc.)
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
