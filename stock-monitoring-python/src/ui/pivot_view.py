@@ -25,10 +25,10 @@ from typing import Optional
 class PivotTableView(ttk.Frame):
     """Excel-like pivot table in Tkinter."""
 
-    # Metric order (same as Excel sample)
+    # Metric order (same as Excel sample + COM)
     METRICS = [
         "SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
-        "4.IN", "5.BARANG MASUK", "6.Selisih IN", "7.OUT",
+        "4.IN", "5.BARANG MASUK", "6.PEMAKAIAN (COM)", "6.Selisih IN", "7.OUT",
     ]
 
     # Soft pastel background colors per metric (subtle, not jarring)
@@ -40,6 +40,7 @@ class PivotTableView(ttk.Frame):
         "3.DEVIASI": "#FDF6E3",            # very light yellow
         "4.IN": "#FFFBE6",                 # light yellow (per sample conditional fmt)
         "5.BARANG MASUK": "#EEF7EC",       # light green (per sample conditional fmt)
+        "6.PEMAKAIAN (COM)": "#E8E0F0",    # light purple — COM is a calculated metric
         "6.Selisih IN": "#FCEEE8",         # light pink
         "7.OUT": "#F8F0F0",                # very light red
     }
@@ -254,10 +255,17 @@ class PivotTableView(ttk.Frame):
             row_count += 1
 
             for metric in self.METRICS:
-                try:
-                    row_data = pivot.loc[(item, metric)]
-                except KeyError:
-                    row_data = pd.Series({t: 0 for t in tanggals})
+                if metric == "6.PEMAKAIAN (COM)":
+                    # COM is a calculated metric — not in the source data.
+                    # Formula (ported from M code):
+                    #   First tanggal: COM = SALDO_AWAL + BARANG_MASUK - BARANG_KELUAR - SO
+                    #   Other tanggal: COM = SO_prev + BARANG_MASUK - BARANG_KELUAR - SO_current
+                    row_data = self._compute_com(pivot, item, tanggals)
+                else:
+                    try:
+                        row_data = pivot.loc[(item, metric)]
+                    except KeyError:
+                        row_data = pd.Series({t: 0 for t in tanggals})
 
                 # Determine tag(s) based on conditional formatting rules
                 tags = self._compute_row_tags(metric, item, row_data, tanggals)
@@ -423,3 +431,48 @@ class PivotTableView(ttk.Frame):
         if val < 0:
             return f"({s[1:]})"  # accounting style: (123.4)
         return s
+
+    @staticmethod
+    def _compute_com(pivot, item, tanggals):
+        """Compute 6.PEMAKAIAN (COM) per tanggal for a given Nama Barang.
+
+        Ported from M code:
+          pemakaian[i] = (if i=0 then stokAwal[0] else so[i-1]) + bm[i] - bk[i] - so[i]
+
+        Where (per Nama Barang, sorted by tanggal ascending):
+          stokAwal = SALDO AWAL values per tanggal
+          so       = 1.SO values per tanggal
+          bm       = 5.BARANG MASUK values per tanggal
+          bk       = 7.OUT values per tanggal
+
+        Returns: pd.Series indexed by tanggal with COM values.
+        """
+        def get_series(jenis):
+            try:
+                return pivot.loc[(item, jenis)]
+            except KeyError:
+                return pd.Series({t: 0 for t in tanggals})
+
+        so = get_series("1.SO")
+        bm = get_series("5.BARANG MASUK")
+        bk = get_series("7.OUT")
+        sa = get_series("SALDO AWAL")
+
+        com_values = {}
+        for i, t in enumerate(tanggals):
+            so_val = float(so.get(t, 0) or 0)
+            bm_val = float(bm.get(t, 0) or 0)
+            bk_val = float(bk.get(t, 0) or 0)
+            sa_val = float(sa.get(t, 0) or 0)
+
+            if i == 0:
+                # First tanggal: Stok Awal + BM - BK - SO
+                com_val = sa_val + bm_val - bk_val - so_val
+            else:
+                # Other tanggal: SO_prev + BM - BK - SO_current
+                so_prev = float(so.get(tanggals[i - 1], 0) or 0)
+                com_val = so_prev + bm_val - bk_val - so_val
+
+            com_values[t] = com_val
+
+        return pd.Series(com_values)
