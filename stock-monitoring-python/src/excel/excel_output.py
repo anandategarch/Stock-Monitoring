@@ -282,124 +282,121 @@ def _generate_cache_definition(fields: list, shared_data: list, record_count: in
 
 
 def _generate_cache_records(df: pd.DataFrame, fields: list, shared_data: list,
-                              output_path: str = None, chunk_size: int = 50000) -> str:
+                              output_path: str = None, chunk_size: int = 100000) -> str:
     """Generate pivotCacheRecords XML from DataFrame.
-    STREAMING MODE: writes directly to file if output_path given (saves ~50% memory for large data).
-    CHUNKED: processes in chunks to avoid building giant string list.
+    STREAMING MODE: writes directly to file if output_path given.
+    CHUNKED: processes in chunks of 100k records.
 
-    Args:
-        df: DataFrame with source data
-        fields: field configuration list
-        shared_data: pre-built shared items data
-        output_path: if given, write directly to file (streaming). If None, return string.
-        chunk_size: number of records per chunk (for streaming progress)
+    ULTRA-OPTIMIZED: pre-compute XML map per shared field, then .map() (C-level).
+    Inline fields use .map() with format function.
+    Records built with zip + join (single pass).
     """
-    # === Pre-extract columns as Python lists (faster than pandas indexing) ===
-    col_data = {}
-    for i, field in enumerate(fields):
-        name = field["name"]
-        if name in df.columns:
-            col_data[i] = df[name].tolist()
-        else:
-            col_data[i] = [None] * len(df)
-
-    # Pre-extract lookups for shared fields (avoid dict lookup overhead in loop)
-    field_lookup = {}
-    for i, field in enumerate(fields):
-        ftype = field["type"]
-        if ftype in ("shared_text", "shared_int", "shared_date", "shared_datetime"):
-            field_lookup[i] = shared_data[i]["lookup"]
-        else:
-            field_lookup[i] = None
-
     n = len(df)
 
-    # === Helper: process a batch of records → list of XML strings ===
-    def _process_batch(start: int, end: int) -> list:
-        """Process records [start, end) and return list of XML record strings."""
-        batch = []
-        # Local variable binding for speed (avoid global lookup in loop)
-        _escape = _xml_escape
-        _val_str = _val_to_str
-        _val_num = _val_to_num
-        _val_date = _val_to_date_str
+    # === STEP 1: Pre-convert each column to a list of XML fragment strings ===
+    col_lists = []
 
-        for row_idx in range(start, end):
-            parts = ["<r>"]
-            for i, field in enumerate(fields):
-                ftype = field["type"]
-                val = col_data[i][row_idx]
+    for i, field in enumerate(fields):
+        ftype = field["type"]
+        name = field["name"]
 
-                if ftype == "shared_text":
-                    key = _val_str(val)
-                    lookup = field_lookup[i]
-                    idx = lookup.get(key) if key is not None else None
-                    parts.append(f'<x v="{idx}"/>' if idx is not None else '<m/>')
+        if name in df.columns:
+            col = df[name]
+        else:
+            col = pd.Series([None] * n)
 
-                elif ftype == "shared_int":
-                    try:
-                        key = int(val) if val is not None and not (isinstance(val, float) and pd.isna(val)) else None
-                    except (TypeError, ValueError):
-                        key = None
-                    lookup = field_lookup[i]
-                    idx = lookup.get(key) if key is not None else None
-                    parts.append(f'<x v="{idx}"/>' if idx is not None else '<m/>')
+        if ftype == "shared_text":
+            lookup = shared_data[i]["lookup"]
+            # Pre-compute XML map: index → '<x v="N"/>', plus NaN → '<m/>'
+            max_idx = max(lookup.values()) if lookup else -1
+            xml_map = {v: f'<x v="{v}"/>' for v in lookup.values()}
+            # .map(lookup) = C-level dict lookup → Series of int or NaN
+            indices = col.astype(str).map(lookup)
+            # .map(xml_map) = C-level dict lookup → Series of XML strings
+            xml_series = indices.map(xml_map)
+            # Fill NaN (values not in lookup) with '<m/>'
+            xml_list = xml_series.fillna('<m/>').tolist()
 
-                elif ftype in ("shared_date", "shared_datetime"):
-                    key = _val_date(val)
-                    lookup = field_lookup[i]
-                    idx = lookup.get(key) if key is not None else None
-                    parts.append(f'<x v="{idx}"/>' if idx is not None else '<m/>')
+        elif ftype == "shared_int":
+            lookup = shared_data[i]["lookup"]
+            max_idx = max(lookup.values()) if lookup else -1
+            xml_map = {v: f'<x v="{v}"/>' for v in lookup.values()}
+            nums = pd.to_numeric(col, errors="coerce")
+            # Map each number to lookup index
+            indices = nums.map(lambda v: lookup.get(int(v)) if pd.notna(v) else None)
+            xml_series = indices.map(xml_map) if xml_map else None
+            if xml_series is not None:
+                xml_list = xml_series.fillna('<m/>').tolist()
+            else:
+                xml_list = ['<m/>'] * n
 
-                elif ftype == "inline_num":
-                    num = _val_num(val)
-                    if num is not None:
-                        # Format: integer if whole, else float
-                        if num == int(num):
-                            parts.append(f'<n v="{int(num)}"/>')
-                        else:
-                            parts.append(f'<n v="{num}"/>')
-                    else:
-                        parts.append('<m/>')
+        elif ftype in ("shared_date", "shared_datetime"):
+            lookup = shared_data[i]["lookup"]
+            xml_map = {v: f'<x v="{v}"/>' for v in lookup.values()}
+            dt = pd.to_datetime(col, errors="coerce")
+            iso_vals = dt.dt.strftime("%Y-%m-%dT%H:%M:%S")
+            indices = iso_vals.map(lookup)
+            xml_series = indices.map(xml_map) if xml_map else None
+            if xml_series is not None:
+                xml_list = xml_series.fillna('<m/>').tolist()
+            else:
+                xml_list = ['<m/>'] * n
 
-                elif ftype == "inline_str":
-                    s = _val_str(val)
-                    parts.append(f'<s v="{_escape(s)}"/>' if s is not None else '<m/>')
+        elif ftype == "inline_num":
+            nums = pd.to_numeric(col, errors="coerce")
+            # Split into 3 categories: NaN, integer, float
+            is_nan = nums.isna()
+            is_int = ~is_nan & (nums == nums.astype('Int64'))
+            is_float = ~is_nan & ~is_int
 
-            parts.append("</r>")
-            batch.append("".join(parts))
-        return batch
+            xml = pd.Series('<m/>', index=col.index, dtype=object)
+            # Integers: '<n v="N"/>'
+            int_vals = nums[is_int].astype(int).astype(str)
+            xml[is_int] = '<n v="' + int_vals + '"/>'
+            # Floats: '<n v="X"/>'
+            float_vals = nums[is_float].astype(str)
+            xml[is_float] = '<n v="' + float_vals + '"/>'
+            xml_list = xml.tolist()
 
-    # === STREAMING MODE: write directly to file ===
+        elif ftype == "inline_str":
+            _escape = _xml_escape
+            # Convert to string, escape XML, wrap in <s v="..."/>
+            # NaN/None → '<m/>'
+            is_null = col.isna()
+            str_vals = col.astype(str).where(~is_null, other='')
+            escaped = str_vals.apply(_escape)
+            xml = pd.Series('<m/>', index=col.index, dtype=object)
+            xml[~is_null] = '<s v="' + escaped[~is_null] + '"/>'
+            xml_list = xml.tolist()
+
+        col_lists.append(xml_list)
+
+    # === STEP 2: Build records with zip + join ===
     if output_path is not None:
-        with open(output_path, "w", encoding="utf-8", buffering=1 << 20) as f:  # 1MB buffer
+        with open(output_path, "w", encoding="utf-8", buffering=1 << 20) as f:
             f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
             f.write('<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
                     'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
                     f'count="{n}">')
 
-            # Process in chunks for progress reporting
             for start in range(0, n, chunk_size):
                 end = min(start + chunk_size, n)
-                batch = _process_batch(start, end)
-                # Write all records in chunk at once (fewer I/O calls)
-                f.write("".join(batch))
-                # Progress for very large datasets
-                if n >= 100000 and (start // chunk_size) % 10 == 0:
+                chunk_cols = [col[start:end] for col in col_lists]
+                records = ['<r>' + ''.join(parts) + '</r>' for parts in zip(*chunk_cols)]
+                f.write("".join(records))
+
+                if n >= 100000 and (start // chunk_size) % 5 == 0 and start > 0:
                     print(f"    ... records {end}/{n} ({100*end//n}%)", flush=True)
 
             f.write('</pivotCacheRecords>')
-        return None  # Written to file
-
-    # === IN-MEMORY MODE: return string (for small data or backward compat) ===
+        return None
     else:
+        records = ['<r>' + ''.join(parts) + '</r>' for parts in zip(*col_lists)]
         parts = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n']
         parts.append('<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
                      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
                      f'count="{n}">')
-        # Process all at once (small data)
-        all_records = _process_batch(0, n)
-        parts.extend(all_records)
+        parts.extend(records)
         parts.append('</pivotCacheRecords>')
         return "".join(parts)
 
@@ -455,17 +452,15 @@ def _build_shared_data(df: pd.DataFrame, fields: list) -> list:
 def _remove_items_from_pivot_fields(xml: str) -> str:
     """Remove <items> from each <pivotField> in pivotTable XML.
     Excel will rebuild items on open.
+    FIX BUG-24: handle BOTH <items>...</items> AND self-closing <items .../>.
     """
-    # Replace <pivotField ...><items>...</items></pivotField> → <pivotField .../>
-    # Or <pivotField ...><items>...</items> → <pivotField ...>
-    # Strategy: remove all <items count="N">...</items> blocks inside pivotField
-
     # Find each pivotField element and remove its <items> child
     def replace_pivot_field(m):
         field_xml = m.group(0)
-        # Remove <items ...>...</items>
+        # Remove <items ...>...</items> (open-close form)
         field_xml = re.sub(r'<items[^>]*>.*?</items>', '', field_xml, flags=re.DOTALL)
-        # If pivotField is now empty (self-closing not needed), keep as is
+        # Remove self-closing <items .../> (FIX BUG-24)
+        field_xml = re.sub(r'<items[^>]*/>', '', field_xml)
         return field_xml
 
     # Match <pivotField ...>...</pivotField> or <pivotField .../>

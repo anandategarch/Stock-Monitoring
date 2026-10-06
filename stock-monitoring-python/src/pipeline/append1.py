@@ -19,7 +19,8 @@ from .fn_running_stock import fn_running_stock, fn_running_stock_grouped
 
 def _value_to_text(val) -> str:
     """Mirror M: Text.From(_) — convert value to text.
-    Untuk datetime: format "DD/MM/YYYY HH:MM:SS" (sesuai locale Indonesian di Power Query).
+    FIX BUG-21: float 0.0 → "0" (bukan "0.0") agar filter != "0" bekerja.
+    Untuk datetime: format "DD/MM/YYYY HH:MM:SS".
     """
     if val is None:
         return None
@@ -34,6 +35,14 @@ def _value_to_text(val) -> str:
         return val.strftime("%d/%m/%Y %H:%M:%S")
     if hasattr(val, "strftime"):  # datetime object
         return val.strftime("%d/%m/%Y %H:%M:%S")
+    # FIX: float yang whole number → format sebagai integer (mirror M Text.From)
+    # M: Text.From(0.0) = "0", Text.From(1.0) = "1"
+    if isinstance(val, (int, np.integer)):
+        return str(val)
+    if isinstance(val, (float, np.floating)):
+        if val == int(val):
+            return str(int(val))
+        return str(val)
     return str(val).strip()
 
 
@@ -44,10 +53,27 @@ def _concat_valid_values(series: pd.Series) -> str:
     - Filter: not null, not "", not "0"
     - Distinct (preserve order)
     - Text.Combine dengan ", "
+
+    OPTIMIZED: pre-convert series, avoid .apply() for common types.
     """
-    # Transform to trimmed string
-    values = series.apply(_value_to_text)
-    # Filter valid
+    # Fast path: if series is datetime dtype, use vectorized strftime
+    if pd.api.types.is_datetime64_any_dtype(series):
+        values = series.dt.strftime("%d/%m/%Y %H:%M:%S")
+        values = values.where(series.notna(), other=None)
+    elif pd.api.types.is_numeric_dtype(series):
+        # Convert numeric to text (whole numbers as int, others as float)
+        def _num_to_text(v):
+            if pd.isna(v):
+                return None
+            if v == int(v):
+                return str(int(v))
+            return str(v)
+        values = series.apply(_num_to_text)
+    else:
+        # Mixed/object dtype — use _value_to_text
+        values = series.apply(_value_to_text)
+
+    # Filter valid: not null, not "", not "0"
     mask = values.notna() & (values != "") & (values != "0")
     valid = values[mask]
     # Distinct (preserve order of first appearance)

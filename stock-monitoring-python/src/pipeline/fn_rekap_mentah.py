@@ -1,11 +1,19 @@
 """
 fn_rekap_mentah.py — Mirror persis fnRekapMentah di M code.
 Membaca folder Rekap Mentah (SO + BARANG MASUK), unpivot kolom tanggal.
+
+CRITICAL FIX: NAMA RESTO berasal dari FILE NAME (bukan sheet column).
+Mirror M: fnCombineFolder → Name column → PromoteHeaders → firstColumn = file1's name
+           → rename → "NAMA RESTO" → Text.BeforeDelimiter(_, ".")
+
+OPTIMIZED: vectorized text operations.
 """
 import pandas as pd
 import numpy as np
 from typing import Optional, List
-from .helpers import fn_combine_folder, table_select_columns, safe_to_str, safe_to_numeric
+from .helpers import (
+    fn_combine_folder, promote_headers, safe_to_str, safe_to_numeric
+)
 
 
 def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str]] = None) -> pd.DataFrame:
@@ -13,51 +21,76 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
     Mirror M: fnRekapMentah(folderPath, mode, optional jenisFilter).
 
     mode: "berjalan" (tanggal 1..31) atau "lalu" (tanggal 25..31, dinegasikan).
-    jenis_filter: list JENIS yang di-keep (e.g., {"BARANG MASUK", "SO"}). None = no filter.
+    jenis_filter: list JENIS yang di-keep. None = no filter.
 
     Output columns: NAMA RESTO, SOURCE DATA, JENIS, STATUS, NAMA BARANG, SATUAN, Attribute, Value
-    Attribute: int (berjalan: 1..31, lalu: -25..-31)
     """
-    # expand = fnCombineFolder(folderPath, "REKAP MENTAH") — no doPromote
-    # prom = Table.PromoteHeaders(expand) — first row jadi header
-    # Di pandas: header=0 (baca dengan row pertama sebagai header)
-    expand = fn_combine_folder(folder_path, "REKAP MENTAH", header_row=0)
+    # === STEP 1: fnCombineFolder(folderPath, "REKAP MENTAH") dengan doPromote=null ===
+    # raw=True: baca tanpa header, add_name_col=True: tambah kolom "Name" (file name)
+    expand = fn_combine_folder(folder_path, "REKAP MENTAH", raw=True, add_name_col=True)
     if expand.empty:
         return pd.DataFrame()
 
-    prom = expand.copy()
+    # === STEP 2: prom = Table.PromoteHeaders(expand, [PromoteAllScalars = true]) ===
+    # Row 0 (file1's header row) → column names
+    # Name column → renamed to file1's name (e.g., "MLGPAR.xlsx")
+    prom = promote_headers(expand)
 
-    # firstColumn = Table.ColumnNames(prom){0}
+    # === STEP 3: firstColumn = Table.ColumnNames(prom){0} ===
+    # firstColumn = file1's name (e.g., "MLGPAR.xlsx")
     first_column = prom.columns[0]
 
-    # ren = Table.RenameColumns(prom, {{firstColumn, "NAMA RESTO"}})
+    # === STEP 4: ren = Table.RenameColumns(prom, {{firstColumn, "NAMA RESTO"}}) ===
     ren = prom.rename(columns={first_column: "NAMA RESTO"})
 
-    # clean = Table.TransformColumns(ren, {{"NAMA RESTO", each Text.BeforeDelimiter(_, "."), type text}})
-    ren["NAMA RESTO"] = ren["NAMA RESTO"].apply(
-        lambda x: None if pd.isna(x) else str(x).split(".")[0]
-    )
+    # === STEP 4b: Handle duplicate "NAMA RESTO" columns ===
+    # After rename, there may be TWO "NAMA RESTO" columns:
+    #   1. Former Name column (file names) at position 0 — this is the one we want
+    #   2. Sheet's original "NAMA RESTO" column (from PromoteHeaders) at position 1
+    # M's Table.SelectColumns keeps the FIRST occurrence.
+    # In pandas, we select by POSITION (not name) to keep only the first.
+    cols = ren.columns.tolist()
+    keep_positions = []
+    seen_nama_resto = False
+    for i, c in enumerate(cols):
+        if c == "NAMA RESTO":
+            if not seen_nama_resto:
+                seen_nama_resto = True
+                keep_positions.append(i)
+            # else: skip duplicate (position 1+)
+        else:
+            keep_positions.append(i)
+    ren = ren.iloc[:, keep_positions]
 
-    # base = {"NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS", "NAMA BARANG", "SATUAN"}
+    # === STEP 5: clean = NAMA RESTO → Text.BeforeDelimiter(_, ".") ===
+    # NAMA RESTO column berisi file names (e.g., "MLGPAR.xlsx", "BDGUKU.xlsx")
+    # Text.BeforeDelimiter(_, ".") → "MLGPAR", "BDGUKU"
+    # Vectorized: .str.split(".").str[0]
+    nama_resto_series = ren["NAMA RESTO"]
+    if isinstance(nama_resto_series, pd.DataFrame):
+        # Still a DataFrame if duplicate wasn't resolved — take first column
+        nama_resto_series = nama_resto_series.iloc[:, 0]
+    ren["NAMA RESTO"] = nama_resto_series.astype(str).str.split(".").str[0]
+
+    # === STEP 6: base columns + days ===
     base = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS", "NAMA BARANG", "SATUAN"]
-
-    # days = berjalan: {"1".."31"}, lalu: {"25".."31"}
     if mode == "berjalan":
         days = [str(d) for d in range(1, 32)]
     else:  # "lalu"
         days = [str(d) for d in range(25, 32)]
 
-    # sel = Table.SelectColumns(clean, base & days) — only keep available columns
+    # === STEP 7: sel = Table.SelectColumns(clean, base & days) ===
     all_cols = base + days
     available = [c for c in all_cols if c in ren.columns]
     sel = ren[available].copy()
 
-    # fil = if jenisFilter = null then sel else Table.SelectRows(sel, each List.Contains(jenisFilter, [JENIS]))
+    # === STEP 8: fil = filter JENIS (if jenisFilter given) ===
     if jenis_filter is not None:
         sel_jenis = sel["JENIS"].astype(str)
         sel = sel[sel_jenis.isin([str(j) for j in jenis_filter])].copy()
 
-    # Type cast: base → text, days → number
+    # === STEP 9: Type cast: base → text, days → number ===
+    # Vectorized text conversion
     for col in base:
         if col in sel.columns:
             sel[col] = safe_to_str(sel[col])
@@ -65,7 +98,7 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
         if col in sel.columns:
             sel[col] = safe_to_numeric(sel[col])
 
-    # up = Table.Unpivot(typed, days, "Attribute", "Value")
+    # === STEP 10: up = Table.Unpivot(typed, days, "Attribute", "Value") ===
     available_days = [d for d in days if d in sel.columns]
     if not available_days:
         return pd.DataFrame(columns=base + ["Attribute", "Value"])
@@ -77,7 +110,8 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
         value_name="Value"
     )
 
-    # final: berjalan → Attribute as Int64; lalu → Attribute = -Number.From(Attribute)
+    # === STEP 11: final type conversion ===
+    # berjalan → Attribute as Int64; lalu → Attribute = -Number.From(Attribute)
     up["Attribute"] = safe_to_numeric(up["Attribute"])
     if mode == "berjalan":
         up["Attribute"] = up["Attribute"].astype("Int64")
@@ -87,11 +121,7 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
     # Value → numeric
     up["Value"] = safe_to_numeric(up["Value"])
 
-    # Drop rows where Value is null (Table.Unpivot di M tidak membuat row untuk null)
-    # Actually, M's Table.Unpivot keeps rows even if Value is 0 (after ReplaceValue).
-    # But it drops rows where the value was null BEFORE unpivot.
-    # Since we read with pandas, nulls in day columns → melt creates rows with NaN Value.
-    # We drop NaN Value rows to match M behavior (null cells are not unpivoted).
+    # Drop rows where Value is null (M's Table.Unpivot doesn't create rows for nulls)
     up = up.dropna(subset=["Value"]).reset_index(drop=True)
 
     return up
