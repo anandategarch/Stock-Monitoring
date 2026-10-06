@@ -31,22 +31,27 @@ class DeviasiView(ttk.Frame):
         ("Resto", 70, "w"),
         ("Nama Barang", 180, "w"),
         ("Satuan", 50, "w"),
-        ("SO_H-2", 70, "e"),    # SO Tanggal H-2
-        ("SO_H-1", 70, "e"),    # SO Tanggal H-1
-        ("In_H-1", 70, "e"),    # BARANG MASUK Tanggal H-1
-        ("SO_H", 70, "e"),       # SO Tanggal H
-        ("In_H", 70, "e"),       # BARANG MASUK Tanggal H
-        ("Out_H", 70, "e"),      # OUT Tanggal H
-        ("SO_H+1", 70, "e"),    # SO Tanggal H+1
-        ("In_H+1", 70, "e"),    # BARANG MASUK Tanggal H+1
-        ("SO_H+2", 70, "e"),    # SO Tanggal H+2
-        ("Sistem", 80, "e"),     # SALDO AKHIR Tanggal H
-        ("Deviasi", 80, "e"),    # SO_H - Sistem
-        ("ABS", 80, "e"),        # abs(Deviasi)
-        ("Rank", 50, "e"),       # rank per Nama Barang (by ABS, desc)
-        ("Max Dev", 80, "e"),    # max(ABS) per Nama Barang
-        ("Stok Seharusnya", 90, "e"),  # Sistem + In_H - Out_H
+        ("AKTIF/NON", 70, "w"),
+        ("SO_H-2", 70, "e"),
+        ("SO_H-1", 70, "e"),
+        ("In_H-1", 70, "e"),
+        ("SO_H", 70, "e"),
+        ("In_H", 70, "e"),
+        ("Out_H", 70, "e"),
+        ("SO_H+1", 70, "e"),
+        ("In_H+1", 70, "e"),
+        ("SO_H+2", 70, "e"),
+        ("Sistem", 80, "e"),
+        ("Deviasi", 80, "e"),
+        ("ABS", 80, "e"),
+        ("Rank", 50, "e"),
+        ("Max Dev", 80, "e"),
+        ("Stok Seharusnya", 90, "e"),
+        ("CEK", 120, "w"),
     ]
+
+    # Threshold for Hitung Manual condition (mirrors $Y$1 in Excel = 1.3 = 130%)
+    CEK_THRESHOLD = 1.3
 
     def __init__(self, parent, satuan_mode: str = "GR"):
         super().__init__(parent)
@@ -144,6 +149,58 @@ class DeviasiView(ttk.Frame):
         self.tree.tag_configure("negative", foreground="#CC0000")
         # Zero Deviasi → gray font
         self.tree.tag_configure("zero_dev", foreground="#999999")
+        # CEK categories — color-coded for quick visual scan
+        self.tree.tag_configure("cek_kosong", foreground="#996633")       # brown — Kosong/Non Aktif
+        self.tree.tag_configure("cek_tanggal", foreground="#0066CC")       # blue — Beda Tanggal
+        self.tree.tag_configure("cek_manual", foreground="#CC6600")       # orange — Hitung Manual
+        self.tree.tag_configure("cek_drastis", foreground="#CC0000")       # red — Turun Drastis
+        self.tree.tag_configure("cek_acr", foreground="#660099")            # purple — ACR to BOM
+
+    @staticmethod
+    def _compute_cek(aktif_non, so_h, so_h_prev, in_h, out_h,
+                     stok_seharusnya, threshold=1.3):
+        """Port Excel LET formula (4 of 5 conditions — ACR condition needs BOM, TODO).
+
+        Priority: KondisiKosong → KondisiNaikturun → KondisiHitungManual →
+                  KondisiTurunDrastis. (KondisiACR skipped — needs Dev to BOM%.)
+
+        Returns: anomaly category string ("Kosong/Non Aktif", "Beda Tanggal",
+                 "Hitung Manual", "Turun Drastis", or "" = no anomaly).
+        """
+        aktif = str(aktif_non or "").strip().upper()
+
+        # 1. KondisiKosong → "Kosong/Non Aktif"
+        if aktif == "AKTIF" and so_h < 0:
+            return "Kosong/Non Aktif"
+        if aktif == "NON AKTIF" and so_h > 0:
+            return "Kosong/Non Aktif"
+
+        # 2. KondisiNaikturun → "Beda Tanggal"
+        #    a) ada barang masuk (In>0), SO turun (H<F), tidak ada OUT (J=0)
+        if in_h > 0 and so_h < so_h_prev and out_h == 0:
+            return "Beda Tanggal"
+        #    b) SO naik >50% dari kemarin, tanpa In & Out
+        if so_h_prev > 0:
+            if so_h > so_h_prev + (0.5 * so_h_prev) and in_h == 0 and out_h == 0:
+                return "Beda Tanggal"
+
+        # 3. KondisiHitungManual → "Hitung Manual"
+        #    Skip jika data kosong
+        if stok_seharusnya != 0:
+            if so_h != 0 and stok_seharusnya == 0:
+                return "Hitung Manual"
+            ratio = abs(so_h - stok_seharusnya) / abs(stok_seharusnya)
+            if ratio > threshold:
+                return "Hitung Manual"
+
+        # 4. KondisiTurunDrastis → "Turun Drastis"
+        if so_h_prev > 0 and (so_h / so_h_prev) < 0.5:
+            return "Turun Drastis"
+
+        # 5. KondisiACR → "ACR to BOM" (SKIPPED — needs Dev to BOM%)
+        # TODO: add when BOM data from 22.05 is available
+
+        return ""
 
     def _col_display_name(self, col_name: str) -> str:
         """Get display name for column, replacing H with actual tanggal."""
@@ -254,6 +311,7 @@ class DeviasiView(ttk.Frame):
             nama_barang = str(_scalar(row.get("Nama Barang", "")))
             nama_resto = str(_scalar(row.get("NAMA RESTO", "")))
             satuan = str(_scalar(row.get("SATUAN", "")))
+            aktif_non = str(_scalar(row.get("AKTIF/NON", "")))
 
             so_h_minus_2 = get_val(row, "1.SO", h - 2)
             so_h_minus_1 = get_val(row, "1.SO", h - 1)
@@ -270,10 +328,18 @@ class DeviasiView(ttk.Frame):
             abs_dev = abs(deviasi)
             stok_seharusnya = sistem + in_h - out_h
 
+            # CEK formula (ported from Excel LET formula — 4 of 5 conditions)
+            # ACR condition (KondisiACR) skipped — needs BOM data from 22.05 (TODO)
+            cek = self._compute_cek(
+                aktif_non, so_h, so_h_minus_1, in_h, out_h,
+                stok_seharusnya, self.CEK_THRESHOLD
+            )
+
             output_rows.append({
                 "Resto": nama_resto,
                 "Nama Barang": nama_barang,
                 "Satuan": satuan,
+                "AKTIF/NON": aktif_non,
                 "SO_H-2": so_h_minus_2,
                 "SO_H-1": so_h_minus_1,
                 "In_H-1": in_h_minus_1,
@@ -287,6 +353,7 @@ class DeviasiView(ttk.Frame):
                 "Deviasi": deviasi,
                 "ABS": abs_dev,
                 "Stok Seharusnya": stok_seharusnya,
+                "CEK": cek,
             })
 
         result = pd.DataFrame(output_rows)
@@ -370,6 +437,18 @@ class DeviasiView(ttk.Frame):
                     tags.append("negative")
                 elif deviasi == 0:
                     tags.append("zero_dev")
+            # CEK color tag
+            cek_val = str(row.get("CEK", "") or "").strip()
+            if cek_val == "Kosong/Non Aktif":
+                tags.append("cek_kosong")
+            elif cek_val == "Beda Tanggal":
+                tags.append("cek_tanggal")
+            elif cek_val == "Hitung Manual":
+                tags.append("cek_manual")
+            elif cek_val == "Turun Drastis":
+                tags.append("cek_drastis")
+            elif cek_val == "ACR to BOM":
+                tags.append("cek_acr")
             tags.append("evenrow" if i % 2 == 0 else "oddrow")
 
             self.tree.insert("", "end", values=values, tags=tuple(tags))
