@@ -1,0 +1,286 @@
+"""
+append1.py — Mirror SANGAT PERSIS query Append1 di M code.
+Pipeline utama yang menggabungkan semua sumber data, melakukan pivot, running stock,
+deviasi, merge kategori, dan unpivot ke format long.
+
+Output: DataFrame long format dengan kolom:
+  Nama Barang, NAMA RESTO, Tanggal, JENIS, NILAI, Nomor, Nomor PO,
+  #Tgl/Jam Pembuatan IT, KATEGORI, SOURCE KIRIMAN
+"""
+import pandas as pd
+import numpy as np
+from typing import List
+from .queries import (
+    query_4217, query_full_rekap_mentah_so, query_out, query_in,
+    query_27_konversi_satuan, query_dbs_kategori
+)
+from .fn_running_stock import fn_running_stock, fn_running_stock_grouped
+
+
+def _value_to_text(val) -> str:
+    """Mirror M: Text.From(_) — convert value to text.
+    Untuk datetime: format "DD/MM/YYYY HH:MM:SS" (sesuai locale Indonesian di Power Query).
+    """
+    if val is None:
+        return None
+    # Check for pandas/numpy NaN
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    # datetime → "DD/MM/YYYY HH:MM:SS"
+    if isinstance(val, pd.Timestamp):
+        return val.strftime("%d/%m/%Y %H:%M:%S")
+    if hasattr(val, "strftime"):  # datetime object
+        return val.strftime("%d/%m/%Y %H:%M:%S")
+    return str(val).strip()
+
+
+def _concat_valid_values(series: pd.Series) -> str:
+    """
+    Mirror M: untuk setiap InfoColumn di InformationGrouped.
+    - Transform: null → null, else Text.Trim(Text.From(_))
+    - Filter: not null, not "", not "0"
+    - Distinct (preserve order)
+    - Text.Combine dengan ", "
+    """
+    # Transform to trimmed string
+    values = series.apply(_value_to_text)
+    # Filter valid
+    mask = values.notna() & (values != "") & (values != "0")
+    valid = values[mask]
+    # Distinct (preserve order of first appearance)
+    distinct = list(dict.fromkeys(valid.tolist()))
+    # Join
+    return ", ".join(distinct) if distinct else None
+
+
+def build_append1(config) -> pd.DataFrame:
+    """
+    Mirror M: shared Append1.
+    Pipeline lengkap dari source data sampai output long format.
+    """
+    print("  [Append1] Loading master data...")
+    # Pre-load master queries (dipakai multiple times)
+    konversi = query_27_konversi_satuan(config)
+    dbs_kategori = query_dbs_kategori(config)
+    print(f"    Konversi Satuan: {len(konversi)} rows")
+    print(f"    DBS Kategori: {len(dbs_kategori)} rows")
+
+    # =========================================================================
+    # 1. SOURCE — Table.Combine({4217, Full Rekap Mentah SO, OUT, IN})
+    # =========================================================================
+    print("  [Append1] Loading transaction data...")
+    q4217 = query_4217(config)
+    print(f"    4217 (Saldo Awal): {len(q4217)} rows")
+
+    full_rekap_so = query_full_rekap_mentah_so(config)
+    print(f"    Full Rekap Mentah SO: {len(full_rekap_so)} rows")
+
+    out_df = query_out(config)
+    print(f"    OUT: {len(out_df)} rows")
+
+    in_df = query_in(config, konversi)
+    print(f"    IN: {len(in_df)} rows")
+
+    # Combine all 4 sources
+    parts = []
+    for df in [q4217, full_rekap_so, out_df, in_df]:
+        if not df.empty:
+            parts.append(df)
+
+    if not parts:
+        print("  [Append1] WARNING: No source data found!")
+        return pd.DataFrame(columns=[
+            "Nama Barang", "NAMA RESTO", "Tanggal", "JENIS", "NILAI",
+            "Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT", "KATEGORI", "SOURCE KIRIMAN"
+        ])
+
+    # Table.Buffer equivalent — just use the DataFrame (already in memory)
+    source = pd.concat(parts, ignore_index=True, sort=False)
+    print(f"    Combined source: {len(source)} rows")
+
+    # =========================================================================
+    # 2. KONFIGURASI
+    # =========================================================================
+    InfoColumns = ["Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT"]
+    KeyColumns = ["Nama Barang", "NAMA RESTO", "Tanggal"]
+    AvailableInfoColumns = [c for c in InfoColumns if c in source.columns]
+
+    # =========================================================================
+    # 3. INFORMATION — group by KeyColumns, concat valid values for InfoColumns
+    # =========================================================================
+    print("  [Append1] Building information (grouped)...")
+    info_cols = KeyColumns + AvailableInfoColumns
+    info_available = [c for c in info_cols if c in source.columns]
+    information = source[info_available].copy()
+
+    if AvailableInfoColumns and len(information) > 0:
+        # Group by KeyColumns, agg each InfoColumn with concat_valid_values
+        agg_dict = {col: _concat_valid_values for col in AvailableInfoColumns if col in information.columns}
+        information_grouped = information.groupby(KeyColumns, as_index=False, dropna=False).agg(agg_dict)
+    else:
+        information_grouped = information[KeyColumns].drop_duplicates().reset_index(drop=True) if KeyColumns else information.copy()
+
+    # =========================================================================
+    # 4. PERHITUNGAN — pivot, replace null→0, group+fnRunningStock, deviasi, selisih, rename
+    # =========================================================================
+    print("  [Append1] Pivot + running stock + calculations...")
+    calc_columns = KeyColumns + ["JENIS", "Value"]
+    calc_available = [c for c in calc_columns if c in source.columns]
+    calculation_source = source[calc_available].copy()
+
+    # pivoted = Table.Pivot(CalculationSource, distinct JENIS, "JENIS", "Value", List.Sum)
+    if len(calculation_source) > 0 and "JENIS" in calculation_source.columns:
+        # Ensure Value is numeric
+        calculation_source["Value"] = pd.to_numeric(calculation_source["Value"], errors="coerce").fillna(0)
+
+        # Pivot: group by KeyColumns, columns = JENIS, values = sum(Value)
+        pivoted = calculation_source.pivot_table(
+            index=KeyColumns,
+            columns="JENIS",
+            values="Value",
+            aggfunc="sum",
+            dropna=False
+        ).reset_index()
+        # Flatten column index (pivot_table creates MultiIndex column when using columns param)
+        pivoted.columns.name = None
+    else:
+        pivoted = pd.DataFrame(columns=KeyColumns)
+
+    # ReplaceColumns = {"SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN"}
+    # AvailableReplaceColumns = intersection with pivoted columns
+    replace_columns = ["SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN"]
+    available_replace = [c for c in replace_columns if c in pivoted.columns]
+
+    # replaced = Table.ReplaceValue(pivoted, null, 0, ..., AvailableReplaceColumns)
+    for col in available_replace:
+        pivoted[col] = pivoted[col].fillna(0)
+
+    # grouped = Table.Group(replaced, {Nama Barang, NAMA RESTO}, fnRunningStock)
+    # OPTIMIZED: pakai fn_running_stock_grouped (pre-sort + groupby C-level)
+    group_keys = ["Nama Barang", "NAMA RESTO"]
+    available_group_keys = [c for c in group_keys if c in pivoted.columns]
+
+    if len(pivoted) > 0 and len(available_group_keys) == 2:
+        # Use optimized grouped version (pre-sort once, iterate at C-level)
+        combined = fn_running_stock_grouped(pivoted, available_group_keys)
+    else:
+        combined = pivoted.copy()
+        if "SALDO AKHIR" not in combined.columns:
+            combined["SALDO AKHIR"] = 0.0
+
+    # typed = SALDO AKHIR → number
+    if "SALDO AKHIR" in combined.columns:
+        combined["SALDO AKHIR"] = pd.to_numeric(combined["SALDO AKHIR"], errors="coerce").fillna(0)
+
+    # deviasi = SO - SALDO AKHIR (try [SO] otherwise 0)
+    so_vals = combined["SO"] if "SO" in combined.columns else pd.Series(0, index=combined.index)
+    saldo_akhir_vals = combined["SALDO AKHIR"] if "SALDO AKHIR" in combined.columns else pd.Series(0, index=combined.index)
+    combined["DEVIASI"] = so_vals.fillna(0) - saldo_akhir_vals.fillna(0)
+
+    # noNull = filter Nama Barang not null
+    if "Nama Barang" in combined.columns:
+        combined = combined[combined["Nama Barang"].notna()].reset_index(drop=True)
+
+    # selisih = BARANG MASUK - IN (try [BARANG MASUK] otherwise 0 - try [IN] otherwise 0)
+    bm_vals = combined["BARANG MASUK"] if "BARANG MASUK" in combined.columns else pd.Series(0, index=combined.index)
+    in_vals = combined["IN"] if "IN" in combined.columns else pd.Series(0, index=combined.index)
+    combined["Selisih IN"] = bm_vals.fillna(0) - in_vals.fillna(0)
+
+    # renamed — beri prefix nomor
+    rename_map = {
+        "SALDO AKHIR": "2.SALDO AKHIR",
+        "SO": "1.SO",
+        "DEVIASI": "3.DEVIASI",
+        "IN": "4.IN",
+        "BARANG MASUK": "5.BARANG MASUK",
+        "Selisih IN": "6.Selisih IN",
+        "OUT": "7.OUT",
+    }
+    # Only rename columns that exist
+    valid_rename = {old: new for old, new in rename_map.items() if old in combined.columns}
+    renamed = combined.rename(columns=valid_rename)
+
+    # =========================================================================
+    # 5. MERGE INFORMATION + KATEGORI
+    # =========================================================================
+    print("  [Append1] Merging information + kategori...")
+    # MergedInformation = LeftOuter join renamed × InformationGrouped on KeyColumns
+    if AvailableInfoColumns and len(information_grouped) > 0:
+        # Ensure KeyColumns exist in both
+        merge_keys = [c for c in KeyColumns if c in renamed.columns and c in information_grouped.columns]
+        if merge_keys:
+            # Drop InfoColumns from renamed that will come from InformationGrouped (to avoid suffix)
+            info_cols_to_drop = [c for c in AvailableInfoColumns if c in renamed.columns]
+            renamed_clean = renamed.drop(columns=info_cols_to_drop, errors="ignore")
+            expanded_information = renamed_clean.merge(
+                information_grouped, on=merge_keys, how="left"
+            )
+        else:
+            expanded_information = renamed.copy()
+            for col in AvailableInfoColumns:
+                expanded_information[col] = None
+    else:
+        expanded_information = renamed.copy()
+
+    # mergedKategori = LeftOuter join × DBS_Kategori on Nama Barang = NAMA BARANG
+    if len(dbs_kategori) > 0 and "Nama Barang" in expanded_information.columns:
+        # Prepare DBS_Kategori for merge
+        kat = dbs_kategori[["NAMA BARANG", "KATEGORI", "SOURCE KIRIMAN"]].copy()
+        kat = kat.rename(columns={"NAMA BARANG": "Nama Barang"})
+        # Ensure Nama Barang is string for merge
+        expanded_information["Nama Barang"] = expanded_information["Nama Barang"].astype(str)
+        kat["Nama Barang"] = kat["Nama Barang"].astype(str)
+        expanded_kategori = expanded_information.merge(kat, on="Nama Barang", how="left")
+    else:
+        expanded_kategori = expanded_information.copy()
+        expanded_kategori["KATEGORI"] = None
+        expanded_kategori["SOURCE KIRIMAN"] = None
+
+    # =========================================================================
+    # 6. UNPIVOT — 7 metric columns + SALDO AWAL → (JENIS, NILAI)
+    # =========================================================================
+    print("  [Append1] Unpivoting metrics...")
+    unpivot_columns = [
+        "2.SALDO AKHIR", "1.SO", "3.DEVIASI", "4.IN",
+        "5.BARANG MASUK", "6.Selisih IN", "7.OUT", "SALDO AWAL"
+    ]
+    available_unpivot = [c for c in unpivot_columns if c in expanded_kategori.columns]
+
+    if not available_unpivot:
+        print("  [Append1] WARNING: No metric columns found for unpivot!")
+        return pd.DataFrame(columns=[
+            "Nama Barang", "NAMA RESTO", "Tanggal", "JENIS", "NILAI",
+            "Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT", "KATEGORI", "SOURCE KIRIMAN"
+        ])
+
+    # id_vars = all columns except the unpivot columns
+    id_vars = [c for c in expanded_kategori.columns if c not in available_unpivot]
+    unpivoted = expanded_kategori.melt(
+        id_vars=id_vars,
+        value_vars=available_unpivot,
+        var_name="JENIS",
+        value_name="NILAI"
+    )
+
+    # Drop rows where NILAI is null (M's Table.Unpivot doesn't create rows for nulls)
+    # After ReplaceValue null→0, metrics are 0 not null. But SALDO AWAL might have nulls.
+    unpivoted = unpivoted.dropna(subset=["NILAI"]).reset_index(drop=True)
+
+    # =========================================================================
+    # 7. RESTORE URUTAN KOLOM FINAL
+    # =========================================================================
+    final_columns = KeyColumns + ["JENIS", "NILAI"] + AvailableInfoColumns + ["KATEGORI", "SOURCE KIRIMAN"]
+    available_final = [c for c in final_columns if c in unpivoted.columns]
+    final = unpivoted[available_final].copy()
+
+    # Type: Tanggal → Int64, NILAI → numeric
+    if "Tanggal" in final.columns:
+        final["Tanggal"] = pd.to_numeric(final["Tanggal"], errors="coerce").astype("Int64")
+    if "NILAI" in final.columns:
+        final["NILAI"] = pd.to_numeric(final["NILAI"], errors="coerce")
+
+    print(f"  [Append1] DONE: {len(final)} rows")
+    return final

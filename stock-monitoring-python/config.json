@@ -1,0 +1,35 @@
+{
+  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berbeda. Struktur folder & sheet name HARUS sama dengan export Accurate Online.",
+  "RootPath": "C:\\KERJA\\1. RESTO\\9.NEW QUERY\\",
+  "Folders": {
+    "RekapBerjalan":  "1. DEVIASI WEEKLY",
+    "RekapLalu":      "1.12 Rekap Mentah Bulan Lalu",
+    "Penjualan2205":  "2. 22.05",
+    "Kirim4215":      "3.1 42.15 Kirim",
+    "Terima4215":     "3. 42.15",
+    "RI3224":         "13. 32.24 RI",
+    "RI3224Lalu":     "13.2 3224 RI Bulan Lalu",
+    "PI":             "26.Rincian PI",
+    "SaldoAwal4217":  "6.1 42.17 Saldo Awal",
+    "KonversiSatuan": "27.Konversi Satuan Dex",
+    "DBSKategori":    "21. DBS Kategori",
+    "Pemindahan4205": "4. 42.05",
+    "RincianPO":      "25. Rincian PO"
+  },
+  "Sheets": {
+    "RekapMentah":     "REKAP MENTAH",
+    "Penjualan2205":   "#22.05. Rincian Penjualan per B",
+    "Pemindahan4215":  "#42.15. Pemindahan Barang (KIRI",
+    "Penerimaan3224":  "#32.24. Rincian Penerimaan Bara",
+    "SaldoAwal4217":   "#42.17. Kuantitas Barang per Gu",
+    "FakturPembelian": "#32.42. Rincian Faktur Pembelia",
+    "KonversiSatuan":  "Sheet1",
+    "DBSKategori":     "Sheet1",
+    "Pemindahan4205":  "#42.05. Rincian Pemindahan Bara",
+    "PesananPO":       "#32.43. Rincian Pesanan Pembeli"
+  },
+  "Output": {
+    "TemplateFile": "template/Mutasi Barang - Template.xlsx",
+    "DefaultOutput": "output/Mutasi Barang.xlsx"
+  }
+}

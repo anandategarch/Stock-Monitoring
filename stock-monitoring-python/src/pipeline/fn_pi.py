@@ -1,0 +1,88 @@
+"""
+fn_pi.py — Mirror persis fnPI di M code.
+Faktur Pembelian (modul 32.42) → sumber IN dengan konversi satuan.
+"""
+import pandas as pd
+from .helpers import (
+    fn_combine_folder, safe_to_str, safe_to_numeric,
+    date_to_day, text_after_delimiter
+)
+
+
+def fn_pi(folder_path: str, konversi: pd.DataFrame) -> pd.DataFrame:
+    """
+    Mirror M: fnPI(folderPath, konversi).
+
+    konversi: DataFrame dari fn_konversi_satuan (columns: Nama Barang, Satuan, Rasio).
+
+    Output columns: Tanggal, NAMA RESTO, Nama Barang, Value
+    - Value = Kuantitas × Rasio (konversi ke unit terkecil)
+    """
+    # expand + Skip(3) + Promote = header=4
+    prom = fn_combine_folder(folder_path, "#32.42. Rincian Faktur Pembelia", header_row=4)
+    if prom.empty:
+        return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
+
+    # sel = Table.SelectColumns(prom, {"Nama Cabang#", "Tgl Pengiriman", "Nama Barang", "Kuantitas", "Nama Satuan"})
+    needed = ["Nama Cabang#", "Tgl Pengiriman", "Nama Barang", "Kuantitas", "Nama Satuan"]
+    available = [c for c in needed if c in prom.columns]
+    sel = prom[available].copy()
+
+    # typed
+    for col in ["Nama Cabang#", "Nama Barang", "Nama Satuan"]:
+        if col in sel.columns:
+            sel[col] = safe_to_str(sel[col])
+    if "Kuantitas" in sel.columns:
+        sel["Kuantitas"] = safe_to_numeric(sel["Kuantitas"])
+
+    # extDay: Tgl Pengiriman → Date.Day
+    if "Tgl Pengiriman" in sel.columns:
+        sel["Tgl Pengiriman"] = date_to_day(sel["Tgl Pengiriman"])
+
+    # fil = Table.SelectRows(extDay, each [#"Nama Cabang#"] <> null)
+    if "Nama Cabang#" in sel.columns:
+        mask = sel["Nama Cabang#"].notna() & (sel["Nama Cabang#"].astype(str).str.strip() != "")
+        sel = sel[mask].copy()
+
+    # extCab: Nama Cabang# → Text.AfterDelimiter(_, ".")
+    # Format: "1370.MLGPAR" → "MLGPAR"
+    if "Nama Cabang#" in sel.columns:
+        sel["NAMA RESTO"] = sel["Nama Cabang#"].apply(lambda x: text_after_delimiter(x, "."))
+
+    # LEFT JOIN with konversi on (Nama Barang, Nama Satuan) = (Nama Barang, Satuan)
+    if konversi is not None and not konversi.empty and "Nama Barang" in sel.columns and "Nama Satuan" in sel.columns:
+        konv = konversi[["Nama Barang", "Satuan", "Rasio"]].copy()
+        # Pastikan type konsisten untuk join
+        konv["Nama Barang"] = konv["Nama Barang"].astype(str)
+        konv["Satuan"] = konv["Satuan"].astype(str)
+        sel["Nama Barang"] = sel["Nama Barang"].astype(str)
+        sel["Nama Satuan"] = sel["Nama Satuan"].astype(str)
+
+        merged = sel.merge(konv, how="left",
+                           left_on=["Nama Barang", "Nama Satuan"],
+                           right_on=["Nama Barang", "Satuan"],
+                           suffixes=("", "_konv"))
+    else:
+        merged = sel.copy()
+        merged["Rasio"] = pd.NA
+
+    # rep = Table.ReplaceValue(exp, null, 1, {"Rasio"})
+    merged["Rasio"] = merged["Rasio"].fillna(1)
+
+    # add = Value = Kuantitas * Rasio
+    if "Kuantitas" in merged.columns:
+        merged["Value"] = merged["Kuantitas"].fillna(0) * merged["Rasio"]
+    else:
+        merged["Value"] = 0
+
+    # ren: Nama Cabang# → NAMA RESTO (sudah dibuat), Tgl Pengiriman → Tanggal
+    merged = merged.rename(columns={"Tgl Pengiriman": "Tanggal"})
+
+    # fin = Table.SelectColumns(ren, {"Tanggal", "NAMA RESTO", "Nama Barang", "Value"})
+    final_cols = ["Tanggal", "NAMA RESTO", "Nama Barang", "Value"]
+    for c in final_cols:
+        if c not in merged.columns:
+            merged[c] = pd.NA
+    fin = merged[final_cols].reset_index(drop=True)
+
+    return fin
