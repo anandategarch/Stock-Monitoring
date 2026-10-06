@@ -491,20 +491,27 @@ def run_test():
     print(f"    Append1: {len(append1_result)} rows, cols: {list(append1_result.columns)}")
     print(f"    Rincian PO: {len(rincian_result)} rows")
 
-    # Test deviasi view widget (smoke test)
-    print("\n  [7] Testing deviasi view widget...")
+    # Test view widgets (smoke test)
+    print("\n  [7] Testing view widgets...")
     import tkinter as tk
     from tkinter import ttk
     root = tk.Tk()
     root.withdraw()  # don't show window
+
+    # Test PivotTableView (long format pivot)
+    from src.ui.pivot_view import PivotTableView
+    pv = PivotTableView(root)
+    pv.load_data(append1_df)
+    children = pv.tree.get_children()
+    print(f"    ✓ PivotTableView loaded: {len(children)} item rows")
+
+    # Test DeviasiView (GR + PCS)
     from src.ui.deviasi_view import DeviasiView
     dv = DeviasiView(root, satuan_mode="GR")
     dv.load_data(append1_df)
-    # Verify tree has items (or empty but no crash)
     children = dv.tree.get_children()
     print(f"    ✓ DeviasiView (GR) loaded: {len(children)} rows")
 
-    # Test PCS mode
     dv2 = DeviasiView(root, satuan_mode="PCS")
     dv2.load_data(append1_df)
     children2 = dv2.tree.get_children()
