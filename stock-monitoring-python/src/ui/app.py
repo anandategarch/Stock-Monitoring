@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import pandas as pd
 
 # Pastikan parent folder di sys.path agar `from src...` jalan
 _BASE = Path(__file__).resolve().parent.parent.parent
@@ -297,9 +298,17 @@ class StockMonitorApp:
             top, text="MULAI PROSES", style="Big.TButton", command=self._start_pipeline)
         self.btn_mulai.pack(side=tk.LEFT, padx=(0, 8))
 
+        self.btn_stop = ttk.Button(
+            top, text="Stop", state="disabled", command=self._stop_pipeline)
+        self.btn_stop.pack(side=tk.LEFT, padx=4)
+
         self.btn_bersih = ttk.Button(
             top, text="Bersihkan Log", command=self._clear_log)
         self.btn_bersih.pack(side=tk.LEFT, padx=4)
+
+        self.btn_export = ttk.Button(
+            top, text="Export ke Excel", state="disabled", command=self._export_excel)
+        self.btn_export.pack(side=tk.LEFT, padx=4)
 
         prog_frame = ttk.Frame(tab)
         prog_frame.pack(fill=tk.X, pady=(0, 6))
@@ -351,6 +360,8 @@ class StockMonitorApp:
         self.notebook.select(self.tab_proses)
         self.is_running = True
         self.btn_mulai.configure(state="disabled")
+        self.btn_stop.configure(state="normal")
+        self.btn_export.configure(state="disabled")
         self.status_var.set("Status: menjalankan pipeline...")
         self.progress.start(12)
 
@@ -378,6 +389,7 @@ class StockMonitorApp:
         self.progress.stop()
         self.is_running = False
         self.btn_mulai.configure(state="normal")
+        self.btn_stop.configure(state="disabled")
 
         if error is not None:
             exc, tb = error
@@ -400,6 +412,7 @@ class StockMonitorApp:
         self.deviasi_gr_view.load_data(append1_df)
         self.deviasi_pcs_view.load_data(append1_df)
         self.rincian_view.load_data(rincian_po_df)
+        self.btn_export.configure(state="normal")
 
         # Switch to Pivot Table tab (default view)
         self.notebook.select(self.tab_pivot)
@@ -408,6 +421,38 @@ class StockMonitorApp:
             f"Pipeline selesai.\n\nAppend1: {len(append1_df)} rows\nRincian PO: {len(rincian_po_df)} rows\n\n"
             f"Lihat data di tab Pivot Table, DEVIASI GR, DEVIASI PCS & Rincian PO.",
             parent=self.root)
+
+    def _stop_pipeline(self):
+        """Stop the pipeline (graceful — sets flag, thread checks it)."""
+        if not self.is_running:
+            return
+        self.is_running = False
+        self.btn_stop.configure(state="disabled")
+        self.status_var.set("Status: menghentikan pipeline...")
+        self._append_log("\n[STOP] Permintaan stop dikirim. Pipeline akan berhenti di checkpoint berikutnya.\n")
+
+    def _export_excel(self):
+        """Export current data (Append1 + Rincian PO) to Excel."""
+        if self.append1_df is None and self.rincian_po_df is None:
+            messagebox.showwarning("Export", "Belum ada data. Jalankan pipeline dulu.", parent=self.root)
+            return
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan sebagai Excel",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile="stock_monitoring_export.xlsx",
+        )
+        if not filepath:
+            return
+        try:
+            with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+                if self.append1_df is not None and not self.append1_df.empty:
+                    self.append1_df.to_excel(writer, sheet_name="Append1", index=False)
+                if self.rincian_po_df is not None and not self.rincian_po_df.empty:
+                    self.rincian_po_df.to_excel(writer, sheet_name="Rincian PO", index=False)
+            messagebox.showinfo("Export Berhasil", f"Data di-export ke:\n{filepath}", parent=self.root)
+        except Exception as e:
+            messagebox.showerror("Export Gagal", f"Tidak bisa export:\n{e}", parent=self.root)
 
     # --- TAB: Pivot Table ---------------------------------------------------
     def _build_pivot_tab(self):

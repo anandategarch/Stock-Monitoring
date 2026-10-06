@@ -13,7 +13,7 @@ Features:
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import pandas as pd
 import numpy as np
 from typing import Optional
@@ -126,7 +126,7 @@ class DeviasiView(ttk.Frame):
         # --- Hint + Status ---
         ttk.Label(
             self,
-            text="💡 Double-click baris untuk melihat detail source data",
+            text="Double-click baris untuk melihat detail source data",
             font=("Segoe UI", 9, "italic"),
             foreground="#888",
         ).pack(anchor="w", pady=(2, 0))
@@ -392,10 +392,10 @@ class DeviasiView(ttk.Frame):
                 self._cached_pivot = None  # invalidate cache
                 self._refresh()
             else:
-                tk.messagebox.showwarning("Invalid", "Tanggal H harus 1-31")
+                messagebox.showwarning("Invalid", "Tanggal H harus 1-31", parent=self.winfo_toplevel())
                 self.tanggal_h_var.set(str(self.tanggal_h))
         except ValueError:
-            tk.messagebox.showwarning("Invalid", "Tanggal H harus angka")
+            messagebox.showwarning("Invalid", "Tanggal H harus angka", parent=self.winfo_toplevel())
             self.tanggal_h_var.set(str(self.tanggal_h))
 
     def _reset_filter(self):
@@ -404,11 +404,17 @@ class DeviasiView(ttk.Frame):
         self._refresh()
 
     def _sort_by(self, col: str):
-        """Sort treeview by column."""
+        """Sort treeview by column (handles accounting-style negatives in parentheses)."""
         items = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
         try:
-            items.sort(key=lambda x: float(str(x[0]).replace(",", "").replace("(", "-").replace(")", "").replace("-", "0") or 0),
-                       reverse=True)
+            def parse_val(s):
+                s = str(s).replace(",", "").strip()
+                if s == "-" or s == "":
+                    return 0
+                if s.startswith("(") and s.endswith(")"):
+                    return -float(s[1:-1])
+                return float(s)
+            items.sort(key=lambda x: parse_val(x[0]), reverse=True)
         except (ValueError, AttributeError):
             items.sort(key=lambda x: str(x[0]), reverse=True)
         for i, (_, k) in enumerate(items):

@@ -121,7 +121,7 @@ class PivotTableView(ttk.Frame):
         # --- Hint bar (above status) ---
         ttk.Label(
             self,
-            text="💡 Double-click cell/baris untuk melihat detail source data",
+            text="Double-click cell/baris untuk melihat detail source data",
             font=("Segoe UI", 9, "italic"),
             foreground="#888",
         ).pack(anchor="w", pady=(2, 0))
