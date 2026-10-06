@@ -182,8 +182,9 @@ def query_full_rekap_mentah_so(config) -> pd.DataFrame:
     # d = rename: Attribute → Tanggal, NAMA BARANG → Nama Barang
     c = c.rename(columns={"Attribute": "Tanggal", "NAMA BARANG": "Nama Barang"})
 
-    # e = select {NAMA RESTO, Nama Barang, JENIS, Tanggal, Value}
-    needed = ["NAMA RESTO", "Nama Barang", "JENIS", "Tanggal", "Value"]
+    # e = select {NAMA RESTO, Nama Barang, JENIS, Tanggal, Value, SATUAN}
+    # SATUAN ditambahkan untuk DEVIASI GR/PCS split (perlu satuan per barang)
+    needed = ["NAMA RESTO", "Nama Barang", "JENIS", "Tanggal", "Value", "SATUAN"]
     available = [col for col in needed if col in c.columns]
     e = c[available].copy()
 

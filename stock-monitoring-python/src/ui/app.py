@@ -36,7 +36,7 @@ if str(_BASE) not in sys.path:
 
 from src.config import Config
 from src.main import run_pipeline
-from src.ui.pivot_view import PivotTableView
+from src.ui.deviasi_view import DeviasiView
 from src.ui.rincian_po_view import RincianPoView
 
 # --- Konstanta UI -----------------------------------------------------------
@@ -133,17 +133,20 @@ class StockMonitorApp:
 
         self.tab_config = ttk.Frame(self.notebook)
         self.tab_proses = ttk.Frame(self.notebook)
-        self.tab_pivot = ttk.Frame(self.notebook)
+        self.tab_deviasi_gr = ttk.Frame(self.notebook)
+        self.tab_deviasi_pcs = ttk.Frame(self.notebook)
         self.tab_rincian = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_config, text="Config")
         self.notebook.add(self.tab_proses, text="Proses")
-        self.notebook.add(self.tab_pivot, text="Pivot Table")
+        self.notebook.add(self.tab_deviasi_gr, text="DEVIASI GR")
+        self.notebook.add(self.tab_deviasi_pcs, text="DEVIASI PCS")
         self.notebook.add(self.tab_rincian, text="Rincian PO")
 
         self._build_config_tab()
         self._build_proses_tab()
-        self._build_pivot_tab()
+        self._build_deviasi_gr_tab()
+        self._build_deviasi_pcs_tab()
         self._build_rincian_tab()
 
     # --- TAB: Config --------------------------------------------------------
@@ -389,21 +392,27 @@ class StockMonitorApp:
         self._append_log(f"  Rincian PO: {len(rincian_po_df)} rows\n")
 
         # Load data into views
-        self.pivot_view.load_data(append1_df)
+        self.deviasi_gr_view.load_data(append1_df)
+        self.deviasi_pcs_view.load_data(append1_df)
         self.rincian_view.load_data(rincian_po_df)
 
-        # Switch to Pivot Table tab
-        self.notebook.select(self.tab_pivot)
+        # Switch to DEVIASI GR tab
+        self.notebook.select(self.tab_deviasi_gr)
 
         messagebox.showinfo("Selesai",
             f"Pipeline selesai.\n\nAppend1: {len(append1_df)} rows\nRincian PO: {len(rincian_po_df)} rows\n\n"
-            f"Lihat data di tab Pivot Table & Rincian PO.",
+            f"Lihat data di tab DEVIASI GR, DEVIASI PCS & Rincian PO.",
             parent=self.root)
 
-    # --- TAB: Pivot Table ---------------------------------------------------
-    def _build_pivot_tab(self):
-        self.pivot_view = PivotTableView(self.tab_pivot)
-        self.pivot_view.pack(fill="both", expand=True)
+    # --- TAB: DEVIASI GR ----------------------------------------------------
+    def _build_deviasi_gr_tab(self):
+        self.deviasi_gr_view = DeviasiView(self.tab_deviasi_gr, satuan_mode="GR")
+        self.deviasi_gr_view.pack(fill="both", expand=True)
+
+    # --- TAB: DEVIASI PCS ---------------------------------------------------
+    def _build_deviasi_pcs_tab(self):
+        self.deviasi_pcs_view = DeviasiView(self.tab_deviasi_pcs, satuan_mode="PCS")
+        self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     # --- TAB: Rincian PO ----------------------------------------------------
     def _build_rincian_tab(self):

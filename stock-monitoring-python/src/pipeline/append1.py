@@ -181,12 +181,9 @@ def build_append1(config) -> pd.DataFrame:
     # =========================================================================
     InfoColumns = ["Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT"]
     KeyColumns = ["Nama Barang", "NAMA RESTO", "Tanggal"]
-    # LightMode: skip InfoColumns (hemat grouping time)
-    if config.LightMode:
-        AvailableInfoColumns = []
-        print("    LightMode: skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam)")
-    else:
-        AvailableInfoColumns = [c for c in InfoColumns if c in source.columns]
+    # FIX: jangan skip InfoColumns (Nomor/Nomor PO perlu terisi)
+    # LightMode tetap proses InfoColumns untuk popup details
+    AvailableInfoColumns = [c for c in InfoColumns if c in source.columns]
 
 
     # =========================================================================
@@ -379,7 +376,7 @@ def build_append1(config) -> pd.DataFrame:
     # =========================================================================
     # 7. RESTORE URUTAN KOLOM FINAL
     # =========================================================================
-    final_columns = KeyColumns + ["JENIS", "NILAI"] + AvailableInfoColumns + ["KATEGORI", "SOURCE KIRIMAN"]
+    final_columns = KeyColumns + ["JENIS", "NILAI"] + AvailableInfoColumns + ["KATEGORI", "SOURCE KIRIMAN", "SATUAN"]
     available_final = [c for c in final_columns if c in unpivoted.columns]
     final = unpivoted[available_final].copy()
 
@@ -388,6 +385,30 @@ def build_append1(config) -> pd.DataFrame:
         final["Tanggal"] = pd.to_numeric(final["Tanggal"], errors="coerce").astype("Int64")
     if "NILAI" in final.columns:
         final["NILAI"] = pd.to_numeric(final["NILAI"], errors="coerce")
+
+    # =========================================================================
+    # 8. LOOKUP SATUAN (untuk DEVIASI GR/PCS split)
+    # =========================================================================
+    # SATUAN hanya ada di Full Rekap Mentah SO (dari fn_rekap_mentah).
+    # Di pivot+unpivot, SATUAN hilang. Lookup dari full_rekap_so berdasarkan (Nama Barang, NAMA RESTO).
+    if full_rekap_so is not None and "SATUAN" in full_rekap_so.columns:
+        # Build SATUAN mapping: (Nama Barang, NAMA RESTO) → SATUAN (first non-null)
+        satuan_map = (
+            full_rekap_so[["Nama Barang", "NAMA RESTO", "SATUAN"]]
+            .dropna(subset=["SATUAN"])
+            .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"], keep="first")
+        )
+        if not satuan_map.empty:
+            # Merge SATUAN to final (creates SATUAN column if not exists, fills if exists)
+            if "SATUAN" in final.columns:
+                final = final.merge(
+                    satuan_map.rename(columns={"SATUAN": "_SATUAN_LOOKUP"}),
+                    on=["Nama Barang", "NAMA RESTO"], how="left"
+                )
+                final["SATUAN"] = final["SATUAN"].fillna(final["_SATUAN_LOOKUP"])
+                final = final.drop(columns=["_SATUAN_LOOKUP"])
+            else:
+                final = final.merge(satuan_map, on=["Nama Barang", "NAMA RESTO"], how="left")
 
     print(f"  [Append1] DONE: {len(final)} rows")
     return final
