@@ -58,6 +58,8 @@ class DeviasiView(ttk.Frame):
         self.satuan_mode = satuan_mode  # "GR" or "PCS"
         self.tanggal_h = 25  # default H
         self._cached_pivot = None  # cache pivot result
+        self._cached_h = None  # FIX: track tanggal_h used for cache (was missing)
+        self._aktif_lookup = {}  # FIX: AKTIF/NON lookup by Nama Barang (lost in pivot_table)
 
         self._build_ui()
         self._setup_tags()
@@ -258,7 +260,8 @@ class DeviasiView(ttk.Frame):
 
         # Filter to relevant JENIS + tanggal range (H-2 s/d H+2)
         tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
-        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "7.OUT", "8.BARANG KELUAR"]
+        # FIX: use new numbering 9.OUT (was 7.OUT after OUT/BK split)
+        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.OUT", "8.BARANG KELUAR"]
 
         # Ensure Tanggal is numeric
         df = df.copy()
@@ -267,6 +270,21 @@ class DeviasiView(ttk.Frame):
             (df["JENIS"].isin(relevant_jenis)) &
             (df["Tanggal_num"].isin(tanggal_range))
         ].copy()
+
+        # FIX: Build AKTIF/NON lookup BEFORE pivot_table (which drops string cols)
+        # AKTIF/NON is per Nama Barang (from DBS Kategori merge in append1.py)
+        if "AKTIF/NON" in df.columns and "Nama Barang" in df.columns:
+            aktif_df = (
+                df[["Nama Barang", "AKTIF/NON"]]
+                .dropna(subset=["AKTIF/NON"])
+                .drop_duplicates(subset=["Nama Barang"], keep="first")
+            )
+            self._aktif_lookup = dict(zip(
+                aktif_df["Nama Barang"].astype(str),
+                aktif_df["AKTIF/NON"].astype(str)
+            ))
+        else:
+            self._aktif_lookup = {}
 
         if df_filtered.empty:
             return pd.DataFrame()
@@ -315,14 +333,17 @@ class DeviasiView(ttk.Frame):
             nama_barang = str(_scalar(row.get("Nama Barang", "")))
             nama_resto = str(_scalar(row.get("NAMA RESTO", "")))
             satuan = str(_scalar(row.get("SATUAN", "")))
-            aktif_non = str(_scalar(row.get("AKTIF/NON", "")))
+            # FIX: AKTIF/NON is dropped by pivot_table (aggfunc=sum on string col)
+            # Use lookup dict built before pivot
+            aktif_non = str(self._aktif_lookup.get(nama_barang, ""))
 
             so_h_minus_2 = get_val(row, "1.SO", h - 2)
             so_h_minus_1 = get_val(row, "1.SO", h - 1)
             in_h_minus_1 = get_val(row, "4.IN", h - 1)
             so_h = get_val(row, "1.SO", h)
             in_h = get_val(row, "4.IN", h)
-            out_h = get_val(row, "7.OUT", h)
+            # FIX: use new numbering 9.OUT (was 7.OUT)
+            out_h = get_val(row, "9.OUT", h)
             bk_h = get_val(row, "8.BARANG KELUAR", h)
             so_h_plus_1 = get_val(row, "1.SO", h + 1)
             in_h_plus_1 = get_val(row, "4.IN", h + 1)

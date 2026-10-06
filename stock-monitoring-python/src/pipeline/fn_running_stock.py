@@ -6,10 +6,15 @@ LOGIKA (dari M code List.Generate):
 - Tanggal < 1  (bulan lalu)  → SALDO AKHIR = 0
 - Tanggal >= 1 (bulan berjalan):
   - Jika BELUM pernah started (first time tgl >= 1):
-      SALDO AKHIR = SaldoAwal + IN - OUT
+      SALDO AKHIR = SaldoAwal + IN - OUT - BARANG_KELUAR
   - Jika SUDAH started:
-      SALDO AKHIR = previous_saldo + IN - OUT
+      SALDO AKHIR = previous_saldo + IN - OUT - BARANG_KELUAR
 - Flag 'started' sekali True, tetap True.
+
+FIX (post OUT/BK split): subtract BARANG KELUAR (42.15 Kirim) too.
+In OLD setup OUT = 22.05 sales + 42.15 Kirim (combined).
+In NEW setup OUT = 22.05 only, BARANG KELUAR = 42.15 Kirim (separate).
+To maintain same SALDO AKHIR behavior, must subtract both.
 
 ULTRA-OPTIMIZED untuk data besar:
 - Vectorized dengan numpy cumsum trick (no Python loop!)
@@ -49,6 +54,8 @@ def fn_running_stock(t: pd.DataFrame) -> pd.DataFrame:
     dates_arr = srt["Tanggal"].to_numpy(dtype="float64")  # NaN for null
     ins_arr = srt["IN"].fillna(0).to_numpy(dtype="float64") if "IN" in srt.columns else np.zeros(n)
     outs_arr = srt["OUT"].fillna(0).to_numpy(dtype="float64") if "OUT" in srt.columns else np.zeros(n)
+    # FIX: subtract BARANG KELUAR too (post OUT/BK split — was previously part of OUT)
+    bk_arr = srt["BARANG KELUAR"].fillna(0).to_numpy(dtype="float64") if "BARANG KELUAR" in srt.columns else np.zeros(n)
 
     if n == 0:
         srt["SALDO AKHIR"] = []
@@ -79,7 +86,10 @@ def fn_running_stock(t: pd.DataFrame) -> pd.DataFrame:
 
     if started_mask.any():
         start_idx = np.argmax(started_mask)  # first True index
-        net = ins_arr - outs_arr
+        # FIX: net = IN - OUT - BARANG_KELUAR (was IN - OUT only)
+        # Reason: post-split OUT = 22.05 sales only, BARANG KELUAR = 42.15 Kirim
+        # Both represent goods leaving this resto's stock
+        net = ins_arr - outs_arr - bk_arr
 
         # saldo[start_idx] = SaldoAwal + net[start_idx]
         # saldo[start_idx+1:] = SaldoAwal + cumsum(net[start_idx:])

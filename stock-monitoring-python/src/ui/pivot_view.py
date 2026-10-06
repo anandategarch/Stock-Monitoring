@@ -304,11 +304,11 @@ class PivotTableView(ttk.Frame):
         - "4.IN" → in_row (brown font + yellow bg)
         - "5.BARANG MASUK" → bm_row (green font + green bg)
         - "3.DEVIASI" → deviasi_row (red font)
-        - "6.Selisih IN" with any value ≠ 0 → selisih_anomaly (red font + pink bg)
+        - "7.Selisih IN" with any value ≠ 0 → selisih_anomaly (red font + pink bg)
         - Any row with negative value → negative (red font)
           * Priority: in_row / bm_row keep their colors (negatives in parentheses)
           * DEVIASI already red, Selisih anomaly already red
-          * Others (SALDO AWAL, 1.SO, 2.SALDO AKHIR, 7.OUT) → red font if has negative
+          * Others (SALDO AWAL, 1.SO, 2.SALDO AKHIR, 9.OUT) → red font if has negative
 
         Note: Treeview applies tags per-ROW, not per-cell. So "negative" red applies
         to the whole row text. This is a limitation — Excel does per-cell coloring.
@@ -322,14 +322,14 @@ class PivotTableView(ttk.Frame):
             return ("in_row",)  # brown font + yellow bg (keep, negatives in parentheses)
         if metric == "5.BARANG MASUK":
             return ("bm_row",)  # green font + green bg (keep, negatives in parentheses)
-        if metric == "6.Selisih IN":
+        if metric == "7.Selisih IN":
             has_nonzero = any(row_data.get(t, 0) != 0 for t in tanggals)
             if has_nonzero:
                 return ("selisih_anomaly",)  # red font + pink bg
             return (self._metric_tag(metric),)
         if metric == "3.DEVIASI":
             return ("deviasi_row",)  # red font (already red, negatives visible)
-        # SALDO AWAL, 1.SO, 2.SALDO AKHIR, 7.OUT:
+        # SALDO AWAL, 1.SO, 2.SALDO AKHIR, 9.OUT:
         # - If has negative → red font (negative tag overrides metric_bg)
         # - Else → metric background
         if has_negative:
@@ -449,8 +449,8 @@ class PivotTableView(ttk.Frame):
         Where (per Nama Barang, sorted by tanggal ascending):
           stokAwal = SALDO AWAL values per tanggal
           so       = 1.SO values per tanggal
-          bm       = 5.BARANG MASUK values per tanggal
-          bk       = 7.OUT values per tanggal
+          bm       = 4.IN values per tanggal (BARANG MASUK = IN, per user spec)
+          bk       = 8.BARANG KELUAR values per tanggal (42.15 Kirim only, post-split)
 
         Returns: pd.Series indexed by tanggal with COM values.
         """

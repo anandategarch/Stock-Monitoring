@@ -256,9 +256,10 @@ def build_append1(config) -> pd.DataFrame:
     else:
         pivoted = pd.DataFrame(columns=KeyColumns)
 
-    # ReplaceColumns = {"SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN"}
+    # ReplaceColumns = {"SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN", "BARANG KELUAR"}
     # AvailableReplaceColumns = intersection with pivoted columns
-    replace_columns = ["SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN"]
+    # FIX: include BARANG KELUAR (was missing after OUT/BK split)
+    replace_columns = ["SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN", "BARANG KELUAR"]
     available_replace = [c for c in replace_columns if c in pivoted.columns]
 
     # replaced = Table.ReplaceValue(pivoted, null, 0, ..., AvailableReplaceColumns)
@@ -296,15 +297,19 @@ def build_append1(config) -> pd.DataFrame:
     in_vals = combined["IN"] if "IN" in combined.columns else pd.Series(0, index=combined.index)
     combined["Selisih IN"] = bm_vals.fillna(0) - in_vals.fillna(0)
 
-    # renamed — beri prefix nomor
+    # renamed — beri prefix nomor (NEW numbering scheme after OUT/BK split)
+    #   7.Selisih IN (was 6.Selisih IN)
+    #   8.BARANG KELUAR (NEW — was not in rename_map before)
+    #   9.OUT (was 7.OUT)
     rename_map = {
         "SALDO AKHIR": "2.SALDO AKHIR",
         "SO": "1.SO",
         "DEVIASI": "3.DEVIASI",
         "IN": "4.IN",
         "BARANG MASUK": "5.BARANG MASUK",
-        "Selisih IN": "6.Selisih IN",
-        "OUT": "7.OUT",
+        "Selisih IN": "7.Selisih IN",
+        "BARANG KELUAR": "8.BARANG KELUAR",
+        "OUT": "9.OUT",
     }
     # Only rename columns that exist
     valid_rename = {old: new for old, new in rename_map.items() if old in combined.columns}
@@ -352,12 +357,14 @@ def build_append1(config) -> pd.DataFrame:
         expanded_kategori["AKTIF/NON"] = None
 
     # =========================================================================
-    # 6. UNPIVOT — 7 metric columns + SALDO AWAL → (JENIS, NILAI)
+    # 6. UNPIVOT — 8 metric columns + SALDO AWAL → (JENIS, NILAI)
     # =========================================================================
     print("  [Append1] Unpivoting metrics...")
+    # FIX: include 8.BARANG KELUAR (was missing → all BK data lost)
+    # FIX: use new numbering 7.Selisih IN + 9.OUT (matches pivot_view METRICS)
     unpivot_columns = [
         "2.SALDO AKHIR", "1.SO", "3.DEVIASI", "4.IN",
-        "5.BARANG MASUK", "6.Selisih IN", "7.OUT", "SALDO AWAL"
+        "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.OUT", "SALDO AWAL"
     ]
     available_unpivot = [c for c in unpivot_columns if c in expanded_kategori.columns]
 
