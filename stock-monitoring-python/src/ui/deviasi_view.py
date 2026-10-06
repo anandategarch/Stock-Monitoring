@@ -27,6 +27,7 @@ class DeviasiView(ttk.Frame):
     """
 
     # Columns: (column_id, display_name, width, anchor)
+    # Display names use H±N pattern → actual date computed dynamically
     COLUMNS = [
         ("Resto", 70, "w"),
         ("Nama Barang", 180, "w"),
@@ -44,10 +45,7 @@ class DeviasiView(ttk.Frame):
         ("SO_H+2", 70, "e"),
         ("Sistem", 80, "e"),
         ("Deviasi", 80, "e"),
-        ("ABS", 80, "e"),
         ("Rank", 50, "e"),
-        ("Max Dev", 80, "e"),
-        ("Stok Seharusnya", 90, "e"),
         ("CEK", 120, "w"),
     ]
 
@@ -204,15 +202,20 @@ class DeviasiView(ttk.Frame):
         return ""
 
     def _col_display_name(self, col_name: str) -> str:
-        """Get display name for column, replacing H with actual tanggal."""
-        for cid, name, _ in self.COLUMNS:
-            if cid == col_name:
-                # name is int (width), use col_name as display base
-                # Replace H patterns in col_name with actual tanggal
-                result = col_name
-                if "H" in result:
-                    result = result.replace("H", str(self.tanggal_h))
-                return result
+        """Get display name: parse H±N pattern and compute actual date.
+
+        Example: 'SO_H-1' with tanggal_h=3 → 'SO_2' (not 'SO_3-1').
+                 'In_H+1' with tanggal_h=3 → 'In_4'.
+        """
+        import re
+        h = self.tanggal_h
+        m = re.match(r"^(.*)_H([+-]\d+)?$", col_name)
+        if m:
+            prefix = m.group(1)
+            offset_str = m.group(2)
+            offset = int(offset_str) if offset_str else 0
+            date = h + offset
+            return f"{prefix}_{date}"
         return col_name
 
     def _update_headings(self):
@@ -327,8 +330,7 @@ class DeviasiView(ttk.Frame):
             sistem = get_val(row, "2.SALDO AKHIR", h)
 
             deviasi = so_h - sistem
-            abs_dev = abs(deviasi)
-            # Stok Seharusnya = Sistem + IN_H - OUT_H - BK_H (IN + Kirim out)
+            # Stok Seharusnya (used internally for CEK formula only — not displayed)
             stok_seharusnya = sistem + in_h - out_h - bk_h
 
             # CEK formula (ported from Excel LET formula — 4 of 5 conditions)
@@ -355,8 +357,7 @@ class DeviasiView(ttk.Frame):
                 "SO_H+2": so_h_plus_2,
                 "Sistem": sistem,
                 "Deviasi": deviasi,
-                "ABS": abs_dev,
-                "Stok Seharusnya": stok_seharusnya,
+                "_ABS": abs(deviasi),  # internal — for Rank only, not displayed
                 "CEK": cek,
             })
 
@@ -365,12 +366,12 @@ class DeviasiView(ttk.Frame):
         if result.empty:
             return result
 
-        # Rank per Nama Barang (by ABS, descending — highest deviasi = rank 1)
-        result["Rank"] = result.groupby("Nama Barang")["ABS"].rank(
+        # Rank per Nama Barang (by |Deviasi|, descending — highest deviasi = rank 1)
+        result["Rank"] = result.groupby("Nama Barang")["_ABS"].rank(
             method="min", ascending=False).astype("Int64")
 
-        # Max Deviasi per Nama Barang (max ABS across restos)
-        result["Max Dev"] = result.groupby("Nama Barang")["ABS"].transform("max")
+        # Drop internal helper column before returning
+        result = result.drop(columns=["_ABS"])
 
         return result
 
@@ -416,19 +417,21 @@ class DeviasiView(ttk.Frame):
             self.status_var.set(f"Tidak ada data {'GR' if self.satuan_mode == 'GR' else 'PCS'} setelah filter.")
             return
 
-        # Sort: by Nama Barang, then by ABS descending (highest deviasi first)
-        filtered = filtered.sort_values(["Nama Barang", "ABS"], ascending=[True, False])
+        # Sort: by Nama Barang, then by |Deviasi| descending (highest deviasi first)
+        filtered["_abs_dev"] = filtered["Deviasi"].abs()
+        filtered = filtered.sort_values(["Nama Barang", "_abs_dev"], ascending=[True, False])
+        filtered = filtered.drop(columns=["_abs_dev"])
 
         # Render rows
         col_ids = [c[0] for c in self.COLUMNS]
         n = len(filtered)
-        total_dev = 0
+        total_dev = 0.0
 
         for i, (_, row) in enumerate(filtered.iterrows()):
             values = []
             for col_id in col_ids:
                 val = row.get(col_id, 0)
-                if col_id in ("Rank",):
+                if col_id == "Rank":
                     values.append(self._fmt_int(val))
                 else:
                     values.append(self._fmt_num(val))
@@ -463,7 +466,7 @@ class DeviasiView(ttk.Frame):
         self._update_headings()
 
         self.status_var.set(
-            f"{n} rows ({self.satuan_mode}). Total ABS Deviasi: {self._fmt_num(total_dev)}. H={self.tanggal_h}"
+            f"{n} rows ({self.satuan_mode}). Total |Deviasi|: {self._fmt_num(total_dev)}. H={self.tanggal_h}"
         )
 
     def _on_tanggal_h_change(self):

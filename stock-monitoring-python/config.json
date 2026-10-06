@@ -15,7 +15,8 @@
     "KonversiSatuan": "27.Konversi Satuan Dex",
     "DBSKategori":    "21. DBS Kategori",
     "Pemindahan4205": "4. 42.05",
-    "RincianPO":      "25. Rincian PO"
+    "RincianPO":      "25. Rincian PO",
+    "Data9901":       "30. 9901"
   },
   "Sheets": {
     "RekapMentah":     "REKAP MENTAH",
@@ -28,5 +29,6 @@
     "DBSKategori":     "Sheet1",
     "Pemindahan4205":  "#42.05. Rincian Pemindahan Bara",
     "PesananPO":       "#32.43. Rincian Pesanan Pembeli"
-  }
+  },
+  "_comment_9901": "30. 9901 = mutasi barang tanpa nomor penerimaan, dipakai sebagai sumber IN tambahan. Filter: Nomor # Penerimaan Barang = blank, Jenis = Persediaan. Kolom: #Prime.Qty, Nama barang, Nama cabang, Tanggal."
 }

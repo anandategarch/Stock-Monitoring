@@ -14,6 +14,7 @@ from .fn_4217 import fn_4217
 from .fn_pi import fn_pi
 from .fn_konversi_satuan import fn_konversi_satuan
 from .fn_dbs_kategori import fn_dbs_kategori
+from .fn_9901 import fn_9901
 
 
 # =============================================================================
@@ -84,6 +85,16 @@ def query_4205(config) -> pd.DataFrame:
     return fn_4205(config.folder("Pemindahan4205"), sheet_name=sheet_name)
 
 
+def query_9901(config) -> pd.DataFrame:
+    """Process 9901 file (mutasi tanpa nomor penerimaan) → sumber IN tambahan.
+
+    Filter: Nomor # Penerimaan Barang = blank, Jenis = Persediaan.
+    Kolom: #Prime.Qty → Value, Nama barang → Nama Barang,
+          Nama cabang → NAMA RESTO, Tanggal → Tanggal (day).
+    """
+    return fn_9901(config.folder("Data9901"))
+
+
 def query_pi(config, konversi: pd.DataFrame) -> pd.DataFrame:
     """Mirror M: shared PI = fnPI(Config[RootPath] & Config[Folders][PI], #"27 Konversi Satuan Dex")"""
     return fn_pi(config.folder("PI"), konversi)
@@ -126,15 +137,18 @@ def query_in(config, konversi: pd.DataFrame) -> pd.DataFrame:
         Added Custom JENIS = "IN"
 
     LightMode: skip #"3224_Bulan Lalu" (hemat ~50% data IN).
+    + 9901 file (mutasi tanpa nomor penerimaan) sebagai sumber IN tambahan.
     """
     q3224 = query_3224(config)
     # LightMode: skip bulan lalu
     q3224_lalu = pd.DataFrame() if config.LightMode else query_3224_bulan_lalu(config)
     qpi = query_pi(config, konversi)
     q4205 = query_4205(config)
+    q9901 = query_9901(config)
+    print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")
 
     parts = []
-    for df in [q3224, q3224_lalu, qpi, q4205]:
+    for df in [q3224, q3224_lalu, qpi, q4205, q9901]:
         if not df.empty:
             parts.append(df)
 

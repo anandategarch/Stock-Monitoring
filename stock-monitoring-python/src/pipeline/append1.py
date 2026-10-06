@@ -333,9 +333,13 @@ def build_append1(config) -> pd.DataFrame:
         expanded_information = renamed.copy()
 
     # mergedKategori = LeftOuter join × DBS_Kategori on Nama Barang = NAMA BARANG
+    # FIX: also bring AKTIF/NON column (was missing → AKTIF/NON always empty in UI)
     if len(dbs_kategori) > 0 and "Nama Barang" in expanded_information.columns:
-        # Prepare DBS_Kategori for merge
-        kat = dbs_kategori[["NAMA BARANG", "KATEGORI", "SOURCE KIRIMAN"]].copy()
+        # Prepare DBS_Kategori for merge — include AKTIF/NON if present
+        kat_cols = ["NAMA BARANG", "KATEGORI", "SOURCE KIRIMAN"]
+        if "AKTIF/NON" in dbs_kategori.columns:
+            kat_cols.append("AKTIF/NON")
+        kat = dbs_kategori[kat_cols].copy()
         kat = kat.rename(columns={"NAMA BARANG": "Nama Barang"})
         # Ensure Nama Barang is string for merge
         expanded_information["Nama Barang"] = expanded_information["Nama Barang"].astype(str)
@@ -345,6 +349,7 @@ def build_append1(config) -> pd.DataFrame:
         expanded_kategori = expanded_information.copy()
         expanded_kategori["KATEGORI"] = None
         expanded_kategori["SOURCE KIRIMAN"] = None
+        expanded_kategori["AKTIF/NON"] = None
 
     # =========================================================================
     # 6. UNPIVOT — 7 metric columns + SALDO AWAL → (JENIS, NILAI)
@@ -379,7 +384,8 @@ def build_append1(config) -> pd.DataFrame:
     # =========================================================================
     # 7. RESTORE URUTAN KOLOM FINAL
     # =========================================================================
-    final_columns = KeyColumns + ["JENIS", "NILAI"] + AvailableInfoColumns + ["KATEGORI", "SOURCE KIRIMAN", "SATUAN"]
+    final_columns = KeyColumns + ["JENIS", "NILAI"] + AvailableInfoColumns + [
+        "KATEGORI", "SOURCE KIRIMAN", "SATUAN", "AKTIF/NON"]
     available_final = [c for c in final_columns if c in unpivoted.columns]
     final = unpivoted[available_final].copy()
 
