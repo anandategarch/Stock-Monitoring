@@ -1,13 +1,21 @@
 """
-deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.1).
+deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2).
 
 1 row per (Barang × Resto) di sekitar Tanggal H (H-2 … H+2) — logika
-komputasi 100% identik versi lama (pivot + CEK anomaly detection).
+komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
+VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
-Fitur v3.1:
-- Filter Nama Barang menempel di header kolom (corong, Excel-like) —
-  search box lama DIHAPUS
-- Tombol ⛶ Perbesar: buka tabel fullscreen
+Fitur v3.2:
+- KPI row di atas tabel DIHAPUS (permintaan user: tabel jadi lebar &
+  besar; ringkasan tetap ada di status footer)
+- Kolom ✓ follow-up: klik sel ✓ = daftarkan/keluarkan baris ke tab
+  ☑ Follow Up (ala repo Waste; persist followup.json)
+- Lazy refresh: view hanya compute saat tab-nya terlihat (app memanggil
+  ensure_refreshed saat tab dipilih)
+
+Fitur v3.1 (dipertahankan):
+- Filter Nama Barang menempel di header kolom (corong, Excel-like)
+- Tombol ⛶ Perbesar: buka tabel fullscreen (+ ✓ aktif di sana)
 - Loading overlay + compute/render async (UI tidak membeku)
 """
 
@@ -19,14 +27,14 @@ from typing import Optional, Callable
 
 from .theme import (
     C_BG, C_CARD, C_HEADER, C_TEXT_MUTED,
-    C_RED, C_ORANGE, C_AMBER, C_GREEN, C_BLUE, C_PURPLE,
     font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, KpiCard, KpiRow, LegendRow,
+    Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
     LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
     run_async,
 )
+from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
 
 class DeviasiView(tk.Frame):
@@ -37,6 +45,7 @@ class DeviasiView(tk.Frame):
     """
 
     COLUMNS = [
+        ("✓", 34, "center"),
         ("Resto", 70, "w"),
         ("Nama Barang", 180, "w"),
         ("Satuan", 50, "w"),
@@ -60,7 +69,8 @@ class DeviasiView(tk.Frame):
     CEK_THRESHOLD = 1.3
 
     def __init__(self, parent, satuan_mode: str = "GR",
-                 go_to_proses: Callable | None = None):
+                 go_to_proses: Callable | None = None,
+                 followup_store: FollowUpStore | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.satuan_mode = satuan_mode
@@ -72,6 +82,11 @@ class DeviasiView(tk.Frame):
         self._name_selected: set | None = None
         self._busy = False
         self._pending = False
+        self._dirty = False                # lazy refresh (v3.2)
+        self.store = followup_store       # shared FollowUpStore (v3.2)
+        self._fp_map: dict[str, str] = {}     # iid → fingerprint
+        self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw (v3.2)
+        self._tnum = None                 # cache pd.to_numeric(Tanggal)
 
         self._build_ui()
         self._setup_tags()
@@ -99,22 +114,15 @@ class DeviasiView(tk.Frame):
         # --- Konten utama ---
         self.content = tk.Frame(self, bg=C_BG)
 
-        # KPI row
-        kpi = KpiRow(self.content)
-        self.kpi_rows = KpiCard(kpi, "Baris", "—", f"satuan {mode_label}")
-        self.kpi_dev = KpiCard(kpi, "Total |Deviasi|", "—", "SO − Sistem")
-        self.kpi_cek = KpiCard(kpi, "Anomali CEK", "—",
-                               "baris terdeteksi anomali")
-        for c in (self.kpi_rows, self.kpi_dev, self.kpi_cek):
-            kpi.add(c)
-        kpi.pack(fill="x", padx=12, pady=(12, 8))
+        # (v3.2) KPI row DIHAPUS — tabel kini lebar & besar; ringkasan
+        # (baris · total deviasi · anomali CEK) ada di status footer.
 
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
                      subtitle="Tanggal H = titik fokus analisis (kolom H-2 … "
                               "H+2). Filter Nama Barang → klik header kolom "
                               "(ikon corong ⧩) di tabel.")
-        fcard.pack(fill="x", padx=12)
+        fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
         r0 = tk.Frame(fbody, bg=C_CARD)
@@ -144,7 +152,7 @@ class DeviasiView(tk.Frame):
 
         # --- Tabel card ---
         tcard = Card(self.content)
-        tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
         tbody = tcard.body()
 
         # Header tabel: judul + tombol perbesar
@@ -164,10 +172,11 @@ class DeviasiView(tk.Frame):
                                  selectmode="browse")
 
         for col_name, width, anchor in self.COLUMNS:
-            self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
+            self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
             display = self._col_display_name(col_name)
             # kolom Nama Barang: klik heading = filter (sort via popup filter)
-            if col_name == "Nama Barang":
+            # kolom ✓: heading tanpa sort (klik sel = toggle follow-up)
+            if col_name in ("Nama Barang", "✓"):
                 self.tree.heading(col_name, text=display)
             else:
                 self.tree.heading(col_name, text=display,
@@ -186,8 +195,8 @@ class DeviasiView(tk.Frame):
         # Footer: hint + status
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → detail source · klik "
-                            "judul kolom = sort · ⧩ header Nama Barang = filter",
+        tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = masuk Follow "
+                            "Up · klik judul kolom = sort · ⧩ Nama Barang = filter",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
@@ -215,6 +224,44 @@ class DeviasiView(tk.Frame):
         legend.pack(fill="x", padx=12, pady=(6, 0))
 
         self.tree.bind("<Double-1>", self._on_double_click)
+        # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
+        self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+
+    # =========================================================================
+    # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
+    # =========================================================================
+    def _on_tree_click(self, event):
+        tree = event.widget
+        try:
+            if tree.identify_region(event.x, event.y) != "cell":
+                return
+            col = tree.identify_column(event.x)
+            if not col or int(col.replace("#", "")) != 1:  # kolom data #1 = ✓
+                return
+            row_iid = tree.identify_row(event.y)
+        except Exception:
+            return
+        if not row_iid or self.store is None:
+            return
+        fp = self._fp_map.get(row_iid)
+        snap = self._row_snaps.get(row_iid)
+        if not fp or snap is None:
+            return
+        added = self.store.toggle(fp, snap)
+        try:
+            tree.set(row_iid, "✓", CHECK_ON if added else CHECK_OFF)
+        except tk.TclError:
+            pass
+        n = len(self.store)
+        self.status_var.set(
+            f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
+            f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
+
+    def ensure_refreshed(self):
+        """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
+        if self._dirty and self.data is not None and not self.data.empty:
+            self._dirty = False
+            self._refresh()
 
     def _name_values(self) -> list:
         if self.data is None or self.data.empty or \
@@ -299,8 +346,12 @@ class DeviasiView(tk.Frame):
     def _update_headings(self):
         for col_name, _, _ in self.COLUMNS:
             display = self._col_display_name(col_name)
-            self.tree.heading(col_name, text=display,
-                              command=lambda c=col_name: self._sort_by(c))
+            if col_name in ("Nama Barang", "✓"):
+                # Nama Barang = filter corong (sort via popup) · ✓ = toggle
+                self.tree.heading(col_name, text=display)
+            else:
+                self.tree.heading(col_name, text=display,
+                                  command=lambda c=col_name: self._sort_by(c))
 
     # =========================================================================
     # DATA LOADING
@@ -310,11 +361,17 @@ class DeviasiView(tk.Frame):
         self._cached_pivot = None
         self._cached_h = None
         self._aktif_lookup = {}
+        self._tnum = None  # reset cache to_numeric(Tanggal)
         self._show_content()
         self._populate_filters()
         self._name_selected = None
         self.header_filter.clear()
-        self._refresh()
+        # (v3.2) lazy refresh: hanya compute bila tab ini sedang terlihat;
+        # tab lain menunggu dipilih (app memanggil ensure_refreshed).
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
 
     def _populate_filters(self):
         if self.data is None or self.data.empty:
@@ -326,7 +383,7 @@ class DeviasiView(tk.Frame):
                 combo["values"] = values
 
     # =========================================================================
-    # PIVOT COMPUTATION (identik versi lama)
+    # PIVOT COMPUTATION (v3.2 — VEKTORISASI numpy, hasil identik versi lama)
     # =========================================================================
     def _compute_pivot(self) -> pd.DataFrame:
         if self.data is None or self.data.empty:
@@ -339,12 +396,13 @@ class DeviasiView(tk.Frame):
         relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.OUT",
                           "8.BARANG KELUAR"]
 
-        df = df.copy()
-        df["Tanggal_num"] = pd.to_numeric(df["Tanggal"], errors="coerce")
-        df_filtered = df[
-            (df["JENIS"].isin(relevant_jenis)) &
-            (df["Tanggal_num"].isin(tanggal_range))
-        ].copy()
+        # cache to_numeric(Tanggal) per objek data (hindari recompute tiap H)
+        tnum = self._tnum
+        if tnum is None:
+            tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+            self._tnum = tnum
+        mask = (df["JENIS"].isin(relevant_jenis)) & (tnum.isin(tanggal_range))
+        df_filtered = df[mask].assign(Tanggal_num=tnum[mask].to_numpy())
 
         if "AKTIF/NON" in df.columns and "Nama Barang" in df.columns:
             aktif_df = (
@@ -377,72 +435,82 @@ class DeviasiView(tk.Frame):
             return pd.DataFrame()
 
         pivot = pivot.reset_index()
+        n = len(pivot)
 
-        def get_val(row, jenis, tgl):
-            col = (jenis, float(tgl))
-            if col in row.index:
-                val = row[col]
-                if pd.isna(val):
-                    return 0
-                return float(val)
-            return 0
+        def arr(jenis: str, tgl) -> np.ndarray:
+            """Kolom (JENIS, Tanggal) sebagai array float64 (0 bila absen) —
+            semantik identik get_val versi lama (NaN → 0)."""
+            key = (jenis, float(tgl))
+            if key in pivot.columns:
+                return pd.to_numeric(
+                    pivot[key], errors="coerce").fillna(0).to_numpy(
+                    dtype="float64")
+            return np.zeros(n, dtype="float64")
 
-        def _scalar(val, default=""):
-            if isinstance(val, pd.Series):
-                val = val.iloc[0] if not val.empty else default
-            if val is None or (isinstance(val, float) and pd.isna(val)):
-                return default
-            return val
+        so_m2 = arr("1.SO", h - 2)
+        so_m1 = arr("1.SO", h - 1)
+        in_m1 = arr("4.IN", h - 1)
+        so_h = arr("1.SO", h)
+        in_h = arr("4.IN", h)
+        out_h = arr("9.OUT", h)
+        bk_h = arr("8.BARANG KELUAR", h)
+        so_p1 = arr("1.SO", h + 1)
+        in_p1 = arr("4.IN", h + 1)
+        so_p2 = arr("1.SO", h + 2)
+        sistem = arr("2.SALDO AKHIR", h)
 
-        output_rows = []
-        for _, row in pivot.iterrows():
-            nama_barang = str(_scalar(row.get("Nama Barang", "")))
-            nama_resto = str(_scalar(row.get("NAMA RESTO", "")))
-            satuan = str(_scalar(row.get("SATUAN", "")))
-            aktif_non = str(self._aktif_lookup.get(nama_barang, ""))
+        deviasi = so_h - sistem
+        stok = sistem + in_h - out_h - bk_h
 
-            so_h_minus_2 = get_val(row, "1.SO", h - 2)
-            so_h_minus_1 = get_val(row, "1.SO", h - 1)
-            in_h_minus_1 = get_val(row, "4.IN", h - 1)
-            so_h = get_val(row, "1.SO", h)
-            in_h = get_val(row, "4.IN", h)
-            out_h = get_val(row, "9.OUT", h)
-            bk_h = get_val(row, "8.BARANG KELUAR", h)
-            so_h_plus_1 = get_val(row, "1.SO", h + 1)
-            in_h_plus_1 = get_val(row, "4.IN", h + 1)
-            so_h_plus_2 = get_val(row, "1.SO", h + 2)
-            sistem = get_val(row, "2.SALDO AKHIR", h)
+        # --- CEK vektorisasi (np.select — urutan kondisi PERSIS versi lama) ---
+        barang_s = pivot["Nama Barang"].astype(str)
+        aktif_s = (barang_s.map(self._aktif_lookup).fillna("")
+                   .astype(str).str.strip().str.upper())
+        a = aktif_s.to_numpy()
 
-            deviasi = so_h - sistem
-            stok_seharusnya = sistem + in_h - out_h - bk_h
+        cond_kosong = ((a == "AKTIF") & (so_h < 0)) | \
+                      ((a == "NON AKTIF") & (so_h > 0))
 
-            cek = self._compute_cek(
-                aktif_non, so_h, so_h_minus_1, in_h, out_h,
-                stok_seharusnya, self.CEK_THRESHOLD
-            )
+        cond_tanggal = ((in_h > 0) & (so_h < so_m1) & (out_h == 0)) | \
+                       ((so_m1 > 0) & (so_h > so_m1 + 0.5 * so_m1) &
+                        (in_h == 0) & (out_h == 0))
 
-            output_rows.append({
-                "Resto": nama_resto,
-                "Nama Barang": nama_barang,
-                "Satuan": satuan,
-                "AKTIF/NON": aktif_non,
-                "SO_H-2": so_h_minus_2,
-                "SO_H-1": so_h_minus_1,
-                "In_H-1": in_h_minus_1,
-                "SO_H": so_h,
-                "In_H": in_h,
-                "Out_H": out_h,
-                "BK_H": bk_h,
-                "SO_H+1": so_h_plus_1,
-                "In_H+1": in_h_plus_1,
-                "SO_H+2": so_h_plus_2,
-                "Sistem": sistem,
-                "Deviasi": deviasi,
-                "_ABS": abs(deviasi),
-                "CEK": cek,
-            })
+        stok_safe = np.where(stok == 0, 1.0, stok)
+        ratio = np.abs(so_h - stok) / np.abs(stok_safe)
+        cond_manual = np.where(stok == 0, so_h != 0, ratio > 1.3)
 
-        result = pd.DataFrame(output_rows)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            drop_ratio = np.divide(
+                so_h, so_m1, out=np.full(n, np.inf), where=so_m1 > 0)
+        cond_drastis = (so_m1 > 0) & (drop_ratio < 0.5)
+
+        cek = np.select(
+            [cond_kosong, cond_tanggal, cond_manual, cond_drastis],
+            ["Kosong/Non Aktif", "Beda Tanggal", "Hitung Manual",
+             "Turun Drastis"],
+            default="",
+        )
+
+        result = pd.DataFrame({
+            "Resto": pivot["NAMA RESTO"].astype(str).to_numpy(),
+            "Nama Barang": barang_s.to_numpy(),
+            "Satuan": pivot["SATUAN"].astype(str).to_numpy(),
+            "AKTIF/NON": aktif_s.to_numpy(),
+            "SO_H-2": so_m2,
+            "SO_H-1": so_m1,
+            "In_H-1": in_m1,
+            "SO_H": so_h,
+            "In_H": in_h,
+            "Out_H": out_h,
+            "BK_H": bk_h,
+            "SO_H+1": so_p1,
+            "In_H+1": in_p1,
+            "SO_H+2": so_p2,
+            "Sistem": sistem,
+            "Deviasi": deviasi,
+            "_ABS": np.abs(deviasi),
+            "CEK": cek,
+        })
 
         if result.empty:
             return result
@@ -518,29 +586,57 @@ class DeviasiView(tk.Frame):
 
         col_ids = [c[0] for c in self.COLUMNS]
         n = len(filtered)
-        total_dev = 0.0
-        cek_count = 0
+        total_dev = float(filtered["Deviasi"].abs().sum())
+        cek_series = filtered["CEK"].astype(str).str.strip()
+        cek_count = int((cek_series != "").sum())
         items = []
-        for i, (_, row) in enumerate(filtered.iterrows()):
-            values = []
-            for col_id in col_ids:
-                val = row.get(col_id, 0)
+        fp_map = {}
+        row_snaps = {}
+        store = self.store
+        asal = f"DEVIASI {self.satuan_mode}"
+        cols_np = {c: filtered[c].to_numpy() for c in
+                   ("Resto", "Nama Barang", "Satuan", "AKTIF/NON",
+                    "SO_H", "Sistem", "Deviasi", "CEK", "Rank")}
+        for i in range(n):
+            barang = str(cols_np["Nama Barang"][i])
+            resto = str(cols_np["Resto"][i])
+            values = [""] * len(col_ids)  # ✓ diisi di bawah
+            for j, col_id in enumerate(col_ids):
+                if col_id == "✓":
+                    continue
+                val = cols_np[col_id][i] if col_id in cols_np else 0
                 if col_id == "Rank":
-                    values.append(self._fmt_int(val))
+                    values[j] = self._fmt_int(val)
                 else:
-                    values.append(self._fmt_num(val))
+                    values[j] = self._fmt_num(val)
+
+            # v3.2: fingerprint + snapshot (raw, tanpa format tampilan)
+            snap = {
+                "asal": asal,
+                "resto": resto,
+                "barang": barang,
+                "satuan": str(cols_np["Satuan"][i]),
+                "aktif": str(cols_np["AKTIF/NON"][i]),
+                "h": st["tanggal_h"],
+                "so": float(cols_np["SO_H"][i]),
+                "sistem": float(cols_np["Sistem"][i]),
+                "deviasi": float(cols_np["Deviasi"][i]),
+                "cek": str(cols_np["CEK"][i]),
+            }
+            fp = row_fingerprint(snap)
+            checked = store is not None and store.has(fp)
+            values[0] = CHECK_ON if checked else CHECK_OFF
+            fp_map[f"row_{i}"] = fp
+            row_snaps[f"row_{i}"] = snap
 
             tags = []
-            deviasi = row.get("Deviasi", 0)
+            deviasi = cols_np["Deviasi"][i]
             if pd.notna(deviasi):
                 if deviasi < 0:
                     tags.append("negative")
                 elif deviasi == 0:
                     tags.append("zero_dev")
-                total_dev += abs(float(deviasi))
-            cek_val = str(row.get("CEK", "") or "").strip()
-            if cek_val:
-                cek_count += 1
+            cek_val = cek_series.iloc[i]
             if cek_val == "Kosong/Non Aktif":
                 tags.append("cek_kosong")
             elif cek_val == "Beda Tanggal":
@@ -561,14 +657,16 @@ class DeviasiView(tk.Frame):
             f"{self._fmt_num(total_dev)} · Anomali CEK: {cek_count} · "
             f"H={st['tanggal_h']}")
         return {"items": items, "kpi": (n, total_dev, cek_count),
-                "status": status}
+                "status": status, "fp_map": fp_map, "row_snaps": row_snaps}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
         self._update_headings()
         self.header_filter.refresh_icon()
-        n, total_dev, cek_count = payload["kpi"]
-        self._update_kpis(n, total_dev, cek_count)
+        self._fp_map = payload.get("fp_map", {})
+        self._row_snaps = payload.get("row_snaps", {})
+        # ringkasan (baris · total deviasi · anomali) ada di status footer —
+        # KPI row atas tabel sudah dihapus (v3.2)
         self.status_var.set(payload["status"])
 
         def render_done():
@@ -577,16 +675,8 @@ class DeviasiView(tk.Frame):
                 self._pending = False
                 self._refresh()
 
-        insert_tree_items(self.tree, payload["items"], batch=400,
+        insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
-
-    def _update_kpis(self, n: int, total_dev: float, cek_count: int):
-        accent = C_RED if cek_count > 0 else C_GREEN
-        self.kpi_rows.set_value(f"{n:,}", f"satuan {self.satuan_mode}")
-        self.kpi_dev.set_value(self._fmt_num(total_dev), "SO − Sistem")
-        self.kpi_cek.set_value(f"{cek_count:,}",
-                               "baris terdeteksi anomali" if cek_count else
-                               "tidak ada anomali terdeteksi", accent)
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
@@ -596,16 +686,23 @@ class DeviasiView(tk.Frame):
 
         def sort_setup(new_tree):
             for col_name, _, _ in self.COLUMNS:
-                new_tree.heading(
-                    col_name, text=self._col_display_name(col_name),
-                    command=lambda c=col_name, t=new_tree:
-                        self._sort_by(c, tree=t))
+                if col_name in ("Nama Barang", "✓"):
+                    new_tree.heading(col_name,
+                                     text=self._col_display_name(col_name))
+                else:
+                    new_tree.heading(
+                        col_name, text=self._col_display_name(col_name),
+                        command=lambda c=col_name, t=new_tree:
+                            self._sort_by(c, tree=t))
 
-        return open_tree_maximized(
+        win, new_tree = open_tree_maximized(
             self.tree, f"Deviasi {mode_label} — CEK Anomaly",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
             on_sort_setup=sort_setup)
+        # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
+        new_tree.bind("<Button-1>", self._on_tree_click, add="+")
+        return win, new_tree
 
     def _on_tanggal_h_change(self):
         try:

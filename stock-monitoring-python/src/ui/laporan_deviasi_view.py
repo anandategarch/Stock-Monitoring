@@ -1,12 +1,18 @@
 """
-laporan_deviasi_view.py — Long-format daily audit view (v3.1).
+laporan_deviasi_view.py — Long-format daily audit view (v3.2).
 
 Audit harian per (Resto, Nama Barang, Tanggal) + klasifikasi 6-way Status
-Audit — logika komputasi 100% identik versi lama.
+Audit — hasil komputasi identik, kini Status Audit dihitung VEKTORISASI
+np.select (bukan .apply(axis=1) — 10-50× lebih cepat).
 
-Fitur v3.1:
-- Filter Nama Barang menempel di header kolom (corong, Excel-like) —
-  search box lama DIHAPUS
+Fitur v3.2:
+- 6 kartu KPI status di atas tabel DIHAPUS (tabel jadi lebar & besar;
+  filter status tetap ada di combo STATUS; distribusi ada di footer)
+- Kolom ✓ follow-up: klik sel ✓ = daftarkan baris ke tab ☑ Follow Up
+- Lazy refresh: compute hanya saat tab terlihat (app → ensure_refreshed)
+
+Fitur v3.1 (dipertahankan):
+- Filter Nama Barang menempel di header kolom (corong, Excel-like)
 - Tombol ⛶ Perbesar: buka tabel fullscreen
 - Loading overlay + compute/render async (UI tidak membeku)
 """
@@ -18,87 +24,33 @@ import numpy as np
 from typing import Optional, Callable
 
 from .theme import (
-    C_ACCENT, C_BG, C_CARD, C_BORDER, C_HEADER, C_TEXT_MUTED,
-    C_GREEN, C_AMBER, C_RED, C_BLUE, C_ORANGE,
+    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED,
     font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, KpiCard, KpiRow,
+    Card, EmptyState, GhostButton, HeaderFilter,
     LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
     run_async,
 )
+from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
-# 6 Status Audit: (nama, warna aksen) — dipakai KPI + pewarnaan baris
-_STATUS_DEFS = [
-    ("OK (Matching)", C_GREEN, "ok_match"),
-    ("OK (Dalam Cut-off)", "#65a30d", "ok_cutoff"),
-    ("DEVIASI MURNI", C_RED, "deviasi_murni"),
-    ("VALID (Sistem Masuk)", C_BLUE, "valid_sistem"),
-    ("CUT-OFF RESOLVED", "#059669", "cutoff_resolved"),
-    ("REVIEW", C_ORANGE, "review"),
+# 6 Status Audit (v3.2 — kartu KPI dihapus; dipakai combo filter +
+# pewarnaan baris via tag name)
+_STATUS_NAMES = [
+    ("OK (Matching)", "ok_match"),
+    ("OK (Dalam Cut-off)", "ok_cutoff"),
+    ("DEVIASI MURNI", "deviasi_murni"),
+    ("VALID (Sistem Masuk)", "valid_sistem"),
+    ("CUT-OFF RESOLVED", "cutoff_resolved"),
+    ("REVIEW", "review"),
 ]
-
-
-class _StatusKpi(tk.Frame):
-    """Kartu KPI status yang bisa diklik untuk toggle filter status."""
-
-    def __init__(self, parent, label: str, accent: str, on_click, **kw):
-        super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
-                         highlightthickness=1, cursor="hand2", **kw)
-        self._accent = accent
-        self._on_click = on_click
-        self._active = False
-
-        row = tk.Frame(self, bg=C_CARD)
-        row.pack(fill="both", expand=True, padx=10, pady=8)
-        bar = tk.Frame(row, bg=accent, width=4)
-        bar.pack(side="left", fill="y", padx=(0, 8))
-        txt = tk.Frame(row, bg=C_CARD)
-        txt.pack(side="left", fill="both", expand=True)
-
-        tk.Label(txt, text=label.upper(), bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(7, "bold"), anchor="w", wraplength=120,
-                 justify="left").pack(fill="x")
-        self._value_var = tk.StringVar(value="0")
-        tk.Label(txt, textvariable=self._value_var, bg=C_CARD, fg=C_HEADER,
-                 font=font(15, "bold"), anchor="w").pack(fill="x", pady=(2, 0))
-
-        for w in (self, row, txt):
-            w.bind("<Button-1>", lambda e: self._click())
-        self._bar = bar
-
-    def _click(self):
-        if self._on_click:
-            self._on_click()
-
-    def set_value(self, value: str):
-        self._value_var.set(value)
-
-    def set_active(self, active: bool):
-        self._active = active
-        self.configure(
-            highlightbackground=C_ACCENT if active else C_BORDER,
-            highlightthickness=2 if active else 1,
-            bg="#f0fdfa" if active else C_CARD)
-        # re-style children bg
-        for child in self.winfo_children():
-            try:
-                child.configure(bg="#f0fdfa" if active else C_CARD)
-                for sub in child.winfo_children():
-                    sub.configure(bg="#f0fdfa" if active else C_CARD)
-                    for sub2 in sub.winfo_children():
-                        if sub2.winfo_class() == "Frame":
-                            continue
-                        sub2.configure(
-                            bg="#f0fdfa" if active else C_CARD)
-            except tk.TclError:
-                pass
 
 
 class LaporanDeviasiView(tk.Frame):
     """Long-format daily audit view (LAPORAN DEVIASI) — tampilan baru."""
 
     COLUMNS = [
+        ("✓", 34, "center"),
         ("Tanggal", 60, "e"),
         ("Resto", 90, "w"),
         ("Nama Barang", 200, "w"),
@@ -118,16 +70,20 @@ class LaporanDeviasiView(tk.Frame):
 
     CUT_OFF_TOLERANCE = 5.0
 
-    def __init__(self, parent, go_to_proses: Callable | None = None):
+    def __init__(self, parent, go_to_proses: Callable | None = None,
+                 followup_store: FollowUpStore | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self._cached_result = None
         self._cached_signature = None
         self.go_to_proses = go_to_proses
-        self._status_kpis: dict[str, _StatusKpi] = {}
+        self.store = followup_store       # shared FollowUpStore (v3.2)
+        self._fp_map: dict[str, str] = {}     # iid → fingerprint
+        self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw
         self._name_selected: set | None = None
         self._busy = False
         self._pending = False
+        self._dirty = False                # lazy refresh (v3.2)
 
         self._build_ui()
         self._setup_tags()
@@ -149,31 +105,16 @@ class LaporanDeviasiView(tk.Frame):
         # --- Konten utama ---
         self.content = tk.Frame(self, bg=C_BG)
 
-        # 6 KPI status — klik untuk filter
-        intro = tk.Frame(self.content, bg=C_BG)
-        intro.pack(fill="x", padx=12, pady=(12, 4))
-        tk.Label(intro, text="Distribusi Status Audit — klik kartu untuk "
-                             "memfilter status",
-                 bg=C_BG, fg=C_TEXT_MUTED, font=font(9)).pack(side="left")
-
-        kpi_wrap = tk.Frame(self.content, bg=C_BG)
-        kpi_wrap.pack(fill="x", padx=12)
-        for i, (label, accent, _) in enumerate(_STATUS_DEFS):
-            kpi = _StatusKpi(kpi_wrap, label, accent,
-                             on_click=lambda l=label: self._toggle_status(l))
-            kpi.grid(row=0, column=i, sticky="nsew",
-                     padx=(0 if i == 0 else 6, 0))
-            kpi_wrap.grid_columnconfigure(i, weight=1)
-            add_tooltip(kpi, f"Klik: tampilkan hanya baris '{label}'.\n"
-                             "Klik lagi untuk melepas filter.")
-            self._status_kpis[label] = kpi
+        # (v3.2) 6 kartu KPI status + intro DIHAPUS — tabel jadi lebar &
+        # besar; filter status tetap di combo STATUS (kartu filter),
+        # distribusi status ada di status footer bawah tabel.
 
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
                      subtitle="Sort default: |Deviasi| terbesar dulu. Filter "
                               "Nama Barang → klik header kolom (ikon corong ⧩) "
                               "di tabel.")
-        fcard.pack(fill="x", padx=12, pady=(10, 0))
+        fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
         r0 = tk.Frame(fbody, bg=C_CARD)
@@ -193,7 +134,7 @@ class LaporanDeviasiView(tk.Frame):
                                          state="readonly", width=22)
         self.status_combo.pack(side="left", padx=(6, 0))
         self.status_combo.bind("<<ComboboxSelected>>",
-                               lambda e: self._sync_kpi_selection())
+                               lambda e: self._refresh())
 
         r1 = tk.Frame(fbody, bg=C_CARD)
         r1.pack(fill="x")
@@ -218,7 +159,7 @@ class LaporanDeviasiView(tk.Frame):
 
         # --- Tabel card ---
         tcard = Card(self.content)
-        tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
         tbody = tcard.body()
 
         # Header tabel: judul + tombol perbesar
@@ -237,9 +178,9 @@ class LaporanDeviasiView(tk.Frame):
                                  selectmode="browse")
 
         for col_name, width, anchor in self.COLUMNS:
-            self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
-            # kolom Nama Barang: klik heading = filter (sort via popup filter)
-            if col_name == "Nama Barang":
+            self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
+            # Nama Barang = filter corong · ✓ = toggle follow-up (tanpa sort)
+            if col_name in ("Nama Barang", "✓"):
                 self.tree.heading(col_name, text=col_name)
             else:
                 self.tree.heading(col_name, text=col_name,
@@ -257,8 +198,8 @@ class LaporanDeviasiView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → detail source · klik "
-                            "judul kolom = sort · ⧩ header Nama Barang = filter",
+        tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = masuk Follow "
+                            "Up · klik judul kolom = sort · ⧩ Nama Barang = filter",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var_label = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
@@ -276,6 +217,44 @@ class LaporanDeviasiView(tk.Frame):
             on_sort=lambda desc: self._sort_by("Nama Barang", reverse=desc))
 
         self.tree.bind("<Double-1>", self._on_double_click)
+        # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
+        self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+
+    # =========================================================================
+    # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
+    # =========================================================================
+    def _on_tree_click(self, event):
+        tree = event.widget
+        try:
+            if tree.identify_region(event.x, event.y) != "cell":
+                return
+            col = tree.identify_column(event.x)
+            if not col or int(col.replace("#", "")) != 1:  # kolom data #1 = ✓
+                return
+            row_iid = tree.identify_row(event.y)
+        except Exception:
+            return
+        if not row_iid or self.store is None:
+            return
+        fp = self._fp_map.get(row_iid)
+        snap = self._row_snaps.get(row_iid)
+        if not fp or snap is None:
+            return
+        added = self.store.toggle(fp, snap)
+        try:
+            tree.set(row_iid, "✓", CHECK_ON if added else CHECK_OFF)
+        except tk.TclError:
+            pass
+        n = len(self.store)
+        self.status_var_label.set(
+            f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
+            f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
+
+    def ensure_refreshed(self):
+        """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
+        if self._dirty and self.data is not None and not self.data.empty:
+            self._dirty = False
+            self._refresh()
 
     def _name_values(self) -> list:
         if self.data is None or self.data.empty or \
@@ -318,7 +297,11 @@ class LaporanDeviasiView(tk.Frame):
         self._populate_filters()
         self._name_selected = None
         self.header_filter.clear()
-        self._refresh()
+        # (v3.2) lazy refresh — compute hanya bila tab terlihat
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
 
     def _populate_filters(self):
         if self.data is None or self.data.empty:
@@ -328,22 +311,10 @@ class LaporanDeviasiView(tk.Frame):
                 values = ["(All)"] + sorted(
                     self.data[col].dropna().astype(str).unique().tolist())
                 combo["values"] = values
-        self.status_combo["values"] = ["(All)"] + [s[0] for s in _STATUS_DEFS]
-
-    def _toggle_status(self, label: str):
-        """Klik KPI status → set/lepas filter status lalu refresh."""
-        current = self.status_var.get()
-        self.status_var.set("(All)" if current == label else label)
-        self._sync_kpi_selection()
-
-    def _sync_kpi_selection(self):
-        active = self.status_var.get()
-        for label, kpi in self._status_kpis.items():
-            kpi.set_active(label == active and label != "(All)")
-        self._refresh()
+        self.status_combo["values"] = ["(All)"] + [s[0] for s in _STATUS_NAMES]
 
     # =========================================================================
-    # COMPUTATION (identik versi lama)
+    # COMPUTATION (v3.2 — Status Audit VEKTORISASI np.select; hasil identik)
     # =========================================================================
     def _compute_audit(self) -> pd.DataFrame:
         if self.data is None or self.data.empty:
@@ -401,9 +372,12 @@ class LaporanDeviasiView(tk.Frame):
                 .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
                                  keep="first")
             )
+            # v3.2: zip (bukan iterrows — jauh lebih cepat)
             satuan_lookup = {
-                (r["Nama Barang"], r["NAMA RESTO"]): r["SATUAN"]
-                for _, r in satuan_df.iterrows()
+                (nb, nr): sat
+                for nb, nr, sat in zip(satuan_df["Nama Barang"].astype(str),
+                                       satuan_df["NAMA RESTO"].astype(str),
+                                       satuan_df["SATUAN"].astype(str))
             }
 
         def gcol(df_, name):
@@ -442,13 +416,26 @@ class LaporanDeviasiView(tk.Frame):
         result["Saldo Kumulatif"] = result.groupby(
             ["Resto", "Nama Barang"])["SO"].cumsum()
 
-        result["Status Audit"] = result.apply(self._classify_status, axis=1)
-
-        result["_prev_deviasi"] = result.groupby(
+        # v3.2: Status Audit vektorisasi np.select (semantik PERSIS
+        # _classify_status_v2 versi lama; .apply(axis=1) lama — yang
+        # pertama bahkan dead-code hasilnya ditimpa — dihapus)
+        prev = result.groupby(
             ["Resto", "Nama Barang"])["Deviasi"].shift(1).fillna(0)
-
-        result["Status Audit"] = result.apply(self._classify_status_v2, axis=1)
-        result = result.drop(columns=["_prev_deviasi"])
+        tol = self.CUT_OFF_TOLERANCE
+        dev = result["Deviasi"].to_numpy(dtype="float64")
+        prv = prev.to_numpy(dtype="float64")
+        so_np = result["SO"].to_numpy(dtype="float64")
+        sis_np = result["Sistem"].to_numpy(dtype="float64")
+        result["Status Audit"] = np.select(
+            [(np.abs(prv) > tol) & (np.abs(dev) <= tol),
+             dev == 0,
+             np.abs(dev) <= tol,
+             so_np > sis_np,
+             np.abs(dev) > tol],
+            ["CUT-OFF RESOLVED", "OK (Matching)", "OK (Dalam Cut-off)",
+             "VALID (Sistem Masuk)", "DEVIASI MURNI"],
+            default="REVIEW",
+        )
 
         total_abs_dev = result["Deviasi"].abs().sum()
         if total_abs_dev > 0:
@@ -459,40 +446,8 @@ class LaporanDeviasiView(tk.Frame):
 
         return result.sort_values("Tanggal").reset_index(drop=True)
 
-    def _classify_status(self, row) -> str:
-        deviasi = row["Deviasi"]
-        so = row["SO"]
-        sistem = row["Sistem"]
-
-        if deviasi == 0:
-            return "OK (Matching)"
-        if abs(deviasi) <= self.CUT_OFF_TOLERANCE:
-            return "OK (Dalam Cut-off)"
-        if so > sistem:
-            return "VALID (Sistem Masuk)"
-        if abs(deviasi) > self.CUT_OFF_TOLERANCE:
-            return "DEVIASI MURNI"
-        return "REVIEW"
-
-    def _classify_status_v2(self, row) -> str:
-        deviasi = row["Deviasi"]
-        prev_deviasi = row["_prev_deviasi"]
-        so = row["SO"]
-        sistem = row["Sistem"]
-
-        if abs(prev_deviasi) > self.CUT_OFF_TOLERANCE and \
-                abs(deviasi) <= self.CUT_OFF_TOLERANCE:
-            return "CUT-OFF RESOLVED"
-
-        if deviasi == 0:
-            return "OK (Matching)"
-        if abs(deviasi) <= self.CUT_OFF_TOLERANCE:
-            return "OK (Dalam Cut-off)"
-        if so > sistem:
-            return "VALID (Sistem Masuk)"
-        if abs(deviasi) > self.CUT_OFF_TOLERANCE:
-            return "DEVIASI MURNI"
-        return "REVIEW"
+    # (_classify_status / _classify_status_v2 skalar dihapus — digantikan
+    #  np.select di atas; semantik identik, urutan kondisi dipertahankan)
 
     # =========================================================================
     # RENDER (async + batched — logika identik versi lama)
@@ -545,12 +500,12 @@ class LaporanDeviasiView(tk.Frame):
         """Pure pandas: filter result + sort → items tree (thread-safe)."""
         result = self._cached_result
         if result is None or result.empty:
-            return {"items": [], "kpis": {}, "status": "Tidak ada data."}
+            return {"items": [], "status": "Tidak ada data."}
 
         tgl_start, tgl_end = st["tgl_start"], st["tgl_end"]
         filtered = result[
             (result["Tanggal"] >= tgl_start) & (result["Tanggal"] <= tgl_end)
-        ].copy()
+        ]
 
         resto_val = st["resto"]
         if resto_val and resto_val != "(All)":
@@ -565,12 +520,7 @@ class LaporanDeviasiView(tk.Frame):
             filtered = filtered[filtered["Status Audit"].astype(str) == status_val]
 
         if filtered.empty:
-            # KPI status tetap dihitung dari basis non-status-filter
-            dist = self._apply_non_status_filters(
-                result, tgl_start, tgl_end, resto_val,
-                st["name_selected"])
-            return {"items": [], "kpis": dist["Status Audit"].value_counts()
-                        .to_dict() if not dist.empty else {},
+            return {"items": [],
                     "status": "Tidak ada data setelah filter. Klik 'Reset "
                               "Filter' atau ubah filter."}
 
@@ -587,22 +537,51 @@ class LaporanDeviasiView(tk.Frame):
         status_counts = filtered["Status Audit"].value_counts().to_dict()
 
         items = []
-        for i, (_, row) in enumerate(filtered.iterrows()):
-            values = []
-            for col_id in col_ids:
-                val = row.get(col_id, 0)
-                if col_id in ("Tanggal",):
-                    values.append(self._fmt_int(val))
+        fp_map = {}
+        row_snaps = {}
+        store = self.store
+        cols_np = {c: filtered[c].to_numpy() for c in
+                   ("Tanggal", "Resto", "Nama Barang", "Satuan",
+                    "AKTIF/NON", "SO", "Sistem", "Deviasi",
+                    "Status Audit", "Kontribusi %")}
+        for i in range(n):
+            values = [""] * len(col_ids)  # ✓ diisi di bawah
+            for j, col_id in enumerate(col_ids):
+                if col_id == "✓":
+                    continue
+                val = cols_np[col_id][i] if col_id in cols_np else 0
+                if col_id == "Tanggal":
+                    values[j] = self._fmt_int(val)
                 elif col_id == "Kontribusi %":
-                    values.append(self._fmt_pct(val))
+                    values[j] = self._fmt_pct(val)
                 else:
-                    values.append(self._fmt_num(val))
+                    values[j] = self._fmt_num(val)
+
+            # v3.2: fingerprint + snapshot (raw, tanpa format tampilan)
+            barang = str(cols_np["Nama Barang"][i])
+            snap = {
+                "asal": "LAPORAN",
+                "resto": str(cols_np["Resto"][i]),
+                "barang": barang,
+                "satuan": str(cols_np["Satuan"][i]),
+                "aktif": str(cols_np["AKTIF/NON"][i]),
+                "h": cols_np["Tanggal"][i],
+                "so": float(cols_np["SO"][i]),
+                "sistem": float(cols_np["Sistem"][i]),
+                "deviasi": float(cols_np["Deviasi"][i]),
+                "cek": str(cols_np["Status Audit"][i]),
+            }
+            fp = row_fingerprint(snap)
+            checked = store is not None and store.has(fp)
+            values[0] = CHECK_ON if checked else CHECK_OFF
+            fp_map[f"row_{i}"] = fp
+            row_snaps[f"row_{i}"] = snap
 
             tags = []
-            deviasi = row.get("Deviasi", 0)
+            deviasi = cols_np["Deviasi"][i]
             if pd.notna(deviasi) and deviasi < 0:
                 tags.append("negative")
-            status_aud = str(row.get("Status Audit", "") or "").strip()
+            status_aud = str(cols_np["Status Audit"][i]).strip()
             if status_aud == "OK (Matching)":
                 tags.append("ok_match")
             elif status_aud == "OK (Dalam Cut-off)":
@@ -620,24 +599,19 @@ class LaporanDeviasiView(tk.Frame):
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
 
-        # KPI status — distribusi mengabaikan filter status
-        dist_base = self._apply_non_status_filters(
-            result, tgl_start, tgl_end, resto_val, st["name_selected"])
-        kpis = dist_base["Status Audit"].value_counts().to_dict() \
-            if not dist_base.empty else {}
-
         summary = " · ".join(f"{k}: {v}" for k, v in
                              sorted(status_counts.items()))
         status = (f"{n} rows · Total |Deviasi|: {self._fmt_num(total_dev)} · "
                   f"{summary}")
-        return {"items": items, "kpis": kpis, "status": status}
+        return {"items": items, "status": status,
+                "fp_map": fp_map, "row_snaps": row_snaps}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
         self.header_filter.refresh_icon()
-        kpis = payload.get("kpis", {}) or {}
-        for label, kpi in self._status_kpis.items():
-            kpi.set_value(f"{kpis.get(label, 0):,}")
+        self._fp_map = payload.get("fp_map", {})
+        self._row_snaps = payload.get("row_snaps", {})
+        # distribusi status ada di status footer (v3.2 — kartu KPI dihapus)
         self.status_var_label.set(payload["status"])
 
         def render_done():
@@ -646,19 +620,8 @@ class LaporanDeviasiView(tk.Frame):
                 self._pending = False
                 self._refresh()
 
-        insert_tree_items(self.tree, payload["items"], batch=400,
+        insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
-
-    def _apply_non_status_filters(self, result, tgl_start, tgl_end,
-                                  resto_val, name_selected):
-        """Distribusi status mengabaikan filter status (untuk KPI)."""
-        out = result[(result["Tanggal"] >= tgl_start) &
-                     (result["Tanggal"] <= tgl_end)]
-        if resto_val and resto_val != "(All)":
-            out = out[out["Resto"].astype(str) == resto_val]
-        if name_selected:
-            out = out[out["Nama Barang"].astype(str).isin(name_selected)]
-        return out
 
     def _reset_filter(self):
         self.resto_var.set("(All)")
@@ -667,7 +630,7 @@ class LaporanDeviasiView(tk.Frame):
         self.tgl_end_var.set("31")
         self._name_selected = None
         self.header_filter.clear()
-        self._sync_kpi_selection()
+        self._refresh()
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
@@ -675,16 +638,22 @@ class LaporanDeviasiView(tk.Frame):
     def _maximize(self):
         def sort_setup(new_tree):
             for col_name, _, _ in self.COLUMNS:
-                new_tree.heading(
-                    col_name, text=col_name,
-                    command=lambda c=col_name, t=new_tree:
-                        self._sort_by(c, tree=t))
+                if col_name in ("Nama Barang", "✓"):
+                    new_tree.heading(col_name, text=col_name)
+                else:
+                    new_tree.heading(
+                        col_name, text=col_name,
+                        command=lambda c=col_name, t=new_tree:
+                            self._sort_by(c, tree=t))
 
-        return open_tree_maximized(
+        win, new_tree = open_tree_maximized(
             self.tree, "Laporan Deviasi — Audit Harian",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
             on_sort_setup=sort_setup)
+        # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
+        new_tree.bind("<Button-1>", self._on_tree_click, add="+")
+        return win, new_tree
 
     def _on_tanggal_change(self):
         try:

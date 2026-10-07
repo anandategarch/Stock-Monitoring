@@ -1,25 +1,33 @@
 """
-app.py — Shell UI Stock Monitoring v3.0 (total redesign).
+app.py — Shell UI Stock Monitoring v3.2 (total redesign).
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.0 + [Export] [❓]  │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.2 + [Export] [❓]  │
     ├────────────────────────────────────────────────────┤
-    │ Tab modern ber-ikon (7 tab, fungsi tidak berubah)  │
+    │ Tab modern ber-ikon (8 tab, fungsi tidak berubah)  │
     ├────────────────────────────────────────────────────┤
-    │ Konten card-based per view                          │
+    │ Konten card-based per view (tabel lebar & besar)   │
     ├────────────────────────────────────────────────────┤
     │ StatusBar: ● status data + ringkasan rows           │
     └────────────────────────────────────────────────────┘
 
-7 tab (fungsi & logika pipeline 100% dipertahankan):
+8 tab:
   1. ⚙️ Config          : RootPath + LightMode + info config
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
-  3. 📊 Pivot Table     : pivot matrix Excel-like
-  4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR)
-  5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR)
-  6. 📋 Laporan Deviasi : audit harian + 6-way Status Audit
-  7. 🛒 Rincian PO      : pivot PO dengan search + sort
+  3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default)
+  4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
+  5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
+  6. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
+  7. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
+  8. 🛒 Rincian PO      : pivot PO dengan search + sort
+
+v3.2 ringkasan:
+- Tab data tanpa KPI row (tabel lebih besar; ringkasan di footer)
+- Kolom ✓ di Deviasi GR/PCS + Laporan → tab ☑ Follow Up (persist
+  followup.json, export Excel + impor hasil tindak lanjut)
+- Perf: vektorisasi numpy (deviasi/laporan), lazy refresh per tab,
+  cache to_numeric — app jauh lebih ringan.
 
 Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
@@ -57,15 +65,18 @@ from src.ui.widgets import (
     Spinner, StatusBar, Toolbar, add_tooltip, make_log_console, make_tree,
     run_async,
 )
+from src.ui.followup import FollowUpStore
 from src.ui.pivot_view import PivotTableView
 from src.ui.deviasi_view import DeviasiView
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.rincian_po_view import RincianPoView
+from src.ui.followup_view import FollowUpView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.1.0"  # UX v3.1: header filter, perbesar tabel, copy popup,
-                        # pivot per resto, loading animation di semua proses
+APP_VERSION = "3.2.0"  # v3.2: tab Follow Up (ala Waste), hapus KPI row di
+                        # semua tab data (tabel lebar & besar), perf:
+                        # vektorisasi numpy + lazy refresh per tab
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -102,7 +113,7 @@ class StreamToQueue:
 
 
 # --- Panduan singkat ---------------------------------------------------------
-_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.1
+_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.2
 
 ALUR KERJA
   1. Tab ⚙️ Config   : pastikan RootPath menunjuk folder data export Accurate Online.
@@ -110,6 +121,7 @@ ALUR KERJA
      (semua proses panjang menampilkan animasi loading / progress)
   3. Data otomatis terisi ke tab 📊 Pivot, 📦 Deviasi GR, 🧩 Deviasi PCS,
      📋 Laporan Deviasi, dan 🛒 Rincian PO.
+     (v3.2: tab hanya dihitung saat dibuka — app lebih ringan)
 
 TAB PIVOT TABLE
   • PIVOT PER: 🏪 Resto (default) atau 📅 Tanggal.
@@ -117,9 +129,21 @@ TAB PIVOT TABLE
       nilai total > 0 yang tampil (baris kosong disembunyikan, kolom Total
       tidak ditampilkan). Contoh: item yang hanya ada di satu resto tetap
       muncul di kolom resto tersebut.
-    - Tanggal : kolom = tanggal (seperti v3.0) + rentang tanggal.
+    - Tanggal : kolom = tanggal + rentang tanggal.
   • Filter Nama Barang: klik header kolom "Nama Barang" (ikon corong ⧩).
   • Double-click cell → pop-up baris source data pendukung.
+
+FOLLOW UP (v3.2 — ala aplikasi Waste)
+  • Centang kolom ✓ di tabel Deviasi GR / Deviasi PCS / Laporan Deviasi
+    → baris masuk ke tab ☑ Follow Up (badge jumlah di judul tab).
+  • Daftar MENETAP (tidak ikut filter/H) + tersimpan otomatis
+    (followup.json) — aman walau aplikasi ditutup.
+  • Klik ✓ lagi (di tab mana pun, termasuk window ⛶) = keluarkan baris.
+  • 💽 Export Excel : snapshot + kolom kosong PIC / KATEGORI MASALAH /
+    TINDAKAN utk diisi petugas.
+  • 📥 Impor Hasil TL: baca kembali file terisi → baris ber-status
+    "Selesai" + PIC tampil.
+  • Double-click baris → pop-up detail source data.
 
 FILTER NAMA BARANG (SEMUA TAB)
   • Klik header kolom "Nama Barang" → popup filter ala Excel AutoFilter:
@@ -128,14 +152,15 @@ FILTER NAMA BARANG (SEMUA TAB)
 
 TOMBOL ⛶ PERBESAR
   • Di setiap tabel: klik ⛶ Perbesar → window besar berisi tabel lengkap.
-    Esc untuk menutup. Sort & double-click tetap berfungsi di sana.
+    Esc untuk menutup. Sort, double-click, ✓ follow-up tetap berfungsi.
 
 TAB DEVIASI GR / PCS
   • 1 baris per (Resto × Barang × Satuan) di sekitar Tanggal H (H-2 … H+2).
   • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Enter.
+  • (v3.2) ringkasan Total |Deviasi| & Anomali CEK ada di footer bawah tabel.
 
 TAB LAPORAN DEVIASI
-  • Audit harian + 6 Status Audit. Klik kartu KPI untuk memfilter status.
+  • Audit harian + 6 Status Audit (filter via combo STATUS).
 
 TAB RINCIAN PO
   • Pivot PO: Nomor # (induk) → detail barang. Filter Cabang & Status.
@@ -174,6 +199,9 @@ class StockMonitorApp:
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
+
+        # v3.2: store follow-up bersama (persist followup.json)
+        self.followup_store = FollowUpStore()
 
         # Style ttk (design system global)
         apply_theme(self.root)
@@ -223,6 +251,7 @@ class StockMonitorApp:
         self.tab_deviasi_gr = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_pcs = tk.Frame(self.notebook, bg=C_BG)
         self.tab_laporan = tk.Frame(self.notebook, bg=C_BG)
+        self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
 
         self.notebook.add(self.tab_config, text="  ⚙️ Config  ")
@@ -231,7 +260,15 @@ class StockMonitorApp:
         self.notebook.add(self.tab_deviasi_gr, text="  📦 Deviasi GR  ")
         self.notebook.add(self.tab_deviasi_pcs, text="  🧩 Deviasi PCS  ")
         self.notebook.add(self.tab_laporan, text="  📋 Laporan Deviasi  ")
+        self.notebook.add(self.tab_followup, text="  ☑ Follow Up  ")
         self.notebook.add(self.tab_rincian, text="  🛒 Rincian PO  ")
+
+        # v3.2: lazy refresh — tab data hanya compute saat TERLIHAT
+        # (setelah pipeline selesai hanya tab aktif yang refresh; tab lain
+        # menunggu dipilih → app terasa jauh lebih ringan)
+        self.notebook.bind("<<NotebookTabChanged>>",
+                           self._on_tab_changed)
+        self._update_followup_badge()
 
         self._build_config_tab()
         self._build_proses_tab()
@@ -239,7 +276,38 @@ class StockMonitorApp:
         self._build_deviasi_gr_tab()
         self._build_deviasi_pcs_tab()
         self._build_laporan_tab()
+        self._build_followup_tab()
         self._build_rincian_tab()
+
+    def _on_tab_changed(self, _event=None):
+        """Tab baru dipilih → pastikan view-nya sudah di-refresh."""
+        try:
+            cur = self.notebook.index(self.notebook.select())
+        except Exception:
+            return
+        view = None
+        if cur == 2:
+            view = self.pivot_view
+        elif cur == 3:
+            view = self.deviasi_gr_view
+        elif cur == 4:
+            view = self.deviasi_pcs_view
+        elif cur == 5:
+            view = self.laporan_view
+        elif cur == 7:
+            view = self.rincian_view
+        if view is not None and hasattr(view, "ensure_refreshed"):
+            view.ensure_refreshed()
+
+    def _update_followup_badge(self):
+        """Badge jumlah baris di judul tab Follow Up."""
+        try:
+            n = len(self.followup_store)
+            self.notebook.tab(
+                self.tab_followup,
+                text=f"  ☑ Follow Up{' (' + str(n) + ')' if n else ''}  ")
+        except Exception:
+            pass
 
     # =====================================================================
     # TAB: CONFIG
@@ -661,7 +729,8 @@ class StockMonitorApp:
         self._append_log_batched(f"\n  Append1: {len(append1_df)} rows\n")
         self._append_log_batched(f"  Rincian PO: {len(rincian_po_df)} rows\n")
 
-        # Load data into views
+        # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
+        # tab lain menunggu dipilih via <<NotebookTabChanged>>)
         self.pivot_view.load_data(append1_df)
         self.deviasi_gr_view.load_data(append1_df)
         self.deviasi_pcs_view.load_data(append1_df)
@@ -670,8 +739,10 @@ class StockMonitorApp:
         self.btn_export.configure(state="normal")
         self.btn_export_tb.configure(state="normal")
 
-        # Switch to Pivot Table tab (default view)
+        # Switch to Pivot Table tab (default view) — refresh pivot lewat
+        # event tab-changed (lazy loading)
         self.notebook.select(self.tab_pivot)
+        self.pivot_view.ensure_refreshed()
 
         messagebox.showinfo(
             "Selesai",
@@ -803,20 +874,33 @@ class StockMonitorApp:
     def _build_deviasi_gr_tab(self):
         self.deviasi_gr_view = DeviasiView(
             self.tab_deviasi_gr, satuan_mode="GR",
-            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            followup_store=self.followup_store)
         self.deviasi_gr_view.pack(fill="both", expand=True)
 
     def _build_deviasi_pcs_tab(self):
         self.deviasi_pcs_view = DeviasiView(
             self.tab_deviasi_pcs, satuan_mode="PCS",
-            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            followup_store=self.followup_store)
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     def _build_laporan_tab(self):
         self.laporan_view = LaporanDeviasiView(
             self.tab_laporan,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            followup_store=self.followup_store)
         self.laporan_view.pack(fill="both", expand=True)
+
+    def _build_followup_tab(self):
+        self.followup_view = FollowUpView(
+            self.tab_followup, self.followup_store,
+            get_data=lambda: self.append1_df,
+            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+        self.followup_view.pack(fill="both", expand=True)
+        # badge tab ikut berubah saat daftar berubah
+        self.followup_store.add_listener(
+            lambda _s: self.root.after(0, self._update_followup_badge))
 
     def _build_rincian_tab(self):
         self.rincian_view = RincianPoView(

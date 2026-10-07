@@ -531,36 +531,64 @@ def run_test():
     root = tk.Tk()
     root.withdraw()  # don't show window
 
+    # v3.2: load_data kini LAZY (view tak terlihat → defer). Test memanggil
+    # ensure_refreshed() langsung — persis yang app lakukan saat tab dipilih.
+
     # Test PivotTableView (long format pivot)
     from src.ui.pivot_view import PivotTableView
     pv = PivotTableView(root)
     pv.load_data(append1_df)
+    pv.ensure_refreshed()
     wait_view(root, pv)
     children = pv.tree.get_children()
+    assert len(children) > 0, "Pivot tree should have rows after load_data"
     print(f"    ✓ PivotTableView loaded: {len(children)} item rows")
 
-    # Test DeviasiView (GR + PCS)
+    # Test DeviasiView (GR + PCS) — mock pakai SATUAN "KG" → PCS(non-GR)
+    # berisi baris, GR memang 0 (perilaku benar utk data KG)
     from src.ui.deviasi_view import DeviasiView
     dv = DeviasiView(root, satuan_mode="GR")
     dv.load_data(append1_df)
+    dv.ensure_refreshed()
     wait_view(root, dv)
     children = dv.tree.get_children()
-    print(f"    ✓ DeviasiView (GR) loaded: {len(children)} rows")
+    print(f"    ✓ DeviasiView (GR) loaded: {len(children)} rows (KG≠GR)")
 
     dv2 = DeviasiView(root, satuan_mode="PCS")
     dv2.load_data(append1_df)
+    dv2.ensure_refreshed()
     wait_view(root, dv2)
     children2 = dv2.tree.get_children()
+    assert len(children2) > 0, "Deviasi PCS (non-GR/KG) tree should have rows"
     print(f"    ✓ DeviasiView (PCS) loaded: {len(children2)} rows")
 
     # Test rincian view widget
     from src.ui.rincian_po_view import RincianPoView
     rv = RincianPoView(root)
     rv.load_data(rincian_po_df)
+    rv.ensure_refreshed()
     wait_view(root, rv)
     children = rv.tree.get_children()
     assert len(children) > 0, "Rincian tree should have rows after load_data"
     print(f"    ✓ RincianPoView loaded: {len(children)} rows")
+
+    # v3.2: FollowUpView + toggle ✓ (roundtrip kecil)
+    from src.ui.followup import FollowUpStore
+    from src.ui.followup_view import FollowUpView
+    fs = FollowUpStore()
+    fu = FollowUpView(root, fs, get_data=lambda: append1_df)
+    snap = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+            "barang": "AYAM FILET", "satuan": "GR", "aktif": "AKTIF",
+            "h": 25, "so": 80.0, "sistem": 10.0, "deviasi": 70.0,
+            "cek": "Hitung Manual"}
+    from src.ui.followup import row_fingerprint
+    fp = row_fingerprint(snap)
+    fs.toggle(fp, snap)
+    root.update()
+    assert len(fu.tree.get_children("")) == 1, \
+        "Follow Up tree should render snapshot"
+    print("    ✓ FollowUpView renders snapshot + toggle ✓")
+    fs.toggle(fp, snap)
     root.destroy()
 
     print("\n  [8] UI widgets PASSED!")

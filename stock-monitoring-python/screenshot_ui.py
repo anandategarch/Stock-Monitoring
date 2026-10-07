@@ -1,5 +1,5 @@
 """
-screenshot_ui.py — Render app v3.1 + screenshot tiap tab & fitur baru.
+screenshot_ui.py — Render app v3.2 + screenshot tiap tab & fitur baru.
 Jalankan di bawah Xvfb (DISPLAY=:99).
 
 Output: /tmp/shots/*.png
@@ -17,7 +17,8 @@ import tkinter as tk
 
 from src.ui.app import StockMonitorApp
 
-from test_ui_redesign import make_mock_append1, make_mock_rincian, wait_view
+from test_ui_redesign import (make_mock_append1, make_mock_rincian,
+                               select_and_wait, wait_view)
 
 OUT = Path("/tmp/shots")
 OUT.mkdir(exist_ok=True)
@@ -59,10 +60,9 @@ def main():
     pump(root, 0.3)
     shot("2-proses")
 
-    # Load data — pivot default mode RESTO
+    # Load data — pivot default mode RESTO (v3.2: lazy → select+wait)
     app.pivot_view.load_data(append1)
-    app.notebook.select(app.tab_pivot)
-    wait_view(root, app.pivot_view)
+    select_and_wait(root, app, app.tab_pivot, app.pivot_view)
     shot("3-pivot-resto")
 
     # Header filter popup terbuka (klik heading #0)
@@ -98,28 +98,43 @@ def main():
     win.destroy()
     pump(root, 0.2)
 
-    # Deviasi GR
+    # Deviasi GR (v3.2: lazy + kolom ✓ + tanpa KPI row)
     app.deviasi_gr_view.load_data(append1)
-    app.notebook.select(app.tab_deviasi_gr)
-    wait_view(root, app.deviasi_gr_view)
+    select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
     shot("8-deviasi-gr")
+
+    # v3.2: centang ✓ 2 baris pertama → ikut screenshot (☑ + badge tab)
+    tree = app.deviasi_gr_view.tree
+    class _Ev:
+        pass
+    for iid in list(tree.get_children(""))[:2]:
+        bbox = tree.bbox(iid)
+        if bbox:
+            ev = _Ev()
+            ev.widget = tree
+            ev.x, ev.y = bbox[0] + 8, bbox[1] + bbox[3] // 2
+            app.deviasi_gr_view._on_tree_click(ev)
+    pump(root, 0.3)
+    shot("8b-deviasi-gr-followup-checked")
 
     # Deviasi PCS
     app.deviasi_pcs_view.load_data(append1)
-    app.notebook.select(app.tab_deviasi_pcs)
-    wait_view(root, app.deviasi_pcs_view)
+    select_and_wait(root, app, app.tab_deviasi_pcs, app.deviasi_pcs_view)
     shot("9-deviasi-pcs")
 
     # Laporan
     app.laporan_view.load_data(append1)
-    app.notebook.select(app.tab_laporan)
-    wait_view(root, app.laporan_view)
+    select_and_wait(root, app, app.tab_laporan, app.laporan_view)
     shot("10-laporan")
+
+    # v3.2: tab Follow Up (badge + snapshot rows)
+    select_and_wait(root, app, app.tab_followup, app.followup_view)
+    pump(root, 0.4)
+    shot("10b-followup")
 
     # Rincian PO
     app.rincian_view.load_data(rincian)
-    app.notebook.select(app.tab_rincian)
-    wait_view(root, app.rincian_view)
+    select_and_wait(root, app, app.tab_rincian, app.rincian_view)
     shot("11-rincian")
 
     # Details popup (dari pivot resto — double-click style)

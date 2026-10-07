@@ -1,5 +1,5 @@
 """
-rincian_po_view.py — Pivot table view untuk Rincian PO (v3.1).
+rincian_po_view.py — Pivot table view untuk Rincian PO (v3.2).
 
 Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 - Page filters: Cabang PO, Status Pesanan Pembelian
@@ -7,10 +7,9 @@ Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 - Value: Sum of Kuantitas per row
 - Grand total row
 
-Fitur v3.1:
-- Filter Nama Barang menempel di header kolom (corong, Excel-like)
-- Tombol ⛶ Perbesar: buka tabel fullscreen
-- Loading overlay + render async batched
+v3.2: KPI row DIHAPUS (ringkasan PO·item·qty di status footer) + lazy
+refresh (compute hanya saat tab terlihat).
+v3.1 (dipertahankan): filter corong header, ⛶ perbesar, loading overlay.
 """
 
 import tkinter as tk
@@ -19,9 +18,9 @@ import pandas as pd
 import numpy as np
 from typing import Optional, Callable
 
-from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT, font
+from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, KpiCard, KpiRow,
+    Card, EmptyState, GhostButton, HeaderFilter,
     LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
     run_async,
 )
@@ -38,6 +37,7 @@ class RincianPoView(tk.Frame):
         self._name_selected: set | None = None
         self._busy = False
         self._pending = False
+        self._dirty = False                # lazy refresh (v3.2)
 
         self._build_ui()
         self._setup_tags()
@@ -62,22 +62,15 @@ class RincianPoView(tk.Frame):
         # --- Konten utama ---
         self.content = tk.Frame(self, bg=C_BG)
 
-        # KPI row
-        kpi = KpiRow(self.content)
-        self.kpi_po = KpiCard(kpi, "Jumlah PO", "—", "nomor PO unik")
-        self.kpi_items = KpiCard(kpi, "Item", "—", "baris detail")
-        self.kpi_qty = KpiCard(kpi, "Total Kuantitas", "—",
-                               "sum of Kuantitas", C_ACCENT)
-        for c in (self.kpi_po, self.kpi_items, self.kpi_qty):
-            kpi.add(c)
-        kpi.pack(fill="x", padx=12, pady=(12, 8))
+        # (v3.2) KPI row DIHAPUS — tabel lebar & besar; ringkasan
+        # (PO · item · total kuantitas) ada di status footer.
 
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
                      subtitle="Filter level PO (page filter). Filter Nama "
                               "Barang → klik header kolom (ikon corong ⧩) "
                               "di tabel.")
-        fcard.pack(fill="x", padx=12)
+        fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
         r0 = tk.Frame(fbody, bg=C_CARD)
@@ -108,7 +101,7 @@ class RincianPoView(tk.Frame):
 
         # --- Tabel card ---
         tcard = Card(self.content)
-        tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
         tbody = tcard.body()
 
         # Header tabel: judul + tombol perbesar
@@ -208,7 +201,17 @@ class RincianPoView(tk.Frame):
         self._populate_filters()
         self._name_selected = None
         self.header_filter.clear()
-        self._refresh()
+        # (v3.2) lazy refresh — compute hanya bila tab terlihat
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
+    def ensure_refreshed(self):
+        """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
+        if self._dirty and self.data is not None and not self.data.empty:
+            self._dirty = False
+            self._refresh()
 
     def _populate_filters(self):
         if self.data is None or self.data.empty:
@@ -314,7 +317,7 @@ class RincianPoView(tk.Frame):
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
         self.header_filter.refresh_icon()
-        self._update_kpis(*payload["kpi"])
+        # ringkasan (PO · item · total qty) ada di status footer (v3.2)
         self.status_var.set(payload["status"])
 
         def render_done():
@@ -323,13 +326,8 @@ class RincianPoView(tk.Frame):
                 self._pending = False
                 self._refresh()
 
-        insert_tree_items(self.tree, payload["items"], batch=400,
+        insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
-
-    def _update_kpis(self, po_count: int, items: int, total_qty):
-        self.kpi_po.set_value(f"{po_count:,}", "nomor PO unik")
-        self.kpi_items.set_value(f"{items:,}", "baris detail")
-        self.kpi_qty.set_value(f"{total_qty:,}", "sum of Kuantitas")
 
     def _reset_filter(self):
         self.cabang_var.set("(All)")

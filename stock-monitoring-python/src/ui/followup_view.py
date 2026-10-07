@@ -1,0 +1,447 @@
+"""followup_view.py — Tab "☑ Follow Up" (v3.2.0) — ala repo Waste.
+
+Daftar baris anomali yang di-CENTANG (kolom ✓) di tab DEVIASI GR /
+DEVIASI PCS / LAPORAN DEVIASI — shortlist investigasi berbentuk SNAPSHOT
+(nilai apa adanya saat baris dicentang; TIDAK ikut filter/H aktif).
+
+Perilaku:
+- Baris menetap: tertutup aplikasi pun aman (followup.json, atomic write).
+- Klik sel ✓ di tabel ini = KELUARKAN baris dari daftar.
+- 💾 Export Excel: snapshot + kolom serah-terima kosong (PIC / KATEGORI
+  MASALAH / TINDAKAN — diisi petugas, konvensi rekap mentah).
+- 📥 Impor Hasil TL: baca kembali workbook terisi → baris ber-status
+  "Selesai" + PIC tampil (persist followup_resolved.json).
+- ✕ Kosongkan: hapus seluruh daftar (konfirmasi).
+- Double-click baris → pop-up detail source (bila data pipeline tersedia).
+- Sort kolom via klik judul (parse angka negatif kurung).
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import pandas as pd
+from typing import Callable, Optional
+
+from .theme import (
+    C_BG, C_CARD, C_GREEN, C_RED, C_TEXT_MUTED, C_HEADER, font,
+)
+from .widgets import (
+    AccentButton, Card, DangerButton, EmptyState, GhostButton,
+    LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
+    run_async,
+)
+from .followup import CHECK_OFF, CHECK_ON, FollowUpStore
+
+# kolom tabel Follow Up (✓ pertama — klik = keluarkan)
+COLUMNS = [
+    ("✓", 34, "center"),
+    ("Asal", 100, "w"),
+    ("Resto", 90, "w"),
+    ("Nama Barang", 220, "w"),
+    ("Satuan", 55, "w"),
+    ("H", 40, "e"),
+    ("SO", 80, "e"),
+    ("Sistem", 80, "e"),
+    ("Deviasi", 80, "e"),
+    ("CEK / Status", 140, "w"),
+    ("Status TL", 90, "w"),
+    ("PIC", 110, "w"),
+    ("Ditambahkan", 120, "w"),
+]
+
+
+class FollowUpView(tk.Frame):
+    """Tab Follow Up: tabel snapshot baris tercentang + ekspor/impor."""
+
+    def __init__(self, parent, store: FollowUpStore,
+                 get_data: Optional[Callable[[], Optional[pd.DataFrame]]] = None,
+                 go_to_proses: Callable | None = None):
+        super().__init__(parent, bg=C_BG)
+        self.store = store
+        self.get_data = get_data      # akses append1_df (untuk popup detail)
+        self.go_to_proses = go_to_proses
+        self._fp_order: list[str] = []   # urutan fp di tabel saat ini
+
+        self._build_ui()
+        self._setup_tags()
+        store.add_listener(self._on_store_changed)
+        self._render()
+
+    # =========================================================================
+    # UI BUILD
+    # =========================================================================
+    def _build_ui(self):
+        # --- Empty state ---
+        self.empty = EmptyState(
+            self, icon="☑", title="Daftar Follow Up masih kosong",
+            subtitle="Centang baris mencurigakan (kolom ✓) di tab Deviasi "
+                     "GR / Deviasi PCS / Laporan Deviasi — baris terkumpul "
+                     "di sini untuk ditindaklanjuti.",
+            cta_text="🚀 Jalankan Pipeline",
+            on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+        # --- Konten utama ---
+        self.content = tk.Frame(self, bg=C_BG)
+
+        # --- Kartu aksi (ringkas — tanpa KPI row) ---
+        ccard = Card(self.content, title="Daftar Follow Up",
+                     subtitle="Baris tercentang (✓) di tab Deviasi & "
+                              "Laporan. Lepas ✓ = keluarkan. Tersimpan "
+                              "otomatis (followup.json).")
+        ccard.pack(fill="x", padx=12, pady=(12, 0))
+        cbody = ccard.body()
+
+        r0 = tk.Frame(cbody, bg=C_CARD)
+        r0.pack(fill="x")
+        self.btn_export = AccentButton(r0, text="💾 Export Excel",
+                                       command=self._on_export)
+        self.btn_export.pack(side="left")
+        add_tooltip(self.btn_export,
+                    "Simpan daftar sebagai workbook Excel (.xlsx):\n"
+                    "kolom snapshot + kolom kosong PIC / KATEGORI\n"
+                    "MASALAH / TINDAKAN utk diisi petugas.")
+
+        self.btn_import = GhostButton(r0, text="📥 Impor Hasil TL",
+                                      command=self._on_import)
+        self.btn_import.pack(side="left", padx=(8, 0))
+        add_tooltip(self.btn_import,
+                    "Baca kembali file ekspor yang SUDAH DIISI petugas\n"
+                    "(kolom PIC / KATEGORI MASALAH / TINDAKAN di sheet\n"
+                    "'FOLLOW UP') → baris cocok diberi status Selesai.")
+
+        self.btn_clear = DangerButton(r0, text="✕ Kosongkan",
+                                      command=self._on_clear)
+        self.btn_clear.pack(side="left", padx=(8, 0))
+        add_tooltip(self.btn_clear,
+                    "Hapus SEMUA baris dari daftar follow-up\n"
+                    "(centangan di tab Deviasi/Laporan ikut lepas).")
+
+        self.status_var = tk.StringVar(value="0 baris.")
+        tk.Label(r0, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
+                 font=font(9, "bold")).pack(side="right")
+
+        # --- Tabel card ---
+        tcard = Card(self.content)
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+        tbody = tcard.body()
+
+        head = tk.Frame(tbody, bg=C_CARD)
+        head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        tk.Label(head, text="Follow Up — baris anomali terpilih",
+                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
+            side="left")
+        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        btn_max.pack(side="right")
+        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
+                             "(Esc untuk menutup)")
+
+        col_ids = [c[0] for c in COLUMNS]
+        self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
+                                 selectmode="browse")
+        for col_name, width, anchor in COLUMNS:
+            self.tree.column(col_name, width=width, minwidth=34,
+                             anchor=anchor)
+            if col_name == "✓":
+                self.tree.heading(col_name, text=col_name)
+            else:
+                self.tree.heading(
+                    col_name, text=col_name,
+                    command=lambda c=col_name: self._sort_by(c))
+
+        vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        tbody.grid_rowconfigure(1, weight=1)
+        tbody.grid_columnconfigure(0, weight=1)
+
+        foot = tk.Frame(tbody, bg=C_CARD)
+        foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        tk.Label(foot, text="🖱 Double-click baris → detail source · klik ✓ "
+                            "= keluarkan · klik judul kolom = sort",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
+
+        # Loading overlay
+        self.overlay = LoadingOverlay(tbody, "Menyiapkan daftar…")
+
+        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+
+    def _setup_tags(self):
+        self.tree.tag_configure("evenrow", background="#ffffff")
+        self.tree.tag_configure("oddrow", background="#f8fafc")
+        self.tree.tag_configure("negative", foreground="#dc2626")
+        self.tree.tag_configure("resolved", foreground="#059669")
+        self.tree.tag_configure("pending", foreground="#b45309")
+
+    # =========================================================================
+    # RENDER
+    # =========================================================================
+    def _on_store_changed(self, store):
+        # dipanggil listener store (toggle dari tab lain / import)
+        try:
+            if self.winfo_exists():
+                self.after(0, self._render)
+        except tk.TclError:
+            pass
+
+    def _show_empty(self):
+        self.content.pack_forget()
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+    def _show_content(self):
+        self.empty.pack_forget()
+        self.content.pack(fill="both", expand=True)
+
+    def _render(self):
+        rows = list(self.store.rows.values())
+        self.tree.delete(*self.tree.get_children())
+        self._fp_order = []
+
+        if not rows:
+            self._show_empty()
+            return
+        self._show_content()
+
+        items = []
+        fp_order = []
+        for i, snap in enumerate(rows):
+            fp = snap.get("fp", "")
+            fp_order.append(fp)
+            info = self.store.resolved.get(fp, {})
+            resolved = bool(info)
+            dev = snap.get("deviasi", 0)
+            try:
+                dev_f = float(dev)
+            except (TypeError, ValueError):
+                dev_f = 0.0
+
+            def _num(v):
+                try:
+                    f = float(v)
+                    return f"{f:,.0f}" if f == int(f) else f"{f:,.1f}"
+                except (TypeError, ValueError):
+                    return str(v or "-")
+            dev_txt = _num(dev) if dev_f else "-"
+            if dev_f < 0:
+                dev_txt = f"({dev_txt[1:] if dev_txt.startswith('-') else dev_txt})"
+
+            values = [
+                CHECK_ON,
+                snap.get("asal", ""), snap.get("resto", ""),
+                snap.get("barang", ""), snap.get("satuan", ""),
+                _num(snap.get("h")) if snap.get("h") not in ("", None) else "-",
+                _num(snap.get("so")) if snap.get("so") else "-",
+                _num(snap.get("sistem")) if snap.get("sistem") else "-",
+                dev_txt,
+                snap.get("cek", "") or "-",
+                "Selesai" if resolved else "Menunggu",
+                info.get("PIC", ""),
+                (snap.get("added_at", "") or "")[:16].replace("T", " "),
+            ]
+            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            if dev_f < 0:
+                tags.append("negative")
+            tags.append("resolved" if resolved else "pending")
+            items.append(("", f"fu_{i}", {"values": values,
+                                           "tags": tuple(tags)}))
+
+        self._fp_order = fp_order
+        n = len(rows)
+        selesai = self.store.resolved_count()
+        self.status_var.set(
+            f"{n} baris · {selesai} selesai · {n - selesai} menunggu")
+        self.btn_clear.set_enabled(n > 0)
+        self.btn_export.set_enabled(n > 0)
+
+        insert_tree_items(self.tree, items, batch=500)
+
+    # =========================================================================
+    # ✓ KLIK = KELUARKAN
+    # =========================================================================
+    def _on_tree_click(self, event):
+        tree = event.widget
+        try:
+            if tree.identify_region(event.x, event.y) != "cell":
+                return
+            col = tree.identify_column(event.x)
+            if not col or int(col.replace("#", "")) != 1:
+                return
+            idx = tree.index(tree.identify_row(event.y))
+        except Exception:
+            return
+        if not (0 <= idx < len(self._fp_order)):
+            return
+        fp = self._fp_order[idx]
+        snap = self.store.rows.get(fp)
+        if snap:
+            # toggle → off (keluarkan); _render dipanggil via listener
+            self.store.toggle(fp, snap)
+
+    # =========================================================================
+    # AKSI: EXPORT / IMPOR / KOSONGKAN
+    # =========================================================================
+    def _on_export(self):
+        if not self.store.rows:
+            messagebox.showinfo(
+                "Export", "Daftar follow-up masih kosong.", parent=self)
+            return
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Daftar Follow Up",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile="follow_up.xlsx",
+            parent=self,
+        )
+        if not filepath:
+            return
+
+        def work():
+            return self.store.export_xlsx(filepath)
+
+        def done(path):
+            messagebox.showinfo(
+                "Export Berhasil",
+                f"Daftar follow-up di-export ke:\n{path}\n\n"
+                "Kolom PIC / KATEGORI MASALAH / TINDAKAN\n"
+                "diisi petugas, lalu impor kembali via\n"
+                "📥 Impor Hasil TL.",
+                parent=self)
+
+        def on_error(e):
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}", parent=self)
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengekspor follow-up…", on_error=on_error)
+
+    def _on_import(self):
+        if not self.store.rows:
+            messagebox.showinfo(
+                "Impor", "Daftar follow-up masih kosong — tidak ada yang "
+                         "bisa dicocokkan.", parent=self)
+            return
+        filepath = filedialog.askopenfilename(
+            title="Pilih File Hasil Tindak Lanjut",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            parent=self,
+        )
+        if not filepath:
+            return
+
+        def work():
+            return self.store.import_workbook(filepath)
+
+        def done(res):
+            if res.get("error"):
+                messagebox.showwarning("Impor Gagal", res["error"],
+                                       parent=self)
+                return
+            n_filled = res.get("n_filled", 0)
+            n_matched = res.get("n_matched", 0)
+            if n_filled:
+                self._render()
+                messagebox.showinfo(
+                    "Impor Berhasil",
+                    f"{n_filled} baris ditandai SELESAI\n"
+                    f"(cocok: {n_matched} dari {res.get('n_rows', 0)} baris "
+                    f"di file).",
+                    parent=self)
+            else:
+                messagebox.showinfo(
+                    "Impor",
+                    "Tidak ada baris terisi (kolom PIC / KATEGORI /\n"
+                    "TINDAKAN masih kosong semua).",
+                    parent=self)
+
+        def on_error(e):
+            messagebox.showerror("Impor Gagal", f"Gagal membaca file:\n{e}",
+                                 parent=self)
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Membaca hasil tindak lanjut…",
+                  on_error=on_error)
+
+    def _on_clear(self):
+        if not self.store.rows:
+            return
+        if not messagebox.askyesno(
+                "Kosongkan Follow Up",
+                f"Hapus SEMUA {len(self.store.rows)} baris dari daftar "
+                "follow-up?\n\nCentangan di tab Deviasi/Laporan ikut lepas.",
+                parent=self):
+            return
+        self.store.clear()   # _render via listener
+
+    # =========================================================================
+    # ⛶ PERBESAR
+    # =========================================================================
+    def _maximize(self):
+        def sort_setup(new_tree):
+            for col_name, _, _ in COLUMNS:
+                if col_name == "✓":
+                    new_tree.heading(col_name, text=col_name)
+                else:
+                    new_tree.heading(
+                        col_name, text=col_name,
+                        command=lambda c=col_name, t=new_tree:
+                            self._sort_by(c, tree=t))
+
+        win, new_tree = open_tree_maximized(
+            self.tree, "Daftar Follow Up",
+            setup_tags=lambda t: self._setup_tags(),
+            on_double_click=self._on_double_click,
+            on_sort_setup=sort_setup)
+        new_tree.bind("<Button-1>", self._on_tree_click, add="+")
+        return win, new_tree
+
+    # =========================================================================
+    # SORT
+    # =========================================================================
+    def _sort_by(self, col: str, reverse: bool = True, tree=None):
+        tree = tree if tree is not None else self.tree
+        items = [(tree.set(k, col), k) for k in tree.get_children("")]
+        try:
+            def parse_val(s):
+                s = str(s).replace(",", "").strip()
+                if s in ("-", "", "Menunggu", "Selesai"):
+                    return 0 if s in ("-", "") else (1 if s == "Menunggu" else 2)
+                if s.startswith("(") and s.endswith(")"):
+                    return -float(s[1:-1])
+                return float(s)
+            items.sort(key=lambda x: parse_val(x[0]), reverse=reverse)
+        except (ValueError, AttributeError):
+            items.sort(key=lambda x: str(x[0]), reverse=reverse)
+        for i, (_, k) in enumerate(items):
+            tree.move(k, "", i)
+
+    # =========================================================================
+    # DOUBLE-CLICK → POPUP DETAIL
+    # =========================================================================
+    def _on_double_click(self, event):
+        data = self.get_data() if self.get_data else None
+        if data is None or data.empty:
+            return
+        tree = event.widget
+        row_iid = tree.identify_row(event.y)
+        if not row_iid:
+            return
+        idx = tree.index(row_iid)
+        if not (0 <= idx < len(self._fp_order)):
+            return
+        snap = self.store.rows.get(self._fp_order[idx])
+        if not snap:
+            return
+
+        from src.ui.details_popup import show_details_popup
+        show_details_popup(
+            self.winfo_toplevel(), data,
+            nama_barang=snap.get("barang"),
+            jenis=None,
+            tanggal=None,
+            filters={"NAMA RESTO": snap.get("resto")} if snap.get("resto")
+            else None,
+        )

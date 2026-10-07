@@ -20,3 +20,9 @@ python -m src.main
 ```
 
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
+
+## Changelog
+
+- **v3.2.0** — Tab **☑ Follow Up** (ala aplikasi *Waste*): centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi persisten (`followup.json`), export Excel + impor hasil tindak lanjut (PIC/KATEGORI/TINDAKAN). **KPI row di atas tabel dihapus** di semua tab data — tabel jadi lebar & besar (ringkasan pindah ke status footer). **Perf**: vektorisasi numpy (deviasi 16×, laporan 3.7× lebih cepat) + lazy refresh per tab (hanya tab aktif yang dihitung setelah pipeline).
+- **v3.1.0** — Header filter (Excel AutoFilter) di semua tab, tombol ⛶ perbesar tabel, copy Nomor/Nomor PO di pop-up, pivot per resto (baris kosong disembunyikan, tanpa kolom Total), loading animation semua proses.
+- **v3.0.0** — Total UI/UX redesign (design language Waste: slate + teal, card-based, dark toolbar).

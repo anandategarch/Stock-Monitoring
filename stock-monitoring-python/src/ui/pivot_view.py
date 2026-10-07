@@ -1,5 +1,5 @@
 """
-pivot_view.py — Pivot matrix view (v3.1).
+pivot_view.py — Pivot matrix view (v3.2).
 
 Dua mode pivot (segment "PIVOT PER" di atas tabel):
 - 🏪 RESTO (default): baris = Nama Barang × JENIS, kolom = NAMA RESTO,
@@ -10,9 +10,13 @@ Dua mode pivot (segment "PIVOT PER" di atas tabel):
   item tanpa nilai di semua resto disembunyikan.
 - 📅 TANGGAL: kolom = Tanggal (perilaku v3.0) + rentang tanggal.
 
-Filter Nama Barang memakai corong yang menempel di header kolom (Excel
-AutoFilter) — search box lama DIHAPUS. Tombol ⛶ Perbesar membuka tabel
-fullscreen. Compute + render berjalan async dengan loading overlay.
+v3.2:
+- KPI row di atas tabel DIHAPUS (tabel lebar & besar; ringkasan di footer)
+- Lazy refresh: compute hanya saat tab terlihat (app → ensure_refreshed)
+- Ekstraksi per-item via satu .loc (bukan item×metric) — lebih cepat
+
+v3.1 (dipertahankan): filter corong di header, ⛶ perbesar, loading overlay,
+compute/render async.
 """
 
 import tkinter as tk
@@ -25,7 +29,7 @@ from .theme import (
     C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, KpiCard, KpiRow, LegendRow,
+    Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
     LoadingOverlay, SegmentBar, add_tooltip, insert_tree_items,
     open_tree_maximized, run_async,
 )
@@ -64,6 +68,7 @@ class PivotTableView(tk.Frame):
         self._name_selected: set | None = None
         self._busy = False
         self._pending = False
+        self._dirty = False                # lazy refresh (v3.2)
 
         self._build_ui()
         self._setup_tags()
@@ -88,20 +93,14 @@ class PivotTableView(tk.Frame):
         # --- Konten utama (disembunyikan sampai ada data) ---
         self.content = tk.Frame(self, bg=C_BG)
 
-        # KPI row
-        kpi = KpiRow(self.content)
-        self.kpi_items = KpiCard(kpi, "Barang", "—", "nama barang tampil")
-        self.kpi_cols = KpiCard(kpi, "Kolom", "—", "resto")
-        self.kpi_rows = KpiCard(kpi, "Baris Matrix", "—", "barang × metric")
-        for c in (self.kpi_items, self.kpi_cols, self.kpi_rows):
-            kpi.add(c)
-        kpi.pack(fill="x", padx=12, pady=(12, 8))
+        # (v3.2) KPI row DIHAPUS — tabel lebar & besar; ringkasan
+        # (barang × kolom = baris) ada di status footer.
 
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
                      subtitle="Filter Nama Barang → klik header kolom "
                               "Nama Barang (ikon corong ⧩) di tabel.")
-        fcard.pack(fill="x", padx=12)
+        fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
         # Row 0: RESTO (mode tanggal saja) / SOURCE / KATEGORI
@@ -177,7 +176,7 @@ class PivotTableView(tk.Frame):
 
         # --- Tabel card ---
         tcard = Card(self.content)
-        tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
         tbody = tcard.body()
 
         # Header tabel: judul + segment mode + tombol perbesar
@@ -263,9 +262,6 @@ class PivotTableView(tk.Frame):
             self.f_resto.pack(side="left", padx=(0, 18))
         self.f_source.pack(side="left", padx=(0, 18))
         self.f_kategori.pack(side="left", padx=(0, 18))
-        self.kpi_cols.set_value(self.kpi_cols._value_var.get(),
-                                "resto" if self.pivot_mode == "resto"
-                                else "tanggal")
         if self.pivot_mode == "resto":
             self.hint_var.set(
                 "🖱 Double-click cell (barang×resto) → detail source · "
@@ -317,7 +313,17 @@ class PivotTableView(tk.Frame):
         self._populate_filters()
         self._name_selected = None
         self.header_filter.clear()
-        self._refresh_pivot()
+        # (v3.2) lazy refresh — compute hanya bila tab terlihat
+        if self.winfo_ismapped():
+            self._refresh_pivot()
+        else:
+            self._dirty = True
+
+    def ensure_refreshed(self):
+        """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
+        if self._dirty and self.data is not None and not self.data.empty:
+            self._dirty = False
+            self._refresh_pivot()
 
     def _populate_filters(self):
         if self.data is None or self.data.empty:
@@ -433,17 +439,26 @@ class PivotTableView(tk.Frame):
         tree_items = []
         n_rows = 0
         n_items_shown = 0
+        empty_series = pd.Series({c: 0 for c in col_keys})
         for item in items:
             item_iid = f"item_{n_items_shown}"
             child_rows = []
+            # v3.2: SATU .loc per item (DataFrame metric×kolom) — bukan
+            # satu .loc per (item × metric) — 10× lebih sedikit lookup
+            try:
+                item_grp = pivot.loc[item]
+            except KeyError:
+                item_grp = None
             for metric in metrics:
                 if mode == "tanggal" and metric == "6.PEMAKAIAN (COM)":
                     row_data = self._compute_com(pivot, item, col_keys)
-                else:
+                elif item_grp is not None:
                     try:
-                        row_data = pivot.loc[(item, metric)]
+                        row_data = item_grp.loc[metric]
                     except KeyError:
-                        row_data = pd.Series({c: 0 for c in col_keys})
+                        row_data = empty_series
+                else:
+                    row_data = empty_series
 
                 total = 0.0
                 try:
@@ -518,15 +533,8 @@ class PivotTableView(tk.Frame):
         # pastikan ikon corong tetap terpasang + state benar
         self.header_filter.refresh_icon()
 
-        self.kpi_items.set_value(f"{payload['kpi'][0]:,}",
-                                 "nama barang tampil")
-        self.kpi_cols.set_value(
-            f"{payload['kpi'][1]:,}",
-            "resto" if payload.get("col_kind") == "resto" else "tanggal")
-        self.kpi_rows.set_value(
-            f"{payload['kpi'][2]:,}",
-            f"filter: {payload.get('filtered_rows', 0):,} dari "
-            f"{len(self.data) if self.data is not None else 0:,} rows")
+        # ringkasan (barang × kolom = baris) ada di status footer (v3.2 —
+        # KPI row atas tabel dihapus)
         self.status_var.set(payload["status"])
 
         def render_done():
@@ -535,7 +543,7 @@ class PivotTableView(tk.Frame):
                 self._pending = False
                 self._refresh_pivot()
 
-        insert_tree_items(self.tree, payload["items"], batch=400,
+        insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
 
     def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series,

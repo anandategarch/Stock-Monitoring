@@ -1,12 +1,13 @@
 """
-test_ui_redesign.py — Verifikasi UI v3.1 dengan mock data.
+test_ui_redesign.py — Verifikasi UI v3.2 dengan mock data.
 
 Jalankan di bawah Xvfb:
-    xvfb-run -a python test_ui_redesign.py
+    DISPLAY=:99 python test_ui_redesign.py
 
 Memverifikasi:
-1. App shell terbangun (toolbar, 7 tab, status bar, spinner) tanpa error
-2. Semua view menerima mock data & merender baris (async + batched)
+1. App shell terbangun (toolbar, 8 tab, status bar, spinner) tanpa error
+2. Semua view menerima mock data & merender baris (async + batched) —
+   LAZY REFRESH: view compute saat tab-nya dipilih (v3.2)
 3. PIVOT PER RESTO (default): kolom = resto, tanpa kolom Total, baris kosong
    disembunyikan, item yang HANYA ada di 1 resto (ADONAN GORENG MEKAR /
    MLGPAR) tetap tampil
@@ -18,6 +19,10 @@ Memverifikasi:
 8. Details popup: render + copy Nomor / Nomor PO (Ctrl+C, double-click cell,
    copy semua unik) + header filter + maximize
 9. Loading overlay terpasang di semua view
+10. v3.2 — KPI row DIHAPUS di tab data (tabel besar; ringkasan di footer)
+11. v3.2 — FOLLOW UP: kolom ✓ (toggle via klik sel), badge tab, tab
+    ☑ Follow Up (render snapshot, uncheck=hapus), export xlsx + impor
+    hasil TL (status Selesai + PIC), persistensi followup.json
 """
 import sys
 import time
@@ -58,6 +63,15 @@ def wait_view(root, view, timeout=15.0):
         root.update()
         time.sleep(0.01)
     return not getattr(view, "_busy", False)
+
+
+def select_and_wait(root, app, tab, view, timeout=15.0):
+    """Pilih tab lalu tunggu lazy refresh selesai (v3.2)."""
+    app.notebook.select(tab)
+    root.update()
+    if hasattr(view, "ensure_refreshed"):
+        view.ensure_refreshed()
+    return wait_view(root, view, timeout)
 
 
 def find_trees(widget):
@@ -135,10 +149,10 @@ def main():
     app = StockMonitorApp(root)
     sys.stdout, sys.stderr = real_stdout, real_stderr
     root.update_idletasks()
-    check("App + toolbar + 7 tab terbangun", len(app.notebook.tabs()) == 7,
-          f"tabs={len(app.notebook.tabs())}")
+    check("App + toolbar + 8 tab terbangun (v3.2: +Follow Up)",
+          len(app.notebook.tabs()) == 8, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.1.0", APP_VERSION == "3.1.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.2.0", APP_VERSION == "3.2.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -163,15 +177,26 @@ def main():
           isinstance(app.laporan_view.overlay, LoadingOverlay))
     check("Rincian punya loading overlay",
           isinstance(app.rincian_view.overlay, LoadingOverlay))
+    check("Follow Up punya loading overlay",
+          isinstance(app.followup_view.overlay, LoadingOverlay))
 
+    # (v3.2) LAZY: load_data tanpa tab aktif → defer (dirty)
     app.pivot_view.load_data(append1)
     app.deviasi_gr_view.load_data(append1)
     app.deviasi_pcs_view.load_data(append1)
     app.laporan_view.load_data(append1)
     app.rincian_view.load_data(rincian)
-    for v in (app.pivot_view, app.deviasi_gr_view, app.deviasi_pcs_view,
-              app.laporan_view, app.rincian_view):
-        ok = wait_view(root, v)
+    root.update()
+    check("Lazy: view tak terlihat defer refresh (dirty)",
+          app.deviasi_gr_view._dirty and app.laporan_view._dirty and
+          app.rincian_view._dirty)
+
+    for tab, v in [(app.tab_pivot, app.pivot_view),
+                   (app.tab_deviasi_gr, app.deviasi_gr_view),
+                   (app.tab_deviasi_pcs, app.deviasi_pcs_view),
+                   (app.tab_laporan, app.laporan_view),
+                   (app.tab_rincian, app.rincian_view)]:
+        ok = select_and_wait(root, app, tab, v)
         check(f"render async selesai ({type(v).__name__})", ok)
 
     # ---- PIVOT MODE RESTO (default) ----
@@ -213,8 +238,9 @@ def main():
         check("6.PEMAKAIAN (COM) tidak ada di mode resto",
               "6.PEMAKAIAN (COM)" not in kinds)
 
-    check("KPI kolom = 2 resto", pv.kpi_cols._value_var.get() == "2",
-          f"got {pv.kpi_cols._value_var.get()}")
+    check("(v3.2) KPI row pivot DIHAPUS", not hasattr(pv, "kpi_items"))
+    check("(v3.2) Pivot status footer memuat ringkasan",
+          "barang" in pv.status_var.get(), f"got {pv.status_var.get()!r}")
 
     # hide-empty OFF → semua metric muncul
     pv.hide_empty_var.set(False)
@@ -322,13 +348,20 @@ def main():
     root.update()
 
     print("== 6. Deviasi GR / PCS ==")
-    app.notebook.select(app.tab_deviasi_gr)
-    root.update()
+    select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
     n_gr = len(app.deviasi_gr_view.tree.get_children(""))
     check("Deviasi GR rows = 5 (ADONAN hanya MLGPAR)", n_gr == 5,
           f"got {n_gr}")
     n_pcs = len(app.deviasi_pcs_view.tree.get_children(""))
     check("Deviasi PCS rows = 4", n_pcs == 4, f"got {n_pcs}")
+    check("(v3.2) KPI deviasi DIHAPUS (tabel besar)",
+          not hasattr(app.deviasi_gr_view, "kpi_dev") and
+          not hasattr(app.deviasi_gr_view, "kpi_cek"))
+    check("(v3.2) Kolom ✓ ada (follow-up)",
+          "✓" in [c[0] for c in app.deviasi_gr_view.COLUMNS])
+    check("(v3.2) Ringkasan deviasi di status footer",
+          "Deviasi" in app.deviasi_gr_view.status_var.get(),
+          f"got {app.deviasi_gr_view.status_var.get()!r}")
 
     app.deviasi_gr_view._on_name_filter({"ADONAN GORENG MEKAR"})
     wait_view(root, app.deviasi_gr_view)
@@ -361,20 +394,26 @@ def main():
     root.update()
 
     print("== 7. Laporan Deviasi ==")
-    app.notebook.select(app.tab_laporan)
-    root.update()
+    select_and_wait(root, app, app.tab_laporan, app.laporan_view)
     lap = app.laporan_view
     n_all = len(lap.tree.get_children(""))
     print(f"   laporan rows total: {n_all}")
     check("Laporan rows > 0", n_all > 0)
-    lap._toggle_status("DEVIASI MURNI")
+    check("(v3.2) 6 kartu KPI status DIHAPUS",
+          not hasattr(lap, "_status_kpis"))
+    check("(v3.2) Kolom ✓ di laporan", "✓" in [c[0] for c in lap.COLUMNS])
+
+    # filter status via combo (pengganti klik kartu KPI)
+    lap.status_var.set("DEVIASI MURNI")
+    lap._refresh()
     wait_view(root, lap)
     n_murni = len(lap.tree.get_children(""))
-    check("KPI toggle status memfilter (rows berkurang / tetap valid)",
+    check("Combo status memfilter (rows berkurang / tetap valid)",
           n_murni <= n_all)
-    lap._toggle_status("DEVIASI MURNI")  # toggle off
+    lap.status_var.set("(All)")
+    lap._refresh()
     wait_view(root, lap)
-    check("Toggle off → kembali", len(lap.tree.get_children("")) == n_all)
+    check("Status (All) → kembali", len(lap.tree.get_children("")) == n_all)
 
     lap._on_name_filter({"AYAM FILET"})
     wait_view(root, lap)
@@ -398,12 +437,14 @@ def main():
     wait_view(root, lap)
 
     print("== 8. Rincian PO ==")
-    app.notebook.select(app.tab_rincian)
-    root.update()
+    select_and_wait(root, app, app.tab_rincian, app.rincian_view)
     n_po = len(app.rincian_view.tree.get_children("")) - 1  # minus grand total
     check("Rincian: 12 PO (parent) + grand total", n_po == 12, f"got {n_po}")
-    check("Rincian KPI PO = 12",
-          app.rincian_view.kpi_po._value_var.get() == "12")
+    check("(v3.2) KPI rincian DIHAPUS",
+          not hasattr(app.rincian_view, "kpi_po"))
+    check("(v3.2) Ringkasan PO di status footer",
+          "PO" in app.rincian_view.status_var.get(),
+          f"got {app.rincian_view.status_var.get()!r}")
 
     app.rincian_view.cabang_var.set("MLGPAR")
     app.rincian_view._refresh()
@@ -501,6 +542,111 @@ def main():
     print("== 10. Proses tab KPI ==")
     app.kpi_append.set_value("1,234", "test")
     check("KPI append set", app.kpi_append._value_var.get() == "1,234")
+
+    # ==================================================================
+    print("== 11. FOLLOW UP (v3.2 — ala Waste) ==")
+    from src.ui.followup import followup_path, resolved_path
+    for p in (followup_path(), resolved_path()):
+        if p.exists():
+            p.unlink()
+
+    store = app.followup_store
+    check("Store follow-up bersih", len(store) == 0)
+
+    # -- toggle ✓ dari Deviasi GR (klik sel kolom pertama) --
+    select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
+    dv = app.deviasi_gr_view
+    tree = dv.tree
+    first = tree.get_children("")[0]
+    bbox = tree.bbox(first)
+    check("bbox baris deviasi tersedia", bool(bbox))
+
+    class _Ev:
+        pass
+
+    ev = _Ev()
+    ev.widget = tree
+    ev.x, ev.y = bbox[0] + 8, bbox[1] + bbox[3] // 2
+    dv._on_tree_click(ev)
+    root.update()
+    check("Klik ✓ → baris masuk follow-up", len(store) == 1)
+    check("Cell ✓ berubah ☑", tree.set(first, "✓") == "☑",
+          f"got {tree.set(first, '✓')!r}")
+    fp0 = dv._fp_map.get(first)
+    check("fp_map terisi", fp0 is not None and fp0 in store.rows)
+    check("followup.json tersimpan", followup_path().exists())
+    badge = app.notebook.tab(app.tab_followup, "text")
+    root.update()
+    check("Badge tab 'Follow Up (1)'", "1" in badge, f"got {badge!r}")
+
+    # -- tab Follow Up: render snapshot --
+    select_and_wait(root, app, app.tab_followup, app.followup_view)
+    fu = app.followup_view
+    root.update()
+    n_fu = len(fu.tree.get_children(""))
+    check("Tab Follow Up menampilkan 1 baris", n_fu == 1, f"got {n_fu}")
+    vals = fu.tree.item(fu.tree.get_children("")[0], "values")
+    check("Snapshot: kolom asal = DEVIASI GR", vals[1] == "DEVIASI GR",
+          f"got {vals[1]!r}")
+    check("Snapshot: ada resto", bool(vals[2]))
+    check("Status TL = Menunggu", vals[10] == "Menunggu", f"got {vals[10]!r}")
+
+    # -- lepas ✓ dari tab Follow Up --
+    first_fu = fu.tree.get_children("")[0]
+    bbox_fu = fu.tree.bbox(first_fu)
+    ev2 = _Ev()
+    ev2.widget = fu.tree
+    ev2.x, ev2.y = bbox_fu[0] + 8, bbox_fu[1] + bbox_fu[3] // 2
+    fu._on_tree_click(ev2)
+    root.update()
+    check("Klik ✓ di tab Follow Up → keluarkan", len(store) == 0)
+    check("Empty state Follow Up kembali",
+          fu.empty.winfo_manager() == "pack")
+
+    # -- toggle dari Laporan + export + import roundtrip --
+    select_and_wait(root, app, app.tab_laporan, app.laporan_view)
+    lap_tree = app.laporan_view.tree
+    first_lap = lap_tree.get_children("")[0]
+    bbox_lap = lap_tree.bbox(first_lap)
+    ev3 = _Ev()
+    ev3.widget = lap_tree
+    ev3.x, ev3.y = bbox_lap[0] + 8, bbox_lap[1] + bbox_lap[3] // 2
+    app.laporan_view._on_tree_click(ev3)
+    root.update()
+    check("Klik ✓ di Laporan → masuk follow-up", len(store) == 1)
+
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tf:
+        xlsx_path = tf.name
+    store.export_xlsx(xlsx_path)
+    check("Export FOLLOW UP xlsx", os.path.getsize(xlsx_path) > 0)
+
+    # isi kolom PIC petugas → import → resolved
+    from openpyxl import load_workbook
+    wb = load_workbook(xlsx_path)
+    ws = wb["FOLLOW UP"]
+    pic_col = next(c.column for c in ws[1] if c.value == "PIC")
+    ws.cell(row=2, column=pic_col, value="TEGAR")
+    wb.save(xlsx_path)
+    res = store.import_workbook(xlsx_path)
+    check("Impor hasil TL: 1 baris terisi",
+          res.get("n_filled") == 1, f"got {res}")
+    check("Baris ber-status Selesai", store.resolved_count() == 1)
+    os.unlink(xlsx_path)
+
+    # -- persistensi: store baru membaca followup.json --
+    from src.ui.followup import FollowUpStore
+    store2 = FollowUpStore()
+    check("Persistensi: store baru memuat 1 baris", len(store2) == 1)
+    check("Persistensi: resolved ikut tersimpan", store2.resolved_count() == 1)
+
+    # -- kosongkan --
+    store.clear()
+    check("Kosongkan → 0 baris", len(store) == 0)
+
+    for p in (followup_path(), resolved_path()):
+        if p.exists():
+            p.unlink()
 
     # Cleanup
     root.destroy()

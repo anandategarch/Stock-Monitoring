@@ -7,6 +7,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
 > **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
 > **v3.1 — UX upgrade**: filter Nama Barang menempel di header kolom (ala Excel AutoFilter, di SEMUA tab), tombol ⛶ **Perbesar tabel** (fullscreen), **copy Nomor/Nomor PO** di pop-up detail, **pivot per RESTO** (baris kosong disembunyikan, tanpa kolom Total), dan **animasi loading** di semua proses. Pipeline tetap 100% tidak berubah.
+> **v3.2 — Follow Up + tabel besar + perf**: tab baru **☑ Follow Up** (ala aplikasi *Waste*: centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi, persist `followup.json`, export Excel + impor hasil tindak lanjut), **KPI row di atas tabel DIHAPUS** di semua tab data (tabel jadi lebar & besar; ringkasan pindah ke status footer), dan **aplikasi diperingatkan** (deviasi 16× lebih cepat via vektorisasi numpy; laporan 3.7×; lazy refresh per tab — hanya tab aktif yang dihitung).
 
 ---
 
@@ -48,6 +49,29 @@ Stock Monitoring — Python Edition
 - Nomor # sebagai parent row (klik ▸ untuk expand).
 
 ---
+
+## Fitur Baru v3.2
+
+### ☑ Follow Up (ala aplikasi Waste)
+- **Centang kolom ✓** di tabel Deviasi GR / Deviasi PCS / Laporan Deviasi → baris masuk ke tab **☑ Follow Up** (badge jumlah di judul tab).
+- Daftar berbentuk **snapshot** (nilai apa adanya saat dicentang) — menetap, tidak ikut filter/Tanggal H.
+- **Tersimpan otomatis** (`followup.json`, atomic write + backup file korup) — aman walau aplikasi ditutup.
+- Klik ✓ lagi (di tab mana pun, termasuk window ⛶ Perbesar) = keluarkan baris.
+- **💾 Export Excel**: snapshot + kolom serah-terima kosong **PIC / KATEGORI MASALAH / TINDAKAN** (diisi petugas, konvensi rekap mentah) — freeze header + autofilter.
+- **📥 Impor Hasil TL**: baca kembali file terisi → baris cocok ber-status **Selesai** + PIC tampil (persist `followup_resolved.json`).
+- ✕ **Kosongkan**: hapus seluruh daftar (dengan konfirmasi).
+- Double-click baris → pop-up detail source data.
+
+### 📐 Tabel lebar & besar (KPI row dihapus)
+- Baris kartu KPI di atas tabel (Total |Deviasi|, Anomali CEK, 6 kartu status, dll.) **DIHAPUS** di semua tab data — tabel kini mengisi ruang vertikal penuh.
+- Ringkasan yang hilang tetap tersedia di **status footer** bawah tabel (jumlah baris · total deviasi · anomali · distribusi status).
+- Filter yang tadinya via klik kartu KPI status → pakai **combo STATUS** di kartu Filter.
+
+### ⚡ Performa (app diperingatkan)
+- **Vektorisasi numpy**: Deviasi GR/PCS — `iterrows` per sel → operasi array + `np.select` CEK (**16× lebih cepat**: 1262 ms → 76 ms @ 200k rows); Laporan — `.apply(axis=1)` ganda (yang pertama dead-code) → `np.select` vektor (**3.7×**: 805 ms → 217 ms).
+- **Lazy refresh per tab**: setelah pipeline selesai hanya tab aktif yang compute; tab lain menunggu dipilih (`<<NotebookTabChanged>>` → `ensure_refreshed()`) — dulu 5 view berhitung + render bersamaan.
+- Cache `pd.to_numeric(Tanggal)` per data; ekstraksi pivot satu `.loc` per item (bukan item×metric); satuan-lookup via `zip` (bukan `iterrows`).
+- Hasil komputasi **identik** (CEK & Status Audit diverifikasi identik vs formula lama).
 
 ## Fitur Baru v3.1
 
@@ -98,10 +122,11 @@ Komponen inti (`src/ui/theme.py` + `src/ui/widgets.py`):
 
 Palet: `#f1f5f9` (bg) · `#ffffff` (kartu) · `#0f172a` (toolbar/teks judul) · `#0f766e` (aksen teal) · status: merah/oranye/amber/hijau. Font otomatis resolve: Segoe UI (Windows) → Noto Sans → DejaVu Sans.
 
-Fitur UX baru per tab:
+Fitur UX per tab:
 - **Proses** — 4 KPI live (status pipeline, waktu berjalan, rows Append1, rows Rincian PO) + progress bar + konsol log gelap
-- **Deviasi GR/PCS** — KPI baris / total |Deviasi| / jumlah anomali CEK + legenda warna CEK
-- **Laporan Deviasi** — **6 kartu Status Audit yang bisa diklik untuk memfilter** (klik lagi untuk melepas)
+- **Deviasi GR/PCS** — kolom ✓ follow-up + legenda warna CEK; ringkasan (baris · total |Deviasi| · anomali CEK) di status footer *(v3.2: KPI row di atas tabel dihapus supaya tabel besar)*
+- **Laporan Deviasi** — kolom ✓ follow-up + filter status via combo STATUS; distribusi status di status footer *(v3.2: 6 kartu KPI dihapus)*
+- **Follow Up** *(v3.2)* — tabel snapshot baris tercentang + Export Excel / Impor Hasil TL / Kosongkan
 - **Semua tabel** — zebra rows, sort kolom (klik header), double-click baris → popup detail source data (header gelap, centered modal, Esc untuk tutup)
 - Popup & jendela Bantuan otomatis **ter-center** di parent
 
@@ -116,21 +141,24 @@ stock-monitoring-python/
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
 ├── test_large_scale.py         # benchmark 855K records (memory < 2GB)
-├── test_ui_redesign.py         # test UI v3.1 (70 check — header filter/perbesar/copy/pivot resto/loading)
+├── test_ui_redesign.py         # test UI v3.2 (99 check — lazy/follow-up/KPI hapus + semua fitur v3.1)
+├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
     ├── config.py               # loader config.json
     ├── main.py                 # run_pipeline() → (append1_df, rincian_po_df)
     ├── pipeline/               # porting fn_* dari M code (TIDAK berubah di v3)
-    └── ui/                     # ← REDESIGN v3.0
-        ├── app.py              # shell: toolbar + tab + status bar + kontrol pipeline
+    └── ui/                     # ← REDESIGN v3.0 (v3.2: +followup)
+        ├── app.py              # shell: toolbar + 8 tab + status bar + kontrol pipeline + lazy tab refresh
         ├── theme.py            # design system (palet + font + ttk style)
-        ├── widgets.py          # Card, KpiCard, tombol, tooltip, empty state, dll
-        ├── pivot_view.py       # tab Pivot Table
-        ├── deviasi_view.py     # tab Deviasi GR & PCS (dipakai 2×)
-        ├── laporan_deviasi_view.py  # tab Laporan Deviasi (6-way Status Audit)
+        ├── widgets.py          # Card, tombol, tooltip, empty state, overlay, header filter, dll
+        ├── followup.py         # (v3.2) FollowUpStore: fingerprint, snapshot, persist, export/import xlsx
+        ├── followup_view.py    # (v3.2) tab ☑ Follow Up
+        ├── pivot_view.py       # tab Pivot Table (per resto default)
+        ├── deviasi_view.py     # tab Deviasi GR & PCS (vektorisasi numpy + kolom ✓)
+        ├── laporan_deviasi_view.py  # tab Laporan Deviasi (np.select + kolom ✓)
         ├── rincian_po_view.py  # tab Rincian PO
-        └── details_popup.py    # popup detail source rows
+        └── details_popup.py    # popup detail source rows (copy Nomor/PO)
 ```
 
 ---
@@ -139,7 +167,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3.1: 70 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.2: 99 check (jalankan di bawah Xvfb di Linux)
 python test_large_scale.py   # benchmark 855K rows
 ```
 
