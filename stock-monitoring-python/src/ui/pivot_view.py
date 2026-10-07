@@ -26,7 +26,7 @@ class PivotTableView(ttk.Frame):
     """Excel-like pivot table in Tkinter."""
 
     # Metric order — fixed per user request:
-    #   4.IN = BARANG MASUK (from query_in: 3224+PI+4205)
+    #   4.IN = BARANG MASUK (from query_in: 3224+4205+9901)
     #   5.BARANG MASUK = from Rekap Mentah (SO report)
     #   7.Selisih IN = computed
     #   8.BARANG KELUAR = from 42.15 Kirim (separated from OUT)
@@ -483,7 +483,7 @@ class PivotTableView(ttk.Frame):
                 return pd.Series({t: 0 for t in tanggals})
 
         so = get_series("1.SO")
-        bm = get_series("4.IN")           # BARANG MASUK = IN (from 3224+PI+4205)
+        bm = get_series("4.IN")           # BARANG MASUK = IN (from 3224+4205+9901)
         bk = get_series("8.BARANG KELUAR") # BARANG KELUAR = 42.15 Kirim only
         sa = get_series("SALDO AWAL")
 

@@ -1,6 +1,6 @@
 """
 fn_9901.py — Process 9901 file (mutasi barang tanpa nomor penerimaan).
-Sumber data IN tambahan (digabung dengan 3224, PI, 4205 di query_in).
+Sumber data IN tambahan (digabung dengan 3224, 4205 di query_in).
 
 Filter:
   - "Nomor # Penerimaan Barang" = Blank (kosong)
@@ -9,12 +9,15 @@ Filter:
 Column mapping:
   - #Prime.Qty     → Value
   - Nama barang    → Nama Barang
-  - Nama cabang    → NAMA RESTO
+  - Nama cabang    → NAMA RESTO (extract after ".", e.g., "1137.CKGPAH" → "CKGPAH")
+                   CONSISTENT with fn_3224/fn_4215/fn_4217/fn_4205 which extract
+                   from between parentheses "(" and ")"
   - Tanggal        → Tanggal (day-of-month)
 """
 import pandas as pd
 from .helpers import (
-    fn_combine_folder, safe_to_str, safe_to_numeric, date_to_day
+    fn_combine_folder, safe_to_str, safe_to_numeric, date_to_day,
+    vec_text_after_delimiter
 )
 
 
@@ -201,8 +204,13 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         out["Tanggal"] = pd.NA
 
     # NAMA RESTO from Nama cabang
+    # FIX: extract text AFTER first "." (e.g., "1137.CKGPAH" → "CKGPAH")
+    # supaya konsisten dengan fn_3224/fn_4215/fn_4217/fn_4205 yang pakai
+    # vec_text_between_delimiters(..., "(", ")") untuk extract resto code.
+    # Sebelumnya pakai safe_to_str langsung → "1137.CKGPAH" dianggap resto berbeda
+    # dari "CKGPAH" di source lain → pivot melihat 2 resto yang sebenarnya sama.
     if col_nama_cabang is not None:
-        out["NAMA RESTO"] = safe_to_str(prom[col_nama_cabang])
+        out["NAMA RESTO"] = vec_text_after_delimiter(prom[col_nama_cabang], ".")
     else:
         out["NAMA RESTO"] = pd.NA
 

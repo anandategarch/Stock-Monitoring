@@ -11,8 +11,6 @@ from .fn_3224 import fn_3224
 from .fn_4215 import fn_4215
 from .fn_4205 import fn_4205
 from .fn_4217 import fn_4217
-from .fn_pi import fn_pi
-from .fn_konversi_satuan import fn_konversi_satuan
 from .fn_dbs_kategori import fn_dbs_kategori
 from .fn_9901 import fn_9901
 
@@ -20,11 +18,6 @@ from .fn_9901 import fn_9901
 # =============================================================================
 # MASTER QUERIES (dari Config)
 # =============================================================================
-
-def query_27_konversi_satuan(config) -> pd.DataFrame:
-    """Mirror M: shared #"27 Konversi Satuan Dex" = fnKonversiSatuan(Config[RootPath] & Config[Folders][KonversiSatuan])"""
-    return fn_konversi_satuan(config.folder("KonversiSatuan"))
-
 
 def query_dbs_kategori(config) -> pd.DataFrame:
     """Mirror M: shared DBS_Kategori = fnDBSKategori(Config[RootPath] & Config[Folders][DBSKategori])"""
@@ -90,14 +83,10 @@ def query_9901(config) -> pd.DataFrame:
 
     Filter: Nomor # Penerimaan Barang = blank, Jenis = Persediaan.
     Kolom: #Prime.Qty → Value, Nama barang → Nama Barang,
-          Nama cabang → NAMA RESTO, Tanggal → Tanggal (day).
+          Nama cabang → NAMA RESTO (extract after ".", e.g., "1137.CKGPAH" → "CKGPAH"),
+          Tanggal → Tanggal (day).
     """
     return fn_9901(config.folder("Data9901"))
-
-
-def query_pi(config, konversi: pd.DataFrame) -> pd.DataFrame:
-    """Mirror M: shared PI = fnPI(Config[RootPath] & Config[Folders][PI], #"27 Konversi Satuan Dex")"""
-    return fn_pi(config.folder("PI"), konversi)
 
 
 # =============================================================================
@@ -130,25 +119,21 @@ def query_barang_keluar(config) -> pd.DataFrame:
     return result if not result.empty else pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
 
-def query_in(config, konversi: pd.DataFrame) -> pd.DataFrame:
+def query_in(config) -> pd.DataFrame:
     """
-    Mirror M: shared IN = let
-        Source = Table.Combine({#"3224", #"3224_Bulan Lalu", PI, #"4205"}),
-        Added Custom JENIS = "IN"
+    IN source = Table.Combine({3224, 3224_Bulan_Lalu, 4205, 9901})
+    with JENIS = "IN".
 
-    LightMode: skip #"3224_Bulan Lalu" (hemat ~50% data IN).
-    + 9901 file (mutasi tanpa nomor penerimaan) sebagai sumber IN tambahan.
+    LightMode: skip 3224_Bulan_Lalu (hemat ~50% data IN).
 
-    FIX: query_pi (folder 26.Rincian PI) DIHAPUS dari combine list karena
-    sudah digantikan oleh 9901 (folder 30. 9901) — per request user.
-    fn_pi.py + query_pi tetap dipertahankan untuk reference, tapi tidak
-    dipanggil lagi di pipeline.
+    FIX: query_pi (folder 26.Rincian PI) + query_27_konversi_satuan DIHAPUS
+    dari pipeline karena sudah digantikan oleh 9901 (folder 30. 9901).
+    9901 pakai #Prime.Qty (sudah unit utama) — tidak perlu konversi satuan.
+    fn_pi.py + fn_konversi_satuan.py sudah dihapus dari codebase.
     """
     q3224 = query_3224(config)
     # LightMode: skip bulan lalu
     q3224_lalu = pd.DataFrame() if config.LightMode else query_3224_bulan_lalu(config)
-    # FIX: qpi dihapus dari IN — sudah digantikan oleh 9901
-    # qpi = query_pi(config, konversi)  # commented out — see note above
     q4205 = query_4205(config)
     q9901 = query_9901(config)
     print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")

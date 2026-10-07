@@ -12,7 +12,7 @@ import numpy as np
 from typing import List
 from .queries import (
     query_4217, query_full_rekap_mentah_so, query_out, query_barang_keluar, query_in,
-    query_27_konversi_satuan, query_dbs_kategori
+    query_dbs_kategori
 )
 from .fn_running_stock import fn_running_stock, fn_running_stock_grouped
 
@@ -124,9 +124,8 @@ def build_append1(config, stop_event=None) -> pd.DataFrame:
     print(f"  [Append1] Mode: {'LIGHT' if config.LightMode else 'FULL'}")
     print("  [Append1] Loading master data...")
     # Pre-load master queries (dipakai multiple times)
-    konversi = query_27_konversi_satuan(config)
+    # FIX: query_27_konversi_satuan dihapus — PI sudah digantikan 9901, konversi gak dipakai lagi
     dbs_kategori = query_dbs_kategori(config)
-    print(f"    Konversi Satuan: {len(konversi)} rows")
     print(f"    DBS Kategori: {len(dbs_kategori)} rows")
 
     # =========================================================================
@@ -150,7 +149,7 @@ def build_append1(config, stop_event=None) -> pd.DataFrame:
     keluar_df = query_barang_keluar(config)
     print(f"    BARANG KELUAR (42.15 Kirim): {len(keluar_df)} rows")
 
-    in_df = query_in(config, konversi)
+    in_df = query_in(config)
     print(f"    IN: {len(in_df)} rows")
 
     # FIX: Stop checkpoint after IN load
