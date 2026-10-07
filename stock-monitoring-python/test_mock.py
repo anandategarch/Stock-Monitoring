@@ -513,8 +513,21 @@ def run_test():
 
     # Test view widgets (smoke test)
     print("\n  [7] Testing view widgets...")
+    import time
     import tkinter as tk
     from tkinter import ttk
+
+    def wait_view(root, view, timeout=15.0):
+        """Pump event loop sampai render async view selesai (v3.1)."""
+        t0 = time.time()
+        while getattr(view, "_busy", False) and time.time() - t0 < timeout:
+            root.update()
+            time.sleep(0.01)
+        t0 = time.time()
+        while time.time() - t0 < 0.4:
+            root.update()
+            time.sleep(0.01)
+
     root = tk.Tk()
     root.withdraw()  # don't show window
 
@@ -522,6 +535,7 @@ def run_test():
     from src.ui.pivot_view import PivotTableView
     pv = PivotTableView(root)
     pv.load_data(append1_df)
+    wait_view(root, pv)
     children = pv.tree.get_children()
     print(f"    ✓ PivotTableView loaded: {len(children)} item rows")
 
@@ -529,11 +543,13 @@ def run_test():
     from src.ui.deviasi_view import DeviasiView
     dv = DeviasiView(root, satuan_mode="GR")
     dv.load_data(append1_df)
+    wait_view(root, dv)
     children = dv.tree.get_children()
     print(f"    ✓ DeviasiView (GR) loaded: {len(children)} rows")
 
     dv2 = DeviasiView(root, satuan_mode="PCS")
     dv2.load_data(append1_df)
+    wait_view(root, dv2)
     children2 = dv2.tree.get_children()
     print(f"    ✓ DeviasiView (PCS) loaded: {len(children2)} rows")
 
@@ -541,6 +557,7 @@ def run_test():
     from src.ui.rincian_po_view import RincianPoView
     rv = RincianPoView(root)
     rv.load_data(rincian_po_df)
+    wait_view(root, rv)
     children = rv.tree.get_children()
     assert len(children) > 0, "Rincian tree should have rows after load_data"
     print(f"    ✓ RincianPoView loaded: {len(children)} rows")

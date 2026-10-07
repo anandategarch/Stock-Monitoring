@@ -1,5 +1,5 @@
 """
-rincian_po_view.py — Pivot table view untuk Rincian PO (v3.0 redesign).
+rincian_po_view.py — Pivot table view untuk Rincian PO (v3.1).
 
 Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 - Page filters: Cabang PO, Status Pesanan Pembelian
@@ -7,8 +7,10 @@ Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 - Value: Sum of Kuantitas per row
 - Grand total row
 
-Tampilan baru: empty state + CTA, KPI strip (jumlah PO, item, total
-kuantitas), filter card, kartu tabel.
+Fitur v3.1:
+- Filter Nama Barang menempel di header kolom (corong, Excel-like)
+- Tombol ⛶ Perbesar: buka tabel fullscreen
+- Loading overlay + render async batched
 """
 
 import tkinter as tk
@@ -19,7 +21,9 @@ from typing import Optional, Callable
 
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT, font
 from .widgets import (
-    Card, EmptyState, GhostButton, KpiCard, KpiRow, add_tooltip,
+    Card, EmptyState, GhostButton, HeaderFilter, KpiCard, KpiRow,
+    LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
+    run_async,
 )
 
 
@@ -31,6 +35,9 @@ class RincianPoView(tk.Frame):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.go_to_proses = go_to_proses
+        self._name_selected: set | None = None
+        self._busy = False
+        self._pending = False
 
         self._build_ui()
         self._setup_tags()
@@ -67,7 +74,9 @@ class RincianPoView(tk.Frame):
 
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
-                     subtitle="Filter level PO (page filter).")
+                     subtitle="Filter level PO (page filter). Filter Nama "
+                              "Barang → klik header kolom (ikon corong ⧩) "
+                              "di tabel.")
         fcard.pack(fill="x", padx=12)
         fbody = fcard.body()
 
@@ -102,6 +111,17 @@ class RincianPoView(tk.Frame):
         tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
         tbody = tcard.body()
 
+        # Header tabel: judul + tombol perbesar
+        head = tk.Frame(tbody, bg=C_CARD)
+        head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        tk.Label(head, text="Pivot Rincian PO — Nomor # → detail barang",
+                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
+            side="left")
+        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        btn_max.pack(side="right")
+        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
+                             "(Esc untuk menutup)")
+
         cols = ["Tanggal", "Nama Barang", "Keterangan PO", "Pemasok",
                 "Tgl/Jam Pembuatan", "Satuan", "Kuantitas"]
         self.tree = ttk.Treeview(tbody, columns=cols, show="tree headings",
@@ -123,20 +143,40 @@ class RincianPoView(tk.Frame):
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        tbody.grid_rowconfigure(0, weight=1)
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        tbody.grid_rowconfigure(1, weight=1)
         tbody.grid_columnconfigure(0, weight=1)
 
         foot = tk.Frame(tbody, bg=C_CARD)
-        foot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         tk.Label(foot, text="🛒 Nomor # = induk PO · klik ▸ untuk buka/tutup "
-                            "detail",
+                            "detail · ⧩ header Nama Barang = filter",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
+
+        # Loading overlay (stacking di atas tree)
+        self.overlay = LoadingOverlay(tbody, "Menyiapkan pivot PO…")
+
+        # Filter "Nama Barang" menempel di header kolom
+        self.header_filter = HeaderFilter(
+            self.tree, "Nama Barang",
+            get_values=self._name_values,
+            on_apply=self._on_name_filter,
+            label="Nama Barang")
+
+    def _name_values(self) -> list:
+        if self.data is None or self.data.empty or \
+                "Nama Barang" not in self.data.columns:
+            return []
+        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+
+    def _on_name_filter(self, selected):
+        self._name_selected = selected
+        self._refresh()
 
     def _show_empty(self):
         self.content.pack_forget()
@@ -146,17 +186,18 @@ class RincianPoView(tk.Frame):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
 
-    def _setup_tags(self):
+    def _setup_tags(self, tree=None):
+        tree = tree if tree is not None else self.tree
         # Nomor# parent row — teal tint + bold
-        self.tree.tag_configure("po_header", font=font(9, "bold"),
-                                background="#ccfbf1",
-                                foreground="#134e4a")
-        self.tree.tag_configure("evenrow", background="#ffffff")
-        self.tree.tag_configure("oddrow", background="#f8fafc")
+        tree.tag_configure("po_header", font=font(9, "bold"),
+                           background="#ccfbf1",
+                           foreground="#134e4a")
+        tree.tag_configure("evenrow", background="#ffffff")
+        tree.tag_configure("oddrow", background="#f8fafc")
         # Grand total row — slate
-        self.tree.tag_configure("grand_total", font=font(9, "bold"),
-                                background="#e2e8f0",
-                                foreground="#0f172a")
+        tree.tag_configure("grand_total", font=font(9, "bold"),
+                           background="#e2e8f0",
+                           foreground="#0f172a")
 
     # =========================================================================
     # DATA LOADING
@@ -165,6 +206,8 @@ class RincianPoView(tk.Frame):
         self.data = data
         self._show_content()
         self._populate_filters()
+        self._name_selected = None
+        self.header_filter.clear()
         self._refresh()
 
     def _populate_filters(self):
@@ -178,30 +221,49 @@ class RincianPoView(tk.Frame):
                 combo["values"] = values
 
     # =========================================================================
-    # RENDER (logika identik + update KPI)
+    # RENDER (async + batched — logika identik versi lama)
     # =========================================================================
-    def _refresh(self):
+    def _refresh(self, sync: bool = False):
         if self.data is None or self.data.empty:
             self.status_var.set("Belum ada data.")
             return
+        if self._busy:
+            self._pending = True
+            return
+        self._busy = True
+        st = {
+            "cabang": self.cabang_var.get(),
+            "status_pesanan": self.status_pesanan_var.get(),
+            "name_selected": self._name_selected,
+        }
 
+        def work():
+            return self._prepare_rows(st)
+
+        def done(payload):
+            self._render_rows(payload)
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Menyiapkan pivot PO…", sync=sync)
+
+    def _prepare_rows(self, st: dict) -> dict:
+        """Pure pandas: filter + group → items tree (thread-safe)."""
         df = self.data
-        for col, var in [("Cabang PO", self.cabang_var),
-                         ("Status Pesanan Pembelian", self.status_pesanan_var)]:
-            val = var.get()
+        for col, val in [("Cabang PO", st["cabang"]),
+                         ("Status Pesanan Pembelian", st["status_pesanan"])]:
             if val and val != "(All)" and col in df.columns:
                 df = df[df[col].astype(str) == val]
 
-        self.tree.delete(*self.tree.get_children())
+        if st["name_selected"] and "Nama Barang" in df.columns:
+            df = df[df["Nama Barang"].astype(str).isin(st["name_selected"])]
 
         if df.empty:
-            self.status_var.set("Tidak ada data setelah filter.")
-            self._update_kpis(0, 0, 0)
-            return
+            return {"items": [], "kpi": (0, 0, 0),
+                    "status": "Tidak ada data setelah filter."}
 
         if "Nomor #" not in df.columns:
-            self.status_var.set("Kolom 'Nomor #' tidak ditemukan.")
-            return
+            return {"items": [], "kpi": (0, 0, 0),
+                    "status": "Kolom 'Nomor #' tidak ditemukan."}
 
         sort_cols = [c for c in ["Nomor #", "Tanggal"] if c in df.columns]
         df_sorted = df.sort_values(sort_cols) if sort_cols else df
@@ -209,48 +271,60 @@ class RincianPoView(tk.Frame):
         total_qty = 0
         po_count = 0
         row_idx = 0
+        items = []
 
         for nomor, group in df_sorted.groupby("Nomor #", sort=False):
             po_count += 1
             po_qty = group["Kuantitas"].sum() if "Kuantitas" in group.columns else 0
             total_qty += po_qty
             parent_iid = f"po_{po_count}"
-            self.tree.insert(
-                "", "end", iid=parent_iid, text=str(nomor),
-                values=["", "", "", "", "", "Total:", f"{po_qty:,}"],
-                tags=("po_header",),
-            )
+            items.append(("", parent_iid,
+                          {"text": str(nomor),
+                           "values": ["", "", "", "", "", "Total:",
+                                      f"{po_qty:,}"],
+                           "tags": ("po_header",), "open": True}))
 
             for _, row in group.iterrows():
                 tag = "evenrow" if row_idx % 2 == 0 else "oddrow"
                 row_idx += 1
-                self.tree.insert(
-                    parent_iid, "end",
-                    text="",
-                    values=[
-                        self._fmt_date(row.get("Tanggal")),
-                        str(row.get("Nama Barang", "")),
-                        str(row.get("Keterangan PO", "")),
-                        str(row.get("Pemasok", "")),
-                        self._fmt_datetime(row.get("Tgl/Jam Pembuatan")),
-                        str(row.get("Satuan", "")),
-                        self._fmt_num(row.get("Kuantitas")),
-                    ],
-                    tags=(tag,),
-                )
+                items.append((
+                    parent_iid, f"{parent_iid}_{row_idx}",
+                    {"text": "",
+                     "values": [
+                         self._fmt_date(row.get("Tanggal")),
+                         str(row.get("Nama Barang", "")),
+                         str(row.get("Keterangan PO", "")),
+                         str(row.get("Pemasok", "")),
+                         self._fmt_datetime(row.get("Tgl/Jam Pembuatan")),
+                         str(row.get("Satuan", "")),
+                         self._fmt_num(row.get("Kuantitas")),
+                     ],
+                     "tags": (tag,), "open": False}))
 
-            self.tree.item(parent_iid, open=True)
+        items.append(("", "grand_total",
+                      {"text": "GRAND TOTAL",
+                       "values": ["", "", "", "", "", "",
+                                  f"{total_qty:,}"],
+                       "tags": ("grand_total",), "open": False}))
 
-        self.tree.insert(
-            "", "end", iid="grand_total",
-            text="GRAND TOTAL",
-            values=["", "", "", "", "", "", f"{total_qty:,}"],
-            tags=("grand_total",),
-        )
+        status = f"{po_count} PO · {row_idx} item · Total Kuantitas: {total_qty:,}"
+        return {"items": items, "kpi": (po_count, row_idx, total_qty),
+                "status": status}
 
-        self._update_kpis(po_count, row_idx, total_qty)
-        self.status_var.set(
-            f"{po_count} PO · {row_idx} item · Total Kuantitas: {total_qty:,}")
+    def _render_rows(self, payload: dict):
+        self.tree.delete(*self.tree.get_children())
+        self.header_filter.refresh_icon()
+        self._update_kpis(*payload["kpi"])
+        self.status_var.set(payload["status"])
+
+        def render_done():
+            self._busy = False
+            if self._pending:
+                self._pending = False
+                self._refresh()
+
+        insert_tree_items(self.tree, payload["items"], batch=400,
+                          on_done=render_done)
 
     def _update_kpis(self, po_count: int, items: int, total_qty):
         self.kpi_po.set_value(f"{po_count:,}", "nomor PO unik")
@@ -260,7 +334,17 @@ class RincianPoView(tk.Frame):
     def _reset_filter(self):
         self.cabang_var.set("(All)")
         self.status_pesanan_var.set("(All)")
+        self._name_selected = None
+        self.header_filter.clear()
         self._refresh()
+
+    # =========================================================================
+    # ⛶ PERBESAR (fullscreen)
+    # =========================================================================
+    def _maximize(self):
+        return open_tree_maximized(
+            self.tree, "Rincian PO — Pivot Nomor #",
+            setup_tags=lambda t: self._setup_tags(t))
 
     # =========================================================================
     # HELPERS (identik versi lama)

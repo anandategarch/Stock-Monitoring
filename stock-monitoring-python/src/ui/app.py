@@ -53,8 +53,9 @@ from src.ui.theme import (
     apply_theme, font, mono,
 )
 from src.ui.widgets import (
-    AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, StatusBar,
-    Toolbar, add_tooltip, make_log_console, make_tree,
+    AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, LoadingOverlay,
+    Spinner, StatusBar, Toolbar, add_tooltip, make_log_console, make_tree,
+    run_async,
 )
 from src.ui.pivot_view import PivotTableView
 from src.ui.deviasi_view import DeviasiView
@@ -63,7 +64,8 @@ from src.ui.rincian_po_view import RincianPoView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.0.0"  # total UI/UX redesign (design language Waste)
+APP_VERSION = "3.1.0"  # UX v3.1: header filter, perbesar tabel, copy popup,
+                        # pivot per resto, loading animation di semua proses
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -100,35 +102,52 @@ class StreamToQueue:
 
 
 # --- Panduan singkat ---------------------------------------------------------
-_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3
+_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.1
 
 ALUR KERJA
   1. Tab ⚙️ Config   : pastikan RootPath menunjuk folder data export Accurate Online.
   2. Tab 🚀 Proses   : klik MULAI PROSES → pantau log → tunggu "SELESAI".
+     (semua proses panjang menampilkan animasi loading / progress)
   3. Data otomatis terisi ke tab 📊 Pivot, 📦 Deviasi GR, 🧩 Deviasi PCS,
      📋 Laporan Deviasi, dan 🛒 Rincian PO.
 
 TAB PIVOT TABLE
-  • Matrix: baris = Nama Barang × JENIS, kolom = Tanggal.
-  • Filter: NAMA RESTO / NAMA BARANG / SOURCE KIRIMAN / KATEGORI + pencarian substring.
-  • Double-click sel → pop-up baris source data pendukung.
+  • PIVOT PER: 🏪 Resto (default) atau 📅 Tanggal.
+    - Resto   : kolom = resto, nilai = total per resto; hanya baris dengan
+      nilai total > 0 yang tampil (baris kosong disembunyikan, kolom Total
+      tidak ditampilkan). Contoh: item yang hanya ada di satu resto tetap
+      muncul di kolom resto tersebut.
+    - Tanggal : kolom = tanggal (seperti v3.0) + rentang tanggal.
+  • Filter Nama Barang: klik header kolom "Nama Barang" (ikon corong ⧩).
+  • Double-click cell → pop-up baris source data pendukung.
+
+FILTER NAMA BARANG (SEMUA TAB)
+  • Klik header kolom "Nama Barang" → popup filter ala Excel AutoFilter:
+    pencarian nilai + daftar checkbox + Pilih semua + sort A→Z/Z→A.
+  • Corong header berubah teal saat filter aktif.
+
+TOMBOL ⛶ PERBESAR
+  • Di setiap tabel: klik ⛶ Perbesar → window besar berisi tabel lengkap.
+    Esc untuk menutup. Sort & double-click tetap berfungsi di sana.
 
 TAB DEVIASI GR / PCS
   • 1 baris per (Resto × Barang × Satuan) di sekitar Tanggal H (H-2 … H+2).
-  • Kolom CEK = deteksi anomali otomatis (Kosong/Non Aktif, Beda Tanggal,
-    Hitung Manual, Turun Drastis).
-  • Ubah Tanggal H lalu Enter untuk menggeser jendela analisis.
+  • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Enter.
 
 TAB LAPORAN DEVIASI
-  • Audit harian per (Resto × Barang × Tanggal) + klasifikasi 6 Status Audit.
-  • KPI atas menampilkan distribusi status — klik kartu untuk memfilter.
+  • Audit harian + 6 Status Audit. Klik kartu KPI untuk memfilter status.
 
 TAB RINCIAN PO
-  • Pivot PO: Nomor # (induk) → detail barang. Filter Cabang PO & Status.
+  • Pivot PO: Nomor # (induk) → detail barang. Filter Cabang & Status.
+
+POP-UP DETAIL — COPY NOMOR / NOMOR PO
+  • Klik kanan baris     : Copy Nomor, Copy Nomor PO, copy baris,
+                          copy SEMUA Nomor / Nomor PO (unik).
+  • Double-click cell Nomor / Nomor PO : langsung copy nilai cell.
+  • Ctrl+C               : copy Nomor baris terpilih.
 
 SEMUA TABEL
-  • Klik judul kolom untuk sort. Double-click baris = detail source data.
-  • Angka negatif ditulis (merah) gaya akuntansi; nol ditampilkaan "-".
+  • Klik judul kolom untuk sort. Angka negatif (merah); nol = "-".
 
 EXPORT
   • Tombol 💾 Export Excel di toolbar atas (aktif setelah pipeline selesai).
@@ -432,7 +451,12 @@ class StockMonitorApp:
         self.btn_export.pack(side="left", padx=(8, 0))
 
         self.status_var = tk.StringVar(value="Status: siap.")
-        tk.Label(ctrl_inner, textvariable=self.status_var, bg=C_CARD,
+        status_row = tk.Frame(ctrl_inner, bg=C_CARD)
+        status_row.pack(fill="x")
+        self.status_spinner = Spinner(status_row, size=18, bg=C_CARD)
+        self.status_spinner.pack(side="left", padx=(0, 8))
+        self.status_spinner.stop()
+        tk.Label(status_row, textvariable=self.status_var, bg=C_CARD,
                  fg=C_HEADER, font=font(10, "bold")).pack(anchor="w")
         self.progress = ttk.Progressbar(ctrl_inner, mode="indeterminate",
                                         orient="horizontal")
@@ -538,6 +562,7 @@ class StockMonitorApp:
         self.btn_export.configure(state="disabled")
         self.btn_export_tb.configure(state="disabled")
         self.status_var.set("Status: menjalankan pipeline…")
+        self.status_spinner.start()
         self.statusbar.set_status(*_ST_RUN)
         self.kpi_status.set_value("MENJALANKAN", "pipeline sedang diproses…",
                                   C_ORANGE)
@@ -588,6 +613,7 @@ class StockMonitorApp:
     def _on_pipeline_done(self, append1_df, rincian_po_df, error):
         """Dijadwalkan ke main thread via after()."""
         self.progress.stop()
+        self.status_spinner.stop()
         self._stop_elapsed()
         self.is_running = False
         self.btn_mulai.set_enabled(True)
@@ -670,7 +696,7 @@ class StockMonitorApp:
             "di checkpoint berikutnya.\n")
 
     def _export_excel(self):
-        """Export data (Append1 + Rincian PO) ke Excel."""
+        """Export data (Append1 + Rincian PO) ke Excel — async + loading."""
         if self.append1_df is None and self.rincian_po_df is None:
             messagebox.showwarning(
                 "Export", "Belum ada data. Jalankan pipeline dulu.",
@@ -684,20 +710,45 @@ class StockMonitorApp:
         )
         if not filepath:
             return
-        try:
+
+        append1_df = self.append1_df
+        rincian_po_df = self.rincian_po_df
+
+        # loading overlay di tengah jendela utama (dibuat lazily)
+        if not hasattr(self, "_export_overlay"):
+            self._export_overlay = LoadingOverlay(self.root,
+                                                  "Mengekspor ke Excel…")
+        self._export_overlay.show("Mengekspor ke Excel…", delay_ms=0)
+        self.btn_export.configure(state="disabled")
+        self.btn_export_tb.configure(state="disabled")
+
+        def work():
             with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-                if self.append1_df is not None and not self.append1_df.empty:
-                    self.append1_df.to_excel(writer, sheet_name="Append1",
-                                             index=False)
-                if self.rincian_po_df is not None and not self.rincian_po_df.empty:
-                    self.rincian_po_df.to_excel(writer, sheet_name="Rincian PO",
-                                                index=False)
+                if append1_df is not None and not append1_df.empty:
+                    append1_df.to_excel(writer, sheet_name="Append1",
+                                        index=False)
+                if rincian_po_df is not None and not rincian_po_df.empty:
+                    rincian_po_df.to_excel(writer, sheet_name="Rincian PO",
+                                           index=False)
+            return filepath
+
+        def done(path):
+            if self.append1_df is not None:
+                self.btn_export.configure(state="normal")
+                self.btn_export_tb.configure(state="normal")
             messagebox.showinfo(
-                "Export Berhasil", f"Data di-export ke:\n{filepath}",
+                "Export Berhasil", f"Data di-export ke:\n{path}",
                 parent=self.root)
-        except Exception as e:
+
+        def on_error(e):
+            if self.append1_df is not None:
+                self.btn_export.configure(state="normal")
+                self.btn_export_tb.configure(state="normal")
             messagebox.showerror(
                 "Export Gagal", f"Tidak bisa export:\n{e}", parent=self.root)
+
+        run_async(self.root, work, done, overlay=self._export_overlay,
+                  loading_text="Mengekspor ke Excel…", on_error=on_error)
 
     # =====================================================================
     # BANTUAN

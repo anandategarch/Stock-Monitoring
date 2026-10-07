@@ -16,13 +16,18 @@ Semua komponen dipakai lintas view supaya tampilan konsisten:
 """
 from __future__ import annotations
 
+import math
+import threading
+import time as _time
+
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox as _mb
 
 from .theme import (
-    C_ACCENT, C_ACCENT_HOVER, C_ACCENT_DARK, C_BG, C_BORDER, C_BORDER_DARK,
-    C_CARD, C_GREEN, C_HEADER, C_LOG_BG, C_LOG_FG, C_RED, C_RED_SOFT,
-    C_TEXT_MUTED, C_TEXT_SOFT, font, font_family, mono, setup_tree_tags,
+    C_ACCENT, C_ACCENT_HOVER, C_ACCENT_DARK, C_ACCENT_SOFT, C_BG, C_BORDER,
+    C_BORDER_DARK, C_CARD, C_GREEN, C_HEADER, C_LOG_BG, C_LOG_FG, C_RED,
+    C_RED_SOFT, C_TEXT_MUTED, C_TEXT_SOFT, font, font_family, mono,
+    setup_tree_tags,
 )
 
 # Tombol aksen/berbahaya pakai tk.Button murni: kontrol penuh atas warna
@@ -423,3 +428,785 @@ def make_log_console(parent, **kw) -> tuple[tk.Text, tk.Frame]:
     text.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
     return text, frame
+
+
+# =============================================================================
+# v3.1 — Komponen baru: loading spinner, overlay, segment, header-filter,
+#         maximize table, async helper, insert batched
+# =============================================================================
+
+def _mix_hex(c1: str, c2: str, t: float) -> str:
+    """Interpolasi dua warna hex (t=0 → c1, t=1 → c2)."""
+
+    def parse(c: str):
+        c = c.lstrip("#")
+        return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+
+    r1, g1, b1 = parse(c1)
+    r2, g2, b2 = parse(c2)
+    return "#{:02x}{:02x}{:02x}".format(
+        round(r1 + (r2 - r1) * t),
+        round(g1 + (g2 - g1) * t),
+        round(b1 + (b2 - b1) * t),
+    )
+
+
+class Spinner(tk.Canvas):
+    """Spinner animasi (8 titik memudar) — indikasi loading proses."""
+
+    def __init__(self, parent, size: int = 26, color: str = C_ACCENT,
+                 bg: str = C_CARD, speed: int = 90, **kw):
+        super().__init__(parent, width=size, height=size, bg=bg,
+                         highlightthickness=0, bd=0, **kw)
+        self._bg = bg
+        self._speed = speed
+        self._after_id = None
+        self._phase = 0
+        self._color = color
+        cx = size / 2.0
+        r = size / 2.0 - 3.0
+        d = max(3.0, size * 0.17)
+        self._dots = []
+        for i in range(8):
+            ang = i * (math.pi / 4)
+            x = cx + r * math.cos(ang)
+            y = cx + r * math.sin(ang)
+            dot = self.create_oval(x - d / 2, y - d / 2, x + d / 2, y + d / 2,
+                                   fill=color, outline=color)
+            self._dots.append(dot)
+        self._render()
+
+    def _render(self):
+        for i, dot in enumerate(self._dots):
+            dist = (i - self._phase) % 8
+            shade = _mix_hex(self._color, self._bg, (dist / 8.0) * 0.85)
+            self.itemconfigure(dot, fill=shade, outline=shade)
+
+    def start(self):
+        self.stop()
+
+        def tick():
+            if not self.winfo_exists():
+                self._after_id = None
+                return
+            self._phase = (self._phase + 1) % 8
+            self._render()
+            self._after_id = self.after(self._speed, tick)
+
+        self._after_id = self.after(self._speed, tick)
+
+    def stop(self):
+        if self._after_id:
+            try:
+                self.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+
+class LoadingOverlay(tk.Frame):
+    """Chip loading melayang di tengah parent: spinner + teks.
+
+    show(text, delay_ms=180) — chip hanya benar-benar muncul bila proses
+    berjalan lebih lama dari delay (anti-kedip untuk operasi cepat).
+    """
+
+    def __init__(self, parent, text: str = "Memuat…", **kw):
+        super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER_DARK,
+                         highlightthickness=1, **kw)
+        inner = tk.Frame(self, bg=C_CARD)
+        inner.pack(padx=24, pady=14)
+        self.spinner = Spinner(inner, bg=C_CARD)
+        self.spinner.pack(side="left", padx=(0, 12))
+        self._var = tk.StringVar(value=text)
+        tk.Label(inner, textvariable=self._var, bg=C_CARD, fg=C_HEADER,
+                 font=font(11, "bold")).pack(side="left")
+        self._show_after = None
+        self._visible = False
+
+    def show(self, text: str | None = None, delay_ms: int = 180):
+        if text:
+            self._var.set(text)
+        if self._visible:
+            return
+        self._visible = True
+        if delay_ms and delay_ms > 0:
+            self._show_after = self.after(delay_ms, self._place)
+        else:
+            self._place()
+
+    def _place(self):
+        if not self._visible:
+            return
+        try:
+            if not self.winfo_exists():
+                return
+            self.place(relx=0.5, rely=0.5, anchor="center")
+            self.lift()
+            self.spinner.start()
+            self.winfo_toplevel().configure(cursor="watch")
+        except tk.TclError:
+            pass
+
+    def hide(self):
+        self._visible = False
+        if self._show_after:
+            try:
+                self.after_cancel(self._show_after)
+            except Exception:
+                pass
+            self._show_after = None
+        try:
+            self.place_forget()
+            self.spinner.stop()
+            self.winfo_toplevel().configure(cursor="")
+        except tk.TclError:
+            pass
+
+
+class SegmentBar(tk.Frame):
+    """Segmented control kecil: beberapa opsi, satu aktif (teal)."""
+
+    def __init__(self, parent, options: list[str], command=None,
+                 bg: str = C_CARD, **kw):
+        super().__init__(parent, bg=bg, **kw)
+        self._command = command
+        self._buttons: list[tk.Button] = []
+        self._active = 0
+        for i, opt in enumerate(options):
+            b = tk.Button(self, text=opt, font=font(9, "bold"),
+                          bd=0, relief="flat", highlightthickness=0,
+                          cursor="hand2", padx=14, pady=5,
+                          command=lambda idx=i: self._select(idx))
+            b.pack(side="left", padx=(0 if i == 0 else 4, 0))
+            self._buttons.append(b)
+        self._render()
+
+    def _select(self, idx: int):
+        if idx == self._active:
+            return
+        self._active = idx
+        self._render()
+        if self._command:
+            self._command(idx)
+
+    def set_active(self, idx: int, fire: bool = False):
+        self._active = idx
+        self._render()
+        if fire and self._command:
+            self._command(idx)
+
+    @property
+    def active(self) -> int:
+        return self._active
+
+    def _render(self):
+        for i, b in enumerate(self._buttons):
+            if i == self._active:
+                b.configure(bg=C_ACCENT, fg="#ffffff",
+                            activebackground=C_ACCENT_HOVER,
+                            activeforeground="#ffffff")
+            else:
+                b.configure(bg="#f1f5f9", fg=C_TEXT_MUTED,
+                            activebackground="#e2e8f0",
+                            activeforeground=C_HEADER)
+
+
+# --- Ikon corong utk header filter (digambar via PhotoImage, tanpa PIL) -----
+_FUNNEL_CACHE: dict = {}
+
+
+def funnel_image(color: str = "#94a3b8") -> tk.PhotoImage:
+    """Ikon corong kecil 11x8 px (alpha via PhotoImage Tk 8.6)."""
+    if color in _FUNNEL_CACHE:
+        return _FUNNEL_CACHE[color]
+    w, h = 11, 8
+    img = tk.PhotoImage(width=w, height=h)
+    # bentuk corong: cone melebar + stem
+    shape = [
+        (1, 9),   # rim atas
+        (2, 8),
+        (3, 7),
+        (4, 6),
+        (5, 5),   # ujung cone
+        (5, 5),   # stem
+        (5, 5),
+        (5, 5),
+    ]
+    for y in range(h):
+        x0, x1 = shape[y]
+        for x in range(w):
+            if x0 <= x <= x1:
+                img.put(color, (x, y))
+            else:
+                try:
+                    img.transparency_set(x, y, True)
+                except Exception:
+                    pass
+    _FUNNEL_CACHE[color] = img
+    return img
+
+
+class HeaderFilter:
+    """Filter kolom yang MENEMPEL DI HEADER Treeview (ala Excel AutoFilter).
+
+    - Ikon corong dipasang di heading kolom; klik heading → popup filter.
+    - Popup: pencarian nilai + daftar checkbox nilai unik + pilih-semua
+      + sort A→Z / Z→A (opsional) + reset.
+    - Setiap toggle checkbox langsung memanggil on_apply(selection):
+        None      → semua nilai tampil (tanpa filter)
+        set(...)  → hanya nilai terpilih yang tampil
+    - get_values() dipanggil saat popup dibuka (nilai unik terbaru).
+    """
+
+    MAX_CHECKS = 600  # batas render checkbox — pakai 🔍 untuk list besar
+
+    def __init__(self, tree: ttk.Treeview, col_id: str, *, get_values,
+                 on_apply, label: str = "Nama Barang", on_sort=None,
+                 popup_width: int = 330):
+        self.tree = tree
+        self.col_id = col_id
+        self.get_values = get_values
+        self.on_apply = on_apply
+        self.on_sort = on_sort
+        self.label = label
+        self.popup_width = popup_width
+        self.selected: set | None = None
+        self._popup: tk.Toplevel | None = None
+        self._closed_at = 0.0
+        self._checks: dict[str, ttk.Checkbutton] = {}
+        self._vars: dict[str, tk.BooleanVar] = {}
+        self._search_var = tk.StringVar()
+        self._all_var = tk.BooleanVar(value=True)
+        self._count_var = tk.StringVar(value="")
+        self.refresh_icon()
+        tree.bind("<Button-1>", self._on_tree_press, add="+")
+
+    # -- ikon corong ---------------------------------------------------------
+    def refresh_icon(self):
+        active = self.selected is not None
+        try:
+            self.tree.heading(
+                self.col_id,
+                image=funnel_image(C_ACCENT if active else "#94a3b8"))
+        except tk.TclError:
+            pass
+
+    # -- klik heading --------------------------------------------------------
+    def _on_tree_press(self, event):
+        try:
+            if self.tree.identify_region(event.x, event.y) != "heading":
+                return
+            if self.tree.identify_column(event.x) != self.col_id:
+                return
+        except Exception:
+            return
+        # hindari langsung terbuka lagi setelah ditutup (toggle natural)
+        if _time.time() - self._closed_at < 0.35:
+            return
+        self.open_popup()
+
+    # -- popup ----------------------------------------------------------------
+    def open_popup(self):
+        if self._popup is not None and self._popup.winfo_exists():
+            self._close()
+            return
+        values = []
+        try:
+            values = sorted({str(v) for v in self.get_values()
+                             if str(v) and str(v) != "nan"})
+        except Exception:
+            values = []
+        if not values:
+            _mb.showinfo("Filter", "Tidak ada nilai yang bisa difilter.",
+                         parent=self.tree)
+            return
+
+        root = self.tree.winfo_toplevel()
+        win = tk.Toplevel(root)
+        self._popup = win
+        win.title(f"Filter — {self.label}")
+        win.configure(bg=C_CARD)
+        win.transient(root)
+        win.resizable(False, False)
+        try:
+            win.grab_set()
+        except Exception:
+            pass
+
+        body = tk.Frame(win, bg=C_CARD)
+        body.pack(fill="both", expand=True, padx=14, pady=12)
+
+        # pencarian nilai (menyaring daftar, bukan data)
+        srow = tk.Frame(body, bg=C_CARD)
+        srow.pack(fill="x")
+        tk.Label(srow, text="🔍", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
+        entry = ttk.Entry(srow, textvariable=self._search_var)
+        entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        entry.bind("<KeyRelease>", lambda e: self._filter_list())
+
+        # pilih semua + counter
+        arow = tk.Frame(body, bg=C_CARD)
+        arow.pack(fill="x", pady=(10, 2))
+        ttk.Checkbutton(arow, text=f"Pilih semua ({len(values)} nilai)",
+                        variable=self._all_var,
+                        command=self._toggle_all).pack(side="left")
+        tk.Label(arow, textvariable=self._count_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8)).pack(side="right")
+
+        # daftar nilai (scrollable checkbox)
+        wrap = tk.Frame(body, bg=C_CARD, highlightbackground=C_BORDER,
+                        highlightthickness=1)
+        wrap.pack(fill="both", expand=True, pady=(6, 10))
+        cv = tk.Canvas(wrap, bg=C_CARD, highlightthickness=0, bd=0,
+                       width=self.popup_width - 30, height=300)
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv, bg=C_CARD)
+        inner.bind("<Configure>",
+                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=inner, anchor="nw",
+                         width=self.popup_width - 30)
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        # scroll wheel
+        cv.bind("<MouseWheel>",
+                lambda e: cv.yview_scroll(-1 * (e.delta // 120), "units"))
+
+        self._vars.clear()
+        self._checks.clear()
+        for v in values[: self.MAX_CHECKS]:
+            var = tk.BooleanVar(
+                value=self.selected is None or v in self.selected)
+            self._vars[v] = var
+            cb = ttk.Checkbutton(inner, text=v, variable=var,
+                                 command=self._on_toggle)
+            cb.pack(fill="x", padx=8, pady=1)
+            self._checks[v] = cb
+        if len(values) > self.MAX_CHECKS:
+            tk.Label(inner, text=f"… {len(values) - self.MAX_CHECKS} nilai "
+                                 "lainnya — gunakan 🔍 di atas",
+                     bg=C_CARD, fg=C_TEXT_SOFT, font=font(8)).pack(
+                fill="x", padx=8, pady=4)
+
+        # tombol aksi
+        brow = tk.Frame(body, bg=C_CARD)
+        brow.pack(fill="x")
+        GhostButton(brow, text="↺ Reset", command=self._reset).pack(side="left")
+        if self.on_sort is not None:
+            GhostButton(brow, text="↕ Sort A→Z",
+                        command=lambda: self._do_sort(False)).pack(
+                side="left", padx=(6, 0))
+            GhostButton(brow, text="↕ Sort Z→A",
+                        command=lambda: self._do_sort(True)).pack(
+                side="left", padx=(6, 0))
+        GhostButton(brow, text="✕ Tutup (Esc)", command=self._close).pack(
+            side="right")
+
+        self._update_count()
+        self._filter_list()
+
+        # posisikan tepat di bawah heading kolom
+        win.update_idletasks()
+        px, py = self._popup_position()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        px = min(max(px, 8), max(8, sw - win.winfo_reqwidth() - 8))
+        py = min(max(py, 8), max(8, sh - win.winfo_reqheight() - 8))
+        win.geometry(f"+{px}+{py}")
+        entry.focus_set()
+        win.bind("<Escape>", lambda e: self._close())
+
+    def _popup_position(self):
+        tree = self.tree
+        try:
+            cols = ["#0"] + list(tree["columns"])
+            x = 0
+            if self.col_id in cols:
+                x = sum(tree.column(c, "width")
+                        for c in cols[:cols.index(self.col_id)])
+                first = tree.xview()[0]
+                if first > 0:
+                    content_w = sum(tree.column(c, "width") for c in cols)
+                    visible_w = tree.winfo_width()
+                    if content_w > visible_w:
+                        x -= first * (content_w - visible_w)
+            px = int(tree.winfo_rootx() + max(0, x))
+            hy = 30
+            for iid in tree.get_children(""):
+                bbox = tree.bbox(iid)
+                if bbox:
+                    hy = bbox[1] + 4
+                    break
+            py = int(tree.winfo_rooty() + hy)
+        except Exception:
+            px, py = tree.winfo_rootx(), tree.winfo_rooty() + 40
+        return px, py
+
+    # -- aksi popup ------------------------------------------------------------
+    def _on_toggle(self):
+        self._update_count()
+        self._emit()
+
+    def _toggle_all(self):
+        to = self._all_var.get()
+        for var in self._vars.values():
+            var.set(to)
+        self._update_count()
+        self._emit()
+
+    def _emit(self):
+        checked = {v for v, var in self._vars.items() if var.get()}
+        if not checked or len(checked) == len(self._vars):
+            self.selected = None
+        else:
+            self.selected = checked
+        self.refresh_icon()
+        if self.on_apply:
+            self.on_apply(self.selected)
+
+    def _update_count(self):
+        checked = sum(1 for var in self._vars.values() if var.get())
+        total = len(self._vars)
+        self._all_var.set(total > 0 and checked == total)
+        self._count_var.set(f"{checked}/{total} dipilih")
+
+    def _filter_list(self):
+        q = (self._search_var.get() or "").strip().lower()
+        for v, cb in self._checks.items():
+            if not q or q in v.lower():
+                cb.pack(fill="x", padx=8, pady=1)
+            else:
+                cb.pack_forget()
+
+    def _reset(self):
+        for var in self._vars.values():
+            var.set(True)
+        self._update_count()
+        self._emit()
+
+    def _do_sort(self, descending: bool):
+        if self.on_sort is not None:
+            self.on_sort(descending)
+        self._close()
+
+    def _close(self):
+        if self._popup is not None:
+            try:
+                self._popup.grab_release()
+            except Exception:
+                pass
+            try:
+                self._popup.destroy()
+            except Exception:
+                pass
+        self._popup = None
+        self._closed_at = _time.time()
+
+    def clear(self):
+        """Reset state filter dari luar (dipanggil tombol Reset Filter view).
+        TIDAK memanggil on_apply — view memicu refresh sendiri."""
+        self.selected = None
+        for var in self._vars.values():
+            var.set(True)
+        self.refresh_icon()
+
+
+# --- Async + render batched ---------------------------------------------------
+
+# BUG WORKAROUND (CPython 3.12 + Tk 9 di beberapa build): objek Thread daemon
+# yang baru selesai dapat di-finalisasi oleh GC tepat saat main thread
+# mengeksekusi Tk after(), yang bisa memicu segfault level C. Menyimpan
+# referensi thread yang sudah selesai (bounded) mencegah finalisasi Thread
+# oleh GC pada momen acak.
+_worker_threads: list = []
+_MAX_KEPT_THREADS = 40
+
+
+def _spawn_worker(target) -> threading.Thread:
+    t = threading.Thread(target=target, daemon=True)
+    _worker_threads.append(t)
+    if len(_worker_threads) > _MAX_KEPT_THREADS:
+        del _worker_threads[: _MAX_KEPT_THREADS // 2]
+    t.start()
+    return t
+
+
+def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
+              loading_text: str | None = None, on_error=None,
+              sync: bool = False) -> dict:
+    """Jalankan work() (compute murni, TANPA sentuhan widget) di thread
+    terpisah; hasil dikirim ke on_done(result) di main thread.
+
+    Overlay otomatis show/hide. sync=True → blocking (untuk test).
+    Return dict job: {"busy": bool, "cancel": callable}.
+    """
+    job = {"busy": True, "cancelled": False, "result": None, "error": None,
+           "traceback": None}
+
+    def finish():
+        if overlay is not None:
+            overlay.hide()
+        err = job["error"]
+        if err is not None:
+            if on_error is not None:
+                on_error(err)
+            else:
+                try:
+                    _mb.showerror(
+                        "Error Memproses",
+                        f"Gagal memproses data:\n\n{err}", parent=widget)
+                except Exception:
+                    print(job.get("traceback") or err)
+        else:
+            on_done(job["result"])
+
+    def runner():
+        # PENTING: matikan GC otomatis selama work() berjalan di thread ini.
+        # Tanpa ini, GC yang dipicu pandas bisa mem-finalisasi objek tkinter
+        # (__del__ memanggil Tcl) dari NON-MAIN thread → Tk tidak thread-safe
+        # → segfault. GC diaktifkan kembali setelah work() selesai; finalisasi
+        # tkinter objects kemudian terjadi di main thread (aman).
+        import gc as _gc
+        _gc_was_enabled = _gc.isenabled()
+        _gc.disable()
+        try:
+            job["result"] = work()
+        except Exception as e:  # pragma: no cover
+            import traceback as _tb
+            job["error"] = e
+            job["traceback"] = _tb.format_exc()
+        finally:
+            if _gc_was_enabled:
+                _gc.enable()
+        job["busy"] = False
+
+    if sync:
+        runner()
+        finish()
+        return job
+
+    if overlay is not None:
+        overlay.show(loading_text)
+    _spawn_worker(runner)
+
+    def poll():
+        if job["cancelled"]:
+            return
+        try:
+            if not widget.winfo_exists():
+                return  # widget sudah ditutup — buang hasil
+        except tk.TclError:
+            return
+        if job["busy"]:
+            widget.after(70, poll)
+            return
+        finish()
+
+    widget.after(70, poll)
+    job["cancel"] = lambda: job.update(cancelled=True)
+    return job
+
+
+def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
+                      on_done=None, chunk_callback=None, delay: int = 10):
+    """Insert items [(parent_iid, iid, kwargs)] bertahap per-batch via after()
+    supaya UI tetap responsif (spinner tetap hidup) saat render data besar.
+
+    Return fungsi cancel() utk membatalkan sisa batch.
+    """
+    state = {"i": 0, "cancelled": False}
+
+    def chunk():
+        if state["cancelled"]:
+            return
+        try:
+            if not tree.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        start = state["i"]
+        end = min(start + batch, len(items))
+        try:
+            for parent_iid, iid, kw in items[start:end]:
+                tree.insert(parent_iid, "end", iid=iid, **kw)
+        except tk.TclError:
+            return
+        state["i"] = end
+        if chunk_callback:
+            try:
+                chunk_callback(end, len(items))
+            except Exception:
+                pass
+        if end < len(items):
+            try:
+                tree.after(delay, chunk)
+            except tk.TclError:
+                pass
+        elif on_done:
+            on_done()
+
+    if items:
+        chunk()
+    elif on_done:
+        on_done()
+
+    def cancel():
+        state["cancelled"] = True
+
+    return cancel
+
+
+# --- Maximize table (fullscreen clone) ----------------------------------------
+
+def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
+                        setup_tags=None, on_double_click=None,
+                        on_sort_setup=None, on_context_menu=None):
+    """Buka window besar berisi clone penuh dari source_tree — tombol ⛶.
+
+    setup_tags(new_tree)   : pasang tag styling (mis. self._setup_tags).
+    on_double_click(event) : handler double-click — harus tree-agnostic
+                             (identifikasi baris via event.widget).
+    on_sort_setup(new_tree): pasang command sort heading per view.
+    on_context_menu(event) : handler klik-kanan (copy Nomor/Nomor PO, dll).
+
+    Return (win, new_tree).
+    """
+    root = source_tree.winfo_toplevel()
+    win = tk.Toplevel(root)
+    win.title(f"{title} — Perbesar")
+    win.configure(bg=C_BG)
+    win.transient(root)
+
+    try:
+        rw, rh = root.winfo_width(), root.winfo_height()
+        rw = rw if rw > 300 else 1280
+        rh = rh if rh > 300 else 760
+        w, h = int(rw * 0.95), int(rh * 0.92)
+        x = int(root.winfo_rootx() + (rw - w) / 2)
+        y = int(root.winfo_rooty() + (rh - h) / 2)
+        win.geometry(f"{w}x{h}+{max(x, 0)}+{max(y, 0)}")
+    except Exception:
+        win.geometry("1240x760")
+
+    # -- header band gelap --
+    head = tk.Frame(win, bg=C_HEADER)
+    head.pack(fill="x")
+    hi = tk.Frame(head, bg=C_HEADER)
+    hi.pack(fill="x", padx=16, pady=10)
+    tk.Label(hi, text="⛶", bg=C_HEADER, fg="#5eead4",
+             font=(font_family(), 12, "bold")).pack(side="left")
+    tk.Label(hi, text=title, bg=C_HEADER, fg="#f1f5f9",
+             font=font(12, "bold")).pack(side="left", padx=(8, 0))
+    tk.Button(
+        hi, text="✕ Tutup (Esc)", command=win.destroy,
+        bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+        activeforeground="#ffffff", bd=0, relief="flat",
+        highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+        padx=12, pady=5,
+    ).pack(side="right")
+
+    # -- body --
+    body = tk.Frame(win, bg=C_BG)
+    body.pack(fill="both", expand=True, padx=12, pady=12)
+    card = tk.Frame(body, bg=C_CARD, highlightbackground=C_BORDER,
+                    highlightthickness=1)
+    card.pack(fill="both", expand=True)
+    cin = tk.Frame(card, bg=C_CARD)
+    cin.pack(fill="both", expand=True, padx=8, pady=8)
+
+    try:
+        # Tk 9.x: cget("show") mengembalikan tuple index-object —
+        # deteksi via representasi string (kompatibel Tk 8 & 9)
+        raw = source_tree.cget("show")
+        parts = " ".join(str(x) for x in raw) if isinstance(raw, (tuple, list)) \
+            else str(raw)
+        show_opt = "tree headings" if "tree" in parts else "headings"
+    except Exception:
+        show_opt = "headings"
+    new_tree = ttk.Treeview(cin, columns=list(source_tree["columns"]),
+                            show=show_opt, selectmode="browse")
+
+    for cid in ["#0"] + list(source_tree["columns"]):
+        try:
+            cfg = source_tree.column(cid)
+            new_tree.column(cid, width=cfg.get("width", 100),
+                            minwidth=cfg.get("minwidth", 40),
+                            anchor=cfg.get("anchor", "w"),
+                            stretch=cfg.get("stretch", True))
+            h = source_tree.heading(cid)
+            kw = {"text": h.get("text", "")}
+            if h.get("image"):
+                kw["image"] = h["image"]
+            new_tree.heading(cid, **kw)
+        except tk.TclError:
+            continue
+
+    if setup_tags:
+        try:
+            setup_tags(new_tree)
+        except Exception:
+            pass
+
+    vsb = ttk.Scrollbar(cin, orient="vertical", command=new_tree.yview)
+    hsb = ttk.Scrollbar(cin, orient="horizontal", command=new_tree.xview)
+    new_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+    new_tree.grid(row=0, column=0, sticky="nsew")
+    vsb.grid(row=0, column=1, sticky="ns")
+    hsb.grid(row=1, column=0, sticky="ew")
+    cin.grid_rowconfigure(0, weight=1)
+    cin.grid_columnconfigure(0, weight=1)
+
+    foot = tk.Frame(cin, bg=C_CARD)
+    foot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+    count_var = tk.StringVar(value="Menyalin tabel…")
+    tk.Label(foot, textvariable=count_var, bg=C_CARD, fg=C_TEXT_MUTED,
+             font=font(9)).pack(side="left")
+    tk.Label(foot, text="🖱 Double-click = detail · klik kanan = copy "
+                        "(bila tersedia) · Esc = tutup",
+             bg=C_CARD, fg=C_TEXT_SOFT, font=font(8)).pack(side="right")
+
+    overlay = LoadingOverlay(cin, "Menyalin tabel…")
+    overlay.show(delay_ms=120)
+
+    items = []
+
+    def collect(parent):
+        for iid in source_tree.get_children(parent):
+            it = source_tree.item(iid)
+            items.append((parent, iid, {
+                "text": it.get("text", ""),
+                "values": it.get("values", ""),
+                "tags": it.get("tags", ""),
+                "open": it.get("open", False),
+            }))
+            collect(iid)
+
+    collect("")
+
+    def done():
+        overlay.hide()
+        count_var.set(f"{len(items):,} baris · {title}")
+
+    insert_cancel = insert_tree_items(new_tree, items, batch=600,
+                                      on_done=done,
+                                      chunk_callback=lambda n, t: count_var.set(
+                                          f"Menyalin {n:,}/{t:,} baris…"))
+
+    def _on_win_destroy(event):
+        # batalkan batch + timer yang masih pending saat window ditutup
+        if event.widget is win:
+            insert_cancel()
+            overlay.hide()
+
+    win.bind("<Destroy>", _on_win_destroy, add="+")
+
+    if on_double_click:
+        new_tree.bind("<Double-1>", on_double_click)
+    if on_context_menu:
+        new_tree.bind("<Button-3>", on_context_menu)
+    if on_sort_setup:
+        on_sort_setup(new_tree)
+
+    win.bind("<Escape>", lambda e: win.destroy())
+    win.focus_set()
+    return win, new_tree

@@ -1,8 +1,12 @@
 """
-screenshot_ui.py — Render app v3 + screenshot tiap tab (untuk review visual).
-Jalankan di bawah Xvfb DISPLAY=:99.
+screenshot_ui.py — Render app v3.1 + screenshot tiap tab & fitur baru.
+Jalankan di bawah Xvfb (DISPLAY=:99).
+
+Output: /tmp/shots/*.png
 """
+import os
 import sys
+import time
 from pathlib import Path
 import pandas as pd
 
@@ -10,22 +14,31 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import tkinter as tk
+
 from src.ui.app import StockMonitorApp
 
-from test_ui_redesign import make_mock_append1, make_mock_rincian
+from test_ui_redesign import make_mock_append1, make_mock_rincian, wait_view
 
 OUT = Path("/tmp/shots")
 OUT.mkdir(exist_ok=True)
 
 
-def shot(root, name):
+def shot(name, delay=0.35):
+    time.sleep(delay)
     try:
         from PIL import ImageGrab
-        img = ImageGrab.grab(xdisplay=":99")
+        img = ImageGrab.grab(xdisplay=os.environ.get("DISPLAY", ":99"))
         img.save(OUT / f"{name}.png")
         print(f"  📸 {name}.png ({img.size})")
     except Exception as e:
-        print(f"  ! screenshot gagal: {e}")
+        print(f"  ! screenshot gagal {name}: {e}")
+
+
+def pump(root, seconds=0.5):
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        root.update()
+        time.sleep(0.01)
 
 
 def main():
@@ -37,72 +50,107 @@ def main():
 
     append1 = make_mock_append1()
     rincian = make_mock_rincian()
+
+    pump(root, 0.3)
+    shot("1-config")
+
+    # Proses tab (spinner idle)
+    app.notebook.select(app.tab_proses)
+    pump(root, 0.3)
+    shot("2-proses")
+
+    # Load data — pivot default mode RESTO
     app.pivot_view.load_data(append1)
+    app.notebook.select(app.tab_pivot)
+    wait_view(root, app.pivot_view)
+    shot("3-pivot-resto")
+
+    # Header filter popup terbuka (klik heading #0)
+    root.update()
+    app.pivot_view.tree.event_generate("<Button-1>", x=20, y=10)
+    pump(root, 0.4)
+    shot("4-pivot-resto-headerfilter-open")
+
+    # aktifkan filter (hanya 1 barang) → corong teal
+    hf = app.pivot_view.header_filter
+    if hf._popup is not None and hf._popup.winfo_exists():
+        for v, var in hf._vars.items():
+            var.set(v == "ADONAN GORENG MEKAR")
+        hf._update_count()
+        hf._emit()
+        wait_view(root, app.pivot_view)
+        pump(root, 0.4)
+        shot("5-pivot-resto-filtered")
+        hf._close()
+        pump(root, 0.2)
+
+    # Pivot mode TANGGAL
+    app.pivot_view._on_mode_change(1)
+    wait_view(root, app.pivot_view)
+    shot("6-pivot-tanggal")
+
+    # Perbesar (maximize) pivot resto
+    app.pivot_view._on_mode_change(0)
+    wait_view(root, app.pivot_view)
+    win, mtree = app.pivot_view._maximize()
+    pump(root, 1.0)
+    shot("7-pivot-maximized")
+    win.destroy()
+    pump(root, 0.2)
+
+    # Deviasi GR
     app.deviasi_gr_view.load_data(append1)
+    app.notebook.select(app.tab_deviasi_gr)
+    wait_view(root, app.deviasi_gr_view)
+    shot("8-deviasi-gr")
+
+    # Deviasi PCS
     app.deviasi_pcs_view.load_data(append1)
+    app.notebook.select(app.tab_deviasi_pcs)
+    wait_view(root, app.deviasi_pcs_view)
+    shot("9-deviasi-pcs")
+
+    # Laporan
     app.laporan_view.load_data(append1)
+    app.notebook.select(app.tab_laporan)
+    wait_view(root, app.laporan_view)
+    shot("10-laporan")
+
+    # Rincian PO
     app.rincian_view.load_data(rincian)
-    root.update()
+    app.notebook.select(app.tab_rincian)
+    wait_view(root, app.rincian_view)
+    shot("11-rincian")
 
-    # Simulasi log console
-    app._append_log_batched(
-        "=" * 60 + "\n  STOCK MONITORING - PIPELINE RUNNER\n" + "=" * 60 +
-        "\n  RootPath: C:\\KERJA\\1. RESTO\\9.NEW QUERY\\\n  Mode: LIGHT\n" +
-        "-" * 60 + "\n  [1/2] Building Append1...\n  Rekap Berjalan: 9901 rows OK\n" +
-        "  22.05: 4.221 rows OK\n  42.15: 8.730 rows OK\n" +
-        "\n  Append1 result: 1920 rows\n" +
-        "-" * 60 + "\n  [2/2] Building Rincian PO...\n  Rincian PO: 36 rows\n" +
-        "\n  SELESAI dalam 12.4 detik\n" + "=" * 60 + "\n")
-    app.kpi_status.set_value("SELESAI", "data siap dianalisis", "#16a34a")
-    app.kpi_append.set_value("1,920", "baris pivot siap")
-    app.kpi_rincian.set_value("36", "baris PO siap")
-    app.kpi_elapsed.set_value("12.4 dtk", "total waktu proses")
-    app.statusbar.set_status("SELESAI — Append1: 1,920 rows · Rincian PO: 36 rows",
-                             "#16a34a")
-    app.btn_export.configure(state="normal")  # GhostButton = ttk.Button
-    app.btn_export_tb.configure(state="normal")
-    root.update()
-
-    tabs = [
-        (app.tab_config, "1-config"),
-        (app.tab_proses, "2-proses"),
-        (app.tab_pivot, "3-pivot"),
-        (app.tab_deviasi_gr, "4-deviasi-gr"),
-        (app.tab_deviasi_pcs, "5-deviasi-pcs"),
-        (app.tab_laporan, "6-laporan"),
-        (app.tab_rincian, "7-rincian"),
-    ]
-    for tab, name in tabs:
-        app.notebook.select(tab)
-        root.update()
-        root.after(150)
-        root.update()
-        shot(root, name)
-
-    # Popup detail
+    # Details popup (dari pivot resto — double-click style)
     from src.ui.details_popup import show_details_popup
-    popup = show_details_popup(root, append1, nama_barang="AYAM FILET")
-    root.update()
-    root.after(150)
-    root.update()
-    shot(root, "8-popup")
+    popup = show_details_popup(root, append1,
+                               nama_barang="ADONAN GORENG MEKAR",
+                               jenis="1.SO", filters={"NAMA RESTO": "MLGPAR"})
+    wait_view(root, popup)
+    pump(root, 0.4)
+    shot("12-popup-detail")
+
+    # Popup maximized
+    pwin, pmtree = popup._maximize()
+    pump(root, 1.0)
+    shot("13-popup-maximized")
+    pwin.destroy()
+    pump(root, 0.2)
+
+    # Loading overlay terlihat saat refresh (force show tanpa delay)
     popup.destroy()
+    pump(root, 0.2)
+    app.notebook.select(app.tab_pivot)
+    pump(root, 0.2)
+    app.pivot_view.overlay.show("Menghitung matrix pivot…", delay_ms=0)
+    pump(root, 0.5)
+    shot("14-loading-overlay")
+    app.pivot_view.overlay.hide()
 
-    # Empty state (tab pivot sebelum data — buat app kecil terpisah)
-    root2 = tk.Tk()
-    root2.geometry("1440x900+0+0")
-    real_stdout2, real_stderr2 = sys.stdout, sys.stderr
-    app2 = StockMonitorApp(root2)
-    sys.stdout, sys.stderr = real_stdout2, real_stderr2
-    app2.notebook.select(app2.tab_pivot)
-    root2.update()
-    root2.after(150)
-    root2.update()
-    shot(root2, "9-empty-state")
-    root2.destroy()
-
+    pump(root, 0.2)
     root.destroy()
-    print(f"Selesai — screenshot di {OUT}")
+    print("SELESAI — semua screenshot di", OUT)
 
 
 if __name__ == "__main__":

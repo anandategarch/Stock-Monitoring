@@ -1,18 +1,18 @@
 """
-pivot_view.py — Pivot table view (v3.0 redesign).
+pivot_view.py — Pivot matrix view (v3.1).
 
-Menampilkan data Append1 sebagai matrix pivot (rows: Nama Barang × JENIS,
-cols: Tanggal) — logika identik dengan versi lama, tampilan baru:
-- Empty state dengan CTA "Jalankan Pipeline" saat belum ada data
-- KPI strip: jumlah barang, jumlah tanggal, jumlah baris
-- Filter card (RESTO / BARANG / SOURCE / KATEGORI / search) + tombol Reset
-- Kartu tabel dengan footer status
-- Conditional formatting dari sample Excel dipertahankan:
-  * DEVIASI row → font merah
-  * Selisih IN ≠ 0 → font merah + bg pink
-  * Value = 0 → suppress (tampil "-", font abu-abu)
-  * "4.IN" → cokelat + kuning muda
-  * "5.BARANG MASUK" → hijau tua + hijau muda
+Dua mode pivot (segment "PIVOT PER" di atas tabel):
+- 🏪 RESTO (default): baris = Nama Barang × JENIS, kolom = NAMA RESTO,
+  nilai = total NILAI per resto dalam rentang Tanggal. Hanya baris dengan
+  total > 0 yang ditampilkan (☑ "Sembunyikan baris kosong", default ON);
+  kolom Total sengaja TIDAK ditampilkan (total hanya dipakai utk filtering).
+  Contoh: item yang hanya ada di resto MLGPAR tetap tampil (nilainya ada),
+  item tanpa nilai di semua resto disembunyikan.
+- 📅 TANGGAL: kolom = Tanggal (perilaku v3.0) + rentang tanggal.
+
+Filter Nama Barang memakai corong yang menempel di header kolom (Excel
+AutoFilter) — search box lama DIHAPUS. Tombol ⛶ Perbesar membuka tabel
+fullscreen. Compute + render berjalan async dengan loading overlay.
 """
 
 import tkinter as tk
@@ -22,12 +22,12 @@ import numpy as np
 from typing import Optional, Callable
 
 from .theme import (
-    C_ACCENT, C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, ROW_EVEN, ROW_ODD,
-    font, setup_tree_tags,
+    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, KpiCard, KpiRow, LegendRow, add_tooltip,
-    make_tree,
+    Card, EmptyState, GhostButton, HeaderFilter, KpiCard, KpiRow, LegendRow,
+    LoadingOverlay, SegmentBar, add_tooltip, insert_tree_items,
+    open_tree_maximized, run_async,
 )
 
 
@@ -60,6 +60,10 @@ class PivotTableView(tk.Frame):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.go_to_proses = go_to_proses
+        self.pivot_mode = "resto"          # "resto" | "tanggal"
+        self._name_selected: set | None = None
+        self._busy = False
+        self._pending = False
 
         self._build_ui()
         self._setup_tags()
@@ -76,93 +80,119 @@ class PivotTableView(tk.Frame):
         self.empty = EmptyState(
             self, icon="📊", title="Belum ada data pivot",
             subtitle="Jalankan pipeline untuk memuat matrix pivot "
-                     "(Nama Barang × Tanggal) ke tampilan ini.",
+                     "(Nama Barang × Resto / Tanggal) ke tampilan ini.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=self._cta_proses)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
-        # --- Konten utama ( disembunyikan sampai ada data ) ---
+        # --- Konten utama (disembunyikan sampai ada data) ---
         self.content = tk.Frame(self, bg=C_BG)
 
         # KPI row
         kpi = KpiRow(self.content)
-        self.kpi_items = KpiCard(kpi, "Barang", "—", "nama barang unik")
-        self.kpi_days = KpiCard(kpi, "Tanggal", "—", "kolom tanggal")
+        self.kpi_items = KpiCard(kpi, "Barang", "—", "nama barang tampil")
+        self.kpi_cols = KpiCard(kpi, "Kolom", "—", "resto")
         self.kpi_rows = KpiCard(kpi, "Baris Matrix", "—", "barang × metric")
-        for c in (self.kpi_items, self.kpi_days, self.kpi_rows):
+        for c in (self.kpi_items, self.kpi_cols, self.kpi_rows):
             kpi.add(c)
         kpi.pack(fill="x", padx=12, pady=(12, 8))
 
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
-                     subtitle="Semua filter live-apply. Search = substring, "
-                              "kosongkan untuk lihat semua.")
+                     subtitle="Filter Nama Barang → klik header kolom "
+                              "Nama Barang (ikon corong ⧩) di tabel.")
         fcard.pack(fill="x", padx=12)
         fbody = fcard.body()
 
-        # Row 0: NAMA RESTO, NAMA BARANG
+        # Row 0: RESTO (mode tanggal saja) / SOURCE / KATEGORI
         r0 = tk.Frame(fbody, bg=C_CARD)
         r0.pack(fill="x", pady=(0, 6))
-        tk.Label(r0, text="RESTO", bg=C_CARD, fg=C_TEXT_MUTED,
+
+        self.f_resto = tk.Frame(r0, bg=C_CARD)
+        tk.Label(self.f_resto, text="RESTO", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self.resto_var = tk.StringVar(value="(All)")
-        self.resto_combo = ttk.Combobox(r0, textvariable=self.resto_var,
+        self.resto_combo = ttk.Combobox(self.f_resto,
+                                        textvariable=self.resto_var,
                                         state="readonly", width=16)
-        self.resto_combo.pack(side="left", padx=(6, 18))
+        self.resto_combo.pack(side="left", padx=(6, 0))
         self.resto_combo.bind("<<ComboboxSelected>>",
                               lambda e: self._refresh_pivot())
-        add_tooltip(self.resto_combo, "Filter cabang resto")
+        add_tooltip(self.resto_combo, "Filter cabang resto (mode Tanggal)")
 
-        tk.Label(r0, text="NAMA BARANG", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.barang_var = tk.StringVar(value="(All)")
-        self.barang_combo = ttk.Combobox(r0, textvariable=self.barang_var,
-                                         state="readonly", width=26)
-        self.barang_combo.pack(side="left", padx=(6, 0))
-        self.barang_combo.bind("<<ComboboxSelected>>",
-                               lambda e: self._refresh_pivot())
-        add_tooltip(self.barang_combo, "Filter nama barang (exact match)")
-
-        # Row 1: SOURCE KIRIMAN, KATEGORI
-        r1 = tk.Frame(fbody, bg=C_CARD)
-        r1.pack(fill="x", pady=(0, 6))
-        tk.Label(r1, text="SOURCE KIRIMAN", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
+        self.f_source = tk.Frame(r0, bg=C_CARD)
+        tk.Label(self.f_source, text="SOURCE KIRIMAN", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         self.source_var = tk.StringVar(value="(All)")
-        self.source_combo = ttk.Combobox(r1, textvariable=self.source_var,
+        self.source_combo = ttk.Combobox(self.f_source,
+                                         textvariable=self.source_var,
                                          state="readonly", width=16)
-        self.source_combo.pack(side="left", padx=(6, 18))
+        self.source_combo.pack(side="left", padx=(6, 0))
         self.source_combo.bind("<<ComboboxSelected>>",
                                lambda e: self._refresh_pivot())
 
-        tk.Label(r1, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
+        self.f_kategori = tk.Frame(r0, bg=C_CARD)
+        tk.Label(self.f_kategori, text="KATEGORI", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         self.kategori_var = tk.StringVar(value="(All)")
-        self.kategori_combo = ttk.Combobox(r1, textvariable=self.kategori_var,
+        self.kategori_combo = ttk.Combobox(self.f_kategori,
+                                           textvariable=self.kategori_var,
                                            state="readonly", width=16)
-        self.kategori_combo.pack(side="left", padx=(6, 18))
+        self.kategori_combo.pack(side="left", padx=(6, 0))
         self.kategori_combo.bind("<<ComboboxSelected>>",
                                  lambda e: self._refresh_pivot())
 
-        # Row 2: search + reset
-        r2 = tk.Frame(fbody, bg=C_CARD)
-        r2.pack(fill="x")
-        tk.Label(r2, text="CARI", bg=C_CARD, fg=C_TEXT_MUTED,
+        # Row 1: TANGGAL range + sembunyikan baris kosong + reset
+        r1 = tk.Frame(fbody, bg=C_CARD)
+        r1.pack(fill="x")
+        tk.Label(r1, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.search_var = tk.StringVar(value="")
-        search_entry = ttk.Entry(r2, textvariable=self.search_var, width=32)
-        search_entry.pack(side="left", padx=(6, 12))
-        search_entry.bind("<KeyRelease>", lambda e: self._refresh_pivot())
-        add_tooltip(search_entry,
-                    "Pencarian substring case-insensitive pada Nama Barang.\n"
-                    "Mencocokkan baris parent (semua metric ikut tampil).")
-        GhostButton(r2, text="✕ Reset Filter",
-                    command=self._reset_filter).pack(side="left", padx=(4, 0))
+        self.tgl_start_var = tk.StringVar(value="1")
+        t1 = ttk.Entry(r1, textvariable=self.tgl_start_var, width=5)
+        t1.pack(side="left", padx=(6, 2))
+        t1.bind("<Return>", lambda e: self._refresh_pivot())
+        tk.Label(r1, text="–", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
+        self.tgl_end_var = tk.StringVar(value="31")
+        t2 = ttk.Entry(r1, textvariable=self.tgl_end_var, width=5)
+        t2.pack(side="left", padx=(2, 6))
+        t2.bind("<Return>", lambda e: self._refresh_pivot())
+        add_tooltip(t1, "Rentang tanggal (1-31).\nMode Resto: batas total "
+                        "per resto · Mode Tanggal: batas kolom tanggal.")
+        GhostButton(r1, text="Apply", command=self._refresh_pivot).pack(
+            side="left", padx=(0, 18))
+
+        self.hide_empty_var = tk.BooleanVar(value=True)
+        self.chk_hide_empty = ttk.Checkbutton(
+            r1, text="Sembunyikan baris kosong (total ≤ 0)",
+            variable=self.hide_empty_var,
+            command=self._refresh_pivot)
+        self.chk_hide_empty.pack(side="left", padx=(0, 18))
+        add_tooltip(self.chk_hide_empty,
+                    "ON: hanya tampil (barang × jenis) yang punya nilai total "
+                    "> 0.\nKolom total tidak ditampilkan — hanya dipakai "
+                    "untuk filtering.")
+
+        GhostButton(r1, text="✕ Reset Filter",
+                    command=self._reset_filter).pack(side="left")
 
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
         tbody = tcard.body()
+
+        # Header tabel: judul + segment mode + tombol perbesar
+        head = tk.Frame(tbody, bg=C_CARD)
+        head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        tk.Label(head, text="Matrix Pivot", bg=C_CARD, fg=C_HEADER,
+                 font=font(10, "bold")).pack(side="left")
+        self.mode_seg = SegmentBar(
+            head, ["🏪 Resto", "📅 Tanggal"], bg=C_CARD,
+            command=self._on_mode_change)
+        self.mode_seg.pack(side="left", padx=(14, 0))
+        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        btn_max.pack(side="right")
+        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
+                             "(Esc untuk menutup)")
 
         self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="browse")
 
@@ -170,21 +200,27 @@ class PivotTableView(tk.Frame):
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        tbody.grid_rowconfigure(0, weight=1)
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        tbody.grid_rowconfigure(1, weight=1)
         tbody.grid_columnconfigure(0, weight=1)
 
         # Footer card: hint + status
         foot = tk.Frame(tbody, bg=C_CARD)
-        foot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click cell/baris untuk detail source data",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
+        foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.hint_var = tk.StringVar(
+            value="🖱 Double-click cell → detail source · ⧩ klik header "
+                  "Nama Barang utk filter")
+        tk.Label(foot, textvariable=self.hint_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
+
+        # Loading overlay (dibuat setelah tree → stacking di atas)
+        self.overlay = LoadingOverlay(tbody, "Menghitung matrix pivot…")
 
         # Legend metric colors
         legend = LegendRow(
@@ -194,6 +230,52 @@ class PivotTableView(tk.Frame):
         legend.pack(fill="x", padx=12, pady=(6, 0))
 
         self.tree.bind("<Double-1>", self._on_double_click)
+
+        # Filter "Nama Barang" menempel di header kolom #0
+        self.header_filter = HeaderFilter(
+            self.tree, "#0",
+            get_values=self._name_values,
+            on_apply=self._on_name_filter,
+            label="Nama Barang")
+
+        self._apply_mode_ui()
+
+    def _name_values(self) -> list:
+        if self.data is None or self.data.empty or \
+                "Nama Barang" not in self.data.columns:
+            return []
+        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+
+    def _on_name_filter(self, selected):
+        self._name_selected = selected
+        self._refresh_pivot()
+
+    def _on_mode_change(self, idx: int):
+        self.pivot_mode = "resto" if idx == 0 else "tanggal"
+        self._apply_mode_ui()
+        self._refresh_pivot()
+
+    def _apply_mode_ui(self):
+        """RESTO filter hanya relevan di mode Tanggal (resto = kolom di mode Resto)."""
+        for f in (self.f_resto, self.f_source, self.f_kategori):
+            f.pack_forget()
+        if self.pivot_mode == "tanggal":
+            self.f_resto.pack(side="left", padx=(0, 18))
+        self.f_source.pack(side="left", padx=(0, 18))
+        self.f_kategori.pack(side="left", padx=(0, 18))
+        self.kpi_cols.set_value(self.kpi_cols._value_var.get(),
+                                "resto" if self.pivot_mode == "resto"
+                                else "tanggal")
+        if self.pivot_mode == "resto":
+            self.hint_var.set(
+                "🖱 Double-click cell (barang×resto) → detail source · "
+                "⧩ klik header Nama Barang utk filter · baris kosong "
+                "disembunyikan")
+        else:
+            self.hint_var.set(
+                "🖱 Double-click cell (barang×tanggal) → detail source · "
+                "⧩ klik header Nama Barang utk filter · 6.PEMAKAIAN (COM) "
+                "hanya di mode Tanggal")
 
     def _cta_proses(self):
         if self.go_to_proses:
@@ -207,23 +289,24 @@ class PivotTableView(tk.Frame):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
 
-    def _setup_tags(self):
+    def _setup_tags(self, tree=None):
         """Tag Treeview: warna metric + conditional formatting (identik lama)."""
+        tree = tree if tree is not None else self.tree
         for metric, color in self.METRIC_BG.items():
-            self.tree.tag_configure(self._metric_tag(metric), background=color)
+            tree.tag_configure(self._metric_tag(metric), background=color)
 
-        self.tree.tag_configure(
+        tree.tag_configure(
             "item_header", font=font(9, "bold"), background="#e2e8f0",
             foreground=C_HEADER)
-        self.tree.tag_configure("deviasi_row", foreground="#CC0000")
-        self.tree.tag_configure("selisih_anomaly", foreground="#CC0000",
-                                background="#FFC9C9")
-        self.tree.tag_configure("in_row", foreground="#9C5700",
-                                background="#FFEB9C")
-        self.tree.tag_configure("bm_row", foreground="#006100",
-                                background="#C6EFCE")
-        self.tree.tag_configure("negative", foreground="#CC0000")
-        self.tree.tag_configure("zero_value", foreground="#999999")
+        tree.tag_configure("deviasi_row", foreground="#CC0000")
+        tree.tag_configure("selisih_anomaly", foreground="#CC0000",
+                           background="#FFC9C9")
+        tree.tag_configure("in_row", foreground="#9C5700",
+                           background="#FFEB9C")
+        tree.tag_configure("bm_row", foreground="#006100",
+                           background="#C6EFCE")
+        tree.tag_configure("negative", foreground="#CC0000")
+        tree.tag_configure("zero_value", foreground="#999999")
 
     # =========================================================================
     # DATA LOADING
@@ -232,6 +315,8 @@ class PivotTableView(tk.Frame):
         self.data = data
         self._show_content()
         self._populate_filters()
+        self._name_selected = None
+        self.header_filter.clear()
         self._refresh_pivot()
 
     def _populate_filters(self):
@@ -239,7 +324,6 @@ class PivotTableView(tk.Frame):
             return
         for col, combo in [
             ("NAMA RESTO", self.resto_combo),
-            ("Nama Barang", self.barang_combo),
             ("SOURCE KIRIMAN", self.source_combo),
             ("KATEGORI", self.kategori_combo),
         ]:
@@ -249,112 +333,210 @@ class PivotTableView(tk.Frame):
                 combo["values"] = values
 
     # =========================================================================
-    # PIVOT COMPUTATION + RENDERING (logika identik versi lama)
+    # FILTER STATE + COMPUTE (pure — berjalan di thread)
     # =========================================================================
-    def _refresh_pivot(self):
-        if self.data is None or self.data.empty:
-            self.status_var.set("Belum ada data.")
-            return
+    def _filter_state(self) -> dict:
+        try:
+            t1 = int(self.tgl_start_var.get())
+        except ValueError:
+            t1 = 1
+        try:
+            t2 = int(self.tgl_end_var.get())
+        except ValueError:
+            t2 = 31
+        if t1 > t2:
+            t1, t2 = t2, t1
+        return {
+            "name_selected": self._name_selected,
+            "resto": self.resto_var.get(),
+            "source": self.source_var.get(),
+            "kategori": self.kategori_var.get(),
+            "tgl_start": t1,
+            "tgl_end": t2,
+            "mode": self.pivot_mode,
+            "hide_empty": bool(self.hide_empty_var.get()),
+        }
 
-        # Apply filters
+    def _compute_payload(self, st: dict) -> dict:
+        """Compute pivot + siapkan baris tree (pure pandas, thread-safe)."""
+        empty = {"columns": [], "col_kind": st["mode"], "items": [],
+                 "kpi": (0, 0, 0), "status": "Belum ada data.",
+                 "filtered_rows": 0}
         df = self.data
-        for col, var in [
-            ("NAMA RESTO", self.resto_var),
-            ("Nama Barang", self.barang_var),
-            ("SOURCE KIRIMAN", self.source_var),
-            ("KATEGORI", self.kategori_var),
-        ]:
-            val = var.get()
-            if val and val != "(All)" and col in df.columns:
-                df = df[df[col].astype(str) == val]
+        if df is None or df.empty:
+            return empty
 
-        # substring search (case-insensitive) — parent rows only
-        search_val = self.search_var.get().strip().lower()
-        if search_val and "Nama Barang" in df.columns:
-            df = df[df["Nama Barang"].astype(str).str.lower().str.contains(
-                search_val, regex=False)]
+        if st["name_selected"] and "Nama Barang" in df.columns:
+            df = df[df["Nama Barang"].astype(str).isin(st["name_selected"])]
+        if st["resto"] and st["resto"] != "(All)" and \
+                "NAMA RESTO" in df.columns and st["mode"] == "tanggal":
+            df = df[df["NAMA RESTO"].astype(str) == st["resto"]]
+        if st["source"] and st["source"] != "(All)" and \
+                "SOURCE KIRIMAN" in df.columns:
+            df = df[df["SOURCE KIRIMAN"].astype(str) == st["source"]]
+        if st["kategori"] and st["kategori"] != "(All)" and \
+                "KATEGORI" in df.columns:
+            df = df[df["KATEGORI"].astype(str) == st["kategori"]]
+
+        # rentang tanggal berlaku untuk kedua mode
+        if "Tanggal" in df.columns and not df.empty:
+            tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+            df = df[tnum.between(st["tgl_start"], st["tgl_end"])]
 
         if df.empty:
-            self.tree.delete(*self.tree.get_children())
-            self.status_var.set("Tidak ada data setelah filter.")
-            return
+            out = dict(empty)
+            out["status"] = "Tidak ada data setelah filter."
+            return out
 
-        # Compute pivot
+        mode = st["mode"]
+        hide_empty = st["hide_empty"]
+
         try:
-            pivot = df.pivot_table(
-                index=["Nama Barang", "JENIS"],
-                columns="Tanggal",
-                values="NILAI",
-                aggfunc="sum",
-                fill_value=0,
-            )
+            if mode == "resto":
+                pivot = df.pivot_table(
+                    index=["Nama Barang", "JENIS"],
+                    columns="NAMA RESTO",
+                    values="NILAI",
+                    aggfunc="sum",
+                    fill_value=0,
+                )
+            else:
+                pivot = df.pivot_table(
+                    index=["Nama Barang", "JENIS"],
+                    columns="Tanggal",
+                    values="NILAI",
+                    aggfunc="sum",
+                    fill_value=0,
+                )
         except Exception as e:
-            self.status_var.set(f"Error: {e}")
-            return
+            out = dict(empty)
+            out["status"] = f"Error pivot: {e}"
+            return out
 
         if pivot.empty:
-            self.tree.delete(*self.tree.get_children())
-            self.status_var.set("Tidak ada data setelah pivot.")
-            return
+            out = dict(empty)
+            out["status"] = "Tidak ada data setelah pivot."
+            out["filtered_rows"] = len(df)
+            return out
 
-        tanggals = sorted(pivot.columns.tolist())
-        items = sorted(pivot.index.get_level_values("Nama Barang").unique().tolist())
+        columns = [str(c) for c in sorted(pivot.columns.tolist())]
+        col_keys = sorted(pivot.columns.tolist())  # keys asli (int utk Tanggal)
+        items = sorted(pivot.index.get_level_values("Nama Barang")
+                       .unique().tolist())
 
-        # Clear tree
-        self.tree.delete(*self.tree.get_children())
+        metrics = list(self.METRICS)
+        if mode == "resto":
+            # COM adalah metric harian (urutan tanggal) — hanya relevan
+            # di mode Tanggal
+            metrics = [m for m in metrics if m != "6.PEMAKAIAN (COM)"]
 
-        # Configure columns
-        self.tree["columns"] = [str(t) for t in tanggals]
-        self.tree.column("#0", width=280, minwidth=180)
-        self.tree.heading("#0", text="Nama Barang")
-        for t in tanggals:
-            self.tree.column(str(t), width=70, minwidth=50, anchor="e")
-            self.tree.heading(str(t), text=str(t))
-
-        # Insert rows: item header (parent) + metric rows (children)
-        row_count = 0
+        tree_items = []
+        n_rows = 0
+        n_items_shown = 0
         for item in items:
-            item_iid = f"item_{row_count}"
-            self.tree.insert(
-                "", "end", iid=item_iid, text=item,
-                values=["" for _ in tanggals],
-                tags=("item_header",),
-            )
-            row_count += 1
-
-            for metric in self.METRICS:
-                if metric == "6.PEMAKAIAN (COM)":
-                    row_data = self._compute_com(pivot, item, tanggals)
+            item_iid = f"item_{n_items_shown}"
+            child_rows = []
+            for metric in metrics:
+                if mode == "tanggal" and metric == "6.PEMAKAIAN (COM)":
+                    row_data = self._compute_com(pivot, item, col_keys)
                 else:
                     try:
                         row_data = pivot.loc[(item, metric)]
                     except KeyError:
-                        row_data = pd.Series({t: 0 for t in tanggals})
+                        row_data = pd.Series({c: 0 for c in col_keys})
 
-                tags = self._compute_row_tags(metric, item, row_data, tanggals)
+                total = 0.0
+                try:
+                    total = float(pd.to_numeric(
+                        row_data, errors="coerce").fillna(0).sum())
+                except Exception:
+                    total = 0.0
+                if hide_empty and total <= 0:
+                    continue  # baris tanpa nilai → sembunyikan
 
-                values = []
-                for t in tanggals:
-                    v = row_data.get(t, 0)
-                    values.append(self._format_num(v))
+                tags = self._compute_row_tags(metric, item, row_data,
+                                              col_keys)
+                values = [self._format_num(row_data.get(c, 0))
+                          for c in col_keys]
+                child_rows.append((
+                    item_iid, f"{item_iid}_{self._metric_tag(metric)}",
+                    {"text": metric, "values": values, "tags": tags,
+                     "open": False}))
 
-                self.tree.insert(
-                    item_iid, "end", text=metric, values=values, tags=tags
-                )
-                row_count += 1
+            if not child_rows:
+                continue  # item tanpa metric bernilai → sembunyikan parent
 
-        # Expand all items
-        for item in self.tree.get_children():
-            self.tree.item(item, open=True)
+            tree_items.append(("", item_iid,
+                               {"text": item,
+                                "values": ["" for _ in columns],
+                                "tags": ("item_header",), "open": True}))
+            tree_items.extend(child_rows)
+            n_items_shown += 1
+            n_rows += 1 + len(child_rows)
 
-        # KPI + status
-        self.kpi_items.set_value(f"{len(items):,}", "nama barang unik")
-        self.kpi_days.set_value(f"{len(tanggals):,}", "kolom tanggal")
-        self.kpi_rows.set_value(f"{row_count:,}", f"filter: {len(df):,} dari "
-                                                   f"{len(self.data):,} rows")
-        self.status_var.set(
-            f"{len(items)} barang × {len(tanggals)} tanggal = {row_count} baris · "
+        kpi = (n_items_shown, len(columns), n_rows)
+        status = (
+            f"{n_items_shown} barang × {len(columns)} "
+            f"{'resto' if mode == 'resto' else 'tanggal'} = {n_rows} baris · "
             f"filtered {len(df):,}/{len(self.data):,} rows")
+        return {"columns": columns, "col_kind": mode, "items": tree_items,
+                "kpi": kpi, "status": status, "filtered_rows": len(df)}
+
+    # =========================================================================
+    # REFRESH (async + render batched)
+    # =========================================================================
+    def _refresh_pivot(self, sync: bool = False):
+        if self.data is None or self.data.empty:
+            self.status_var.set("Belum ada data.")
+            return
+        if self._busy:
+            self._pending = True
+            return
+        st = self._filter_state()
+        self._busy = True
+
+        def work():
+            return self._compute_payload(st)
+
+        def done(payload):
+            self._render_payload(payload)
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Menghitung matrix pivot…", sync=sync)
+
+    def _render_payload(self, payload: dict):
+        cols = payload["columns"]
+        self.tree.delete(*self.tree.get_children())
+        self.tree["columns"] = cols
+        width = 90 if payload.get("col_kind") == "resto" else 70
+        self.tree.column("#0", width=280, minwidth=180)
+        self.tree.heading("#0", text="Nama Barang")
+        for c in cols:
+            self.tree.column(c, width=width, minwidth=50, anchor="e",
+                             stretch=True)
+            self.tree.heading(c, text=str(c))
+        # pastikan ikon corong tetap terpasang + state benar
+        self.header_filter.refresh_icon()
+
+        self.kpi_items.set_value(f"{payload['kpi'][0]:,}",
+                                 "nama barang tampil")
+        self.kpi_cols.set_value(
+            f"{payload['kpi'][1]:,}",
+            "resto" if payload.get("col_kind") == "resto" else "tanggal")
+        self.kpi_rows.set_value(
+            f"{payload['kpi'][2]:,}",
+            f"filter: {payload.get('filtered_rows', 0):,} dari "
+            f"{len(self.data) if self.data is not None else 0:,} rows")
+        self.status_var.set(payload["status"])
+
+        def render_done():
+            self._busy = False
+            if self._pending:
+                self._pending = False
+                self._refresh_pivot()
+
+        insert_tree_items(self.tree, payload["items"], batch=400,
+                          on_done=render_done)
 
     def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series,
                           tanggals: list) -> tuple:
@@ -380,51 +562,71 @@ class PivotTableView(tk.Frame):
 
     def _reset_filter(self):
         self.resto_var.set("(All)")
-        self.barang_var.set("(All)")
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
-        self.search_var.set("")
+        self.tgl_start_var.set("1")
+        self.tgl_end_var.set("31")
+        self.hide_empty_var.set(True)
+        self._name_selected = None
+        self.header_filter.clear()
         self._refresh_pivot()
 
     # =========================================================================
-    # DOUBLE-CLICK → POPUP DETAILS (identik versi lama)
+    # ⛶ PERBESAR (fullscreen)
+    # =========================================================================
+    def _maximize(self):
+        mode = "Per Resto" if self.pivot_mode == "resto" else "Per Tanggal"
+        return open_tree_maximized(
+            self.tree, f"Pivot Table — {mode}",
+            setup_tags=lambda t: self._setup_tags(t),
+            on_double_click=self._on_double_click)
+
+    # =========================================================================
+    # DOUBLE-CLICK → POPUP DETAILS
     # =========================================================================
     def _on_double_click(self, event):
         if self.data is None or self.data.empty:
             return
+        tree = event.widget
 
-        row_iid = self.tree.identify_row(event.y)
-        col_id = self.tree.identify_column(event.x)
+        row_iid = tree.identify_row(event.y)
+        col_id = tree.identify_column(event.x)
 
         if not row_iid:
             return
 
-        parent_iid = self.tree.parent(row_iid)
+        parent_iid = tree.parent(row_iid)
 
         if parent_iid:
-            nama_barang = self.tree.item(parent_iid, "text")
-            jenis = self.tree.item(row_iid, "text")
+            nama_barang = tree.item(parent_iid, "text")
+            jenis = tree.item(row_iid, "text")
         else:
-            nama_barang = self.tree.item(row_iid, "text")
+            nama_barang = tree.item(row_iid, "text")
             jenis = None
 
+        active_filters = {}
         tanggal = None
         if col_id and col_id != "#0":
             try:
                 col_idx = int(col_id.replace("#", "")) - 1
-                tree_cols = list(self.tree["columns"])
+                tree_cols = list(tree["columns"])
                 if 0 <= col_idx < len(tree_cols):
-                    tanggal_str = tree_cols[col_idx]
-                    tanggal = int(tanggal_str)
+                    col_val = tree_cols[col_idx]
+                    if self.pivot_mode == "resto":
+                        active_filters["NAMA RESTO"] = str(col_val)
+                    else:
+                        tanggal = int(col_val)
             except (ValueError, IndexError):
                 pass
 
-        active_filters = {}
-        for col, var in [
-            ("NAMA RESTO", self.resto_var),
-            ("SOURCE KIRIMAN", self.source_var),
-            ("KATEGORI", self.kategori_var),
-        ]:
+        # filter kartu tetap diberlaku (RESTO hanya mode Tanggal)
+        pairs = ([("NAMA RESTO", self.resto_var),
+                  ("SOURCE KIRIMAN", self.source_var),
+                  ("KATEGORI", self.kategori_var)]
+                 if self.pivot_mode == "tanggal" else
+                 [("SOURCE KIRIMAN", self.source_var),
+                  ("KATEGORI", self.kategori_var)])
+        for col, var in pairs:
             val = var.get()
             if val and val != "(All)":
                 active_filters[col] = val

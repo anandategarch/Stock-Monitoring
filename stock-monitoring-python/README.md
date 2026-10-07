@@ -6,6 +6,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
 > **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
+> **v3.1 — UX upgrade**: filter Nama Barang menempel di header kolom (ala Excel AutoFilter, di SEMUA tab), tombol ⛶ **Perbesar tabel** (fullscreen), **copy Nomor/Nomor PO** di pop-up detail, **pivot per RESTO** (baris kosong disembunyikan, tanpa kolom Total), dan **animasi loading** di semua proses. Pipeline tetap 100% tidak berubah.
 
 ---
 
@@ -34,14 +35,44 @@ Stock Monitoring — Python Edition
 - Tunggu sampai status bar menunjukkan **SELESAI**.
 
 ### 5. Pivot Table (tab ketiga)
-- Pivot matrix ditampilkan langsung di UI (rows: Nama Barang × JENIS, cols: Tanggal).
-- Filter: NAMA RESTO, NAMA BARANG, SOURCE KIRIMAN, KATEGORI + pencarian substring.
+- **PIVOT PER** (segment di atas tabel):
+  - **🏪 Resto** (default): kolom = resto, nilai = total per resto. Hanya baris dengan nilai total > 0 yang tampil (☑ "Sembunyikan baris kosong", ON) — item yang hanya ada di satu resto tetap muncul; **kolom Total sengaja tidak ditampilkan** (hanya dipakai internal untuk filter).
+  - **📅 Tanggal**: kolom = tanggal + rentang tanggal (1–31) + metric 6.PEMAKAIAN (COM).
+- Filter: RESTO (mode Tanggal), SOURCE KIRIMAN, KATEGORI + **filter Nama Barang via ikon corong di header kolom**.
 - Color-coded per metric (1.SO, 2.SALDO AKHIR, 3.DEVIASI, dll).
 - Negative values in parentheses, zero shown as '-'.
+- Double-click cell → pop-up detail source (baris×resto / baris×tanggal).
 
 ### 6. Rincian PO (tab ketujuh)
 - Tabel Rincian PO dengan filter Cabang PO & Status.
 - Nomor # sebagai parent row (klik ▸ untuk expand).
+
+---
+
+## Fitur Baru v3.1
+
+### ⧩ Filter Nama Barang menempel di header (semua tab)
+Klik header kolom **Nama Barang** (ikon corong) → popup ala **Excel AutoFilter**:
+- 🔍 pencarian nilai (menyaring daftar), daftar checkbox nilai unik, "Pilih semua"
+- sort **A→Z / Z→A** langsung dari popup
+- corong header berubah **teal** saat filter aktif; live-apply tiap toggle
+- Search box lama & dropdown NAMA BARANG di kartu filter **dihapus** (digantikan fitur ini, berlaku di semua tab + pop-up detail)
+
+### ⛶ Perbesar tabel (semua tab + pop-up)
+- Tombol **⛶ Perbesar** di kartu tabel tiap tab (dan di header pop-up detail) membuka window besar berisi clone tabel lengkap.
+- Sort, double-click detail, dan klik-kanan copy tetap berfungsi di window perbesar. **Esc** untuk menutup.
+
+### 📋 Copy Nomor / Nomor PO (pop-up detail)
+- **Klik kanan baris** → menu: Copy Nomor, Copy Nomor PO, Copy seluruh baris (tab-separated), Copy SEMUA Nomor / Nomor PO (unik), dan Perbesar.
+- **Double-click cell** kolom Nomor / Nomor PO → langsung copy nilai cell.
+- **Ctrl+C** → copy Nomor baris terpilih.
+- Tombol cepat **📋 Semua Nomor / Semua Nomor PO** di footer pop-up.
+- Status footer memberi konfirmasi "📋 … TERSALIN" setiap kali copy.
+
+### ⏳ Loading animation di semua proses
+- Chip loading melayang (spinner + teks) di tengah tabel saat: hitung pivot/deviasi/audit/rincian, render tabel besar (batched), buka pop-up detail, clone tabel perbesar, dan **Export Excel** (async — UI tidak membeku).
+- Pipeline: progressbar + spinner status di tab Proses (dipertahankan).
+- Compute berat berjalan di thread terpisah; render bertahap per-batch supaya UI tetap responsif.
 
 ---
 
@@ -85,7 +116,7 @@ stock-monitoring-python/
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
 ├── test_large_scale.py         # benchmark 855K records (memory < 2GB)
-├── test_ui_redesign.py         # test UI v3 (28 check — shell/KPI/filter/empty state)
+├── test_ui_redesign.py         # test UI v3.1 (70 check — header filter/perbesar/copy/pivot resto/loading)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
     ├── config.py               # loader config.json
@@ -108,7 +139,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3: 28 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.1: 70 check (jalankan di bawah Xvfb di Linux)
 python test_large_scale.py   # benchmark 855K rows
 ```
 
