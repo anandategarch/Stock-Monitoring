@@ -9,6 +9,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 > **v3.1 — UX upgrade**: filter Nama Barang menempel di header kolom (ala Excel AutoFilter, di SEMUA tab), tombol ⛶ **Perbesar tabel** (fullscreen), **copy Nomor/Nomor PO** di pop-up detail, **pivot per RESTO** (baris kosong disembunyikan, tanpa kolom Total), dan **animasi loading** di semua proses. Pipeline tetap 100% tidak berubah.
 > **v3.2 — Follow Up + tabel besar + perf**: tab baru **☑ Follow Up** (ala aplikasi *Waste*: centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi, persist `followup.json`, export Excel + impor hasil tindak lanjut), **KPI row di atas tabel DIHAPUS** di semua tab data (tabel jadi lebar & besar; ringkasan pindah ke status footer), dan **aplikasi diperingatkan** (deviasi 16× lebih cepat via vektorisasi numpy; laporan 3.7×; lazy refresh per tab — hanya tab aktif yang dihitung).
 > **v3.3 — Engine cepat + bug fix hasil deep audit**: **sort kolom kini LINEAR** (delete+reinsert — dulu `tree.move` O(n²) membekukan UI 45 detik di 50k baris, kini 0,7 detik), **fix bug follow-up salah baris setelah sort** (iid-based), **fix NameError path error pipeline**, double-click sel ✓ = toggle, cache pivot dibagi GR/PCS, tanpa modal "Selesai", dead code dibersihkan.
+> **v3.3.1 — FIX "Saldo SO kosong semua"** (tab Deviasi GR/PCS & Laporan): dua akar masalah digarap tuntas — **(1) sumber SO gagal terbaca**: data kini berupa **workbook gabungan `.xlsb`** (mis. `01.1 CEK STOCK V2.xlsb`, sheet `1  DEVIASI WEEKLY`, semua resto dalam 1 sheet) padahal reader lama hanya mencari file per-resto `.xlsx` ber-sheet `REKAP MENTAH` → reader baru otomatis mendeteksi sheet ber-schema rekap mentah di file/format apa pun (`*.xlsb` kini ter-glob; NAMA RESTO diambil dari kolom; scan folder + RootPath; `pyxlsb` ditambahkan ke requirements), **(2) bug render vektorisasi v3.2**: kolom matrix `SO_H-2 … SO_H+2 / In / Out / BK` (Deviasi) dan `Saldo Awal / IN / OUT / BK / Saldo Kumulatif` (Laporan) tidak pernah diekstrak ke builder baris → selalu tampil `-` walau datanya ada → kini semua kolom terisi. Divalidasi terhadap sheet `DEVIASI GR` workbook user: 1404/1405 baris identik (2 sel beda = pivot cache Excel user yang stale, bukan app).
 
 ---
 
@@ -50,6 +51,23 @@ Stock Monitoring — Python Edition
 - Nomor # sebagai parent row (klik ▸ untuk expand).
 
 ---
+
+## Fitur Baru v3.3.1
+
+### 🐛 FIX KRITIS — "Saldo SO kosong semua" (tab Deviasi GR / PCS / Laporan)
+Dua akar masalah, keduanya digarap:
+
+**1. Sumber SO tidak terbaca (pipeline `fn_rekap_mentah`)**
+- Data SO user kini berupa **satu workbook gabungan `.xlsb`** (`01.1 CEK STOCK V2.xlsb`, sheet `1  DEVIASI WEEKLY`: 20 resto × 150 barang × hari 1-31, JENIS = `SO`, NAMA RESTO sebagai KOLOM) — padahal reader lama (mirror M) hanya mencari **file per-resto `.xlsx/.xls/.xlsm` ber-sheet `REKAP MENTAH`** dengan NAMA RESTO dari nama file. Akibat: glob tidak match → SO = 0 semua → kolom SO `-`.
+- Reader baru: bila folder tidak punya file per-resto, **scan otomatis** semua file (termasuk `*.xlsb`) × sheet → deteksi baris header ber-schema rekap mentah (NAMA RESTO + JENIS + NAMA BARANG + SATUAN + ≥3 kolom hari 1-31) → baca dengan NAMA RESTO dari kolom. Scan folder itu + folder induk/RootPath (mode berjalan saja, agar bulan lalu tidak tercampur).
+- Format per-resto lama **tetap didukung** (dipakai duluan bila ada — tidak ada double-count).
+- `*.xlsb` kini terbaca di seluruh pipeline (`helpers._list_excel_files` + engine `pyxlsb`/`calamine` di `fn_buka_sheet`); `pyxlsb>=0.7.0` ditambahkan ke `requirements.txt`.
+- Nilai teks di-strip (`SATUAN "GR "` → `"GR"` — 57 nilai trailing-space di data user; tanpa strip baris GR bocor ke tab PCS).
+
+**2. Bug render vektorisasi v3.2 (UI)**
+- `_prepare_rows` (Deviasi GR/PCS & Laporan) membangun `cols_np` yang **lupa 8 kolom matrix**: `SO_H-2, SO_H-1, In_H-1, In_H, Out_H, BK_H, SO_H+1, In_H+1, SO_H+2` + (Laporan) `Saldo Awal, IN, OUT, BK, Saldo Kumulatif` → kolom tersebut jatuh ke `else 0` → **selalu `-` walau data pivot benar**. Kini semua kolom diekstrak numerik.
+
+**Validasi (data asli user):** `BDGUKU · ADONAN PANGSIT (V.20) · tgl 25 = 336.480` identik dgn sheet mentah; perbandingan penuh vs sheet `DEVIASI GR` workbook user: **1404/1405 baris SO_23/24/25 identik** (2 sel beda = pivot cache Excel user yang stale — data mentahnya sendiri sudah direvisi setelah refresh terakhir). `test_mock.py` (format per-resto) + `test_ui_redesign.py` 117/117 PASS.
 
 ## Fitur Baru v3.3
 

@@ -80,10 +80,12 @@ from src.ui.followup_view import FollowUpView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.3.0"  # v3.3: engine sort linear (O(n²)→O(n)), fix bug
-                        # follow-up salah baris setelah sort, fix NameError
-                        # path error pipeline, shared cache pivot GR/PCS,
-                        # bersih-bersih dead code hasil deep audit
+APP_VERSION = "3.3.1"  # v3.3.1: FIX "Saldo SO kosong semua" — (1) reader
+                        # SO kini dukung workbook gabungan .xlsb (sheet apa pun
+                        # ber-schema rekap mentah, NAMA RESTO dari kolom); (2)
+                        # fix render: vektorisasi v3.2 lupa kolom matrix
+                        # (SO_H-2..SO_H+2/In/Out/BK + Saldo Awal/IN/OUT/BK/
+                        # Saldo Kumulatif di Laporan) → selalu tampil "-"
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 

@@ -628,9 +628,19 @@ class DeviasiView(tk.Frame):
         row_snaps = {}
         store = self.store
         asal = f"DEVIASI {self.satuan_mode}"
+        # v3.3.1 FIX "Saldo SO kosong semua": vektorisasi v3.2 lupa memasukkan
+        # kolom matrix selain SO_H/Sistem/Deviasi ke cols_np → semua kolom
+        # SO_H-2 … SO_H+2, In, Out, BK jatuh ke `else 0` → selalu tampil "-".
+        # Kini SEMUA kolom numerik diekstrak (identik perilaku v3.1 row.get).
         cols_np = {c: filtered[c].to_numpy() for c in
-                   ("Resto", "Nama Barang", "Satuan", "AKTIF/NON",
-                    "SO_H", "Sistem", "Deviasi", "CEK", "Rank")}
+                   ("Resto", "Nama Barang", "Satuan", "AKTIF/NON", "CEK")}
+        for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
+                  "Out_H", "BK_H", "SO_H+1", "In_H+1", "SO_H+2",
+                  "Sistem", "Deviasi"):
+            cols_np[c] = pd.to_numeric(
+                filtered[c], errors="coerce").fillna(0).to_numpy(
+                dtype="float64")
+        cols_np["Rank"] = filtered["Rank"].to_numpy()
         for i in range(n):
             barang = str(cols_np["Nama Barang"][i])
             resto = str(cols_np["Resto"][i])

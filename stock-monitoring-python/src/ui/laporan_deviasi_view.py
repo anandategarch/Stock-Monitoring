@@ -543,10 +543,17 @@ class LaporanDeviasiView(tk.Frame):
         fp_map = {}
         row_snaps = {}
         store = self.store
+        # v3.3.1 FIX (pola sama dgn deviasi_view): vektorisasi v3.2 lupa
+        # memasukkan Saldo Awal/IN/OUT/BK/Saldo Kumulatif ke cols_np → kolom
+        # tersebut selalu tampil "-" walau datanya ada.
         cols_np = {c: filtered[c].to_numpy() for c in
                    ("Tanggal", "Resto", "Nama Barang", "Satuan",
                     "AKTIF/NON", "SO", "Sistem", "Deviasi",
                     "Status Audit", "Kontribusi %")}
+        for c in ("Saldo Awal", "IN", "OUT", "BK", "Saldo Kumulatif"):
+            cols_np[c] = pd.to_numeric(
+                filtered[c], errors="coerce").fillna(0).to_numpy(
+                dtype="float64")
         for i in range(n):
             values = [""] * len(col_ids)  # ✓ diisi di bawah
             for j, col_id in enumerate(col_ids):

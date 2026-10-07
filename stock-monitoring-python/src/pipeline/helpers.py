@@ -107,10 +107,13 @@ def vec_text_between_delimiters(series: pd.Series, open_delim: str = "(", close_
 # =============================================================================
 
 def _list_excel_files(folder_path: str) -> List[str]:
-    """List semua file Excel di folder, exclude hidden & temp files."""
+    """List semua file Excel di folder, exclude hidden & temp files.
+    v3.3.1: sertakan *.xlsb — sumber SO user kini berupa workbook gabungan
+    .xlsb ("01.1 CEK STOCK V2.xlsb") yang sebelumnya TIDAK terbaca sama
+    sekali (akibatnya Saldo SO kosong semua di tab Deviasi GR/PCS)."""
     if not os.path.isdir(folder_path):
         return []
-    patterns = ["*.xlsx", "*.xls", "*.xlsm"]
+    patterns = ["*.xlsx", "*.xls", "*.xlsm", "*.xlsb"]
     files = []
     for p in patterns:
         files.extend(glob.glob(os.path.join(folder_path, p)))
@@ -135,6 +138,48 @@ def _get_excel_engine() -> str:
 _EXCEL_ENGINE = _get_excel_engine()
 
 
+def _xlsb_engine() -> Optional[str]:
+    """Engine untuk file .xlsb: calamine (jika ada) > pyxlsb > None.
+    None = engine tidak tersedia (.xlsb harus di-skip dengan pesan jelas)."""
+    if _EXCEL_ENGINE == "calamine":
+        return "calamine"
+    try:
+        import pyxlsb  # noqa: F401
+        return "pyxlsb"
+    except ImportError:
+        return None
+
+
+def _list_sheet_names(file_path: str) -> List[str]:
+    """Daftar nama sheet dari file Excel (semua format, termasuk .xlsb).
+    Urutan coba: calamine > openpyxl (.xlsx) / pyxlsb (.xlsb)."""
+    low = file_path.lower()
+    # 1) calamine — cepat untuk semua format
+    if _EXCEL_ENGINE == "calamine":
+        try:
+            from python_calamine import load_workbook
+            return list(load_workbook(file_path).sheet_names)
+        except Exception:
+            pass
+    # 2) .xlsb → pyxlsb
+    if low.endswith(".xlsb"):
+        try:
+            from pyxlsb import open_workbook
+            with open_workbook(file_path) as wb:
+                return list(wb.sheets)
+        except Exception:
+            return []
+    # 3) .xlsx/.xlsm → openpyxl
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(file_path, read_only=True)
+        names = list(wb.sheetnames)
+        wb.close()
+        return names
+    except Exception:
+        return []
+
+
 def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
                    raw: bool = False) -> pd.DataFrame:
     """
@@ -143,6 +188,7 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
 
     OPTIMIZED: gunakan calamine engine (Rust) jika tersedia — 10-20x faster.
     Fallback ke openpyxl jika calamine tidak terinstall.
+    v3.3.1: file .xlsb didukung (engine pyxlsb bila calamine absen).
 
     raw=True: baca tanpa header (header=None), kolom = Column1, Column2, ...
               Mirror M doPromote=null/false.
@@ -150,7 +196,17 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
               Mirror M doPromote=true + Skip(N) + PromoteHeaders.
               header_row=4 = skip rows 0-3, row 4 jadi header.
     """
-    engine_kwargs = {"engine": _EXCEL_ENGINE} if _EXCEL_ENGINE else {}
+    # v3.3.1: pilih engine eksplisit untuk .xlsb (openpyxl tidak bisa .xlsb;
+    # pandas default-engine pun butuh pyxlsb terinstall — beri pesan jelas)
+    if file_path.lower().endswith(".xlsb") and _EXCEL_ENGINE != "calamine":
+        xlsb_eng = _xlsb_engine()
+        if xlsb_eng is None:
+            raise ImportError(
+                "File .xlsb membutuhkan package 'pyxlsb' atau "
+                "'python-calamine' — jalankan: pip install pyxlsb")
+        engine_kwargs = {"engine": xlsb_eng}
+    else:
+        engine_kwargs = {"engine": _EXCEL_ENGINE} if _EXCEL_ENGINE else {}
     try:
         if raw:
             df = pd.read_excel(file_path, sheet_name=sheet_name, header=None,

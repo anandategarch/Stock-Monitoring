@@ -152,7 +152,7 @@ def main():
     check("App + toolbar + 8 tab terbangun (v3.2: +Follow Up)",
           len(app.notebook.tabs()) == 8, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.3.0", APP_VERSION == "3.3.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.3.1", APP_VERSION == "3.3.1", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
