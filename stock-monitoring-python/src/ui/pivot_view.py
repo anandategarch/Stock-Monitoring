@@ -1,187 +1,228 @@
 """
-pivot_view.py — Excel-like pivot table widget untuk Tkinter.
-Menampilkan data Append1 sebagai matrix pivot (rows: Nama Barang × JENIS, cols: Tanggal).
+pivot_view.py — Pivot table view (v3.0 redesign).
 
-Visual style matching Excel sample:
-- Filter bar di atas (NAMA RESTO, NAMA BARANG, SOURCE KIRIMAN, KATEGORI)
-- Row Labels (tree column) + Tanggal columns
-- Conditional formatting dari sample Excel:
+Menampilkan data Append1 sebagai matrix pivot (rows: Nama Barang × JENIS,
+cols: Tanggal) — logika identik dengan versi lama, tampilan baru:
+- Empty state dengan CTA "Jalankan Pipeline" saat belum ada data
+- KPI strip: jumlah barang, jumlah tanggal, jumlah baris
+- Filter card (RESTO / BARANG / SOURCE / KATEGORI / search) + tombol Reset
+- Kartu tabel dengan footer status
+- Conditional formatting dari sample Excel dipertahankan:
   * DEVIASI row → font merah
-  * Selisih IN ≠ 0 → font merah + bg pink (FFFFC9C9)
-  * Value = 0 → suppress (tampilkan "-", font abu-abu)
-  * "4.IN" label → brown font (FF9C5700) + light yellow bg (FFFFEB9C)
-  * "5.BARANG MASUK" label → dark green font (FF006100) + light green bg (FFC6EFCE)
-- Number format: #,##0.0 ;[Red]-#,##0.0(negative merah, 1 decimal)
-- Warna background lembut (pastel) — tidak mencolok
+  * Selisih IN ≠ 0 → font merah + bg pink
+  * Value = 0 → suppress (tampil "-", font abu-abu)
+  * "4.IN" → cokelat + kuning muda
+  * "5.BARANG MASUK" → hijau tua + hijau muda
 """
 
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Optional, Callable
+
+from .theme import (
+    C_ACCENT, C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, ROW_EVEN, ROW_ODD,
+    font, setup_tree_tags,
+)
+from .widgets import (
+    Card, EmptyState, GhostButton, KpiCard, KpiRow, LegendRow, add_tooltip,
+    make_tree,
+)
 
 
-class PivotTableView(ttk.Frame):
-    """Excel-like pivot table in Tkinter."""
+class PivotTableView(tk.Frame):
+    """Pivot matrix view dengan tampilan card-based."""
 
-    # Metric order — fixed per user request:
-    #   4.IN = BARANG MASUK (from query_in: 3224+4205+9901)
-    #   5.BARANG MASUK = from Rekap Mentah (SO report)
-    #   7.Selisih IN = computed
-    #   8.BARANG KELUAR = from 42.15 Kirim (separated from OUT)
-    #   9.OUT = from 22.05 sales (ACR)
+    # Metric order — fixed (identik versi lama):
     METRICS = [
         "SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
         "4.IN", "5.BARANG MASUK", "6.PEMAKAIAN (COM)",
         "7.Selisih IN", "8.BARANG KELUAR", "9.OUT",
     ]
 
-    # Soft pastel background colors per metric (subtle, not jarring)
-    # Based on sample Excel but with reduced intensity
+    # Soft pastel background per metric (identik versi lama)
     METRIC_BG = {
-        "SALDO AWAL": "#F5F5F5",          # very light gray
-        "1.SO": "#F0F4FA",                 # very light blue
-        "2.SALDO AKHIR": "#F2F8EE",        # very light green
-        "3.DEVIASI": "#FDF6E3",            # very light yellow
-        "4.IN": "#FFFBE6",                 # light yellow (per sample conditional fmt)
-        "5.BARANG MASUK": "#EEF7EC",       # light green (per sample conditional fmt)
-        "6.PEMAKAIAN (COM)": "#E8E0F0",    # light purple — COM is a calculated metric
-        "7.Selisih IN": "#FCEEE8",         # light pink
-        "8.BARANG KELUAR": "#FFF0E0",      # light orange — goods sent to other branches
-        "9.OUT": "#F8F0F0",                # very light red — sales (22.05)
+        "SALDO AWAL": "#F5F5F5",
+        "1.SO": "#F0F4FA",
+        "2.SALDO AKHIR": "#F2F8EE",
+        "3.DEVIASI": "#FDF6E3",
+        "4.IN": "#FFFBE6",
+        "5.BARANG MASUK": "#EEF7EC",
+        "6.PEMAKAIAN (COM)": "#E8E0F0",
+        "7.Selisih IN": "#FCEEE8",
+        "8.BARANG KELUAR": "#FFF0E0",
+        "9.OUT": "#F8F0F0",
     }
 
-    def __init__(self, parent, data: pd.DataFrame = None):
-        super().__init__(parent)
+    def __init__(self, parent, data: pd.DataFrame = None,
+                 go_to_proses: Callable | None = None):
+        super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
+        self.go_to_proses = go_to_proses
 
         self._build_ui()
         self._setup_tags()
         if data is not None and not data.empty:
             self.load_data(data)
+        else:
+            self._show_empty()
 
     # =========================================================================
     # UI BUILD
     # =========================================================================
     def _build_ui(self):
-        # --- Filter bar (top) — 2 rows for 4 filters + reset ---
-        filter_frame = ttk.LabelFrame(self, text="Filter")
-        filter_frame.pack(fill=tk.X, pady=(0, 4))
+        # --- Empty state ---
+        self.empty = EmptyState(
+            self, icon="📊", title="Belum ada data pivot",
+            subtitle="Jalankan pipeline untuk memuat matrix pivot "
+                     "(Nama Barang × Tanggal) ke tampilan ini.",
+            cta_text="🚀 Jalankan Pipeline",
+            on_cta=self._cta_proses)
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+        # --- Konten utama ( disembunyikan sampai ada data ) ---
+        self.content = tk.Frame(self, bg=C_BG)
+
+        # KPI row
+        kpi = KpiRow(self.content)
+        self.kpi_items = KpiCard(kpi, "Barang", "—", "nama barang unik")
+        self.kpi_days = KpiCard(kpi, "Tanggal", "—", "kolom tanggal")
+        self.kpi_rows = KpiCard(kpi, "Baris Matrix", "—", "barang × metric")
+        for c in (self.kpi_items, self.kpi_days, self.kpi_rows):
+            kpi.add(c)
+        kpi.pack(fill="x", padx=12, pady=(12, 8))
+
+        # --- Filter card ---
+        fcard = Card(self.content, title="Filter",
+                     subtitle="Semua filter live-apply. Search = substring, "
+                              "kosongkan untuk lihat semua.")
+        fcard.pack(fill="x", padx=12)
+        fbody = fcard.body()
 
         # Row 0: NAMA RESTO, NAMA BARANG
-        ttk.Label(filter_frame, text="NAMA RESTO:").grid(
-            row=0, column=0, padx=(8, 4), pady=4, sticky="w")
+        r0 = tk.Frame(fbody, bg=C_CARD)
+        r0.pack(fill="x", pady=(0, 6))
+        tk.Label(r0, text="RESTO", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
         self.resto_var = tk.StringVar(value="(All)")
-        self.resto_combo = ttk.Combobox(
-            filter_frame, textvariable=self.resto_var, state="readonly", width=15)
-        self.resto_combo.grid(row=0, column=1, padx=(0, 12), pady=4)
-        self.resto_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_pivot())
+        self.resto_combo = ttk.Combobox(r0, textvariable=self.resto_var,
+                                        state="readonly", width=16)
+        self.resto_combo.pack(side="left", padx=(6, 18))
+        self.resto_combo.bind("<<ComboboxSelected>>",
+                              lambda e: self._refresh_pivot())
+        add_tooltip(self.resto_combo, "Filter cabang resto")
 
-        ttk.Label(filter_frame, text="NAMA BARANG:").grid(
-            row=0, column=2, padx=(0, 4), pady=4, sticky="w")
+        tk.Label(r0, text="NAMA BARANG", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
         self.barang_var = tk.StringVar(value="(All)")
-        self.barang_combo = ttk.Combobox(
-            filter_frame, textvariable=self.barang_var, state="readonly", width=25)
-        self.barang_combo.grid(row=0, column=3, padx=(0, 12), pady=4)
-        self.barang_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_pivot())
+        self.barang_combo = ttk.Combobox(r0, textvariable=self.barang_var,
+                                         state="readonly", width=26)
+        self.barang_combo.pack(side="left", padx=(6, 0))
+        self.barang_combo.bind("<<ComboboxSelected>>",
+                               lambda e: self._refresh_pivot())
+        add_tooltip(self.barang_combo, "Filter nama barang (exact match)")
 
-        # Row 1: SOURCE KIRIMAN, KATEGORI, Reset
-        ttk.Label(filter_frame, text="SOURCE KIRIMAN:").grid(
-            row=1, column=0, padx=(8, 4), pady=4, sticky="w")
+        # Row 1: SOURCE KIRIMAN, KATEGORI
+        r1 = tk.Frame(fbody, bg=C_CARD)
+        r1.pack(fill="x", pady=(0, 6))
+        tk.Label(r1, text="SOURCE KIRIMAN", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
         self.source_var = tk.StringVar(value="(All)")
-        self.source_combo = ttk.Combobox(
-            filter_frame, textvariable=self.source_var, state="readonly", width=15)
-        self.source_combo.grid(row=1, column=1, padx=(0, 12), pady=4)
-        self.source_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_pivot())
+        self.source_combo = ttk.Combobox(r1, textvariable=self.source_var,
+                                         state="readonly", width=16)
+        self.source_combo.pack(side="left", padx=(6, 18))
+        self.source_combo.bind("<<ComboboxSelected>>",
+                               lambda e: self._refresh_pivot())
 
-        ttk.Label(filter_frame, text="KATEGORI:").grid(
-            row=1, column=2, padx=(0, 4), pady=4, sticky="w")
+        tk.Label(r1, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
         self.kategori_var = tk.StringVar(value="(All)")
-        self.kategori_combo = ttk.Combobox(
-            filter_frame, textvariable=self.kategori_var, state="readonly", width=15)
-        self.kategori_combo.grid(row=1, column=3, padx=(0, 12), pady=4)
-        self.kategori_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_pivot())
+        self.kategori_combo = ttk.Combobox(r1, textvariable=self.kategori_var,
+                                           state="readonly", width=16)
+        self.kategori_combo.pack(side="left", padx=(6, 18))
+        self.kategori_combo.bind("<<ComboboxSelected>>",
+                                 lambda e: self._refresh_pivot())
 
-        ttk.Button(filter_frame, text="Reset Filter", command=self._reset_filter).grid(
-            row=1, column=4, padx=4, pady=4, sticky="w")
-
-        # Row 2: Search box for Nama Barang (FIX: substring search)
-        ttk.Label(filter_frame, text="CARI BARANG:").grid(
-            row=2, column=0, padx=(8, 4), pady=4, sticky="w")
+        # Row 2: search + reset
+        r2 = tk.Frame(fbody, bg=C_CARD)
+        r2.pack(fill="x")
+        tk.Label(r2, text="CARI", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
         self.search_var = tk.StringVar(value="")
-        search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=30)
-        search_entry.grid(row=2, column=1, columnspan=3, padx=(0, 12), pady=4, sticky="ew")
-        # FIX: bind KeyRelease for live substring filter (matches parent rows only)
+        search_entry = ttk.Entry(r2, textvariable=self.search_var, width=32)
+        search_entry.pack(side="left", padx=(6, 12))
         search_entry.bind("<KeyRelease>", lambda e: self._refresh_pivot())
-        ttk.Label(filter_frame,
-            text="(substring match — kosongkan untuk lihat semua)",
-            font=("Segoe UI", 8, "italic"), foreground="#666"
-        ).grid(row=2, column=4, padx=4, pady=4, sticky="w")
+        add_tooltip(search_entry,
+                    "Pencarian substring case-insensitive pada Nama Barang.\n"
+                    "Mencocokkan baris parent (semua metric ikut tampil).")
+        GhostButton(r2, text="✕ Reset Filter",
+                    command=self._reset_filter).pack(side="left", padx=(4, 0))
 
-        # --- Pivot table (Treeview) ---
-        tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill="both", expand=True)
+        # --- Tabel card ---
+        tcard = Card(self.content)
+        tcard.pack(fill="both", expand=True, padx=12, pady=(8, 0))
+        tbody = tcard.body()
 
-        self.tree = ttk.Treeview(tree_frame, show="tree headings", selectmode="browse")
+        self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="browse")
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
+        vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        tbody.grid_rowconfigure(0, weight=1)
+        tbody.grid_columnconfigure(0, weight=1)
 
-        # --- Status bar (bottom) ---
-        self.status_var = tk.StringVar(value="Belum ada data. Jalankan pipeline di tab Proses.")
-        ttk.Label(self, textvariable=self.status_var).pack(anchor="w", pady=(2, 0))
+        # Footer card: hint + status
+        foot = tk.Frame(tbody, bg=C_CARD)
+        foot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        tk.Label(foot, text="🖱 Double-click cell/baris untuk detail source data",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
-        # --- Hint bar (above status) ---
-        # FIX: contrast #888 → #666 (WCAG AA)
-        ttk.Label(
-            self,
-            text="Double-click cell/baris untuk melihat detail source data",
-            font=("Segoe UI", 9, "italic"),
-            foreground="#666",
-        ).pack(anchor="w", pady=(2, 0))
+        self.status_var = tk.StringVar(value="Belum ada data.")
+        tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
+                 font=font(8, "bold")).pack(side="right")
 
-        # --- Bind double-click ---
+        # Legend metric colors
+        legend = LegendRow(
+            self.content,
+            [("IN", "#9C5700"), ("BARANG MASUK", "#006100"),
+             ("DEVIASI", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9")])
+        legend.pack(fill="x", padx=12, pady=(6, 0))
+
         self.tree.bind("<Double-1>", self._on_double_click)
 
+    def _cta_proses(self):
+        if self.go_to_proses:
+            self.go_to_proses()
+
+    def _show_empty(self):
+        self.content.pack_forget()
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+    def _show_content(self):
+        self.empty.pack_forget()
+        self.content.pack(fill="both", expand=True)
+
     def _setup_tags(self):
-        """Configure Treeview tags for metric colors + conditional formatting."""
-        # 1. Soft pastel background per metric
+        """Tag Treeview: warna metric + conditional formatting (identik lama)."""
         for metric, color in self.METRIC_BG.items():
-            tag = self._metric_tag(metric)
-            self.tree.tag_configure(tag, background=color)
+            self.tree.tag_configure(self._metric_tag(metric), background=color)
 
-        # 2. Item header (Nama Barang) — bold, gray
-        self.tree.tag_configure("item_header", font=("Segoe UI", 9, "bold"),
-                                 background="#D9D9D9")
-
-        # 3. Conditional formatting tags (from sample Excel dxfs):
-        # dxf[13]: DEVIASI row → font red (FFFF0000)
+        self.tree.tag_configure(
+            "item_header", font=font(9, "bold"), background="#e2e8f0",
+            foreground=C_HEADER)
         self.tree.tag_configure("deviasi_row", foreground="#CC0000")
-
-        # dxf[12]: Selisih IN ≠ 0 → font red + bg pink (FFFFC9C9)
         self.tree.tag_configure("selisih_anomaly", foreground="#CC0000",
-                                 background="#FFC9C9")
-
-        # dxf[9]: "4.IN" label → brown font (FF9C5700) + light yellow bg (FFFFEB9C)
+                                background="#FFC9C9")
         self.tree.tag_configure("in_row", foreground="#9C5700",
-                                 background="#FFEB9C")
-
-        # dxf[10]: "5.BARANG MASUK" label → dark green font (FF006100) + light green bg (FFC6EFCE)
+                                background="#FFEB9C")
         self.tree.tag_configure("bm_row", foreground="#006100",
-                                 background="#C6EFCE")
-
-        # Negative value → font red (number format [Red])
+                                background="#C6EFCE")
         self.tree.tag_configure("negative", foreground="#CC0000")
-
-        # Zero value → suppressed (gray, dimmed)
         self.tree.tag_configure("zero_value", foreground="#999999")
 
     # =========================================================================
@@ -189,13 +230,13 @@ class PivotTableView(ttk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
         self.data = data
+        self._show_content()
         self._populate_filters()
         self._refresh_pivot()
 
     def _populate_filters(self):
         if self.data is None or self.data.empty:
             return
-
         for col, combo in [
             ("NAMA RESTO", self.resto_combo),
             ("Nama Barang", self.barang_combo),
@@ -208,7 +249,7 @@ class PivotTableView(ttk.Frame):
                 combo["values"] = values
 
     # =========================================================================
-    # PIVOT COMPUTATION + RENDERING
+    # PIVOT COMPUTATION + RENDERING (logika identik versi lama)
     # =========================================================================
     def _refresh_pivot(self):
         if self.data is None or self.data.empty:
@@ -227,14 +268,15 @@ class PivotTableView(ttk.Frame):
             if val and val != "(All)" and col in df.columns:
                 df = df[df[col].astype(str) == val]
 
-        # FIX: apply substring search for Nama Barang (case-insensitive)
+        # substring search (case-insensitive) — parent rows only
         search_val = self.search_var.get().strip().lower()
         if search_val and "Nama Barang" in df.columns:
-            df = df[df["Nama Barang"].astype(str).str.lower().str.contains(search_val, regex=False)]
+            df = df[df["Nama Barang"].astype(str).str.lower().str.contains(
+                search_val, regex=False)]
 
         if df.empty:
             self.tree.delete(*self.tree.get_children())
-            self.status_var.set("Tidak ada data setelah filter. Klik 'Reset Filter' atau ubah filter.")
+            self.status_var.set("Tidak ada data setelah filter.")
             return
 
         # Compute pivot
@@ -263,15 +305,13 @@ class PivotTableView(ttk.Frame):
 
         # Configure columns
         self.tree["columns"] = [str(t) for t in tanggals]
-        # FIX: widen tree col #0 from 200 → 280 to fit long Nama Barang
         self.tree.column("#0", width=280, minwidth=180)
-        # FIX: header text "Row Labels" → "Nama Barang" (Excel jargon removed)
         self.tree.heading("#0", text="Nama Barang")
         for t in tanggals:
             self.tree.column(str(t), width=70, minwidth=50, anchor="e")
             self.tree.heading(str(t), text=str(t))
 
-        # Insert rows: item header (parent) + 8 metric rows (children)
+        # Insert rows: item header (parent) + metric rows (children)
         row_count = 0
         for item in items:
             item_iid = f"item_{row_count}"
@@ -284,10 +324,6 @@ class PivotTableView(ttk.Frame):
 
             for metric in self.METRICS:
                 if metric == "6.PEMAKAIAN (COM)":
-                    # COM is a calculated metric — not in the source data.
-                    # Formula (ported from M code):
-                    #   First tanggal: COM = SALDO_AWAL + BARANG_MASUK - BARANG_KELUAR - SO
-                    #   Other tanggal: COM = SO_prev + BARANG_MASUK - BARANG_KELUAR - SO_current
                     row_data = self._compute_com(pivot, item, tanggals)
                 else:
                     try:
@@ -295,10 +331,8 @@ class PivotTableView(ttk.Frame):
                     except KeyError:
                         row_data = pd.Series({t: 0 for t in tanggals})
 
-                # Determine tag(s) based on conditional formatting rules
                 tags = self._compute_row_tags(metric, item, row_data, tanggals)
 
-                # Format values
                 values = []
                 for t in tanggals:
                     v = row_data.get(t, 0)
@@ -313,46 +347,33 @@ class PivotTableView(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.item(item, open=True)
 
+        # KPI + status
+        self.kpi_items.set_value(f"{len(items):,}", "nama barang unik")
+        self.kpi_days.set_value(f"{len(tanggals):,}", "kolom tanggal")
+        self.kpi_rows.set_value(f"{row_count:,}", f"filter: {len(df):,} dari "
+                                                   f"{len(self.data):,} rows")
         self.status_var.set(
-            f"{len(items)} barang × {len(tanggals)} tanggal = {row_count} baris. "
-            f"Filtered: {len(df)} dari {len(self.data)} rows."
-        )
+            f"{len(items)} barang × {len(tanggals)} tanggal = {row_count} baris · "
+            f"filtered {len(df):,}/{len(self.data):,} rows")
 
-    def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series, tanggals: list) -> tuple:
-        """Compute tags for a metric row based on conditional formatting rules.
-
-        Rules from sample Excel (dxf mapping):
-        - "4.IN" → in_row (brown font + yellow bg)
-        - "5.BARANG MASUK" → bm_row (green font + green bg)
-        - "3.DEVIASI" → deviasi_row (red font)
-        - "7.Selisih IN" with any value ≠ 0 → selisih_anomaly (red font + pink bg)
-        - Any row with negative value → negative (red font)
-          * Priority: in_row / bm_row keep their colors (negatives in parentheses)
-          * DEVIASI already red, Selisih anomaly already red
-          * Others (SALDO AWAL, 1.SO, 2.SALDO AKHIR, 9.OUT) → red font if has negative
-
-        Note: Treeview applies tags per-ROW, not per-cell. So "negative" red applies
-        to the whole row text. This is a limitation — Excel does per-cell coloring.
-        """
-        # Check for negative values in this row
+    def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series,
+                          tanggals: list) -> tuple:
+        """Conditional formatting rules (identik versi lama)."""
         has_negative = any(
             (row_data.get(t, 0) or 0) < 0 for t in tanggals
         )
 
         if metric == "4.IN":
-            return ("in_row",)  # brown font + yellow bg (keep, negatives in parentheses)
+            return ("in_row",)
         if metric == "5.BARANG MASUK":
-            return ("bm_row",)  # green font + green bg (keep, negatives in parentheses)
+            return ("bm_row",)
         if metric == "7.Selisih IN":
             has_nonzero = any(row_data.get(t, 0) != 0 for t in tanggals)
             if has_nonzero:
-                return ("selisih_anomaly",)  # red font + pink bg
+                return ("selisih_anomaly",)
             return (self._metric_tag(metric),)
         if metric == "3.DEVIASI":
-            return ("deviasi_row",)  # red font (already red, negatives visible)
-        # SALDO AWAL, 1.SO, 2.SALDO AKHIR, 9.OUT:
-        # - If has negative → red font (negative tag overrides metric_bg)
-        # - Else → metric background
+            return ("deviasi_row",)
         if has_negative:
             return ("negative", self._metric_tag(metric))
         return (self._metric_tag(metric),)
@@ -362,47 +383,35 @@ class PivotTableView(ttk.Frame):
         self.barang_var.set("(All)")
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
-        self.search_var.set("")  # FIX: reset search box too
+        self.search_var.set("")
         self._refresh_pivot()
 
     # =========================================================================
-    # DOUBLE-CLICK → POPUP DETAILS
+    # DOUBLE-CLICK → POPUP DETAILS (identik versi lama)
     # =========================================================================
     def _on_double_click(self, event):
-        """Handle double-click: identify cell + show source data popup."""
         if self.data is None or self.data.empty:
             return
 
-        # Identify row + column from click position
         row_iid = self.tree.identify_row(event.y)
         col_id = self.tree.identify_column(event.x)
 
         if not row_iid:
-            return  # clicked empty area
+            return
 
-        # Determine: is this a parent (item header) or child (metric row)?
         parent_iid = self.tree.parent(row_iid)
 
         if parent_iid:
-            # This is a child (metric row)
-            # Nama Barang = parent's text
-            # JENIS = this row's text
             nama_barang = self.tree.item(parent_iid, "text")
             jenis = self.tree.item(row_iid, "text")
         else:
-            # This is a parent (item header)
-            # Nama Barang = this row's text
-            # JENIS = all
             nama_barang = self.tree.item(row_iid, "text")
             jenis = None
 
-        # Determine Tanggal from column
         tanggal = None
         if col_id and col_id != "#0":
-            # col_id format: "#1", "#2", ...
             try:
-                col_idx = int(col_id.replace("#", "")) - 1  # 0-indexed
-                # Treeview columns are tanggal strings
+                col_idx = int(col_id.replace("#", "")) - 1
                 tree_cols = list(self.tree["columns"])
                 if 0 <= col_idx < len(tree_cols):
                     tanggal_str = tree_cols[col_idx]
@@ -410,7 +419,6 @@ class PivotTableView(ttk.Frame):
             except (ValueError, IndexError):
                 pass
 
-        # Get active filters (exclude Nama Barang since we filter by it explicitly)
         active_filters = {}
         for col, var in [
             ("NAMA RESTO", self.resto_var),
@@ -421,9 +429,7 @@ class PivotTableView(ttk.Frame):
             if val and val != "(All)":
                 active_filters[col] = val
 
-        # Show popup
         from src.ui.details_popup import show_details_popup
-        # Find root Tk for popup parent
         root = self.winfo_toplevel()
         show_details_popup(
             root, self.data,
@@ -434,7 +440,7 @@ class PivotTableView(ttk.Frame):
         )
 
     # =========================================================================
-    # HELPERS
+    # HELPERS (identik versi lama)
     # =========================================================================
     @staticmethod
     def _metric_tag(metric: str) -> str:
@@ -442,8 +448,7 @@ class PivotTableView(ttk.Frame):
 
     @staticmethod
     def _format_num(val) -> str:
-        """Format number: 1 decimal, thousand separators, negative in parentheses (red via tag).
-        Mirror Excel numFmt 165: #,##0.0_ ;[Red]-#,##0.0 (negative red)"""
+        """Format angka: 1 desimal, separator ribuan, negatif dalam kurung."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
         try:
@@ -452,30 +457,17 @@ class PivotTableView(ttk.Frame):
             return str(val)
         if val == 0:
             return "-"
-        # 1 decimal, thousand separators
         if val == int(val):
-            s = f"{val:,.0f}"  # whole number, no decimal
+            s = f"{val:,.0f}"
         else:
-            s = f"{val:,.1f}"  # 1 decimal
+            s = f"{val:,.1f}"
         if val < 0:
-            return f"({s[1:]})"  # accounting style: (123.4)
+            return f"({s[1:]})"
         return s
 
     @staticmethod
     def _compute_com(pivot, item, tanggals):
-        """Compute 6.PEMAKAIAN (COM) per tanggal for a given Nama Barang.
-
-        Ported from M code:
-          pemakaian[i] = (if i=0 then stokAwal[0] else so[i-1]) + bm[i] - bk[i] - so[i]
-
-        Where (per Nama Barang, sorted by tanggal ascending):
-          stokAwal = SALDO AWAL values per tanggal
-          so       = 1.SO values per tanggal
-          bm       = 4.IN values per tanggal (BARANG MASUK = IN, per user spec)
-          bk       = 8.BARANG KELUAR values per tanggal (42.15 Kirim only, post-split)
-
-        Returns: pd.Series indexed by tanggal with COM values.
-        """
+        """Hitung 6.PEMAKAIAN (COM) per tanggal (port dari M code)."""
         def get_series(jenis):
             try:
                 return pivot.loc[(item, jenis)]
@@ -483,8 +475,8 @@ class PivotTableView(ttk.Frame):
                 return pd.Series({t: 0 for t in tanggals})
 
         so = get_series("1.SO")
-        bm = get_series("4.IN")           # BARANG MASUK = IN (from 3224+4205+9901)
-        bk = get_series("8.BARANG KELUAR") # BARANG KELUAR = 42.15 Kirim only
+        bm = get_series("4.IN")
+        bk = get_series("8.BARANG KELUAR")
         sa = get_series("SALDO AWAL")
 
         com_values = {}
@@ -495,10 +487,8 @@ class PivotTableView(ttk.Frame):
             sa_val = float(sa.get(t, 0) or 0)
 
             if i == 0:
-                # First tanggal: Stok Awal + BM - BK - SO
                 com_val = sa_val + bm_val - bk_val - so_val
             else:
-                # Other tanggal: SO_prev + BM - BK - SO_current
                 so_prev = float(so.get(tanggals[i - 1], 0) or 0)
                 com_val = so_prev + bm_val - bk_val - so_val
 

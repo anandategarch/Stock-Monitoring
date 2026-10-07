@@ -218,6 +218,36 @@ def create_mock_konversi(filepath, barang_list):
     wb.close()
 
 
+def create_mock_9901(filepath, resto, barang_list):
+    """Create mock 9901 (mutasi barang tanpa nomor penerimaan).
+    Header at row 1. Nama cabang format '1137.<RESTO>' sesuai export asli."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+
+    headers = ["Nomor # Penerimaan Barang", "Jenis Barang Barang & Jasa",
+               "#Prime.Qty", "Nama barang", "Nama cabang", "Tanggal"]
+    for col_idx, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col_idx, value=h)
+
+    # 2 baris valid (nomor penerimaan blank + jenis Persediaan)
+    # + 1 baris yang harus terfilter (ada nomor penerimaan)
+    rows = []
+    for i, (barang, _) in enumerate(barang_list[:2]):
+        rows.append([None, "Persediaan", 5.0 * (i + 1), barang,
+                     f"1137.{resto}", 5 + i])
+    rows.append(["RI-900", "Persediaan", 99.0, barang_list[0][0],
+                 f"1137.{resto}", 7])
+
+    for r_idx, row_data in enumerate(rows, 2):
+        for c_idx, val in enumerate(row_data, 1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    wb.save(filepath)
+    wb.close()
+
+
 def create_mock_dbs_kategori(filepath, barang_list):
     """Create Sheet1 (DBS kategori). Header at row 1."""
     wb = openpyxl.Workbook()
@@ -304,6 +334,7 @@ def run_test():
     create_mock_konversi(os.path.join(root_path, "27.Konversi Satuan Dex", "konversi.xlsx"), barbar_list)
     create_mock_dbs_kategori(os.path.join(root_path, "21. DBS Kategori", "kategori.xlsx"), barbar_list)
     create_mock_rincian_po(os.path.join(root_path, "25. Rincian PO", "po.xlsx"), resto, barbar_list)
+    create_mock_9901(os.path.join(root_path, "30. 9901", "mutasi.xlsx"), resto, barbar_list)
 
     print(f"  Mock data created at: {root_path}")
 
@@ -325,7 +356,8 @@ def run_test():
             "KonversiSatuan": "27.Konversi Satuan Dex",
             "DBSKategori":    "21. DBS Kategori",
             "Pemindahan4205": "4. 42.05",
-            "RincianPO":      "25. Rincian PO"
+            "RincianPO":      "25. Rincian PO",
+            "Data9901":       "30. 9901"
         },
         "Sheets": {
             "RekapMentah":     "REKAP MENTAH",
@@ -364,16 +396,10 @@ def run_test():
     from src.pipeline.fn_4215 import fn_4215
     from src.pipeline.fn_4205 import fn_4205
     from src.pipeline.fn_4217 import fn_4217
-    from src.pipeline.fn_pi import fn_pi
-    from src.pipeline.fn_konversi_satuan import fn_konversi_satuan
+    # NOTE: fn_pi + fn_konversi_satuan dihapus di refactor
+    # "hapus PI + Konversi Satuan" — test PI/Konversi dihapus sesuai pipeline.
     from src.pipeline.fn_dbs_kategori import fn_dbs_kategori
     from src.pipeline.fn_running_stock import fn_running_stock
-
-    # Test fn_konversi_satuan
-    konv = fn_konversi_satuan(config.folder("KonversiSatuan"))
-    print(f"    fn_konversi_satuan: {len(konv)} rows, cols={list(konv.columns)}")
-    assert len(konv) > 0, "Konversi satuan should have data"
-    assert "Rasio" in konv.columns, "Konversi should have Rasio column"
 
     # Test fn_dbs_kategori
     kat = fn_dbs_kategori(config.folder("DBSKategori"))
@@ -415,12 +441,6 @@ def run_test():
     assert len(q4217) > 0, "4217 should have data"
     assert q4217["JENIS"].iloc[0] == "SALDO AWAL"
     assert q4217["Tanggal"].iloc[0] == 1
-
-    # Test fn_pi
-    qpi = fn_pi(config.folder("PI"), konv)
-    print(f"    fn_pi: {len(qpi)} rows, cols={list(qpi.columns)}")
-    assert len(qpi) > 0, "PI should have data"
-    assert "Value" in qpi.columns
 
     # Test fn_rekap_mentah
     rekap = fn_rekap_mentah(config.folder("RekapBerjalan"), "berjalan", ["BARANG MASUK", "SO"])

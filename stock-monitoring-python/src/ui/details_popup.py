@@ -1,10 +1,11 @@
 """
-details_popup.py — Popup window untuk menampilkan source rows Append1.
-Muncul saat user double-click cell di PivotTableView.
+details_popup.py — Popup detail source rows Append1 (v3.0 redesign).
 
-Menampilkan 10 kolom:
-  Nama Barang, NAMA RESTO, Tanggal, JENIS, NILAI,
-  Nomor, Nomor PO, #Tgl/Jam Pembuatan IT, KATEGORI, SOURCE KIRIMAN
+Muncul saat user double-click cell/baris di PivotTableView / DeviasiView /
+LaporanDeviasiView. Logika filter identik versi lama; tampilan baru:
+- Header band gelap dengan judul + info filter (chip)
+- Tabel ter-style + footer status
+- Tombol Tutup accent + shortcut Esc
 """
 
 import tkinter as tk
@@ -12,8 +13,12 @@ from tkinter import ttk
 import pandas as pd
 from typing import Optional
 
+from .theme import (
+    C_ACCENT, C_BG, C_BORDER, C_CARD, C_HEADER, C_TEXT_MUTED, font, mono,
+)
+from .widgets import AccentButton
 
-# Column definitions: (column_id, display_name, width, anchor)
+# Column definitions: (column_id, width, anchor)
 COLUMNS = [
     ("Nama Barang", 140, "w"),
     ("NAMA RESTO", 80, "w"),
@@ -31,18 +36,20 @@ COLUMNS = [
 class DetailsPopup(tk.Toplevel):
     """Popup window menampilkan source rows untuk kombinasi cell pivot."""
 
-    def __init__(self, parent, title: str, df: pd.DataFrame, filter_info: str = ""):
-        """
-        Args:
-            parent: parent widget (root Tk)
-            title: judul popup (e.g., "GULA (V.20) / 1.SO / Tgl 5")
-            df: DataFrame source rows (sudah filtered)
-            filter_info: string deskripsi filter aktif (e.g., "NAMA RESTO=MLGPAR")
-        """
+    def __init__(self, parent, title: str, df: pd.DataFrame,
+                 filter_info: str = ""):
         super().__init__(parent)
-        self.title(f"Details: {title}")
-        self.geometry("1100x500")
-        self.minsize(800, 300)
+        self.title(f"Detail — {title}")
+        # Posisikan di tengah parent (modal nyaman, deterministik)
+        try:
+            pw, ph = 1100, 520
+            px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
+            py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
+            self.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
+        except Exception:
+            self.geometry("1100x520")
+        self.minsize(800, 320)
+        self.configure(bg=C_BG)
 
         # Modal — block parent sampai ditutup
         self.transient(parent)
@@ -62,72 +69,68 @@ class DetailsPopup(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.destroy())
 
     def _build_ui(self, title: str, filter_info: str):
-        # --- Header frame ---
-        header = ttk.Frame(self)
-        header.pack(fill=tk.X, padx=8, pady=(8, 4))
+        # --- Header band gelap ---
+        header = tk.Frame(self, bg=C_HEADER)
+        header.pack(fill="x")
+        head_in = tk.Frame(header, bg=C_HEADER)
+        head_in.pack(fill="x", padx=16, pady=12)
 
-        ttk.Label(
-            header,
-            text=f"Details: {title}",
-            font=("Segoe UI", 11, "bold"),
-        ).pack(anchor="w")
-
+        tk.Label(head_in, text=f"🔍 Detail Source Data", bg=C_HEADER,
+                 fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
+        tk.Label(head_in, text=title, bg=C_HEADER, fg="#f1f5f9",
+                 font=font(12, "bold"), wraplength=1000, justify="left"
+                 ).pack(anchor="w", pady=(2, 0))
         if filter_info:
-            ttk.Label(
-                header,
-                text=f"Filter aktif: {filter_info}",
-                font=("Segoe UI", 9),
-                # FIX: contrast #666 → #555 (still acceptable, slightly darker)
-                foreground="#555",
-            ).pack(anchor="w", pady=(2, 0))
+            tk.Label(head_in, text=f"Filter aktif: {filter_info}",
+                     bg=C_HEADER, fg="#94a3b8", font=font(9)).pack(
+                anchor="w", pady=(2, 0))
 
-        ttk.Separator(self, orient="horizontal").pack(fill=tk.X, padx=8, pady=4)
+        # --- Body: tabel ---
+        body = tk.Frame(self, bg=C_BG)
+        body.pack(fill="both", expand=True, padx=12, pady=12)
 
-        # --- Treeview ---
-        tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        card = tk.Frame(body, bg=C_CARD, highlightbackground=C_BORDER,
+                        highlightthickness=1)
+        card.pack(fill="both", expand=True)
+        card_in = tk.Frame(card, bg=C_CARD)
+        card_in.pack(fill="both", expand=True, padx=8, pady=8)
 
         col_ids = [c[0] for c in COLUMNS]
-        self.tree = ttk.Treeview(
-            tree_frame, columns=col_ids, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(card_in, columns=col_ids, show="headings",
+                                 selectmode="browse")
 
         for col_name, width, anchor in COLUMNS:
             self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
             self.tree.heading(col_name, text=col_name)
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
+        vsb = ttk.Scrollbar(card_in, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(card_in, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        card_in.grid_rowconfigure(0, weight=1)
+        card_in.grid_columnconfigure(0, weight=1)
 
-        # Alternating row colors
-        self.tree.tag_configure("evenrow", background="#FFFFFF")
-        self.tree.tag_configure("oddrow", background="#F5F5F5")
-        # Negative NILAI → red font
-        self.tree.tag_configure("negative", foreground="#CC0000")
+        # Zebra + negative
+        self.tree.tag_configure("evenrow", background="#ffffff")
+        self.tree.tag_configure("oddrow", background="#f8fafc")
+        self.tree.tag_configure("negative", foreground="#dc2626")
 
-        # --- Status bar ---
+        # --- Footer: status + tombol ---
+        foot = tk.Frame(self, bg=C_BG)
+        foot.pack(fill="x", padx=12, pady=(0, 12))
+
         self.status_var = tk.StringVar()
-        ttk.Label(
-            self,
-            textvariable=self.status_var,
-            font=("Segoe UI", 9),
-            # FIX: contrast #666 → #555
-            foreground="#555",
-        ).pack(anchor="w", padx=8, pady=(4, 2))
+        tk.Label(foot, textvariable=self.status_var, bg=C_BG,
+                 fg=C_TEXT_MUTED, font=font(9)).pack(side="left")
 
-        # --- Button frame ---
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=8, pady=(2, 8))
-        ttk.Button(btn_frame, text="Tutup", command=self.destroy).pack(side=tk.RIGHT)
+        AccentButton(foot, text="Tutup (Esc)", command=self.destroy).pack(
+            side="right")
 
     def _render(self):
-        """Render DataFrame ke Treeview."""
+        """Render DataFrame ke Treeview (identik versi lama)."""
         self.tree.delete(*self.tree.get_children())
 
         if self.df is None or self.df.empty:
@@ -155,7 +158,8 @@ class DetailsPopup(tk.Toplevel):
                     if is_neg:
                         has_negative = True
                     try:
-                        total_nilai += float(val) if val is not None and not pd.isna(val) else 0
+                        total_nilai += float(val) if val is not None and \
+                            not pd.isna(val) else 0
                     except (TypeError, ValueError):
                         pass
                 else:
@@ -172,12 +176,11 @@ class DetailsPopup(tk.Toplevel):
             total_str = f"{int(total_nilai):,}"
         else:
             total_str = f"{total_nilai:,.1f}"
-        self.status_var.set(f"{n} rows. Total NILAI: {total_str}")
+        self.status_var.set(f"{n} rows · Total NILAI: {total_str}")
 
     @staticmethod
     def _fmt_nilai(val):
-        """Format NILAI: thousand separators, negative in parentheses, 1 decimal.
-        Returns (formatted_string, is_negative)."""
+        """Format NILAI: separator ribuan, negatif dalam kurung, 1 desimal."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return "", False
         try:
@@ -197,10 +200,9 @@ class DetailsPopup(tk.Toplevel):
 
     @staticmethod
     def _fmt_cell(val, col_name: str) -> str:
-        """Format cell value for display."""
+        """Format cell value for display (identik versi lama)."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
-        # Datetime columns
         if col_name in ("#Tgl/Jam Pembuatan IT",):
             if hasattr(val, "strftime"):
                 return val.strftime("%d/%m/%Y %H:%M:%S")
@@ -208,7 +210,6 @@ class DetailsPopup(tk.Toplevel):
                 return pd.to_datetime(val).strftime("%d/%m/%Y %H:%M:%S")
             except Exception:
                 return str(val)
-        # Tanggal (int)
         if col_name == "Tanggal":
             try:
                 return str(int(val))
@@ -220,18 +221,8 @@ class DetailsPopup(tk.Toplevel):
 def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
                         filters: dict = None):
-    """Filter data + show popup.
-
-    Args:
-        parent: parent widget
-        data: full Append1 DataFrame
-        nama_barang: filter Nama Barang (None = all)
-        jenis: filter JENIS (None = all)
-        tanggal: filter Tanggal (None = all)
-        filters: dict of {column: value} for additional filters (e.g., NAMA RESTO)
-    """
+    """Filter data + show popup (identik versi lama)."""
     if data is None or data.empty:
-        # Show empty popup
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame())
         return popup
 

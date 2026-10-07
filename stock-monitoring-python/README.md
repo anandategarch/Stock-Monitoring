@@ -5,7 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
-> UI: Tkinter 7-tab (Config / Proses / Pivot Table / DEVIASI GR / DEVIASI PCS / LAPORAN DEVIASI / Rincian PO).
+> **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
 
 ---
 
@@ -18,9 +18,9 @@ pandas, openpyxl, numpy, python-calamine
 ```
 
 ### 2. MULAI
-Klik dua kali **`MULAI.bat`** — akan membuka UI Tkinter:
+Klik dua kali **`MULAI.bat`** — akan membuka UI:
 ```
-Stock Monitoring - Python Edition
+Stock Monitoring — Python Edition
 ```
 
 ### 3. Config (tab pertama)
@@ -30,17 +30,49 @@ Stock Monitoring - Python Edition
 
 ### 4. Proses (tab kedua)
 - Klik **MULAI PROSES**.
-- Lihat log real-time. Tunggu sampai muncul "SELESAI".
+- Lihat log real-time di konsol gelap + KPI (status, waktu, rows).
+- Tunggu sampai status bar menunjukkan **SELESAI**.
 
 ### 5. Pivot Table (tab ketiga)
 - Pivot matrix ditampilkan langsung di UI (rows: Nama Barang × JENIS, cols: Tanggal).
-- Filter: NAMA RESTO, SOURCE KIRIMAN, KATEGORI (dropdown).
+- Filter: NAMA RESTO, NAMA BARANG, SOURCE KIRIMAN, KATEGORI + pencarian substring.
 - Color-coded per metric (1.SO, 2.SALDO AKHIR, 3.DEVIASI, dll).
 - Negative values in parentheses, zero shown as '-'.
 
-### 6. Rincian PO (tab keempat)
-- Tabel Rincian PO dengan search + sort.
-- Klik header kolom untuk sort.
+### 6. Rincian PO (tab ketujuh)
+- Tabel Rincian PO dengan filter Cabang PO & Status.
+- Nomor # sebagai parent row (klik ▸ untuk expand).
+
+---
+
+## UI v3.0 — Design System
+
+Shell aplikasi:
+- **Toolbar gelap** (slate-900) — judul aplikasi, badge versi, aksi cepat `💾 Export Excel` & `❓ Bantuan`
+- **7 tab ber-ikon**: ⚙️ Config · 🚀 Proses · 📊 Pivot Table · 📦 Deviasi GR · 🧩 Deviasi PCS · 📋 Laporan Deviasi · 🛒 Rincian PO
+- **Status bar** global — indikator status pipeline (● SIAP / MENJALANKAN / SELESAI / ERROR) + ringkasan rows
+- **Empty state** — setiap tab data menampilkan placeholder + tombol CTA "🚀 Jalankan Pipeline" saat belum ada data (auto berganti menjadi tabel saat data termuat)
+
+Komponen inti (`src/ui/theme.py` + `src/ui/widgets.py`):
+| Komponen | Fungsi |
+|---|---|
+| `Card` | kartu putih + border slate, judul & subtitle opsional |
+| `KpiCard` / `KpiRow` | kartu metrik (label kecil, angka besar, aksen warna kiri) |
+| `AccentButton` | tombol teal solid (aksi utama) — MULAI PROSES, Simpan Config |
+| `DangerButton` | tombol putih teks merah — Stop |
+| `EmptyState` | placeholder data kosong + CTA |
+| `make_log_console` | konsol log gelap ala terminal (#0b1220 + monospace) |
+| `ToolTip` | tooltip hover untuk kontrol penting |
+| `StatusDot` | titik warna status di status bar |
+
+Palet: `#f1f5f9` (bg) · `#ffffff` (kartu) · `#0f172a` (toolbar/teks judul) · `#0f766e` (aksen teal) · status: merah/oranye/amber/hijau. Font otomatis resolve: Segoe UI (Windows) → Noto Sans → DejaVu Sans.
+
+Fitur UX baru per tab:
+- **Proses** — 4 KPI live (status pipeline, waktu berjalan, rows Append1, rows Rincian PO) + progress bar + konsol log gelap
+- **Deviasi GR/PCS** — KPI baris / total |Deviasi| / jumlah anomali CEK + legenda warna CEK
+- **Laporan Deviasi** — **6 kartu Status Audit yang bisa diklik untuk memfilter** (klik lagi untuk melepas)
+- **Semua tabel** — zebra rows, sort kolom (klik header), double-click baris → popup detail source data (header gelap, centered modal, Esc untuk tutup)
+- Popup & jendela Bantuan otomatis **ter-center** di parent
 
 ---
 
@@ -48,105 +80,54 @@ Stock Monitoring - Python Edition
 
 ```
 stock-monitoring-python/
-├── MULAI.bat                     # Entry point UI (Windows)
-├── SETUP.bat                     # Install dependencies (sekali)
-├── requirements.txt              # pandas, openpyxl, numpy, python-calamine
-├── README.md                     # Dokumen ini
-├── config.json                   # Path & sheet name + LightMode (EDIT di tab Config)
+├── MULAI.bat / SETUP.bat       # entry point Windows
+├── config.json                 # RootPath + LightMode + Folders + Sheets
+├── requirements.txt
+├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
+├── test_large_scale.py         # benchmark 855K records (memory < 2GB)
+├── test_ui_redesign.py         # test UI v3 (28 check — shell/KPI/filter/empty state)
+├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
-    ├── __init__.py
-    ├── config.py                 # Loader config.json
-    ├── main.py                   # Pipeline runner (return DataFrames)
-    ├── pipeline/
-    │   ├── __init__.py
-    │   ├── helpers.py            # fn_combine_folder + calamine engine + vectorized text
-    │   ├── fn_rekap_mentah.py    # SO + BARANG MASUK (NAMA RESTO dari file name)
-    │   ├── fn_2205.py            # Penjualan (OUT)
-    │   ├── fn_3224.py            # Penerimaan (IN)
-    │   ├── fn_9901.py            # Mutasi tanpa nomor penerimaan (IN tambahan)
-    │   ├── fn_4215.py            # Pemindahan kirim (BARANG KELUAR)
-    │   ├── fn_4205.py            # Pemindahan barang (IN)
-    │   ├── fn_4217.py            # Saldo awal
-    │   ├── fn_pi.py              # Faktur pembelian (IN + konversi satuan)
-    │   ├── fn_konversi_satuan.py # Master konversi
-    │   ├── fn_dbs_kategori.py    # Master kategori (incl. AKTIF/NON)
-    │   ├── fn_running_stock.py   # Algoritma running balance (vectorized cumsum)
-    │   ├── queries.py            # OUT, IN, Full Rekap SO (LightMode: skip bulan lalu)
-    │   ├── append1.py            # Pipeline utama (LightMode: pre-filter DEVIASI)
-    │   └── rincian_po.py         # Query Rincian PO
-    └── ui/
-        ├── __init__.py
-        ├── app.py                # Tkinter 7-tab UI
-        ├── pivot_view.py         # Excel-like pivot table widget
-        ├── deviasi_view.py       # DEVIASI GR/PCS view + CEK anomaly detection
-        ├── laporan_deviasi_view.py # LAPORAN DEVIASI view + 6-way Status Audit
-        ├── details_popup.py      # Double-click source data popup
-        └── rincian_po_view.py    # Rincian PO table widget
+    ├── config.py               # loader config.json
+    ├── main.py                 # run_pipeline() → (append1_df, rincian_po_df)
+    ├── pipeline/               # porting fn_* dari M code (TIDAK berubah di v3)
+    └── ui/                     # ← REDESIGN v3.0
+        ├── app.py              # shell: toolbar + tab + status bar + kontrol pipeline
+        ├── theme.py            # design system (palet + font + ttk style)
+        ├── widgets.py          # Card, KpiCard, tombol, tooltip, empty state, dll
+        ├── pivot_view.py       # tab Pivot Table
+        ├── deviasi_view.py     # tab Deviasi GR & PCS (dipakai 2×)
+        ├── laporan_deviasi_view.py  # tab Laporan Deviasi (6-way Status Audit)
+        ├── rincian_po_view.py  # tab Rincian PO
+        └── details_popup.py    # popup detail source rows
 ```
 
 ---
 
-## LightMode (config.json)
+## Testing
 
-```json
-{
-  "LightMode": true,
-  "RootPath": "C:\\KERJA\\1. RESTO\\9.NEW QUERY\\",
-  ...
-}
+```
+python test_mock.py          # pipeline end-to-end dgn mock data Accurate
+python test_ui_redesign.py   # UI v3: 28 check (jalankan di bawah Xvfb di Linux)
+python test_large_scale.py   # benchmark 855K rows
 ```
 
-**LightMode=true (default, ringan):**
-- Skip bulan lalu (RekapLalu + 3224_Bulan Lalu) — hemat ~40% source
-- Skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam) — hemat grouping time
-- Pre-filter KATEGORI=DEVIASI — hemat ~60% barang
-- Hasil: ~50-80k rows (vs 1.2M Full mode)
-
-**LightMode=false (penuh):**
-- Semua data, semua kolom, semua barang
-- Lebih lengkap tapi lebih lambat
+> UI test di Linux/headless: `xvfb-run` atau `Xvfb :99` + `DISPLAY=:99 python test_ui_redesign.py`.
+> Di Windows langsung `python test_ui_redesign.py` (perlu display).
 
 ---
 
-## Performance
+## Changelog
 
-| Metric | LightMode | Full Mode |
-|---|---|---|
-| Source data | ~80-120k rows | ~429k rows |
-| Output data | ~50-80k rows | ~1.2M rows |
-| Pipeline time | ~10-20s | ~60-120s |
-| Pivot render | ~0.15s | ~0.5s |
-| Filter change | ~0.12s | ~0.3s |
-| Memory | ~100-200 MB | ~500 MB |
+### v3.0.0 — Total UI/UX Redesign
+- Design system baru (`theme.py` + `widgets.py`): slate/teal ala aplikasi Waste, card-based, dark toolbar, status bar global.
+- Empty state + CTA di semua tab data; KPI cards di Proses/Deviasi/Laporan/Rincian.
+- 6 kartu Status Audit klik-untuk-filter di tab Laporan.
+- Konsol log gelap anti-freeze (batch + truncation tetap dari v2.1.1).
+- Popup detail & Bantuan: header gelap, centered modal, Esc untuk tutup.
+- Tooltip hover untuk kontrol penting; legenda warna CEK & metric.
+- **Pipeline, logika pivot/deviasi/audit/CEK, dan semua perilaku data 100% dipertahankan** (hanya lapisan UI yang diganti).
+- Fix pre-existing: `test_mock.py` kini konsisten dengan pipeline pasca-refactor hapus PI/Konversi + sumber IN 9901 (mock 9901 + folder `Data9901` ditambahkan).
 
-Benchmark (100 items × 5 restos × 31 days × 8 metrics = 124k rows):
-- Load + render: 0.15s
-- Filter change: 0.12s
-- No lag
-
----
-
-## Dependencies
-
-- **pandas** — DataFrame operations
-- **openpyxl** — Excel reader (fallback)
-- **numpy** — numerical operations
-- **python-calamine** — Rust-based Excel reader (10-20x faster than openpyxl)
-
-Install: `SETUP.bat` atau `pip install -r requirements.txt`
-
----
-
-## Troubleshooting
-
-**Q: Pipeline lambat**
-A: Pastikan LightMode=true di config.json. Pastikan python-calamine terinstall (cekc via `pip show python-calamine`).
-
-**Q: Pivot table kosong**
-A: Jalankan pipeline di tab Proses dulu. Pastikan data source ada di RootPath.
-
-**Q: Filter tidak berfungsi**
-A: Klik dropdown, pilih nilai, pivot auto-refresh.
-
-**Q: Error "No module named 'src'"**
-A: Jalankan via `MULAI.bat` atau `python -m src.ui.app` dari root folder.
+### v2.1.1 — freeze fix + SettingWithCopyWarning fix
+### v2.1.0 — LAPORAN DEVIASI tab + deep-audit fixes
