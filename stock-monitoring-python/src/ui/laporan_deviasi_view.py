@@ -444,8 +444,14 @@ class LaporanDeviasiView(ttk.Frame):
             return
 
         # Sort by |Deviasi| descending (biggest issues first)
-        filtered["_abs_dev"] = filtered["Deviasi"].abs()
-        filtered = filtered.sort_values("_abs_dev", ascending=False).drop(columns=["_abs_dev"])
+        # FIX: use .assign() functional style to avoid SettingWithCopyWarning
+        # (filtered is a slice of result; assigning a column to a slice triggers warning)
+        filtered = (
+            filtered
+            .assign(_abs_dev=filtered["Deviasi"].abs())
+            .sort_values("_abs_dev", ascending=False)
+            .drop(columns=["_abs_dev"])
+        )
 
         # Render rows
         col_ids = [c[0] for c in self.COLUMNS]

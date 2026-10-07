@@ -138,17 +138,23 @@ def query_in(config, konversi: pd.DataFrame) -> pd.DataFrame:
 
     LightMode: skip #"3224_Bulan Lalu" (hemat ~50% data IN).
     + 9901 file (mutasi tanpa nomor penerimaan) sebagai sumber IN tambahan.
+
+    FIX: query_pi (folder 26.Rincian PI) DIHAPUS dari combine list karena
+    sudah digantikan oleh 9901 (folder 30. 9901) — per request user.
+    fn_pi.py + query_pi tetap dipertahankan untuk reference, tapi tidak
+    dipanggil lagi di pipeline.
     """
     q3224 = query_3224(config)
     # LightMode: skip bulan lalu
     q3224_lalu = pd.DataFrame() if config.LightMode else query_3224_bulan_lalu(config)
-    qpi = query_pi(config, konversi)
+    # FIX: qpi dihapus dari IN — sudah digantikan oleh 9901
+    # qpi = query_pi(config, konversi)  # commented out — see note above
     q4205 = query_4205(config)
     q9901 = query_9901(config)
     print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")
 
     parts = []
-    for df in [q3224, q3224_lalu, qpi, q4205, q9901]:
+    for df in [q3224, q3224_lalu, q4205, q9901]:
         if not df.empty:
             parts.append(df)
 

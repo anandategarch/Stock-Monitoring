@@ -464,9 +464,14 @@ class DeviasiView(ttk.Frame):
             return
 
         # Sort: by Nama Barang, then by |Deviasi| descending (highest deviasi first)
-        filtered["_abs_dev"] = filtered["Deviasi"].abs()
-        filtered = filtered.sort_values(["Nama Barang", "_abs_dev"], ascending=[True, False])
-        filtered = filtered.drop(columns=["_abs_dev"])
+        # FIX: use .assign() functional style to avoid SettingWithCopyWarning
+        # (filtered is a slice of pivot_df; assigning a column to a slice triggers warning)
+        filtered = (
+            filtered
+            .assign(_abs_dev=filtered["Deviasi"].abs())
+            .sort_values(["Nama Barang", "_abs_dev"], ascending=[True, False])
+            .drop(columns=["_abs_dev"])
+        )
 
         # Render rows
         col_ids = [c[0] for c in self.COLUMNS]
