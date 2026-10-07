@@ -23,7 +23,6 @@ ULTRA-OPTIMIZED untuk data besar:
 """
 import pandas as pd
 import numpy as np
-from typing import List
 
 
 def fn_running_stock(t: pd.DataFrame) -> pd.DataFrame:

@@ -17,7 +17,7 @@ import pandas as pd
 from typing import Optional
 
 from .theme import (
-    C_ACCENT, C_ACCENT_DARK, C_ACCENT_SOFT, C_BG, C_BORDER, C_CARD,
+    C_ACCENT_DARK, C_ACCENT_SOFT, C_BG, C_BORDER, C_CARD,
     C_HEADER, C_TEXT_MUTED, font, font_family,
 )
 from .widgets import (
@@ -497,12 +497,17 @@ class DetailsPopup(tk.Toplevel):
 def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
                         filters: dict = None):
-    """Filter data + show popup (identik versi lama)."""
+    """Filter data + show popup.
+
+    v3.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
+    menghasilkan DataFrame baru, dan ``reset_index(drop=True)`` di ujung
+    selalu mengembalikan objek baru (hemat ~10ms + memori di 200k baris).
+    """
     if data is None or data.empty:
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame())
         return popup
 
-    df = data.copy()
+    df = data
 
     # Build title parts
     title_parts = []

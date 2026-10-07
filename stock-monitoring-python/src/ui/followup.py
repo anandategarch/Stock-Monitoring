@@ -158,9 +158,6 @@ class FollowUpStore:
     def __len__(self) -> int:
         return len(self.rows)
 
-    def pending_count(self) -> int:
-        return sum(1 for fp in self.rows if fp not in self.resolved)
-
     def resolved_count(self) -> int:
         return sum(1 for fp in self.rows if fp in self.resolved)
 
@@ -189,19 +186,6 @@ class FollowUpStore:
         self.save()
         self.save_resolved()
         self._notify()
-
-    def prune_for_new_data(self, valid_fps: set | None = None) -> int:
-        """Hapus fp yang tak ada lagi di data baru (opsional — belum dipakai)."""
-        if not valid_fps:
-            return 0
-        stale = [fp for fp in self.rows if fp not in valid_fps]
-        for fp in stale:
-            del self.rows[fp]
-            self.resolved.pop(fp, None)
-        if stale:
-            self.save()
-            self._notify()
-        return len(stale)
 
     # -- persistensi ---------------------------------------------------------------
     def save(self) -> bool:

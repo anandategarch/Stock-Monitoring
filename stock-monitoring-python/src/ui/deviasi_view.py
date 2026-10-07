@@ -32,9 +32,33 @@ from .theme import (
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
     LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
-    run_async,
+    run_async, sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
+
+
+class SharedPivotCache:
+    """Cache pivot Deviasi yang DIBAGI antar view GR & PCS (v3.3).
+
+    _compute_pivot() tidak bergantung satuan (filter GR/PCS terjadi di
+    _prepare_rows) — sebelumnya tab DEVIASI GR dan DEVIASI PCS masing-
+    masing menghitung pivot identik 2× (waktu + memori ganda).
+    """
+
+    def __init__(self):
+        self._entry: tuple | None = None   # (data_ref, h, pivot_df)
+
+    def get(self, data, h):
+        ent = self._entry
+        if ent is not None and ent[0] is data and ent[1] == h:
+            return ent[2]
+        return None
+
+    def put(self, data, h, pivot):
+        self._entry = (data, h, pivot)
+
+    def clear(self):
+        self._entry = None
 
 
 class DeviasiView(tk.Frame):
@@ -70,13 +94,15 @@ class DeviasiView(tk.Frame):
 
     def __init__(self, parent, satuan_mode: str = "GR",
                  go_to_proses: Callable | None = None,
-                 followup_store: FollowUpStore | None = None):
+                 followup_store: FollowUpStore | None = None,
+                 shared_cache: SharedPivotCache | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.satuan_mode = satuan_mode
         self.tanggal_h = 25
         self._cached_pivot = None
         self._cached_h = None
+        self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
         self._aktif_lookup = {}
         self.go_to_proses = go_to_proses
         self._name_selected: set | None = None
@@ -360,6 +386,8 @@ class DeviasiView(tk.Frame):
         self.data = data
         self._cached_pivot = None
         self._cached_h = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
         self._aktif_lookup = {}
         self._tnum = None  # reset cache to_numeric(Tanggal)
         self._show_content()
@@ -539,9 +567,15 @@ class DeviasiView(tk.Frame):
         }
 
         def work():
-            if self._cached_pivot is None or self._cached_h != self.tanggal_h:
-                self._cached_pivot = self._compute_pivot()
-                self._cached_h = self.tanggal_h
+            pivot = None
+            if self._shared_cache is not None:
+                pivot = self._shared_cache.get(self.data, self.tanggal_h)
+            if pivot is None:
+                pivot = self._compute_pivot()
+                if self._shared_cache is not None and pivot is not None:
+                    self._shared_cache.put(self.data, self.tanggal_h, pivot)
+            self._cached_pivot = pivot
+            self._cached_h = self.tanggal_h
             return self._prepare_rows(st)
 
         def done(payload):
@@ -653,8 +687,8 @@ class DeviasiView(tk.Frame):
                                             "tags": tuple(tags)}))
 
         status = (
-            f"{n} rows ({self.satuan_mode}) · Total |Deviasi|: "
-            f"{self._fmt_num(total_dev)} · Anomali CEK: {cek_count} · "
+            f"{n} baris {self.satuan_mode} · Total |Deviasi| "
+            f"{self._fmt_num(total_dev)} · CEK {cek_count} · "
             f"H={st['tanggal_h']}")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps}
@@ -727,22 +761,12 @@ class DeviasiView(tk.Frame):
         self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
-        """Sort treeview by kolom (negatif dalam kurung ditangani)."""
+        """Sort kolom — engine LINEAR v3.3 (delete+reinsert, bukan
+        tree.move O(n²) yang membekukan UI di tabel besar)."""
+        if self._busy and tree is None:
+            return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
-        items = [(tree.set(k, col), k) for k in tree.get_children("")]
-        try:
-            def parse_val(s):
-                s = str(s).replace(",", "").strip()
-                if s == "-" or s == "":
-                    return 0
-                if s.startswith("(") and s.endswith(")"):
-                    return -float(s[1:-1])
-                return float(s)
-            items.sort(key=lambda x: parse_val(x[0]), reverse=reverse)
-        except (ValueError, AttributeError):
-            items.sort(key=lambda x: str(x[0]), reverse=reverse)
-        for i, (_, k) in enumerate(items):
-            tree.move(k, "", i)
+        sort_tree_by_column(tree, col, reverse=reverse)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP (tree-agnostic via event.widget)
@@ -755,6 +779,15 @@ class DeviasiView(tk.Frame):
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return
+
+        # v3.3: double-click di sel kolom ✓ = toggle follow-up
+        # (dulu tetap membuka popup detail — kurang intuitif)
+        try:
+            if tree.identify_column(event.x) == "#1":
+                self._on_tree_click(event)
+                return
+        except Exception:
+            pass
 
         values = tree.item(row_iid, "values")
         if not values:

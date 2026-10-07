@@ -9,7 +9,6 @@ Mirror M: fnCombineFolder → Name column → PromoteHeaders → firstColumn = f
 OPTIMIZED: vectorized text operations.
 """
 import pandas as pd
-import numpy as np
 from typing import Optional, List
 from .helpers import (
     fn_combine_folder, promote_headers, safe_to_str, safe_to_numeric

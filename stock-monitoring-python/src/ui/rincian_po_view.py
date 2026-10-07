@@ -15,7 +15,6 @@ v3.1 (dipertahankan): filter corong header, ⛶ perbesar, loading overlay.
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
-import numpy as np
 from typing import Optional, Callable
 
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font

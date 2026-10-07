@@ -8,6 +8,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 > **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
 > **v3.1 — UX upgrade**: filter Nama Barang menempel di header kolom (ala Excel AutoFilter, di SEMUA tab), tombol ⛶ **Perbesar tabel** (fullscreen), **copy Nomor/Nomor PO** di pop-up detail, **pivot per RESTO** (baris kosong disembunyikan, tanpa kolom Total), dan **animasi loading** di semua proses. Pipeline tetap 100% tidak berubah.
 > **v3.2 — Follow Up + tabel besar + perf**: tab baru **☑ Follow Up** (ala aplikasi *Waste*: centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi, persist `followup.json`, export Excel + impor hasil tindak lanjut), **KPI row di atas tabel DIHAPUS** di semua tab data (tabel jadi lebar & besar; ringkasan pindah ke status footer), dan **aplikasi diperingatkan** (deviasi 16× lebih cepat via vektorisasi numpy; laporan 3.7×; lazy refresh per tab — hanya tab aktif yang dihitung).
+> **v3.3 — Engine cepat + bug fix hasil deep audit**: **sort kolom kini LINEAR** (delete+reinsert — dulu `tree.move` O(n²) membekukan UI 45 detik di 50k baris, kini 0,7 detik), **fix bug follow-up salah baris setelah sort** (iid-based), **fix NameError path error pipeline**, double-click sel ✓ = toggle, cache pivot dibagi GR/PCS, tanpa modal "Selesai", dead code dibersihkan.
 
 ---
 
@@ -49,6 +50,28 @@ Stock Monitoring — Python Edition
 - Nomor # sebagai parent row (klik ▸ untuk expand).
 
 ---
+
+## Fitur Baru v3.3
+
+### ⚡ Engine sort LINEAR (akar "aplikasi tambah berat")
+- Dulu: klik judul kolom → `tree.move` per baris → **O(n²)** internal Tk — sort 50k baris (Laporan Deviasi) **membekukan UI 45 detik**.
+- Kini: snapshot `tree.item()` → `delete` semua → insert ulang di posisi `end` (append cepat) → **O(n)** — 50k baris ter-sort **0,7 detik** (42-64× lebih cepat); 20k: 1,9 s → 0,29 s.
+- **iid dipertahankan** → pemetaan ✓ follow-up & double-click tetap mengenai baris yang benar setelah sort; seleksi baris dipulihkan.
+- Sort saat render batch berjalan ditunda otomatis (mencegah urutan campur).
+
+### 🐛 Bug fix hasil deep audit
+- **Follow-up salah baris setelah sort** (kritis): klik ✓ / double-click di tab Follow Up memakai `tree.index()` + urutan lama → SETELAH SORT mengenai/keluarkan **baris yang salah**. Kini **iid-based** (`iid → fingerprint`) — selalu baris yang benar, juga di window ⛶ Perbesar.
+- **Path error pipeline tidak pernah sampai UI**: `except … as e:` + lambda tertunda → Python menghapus binding `e` di akhir blok → **NameError** di callback. Kini error ditangkap ke tuple lokal dulu.
+- **Double-click sel kolom ✓** = toggle follow-up (dulu tetap membuka popup — kurang intuitif), di Deviasi/Laporan/Follow Up.
+
+### 🧹 Perf & bersih-bersih
+- **Cache pivot Deviasi dibagi GR/PCS** — `_compute_pivot()` tidak bergantung satuan, dulu GR & PCS menghitung pivot identik **2×** (waktu + memori ganda).
+- **Cache Laporan tanpa recompute** saat ganti rentang tanggal (signature lama memasukkan rentang padahal compute tidak bergantung rentang → 230 ms sia-sia per ganti).
+- Insert batch **delay adaptif** (>20k baris: 1 ms/batch, tidak lagi +1 detik ekstra di 50k).
+- Pop-up detail **tanpa `data.copy()` penuh** sebelum filter.
+- Selesai pipeline → **status bar + log** (modal `messagebox "Selesai"` yang mem-blok alur dihapus).
+- **Dead code dibersihkan**: 24 unused import (ruff F401), 9 konstanta warna theme tak terpakai, method mati (`SegmentBar.set_active`, `FollowUpStore.pending_count`/`prune_for_new_data`, `Card._title/_subtitle`), dead lines di `vec_text_before_delimiter`, `test_large_scale.py` dihapus. `ruff check --select F401,F811,F841` kini **bersih**.
+- `.gitignore` ditambahkan (`followup*.json`, `__pycache__/`, `*.bad`) — file runtime lokal tidak masuk repo.
 
 ## Fitur Baru v3.2
 
@@ -140,8 +163,7 @@ stock-monitoring-python/
 ├── config.json                 # RootPath + LightMode + Folders + Sheets
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
-├── test_large_scale.py         # benchmark 855K records (memory < 2GB)
-├── test_ui_redesign.py         # test UI v3.2 (99 check — lazy/follow-up/KPI hapus + semua fitur v3.1)
+├── test_ui_redesign.py         # test UI v3.3 (117 check — sort engine/iid fix/shared cache + semua fitur v3.1-v3.2)
 ├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/

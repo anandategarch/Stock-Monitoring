@@ -22,14 +22,14 @@ import pandas as pd
 from typing import Callable, Optional
 
 from .theme import (
-    C_BG, C_CARD, C_GREEN, C_RED, C_TEXT_MUTED, C_HEADER, font,
+    C_BG, C_CARD, C_TEXT_MUTED, C_HEADER, font,
 )
 from .widgets import (
     AccentButton, Card, DangerButton, EmptyState, GhostButton,
     LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
-    run_async,
+    run_async, sort_tree_by_column,
 )
-from .followup import CHECK_OFF, CHECK_ON, FollowUpStore
+from .followup import CHECK_ON, FollowUpStore
 
 # kolom tabel Follow Up (✓ pertama — klik = keluarkan)
 COLUMNS = [
@@ -59,7 +59,10 @@ class FollowUpView(tk.Frame):
         self.store = store
         self.get_data = get_data      # akses append1_df (untuk popup detail)
         self.go_to_proses = go_to_proses
-        self._fp_order: list[str] = []   # urutan fp di tabel saat ini
+        # v3.3: peta iid → fingerprint (BUKAN index) — klik ✓ / double-click
+        # mengenai baris yang benar WALAUPUN tabel sudah di-sort/di-reorder
+        # (bug v3.2: tree.index() + _fp_order → salah baris setelah sort)
+        self._iid_fp: dict[str, str] = {}
 
         self._build_ui()
         self._setup_tags()
@@ -72,7 +75,7 @@ class FollowUpView(tk.Frame):
     def _build_ui(self):
         # --- Empty state ---
         self.empty = EmptyState(
-            self, icon="☑", title="Daftar Follow Up masih kosong",
+            self, icon="📌", title="Daftar Follow Up masih kosong",
             subtitle="Centang baris mencurigakan (kolom ✓) di tab Deviasi "
                      "GR / Deviasi PCS / Laporan Deviasi — baris terkumpul "
                      "di sini untuk ditindaklanjuti.",
@@ -199,7 +202,7 @@ class FollowUpView(tk.Frame):
     def _render(self):
         rows = list(self.store.rows.values())
         self.tree.delete(*self.tree.get_children())
-        self._fp_order = []
+        self._iid_fp = {}
 
         if not rows:
             self._show_empty()
@@ -207,10 +210,9 @@ class FollowUpView(tk.Frame):
         self._show_content()
 
         items = []
-        fp_order = []
         for i, snap in enumerate(rows):
             fp = snap.get("fp", "")
-            fp_order.append(fp)
+            self._iid_fp[f"fu_{i}"] = fp
             info = self.store.resolved.get(fp, {})
             resolved = bool(info)
             dev = snap.get("deviasi", 0)
@@ -249,7 +251,6 @@ class FollowUpView(tk.Frame):
             items.append(("", f"fu_{i}", {"values": values,
                                            "tags": tuple(tags)}))
 
-        self._fp_order = fp_order
         n = len(rows)
         selesai = self.store.resolved_count()
         self.status_var.set(
@@ -260,7 +261,7 @@ class FollowUpView(tk.Frame):
         insert_tree_items(self.tree, items, batch=500)
 
     # =========================================================================
-    # ✓ KLIK = KELUARKAN
+    # ✓ KLIK = KELUARKAN (v3.3: iid-based — benar setelah sort)
     # =========================================================================
     def _on_tree_click(self, event):
         tree = event.widget
@@ -270,12 +271,12 @@ class FollowUpView(tk.Frame):
             col = tree.identify_column(event.x)
             if not col or int(col.replace("#", "")) != 1:
                 return
-            idx = tree.index(tree.identify_row(event.y))
+            row_iid = tree.identify_row(event.y)
         except Exception:
             return
-        if not (0 <= idx < len(self._fp_order)):
+        if not row_iid:
             return
-        fp = self._fp_order[idx]
+        fp = self._iid_fp.get(row_iid)
         snap = self.store.rows.get(fp)
         if snap:
             # toggle → off (keluarkan); _render dipanggil via listener
@@ -399,40 +400,48 @@ class FollowUpView(tk.Frame):
         return win, new_tree
 
     # =========================================================================
-    # SORT
+    # SORT (v3.3: engine linear + parse khusus status TL)
     # =========================================================================
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         tree = tree if tree is not None else self.tree
-        items = [(tree.set(k, col), k) for k in tree.get_children("")]
-        try:
-            def parse_val(s):
-                s = str(s).replace(",", "").strip()
-                if s in ("-", "", "Menunggu", "Selesai"):
-                    return 0 if s in ("-", "") else (1 if s == "Menunggu" else 2)
-                if s.startswith("(") and s.endswith(")"):
-                    return -float(s[1:-1])
-                return float(s)
-            items.sort(key=lambda x: parse_val(x[0]), reverse=reverse)
-        except (ValueError, AttributeError):
-            items.sort(key=lambda x: str(x[0]), reverse=reverse)
-        for i, (_, k) in enumerate(items):
-            tree.move(k, "", i)
+
+        def parse_fu(s):
+            s = str(s).replace(",", "").strip()
+            if s in ("Menunggu", "Selesai"):
+                return 1 if s == "Menunggu" else 2
+            if s in ("-", ""):
+                return 0
+            if s.startswith("(") and s.endswith(")"):
+                return -float(s[1:-1])
+            return float(s)
+
+        sort_tree_by_column(tree, col, reverse=reverse, parse=parse_fu)
 
     # =========================================================================
-    # DOUBLE-CLICK → POPUP DETAIL
+    # DOUBLE-CLICK → POPUP DETAIL (v3.3: iid-based — benar setelah sort;
+    # double-click di kolom ✓ = toggle keluarkan)
     # =========================================================================
     def _on_double_click(self, event):
-        data = self.get_data() if self.get_data else None
-        if data is None or data.empty:
-            return
         tree = event.widget
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return
-        idx = tree.index(row_iid)
-        if not (0 <= idx < len(self._fp_order)):
+
+        # v3.3: double-click sel ✓ = keluarkan baris (bukan popup) —
+        # jalan juga saat data source belum tersedia
+        try:
+            if tree.identify_column(event.x) == "#1":
+                self._on_tree_click(event)
+                return
+        except Exception:
+            pass
+
+        data = self.get_data() if self.get_data else None
+        if data is None or data.empty:
             return
-        snap = self.store.rows.get(self._fp_order[idx])
+
+        fp = self._iid_fp.get(row_iid)
+        snap = self.store.rows.get(fp)
         if not snap:
             return
 

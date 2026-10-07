@@ -152,7 +152,7 @@ def main():
     check("App + toolbar + 8 tab terbangun (v3.2: +Follow Up)",
           len(app.notebook.tabs()) == 8, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.2.0", APP_VERSION == "3.2.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.3.0", APP_VERSION == "3.3.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -643,6 +643,141 @@ def main():
     # -- kosongkan --
     store.clear()
     check("Kosongkan → 0 baris", len(store) == 0)
+
+    # ==================================================================
+    print("== 12. v3.3 ENGINE: sort linear + iid fix + shared cache ==")
+
+    # ---- (a) SORT engine baru: iid & mapping tetap utuh ----
+    select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
+    dv = app.deviasi_gr_view
+    tree = dv.tree
+    kids = list(tree.get_children(""))
+    check("Deviasi ≥ 2 baris utk uji sort", len(kids) >= 2, f"got {len(kids)}")
+
+    dv._sort_by("Nama Barang", reverse=True)   # Z→A
+    root.update()
+    kids_after = list(tree.get_children(""))
+    check("Sort: jumlah baris tetap", len(kids_after) == len(kids))
+    check("Sort: iid dipertahankan (set sama)", set(kids_after) == set(kids))
+    check("Sort: urutan berubah (Z→A)", kids_after != kids)
+    nama_first = tree.set(kids_after[0], "Nama Barang")
+    nama_last = tree.set(kids_after[-1], "Nama Barang")
+    check("Sort Z→A benar (first ≥ last)", nama_first >= nama_last,
+          f"{nama_first!r} vs {nama_last!r}")
+
+    # toggle baris pertama SETELAH sort → fp harus fp baris visual itu
+    first_after = kids_after[0]
+    fp_expected = dv._fp_map.get(first_after)
+    snap_expected = dv._row_snaps.get(first_after)
+    bbox = tree.bbox(first_after)
+    evs = _Ev()
+    evs.widget = tree
+    evs.x, evs.y = bbox[0] + 8, bbox[1] + bbox[3] // 2
+    dv._on_tree_click(evs)
+    root.update()
+    check("Toggle post-sort: fp baris visual masuk store",
+          fp_expected in store.rows)
+    snap_in_store = store.rows.get(fp_expected)
+    check("Toggle post-sort: snapshot = baris visual (barang cocok)",
+          snap_in_store is not None and
+          snap_in_store.get("barang") == snap_expected.get("barang"))
+
+    # double-click sel kolom ✓ → toggle (bukan popup)
+    n_before = len(store)
+    evd = _Ev()
+    evd.widget = tree
+    evd.x, evd.y = bbox[0] + 8, bbox[1] + bbox[3] // 2
+    dv._on_double_click(evd)
+    root.update()
+    check("Double-click sel ✓ = toggle (v3.3)", len(store) != n_before,
+          f"{n_before} → {len(store)}")
+
+    # ---- (b) FOLLOW UP: bug v3.2 'salah baris setelah sort' → iid fix ----
+    # ambil 2 baris deviasi dengan Nama Barang BERBEDA
+    kids = list(tree.get_children(""))
+    picks = []
+    seen_nama = set()
+    for k in kids:
+        nm = tree.set(k, "Nama Barang")
+        if nm not in seen_nama:
+            seen_nama.add(nm)
+            picks.append(k)
+        if len(picks) == 2:
+            break
+    check("Dapat 2 baris barang berbeda utk uji follow-up",
+          len(picks) == 2)
+    if len(picks) == 2:
+        store.clear()
+        # toggle urutan TERBALIK (A dulu, Z kemudian) supaya urutan tabel
+        # follow-up awal = [A, Z] → sort Z→A benar-benar membalik urutan
+        for k in reversed(picks):
+            b = tree.bbox(k)
+            evp = _Ev()
+            evp.widget = tree
+            evp.x, evp.y = b[0] + 8, b[1] + b[3] // 2
+            dv._on_tree_click(evp)
+            root.update()
+        check("2 baris masuk follow-up", len(store) == 2)
+
+        select_and_wait(root, app, app.tab_followup, app.followup_view)
+        fu = app.followup_view
+        fu_kids = list(fu.tree.get_children(""))
+        check("Follow Up tampil 2 baris", len(fu_kids) == 2)
+
+        # urutan awal → barang masing-masing (kolom idx 3 = Barang)
+        barang_awal = [fu.tree.item(k, "values")[3] for k in fu_kids]
+
+        # SORT tabel follow-up by Nama Barang Z→A → urutan terbalik
+        fu._sort_by("Nama Barang", reverse=True)
+        root.update()
+        fu_kids_sorted = list(fu.tree.get_children(""))
+        check("FU sort: urutan berubah",
+              fu_kids_sorted != fu_kids and len(fu_kids_sorted) == 2)
+        barang_sorted = [fu.tree.item(k, "values")[3]
+                         for k in fu_kids_sorted]
+        check("FU sort Z→A benar", barang_sorted == sorted(
+            barang_awal, reverse=True))
+
+        # klik ✓ pada baris visual PERTAMA setelah sort → baris yang
+        # keluar harus baris visual itu (v3.2 buggy: keluar baris index-0
+        # lama = kemungkinan baris yang salah)
+        first_fu = fu_kids_sorted[0]
+        barang_first = fu.tree.item(first_fu, "values")[3]
+        fps_before = set(store.rows)
+        snaps_before = dict(store.rows)   # fp → snap (sebelum dihapus)
+        bf = fu.tree.bbox(first_fu)
+        evf = _Ev()
+        evf.widget = fu.tree
+        evf.x, evf.y = bf[0] + 8, bf[1] + bf[3] // 2
+        fu._on_tree_click(evf)
+        root.update()
+        removed = fps_before - set(store.rows)
+        check("Klik ✓ post-sort mengeluarkan baris yang BENAR (v3.3)",
+              len(removed) == 1)
+        if removed:
+            snap_removed = snaps_before.get(list(removed)[0])
+            check("Baris keluar = baris visual pertama (barang cocok)",
+                  snap_removed is not None and
+                  snap_removed.get("barang") == barang_first,
+                  f"{snap_removed.get('barang')!r} vs {barang_first!r}")
+        check("1 baris tersisa di follow-up", len(store) == 1)
+
+    # ---- (c) Shared pivot cache GR/PCS ----
+    check("Cache pivot GR/PCS dibagikan (objek cache sama)",
+          app.deviasi_gr_view._shared_cache is
+          app.deviasi_pcs_view._shared_cache and
+          app.deviasi_gr_view._shared_cache is app._deviasi_pivot_cache)
+    # samakan H (section 6 mengubah H GR→10; PCS masih 25) lalu paksa
+    # refresh PCS → HARUS cache-hit → objek pivot identik dgn GR
+    app.deviasi_pcs_view.tanggal_h = app.deviasi_gr_view.tanggal_h
+    app.deviasi_pcs_view._refresh()
+    wait_view(root, app.deviasi_pcs_view)
+    check("Pivot GR & PCS = objek DataFrame sama (compute 1×, bukan 2×)",
+          app.deviasi_pcs_view._cached_pivot is
+          app.deviasi_gr_view._cached_pivot and
+          app.deviasi_pcs_view._cached_pivot is not None)
+
+    store.clear()
 
     for p in (followup_path(), resolved_path()):
         if p.exists():

@@ -22,7 +22,6 @@ compute/render async.
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
-import numpy as np
 from typing import Optional, Callable
 
 from .theme import (

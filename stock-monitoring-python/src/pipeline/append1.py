@@ -9,12 +9,11 @@ Output: DataFrame long format dengan kolom:
 """
 import pandas as pd
 import numpy as np
-from typing import List
 from .queries import (
     query_4217, query_full_rekap_mentah_so, query_out, query_barang_keluar, query_in,
     query_dbs_kategori
 )
-from .fn_running_stock import fn_running_stock, fn_running_stock_grouped
+from .fn_running_stock import fn_running_stock_grouped
 
 
 def _value_to_text(val) -> str:

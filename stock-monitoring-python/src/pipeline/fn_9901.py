@@ -16,8 +16,7 @@ Column mapping:
 """
 import pandas as pd
 from .helpers import (
-    fn_combine_folder, safe_to_str, safe_to_numeric, date_to_day,
-    vec_text_after_delimiter
+    safe_to_str, safe_to_numeric, date_to_day, vec_text_after_delimiter
 )
 
 

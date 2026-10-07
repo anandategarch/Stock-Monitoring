@@ -56,20 +56,20 @@ def text_between_delimiters(s, open_delim: str = "(", close_delim: str = ")") ->
 # === VECTORIZED VERSIONS (for pandas Series — 10-50x faster than .apply) ===
 
 def vec_text_before_delimiter(series: pd.Series, delimiter: str = ".") -> pd.Series:
-    """Vectorized Text.BeforeDelimiter untuk pandas Series."""
+    """Vectorized Text.BeforeDelimiter untuk pandas Series.
+
+    Perilaku: baris mengandung delimiter → teks sebelum delimiter;
+    tanpa delimiter → teks asli; NaN → None. (v3.3: dead lines dibersihkan
+    — dulu `result` dihitung dua kali, hasil pertama ditimpa.)
+    """
     s = series.astype(str).where(series.notna(), other=np.nan)
     idx = s.str.find(delimiter)
-    result = s.where(idx < 0, s.str.slice(0, idx.where(idx >= 0, 0)))
-    # Where idx >= 0, take slice(0, idx). Where idx < 0, keep original.
-    mask_no_delim = idx < 0
     result = s.copy()
     has_delim = idx >= 0
-    if has_delim.any():
-        # Use numpy indexing for speed
+    if bool(has_delim.any()):
         positions = idx[has_delim].values
         vals = s[has_delim].values
-        sliced = [str(v)[:int(p)] for v, p in zip(vals, positions)]
-        result[has_delim] = sliced
+        result[has_delim] = [str(v)[:int(p)] for v, p in zip(vals, positions)]
     result = result.where(series.notna(), other=None)
     return result
 

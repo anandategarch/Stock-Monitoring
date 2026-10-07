@@ -26,7 +26,6 @@ from tkinter import ttk
 C_BG = "#f1f5f9"            # slate-100 — latar utama
 C_CARD = "#ffffff"           # kartu
 C_HEADER = "#0f172a"         # slate-900 — teks judul + toolbar
-C_HEADER_2 = "#1e293b"       # slate-800 — hover toolbar
 C_BORDER = "#e2e8f0"         # slate-200 — border kartu
 C_BORDER_DARK = "#cbd5e1"    # slate-300 — hover border
 C_TEXT_MUTED = "#64748b"     # slate-500 — teks sekunder
@@ -38,23 +37,17 @@ C_ACCENT_SOFT = "#ccfbf1"    # teal-100 — seleksi baris
 C_ACCENT_DARK = "#134e4a"    # teal-900 — teks di atas seleksi
 
 # Status colors — identik dengan STATUS_COLORS Waste
+# (v3.3: varian *_SOFT & C_BLUE/C_PURPLE/C_LOG_MUTED yang tak terpakai
+#  dihapus — view memakai hex literal untuk warna baris khusus)
 C_RED = "#dc2626"
 C_RED_SOFT = "#fef2f2"
 C_ORANGE = "#ea580c"
-C_ORANGE_SOFT = "#fff7ed"
 C_AMBER = "#b45309"
-C_AMBER_SOFT = "#fffbeb"
 C_GREEN = "#16a34a"
-C_GREEN_SOFT = "#f0fdf4"
-C_BLUE = "#2563eb"
-C_BLUE_SOFT = "#eff6ff"
-C_PURPLE = "#7c3aed"
-C_PURPLE_SOFT = "#f5f3ff"
 
 # Konsol log (mirror Waste: #0b1220)
 C_LOG_BG = "#0b1220"
 C_LOG_FG = "#cbd5e1"
-C_LOG_MUTED = "#64748b"
 
 # Zebra rows tabel
 ROW_EVEN = "#ffffff"

@@ -1,9 +1,9 @@
 """
-app.py — Shell UI Stock Monitoring v3.2 (total redesign).
+app.py — Shell UI Stock Monitoring v3.3 (total redesign).
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.2 + [Export] [❓]  │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.3 + [Export] [❓]  │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (8 tab, fungsi tidak berubah)  │
     ├────────────────────────────────────────────────────┤
@@ -22,12 +22,19 @@ Struktur jendela (ala aplikasi Waste):
   7. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
   8. 🛒 Rincian PO      : pivot PO dengan search + sort
 
-v3.2 ringkasan:
-- Tab data tanpa KPI row (tabel lebih besar; ringkasan di footer)
-- Kolom ✓ di Deviasi GR/PCS + Laporan → tab ☑ Follow Up (persist
-  followup.json, export Excel + impor hasil tindak lanjut)
-- Perf: vektorisasi numpy (deviasi/laporan), lazy refresh per tab,
-  cache to_numeric — app jauh lebih ringan.
+v3.3 ringkasan (hasil DEEP AUDIT):
+- ENGINE SORT LINEAR: klik judul kolom kini delete+reinsert O(n)
+  (tree.move O(n²) dulu membekukan UI 45 detik di 50k baris)
+- BUG FIX follow-up: klik ✓ / double-click kini iid-based — setelah
+  sort TIDAK lagi mengenai/keluar baris yang salah
+- BUG FIX pipeline error: except-as-e + lambda tertunda → NameError
+  (path error tidak pernah sampai ke handler UI)
+- BUG FIX double-click kolom ✓ = toggle follow-up (bukan popup)
+- Perf: cache pivot Deviasi dibagi GR/PCS (compute 1× bukan 2×),
+  cache Laporan tanpa recompute saat ganti rentang tanggal,
+  insert batch delay adaptif, popup detail tanpa full copy data
+- UX: selesai pipeline → status bar + log (modal "Selesai" dihapus)
+- Dead code dibersihkan (24 unused import, method/konstanta mati)
 
 Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
@@ -54,7 +61,6 @@ _BASE = Path(__file__).resolve().parent.parent.parent
 if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
-from src.config import Config
 from src.main import run_pipeline, PipelineStopped
 from src.ui.theme import (
     C_BG, C_CARD, C_GREEN, C_HEADER, C_ORANGE, C_AMBER, C_RED, C_TEXT_MUTED,
@@ -67,16 +73,17 @@ from src.ui.widgets import (
 )
 from src.ui.followup import FollowUpStore
 from src.ui.pivot_view import PivotTableView
-from src.ui.deviasi_view import DeviasiView
+from src.ui.deviasi_view import DeviasiView, SharedPivotCache
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.rincian_po_view import RincianPoView
 from src.ui.followup_view import FollowUpView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.2.0"  # v3.2: tab Follow Up (ala Waste), hapus KPI row di
-                        # semua tab data (tabel lebar & besar), perf:
-                        # vektorisasi numpy + lazy refresh per tab
+APP_VERSION = "3.3.0"  # v3.3: engine sort linear (O(n²)→O(n)), fix bug
+                        # follow-up salah baris setelah sort, fix NameError
+                        # path error pipeline, shared cache pivot GR/PCS,
+                        # bersih-bersih dead code hasil deep audit
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -113,7 +120,7 @@ class StreamToQueue:
 
 
 # --- Panduan singkat ---------------------------------------------------------
-_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.2
+_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.3
 
 ALUR KERJA
   1. Tab ⚙️ Config   : pastikan RootPath menunjuk folder data export Accurate Online.
@@ -139,11 +146,14 @@ FOLLOW UP (v3.2 — ala aplikasi Waste)
   • Daftar MENETAP (tidak ikut filter/H) + tersimpan otomatis
     (followup.json) — aman walau aplikasi ditutup.
   • Klik ✓ lagi (di tab mana pun, termasuk window ⛶) = keluarkan baris.
-  • 💽 Export Excel : snapshot + kolom kosong PIC / KATEGORI MASALAH /
+  • (v3.3) double-click sel ✓ = keluarkan/masukkan cepat.
+  • 💾 Export Excel : snapshot + kolom kosong PIC / KATEGORI MASALAH /
     TINDAKAN utk diisi petugas.
   • 📥 Impor Hasil TL: baca kembali file terisi → baris ber-status
     "Selesai" + PIC tampil.
   • Double-click baris → pop-up detail source data.
+  • Sort kolom apa pun tetap aman: baris yang di-klik/di-keluarkan
+    tetap baris yang benar (v3.3).
 
 FILTER NAMA BARANG (SEMUA TAB)
   • Klik header kolom "Nama Barang" → popup filter ala Excel AutoFilter:
@@ -172,7 +182,8 @@ POP-UP DETAIL — COPY NOMOR / NOMOR PO
   • Ctrl+C               : copy Nomor baris terpilih.
 
 SEMUA TABEL
-  • Klik judul kolom untuk sort. Angka negatif (merah); nol = "-".
+  • Klik judul kolom untuk sort — instan walau puluhan ribu baris (v3.3).
+    Angka negatif (merah); nol = "-".
 
 EXPORT
   • Tombol 💾 Export Excel di toolbar atas (aktif setelah pipeline selesai).
@@ -202,6 +213,8 @@ class StockMonitorApp:
 
         # v3.2: store follow-up bersama (persist followup.json)
         self.followup_store = FollowUpStore()
+        # v3.3: cache pivot Deviasi dibagi GR & PCS (compute 1×, bukan 2×)
+        self._deviasi_pivot_cache = SharedPivotCache()
 
         # Style ttk (design system global)
         apply_theme(self.root)
@@ -665,18 +678,25 @@ class StockMonitorApp:
             self._elapsed_after_id = None
 
     def _run_pipeline_worker(self):
-        """Worker thread: jalankan run_pipeline, tangkap error."""
+        """Worker thread: jalankan run_pipeline, tangkap error.
+
+        v3.3 BUG FIX: dulu `except X as e:` + lambda tertunda → Python
+        menghapus binding `e` di akhir blok except → NameError saat
+        callback berjalan (error pipeline tidak pernah sampai ke UI).
+        Kini error ditangkap ke tuple lokal dulu, lambda bebas closure.
+        """
         try:
             append1_df, rincian_po_df = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
             self.root.after(0, lambda: self._on_pipeline_done(
                 append1_df, rincian_po_df, None))
-        except PipelineStopped as e:
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, (e, None)))
-        except Exception as e:
+        except PipelineStopped as exc:
+            err = (exc, None)
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, err))
+        except Exception as exc:
             import traceback
-            tb = traceback.format_exc()
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, (e, tb)))
+            err = (exc, traceback.format_exc())
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, err))
 
     def _on_pipeline_done(self, append1_df, rincian_po_df, error):
         """Dijadwalkan ke main thread via after()."""
@@ -744,13 +764,12 @@ class StockMonitorApp:
         self.notebook.select(self.tab_pivot)
         self.pivot_view.ensure_refreshed()
 
-        messagebox.showinfo(
-            "Selesai",
-            f"Pipeline selesai.\n\nAppend1: {len(append1_df):,} rows\n"
-            f"Rincian PO: {len(rincian_po_df):,} rows\n\n"
-            "Lihat data di tab Pivot Table, Deviasi GR, Deviasi PCS,\n"
-            "Laporan Deviasi & Rincian PO.",
-            parent=self.root)
+        # v3.3: selesai = status bar (hijau) + log — TANPA dialog modal
+        # (dulu messagebox "Selesai" mem-blok alur tiap kali pipeline usai)
+        self._append_log_batched(
+            "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
+            "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
+            "📋 Laporan / ☑ Follow Up / 🛒 Rincian PO.\n")
 
     def _stop_pipeline(self):
         """Stop graceful — set stop_event, pipeline memeriksa di checkpoint."""
@@ -875,14 +894,16 @@ class StockMonitorApp:
         self.deviasi_gr_view = DeviasiView(
             self.tab_deviasi_gr, satuan_mode="GR",
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
-            followup_store=self.followup_store)
+            followup_store=self.followup_store,
+            shared_cache=self._deviasi_pivot_cache)
         self.deviasi_gr_view.pack(fill="both", expand=True)
 
     def _build_deviasi_pcs_tab(self):
         self.deviasi_pcs_view = DeviasiView(
             self.tab_deviasi_pcs, satuan_mode="PCS",
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
-            followup_store=self.followup_store)
+            followup_store=self.followup_store,
+            shared_cache=self._deviasi_pivot_cache)
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     def _build_laporan_tab(self):
@@ -912,7 +933,7 @@ class StockMonitorApp:
 # --- Entry point ------------------------------------------------------------
 def main():
     root = tk.Tk()
-    app = StockMonitorApp(root)
+    StockMonitorApp(root)
     root.mainloop()
 
 

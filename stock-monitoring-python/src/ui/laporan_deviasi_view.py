@@ -18,7 +18,7 @@ Fitur v3.1 (dipertahankan):
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import pandas as pd
 import numpy as np
 from typing import Optional, Callable
@@ -30,7 +30,7 @@ from .theme import (
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter,
     LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
-    run_async,
+    run_async, sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -475,7 +475,10 @@ class LaporanDeviasiView(tk.Frame):
             return
         self._busy = True
 
-        sig = (len(self.data), tgl_start, tgl_end)
+        # v3.3: signature tanpa rentang tanggal — _compute_audit() tidak
+        # bergantung tgl_start/tgl_end (filter rentang terjadi di
+        # _prepare_rows) → ganti rentang tidak lagi recompute 230ms sia-sia
+        sig = id(self.data)
         st = {
             "tgl_start": tgl_start,
             "tgl_end": tgl_end,
@@ -664,21 +667,12 @@ class LaporanDeviasiView(tk.Frame):
             self.status_var_label.set("Tanggal harus angka. Contoh: 1-31.")
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
+        """Sort kolom — engine LINEAR v3.3 (delete+reinsert; tree.move
+        O(n²) dulu membekukan UI 45s saat sort 50k baris)."""
+        if self._busy and tree is None:
+            return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
-        items = [(tree.set(k, col), k) for k in tree.get_children("")]
-        try:
-            def parse_val(s):
-                s = str(s).replace(",", "").replace("%", "").strip()
-                if s == "-" or s == "":
-                    return 0
-                if s.startswith("(") and s.endswith(")"):
-                    return -float(s[1:-1])
-                return float(s)
-            items.sort(key=lambda x: parse_val(x[0]), reverse=reverse)
-        except (ValueError, AttributeError):
-            items.sort(key=lambda x: str(x[0]), reverse=reverse)
-        for i, (_, k) in enumerate(items):
-            tree.move(k, "", i)
+        sort_tree_by_column(tree, col, reverse=reverse)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP (tree-agnostic via event.widget)
@@ -691,6 +685,14 @@ class LaporanDeviasiView(tk.Frame):
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return
+
+        # v3.3: double-click di sel kolom ✓ = toggle follow-up
+        try:
+            if tree.identify_column(event.x) == "#1":
+                self._on_tree_click(event)
+                return
+        except Exception:
+            pass
 
         values = tree.item(row_iid, "values")
         if not values:

@@ -3,8 +3,6 @@ queries.py — Semua query antara (mirror M code shared queries).
 Setiap function = 1 shared query di M code.
 """
 import pandas as pd
-import numpy as np
-from typing import Optional
 from .fn_rekap_mentah import fn_rekap_mentah
 from .fn_2205 import fn_2205
 from .fn_3224 import fn_3224

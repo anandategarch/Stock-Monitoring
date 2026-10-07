@@ -1,5 +1,5 @@
 """
-screenshot_ui.py — Render app v3.2 + screenshot tiap tab & fitur baru.
+screenshot_ui.py — Render app v3.3 + screenshot tiap tab & fitur baru.
 Jalankan di bawah Xvfb (DISPLAY=:99).
 
 Output: /tmp/shots/*.png

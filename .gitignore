@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Data runtime & state aplikasi (dibuat lokal, tidak masuk repo)
+followup*.json
+*.bad
+followup*.json.bad
+
+# Screenshot / hasil uji sementara
+*.png
+!docs/**/*.png

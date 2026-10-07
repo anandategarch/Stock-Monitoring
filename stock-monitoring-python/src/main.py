@@ -6,7 +6,6 @@ Tidak ada Excel output — data ditampilkan langsung di UI.
 Bisa dipanggil langsung (CLI) atau dari UI Tkinter.
 """
 import sys
-import os
 import time
 import warnings
 from pathlib import Path
