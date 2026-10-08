@@ -122,7 +122,28 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.2"  # v3.9.2 — MINUS MERAH PER CELL + EXPORT PIVOT SESUAI TAMPILAN
+APP_VERSION = "3.9.3"  # v3.9.3 — TAB LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM)
+# v3.9.3 (permintaan user: "hapus isi data pada tab laporan deviasi dan
+# sementara ganti dengan list nama barang dan resto yang pemakaian (com)
+# nya minus atau lebih tinggi dari median pada pada kolom H"):
+# (1) Isi tab 📋 LAPORAN DEVIASI DIGANTI (sementara; tabel Audit Harian
+#     lama tersimpan di git history — commit e20141a): kini berisi DAFTAR
+#     (Nama Barang × Resto) dengan nilai PEMAKAIAN (COM) pada kolom H yang
+#     MINUS (< 0) atau LEBIH TINGGI dari MEDIAN barang tsb (median
+#     dihitung antar resto, per barang, pada kolom H).
+# (2) COM dihitung dgn formula identik baris 6.PEMAKAIAN (COM) di pivot
+#     mode Tanggal: com(t) = SO(t-1) + IN(t) - BK(t) - SO(t), tanggal
+#     pertama memakai SALDO AWAL. Matriks COM di-cache per data
+#     (H-independen) — ganti H cukup pilih kolom, tanpa recompute pivot.
+# (3) TANGGAL H = state bersama (SharedTanggalH v3.9): tab ini menampilkan
+#     chip read-only + auto-refresh saat H di-apply di tab 📦 Deviasi GR.
+# (4) Kolom: ✓ · Nama Barang · Resto · Satuan · COM (heading dinamis
+#     "COM (H=25)") · Median · Selisih vs Median · Status (MINUS /
+#     > MEDIAN / MINUS + > MEDIAN). Minus merah PER CELL (v3.9.2) + sel
+#     Status merah/amber per-cell; parser sort numerik format Indonesia.
+# (5) Follow-up ✓ tetap jalan (asal snapshot = LAPORAN-COM: SO=nilai COM,
+#     Sistem=median, Deviasi=selisih, CEK=status).
+# v3.9.2 — MINUS MERAH PER CELL + EXPORT PIVOT SESUAI TAMPILAN
 # v3.9.2 (permintaan user: "minus harusnya cuman merah per cell bukan per
 # baris dan pivot tabel nya bisa export excel"):
 # (1) MINUS MERAH PER CELL (bukan per baris) di SEMUA tabel: Pivot matrix,
@@ -294,6 +315,8 @@ TAB PIVOT TABLE
 FOLLOW UP (v3.2 — ala aplikasi Waste)
   • Centang kolom ✓ di tabel Deviasi GR / Deviasi PCS / Laporan Deviasi
     → baris masuk ke tab ☑ Follow Up (badge jumlah di judul tab).
+    (v3.9.3: dari tab Laporan, snapshot memakai asal LAPORAN-COM —
+    SO = nilai COM, Sistem = median, Deviasi = selisih, CEK = status.)
   • Daftar MENETAP (tidak ikut filter/H) + tersimpan otomatis
     (followup.json) — aman walau aplikasi ditutup.
   • Klik ✓ lagi (di tab mana pun, termasuk window ⛶) = keluarkan baris.
@@ -325,8 +348,20 @@ TAB DEVIASI GR / PCS (v3.9 — H BERSAMA)
   • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Apply.
   • (v3.2) ringkasan Total |Deviasi| & Anomali CEK ada di footer bawah tabel.
 
-TAB LAPORAN DEVIASI
-  • Audit harian + 6 Status Audit (filter via combo STATUS).
+TAB LAPORAN DEVIASI (v3.9.3 — SEMENTARA: daftar anomali pemakaian)
+  • Isi tab DIGANTI: daftar Nama Barang × Resto dengan PEMAKAIAN (COM)
+    pada kolom H yang MINUS (< 0) atau LEBIH TINGGI dari MEDIAN barang
+    tersebut (median dihitung antar resto per barang, di kolom H).
+  • COM = pemakaian harian (formula pivot 6.PEMAKAIAN (COM)):
+    com(t) = SO(t-1) + IN(t) − BK(t) − SO(t); tanggal pertama memakai
+    SALDO AWAL.
+  • TANGGAL H diatur di tab 📦 Deviasi GR (chip read-only di sini;
+    tabel ikut refresh otomatis saat H berubah — tanpa double input).
+  • Kolom: ✓ follow-up · Nama Barang · Resto · Satuan · COM (H) ·
+    Median · Selisih vs Median · Status (MINUS / > MEDIAN /
+    MINUS + > MEDIAN). Minus merah per CELL; sel Status merah/amber.
+  • Sort numerik memakai format Indonesia; tabel Audit Harian lama
+    (6 Status Audit) tersimpan di git history (commit e20141a).
 
 TAB RINCIAN PO (v3.9 — LAYOUT RINGKAS)
   • Baris TEAL = PO: Nomor # + Tanggal + Pemasok + Status Pesanan +
@@ -1148,10 +1183,13 @@ class StockMonitorApp:
         self.in_selisih_view.pack(fill="both", expand=True)
 
     def _build_laporan_tab(self):
+        # v3.9.3: H bersama — chip read-only + auto-refresh saat H
+        # di-apply di tab 📦 Deviasi GR (pola tab 🧩 Deviasi PCS)
         self.laporan_view = LaporanDeviasiView(
             self.tab_laporan,
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
-            followup_store=self.followup_store)
+            followup_store=self.followup_store,
+            h_state=self._shared_h)
         self.laporan_view.pack(fill="both", expand=True)
 
     def _build_followup_tab(self):

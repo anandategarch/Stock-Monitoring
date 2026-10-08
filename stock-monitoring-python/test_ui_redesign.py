@@ -28,6 +28,10 @@ Memverifikasi:
     (dokumen 42.05/32.24/99.01 + Nomor + subtotal per sumber + copy nomor)
 14. v3.4 — LEBAR KOLOM: drag tepi heading mengubah lebar (enable_col_
     resize), tombol ↔ Auto-Fit menyesuaikan lebar ke konten
+15. v3.9.3 — LAPORAN DEVIASI DIGANTI (sementara): daftar anomali pemakaian
+    (COM) per (Nama Barang × Resto) — COM minus atau > median barang
+    (median antar resto) pada kolom H; H shared dari tab Deviasi GR (chip
+    read-only + auto-refresh); minus merah per-cell + sel Status merah/amber
 """
 import sys
 import time
@@ -224,7 +228,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.2", APP_VERSION == "3.9.2", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.3", APP_VERSION == "3.9.3", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -498,52 +502,184 @@ def main():
     win2.destroy()
     root.update()
 
-    print("== 7. Laporan Deviasi ==")
+    print("== 7. Laporan Deviasi (v3.9.3 — daftar anomali COM) ==")
     select_and_wait(root, app, app.tab_laporan, app.laporan_view)
     lap = app.laporan_view
     n_all = len(lap.tree.get_children(""))
     print(f"   laporan rows total: {n_all}")
-    check("Laporan rows > 0", n_all > 0)
+    check("(v3.9.3) Skema kolom baru (COM list)",
+          [c[0] for c in lap.COLUMNS] == ["✓", "Nama Barang", "Resto",
+                                          "Satuan", "COM", "Median",
+                                          "Selisih vs Median", "Status"])
+    check("(v3.9.3) Tabel audit harian lama DIGANTI (tanpa tgl range)",
+          not hasattr(lap, "tgl_start_var") and
+          not hasattr(lap, "tgl_end_var"))
+    check("(v3.9.3) H laporan ikut H=10 dari tab GR (shared, tanpa input)",
+          lap.tanggal_h == 10 and not hasattr(lap, "tanggal_h_var"),
+          f"got {lap.tanggal_h}")
+    check("(v3.9.3) Chip H read-only menampilkan 10",
+          lap._h_chip_var.get() == "10",
+          f"got {lap._h_chip_var.get()!r}")
+    check("(v3.9.3) Heading COM dinamis 'COM (H=10)'",
+          lap.tree.heading("COM")["text"] == "COM (H=10)",
+          f"got {lap.tree.heading('COM')['text']!r}")
     check("(v3.2) 6 kartu KPI status DIHAPUS",
           not hasattr(lap, "_status_kpis"))
     check("(v3.2) Kolom ✓ di laporan", "✓" in [c[0] for c in lap.COLUMNS])
-
-    # v3.5: filter status via HEADER FILTER (combo STATUS dihapus)
-    check("(v3.5) Combo RESTO/STATUS dihapus dari laporan",
-          not hasattr(lap, "resto_combo") and not hasattr(lap, "status_combo"))
     check("(v3.5) HeaderFilterGroup terpasang (semua kolom)",
-          hasattr(lap, "header_filters") and len(lap._col_sel) >= 10)
-    lap._col_sel["Status Audit"] = {"DEVIASI MURNI"}
-    lap._refresh()
-    wait_view(root, lap)
-    n_murni = len(lap.tree.get_children(""))
-    check("Header filter Status Audit memfilter (rows berkurang/tetap)",
-          n_murni <= n_all)
-    lap._col_sel["Status Audit"] = None
-    lap._refresh()
-    wait_view(root, lap)
-    check("Status filter direset → kembali", len(lap.tree.get_children("")) == n_all)
+          hasattr(lap, "header_filters") and len(lap._col_sel) >= 7)
 
-    lap._on_col_filter("Nama Barang", {"AYAM FILET"})
+    # mock data: com H=10 identik antar resto (hash per-barang, bukan
+    # per-resto) → 0 anomali = perilaku benar (status jujur, bukan error)
+    check("(v3.9.3) Mock simetris di H=10 → 0 anomali + pesan jujur",
+          n_all == 0 and "0 baris" in lap.status_var_label.get(),
+          f"got {n_all} / {lap.status_var_label.get()!r}")
+
+    # anomali mock: AYAM FILET MLGPAR SO(25)=80 → com(25) besar negatif;
+    # Apply H=25 di GR → laporan ikut refresh otomatis (shared H)
+    app.deviasi_gr_view.tanggal_h_var.set("25")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
     wait_view(root, lap)
-    n_ayam = len(lap.tree.get_children(""))
-    check("Laporan header filter AYAM FILET → rows berkurang",
-          0 < n_ayam < n_all, f"got {n_ayam}")
+    n_h25 = len(lap.tree.get_children(""))
+    check("(v3.9.3) H=25 (anomali mock) → 2 baris: MLGPAR MINUS + "
+          "SBYKET > MEDIAN", n_h25 == 2, f"got {n_h25}")
+    if n_h25 == 2:
+        a_mlg = [k for k in lap.tree.get_children("")
+                 if lap.tree.set(k, "Resto") == "MLGPAR"]
+        a_sby = [k for k in lap.tree.get_children("")
+                 if lap.tree.set(k, "Resto") == "SBYKET"]
+        ok_mlg = (len(a_mlg) == 1 and
+                  lap.tree.set(a_mlg[0], "Nama Barang") == "AYAM FILET" and
+                  lap.tree.set(a_mlg[0], "Status") == "MINUS" and
+                  lap.tree.set(a_mlg[0], "COM").startswith("("))
+        ok_sby = (len(a_sby) == 1 and
+                  lap.tree.set(a_sby[0], "Status") == "> MEDIAN")
+        check("(v3.9.3) AYAM FILET/MLGPAR → MINUS (com negatif '(…)')",
+              ok_mlg, f"got {[lap.tree.set(k, 'Status') for k in a_mlg]}")
+        check("(v3.9.3) AYAM FILET/SBYKET → > MEDIAN (median tertarik "
+              "anomali)", ok_sby,
+              f"got {[lap.tree.set(k, 'Status') for k in a_sby]}")
+    # kembali ke H=10 utk blok data deterministik
+    app.deviasi_gr_view.tanggal_h_var.set("10")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
+    wait_view(root, lap)
+
+    # ---- data deterministik: median / flag / status bisa dihitung tangan ----
+    # com(H=10) = SO(9) − SO(10) (IN=BK=0) → kontrol via pasangan SO.
+    det_rows = []
+
+    def _so(barang, resto, t, val):
+        det_rows.append({"Nama Barang": barang, "JENIS": "1.SO",
+                         "NAMA RESTO": resto, "Tanggal": t, "NILAI": val,
+                         "SATUAN": "GR"})
+
+    # com @H=10: TEH MELATI = [10, 20, 30] → median 20 → flag: 30 (> MEDIAN)
+    for rs, com in [("R1", 10.0), ("R2", 20.0), ("R3", 30.0)]:
+        _so("TEH MELATI", rs, 9, 100.0)
+        _so("TEH MELATI", rs, 10, 100.0 - com)
+    # KOPI ROBUSTA = [-5, -15, 100] → median -5 → flag: -5, -15 (MINUS), 100
+    for rs, com in [("R1", -5.0), ("R2", -15.0), ("R3", 100.0)]:
+        _so("KOPI ROBUSTA", rs, 9, 100.0)
+        _so("KOPI ROBUSTA", rs, 10, 100.0 - com)
+    # GULA AREN = [-30, -10] → median -20 → flag: -30 (MINUS),
+    # -10 (MINUS + > MEDIAN karena -10 > -20)
+    for rs, com in [("R1", -30.0), ("R2", -10.0)]:
+        _so("GULA AREN", rs, 9, 100.0)
+        _so("GULA AREN", rs, 10, 100.0 - com)
+    lap.load_data(pd.DataFrame(det_rows))
+    wait_view(root, lap)
+    n_det = len(lap.tree.get_children(""))
+    check("(v3.9.3) Baris deterministik = 6 (1+3+2)",
+          n_det == 6, f"got {n_det}")
+
+    def _rowval(i, col):
+        return lap.tree.set(lap.tree.get_children("")[i], col)
+
+    # sort default: barang asc, COM desc →
+    # GULA AREN(-10, -30), KOPI ROBUSTA(100, -5, -15), TEH MELATI(30)
+    check("(v3.9.3) COM -10 (GULA AREN R2) tampil '(10)'",
+          _rowval(0, "COM") == "(10)", f"got {_rowval(0, 'COM')!r}")
+    check("(v3.9.3) Status 'MINUS + > MEDIAN' (-10 > median -20)",
+          _rowval(0, "Status") == "MINUS + > MEDIAN",
+          f"got {_rowval(0, 'Status')!r}")
+    check("(v3.9.3) COM -30 → '(30)' + status MINUS",
+          _rowval(1, "COM") == "(30)" and _rowval(1, "Status") == "MINUS",
+          f"got {_rowval(1, 'COM')!r}/{_rowval(1, 'Status')!r}")
+    check("(v3.9.3) Median kolom = nilai median barang (-20 → '(20)')",
+          _rowval(0, "Median") == "(20)", f"got {_rowval(0, 'Median')!r}")
+    check("(v3.9.3) Selisih vs Median = COM - median",
+          _rowval(0, "Selisih vs Median") == "10",
+          f"got {_rowval(0, 'Selisih vs Median')!r}")
+    check("(v3.9.3) KOPI 100 → '> MEDIAN'",
+          _rowval(2, "COM") == "100" and _rowval(2, "Status") == "> MEDIAN",
+          f"got {_rowval(2, 'COM')!r}/{_rowval(2, 'Status')!r}")
+    check("(v3.9.3) TEH 30 → '> MEDIAN' (median 20)",
+          _rowval(5, "COM") == "30" and _rowval(5, "Status") == "> MEDIAN",
+          f"got {_rowval(5, 'COM')!r}/{_rowval(5, 'Status')!r}")
+    teh_coms = [lap.tree.set(k, "COM")
+                for k in lap.tree.get_children("")
+                if lap.tree.set(k, "Nama Barang") == "TEH MELATI"]
+    check("(v3.9.3) TEH MELATI: hanya com=30 tampil (10/20 tidak ter-flag)",
+          teh_coms == ["30"], f"got {teh_coms}")
+
+    # minus merah PER CELL (v3.9.2 berlanjut): 4 baris minus → 4 cell COM
+    check("(v3.9.3) neg_cells: 4 cell COM minus",
+          len(lap._neg_cells) == 4 and
+          all(c[1] == "COM" for c in lap._neg_cells),
+          f"got {lap._neg_cells}")
+    check("(v3.9.3) sel Status minus 4 / above 2 (per-cell warna)",
+          len(lap._st_minus_cells) == 4 and len(lap._st_above_cells) == 2,
+          f"got {len(lap._st_minus_cells)}/{len(lap._st_above_cells)}")
+
+    # header filter Status = 'MINUS' → kecocokan nilai TERFORMAT (exact):
+    # GULA -30, KOPI -5, KOPI -15 (3 baris; 'MINUS + > MEDIAN' ≠ 'MINUS')
+    lap._on_col_filter("Status", {"MINUS"})
+    wait_view(root, lap)
+    check("(v3.5) Header filter Status='MINUS' → 3 baris",
+          len(lap.tree.get_children("")) == 3,
+          f"got {len(lap.tree.get_children(''))}")
+    lap._on_col_filter("Nama Barang", {"GULA AREN"})
+    wait_view(root, lap)
+    check("(v3.5) Header filter Nama Barang GULA AREN → 1 row",
+          len(lap.tree.get_children("")) == 1)
     lap._reset_filter()
     wait_view(root, lap)
+    check("Reset filter → semua baris kembali",
+          len(lap.tree.get_children("")) == n_det)
 
-    # Tanggal range
-    lap.tgl_start_var.set("1")
-    lap.tgl_end_var.set("10")
-    lap._refresh()
+    # H berubah dari tab GR → laporan ikut refresh (shared H)
+    app.deviasi_gr_view.tanggal_h_var.set("9")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
     wait_view(root, lap)
-    n_range = len(lap.tree.get_children(""))
-    check("Range tanggal 1-10 memfilter", n_range < n_all,
-          f"{n_range} vs {n_all}")
-    lap.tgl_start_var.set("1")
-    lap.tgl_end_var.set("31")
-    lap._refresh()
+    check("(v3.9.3) Apply H=9 di tab GR → laporan ikut (chip + heading)",
+          lap.tanggal_h == 9 and lap._h_chip_var.get() == "9" and
+          lap.tree.heading("COM")["text"] == "COM (H=9)",
+          f"got H={lap.tanggal_h}")
+    # com(H=9) = SA(9) + 0 - 0 - SO(9) = -100 semua → 8 baris MINUS
+    n_h9 = len(lap.tree.get_children(""))
+    check("(v3.9.3) H=9: COM = -100 semua pasangan → 8 baris MINUS",
+          n_h9 == 8, f"got {n_h9}")
+    ok_all_minus = all(
+        lap.tree.set(k, "Status").startswith("MINUS")
+        for k in lap.tree.get_children(""))
+    check("(v3.9.3) H=9: seluruh baris status MINUS", ok_all_minus)
+    # kembalikan data mock; H=25 (anomali AYAM FILET → 2 baris) supaya
+    # section 11 (klik ✓ follow-up dari Laporan) punya baris
+    lap.load_data(append1)
     wait_view(root, lap)
+    check("(v3.9.3) Kembali ke mock data: matriks COM terhitung (9 pasangan)",
+          lap._cached_com is not None and lap._cached_com.shape[0] == 9,
+          f"got {None if lap._cached_com is None else lap._cached_com.shape}")
+    app.deviasi_gr_view.tanggal_h_var.set("25")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
+    wait_view(root, lap)
+    check("(v3.9.3) Mock + H=25 → 2 baris anomali (baris utk section 11)",
+          len(lap.tree.get_children("")) == 2,
+          f"got {len(lap.tree.get_children(''))}")
 
     print("== 8. Rincian PO (v3.9 — layout ringkas) ==")
     select_and_wait(root, app, app.tab_rincian, app.rincian_view)
@@ -755,6 +891,11 @@ def main():
     app.laporan_view._on_tree_click(ev3)
     root.update()
     check("Klik ✓ di Laporan → masuk follow-up", len(store) == 1)
+    snap_lap = next(iter(store.rows.values()))
+    check("(v3.9.3) Snapshot asal LAPORAN-COM (SO=COM, Sistem=median)",
+          snap_lap.get("asal") == "LAPORAN-COM" and
+          "so" in snap_lap and "sistem" in snap_lap,
+          f"got asal={snap_lap.get('asal')!r}")
 
     import tempfile, os
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tf:
@@ -1025,7 +1166,8 @@ def main():
     from src.pipeline.fn_audit import (build_audit_rekap,
                                        build_audit_input,
                                        AUDIT_INPUT_COLUMNS)
-    import pandas as pd
+    # (pd sudah di-import di level modul — import lokal membuat 'pd' local
+    #  name utk seluruh main() → UnboundLocalError di section sebelumnya)
 
     # --- (a) build_audit_input: rekap + in_detail → 10 kolom kanonik ---
     raw = build_audit_input(rekap_so, in_detail)

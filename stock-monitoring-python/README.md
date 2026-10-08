@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.3 — LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM) (SEMENTARA)**: isi tab 📋 Laporan Deviasi DIGANTI — kini **daftar (Nama Barang × Resto) dengan pemakaian (COM) di kolom H yang MINUS atau LEBIH TINGGI dari MEDIAN barang tsb** (median antar resto, per barang, di kolom H). Formula COM identik baris 6.PEMAKAIAN (COM) pivot (com = SO(t-1) + IN − BK − SO; tanggal pertama = SALDO AWAL — diverifikasi oracle 286 nilai vs pivot, 0 mismatch); matriks COM di-cache (ganti H tanpa recompute); TANGGAL H bersama dari tab 📦 Deviasi GR (chip read-only + auto-refresh); minus merah **per cell** + sel Status merah/amber; tabel Audit Harian lama tersimpan di git history (commit e20141a).
 > **v3.9 — SHARED H + EXPORT AUDIT + RINCIAN PO RINGKAS + STYLE WASTE**: **(1) TANGGAL H cukup input 1×** — input + tombol *Apply H* hanya ada di tab 📦 Deviasi GR, otomatis berlaku juga di tab 🧩 Deviasi PCS (chip nilai H read-only + refresh otomatis; pivot dihitung 1× via cache bersama + lock — tidak ada double input lagi). **(2) Export Rekap Selisih IN + opsi kolom hasil audit** — sebelum simpan file muncul dialog opsi: ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit (bisa ditambahkan atau tidak, sesuai kebutuhan). **(3) Rincian PO DISEDERHANAKAN** — baris TEAL = info PO lengkap SEKALI (Nomor #, Tanggal, Pemasok, Status, Keterangan, N item, Total), baris putih di bawahnya = item saja (Nama Barang · Satuan · Kuantitas); kolom Tgl/Jam Pembuatan pindah ke baris induk + tersembunyi default (tampilkan via ◱ Kolom). **(4) STYLE ala repo Waste** — corong filter header **MERAH saat kolom terfilter** (idle = isi terang + outline gelap), **tabel diperbesar** (font 9→10, rowheight 26→30, heading 10 bold), tombol **⤢ Perbesar Tabel** (ciutkan baris kontrol → tabel tinggi penuh, in-place) + **⛶ Layar Penuh** (window terpisah) di semua tab, padding tombol/tab lebih lapang. **(5) CRASH FIX laten CPython 3.12+Tk** — finalisasi `tk.Variable` dari thread worker (pemicu segfault; kini mustahil via GC shield seumur thread) + cache pivot GR/PCS kini thread-safe (lock).
 > **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
 > **v3.1 — UX upgrade**: filter Nama Barang menempel di header kolom (ala Excel AutoFilter, di SEMUA tab), tombol ⛶ **Perbesar tabel** (fullscreen), **copy Nomor/Nomor PO** di pop-up detail, **pivot per RESTO** (baris kosong disembunyikan, tanpa kolom Total), dan **animasi loading** di semua proses. Pipeline tetap 100% tidak berubah.
@@ -51,9 +52,35 @@ Stock Monitoring — Python Edition
 - Negative values in parentheses, zero shown as '-'.
 - Double-click cell → pop-up detail source (baris×resto / baris×tanggal).
 
-### 6. Rincian PO (tab ketujuh)
+### 6. Laporan Deviasi (v3.9.3 — SEMENTARA: daftar anomali pemakaian)
+- Daftar **(Nama Barang × Resto)** dengan **pemakaian (COM) di kolom H** yang **minus** atau **lebih tinggi dari median barang tsb** (median antar resto, per barang).
+- Kolom: ✓ · Nama Barang · Resto · Satuan · COM (H) · Median · Selisih vs Median · Status (MINUS / > MEDIAN / MINUS + > MEDIAN).
+- **Tanggal H diatur di tab 📦 Deviasi GR** (chip read-only — tabel ikut refresh otomatis saat H berubah).
+- ✓ = masuk Follow Up (asal LAPORAN-COM) · double-click → detail · klik judul kolom ⧩ = filter + sort.
+
+### 7. Rincian PO (tab ketujuh)
 - Tabel Rincian PO dengan filter Cabang PO & Status.
 - Nomor # sebagai parent row (klik ▸ untuk expand).
+
+---
+
+## Fitur Baru v3.9.3 — Laporan Deviasi: Daftar Anomali Pemakaian (COM)
+
+Permintaan user: *"hapus isi data pada tab laporan deviasi dan sementara ganti dengan list nama barang dan resto yang pemakaian (com) nya minus atau lebih tinggi dari median pada pada kolom H"*.
+
+Isi tab 📋 **Laporan Deviasi** DIGANTI (sementara — tabel *Audit Harian 6 Status* lama tersimpan di git history, commit `e20141a`, siap dipulihkan bila dibutuhkan). Yang tampil sekarang:
+
+- **Baris = (Nama Barang × Nama Resto)** dengan nilai **PEMAKAIAN (COM) pada kolom H** yang **MINUS (< 0)** atau **LEBIH TINGGI dari MEDIAN barang tersebut** — median dihitung **antar resto untuk barang yang sama, pada kolom H** (identifikasi resto pemakai-abnormal per barang).
+- **Kolom**: ✓ follow-up · Nama Barang · Resto · Satuan · **COM** (heading dinamis `COM (H=25)`) · **Median** · **Selisih vs Median** · **Status** (`MINUS` / `> MEDIAN` / `MINUS + > MEDIAN` — dua kondisi bisa sekaligus, mis. com −10 vs median −20).
+- **Formula COM** sama persis dgn baris `6.PEMAKAIAN (COM)` tab 📊 Pivot mode Tanggal (port M code): `com(t) = SO(t-1) + IN(t) − BK(t) − SO(t)`, tanggal PERTAMA memakai SALDO AWAL. Diverifikasi oracle: 286 nilai dibandingkan vs `PivotTableView._compute_com` — **0 mismatch** (termasuk tanggal negatif bulan lalu & barang 1-resto).
+- **TANGGAL H bersama** (SharedTanggalH v3.9): chip read-only + **auto-refresh saat H di-apply/reset di tab 📦 Deviasi GR** — tanpa double input. Bila H tidak ada di data: pesan jelas "Kolom H=99 tidak ada di data — tanggal tersedia …".
+- **Matriks COM di-cache & vektorisasi**: pivot (Barang×Resto×JENIS) × tanggal dibangun SEKALI per data (H-independen — ganti H hanya memilih kolom + median); real-data 215.950 baris → 791 anomali di H=25 dalam hitungan detik.
+- **Minus merah PER CELL** (lanjutan v3.9.2 — hanya sel COM bernilai negatif) + **sel Status** diberi warna per-cell (MINUS = merah, > MEDIAN = amber); angka format Indonesia (1.234.567, negatif kurung); **parser sort numerik Indonesia** (`_parse_num_id` — "1.234" = 1234, "(1.234)" = −1234).
+- **Infrastruktur tabel utuh**: filter header ⧩ semua kolom, sort linear, ⛶ Layar Penuh (tag per-cell dipasang ulang di clone), ⤢ Perbesar Tabel, ◱ Kolom, ↔ Auto-Fit, loading overlay + compute async.
+- **✓ follow-up tetap jalan** — snapshot memakai asal **LAPORAN-COM** dengan pemetaan kolom Follow Up: **SO = nilai COM**, **Sistem = median** (pembanding), **Deviasi = selisih**, **CEK = status**.
+
+### ✅ Test
+279/279 UI test (256 v3.9.2 + **23 baru**: skema kolom baru, data deterministik median/flag/status 3-barang × 2/3-resto termasuk kasus MINUS + > MEDIAN, minus per-cell + sel status, H-shared chip/heading/auto-refresh dari tab GR, filter header Status/Nama Barang, snapshot follow-up LAPORAN-COM) + mock pipeline PASS; ruff 0 error baru (8 = 8 baseline file); 4 screenshot dicek visual (VLM) memakai data real 01.1 CEK STOCK V2.xlsb (20 resto × ±320 barang).
 
 ---
 
@@ -346,7 +373,7 @@ stock-monitoring-python/
 ├── config.json                 # RootPath + Folders + Sheets
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
-├── test_ui_redesign.py         # test UI v3.9 (230 check — + shared H, rincian ringkas, export audit, style/expander)
+├── test_ui_redesign.py         # test UI v3.9.3 (279 check — + daftar anomali COM di Laporan Deviasi)
 ├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
@@ -376,7 +403,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3.9: 230 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.9.3: 279 check (jalankan di bawah Xvfb di Linux)
 ```
 
 > UI test di Linux/headless: `xvfb-run` atau `Xvfb :99` + `DISPLAY=:99 python test_ui_redesign.py`.
