@@ -224,7 +224,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.0", APP_VERSION == "3.9.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.1", APP_VERSION == "3.9.1", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -1007,8 +1007,10 @@ def main():
             # detail mock terpisah; verifikasi total popup = 1050)
             total_row = [pop.tree.set(k, "Qty") for k in pkids
                          if pop.tree.set(k, "Source") == "TOTAL IN"]
-            check("Popup: TOTAL IN = 1,050 (42.05:750 + 32.24:300)",
-                  total_row and total_row[0] == "1,050", f"got {total_row}")
+            # v3.9.1 (FIX C-03): format angka gaya Indonesia — 1.050,
+            # bukan 1,050 (konsisten dgn formatter tabel/KPI).
+            check("Popup: TOTAL IN = 1.050 (42.05:750 + 32.24:300)",
+                  total_row and total_row[0] == "1.050", f"got {total_row}")
             # copy semua nomor unik
             pop._copy_all_unique()
             root.update()

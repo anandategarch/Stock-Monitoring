@@ -51,6 +51,7 @@ from .widgets import (
     ColumnManager, TableExpander, add_tooltip, attach_clone_filters,
     auto_fit_columns, enable_col_resize, identify_to_column,
     insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
+    fmt_int_id, validated_tgl_entry,
 )
 from .export_sheets import (
     AUDIT_EXPORT_COLUMNS, build_selisih_export_df, write_selisih_sheet,
@@ -129,10 +130,12 @@ def _fmt_num(val) -> str:
         return str(val)
     if v == 0:
         return "-"
+    # FIX C-03: format angka gaya Indonesia — 1.234.567 / 1.234,5
+    # (sebelumnya koma gaya Inggris: 1,234,567 / 1,234.5).
     if v == int(v):
-        s = f"{v:,.0f}"
+        s = fmt_int_id(v)
     else:
-        s = f"{v:,.1f}"
+        s = f"{v:,.1f}".replace(",", "\u00a0").replace(".", ",").replace("\u00a0", ".")
     if v < 0:
         return f"({s[1:]})"
     return s
@@ -795,14 +798,16 @@ class InSelisihView(tk.Frame):
             self.kpi_card.pack_forget()
             return
         k = self.audit_kpi
+        # FIX C-03: KPI chips ikut format Indonesia (1.234.567, bukan
+        # 1,234,567) — konsisten dgn formatter tabel.
         chips = [
             ("TOTAL BARIS", f"{k.get('rows', 0):,}", "#0f766e"),
-            ("OK (MATCHING)", f"{k.get('ok', 0):,}", "#16a34a"),
-            ("VALID (SISTEM MASUK)", f"{k.get('omit', 0):,}", "#1f4e78"),
-            ("CUT-OFF RESOLVED", f"{k.get('cutoff', 0):,}", "#806000"),
-            ("DEVIASI MURNI", f"{k.get('deviasi_murni', 0):,}", "#c65911"),
+            ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
+            ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
+            ("CUT-OFF RESOLVED", fmt_int_id(k.get('cutoff', 0)), "#806000"),
+            ("DEVIASI MURNI", fmt_int_id(k.get('deviasi_murni', 0)), "#c65911"),
             ("SISA GANTUNG (NET)",
-             f"{k.get('deviasi_qty', 0.0):,.0f}",
+             fmt_int_id(k.get('deviasi_qty', 0.0)),
              "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
         ]
         for label, value, color in chips:
@@ -905,14 +910,14 @@ class InSelisihView(tk.Frame):
             self._pending = True
             return
         self._busy = True
-        try:
-            tgl_start = int(float(self.tgl_start_var.get()))
-        except (TypeError, ValueError):
-            tgl_start = 1
-        try:
-            tgl_end = int(float(self.tgl_end_var.get()))
-        except (TypeError, ValueError):
-            tgl_end = 31
+        # FIX B-02: validasi konsisten (warning + revert) — sebelumnya
+        # fallback senyap ke 1/31.
+        tgl_start = validated_tgl_entry(self.tgl_start_var, lo=-31, hi=31,
+                                        fallback=1, label="Tanggal awal",
+                                        parent=self)
+        tgl_end = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
+                                      fallback=31, label="Tanggal akhir",
+                                      parent=self)
         st = {
             "tgl_start": tgl_start,
             "tgl_end": tgl_end,
@@ -928,8 +933,16 @@ class InSelisihView(tk.Frame):
         def done(payload):
             self._render_rows(payload)
 
+        # FIX B-01: _busy wajib di-reset saat compute GAGAL — tanpa ini
+        # view mati permanen setelah 1x error (filter/reset ditelan senyap).
+        def on_error(err):
+            self._busy = False
+            self._pending = False
+            self.status_var.set(f"⚠ Gagal menghitung rekap Selisih IN: {err}")
+
         run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Menghitung rekap Selisih IN…", sync=sync)
+                  loading_text="Menghitung rekap Selisih IN…",
+                  on_error=on_error, sync=sync)
 
     def _prepare_rows(self, st: dict) -> dict:
         base = self._cached_base
@@ -1116,14 +1129,14 @@ class InSelisihView(tk.Frame):
     def _do_export(self, filepath: str, audit_cols: list):
         """Export inti (v3.9) — dipisah dari _on_export supaya bisa
         dipanggil langsung oleh test tanpa dialog."""
-        try:
-            tgl_start = int(float(self.tgl_start_var.get()))
-        except (TypeError, ValueError):
-            tgl_start = 1
-        try:
-            tgl_end = int(float(self.tgl_end_var.get()))
-        except (TypeError, ValueError):
-            tgl_end = 31
+        # FIX B-02: jalur export ikut validasi konsisten (bukan fallback
+        # senyap ke 1/31 seperti sebelumnya).
+        tgl_start = validated_tgl_entry(self.tgl_start_var, lo=-31, hi=31,
+                                        fallback=1, label="Tanggal awal",
+                                        parent=self)
+        tgl_end = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
+                                      fallback=31, label="Tanggal akhir",
+                                      parent=self)
         if tgl_start > tgl_end:
             tgl_start, tgl_end = tgl_end, tgl_start
 

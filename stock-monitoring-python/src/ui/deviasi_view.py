@@ -43,7 +43,7 @@ from .widgets import (
     ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
     attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
-    sort_tree_by_column,
+    sort_tree_by_column, fmt_int_id,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -361,8 +361,11 @@ class DeviasiView(tk.Frame):
         self._expander = TableExpander(
             btn_expand, [self._fcard, title_label, legend])
 
-        # v3.9: berlangganan perubahan H bersama (tab PCS otomatis ikut)
-        if self._h_state is not None and not self._h_editable:
+        # v3.9: berlangganan perubahan H bersama (tab PCS otomatis ikut;
+        # FIX B-07: tab GR juga berlangganan supaya Reset Filter H=25 dari
+        # tab mana pun tersinkron ke KEDUA tab — Apply H di GR tetap aman:
+        # SharedPivotCache ter-lock, pivot tetap dihitung 1×).
+        if self._h_state is not None:
             self._h_state.subscribe(self._on_shared_h_changed)
 
         self.tree.bind("<Double-1>", self._on_double_click)
@@ -712,8 +715,17 @@ class DeviasiView(tk.Frame):
         def done(payload):
             self._render_rows(payload)
 
+        # FIX B-01: _busy wajib di-reset saat compute GAGAL — tanpa ini
+        # view mati permanen setelah 1x error (Apply H / filter / reset
+        # berikutnya ditelan senyap oleh guard `if self._busy: return`).
+        def on_error(err):
+            self._busy = False
+            self._pending = False
+            self.status_var.set(f"⚠ Gagal menghitung deviasi: {err}")
+
         run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Menghitung deviasi…", sync=sync)
+                  loading_text="Menghitung deviasi…", on_error=on_error,
+                  sync=sync)
 
     def _prepare_rows(self, st: dict) -> dict:
         """Pure pandas: filter cached pivot + sort → items tree (thread-safe)."""
@@ -904,9 +916,9 @@ class DeviasiView(tk.Frame):
         self._refresh()
 
     def _on_shared_h_changed(self, new_h: int):
-        """Listener tab PCS (v3.9): H diubah di tab GR → ikut tanpa input.
+        """Listener tab pengikut (v3.9): H diubah/reset → ikut tanpa input.
 
-        Chip nilai H diperbarui + pivot cache dilonggarkan + refresh
+        Chip/entry nilai H diperbarui + pivot cache dilonggarkan + refresh
         (bila tab belum pernah dilihat: tetap dirty, di-refresh saat
         tab dibuka — ensure_refreshed)."""
         self.tanggal_h = int(new_h)
@@ -914,6 +926,9 @@ class DeviasiView(tk.Frame):
         self._cached_h = None
         if hasattr(self, "_h_chip_var"):
             self._h_chip_var.set(str(new_h))
+        # FIX B-07: sync juga entry H di tab GR (reset dari tab lain)
+        if self._h_editable and hasattr(self, "tanggal_h_var"):
+            self.tanggal_h_var.set(str(new_h))
         if self._dirty:
             return          # belum pernah dirender — refresh saat tab dibuka
         if self.data is not None and not self.data.empty:
@@ -923,6 +938,22 @@ class DeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # FIX B-07: ✕ Reset Filter kini juga me-reset TANGGAL H ke default
+        # (25) — sebelumnya nilai H lama tetap aktif, semantik reset tidak
+        # total dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya
+        # KEDUA tab Deviasi GR & PCS ikut kembali ke 25.)
+        if self.tanggal_h != 25:
+            self.tanggal_h = 25
+            self._cached_pivot = None
+            self._cached_h = None
+            if self._h_state is not None:
+                # set() men-trigger listener tab lain (termasuk entry/chip H);
+                # pivot dihitung ulang 1× lewat SharedPivotCache.
+                self._h_state.set(25)
+            if self._h_editable and hasattr(self, "tanggal_h_var"):
+                self.tanggal_h_var.set("25")
+            if hasattr(self, "_h_chip_var"):
+                self._h_chip_var.set("25")
         self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
@@ -1000,10 +1031,12 @@ class DeviasiView(tk.Frame):
             return str(val)
         if v == 0:
             return "-"
+        # FIX C-03: format angka gaya Indonesia — 1.234.567 / 1.234,5
+        # (sebelumnya koma gaya Inggris: 1,234,567 / 1,234.5).
         if v == int(v):
-            s = f"{v:,.0f}"
+            s = fmt_int_id(v)
         else:
-            s = f"{v:,.1f}"
+            s = f"{v:,.1f}".replace(",", "\u00a0").replace(".", ",").replace("\u00a0", ".")
         if v < 0:
             return f"({s[1:]})"
         return s

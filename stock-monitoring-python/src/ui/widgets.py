@@ -50,6 +50,36 @@ _BTN_BASE = dict(
 )
 
 
+def fmt_int_id(v) -> str:
+    """FIX C-03: format integer gaya Indonesia — 1.234.567 (bukan 1,234,567)."""
+    try:
+        n = round(float(v))
+    except (TypeError, ValueError):
+        return str(v)
+    return f"{n:,}".replace(",", ".")
+
+
+def validated_tgl_entry(var, *, lo: int, hi: int, fallback: int,
+                        label: str, parent) -> int:
+    """FIX B-02: validasi input tanggal KONSISTEN di semua view — warning
+    + revert entry (pola yang sudah dipakai tab Deviasi), menggantikan
+    fallback senyap di Pivot & Rekap Selisih IN. Panggil dari MAIN thread."""
+    raw = (var.get() or "").strip()
+    val = None
+    try:
+        val = int(float(raw))
+    except (TypeError, ValueError):
+        val = None
+    if val is None or not (lo <= val <= hi):
+        _mb.showwarning("Input tidak valid",
+                        f"{label} harus angka {lo}–{hi}.",
+                        parent=parent.winfo_toplevel())
+        var.set(str(fallback))
+        return fallback
+    var.set(str(val))
+    return val
+
+
 class AccentButton(tk.Button):
     """Tombol aksi utama — teal solid, putih teks, hover teal-800."""
 
@@ -160,7 +190,9 @@ class KpiCard(tk.Frame):
 
         self._label_var = tk.StringVar(value=label.upper())
         tk.Label(txt, textvariable=self._label_var, bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold"), anchor="w").pack(fill="x")
+                 # FIX A-08: label KPI 8→9pt — teks terkecil jangan untuk
+                 # label kartu KPI yang penting (nyaris tak terbaca 1080p).
+                 font=font(9, "bold"), anchor="w").pack(fill="x")
 
         self._value_var = tk.StringVar(value=value)
         tk.Label(txt, textvariable=self._value_var, bg=C_CARD, fg=C_HEADER,
@@ -168,7 +200,7 @@ class KpiCard(tk.Frame):
 
         self._sub_var = tk.StringVar(value=subtitle)
         self._sub = tk.Label(txt, textvariable=self._sub_var, bg=C_CARD,
-                             fg=C_TEXT_SOFT, font=font(8), anchor="w")
+                             fg=C_TEXT_SOFT, font=font(9), anchor="w")  # FIX A-08
         if subtitle:
             self._sub.pack(fill="x")
 
@@ -245,6 +277,21 @@ class Toolbar(tk.Frame):
         btn.bind("<Enter>", lambda e: btn.configure(background=hover)
                  if str(btn.cget("state")) != "disabled" else None)
         btn.bind("<Leave>", lambda e: btn.configure(background=bg))
+
+        def _set_enabled(enabled: bool) -> None:
+            # FIX A-01/A-02: state disabled harus terlihat dim & konsisten —
+            # sebelumnya tombol toolbar (mis. 💾 Export) tetap berwarna teal
+            # saat disabled sehingga TAMPAK AKTIF padahal tidak bisa diklik.
+            if enabled:
+                btn.configure(state="normal", background=bg, fg=fg)
+            elif accent:
+                btn.configure(state="disabled", background="#94a3b8",
+                              fg="#1e293b")
+            else:
+                btn.configure(state="disabled", background="#0f172a",
+                              fg="#64748b")
+
+        btn.set_enabled = _set_enabled  # type: ignore[attr-defined]
         return btn
 
 
@@ -340,7 +387,7 @@ class LegendRow(tk.Frame):
             cv.pack(side="left", padx=(0, 5))
             cv.create_oval(0, 0, 8, 8, fill=color, outline=color)
             tk.Label(chip, text=label, bg=bg, fg=C_TEXT_MUTED,
-                     font=font(8)).pack(side="left")
+                     font=font(9)).pack(side="left")  # FIX A-08: legend
 
 
 class ToolTip:
@@ -826,7 +873,7 @@ class HeaderFilter:
     - get_values() dipanggil saat popup dibuka (nilai unik terbaru).
     """
 
-    MAX_CHECKS = 600  # batas render checkbox — pakai 🔍 untuk list besar
+    MAX_CHECKS = 3000  # FIX B-03: 600→3000 — gunakan 🔍 untuk list sangat besar
 
     def __init__(self, tree: ttk.Treeview, col_id: str, *, get_values,
                  on_apply, label: str = "Nama Barang", on_sort=None,
@@ -934,7 +981,7 @@ class HeaderFilter:
                         variable=self._all_var,
                         command=self._toggle_all).pack(side="left")
         tk.Label(arow, textvariable=self._count_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(8)).pack(side="right")
+                 fg=C_TEXT_MUTED, font=font(9)).pack(side="right")  # FIX A-08
 
         # daftar nilai (scrollable checkbox)
         wrap = tk.Frame(body, bg=C_CARD, highlightbackground=C_BORDER,
@@ -966,9 +1013,12 @@ class HeaderFilter:
             cb.pack(fill="x", padx=8, pady=1)
             self._checks[v] = cb
         if len(values) > self.MAX_CHECKS:
-            tk.Label(inner, text=f"… {len(values) - self.MAX_CHECKS} nilai "
-                                 "lainnya — gunakan 🔍 di atas",
-                     bg=C_CARD, fg=C_TEXT_SOFT, font=font(8)).pack(
+            # FIX B-03: label jujur — tampilkan total nilai sebenarnya,
+            # bukan hanya jumlah yang tersembunyi.
+            tk.Label(inner, text=f"… menampilkan {self.MAX_CHECKS} dari "
+                                 f"{len(values)} nilai — gunakan 🔍 di atas "
+                                 "untuk mencari nilai lain",
+                     bg=C_CARD, fg=C_TEXT_SOFT, font=font(9)).pack(
                 fill="x", padx=8, pady=4)
 
         # tombol aksi
@@ -1326,7 +1376,7 @@ class ColumnManager:
                  fg=C_HEADER, font=font(10, "bold")).pack(side="left")
         n_vis = tk.StringVar(value=f"{len(self.visible())}/{len(cols)} tampil")
         tk.Label(head, textvariable=n_vis, bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8)).pack(side="right")
+                 font=font(9)).pack(side="right")  # FIX A-08
 
         btnrow = tk.Frame(body, bg=C_CARD)
         btnrow.pack(fill="x", pady=(6, 4))
@@ -2188,7 +2238,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
              font=font(9)).pack(side="left")
     tk.Label(foot, text="🖱 Double-click = detail · klik kanan = copy "
                         "(bila tersedia) · Esc = tutup",
-             bg=C_CARD, fg=C_TEXT_SOFT, font=font(8)).pack(side="right")
+             bg=C_CARD, fg=C_TEXT_SOFT, font=font(9)).pack(side="right")  # FIX A-08
 
     overlay = LoadingOverlay(cin, "Menyalin tabel…")
     overlay.show(delay_ms=120)

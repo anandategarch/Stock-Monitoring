@@ -37,7 +37,7 @@ from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
     LoadingOverlay, SegmentBar, TableExpander, add_tooltip, auto_fit_columns,
     enable_col_resize, identify_to_column, insert_tree_items,
-    open_tree_maximized, run_async,
+    open_tree_maximized, run_async, fmt_int_id, validated_tgl_entry,
     ColumnManager, attach_clone_filters,
 )
 
@@ -283,12 +283,23 @@ class PivotTableView(tk.Frame):
             label="Nama Barang")
 
         # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
+        # FIX C-05: item menu "⧩ Filter kolom" untuk kolom non-#0 tidak lagi
+        # mati senyap — diarahkan ke filter Nama Barang + status menjelaskan.
         self._colmgr = ColumnManager(
             self.tree,
-            open_filter=lambda c: self.header_filter.open_popup()
-            if c == "#0" else None)
+            open_filter=self._open_col_filter)
 
         self._apply_mode_ui()
+
+    def _open_col_filter(self, col: str):
+        """Filter teks di view Pivot tersedia untuk kolom nama (#0); kolom
+        matrix (resto/tanggal) difilter lewat kontrol RESTO/TANGGAL di atas
+        tabel. Sebelumnya: klik menu di kolom lain TIDAK melakukan apa-apa."""
+        if col != "#0":
+            self.status_var.set(
+                "ℹ Kolom matrix difilter lewat RESTO / TANGGAL di atas tabel "
+                "— filter teks hanya untuk kolom 'Nama Barang'.")
+        return self.header_filter.open_popup()
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""
@@ -400,14 +411,14 @@ class PivotTableView(tk.Frame):
     # FILTER STATE + COMPUTE (pure — berjalan di thread)
     # =========================================================================
     def _filter_state(self) -> dict:
-        try:
-            t1 = int(self.tgl_start_var.get())
-        except ValueError:
-            t1 = 1
-        try:
-            t2 = int(self.tgl_end_var.get())
-        except ValueError:
-            t2 = 31
+        # FIX B-02: validasi input konsisten (warning + revert) — sebelumnya
+        # input invalid difallback SENYAP ke 1/31 tanpa memberi tahu user.
+        t1 = validated_tgl_entry(self.tgl_start_var, lo=-31, hi=31,
+                                 fallback=1, label="Tanggal awal",
+                                 parent=self)
+        t2 = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
+                                 fallback=31, label="Tanggal akhir",
+                                 parent=self)
         if t1 > t2:
             t1, t2 = t2, t1
         return {
@@ -584,8 +595,17 @@ class PivotTableView(tk.Frame):
         def done(payload):
             self._render_payload(payload)
 
+        # FIX B-01: _busy wajib di-reset saat compute GAGAL — tanpa ini
+        # view mati permanen setelah 1x error (refresh berikutnya ditelan
+        # senyap oleh guard `if self._busy: return`).
+        def on_error(err):
+            self._busy = False
+            self._pending = False
+            self.status_var.set(f"⚠ Gagal menghitung matrix pivot: {err}")
+
         run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Menghitung matrix pivot…", sync=sync)
+                  loading_text="Menghitung matrix pivot…", on_error=on_error,
+                  sync=sync)
 
     def _render_payload(self, payload: dict):
         cols = payload["columns"]
@@ -762,10 +782,12 @@ class PivotTableView(tk.Frame):
             return str(val)
         if val == 0:
             return "-"
+        # FIX C-03: format angka gaya Indonesia — 1.234.567 / 1.234,5
+        # (sebelumnya koma gaya Inggris: 1,234,567 / 1,234.5).
         if val == int(val):
-            s = f"{val:,.0f}"
+            s = fmt_int_id(val)
         else:
-            s = f"{val:,.1f}"
+            s = f"{val:,.1f}".replace(",", "\u00a0").replace(".", ",").replace("\u00a0", ".")
         if val < 0:
             return f"({s[1:]})"
         return s

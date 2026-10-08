@@ -109,7 +109,7 @@ from src.ui.theme import (
 from src.ui.widgets import (
     AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, LoadingOverlay,
     Spinner, StatusBar, Toolbar, add_tooltip, make_log_console, make_tree,
-    run_async, gc_shield_acquire, gc_shield_release,
+    run_async, gc_shield_acquire, gc_shield_release, fmt_int_id,
 )
 from src.ui.followup import FollowUpStore
 from src.ui.pivot_view import PivotTableView
@@ -122,26 +122,42 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.0"  # v3.9.0 — SHARED H + EXPORT AUDIT + RINCIAN PO
-# RINGKAS + STYLE WASTE:
+APP_VERSION = "3.9.1"  # v3.9.1 — DEEP AUDIT UI/UX → 15 FIX PORT KE v3.9
+# v3.9.1 (hasil audit 39 temuan, 3 high — semua fix ditandai "# FIX <ID>"
+# di kode, bisa di-grep):
+# (1) B-01 (HIGH): _busy di-reset saat compute GAGAL — sebelumnya 1x error
+#     membuat view mati permanen (Apply H/filter/reset berikutnya ditelan
+#     guard `if self._busy`). on_error dipasang di 3 view (Deviasi/Pivot/
+#     Rekap Selisih IN).
+# (2) B-02 (HIGH): validasi input TANGGAL konsisten di semua view lewat
+#     helper validated_tgl_entry (warning + revert, pola tab Deviasi) —
+#     sebelumnya 3 perilaku beda: pivot fallback senyap, selisih int(float)
+#     senyap, deviasi modal+revert. Jalur export selisih ikut tervalidasi.
+# (3) B-03: popup funnel 600→3000 nilai + label jujur "menampilkan X dari Y".
+# (4) B-07: ✕ Reset Filter kini juga reset TANGGAL H ke 25 (v3.9: lewat
+#     SharedTanggalH — GR & PCS sync; tab GR ikut berlangganan listener).
+# (5) C-03: format angka gaya INDONESIA konsisten (1.234.567 / 1.234,5 /
+#     negatif kurung) di 3 view + KPI chips + log audit + popup TOTAL IN.
+# (6) C-05: menu ⧩ Filter kolom non-#0 di Pivot tidak mati senyap — kini
+#     diarahkan ke filter Nama + status bar menjelaskan.
+# (7) A-01/A-02: tombol toolbar disabled kini terlihat DIM (teal→abu)
+#     lewat Toolbar.add_action.set_enabled; konvensi konsisten.
+# (8) A-04: judul panduan (❓ Bantuan) kini mengikuti APP_VERSION dinamis
+#     (dulu hard-coded "v3.4" — basi 5 versi).
+# (9) A-08: teks fungsional font(8)→font(9): label KPI, legend, counter
+#     filter, counter panel kolom, hint window clone (metadata tetap 8).
+# Riwayat v3.9.0 — SHARED H + EXPORT AUDIT + RINCIAN PO RINGKAS + STYLE WASTE:
 # (1) TANGGAL H dibagi 2 tab: input + "Apply H" hanya di tab 📦 Deviasi
 #     GR, otomatis berlaku juga di tab 🧩 Deviasi PCS (chip read-only +
-#     refresh otomatis — tidak ada double input; permintaan user).
-# (2) Export Rekap Selisih IN: dialog opsi menanyakan kolom hasil audit
-#     (Hasil Audit / Saldo / Catatan Audit) — bisa ditambahkan atau tidak
-#     (permintaan user "waktu ekspor tambahin hasil auditnya aja tapi ada
-#     opsi buat tambahin kolom tersebut atau tidak").
-# (3) Rincian PO disederhanakan: baris TEAL = info PO lengkap sekali
-#     (Tanggal/Pemasok/Status/Keterangan/Total), baris putih = item saja
-#     (Nama Barang/Satuan/Kuantitas) — dulu semua baris anak mengulang info
-#     PO; kolom Tgl/Jam Pembuatan pindah ke baris induk + tersembunyi
-#     default (permintaan user "biar mudah dibaca").
-# (4) STYLE WASTE (permintaan user: tiru repo Waste mulai dari tombol
-#     filternya, perbesar tabelnya, dll): funnel header filter MERAH saat
-#     aktif (ala Waste, idle = isi terang + outline); tabel diperbesar
-#     (font 9→10, rowheight 26→30, heading 10 bold); tombol ⤢ Perbesar
-#     Tabel (ciutkan baris kontrol — tabel tinggi penuh) + ⛶ Layar Penuh
-#     di semua tab; padding tombol/tab lebih lapang.
+#     refresh otomatis — tidak ada double input; permintaan user);
+#     SharedPivotCache thread-safe dgn lock (GR+PCS refresh bersamaan).
+# (2) Export Rekap Selisih IN: dialog opsi kolom hasil audit (Hasil Audit /
+#     Saldo / Catatan Audit — bisa ditambahkan atau tidak, permintaan user).
+# (3) Rincian PO disederhanakan: baris TEAL = info PO lengkap sekali, baris
+#     putih = item saja; kolom Tgl/Jam Pembuatan tersembunyi default.
+# (4) STYLE WASTE: funnel header MERAH saat terfilter; tabel diperbesar
+#     (font 10, rowheight 30); ⤢ Perbesar Tabel + ⛶ Layar Penuh semua tab.
+# (5) CRASH FIX laten CPython 3.12 + Tk: GC shield saat thread worker hidup.
 # Riwayat: v3.8.0 — selisih IN 1-31; pivot -31..31 (kolom 25•-31• lengkap);
 # sheet PIVOT + CF; export selisih per resto; impor TL dihapus. v3.7.0 —
 # ENGINE TURBO (output identik, 4× lebih cepat) + fix 9 bug index display.
@@ -184,7 +200,9 @@ class StreamToQueue:
 
 
 # --- Panduan singkat ---------------------------------------------------------
-_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.4
+# FIX A-04: versi di judul panduan kini mengikuti APP_VERSION secara
+# dinamis — sebelumnya tertulis hard-coded "v3.4" sehingga basi 5 versi.
+_HELP_TEXT = f"""PANDUAN SINGKAT — STOCK MONITORING v{APP_VERSION}
 
 ALUR KERJA
   1. Tab ⚙️ Config   : pastikan RootPath menunjuk folder data export Accurate Online.
@@ -912,12 +930,15 @@ class StockMonitorApp:
         self._append_log_batched(f"\n  Append1: {len(append1_df)} rows\n")
         self._append_log_batched(f"  Rincian PO: {len(rincian_po_df)} rows\n")
         if audit_df is not None and audit_n:
+            # FIX C-03: log audit ikut format Indonesia (1.234.567) —
+            # konsisten dgn formatter tabel & KPI chips.
             self._append_log_batched(
-                f"  Audit Rekonsiliasi: {audit_n:,} rows · "
-                f"OK {audit_kpi['ok']:,} · Cut-off {audit_kpi['cutoff']:,} · "
-                f"Valid {audit_kpi['omit']:,} · "
-                f"Deviasi Murni {audit_kpi['deviasi_murni']:,} · "
-                f"Sisa Gantung {audit_kpi['deviasi_qty']:,.0f}\n")
+                f"  Audit Rekonsiliasi: {fmt_int_id(audit_n)} rows · "
+                f"OK {fmt_int_id(audit_kpi['ok'])} · "
+                f"Cut-off {fmt_int_id(audit_kpi['cutoff'])} · "
+                f"Valid {fmt_int_id(audit_kpi['omit'])} · "
+                f"Deviasi Murni {fmt_int_id(audit_kpi['deviasi_murni'])} · "
+                f"Sisa Gantung {fmt_int_id(audit_kpi['deviasi_qty'])}\n")
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
