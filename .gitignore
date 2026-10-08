@@ -11,6 +11,7 @@ venv/
 
 # Data runtime & state aplikasi (dibuat lokal, tidak masuk repo)
 followup*.json
+komparasi_last.json
 *.bad
 followup*.json.bad
 

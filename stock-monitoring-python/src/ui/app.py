@@ -108,13 +108,14 @@ from src.ui.theme import (
 )
 from src.ui.widgets import (
     AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, LoadingOverlay,
-    Spinner, StatusBar, Toolbar, add_tooltip, make_log_console, make_tree,
-    run_async, gc_shield_acquire, gc_shield_release, fmt_int_id,
+    SegmentBar, Spinner, StatusBar, Toolbar, add_tooltip, make_log_console,
+    make_tree, run_async, gc_shield_acquire, gc_shield_release, fmt_int_id,
 )
 from src.ui.followup import FollowUpStore
 from src.ui.pivot_view import PivotTableView
 from src.ui.deviasi_view import DeviasiView, SharedPivotCache, SharedTanggalH
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
+from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
 from src.ui.rincian_po_view import RincianPoView
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
@@ -122,7 +123,40 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.3"  # v3.9.3 — TAB LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM)
+APP_VERSION = "3.9.4"  # v3.9.4 — TAB LAPORAN DEVIASI: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR
+# v3.9.4 (permintaan user: "Di file sampel kan ada Dev to bom ini kok gak
+# ada ya? Padahal data udah lengkap 2205 itu bom. Aku barusan upload file
+# deviasi. Nah aku mau compare file deviasi itu dengan yang deviasi di
+# Tab deviasi GR terus coba cek kolom status week 1 itu sama dengan 7
+# week 2 = 14 dan week = 25. Itu buat kolom h."):
+# (1) TAB 📋 LAPORAN DEVIASI kini punya 2 MODE (SegmentBar):
+#     ⚖ Komparasi File Deviasi (BARU — default) dan 🚨 Anomali COM (v3.9.3
+#     dipertahankan, tinggal ganti segmen).
+# (2) MODE KOMPARASI: pilih file deviasi resmi (mis. "20.AGUSTUS 2026.xlsx"
+#     — RESTO/NAMA BAHAN/STATUS BULAN/QTY BOM/QTY COM/QTY DEVIASI/% TO
+#     BOM). Tiap baris file dibandingkan sisi-app pada KOLOM H menurut
+#     STATUS BULAN: WEEK 1→H 7 · WEEK 2→H 14 · WEEK 3/4→H 25 (permintaan
+#     user; file sampel memakai WEEK 4, minggu = CUT-OFF KUMULATIF dari
+#     tgl 1 — WEEK 2 ≈ 2× WEEK 1, konsisten semantik H).
+# (3) "DEV TO BOM" kini ADA di app: BOM·App = Σ penjualan 22.05 (JENIS
+#     9.OUT, tgl 1..H — "2205 itu bom"), COM·App = Σ pemakaian com(t)
+#     tgl 1..H (com(t) = SO(t-1)+IN(t)−BK(t)−SO(t), formula identik
+#     pivot 6.PEMAKAIAN & tab Anomali COM), DEV·App = COM−BOM (formula
+#     identik file), GR·App = SO_H − Sistem_H (PERSIS kolom Deviasi di
+#     tab 📦 Deviasi GR pada H minggu tsb — aljabar: GR·App = ΣOUT−SA−
+#     ΣIN+ΣBK+SO_H = out_cum − com_cum = DEV·App, dua jalur hitung).
+# (4) KOLOM: ✓ · Resto · Nama Barang · Satuan · Minggu · H · BOM/COM/DEV/
+#     %TO BOM File · BOM/COM/DEV App · GR App · Selisih (GR App − DEV
+#     File) · Status (MATCH / SELISIH / TIDAK ADA DI DATA APP / H TIDAK
+#     ADA DI DATA). Resto file "1041.BDGUKU"/"B.1001.MLGPAR" dinormalkan
+#     ke kode app (BDGUKU/MLGPAR). Default hanya resto yang ada di data
+#     app (20 resto cek stock) — centang utk semua 340 cabang.
+# (5) Infrastruktur utuh: ✓ follow-up (asal KOMPARASI), filter header ⧩,
+#     sort parser Indonesia, ⛶ Layar Penuh, ⤢ Perbesar, ◱ Kolom, ↔
+#     Auto-Fit, minus merah per-cell, sel Status hijau/amber/merah,
+#     compute async + FIX B-01, path file terakhir diingat
+#     (komparasi_last.json) → initialdir dialog.
+# v3.9.3 — TAB LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM)
 # v3.9.3 (permintaan user: "hapus isi data pada tab laporan deviasi dan
 # sementara ganti dengan list nama barang dan resto yang pemakaian (com)
 # nya minus atau lebih tinggi dari median pada pada kolom H"):
@@ -348,20 +382,35 @@ TAB DEVIASI GR / PCS (v3.9 — H BERSAMA)
   • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Apply.
   • (v3.2) ringkasan Total |Deviasi| & Anomali CEK ada di footer bawah tabel.
 
-TAB LAPORAN DEVIASI (v3.9.3 — SEMENTARA: daftar anomali pemakaian)
-  • Isi tab DIGANTI: daftar Nama Barang × Resto dengan PEMAKAIAN (COM)
-    pada kolom H yang MINUS (< 0) atau LEBIH TINGGI dari MEDIAN barang
-    tersebut (median dihitung antar resto per barang, di kolom H).
-  • COM = pemakaian harian (formula pivot 6.PEMAKAIAN (COM)):
-    com(t) = SO(t-1) + IN(t) − BK(t) − SO(t); tanggal pertama memakai
-    SALDO AWAL.
-  • TANGGAL H diatur di tab 📦 Deviasi GR (chip read-only di sini;
-    tabel ikut refresh otomatis saat H berubah — tanpa double input).
-  • Kolom: ✓ follow-up · Nama Barang · Resto · Satuan · COM (H) ·
-    Median · Selisih vs Median · Status (MINUS / > MEDIAN /
-    MINUS + > MEDIAN). Minus merah per CELL; sel Status merah/amber.
-  • Sort numerik memakai format Indonesia; tabel Audit Harian lama
-    (6 Status Audit) tersimpan di git history (commit e20141a).
+TAB LAPORAN DEVIASI (v3.9.4 — 2 MODE, ganti lewat SegmentBar MODE)
+  • ⚖ KOMPARASI FILE DEVIASI (default — BARU): bandingkan file deviasi
+    resmi (mis. "20.AGUSTUS 2026.xlsx" — kolom STATUS BULAN, RESTO,
+    NAMA BAHAN, QTY BOM, QTY COM, QTY DEVIASI, % TO BOM) dengan
+    hitungan app. Klik 📂 Pilih File Deviasi… → tiap baris file
+    dibandingkan pada KOLOM H menurut minggunya (user: week 1 = 7,
+    week 2 = 14, week = 25): WEEK 1→H 7 · WEEK 2→H 14 · WEEK 3/4→H 25
+    (minggu file = CUT-OFF KUMULATIF dari tanggal 1).
+  • KOLOM PER BANDING: BOM/COM/DEVIASI/%TO BOM — File (nilai resmi) vs
+    BOM/COM/DEV TO BOM — App (BOM = Σ penjualan 22.05 / "2205 itu BOM",
+    COM = Σ pemakaian, formula pivot 6.PEMAKAIAN (COM)) + DEVIASI — App
+    (Tab GR) = SO_H − Sistem (PERSIS tab 📦 Deviasi GR pada H minggu
+    tsb) + Selisih (GR App − DEV File) + Status MATCH / SELISIH /
+    TIDAK ADA DI DATA APP / H TIDAK ADA DI DATA.
+  • Selisih MATCH bila |GR App − DEV File| ≤ 1 + 0,01%×|DEV File|.
+    Sel Status: MATCH hijau / SELISIH amber / lainnya merah; angka
+    minus merah per CELL.
+  • Resto file "1041.BDGUKU" / "B.1001.MLGPAR" otomatis dicocokkan ke
+    kode app (BDGUKU / MLGPAR). Default hanya resto yang ada di data
+    app — centang "Tampilkan resto di luar data app" untuk semua
+    cabang. Pastikan BULAN file == bulan data app (cek label BULAN di
+    baris file setelah dimuat). Double-click baris → popup detail di
+    tanggal H minggu tsb.
+  • 🚨 ANOMALI COM (v3.9.3 — masih ada, tinggal ganti segmen): daftar
+    Nama Barang × Resto dengan PEMAKAIAN (COM) pada kolom H yang MINUS
+    (< 0) atau LEBIH TINGGI dari MEDIAN barang tsb (median antar resto,
+    per barang, di kolom H); H shared dari tab 📦 Deviasi GR (chip
+    read-only + auto-refresh). Tabel Audit Harian lama (6 Status Audit)
+    tersimpan di git history (commit e20141a).
 
 TAB RINCIAN PO (v3.9 — LAYOUT RINGKAS)
   • Baris TEAL = PO: Nomor # + Tanggal + Pemasok + Status Pesanan +
@@ -526,7 +575,11 @@ class StockMonitorApp:
         elif cur == 5:
             view = self.in_selisih_view
         elif cur == 6:
-            view = self.laporan_view
+            # v3.9.4: refresh pane SESUAI MODE aktif di tab Laporan
+            view = (self.komparasi_view
+                    if getattr(self, "laporan_segment", None) is not None
+                    and self.laporan_segment.active == 0
+                    else self.laporan_view)
         elif cur == 8:
             view = self.rincian_view
         if view is not None and hasattr(view, "ensure_refreshed"):
@@ -1004,6 +1057,7 @@ class StockMonitorApp:
         self.in_selisih_view.load_data(append1_df, in_detail_df,
                                       audit_result=audit_result)
         self.laporan_view.load_data(append1_df)
+        self.komparasi_view.load_data(append1_df)  # v3.9.4 — mode komparasi
         self.rincian_view.load_data(rincian_po_df)
         self.btn_export.configure(state="normal")
         self.btn_export_tb.configure(state="normal")
@@ -1183,14 +1237,48 @@ class StockMonitorApp:
         self.in_selisih_view.pack(fill="both", expand=True)
 
     def _build_laporan_tab(self):
-        # v3.9.3: H bersama — chip read-only + auto-refresh saat H
-        # di-apply di tab 📦 Deviasi GR (pola tab 🧩 Deviasi PCS)
+        # v3.9.4: tab 📋 Laporan Deviasi = 2 MODE via SegmentBar:
+        # ⚖ Komparasi File Deviasi (default — v3.9.4) & 🚨 Anomali COM
+        # (v3.9.3, H bersama chip read-only + auto-refresh dari tab GR).
+        self._laporan_container = tk.Frame(self.tab_laporan, bg=C_BG)
+        self._laporan_container.pack(fill="both", expand=True)
+
+        bar = tk.Frame(self._laporan_container, bg=C_BG)
+        bar.pack(fill="x", padx=12, pady=(10, 0))
+        tk.Label(bar, text="MODE", bg=C_BG, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(0, 6))
+        self.laporan_segment = SegmentBar(
+            bar, ["⚖ Komparasi File Deviasi", "🚨 Anomali COM (H)"],
+            command=lambda idx: self.show_laporan_mode(idx))
+        self.laporan_segment.pack(side="left")
+
+        self.komparasi_view = KomparasiDeviasiView(
+            self._laporan_container,
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            followup_store=self.followup_store,
+            initial_dir=(self.rootpath_var.get().strip()
+                         if getattr(self, "rootpath_var", None) is not None
+                         else ""))
         self.laporan_view = LaporanDeviasiView(
-            self.tab_laporan,
+            self._laporan_container,
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
             followup_store=self.followup_store,
             h_state=self._shared_h)
-        self.laporan_view.pack(fill="both", expand=True)
+        # default: mode 0 (Komparasi) — Anomali COM tersembunyi
+        self.komparasi_view.pack(fill="both", expand=True)
+        self.laporan_view.pack_forget()
+
+    def show_laporan_mode(self, idx: int):
+        """v3.9.4 — ganti mode tab 📋 Laporan Deviasi (dipakai SegmentBar
+        & test): 0 = ⚖ Komparasi File, 1 = 🚨 Anomali COM."""
+        if idx == 0:
+            self.laporan_view.pack_forget()
+            self.komparasi_view.pack(fill="both", expand=True)
+            self.komparasi_view.ensure_refreshed()
+        else:
+            self.komparasi_view.pack_forget()
+            self.laporan_view.pack(fill="both", expand=True)
+            self.laporan_view.ensure_refreshed()
 
     def _build_followup_tab(self):
         self.followup_view = FollowUpView(

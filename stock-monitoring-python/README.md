@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.4 — KOMPARASI FILE DEVIASI vs TAB DEVIASI GR + "DEV TO BOM" DI APP**: tab 📋 Laporan Deviasi kini **2 MODE** (SegmentBar): **⚖ Komparasi File Deviasi (BARU — default)** — pilih file deviasi resmi (mis. `20.AGUSTUS 2026.xlsx`), tiap baris dibandingkan sisi-app pada **kolom H menurut minggunya (WEEK 1→7 · WEEK 2→14 · WEEK 3/4→25** — permintaan user; minggu file = cut-off kumulatif dari tgl 1); **BOM App = Σ penjualan 22.05** ("2205 itu BOM"), COM App = Σ pemakaian, **GR App = SO_H − Sistem persis tab 📦 Deviasi GR**, DEV App = COM−BOM (formula file); kolom Selisih + Status **MATCH / SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA**; resto file "1041.BDGUKU" dinormalkan otomatis; minus merah per-cell + sel Status hijau/amber/merah — dan **🚨 Anomali COM (v3.9.3, tetap ada tinggal ganti segmen)**.
 > **v3.9.3 — LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM) (SEMENTARA)**: isi tab 📋 Laporan Deviasi DIGANTI — kini **daftar (Nama Barang × Resto) dengan pemakaian (COM) di kolom H yang MINUS atau LEBIH TINGGI dari MEDIAN barang tsb** (median antar resto, per barang, di kolom H). Formula COM identik baris 6.PEMAKAIAN (COM) pivot (com = SO(t-1) + IN − BK − SO; tanggal pertama = SALDO AWAL — diverifikasi oracle 286 nilai vs pivot, 0 mismatch); matriks COM di-cache (ganti H tanpa recompute); TANGGAL H bersama dari tab 📦 Deviasi GR (chip read-only + auto-refresh); minus merah **per cell** + sel Status merah/amber; tabel Audit Harian lama tersimpan di git history (commit e20141a).
 > **v3.9 — SHARED H + EXPORT AUDIT + RINCIAN PO RINGKAS + STYLE WASTE**: **(1) TANGGAL H cukup input 1×** — input + tombol *Apply H* hanya ada di tab 📦 Deviasi GR, otomatis berlaku juga di tab 🧩 Deviasi PCS (chip nilai H read-only + refresh otomatis; pivot dihitung 1× via cache bersama + lock — tidak ada double input lagi). **(2) Export Rekap Selisih IN + opsi kolom hasil audit** — sebelum simpan file muncul dialog opsi: ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit (bisa ditambahkan atau tidak, sesuai kebutuhan). **(3) Rincian PO DISEDERHANAKAN** — baris TEAL = info PO lengkap SEKALI (Nomor #, Tanggal, Pemasok, Status, Keterangan, N item, Total), baris putih di bawahnya = item saja (Nama Barang · Satuan · Kuantitas); kolom Tgl/Jam Pembuatan pindah ke baris induk + tersembunyi default (tampilkan via ◱ Kolom). **(4) STYLE ala repo Waste** — corong filter header **MERAH saat kolom terfilter** (idle = isi terang + outline gelap), **tabel diperbesar** (font 9→10, rowheight 26→30, heading 10 bold), tombol **⤢ Perbesar Tabel** (ciutkan baris kontrol → tabel tinggi penuh, in-place) + **⛶ Layar Penuh** (window terpisah) di semua tab, padding tombol/tab lebih lapang. **(5) CRASH FIX laten CPython 3.12+Tk** — finalisasi `tk.Variable` dari thread worker (pemicu segfault; kini mustahil via GC shield seumur thread) + cache pivot GR/PCS kini thread-safe (lock).
 > **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
@@ -52,15 +53,82 @@ Stock Monitoring — Python Edition
 - Negative values in parentheses, zero shown as '-'.
 - Double-click cell → pop-up detail source (baris×resto / baris×tanggal).
 
-### 6. Laporan Deviasi (v3.9.3 — SEMENTARA: daftar anomali pemakaian)
-- Daftar **(Nama Barang × Resto)** dengan **pemakaian (COM) di kolom H** yang **minus** atau **lebih tinggi dari median barang tsb** (median antar resto, per barang).
-- Kolom: ✓ · Nama Barang · Resto · Satuan · COM (H) · Median · Selisih vs Median · Status (MINUS / > MEDIAN / MINUS + > MEDIAN).
-- **Tanggal H diatur di tab 📦 Deviasi GR** (chip read-only — tabel ikut refresh otomatis saat H berubah).
-- ✓ = masuk Follow Up (asal LAPORAN-COM) · double-click → detail · klik judul kolom ⧩ = filter + sort.
+### 6. Laporan Deviasi (v3.9.4 — 2 MODE via SegmentBar MODE)
+- **⚖ Komparasi File Deviasi (default — BARU)**: klik **📂 Pilih File Deviasi…** → bandingkan file deviasi resmi (mis. `20.AGUSTUS 2026.xlsx`) dengan hitungan app per (Resto × Barang × Minggu) pada **kolom H minggunya: WEEK 1→7 · WEEK 2→14 · WEEK 3/4→25**. Kolom: ✓ · Resto · Nama Barang · Satuan · Minggu · H · **BOM/COM/DEVIASI/%TO BOM — File** · **BOM/COM/DEV TO BOM — App** (BOM App = Σ penjualan 22.05 tgl 1..H; COM App = Σ pemakaian) · **DEVIASI — App (Tab GR)** = SO_H − Sistem · **Selisih** (GR App − DEV File) · **Status** (MATCH / SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA DI DATA). Default hanya resto yang ada di data app — centang *"Tampilkan resto di luar data app"* untuk semua cabang (file sampel 340 resto). Double-click → popup detail di tanggal H minggu tsb.
+- **🚨 Anomali COM (v3.9.3 — tetap ada, ganti segmen)**: daftar **(Nama Barang × Resto)** dengan **pemakaian (COM) di kolom H** yang **minus** atau **lebih tinggi dari median barang tsb** (median antar resto, per barang). Kolom: ✓ · Nama Barang · Resto · Satuan · COM (H) · Median · Selisih vs Median · Status (MINUS / > MEDIAN / MINUS + > MEDIAN). **Tanggal H diatur di tab 📦 Deviasi GR** (chip read-only — tabel ikut refresh otomatis saat H berubah).
+- ✓ = masuk Follow Up (Komparasi: asal KOMPARASI; Anomali: asal LAPORAN-COM) · double-click → detail · klik judul kolom ⧩ = filter + sort.
 
 ### 7. Rincian PO (tab ketujuh)
 - Tabel Rincian PO dengan filter Cabang PO & Status.
 - Nomor # sebagai parent row (klik ▸ untuk expand).
+
+---
+
+## Fitur Baru v3.9.4 — Komparasi File Deviasi vs Tab Deviasi GR
+
+Permintaan user: *"Di file sampel kan ada Dev to bom ini kok gak ada ya? Padahal data udah lengkap 2205 itu bom. Aku barusan upload file deviasi. Nah aku mau compare file deviasi itu dengan yang deviasi di Tab deviasi GR terus coba cek kolom status week 1 itu sama dengan 7 week 2 = 14 dan week = 25. Itu buat kolom h."*
+
+Tab 📋 **Laporan Deviasi** kini punya **2 MODE** (SegmentBar `MODE` di atas tab):
+**⚖ Komparasi File Deviasi** (BARU — default) dan **🚨 Anomali COM (H)** (v3.9.3 —
+tetap ada, tinggal ganti segmen; v3.9.1 ada tombol bantu ganti mode
+`app.show_laporan_mode(idx)` untuk otomasi).
+
+### ⚖ Mode Komparasi File Deviasi
+1. **Pilih file** — tombol 📂 *Pilih File Deviasi…* (path terakhir diingat di
+   `komparasi_last.json` → dialog terbuka di folder yang sama; tombol ↻ *Muat
+   Ulang File* membaca ulang). Kolom file yang dibaca (nama fleksibel —
+   kapital/spasi diabaikan): **STATUS BULAN · RESTO · NAMA BAHAN · QTY BOM ·
+   QTY COM · QTY DEVIASI · % QTY DEVIASI TO BOM** (opsional: Satuan, BULAN).
+   Kolom wajib hilang → pesan error jelas beserta daftar kolom file.
+2. **Minggu → Kolom H** (permintaan user): **WEEK 1 → H 7 · WEEK 2 → H 14 ·
+   WEEK 3/WEEK 4 → H 25**; minggu lain → 7×n (maks 31). Chip pemetaan tampil
+   di kartu Filter sesuai minggu yang ada di file. Terverifikasi dari file
+   sampel `20.AGUSTUS 2026.xlsx` (40.739 baris, 340 resto, WEEK 1/2/4):
+   minggu file = **cut-off KUMULATIF dari tanggal 1** (WEEK 2 ≈ 2× WEEK 1) —
+   konsisten dgn semantik Tanggal H.
+3. **Sisi app (tanpa file tambahan — "data udah lengkap, 2205 itu BOM")**:
+   - **BOM — App** = Σ penjualan 22.05 (JENIS `9.OUT`) tgl 1..H — konvensi
+     file (minus = pemakaian) supaya kolom berdampingan langsung banding.
+   - **COM — App** = Σ pemakaian `com(t)` tgl 1..H; `com(t) = SO(t-1) +
+     IN(t) − BK(t) − SO(t)`, tanggal pertama memakai SALDO AWAL (formula
+     identik baris 6.PEMAKAIAN (COM) pivot & tab 🚨 Anomali COM).
+   - **DEV TO BOM — App** = COM App − BOM App (formula identik file).
+   - **DEVIASI — App (Tab GR)** = `SO_H − Sistem_H` — PERSIS kolom *Deviasi*
+     tab 📦 Deviasi GR pada H minggu tsb. Secara aljabar
+     `GR App = ΣOUT − SA − ΣIN + ΣBK + SO_H = out_cum − com_cum = DEV App`
+     — dua jalur hitung yang seharusnya sama (selisih internal langsung
+     terlihat bila data tidak konsisten).
+4. **Verdict** — **Selisih** = GR App − DEV File; **Status**: `MATCH` (|selisih|
+   ≤ 1 + 0,01%·|DEV File|) / `SELISIH` / `TIDAK ADA DI DATA APP` (pasangan
+   barang-resto tidak ada di data) / `H TIDAK ADA DI DATA` (tanggal H di luar
+   rentang data app — mis. WEEK 5→31 saat data s/d 25). Footer menghitung
+   semuanya + label BULAN file (reminder: pastikan bulan file = bulan data
+   app).
+5. **Resto otomatis dicocokkan** — file memakai kode cabang (`1041.BDGUKU`,
+   `B.1001.MLGPAR`) → segmen setelah titik terakhir (`BDGUKU`, `MLGPAR`) →
+   nama barang upper+strip. Default hanya **resto yang ada di data app**
+   (mis. 20 resto cek stock) — centang *Tampilkan resto di luar data app*
+   untuk semua cabang (file sampel: 340 resto; 37.321 baris disembunyikan).
+6. **Infrastruktur tabel utuh** — ✓ follow-up (asal **KOMPARASI**: SO = GR
+   App, Sistem = DEV File, Deviasi = selisih, CEK = status, + minggu),
+   filter header ⧩ semua kolom, sort parser angka Indonesia, ⛶ Layar Penuh,
+   ⤢ Perbesar Tabel, ◱ Kolom, ↔ Auto-Fit, minus **merah PER CELL** di semua
+   kolom angka, **sel Status hijau (MATCH) / amber (SELISIH) / merah**,
+   compute async + FIX B-01 (view tidak mati setelah error), double-click →
+   popup detail difilter barang + resto (kode app) + tanggal H minggu.
+
+### ✅ Test
+312/312 UI test (279 v3.9.3 + **33 baru** — mode switcher, parsing file format
+asli, pemetaan minggu→H, GR App = SO_H−Sistem eksak (49/113/150 dari mock
+deterministik), BOM/COM/DEV App konvensi file, MATCH/SELISIH/TIDAK ADA DI
+DATA APP/H TIDAK ADA, opsi semua resto, minus per-cell + sel Status berwarna
++ dipasang ulang setelah sort, filter header Status, ✓ follow-up KOMPARASI,
+tutup file) × 2 run stabil + mock pipeline PASS; ruff 0 error baru (app.py
+13 = 13 baseline, test 23 = 23 baseline); smoke real-data: file
+`20.AGUSTUS 2026.xlsx` (40.739 baris × 340 resto) vs matriks app dari sheet
+SO BULAN INI/Barang Masuk/Barang Keluar (101.697 baris) → 3.418 baris
+komparasi (3 MATCH + 3.383 SELISIH — beda bulan Sept vs Agust sesuai
+harapan) dalam 8,7 detik.
 
 ---
 

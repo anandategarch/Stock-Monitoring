@@ -32,7 +32,15 @@ Memverifikasi:
     (COM) per (Nama Barang × Resto) — COM minus atau > median barang
     (median antar resto) pada kolom H; H shared dari tab Deviasi GR (chip
     read-only + auto-refresh); minus merah per-cell + sel Status merah/amber
+16. v3.9.4 — TAB LAPORAN DEVIASI 2 MODE (SegmentBar): ⚖ KOMPARASI FILE
+    DEVIASI vs TAB DEVIASI GR (pilih file resmi; STATUS BULAN → kolom H:
+    WEEK 1=7, WEEK 2=14, WEEK 3/4=25; BOM App = Σ penjualan 22.05,
+    COM App = Σ pemakaian, GR App = SO_H − Sistem persis tab GR;
+    status MATCH/SELISIH/TIDAK ADA DI DATA APP/H TIDAK ADA; resto file
+    "1041.BDGUKU" dinormalkan; opsi tampil semua resto; minus merah
+    per-cell + sel Status hijau/amber/merah) & 🚨 Anomali COM (v3.9.3)
 """
+import os
 import sys
 import time
 from pathlib import Path
@@ -129,6 +137,112 @@ def make_mock_append1() -> pd.DataFrame:
                         "#Tgl/Jam Pembuatan IT": None,
                     })
     return pd.DataFrame(rows)
+
+
+def make_mock_komparasi_df() -> pd.DataFrame:
+    """Mock deterministik utk KOMPARASI (v3.9.4) — 2 barang × 2 resto,
+    tgl 1..25, running-stock konsisten (DEV App == GR App secara aljabar).
+
+    AYAM FILET: SA=100, SO(t)=100-3t, IN=10 (t%5==0), OUT=20 genap/5 ganjil
+      → SIS(t) running → GR(7)=49, GR(14)=113, GR(25)=180
+      com(t)=3+IN(t) → cum(1..7)=31; out_cum(1..7)=80 → DEV App(7)=49
+    GULA PASIR: SA=60, SO(t)=60-2t, IN=0, OUT=8
+      → GR(25)=150; com cum(1..25)=50; out_cum=200 → DEV App=150
+    """
+    rows = []
+    spec = [
+        ("AYAM FILET", "GR", 100.0, 100.0, 3.0),
+        ("GULA PASIR", "GR", 60.0, 60.0, 2.0),
+    ]
+    for barang, satuan, sa, so_a, so_b in spec:
+        for resto in ("MLGPAR", "SBYKET"):
+            sis = sa
+            for t in range(1, 26):
+                so = so_a - so_b * t
+                in_v = 10.0 if (barang == "AYAM FILET" and t % 5 == 0) else 0.0
+                out_v = (20.0 if t % 2 == 0 else 5.0) \
+                    if barang == "AYAM FILET" else 8.0
+                sis = sis + in_v - out_v
+                rows.append({
+                    "Nama Barang": barang, "JENIS": "SALDO AWAL",
+                    "NAMA RESTO": resto, "Tanggal": t,
+                    "NILAI": sa if t == 1 else 0.0,
+                    "SATUAN": satuan, "AKTIF/NON": "AKTIF",
+                    "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                    "Nomor": None, "Nomor PO": None,
+                    "#Tgl/Jam Pembuatan IT": None,
+                })
+                for jenis, val in (("1.SO", so), ("2.SALDO AKHIR", sis),
+                                   ("4.IN", in_v), ("9.OUT", out_v),
+                                   ("8.BARANG KELUAR", 0.0)):
+                    rows.append({
+                        "Nama Barang": barang, "JENIS": jenis,
+                        "NAMA RESTO": resto, "Tanggal": t, "NILAI": val,
+                        "SATUAN": satuan, "AKTIF/NON": "AKTIF",
+                        "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                        "Nomor": None, "Nomor PO": None,
+                        "#Tgl/Jam Pembuatan IT": None,
+                    })
+    return pd.DataFrame(rows)
+
+
+def make_mock_deviasi_file() -> str:
+    """Mock file deviasi (format kolom file asli '20.AGUSTUS 2026.xlsx').
+
+    7 baris: 3 MATCH (nilai = hitungan app), 1 SELISIH (DEV File 74 vs
+    GR 49), 1 resto tak dikenal (9999.XYZZZ), 1 barang tak ada di app,
+    1 WEEK 5 (H=31 tidak ada di data 1..25).
+    """
+    import tempfile
+    from openpyxl import Workbook
+    hdr = ["Akun Penyesuaian Persediaan", "STATUS", "RESTO", "NAMA BAHAN",
+           "Satuan", "QTY BOM", "QTY COM", "QTY DEVIASI", "QTY WASTE",
+           "QTY SUSUT", "QTY TRIAL", "QTY LOSS SURPLUS", "NOMINAL DEVIASI",
+           "NOMINAL WASTE", "NOMINAL SUSUT", "NOMINAL TRIAL",
+           "NOMINAL LOSS/SURPLUS", "QTY WASTE + SUSUT", "% WASTE + SUSUT",
+           "%TOLERANSI", "% QTY DEVIASI TO BOM", "QTY WASTE TO BOM",
+           "QTY SUSUT TO BOM", "QTY TRIAL  TO BOM",
+           "QTY LOSS/ SURPLUS TO BOM", "AREA", "BULAN", "PENJUALAN",
+           "STATUS BULAN", "BULAN 2"]
+    data = [
+        ["COM DEVIASI - RESTO", "DEVIASI", "1001.MLGPAR", "AYAM FILET",
+         "GR", -80, -31, 49, 0, 0, 0, 49, 49000, 0, 0, 0, 49000, 0, 0,
+         "BELUM ADA TOLERANSI", 49 / 80, 0, 0, 0, 49 / 80, "JAWA TIMUR",
+         "201.OKT 26", 1000, "WEEK 1", "8.OKTOBER"],
+        ["COM DEVIASI - RESTO", "DEVIASI", "1002.SBYKET", "AYAM FILET",
+         "GR", -80, -31, 74, 0, 0, 0, 74, 74000, 0, 0, 0, 74000, 0, 0,
+         "BELUM ADA TOLERANSI", 74 / 80, 0, 0, 0, 74 / 80, "JAWA TIMUR",
+         "201.OKT 26", 1000, "WEEK 1", "8.OKTOBER"],
+        ["COM DEVIASI - RESTO", "DEVIASI", "1001.MLGPAR", "AYAM FILET",
+         "GR", -175, -62, 113, 0, 0, 0, 113, 113000, 0, 0, 0, 113000, 0, 0,
+         "BELUM ADA TOLERANSI", 113 / 175, 0, 0, 0, 113 / 175, "JAWA TIMUR",
+         "202.OKT 26", 2000, "WEEK 2", "8.OKTOBER"],
+        ["COM DEVIASI - RESTO", "DEVIASI", "1001.MLGPAR", "GULA PASIR",
+         "GR", -200, -50, 150, 0, 0, 0, 150, 150000, 0, 0, 0, 150000, 0, 0,
+         "BELUM ADA TOLERANSI", 150 / 200, 0, 0, 0, 150 / 200, "JAWA TIMUR",
+         "204.OKT 26", 4000, "WEEK 4", "8.OKTOBER"],
+        ["COM DEVIASI - RESTO", "DEVIASI", "9999.XYZZZ", "AYAM FILET",
+         "GR", -10, -5, 5, 0, 0, 0, 5, 5000, 0, 0, 0, 5000, 0, 0,
+         "BELUM ADA TOLERANSI", 0.5, 0, 0, 0, 0.5, "LUAR JAWA",
+         "201.OKT 26", 100, "WEEK 1", "8.OKTOBER"],
+        ["COM DEVIASI - RESTO", "DEVIASI", "1001.MLGPAR", "BARANG TAK ADA",
+         "GR", -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+         "BELUM ADA TOLERANSI", 0, 0, 0, 0, 0, "JAWA TIMUR",
+         "201.OKT 26", 100, "WEEK 1", "8.OKTOBER"],
+        ["COM DEVIASI - RESTO", "DEVIASI", "1001.MLGPAR", "AYAM FILET",
+         "GR", -305, -125, 180, 0, 0, 0, 180, 180000, 0, 0, 0, 180000, 0, 0,
+         "BELUM ADA TOLERANSI", 180 / 305, 0, 0, 0, 180 / 305, "JAWA TIMUR",
+         "205.OKT 26", 5000, "WEEK 5", "8.OKTOBER"],
+    ]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(hdr)
+    for row in data:
+        ws.append(row)
+    tmp = os.path.join(tempfile.gettempdir(), "mock_deviasi_komparasi.xlsx")
+    wb.save(tmp)
+    return tmp
 
 
 def make_mock_in_detail() -> pd.DataFrame:
@@ -228,7 +342,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.3", APP_VERSION == "3.9.3", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.4", APP_VERSION == "3.9.4", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -503,6 +617,7 @@ def main():
     root.update()
 
     print("== 7. Laporan Deviasi (v3.9.3 — daftar anomali COM) ==")
+    app.show_laporan_mode(1)   # v3.9.4: segmen Anomali COM (mode 1)
     select_and_wait(root, app, app.tab_laporan, app.laporan_view)
     lap = app.laporan_view
     n_all = len(lap.tree.get_children(""))
@@ -881,6 +996,7 @@ def main():
           fu.empty.winfo_manager() == "pack")
 
     # -- toggle dari Laporan + export (v3.8: Impor Hasil TL DIHAPUS) --
+    app.show_laporan_mode(1)   # v3.9.4: segmen Anomali COM (mode 1)
     select_and_wait(root, app, app.tab_laporan, app.laporan_view)
     lap_tree = app.laporan_view.tree
     first_lap = lap_tree.get_children("")[0]
@@ -897,7 +1013,7 @@ def main():
           "so" in snap_lap and "sistem" in snap_lap,
           f"got asal={snap_lap.get('asal')!r}")
 
-    import tempfile, os
+    import tempfile
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tf:
         xlsx_path = tf.name
     store.export_xlsx(xlsx_path)
@@ -2143,6 +2259,214 @@ def main():
         check("(v3.9.2) Deviasi: sort → tag cell minus DIPASANG ULANG",
               _hcd(_devmin_iid) == 1)
     dv2.destroy()
+
+    # ==================================================================
+    print("== 22. (v3.9.4) KOMPARASI FILE DEVIASI vs TAB DEVIASI GR ==")
+
+    kv = app.komparasi_view
+    app.show_laporan_mode(0)   # section 7/11 meninggalkan mode 1 — reset
+    app.notebook.select(app.tab_laporan)
+    root.update()
+
+    check("(v3.9.4) SegmentBar mode default = 0 (Komparasi)",
+          app.laporan_segment.active == 0)
+    check("(v3.9.4) Komparasi terlihat, Anomali COM tersembunyi",
+          kv.winfo_ismapped() and not app.laporan_view.winfo_ismapped())
+    app.show_laporan_mode(1)
+    root.update()
+    check("(v3.9.4) show_laporan_mode(1) → Anomali COM terlihat",
+          app.laporan_view.winfo_ismapped() and not kv.winfo_ismapped())
+    app.show_laporan_mode(0)
+    root.update()
+    check("(v3.9.4) show_laporan_mode(0) → kembali ke Komparasi",
+          kv.winfo_ismapped() and not app.laporan_view.winfo_ismapped())
+
+    check("(v3.9.4) Skema kolom komparasi (16 kolom)",
+          [c[0] for c in kv.COLUMNS] == [
+              "✓", "Resto", "Nama Barang", "Satuan", "Minggu", "H",
+              "BOM File", "COM File", "DEV File", "%TO BOM File",
+              "BOM App", "COM App", "DEV App", "GR App", "Selisih",
+              "Status"])
+    check("(v3.9.4) Heading dua sisi terpasang",
+          kv.tree.heading("GR App")["text"] == "DEVIASI — App (Tab GR)" and
+          kv.tree.heading("BOM App")["text"] == "BOM — App (Σ jual 22.05)")
+
+    # data deterministik: AYAM FILET & GULA PASIR × 2 resto, tgl 1..25
+    # AYAM: SA=100, SO(t)=100-3t, IN=10 (t%5==0), OUT=20 (genap)/5 (ganjil)
+    #       → SIS = running stock → GR(7)=49, GR(14)=113, GR(25)=180
+    #       com(t)=3+IN(t) → cum(1..7)=31; out_cum(1..7)=80 → DEV App=49
+    # GULA: SA=60, SO(t)=60-2t, IN=0, OUT=8 → GR(25)=150; cum com=50;
+    #       out_cum=200 → DEV App=150
+    det = make_mock_komparasi_df()
+    kv.load_data(det)
+    wait_view(root, kv)
+    check("(v3.9.4) Tanpa file → pesan jujur 'Belum ada file'",
+          "Belum ada file" in kv.status_var_label.get(),
+          f"got {kv.status_var_label.get()!r}")
+
+    xlsx_path = make_mock_deviasi_file()
+    kv._load_file(xlsx_path)
+    wait_view(root, kv)
+
+    n_kv = len(kv.tree.get_children(""))
+    check("(v3.9.4) File 7 baris → 6 tampil (resto 9999.XYZZZ "
+          "disembunyikan default)", n_kv == 6, f"got {n_kv}")
+    check("(v3.9.4) Label file terisi (nama + baris + resto)",
+          "mock_deviasi" in kv._file_label_var.get() and
+          "7 baris" in kv._file_label_var.get(),
+          f"got {kv._file_label_var.get()!r}")
+    _chips_txt = " ".join(
+        c.winfo_children()[0].cget("text")
+        for c in kv._week_chips.winfo_children()
+        if c.winfo_children())
+    check("(v3.9.4) Chip minggu→H: WEEK 1→7 · 2→14 · 4→25 · 5→31",
+          all(t in _chips_txt for t in
+              ["WEEK 1 → H 7", "WEEK 2 → H 14", "WEEK 4 → H 25",
+               "WEEK 5 → H 31"]), f"got {_chips_txt!r}")
+    check("(v3.9.4) Footer hitung status (MATCH 3 · SELISIH 1 · H tdk 1)",
+          "MATCH: 3" in kv.status_var_label.get() and
+          "SELISIH: 1" in kv.status_var_label.get() and
+          "H tdk ada: 1" in kv.status_var_label.get(),
+          f"got {kv.status_var_label.get()!r}")
+
+    def kv_row(resto, barang, minggu):
+        for k in kv.tree.get_children(""):
+            if (kv.tree.set(k, "Resto") == resto and
+                    kv.tree.set(k, "Nama Barang") == barang and
+                    kv.tree.set(k, "Minggu") == minggu):
+                return k
+        return None
+
+    k_match = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 1")
+    check("(v3.9.4) Baris MATCH ada", k_match is not None)
+    if k_match:
+        check("(v3.9.4) GR App = SO(7)-Sistem = '49' (persis Tab GR)",
+              kv.tree.set(k_match, "GR App") == "49",
+              f"got {kv.tree.set(k_match, 'GR App')!r}")
+        check("(v3.9.4) BOM App = -ΣOUT(1..7) = '(80)' (konvensi file)",
+              kv.tree.set(k_match, "BOM App") == "(80)",
+              f"got {kv.tree.set(k_match, 'BOM App')!r}")
+        check("(v3.9.4) COM App = -Σpemakaian = '(31)'",
+              kv.tree.set(k_match, "COM App") == "(31)",
+              f"got {kv.tree.set(k_match, 'COM App')!r}")
+        check("(v3.9.4) DEV App (COM-BOM) = '49' = GR App (aljabar cocok)",
+              kv.tree.set(k_match, "DEV App") == "49",
+              f"got {kv.tree.set(k_match, 'DEV App')!r}")
+        check("(v3.9.4) Selisih 0 → status MATCH",
+              kv.tree.set(k_match, "Status") == "MATCH" and
+              kv.tree.set(k_match, "Selisih") == "-",
+              f"got {kv.tree.set(k_match, 'Status')!r} / "
+              f"{kv.tree.set(k_match, 'Selisih')!r}")
+        check("(v3.9.4) % TO BOM file = '61,25%'",
+              kv.tree.set(k_match, "%TO BOM File") == "61,25%",
+              f"got {kv.tree.set(k_match, '%TO BOM File')!r}")
+        check("(v3.9.4) H minggu WEEK 1 = 7",
+              kv.tree.set(k_match, "H") == "7")
+
+    k_w2 = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 2")
+    check("(v3.9.4) WEEK 2 → H 14, GR App = '113' (MATCH)",
+          k_w2 is not None and kv.tree.set(k_w2, "H") == "14" and
+          kv.tree.set(k_w2, "GR App") == "113" and
+          kv.tree.set(k_w2, "Status") == "MATCH",
+          f"got H={kv.tree.set(k_w2, 'H') if k_w2 else None} "
+          f"GR={kv.tree.set(k_w2, 'GR App') if k_w2 else None}")
+
+    k_gula = kv_row("1001.MLGPAR", "GULA PASIR", "WEEK 4")
+    check("(v3.9.4) WEEK 4 → H 25, GULA GR App = '150' (MATCH)",
+          k_gula is not None and kv.tree.set(k_gula, "H") == "25" and
+          kv.tree.set(k_gula, "GR App") == "150" and
+          kv.tree.set(k_gula, "Status") == "MATCH")
+
+    k_sel = kv_row("1002.SBYKET", "AYAM FILET", "WEEK 1")
+    check("(v3.9.4) DEV File 74 vs GR 49 → SELISIH + selisih '(25)'",
+          k_sel is not None and kv.tree.set(k_sel, "Status") == "SELISIH" and
+          kv.tree.set(k_sel, "Selisih") == "(25)",
+          f"got {kv.tree.set(k_sel, 'Status') if k_sel else None} / "
+          f"{kv.tree.set(k_sel, 'Selisih') if k_sel else None}")
+
+    k_noapp = kv_row("1001.MLGPAR", "BARANG TAK ADA", "WEEK 1")
+    check("(v3.9.4) Barang tak ada di app → TIDAK ADA DI DATA APP + '—'",
+          k_noapp is not None and
+          kv.tree.set(k_noapp, "Status") == "TIDAK ADA DI DATA APP" and
+          kv.tree.set(k_noapp, "GR App") == "—")
+
+    k_noh = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 5")
+    check("(v3.9.4) WEEK 5 → H 31 tidak ada di data (tgl 1..25) → "
+          "H TIDAK ADA DI DATA",
+          k_noh is not None and kv.tree.set(k_noh, "H") == "31" and
+          kv.tree.set(k_noh, "Status") == "H TIDAK ADA DI DATA")
+
+    # opsi: tampilkan resto di luar data app
+    kv._show_all_resto.set(True)
+    kv._on_option_changed()
+    wait_view(root, kv)
+    n_all_kv = len(kv.tree.get_children(""))
+    k_xzz = kv_row("9999.XYZZZ", "AYAM FILET", "WEEK 1")
+    check("(v3.9.4) Centang semua resto → 7 baris + XYZZZ TIDAK ADA",
+          n_all_kv == 7 and k_xzz is not None and
+          kv.tree.set(k_xzz, "Status") == "TIDAK ADA DI DATA APP",
+          f"got {n_all_kv}")
+    kv._show_all_resto.set(False)
+    kv._on_option_changed()
+    wait_view(root, kv)
+
+    # per-cell: minus merah di BOM File, status MATCH hijau per-cell
+    if CELL_TAGS_SUPPORTED and k_match:
+        _khcd = lambda i, col: root.tk.call(
+            str(kv.tree), "tag", "cell", "has", "neg_cell", (i, col))
+        _khst = lambda i: root.tk.call(
+            str(kv.tree), "tag", "cell", "has", "st_match", (i, "Status"))
+        check("(v3.9.4) Minus merah PER-CELL di sel BOM File (-80)",
+              _khcd(k_match, "BOM File") == 1 and
+              _khcd(k_match, "Satuan") == 0)
+        check("(v3.9.4) Sel Status MATCH hijau per-cell",
+              _khst(k_match) == 1 and _khst(k_sel) == 0)
+        kv._sort_by("Selisih", reverse=False)
+        check("(v3.9.4) Sort Selisih naik → baris SELISIH (-25) di atas + "
+              "tag cell dipasang ulang",
+              kv.tree.set(kv.tree.get_children("")[0], "Status") ==
+              "SELISIH" and _khcd(k_match, "BOM File") == 1)
+
+    # filter header Status = MATCH → 3 baris
+    kv._on_col_filter("Status", ["MATCH"])
+    wait_view(root, kv)
+    check("(v3.9.4) Filter header Status=MATCH → 3 baris",
+          len(kv.tree.get_children("")) == 3,
+          f"got {len(kv.tree.get_children(''))}")
+    kv._reset_filter()
+    wait_view(root, kv)
+
+    # ✓ follow-up (asal KOMPARASI) — store dibersihkan di akhir section 11
+    store = app.followup_store
+    first_kv = kv.tree.get_children("")[0]
+    bbox_kv = kv.tree.bbox(first_kv)
+    check("(v3.9.4) bbox baris komparasi tersedia", bool(bbox_kv))
+    if bbox_kv:
+        ev4 = _Ev()
+        ev4.widget = kv.tree
+        ev4.x, ev4.y = bbox_kv[0] + 8, bbox_kv[1] + bbox_kv[3] // 2
+        kv._on_tree_click(ev4)
+        root.update()
+        check("(v3.9.4) Klik ✓ → masuk follow-up (asal KOMPARASI)",
+              len(store) == 1 and
+              next(iter(store.rows.values())).get("asal") == "KOMPARASI")
+        kv._on_tree_click(ev4)
+        root.update()
+        check("(v3.9.4) Klik ✓ lagi → keluar follow-up", len(store) == 0)
+
+    # tutup file → pesan jujur
+    kv._close_file()
+    check("(v3.9.4) Tutup file → tabel kosong + pesan",
+          len(kv.tree.get_children("")) == 0 and
+          "File ditutup" in kv.status_var_label.get(),
+          f"got {kv.status_var_label.get()!r}")
+
+    os.unlink(xlsx_path)
+    if os.path.isfile("komparasi_last.json"):
+        os.unlink("komparasi_last.json")
+    # kembalikan data mock utama supaya state akhir konsisten
+    kv.load_data(append1)
+    wait_view(root, kv)
 
     # Cleanup
     root.destroy()
