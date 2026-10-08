@@ -499,7 +499,9 @@ def run_test():
     # Test DataFrame return (no Excel output — data displayed in UI)
     print("\n  [6] Testing pipeline DataFrame return...")
     from src.main import run_pipeline
-    append1_result, rincian_result = run_pipeline(config_path=config_path, verbose=False)
+    # v3.4: run_pipeline kini return 3 DataFrame (append1, rincian_po, in_detail)
+    append1_result, rincian_result, in_detail_result = run_pipeline(
+        config_path=config_path, verbose=False)
     # Verify DataFrames returned with correct columns (not exact row count — LightMode may differ)
     expected_append1_cols = ["Nama Barang", "NAMA RESTO", "Tanggal", "JENIS", "NILAI",
                              "KATEGORI", "SOURCE KIRIMAN"]
@@ -507,9 +509,16 @@ def run_test():
         assert col in append1_result.columns, f"Missing column in run_pipeline result: {col}"
     assert len(append1_result) > 0, "run_pipeline Append1 should have data"
     assert len(rincian_result) > 0, "run_pipeline Rincian PO should have data"
-    print(f"    ✓ run_pipeline returns DataFrames correctly")
+    # v3.4: IN detail per dokumen (42.05/32.24/99.01 + nomor)
+    assert in_detail_result is not None, "run_pipeline should return in_detail DataFrame"
+    expected_detail_cols = ["NAMA RESTO", "Nama Barang", "Tanggal", "Value",
+                            "Nomor", "SOURCE IN"]
+    for col in expected_detail_cols:
+        assert col in in_detail_result.columns, f"Missing in_detail column: {col}"
+    print(f"    ✓ run_pipeline returns 3 DataFrames correctly (incl. IN detail v3.4)")
     print(f"    Append1: {len(append1_result)} rows, cols: {list(append1_result.columns)}")
     print(f"    Rincian PO: {len(rincian_result)} rows")
+    print(f"    IN detail: {len(in_detail_result)} rows")
 
     # Test view widgets (smoke test)
     print("\n  [7] Testing view widgets...")

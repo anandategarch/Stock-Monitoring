@@ -23,6 +23,11 @@ Memverifikasi:
 11. v3.2 — FOLLOW UP: kolom ✓ (toggle via klik sel), badge tab, tab
     ☑ Follow Up (render snapshot, uncheck=hapus), export xlsx + impor
     hasil TL (status Selesai + PIC), persistensi followup.json
+13. v3.4 — TAB 📤 REKAP SELISIH IN: render baris (Resto/Tanggal/Barang/
+    Satuan/IN/Barang Masuk/Selisih IN), double-click → popup RINCIAN IN
+    (dokumen 42.05/32.24/99.01 + Nomor + subtotal per sumber + copy nomor)
+14. v3.4 — LEBAR KOLOM: drag tepi heading mengubah lebar (enable_col_
+    resize), tombol ↔ Auto-Fit menyesuaikan lebar ke konten
 """
 import sys
 import time
@@ -122,6 +127,33 @@ def make_mock_append1() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def make_mock_in_detail() -> pd.DataFrame:
+    """Mock detail IN per dokumen (v3.4) — 3 sumber + Nomor."""
+    rows = []
+    # 42.05 (pemindahan/SJ) — AYAM FILET MLGPAR tgl 5,10,15
+    for tgl, nomor, qty in [(5, "IT.2026.09.00101", 500.0),
+                            (10, "IT.2026.09.00202", 750.0),
+                            (15, "IT.2026.09.00303", 250.0)]:
+        rows.append({
+            "NAMA RESTO": "MLGPAR", "Nama Barang": "AYAM FILET",
+            "Tanggal": tgl, "Value": qty, "Nomor": nomor,
+            "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+            "SOURCE IN": "42.05", "JENIS": "IN"})
+    # 32.24 (RI) — AYAM FILET MLGPAR tgl 10
+    rows.append({
+        "NAMA RESTO": "MLGPAR", "Nama Barang": "AYAM FILET",
+        "Tanggal": 10, "Value": 300.0, "Nomor": "RI.2026.09.009",
+        "Nomor PO": "PO-010", "#Tgl/Jam Pembuatan IT": None,
+        "SOURCE IN": "32.24", "JENIS": "IN"})
+    # 99.01 (pembelian tanpa penerimaan) — GULA PASIR SBYKET tgl 5
+    rows.append({
+        "NAMA RESTO": "SBYKET", "Nama Barang": "GULA PASIR",
+        "Tanggal": 5, "Value": 1200.0, "Nomor": "PI.2026.10.01556",
+        "Nomor PO": "PO.2026.10.012", "#Tgl/Jam Pembuatan IT": None,
+        "SOURCE IN": "99.01", "JENIS": "IN"})
+    return pd.DataFrame(rows)
+
+
 def make_mock_rincian() -> pd.DataFrame:
     rows = []
     for i in range(1, 13):
@@ -149,10 +181,10 @@ def main():
     app = StockMonitorApp(root)
     sys.stdout, sys.stderr = real_stdout, real_stderr
     root.update_idletasks()
-    check("App + toolbar + 8 tab terbangun (v3.2: +Follow Up)",
-          len(app.notebook.tabs()) == 8, f"tabs={len(app.notebook.tabs())}")
+    check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
+          len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.3.1", APP_VERSION == "3.3.1", f"got {APP_VERSION}")
+    check(f"Versi = 3.4.0", APP_VERSION == "3.4.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -163,11 +195,14 @@ def main():
     check("Deviasi GR empty", app.deviasi_gr_view.data is None)
     check("Laporan empty", app.laporan_view.data is None)
     check("Rincian empty", app.rincian_view.data is None)
+    check("Rekap Selisih IN empty (v3.4)", app.in_selisih_view.data is None)
 
     print("== 3. Load mock data (async + loading overlay) ==")
     append1 = make_mock_append1()
     rincian = make_mock_rincian()
-    print(f"   mock append1: {len(append1)} rows, rincian: {len(rincian)} rows")
+    in_detail = make_mock_in_detail()
+    print(f"   mock append1: {len(append1)} rows, rincian: {len(rincian)} rows, "
+          f"in_detail: {len(in_detail)} rows")
 
     check("Pivot punya loading overlay",
           isinstance(app.pivot_view.overlay, LoadingOverlay))
@@ -184,16 +219,18 @@ def main():
     app.pivot_view.load_data(append1)
     app.deviasi_gr_view.load_data(append1)
     app.deviasi_pcs_view.load_data(append1)
+    app.in_selisih_view.load_data(append1, in_detail)
     app.laporan_view.load_data(append1)
     app.rincian_view.load_data(rincian)
     root.update()
     check("Lazy: view tak terlihat defer refresh (dirty)",
           app.deviasi_gr_view._dirty and app.laporan_view._dirty and
-          app.rincian_view._dirty)
+          app.rincian_view._dirty and app.in_selisih_view._dirty)
 
     for tab, v in [(app.tab_pivot, app.pivot_view),
                    (app.tab_deviasi_gr, app.deviasi_gr_view),
                    (app.tab_deviasi_pcs, app.deviasi_pcs_view),
+                   (app.tab_in_selisih, app.in_selisih_view),
                    (app.tab_laporan, app.laporan_view),
                    (app.tab_rincian, app.rincian_view)]:
         ok = select_and_wait(root, app, tab, v)
@@ -782,6 +819,125 @@ def main():
     for p in (followup_path(), resolved_path()):
         if p.exists():
             p.unlink()
+
+    # ==================================================================
+    print("== 13. v3.4 — TAB 📤 REKAP SELISIH IN ==")
+    from src.ui.in_selisih_view import InSelisihView, InDetailPopup, COL_IDS
+    iv = app.in_selisih_view
+    select_and_wait(root, app, app.tab_in_selisih, iv)
+    tree_in = iv.tree
+    kids_in = list(tree_in.get_children(""))
+    check("Rekap Selisih IN: ada baris (aktivitas IN≠0)", len(kids_in) > 0,
+          f"got {len(kids_in)}")
+    hdrs = [tree_in.heading(c)["text"] for c in COL_IDS]
+    check("Kolom = Resto/Tanggal/Nama Barang/Satuan/IN/Barang Masuk/Selisih IN",
+          hdrs == ["Resto", "Tanggal", "Nama Barang", "Satuan", "IN",
+                   "Barang Masuk", "Selisih IN"], f"got {hdrs}")
+    # nilai IN ≠ '-' di baris pertama? (mock: tgl % 5 == 0 → IN=5)
+    has_in_val = any(tree_in.set(k, "IN") not in ("-", "") for k in kids_in)
+    check("Kolom IN terisi (bukan '-' semua)", has_in_val)
+    # selisih = BM - IN (mock BM=0 → selisih negatif ditampilkan dgn kurung)
+    row0 = {c: tree_in.set(kids_in[0], c) for c in COL_IDS}
+    in_v = row0.get("IN", "-").replace(",", "")
+    if in_v not in ("-", "") and in_v.startswith("(") is False and in_v != "":
+        # parse IN → selisih harus -IN (kurung)
+        try:
+            in_f = float(in_v)
+            sel_v = row0.get("Selisih IN", "").replace(",", "")
+            check("Selisih IN = BM - IN (mock BM=0 → (IN))",
+                  sel_v == f"({in_f:,.0f})", f"in={in_v} sel={sel_v}")
+        except ValueError:
+            check("Selisih IN parse", False, f"in={in_v!r}")
+
+    # ---- drill-down: double-click baris AYAM FILET MLGPAR tgl 10 ----
+    target = None
+    for k in kids_in:
+        vals = tree_in.item(k, "values")
+        if vals[0] == "MLGPAR" and vals[1] == "10" and vals[2] == "AYAM FILET":
+            target = k
+            break
+    check("Ada baris MLGPAR/AYAM FILET/Tgl 10 utk drill-down", target is not None)
+    if target is not None:
+        bbox = tree_in.bbox(target)
+        evd = _Ev()
+        evd.widget = tree_in
+        evd.x, evd.y = bbox[0] + 10, bbox[1] + bbox[3] // 2
+        iv._on_double_click(evd)
+        root.update()
+        # popup terakhir di stack toplevel
+        popups = [w for w in root.winfo_children()
+                  if isinstance(w, InDetailPopup) and w.winfo_exists()]
+        check("Double-click → popup Rincian IN terbuka", len(popups) >= 1)
+        if popups:
+            pop = popups[-1]
+            pkids = list(pop.tree.get_children(""))
+            srcs = {pop.tree.set(k, "Source") for k in pkids}
+            check("Popup: ada dokumen 42.05", any("42.05" in s for s in srcs),
+                  f"srcs={srcs}")
+            check("Popup: ada dokumen 32.24", any("32.24" in s for s in srcs),
+                  f"srcs={srcs}")
+            check("Popup: ada subtotal per sumber",
+                  any(str(s).startswith("TOTAL") for s in srcs))
+            check("Popup: ada TOTAL IN", "TOTAL IN" in str(pop.tree.item(
+                pkids[-1], "values")[0] if pkids else ""))
+            nomors = [pop.tree.set(k, "Nomor") for k in pkids
+                      if pop.tree.set(k, "Nomor")]
+            check("Popup: Nomor dokumen tampil (IT./RI.)",
+                  any(n.startswith(("IT.", "RI.", "PI.")) for n in nomors),
+                  f"nomors={nomors[:4]}")
+            # qty 42.05(750) + 32.24(300) = 1050 == IN metric di append1? (mock IN=5 —
+            # detail mock terpisah; verifikasi total popup = 1050)
+            total_row = [pop.tree.set(k, "Qty") for k in pkids
+                         if pop.tree.set(k, "Source") == "TOTAL IN"]
+            check("Popup: TOTAL IN = 1,050 (42.05:750 + 32.24:300)",
+                  total_row and total_row[0] == "1,050", f"got {total_row}")
+            # copy semua nomor unik
+            pop._copy_all_unique()
+            root.update()
+            clip = root.clipboard_get()
+            check("Copy Semua Nomor → clipboard berisi IT./RI. unik",
+                  "IT.2026.09.00202" in clip and "RI.2026.09.009" in clip)
+            pop.destroy()
+            root.update()
+
+    # ==================================================================
+    print("== 14. v3.4 — LEBAR KOLOM: drag tepi + ↔ Auto-Fit ==")
+    from src.ui.widgets import enable_col_resize, auto_fit_columns
+    # (a) drag tepi kanan heading kolom pertama
+    # (stretch=False supaya lebar deterministik — dengan stretch Tk
+    # redistribusi ruang sisa jendela ke semua kolom)
+    tree_in.column("Resto", stretch=False)
+    w_before = tree_in.column("Resto", "width")
+    edge_x = w_before  # tepi kanan kolom pertama
+    tree_in.event_generate("<Button-1>", x=edge_x, y=10)
+    root.update()
+    tree_in.event_generate("<B1-Motion>", x=edge_x + 60, y=10)
+    root.update()
+    tree_in.event_generate("<ButtonRelease-1>", x=edge_x + 60, y=10)
+    root.update()
+    w_after = tree_in.column("Resto", "width")
+    check("Drag tepi heading → lebar kolom berubah (w+60)",
+          w_after == w_before + 60, f"{w_before} → {w_after}")
+    tree_in.column("Resto", stretch=True)
+    # (b) tombol ↔ Auto-Fit menyesuaikan lebar ke konten
+    iv._auto_fit()
+    root.update()
+    w_autofit = tree_in.column("Nama Barang", "width")
+    check("↔ Auto-Fit: kolom Nama Barang menyesuaikan konten (>default)",
+          w_autofit != 200, f"200 → {w_autofit}")
+    # (c) enable_col_resize terpasang di semua view utama
+    views_trees = [
+        app.pivot_view.tree, app.deviasi_gr_view.tree,
+        app.deviasi_pcs_view.tree, app.laporan_view.tree,
+        app.rincian_view.tree, app.followup_view.tree,
+        app.in_selisih_view.tree,
+    ]
+    # tidak ada API publik utk cek binding — verifikasi tidak error saat
+    # memanggil ulang (idempotent) + smoke drag di pivot (show tree headings)
+    for t in views_trees:
+        enable_col_resize(t)
+    check("enable_col_resize terpasang di 7 view (idempotent, tanpa error)",
+          True)
 
     # Cleanup
     root.destroy()

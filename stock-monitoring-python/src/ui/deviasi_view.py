@@ -31,8 +31,8 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
-    LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
-    run_async, sort_tree_by_column,
+    LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
+    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -192,6 +192,11 @@ class DeviasiView(tk.Frame):
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(Esc untuk menutup)")
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
+                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
+                             "drag tepi kolom = atur lebar manual)")
 
         col_ids = [c[0] for c in self.COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
@@ -217,6 +222,10 @@ class DeviasiView(tk.Frame):
         hsb.grid(row=2, column=0, sticky="ew")
         tbody.grid_rowconfigure(1, weight=1)
         tbody.grid_columnconfigure(0, weight=1)
+
+        # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
+        # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
+        enable_col_resize(self.tree)
 
         # Footer: hint + status
         foot = tk.Frame(tbody, bg=C_CARD)
@@ -777,6 +786,10 @@ class DeviasiView(tk.Frame):
             return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
         sort_tree_by_column(tree, col, reverse=reverse)
+
+    def _auto_fit(self):
+        """v3.4 — auto-fit lebar semua kolom ke konten."""
+        auto_fit_columns(self.tree)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP (tree-agnostic via event.widget)

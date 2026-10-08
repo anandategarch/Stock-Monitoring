@@ -19,6 +19,20 @@ Bila folder tidak punya file per-resto "REKAP MENTAH", reader otomatis:
      NAMA BARANG + SATUAN + ≥3 kolom hari 1..31) pada ≤6 baris pertama
   3. baca sheet tsb, NAMA RESTO diambil dari KOLOM (bukan nama file)
 
+v3.4 — FIX "SO bulan lalu gak ke record meskipun LightMode OFF":
+Data bulan lalu user ada di sheet 'SO BULAN LALU' (workbook gabungan di
+RootPath) — schema: NAMA RESTO + NAMA BARANG + JENIS + kolom hari
+"Sum of 1".."Sum of 31", TANPA SATUAN. Sebelumnya:
+  - mode "lalu" tidak pernah scan folder induk/RootPath;
+  - sheet itu gagal deteksi (kolom hari "Sum of N" + tanpa SATUAN).
+Perbaikan:
+  - deteksi schema menerima header hari "Sum of N" & SATUAN opsional
+    (wajib: NAMA RESTO + JENIS + NAMA BARANG + ≥3 kolom hari);
+  - mode "lalu" ikut scan RootPath, TAPI hanya sheet ber-nama "LALU"
+    (jangan campur data bulan berjalan ke bulan lalu);
+  - mode "berjalan" kini SKIP sheet ber-nama "LALU" (defensive — sheet
+    '1  DEVIASI WEEKLY' tetap yang terbaca untuk bulan berjalan).
+
 OPTIMIZED: vectorized text operations.
 """
 import os
@@ -33,35 +47,56 @@ from .helpers import (
 _BASE_COLS = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS",
               "NAMA BARANG", "SATUAN"]
 
+# Kolom WAJIB utk deteksi schema combined (v3.4: SATUAN jadi opsional —
+# sheet 'SO BULAN LALU' user tidak punya kolom SATUAN)
+_REQUIRED_COLS = ["NAMA RESTO", "JENIS", "NAMA BARANG"]
+
+
+def _parse_day_header(h: str):
+    """Header kolom hari → nomor hari (1..31), atau None.
+    Menerima '1' / 1 / 1.0 (gabungan v3.3.1) maupun 'Sum of 25' (pivot
+    Excel — sheet 'SO BULAN LALU' user, v3.4)."""
+    s = str(h).strip().upper()
+    if s.startswith("SUM OF "):
+        s = s[len("SUM OF "):].strip()
+    elif s.startswith("SUM OF"):
+        s = s[len("SUM OF"):].strip()
+    if not s or s in ("NONE", "NAN"):
+        return None
+    try:
+        d = int(float(s))
+    except (TypeError, ValueError):
+        return None
+    return d if 1 <= d <= 31 else None
+
 
 def _detect_rekap_header(peek: pd.DataFrame):
     """Deteksi baris header ber-schema rekap-mentah dalam peek (raw,
     header=None, ≤6 baris pertama). Format combined: kolom NAMA RESTO +
-    JENIS + NAMA BARANG + SATUAN + ≥3 kolom hari (header 1..31).
+    JENIS + NAMA BARANG (+ SATUAN opsional) + ≥3 kolom hari (header 1..31
+    atau 'Sum of N' — v3.4).
     Return (header_row_idx, {posisi_kolom: nomor_hari}) atau None.
 
     Diverifikasi terhadap workbook gabungan user (16 sheet): hanya sheet
-    '1  DEVIASI WEEKLY' yang lolos — sheet lain (SO BULAN INI, DEVIASI GR,
-    Barang Masuk/Keluar, 29 Rekap, Follow UP, dll) tertolak karena tidak
-    punya JENIS / NAMA RESTO persis / kolom hari.
+    '1  DEVIASI WEEKLY' (berjalan) dan 'SO BULAN LALU' (lalu) yang lolos —
+    sheet lain (SO BULAN INI, DEVIASI GR, Barang Masuk/Keluar, 29 Rekap,
+    Follow UP, dll) tertolak karena tidak punya JENIS / NAMA RESTO persis /
+    kolom hari.
     """
     if peek is None or peek.empty:
         return None
     for hr in range(min(6, len(peek))):
         headers = [str(h).strip() if h is not None else "" for h in peek.iloc[hr].tolist()]
         up = [h.upper() for h in headers]
-        if "NAMA RESTO" not in up or "JENIS" not in up \
-                or "NAMA BARANG" not in up or "SATUAN" not in up:
+        # v3.4: SATUAN opsional — wajib NAMA RESTO + JENIS + NAMA BARANG
+        if any(rc not in up for rc in _REQUIRED_COLS):
             continue
         day_pos = {}
         for i, h in enumerate(up):
             if h in ("", "NONE", "NAN"):
                 continue
-            try:
-                d = int(float(h))
-            except (TypeError, ValueError):
-                continue
-            if 1 <= d <= 31:
+            d = _parse_day_header(h)
+            if d is not None:
                 day_pos[i] = d
         if len(day_pos) >= 3:
             return hr, day_pos
@@ -81,15 +116,13 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
         return up.index(name) if name in up else None
 
     # kolom hari: cari ulang dari header aktual (posisi = posisi peek)
+    # v3.4: header 'Sum of N' juga diterima (sheet SO BULAN LALU)
     days = {}
     for i, h in enumerate(up):
         if h in ("", "NONE", "NAN"):
             continue
-        try:
-            d = int(float(h))
-        except (TypeError, ValueError):
-            continue
-        if 1 <= d <= 31:
+        d = _parse_day_header(h)
+        if d is not None:
             days[i] = d
     # mode "lalu" (mirror M): hanya hari 25..31, dinegasikan
     if mode != "berjalan":
@@ -141,8 +174,12 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
 
 
 def _read_combined_file(file_path: str, mode: str,
-                        jenis_filter: Optional[List[str]]) -> Optional[pd.DataFrame]:
-    """Cari sheet rekap-mentah (combined) dalam satu file; baca → long."""
+                        jenis_filter: Optional[List[str]],
+                        sheet_filter=None) -> Optional[pd.DataFrame]:
+    """Cari sheet rekap-mentah (combined) dalam satu file; baca → long.
+
+    sheet_filter(sn) → bool: filter nama sheet (dipakai pemisah bulan
+    berjalan vs bulan lalu saat scan folder induk/RootPath — v3.4)."""
     if file_path.lower().endswith(".xlsb") and _xlsb_engine() is None:
         print(f"  [fn_rekap_mentah] SKIP {os.path.basename(file_path)}: file .xlsb "
               "butuh package pyxlsb/python-calamine (pip install pyxlsb)")
@@ -153,6 +190,8 @@ def _read_combined_file(file_path: str, mode: str,
         engine = _EXCEL_ENGINE           # calamine bila ada, else default
     engine_kwargs = {"engine": engine} if engine else {}
     for sn in _list_sheet_names(file_path):
+        if sheet_filter is not None and not sheet_filter(sn):
+            continue
         try:
             peek = pd.read_excel(file_path, sheet_name=sn, header=None,
                                  nrows=8, dtype=object, **engine_kwargs)
@@ -180,19 +219,34 @@ def _read_combined_file(file_path: str, mode: str,
 
 def _read_combined_rekap(folder_path: str, mode: str,
                          jenis_filter: Optional[List[str]]) -> Optional[pd.DataFrame]:
-    """Fallback v3.3.1: cari workbook gabungan ber-schema rekap mentah.
-    Urutan: folder itu sendiri → (mode 'berjalan' saja) folder induk/RootPath.
-    Folder induk tidak discan untuk mode 'lalu' agar data bulan berjalan
-    tidak tercampur ke bulan lalu."""
-    search_paths = [folder_path]
-    if mode == "berjalan":
-        parent = os.path.dirname(os.path.abspath(folder_path))
-        if parent and os.path.isdir(parent) \
-                and os.path.abspath(parent) != os.path.abspath(folder_path):
-            search_paths.append(parent)
-    for base in search_paths:
-        for f in _list_excel_files(base):
-            out = _read_combined_file(f, mode, jenis_filter)
+    """Fallback: cari workbook gabungan ber-schema rekap mentah.
+
+    Urutan scan (v3.4):
+    1. folder itu sendiri — file gabungan diletakkan langsung di folder
+       RekapBerjalan/RekapLalu (semua sheet boleh — folder menentukan
+       bulan-nya, cocok utk format legacy).
+    2. folder induk / RootPath — file gabungan user sering disimpan di
+       RootPath, MAKA dipisah lewat nama sheet supaya data bulan
+       berjalan tidak tercampur ke bulan lalu (dan sebaliknya):
+       - mode "berjalan": SKIP sheet ber-nama "LALU"
+       - mode "lalu"    : HANYA sheet ber-nama "LALU"
+    """
+    # 1. folder itu sendiri (tanpa filter nama sheet)
+    for f in _list_excel_files(folder_path):
+        out = _read_combined_file(f, mode, jenis_filter)
+        if out is not None:
+            return out
+    # 2. folder induk / RootPath (dengan filter nama sheet)
+    parent = os.path.dirname(os.path.abspath(folder_path))
+    if parent and os.path.isdir(parent) \
+            and os.path.abspath(parent) != os.path.abspath(folder_path):
+        if mode == "berjalan":
+            sheet_filter = lambda sn: "LALU" not in sn.upper()  # noqa: E731
+        else:
+            sheet_filter = lambda sn: "LALU" in sn.upper()     # noqa: E731
+        for f in _list_excel_files(parent):
+            out = _read_combined_file(f, mode, jenis_filter,
+                                      sheet_filter=sheet_filter)
             if out is not None:
                 return out
     print(f"  [fn_rekap_mentah] WARNING: tidak ada file per-resto 'REKAP MENTAH' "

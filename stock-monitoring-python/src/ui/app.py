@@ -18,9 +18,10 @@ Struktur jendela (ala aplikasi Waste):
   3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
-  6. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
-  7. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
-  8. 🛒 Rincian PO      : pivot PO dengan search + sort
+  6. 📤 Rekap Selisih IN: IN (Accurate) vs Barang Masuk + rincian dokumen (v3.4)
+  7. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
+  8. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
+  9. 🛒 Rincian PO      : pivot PO dengan search + sort
 
 v3.3 ringkasan (hasil DEEP AUDIT):
 - ENGINE SORT LINEAR: klik judul kolom kini delete+reinsert O(n)
@@ -77,15 +78,19 @@ from src.ui.deviasi_view import DeviasiView, SharedPivotCache
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.rincian_po_view import RincianPoView
 from src.ui.followup_view import FollowUpView
+from src.ui.in_selisih_view import InSelisihView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.3.1"  # v3.3.1: FIX "Saldo SO kosong semua" — (1) reader
-                        # SO kini dukung workbook gabungan .xlsb (sheet apa pun
-                        # ber-schema rekap mentah, NAMA RESTO dari kolom); (2)
-                        # fix render: vektorisasi v3.2 lupa kolom matrix
-                        # (SO_H-2..SO_H+2/In/Out/BK + Saldo Awal/IN/OUT/BK/
-                        # Saldo Kumulatif di Laporan) → selalu tampil "-"
+APP_VERSION = "3.4.0"  # v3.4.0: (1) lebar kolom bisa di-adjust (drag tepi
+                        # heading) + tombol ↔ Auto-Fit di semua tabel; (2) FIX
+                        # "SO bulan lalu gak ke record" — reader rekap kini
+                        # baca sheet 'SO BULAN LALU' (header 'Sum of N', tanpa
+                        # SATUAN) dari workbook gabungan saat LightMode OFF;
+                        # (3) tab BARU 📤 Rekap Selisih IN (Resto/Tanggal/
+                        # Barang/Satuan/IN/Barang Masuk/Selisih IN) + drill-down
+                        # popup rincian IN per dokumen 42.05/32.24/99.01
+                        # beserta nomornya
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -122,15 +127,38 @@ class StreamToQueue:
 
 
 # --- Panduan singkat ---------------------------------------------------------
-_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.3
+_HELP_TEXT = """PANDUAN SINGKAT — STOCK MONITORING v3.4
 
 ALUR KERJA
   1. Tab ⚙️ Config   : pastikan RootPath menunjuk folder data export Accurate Online.
   2. Tab 🚀 Proses   : klik MULAI PROSES → pantau log → tunggu "SELESAI".
      (semua proses panjang menampilkan animasi loading / progress)
   3. Data otomatis terisi ke tab 📊 Pivot, 📦 Deviasi GR, 🧩 Deviasi PCS,
-     📋 Laporan Deviasi, dan 🛒 Rincian PO.
+     📤 Rekap Selisih IN, 📋 Laporan Deviasi, dan 🛒 Rincian PO.
      (v3.2: tab hanya dihitung saat dibuka — app lebih ringan)
+
+LEBAR KOLOM (v3.4 — BARU)
+  • Drag tepi kanan judul kolom = atur lebar kolom secara manual.
+  • Double-click tepi kolom = auto-fit kolom itu ke lebar konten.
+  • Tombol ↔ Auto-Fit di atas tabel = auto-fit SEMUA kolom sekaligus
+    (juga tersedia di window ⛶ Perbesar dan di semua popup).
+
+TAB 📤 REKAP SELISIH IN (v3.4 — BARU)
+  • Rekap per (Resto × Tanggal × Barang × Satuan):
+      IN           = barang masuk per dokumen Accurate (42.05 + 32.24 + 99.01)
+      Barang Masuk = barang masuk yang dicatat di input SO harian (rekap)
+      Selisih IN   = Barang Masuk − IN
+  • Double-click baris → popup RINCIAN IN: daftar dokumen pendukung
+    per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA + subtotal
+    per sumber + total IN.
+  • Klik kanan / double-click kolom Nomor di popup = copy nomor.
+  • Rentang tanggal 1–31; tanggal -25 s/d -31 = data bulan lalu
+    (hanya dibaca saat LightMode OFF).
+
+SO BULAN LALU (v3.4 — FIX)
+  • Dengan LightMode OFF, SO bulan lalu kini terbaca otomatis dari
+    sheet 'SO BULAN LALU' di workbook gabungan (RootPath) → tercatat
+    sebagai Tanggal -25 s/d -31. (Sebelumnya: tidak pernah ke-record.)
 
 TAB PIVOT TABLE
   • PIVOT PER: 🏪 Resto (default) atau 📅 Tanggal.
@@ -186,9 +214,12 @@ POP-UP DETAIL — COPY NOMOR / NOMOR PO
 SEMUA TABEL
   • Klik judul kolom untuk sort — instan walau puluhan ribu baris (v3.3).
     Angka negatif (merah); nol = "-".
+  • Lebar kolom bisa diatur: drag tepi judul kolom (v3.4);
+    double-click tepi = auto-fit kolom; ↔ Auto-Fit = semua kolom.
 
 EXPORT
   • Tombol 💾 Export Excel di toolbar atas (aktif setelah pipeline selesai).
+    Sheet: Append1 + Rincian PO + Rincian IN (detail dokumen, v3.4).
 """
 
 
@@ -209,6 +240,7 @@ class StockMonitorApp:
         self.stop_event = threading.Event()
         self.append1_df = None
         self.rincian_po_df = None
+        self.in_detail_df = None
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
@@ -246,7 +278,7 @@ class StockMonitorApp:
         self.btn_export_tb = self.toolbar.add_action(
             "💾 Export Excel", command=self._export_excel, accent=True)
         add_tooltip(self.btn_export_tb,
-                    "Export Append1 + Rincian PO ke Excel\n(aktif setelah pipeline selesai)")
+                    "Export Append1 + Rincian PO + Rincian IN ke Excel\n(aktif setelah pipeline selesai)")
         self.btn_export_tb.configure(state="disabled")
 
         self.toolbar.add_action("❓ Bantuan", command=self._show_help)
@@ -265,6 +297,7 @@ class StockMonitorApp:
         self.tab_pivot = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_gr = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_pcs = tk.Frame(self.notebook, bg=C_BG)
+        self.tab_in_selisih = tk.Frame(self.notebook, bg=C_BG)
         self.tab_laporan = tk.Frame(self.notebook, bg=C_BG)
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
@@ -274,6 +307,7 @@ class StockMonitorApp:
         self.notebook.add(self.tab_pivot, text="  📊 Pivot Table  ")
         self.notebook.add(self.tab_deviasi_gr, text="  📦 Deviasi GR  ")
         self.notebook.add(self.tab_deviasi_pcs, text="  🧩 Deviasi PCS  ")
+        self.notebook.add(self.tab_in_selisih, text="  📤 Rekap Selisih IN  ")
         self.notebook.add(self.tab_laporan, text="  📋 Laporan Deviasi  ")
         self.notebook.add(self.tab_followup, text="  ☑ Follow Up  ")
         self.notebook.add(self.tab_rincian, text="  🛒 Rincian PO  ")
@@ -290,6 +324,7 @@ class StockMonitorApp:
         self._build_pivot_tab()
         self._build_deviasi_gr_tab()
         self._build_deviasi_pcs_tab()
+        self._build_in_selisih_tab()
         self._build_laporan_tab()
         self._build_followup_tab()
         self._build_rincian_tab()
@@ -308,8 +343,10 @@ class StockMonitorApp:
         elif cur == 4:
             view = self.deviasi_pcs_view
         elif cur == 5:
+            view = self.in_selisih_view
+        elif cur == 6:
             view = self.laporan_view
-        elif cur == 7:
+        elif cur == 8:
             view = self.rincian_view
         if view is not None and hasattr(view, "ensure_refreshed"):
             view.ensure_refreshed()
@@ -688,19 +725,19 @@ class StockMonitorApp:
         Kini error ditangkap ke tuple lokal dulu, lambda bebas closure.
         """
         try:
-            append1_df, rincian_po_df = run_pipeline(
+            append1_df, rincian_po_df, in_detail_df = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
             self.root.after(0, lambda: self._on_pipeline_done(
-                append1_df, rincian_po_df, None))
+                append1_df, rincian_po_df, in_detail_df, None))
         except PipelineStopped as exc:
             err = (exc, None)
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, err))
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, err))
         except Exception as exc:
             import traceback
             err = (exc, traceback.format_exc())
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, err))
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, err))
 
-    def _on_pipeline_done(self, append1_df, rincian_po_df, error):
+    def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df, error):
         """Dijadwalkan ke main thread via after()."""
         self.progress.stop()
         self.status_spinner.stop()
@@ -739,10 +776,12 @@ class StockMonitorApp:
         # Sukses — simpan + muat data ke semua view
         self.append1_df = append1_df
         self.rincian_po_df = rincian_po_df
+        self.in_detail_df = in_detail_df
         self.status_var.set("Status: SELESAI.")
         self.statusbar.set_status(
             f"SELESAI — Append1: {len(append1_df):,} rows · "
-            f"Rincian PO: {len(rincian_po_df):,} rows", C_GREEN)
+            f"Rincian PO: {len(rincian_po_df):,} rows · "
+            f"IN detail: {len(in_detail_df):,} rows", C_GREEN)
         self.kpi_status.set_value("SELESAI", "data siap dianalisis", C_GREEN)
         self.kpi_append.set_value(f"{len(append1_df):,}",
                                   "baris pivot siap di tab 📊")
@@ -756,6 +795,7 @@ class StockMonitorApp:
         self.pivot_view.load_data(append1_df)
         self.deviasi_gr_view.load_data(append1_df)
         self.deviasi_pcs_view.load_data(append1_df)
+        self.in_selisih_view.load_data(append1_df, in_detail_df)
         self.laporan_view.load_data(append1_df)
         self.rincian_view.load_data(rincian_po_df)
         self.btn_export.configure(state="normal")
@@ -771,7 +811,7 @@ class StockMonitorApp:
         self._append_log_batched(
             "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
             "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
-            "📋 Laporan / ☑ Follow Up / 🛒 Rincian PO.\n")
+            "📤 Rekap Selisih IN / 📋 Laporan / ☑ Follow Up / 🛒 Rincian PO.\n")
 
     def _stop_pipeline(self):
         """Stop graceful — set stop_event, pipeline memeriksa di checkpoint."""
@@ -788,7 +828,7 @@ class StockMonitorApp:
             "di checkpoint berikutnya.\n")
 
     def _export_excel(self):
-        """Export data (Append1 + Rincian PO) ke Excel — async + loading."""
+        """Export data (Append1 + Rincian PO + Rincian IN) ke Excel — async + loading."""
         if self.append1_df is None and self.rincian_po_df is None:
             messagebox.showwarning(
                 "Export", "Belum ada data. Jalankan pipeline dulu.",
@@ -805,6 +845,7 @@ class StockMonitorApp:
 
         append1_df = self.append1_df
         rincian_po_df = self.rincian_po_df
+        in_detail_df = self.in_detail_df
 
         # loading overlay di tengah jendela utama (dibuat lazily)
         if not hasattr(self, "_export_overlay"):
@@ -822,6 +863,10 @@ class StockMonitorApp:
                 if rincian_po_df is not None and not rincian_po_df.empty:
                     rincian_po_df.to_excel(writer, sheet_name="Rincian PO",
                                            index=False)
+                # v3.4: detail IN per dokumen (42.05 / 32.24 / 99.01 + nomor)
+                if in_detail_df is not None and not in_detail_df.empty:
+                    in_detail_df.to_excel(writer, sheet_name="Rincian IN",
+                                          index=False)
             return filepath
 
         def done(path):
@@ -907,6 +952,13 @@ class StockMonitorApp:
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache)
         self.deviasi_pcs_view.pack(fill="both", expand=True)
+
+    def _build_in_selisih_tab(self):
+        """v3.4 — tab 📤 Rekap Selisih IN (drill-down rincian dokumen IN)."""
+        self.in_selisih_view = InSelisihView(
+            self.tab_in_selisih,
+            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+        self.in_selisih_view.pack(fill="both", expand=True)
 
     def _build_laporan_tab(self):
         self.laporan_view = LaporanDeviasiView(

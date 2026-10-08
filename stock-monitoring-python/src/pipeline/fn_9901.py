@@ -13,6 +13,11 @@ Column mapping:
                    CONSISTENT with fn_3224/fn_4215/fn_4217/fn_4205 which extract
                    from between parentheses "(" and ")"
   - Tanggal        → Tanggal (day-of-month)
+  - Nomor #        → Nomor (nomor faktur pembelian, mis. PI.2026.09.30973) — v3.4
+  - Nomor # Pesanan Pembelian → Nomor PO — v3.4
+
+v3.4: kolom Nomor / Nomor PO ditambahkan untuk tab "Rekap Selisih IN"
+(rincian IN per dokumen 42.05 / 32.24 / 99.01 beserta nomornya).
 """
 import pandas as pd
 from .helpers import (
@@ -149,6 +154,24 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         candidates=["Tanggal", "TGL", "Date"],
         contains_any=["tanggal", "tgl", "date"]
     )
+    # v3.4: nomor faktur pembelian (PI.2026…) + nomor pesanan (PO.2026…)
+    col_nomor = _find_column(
+        prom.columns,
+        candidates=["Nomor #", "Nomor"],
+        contains_any=[],
+    )
+    # pastikan col_nomor bukan kolom penerimaan/pesanan/aset
+    if col_nomor is not None:
+        cl = str(col_nomor).strip().lower()
+        if any(x in cl for x in ("penerimaan", "pesanan", "aset", "kirim",
+                                 "faktur pajak")):
+            col_nomor = None
+    col_nomor_po = _find_column(
+        prom.columns,
+        candidates=["Nomor # Pesanan Pembelian", "Nomor Pesanan Pembelian",
+                    "Nomor # Pesanan"],
+        contains_any=["pesanan pembelian", "pesanan"],
+    )
 
     # Diagnostic logging (helps user debug if mapping fails)
     missing = []
@@ -224,6 +247,16 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         out["Value"] = safe_to_numeric(prom[col_qty])
     else:
         out["Value"] = pd.NA
+
+    # v3.4 — Nomor (faktur pembelian PI…) & Nomor PO (pesanan PO…)
+    if col_nomor is not None:
+        out["Nomor"] = safe_to_str(prom[col_nomor])
+    else:
+        out["Nomor"] = pd.NA
+    if col_nomor_po is not None:
+        out["Nomor PO"] = safe_to_str(prom[col_nomor_po])
+    else:
+        out["Nomor PO"] = pd.NA
 
     # Drop rows where NAMA RESTO is empty (mirror fn_3224 behavior)
     mask_valid_resto = out["NAMA RESTO"].notna() & (

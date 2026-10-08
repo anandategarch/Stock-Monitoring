@@ -1120,6 +1120,190 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
             pass
 
 
+# --- Column resize + auto-fit (v3.4) -------------------------------------------
+
+def _tree_display_columns(tree: ttk.Treeview) -> list[str]:
+    """Kolom yang tampil (urutan layout): ['#0' bila show tree] + columns."""
+    try:
+        raw = tree.cget("show")
+        parts = " ".join(str(x) for x in raw) if isinstance(raw, (tuple, list)) \
+            else str(raw)
+    except Exception:
+        parts = "headings"
+    cols = []
+    if "tree" in parts:
+        cols.append("#0")
+    cols += list(tree["columns"])
+    return cols
+
+
+def _tree_content_x(tree: ttk.Treeview, event_x: int) -> float:
+    """Konversi x event (relatif widget) → koordinat konten kolom
+    (memperhitungkan scroll horizontal)."""
+    try:
+        frac = tree.xview()[0]
+        content_w = sum(tree.column(c, "width")
+                        for c in _tree_display_columns(tree))
+        visible_w = tree.winfo_width()
+        offset = frac * max(0, content_w - visible_w)
+    except Exception:
+        offset = 0
+    return event_x + offset
+
+
+def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):
+    """v3.4 — Resize lebar kolom MANUAL via drag + AUTO-FIT double-click.
+
+    Masalah lama: lebar kolom terasa "tidak bisa di-adjust" —
+    - zona separator bawaan Tk sangat sempit & sulit ditemukan;
+    - klik heading men-trigger sort/popup filter (HeaderFilter membuka
+      Toplevel + grab_set di Button-1 → pointer "dicuri" → drag mati).
+
+    Solusi: binding sendiri yang DIPASANG PERTAMA (sebelum HeaderFilter/
+    handler klik view lain) supaya `return "break"` saat drag mematikan
+    sort/filter bawaan:
+    - Press di area heading dalam `edge_px` px dari tepi KANAN kolom
+      → mulai drag-resize kolom itu.
+    - Drag (B1-Motion) → lebar mengikuti mouse (clamp minwidth).
+    - Double-click di tepi kolom → auto-fit kolom itu ke lebar konten.
+    """
+    state = {"col": None, "start_x": 0, "start_w": 0}
+
+    def _edges():
+        cols = _tree_display_columns(tree)
+        x = 0
+        out = []
+        for c in cols:
+            x += tree.column(c, "width")
+            out.append((x, c))
+        return out
+
+    def _near_edge(cx):
+        best = None
+        for edge_x, col in _edges():
+            if abs(cx - edge_x) <= edge_px:
+                best = col  # pilih yang terakhir dalam toleransi
+        return best
+
+    def _on_press(event):
+        if state["col"] is not None:
+            return "break"
+        try:
+            region = tree.identify_region(event.x, event.y)
+        except Exception:
+            return None
+        if region not in ("heading", "separator"):
+            return None
+        col = _near_edge(_tree_content_x(tree, event.x))
+        if col is None:
+            return None  # klik heading biasa → sort/filter tetap jalan
+        state["col"] = col
+        state["start_x"] = event.x
+        state["start_w"] = tree.column(col, "width")
+        return "break"
+
+    def _on_motion(event):
+        if state["col"] is None:
+            return None
+        try:
+            min_w = tree.column(state["col"], "minwidth") or 24
+        except Exception:
+            min_w = 24
+        new_w = int(max(min_w, state["start_w"] + (event.x - state["start_x"])))
+        try:
+            tree.column(state["col"], width=new_w)
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _on_release(_event):
+        if state["col"] is None:
+            return None
+        state["col"] = None
+        return "break"
+
+    def _on_double(event):
+        try:
+            region = tree.identify_region(event.x, event.y)
+        except Exception:
+            return None
+        if region not in ("heading", "separator"):
+            return None
+        col = _near_edge(_tree_content_x(tree, event.x))
+        if col is None:
+            return None
+        auto_fit_columns(tree, columns=[col])
+        return "break"
+
+    tree.bind("<Button-1>", _on_press, add="+")
+    tree.bind("<B1-Motion>", _on_motion, add="+")
+    tree.bind("<ButtonRelease-1>", _on_release, add="+")
+    tree.bind("<Double-1>", _on_double, add="+")
+    return tree
+
+
+def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
+                     max_width: int = 340, min_width: int = 44,
+                     pad: int = 24, sample_rows: int = 400):
+    """v3.4 — Auto-fit lebar kolom ke konten (judul + sampel baris).
+
+    Ukuran dihitung dari font tabel (family, 9) via Font.measure:
+    max(lebar judul, lebar isi terpanjang sampel) + pad, dibatasi
+    [min_width, max_width]. Untuk tabel besar hanya sampel `sample_rows`
+    baris merata yang diukur (ukur 400×30 sel < 100ms).
+    """
+    import tkinter.font as tkfont
+    from .theme import font_family
+
+    cols = list(columns) if columns is not None else _tree_display_columns(tree)
+    try:
+        meas = tkfont.Font(family=font_family(), size=9).measure
+    except Exception:
+        def meas(s):  # fallback kasar
+            return 7 * len(str(s))
+
+    try:
+        children = tree.get_children("")
+    except tk.TclError:
+        return
+    n = len(children)
+    if n > sample_rows:
+        step = n / float(sample_rows)
+        idxs = sorted({min(n - 1, int(i * step)) for i in range(sample_rows)})
+    else:
+        idxs = list(range(n))
+
+    # cache values per baris sampel (1 panggilan Tcl per baris)
+    sampled_vals = []
+    sampled_texts = []
+    for i in idxs:
+        it = tree.item(children[i])
+        sampled_vals.append(it.get("values") or [])
+        sampled_texts.append(str(it.get("text") or ""))
+
+    col_pos = {c: k for k, c in enumerate(_tree_display_columns(tree))}
+    # values[] TIDAK memuat #0 — shift index hanya bila kolom tree tampil
+    disp = _tree_display_columns(tree)
+    tree_shift = 1 if (disp and disp[0] == "#0") else 0
+    for col in cols:
+        try:
+            w = meas(str(tree.heading(col, "text") or "")) + pad + 10
+        except tk.TclError:
+            continue
+        if col == "#0":
+            for t in sampled_texts:
+                w = max(w, meas(t) + pad + 18)
+        else:
+            k = col_pos.get(col, 0) - tree_shift
+            for vals in sampled_vals:
+                if 0 <= k < len(vals):
+                    w = max(w, meas(str(vals[k])) + pad)
+        try:
+            tree.column(col, width=int(min(max(w, min_width), max_width)))
+        except tk.TclError:
+            continue
+
+
 # --- Maximize table (fullscreen clone) ----------------------------------------
 
 def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
@@ -1161,6 +1345,13 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
              font=(font_family(), 12, "bold")).pack(side="left")
     tk.Label(hi, text=title, bg=C_HEADER, fg="#f1f5f9",
              font=font(12, "bold")).pack(side="left", padx=(8, 0))
+    tk.Button(
+        hi, text="↔ Auto-Fit", command=lambda: auto_fit_columns(new_tree),
+        bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+        activeforeground="#ffffff", bd=0, relief="flat",
+        highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+        padx=12, pady=5,
+    ).pack(side="right", padx=(0, 6))
     tk.Button(
         hi, text="✕ Tutup (Esc)", command=win.destroy,
         bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -1210,6 +1401,10 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
             setup_tags(new_tree)
         except Exception:
             pass
+
+    # v3.4: resize kolom manual + auto-fit — dipasang PERTAMA supaya
+    # "break" saat drag/double-click tepi kolom mematikan handler view
+    enable_col_resize(new_tree)
 
     vsb = ttk.Scrollbar(cin, orient="vertical", command=new_tree.yview)
     hsb = ttk.Scrollbar(cin, orient="horizontal", command=new_tree.xview)

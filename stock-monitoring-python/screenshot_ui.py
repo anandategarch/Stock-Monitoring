@@ -132,6 +132,40 @@ def main():
     pump(root, 0.4)
     shot("10b-followup")
 
+    # v3.4: tab Rekap Selisih IN + drill-down popup rincian dokumen
+    from test_ui_redesign import make_mock_in_detail
+    in_detail = make_mock_in_detail()
+    app.in_selisih_view.load_data(append1, in_detail)
+    select_and_wait(root, app, app.tab_in_selisih, app.in_selisih_view)
+    shot("10c-rekap-selisih-in")
+
+    # drill-down: double-click baris MLGPAR/AYAM FILET/Tgl 10
+    from src.ui.in_selisih_view import InDetailPopup
+    itree = app.in_selisih_view.tree
+    for iid in itree.get_children(""):
+        vals = itree.item(iid, "values")
+        if vals[0] == "MLGPAR" and vals[1] == "10" and vals[2] == "AYAM FILET":
+            bbox = itree.bbox(iid)
+            class _Ev2:
+                pass
+            ev = _Ev2()
+            ev.widget = itree
+            ev.x, ev.y = bbox[0] + 10, bbox[1] + bbox[3] // 2
+            app.in_selisih_view._on_double_click(ev)
+            break
+    pump(root, 0.5)
+    shot("10d-rincian-in-popup")
+    popups = [w for w in root.winfo_children()
+              if isinstance(w, InDetailPopup) and w.winfo_exists()]
+    if popups:
+        popups[-1].destroy()
+    pump(root, 0.2)
+
+    # v3.4: ↔ Auto-Fit pada Rekap Selisih IN (kolom menyesuaikan konten)
+    app.in_selisih_view._auto_fit()
+    pump(root, 0.4)
+    shot("10e-rekap-selisih-autofit")
+
     # Rincian PO
     app.rincian_view.load_data(rincian)
     select_and_wait(root, app, app.tab_rincian, app.rincian_view)

@@ -22,7 +22,8 @@ from .theme import (
 )
 from .widgets import (
     AccentButton, GhostButton, HeaderFilter, LoadingOverlay, add_tooltip,
-    insert_tree_items, open_tree_maximized, run_async,
+    auto_fit_columns, enable_col_resize, insert_tree_items,
+    open_tree_maximized, run_async,
 )
 
 # Column definitions: (column_id, width, anchor)
@@ -104,7 +105,17 @@ class DetailsPopup(tk.Toplevel):
                      bg=C_HEADER, fg="#94a3b8", font=font(9)).pack(
                 anchor="w", pady=(2, 0))
 
-        # Aksi di kanan band: ⛶ Perbesar
+        # Aksi di kanan band: ⛶ Perbesar + ↔ Auto-Fit
+        btn_fit = tk.Button(
+            head_in, text="↔ Auto-Fit", command=self._auto_fit,
+            bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+            activeforeground="#ffffff", bd=0, relief="flat",
+            highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+            padx=12, pady=5)
+        btn_fit.pack(side="right", anchor="ne", padx=(0, 6))
+        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
+                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
+                             "drag tepi kolom = atur lebar manual)")
         btn_max = tk.Button(
             head_in, text="⛶ Perbesar", command=self._maximize,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -145,6 +156,10 @@ class DetailsPopup(tk.Toplevel):
         card_in.grid_columnconfigure(0, weight=1)
 
         self._setup_tags(self.tree)
+
+        # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
+        # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
+        enable_col_resize(self.tree)
 
         # loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(card_in, "Menyiapkan detail…")
@@ -444,6 +459,10 @@ class DetailsPopup(tk.Toplevel):
     # =====================================================================
     # ⛶ PERBESAR
     # =====================================================================
+    def _auto_fit(self):
+        """v3.4 — auto-fit lebar semua kolom ke konten."""
+        auto_fit_columns(self.tree)
+
     def _maximize(self):
         return open_tree_maximized(
             self.tree, f"Detail — {self._title}",

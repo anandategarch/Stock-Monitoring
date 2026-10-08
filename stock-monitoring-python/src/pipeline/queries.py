@@ -117,12 +117,19 @@ def query_barang_keluar(config) -> pd.DataFrame:
     return result if not result.empty else pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
 
-def query_in(config) -> pd.DataFrame:
+def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     """
     IN source = Table.Combine({3224, 3224_Bulan_Lalu, 4205, 9901})
     with JENIS = "IN".
 
     LightMode: skip 3224_Bulan_Lalu (hemat ~50% data IN).
+
+    v3.4 — detail_out: bila dict diberikan, diisi DataFrame detail IN
+    PER DOKUMEN (untuk tab "Rekap Selisih IN" — rincian 42.05 / 32.24 /
+    99.01 beserta nomornya): kolom NAMA RESTO, Nama Barang, Tanggal,
+    Value, Nomor, Nomor PO, #Tgl/Jam Pembuatan IT, SOURCE IN, JENIS.
+    Baris detail identik 1:1 dengan baris IN di source (belum difilter
+    KATEGORI — filter yang sama diterapkan build_append1).
 
     FIX: query_pi (folder 26.Rincian PI) + query_27_konversi_satuan DIHAPUS
     dari pipeline karena sudah digantikan oleh 9901 (folder 30. 9901).
@@ -136,17 +143,53 @@ def query_in(config) -> pd.DataFrame:
     q9901 = query_9901(config)
     print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")
 
+    tagged = [
+        ("32.24", q3224),
+        ("32.24 (Bulan Lalu)", q3224_lalu),
+        ("42.05", q4205),
+        ("99.01", q9901),
+    ]
+
     parts = []
-    for df in [q3224, q3224_lalu, q4205, q9901]:
-        if not df.empty:
-            parts.append(df)
+    detail_parts = []
+    for tag, df in tagged:
+        if df is None or df.empty:
+            continue
+        parts.append(df)
+        if detail_out is not None:
+            d = df.copy()
+            d["SOURCE IN"] = tag
+            detail_parts.append(d)
 
     if not parts:
-        return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
+        empty = pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang",
+                                      "Value", "JENIS"])
+        if detail_out is not None:
+            detail_out["df"] = pd.DataFrame(columns=IN_DETAIL_COLUMNS)
+        return empty
 
     source = pd.concat(parts, ignore_index=True, sort=False)
     source["JENIS"] = "IN"
+
+    if detail_out is not None:
+        if detail_parts:
+            detail = pd.concat(detail_parts, ignore_index=True, sort=False)
+            detail["JENIS"] = "IN"
+            for col in IN_DETAIL_COLUMNS:
+                if col not in detail.columns:
+                    detail[col] = pd.NA
+            detail_out["df"] = detail[IN_DETAIL_COLUMNS].reset_index(drop=True)
+        else:
+            detail_out["df"] = pd.DataFrame(columns=IN_DETAIL_COLUMNS)
+
     return source
+
+
+# Kolom standar detail IN per dokumen (v3.4 — tab Rekap Selisih IN)
+IN_DETAIL_COLUMNS = [
+    "NAMA RESTO", "Nama Barang", "Tanggal", "Value", "Nomor",
+    "Nomor PO", "#Tgl/Jam Pembuatan IT", "SOURCE IN", "JENIS",
+]
 
 
 # =============================================================================

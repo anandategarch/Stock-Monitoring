@@ -20,8 +20,8 @@ from typing import Optional, Callable
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter,
-    LoadingOverlay, add_tooltip, insert_tree_items, open_tree_maximized,
-    run_async,
+    LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
+    insert_tree_items, open_tree_maximized, run_async,
 )
 
 
@@ -113,6 +113,11 @@ class RincianPoView(tk.Frame):
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(Esc untuk menutup)")
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
+                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
+                             "drag tepi kolom = atur lebar manual)")
 
         cols = ["Tanggal", "Nama Barang", "Keterangan PO", "Pemasok",
                 "Tgl/Jam Pembuatan", "Satuan", "Kuantitas"]
@@ -141,6 +146,10 @@ class RincianPoView(tk.Frame):
         tbody.grid_rowconfigure(1, weight=1)
         tbody.grid_columnconfigure(0, weight=1)
 
+        # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
+        # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
+        enable_col_resize(self.tree)
+
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         tk.Label(foot, text="🛒 Nomor # = induk PO · klik ▸ untuk buka/tutup "
@@ -159,6 +168,10 @@ class RincianPoView(tk.Frame):
             get_values=self._name_values,
             on_apply=self._on_name_filter,
             label="Nama Barang")
+
+    def _auto_fit(self):
+        """v3.4 — auto-fit lebar semua kolom ke konten."""
+        auto_fit_columns(self.tree)
 
     def _name_values(self) -> list:
         if self.data is None or self.data.empty or \

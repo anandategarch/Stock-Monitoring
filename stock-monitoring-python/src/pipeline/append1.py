@@ -109,7 +109,7 @@ def _concat_valid_values(series: pd.Series) -> str:
     return ", ".join(distinct) if distinct else None
 
 
-def build_append1(config, stop_event=None) -> pd.DataFrame:
+def build_append1(config, stop_event=None, in_detail_out: dict | None = None) -> pd.DataFrame:
     """
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
@@ -117,6 +117,11 @@ def build_append1(config, stop_event=None) -> pd.DataFrame:
     LightMode (config.LightMode=True):
     - Skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam) — hemat kolom & grouping time
     - Pre-filter KATEGORI=DEVIASI di awal — hemat ~60% data
+
+    v3.4 — in_detail_out: dict opsional; diisi DataFrame detail IN per
+    dokumen (lihat query_in). Filter KATEGORI=DEVIASI (LightMode) yang
+    diterapkan ke source JUGA diterapkan ke detail supaya total rincian
+    di popup Rekap Selisih IN == kolom IN tabel utama.
 
     stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
     """
@@ -148,8 +153,10 @@ def build_append1(config, stop_event=None) -> pd.DataFrame:
     keluar_df = query_barang_keluar(config)
     print(f"    BARANG KELUAR (42.15 Kirim): {len(keluar_df)} rows")
 
-    in_df = query_in(config)
+    in_df = query_in(config, detail_out=in_detail_out)
     print(f"    IN: {len(in_df)} rows")
+    if in_detail_out is not None:
+        print(f"    IN detail (per dokumen, v3.4): {len(in_detail_out.get('df'))} rows")
 
     # FIX: Stop checkpoint after IN load
     if stop_event is not None and stop_event.is_set():
@@ -188,6 +195,13 @@ def build_append1(config, stop_event=None) -> pd.DataFrame:
         source["Nama Barang"] = source["Nama Barang"].astype(str)
         source = source[source["Nama Barang"].isin(deviasi_barang)].reset_index(drop=True)
         print(f"    LightMode pre-filter KATEGORI=DEVIASI: {before} → {len(source)} rows")
+        # v3.4: filter identik utk detail IN (konsistensi total rincian)
+        if in_detail_out is not None and "df" in in_detail_out \
+                and not in_detail_out["df"].empty:
+            det = in_detail_out["df"]
+            det["Nama Barang"] = det["Nama Barang"].astype(str)
+            in_detail_out["df"] = det[det["Nama Barang"].isin(deviasi_barang)] \
+                .reset_index(drop=True)
 
     # =========================================================================
     # 2. KONFIGURASI

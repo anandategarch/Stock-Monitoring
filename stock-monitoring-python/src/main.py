@@ -10,6 +10,8 @@ import time
 import warnings
 from pathlib import Path
 
+import pandas as pd
+
 # Suppress openpyxl noise warnings (no default style, etc.)
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
@@ -37,7 +39,9 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
                     berikutnya dengan raise PipelineStopped
 
     Returns:
-        Tuple (append1_df, rincian_po_df)
+        Tuple (append1_df, rincian_po_df, in_detail_df)
+        v3.4: in_detail_df = detail IN per dokumen (42.05 / 32.24 / 99.01
+        + nomor) untuk tab "Rekap Selisih IN".
     """
     start_time = time.time()
 
@@ -53,13 +57,15 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         print(f"\n  RootPath: {config.RootPath}")
         print(f"  Mode: {'LIGHT' if config.LightMode else 'FULL'}")
 
-    # 2. Build Append1
+    # 2. Build Append1 (+ IN detail v3.4)
     if verbose:
         print("\n" + "-" * 60)
         print("  [1/2] Building Append1 (main pipeline)...")
         print("-" * 60)
 
-    append1_df = build_append1(config, stop_event=stop_event)
+    in_detail_holder: dict = {}
+    append1_df = build_append1(config, stop_event=stop_event,
+                               in_detail_out=in_detail_holder)
 
     # FIX: check stop_event after Append1 build
     if stop_event is not None and stop_event.is_set():
@@ -85,14 +91,21 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     if verbose:
         print(f"\n  Rincian PO result: {len(rincian_po_df)} rows")
 
+    in_detail_df = in_detail_holder.get("df")
+    if in_detail_df is None:
+        in_detail_df = pd.DataFrame()
+    if verbose:
+        print(f"  IN detail (v3.4): {len(in_detail_df)} rows")
+
     elapsed = time.time() - start_time
     if verbose:
         print(f"\n{'=' * 60}")
         print(f"  SELESAI dalam {elapsed:.1f} detik")
-        print(f"  Append1: {len(append1_df)} rows | Rincian PO: {len(rincian_po_df)} rows")
+        print(f"  Append1: {len(append1_df)} rows | Rincian PO: {len(rincian_po_df)} rows"
+              f" | IN detail: {len(in_detail_df)} rows")
         print(f"{'=' * 60}")
 
-    return append1_df, rincian_po_df
+    return append1_df, rincian_po_df, in_detail_df
 
 
 if __name__ == "__main__":
@@ -103,9 +116,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        append1_df, rincian_po_df = run_pipeline(config_path=args.config)
+        append1_df, rincian_po_df, in_detail_df = run_pipeline(
+            config_path=args.config)
         print(f"\nAppend1: {len(append1_df)} rows")
         print(f"Rincian PO: {len(rincian_po_df)} rows")
+        print(f"IN detail: {len(in_detail_df)} rows")
     except Exception as e:
         print(f"\n[ERROR] {e}")
         import traceback
