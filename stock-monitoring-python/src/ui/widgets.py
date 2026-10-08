@@ -1465,7 +1465,8 @@ def _tree_row_passes(kw: dict, col_idx: dict, active: dict,
     return True
 
 
-def apply_tree_row_filters(tree: ttk.Treeview, filters: dict):
+def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
+                           on_done=None):
     """Terapkan filter kolom (nilai TERFORMAT) ke baris tree IN PLACE (v3.6).
 
     Dipakai tabel CLONE (⛶ Perbesar): snapshot item lengkap di-cache saat
@@ -1473,6 +1474,11 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict):
     batched, urutan asli dipertahankan, iid tetap). Hirarki 2 level
     (parent + anak, mis. pivot matrix) didukung: parent tampil bila ada
     anak yang lolos filter; filter '#0' mencocokkan text parent.
+
+    v3.9.5 FIX (audit 19-a #3 / 19-c #4): rebuild (delete+insert) me-reset
+    TAG PER-CELL — parameter ``on_done`` dipanggil setelah semua baris
+    selesai di-insert ulang supaya view bisa memasang ulang tag cell
+    (minus merah / warna Status) di clone ⛶.
     """
     active = {c: s for c, s in filters.items() if s}
     try:
@@ -1531,11 +1537,12 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict):
         tree.delete(*tree.get_children(""))
     except tk.TclError:
         return
-    tree._row_filter_cancel = insert_tree_items(tree, items, batch=600)
+    tree._row_filter_cancel = insert_tree_items(tree, items, batch=600,
+                                                on_done=on_done)
 
 
 def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
-                         get_values, on_sort=None):
+                         get_values, on_sort=None, on_after_filter=None):
     """HeaderFilterGroup utk tabel CLONE ⛶ (v3.6).
 
     Sebelumnya clone ⛶ MENYALIN ikon funnel dari heading sumber tapi TIDAK
@@ -1543,13 +1550,20 @@ def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
     "tombol filter tidak bisa diklik"). Sekarang clone punya filter
     sendiri: on_apply memfilter baris clone IN PLACE (cache snapshot),
     sort via popup (tree-aware).
+
+    v3.9.5 (audit 19-a #3): ``on_after_filter`` dipanggil setelah rebuild
+    filter selesai — dipakai view utk memasang ulang TAG PER-CELL di
+    clone (dulu: filter di clone menghapus minus-merah & warna Status).
+    Callback apply juga disimpan di ``tree._clone_filter_apply``
+    (dipakai test / integrasi).
     """
     state: dict = {}
 
     def on_apply(col, sel):
         state[col] = sel
-        apply_tree_row_filters(tree, state)
+        apply_tree_row_filters(tree, state, on_done=on_after_filter)
 
+    tree._clone_filter_apply = on_apply
     return HeaderFilterGroup(tree, cols, get_values=get_values,
                              on_apply=on_apply, on_sort=on_sort)
 
@@ -1631,6 +1645,29 @@ def _spawn_worker(target) -> threading.Thread:
     return t
 
 
+def _poll_host(widget):
+    """v3.9.5 FIX (audit 19-c #1) — host timer poll run_async yang ABADI.
+
+    Poll dulu dijadwalkan pada widget PEMILIK job (mis. Toplevel popup
+    detail). Bila pemilik di-destroy di tengah job — popup ditutup saat
+    render masih berjalan — callback after() tidak pernah menembak:
+    on_done/on_error tidak jalan, shield GC tidak pernah dilepas, dan
+    gc.disable() MENEMPEL seumur sesi (kebocoran memori seluruh app;
+    cabang winfo_exists() di poll() tadinya kode mati). Poll dipindah ke
+    ROOT aplikasi (naik rantai master — hidup sepanjang sesi)."""
+    w = widget
+    seen = set()
+    while True:
+        if id(w) in seen:
+            break
+        seen.add(id(w))
+        master = getattr(w, "master", None)
+        if master is None:
+            break
+        w = master
+    return w
+
+
 def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
               loading_text: str | None = None, on_error=None,
               sync: bool = False) -> dict:
@@ -1647,11 +1684,14 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
     """
     job = {"busy": True, "cancelled": False, "result": None, "error": None,
            "traceback": None, "_thread": None}
+    host = _poll_host(widget)
 
     def finish():
         if overlay is not None:
             overlay.hide()
-        gc_shield_release(job["_thread"], retry_widget=widget)
+        # v3.9.5: retry pada HOST (root) — pemilik job bisa saja sudah
+        # di-destroy saat finish menembak.
+        gc_shield_release(job["_thread"], retry_widget=host)
         err = job["error"]
         if err is not None:
             if on_error is not None:
@@ -1697,7 +1737,7 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
 
     def _sched_poll():
         try:
-            widget.after(70, poll)
+            host.after(70, poll)
         except tk.TclError:
             pass
 
@@ -1710,13 +1750,18 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
             else:
                 if overlay is not None:
                     overlay.hide()
-                gc_shield_release(job["_thread"], retry_widget=widget)
+                gc_shield_release(job["_thread"], retry_widget=host)
             return
         try:
             if not widget.winfo_exists():
-                # widget ditutup — buang hasil, tapi tetap lepas shield GC
-                # lewat retry_widget (root) supaya GC tidak mati selamanya
-                gc_shield_release(job["_thread"], retry_widget=widget)
+                # widget PEMILIK ditutup — buang hasil, lepas shield GC via
+                # host (root, masih hidup). Cabang ini dulu KODE MATI:
+                # poll dijadwalkan pada pemilik yang mati → tak pernah
+                # menembak → gc.disable() menempel seumur sesi (audit 19-c
+                # #1: popup detail ditutup saat render berjalan).
+                if overlay is not None:
+                    overlay.hide()
+                gc_shield_release(job["_thread"], retry_widget=host)
                 return
         except tk.TclError:
             return
@@ -1725,7 +1770,8 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
             return
         finish()
 
-    widget.after(70, poll)
+    with contextlib.suppress(tk.TclError):
+        host.after(70, poll)
     job["cancel"] = lambda: job.update(cancelled=True)
     return job
 
@@ -1796,15 +1842,30 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
 CELL_TAGS_SUPPORTED = tk.TkVersion >= 9.0
 
 
+def _collect_iids(tree, parent="") -> set:
+    """Kumpulkan SEMUA iid tree (parent + anak — mendukung hierarki 2
+    level ala pivot). Dipakai fallback apply_cell_tag."""
+    out = set()
+    try:
+        kids = tree.get_children(parent)
+    except tk.TclError:
+        return out
+    for k in kids:
+        out.add(str(k))
+        out |= _collect_iids(tree, k)
+    return out
+
+
 def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
                    chunk: int = 3000) -> int:
     """Pasang TAG per-CELL ke daftar sel [(iid, column_id), ...] via
     `treeview tag cell add` (Tk 9+).
 
     - Dikirim per-chunk supaya list Tcl tidak terlalu besar.
-    - Item yang sudah tidak ada (re-render terjadi di tengah jalan) →
-      TclError → sisa chunk dibatalkan AMAN (render baru akan memasang
-      ulang seluruh cell).
+    - Item yang sudah tidak ada (re-render/filter terjadi di tengah
+      jalan) → v3.9.5: chunk di-fallback ke pemasangan utk iid yang MASIH
+      ADA (dulu SATU item hilang membatalkan SELURUH chunk — mis. clone ⛶
+      yang difilter hanya memuat sebagian baris → semua tag gagal).
     - No-op senyap di Tk 8 (tidak ada `tag cell`) — view wajib menyediakan
       fallback tag per-baris lewat CELL_TAGS_SUPPORTED.
     Return jumlah cell yang berhasil ditandai.
@@ -1815,12 +1876,23 @@ def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
     path = str(tree)
     for i in range(0, len(cells), chunk):
         part = cells[i:i + chunk]
+        spec = tuple((str(iid), str(col)) for iid, col in part)
         try:
-            tree.tk.call(path, "tag", "cell", "add", tag,
-                         tuple((str(iid), str(col)) for iid, col in part))
+            tree.tk.call(path, "tag", "cell", "add", tag, spec)
+            applied += len(part)
+            continue
         except tk.TclError:
-            break   # item sudah dihapus (re-render) — sisanya tak relevan
-        applied += len(part)
+            pass
+        # fallback: sebagian iid sudah tidak ada (clone terfilter /
+        # re-render di tengah jalan) — pasang hanya utk yang masih ada
+        existing = _collect_iids(tree)
+        part2 = [(iid, col) for iid, col in part if str(iid) in existing]
+        if not part2:
+            continue
+        spec2 = tuple((str(iid), str(col)) for iid, col in part2)
+        with contextlib.suppress(tk.TclError):
+            tree.tk.call(path, "tag", "cell", "add", tag, spec2)
+            applied += len(part2)
     return applied
 
 

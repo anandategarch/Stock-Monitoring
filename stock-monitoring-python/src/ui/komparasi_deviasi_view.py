@@ -27,14 +27,20 @@ SISI APP (dari data pipeline / append1, tanpa file tambahan — "data udah
 lengkap, 2205 itu BOM"):
     BOM·App   = −Σ 9.OUT (penjualan 22.05) tanggal 1..H   — konvensi file
     COM·App   = −Σ pemakaian com(t) tanggal 1..H, dengan
-                com(t) = SO(t-1) + IN(t) − BK(t) − SO(t)  (formula identik
-                baris 6.PEMAKAIAN (COM) pivot & tab 📋 Anomali COM)
+                com(1) = SALDO AWAL + IN(1) − BK(1) − SO(1)  (SA pair,
+                          baris ber-Tanggal=1 — fn_4217; fallback
+                          SO(t-1) bila SA tidak ada)
+                com(t>1) = SO(t-1) + IN(t) − BK(t) − SO(t)  (formula
+                          identik baris 6.PEMAKAIAN (COM) pivot & tab
+                          🚨 Anomali COM)
     DEV·App   = COM·App − BOM·App  ("Dev to BOM" versi app)
     GR·App    = SO_H − Sistem_H (2.SALDO AKHIR) — PERSIS kolom Deviasi di
                 tab 📦 Deviasi GR pada H minggu tsb.
-    Secara aljabar GR·App = ΣOUT − SA − ΣIN + ΣBK + SO_H = out_cum − com_cum
-    = DEV·App — dua jalur hitung yang seharusnya sama; keduanya ditampilkan
-    sehingga selisih internal juga terlihat.
+
+    v3.9.5: karena Sistem (fn_running_stock) berbasis SALDO AWAL dan com(1)
+    kini juga berbasis SA → GR·App == DEV·App secara ALJABAR PERSIS (dua
+    jalur hitung saling cek internal; dulu menyimpang sebesar SO(−31)−SA
+    saat data memuat tanggal negatif bulan lalu).
 
 VERDIK: Selisih = GR·App − DEV·File → Status MATCH (dalam toleransi) /
 SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA DI DATA.
@@ -50,6 +56,7 @@ on_error reset _busy (FIX B-01), minus merah PER CELL (v3.9.2 apply_cell_tag),
 sel Status berwarna per-cell (MATCH hijau / SELISIH amber / lainnya merah).
 """
 
+import contextlib
 import json
 import os
 import re
@@ -148,6 +155,38 @@ def _week_h(label) -> "int | None":
     return None
 
 
+def _norm_col_map(df: pd.DataFrame) -> dict:
+    """Peta kolom ternormalisasi (case/spasi diabaikan) → kolom asli."""
+    cols = {}
+    for c in df.columns:
+        cols[str(c).strip().upper().replace(" ", "")] = c
+    return cols
+
+
+def _find_col(cols: dict, *cands):
+    for cand in cands:
+        key = cand.upper().replace(" ", "")
+        if key in cols:
+            return cols[key]
+    return None
+
+
+def _missing_required_columns(df: pd.DataFrame) -> list:
+    """Label kolom wajib yang hilang dari df ([] = lengkap)."""
+    cols = _norm_col_map(df)
+    got = {
+        "RESTO": _find_col(cols, "RESTO", "NAMARESTO", "CABANG"),
+        "NAMA BAHAN": _find_col(cols, "NAMABAHAN", "NAMABARANG", "BARANG",
+                                "ITEM"),
+        "STATUS BULAN": _find_col(cols, "STATUSBULAN", "STATUSMINGGU",
+                                  "WEEK", "MINGGU", "STATUS"),
+        "QTY BOM": _find_col(cols, "QTYBOM", "BOM"),
+        "QTY COM": _find_col(cols, "QTYCOM", "COM"),
+        "QTY DEVIASI": _find_col(cols, "QTYDEVIASI", "DEVIASI"),
+    }
+    return [label for label, c in got.items() if c is None]
+
+
 def parse_deviasi_file(path: str) -> dict:
     """Baca & validasi file deviasi (pure — tanpa Tk; mudah diuji).
 
@@ -156,68 +195,82 @@ def parse_deviasi_file(path: str) -> dict:
         error: str (bila not ok)
         df: DataFrame ternormalisasi (kolom _resto_norm, _bahan_norm,
             _week, _h) atau None
-        meta: {weeks, n_rows, n_resto, bulan, file_name, sheet}
+        meta: {weeks, n_rows, n_resto, bulan, file_name, sheet,
+               n_unknown_week, n_duplicates}
+
+    v3.9.5 (audit 19-a #5/#11): duplikat lintas bulan DIHITUNG & dilaporkan
+    via meta.n_duplicates (dulu dibuang diam-diam — file "History"
+    multi-bulan); sheet dicoba satu per satu sampai ketemu sheet dengan
+    kolom wajib (dulu hanya sheet pertama — data di sheet lain → error
+    kolom yang menyesatkan).
     """
     meta = {"file_name": os.path.basename(path), "sheet": None,
             "weeks": [], "n_rows": 0, "n_resto": 0, "bulan": []}
     try:
         xl = pd.ExcelFile(path)
-        sheet = xl.sheet_names[0]
-        meta["sheet"] = sheet
-        df = xl.parse(sheet)
     except Exception as e:
         return {"ok": False, "error": f"Gagal membaca file: {e}",
                 "df": None, "meta": meta}
 
-    if df is None or df.empty:
+    # v3.9.5 (audit 19-a #11): pilih sheet PERTAMA yang punya kolom wajib
+    # & berisi baris; bila tidak ada → pakai sheet pertama utk pesan error.
+    df = None
+    sheet = None
+    for sh in xl.sheet_names:
+        cand = None
+        with contextlib.suppress(Exception):
+            cand = xl.parse(sh)
+        if cand is None or cand.empty:
+            if df is None:
+                df, sheet = cand, sh
+            continue
+        if not _missing_required_columns(cand):
+            df, sheet = cand, sh
+            break
+        if df is None or df.empty:
+            df, sheet = cand, sh
+    if df is None:
+        return {"ok": False, "error": "File kosong (tidak ada baris).",
+                "df": None, "meta": meta}
+    meta["sheet"] = sheet
+
+    if df.empty:
         return {"ok": False, "error": "File kosong (tidak ada baris).",
                 "df": None, "meta": meta}
 
+    missing = _missing_required_columns(df)
+    if missing:
+        return {"ok": False,
+                "error": "Kolom wajib tidak ditemukan: "
+                         + ", ".join(missing)
+                         + ". Kolom file (sheet " + str(sheet) + "): "
+                         + ", ".join(str(c) for c in df.columns[:12]),
+                "df": None, "meta": meta}
+
     # --- deteksi kolom (nama fleksibel, case/space-insensitive) ---
-    cols = {}
-    for c in df.columns:
-        cols[str(c).strip().upper().replace(" ", "")] = c
-
-    def find(*cands):
-        for cand in cands:
-            if cand.upper().replace(" ", "") in cols:
-                return cols[cand.upper().replace(" ", "")]
-        return None
-
-    col_resto = find("RESTO", "NAMARESTO", "CABANG")
-    col_bahan = find("NAMABAHAN", "NAMABARANG", "BARANG", "ITEM")
-    col_week = find("STATUSBULAN", "STATUSMINGGU", "WEEK", "MINGGU",
-                    "STATUS")
-    col_bom = find("QTYBOM", "BOM")
-    col_com = find("QTYCOM", "COM")
-    col_dev = find("QTYDEVIASI", "DEVIASI")
-    col_sat = find("SATUAN", "UOM", "UNIT")
+    cols = _norm_col_map(df)
+    col_resto = _find_col(cols, "RESTO", "NAMARESTO", "CABANG")
+    col_bahan = _find_col(cols, "NAMABAHAN", "NAMABARANG", "BARANG", "ITEM")
+    col_week = _find_col(cols, "STATUSBULAN", "STATUSMINGGU", "WEEK",
+                         "MINGGU", "STATUS")
+    col_bom = _find_col(cols, "QTYBOM", "BOM")
+    col_com = _find_col(cols, "QTYCOM", "COM")
+    col_dev = _find_col(cols, "QTYDEVIASI", "DEVIASI")
+    col_sat = _find_col(cols, "SATUAN", "UOM", "UNIT")
     col_pct = None
     for k, orig in cols.items():
         if k.startswith("%") and "DEVIASI" in k and "BOM" in k:
             col_pct = orig
             break
-    col_bulan = find("BULAN", "MONTH")
-
-    missing = []
-    for label, c in [("RESTO", col_resto), ("NAMA BAHAN", col_bahan),
-                     ("STATUS BULAN", col_week), ("QTY BOM", col_bom),
-                     ("QTY COM", col_com), ("QTY DEVIASI", col_dev)]:
-        if c is None:
-            missing.append(label)
-    if missing:
-        return {"ok": False,
-                "error": "Kolom wajib tidak ditemukan: "
-                         + ", ".join(missing)
-                         + ". Kolom file: "
-                         + ", ".join(str(c) for c in df.columns[:12]),
-                "df": None, "meta": meta}
+    col_bulan = _find_col(cols, "BULAN", "MONTH")
 
     out = pd.DataFrame({
         "Resto": df[col_resto].astype(str),
         "Nama Barang": df[col_bahan].astype(str),
-        "Satuan": (df[col_sat].astype(str) if col_sat is not None
-                   else ""),
+        # v3.9.5 (audit 19-a #13): NaN → '' (astype(str) menghasilkan
+        # literal 'nan')
+        "Satuan": (df[col_sat].fillna("").astype(str)
+                   if col_sat is not None else ""),
         "Minggu": df[col_week].astype(str).str.strip().str.upper(),
         "BOM File": pd.to_numeric(df[col_bom], errors="coerce"),
         "COM File": pd.to_numeric(df[col_com], errors="coerce"),
@@ -225,7 +278,7 @@ def parse_deviasi_file(path: str) -> dict:
     })
     out["%TO BOM File"] = (pd.to_numeric(df[col_pct], errors="coerce")
                            if col_pct is not None else np.nan)
-    out["BULAN"] = (df[col_bulan].astype(str).str.strip()
+    out["BULAN"] = (df[col_bulan].fillna("").astype(str).str.strip()
                     if col_bulan is not None else "")
 
     out["_resto_norm"] = out["Resto"].map(_norm_resto)
@@ -237,9 +290,14 @@ def parse_deviasi_file(path: str) -> dict:
     n_bad = int(bad_week.sum())
     out = out[~bad_week].copy()
 
-    # duplikat (minggu, resto, bahan) → keep first (file sampel unik)
+    # duplikat (minggu, resto, bahan) → keep first (file sampel unik);
+    # v3.9.5 (audit 19-a #5): jumlah duplikat DIHITUNG (umumnya baris
+    # bulan lain — file "History" multi-bulan) & dilaporkan via meta —
+    # dulu dibuang diam-diam.
+    before_dedup = len(out)
     out = out.drop_duplicates(
         subset=["Minggu", "_resto_norm", "_bahan_norm"], keep="first")
+    n_dup = before_dedup - len(out)
 
     # rapatkan index setelah filter
     out = out.reset_index(drop=True)
@@ -253,6 +311,7 @@ def parse_deviasi_file(path: str) -> dict:
                  if b and b.lower() != "nan"]
         meta["bulan"] = sorted(bulan)[:6]
     meta["n_unknown_week"] = n_bad
+    meta["n_duplicates"] = n_dup
     return {"ok": True, "error": None, "df": out, "meta": meta}
 
 
@@ -295,15 +354,30 @@ class KomparasiDeviasiView(tk.Frame):
         self._busy = False
         self._pending = False
         self._dirty = False                 # lazy refresh
+        # v3.9.5 (audit 19-a #1): generation counter — job async yang
+        # sudah kedaluwarsa (file ditutup/diganti, data baru) dibuang di
+        # done() supaya hasil file lama tidak muncul kembali.
+        self._render_gen = 0
+        self._insert_cancel = None         # batch insert yang berjalan
+        self._pending_path: str | None = None   # file yang antre saat busy
+        self._pending_sort = None          # (col, reverse) antre saat busy
         # file deviasi yang sedang dibandingkan
         self._file_df: pd.DataFrame | None = None
         self._file_meta: dict = {}
         self._file_path: str = ""
-        # cache matriks app — per objek data (id) + file
+        # cache matriks app — per objek data + file
         self._cached_mats = None
         self._cached_signature = None
+        # v3.9.5 (audit 19-b #4): identitas df utk cache (id() bisa
+        # dipakai ulang CPython setelah GC; identitas objek lebih aman)
+        self._cached_data = None
         self._satuan_lookup: dict = {}
+        self._aktif_lookup: dict = {}   # v3.9.5 (audit 19-b #5): AKTIF/NON
         self._result_df = None
+        # v3.9.5 (audit 19-a #2): (bahan_norm, resto_norm) → nama barang &
+        # resto versi APP — dipakai popup detail (nama file RAW tidak
+        # selalu cocok exact dgn nama app).
+        self._pair_index: dict = {}
         # opsi tampilan
         self._show_all_resto = tk.BooleanVar(value=False)
         # v3.9.2: minus merah PER CELL
@@ -592,7 +666,6 @@ class KomparasiDeviasiView(tk.Frame):
         tree.tag_configure("oddrow", background="#f8fafc")
         # fallback Tk 8 (tanpa tag cell): warna per BARIS
         tree.tag_configure("negative", foreground="#dc2626")
-        tree.tag_configure("match_row", foreground="#15803d")
         # per-cell
         tree.tag_configure("neg_cell", foreground="#dc2626")
         tree.tag_configure("st_match", foreground="#15803d")
@@ -604,10 +677,18 @@ class KomparasiDeviasiView(tk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
         self.data = data
+        # v3.9.5 (audit 19-a #1): data berganti → job lama dibuang
+        self._render_gen += 1
+        if self._insert_cancel is not None:
+            self._insert_cancel()
+            self._insert_cancel = None
         self._cached_mats = None
         self._cached_signature = None
+        self._cached_data = None
         self._satuan_lookup = {}
+        self._aktif_lookup = {}
         self._result_df = None
+        self._pair_index = {}
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
         self._show_content()
@@ -644,28 +725,44 @@ class KomparasiDeviasiView(tk.Frame):
         path = filedialog.askopenfilename(
             parent=self.winfo_toplevel(), title="Pilih File Deviasi",
             initialdir=initialdir,
-            filetypes=[("Excel", "*.xlsx *.xlsm *.xls"),
+            filetypes=[("Excel", "*.xlsx *.xlsm *.xls *.xlsb"),
                        ("Semua file", "*.*")])
         if not path:
             return
         self._load_file(path)
 
     def _load_file(self, path: str):
-        res = parse_deviasi_file(path)
-        if not res["ok"]:
-            messagebox.showerror("File deviasi tidak valid", res["error"],
-                                 parent=self.winfo_toplevel())
-            self.status_var_label.set(f"⚠ {res['error']}")
+        """v3.9.5 (audit 19-a #4): PARSE FILE DIJALANKAN DI THREAD WORKER —
+        file nyata 9,4MB butuh ±8 detik; parse di main thread membekukan
+        UI tanpa overlay. Seluruh parse+compute+join kini satu job async.
+        Filter header file LAMA direset DI SINI (sebelum job) — payload
+        memakai snapshot state saat job mulai (audit 19-c #5: sisa filter
+        menyembunyikan baris file baru secara diam-diam).
+        """
+        if self.data is None or self.data.empty:
+            messagebox.showinfo(
+                "Belum ada data app",
+                "Jalankan pipeline dulu (tab 🚀 Proses) supaya ada data "
+                "app untuk dibandingkan dengan file deviasi.",
+                parent=self.winfo_toplevel())
             return
-        self._file_df = res["df"]
-        self._file_meta = res["meta"]
-        self._file_path = path
-        # simpan path terakhir (initialdir dialog berikutnya)
-        try:
-            with open(_LAST_FILE_JSON, "w", encoding="utf-8") as f:
-                json.dump({"path": path}, f)
-        except Exception:
-            pass
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
+        self._refresh(parse_path=path)
+
+    def _apply_file_state(self, new_file: dict, path: str | None):
+        """Simpan state file yang baru selesai diparse (main thread)."""
+        self._file_df = new_file["df"]
+        self._file_meta = new_file["meta"]
+        if path:
+            self._file_path = path
+            # simpan path terakhir (initialdir dialog berikutnya)
+            try:
+                with open(_LAST_FILE_JSON, "w", encoding="utf-8") as f:
+                    json.dump({"path": path}, f)
+            except Exception:
+                pass
         self._btn_close.configure(state="normal")
         self._render_week_chips()
         meta = self._file_meta
@@ -676,20 +773,43 @@ class KomparasiDeviasiView(tk.Frame):
         if meta.get("n_unknown_week"):
             info += (f" · {meta['n_unknown_week']} baris minggu tak "
                      f"dikenal dibuang")
+        if meta.get("n_duplicates"):
+            info += (f" · {meta['n_duplicates']} baris duplikat "
+                     f"(minggu+resto+bahan sama) dibuang")
         self._file_label_var.set(info)
         self._file_label.configure(fg=C_HEADER)
-        self._refresh()
 
     def _close_file(self):
+        # v3.9.5 FIX (audit 19-a #1 — P1): ✕ Tutup saat job komparasi masih
+        # berjalan → job lama harus dibuang. Tanpa ini, hasil compute file
+        # yang barusan ditutup tetap di-render kembali oleh done() (3.418
+        # baris + footer file lama muncul lagi padahal label "Belum ada
+        # file"). Generation counter + pembatalan batch insert.
+        self._render_gen += 1
+        self._pending = False
+        self._pending_path = None
+        self._pending_sort = None
+        if self._insert_cancel is not None:
+            self._insert_cancel()
+            self._insert_cancel = None
         self._file_df = None
         self._file_meta = {}
         self._file_path = ""
+        self._pair_index = {}
         self._btn_close.configure(state="disabled")
         self._file_label_var.set("Belum ada file dipilih.")
         self._file_label.configure(fg=C_TEXT_MUTED)
         self._render_week_chips()
         self.tree.delete(*self.tree.get_children())
         self._result_df = None
+        self._neg_cells = []
+        self._st_match_cells = []
+        self._st_diff_cells = []
+        self._st_missing_cells = []
+        # v3.9.5 (audit 19-c #5): reset filter header saat file ditutup
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         self.status_var_label.set(
             "File ditutup — klik 📂 Pilih File Deviasi… untuk memuat.")
 
@@ -706,9 +826,22 @@ class KomparasiDeviasiView(tk.Frame):
         """Pivot data app per (Nama Barang × NAMA RESTO) × tanggal untuk
         JENIS yang dipakai komparasi. Formula com identik
         laporan_deviasi_view._compute_com_matrix / pivot 6.PEMAKAIAN (COM):
-            com(t0)  = SALDO AWAL + IN(t0) − BK(t0) − SO(t0)
-            com(t>0) = SO(t-1) + IN(t) − BK(t) − SO(t)
+            com(t=1)  = SALDO AWAL + IN(1) − BK(1) − SO(1)   (bila SA ada)
+            com(t>1)  = SO(t-1) + IN(t) − BK(t) − SO(t)
         Ditambah matriks so / sis (2.SALDO AKHIR) / out (9.OUT).
+
+        v3.9.5 FIX (audit 19-a #6 / 19-b #2): base com di TANGGAL 1 kini
+        SALDO AWAL milik pair (baris SA ber-Tanggal=1, fn_4217) bila ada;
+        fallback SO(t-1) via shift (tanggal negatif bulan lalu), fallback 0.
+        SEMANTIK LAMA: SA ditempel ke kolom kronologis PERTAMA GLOBAL —
+        saat data memuat tanggal negatif (pipeline FULL), kolom pertama =
+        −25 (SA=0 di situ) → SA tidak pernah terpakai, com(1) memakai
+        SO(−31), dan pair TANPA data bulan lalu mendapat com(1) =
+        IN−BK−SO ≈ −SO(1) = MINUS PALSU (431/654 anomali H=1 di data
+        real). Dengan SA sebagai base: GR·App == DEV·App secara aljabar
+        (Sistem fn_running_stock juga berbasis SA). Fix diterapkan ke 3
+        tempat sekaligus (pivot, laporan, komparasi) supaya formula COM
+        tetap identik antar view.
         """
         df = self.data
         if df is None or df.empty:
@@ -743,29 +876,52 @@ class KomparasiDeviasiView(tk.Frame):
         col_keys = sorted(pivot.columns.tolist(), key=_chrono)
         pairs = pivot.index.droplevel("JENIS").unique()
 
-        def jenis_df(jenis: str) -> pd.DataFrame:
+        def jenis_df(jenis: str, fill: bool = True) -> pd.DataFrame:
             try:
                 sub = pivot.xs(jenis, level="JENIS")
             except KeyError:
                 sub = pd.DataFrame()
-            return (sub.reindex(index=pairs, columns=col_keys)
-                    .astype("float64").fillna(0.0))
+            out = (sub.reindex(index=pairs, columns=col_keys)
+                   .astype("float64"))
+            return out.fillna(0.0) if fill else out
 
         so = jenis_df("1.SO")
-        sa = jenis_df("SALDO AWAL")
         sis = jenis_df("2.SALDO AKHIR")
         bm = jenis_df("4.IN")
         bk = jenis_df("8.BARANG KELUAR")
         out = jenis_df("9.OUT")
 
         so_prev = so.shift(1, axis=1).fillna(0.0)
+        # v3.9.5 (audit 19-a #6 / 19-b #2): base com tanggal 1 = SALDO
+        # AWAL pair (tanpa fillna — membedakan 'SA ada, nilainya 0' dari
+        # 'SA tidak ada') bila ada; fallback SO(t-1) shift; kolom pertama
+        # tanpa SA → 0 (tidak ada data sebelumnya).
         if len(col_keys):
-            so_prev.iloc[:, 0] = sa.iloc[:, 0]
+            so_prev.iloc[:, 0] = 0.0
+        pos1 = [c for c in col_keys if int(float(c)) == 1]
+        if pos1:
+            sa_raw = jenis_df("SALDO AWAL", fill=False)
+            key1 = pos1[0]
+            so_prev[key1] = sa_raw[key1].fillna(so_prev[key1])
         com = so_prev + bm - bk - so
 
         self._build_satuan_lookup(df)
+        self._build_aktif_lookup(df)
         return {"pairs": pairs, "col_keys": col_keys, "com": com,
                 "out": out, "so": so, "sis": sis}
+
+    def _build_aktif_lookup(self, df: pd.DataFrame):
+        """v3.9.5 (audit 19-b #5): lookup AKTIF/NON per barang — mengisi
+        snapshot follow-up (kolom AKTIF/NON di tab ☑ Follow Up; sebelumnya
+        kosong utk baris asal KOMPARASI)."""
+        self._aktif_lookup = {}
+        if "AKTIF/NON" in df.columns and "Nama Barang" in df.columns:
+            adf = (df[["Nama Barang", "AKTIF/NON"]]
+                   .dropna(subset=["AKTIF/NON"])
+                   .drop_duplicates(subset=["Nama Barang"], keep="first"))
+            self._aktif_lookup = dict(zip(
+                adf["Nama Barang"].astype(str),
+                adf["AKTIF/NON"].astype(str)))
 
     def _build_satuan_lookup(self, df: pd.DataFrame):
         self._satuan_lookup = {}
@@ -822,13 +978,29 @@ class KomparasiDeviasiView(tk.Frame):
     # =========================================================================
     # RENDER (async + batched)
     # =========================================================================
-    def _refresh(self, sync: bool = False):
+    def _refresh(self, sync: bool = False, parse_path: str | None = None):
         if self.data is None or self.data.empty:
+            # v3.9.5 (audit 19-a #12): bersihkan baris basi — dulu early-
+            # return meninggalkan baris render lama tetap tampil
+            if self._insert_cancel is not None:
+                self._insert_cancel()
+                self._insert_cancel = None
+            try:
+                self.tree.delete(*self.tree.get_children())
+            except tk.TclError:
+                pass
             self.status_var_label.set(
                 "Belum ada data. Jalankan pipeline di tab Proses.")
             return
-        if self._file_df is None:
-            self.tree.delete(*self.tree.get_children())
+        if parse_path is None and self._file_df is None:
+            if self._insert_cancel is not None:
+                self._insert_cancel()
+                self._insert_cancel = None
+            try:
+                self.tree.delete(*self.tree.get_children())
+            except tk.TclError:
+                pass
+            self._result_df = None
             self.status_var_label.set(
                 "Belum ada file — klik '📂 Pilih File Deviasi…' untuk "
                 "memuat file perbandingan.")
@@ -836,27 +1008,65 @@ class KomparasiDeviasiView(tk.Frame):
 
         if self._busy:
             self._pending = True
+            if parse_path is not None:
+                self._pending_path = parse_path
             return
         self._busy = True
+        # v3.9.5 (audit 19-a #1): gen naik tiap job — done() membuang job
+        # yang kedaluwarsa (file ditutup/diganti/data baru).
+        gen = self._render_gen = self._render_gen + 1
 
-        sig = (id(self.data), id(self._file_df),
-               bool(self._show_all_resto.get()))
         st = {
             "col_sel": {c: s for c, s in self._col_sel.items() if s},
             "show_all": bool(self._show_all_resto.get()),
         }
+        path = parse_path
 
         def work():
-            if self._cached_mats is None or self._cached_signature != sig[0]:
+            # v3.9.5 (audit 19-a #4): parse file ikut di thread worker —
+            # file 9,4MB tadinya membekukan UI ±8 detik (tanpa overlay).
+            new_file = None
+            if path is not None:
+                res = parse_deviasi_file(path)
+                if not res["ok"]:
+                    return {"gen": gen, "parse_error": res["error"]}
+                new_file = res
+            if (self._cached_mats is None
+                    or self._cached_data is not self.data):
                 self._cached_mats = self._compute_matrices()
-                self._cached_signature = sig[0]
-            return self._prepare_rows(st)
+                self._cached_data = self.data
+                self._cached_signature = id(self.data)
+            return self._prepare_rows(st, new_file, gen)
 
         def done(payload):
+            if payload.get("gen") != self._render_gen:
+                # v3.9.5 (audit 19-a #1): job kedaluwarsa — buang hasil;
+                # jalankan yang mengantre (file baru / refresh data baru)
+                # supaya state tidak macet.
+                self._busy = False
+                p = self._pending_path
+                self._pending_path = None
+                if p:
+                    self._load_file(p)
+                elif self._pending:
+                    self._pending = False
+                    self._refresh()
+                return
+            if payload.get("parse_error"):
+                self._busy = False
+                self._pending = False
+                self._pending_path = None
+                messagebox.showerror("File deviasi tidak valid",
+                                     payload["parse_error"],
+                                     parent=self.winfo_toplevel())
+                self.status_var_label.set(f"⚠ {payload['parse_error']}")
+                return
+            if payload.get("new_file"):
+                self._apply_file_state(payload["new_file"], path)
             self._render_rows(payload)
 
         run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Membandingkan deviasi…", sync=sync,
+                  loading_text="Memuat & membandingkan deviasi…", sync=sync,
                   on_error=self._on_error)
 
     def _on_error(self, err):
@@ -864,18 +1074,26 @@ class KomparasiDeviasiView(tk.Frame):
         mati permanen setelah 1x gagal compute."""
         self._busy = False
         self._pending = False
+        self._pending_path = None
         self.status_var_label.set(f"⚠ Gagal membandingkan: {err}")
 
-    def _prepare_rows(self, st: dict) -> dict:
+    def _prepare_rows(self, st: dict, new_file: dict | None = None,
+                      gen: int = 0) -> dict:
         """Pure pandas: gabung file × matriks app → baris komparasi
-        (delegasi ke implementasi vektor — thread-safe)."""
-        fdf = self._file_df
+        (delegasi ke implementasi vektor — thread-safe).
+
+        v3.9.5: fdf/new_file diteruskan EKSPLISIT (bukan membaca
+        self._file_df dari thread — mutasi UI thread di tengah compute
+        = sumber race ✕ Tutup File).
+        """
+        fdf = new_file["df"] if new_file else self._file_df
         mats = self._cached_mats
         if fdf is None:
-            return {"items": [], "status": "Belum ada file."}
+            return {"gen": gen, "items": [],
+                    "status": "Belum ada file."}
         if mats is None:
             self._result_df = None
-            return {"items": [], "status":
+            return {"gen": gen, "items": [], "status":
                     "Data app tidak punya JENIS yang dibutuhkan "
                     "(SO / SALDO AKHIR / IN / OUT). Jalankan ulang pipeline."}
 
@@ -894,10 +1112,10 @@ class KomparasiDeviasiView(tk.Frame):
         resto_set = {_norm_resto(nr) for (_, nr) in mats["pairs"]}
 
         return self._prepare_rows_vec(fdf, per_h, pair_index, resto_set,
-                                      st, avail_max)
+                                      st, avail_max, gen, new_file)
 
     def _prepare_rows_vec(self, fdf, per_h, pair_index, resto_set,
-                          st, avail_max) -> dict:
+                          st, avail_max, gen=0, new_file=None) -> dict:
         """Implementasi vektor _prepare_rows — akses kolom berspasi aman
         via DataFrame pandas (tanpa itertuples)."""
         n = len(fdf)
@@ -968,17 +1186,14 @@ class KomparasiDeviasiView(tk.Frame):
         in_app_resto = np.array([r in resto_set for r in
                                  fdf["_resto_norm"].astype(str).values])
         if not st["show_all"]:
-            keep = in_app_resto | (df["Status"].values == "H TIDAK ADA DI DATA")
+            # v3.9.5 (audit 19-c #9): istilah "| Status == H TIDAK ADA"
+            # dihapus — status itu hanya diberi SETELAH pasangan ditemukan
+            # (resto sudah pasti in_app), jadi tidak pernah menambah baris.
+            keep = in_app_resto
             df = df[keep].reset_index(drop=True)
             n_hidden = int((~keep).sum())
         else:
             n_hidden = 0
-
-        n_all = len(df)  # noqa: F841 — dipakai di docstring/status di bawah
-        n_match = int((df["Status"] == "MATCH").sum())
-        n_sel = int((df["Status"] == "SELISIH").sum())
-        n_noapp = int((df["Status"] == "TIDAK ADA DI DATA APP").sum())
-        n_noh = int((df["Status"] == "H TIDAK ADA DI DATA").sum())
 
         # snapshot utk filter header (SEBELUM filter header)
         self._result_df = df.copy()
@@ -990,9 +1205,19 @@ class KomparasiDeviasiView(tk.Frame):
                 fmt = self._format_col_series(col, filtered[col])
                 filtered = filtered[fmt.isin(sel)]
         if filtered.empty:
-            return {"items": [], "status":
+            return {"gen": gen, "new_file": new_file,
+                    "items": [], "status":
                     "Tidak ada baris setelah filter. Klik '✕ Reset Filter' "
                     "atau ubah filter."}
+
+        # v3.9.5 (audit 19-a #7): hitungan status diambil SETELAH filter
+        # header — footer "174 baris · MATCH: 7" padahal MATCH=0 di baris
+        # yang tampil itu menyesatkan.
+        m = len(filtered)
+        n_match = int((filtered["Status"] == "MATCH").sum())
+        n_sel = int((filtered["Status"] == "SELISIH").sum())
+        n_noapp = int((filtered["Status"] == "TIDAK ADA DI DATA APP").sum())
+        n_noh = int((filtered["Status"] == "H TIDAK ADA DI DATA").sum())
 
         # sort default: Resto, Nama Barang, H
         filtered = filtered.sort_values(
@@ -1012,7 +1237,6 @@ class KomparasiDeviasiView(tk.Frame):
         st_diff_cells = []
         st_missing_cells = []
         store = self.store
-        m = len(filtered)
         for i in range(m):
             resto = str(cols_np["Resto"][i])
             barang = str(cols_np["Nama Barang"][i])
@@ -1042,6 +1266,8 @@ class KomparasiDeviasiView(tk.Frame):
                 "resto": _norm_resto(resto),
                 "barang": barang,
                 "satuan": str(cols_np["Satuan"][i]),
+                # v3.9.5 (audit 19-b #5): AKTIF/NON utk kolom Follow Up
+                "aktif": self._aktif_lookup.get(barang, ""),
                 "h": h,
                 "so": (None if np.isnan(cols_np["GR App"][i])
                        else float(cols_np["GR App"][i])),
@@ -1088,19 +1314,34 @@ class KomparasiDeviasiView(tk.Frame):
                        f"(centang utk lihat)")
         if avail_max:
             status += f" · tanggal app s/d {avail_max}"
-        return {"items": items, "status": status,
-                "fp_map": fp_map, "row_snaps": row_snaps,
+        return {"gen": gen, "new_file": new_file, "items": items,
+                "status": status, "fp_map": fp_map,
+                "row_snaps": row_snaps, "pair_index": pair_index,
                 "neg_cells": neg_cells,
                 "st_match_cells": st_match_cells,
                 "st_diff_cells": st_diff_cells,
                 "st_missing_cells": st_missing_cells}
 
     def _render_rows(self, payload: dict):
+        try:
+            self._render_rows_inner(payload)
+        except tk.TclError:
+            # v3.9.5: view di-destroy di tengah render (popup/job async
+            # menembak setelah widget mati) — pastikan state bersusih.
+            self._busy = False
+            self._pending = False
+
+    def _render_rows_inner(self, payload: dict):
+        if self._insert_cancel is not None:
+            # batch insert lama masih berjalan (race) → stop dulu
+            self._insert_cancel()
+            self._insert_cancel = None
         self.tree.delete(*self.tree.get_children())
         self._update_headings()
-        self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
+        # v3.9.5 (audit 19-a #2): simpan pair index utk popup detail
+        self._pair_index = payload.get("pair_index", {})
         self._neg_cells = payload.get("neg_cells", [])
         self._st_match_cells = payload.get("st_match_cells", [])
         self._st_diff_cells = payload.get("st_diff_cells", [])
@@ -1112,10 +1353,22 @@ class KomparasiDeviasiView(tk.Frame):
             self._busy = False
             if self._pending:
                 self._pending = False
-                self._refresh()
+                p = self._pending_path
+                self._pending_path = None
+                self._pending_sort = None
+                if p:
+                    self._load_file(p)   # file yang antre saat busy
+                else:
+                    self._refresh()
+            elif self._pending_sort:
+                # v3.9.5 (audit 19-b #6): sort yang diklik saat render
+                # batch berjalan kini diantrekan (dulu dibuang diam-diam)
+                col, rev = self._pending_sort
+                self._pending_sort = None
+                self._sort_by(col, reverse=rev)
 
-        insert_tree_items(self.tree, payload["items"], batch=500,
-                          on_done=render_done)
+        self._insert_cancel = insert_tree_items(
+            self.tree, payload["items"], batch=500, on_done=render_done)
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell (sort = delete+reinsert)."""
@@ -1146,7 +1399,12 @@ class KomparasiDeviasiView(tk.Frame):
                 [c[0] for c in self.COLUMNS if c[0] != "✓"],
                 get_values=self._col_values,
                 on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
-                                                               tree=t))
+                                                               tree=t),
+                # v3.9.5 FIX (audit 19-a #3): filter di clone ⛶ rebuild
+                # baris (delete+insert) → tag per-cell harus dipasang
+                # ulang setelahnya — dulu minus-merah & warna Status
+                # hilang setelah memfilter di window besar.
+                on_after_filter=lambda t=new_tree: self._reapply_cell_tags(t))
 
         win, new_tree = open_tree_maximized(
             self.tree, "Komparasi Deviasi — File vs Tab Deviasi GR",
@@ -1159,6 +1417,9 @@ class KomparasiDeviasiView(tk.Frame):
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         if self._busy and tree is None:
+            # v3.9.5 (audit 19-b #6): antre sort saat render batch masih
+            # berjalan (dulu dibuang diam-diam tanpa umpan balik)
+            self._pending_sort = (col, reverse)
             return
         tree = tree if tree is not None else self.tree
         parse = self._parse_num_id if col in self.NUMERIC_COLS else None
@@ -1197,15 +1458,24 @@ class KomparasiDeviasiView(tk.Frame):
         except (TypeError, ValueError):
             h = 0
 
+        # v3.9.5 FIX (audit 19-a #2 / 19-c #8): pakai nama barang & resto
+        # versi APP — popup memfilter Nama Barang secara EXACT; nama file
+        # (kapital/spasi beda) cocok di tabel via normalisasi tapi popup
+        # kosong bila nama RAW dipakai.
+        resto_raw = row_data.get("Resto")
+        pair = self._pair_index.get(
+            (_norm_name(nama_barang), _norm_resto(resto_raw)))
+        nb_app, nr_app = (pair if pair is not None
+                          else (nama_barang, _norm_resto(resto_raw)))
+
         from src.ui.details_popup import show_details_popup
         root = self.winfo_toplevel()
         active_filters = {}
-        resto_norm = _norm_resto(row_data.get("Resto"))
-        if resto_norm:
-            active_filters["NAMA RESTO"] = resto_norm
+        if nr_app:
+            active_filters["NAMA RESTO"] = nr_app
         show_details_popup(
             root, self.data,
-            nama_barang=nama_barang,
+            nama_barang=nb_app,
             jenis=None,
             tanggal=h,
             filters=active_filters,
@@ -1237,13 +1507,18 @@ class KomparasiDeviasiView(tk.Frame):
 
     @staticmethod
     def _fmt_pct(val) -> str:
-        """Ratio (0.2697) → '26,97%'; NaN → '—'."""
+        """Ratio (0.2697) → '26,97%'; NaN → '—'.
+
+        v3.9.5 (audit 19-a #8): -0.0 → '0,00%' (dulu '-0,00%' — tanda
+        nol negatif bocor karena '-0.0 < 0' adalah False di Python)."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return "—"
         try:
             val = float(val)
         except (TypeError, ValueError):
             return str(val)
+        if val == 0:
+            return "0,00%"
         s = f"{val * 100:,.2f}".replace(",", "\u00a0").replace(
             ".", ",").replace("\u00a0", ".")
         if val < 0:

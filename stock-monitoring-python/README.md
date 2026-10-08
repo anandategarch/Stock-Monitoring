@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.5 — DEEP AUDIT BUG (4 agent paralel) → semua P1/P2/P3 diperbaiki**: **(P1) race ✕ Tutup File** saat komparasi menghitung → hasil file lama tak muncul lagi (generation counter); **(P1) kebocoran GC seumur sesi** (popup ditutup di tengah render → gc.disable menempel — poll kini di root app); **(P2) parse file 9,4MB di thread worker** (UI tak membeku 8 detik); **(P2) SALDO AWAL jadi base com(1)** di 3 view sekaligus (pivot/laporan/komparasi — pair tanpa data bulan-lalu tak lagi dapat MINUS PALSU di H=1; GR·App == DEV·App aljabar persis); **(P2) popup detail** pakai nama barang versi APP; **(P2) tag per-cell bertahan setelah filter di clone ⛶**; **(P2) popup filter "Selisih vs Median" hidup**; **(P2) Apply H render 1× (dulu 2×)**; plus duplikat multi-bulan dihitung, scan sheet ke-2, footer = hitungan baris tampil, filter reset saat ganti file, sort diantrekan saat busy, initialdir ikut RootPath, unsubscribe H, dst. **337/337 UI test × 2 run + smoke real-data 342rb baris + VLM visual PASS.**
 > **v3.9.4 — KOMPARASI FILE DEVIASI vs TAB DEVIASI GR + "DEV TO BOM" DI APP**: tab 📋 Laporan Deviasi kini **2 MODE** (SegmentBar): **⚖ Komparasi File Deviasi (BARU — default)** — pilih file deviasi resmi (mis. `20.AGUSTUS 2026.xlsx`), tiap baris dibandingkan sisi-app pada **kolom H menurut minggunya (WEEK 1→7 · WEEK 2→14 · WEEK 3/4→25** — permintaan user; minggu file = cut-off kumulatif dari tgl 1); **BOM App = Σ penjualan 22.05** ("2205 itu BOM"), COM App = Σ pemakaian, **GR App = SO_H − Sistem persis tab 📦 Deviasi GR**, DEV App = COM−BOM (formula file); kolom Selisih + Status **MATCH / SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA**; resto file "1041.BDGUKU" dinormalkan otomatis; minus merah per-cell + sel Status hijau/amber/merah — dan **🚨 Anomali COM (v3.9.3, tetap ada tinggal ganti segmen)**.
 > **v3.9.3 — LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM) (SEMENTARA)**: isi tab 📋 Laporan Deviasi DIGANTI — kini **daftar (Nama Barang × Resto) dengan pemakaian (COM) di kolom H yang MINUS atau LEBIH TINGGI dari MEDIAN barang tsb** (median antar resto, per barang, di kolom H). Formula COM identik baris 6.PEMAKAIAN (COM) pivot (com = SO(t-1) + IN − BK − SO; tanggal pertama = SALDO AWAL — diverifikasi oracle 286 nilai vs pivot, 0 mismatch); matriks COM di-cache (ganti H tanpa recompute); TANGGAL H bersama dari tab 📦 Deviasi GR (chip read-only + auto-refresh); minus merah **per cell** + sel Status merah/amber; tabel Audit Harian lama tersimpan di git history (commit e20141a).
 > **v3.9 — SHARED H + EXPORT AUDIT + RINCIAN PO RINGKAS + STYLE WASTE**: **(1) TANGGAL H cukup input 1×** — input + tombol *Apply H* hanya ada di tab 📦 Deviasi GR, otomatis berlaku juga di tab 🧩 Deviasi PCS (chip nilai H read-only + refresh otomatis; pivot dihitung 1× via cache bersama + lock — tidak ada double input lagi). **(2) Export Rekap Selisih IN + opsi kolom hasil audit** — sebelum simpan file muncul dialog opsi: ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit (bisa ditambahkan atau tidak, sesuai kebutuhan). **(3) Rincian PO DISEDERHANAKAN** — baris TEAL = info PO lengkap SEKALI (Nomor #, Tanggal, Pemasok, Status, Keterangan, N item, Total), baris putih di bawahnya = item saja (Nama Barang · Satuan · Kuantitas); kolom Tgl/Jam Pembuatan pindah ke baris induk + tersembunyi default (tampilkan via ◱ Kolom). **(4) STYLE ala repo Waste** — corong filter header **MERAH saat kolom terfilter** (idle = isi terang + outline gelap), **tabel diperbesar** (font 9→10, rowheight 26→30, heading 10 bold), tombol **⤢ Perbesar Tabel** (ciutkan baris kontrol → tabel tinggi penuh, in-place) + **⛶ Layar Penuh** (window terpisah) di semua tab, padding tombol/tab lebih lapang. **(5) CRASH FIX laten CPython 3.12+Tk** — finalisasi `tk.Variable` dari thread worker (pemicu segfault; kini mustahil via GC shield seumur thread) + cache pivot GR/PCS kini thread-safe (lock).
@@ -64,6 +65,22 @@ Stock Monitoring — Python Edition
 
 ---
 
+## Perbaikan Bug v3.9.5 — Deep Audit (4 Agent Paralel)
+
+Audit menyeluruh fitur terbaru (v3.9.3 Anomali COM + v3.9.4 Komparasi Deviasi) memakai 4 agent paralel (view komparasi / view laporan / integrasi app+widgets / runtime) dengan oracle numerik + GUI harness di Xvfb. Temuan: 0 P0, 2 P1, 7 P2, ~15 P3 — **semua diperbaiki**:
+
+1. **RACE ✕ TUTUT FILE (P1)** — menutup file deviasi saat komparasi masih menghitung membuat hasil file lama di-render ulang. Fix: generation counter (`_render_gen`) + pembatalan batch insert + reset `_busy` di `done()`; job kedaluwarsa menjalankan refresh/file yang mengantre.
+2. **KEBOCORAN GC (P1)** — `run_async` menjadwalkan poll pada widget pemilik; popup detail yang ditutup di tengah job → `gc.disable()` menempel seumur sesi. Fix: poll dijadwalkan pada root aplikasi (`_poll_host` naik rantai master).
+3. **PARSE FILE DI THREAD (P2)** — file 9,4MB membekukan UI ±8 detik; kini parse+compute+join = satu job async dengan overlay.
+4. **SALDO AWAL BASE com(1) (P2, 3 file bareng)** — pivot `_compute_com`, laporan `_compute_com_matrix`, komparasi `_compute_matrices`: base com di tanggal 1 = SA milik pair (baris SA ber-Tanggal=1), fallback SO(t-1), fallback 0. Pair tanpa data bulan lalu tak lagi dapat com(1) ≈ −SO(1) (minus palsu); GR·App == DEV·App aljabar persis.
+5. **POPUP DETAIL (P2)** — nama barang file → resolve nama versi APP via `_pair_index` (popup memfilter exact).
+6. **TAG PER-CELL + FILTER DI CLONE ⛶ (P2)** — `attach_clone_filters(on_after_filter=…)`; `apply_tree_row_filters(on_done=…)`; `apply_cell_tag` fallback per-iid yang masih ada (satu iid hilang dulu membatalkan seluruh chunk).
+7. **FILTER "Selisih vs Median" (P2)** — mapping nama tampilan→kolom internal di `_col_values`.
+8. **APPLY H RENDER DOBEL (P2)** — refresh eksplisit hanya bila H tidak berubah / view dirty.
+9. **Lainnya (P3)**: duplikat lintas bulan dihitung+dilaporkan; scan sheet ke-2+; footer status = baris tampil (bukan global); filter reset saat file berganti; sort diantrekan saat busy; pane tersembunyi tak di-compute saat H berubah; initialdir komparasi ikut RootPath; `show_laporan_mode` sinkron SegmentBar; snapshot follow-up + kolom AKTIF/NON; `SharedTanggalH.unsubscribe()`; `-0,00%`→`0,00%`; Satuan NaN→`''`; dialog + `*.xlsb`; baris basi dibersihkan saat data kosong.
+
+**Verifikasi**: 337/337 UI test × 2 run (25 check baru §23) + `test_mock` ALL PASS + ruff 0 error baru + oracle SA 3 view + smoke real-data 342.222 baris (tgl −31..31, parse async 8,2s dgn 740 pump = UI hidup, anomali 2.135 baris 0,4s, race & cache-invalidation bersih) + 3 screenshot VLM PASS.
+
 ## Fitur Baru v3.9.4 — Komparasi File Deviasi vs Tab Deviasi GR
 
 Permintaan user: *"Di file sampel kan ada Dev to bom ini kok gak ada ya? Padahal data udah lengkap 2205 itu bom. Aku barusan upload file deviasi. Nah aku mau compare file deviasi itu dengan yang deviasi di Tab deviasi GR terus coba cek kolom status week 1 itu sama dengan 7 week 2 = 14 dan week = 25. Itu buat kolom h."*
@@ -118,7 +135,7 @@ tetap ada, tinggal ganti segmen; v3.9.1 ada tombol bantu ganti mode
    popup detail difilter barang + resto (kode app) + tanggal H minggu.
 
 ### ✅ Test
-312/312 UI test (279 v3.9.3 + **33 baru** — mode switcher, parsing file format
+337/337 UI test (279 v3.9.3 + 33 v3.9.4 + **25 v3.9.5 audit-fix** — mode switcher, parsing file format
 asli, pemetaan minggu→H, GR App = SO_H−Sistem eksak (49/113/150 dari mock
 deterministik), BOM/COM/DEV App konvensi file, MATCH/SELISIH/TIDAK ADA DI
 DATA APP/H TIDAK ADA, opsi semua resto, minus per-cell + sel Status berwarna

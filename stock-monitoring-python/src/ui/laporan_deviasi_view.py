@@ -28,6 +28,7 @@ bila dibutuhkan):
   async (UI tidak membeku) — semua infrastruktur tabel dipertahankan.
 """
 
+import contextlib
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
@@ -91,10 +92,18 @@ class LaporanDeviasiView(tk.Frame):
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
+        # v3.9.5 (audit 19-a #1): guard job kedaluwarsa + pembatalan batch
+        self._render_gen = 0
+        self._insert_cancel = None
+        self._pending_sort = None          # (col, reverse) antre saat busy
         # cache COM matrix — H-INDEPENDEN (ganti H tidak recompute pivot;
         # kolom H dipilih saat render) + lookup satuan
         self._cached_com = None
         self._cached_signature = None
+        # v3.9.5 (audit 19-b #4): identitas df utk cache (id() bisa
+        # dipakai ulang CPython setelah GC)
+        self._cached_data = None
+        self._aktif_lookup: dict = {}   # v3.9.5 (audit 19-b #5)
         self._satuan_lookup: dict = {}
         self._result_df = None  # hasil flagged di H
         # v3.9.2: minus merah PER CELL (fallback Tk 8: tag per baris)
@@ -253,10 +262,21 @@ class LaporanDeviasiView(tk.Frame):
         # tab ini TIDAK punya input H sendiri — diterapkan di tab GR)
         if self._h_state is not None:
             self._h_state.subscribe(self._on_shared_h_changed)
+            # v3.9.5 (audit 19-b #3): lepas listener saat view di-destroy —
+            # SharedTanggalH kini punya unsubscribe() (anti listener zombie
+            # bila view direbuild di masa depan)
+            self.bind("<Destroy>", self._on_view_destroy, add="+")
 
         self.tree.bind("<Double-1>", self._on_double_click)
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+
+    def _on_view_destroy(self, event):
+        """v3.9.5 (audit 19-b #3): lepas langganan H bersama saat view
+        di-destroy (hanya event utk view ini sendiri, bukan anak)."""
+        if event.widget is self and self._h_state is not None:
+            with contextlib.suppress(Exception):
+                self._h_state.unsubscribe(self._on_shared_h_changed)
 
     # =========================================================================
     # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
@@ -298,11 +318,18 @@ class LaporanDeviasiView(tk.Frame):
             self._refresh()
 
     def _col_values(self, col: str) -> list:
-        """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua kolom)."""
+        """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua kolom).
+
+        v3.9.5 FIX (audit 19-b #1 — P2): kolom tampilan "Selisih vs Median"
+        disimpan di _result_df dengan nama INTERNAL "Selisih" — dipetakan
+        di sini juga. Dulu hanya jalur APPLY yang memetakan → daftar nilai
+        kolom itu selalu KOSONG = popup filter tidak pernah bisa dibuka
+        ("Tidak ada nilai yang bisa difilter")."""
+        key = "Selisih" if col == "Selisih vs Median" else col
         result = self._result_df
-        if result is None or result.empty or col not in result.columns:
+        if result is None or result.empty or key not in result.columns:
             return []
-        return self._format_col_series(col, result[col]).unique().tolist()
+        return self._format_col_series(col, result[key]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
         """Format kolom → string tampilan (identik render tabel — dipakai
@@ -341,9 +368,16 @@ class LaporanDeviasiView(tk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
         self.data = data
+        # v3.9.5 (audit 19-a #12): data berganti → job lama dibuang
+        self._render_gen += 1
+        if self._insert_cancel is not None:
+            self._insert_cancel()
+            self._insert_cancel = None
         self._cached_com = None
         self._cached_signature = None
+        self._cached_data = None
         self._satuan_lookup = {}
+        self._aktif_lookup = {}
         self._result_df = None
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
@@ -366,11 +400,20 @@ class LaporanDeviasiView(tk.Frame):
 
         Formula identik dgn baris "6.PEMAKAIAN (COM)" tab 📊 Pivot mode
         Tanggal (port M code; lihat PivotTableView._compute_com):
-            com(t0)    = SALDO AWAL(t0) + IN(t0) - BK(t0) - SO(t0)
-            com(t>0)   = SO(t-1) + IN(t) - BK(t) - SO(t)
+            com(t=1)  = SALDO AWAL + IN(1) - BK(1) - SO(1)   (SA pair bila ada)
+            com(t>1)  = SO(t-1) + IN(t) - BK(t) - SO(t)
         Kolom diurut kronologis (-25..-31 lalu 1..31). Matrix TIDAK
         bergantung H → dipakai lintas perubahan H (kolom H dipilih saat
         render). Juga mengisi self._satuan_lookup.
+
+        v3.9.5 FIX (audit 19-b #2 — P2, bareng pivot & komparasi): SALDO
+        AWAL dulu ditempel ke kolom kronologis PERTAMA GLOBAL — saat data
+        memuat tanggal negatif (pipeline default FULL), kolom pertama =
+        −25 padahal baris SA ber-Tanggal=1 (fn_4217) → SA tidak pernah
+        terpakai: com(1) memakai SO(−31), dan pair TANPA data bulan lalu
+        mendapat com(1) = IN−BK−SO ≈ −SO(1) = MINUS PALSU di H=1 (431 dari
+        654 anomali H=1 pada data real). Kini base com(1) = SA milik pair
+        (fallback SO(t-1), fallback 0).
         """
         df = self.data
         if df is None or df.empty:
@@ -404,30 +447,52 @@ class LaporanDeviasiView(tk.Frame):
         col_keys = sorted(pivot.columns.tolist(), key=_chrono)
         pairs = pivot.index.droplevel("JENIS").unique()
 
-        def jenis_df(jenis: str) -> pd.DataFrame:
+        def jenis_df(jenis: str, fill: bool = True) -> pd.DataFrame:
             try:
                 sub = pivot.xs(jenis, level="JENIS")
             except KeyError:
                 sub = pd.DataFrame()
-            return (sub.reindex(index=pairs, columns=col_keys)
-                    .astype("float64").fillna(0.0))
+            out = (sub.reindex(index=pairs, columns=col_keys)
+                   .astype("float64"))
+            return out.fillna(0.0) if fill else out
 
         so = jenis_df("1.SO")
-        sa = jenis_df("SALDO AWAL")
         bm = jenis_df("4.IN")
         bk = jenis_df("8.BARANG KELUAR")
 
-        # so_prev[t_i] = SO[t_{i-1}]; kolom pertama = SALDO AWAL (M code)
+        # v3.9.5 (audit 19-b #2): so_prev[t_i] = SO[t_{i-1}]; base com di
+        # TANGGAL 1 = SALDO AWAL milik pair (tanpa fillna — membedakan
+        # 'SA ada, nilainya 0' dari 'SA tidak ada') bila ada, fallback
+        # shift (SO tanggal negatif), kolom pertama tanpa data → 0.
         so_prev = so.shift(1, axis=1).fillna(0.0)
         if len(col_keys):
-            so_prev.iloc[:, 0] = sa.iloc[:, 0]
+            so_prev.iloc[:, 0] = 0.0
+        pos1 = [c for c in col_keys if int(float(c)) == 1]
+        if pos1:
+            sa_raw = jenis_df("SALDO AWAL", fill=False)
+            key1 = pos1[0]
+            so_prev[key1] = sa_raw[key1].fillna(so_prev[key1])
 
         com = so_prev + bm - bk - so
         com.columns = [int(c) if float(c).is_integer() else c
                        for c in col_keys]
 
         self._build_satuan_lookup(df)
+        self._build_aktif_lookup(df)
         return com
+
+    def _build_aktif_lookup(self, df: pd.DataFrame):
+        """v3.9.5 (audit 19-b #5): lookup AKTIF/NON per barang — mengisi
+        snapshot follow-up (kolom AKTIF/NON di tab ☑ Follow Up; sebelumnya
+        kosong utk baris asal LAPORAN-COM)."""
+        self._aktif_lookup = {}
+        if "AKTIF/NON" in df.columns and "Nama Barang" in df.columns:
+            adf = (df[["Nama Barang", "AKTIF/NON"]]
+                   .dropna(subset=["AKTIF/NON"])
+                   .drop_duplicates(subset=["Nama Barang"], keep="first"))
+            self._aktif_lookup = dict(zip(
+                adf["Nama Barang"].astype(str),
+                adf["AKTIF/NON"].astype(str)))
 
     def _build_satuan_lookup(self, df: pd.DataFrame):
         """Lookup satuan per (Nama Barang, Nama Resto) — zip, bukan
@@ -451,6 +516,15 @@ class LaporanDeviasiView(tk.Frame):
     # =========================================================================
     def _refresh(self, sync: bool = False):
         if self.data is None or self.data.empty:
+            # v3.9.5 (audit 19-b #8): bersihkan baris basi — dulu early-
+            # return meninggalkan render lama tetap tampil di tree
+            if self._insert_cancel is not None:
+                self._insert_cancel()
+                self._insert_cancel = None
+            try:
+                self.tree.delete(*self.tree.get_children())
+            except tk.TclError:
+                pass
             self.status_var_label.set(
                 "Belum ada data. Jalankan pipeline di tab Proses.")
             return
@@ -459,22 +533,34 @@ class LaporanDeviasiView(tk.Frame):
             self._pending = True
             return
         self._busy = True
+        # v3.9.5 (audit 19-a #1): gen naik tiap job — done() membuang job
+        # kedaluwarsa (data berganti lewat load_data saat compute jalan)
+        gen = self._render_gen = self._render_gen + 1
 
-        # COM matrix H-independen → cache per data (id) saja; pilihan
-        # kolom H + median difilter di _prepare_rows (murah).
-        sig = id(self.data)
+        # COM matrix H-independen → cache per data (identitas objek) saja;
+        # pilihan kolom H + median difilter di _prepare_rows (murah).
         st = {
             "h": int(self.tanggal_h),
             "col_sel": {c: s for c, s in self._col_sel.items() if s},
         }
 
         def work():
-            if self._cached_com is None or self._cached_signature != sig:
+            if (self._cached_com is None
+                    or self._cached_data is not self.data):
                 self._cached_com = self._compute_com_matrix()
-                self._cached_signature = sig
-            return self._prepare_rows(st)
+                self._cached_data = self.data
+                self._cached_signature = id(self.data)
+            return self._prepare_rows(st, gen)
 
         def done(payload):
+            if payload.get("gen") != self._render_gen:
+                # v3.9.5 (audit 19-a #1): job kedaluwarsa — buang, lalu
+                # jalankan refresh yang mengantre (data baru)
+                self._busy = False
+                if self._pending:
+                    self._pending = False
+                    self._refresh()
+                return
             self._render_rows(payload)
 
         run_async(self, work, done, overlay=self.overlay,
@@ -489,13 +575,13 @@ class LaporanDeviasiView(tk.Frame):
         self._pending = False
         self.status_var_label.set(f"⚠ Gagal menghitung COM: {err}")
 
-    def _prepare_rows(self, st: dict) -> dict:
+    def _prepare_rows(self, st: dict, gen: int = 0) -> dict:
         """Pure pandas: pilih kolom H, median per barang (antar resto),
         flag minus / > median, filter header → items tree (thread-safe)."""
         com = self._cached_com
         if com is None or com.empty:
             self._result_df = None
-            return {"items": [], "status": "Tidak ada data."}
+            return {"gen": gen, "items": [], "status": "Tidak ada data."}
 
         h = st["h"]
         if h not in com.columns:
@@ -504,7 +590,7 @@ class LaporanDeviasiView(tk.Frame):
             lo = f"{avail[0]}" if avail else "-"
             hi = f"{avail[-1]}" if avail else "-"
             self._result_df = None
-            return {"items": [], "status":
+            return {"gen": gen, "items": [], "status":
                     f"Kolom H={h} tidak ada di data — tanggal tersedia "
                     f"{lo} s/d {hi}. Atur H di tab 📦 Deviasi GR."}
 
@@ -534,7 +620,7 @@ class LaporanDeviasiView(tk.Frame):
             self._result_df = flagged[
                 ["Nama Barang", "Resto", "Satuan", "COM", "Median",
                  "Selisih", "Status"]].copy()
-            return {"items": [],
+            return {"gen": gen, "items": [],
                     "status": f"0 baris — tidak ada COM minus / di atas "
                               f"median di kolom H={h}."}
 
@@ -553,7 +639,7 @@ class LaporanDeviasiView(tk.Frame):
                 filtered = filtered[fmt.isin(sel)]
 
         if filtered.empty:
-            return {"items": [],
+            return {"gen": gen, "items": [],
                     "status": "Tidak ada baris COM minus / di atas median "
                               "setelah filter. Klik '✕ Reset Filter' atau "
                               "ubah filter."}
@@ -598,6 +684,8 @@ class LaporanDeviasiView(tk.Frame):
                 "resto": resto,
                 "barang": barang,
                 "satuan": str(cols_np["Satuan"][i]),
+                # v3.9.5 (audit 19-b #5): AKTIF/NON utk kolom Follow Up
+                "aktif": self._aktif_lookup.get(barang, ""),
                 "h": h,
                 "so": com_val,
                 "sistem": med_val,
@@ -628,15 +716,29 @@ class LaporanDeviasiView(tk.Frame):
 
         status = (f"{n} baris · minus: {n_minus} · > median: {n_above} · "
                   f"H={h} · median per barang (antar resto)")
-        return {"items": items, "status": status,
+        return {"gen": gen, "items": items, "status": status,
                 "fp_map": fp_map, "row_snaps": row_snaps,
                 "neg_cells": neg_cells, "st_minus_cells": st_minus_cells,
                 "st_above_cells": st_above_cells}
 
     def _render_rows(self, payload: dict):
+        try:
+            self._render_rows_inner(payload)
+        except tk.TclError:
+            # v3.9.5: view di-destroy di tengah render — pastikan state
+            # bersih supaya job berikutnya tidak terblokir.
+            self._busy = False
+            self._pending = False
+
+    def _render_rows_inner(self, payload: dict):
+        if self._insert_cancel is not None:
+            # batch insert lama masih berjalan → stop dulu (race)
+            self._insert_cancel()
+            self._insert_cancel = None
         self.tree.delete(*self.tree.get_children())
+        # _update_headings() sudah memanggil refresh_icons() — v3.9.5
+        # (audit 19-b #10): hapus panggilan dobel di sini.
         self._update_headings()
-        self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
         self._neg_cells = payload.get("neg_cells", [])       # v3.9.2
@@ -650,10 +752,17 @@ class LaporanDeviasiView(tk.Frame):
             self._busy = False
             if self._pending:
                 self._pending = False
+                self._pending_sort = None
                 self._refresh()
+            elif self._pending_sort:
+                # v3.9.5 (audit 19-b #6): sort yang diklik saat render
+                # batch berjalan kini diantrekan (dulu dibuang diam-diam)
+                col, rev = self._pending_sort
+                self._pending_sort = None
+                self._sort_by(col, reverse=rev)
 
-        insert_tree_items(self.tree, payload["items"], batch=500,
-                          on_done=render_done)
+        self._insert_cancel = insert_tree_items(
+            self.tree, payload["items"], batch=500, on_done=render_done)
 
     def _update_headings(self):
         """Heading COM dinamis mengikuti TANGGAL H (pola Deviasi SO_H)."""
@@ -687,12 +796,21 @@ class LaporanDeviasiView(tk.Frame):
     def _on_shared_h_changed(self, new_h: int):
         """Listener H bersama: H di-apply/reset di tab 📦 Deviasi GR →
         chip diperbarui + view refresh (bila tab belum pernah dilihat:
-        tetap dirty, di-refresh saat tab dibuka — ensure_refreshed)."""
+        tetap dirty, di-refresh saat tab dibuka — ensure_refreshed).
+
+        v3.9.5 FIX (audit 19-c #3): pane tersembunyi (mode ⚖ Komparasi
+        aktif / tab lain) TIDAK di-compute ulang — cukup tandai dirty +
+        perbarui chip; refresh terjadi saat pane benar-benar terlihat.
+        Dulu: 5× ganti H dgn mode 0 aktif = 5× render penuh yang tak
+        terlihat (sort/selection ter-reset sia-sia)."""
         self.tanggal_h = int(new_h)
         if hasattr(self, "_h_chip_var"):
             self._h_chip_var.set(str(new_h))
         if self._dirty:
             return          # belum pernah dirender — refresh saat tab dibuka
+        if not self.winfo_ismapped():
+            self._dirty = True   # tersembunyi — refresh saat terlihat lagi
+            return
         if self.data is not None and not self.data.empty:
             self._refresh()
 
@@ -707,7 +825,12 @@ class LaporanDeviasiView(tk.Frame):
                 [c[0] for c in self.COLUMNS if c[0] != "✓"],
                 get_values=self._col_values,
                 on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
-                                                               tree=t))
+                                                               tree=t),
+                # v3.9.5 FIX (audit 19-a #3 / 19-c #4): filter di clone ⛶
+                # rebuild baris (delete+insert) → tag per-cell dipasang
+                # ulang setelahnya — dulu hilang setelah memfilter di
+                # window besar.
+                on_after_filter=lambda t=new_tree: self._reapply_cell_tags(t))
 
         win, new_tree = open_tree_maximized(
             self.tree, "Pemakaian (COM) — Minus / Di Atas Median",
@@ -723,9 +846,12 @@ class LaporanDeviasiView(tk.Frame):
         """Sort kolom — engine LINEAR v3.3 (delete+reinsert).
         v3.9.2: delete+reinsert me-reset tag PER-CELL → dipasang ulang.
         v3.9.3: kolom numerik memakai parser format Indonesia (1.234,5 /
-        kurung-negatif) — parser default menganggap "1.234" = 1.234."""
+        kurung-negatif) — parser default menganggap "1.234" = 1.234.
+        v3.9.5 (audit 19-b #6): klik sort saat render batch berjalan kini
+        DIANTREKAN (dulu dibuang diam-diam — sort seolah tidak jalan)."""
         if self._busy and tree is None:
-            return   # render batch masih berjalan — sort ditunda (v3.3)
+            self._pending_sort = (col, reverse)
+            return
         tree = tree if tree is not None else self.tree
         parse = self._parse_num_id if col in self.NUMERIC_COLS else None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)

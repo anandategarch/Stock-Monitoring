@@ -39,6 +39,14 @@ Memverifikasi:
     status MATCH/SELISIH/TIDAK ADA DI DATA APP/H TIDAK ADA; resto file
     "1041.BDGUKU" dinormalkan; opsi tampil semua resto; minus merah
     per-cell + sel Status hijau/amber/merah) & 🚨 Anomali COM (v3.9.3)
+17. v3.9.5 — AUDIT DEEP REGRESSION (§23): SALDO AWAL jadi base com(1)
+    (tanggal negatif + pair tanpa bulan-lalu — aljabar GR==DEV), race
+    ✕ Tutup File saat compute, GC-shield dilepas walau pemilik job
+    di-destroy, tag per-cell setelah filter di clone ⛶, duplikat lintas
+    bulan dihitung, data di sheet ke-2, footer = baris tampil, filter
+    reset saat reload file, sort diantrekan saat busy, pair index nama
+    APP, snapshot 'aktif', show_laporan_mode sinkron SegmentBar, popup
+    filter "Selisih vs Median" hidup, Apply H render 1×, unsubscribe H
 """
 import os
 import sys
@@ -53,7 +61,10 @@ import tkinter as tk
 from tkinter import ttk
 
 from src.ui.app import StockMonitorApp, APP_VERSION
-from src.ui.widgets import LoadingOverlay, HeaderFilter
+from src.ui.laporan_deviasi_view import LaporanDeviasiView
+from src.ui.widgets import LoadingOverlay, HeaderFilter, run_async, \
+    _GC_HOLD
+from src.ui.komparasi_deviasi_view import parse_deviasi_file, _norm_name
 
 PASS = []
 FAIL = []
@@ -342,7 +353,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.4", APP_VERSION == "3.9.4", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.5", APP_VERSION == "3.9.5", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -2467,6 +2478,317 @@ def main():
     # kembalikan data mock utama supaya state akhir konsisten
     kv.load_data(append1)
     wait_view(root, kv)
+
+    # ==================================================================
+    print("== 23. (v3.9.5) AUDIT DEEP — REGRESSION FIXES ==")
+
+    import tempfile as _tf
+
+    # --- (A6/B2) SALDO AWAL jadi base com(1) saat ada tanggal negatif ---
+    def make_mock_neg_dates_df() -> pd.DataFrame:
+        """2 barang × 1 resto, tanggal -25..-31 (LALU saja) + tgl 1 & 7
+        (WEEK 1 → H 7 harus ADA supaya GR terhitung).
+
+        LALU: SO(-31)=40, SA(1)=50, SO(1)=10, SO(7)=20, SIS=SA (IN/OUT/BK=0)
+          → GR(7)=SO(7)-SIS(7)=-30; com(1) BARU=SA-SO=40, com(7)=SO(1)-SO(7)
+          =-10 → Σcom=30 → DEV App=-30==GR (LAMA: com(1)=SO(-31)-SO=30 →
+          Σ=20 → DEV=-20 ≠ GR — penyimpangan SO(-31)-SA=10, audit 19-a #6)
+        NOPAIR: tanpa baris bulan lalu — SA(1)=12, SO(1)=10, SO(7)=8
+          → com(1) BARU=2 (LAMA: 0-10=-10 = MINUS PALSU); GR(7)=8-12=-4,
+          Σcom=2+2=4 → DEV=-4==GR
+        """
+        rows = []
+        def add(b, j, t, v):
+            rows.append({"Nama Barang": b, "JENIS": j, "NAMA RESTO": "R1",
+                         "Tanggal": t, "NILAI": v, "SATUAN": "GR",
+                         "AKTIF/NON": "AKTIF"})
+        for t in (-25, -30, -31):
+            add("LALU", "1.SO", t, 5.0 if t != -31 else 40.0)
+        add("LALU", "1.SO", 1, 10.0)
+        add("LALU", "1.SO", 7, 20.0)
+        add("LALU", "2.SALDO AKHIR", 1, 50.0)
+        add("LALU", "2.SALDO AKHIR", 7, 50.0)
+        add("LALU", "SALDO AWAL", 1, 50.0)
+        for j in ("4.IN", "9.OUT", "8.BARANG KELUAR"):
+            for t in (1, 7):
+                add("LALU", j, t, 0.0)
+        add("NOPAIR", "1.SO", 1, 10.0)
+        add("NOPAIR", "1.SO", 7, 8.0)
+        add("NOPAIR", "2.SALDO AKHIR", 1, 12.0)
+        add("NOPAIR", "2.SALDO AKHIR", 7, 12.0)
+        add("NOPAIR", "SALDO AWAL", 1, 12.0)
+        for j in ("4.IN", "9.OUT", "8.BARANG KELUAR"):
+            for t in (1, 7):
+                add("NOPAIR", j, t, 0.0)
+        return pd.DataFrame(rows)
+
+    from openpyxl import Workbook as _WB
+    neg_xlsx = os.path.join(_tf.gettempdir(), "mock_deviasi_neg.xlsx")
+    wb = _WB(); ws = wb.active; ws.title = "Sheet1"
+    ws.append(["RESTO", "NAMA BAHAN", "QTY BOM", "QTY COM", "QTY DEVIASI",
+               "STATUS BULAN"])
+    # file persis hitungan BARU (SA base) → MATCH; LAMA akan SELISIH 10/12
+    ws.append(["1.R1", "LALU", 0, -30, -30, "WEEK 1"])
+    ws.append(["1.R1", "NOPAIR", 0, -4, -4, "WEEK 1"])
+    wb.save(neg_xlsx)
+
+    kv.load_data(make_mock_neg_dates_df())
+    wait_view(root, kv)
+    kv._load_file(neg_xlsx)
+    wait_view(root, kv)
+
+    def kv_row2(resto, barang):
+        for k in kv.tree.get_children(""):
+            if (kv.tree.set(k, "Resto") == resto and
+                    kv.tree.set(k, "Nama Barang") == barang):
+                return k
+        return None
+
+    k_lalu = kv_row2("1.R1", "LALU")
+    k_nop = kv_row2("1.R1", "NOPAIR")
+    check("(v3.9.5) SA base: GR App == DEV App utk pair dgn tanggal "
+          "negatif (LALU: '(30)')",
+          k_lalu is not None and
+          kv.tree.set(k_lalu, "GR App") == "(30)" and
+          kv.tree.set(k_lalu, "DEV App") == "(30)" and
+          kv.tree.set(k_lalu, "Status") == "MATCH",
+          f"GR={kv.tree.set(k_lalu, 'GR App') if k_lalu else None} "
+          f"DEV={kv.tree.set(k_lalu, 'DEV App') if k_lalu else None}")
+    check("(v3.9.5) SA base: pair TANPA bulan-lalu com(1)=SA-SO (NOPAIR: "
+          "'(4)', bukan minus palsu)",
+          k_nop is not None and
+          kv.tree.set(k_nop, "GR App") == "(4)" and
+          kv.tree.set(k_nop, "DEV App") == "(4)" and
+          kv.tree.set(k_nop, "Status") == "MATCH",
+          f"GR={kv.tree.set(k_nop, 'GR App') if k_nop else None}")
+
+    # pivot COM konsisten (tanggal negatif + SA) — _compute_com langsung
+    from src.ui.pivot_view import PivotTableView as _PTV
+    _idx = pd.MultiIndex.from_tuples(
+        [("B", "1.SO"), ("B", "4.IN"), ("B", "8.BARANG KELUAR"),
+         ("B", "SALDO AWAL")], names=["Nama Barang", "JENIS"])
+    _piv = pd.DataFrame({-25.0: [0, 0, 0, pd.NA], 1.0: [10.0, 0, 0, 12.0]},
+                        index=_idx)
+    _s = _PTV._compute_com(_piv, "B", [-25.0, 1.0])
+    check("(v3.9.5) pivot com(1) pakai SA (2.0), bukan -10 (minus palsu)",
+          _s[1.0] == 2.0 and _s[-25.0] == 0.0, f"got {_s.to_dict()}")
+    os.unlink(neg_xlsx)
+
+    # kembali ke mock komparasi standar
+    kv.load_data(det)
+    wait_view(root, kv)
+    xlsx_path = make_mock_deviasi_file()
+    kv._load_file(xlsx_path)
+    wait_view(root, kv)
+
+    # --- (A2/C8) pair index menyelesaikan nama APP utk popup detail ---
+    check("(v3.9.5) _pair_index: nama file case/spacing beda → nama APP",
+          kv._pair_index.get((_norm_name("ayam  filet"), "MLGPAR")) ==
+          ("AYAM FILET", "MLGPAR"),
+          f"got {kv._pair_index.get((_norm_name('ayam  filet'), 'MLGPAR'))!r}")
+
+    # --- (A5) duplikat lintas bulan dihitung & dilaporkan ---
+    dup_xlsx = os.path.join(_tf.gettempdir(), "mock_deviasi_dup.xlsx")
+    wb = _WB(); ws = wb.active
+    ws.append(["RESTO", "NAMA BAHAN", "QTY BOM", "QTY COM", "QTY DEVIASI",
+               "STATUS BULAN", "BULAN"])
+    ws.append(["1001.MLGPAR", "AYAM FILET", -80, -31, 49, "WEEK 1", "201.X"])
+    ws.append(["1001.MLGPAR", "AYAM FILET", -80, -31, 49, "WEEK 1", "202.X"])
+    ws.append(["1001.MLGPAR", "AYAM FILET", -80, -31, 49, "WEEK 1", "203.X"])
+    wb.save(dup_xlsx)
+    res_dup = parse_deviasi_file(dup_xlsx)
+    check("(v3.9.5) Duplikat lintas bulan dihitung (n_duplicates=2) + "
+          "dilaporkan di label",
+          res_dup["ok"] and res_dup["meta"].get("n_duplicates") == 2,
+          f"meta={res_dup['meta']}")
+    os.unlink(dup_xlsx)
+
+    # --- (A11) sheet data di sheet ke-2 tetap terbaca ---
+    multi_xlsx = os.path.join(_tf.gettempdir(), "mock_deviasi_2sheet.xlsx")
+    wb = _WB()
+    ws0 = wb.active; ws0.title = "REKAP"  # sheet 0 tanpa kolom wajib
+    ws0.append(["No", "Info"])
+    ws0.append([1, "sheet ringkasan"])
+    ws1 = wb.create_sheet("DATA")
+    ws1.append(["RESTO", "NAMA BAHAN", "QTY BOM", "QTY COM", "QTY DEVIASI",
+                "STATUS BULAN"])
+    ws1.append(["1001.MLGPAR", "AYAM FILET", -80, -31, 49, "WEEK 1"])
+    wb.save(multi_xlsx)
+    res_multi = parse_deviasi_file(multi_xlsx)
+    check("(v3.9.5) Data di sheet ke-2 ditemukan (bukan error kolom)",
+          res_multi["ok"] and res_multi["meta"]["sheet"] == "DATA" and
+          res_multi["meta"]["n_rows"] == 1,
+          f"meta={res_multi['meta']}")
+    # (A13) Satuan NaN → '' bukan 'nan'
+    check("(v3.9.5) Satuan kosong → '' (bukan literal 'nan')",
+          res_multi["df"]["Satuan"].iloc[0] == "",
+          f"got {res_multi['df']['Satuan'].iloc[0]!r}")
+    os.unlink(multi_xlsx)
+
+    # --- (A8) -0.0 % → '0,00%' ---
+    check("(v3.9.5) _fmt_pct(-0.0) → '0,00%' (bukan '-0,00%')",
+          kv._fmt_pct(-0.0) == "0,00%" and
+          kv._fmt_pct(0.2697) == "26,97%",
+          f"got {kv._fmt_pct(-0.0)!r}")
+
+    # --- (A7) footer status = hitungan baris YANG TAMPIL (setelah filter) ---
+    kv._on_col_filter("Resto", ["1002.SBYKET"])
+    wait_view(root, kv)
+    check("(v3.9.5) Filter Resto=SBYKET (1 baris SELISIH) → footer "
+          "MATCH: 0 (bisa MATCH: 3 global basi)",
+          len(kv.tree.get_children("")) == 1 and
+          "MATCH: 0" in kv.status_var_label.get(),
+          f"footer={kv.status_var_label.get()!r}")
+    kv._reset_filter()
+    wait_view(root, kv)
+
+    # --- (C5) filter header direset saat file dimuat ulang ---
+    kv._on_col_filter("Status", ["MATCH"])
+    wait_view(root, kv)
+    kv._reload_file()
+    wait_view(root, kv)
+    check("(v3.9.5) Reload file → filter lama direset (6 baris tampil)",
+          len(kv.tree.get_children("")) == 6,
+          f"got {len(kv.tree.get_children(''))}")
+
+    # --- (B6) sort saat busy diantrekan ---
+    kv._load_file(xlsx_path)
+    check("(v3.9.5) Sort diklik saat compute berjalan → diantrekan",
+          kv._busy and kv._pending_sort is None)
+    kv._sort_by("Selisih", reverse=False)
+    check("(v3.9.5) _pending_sort terisi saat busy",
+          kv._pending_sort == ("Selisih", False))
+    wait_view(root, kv)
+    check("(v3.9.5) Sort antrean diterapkan setelah render selesai",
+          kv._pending_sort is None and
+          kv.tree.set(kv.tree.get_children("")[0], "Status") == "SELISIH")
+
+    # --- (A3/C4) tag per-cell bertahan setelah filter di clone ⛶ ---
+    k_match2 = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 1")
+    if CELL_TAGS_SUPPORTED and k_match2 is not None:
+        win2, ct = kv._maximize()
+        for _ in range(30):
+            root.update()
+            time.sleep(0.01)
+        _apply_hook = getattr(ct, "_clone_filter_apply", None)
+        check("(v3.9.5) Clone ⛶ punya hook filter apply", _apply_hook is not None)
+        if _apply_hook is not None:
+            _apply_hook("Status", ["MATCH"])
+            for _ in range(40):
+                root.update()
+                time.sleep(0.01)
+            _has_neg = root.tk.call(str(ct), "tag", "cell", "has",
+                                    "neg_cell", (k_match2, "BOM File"))
+            check("(v3.9.5) Filter di clone ⛶ → tag minus PER-CELL tetap "
+                  "terpasang (dulu hilang)",
+                  _has_neg == 1 and len(ct.get_children("")) == 3,
+                  f"neg={_has_neg} rows={len(ct.get_children(''))}")
+        win2.destroy()
+        root.update()
+
+    # --- (A1) ✕ Tutup File saat compute berjalan → hasil DIBUANG ---
+    kv._load_file(xlsx_path)   # job async dimulai (parse+compute)
+    kv._close_file()           # tutup SEBELUM selesai — tanpa pump di antaranya
+    check("(v3.9.5) Tutup saat compute: label kembali 'Belum ada file'",
+          "Belum ada file" in kv._file_label_var.get())
+    wait_view(root, kv)
+    check("(v3.9.5) Race tutup: hasil file lama TIDAK muncul kembali "
+          "(tabel tetap kosong, _busy reset)",
+          len(kv.tree.get_children("")) == 0 and not kv._busy and
+          "File ditutup" in kv.status_var_label.get(),
+          f"rows={len(kv.tree.get_children(''))} busy={kv._busy} "
+          f"status={kv.status_var_label.get()!r}")
+
+    # --- (C1) run_async: shield GC dilepas walau pemilik job di-destroy ---
+    import gc as _gc
+    top = tk.Toplevel(root)
+    run_async(top, lambda: time.sleep(0.4), lambda _r: None)
+    top.destroy()
+    _t0 = time.time()
+    while time.time() - _t0 < 2.5:
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.5) Popup di-destroy saat job jalan → _GC_HOLD depth 0 + "
+          "GC menyala (dulu bocor seumur sesi)",
+          _GC_HOLD["depth"] == 0 and _gc.isenabled(),
+          f"depth={_GC_HOLD['depth']} gc={_gc.isenabled()}")
+
+    # --- (B5) snapshot follow-up memuat 'aktif' ---
+    store = app.followup_store
+    kv._load_file(xlsx_path)
+    wait_view(root, kv)
+    _first = kv.tree.get_children("")[0]
+    _bbox = kv.tree.bbox(_first)
+    if _bbox:
+        ev5 = _Ev()
+        ev5.widget = kv.tree
+        ev5.x, ev5.y = _bbox[0] + 8, _bbox[1] + _bbox[3] // 2
+        kv._on_tree_click(ev5)
+        root.update()
+        _snap = next(iter(store.rows.values())) if len(store) else {}
+        check("(v3.9.5) Snapshot follow-up KOMPARASI memuat 'aktif'",
+              _snap.get("aktif") == "AKTIF", f"got {_snap.get('aktif')!r}")
+        kv._on_tree_click(ev5)   # keluarkan lagi
+        root.update()
+
+    # --- (C7) show_laporan_mode programatik menyinkronkan SegmentBar ---
+    app.show_laporan_mode(1)
+    root.update()
+    check("(v3.9.5) show_laporan_mode(1) → segment.active ikut 1",
+          app.laporan_segment.active == 1 and
+          app.laporan_view.winfo_ismapped())
+
+    # --- (B1) popup filter kolom 'Selisih vs Median' hidup kembali ---
+    lv = app.laporan_view
+    _sel_vals = lv._col_values("Selisih vs Median")
+    check("(v3.9.5) _col_values('Selisih vs Median') tidak lagi kosong "
+          "(popup filter kolom itu hidup)",
+          isinstance(_sel_vals, list) and len(_sel_vals) > 0,
+          f"got {_sel_vals!r}")
+    app.show_laporan_mode(0)
+    root.update()
+
+    # --- (C2) Apply H merender GR tepat 1× (dulu 2×) ---
+    dv = app.deviasi_gr_view
+    _cnt = {"n": 0}
+    _orig_refresh = dv._refresh
+
+    def _counting_refresh(*a, **k):
+        _cnt["n"] += 1
+        return _orig_refresh(*a, **k)
+
+    dv._refresh = _counting_refresh
+    dv.tanggal_h_var.set("10")
+    dv._on_tanggal_h_change()
+    root.update()
+    check("(v3.9.5) Apply H (nilai BERUBAH) → GR refresh 1× (dulu 2×)",
+          _cnt["n"] == 1, f"got {_cnt['n']}")
+    dv.tanggal_h_var.set("10")
+    dv._on_tanggal_h_change()
+    root.update()
+    check("(v3.9.5) Apply H (nilai SAMA) → refresh eksplisit 1× tetap jalan",
+          _cnt["n"] == 2, f"got {_cnt['n']}")
+    dv._refresh = _orig_refresh
+    # pulihkan H=25 (listener fan-out ke PCS + laporan)
+    dv.tanggal_h_var.set("25")
+    dv._on_tanggal_h_change()
+    wait_view(root, dv)
+
+    # --- (B3) unsubscribe H saat view di-destroy ---
+    _h_state = app._shared_h
+    _n_before = len(_h_state._listeners)
+    lv2 = LaporanDeviasiView(app.tab_laporan, h_state=_h_state)
+    check("(v3.9.5) subscribe menambah listener", 
+          len(_h_state._listeners) == _n_before + 1)
+    lv2.destroy()
+    root.update()
+    check("(v3.9.5) destroy view → listener H dilepas (unsubscribe)",
+          len(_h_state._listeners) == _n_before,
+          f"got {len(_h_state._listeners)} (sebelum {_n_before})")
+
+    os.unlink(xlsx_path)
+    if os.path.isfile("komparasi_last.json"):
+        os.unlink("komparasi_last.json")
 
     # Cleanup
     root.destroy()

@@ -102,6 +102,13 @@ class SharedTanggalH:
         """Daftarkan listener fn(new_h) — dipanggil tiap H berubah."""
         self._listeners.append(fn)
 
+    def unsubscribe(self, fn: Callable) -> None:
+        """v3.9.5 (audit 19-b #3): lepas listener — dipanggil saat view
+        yang berlangganan di-destroy (mencegah listener zombie / callback
+        ganda bila view direbuild)."""
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
     def set(self, new_h: int) -> bool:
         """Ubah H + panggil SEMUA listener. Return True bila nilai berubah."""
         new_h = int(new_h)
@@ -929,8 +936,14 @@ class DeviasiView(tk.Frame):
     def _on_tanggal_h_change(self):
         """Apply H dari tab GR (v3.9: satu-satunya jalur ubah H).
 
-        Nilai baru disimpan ke SharedTanggalH → listener tab PCS ikut
-        refresh; tab ini (GR) refresh sendiri di bawah."""
+        Nilai baru disimpan ke SharedTanggalH → listener (tab PCS +
+        Laporan + tab GR sendiri) ikut refresh.
+        v3.9.5 FIX (audit 19-c #2 — P2): dulu refresh eksplisit JUGA
+        dijalankan setelah set() — padahal listener GR sendiri sudah
+        me-render → GR dirender 2× tiap klik Apply (sort/selection
+        ter-reset dua kali, waktu render 2×). Kini refresh eksplisit
+        hanya bila H TIDAK berubah (listener tidak menembak; perilaku
+        lama Apply = re-render tetap terjaga)."""
         try:
             new_h = int(self.tanggal_h_var.get())
         except ValueError:
@@ -943,15 +956,17 @@ class DeviasiView(tk.Frame):
                                    parent=self.winfo_toplevel())
             self.tanggal_h_var.set(str(self.tanggal_h))
             return
+        changed = False
         if self._h_state is not None:
-            # set() memicu listener tab PCS (refresh otomatis di sana;
-            # listener hanya jalan bila nilai H benar-benar berubah)
-            self._h_state.set(new_h)
-        # Apply di tab ini = selalu refresh (perilaku lama: re-apply juga
-        # me-render ulang); pivot dihitung 1× via SharedPivotCache.
-        self.tanggal_h = new_h
-        self._cached_pivot = None
-        self._refresh()
+            # set() memicu listener (PCS + Laporan + GR sendiri) — refresh
+            # #1 terjadi di listener; hanya jalan bila H benar-benar berubah
+            changed = self._h_state.set(new_h)
+        if not changed or self._dirty:
+            # H sama (listener tidak menembak) / view belum pernah dirender
+            # → refresh eksplisit tetap diperlukan (Apply = re-render)
+            self.tanggal_h = new_h
+            self._cached_pivot = None
+            self._refresh()
 
     def _on_shared_h_changed(self, new_h: int):
         """Listener tab pengikut (v3.9): H diubah/reset → ikut tanpa input.
@@ -980,7 +995,11 @@ class DeviasiView(tk.Frame):
         # (25) — sebelumnya nilai H lama tetap aktif, semantik reset tidak
         # total dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya
         # KEDUA tab Deviasi GR & PCS ikut kembali ke 25.)
-        if self.tanggal_h != 25:
+        # v3.9.5 FIX (audit 19-c #2): H berubah → listener GR sendiri sudah
+        # me-render; refresh eksplisit hanya bila H TIDAK berubah (dulu:
+        # dobel render tiap reset).
+        h_changed = self.tanggal_h != 25
+        if h_changed:
             self.tanggal_h = 25
             self._cached_pivot = None
             self._cached_h = None
@@ -992,7 +1011,8 @@ class DeviasiView(tk.Frame):
                 self.tanggal_h_var.set("25")
             if hasattr(self, "_h_chip_var"):
                 self._h_chip_var.set("25")
-        self._refresh()
+        if not h_changed or self._dirty:
+            self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         """Sort kolom — engine LINEAR v3.3 (delete+reinsert, bukan

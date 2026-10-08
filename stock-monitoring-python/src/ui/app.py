@@ -123,7 +123,7 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.4"  # v3.9.4 — TAB LAPORAN DEVIASI: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR
+APP_VERSION = "3.9.5"  # v3.9.5 — AUDIT BUG DEEP (4 agent paralel): fix race ✕ Tutup File, parse async, SALDO AWAL base com(1), GC-shield leak, dll
 # v3.9.4 (permintaan user: "Di file sampel kan ada Dev to bom ini kok gak
 # ada ya? Padahal data udah lengkap 2205 itu bom. Aku barusan upload file
 # deviasi. Nah aku mau compare file deviasi itu dengan yang deviasi di
@@ -689,6 +689,18 @@ class StockMonitorApp:
 
         self.rootpath_var.set(data.get("RootPath", ""))
         self._render_info_tree(data)
+        # v3.9.5 FIX (audit 19-c #6): RootPath dibaca SAAT notebook dibangun
+        # (SEBELUM config dimuat) → initialdir dialog 📂 Pilih File Deviasi
+        # selalu "" saat app baru dibuka. Sinkronkan setiap RootPath berubah.
+        self._sync_komparasi_initial_dir()
+
+    def _sync_komparasi_initial_dir(self):
+        """v3.9.5 (audit 19-c #6): initial dialog komparasi mengikuti
+        RootPath terkini (config dimuat SETELAH notebook dibangun)."""
+        rp = (self.rootpath_var.get().strip()
+              if getattr(self, "rootpath_var", None) is not None else "")
+        if rp and getattr(self, "komparasi_view", None) is not None:
+            self.komparasi_view._initial_dir = rp
 
     def _render_info_tree(self, data: dict):
         self.info_tree.delete(*self.info_tree.get_children())
@@ -1270,7 +1282,14 @@ class StockMonitorApp:
 
     def show_laporan_mode(self, idx: int):
         """v3.9.4 — ganti mode tab 📋 Laporan Deviasi (dipakai SegmentBar
-        & test): 0 = ⚖ Komparasi File, 1 = 🚨 Anomali COM."""
+        & test): 0 = ⚖ Komparasi File, 1 = 🚨 Anomali COM.
+        v3.9.5 FIX (audit 19-c #7): sinkronkan SegmentBar (set_active_silent)
+        — dulu pemanggilan programatik membuat segment.active basi →
+        _on_tab_changed me-refresh pane yang SALAH & tombol mode tetap
+        menyala di posisi lama."""
+        if idx not in (0, 1):
+            idx = 0
+        self.laporan_segment.set_active_silent(idx)
         if idx == 0:
             self.laporan_view.pack_forget()
             self.komparasi_view.pack(fill="both", expand=True)

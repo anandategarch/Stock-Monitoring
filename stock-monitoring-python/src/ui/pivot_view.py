@@ -979,7 +979,18 @@ class PivotTableView(tk.Frame):
 
     @staticmethod
     def _compute_com(pivot, item, tanggals):
-        """Hitung 6.PEMAKAIAN (COM) per tanggal (port dari M code)."""
+        """Hitung 6.PEMAKAIAN (COM) per tanggal (port dari M code).
+
+        v3.9.5 FIX (audit 19-a #6 / 19-b #2 — bareng laporan_deviasi_view
+        & komparasi_deviasi_view): base com di TANGGAL 1 = SALDO AWAL
+        milik item (baris SA ber-Tanggal=1, fn_4217) bila ada; fallback
+        SO(t-1) (tanggal negatif bulan lalu), fallback 0. SEMANTIK LAMA:
+        i==0 memakai SA kolom pertama GLOBAL — saat data memuat tanggal
+        negatif (pipeline FULL), kolom pertama = −25 (SA=0 di situ) → SA
+        tidak pernah terpakai & pair tanpa data bulan lalu mendapat
+        com(1) ≈ −SO(1) = MINUS PALSU. Formula COM kini tetap identik
+        antar ketiga view.
+        """
         def get_series(jenis):
             try:
                 return pivot.loc[(item, jenis)]
@@ -991,19 +1002,29 @@ class PivotTableView(tk.Frame):
         bk = get_series("8.BARANG KELUAR")
         sa = get_series("SALDO AWAL")
 
+        # v3.9.5: SA pair di Tanggal 1 (None/NaN = tidak ada baris SA)
+        sa_t1 = sa.get(1)
+        has_sa_t1 = sa_t1 is not None and not pd.isna(sa_t1)
+        sa_t1_val = float(sa_t1) if has_sa_t1 else 0.0
+
         com_values = {}
         for i, t in enumerate(tanggals):
             so_val = float(so.get(t, 0) or 0)
             bm_val = float(bm.get(t, 0) or 0)
             bk_val = float(bk.get(t, 0) or 0)
-            sa_val = float(sa.get(t, 0) or 0)
 
-            if i == 0:
-                com_val = sa_val + bm_val - bk_val - so_val
+            try:
+                is_t1 = int(float(t)) == 1
+            except (TypeError, ValueError):
+                is_t1 = False
+            if is_t1 and has_sa_t1:
+                # tanggal 1 → base SALDO AWAL pair (audit fix)
+                base = sa_t1_val
+            elif i == 0:
+                base = 0.0
             else:
-                so_prev = float(so.get(tanggals[i - 1], 0) or 0)
-                com_val = so_prev + bm_val - bk_val - so_val
-
+                base = float(so.get(tanggals[i - 1], 0) or 0)
+            com_val = base + bm_val - bk_val - so_val
             com_values[t] = com_val
 
         return pd.Series(com_values)
