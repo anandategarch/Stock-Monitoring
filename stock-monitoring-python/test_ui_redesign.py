@@ -224,7 +224,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.8.0", APP_VERSION == "3.8.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.0", APP_VERSION == "3.9.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -471,6 +471,20 @@ def main():
     check("Heading dinamis SO_H → 'SO_10'", heading == "SO_10",
           f"got '{heading}'")
 
+    # (v3.9) SHARED H — PCS otomatis ikut tanpa input kedua:
+    check("(v3.9) H dibagi: PCS ikut H=10 otomatis (tanpa double input)",
+          app.deviasi_pcs_view.tanggal_h == 10,
+          f"got {app.deviasi_pcs_view.tanggal_h}")
+    check("(v3.9) PCS chip H menampilkan 10",
+          app.deviasi_pcs_view._h_chip_var.get() == "10",
+          f"got {app.deviasi_pcs_view._h_chip_var.get()!r}")
+    check("(v3.9) PCS TIDAK punya input H sendiri",
+          not hasattr(app.deviasi_pcs_view, "tanggal_h_var"))
+    check("(v3.9) GR tetap punya input H + Apply",
+          hasattr(app.deviasi_gr_view, "tanggal_h_var"))
+    pcs_h = app._shared_h.h
+    check("(v3.9) SharedTanggalH state = 10", pcs_h == 10, f"got {pcs_h}")
+
     # maximize deviasi + sort di clone
     win2, mtree2 = app.deviasi_gr_view._maximize()
     root.update()
@@ -531,7 +545,7 @@ def main():
     lap._refresh()
     wait_view(root, lap)
 
-    print("== 8. Rincian PO ==")
+    print("== 8. Rincian PO (v3.9 — layout ringkas) ==")
     select_and_wait(root, app, app.tab_rincian, app.rincian_view)
     n_po = len(app.rincian_view.tree.get_children("")) - 1  # minus grand total
     check("Rincian: 12 PO (parent) + grand total", n_po == 12, f"got {n_po}")
@@ -540,6 +554,38 @@ def main():
     check("(v3.2) Ringkasan PO di status footer",
           "PO" in app.rincian_view.status_var.get(),
           f"got {app.rincian_view.status_var.get()!r}")
+
+    # (v3.9) layout ringkas: parent = info PO lengkap, anak = item saja
+    rv = app.rincian_view
+    first_po = rv.tree.get_children("")[0]
+    po_vals = rv.tree.item(first_po, "values")
+    kids = rv.tree.get_children(first_po)
+    kid_vals = rv.tree.item(kids[0], "values")
+    check("(v3.9) Kolom tabel baru (info PO + item)",
+          list(rv.tree["columns"]) == [
+              "Tanggal", "Pemasok", "Status Pesanan", "Keterangan PO",
+              "Nama Barang", "Satuan", "Kuantitas", "Tgl/Jam Pembuatan"],
+          f"got {list(rv.tree['columns'])}")
+    check("(v3.9) Baris PO (teal) memuat Tanggal + Pemasok + Status",
+          po_vals[0] == "2024-06-02" and po_vals[1] == "PT Sumber" and
+          po_vals[2] == "Selesai",
+          f"got {po_vals[:3]}")
+    check("(v3.9) Baris PO memuat ringkasan jumlah item + total",
+          "item" in po_vals[4] and "Total:" in po_vals[6],
+          f"got {po_vals[4]!r} / {po_vals[6]!r}")
+    check("(v3.9) Baris anak = HANYA item (info PO tidak diulang)",
+          kid_vals[0] == "" and kid_vals[1] == "" and kid_vals[2] == "" and
+          kid_vals[3] == "" and kid_vals[4] == "AYAM FILET" and
+          kid_vals[5] == "GR" and kid_vals[6] == "10",
+          f"got {list(kid_vals)}")
+    check("(v3.9) Tgl/Jam Pembuatan tersembunyi default",
+          "Tgl/Jam Pembuatan" in rv._colmgr.hidden and
+          "Tgl/Jam Pembuatan" not in rv.tree.cget("displaycolumns"),
+          f"hidden={rv._colmgr.hidden}")
+    gt = rv.tree.item(rv.tree.get_children("")[-1], "values")
+    check("(v3.9) Grand total: N PO + total qty di kolom Kuantitas",
+          gt[4] == "12 PO" and gt[6] == "720",
+          f"got {gt[4]!r} / {gt[6]!r}")
 
     app.rincian_view.cabang_var.set("MLGPAR")
     app.rincian_view._refresh()
@@ -855,9 +901,8 @@ def main():
           app.deviasi_gr_view._shared_cache is
           app.deviasi_pcs_view._shared_cache and
           app.deviasi_gr_view._shared_cache is app._deviasi_pivot_cache)
-    # samakan H (section 6 mengubah H GR→10; PCS masih 25) lalu paksa
-    # refresh PCS → HARUS cache-hit → objek pivot identik dgn GR
-    app.deviasi_pcs_view.tanggal_h = app.deviasi_gr_view.tanggal_h
+    # v3.9: H sudah otomatis sama (shared) — paksa refresh PCS →
+    # HARUS cache-hit → objek pivot identik dgn GR
     app.deviasi_pcs_view._refresh()
     wait_view(root, app.deviasi_pcs_view)
     check("Pivot GR & PCS = objek DataFrame sama (compute 1×, bukan 2×)",
@@ -1570,6 +1615,162 @@ def main():
     # (e) tombol export ada di view Selisih IN + Impor TL hilang
     check("(v3.8) Handler export Selisih IN ada",
           callable(app.in_selisih_view._on_export))
+
+    print("== 18. v3.9 — EXPORT AUDIT OPT + STYLE WASTE (⤢/funnel/tabel) ==")
+
+    # (a) build_selisih_export_df + audit_cols — opsi kolom hasil audit
+    ex_audit = build_selisih_export_df(base, 1, 31,
+                                       audit_cols=["Hasil Audit", "Saldo",
+                                                   "Catatan Audit"])
+    check("(v3.9) Export + audit: kolom audit ditambahkan setelah Selisih",
+          list(ex_audit.columns) == SELISIH_EXPORT_COLUMNS + [
+              "Hasil Audit", "Saldo", "Catatan Audit"],
+          f"got {list(ex_audit.columns)}")
+    r_m = ex_audit[ex_audit["Resto"] == "MLGPAR"].iloc[0]
+    check("(v3.9) Export + audit: nilai sebaris BENAR (Hasil Audit ml "
+          "OK (Matching), Saldo 0)",
+          r_m["Hasil Audit"] == "OK (Matching)" and
+          float(r_m["Saldo"]) == 0.0,
+          f"got {r_m['Hasil Audit']!r} / {r_m['Saldo']!r}")
+    ex_partial = build_selisih_export_df(base, 1, 31,
+                                         audit_cols=["Hasil Audit"])
+    check("(v3.9) Export + audit: subset 1 kolom OK",
+          list(ex_partial.columns) == SELISIH_EXPORT_COLUMNS + ["Hasil Audit"])
+    ex_none = build_selisih_export_df(base, 1, 31, audit_cols=[])
+    check("(v3.9) Export tanpa kolom audit (opsi OFF) = perilaku v3.8",
+          list(ex_none.columns) == SELISIH_EXPORT_COLUMNS)
+    ex_bad = build_selisih_export_df(base, 1, 31,
+                                     audit_cols=["Kolom Ngawur", "Saldo"])
+    check("(v3.9) Export + audit: nama kolom invalid diabaikan",
+          list(ex_bad.columns) == SELISIH_EXPORT_COLUMNS + ["Saldo"])
+
+    # (b) dialog opsi export + _do_export inti (tanpa dialog file)
+    check("(v3.9) Dialog opsi export ada (metode view)",
+          callable(app.in_selisih_view._export_options_dialog))
+    check("(v3.9) _do_export terpisah dari dialog (testable)",
+          callable(app.in_selisih_view._do_export))
+    with tempfile.NamedTemporaryFile(suffix=".xlsx",
+                                     delete=False) as tf2:
+        xlsx2 = tf2.name
+    # patch messagebox sampai SELESAI section 18 (done() async memanggil
+    # showinfo SETELAH file tertulis — patch tidak boleh dipulihkan duluan;
+    # patch dipulihkan menjelang cleanup di bawah)
+    import src.ui.in_selisih_view as _isv_mod
+    _orig_info = _isv_mod.messagebox.showinfo
+    _orig_warn = _isv_mod.messagebox.showwarning
+    _isv_mod.messagebox.showinfo = lambda *a, **k: None
+    _isv_mod.messagebox.showwarning = lambda *a, **k: None
+    app.in_selisih_view._do_export(xlsx2, ["Hasil Audit", "Saldo"])
+    t0 = time.time()
+    wb2 = None
+    while time.time() - t0 < 5:
+        root.update()
+        if os.path.exists(xlsx2) and os.path.getsize(xlsx2) > 0:
+            try:
+                wb2 = load_workbook(xlsx2)
+                break
+            except Exception:
+                pass
+        time.sleep(0.05)
+    check("(v3.9) _do_export menulis file (async selesai)",
+          wb2 is not None)
+    if wb2 is not None:
+        ws2 = wb2["Selisih IN per Resto"]
+        hdr2 = [c.value for c in ws2[1]]
+        check("(v3.9) Roundtrip _do_export: header + kolom audit",
+              hdr2 == SELISIH_EXPORT_COLUMNS + ["Hasil Audit", "Saldo"],
+              f"got {hdr2}")
+    # tunggu job export benar2 selesai (done() async + showinfo patched)
+    t0 = time.time()
+    while time.time() - t0 < 3:
+        root.update()
+        time.sleep(0.02)
+    os.unlink(xlsx2)
+
+    # (c) STYLE WASTE — tabel besar + funnel merah + expander ⤢
+    style = ttk.Style(root)
+    check("(v3.9) Tabel diperbesar: rowheight 30 (dari 26) ala Waste",
+          int(style.configure("Treeview", "rowheight")) == 30,
+          f"got {style.configure('Treeview', 'rowheight')}")
+    _hf_font = str(style.configure("Treeview.Heading", "font")).split()
+    check("(v3.9) Tabel diperbesar: heading font size 10 bold",
+          _hf_font[-2:] == ["10", "bold"],
+          f"got {_hf_font}")
+    from src.ui.widgets import funnel_image, TableExpander
+    img_on = funnel_image(active=True)
+    img_off = funnel_image(active=False)
+    check("(v3.9) Funnel Waste: ikon aktif ≠ idle (merah vs terang)",
+          str(img_on) != str(img_off))
+    check("(v3.9) Funnel Waste: dua varian ter-cache",
+          isinstance(funnel_image(active=True), tk.PhotoImage))
+
+    # funnel merah saat kolom terfilter (state HeaderFilter + refresh_icon)
+    def _img_name(v):
+        if isinstance(v, (list, tuple)):
+            return str(v[0]) if v else ""
+        return str(v)
+
+    iv = app.in_selisih_view
+    hf = iv.header_filters._filters["Hasil Audit"]
+    hf.selected = {"OK (Matching)"}   # simulasi apply dari popup
+    hf.refresh_icon()
+    root.update()
+    check("(v3.9) Funnel kolom terfilter = varian MERAH (ala Waste)",
+          _img_name(hf.tree.heading("Hasil Audit")["image"]) ==
+          str(funnel_image(True)),
+          f"got {hf.tree.heading('Hasil Audit')['image']}")
+    hf.selected = None
+    hf.refresh_icon()
+    root.update()
+    check("(v3.9) Funnel kolom tanpa filter = varian idle",
+          _img_name(hf.tree.heading("Hasil Audit")["image"]) ==
+          str(funnel_image(False)),
+          f"got {hf.tree.heading('Hasil Audit')['image']}")
+
+    # (d) expander ⤢ — ciutkan baris kontrol, tabel tinggi penuh
+    dv = app.deviasi_gr_view
+    exp = dv._expander
+    check("(v3.9) TableExpander terpasang di semua view tabel",
+          isinstance(exp, TableExpander) and
+          isinstance(app.pivot_view._expander, TableExpander) and
+          isinstance(app.rincian_view._expander, TableExpander) and
+          isinstance(app.laporan_view._expander, TableExpander) and
+          isinstance(app.followup_view._expander, TableExpander) and
+          isinstance(iv._expander, TableExpander))
+    # pastikan tab deviasi GR sedang TERLIHAT supaya tinggi tree bermakna
+    select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
+    root.update_idletasks()
+    root.update()
+    fcard_w0 = dv._fcard.winfo_width()
+    exp.collapse()
+    root.update()
+    check("(v3.9) ⤢ collapse: kartu Filter tersembunyi",
+          dv._fcard.winfo_manager() == "" and
+          dv._legend.winfo_manager() == "")
+    tree_h1 = dv.tree.winfo_height()
+    exp.restore()
+    root.update()
+    check("(v3.9) ⤡ restore: kartu Filter kembali tampil + urutan layout",
+          dv._fcard.winfo_manager() == "pack" and
+          dv._legend.winfo_manager() == "pack" and
+          dv._fcard.winfo_width() == fcard_w0,
+          f"fcard w={dv._fcard.winfo_width()} vs {fcard_w0}")
+    tree_h0 = dv.tree.winfo_height()
+    check("(v3.9) Tabel lebih TINGGI saat collapse (ala Waste ⤢)",
+          tree_h1 > tree_h0, f"{tree_h1} vs {tree_h0}")
+    # toggle kedua (state machine) + reset
+    exp.collapse()
+    exp.toggle()          # dari expanded → restore
+    check("(v3.9) expander.toggle() siklus collapse↔restore",
+          not exp.expanded and dv._fcard.winfo_manager() == "pack")
+    exp.collapse()
+    exp.reset()
+    check("(v3.9) expander.reset() memulihkan layout",
+          not exp.expanded and dv._fcard.winfo_manager() == "pack")
+
+    # pulihkan messagebox yang di-patch (section 18b)
+    _isv_mod.messagebox.showinfo = _orig_info
+    _isv_mod.messagebox.showwarning = _orig_warn
 
     # Cleanup
     root.destroy()

@@ -29,9 +29,10 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup,
-    ColumnManager, LoadingOverlay, add_tooltip, attach_clone_filters,
-    auto_fit_columns, enable_col_resize, identify_to_column,
-    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
+    ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
+    attach_clone_filters, auto_fit_columns, enable_col_resize,
+    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
+    sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -135,14 +136,23 @@ class LaporanDeviasiView(tk.Frame):
         # Header tabel: judul + tombol perbesar
         head = tk.Frame(tbody, bg=C_CARD)
         head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        tk.Label(head, text="Audit Harian — 6 Status Audit",
-                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
-            side="left")
-        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        title_label = tk.Label(head, text="Audit Harian — 6 Status Audit",
+                               bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
+        title_label.pack(side="left")
+        # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+                              command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(filter & sort juga jalan di window besar;\n"
                              "Esc untuk menutup)")
+        # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_expand,
+                    "Sembunyikan kartu Filter & judul supaya tabel "
+                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
+                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
@@ -203,6 +213,9 @@ class LaporanDeviasiView(tk.Frame):
         self._colmgr = ColumnManager(
             self.tree,
             open_filter=lambda c: self.header_filters.open_popup(c))
+
+        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + judul
+        self._expander = TableExpander(btn_expand, [fcard, title_label])
 
         self.tree.bind("<Double-1>", self._on_double_click)
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
@@ -294,6 +307,9 @@ class LaporanDeviasiView(tk.Frame):
         self.data = data
         self._cached_result = None
         self._cached_signature = None
+        # v3.9: pulihkan layout bila sedang di-perbesar ⤢
+        if getattr(self, "_expander", None) is not None:
+            self._expander.reset()
         self._show_content()
         for c in self._col_sel:
             self._col_sel[c] = None

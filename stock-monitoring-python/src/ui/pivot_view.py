@@ -35,7 +35,7 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
-    LoadingOverlay, SegmentBar, add_tooltip, auto_fit_columns,
+    LoadingOverlay, SegmentBar, TableExpander, add_tooltip, auto_fit_columns,
     enable_col_resize, identify_to_column, insert_tree_items,
     open_tree_maximized, run_async,
     ColumnManager, attach_clone_filters,
@@ -195,16 +195,27 @@ class PivotTableView(tk.Frame):
         # Header tabel: judul + segment mode + tombol perbesar
         head = tk.Frame(tbody, bg=C_CARD)
         head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        tk.Label(head, text="Matrix Pivot", bg=C_CARD, fg=C_HEADER,
-                 font=font(10, "bold")).pack(side="left")
+        title_label = tk.Label(head, text="Matrix Pivot", bg=C_CARD,
+                               fg=C_HEADER, font=font(10, "bold"))
+        title_label.pack(side="left")
         self.mode_seg = SegmentBar(
             head, ["🏪 Resto", "📅 Tanggal"], bg=C_CARD,
             command=self._on_mode_change)
         self.mode_seg.pack(side="left", padx=(14, 0))
-        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+                              command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(Esc untuk menutup)")
+        # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_expand,
+                    "Sembunyikan kartu Filter, judul & legenda supaya "
+                    "tabel memakai seluruh tinggi tampilan.\nKlik lagi "
+                    "(⤡ Tampilkan Filter & KPI) untuk mengembalikan.\n"
+                    "(segment mode & tombol tetap terlihat)")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
@@ -255,6 +266,12 @@ class PivotTableView(tk.Frame):
              ("DEVIASI", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9"),
              ("tgl • = bulan lalu", "#94a3b8")])
         legend.pack(fill="x", padx=12, pady=(6, 0))
+        self._legend = legend
+
+        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + judul
+        # + legenda (segment mode & tombol toolbar tetap tampil)
+        self._expander = TableExpander(
+            btn_expand, [fcard, title_label, legend])
 
         self.tree.bind("<Double-1>", self._on_double_click)
 
@@ -347,6 +364,9 @@ class PivotTableView(tk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
         self.data = data
+        # v3.9: pulihkan layout bila sedang di-perbesar ⤢
+        if getattr(self, "_expander", None) is not None:
+            self._expander.reset()
         self._show_content()
         self._populate_filters()
         self._name_selected = None

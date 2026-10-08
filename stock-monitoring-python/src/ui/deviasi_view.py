@@ -1,13 +1,22 @@
 """
-deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2).
+deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
 1 row per (Barang × Resto) di sekitar Tanggal H (H-2 … H+2) — logika
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
-Fitur v3.2:
-- KPI row di atas tabel DIHAPUS (permintaan user: tabel jadi lebar &
-  besar; ringkasan tetap ada di status footer)
+Fitur v3.9 (permintaan user: "kolom apply H atau input H cukup 1 tab aja
+dan berlaku di 2 tab yang berkaitan yaitu Deviasi Gr dan Deviasi PCS
+sehingga tidak double input"):
+- SharedTanggalH: TANGGAL H kini STATE BERSAMA antar tab Deviasi GR &
+  PCS. Input + tombol "Apply H" hanya ada di tab 📦 Deviasi GR (tab
+  pertama); tab 🧩 Deviasi PCS menampilkan nilai H (read-only chip) dan
+  OTOMATIS ikut refresh saat H diubah — tidak ada double input.
+- Tombol ⤢ "Perbesar Tabel" (ala Waste): ciutkan kartu Filter + judul +
+  legenda supaya tabel memakai tinggi penuh; ⛶ Layar Penuh = window
+  fullscreen.
+
+Fitur v3.2 (dipertahankan):
 - Kolom ✓ follow-up: klik sel ✓ = daftarkan/keluarkan baris ke tab
   ☑ Follow Up (ala repo Waste; persist followup.json)
 - Lazy refresh: view hanya compute saat tab-nya terlihat (app memanggil
@@ -15,25 +24,26 @@ Fitur v3.2:
 
 Fitur v3.1 (dipertahankan):
 - Filter Nama Barang menempel di header kolom (corong, Excel-like)
-- Tombol ⛶ Perbesar: buka tabel fullscreen (+ ✓ aktif di sana)
 - Loading overlay + compute/render async (UI tidak membeku)
 """
-
 import tkinter as tk
 from tkinter import ttk, messagebox
+import contextlib
+import threading
 import pandas as pd
 import numpy as np
 from typing import Optional, Callable
 
 from .theme import (
-    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED,
+    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT,
     font,
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup, LegendRow,
-    ColumnManager, LoadingOverlay, add_tooltip, attach_clone_filters,
-    auto_fit_columns, enable_col_resize, identify_to_column,
-    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
+    ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
+    attach_clone_filters, auto_fit_columns, enable_col_resize,
+    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
+    sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -44,10 +54,16 @@ class SharedPivotCache:
     _compute_pivot() tidak bergantung satuan (filter GR/PCS terjadi di
     _prepare_rows) — sebelumnya tab DEVIASI GR dan DEVIASI PCS masing-
     masing menghitung pivot identik 2× (waktu + memori ganda).
+
+    v3.9: + lock — Apply H kini me-refresh GR & PCS BERSAMAAN (shared H);
+    tanpa lock kedua thread bisa sama-sama cache-miss → compute dobel +
+    entry tertimpa objek berbeda (tes "objek DataFrame sama" gagal
+    intermiten). Dengan lock: 1 compute, pemakai kedua dapat objek sama.
     """
 
     def __init__(self):
         self._entry: tuple | None = None   # (data_ref, h, pivot_df)
+        self.lock = threading.Lock()
 
     def get(self, data, h):
         ent = self._entry
@@ -60,6 +76,43 @@ class SharedPivotCache:
 
     def clear(self):
         self._entry = None
+
+
+class SharedTanggalH:
+    """State TANGGAL H yang DIBAGI antar tab Deviasi GR & PCS (v3.9).
+
+    Permintaan user: input H cukup 1× dan berlaku di KEDUA tab — sebelumnya
+    tiap tab punya entry H sendiri (harus input 2×, nilai bisa beda).
+
+    - Tab 📦 Deviasi GR memegang input + tombol "Apply H" (satu-satunya
+      jalur mengubah H).
+    - Tab 🧩 Deviasi PCS berlangganan: saat H berubah, chip nilai H di UI
+      diperbarui + view di-refresh (pivot cache dibagi, jadi hitung 1×).
+    """
+
+    def __init__(self, initial: int = 25):
+        self._h = int(initial)
+        self._listeners: list[Callable] = []
+
+    @property
+    def h(self) -> int:
+        return self._h
+
+    def subscribe(self, fn: Callable):
+        """Daftarkan listener fn(new_h) — dipanggil tiap H berubah."""
+        self._listeners.append(fn)
+
+    def set(self, new_h: int) -> bool:
+        """Ubah H + panggil SEMUA listener. Return True bila nilai berubah."""
+        new_h = int(new_h)
+        if new_h == self._h:
+            return False
+        self._h = new_h
+        for fn in list(self._listeners):
+            # listener view tidak boleh menjatuhkan pemanggil — telan error
+            with contextlib.suppress(Exception):
+                fn(new_h)
+        return True
 
 
 class DeviasiView(tk.Frame):
@@ -96,11 +149,16 @@ class DeviasiView(tk.Frame):
     def __init__(self, parent, satuan_mode: str = "GR",
                  go_to_proses: Callable | None = None,
                  followup_store: FollowUpStore | None = None,
-                 shared_cache: SharedPivotCache | None = None):
+                 shared_cache: SharedPivotCache | None = None,
+                 h_state: SharedTanggalH | None = None,
+                 h_editable: bool = True):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.satuan_mode = satuan_mode
-        self.tanggal_h = 25
+        # v3.9: H dibagi GR & PCS — sumber nilai = SharedTanggalH bila ada
+        self._h_state = h_state
+        self._h_editable = h_editable
+        self.tanggal_h = h_state.h if h_state is not None else 25
         self._cached_pivot = None
         self._cached_h = None
         self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
@@ -144,11 +202,19 @@ class DeviasiView(tk.Frame):
         # (baris · total deviasi · anomali CEK) ada di status footer.
 
         # --- Filter card ---
-        fcard = Card(self.content, title="Filter",
-                     subtitle="Tanggal H = titik fokus analisis (kolom H-2 … "
-                              "H+2). Filter Nama Barang → klik header kolom "
-                              "(ikon corong ⧩) di tabel.")
+        # v3.9: subtitle beda utk tab pengikut (PCS) — H diatur di tab GR
+        if self._h_editable:
+            sub = ("Tanggal H = titik fokus analisis (kolom H-2 … H+2) — "
+                   "berlaku juga di tab 🧩 Deviasi PCS (H dibagi 2 tab, "
+                   "cukup input 1×). Filter Nama Barang → klik header kolom "
+                   "(ikon corong ⧩) di tabel.")
+        else:
+            sub = ("Tanggal H diatur di tab 📦 Deviasi GR (tombol Apply H "
+                   "— cukup input 1×, berlaku di kedua tab). Filter Nama "
+                   "Barang → klik header kolom (ikon corong ⧩) di tabel.")
+        fcard = Card(self.content, title="Filter", subtitle=sub)
         fcard.pack(fill="x", padx=12, pady=(12, 0))
+        self._fcard = fcard
         fbody = fcard.body()
 
         r0 = tk.Frame(fbody, bg=C_CARD)
@@ -156,15 +222,34 @@ class DeviasiView(tk.Frame):
         # v3.5: RESTO combo DIHAPUS (duplikat → filter header kolom Resto ⧩)
         tk.Label(r0, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.tanggal_h_var = tk.StringVar(value=str(self.tanggal_h))
-        tanggal_h_entry = ttk.Entry(r0, textvariable=self.tanggal_h_var,
-                                    width=6)
-        tanggal_h_entry.pack(side="left", padx=(6, 8))
-        tanggal_h_entry.bind("<Return>", lambda e: self._on_tanggal_h_change())
-        add_tooltip(tanggal_h_entry,
-                    "Tanggal fokus (1-31). Kolom tampil: SO di H-2 s/d H+2.")
-        GhostButton(r0, text="Apply H", command=self._on_tanggal_h_change).pack(
-            side="left", padx=(0, 18))
+        if self._h_editable:
+            self.tanggal_h_var = tk.StringVar(value=str(self.tanggal_h))
+            tanggal_h_entry = ttk.Entry(r0, textvariable=self.tanggal_h_var,
+                                        width=6)
+            tanggal_h_entry.pack(side="left", padx=(6, 8))
+            tanggal_h_entry.bind("<Return>",
+                                 lambda e: self._on_tanggal_h_change())
+            add_tooltip(tanggal_h_entry,
+                        "Tanggal fokus (1-31). Kolom tampil: SO di H-2 s/d "
+                        "H+2.\n(v3.9) Nilai H berlaku JUGA di tab 🧩 Deviasi "
+                        "PCS —\ntidak perlu input H dua kali.")
+            GhostButton(r0, text="Apply H",
+                        command=self._on_tanggal_h_change).pack(
+                side="left", padx=(0, 18))
+        else:
+            # v3.9: tab PCS tidak punya input H — chip read-only yang ikut
+            # berubah saat H di-apply di tab Deviasi GR
+            self._h_chip_var = tk.StringVar(value=str(self.tanggal_h))
+            chip = tk.Frame(r0, bg="#f1f5f9", highlightbackground="#e2e8f0",
+                            highlightthickness=1)
+            chip.pack(side="left", padx=(6, 18))
+            tk.Label(chip, textvariable=self._h_chip_var, bg="#f1f5f9",
+                     fg=C_ACCENT, font=font(11, "bold")).pack(
+                padx=10, pady=(2, 3))
+            add_tooltip(chip, "Tanggal fokus H (read-only) — diatur di tab "
+                              "📦 Deviasi GR lewat tombol Apply H.\n"
+                              "Saat H diubah di tab GR, tab ini ikut "
+                              "refresh otomatis (v3.9: tanpa double input).")
 
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
@@ -178,14 +263,25 @@ class DeviasiView(tk.Frame):
         head = tk.Frame(tbody, bg=C_CARD)
         head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         mode_label = "GR" if self.satuan_mode == "GR" else "PCS / non-GR"
-        tk.Label(head, text=f"Matrix Deviasi {mode_label} — CEK Anomaly",
-                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
-            side="left")
-        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        title_label = tk.Label(
+            head, text=f"Matrix Deviasi {mode_label} — CEK Anomaly",
+            bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
+        title_label.pack(side="left")
+        # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+                              command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(filter & sort juga jalan di window besar;\n"
                              "Esc untuk menutup)")
+        # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place — ciutkan baris
+        # kontrol supaya tabel memakai seluruh tinggi tab)
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_expand,
+                    "Sembunyikan kartu Filter, judul & legenda supaya "
+                    "tabel memakai seluruh tinggi tampilan.\nKlik lagi "
+                    "(⤡ Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
@@ -258,6 +354,16 @@ class DeviasiView(tk.Frame):
             ("negatif (merah)", "#dc2626"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
+        self._legend = legend
+
+        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + judul
+        # + legenda; tombol toolbar tetap tampil supaya bisa dikembalikan.
+        self._expander = TableExpander(
+            btn_expand, [self._fcard, title_label, legend])
+
+        # v3.9: berlangganan perubahan H bersama (tab PCS otomatis ikut)
+        if self._h_state is not None and not self._h_editable:
+            self._h_state.subscribe(self._on_shared_h_changed)
 
         self.tree.bind("<Double-1>", self._on_double_click)
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
@@ -407,6 +513,17 @@ class DeviasiView(tk.Frame):
             self._shared_cache.clear()
         self._aktif_lookup = {}
         self._tnum = None  # reset cache to_numeric(Tanggal)
+        # v3.9: pulihkan layout bila sedang di-perbesar ⤢ (data baru =
+        # layout baru — jangan terjebak setengah-collapse)
+        if getattr(self, "_expander", None) is not None:
+            self._expander.reset()
+        # v3.9: sinkron nilai H bersama (data baru dari pipeline ulang)
+        if self._h_state is not None and self.tanggal_h != self._h_state.h:
+            self.tanggal_h = self._h_state.h
+            if hasattr(self, "_h_chip_var"):
+                self._h_chip_var.set(str(self.tanggal_h))
+        if self._h_editable and hasattr(self, "tanggal_h_var"):
+            self.tanggal_h_var.set(str(self.tanggal_h))
         self._show_content()
         for c in self._col_sel:
             self._col_sel[c] = None
@@ -575,12 +692,19 @@ class DeviasiView(tk.Frame):
 
         def work():
             pivot = None
-            if self._shared_cache is not None:
-                pivot = self._shared_cache.get(self.data, self.tanggal_h)
-            if pivot is None:
+            cache = self._shared_cache
+            if cache is not None:
+                # v3.9: lock dipegang SELAMA get+compute+put — GR & PCS
+                # bisa refresh bersamaan (Apply H); tanpa lock kedua thread
+                # sama-sama miss → compute dobel + entry tertimpa.
+                with cache.lock:
+                    pivot = cache.get(self.data, self.tanggal_h)
+                    if pivot is None:
+                        pivot = self._compute_pivot()
+                        if pivot is not None:
+                            cache.put(self.data, self.tanggal_h, pivot)
+            else:
                 pivot = self._compute_pivot()
-                if self._shared_cache is not None and pivot is not None:
-                    self._shared_cache.put(self.data, self.tanggal_h, pivot)
             self._cached_pivot = pivot
             self._cached_h = self.tanggal_h
             return self._prepare_rows(st)
@@ -753,20 +877,47 @@ class DeviasiView(tk.Frame):
         return win, new_tree
 
     def _on_tanggal_h_change(self):
+        """Apply H dari tab GR (v3.9: satu-satunya jalur ubah H).
+
+        Nilai baru disimpan ke SharedTanggalH → listener tab PCS ikut
+        refresh; tab ini (GR) refresh sendiri di bawah."""
         try:
             new_h = int(self.tanggal_h_var.get())
-            if 1 <= new_h <= 31:
-                self.tanggal_h = new_h
-                self._cached_pivot = None
-                self._refresh()
-            else:
-                messagebox.showwarning("Invalid", "Tanggal H harus 1-31",
-                                       parent=self.winfo_toplevel())
-                self.tanggal_h_var.set(str(self.tanggal_h))
         except ValueError:
             messagebox.showwarning("Invalid", "Tanggal H harus angka",
                                    parent=self.winfo_toplevel())
             self.tanggal_h_var.set(str(self.tanggal_h))
+            return
+        if not (1 <= new_h <= 31):
+            messagebox.showwarning("Invalid", "Tanggal H harus 1-31",
+                                   parent=self.winfo_toplevel())
+            self.tanggal_h_var.set(str(self.tanggal_h))
+            return
+        if self._h_state is not None:
+            # set() memicu listener tab PCS (refresh otomatis di sana;
+            # listener hanya jalan bila nilai H benar-benar berubah)
+            self._h_state.set(new_h)
+        # Apply di tab ini = selalu refresh (perilaku lama: re-apply juga
+        # me-render ulang); pivot dihitung 1× via SharedPivotCache.
+        self.tanggal_h = new_h
+        self._cached_pivot = None
+        self._refresh()
+
+    def _on_shared_h_changed(self, new_h: int):
+        """Listener tab PCS (v3.9): H diubah di tab GR → ikut tanpa input.
+
+        Chip nilai H diperbarui + pivot cache dilonggarkan + refresh
+        (bila tab belum pernah dilihat: tetap dirty, di-refresh saat
+        tab dibuka — ensure_refreshed)."""
+        self.tanggal_h = int(new_h)
+        self._cached_pivot = None
+        self._cached_h = None
+        if hasattr(self, "_h_chip_var"):
+            self._h_chip_var.set(str(new_h))
+        if self._dirty:
+            return          # belum pernah dirender — refresh saat tab dibuka
+        if self.data is not None and not self.data.empty:
+            self._refresh()
 
     def _reset_filter(self):
         for c in self._col_sel:

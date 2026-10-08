@@ -1,15 +1,22 @@
 """
-rincian_po_view.py — Pivot table view untuk Rincian PO (v3.2).
+rincian_po_view.py — Pivot table view untuk Rincian PO (v3.2 → v3.9).
+
+v3.9 — LAYOUT DISEDERHANAKAN (permintaan user: "tampilan rincian PO
+apakah bisa lebih dipermudah lagi biar mudah dibaca?"):
+- Baris INDUK (teal) kini memuat SEMUA info PO SEKALI: Nomor #, Tanggal,
+  Pemasok, Status Pesanan, Keterangan PO, jumlah item & total kuantitas.
+- Baris ANAK (putih) hanya berisi ITEM: Nama Barang, Satuan, Kuantitas —
+  dulu setiap baris anak mengulang Tanggal/Pemasok/Tgl-Jam yang sama
+  (tabel terasa penuh & sulit dipindai).
+- Kolom "Tgl/Jam Pembuatan" (metadata PO, jarang dipakai) dipindah ke
+  baris induk dan DISSEMBUNYIKAN default — tampilkan lewat tombol
+  ◱ Kolom / klik kanan judul kolom.
+- Tombol ⤢ Perbesar Tabel + ⛶ Layar Penuh (ala Waste).
 
 Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 - Page filters: Cabang PO, Status Pesanan Pembelian
 - Tree rows: Nomor# (parent) → detail children
-- Value: Sum of Kuantitas per row
-- Grand total row
-
-v3.2: KPI row DIHAPUS (ringkasan PO·item·qty di status footer) + lazy
-refresh (compute hanya saat tab terlihat).
-v3.1 (dipertahankan): filter corong header, ⛶ perbesar, loading overlay.
+- Value: Sum of Kuantitas per row + grand total row
 """
 
 import tkinter as tk
@@ -20,10 +27,23 @@ from typing import Optional, Callable
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup,
-    ColumnManager, LoadingOverlay, add_tooltip, attach_clone_filters,
-    auto_fit_columns, enable_col_resize, insert_tree_items,
-    open_tree_maximized, run_async,
+    ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
+    attach_clone_filters, auto_fit_columns, enable_col_resize,
+    insert_tree_items, open_tree_maximized, run_async,
 )
+
+# Kolom tabel v3.9 (urutan baru — info PO di kiri, item di kanan):
+# baris induk mengisi kolom PO (Tanggal…Keterangan PO) + ringkasan;
+# baris anak hanya mengisi Nama Barang / Satuan / Kuantitas.
+PO_COLUMNS = [
+    "Tanggal", "Pemasok", "Status Pesanan", "Keterangan PO",
+    "Nama Barang", "Satuan", "Kuantitas", "Tgl/Jam Pembuatan",
+]
+
+# Pemetaan nama kolom tampilan → kolom DataFrame sumber
+COL_SRC = {
+    "Status Pesanan": "Status Pesanan Pembelian",
+}
 
 
 class RincianPoView(tk.Frame):
@@ -101,41 +121,57 @@ class RincianPoView(tk.Frame):
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+        self._tcard = tcard
         tbody = tcard.body()
 
         # Header tabel: judul + tombol perbesar
         head = tk.Frame(tbody, bg=C_CARD)
         head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        tk.Label(head, text="Pivot Rincian PO — Nomor # → detail barang",
-                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
-            side="left")
-        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        title_label = tk.Label(
+            head, text="Rincian PO — per PO (teal) + item barang",
+            bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
+        title_label.pack(side="left")
+        # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+                              command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(filter juga jalan di window besar;\n"
                              "Esc untuk menutup)")
+        # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_expand,
+                    "Sembunyikan kartu Filter & judul supaya tabel "
+                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
+                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
         add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
+                              "(juga bisa: klik kanan judul kolom)\n"
+                              "Kolom 'Tgl/Jam Pembuatan' tersembunyi "
+                              "default (v3.9) —\naktifkan dari sini bila "
+                              "perlu)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
                              "(double-click tepi kolom = auto-fit 1 kolom;\n"
                              "drag tepi kolom = atur lebar manual)")
 
-        cols = ["Tanggal", "Nama Barang", "Keterangan PO", "Pemasok",
-                "Tgl/Jam Pembuatan", "Satuan", "Kuantitas"]
+        # v3.9: expander ⤢ — ciutkan kartu filter + judul
+        self._expander = TableExpander(btn_expand, [fcard, title_label])
+
+        cols = PO_COLUMNS
         self.tree = ttk.Treeview(tbody, columns=cols, show="tree headings",
                                  selectmode="browse")
 
-        self.tree.column("#0", width=160, minwidth=120)
+        self.tree.column("#0", width=130, minwidth=110)
         self.tree.heading("#0", text="Nomor #")
         col_widths = {
-            "Tanggal": 90, "Nama Barang": 180, "Keterangan PO": 90,
-            "Pemasok": 220, "Tgl/Jam Pembuatan": 130, "Satuan": 60,
-            "Kuantitas": 80,
+            "Tanggal": 92, "Pemasok": 200, "Status Pesanan": 110,
+            "Keterangan PO": 110, "Nama Barang": 200, "Satuan": 64,
+            "Kuantitas": 90, "Tgl/Jam Pembuatan": 140,
         }
         for c in cols:
             self.tree.column(c, width=col_widths.get(c, 100), minwidth=50,
@@ -158,8 +194,8 @@ class RincianPoView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🛒 Nomor # = induk PO · klik ▸ untuk buka/tutup "
-                            "detail · klik judul kolom ⧩ = filter",
+        tk.Label(foot, text="🛒 Baris TEAL = PO (info lengkap + total) · baris "
+                            "putih = item barang · klik judul kolom ⧩ = filter",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
@@ -181,13 +217,17 @@ class RincianPoView(tk.Frame):
         self._colmgr = ColumnManager(
             self.tree,
             open_filter=lambda c: self.header_filters.open_popup(c))
+        # v3.9: "Tgl/Jam Pembuatan" disembunyikan default (metadata PO,
+        # jarang dipakai — layout jadi ringkas; aktifkan via ◱ Kolom)
+        self._colmgr.hide("Tgl/Jam Pembuatan")
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""
         auto_fit_columns(self.tree)
 
     def _col_values(self, col: str) -> list:
-        """Nilai unik TERFORMAT utk popup filter header (v3.5)."""
+        """Nilai unik TERFORMAT utk popup filter header (v3.5; v3.9 —
+        mapping nama kolom tampilan → kolom df sumber)."""
         df = self.data
         if df is None or df.empty:
             return []
@@ -195,9 +235,10 @@ class RincianPoView(tk.Frame):
             if "Nomor #" in df.columns:
                 return df["Nomor #"].dropna().astype(str).unique().tolist()
             return []
-        if col not in df.columns:
+        src = COL_SRC.get(col, col)
+        if src not in df.columns:
             return []
-        return self._format_col_series(col, df[col]).unique().tolist()
+        return self._format_col_series(col, df[src]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
         """Format kolom → string tampilan (identik render tabel)."""
@@ -223,14 +264,14 @@ class RincianPoView(tk.Frame):
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
-        # Nomor# parent row — teal tint + bold
-        tree.tag_configure("po_header", font=font(9, "bold"),
+        # Nomor# parent row — teal tint + bold (v3.9: font 10 sej tabel)
+        tree.tag_configure("po_header", font=font(10, "bold"),
                            background="#ccfbf1",
                            foreground="#134e4a")
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         # Grand total row — slate
-        tree.tag_configure("grand_total", font=font(9, "bold"),
+        tree.tag_configure("grand_total", font=font(10, "bold"),
                            background="#e2e8f0",
                            foreground="#0f172a")
 
@@ -239,6 +280,9 @@ class RincianPoView(tk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
         self.data = data
+        # v3.9: pulihkan layout bila sedang di-perbesar ⤢
+        if getattr(self, "_expander", None) is not None:
+            self._expander.reset()
         self._show_content()
         self._populate_filters()
         for c in self._col_sel:
@@ -293,7 +337,14 @@ class RincianPoView(tk.Frame):
                   loading_text="Menyiapkan pivot PO…", sync=sync)
 
     def _prepare_rows(self, st: dict) -> dict:
-        """Pure pandas: filter + group → items tree (thread-safe)."""
+        """Pure pandas: filter + group → items tree (thread-safe).
+
+        v3.9 LAYOUT RINGKAS:
+        - PARENT (teal, "po_header"): Nomor # + SEMUA info PO sekali
+          (Tanggal, Pemasok, Status, Keterangan PO, Tgl/Jam Pembuatan
+          [kolom tersembunyi default]) + ringkasan "N item" + total qty.
+        - ANAK (putih, zebra): HANYA item — Nama Barang, Satuan, Kuantitas.
+        """
         df = self.data
         for col, val in [("Cabang PO", st["cabang"]),
                          ("Status Pesanan Pembelian", st["status_pesanan"])]:
@@ -301,9 +352,9 @@ class RincianPoView(tk.Frame):
                 df = df[df[col].astype(str) == val]
 
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (semua kolom;
-        # #0 = Nomor #)
+        # v3.9: mapping nama kolom tampilan → kolom df sumber)
         for col, sel in st["col_sel"].items():
-            src_col = "Nomor #" if col == "#0" else col
+            src_col = "Nomor #" if col == "#0" else COL_SRC.get(col, col)
             if src_col in df.columns:
                 fmt = self._format_col_series(col, df[src_col])
                 df = df[fmt.isin(sel)]
@@ -321,45 +372,83 @@ class RincianPoView(tk.Frame):
 
         total_qty = 0
         po_count = 0
-        row_idx = 0
+        item_count = 0
         items = []
 
+        def _first_str(series) -> str:
+            """Nilai non-kosong pertama dari series (info level-PO)."""
+            s = series.dropna().astype(str).str.strip()
+            s = s[s != ""]
+            return s.iloc[0] if len(s) else ""
+
+        def _fmt_qty(v) -> str:
+            """Kuantitas: bulat tanpa desimal, pecahan 1 desimal (v3.9)."""
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return str(v)
+            if f == int(f):
+                return f"{int(f):,}"
+            return f"{f:,.1f}"
+
+        # nilai per kolom PO: konsisten dalam satu PO → ambil nilai pertama
         for nomor, group in df_sorted.groupby("Nomor #", sort=False):
             po_count += 1
-            po_qty = group["Kuantitas"].sum() if "Kuantitas" in group.columns else 0
+            n_items = len(group)
+            po_qty = (group["Kuantitas"].sum()
+                      if "Kuantitas" in group.columns else 0)
             total_qty += po_qty
             parent_iid = f"po_{po_count}"
+            # BARIS INDUK = info PO lengkap + ringkasan (v3.9)
             items.append(("", parent_iid,
                           {"text": str(nomor),
-                           "values": ["", "", "", "", "", "Total:",
-                                      f"{po_qty:,}"],
+                           "values": [
+                               self._fmt_date(group["Tanggal"].iloc[0])
+                               if "Tanggal" in group.columns else "",
+                               _first_str(group["Pemasok"])
+                               if "Pemasok" in group.columns else "",
+                               _first_str(group["Status Pesanan Pembelian"])
+                               if "Status Pesanan Pembelian" in group.columns
+                               else "",
+                               _first_str(group["Keterangan PO"])
+                               if "Keterangan PO" in group.columns else "",
+                               f"▸ {n_items} item",
+                               "",
+                               f"Total: {_fmt_qty(po_qty)}",
+                               self._fmt_datetime(
+                                   group["Tgl/Jam Pembuatan"].iloc[0])
+                               if "Tgl/Jam Pembuatan" in group.columns
+                               else "",
+                           ],
                            "tags": ("po_header",), "open": True}))
 
-            for _, row in group.iterrows():
-                tag = "evenrow" if row_idx % 2 == 0 else "oddrow"
-                row_idx += 1
+            # BARIS ANAK = hanya item barang (v3.9 — tanpa mengulang info PO)
+            for i, (_idx, row) in enumerate(group.iterrows()):
+                tag = "evenrow" if i % 2 == 0 else "oddrow"
+                item_count += 1
                 items.append((
-                    parent_iid, f"{parent_iid}_{row_idx}",
+                    parent_iid, f"{parent_iid}_{item_count}",
                     {"text": "",
                      "values": [
-                         self._fmt_date(row.get("Tanggal")),
+                         "", "", "", "",
                          str(row.get("Nama Barang", "")),
-                         str(row.get("Keterangan PO", "")),
-                         str(row.get("Pemasok", "")),
-                         self._fmt_datetime(row.get("Tgl/Jam Pembuatan")),
                          str(row.get("Satuan", "")),
                          self._fmt_num(row.get("Kuantitas")),
+                         "",
                      ],
                      "tags": (tag,), "open": False}))
 
+        # 8 kolom nilai (grand total sejajar kolom Kuantitas)
         items.append(("", "grand_total",
                       {"text": "GRAND TOTAL",
-                       "values": ["", "", "", "", "", "",
-                                  f"{total_qty:,}"],
+                       "values": ["", "", "", "",
+                                   f"{po_count} PO", "",
+                                   _fmt_qty(total_qty), ""],
                        "tags": ("grand_total",), "open": False}))
 
-        status = f"{po_count} PO · {row_idx} item · Total Kuantitas: {total_qty:,}"
-        return {"items": items, "kpi": (po_count, row_idx, total_qty),
+        status = (f"{po_count} PO · {item_count} item · "
+                  f"Total Kuantitas: {_fmt_qty(total_qty)}")
+        return {"items": items, "kpi": (po_count, item_count, total_qty),
                 "status": status}
 
     def _render_rows(self, payload: dict):

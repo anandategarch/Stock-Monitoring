@@ -1,5 +1,5 @@
 """
-widgets.py — Blok bangunan UI Stock Monitoring (v3.0 redesign).
+widgets.py — Blok bangunan UI Stock Monitoring (v3.0 redesign → v3.9).
 
 Semua komponen dipakai lintas view supaya tampilan konsisten:
 - Card            : kartu putih + border slate + judul opsional
@@ -13,9 +13,20 @@ Semua komponen dipakai lintas view supaya tampilan konsisten:
 - make_tree       : Treeview ter-style lengkap dgn scrollbar
 - LegendRow       : chip legenda warna (untuk status/CEK)
 - StatusDot       : titik warna + teks status
+- TableExpander   : (v3.9) tombol ⤢ Perbesar Tabel ala Waste — ciutkan
+                    baris kontrol supaya tabel memakai tinggi penuh
+
+v3.9 "STYLE WASTE" (permintaan user: tiru repo Waste mulai dari tombol
+filternya, perbesar tabelnya, dll — warna sudah identik sejak v3.0):
+- funnel header filter ala Waste: MERAH saat aktif, idle = isi terang
+  + outline gelap; ikon 11x8 → 13x11.
+- theme.py: font tabel 9 → 10 + rowheight 26 → 30 (tabel besar).
+- TableExpander ⤢ + tombol ⛶ "Layar Penuh" di semua view.
 """
 from __future__ import annotations
 
+import contextlib
+import gc as _gc
 import math
 import threading
 import time as _time
@@ -611,38 +622,195 @@ class SegmentBar(tk.Frame):
                             activeforeground=C_HEADER)
 
 
+class TableExpander:
+    """v3.9 — tombol ⤢ "Perbesar Tabel" ala aplikasi Waste.
+
+    Permintaan user: "tiru style repo Waste mulai dari tombol filternya,
+    perbesar tabelnya dan lain-lain". Di Waste, ⤢ menyembunyikan KPI +
+    bar kontrol di sekitar tabel supaya TABEL memakai seluruh tinggi
+    tampilan (tombol & toolbar tabel tetap terlihat supaya bisa
+    dikembalikan); ⛶ Layar Penuh = window fullscreen terpisah.
+
+    Pemakaian:
+        exp = TableExpander(btn, [fcard, kpi_card, legend, title_label])
+        btn.configure(command=exp.toggle)   # atau lewat constructor
+
+    - Widget target pack: opsi pack dicatat + ANCHOR (widget non-target
+      berikutnya) → restore mempertahankan urutan layout asli.
+    - Widget target grid: grid_remove() mengingat opsi sendiri →
+      restore cukup grid().
+    """
+
+    def __init__(self, button, targets, text_expand="⤢ Perbesar Tabel",
+                 text_restore="⤡ Tampilkan Filter & KPI", on_toggle=None):
+        self._button = button
+        self._targets = list(targets)
+        self._text_expand = text_expand
+        self._text_restore = text_restore
+        self._on_toggle = on_toggle
+        self.expanded = False
+        self._saved: list = []   # (widget, manager, options, anchor)
+        try:
+            button.configure(command=self.toggle)
+        except tk.TclError:
+            pass
+        self._update_text()
+
+    # ---------------------------------------------------------------- state --
+    def _update_text(self):
+        try:
+            self._button.configure(
+                text=self._text_restore if self.expanded
+                else self._text_expand)
+        except tk.TclError:
+            pass
+
+    def toggle(self):
+        if self.expanded:
+            self.restore()
+        else:
+            self.collapse()
+        if self._on_toggle:
+            # callback view tidak boleh menjatuhkan toggle — telan error
+            with contextlib.suppress(Exception):
+                self._on_toggle(self.expanded)
+
+    # ------------------------------------------------------------- collapse --
+    def collapse(self):
+        """Sembunyikan semua target → tabel memakai tinggi penuh."""
+        if self.expanded:
+            return
+        target_set = {id(w) for w in self._targets}
+        self._saved = []
+        for w in self._targets:
+            try:
+                mgr = w.winfo_manager()
+            except tk.TclError:
+                continue
+            if mgr == "pack":
+                try:
+                    info = w.pack_info()
+                except tk.TclError:
+                    continue
+                # hitung anchor: sibling non-target BERIKUTNYA (jaga urutan
+                # saat restore) — bila tak ada, sibling non-target sebelumnya
+                anchor = None
+                try:
+                    parent = w.master
+                    order = list(parent.pack_slaves())
+                    idx = order.index(w)
+                    nxt = next((s for s in order[idx + 1:]
+                                if id(s) not in target_set), None)
+                    if nxt is not None:
+                        anchor = ("before", nxt)
+                    else:
+                        prv = next((s for s in reversed(order[:idx])
+                                    if id(s) not in target_set), None)
+                        if prv is not None:
+                            anchor = ("after", prv)
+                except (tk.TclError, ValueError):
+                    anchor = None
+                info = dict(info)
+                info.pop("before", None)
+                info.pop("after", None)
+                self._saved.append((w, "pack", info, anchor))
+                w.pack_forget()
+            elif mgr == "grid":
+                # grid_remove mengingat semua opsi grid — restore = grid()
+                self._saved.append((w, "grid", None, None))
+                w.grid_remove()
+        self.expanded = True
+        self._update_text()
+
+    # -------------------------------------------------------------- restore --
+    def restore(self):
+        """Kembalikan semua target ke posisi semula (urutan asli)."""
+        for w, mgr, info, anchor in self._saved:
+            try:
+                if mgr == "pack":
+                    kw = dict(info)
+                    if anchor is not None:
+                        kw[anchor[0]] = anchor[1]
+                    w.pack(**kw)
+                elif mgr == "grid":
+                    w.grid()
+            except tk.TclError:
+                continue
+        self._saved = []
+        self.expanded = False
+        self._update_text()
+
+    def reset(self):
+        """Pulihkan bila sedang collapse (dipanggil load_data supaya layout
+        view baru tidak terjebak setengah-collapse)."""
+        if self.expanded:
+            self.restore()
+
+
 # --- Ikon corong utk header filter (digambar via PhotoImage, tanpa PIL) -----
+# funnel ala Waste — TERISI MERAH saat kolom terfilter, versi idle = isi
+# terang #cbd5e1 + outline gelap #64748b (terbaca jelas tanpa menutupi
+# judul). Ikon diperbesar 11x8 → 13x11 supaya terlihat seperti funnel
+# header Waste (_HF_ACTIVE "#dc2626" / _HF_IDLE "#94a3b8" + fill #cbd5e1).
 _FUNNEL_CACHE: dict = {}
 
+# Bentuk corong (mask per baris: x0..x1 inklusif) — 13 lebar x 11 tinggi:
+# cone melebar di atas mengecil ke stem 3px di bawah.
+_FUNNEL_SHAPE = [
+    (0, 12),   # rim atas
+    (1, 11),
+    (2, 10),
+    (3, 9),
+    (4, 8),
+    (4, 8),
+    (5, 7),   # stem
+    (5, 7),
+    (5, 7),
+    (5, 7),
+    (5, 7),
+]
 
-def funnel_image(color: str = "#94a3b8") -> tk.PhotoImage:
-    """Ikon corong kecil 11x8 px (alpha via PhotoImage Tk 8.6)."""
-    if color in _FUNNEL_CACHE:
-        return _FUNNEL_CACHE[color]
-    w, h = 11, 8
+
+def _funnel_mask() -> set:
+    """Set piksel (x, y) milik bentuk corong."""
+    mask = set()
+    for y, (x0, x1) in enumerate(_FUNNEL_SHAPE):
+        for x in range(x0, x1 + 1):
+            mask.add((x, y))
+    return mask
+
+
+def funnel_image(active: bool = False) -> tk.PhotoImage:
+    """Ikon corong 13x11 px dua-warna (ala Waste — v3.9).
+
+    active=True  → terisi MERAH #dc2626 (kolom sedang terfilter).
+    active=False → isi terang #cbd5e1 + outline #64748b (idle).
+
+    Alpha via PhotoImage Tk 8.6 (transparency_set)."""
+    key = "on" if active else "off"
+    if key in _FUNNEL_CACHE:
+        return _FUNNEL_CACHE[key]
+    w = max(x1 for _, x1 in _FUNNEL_SHAPE) + 1
+    h = len(_FUNNEL_SHAPE)
     img = tk.PhotoImage(width=w, height=h)
-    # bentuk corong: cone melebar + stem
-    shape = [
-        (1, 9),   # rim atas
-        (2, 8),
-        (3, 7),
-        (4, 6),
-        (5, 5),   # ujung cone
-        (5, 5),   # stem
-        (5, 5),
-        (5, 5),
-    ]
+    mask = _funnel_mask()
+    fill = "#dc2626" if active else "#cbd5e1"
+    outline = "#b91c1c" if active else "#64748b"
     for y in range(h):
-        x0, x1 = shape[y]
         for x in range(w):
-            if x0 <= x <= x1:
-                img.put(color, (x, y))
+            if (x, y) in mask:
+                # piksel tepi (ada tetangga di luar bentuk) → outline gelap,
+                # interior → warna isi — funnel terlihat "digambar", bukan
+                # blok solid tipis yang nyaris tak terbaca di bg header.
+                edge = any((x + dx, y + dy) not in mask
+                           for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+                img.put(outline if edge else fill, (x, y))
             else:
                 try:
                     img.transparency_set(x, y, True)
                 except Exception:
                     pass
-    _FUNNEL_CACHE[color] = img
+    _FUNNEL_CACHE[key] = img
     return img
 
 
@@ -697,7 +865,7 @@ class HeaderFilter:
         try:
             self.tree.heading(
                 self.col_id,
-                image=funnel_image(C_ACCENT if active else "#94a3b8"))
+                image=funnel_image(active=active))
         except tk.TclError:
             pass
 
@@ -1346,6 +1514,63 @@ def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
 _worker_threads: list = []
 _MAX_KEPT_THREADS = 40
 
+# v3.9 CRASH FIX (terbukti saat test shared-H): tk.Variable.__del__ memanggil
+# Tcl (globalunsetvar). Bila GC berjalan DI THREAD WORKER — termasuk tepat
+# saat thread exit (threading._delete) — dan menemukan garbage
+# Variable/StringVar sisa popup/clone window yang sudah ditutup, finalisasi
+# terjadi dari thread BUKAN-main → segfault heap ("alloc: invalid block") di
+# CPython 3.12 + Tk. Dulu nyaris tak pernah terjadi (hanya 1 job async pada
+# satu waktu); v3.9 me-refresh 2 view sekaligus (GR + PCS saat Apply H) →
+# 2 thread exit berdekatan → jendela crash kena. Solusi: GC dimatikan SELAMA
+# thread worker hidup (bukan hanya saat work() — fase thread-exit juga
+# rawan) dan hanya dinyalakan kembali dari MAIN thread SETELAH thread
+# benar-benar mati (dicek via is_alive + retry 15ms).
+_GC_HOLD = {"depth": 0, "was_enabled": True}
+
+
+def gc_shield_acquire() -> None:
+    """Matikan GC otomatis — dipanggil dari thread yang akan bekerja.
+
+    Nested-safe: job bersamaan dihitung depth; GC dinyalakan kembali saat
+    job TERAKHIR dilepas."""
+    if _GC_HOLD["depth"] == 0:
+        _GC_HOLD["was_enabled"] = _gc.isenabled()
+        _gc.disable()
+    _GC_HOLD["depth"] += 1
+
+
+def gc_shield_release(thread_obj=None, retry_widget=None) -> None:
+    """Nyalakan kembali GC — HARUS dipanggil dari MAIN thread.
+
+    Bila thread_obj masih hidup, jadwalkan retry (after 15ms) sampai mati —
+    thread-exit dengan GC menyala persis kondisi crash yang dihindari.
+    retry_widget umumnya widget pemilik job (masih hidup). Bila widget juga
+    mati, join singkat (bounded 0.3s) lalu lepas (app sedang ditutup)."""
+    if _GC_HOLD["depth"] <= 0:
+        return
+    if thread_obj is not None and thread_obj.is_alive():
+        scheduled = False
+        if retry_widget is not None:
+            try:
+                if retry_widget.winfo_exists():
+                    retry_widget.after(
+                        15, lambda: gc_shield_release(thread_obj,
+                                                      retry_widget))
+                    scheduled = True
+            except tk.TclError:
+                scheduled = False
+        if scheduled:
+            return
+        # widget mati — tunggu thread mati secara singkat (bounded)
+        thread_obj.join(0.3)
+        if thread_obj.is_alive():
+            # masih terjepit (sangat lama) — lepas; sisa risiko hanya bila
+            # app ditutup di tengah proses (jarang, dapat diterima).
+            pass
+    _GC_HOLD["depth"] -= 1
+    if _GC_HOLD["depth"] == 0 and _GC_HOLD["was_enabled"]:
+        _gc.enable()
+
 
 def _spawn_worker(target) -> threading.Thread:
     t = threading.Thread(target=target, daemon=True)
@@ -1364,13 +1589,19 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
 
     Overlay otomatis show/hide. sync=True → blocking (untuk test).
     Return dict job: {"busy": bool, "cancel": callable}.
+
+    v3.9: GC dimatikan SELAMA THREAD HIDUP (work + fase exit) — finalisasi
+    tk.Variable dari thread worker (pemicu segfault CPython 3.12+Tk, mis.
+    saat 2 view di-refresh bersamaan) jadi mustahil; GC dinyalakan kembali
+    dari main thread setelah thread mati (gc_shield_release).
     """
     job = {"busy": True, "cancelled": False, "result": None, "error": None,
-           "traceback": None}
+           "traceback": None, "_thread": None}
 
     def finish():
         if overlay is not None:
             overlay.hide()
+        gc_shield_release(job["_thread"], retry_widget=widget)
         err = job["error"]
         if err is not None:
             if on_error is not None:
@@ -1385,45 +1616,62 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
         else:
             on_done(job["result"])
 
-    def runner():
-        # PENTING: matikan GC otomatis selama work() berjalan di thread ini.
-        # Tanpa ini, GC yang dipicu pandas bisa mem-finalisasi objek tkinter
-        # (__del__ memanggil Tcl) dari NON-MAIN thread → Tk tidak thread-safe
-        # → segfault. GC diaktifkan kembali setelah work() selesai; finalisasi
-        # tkinter objects kemudian terjadi di main thread (aman).
-        import gc as _gc
-        _gc_was_enabled = _gc.isenabled()
-        _gc.disable()
+    def _exec_work():
         try:
             job["result"] = work()
         except Exception as e:  # pragma: no cover
             import traceback as _tb
             job["error"] = e
             job["traceback"] = _tb.format_exc()
-        finally:
-            if _gc_was_enabled:
-                _gc.enable()
         job["busy"] = False
 
+    def runner():
+        # PENTING (v3.9): GC dimatikan di sini dan TIDAK dinyalakan ulang di
+        # thread ini — tetap mati sampai thread benar-benar mati, termasuk
+        # saat threading._delete berjalan (bekas jendela crash: GC di
+        # thread-exit mem-finalisasi tk.Variable sisa popup/clone window).
+        gc_shield_acquire()
+        _exec_work()
+
     if sync:
-        runner()
+        # sync: work() di MAIN thread — shield dilepas langsung (aman:
+        # finalisasi juga terjadi di main thread)
+        gc_shield_acquire()
+        _exec_work()
         finish()
         return job
 
     if overlay is not None:
         overlay.show(loading_text)
-    _spawn_worker(runner)
+    job["_thread"] = _spawn_worker(runner)
+
+    def _sched_poll():
+        try:
+            widget.after(70, poll)
+        except tk.TclError:
+            pass
 
     def poll():
         if job["cancelled"]:
+            # hasil dibuang — tapi tunggu thread selesai supaya shield GC
+            # bisa dilepas dengan aman (thread-exit dgn GC nyala = crash)
+            if job["busy"]:
+                _sched_poll()
+            else:
+                if overlay is not None:
+                    overlay.hide()
+                gc_shield_release(job["_thread"], retry_widget=widget)
             return
         try:
             if not widget.winfo_exists():
-                return  # widget sudah ditutup — buang hasil
+                # widget ditutup — buang hasil, tapi tetap lepas shield GC
+                # lewat retry_widget (root) supaya GC tidak mati selamanya
+                gc_shield_release(job["_thread"], retry_widget=widget)
+                return
         except tk.TclError:
             return
         if job["busy"]:
-            widget.after(70, poll)
+            _sched_poll()
             return
         finish()
 
@@ -1725,7 +1973,8 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
                      pad: int = 24, sample_rows: int = 400):
     """v3.4 — Auto-fit lebar kolom ke konten (judul + sampel baris).
 
-    Ukuran dihitung dari font tabel (family, 9) via Font.measure:
+    Ukuran dihitung dari font tabel (family, 10 — v3.9: font tabel
+    diperbesar ala Waste) via Font.measure:
     max(lebar judul, lebar isi terpanjang sampel) + pad, dibatasi
     [min_width, max_width]. Untuk tabel besar hanya sampel `sample_rows`
     baris merata yang diukur (ukur 400×30 sel < 100ms).
@@ -1735,7 +1984,7 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
 
     cols = list(columns) if columns is not None else _tree_display_columns(tree)
     try:
-        meas = tkfont.Font(family=font_family(), size=9).measure
+        meas = tkfont.Font(family=font_family(), size=10).measure
     except Exception:
         def meas(s):  # fallback kasar
             return 7 * len(str(s))

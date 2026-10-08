@@ -3,13 +3,18 @@ export_sheets.py — Pembangun sheet export Excel (v3.8).
 
 Dua bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
 
-1. build_selisih_export_df(base, tgl_start, tgl_end)
+1. build_selisih_export_df(base, tgl_start, tgl_end, audit_cols=None)
    Rekap Selisih IN PER RESTO (permintaan user v3.8): kolom
    Resto, Tanggal, Nama Barang, Kategori, Satuan, Hasil SO,
    Sheet Barang Masuk (input rekap), Kiriman HO (42.05),
    Kiriman Supplier (32.24), Pembelian by Resto (99.01), Selisih —
    urut Resto → Tanggal → Nama Barang, hanya baris dalam rentang
    tanggal aktif (default 1–31 bulan berjalan).
+   v3.9 (permintaan user "waktu ekspor tambahin hasil auditnya aja
+   tapi ada opsi buat tambahin kolom tersebut atau tidak"):
+   audit_cols = daftar kolom audit opsional yang DITAMBAHKAN setelah
+   Selisih — pilihan valid: "Hasil Audit", "Saldo", "Catatan Audit"
+   (None/[] = tanpa kolom audit — perilaku v3.8).
 
 2. add_pivot_sheet(writer, append1_df)
    Sheet "PIVOT" — mirror tab pivot "Mutasi Barang - New" milik user
@@ -62,6 +67,10 @@ SELISIH_EXPORT_COLUMNS = [
     "Pembelian by Resto", "Selisih",
 ]
 
+# v3.9: kolom hasil audit OPSIONAL (ditambahkan setelah Selisih bila
+# pengguna mencentangnya di dialog opsi export — sumber kolom = base)
+AUDIT_EXPORT_COLUMNS = ["Hasil Audit", "Saldo", "Catatan Audit"]
+
 
 # =============================================================================
 # 1. REKAP SELISIH IN PER RESTO
@@ -74,7 +83,8 @@ def _num_col(f: pd.DataFrame, name: str) -> pd.Series:
 
 
 def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
-                            tgl_end: int = 31) -> pd.DataFrame:
+                            tgl_end: int = 31,
+                            audit_cols: list | None = None) -> pd.DataFrame:
     """Bangun tabel rekap Selisih IN per resto dari base (keluaran
     InSelisihView._compute_base — sudah membawa komponen 42.05/32.24/99.01).
 
@@ -82,8 +92,14 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
     - Urut: Resto → Tanggal → Nama Barang.
     - Hasil SO: NaN → sel kosong (tanggal tanpa SO tercatat);
       komponen IN & selisih: NaN → 0.
+    - v3.9: audit_cols = subset ["Hasil Audit", "Saldo", "Catatan Audit"]
+      → kolom tsb DITAMBAHKAN setelah Selisih (None/[] = tanpa audit).
+      "Saldo" mengikuti nilai audit dari data PENUH (bukan rentang tampilan)
+      — konsisten dgn kolom Saldo di tabel UI.
     """
-    empty = pd.DataFrame(columns=SELISIH_EXPORT_COLUMNS)
+    audit_cols = [c for c in (audit_cols or [])
+                  if c in AUDIT_EXPORT_COLUMNS]
+    empty = pd.DataFrame(columns=SELISIH_EXPORT_COLUMNS + audit_cols)
     if base is None or base.empty:
         return empty
 
@@ -109,13 +125,27 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
         "Pembelian by Resto": _num_col(f, "99.01").fillna(0.0),
         "Selisih": _num_col(f, "Selisih IN").fillna(0.0),
     })
+
+    # v3.9: kolom hasil audit opsional — dibangun SEBELUM sort_values
+    # (assignment Series sejajar INDEX f; setelah reset_index(drop=True)
+    # index-nya berubah → nilai akan salah baris bila ditambahkan belakangan).
+    # Sumber = base: nilai audit dihitung dari data PENUH oleh fn_audit,
+    # tidak terpotong rentang tanggal tampilan (konsisten dgn UI).
+    for col in audit_cols:
+        if col == "Saldo":
+            out[col] = _num_col(f, "Saldo").astype("Float64")
+        elif col in f.columns:
+            out[col] = f[col].astype(str)
+        else:
+            out[col] = ""
+
     out = out.sort_values(["Resto", "Tanggal", "Nama Barang"],
                           kind="mergesort", na_position="last") \
         .reset_index(drop=True)
     # Hasil SO NaN → None (sel kosong di Excel, bukan 0)
     out["Hasil SO"] = out["Hasil SO"].astype("Float64").where(
         out["Hasil SO"].notna(), other=None)
-    return out[SELISIH_EXPORT_COLUMNS]
+    return out[SELISIH_EXPORT_COLUMNS + audit_cols]
 
 
 def write_selisih_sheet(writer, df: pd.DataFrame,
@@ -137,6 +167,8 @@ def write_selisih_sheet(writer, df: pd.DataFrame,
         "Satuan": 10, "Hasil SO": 14, "Sheet Barang Masuk": 18,
         "Kiriman HO": 14, "Kiriman Supplier": 16,
         "Pembelian by Resto": 18, "Selisih": 14,
+        # v3.9: kolom audit opsional
+        "Hasil Audit": 22, "Saldo": 12, "Catatan Audit": 40,
     }
     for j, col in enumerate(df.columns, start=1):
         ws.column_dimensions[get_column_letter(j)].width = \

@@ -39,6 +39,7 @@ v3.6 (lama): default -26 s/d 31.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import contextlib
 import pandas as pd
 from typing import Callable, Optional
 
@@ -47,11 +48,13 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup, LoadingOverlay,
-    ColumnManager, add_tooltip, attach_clone_filters, auto_fit_columns,
-    enable_col_resize, identify_to_column, insert_tree_items,
-    open_tree_maximized, run_async, sort_tree_by_column,
+    ColumnManager, TableExpander, add_tooltip, attach_clone_filters,
+    auto_fit_columns, enable_col_resize, identify_to_column,
+    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
 )
-from .export_sheets import build_selisih_export_df, write_selisih_sheet
+from .export_sheets import (
+    AUDIT_EXPORT_COLUMNS, build_selisih_export_df, write_selisih_sheet,
+)
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
 COLUMNS = [
@@ -606,11 +609,20 @@ class InSelisihView(tk.Frame):
                        "Hasil SO",
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         self.title_label.pack(side="left")
-        btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
+        # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+                              command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(filter & sort juga jalan di window besar;\n"
                              "Esc untuk menutup)")
+        # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_expand,
+                    "Sembunyikan kartu Filter, KPI & judul supaya tabel "
+                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
+                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         # v3.8: export rekap Selisih IN per resto (permintaan user)
         btn_export = GhostButton(head, text="💾 Export",
                                  command=self._on_export)
@@ -622,7 +634,10 @@ class InSelisihView(tk.Frame):
             "Kolom: Resto, Tanggal, Nama Barang, Kategori, Satuan,\n"
             "Hasil SO, Sheet Barang Masuk, Kiriman HO (42.05),\n"
             "Kiriman Supplier (32.24), Pembelian by Resto (99.01),\n"
-            "Selisih.")
+            "Selisih.\n"
+            "(v3.9) Dialog opsi menanyakan apakah menambahkan kolom\n"
+            "hasil audit (Hasil Audit / Saldo / Catatan) — bisa dipilih\n"
+            "atau tidak.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
@@ -660,6 +675,11 @@ class InSelisihView(tk.Frame):
                  font=font(8, "bold")).pack(side="right")
 
         self.overlay = LoadingOverlay(tbody, "Menghitung rekap Selisih IN…")
+
+        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + KPI
+        # chips + judul; tombol toolbar tetap tampil utk mengembalikan.
+        self._expander = TableExpander(
+            btn_expand, [fcard, self.kpi_card, self.title_label])
 
         self._apply_columns()
 
@@ -740,6 +760,10 @@ class InSelisihView(tk.Frame):
         self._satuan_map = {}
         self._kategori_map = {}
         self._show_content()
+        # v3.9: pulihkan layout bila sedang di-perbesar ⤢ (kpi_card akan
+        # di-pack ulang oleh _render_kpi_chips di bawah)
+        if getattr(self, "_expander", None) is not None:
+            self._expander.reset()
         self._apply_columns()
         self._reset_filter_states()
         self._render_kpi_chips()
@@ -985,12 +1009,89 @@ class InSelisihView(tk.Frame):
                           on_done=render_done)
 
     # --------------------------------------------------------- EXPORT --
-    def _on_export(self):
-        """v3.8 — Export rekap Selisih IN per resto ke Excel.
+    def _export_options_dialog(self):
+        """v3.9 — dialog opsi export: tambah kolom hasil audit atau tidak.
 
-        Semua baris dalam rentang tanggal aktif (default 1–31 bulan
-        berjalan); filter tampilan (⧩ / Hanya Selisih ≠ 0) tidak ikut —
-        export = REKAP lengkap per resto.
+        Permintaan user: "waktu ekspor tambahin hasil auditnya aja tapi ada
+        opsi buat tambahin kolom tersebut atau tidak". Return list kolom
+        audit terpilih (bisa kosong) atau None bila dibatalkan.
+        """
+        parent = self.winfo_toplevel()
+        win = tk.Toplevel(parent)
+        win.title("Opsi Export — Rekap Selisih IN")
+        win.configure(bg=C_CARD)
+        win.transient(parent)
+        win.resizable(False, False)
+        with contextlib.suppress(Exception):
+            win.grab_set()
+
+        result = {"cols": None}
+
+        body = tk.Frame(win, bg=C_CARD)
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+
+        tk.Label(body, text="💾 Export Rekap Selisih IN per Resto",
+                 bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
+            anchor="w")
+        tk.Label(body,
+                 text="Tambahkan kolom hasil audit ke file export?"
+                      " (opsional — v3.9)",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
+            anchor="w", pady=(2, 10))
+
+        tips = {
+            "Hasil Audit": "Status audit rekonsiliasi per baris: VALID / OK / "
+                            "CUT-OFF RESOLVED / DEVIASI MURNI.",
+            "Saldo": "Saldo kumulatif per (Resto × Barang) urut tanggal "
+                      "(dihitung dari data penuh).",
+            "Catatan Audit": "Rincian penyebab status audit (teks panjang "
+                              "— hasil pembandingan dokumen).",
+        }
+        vars_ = {}
+        for col in AUDIT_EXPORT_COLUMNS:
+            v = tk.BooleanVar(value=True)
+            vars_[col] = v
+            row = tk.Frame(body, bg=C_CARD)
+            row.pack(fill="x", pady=2)
+            cb = ttk.Checkbutton(row, text=col, variable=v)
+            cb.pack(side="left")
+            add_tooltip(cb, tips.get(col, ""))
+
+        btns = tk.Frame(body, bg=C_CARD)
+        btns.pack(fill="x", pady=(12, 0))
+
+        def _ok():
+            result["cols"] = [c for c, v in vars_.items() if v.get()]
+            win.destroy()
+
+        from .widgets import AccentButton
+        AccentButton(btns, text="💾 Export Sekarang", command=_ok).pack(
+            side="right")
+        GhostButton(btns, text="Tanpa Kolom Audit",
+                    command=lambda: (result.update(cols=[]),
+                                     win.destroy())).pack(
+            side="right", padx=(0, 8))
+        GhostButton(btns, text="✕ Batal",
+                    command=win.destroy).pack(side="left")
+
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        win.update_idletasks()
+        px = parent.winfo_rootx() + (parent.winfo_width()
+                                     - win.winfo_reqwidth()) // 2
+        py = parent.winfo_rooty() + (parent.winfo_height()
+                                     - win.winfo_reqheight()) // 2
+        win.geometry(f"+{max(px, 0)}+{max(py, 0)}")
+        win.wait_window()
+        return result["cols"]
+
+    def _on_export(self):
+        """v3.8/v3.9 — Export rekap Selisih IN per resto ke Excel.
+
+        Dialog opsi (v3.9) → pilih file → export async. Semua baris dalam
+        rentang tanggal aktif (default 1–31 bulan berjalan); filter
+        tampilan (⧩ / Hanya Selisih ≠ 0) tidak ikut — export = REKAP
+        lengkap per resto + kolom hasil audit sesuai pilihan.
         """
         if (self.audit_df is None or self.audit_df.empty) and \
                 (self.data is None or self.data.empty):
@@ -998,6 +1099,9 @@ class InSelisihView(tk.Frame):
                 "Export", "Belum ada data. Jalankan pipeline dulu.",
                 parent=self.winfo_toplevel())
             return
+        audit_cols = self._export_options_dialog()
+        if audit_cols is None:
+            return          # dibatalkan
         filepath = filedialog.asksaveasfilename(
             title="Simpan Rekap Selisih IN per Resto",
             defaultextension=".xlsx",
@@ -1007,6 +1111,11 @@ class InSelisihView(tk.Frame):
         )
         if not filepath:
             return
+        self._do_export(filepath, audit_cols)
+
+    def _do_export(self, filepath: str, audit_cols: list):
+        """Export inti (v3.9) — dipisah dari _on_export supaya bisa
+        dipanggil langsung oleh test tanpa dialog."""
         try:
             tgl_start = int(float(self.tgl_start_var.get()))
         except (TypeError, ValueError):
@@ -1022,7 +1131,8 @@ class InSelisihView(tk.Frame):
             base = self._cached_base
             if base is None:
                 base = self._compute_base()
-            df = build_selisih_export_df(base, tgl_start, tgl_end)
+            df = build_selisih_export_df(base, tgl_start, tgl_end,
+                                         audit_cols=audit_cols)
             if df.empty:
                 return None
             with pd.ExcelWriter(filepath, engine="openpyxl") as writer:

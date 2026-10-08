@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9 — SHARED H + EXPORT AUDIT + RINCIAN PO RINGKAS + STYLE WASTE**: **(1) TANGGAL H cukup input 1×** — input + tombol *Apply H* hanya ada di tab 📦 Deviasi GR, otomatis berlaku juga di tab 🧩 Deviasi PCS (chip nilai H read-only + refresh otomatis; pivot dihitung 1× via cache bersama + lock — tidak ada double input lagi). **(2) Export Rekap Selisih IN + opsi kolom hasil audit** — sebelum simpan file muncul dialog opsi: ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit (bisa ditambahkan atau tidak, sesuai kebutuhan). **(3) Rincian PO DISEDERHANAKAN** — baris TEAL = info PO lengkap SEKALI (Nomor #, Tanggal, Pemasok, Status, Keterangan, N item, Total), baris putih di bawahnya = item saja (Nama Barang · Satuan · Kuantitas); kolom Tgl/Jam Pembuatan pindah ke baris induk + tersembunyi default (tampilkan via ◱ Kolom). **(4) STYLE ala repo Waste** — corong filter header **MERAH saat kolom terfilter** (idle = isi terang + outline gelap), **tabel diperbesar** (font 9→10, rowheight 26→30, heading 10 bold), tombol **⤢ Perbesar Tabel** (ciutkan baris kontrol → tabel tinggi penuh, in-place) + **⛶ Layar Penuh** (window terpisah) di semua tab, padding tombol/tab lebih lapang. **(5) CRASH FIX laten CPython 3.12+Tk** — finalisasi `tk.Variable` dari thread worker (pemicu segfault; kini mustahil via GC shield seumur thread) + cache pivot GR/PCS kini thread-safe (lock).
 > **v3.0 — Total UI/UX redesign**: design language baru ala aplikasi *Waste* (slate + teal, card-based, dark toolbar, KPI cards, konsol log gelap). Pipeline & semua logika data **tidak berubah**.
 > **v3.1 — UX upgrade**: filter Nama Barang menempel di header kolom (ala Excel AutoFilter, di SEMUA tab), tombol ⛶ **Perbesar tabel** (fullscreen), **copy Nomor/Nomor PO** di pop-up detail, **pivot per RESTO** (baris kosong disembunyikan, tanpa kolom Total), dan **animasi loading** di semua proses. Pipeline tetap 100% tidak berubah.
 > **v3.2 — Follow Up + tabel besar + perf**: tab baru **☑ Follow Up** (ala aplikasi *Waste*: centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi, persist `followup.json`, export Excel + impor hasil tindak lanjut), **KPI row di atas tabel DIHAPUS** di semua tab data (tabel jadi lebar & besar; ringkasan pindah ke status footer), dan **aplikasi diperingatkan** (deviasi 16× lebih cepat via vektorisasi numpy; laporan 3.7×; lazy refresh per tab — hanya tab aktif yang dihitung).
@@ -53,6 +54,43 @@ Stock Monitoring — Python Edition
 ### 6. Rincian PO (tab ketujuh)
 - Tabel Rincian PO dengan filter Cabang PO & Status.
 - Nomor # sebagai parent row (klik ▸ untuk expand).
+
+---
+
+## Fitur Baru v3.9 — Shared H · Export + Audit · Rincian PO Ringkas · Style Waste
+
+### 1. TANGGAL H dibagi 2 tab — cukup input 1× (tidak double input)
+Permintaan user: *"kolom apply H atau input H cukup 1 tab aja dan berlaku di 2 tab yang berkaitan yaitu Deviasi Gr dan Deviasi PCS sehingga tidak double input"*.
+- Tab 📦 **Deviasi GR** = satu-satunya pemegang input **TANGGAL H** + tombol **Apply H** (dulu tiap tab punya input sendiri — harus input 2× dan nilainya bisa beda).
+- Tab 🧩 **Deviasi PCS** menampilkan **chip nilai H read-only** (ikut berubah saat H di-apply di tab GR) + tabelnya **di-refresh otomatis** — pivot tetap dihitung 1× via `SharedPivotCache` yang kini **thread-safe (lock)**: saat Apply H kedua view refresh bersamaan, hanya 1 thread yang menghitung pivot, keduanya menerima objek yang sama.
+- Subtitle tiap tab menjelaskan arah sinkronisasi (PCS: "Tanggal H diatur di tab 📦 Deviasi GR").
+
+### 2. Export Rekap Selisih IN + opsi kolom hasil audit
+Permintaan user: *"waktu ekspor tambahin hasil auditnya aja tapi ada opsi buat tambahin kolom tersebut atau tidak"*.
+- Klik **💾 Export** di tab 📤 Rekap Selisih IN → muncul **dialog opsi**: ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit (semua default tercentang; centang/batal sesuai kebutuhan — tombol **Tanpa Kolom Audit** untuk export murni rekap v3.8).
+- Kolom audit ditambahkan **setelah kolom Selisih**; nilai audit diambil dari data penuh (konsisten dgn kolom di tabel UI, tidak terpotong rentang tampilan).
+- `build_selisih_export_df(base, tgl_start, tgl_end, audit_cols=None)` — `audit_cols` divalidasi (nama tak dikenal diabaikan); roundtrip file + sebaris nilai dicek test.
+
+### 3. Rincian PO disederhanakan (mudah dibaca)
+Permintaan user: *"tampilan rincian PO apakah bisa lebih dipermudah lagi biar mudah dibaca?"*.
+- **Baris TEAL (induk PO)** memuat SEMUA info PO **SEKALI**: Nomor # · Tanggal · Pemasok · Status Pesanan · Keterangan PO · "▸ N item" · "Total: X".
+- **Baris putih (anak)** hanya item: Nama Barang · Satuan · Kuantitas — dulu setiap baris anak MENGULANG Tanggal/Pemasok/Tgl-Jam yang sama (tabel penuh & sulit dipindai).
+- Kolom **Tgl/Jam Pembuatan** (metadata PO) pindah ke baris induk dan **tersembunyi default** — tampilkan lewat tombol ◱ Kolom / klik kanan judul kolom. Baris GRAND TOTAL menyimpan N PO + total kuantitas.
+
+### 4. Style ala repo Waste (tombol filter, perbesar tabel, dll)
+Permintaan user: *"semua style aplikasi ini bisa gak tiru style repo Waste mulai dari tombol filternya, perbesar tabelnya dan lain lain"* (palet warna sudah identik sejak v3.0 — yang disamakan kini detail komponennya):
+- **Corong filter header ala Waste**: terisi **MERAH** (#dc2626) saat kolom terfilter; idle = isi terang #cbd5e1 + outline #64748b (bukan lagi teal kecil); ikon 11×8 → 13×11 px (2 varian di-cache).
+- **Tabel diperbesar** (theme.py): font Treeview 9 → **10**, rowheight 26 → **30**, heading font **10 bold** + padding (8,8) + latar #f8fafc — baris terasa lapang seperti tabel Waste (13px + padding 3/8).
+- **Tombol ⤢ Perbesar Tabel** (class `TableExpander`) di semua tab tabel — menyembunyikan kartu Filter/KPI/judul/legenda secara IN-PLACE supaya tabel memakai seluruh tinggi tab (klik lagi ⤡ *Tampilkan Filter & KPI* untuk mengembalikan; urutan layout asli dipulihkan via anchor pack/grid_remove).
+- **⛶ Layar Penuh** (dulu "⛶ Perbesar") = window besar terpisah — penamaan sama dengan Waste.
+- Padding tombol ghost (14,7) + tab notebook (18,9) — lebih lapang ala QSS Waste.
+
+### 5. Crash fix laten (CPython 3.12 + Tk) + cache pivot thread-safe
+- **GC shield** (`gc_shield_acquire`/`gc_shield_release`): GC otomatis kini dimatikan **selama thread worker hidup** (bukan hanya saat `work()`) — fase *thread-exit* (`threading._delete`) adalah jendela crash: GC di situ bisa mem-finalisasi `tk.Variable` sisa popup/clone window yang sudah ditutup (destructor memanggil Tcl dari thread bukan-main → segfault heap, terbukti empiris saat 2 view di-refresh bersamaan oleh Apply H). GC dinyalakan kembali dari MAIN thread setelah thread benar-benar mati (cek `is_alive` + retry 15ms). Pipeline thread ikut dilindungi.
+- **`SharedPivotCache` + lock**: tanpa lock, GR & PCS yang refresh bersamaan sama-sama cache-miss → pivot dihitung 2× dan entry tertimpa objek berbeda; kini get+compute+put dalam satu lock → 1 komputasi, objek sama.
+
+### ✅ Test
+230/230 UI test (198 v3.8 + **32 baru**: shared-H 6 check, rincian ringkas 7, export audit 9, style/expander 10) + mock pipeline PASS; ruff 0 error baru; 10 screenshot fitur baru diperiksa visual (VLM).
 
 ---
 
@@ -308,7 +346,7 @@ stock-monitoring-python/
 ├── config.json                 # RootPath + Folders + Sheets
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
-├── test_ui_redesign.py         # test UI v3.8 (196 check — + selisih 1-31, pivot -31, export, CF PIVOT)
+├── test_ui_redesign.py         # test UI v3.9 (230 check — + shared H, rincian ringkas, export audit, style/expander)
 ├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
@@ -338,7 +376,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3.8: 196 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.9: 230 check (jalankan di bawah Xvfb di Linux)
 ```
 
 > UI test di Linux/headless: `xvfb-run` atau `Xvfb :99` + `DISPLAY=:99 python test_ui_redesign.py`.

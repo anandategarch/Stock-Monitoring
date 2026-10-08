@@ -139,8 +139,9 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
                     font=(fam, 12, "bold"))
 
     # --- Tombol (ghost/default — pakai ttk) ---
+    # v3.9 (ala Waste): padding tombol 6px/14px → Tk (14, 7)
     style.configure("TButton", background=C_CARD, foreground=C_HEADER,
-                    font=(fam, 10), padding=(12, 6), borderwidth=1,
+                    font=(fam, 10), padding=(14, 7), borderwidth=1,
                     focuscolor=C_CARD)
     style.map("TButton",
               background=[("active", "#f8fafc"), ("disabled", "#f1f5f9")],
@@ -149,8 +150,9 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     # --- Notebook (tab) ---
     style.configure("TNotebook", background=C_BG, borderwidth=0,
                     tabmargins=(10, 8, 10, 0))
+    # v3.9 (ala Waste): tab lebih lapang — padding (18, 9)
     style.configure("TNotebook.Tab", background="#e2e8f0", foreground=C_TEXT_MUTED,
-                    padding=(16, 8), font=(fam, 10), borderwidth=0)
+                    padding=(18, 9), font=(fam, 10), borderwidth=0)
     style.map("TNotebook.Tab",
               background=[("selected", C_CARD), ("active", "#eef2f7")],
               foreground=[("selected", C_HEADER), ("active", C_HEADER)],
@@ -197,12 +199,15 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     style.map("Horizontal.TScrollbar", background=[("active", "#cbd5e1")])
 
     # --- Treeview (tabel utama) ---
+    # v3.9 "PERBESAR TABEL" (permintaan user — mirror aplikasi Waste:
+    # font tabel 13px + item padding 3px/8px + baris lapang):
+    # font 9 → 10, rowheight 26 → 30 — tabel terlihat besar & mudah dibaca.
     style.configure("Treeview", background=ROW_EVEN, fieldbackground=ROW_EVEN,
-                    foreground=C_HEADER, rowheight=26, font=(fam, 9),
+                    foreground=C_HEADER, rowheight=30, font=(fam, 10),
                     bordercolor=C_BORDER, relief="solid")
-    style.configure("Treeview.Heading", background="#f1f5f9", foreground=C_HEADER,
-                    font=(fam, 9, "bold"), relief="flat", bordercolor=C_BORDER,
-                    padding=(6, 7))
+    style.configure("Treeview.Heading", background="#f8fafc", foreground=C_HEADER,
+                    font=(fam, 10, "bold"), relief="flat", bordercolor=C_BORDER,
+                    padding=(8, 8))
     style.map("Treeview.Heading", background=[("active", "#e8edf3")])
     style.map("Treeview",
               background=[("selected", C_ACCENT_SOFT)],

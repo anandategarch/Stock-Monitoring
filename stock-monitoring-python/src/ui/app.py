@@ -109,11 +109,11 @@ from src.ui.theme import (
 from src.ui.widgets import (
     AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, LoadingOverlay,
     Spinner, StatusBar, Toolbar, add_tooltip, make_log_console, make_tree,
-    run_async,
+    run_async, gc_shield_acquire, gc_shield_release,
 )
 from src.ui.followup import FollowUpStore
 from src.ui.pivot_view import PivotTableView
-from src.ui.deviasi_view import DeviasiView, SharedPivotCache
+from src.ui.deviasi_view import DeviasiView, SharedPivotCache, SharedTanggalH
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.rincian_po_view import RincianPoView
 from src.ui.followup_view import FollowUpView
@@ -122,24 +122,32 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.8.0"  # v3.8.0 — REKAP SELISIH IN 1-31 + PIVOT EXPORT:
-# (1) Rekap Selisih IN: default periode 1-31 bulan BERJALAN saja (tanpa
-# bulan lalu) + tombol 💾 Export per resto (kolom: Resto, Tanggal, Nama
-# Barang, Kategori, Satuan, Hasil SO, Sheet Barang Masuk, Kiriman HO
-# [42.05], Kiriman Supplier [32.24], Pembelian by Resto [99.01],
-# Selisih). (2) Pivot Table: default -31 s/d 31 → kolom tanggal lengkap
-# kronologis 25•-31• lalu 1-31 (dulu -26 memotong tgl 27-31 bulan lalu
-# sehingga kolomnya "25, 26, lalu 1"). (3) Export Excel: + sheet PIVOT
-# (mirror tab pivot "Mutasi Barang - New": row label nama barang + jenis,
-# kolom tanggal, conditional formatting persis file user — termasuk
-# =AND($A8="1.SO";B8>A8)). (4) Impor Hasil TL DIHAPUS (permintaan user —
-# tidak terlalu perlu).
-# Riwayat: v3.7.0 — ENGINE TURBO (running stock vektor 36×, info-group
-# 130×, reader single-parse; output identik A/B real-data) + fix 9 bug
-# display-vs-logis setelah hide kolom. v3.6.0 — fix tombol filter;
-# hide/unhide kolom; audit dari data app (tanpa sheet 29). v3.5.0 —
-# LightMode dihapus; header filter semua kolom; KATEGORI. v3.4.0 —
-# lebar kolom drag/auto-fit; SO bulan lalu terbaca; tab Rekap Selisih IN.
+APP_VERSION = "3.9.0"  # v3.9.0 — SHARED H + EXPORT AUDIT + RINCIAN PO
+# RINGKAS + STYLE WASTE:
+# (1) TANGGAL H dibagi 2 tab: input + "Apply H" hanya di tab 📦 Deviasi
+#     GR, otomatis berlaku juga di tab 🧩 Deviasi PCS (chip read-only +
+#     refresh otomatis — tidak ada double input; permintaan user).
+# (2) Export Rekap Selisih IN: dialog opsi menanyakan kolom hasil audit
+#     (Hasil Audit / Saldo / Catatan Audit) — bisa ditambahkan atau tidak
+#     (permintaan user "waktu ekspor tambahin hasil auditnya aja tapi ada
+#     opsi buat tambahin kolom tersebut atau tidak").
+# (3) Rincian PO disederhanakan: baris TEAL = info PO lengkap sekali
+#     (Tanggal/Pemasok/Status/Keterangan/Total), baris putih = item saja
+#     (Nama Barang/Satuan/Kuantitas) — dulu semua baris anak mengulang info
+#     PO; kolom Tgl/Jam Pembuatan pindah ke baris induk + tersembunyi
+#     default (permintaan user "biar mudah dibaca").
+# (4) STYLE WASTE (permintaan user: tiru repo Waste mulai dari tombol
+#     filternya, perbesar tabelnya, dll): funnel header filter MERAH saat
+#     aktif (ala Waste, idle = isi terang + outline); tabel diperbesar
+#     (font 9→10, rowheight 26→30, heading 10 bold); tombol ⤢ Perbesar
+#     Tabel (ciutkan baris kontrol — tabel tinggi penuh) + ⛶ Layar Penuh
+#     di semua tab; padding tombol/tab lebih lapang.
+# Riwayat: v3.8.0 — selisih IN 1-31; pivot -31..31 (kolom 25•-31• lengkap);
+# sheet PIVOT + CF; export selisih per resto; impor TL dihapus. v3.7.0 —
+# ENGINE TURBO (output identik, 4× lebih cepat) + fix 9 bug index display.
+# v3.6.0 — fix tombol filter; hide/unhide kolom; audit dari data app.
+# v3.5.0 — LightMode dihapus; header filter semua kolom; KATEGORI.
+# v3.4.0 — lebar kolom adjustable; SO bulan lalu; tab Rekap Selisih IN.
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -225,6 +233,9 @@ TAB 📤 REKAP SELISIH IN (v3.4 → v3.6)
     Sheet Barang Masuk, Kiriman HO (42.05), Kiriman Supplier (32.24),
     Pembelian by Resto (99.01), Selisih — semua baris dalam rentang
     tanggal aktif.
+  • (v3.9) Dialog opsi export menanyakan kolom hasil audit:
+    ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit — centang/batal sesuai
+    kebutuhan (bisa tanpa kolom audit sama sekali).
 
 SO BULAN LALU (v3.4 — FIX)
   • SO bulan lalu terbaca otomatis dari sheet 'SO BULAN LALU' di
@@ -257,22 +268,36 @@ FOLLOW UP (v3.2 — ala aplikasi Waste)
 FILTER NAMA BARANG (SEMUA TAB)
   • Klik header kolom "Nama Barang" → popup filter ala Excel AutoFilter:
     pencarian nilai + daftar checkbox + Pilih semua + sort A→Z/Z→A.
-  • Corong header berubah teal saat filter aktif.
+  • (v3.9 ala Waste) Corong header berubah MERAH saat kolom terfilter.
 
-TOMBOL ⛶ PERBESAR
-  • Di setiap tabel: klik ⛶ Perbesar → window besar berisi tabel lengkap.
-    Esc untuk menutup. Sort, double-click, ✓ follow-up tetap berfungsi.
+TOMBOL ⤢ PERBESAR TABEL + ⛶ LAYAR PENUH (v3.9 — ala Waste)
+  • ⤢ Perbesar Tabel : sembunyikan kartu Filter / KPI / judul / legenda
+    supaya TABEL memakai seluruh tinggi tab. Klik lagi (⤡ Tampilkan
+    Filter & KPI) untuk mengembalikan. Tersedia di semua tab tabel.
+  • ⛶ Layar Penuh    : buka tabel di window besar terpisah (Esc =
+    kembali). Sort, filter ⧩, double-click, ✓ follow-up tetap jalan.
 
-TAB DEVIASI GR / PCS
+TAB DEVIASI GR / PCS (v3.9 — H BERSAMA)
   • 1 baris per (Resto × Barang × Satuan) di sekitar Tanggal H (H-2 … H+2).
-  • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Enter.
+  • TANGGAL H cukup diinput 1× di tab 📦 DEVIASI GR (entry + tombol
+    Apply H) — otomatis berlaku JUGA di tab 🧩 DEVIASI PCS (chip nilai H
+    ter-update + tabel ikut refresh; pivot dihitung 1× via cache
+    bersama). Tab PCS tidak punya input H sendiri.
+  • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Apply.
   • (v3.2) ringkasan Total |Deviasi| & Anomali CEK ada di footer bawah tabel.
 
 TAB LAPORAN DEVIASI
   • Audit harian + 6 Status Audit (filter via combo STATUS).
 
-TAB RINCIAN PO
-  • Pivot PO: Nomor # (induk) → detail barang. Filter Cabang & Status.
+TAB RINCIAN PO (v3.9 — LAYOUT RINGKAS)
+  • Baris TEAL = PO: Nomor # + Tanggal + Pemasok + Status Pesanan +
+    Keterangan PO + jumlah item + total kuantitas (semua info PO
+    SEKALI — tidak diulang per baris).
+  • Baris putih di bawahnya = item barang: Nama Barang, Satuan,
+    Kuantitas.
+  • Filter Cabang & Status (page filter) + filter header ⧩ semua kolom.
+  • Kolom Tgl/Jam Pembuatan tersembunyi default — aktifkan lewat
+    ◱ Kolom / klik kanan judul kolom.
 
 POP-UP DETAIL — COPY NOMOR / NOMOR PO
   • Klik kanan baris     : Copy Nomor, Copy Nomor PO, copy baris,
@@ -325,6 +350,9 @@ class StockMonitorApp:
         self.followup_store = FollowUpStore()
         # v3.3: cache pivot Deviasi dibagi GR & PCS (compute 1×, bukan 2×)
         self._deviasi_pivot_cache = SharedPivotCache()
+        # v3.9: TANGGAL H dibagi GR & PCS — input 1× (di tab GR), berlaku
+        # di kedua tab (permintaan user: tidak double input)
+        self._shared_h = SharedTanggalH(25)
 
         # Style ttk (design system global)
         apply_theme(self.root)
@@ -794,7 +822,14 @@ class StockMonitorApp:
         menghapus binding `e` di akhir blok except → NameError saat
         callback berjalan (error pipeline tidak pernah sampai ke UI).
         Kini error ditangkap ke tuple lokal dulu, lambda bebas closure.
+
+        v3.9 CRASH FIX: GC dimatikan selama thread pipeline hidup — GC di
+        thread worker bisa mem-finalisasi tk.Variable sisa popup yang
+        sudah ditutup (destructor memanggil Tcl dari thread bukan-main →
+        segfault CPython 3.12+Tk). Dilepas di _on_pipeline_done (main
+        thread) setelah thread dipastikan mati.
         """
+        gc_shield_acquire()
         try:
             append1_df, rincian_po_df, in_detail_df, audit_result = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
@@ -811,6 +846,9 @@ class StockMonitorApp:
     def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df,
                           audit_result, error):
         """Dijadwalkan ke main thread via after()."""
+        # v3.9: lepas GC shield SEBELUM UI work berat — bila thread pipeline
+        # belum benar-benar mati, retry 15ms sampai mati (lihat widgets.py)
+        gc_shield_release(self.worker_thread, retry_widget=self.root)
         self.progress.stop()
         self.status_spinner.stop()
         self._stop_elapsed()
@@ -1040,19 +1078,24 @@ class StockMonitorApp:
         self.pivot_view.pack(fill="both", expand=True)
 
     def _build_deviasi_gr_tab(self):
+        # v3.9: tab GR = satu-satunya pemegang input H + Apply H
         self.deviasi_gr_view = DeviasiView(
             self.tab_deviasi_gr, satuan_mode="GR",
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
             followup_store=self.followup_store,
-            shared_cache=self._deviasi_pivot_cache)
+            shared_cache=self._deviasi_pivot_cache,
+            h_state=self._shared_h, h_editable=True)
         self.deviasi_gr_view.pack(fill="both", expand=True)
 
     def _build_deviasi_pcs_tab(self):
+        # v3.9: tab PCS TANPA input H — ikut H bersama dari tab GR
+        # (chip read-only + auto-refresh saat H di-apply di tab GR)
         self.deviasi_pcs_view = DeviasiView(
             self.tab_deviasi_pcs, satuan_mode="PCS",
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
             followup_store=self.followup_store,
-            shared_cache=self._deviasi_pivot_cache)
+            shared_cache=self._deviasi_pivot_cache,
+            h_state=self._shared_h, h_editable=False)
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     def _build_in_selisih_tab(self):
