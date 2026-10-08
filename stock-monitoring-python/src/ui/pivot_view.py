@@ -31,6 +31,7 @@ from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
     LoadingOverlay, SegmentBar, add_tooltip, auto_fit_columns,
     enable_col_resize, insert_tree_items, open_tree_maximized, run_async,
+    ColumnManager, attach_clone_filters,
 )
 
 
@@ -145,19 +146,21 @@ class PivotTableView(tk.Frame):
         r1.pack(fill="x")
         tk.Label(r1, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.tgl_start_var = tk.StringVar(value="26")   # v3.5: default 26-31
-        t1 = ttk.Entry(r1, textvariable=self.tgl_start_var, width=5)
+        self.tgl_start_var = tk.StringVar(value="-26")  # v3.6: 26 BULAN LALU
+        t1 = ttk.Entry(r1, textvariable=self.tgl_start_var, width=6)
         t1.pack(side="left", padx=(6, 2))
         t1.bind("<Return>", lambda e: self._refresh_pivot())
         tk.Label(r1, text="–", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
-        self.tgl_end_var = tk.StringVar(value="31")
-        t2 = ttk.Entry(r1, textvariable=self.tgl_end_var, width=5)
+        self.tgl_end_var = tk.StringVar(value="31")  # v3.6: 31 BULAN BERJALAN
+        t2 = ttk.Entry(r1, textvariable=self.tgl_end_var, width=6)
         t2.pack(side="left", padx=(2, 6))
         t2.bind("<Return>", lambda e: self._refresh_pivot())
-        add_tooltip(t1, "Rentang tanggal (1-31), default 26-31.\n"
-                        "Mode 🏪 Resto: total per resto dihitung HANYA dari "
-                        "tanggal dalam rentang ini.\nMode 📅 Tanggal: batas "
-                        "kolom tanggal yang tampil.")
+        add_tooltip(t1, "Rentang tanggal -31..31 (angka NEGATIF = bulan "
+                        "lalu).\nDefault -26 s/d 31 = periode resto PENUH: "
+                        "tgl 26 BULAN LALU s/d 31 BULAN BERJALAN.\n"
+                        "Mode 🏪 Resto: total per resto dihitung HANYA "
+                        "dari tanggal dalam rentang ini.\nMode 📅 Tanggal: "
+                        "batas kolom tanggal yang tampil.")
         GhostButton(r1, text="Apply", command=self._refresh_pivot).pack(
             side="left", padx=(0, 18))
 
@@ -193,6 +196,11 @@ class PivotTableView(tk.Frame):
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(Esc untuk menutup)")
+        btn_cols = GhostButton(head, text="◱ Kolom",
+                               command=lambda: self._colmgr.open_panel())
+        btn_cols.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
+                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
@@ -235,7 +243,8 @@ class PivotTableView(tk.Frame):
         legend = LegendRow(
             self.content,
             [("IN", "#9C5700"), ("BARANG MASUK", "#006100"),
-             ("DEVIASI", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9")])
+             ("DEVIASI", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9"),
+             ("tgl • = bulan lalu", "#94a3b8")])
         legend.pack(fill="x", padx=12, pady=(6, 0))
 
         self.tree.bind("<Double-1>", self._on_double_click)
@@ -246,6 +255,12 @@ class PivotTableView(tk.Frame):
             get_values=self._name_values,
             on_apply=self._on_name_filter,
             label="Nama Barang")
+
+        # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
+        self._colmgr = ColumnManager(
+            self.tree,
+            open_filter=lambda c: self.header_filter.open_popup()
+            if c == "#0" else None)
 
         self._apply_mode_ui()
 
@@ -439,8 +454,18 @@ class PivotTableView(tk.Frame):
             out["filtered_rows"] = len(df)
             return out
 
-        columns = [str(c) for c in sorted(pivot.columns.tolist())]
-        col_keys = sorted(pivot.columns.tolist())  # keys asli (int utk Tanggal)
+        # v3.6: urut KRONOLOGIS — hari negatif (bulan lalu) diurut -25 → -31
+        # lalu 1..31 (ascending naif meletakkan -31 sebelum -25 = terbalik;
+        # juga membuat 6.PEMAKAIAN (COM) salah ambil SO hari-sebelumnya)
+        def _chrono(v):
+            try:
+                iv = int(v)
+                return (0, -iv) if iv < 0 else (1, iv)
+            except (TypeError, ValueError):
+                return (2, str(v))
+
+        col_keys = sorted(pivot.columns.tolist(), key=_chrono)
+        columns = [str(c) for c in col_keys]
         items = sorted(pivot.index.get_level_values("Nama Barang")
                        .unique().tolist())
 
@@ -536,6 +561,13 @@ class PivotTableView(tk.Frame):
     def _render_payload(self, payload: dict):
         cols = payload["columns"]
         self.tree.delete(*self.tree.get_children())
+        # reset displaycolumns SEBELUM re-assign columns — Tk memvalidasi
+        # displaycolumns lama terhadap daftar kolom baru (mode resto→tanggal
+        # ganti nama kolom total → 'Invalid column index' bila tidak direset)
+        try:
+            self.tree.configure(displaycolumns="#all")
+        except tk.TclError:
+            pass
         self.tree["columns"] = cols
         width = 90 if payload.get("col_kind") == "resto" else 70
         self.tree.column("#0", width=280, minwidth=180)
@@ -543,7 +575,17 @@ class PivotTableView(tk.Frame):
         for c in cols:
             self.tree.column(c, width=width, minwidth=50, anchor="e",
                              stretch=True)
-            self.tree.heading(c, text=str(c))
+            # v3.6: kolom tanggal bulan lalu diberi label '25•' (bukan
+            # '-25') — legend '• = bulan lalu'
+            try:
+                ci = int(float(str(c)))
+                htxt = f"{abs(ci)}•" if ci < 0 else str(ci)
+            except (TypeError, ValueError):
+                htxt = str(c)
+            self.tree.heading(c, text=htxt)
+        # re-pasang state kolom tersembunyian (reconfigure columns me-reset
+        # displaycolumns ke #all)
+        self._colmgr.apply()
         # pastikan ikon corong tetap terpasang + state benar
         self.header_filter.refresh_icon()
 
@@ -586,7 +628,7 @@ class PivotTableView(tk.Frame):
         self.resto_var.set("(All)")
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
-        self.tgl_start_var.set("26")   # v3.5: reset ke default 26-31
+        self.tgl_start_var.set("-26")  # v3.6: 26 bulan lalu → 31 berjalan
         self.tgl_end_var.set("31")
         self.hide_empty_var.set(True)
         self._name_selected = None
@@ -598,10 +640,17 @@ class PivotTableView(tk.Frame):
     # =========================================================================
     def _maximize(self):
         mode = "Per Resto" if self.pivot_mode == "resto" else "Per Tanggal"
+
+        def filter_setup(new_tree):
+            # funnel #0 (Nama Barang) jalan juga di window besar
+            attach_clone_filters(new_tree, ["#0"],
+                                 get_values=self._name_values)
+
         return open_tree_maximized(
             self.tree, f"Pivot Table — {mode}",
             setup_tags=lambda t: self._setup_tags(t),
-            on_double_click=self._on_double_click)
+            on_double_click=self._on_double_click,
+            on_filter_setup=filter_setup)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP DETAILS

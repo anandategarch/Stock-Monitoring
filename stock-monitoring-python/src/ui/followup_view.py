@@ -26,8 +26,9 @@ from .theme import (
 )
 from .widgets import (
     AccentButton, Card, DangerButton, EmptyState, GhostButton,
-    HeaderFilterGroup, LoadingOverlay, add_tooltip, auto_fit_columns,
-    enable_col_resize, insert_tree_items, open_tree_maximized, run_async,
+    ColumnManager, HeaderFilterGroup, LoadingOverlay, add_tooltip,
+    attach_clone_filters, auto_fit_columns, enable_col_resize,
+    insert_tree_items, open_tree_maximized, run_async,
     sort_tree_by_column,
 )
 from .followup import CHECK_ON, FollowUpStore
@@ -137,7 +138,13 @@ class FollowUpView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(Esc untuk menutup)")
+                             "(filter & sort juga jalan di window besar;\n"
+                             "Esc untuk menutup)")
+        btn_cols = GhostButton(head, text="◱ Kolom",
+                               command=lambda: self._colmgr.open_panel())
+        btn_cols.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
+                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
@@ -185,6 +192,11 @@ class FollowUpView(tk.Frame):
             get_values=self._col_values,
             on_apply=self._on_col_filter,
             on_sort=lambda c, d: self._sort_by(c, reverse=d))
+
+        # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
+        self._colmgr = ColumnManager(
+            self.tree,
+            open_filter=lambda c: self.header_filters.open_popup(c))
 
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
@@ -439,21 +451,20 @@ class FollowUpView(tk.Frame):
     # ⛶ PERBESAR
     # =========================================================================
     def _maximize(self):
-        def sort_setup(new_tree):
-            for col_name, _, _ in COLUMNS:
-                if col_name == "✓":
-                    new_tree.heading(col_name, text=col_name)
-                else:
-                    new_tree.heading(
-                        col_name, text=col_name,
-                        command=lambda c=col_name, t=new_tree:
-                            self._sort_by(c, tree=t))
+        def filter_setup(new_tree):
+            # v3.6: funnel ⧩ + sort jalan juga di window besar
+            attach_clone_filters(
+                new_tree,
+                [c[0] for c in COLUMNS if c[0] != "✓"],
+                get_values=self._col_values,
+                on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
+                                                               tree=t))
 
         win, new_tree = open_tree_maximized(
             self.tree, "Daftar Follow Up",
             setup_tags=lambda t: self._setup_tags(),
             on_double_click=self._on_double_click,
-            on_sort_setup=sort_setup)
+            on_filter_setup=filter_setup)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
 

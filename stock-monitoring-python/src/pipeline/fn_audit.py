@@ -1,21 +1,31 @@
 """
-fn_rekap29.py — Sheet "29 Rekap Barang Masuk" + engine Audit Rekonsiliasi (v3.5).
+fn_audit.py — Audit Rekonsiliasi: engine VBA + input dari DATA APP (v3.6).
+
+v3.6 (permintaan user): sheet '29 Rekap Barang Masuk' TIDAK DIBACA LAGI.
+Logika macro VBA "BuatLaporanDeviasiSampel" diaplikasikan langsung ke data
+yang SUDAH dibaca pipeline, dengan tambahan kolom SO (Hasil SO) + kolom
+hasil audit — semuanya bisa difilter dari header tabel.
 
 DUA bagian:
 
-1. query_29_rekap_bm(config)
-   Reader sheet "29 Rekap Barang Masuk" dari workbook user (master CEK
-   STOCK). Sheet ini adalah INPUT PERSIS macro VBA
-   BuatLaporanDeviasiSampel: 10 kolom —
-   Resto | Nama Item | UoM | Tanggal | Hasil SO | Qty Masuk SO Harian |
-   Qty SJ (42.05) | Qty RI (32.24) | Qty Pembelian (99.01) | Selisih Qty.
-   Scan: RootPath → semua folder config (nama sheet dinormalisasi: harus
-   mengandung "REKAP" + "BARANG MASUK" — sheet pivot 'Barang Masuk'
-   TIDAK boleh match).
+1. build_audit_input(rekap_so_df, in_detail_df)
+   Bangun input 10 kolom kanonik (persis struktur input VBA) dari:
+   - Hasil SO      ← rekap mentah JENIS='SO'
+                     (hari 1..31 berjalan + -25..-31 bulan lalu; baris
+                     HANYA ada di tanggal yang SO benar-benar direkam —
+                     kehadiran terjaga, bukan 0-fill)
+   - Qty SO Harian ← rekap mentah JENIS='BARANG MASUK' (input resto di
+                     rekap; kosong selama belum diinput — audit akan
+                     menandai baris IN sebagai deviasi sampai terisi)
+   - Qty SJ        ← in_detail SOURCE IN='42.05'  per (resto, barang, tgl)
+   - Qty RI        ← in_detail SOURCE IN='32.24' + '32.24 (Bulan Lalu)'
+   - Qty Pembelian ← in_detail SOURCE IN='99.01'
+   Baris = union tanggal dgn aktivitas (SO direkam / BM / IN ≠ 0),
+   diurutkan per (Resto, Nama Item, Tanggal).
 
 2. build_audit_rekap(df)
    Port 1:1 algoritma rekonsiliasi VBA (grup kontigu Resto+Item, urut
-   sheet — identik perilaku macro):
+   tanggal; selisih & penerimaan dihitung ulang):
    - Penerimaan Sistem = SJ + RI + Pembelian
    - Selisih Harian    = Qty SO Harian − Penerimaan Sistem
    - ATURAN VALID: SO naik (deltaSO>0) + SO Harian=0 + Penerimaan>0
@@ -25,163 +35,118 @@ DUA bagian:
      (baris selisih≠0) / "OK (Dalam Cut-off)" (baris selisih=0)
    - Sisa gantung akhir grup → "DEVIASI MURNI" / "OK"
    - KPI: rows/cutoff/omit/deviasi_murni/deviasi_qty/ok
-   Divalidasi 100% identik dgn sheet LAPORAN_DEVIASI user (output macro).
+
+Riwayat validasi: engine tervalidasi 100% identik dgn sheet
+LAPORAN_DEVIASI user (output macro asli) pada input yang sama
+(86.738 baris; 25 baris beda terbukti snapshot data lama) — port dipakai
+apa adanya; v3.6 hanya mengganti SUMBER input.
 """
-import os
-import re
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from .helpers import _list_excel_files, _list_sheet_names, _xlsb_engine, _EXCEL_ENGINE
-
-# Kolom kanonik output reader
-REKAP29_COLUMNS = [
+# Kolom kanonik input audit (struktur identik input VBA / sheet 29)
+AUDIT_INPUT_COLUMNS = [
     "Resto", "Nama Item", "UoM", "Tanggal", "Hasil SO",
     "Qty SO Harian", "Qty SJ", "Qty RI", "Qty Pembelian", "Selisih Qty",
 ]
 
-_SHEET_HINT = ("REKAP", "BARANGMASUK")
+_KEY_COLS = ["NAMA RESTO", "Nama Barang", "Tanggal"]
 
 
-def _norm(s) -> str:
-    """Normalisasi nama sheet/kolom: upper + hapus non-alfanumerik."""
-    return re.sub(r"[^A-Z0-9]", "", str(s or "").upper())
+def _agg_sum(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Groupby (resto, barang, tgl) → sum(value)."""
+    d = df[_KEY_COLS + [value_col]].copy()
+    d["Tanggal"] = pd.to_numeric(d["Tanggal"], errors="coerce")
+    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+    d = d.dropna(subset=_KEY_COLS)
+    return d.groupby(_KEY_COLS, as_index=False, dropna=False)[value_col].sum()
 
 
-def _is_rekap29_sheet(sheet_name: str) -> bool:
-    n = _norm(sheet_name)
-    return all(h in n for h in _SHEET_HINT)
+def build_audit_input(rekap_so_df: Optional[pd.DataFrame],
+                      in_detail_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Bangun input audit (10 kolom kanonik) dari data app.
 
-
-# Pemetaan kolom fuzzy: (predikat pada nama kolom ternormalisasi, kolom kanonik)
-_COL_RULES = [
-    (lambda n: "RESTO" in n, "Resto"),
-    (lambda n: ("ITEM" in n) or ("NAMABARANG" in n), "Nama Item"),
-    (lambda n: ("UOM" in n) or ("SATUAN" in n), "UoM"),
-    (lambda n: ("TANGGAL" in n) or (n == "TGL"), "Tanggal"),
-    (lambda n: "HASILSO" in n or n == "SO", "Hasil SO"),
-    (lambda n: ("MASUK" in n and "SO" in n) or "SOHARIAN" in n, "Qty SO Harian"),
-    (lambda n: "SJ" in n or "4205" in n or "42.05" in n, "Qty SJ"),
-    (lambda n: "PEMBELIAN" in n or "9901" in n or "99.01" in n, "Qty Pembelian"),
-    (lambda n: "RI" in n or "3224" in n or "32.24" in n, "Qty RI"),
-    (lambda n: "SELISIH" in n, "Selisih Qty"),
-]
-
-
-def _map_columns(columns) -> Optional[dict]:
-    """Peta nama kolom sheet → kolom kanonik. None bila minimal tidak lengkap."""
-    mapping: dict = {}
-    for col in columns:
-        n = _norm(col)
-        if not n:
-            continue
-        for rule, canon in _COL_RULES:
-            if rule(n) and canon not in mapping.values():
-                mapping[str(col)] = canon
-                break
-    # syarat minimal: kunci grup + tanggal + 3 sumber penerimaan
-    required = {"Resto", "Nama Item", "Tanggal", "Qty SJ", "Qty RI", "Qty Pembelian"}
-    if not required.issubset(set(mapping.values())):
-        return None
-    return mapping
-
-
-def query_29_rekap_bm(config) -> pd.DataFrame:
-    """Cari & baca sheet '29 Rekap Barang Masuk' → DataFrame 10 kolom kanonik.
-
-    Urutan scan: file di RootPath → file di tiap folder config (unik).
-    Return DataFrame kosong bila sheet tidak ditemukan (tab UI menampilkan
-    pesan eksplisit — TIDAK ada fallback diam-diam).
+    rekap_so_df : rekap mentah long (JENIS 'SO' / 'BARANG MASUK') —
+                  keluaran query_full_rekap_mentah_so (dipapankan dari
+                  build_append1 via rekap_so_out).
+    in_detail_df: detail IN per dokumen (SOURCE IN 42.05 / 32.24 /
+                  32.24 (Bulan Lalu) / 99.01).
     """
-    search_dirs = []
-    root = getattr(config, "RootPath", "")
-    if root and os.path.isdir(root):
-        search_dirs.append(root)
-    folders = getattr(config, "Folders", None) or {}
-    for name in folders:
-        try:
-            p = config.folder(name)
-        except Exception:
-            continue
-        if p and os.path.isdir(p) and os.path.abspath(p) not in \
-                [os.path.abspath(d) for d in search_dirs]:
-            search_dirs.append(p)
+    empty = pd.DataFrame(columns=AUDIT_INPUT_COLUMNS)
 
-    seen_files = set()
-    for d in search_dirs:
-        for f in _list_excel_files(d):
-            af = os.path.abspath(f)
-            if af in seen_files:
-                continue
-            seen_files.add(af)
-            df = _read_rekap29_file(f)
-            if df is not None:
-                return df
+    so = pd.DataFrame()
+    bm = pd.DataFrame()
+    if rekap_so_df is not None and not rekap_so_df.empty \
+            and "JENIS" in rekap_so_df.columns:
+        jenis = rekap_so_df["JENIS"].fillna("").astype(str) \
+            .str.strip().str.upper()
+        so = rekap_so_df[jenis == "SO"]
+        bm = rekap_so_df[jenis == "BARANG MASUK"]
 
-    print("  [Rekap29] Sheet '29 Rekap Barang Masuk' tidak ditemukan "
-          f"(scan: {', '.join(search_dirs) or '-'})")
-    return pd.DataFrame(columns=REKAP29_COLUMNS)
+    so_agg = _agg_sum(so, "Value").rename(columns={"Value": "Hasil SO"}) \
+        if not so.empty else pd.DataFrame(columns=_KEY_COLS + ["Hasil SO"])
+    bm_agg = _agg_sum(bm, "Value").rename(columns={"Value": "Qty SO Harian"}) \
+        if not bm.empty else pd.DataFrame(columns=_KEY_COLS + ["Qty SO Harian"])
 
+    sj = ri = pb = pd.DataFrame()
+    if in_detail_df is not None and not in_detail_df.empty \
+            and "SOURCE IN" in in_detail_df.columns:
+        src = in_detail_df["SOURCE IN"].fillna("").astype(str).str.strip()
+        sj = in_detail_df[src == "42.05"]
+        ri = in_detail_df[src.isin(["32.24", "32.24 (Bulan Lalu)"])]
+        pb = in_detail_df[src == "99.01"]
+    sj_agg = _agg_sum(sj, "Value").rename(columns={"Value": "Qty SJ"}) \
+        if not sj.empty else pd.DataFrame(columns=_KEY_COLS + ["Qty SJ"])
+    ri_agg = _agg_sum(ri, "Value").rename(columns={"Value": "Qty RI"}) \
+        if not ri.empty else pd.DataFrame(columns=_KEY_COLS + ["Qty RI"])
+    pb_agg = _agg_sum(pb, "Value").rename(columns={"Value": "Qty Pembelian"}) \
+        if not pb.empty else pd.DataFrame(columns=_KEY_COLS + ["Qty Pembelian"])
 
-def _read_rekap29_file(file_path: str) -> Optional[pd.DataFrame]:
-    """Baca sheet 29 dari satu file; None bila tidak ada / gagal parse."""
-    try:
-        sheets = _list_sheet_names(file_path)
-    except Exception:
-        return None
-    for sn in sheets:
-        if not _is_rekap29_sheet(sn):
-            continue
-        if file_path.lower().endswith(".xlsb") and _xlsb_engine() is None:
-            print(f"  [Rekap29] SKIP {os.path.basename(file_path)}: .xlsb "
-                  "butuh pyxlsb/calamine")
-            return None
-        engine = _xlsb_engine() if file_path.lower().endswith(".xlsb") \
-            else (_EXCEL_ENGINE or None)
-        kwargs = {"engine": engine} if engine else {}
-        try:
-            peek = pd.read_excel(file_path, sheet_name=sn, header=None,
-                                 nrows=6, dtype=object, **kwargs)
-        except Exception:
-            continue
-        # deteksi baris header: kolom pertama mengandung "Resto"
-        header_row = None
-        for i in range(min(len(peek), 6)):
-            if "RESTO" in _norm(peek.iloc[i, 0]):
-                header_row = i
-                break
-        if header_row is None:
-            continue
-        try:
-            df = pd.read_excel(file_path, sheet_name=sn, header=header_row,
-                               dtype=object, **kwargs)
-        except Exception as e:
-            print(f"  [Rekap29] Gagal baca '{sn}' {os.path.basename(file_path)}: {e}")
-            continue
-        mapping = _map_columns(df.columns)
-        if mapping is None:
-            continue
-        df = df.rename(columns=mapping)
-        df = df[df["Resto"].notna()].copy()
-        if df.empty:
-            continue
-        for c in REKAP29_COLUMNS:
-            if c not in df.columns:
-                df[c] = np.nan
-        df = df[REKAP29_COLUMNS].reset_index(drop=True)
-        # numerik: Tanggal → Int64, sisanya float (NaN = sel kosong)
-        df["Tanggal"] = pd.to_numeric(df["Tanggal"], errors="coerce").astype("Int64")
-        for c in ("Hasil SO", "Qty SO Harian", "Qty SJ", "Qty RI",
-                  "Qty Pembelian", "Selisih Qty"):
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-        for c in ("Resto", "Nama Item", "UoM"):
-            df[c] = df[c].astype(str).replace("nan", "")
-        print(f"  [Rekap29] {os.path.basename(file_path)} » sheet '{sn}' "
-              f"→ {len(df)} baris (input Audit Rekonsiliasi)")
-        return df
-    return None
+    # baris = union tanggal dengan aktivitas:
+    # SO direkam (baris rekap ada — hadir walaupun nilainya 0),
+    # BM diinput, atau ada penerimaan sistem (IN ≠ 0)
+    parts = []
+    for d in (so_agg, bm_agg):
+        if not d.empty:
+            parts.append(d[_KEY_COLS])
+    for d in (sj_agg, ri_agg, pb_agg):
+        if not d.empty:
+            nz = d[d.columns[-1]] != 0
+            parts.append(d.loc[nz, _KEY_COLS])
+    if not parts:
+        return empty
+    keys = pd.concat(parts, ignore_index=True).drop_duplicates()
+
+    out = keys.merge(so_agg, on=_KEY_COLS, how="left") \
+        .merge(bm_agg, on=_KEY_COLS, how="left") \
+        .merge(sj_agg, on=_KEY_COLS, how="left") \
+        .merge(ri_agg, on=_KEY_COLS, how="left") \
+        .merge(pb_agg, on=_KEY_COLS, how="left")
+
+    out = out.rename(columns={"NAMA RESTO": "Resto",
+                              "Nama Barang": "Nama Item"})
+    out["UoM"] = ""          # Satuan dipetakan view dari append1
+    out["Tanggal"] = pd.to_numeric(out["Tanggal"], errors="coerce")
+    out = out.dropna(subset=["Tanggal"])
+    out["Tanggal"] = out["Tanggal"].astype("Int64")
+    for c in ("Hasil SO", "Qty SO Harian", "Qty SJ", "Qty RI",
+              "Qty Pembelian"):
+        out[c] = pd.to_numeric(out[c], errors="coerce")  # NaN = tidak ada
+    out["Selisih Qty"] = (
+        out["Qty SO Harian"].fillna(0.0)
+        - (out["Qty SJ"].fillna(0.0) + out["Qty RI"].fillna(0.0)
+           + out["Qty Pembelian"].fillna(0.0))
+    )
+    out["Resto"] = out["Resto"].astype(str)
+    out["Nama Item"] = out["Nama Item"].astype(str)
+    out = out[AUDIT_INPUT_COLUMNS]
+    # urut per (Resto, Nama Item, Tanggal) → grup kontigu + tanggal naik
+    out = out.sort_values(["Resto", "Nama Item", "Tanggal"],
+                          kind="mergesort", na_position="last") \
+        .reset_index(drop=True)
+    return out
 
 
 # =============================================================================
@@ -221,8 +186,9 @@ def _fmt_signed(v: float) -> str:
 def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Jalankan algoritma rekonsiliasi → (df hasil + kolom audit, KPI dict).
 
-    Baris diproses PERSIS urutan sheet; grup = blok kontigu dengan
-    (Resto|Nama Item) sama — perilaku identik macro VBA.
+    Baris diproses PERSIS urutan input; grup = blok kontigu dengan
+    (Resto|Nama Item) sama — perilaku identik macro VBA (input v3.6
+    sudah diurutkan per Resto+Item+Tanggal).
     """
     n = len(df)
     kpi = {
@@ -344,18 +310,26 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return out, kpi
 
 
-def build_audit_from_config(config) -> tuple[pd.DataFrame, dict, str]:
-    """Reader + engine sekali jalan.
+def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
+                         in_detail_df: Optional[pd.DataFrame]
+                         ) -> tuple[pd.DataFrame, dict, str]:
+    """Input dari data app + engine sekali jalan.
 
     Return (audit_df, kpi, source_desc). audit_df kosong + kpi["rows"]=0
-    bila sheet 29 tidak ditemukan; source_desc menjelaskan asal data
-    (untuk footer/status UI).
+    bila tidak ada data rekap SO / IN sama sekali; source_desc menjelaskan
+    asal data (untuk status UI).
     """
-    raw = query_29_rekap_bm(config)
+    raw = build_audit_input(rekap_so_df, in_detail_df)
     if raw.empty:
         return raw, {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
-                     "deviasi_qty": 0.0, "ok": 0}, "sheet '29 Rekap Barang Masuk' tidak ditemukan"
+                     "deviasi_qty": 0.0, "ok": 0}, \
+            "tidak ada data rekap SO / IN utk audit"
     audit, kpi = build_audit_rekap(raw)
-    desc = (f"29 Rekap Barang Masuk · {len(raw):,} baris · "
-            f"{raw['Resto'].nunique()} resto")
+    n_so = int(pd.to_numeric(raw["Hasil SO"], errors="coerce")
+               .notna().sum())
+    n_in = int((pd.to_numeric(audit["Penerimaan Sistem"], errors="coerce")
+                .fillna(0) != 0).sum())
+    desc = (f"Data app (rekap SO + BM + IN 42.05/32.24/99.01) · "
+            f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
+            f"SO {n_so:,} · IN {n_in:,}")
     return audit, kpi, desc

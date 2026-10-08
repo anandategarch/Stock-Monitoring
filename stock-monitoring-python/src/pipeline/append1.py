@@ -109,7 +109,8 @@ def _concat_valid_values(series: pd.Series) -> str:
     return ", ".join(distinct) if distinct else None
 
 
-def build_append1(config, stop_event=None, in_detail_out: dict | None = None) -> pd.DataFrame:
+def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
+                 rekap_so_out: dict | None = None) -> pd.DataFrame:
     """
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
@@ -119,6 +120,9 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None) ->
 
     v3.4 — in_detail_out: dict opsional; diisi DataFrame detail IN per
     dokumen (lihat query_in).
+    v3.6 — rekap_so_out: dict opsional; diisi rekap mentah long
+    (JENIS 'SO' / 'BARANG MASUK', Tanggal -25..-31 + 1..31) — input
+    Audit Rekonsiliasi dari data app (fn_audit.build_audit_input).
 
     stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
     """
@@ -143,6 +147,8 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None) ->
 
     full_rekap_so = query_full_rekap_mentah_so(config)
     print(f"    Full Rekap Mentah SO: {len(full_rekap_so)} rows")
+    if rekap_so_out is not None:
+        rekap_so_out["df"] = full_rekap_so
 
     out_df = query_out(config)
     print(f"    OUT (22.05 sales): {len(out_df)} rows")

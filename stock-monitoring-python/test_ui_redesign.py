@@ -145,12 +145,52 @@ def make_mock_in_detail() -> pd.DataFrame:
         "Tanggal": 10, "Value": 300.0, "Nomor": "RI.2026.09.009",
         "Nomor PO": "PO-010", "#Tgl/Jam Pembuatan IT": None,
         "SOURCE IN": "32.24", "JENIS": "IN"})
+    # 42.05 — KOPI BUBUK 100G MLGPAR tgl 8 (utk uji CUT-OFF RESOLVED v3.6)
+    rows.append({
+        "NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK 100G",
+        "Tanggal": 8, "Value": 100.0, "Nomor": "IT.2026.09.00404",
+        "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+        "SOURCE IN": "42.05", "JENIS": "IN"})
     # 99.01 (pembelian tanpa penerimaan) — GULA PASIR SBYKET tgl 5
     rows.append({
         "NAMA RESTO": "SBYKET", "Nama Barang": "GULA PASIR",
         "Tanggal": 5, "Value": 1200.0, "Nomor": "PI.2026.10.01556",
         "Nomor PO": "PO.2026.10.012", "#Tgl/Jam Pembuatan IT": None,
         "SOURCE IN": "99.01", "JENIS": "IN"})
+    return pd.DataFrame(rows)
+
+
+def make_mock_rekap_so() -> pd.DataFrame:
+    """Mock rekap mentah (JENIS 'SO' + 'BARANG MASUK') — input Audit
+    Rekonsiliasi dari data app (v3.6).
+
+    Skenario status yang dihasilkan (bersama make_mock_in_detail):
+    - AYAM FILET/MLGPAR tgl 5,10,15 : BM == IN          → OK (Matching)
+    - GULA PASIR/SBYKET tgl 5        : SO naik+BM=0+IN  → VALID
+    - KOPI BUBUK/MLGPAR tgl 3→8     : +100 lalu -100   → CUT-OFF RESOLVED
+    - SUSU UHT 1L/MLGPAR tgl 2       : BM 80 tanpa IN   → DEVIASI MURNI
+    """
+    rows = []
+
+    def so(barang, resto, tgl, val):
+        rows.append({"NAMA RESTO": resto, "Nama Barang": barang,
+                     "JENIS": "SO", "Tanggal": tgl, "Value": val})
+
+    def bm(barang, resto, tgl, val):
+        rows.append({"NAMA RESTO": resto, "Nama Barang": barang,
+                     "JENIS": "BARANG MASUK", "Tanggal": tgl,
+                     "Value": val})
+
+    for t in (4, 5, 10, 15):
+        so("AYAM FILET", "MLGPAR", t, 100.0 * t)
+    bm("AYAM FILET", "MLGPAR", 5, 500.0)    # IN 500  → selisih 0
+    bm("AYAM FILET", "MLGPAR", 10, 1050.0)  # IN 1050 → selisih 0
+    bm("AYAM FILET", "MLGPAR", 15, 250.0)   # IN 250  → selisih 0
+    so("GULA PASIR", "SBYKET", 4, 100.0)
+    so("GULA PASIR", "SBYKET", 5, 1300.0)   # SO naik +1200, BM=0, IN=1200
+    so("KOPI BUBUK 100G", "MLGPAR", 3, 50.0)
+    bm("KOPI BUBUK 100G", "MLGPAR", 3, 100.0)  # +100 …
+    bm("SUSU UHT 1L", "MLGPAR", 2, 80.0)      # gantung +80
     return pd.DataFrame(rows)
 
 
@@ -184,7 +224,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.5.0", APP_VERSION == "3.5.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.6.0", APP_VERSION == "3.6.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -201,8 +241,14 @@ def main():
     append1 = make_mock_append1()
     rincian = make_mock_rincian()
     in_detail = make_mock_in_detail()
+    rekap_so = make_mock_rekap_so()
+    # v3.6: audit dari data app (rekap SO + BM + IN per tanggal)
+    from src.pipeline.fn_audit import build_audit_from_app
+    audit_df, audit_kpi, audit_desc = build_audit_from_app(rekap_so,
+                                                           in_detail)
+    audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
     print(f"   mock append1: {len(append1)} rows, rincian: {len(rincian)} rows, "
-          f"in_detail: {len(in_detail)} rows")
+          f"in_detail: {len(in_detail)} rows, audit: {len(audit_df)} rows")
 
     check("Pivot punya loading overlay",
           isinstance(app.pivot_view.overlay, LoadingOverlay))
@@ -219,7 +265,8 @@ def main():
     app.pivot_view.load_data(append1)
     app.deviasi_gr_view.load_data(append1)
     app.deviasi_pcs_view.load_data(append1)
-    app.in_selisih_view.load_data(append1, in_detail)
+    app.in_selisih_view.load_data(append1, in_detail,
+                                  audit_result=audit_result)
     app.laporan_view.load_data(append1)
     app.rincian_view.load_data(rincian)
     root.update()
@@ -239,6 +286,10 @@ def main():
     # ---- PIVOT MODE RESTO (default) ----
     pv = app.pivot_view
     check("Pivot default mode = resto", pv.pivot_mode == "resto")
+    check("(v3.6) Pivot default tanggal = -26 s/d 31 (26 bulan lalu → 31 "
+          "bulan berjalan)",
+          pv.tgl_start_var.get() == "-26" and pv.tgl_end_var.get() == "31",
+          f"got {pv.tgl_start_var.get()}..{pv.tgl_end_var.get()}")
     cols = list(pv.tree["columns"])
     check("Pivot resto: kolom = resto (MLGPAR, SBYKET)",
           cols == ["MLGPAR", "SBYKET"], f"got {cols}")
@@ -828,35 +879,55 @@ def main():
             p.unlink()
 
     # ==================================================================
-    print("== 13. v3.4+v3.5 — TAB 📤 REKAP SELISIH IN ==")
-    from src.ui.in_selisih_view import (InDetailPopup, RINGKAS_COLUMNS,
-                                        AUDIT_COLUMNS)
-    COL_IDS = [c[0] for c in RINGKAS_COLUMNS]
+    print("== 13. v3.4→v3.6 — TAB 📤 REKAP SELISIH IN (audit data app) ==")
+    from src.ui.in_selisih_view import InDetailPopup, COLUMNS
+    COL_IDS = [c[0] for c in COLUMNS]
     iv = app.in_selisih_view
     select_and_wait(root, app, app.tab_in_selisih, iv)
     tree_in = iv.tree
     kids_in = list(tree_in.get_children(""))
-    check("Rekap Selisih IN: ada baris (aktivitas IN≠0)", len(kids_in) > 0,
-          f"got {len(kids_in)}")
+    check("Rekap Selisih IN: baris anomali tampil (default Hanya Selisih ≠ 0)",
+          len(kids_in) == 4, f"got {len(kids_in)}")
     hdrs = [tree_in.heading(c)["text"] for c in COL_IDS]
-    check("Kolom = Resto/Tanggal/Nama Barang/KATEGORI/Satuan/IN/BM/Selisih",
+    check("(v3.6) Kolom = 12: + Hasil SO + Saldo + Hasil Audit + Catatan",
           hdrs == ["Resto", "Tanggal", "Nama Barang", "KATEGORI", "Satuan",
-                   "IN", "Barang Masuk", "Selisih IN"], f"got {hdrs}")
-    # nilai IN ≠ '-' di baris pertama? (mock: tgl % 5 == 0 → IN=5)
-    has_in_val = any(tree_in.set(k, "IN") not in ("-", "") for k in kids_in)
-    check("Kolom IN terisi (bukan '-' semua)", has_in_val)
-    # selisih = BM - IN (mock BM=0 → selisih negatif ditampilkan dgn kurung)
-    row0 = {c: tree_in.set(kids_in[0], c) for c in COL_IDS}
-    in_v = row0.get("IN", "-").replace(",", "")
-    if in_v not in ("-", "") and in_v.startswith("(") is False and in_v != "":
-        # parse IN → selisih harus -IN (kurung)
-        try:
-            in_f = float(in_v)
-            sel_v = row0.get("Selisih IN", "").replace(",", "")
-            check("Selisih IN = BM - IN (mock BM=0 → (IN))",
-                  sel_v == f"({in_f:,.0f})", f"in={in_v} sel={sel_v}")
-        except ValueError:
-            check("Selisih IN parse", False, f"in={in_v!r}")
+                   "Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo",
+                   "Hasil Audit", "Catatan Audit"], f"got {hdrs}")
+    check("(v3.6) Tidak ada segment Ringkas|Audit lagi (SATU tabel)",
+          not hasattr(iv, "mode_seg"))
+    # baris ber-selisih: KOPI tgl3 (BM=100, IN=0, SO=50)
+    kopi3 = None
+    for k in kids_in:
+        vals = tree_in.item(k, "values")
+        if vals[2] == "KOPI BUBUK 100G" and vals[1] == "3":
+            kopi3 = k
+    if kopi3:
+        r = {c: tree_in.set(kopi3, c) for c in COL_IDS}
+        check("Selisih IN = BM − IN (KOPI tgl3: BM 100, IN '-' → 100)",
+              r["Barang Masuk"] == "100" and r["IN"] == "-"
+              and r["Selisih IN"] == "100", f"got {r}")
+        check("(v3.6) Kolom SO terisi (KOPI tgl3 SO=50)",
+              r["Hasil SO"] == "50", f"got {r['Hasil SO']!r}")
+        check("(v3.6) Kolom Hasil Audit terisi",
+              r["Hasil Audit"] == "CUT-OFF RESOLVED",
+              f"got {r['Hasil Audit']!r}")
+    st_cells = {tree_in.set(k, "Hasil Audit") for k in kids_in}
+    check("(v3.6) Status VBA tampil (VALID/CUT-OFF/DEVIASI)",
+          {"VALID (Sistem Masuk)", "CUT-OFF RESOLVED",
+           "DEVIASI MURNI"} <= st_cells, f"got {st_cells}")
+    check("(v3.6) KPI chips tampil (audit data app)",
+          iv.kpi_card.winfo_ismapped())
+    tags0 = iv.tree.item(kids_in[0], "tags") if kids_in else ()
+    check("(v3.6) Baris diberi tag warna status",
+          any(t.startswith("st_") for t in tags0), f"got {tags0}")
+
+    # tampilkan semua baris (utk drill-down AYAM tgl 10)
+    iv.only_selisih_var.set(False)
+    iv._refresh()
+    wait_view(root, iv)
+    kids_in = list(tree_in.get_children(""))
+    check("Hanya Selisih OFF → semua baris audit tampil (9)",
+          len(kids_in) == 9, f"got {len(kids_in)}")
 
     # ---- drill-down: double-click baris AYAM FILET MLGPAR tgl 10 ----
     target = None
@@ -910,95 +981,121 @@ def main():
             root.update()
 
     # ==================================================================
-    print("== 14. v3.5 — AUDIT REKONSILIASI (port macro VBA) ==")
-    from src.pipeline.fn_rekap29 import build_audit_rekap, REKAP29_COLUMNS
+    print("== 14. v3.6 — AUDIT REKONSILIASI × DATA APP + FIX/KOLOM ==")
+    from src.pipeline.fn_audit import (build_audit_rekap,
+                                       build_audit_input,
+                                       AUDIT_INPUT_COLUMNS)
     import pandas as pd
 
-    # --- (a) engine murni: aturan VALID / CUT-OFF / DEVIASI MURNI ---
-    audit_src = pd.DataFrame([
-        # grup 1: OK matching (masuk == penerimaan)
-        ("MLGPAR", "AYAM FILET", "GR", 1, 100.0, 50.0, 50.0, 0.0, 0.0, 0.0),
-        ("MLGPAR", "AYAM FILET", "GR", 2, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        # tgl 3: SO naik + BM=0 + penerimaan>0 → VALID (Sistem Masuk)
-        ("MLGPAR", "AYAM FILET", "GR", 3, 160.0, 0.0, 0.0, 70.0, 0.0, -70.0),
-        # tgl 4: masuk tanpa penerimaan → selisih +70 → saldo gantung
-        ("MLGPAR", "AYAM FILET", "GR", 4, 150.0, 70.0, 0.0, 0.0, 0.0, 70.0),
-        # grup 2: cut-off resolved (tgl1 -50, tgl2 +50 → kembali 0)
-        ("SBYKET", "ADONAN", "GR", 1, 100.0, 0.0, 50.0, 0.0, 0.0, -50.0),
-        ("SBYKET", "ADONAN", "GR", 2, 100.0, 50.0, 0.0, 0.0, 0.0, 50.0),
-    ], columns=REKAP29_COLUMNS)
-    audit_out, audit_kpi = build_audit_rekap(audit_src)
-    sts = audit_out["Status Analisis Audit"].tolist()
-    check("Engine: baris OK (Matching) terdeteksi", sts[0] == "OK (Matching)",
-          f"got {sts[0]}")
-    check("Engine: VALID (Sistem Masuk) terdeteksi (SO naik+BM=0+PS>0)",
-          sts[2] == "VALID (Sistem Masuk)", f"got {sts[2]}")
-    check("Engine: DEVIASI MURNI terdeteksi (sisa gantung akhir grup)",
-          sts[3] == "DEVIASI MURNI", f"got {sts[3]}")
-    check("Engine: CUT-OFF RESOLVED terdeteksi (saldo kembali 0)",
-          sts[4] == "CUT-OFF RESOLVED" and sts[5] == "CUT-OFF RESOLVED",
-          f"got {sts[4:6]}")
-    check("Engine: detail catatan VBA-style (Sisa Gantung +70)",
-          "Sisa Gantung: +70" in str(audit_out.iloc[3]["Detail & Catatan Audit"]),
-          f"got {audit_out.iloc[3]['Detail & Catatan Audit']!r}")
-    check("Engine: KPI lengkap (rows/omit/cutoff/deviasi)",
-          audit_kpi["rows"] == 6 and audit_kpi["omit"] == 1
-          and audit_kpi["cutoff"] == 2 and audit_kpi["deviasi_murni"] == 1,
+    # --- (a) build_audit_input: rekap + in_detail → 10 kolom kanonik ---
+    raw = build_audit_input(rekap_so, in_detail)
+    check("build_audit_input: 10 kolom kanonik (struktur input VBA)",
+          list(raw.columns) == AUDIT_INPUT_COLUMNS,
+          f"got {list(raw.columns)}")
+    check("build_audit_input: baris = union aktivitas (SO/BM/IN) = 9",
+          len(raw) == 9, f"got {len(raw)}")
+    check("build_audit_input: urut per (Resto, Item, Tanggal)",
+          raw["Resto"].tolist()[:4] == ["MLGPAR"] * 4
+          and raw["Tanggal"].tolist()[:2] == [4, 5],
+          f"got {list(zip(raw['Resto'], raw['Tanggal']))[:5]}")
+    so_g4 = raw[(raw["Nama Item"] == "GULA PASIR")
+                & (raw["Tanggal"] == 4)]
+    check("build_audit_input: Hasil SO hadir di tanggal SO (NaN selain itu)",
+          float(so_g4["Hasil SO"].iloc[0]) == 100.0
+          and raw[raw["Nama Item"] == "SUSU UHT 1L"]["Hasil SO"].isna().all(),
+          f"got {so_g4['Hasil SO'].tolist()}")
+
+    # --- (b) engine: aturan VBA pada data app ---
+    sts = audit_df["Status Analisis Audit"].tolist()
+    check("Engine: OK (Matching) saat BM == IN",
+          "OK (Matching)" in sts)
+    check("Engine: VALID (Sistem Masuk) (SO naik + BM=0 + IN>0)",
+          "VALID (Sistem Masuk)" in sts)
+    check("Engine: CUT-OFF RESOLVED (+100 lalu −100)",
+          sts.count("CUT-OFF RESOLVED") == 2)
+    check("Engine: DEVIASI MURNI (sisa gantung)",
+          "DEVIASI MURNI" in sts)
+    check("Engine: KPI lengkap dari data app",
+          audit_kpi["rows"] == 9 and audit_kpi["omit"] == 1
+          and audit_kpi["cutoff"] == 2 and audit_kpi["deviasi_murni"] == 1
+          and abs(audit_kpi["deviasi_qty"] - 80.0) < 0.001,
           f"got {audit_kpi}")
+    dm = audit_df[audit_df["Status Analisis Audit"] == "DEVIASI MURNI"]
+    check("Engine: catatan Sisa Gantung VBA-style",
+          "Sisa Gantung: +80" in str(dm.iloc[0]["Detail & Catatan Audit"]),
+          f"got {dm.iloc[0]['Detail & Catatan Audit']!r}")
 
-    # --- (b) mode Audit di UI: muat audit_result → kolom 12 + KPI chips ---
-    iv.load_data(append1, in_detail, audit_result={
-        "df": audit_out, "kpi": audit_kpi, "desc": "mock audit"})
+    # --- (c) BUG FIX v3.6: klik funnel heading → popup TERBUKA ---
     select_and_wait(root, app, app.tab_in_selisih, iv)
-    wait_view(root, iv)
-    check("Data audit termuat dari pipeline", iv.audit_df is not None
-          and not iv.audit_df.empty)
-    iv._on_mode_change(1)      # klik segment 🔍 Audit Rekonsiliasi
-    wait_view(root, iv)
-    check("Mode audit aktif setelah klik segment", iv.mode == "audit",
-          f"got {iv.mode}")
-    audit_ids = [c[0] for c in AUDIT_COLUMNS]
-    check("Kolom audit = 12 (mirror laporan VBA)",
-          list(iv.tree["columns"]) == audit_ids,
-          f"got {list(iv.tree['columns'])}")
-    check("KPI chips tampil (mode audit)",
-          iv.kpi_card.winfo_ismapped())
-    kids_a = list(iv.tree.get_children(""))
-    check("Mode audit: baris bermasalah tampil (default Hanya Selisih ≠ 0)",
-          len(kids_a) > 0, f"got {len(kids_a)}")
-    if kids_a:
-        st_cells = {iv.tree.set(k, "Status Analisis Audit") for k in kids_a}
-        check("Mode audit: status VBA tampil di kolom",
-              st_cells & {"VALID (Sistem Masuk)", "CUT-OFF RESOLVED",
-                          "DEVIASI MURNI"}, f"got {st_cells}")
-        tags0 = iv.tree.item(kids_a[0], "tags")
-        check("Mode audit: baris diberi tag warna status",
-              any(t.startswith("st_") for t in tags0), f"got {tags0}")
+    popups_before = [w for w in root.winfo_children() if w.winfo_exists()]
+    x_resto = 35   # tengah kolom pertama 'Resto'
+    tree_in.event_generate("<Button-1>", x=x_resto, y=10, when="now")
+    root.update()
+    new_pops = [w for w in root.winfo_children()
+                if w.winfo_exists() and w not in popups_before
+                and w.title().startswith("Filter —")]
+    check("(v3.6 BUG FIX) Klik funnel 'Resto' dgn mouse → popup filter "
+          "TERBUKA", len(new_pops) == 1,
+          f"got {[w.title() for w in new_pops]}")
+    for p in new_pops:
+        p.destroy()
+    root.update()
 
-    # --- (c) header filter semua kolom (mode audit) ---
-    check("(v3.5) Semua kolom audit punya HeaderFilter",
+    # --- (d) header filter semua kolom (incl. Hasil Audit & SO) ---
+    check("(v3.6) Semua 12 kolom punya HeaderFilter",
           hasattr(iv, "header_filters") and
-          len(iv.header_filters._filters) == len(audit_ids))
-    iv._on_col_filter("Resto", {"MLGPAR"})
+          len(iv.header_filters._filters) == len(COL_IDS))
+    iv._on_col_filter("Hasil Audit", {"DEVIASI MURNI"})
     wait_view(root, iv)
-    kids_f = list(iv.tree.get_children(""))
-    check("Filter header Resto=MLGPAR (mode audit) → hanya grup MLGPAR",
-          kids_f and all(iv.tree.set(k, "Resto") == "MLGPAR" for k in kids_f),
-          f"got {len(kids_f)}")
+    kids_f = list(tree_in.get_children(""))
+    check("Filter header Hasil Audit=DEVIASI MURNI → hanya baris SUSU",
+          len(kids_f) == 1 and
+          tree_in.set(kids_f[0], "Nama Barang") == "SUSU UHT 1L",
+          f"got {[(tree_in.set(k, 'Nama Barang')) for k in kids_f]}")
     iv._reset_filter_states()
     iv._refresh()
     wait_view(root, iv)
 
-    # --- (d) toggle ke Ringkas: kembali 8 kolom ---
-    iv._on_mode_change(0)
-    wait_view(root, iv)
-    check("Toggle ke Ringkas → 8 kolom v3.4+v3.5 (dgn KATEGORI)",
-          list(iv.tree["columns"]) == COL_IDS,
-          f"got {list(iv.tree['columns'])}")
-    check("KPI chips hilang saat Ringkas",
-          not iv.kpi_card.winfo_ismapped())
+    # --- (e) HIDE/UNHIDE KOLOM (ColumnManager v3.6) ---
+    check("(v3.6) ColumnManager terpasang", iv._colmgr is not None)
+    iv._colmgr.hide("KATEGORI")
+    root.update()
+    check("Hide kolom KATEGORI → displaycolumns tanpa KATEGORI",
+          "KATEGORI" not in [str(c) for c in tree_in.cget("displaycolumns")],
+          f"got {tree_in.cget('displaycolumns')}")
+    hdrs_now = [tree_in.heading(c)["text"]
+                for c in tree_in["columns"]
+                if c in [str(x) for x in
+                         tree_in.cget("displaycolumns")]]
+    check("Hide kolom: heading KATEGORI hilang dari tampilan",
+          "KATEGORI" not in hdrs_now, f"got {hdrs_now}")
+    # identifikasi klik tetap benar setelah kolom disembunyikan
+    # (display: Resto 74 + Tanggal 64 → Nama Barang mulai x=138)
+    x_nb = 74 + 64 + 100   # tengah kolom 'Nama Barang' (KATEGORI hidden)
+    hits = {"n": 0}
+    orig_open = iv.header_filters._filters["Nama Barang"].open_popup
+    iv.header_filters._filters["Nama Barang"].open_popup = \
+        lambda *a, **k: hits.__setitem__("n", hits["n"] + 1)
+    tree_in.event_generate("<Button-1>", x=x_nb, y=10, when="now")
+    root.update()
+    iv.header_filters._filters["Nama Barang"].open_popup = orig_open
+    check("(v3.6) Klik funnel tetap akurat setelah kolom disembunyikan",
+          hits["n"] == 1, f"got {hits['n']}")
+    iv._colmgr.show_all()
+    root.update()
+    check("Show all → semua kolom kembali tampil",
+          "#all" in str(tree_in.cget("displaycolumns")) or
+          len(tree_in.cget("displaycolumns")) == len(COL_IDS),
+          f"got {tree_in.cget('displaycolumns')}")
+    # panel kolom terbuka & tertutup
+    iv._colmgr.open_panel()
+    root.update()
+    check("Tombol ◱ Kolom → panel checklist terbuka",
+          iv._colmgr._panel is not None and iv._colmgr._panel.winfo_exists())
+    iv._colmgr.open_panel()   # toggle tutup
+    root.update()
 
-    # --- (e) LightMode dihapus total ---
+    # --- (f) LightMode dihapus total ---
     import inspect
     from src.config import Config as _Cfg
     check("(v3.5) Config tidak lagi memuat LightMode",

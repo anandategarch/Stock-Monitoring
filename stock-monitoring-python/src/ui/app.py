@@ -16,27 +16,36 @@ Struktur jendela (ala aplikasi Waste):
   1. ⚙️ Config          : RootPath + info config (LightMode dihapus v3.5)
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
   3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default,
-                          tanggal default 26-31 v3.5)
+                          rentang tanggal default 26 BULAN LALU s/d 31
+                          BULAN BERJALAN — v3.6)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
-  6. 📤 Rekap Selisih IN: IN (Accurate) vs Barang Masuk + rincian dokumen
-                          (v3.4) + mode 🔍 Audit Rekonsiliasi (v3.5 — port
-                          macro VBA, sheet '29 Rekap Barang Masuk')
+  6. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
+                          kolom SO + kolom Hasil Audit (logika macro VBA ×
+                          data app — v3.6, tanpa sheet 29) + drill-down
   7. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
   8. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
   9. 🛒 Rincian PO      : pivot PO dengan search + sort
 
-v3.5 ringkasan:
-- AUDIT REKONSILIASI: tab Rekap Selisih IN dapat mode baru (port 1:1 macro
-  VBA BuatLaporanDeviasiSampel) — input sheet '29 Rekap Barang Masuk',
-  11 kolom + KPI chips + status berwarna + drill-down tetap jalan.
-  Tervalidasi 99,97% identik dgn sheet LAPORAN_DEVIASI user (sisanya =
-  snapshot data lama).
-- LIGHTMODE DIHAPUS: pipeline selalu FULL — SO bulan lalu (tanggal
-  -25..-31) selalu terbaca; key lama di config.json diabaikan.
-- SEMUA HEADER KOLOM PUNYA FILTER ⧩ (semua view list-style); filter
-  duplikat di card atas (RESTO/STATUS) dihapus, digantikan header filter.
-- Matrix resto: tanggal default 26-31.
+v3.6 ringkasan:
+- BUG FIX KRITIS: tombol filter ⧩ di header TIDAK BISA DIKLIK dengan
+  mouse (identify_column mengembalikan '#N' posisi-display sedangkan
+  filter memakai nama kolom simbolik — tidak pernah match). Kini klik
+  funnel membuka popup di SEMUA tabel, termasuk saat ada kolom
+  tersembunyi. Clone ⛶ Perbesar juga kini punya filter + sort sendiri
+  (sebelumnya ikon funnel tersalin tapi mati).
+- HIDE/UNHIDE KOLOM: klik kanan judul kolom (Sembunyikan kolom ini /
+  Tampilkan semua / auto-fit / filter) + tombol ◱ Kolom (panel
+  checklist) — di semua tabel & window ⛶.
+- AUDIT REKONSILASI DARI DATA APP: sheet '29 Rekap Barang Masuk' TIDAK
+  dibaca. Tabel Rekap Selisih IN jadi SATU (segment dihapus) dengan
+  kolom baru Hasil SO + Saldo + Hasil Audit + Catatan — semua bisa
+  difilter ⧩. Catatan: kolom Barang Masuk terisi saat rekap memiliki
+  input JENIS='BARANG MASUK'; selama belum diinput, baris ber-IN akan
+  ditandai deviasi (sesuai logika).
+- DEFAULT TANGGAL: -26 s/d 31 = tgl 26 BULAN LALU s/d 31 BULAN
+  BERJALAN (pivot + rekap selisih IN + reset). Kolom hari bulan lalu
+  berlabel '25•' + urutan kronologis diperbaiki.
 
 Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
@@ -83,14 +92,16 @@ from src.ui.in_selisih_view import InSelisihView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.5.0"  # v3.5.0: (1) mode Audit Rekonsiliasi (port macro VBA
-# BuatLaporanDeviasiSampel — input sheet '29 Rekap Barang Masuk', KPI +
-# status berwarna), (2) LightMode DIHAPUS (selalu FULL — bulan lalu selalu
-# terbaca), (3) matrix resto default tanggal 26-31, (4) SEMUA header kolom
-# punya filter ⧩ + filter duplikat di card atas dihapus, (5) kolom KATEGORI
-# di Rekap Selisih IN.
-# Riwayat: v3.4.0 — lebar kolom drag/auto-fit; SO bulan lalu terbaca (sheet
-# 'SO BULAN LALU'); tab Rekap Selisih IN + drill-down 42.05/32.24/99.01.
+APP_VERSION = "3.6.0"  # v3.6.0: (1) BUG FIX tombol filter ⧩ tidak bisa
+# diklik (identify_column posisi-display vs nama simbolik) + clone ⛶
+# sekarang punya filter/sort sendiri, (2) hide/unhide kolom (klik kanan
+# heading + tombol ◱ Kolom, semua tabel + clone), (3) Audit Rekonsiliasi
+# dari DATA APP (sheet 29 tidak dibaca; kolom SO + Hasil Audit + Saldo,
+# satu tabel), (4) default tanggal -26 s/d 31 (26 bulan lalu s/d 31 bulan
+# berjalan) + label '25•' utk kolom bulan lalu + urut kronologis.
+# Riwayat: v3.5.0 — LightMode dihapus; mode Audit (sheet 29); header
+# filter semua kolom; KATEGORI. v3.4.0 — lebar kolom drag/auto-fit; SO
+# bulan lalu terbaca; tab Rekap Selisih IN + drill-down 42.05/32.24/99.01.
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -149,23 +160,27 @@ FILTER HEADER ⧩ (v3.5 — SEMUA KOLOM)
   • Filter duplikat di card atas (RESTO / STATUS) dihapus — pakai
     filter header kolomnya langsung.
 
-TAB 📤 REKAP SELISIH IN (v3.4 + v3.5)
-  • Mode 📋 Ringkas — rekap per (Resto × Tanggal × Barang × Satuan):
+TAB 📤 REKAP SELISIH IN (v3.4 → v3.6)
+  • SATU tabel (v3.6) — per (Resto × Tanggal × Barang):
       IN           = barang masuk per dokumen Accurate (42.05 + 32.24 + 99.01)
-      Barang Masuk = barang masuk yang dicatat di input SO harian (rekap)
+      Barang Masuk = barang masuk yang dicatat di input SO harian (rekap
+                     JENIS='BARANG MASUK')
       Selisih IN   = Barang Masuk − IN
-  • Mode 🔍 Audit Rekonsiliasi (v3.5 — BARU): port macro VBA
-    BuatLaporanDeviasiSampel — baca sheet '29 Rekap Barang Masuk'
-    langsung, 11 kolom (Hasil SO / Qty SO Harian / Penerimaan Sistem /
-    Selisih Harian / Saldo Kumulatif / Status Analisis Audit / Detail &
-    Catatan Audit), KPI chips + status berwarna. Filter hanya
-    menyembunyikan baris — audit tetap dihitung dari sheet penuh.
-  • Double-click baris (kedua mode) → popup RINCIAN IN: daftar dokumen
-    pendukung per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA +
-    subtotal per sumber + total IN.
+      Hasil SO     = hasil stock opname hari itu (rekap JENIS='SO';
+                     '-' = tidak ada SO di tanggal tsb)
+  • Kolom Hasil Audit + Saldo + Catatan = logika macro VBA
+    BuatLaporanDeviasiSampel yang diaplikasikan ke DATA APP (rekap SO +
+    BM + IN per tanggal — v3.6; sheet '29 Rekap Barang Masuk' TIDAK
+    dibaca): VALID (Sistem Masuk) / OK (Matching) / CUT-OFF RESOLVED /
+    OK (Dalam Cut-off) / DEVIASI MURNI + KPI chips. Semua kolom bisa
+    difilter ⧩ (termasuk Hasil Audit & SO).
+  • Double-click baris → popup RINCIAN IN: daftar dokumen pendukung
+    per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA + subtotal per
+    sumber + total IN.
   • Klik kanan / double-click kolom Nomor di popup = copy nomor.
-  • Rentang tanggal 1–31; tanggal -25 s/d -31 = data bulan lalu
-    (selalu terbaca — LightMode dihapus v3.5).
+  • Rentang tanggal default -26 s/d 31 = tgl 26 BULAN LALU s/d 31 BULAN
+    BERJALAN; angka negatif = bulan lalu. Filter hanya menyembunyikan
+    baris — saldo & status dihitung dari data penuh.
 
 SO BULAN LALU (v3.4 — FIX)
   • SO bulan lalu terbaca otomatis dari sheet 'SO BULAN LALU' di

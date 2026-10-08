@@ -21,9 +21,9 @@ from .theme import (
     C_HEADER, C_TEXT_MUTED, font, font_family,
 )
 from .widgets import (
-    AccentButton, GhostButton, HeaderFilter, LoadingOverlay, add_tooltip,
-    auto_fit_columns, enable_col_resize, insert_tree_items,
-    open_tree_maximized, run_async,
+    AccentButton, GhostButton, HeaderFilter, ColumnManager, LoadingOverlay,
+    add_tooltip, attach_clone_filters, auto_fit_columns, enable_col_resize,
+    insert_tree_items, open_tree_maximized, run_async,
 )
 
 # Column definitions: (column_id, width, anchor)
@@ -105,7 +105,7 @@ class DetailsPopup(tk.Toplevel):
                      bg=C_HEADER, fg="#94a3b8", font=font(9)).pack(
                 anchor="w", pady=(2, 0))
 
-        # Aksi di kanan band: ⛶ Perbesar + ↔ Auto-Fit
+        # Aksi di kanan band: ⛶ Perbesar + ◱ Kolom + ↔ Auto-Fit
         btn_fit = tk.Button(
             head_in, text="↔ Auto-Fit", command=self._auto_fit,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -116,6 +116,16 @@ class DetailsPopup(tk.Toplevel):
         add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
                              "(double-click tepi kolom = auto-fit 1 kolom;\n"
                              "drag tepi kolom = atur lebar manual)")
+        btn_cols = tk.Button(
+            head_in, text="◱ Kolom",
+            command=lambda: self._colmgr.open_panel(),
+            bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+            activeforeground="#ffffff", bd=0, relief="flat",
+            highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+            padx=12, pady=5)
+        btn_cols.pack(side="right", anchor="ne", padx=(0, 6))
+        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
+                              "(juga bisa: klik kanan judul kolom)")
         btn_max = tk.Button(
             head_in, text="⛶ Perbesar", command=self._maximize,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -176,6 +186,12 @@ class DetailsPopup(tk.Toplevel):
             get_values=self._name_values,
             on_apply=self._on_name_filter,
             label="Nama Barang")
+
+        # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
+        self._colmgr = ColumnManager(
+            self.tree,
+            open_filter=lambda c: self.header_filter.open_popup()
+            if c == "Nama Barang" else None)
 
         # --- Footer: status + tombol ---
         foot = tk.Frame(self, bg=C_BG)
@@ -464,11 +480,17 @@ class DetailsPopup(tk.Toplevel):
         auto_fit_columns(self.tree)
 
     def _maximize(self):
+        def filter_setup(new_tree):
+            # v3.6: funnel Nama Barang jalan juga di window besar
+            attach_clone_filters(new_tree, ["Nama Barang"],
+                                 get_values=self._name_values)
+
         return open_tree_maximized(
             self.tree, f"Detail — {self._title}",
             setup_tags=lambda t: self._setup_tags(t),
             on_context_menu=self._on_context_menu,
-            on_double_click=self._on_double_click)
+            on_double_click=self._on_double_click,
+            on_filter_setup=filter_setup)
 
     # =====================================================================
     # FORMAT (identik versi lama)

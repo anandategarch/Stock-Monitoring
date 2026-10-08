@@ -21,3 +21,6 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Dev E2E scripts & sandbox (bukan bagian app)
+.dev/

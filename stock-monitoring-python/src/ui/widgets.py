@@ -706,9 +706,14 @@ class HeaderFilter:
         try:
             if self.tree.identify_region(event.x, event.y) != "heading":
                 return
-            if self.tree.identify_column(event.x) != self.col_id:
-                return
+            # v3.6 BUG FIX: resolve '#N' posisi-display → nama kolom aktual
+            # (klik mouse sungguhan sebelumnya tidak pernah match nama
+            # simbolik; juga benar saat ada kolom tersembunyi)
+            actual = identify_to_column(
+                self.tree, self.tree.identify_column(event.x))
         except Exception:
+            return
+        if actual != self.col_id:
             return
         # hindari langsung terbuka lagi setelah ditutup (toggle natural)
         if _time.time() - self._closed_at < 0.35:
@@ -957,10 +962,344 @@ class HeaderFilterGroup:
         for f in self._filters.values():
             f.refresh_icon()
 
+    def open_popup(self, col):
+        """Buka popup filter kolom tertentu (dipakai menu klik-kanan)."""
+        f = self._filters.get(col)
+        if f is not None:
+            f.open_popup()
+
     def detach_all(self):
         """Lepas SEMUA binding klik-heading (saat ganti mode/kolom tree)."""
         for f in self._filters.values():
             f.detach()
+
+
+# --- Column hide/unhide (v3.6) --------------------------------------------------
+
+class ColumnManager:
+    """Sembunyikan / tampilkan kolom tabel (displaycolumns) — v3.6.
+
+    Permintaan user: "aku bisa hide dan unhide kolom juga gak?"
+    - Klik KANAN di area heading → menu konteks:
+        ⧩ Filter kolom ini · ↔ Auto-fit kolom ini ·
+        ◱ Sembunyikan kolom ini · ▦ Tampilkan Semua · ◫ Panel Kolom…
+    - open_panel() (tombol "◱ Kolom" per view) → popup checklist semua
+      kolom (centang = tampil) — satu-satunya jalur unhide setelah kolom
+      tersembunyikan.
+    - State in-memory per tabel (reset saat aplikasi ditutup).
+    - mirror: tree lain (mis. clone ⛶ / tabel utama) yang diterapkan
+      konfigurasi kolom yang sama.
+    """
+
+    def __init__(self, tree: ttk.Treeview, *, open_filter=None, mirror=None,
+                 on_change=None):
+        self.tree = tree
+        self.open_filter = open_filter       # callable(col) → buka popup filter
+        self.mirror = mirror                 # tree lain yang ikut hide/unhide
+        self.on_change = on_change
+        self.hidden: list[str] = []
+        self._panel: tk.Toplevel | None = None
+        tree.bind("<Button-3>", self._on_right_click, add="+")
+
+    # -- state ---------------------------------------------------------------
+    def columns(self) -> list[str]:
+        try:
+            return [str(c) for c in self.tree["columns"]]
+        except Exception:
+            return []
+
+    def visible(self) -> list[str]:
+        self.hidden = [c for c in self.hidden if c in self.columns()]
+        return [c for c in self.columns() if c not in self.hidden]
+
+    def apply(self):
+        vis = self.visible()
+        if not vis:
+            return  # minimal 1 kolom harus tetap tampil
+        try:
+            self.tree.configure(displaycolumns=vis)
+        except tk.TclError:
+            return
+        if self.mirror is not None:
+            try:
+                if self.mirror.winfo_exists():
+                    same = [str(c) for c in self.mirror["columns"]]
+                    mv = [c for c in vis if c in same]
+                    if mv:
+                        self.mirror.configure(displaycolumns=mv)
+            except Exception:
+                pass
+        if self.on_change:
+            try:
+                self.on_change()
+            except Exception:
+                pass
+
+    def hide(self, col: str):
+        if col in self.columns() and col not in self.hidden \
+                and len(self.visible()) > 1:
+            self.hidden.append(col)
+            self.apply()
+
+    def toggle(self, col: str, visible: bool):
+        if col not in self.columns():
+            return
+        if visible:
+            self.hidden = [c for c in self.hidden if c != col]
+        elif col not in self.hidden and len(self.visible()) > 1:
+            self.hidden.append(col)
+        self.apply()
+
+    def show_all(self):
+        self.hidden = []
+        self.apply()
+
+    # -- klik kanan heading ----------------------------------------------------
+    def _on_right_click(self, event):
+        try:
+            if self.tree.identify_region(event.x, event.y) != "heading":
+                return
+            col = identify_to_column(
+                self.tree, self.tree.identify_column(event.x))
+        except Exception:
+            return
+        if col is None:
+            return
+        menu = tk.Menu(self.tree, tearoff=0, bg=C_CARD, fg=C_HEADER,
+                       activebackground=C_ACCENT,
+                       activeforeground="#ffffff", relief="flat", bd=0)
+        label = "Nama Barang (#0)" if col == "#0" else str(col)
+        if col != "#0":
+            if self.open_filter is not None:
+                menu.add_command(
+                    label=f"⧩ Filter kolom '{label}'",
+                    command=lambda c=col: self._safe_open_filter(c))
+            menu.add_command(
+                label="↔ Auto-fit kolom ini",
+                command=lambda c=col: auto_fit_columns(self.tree,
+                                                       columns=[c]))
+            can_hide = len(self.visible()) > 1
+            menu.add_command(
+                label=f"◱ Sembunyikan kolom '{label}'",
+                command=lambda c=col: self.hide(c),
+                state="normal" if can_hide else "disabled")
+        menu.add_command(label="▦ Tampilkan Semua Kolom",
+                         command=self.show_all,
+                         state="normal" if self.hidden else "disabled")
+        menu.add_separator()
+        menu.add_command(label="◫ Panel Kolom…", command=self.open_panel)
+        menu.add_command(label="↔ Auto-fit Semua Kolom",
+                         command=lambda: auto_fit_columns(self.tree))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
+        return "break"
+
+    def _safe_open_filter(self, col):
+        if self.open_filter is None:
+            return
+        try:
+            self.open_filter(col)
+        except Exception:
+            pass
+
+    # -- panel checklist --------------------------------------------------------
+    def open_panel(self):
+        if self._panel is not None and self._panel.winfo_exists():
+            self._panel.destroy()
+            return
+        cols = self.columns()
+        if not cols:
+            return
+        root = self.tree.winfo_toplevel()
+        win = tk.Toplevel(root)
+        self._panel = win
+        win.title("Kolom — Sembunyikan / Tampilkan")
+        win.configure(bg=C_CARD)
+        win.transient(root)
+        win.resizable(False, False)
+        try:
+            win.grab_set()
+        except Exception:
+            pass
+
+        body = tk.Frame(win, bg=C_CARD)
+        body.pack(fill="both", expand=True, padx=14, pady=12)
+
+        head = tk.Frame(body, bg=C_CARD)
+        head.pack(fill="x")
+        tk.Label(head, text="◫ Kolom yang ditampilkan", bg=C_CARD,
+                 fg=C_HEADER, font=font(10, "bold")).pack(side="left")
+        n_vis = tk.StringVar(value=f"{len(self.visible())}/{len(cols)} tampil")
+        tk.Label(head, textvariable=n_vis, bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="right")
+
+        btnrow = tk.Frame(body, bg=C_CARD)
+        btnrow.pack(fill="x", pady=(6, 4))
+
+        def _refresh_count():
+            n_vis.set(f"{len(self.visible())}/{len(cols)} tampil")
+
+        def _show_all():
+            self.show_all()
+            for v in vars_.values():
+                v.set(True)
+            _refresh_count()
+
+        tk.Button(btnrow, text="▦ Tampilkan Semua", command=_show_all,
+                  bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+                  activeforeground="#ffffff", bd=0, relief="flat",
+                  highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+                  padx=12, pady=5).pack(side="left")
+        tk.Button(btnrow, text="✕ Tutup (Esc)", command=win.destroy,
+                  bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+                  activeforeground="#ffffff", bd=0, relief="flat",
+                  highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+                  padx=12, pady=5).pack(side="right")
+
+        # checklist scrollable (pivot matrix bisa punya 30+ kolom tanggal)
+        cv = tk.Canvas(body, bg=C_CARD, highlightthickness=0,
+                       height=min(340, 26 * len(cols) + 10))
+        sb = ttk.Scrollbar(body, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv, bg=C_CARD)
+        inner.bind("<Configure>",
+                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        cv.bind("<MouseWheel>",
+                lambda e: cv.yview_scroll(int(-e.delta / 120) or -1, "units"))
+
+        vars_: dict[str, tk.BooleanVar] = {}
+
+        def _on_toggle(c, v):
+            self.toggle(c, v.get())
+            _refresh_count()
+
+        for c in cols:
+            v = tk.BooleanVar(value=c not in self.hidden)
+            vars_[c] = v
+            ttk.Checkbutton(inner, text=c, variable=v,
+                            command=lambda c=c, v=v: _on_toggle(c, v)) \
+                .pack(anchor="w", padx=8, pady=1)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.update_idletasks()
+        x = min(max(self.tree.winfo_rootx() + 40, 0),
+                max(root.winfo_screenwidth() - win.winfo_reqwidth() - 20, 0))
+        y = min(max(self.tree.winfo_rooty() + 60, 0),
+                max(root.winfo_screenheight() - win.winfo_reqheight() - 40, 0))
+        win.geometry(f"+{x}+{y}")
+
+
+def _tree_row_passes(kw: dict, col_idx: dict, active: dict,
+                     parent_text: str = "") -> bool:
+    """Cek 1 baris snapshot {text, values} lolos filter kolom aktif.
+
+    '#0' (kolom tree) dicocokkan terhadap TEXT baris — bila baris punya
+    parent (baris metric anak), pakai text PARENT (filter nama barang
+    pivot matrix: pilih nama → parent + semua anak metricnya tampil).
+    """
+    vals = kw.get("values") or []
+    text = str(kw.get("text") or "")
+    for c, sel in active.items():
+        if c == "#0":
+            v = text if text else parent_text
+        else:
+            k = col_idx.get(c)
+            v = str(vals[k]) if (k is not None and 0 <= k < len(vals)) else ""
+        if v not in sel:
+            return False
+    return True
+
+
+def apply_tree_row_filters(tree: ttk.Treeview, filters: dict):
+    """Terapkan filter kolom (nilai TERFORMAT) ke baris tree IN PLACE (v3.6).
+
+    Dipakai tabel CLONE (⛶ Perbesar): snapshot item lengkap di-cache saat
+    filter pertama dipasang; setiap perubahan → rebuild (delete + insert
+    batched, urutan asli dipertahankan, iid tetap). Hirarki 2 level
+    (parent + anak, mis. pivot matrix) didukung: parent tampil bila ada
+    anak yang lolos filter; filter '#0' mencocokkan text parent.
+    """
+    active = {c: s for c, s in filters.items() if s}
+    try:
+        cache = getattr(tree, "_row_filter_cache", None)
+        if cache is None:
+            def rec(parent, out):
+                for iid in tree.get_children(parent):
+                    it = tree.item(iid)
+                    out.append((parent, iid, {
+                        "text": it.get("text", ""),
+                        "values": it.get("values", ""),
+                        "tags": it.get("tags", ""),
+                        "open": it.get("open", False),
+                    }))
+                    rec(iid, out)
+            cache = []
+            rec("", cache)
+            tree._row_filter_cache = cache
+        if not cache:
+            return
+        kids_map: dict = {}
+        for parent, iid, kw in cache:
+            kids_map.setdefault(parent, []).append((iid, kw))
+    except tk.TclError:
+        return
+
+    disp = display_data_columns(tree)
+    col_idx = {c: i for i, c in enumerate(disp)}
+    items = []
+    if not active:
+        items = [(p, i, kw) for (p, i, kw) in cache]
+    else:
+        for iid, kw in kids_map.get("", []):
+            kids = kids_map.get(iid)
+            if kids:
+                # parent 2-level: '#0'/text diuji pada parent, kolom data
+                # diuji pada anak — parent tampil bila ada anak yang lolos
+                kept = [(k, w) for (k, w) in kids
+                        if _tree_row_passes(w, col_idx, active,
+                                            str(kw.get("text") or ""))]
+                if kept:
+                    items.append(("", iid, kw))
+                    items.extend((iid, k, w) for (k, w) in kept)
+            elif _tree_row_passes(kw, col_idx, active):
+                items.append(("", iid, kw))
+
+    prev = getattr(tree, "_row_filter_cancel", None)
+    if prev is not None:
+        prev()
+    try:
+        tree.delete(*tree.get_children(""))
+    except tk.TclError:
+        return
+    tree._row_filter_cancel = insert_tree_items(tree, items, batch=600)
+
+
+def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
+                         get_values, on_sort=None):
+    """HeaderFilterGroup utk tabel CLONE ⛶ (v3.6).
+
+    Sebelumnya clone ⛶ MENYALIN ikon funnel dari heading sumber tapi TIDAK
+    memasang binding apa pun → funnel tidak bisa diklik (bagian dari bug
+    "tombol filter tidak bisa diklik"). Sekarang clone punya filter
+    sendiri: on_apply memfilter baris clone IN PLACE (cache snapshot),
+    sort via popup (tree-aware).
+    """
+    state: dict = {}
+
+    def on_apply(col, sel):
+        state[col] = sel
+        apply_tree_row_filters(tree, state)
+
+    return HeaderFilterGroup(tree, cols, get_values=get_values,
+                             on_apply=on_apply, on_sort=on_sort)
 
 
 # --- Async + render batched ---------------------------------------------------
@@ -1182,8 +1521,53 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
 
 # --- Column resize + auto-fit (v3.4) -------------------------------------------
 
+def display_data_columns(tree: ttk.Treeview) -> list[str]:
+    """Kolom DATA yang tampil (urutan display) — menghormati displaycolumns
+    (v3.6: kolom bisa disembunyikan oleh ColumnManager)."""
+    try:
+        dc = tree.cget("displaycolumns")
+        items = [str(x) for x in dc] if isinstance(dc, (tuple, list)) \
+            else str(dc).split()
+    except Exception:
+        items = []
+    if not items or "#all" in items:
+        try:
+            return [str(c) for c in tree["columns"]]
+        except Exception:
+            return []
+    try:
+        cols = list(tree["columns"])
+    except Exception:
+        return []
+    return [c for c in items if c != "#0" and c in cols]
+
+
+def identify_to_column(tree: ttk.Treeview, identified: str):
+    """'#N' hasil identify_column() → nama kolom AKTUAL (v3.6).
+
+    BUG FIX v3.6: identify_column() mengembalikan ID POSISIONAL ('#2')
+    sesuai URUTAN TAMPILAN — sedangkan HeaderFilter memakai nama kolom
+    simbolik ('Nama Barang') → klik funnel TIDAK PERNAH membuka popup
+    dengan mouse sungguhan (hanya via pemanggilan programatik). Tk juga
+    me-reindex saat kolom disembunyikan (displaycolumns).
+    """
+    if not identified or not str(identified).startswith("#"):
+        return None
+    try:
+        n = int(str(identified)[1:])
+    except ValueError:
+        return None
+    if n == 0:
+        return "#0"
+    disp = display_data_columns(tree)
+    if 1 <= n <= len(disp):
+        return disp[n - 1]
+    return None
+
+
 def _tree_display_columns(tree: ttk.Treeview) -> list[str]:
-    """Kolom yang tampil (urutan layout): ['#0' bila show tree] + columns."""
+    """Kolom yang tampil (urutan layout): ['#0' bila show tree] + kolom
+    data yang TAMPIL (displaycolumns-aware — v3.6)."""
     try:
         raw = tree.cget("show")
         parts = " ".join(str(x) for x in raw) if isinstance(raw, (tuple, list)) \
@@ -1193,7 +1577,7 @@ def _tree_display_columns(tree: ttk.Treeview) -> list[str]:
     cols = []
     if "tree" in parts:
         cols.append("#0")
-    cols += list(tree["columns"])
+    cols += display_data_columns(tree)
     return cols
 
 
@@ -1368,14 +1752,25 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
 
 def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                         setup_tags=None, on_double_click=None,
-                        on_sort_setup=None, on_context_menu=None):
+                        on_sort_setup=None, on_context_menu=None,
+                        on_filter_setup=None):
     """Buka window besar berisi clone penuh dari source_tree — tombol ⛶.
 
     setup_tags(new_tree)   : pasang tag styling (mis. self._setup_tags).
     on_double_click(event) : handler double-click — harus tree-agnostic
                              (identifikasi baris via event.widget).
-    on_sort_setup(new_tree): pasang command sort heading per view.
+    on_sort_setup(new_tree): pasang command sort heading per view (LEGASI
+                             v3.4 — utk view tanpa filter kolom).
     on_context_menu(event) : handler klik-kanan (copy Nomor/Nomor PO, dll).
+    on_filter_setup(new_tree): v3.6 — pasang HeaderFilterGroup di clone
+                             (klik funnel = popup filter + sort, ala tabel
+                             utama). Sebelumnya funnel clone cuma ikon
+                             mati — tidak bisa diklik.
+
+    v3.6: displaycolumns (kolom tersembunyian) disalin dari sumber; clone
+    punya ColumnManager sendiri (klik kanan heading / tombol ◱ Kolom) yang
+    MIRROR ke tabel sumber — hide/unhide di window besar juga berlaku di
+    tabel utama setelah window ditutup.
 
     Return (win, new_tree).
     """
@@ -1456,6 +1851,19 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         except tk.TclError:
             continue
 
+    # v3.6: salin state kolom tersembunyi (displaycolumns) sumber → clone
+    try:
+        dc = source_tree.cget("displaycolumns")
+        dc_items = [str(x) for x in dc] if isinstance(dc, (tuple, list)) \
+            else str(dc).split()
+    except Exception:
+        dc_items = []
+    if dc_items and "#all" not in dc_items:
+        try:
+            new_tree.configure(displaycolumns=dc_items)
+        except tk.TclError:
+            pass
+
     if setup_tags:
         try:
             setup_tags(new_tree)
@@ -1465,6 +1873,17 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     # v3.4: resize kolom manual + auto-fit — dipasang PERTAMA supaya
     # "break" saat drag/double-click tepi kolom mematikan handler view
     enable_col_resize(new_tree)
+
+    # v3.6: hide/unhide kolom di clone (klik kanan heading / tombol ◱ Kolom)
+    # — mirror ke tabel sumber supaya state konsisten setelah window tutup
+    clone_colmgr = ColumnManager(new_tree, mirror=source_tree)
+    tk.Button(
+        hi, text="◱ Kolom", command=clone_colmgr.open_panel,
+        bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+        activeforeground="#ffffff", bd=0, relief="flat",
+        highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+        padx=12, pady=5,
+    ).pack(side="right", padx=(0, 6))
 
     vsb = ttk.Scrollbar(cin, orient="vertical", command=new_tree.yview)
     hsb = ttk.Scrollbar(cin, orient="horizontal", command=new_tree.xview)
@@ -1523,7 +1942,12 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         new_tree.bind("<Double-1>", on_double_click)
     if on_context_menu:
         new_tree.bind("<Button-3>", on_context_menu)
-    if on_sort_setup:
+    if on_filter_setup:
+        try:
+            on_filter_setup(new_tree)
+        except Exception:
+            pass
+    elif on_sort_setup:
         on_sort_setup(new_tree)
 
     win.bind("<Escape>", lambda e: win.destroy())

@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import Config
 from src.pipeline.append1 import build_append1
 from src.pipeline.rincian_po import build_rincian_po
-from src.pipeline.fn_rekap29 import build_audit_from_config
+from src.pipeline.fn_audit import build_audit_from_app
 
 
 class PipelineStopped(Exception):
@@ -43,9 +43,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         Tuple (append1_df, rincian_po_df, in_detail_df, audit_result)
         v3.4: in_detail_df = detail IN per dokumen (42.05 / 32.24 / 99.01
         + nomor) untuk tab "Rekap Selisih IN".
-        v3.5: audit_result = dict {"df": audit_df, "kpi": kpi, "desc": ...}
-        — port macro VBA BuatLaporanDeviasiSampel (input: sheet '29 Rekap
-        Barang Masuk') untuk mode "Audit Rekonsiliasi" tab Rekap Selisih IN.
+        v3.6: audit_result = dict {"df": audit_df, "kpi": kpi, "desc": ...}
+        — logika macro VBA BuatLaporanDeviasiSampel diaplikasikan ke DATA
+        APP (rekap SO + BARANG MASUK + IN per tanggal; sheet '29 Rekap
+        Barang Masuk' TIDAK dibaca lagi) + kolom SO & hasil audit di tab
+        Rekap Selisih IN.
     """
     start_time = time.time()
 
@@ -68,8 +70,10 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         print("-" * 60)
 
     in_detail_holder: dict = {}
+    rekap_so_holder: dict = {}
     append1_df = build_append1(config, stop_event=stop_event,
-                               in_detail_out=in_detail_holder)
+                               in_detail_out=in_detail_holder,
+                               rekap_so_out=rekap_so_holder)
 
     # FIX: check stop_event after Append1 build
     if stop_event is not None and stop_event.is_set():
@@ -101,12 +105,14 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     if verbose:
         print(f"  IN detail (v3.4): {len(in_detail_df)} rows")
 
-    # 4. Audit Rekonsiliasi (v3.5 — sheet '29 Rekap Barang Masuk')
+    # 4. Audit Rekonsiliasi (v3.6 — dari DATA APP: rekap SO + BM + IN per
+    #    tanggal; tanpa sheet '29 Rekap Barang Masuk')
     if verbose:
         print("\n" + "-" * 60)
-        print("  [3/3] Audit Rekonsiliasi (29 Rekap Barang Masuk)...")
+        print("  [3/3] Audit Rekonsiliasi (logika VBA × data app)...")
         print("-" * 60)
-    audit_df, audit_kpi, audit_desc = build_audit_from_config(config)
+    audit_df, audit_kpi, audit_desc = build_audit_from_app(
+        rekap_so_holder.get("df"), in_detail_df)
     audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
 
     if stop_event is not None and stop_event.is_set():

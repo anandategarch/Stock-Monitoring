@@ -1,5 +1,5 @@
 {
-  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berubah. v3.5: LightMode DIHAPUS — pipeline selalu mode FULL (semua data, termasuk bulan lalu; sheet '29 Rekap Barang Masuk' untuk Audit Rekonsiliasi discan otomatis dari RootPath). Tidak ada Excel output — data ditampilkan langsung di UI.",
+  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berubah. v3.6: Audit Rekonsiliasi dihitung dari DATA APP (rekap SO + BARANG MASUK + IN per tanggal — sheet '29 Rekap Barang Masuk' TIDAK dibaca lagi). Pipeline selalu mode FULL (semua data, termasuk bulan lalu). Tidak ada Excel output — data ditampilkan langsung di UI.",
   "RootPath": "C:\\KERJA\\1. RESTO\\9.NEW QUERY\\",
   "Folders": {
     "RekapBerjalan": "1. DEVIASI WEEKLY",

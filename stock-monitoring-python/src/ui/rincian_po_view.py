@@ -20,8 +20,9 @@ from typing import Optional, Callable
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup,
-    LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
-    insert_tree_items, open_tree_maximized, run_async,
+    ColumnManager, LoadingOverlay, add_tooltip, attach_clone_filters,
+    auto_fit_columns, enable_col_resize, insert_tree_items,
+    open_tree_maximized, run_async,
 )
 
 
@@ -111,7 +112,13 @@ class RincianPoView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(Esc untuk menutup)")
+                             "(filter juga jalan di window besar;\n"
+                             "Esc untuk menutup)")
+        btn_cols = GhostButton(head, text="◱ Kolom",
+                               command=lambda: self._colmgr.open_panel())
+        btn_cols.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
+                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
@@ -169,6 +176,11 @@ class RincianPoView(tk.Frame):
             get_values=self._col_values,
             on_apply=self._on_col_filter,
             on_sort=None)
+
+        # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
+        self._colmgr = ColumnManager(
+            self.tree,
+            open_filter=lambda c: self.header_filters.open_popup(c))
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""
@@ -377,9 +389,16 @@ class RincianPoView(tk.Frame):
     # ⛶ PERBESAR (fullscreen)
     # =========================================================================
     def _maximize(self):
+        def filter_setup(new_tree):
+            # v3.6: funnel ⧩ jalan juga di window besar
+            attach_clone_filters(
+                new_tree, ["#0"] + [str(c) for c in new_tree["columns"]],
+                get_values=self._col_values)
+
         return open_tree_maximized(
             self.tree, "Rincian PO — Pivot Nomor #",
-            setup_tags=lambda t: self._setup_tags(t))
+            setup_tags=lambda t: self._setup_tags(t),
+            on_filter_setup=filter_setup)
 
     # =========================================================================
     # HELPERS (identik versi lama)
