@@ -13,8 +13,9 @@ Struktur (pola waste_anomaly/followup.py):
   - save/load (atomic write + backup .bad utk file korup)
   - export_xlsx(path) → sheet "FOLLOW UP" + kolom serah-terima kosong
     (PIC / KATEGORI MASALAH / TINDAKAN — diisi petugas, konvensi rekap)
-  - import_workbook(path) → baca kembali file terisi → baris ber-status
-    "Selesai" + PIC tampil (persist followup_resolved.json)
+  (v3.8: import_workbook DIHAPUS — fitur "Impor Hasil TL" tidak perlu
+  lagi, permintaan user; resolved lama tetap dimuat agar status/PIC
+  yang sudah tersimpan sebelumnya tetap tampil.)
 - Modul murni (tanpa Tk) — dipakai view + app.
 """
 from __future__ import annotations
@@ -140,7 +141,7 @@ class FollowUpStore:
 
     # -- sinkronisasi UI ------------------------------------------------------
     def add_listener(self, cb) -> None:
-        """cb(store) dipanggil setiap perubahan (toggle/clear/import)."""
+        """cb(store) dipanggil setiap perubahan (toggle/clear)."""
         if cb not in self._listeners:
             self._listeners.append(cb)
 
@@ -282,69 +283,4 @@ class FollowUpStore:
         wb.save(path)
         return path
 
-    # -- import hasil TL ----------------------------------------------------------
-    def import_workbook(self, path: str) -> dict:
-        """Baca workbook hasil TL terisi → tandai baris Selesai + PIC.
 
-        Kecocokan = fingerprint (kolom kunci + nilai). Baris dianggap TERISI
-        bila minimal satu kolom serah-terima non-kosong. Defensif — tidak
-        pernah raise.
-        """
-        p = Path(path)
-        base = {"file": p.name}
-        try:
-            if not p.exists():
-                return {**base, "error": f"File tidak ditemukan: {p.name}"}
-            df = pd.read_excel(p, sheet_name="FOLLOW UP")
-            if df is None or df.empty:
-                return {**base, "error": "Sheet 'FOLLOW UP' kosong / tidak "
-                                         "ada di file ini (pakai file hasil "
-                                         "ekspor tab Follow Up)."}
-            df = df.rename(columns={c: str(c).strip() for c in df.columns})
-            missing = [c for c in ("Asal", "Resto", "Nama Barang", "Satuan",
-                                   "H", "SO", "Sistem", "Deviasi")
-                       if c not in df.columns]
-            if missing:
-                return {**base, "error": f"Kolom kunci hilang: {missing} — "
-                                         "pakai file hasil ekspor tab Follow "
-                                         "Up (jangan ubah kolomnya)."}
-            ts = datetime.now().isoformat(timespec="seconds")
-            n_filled = 0
-            n_matched = 0
-            for i in range(len(df)):
-                row = {
-                    "asal": df["Asal"].iloc[i],
-                    "resto": df["Resto"].iloc[i],
-                    "barang": df["Nama Barang"].iloc[i],
-                    "satuan": df["Satuan"].iloc[i],
-                    "h": df["H"].iloc[i],
-                    "so": df["SO"].iloc[i],
-                    "sistem": df["Sistem"].iloc[i],
-                    "deviasi": df["Deviasi"].iloc[i],
-                    "cek": (df["CEK / Status"].iloc[i]
-                            if "CEK / Status" in df.columns else ""),
-                }
-                fp = row_fingerprint(row)
-                if fp not in self.rows:
-                    continue
-                n_matched += 1
-                info = {}
-                for col in HANDOVER_COLS:
-                    if col in df.columns:
-                        v = df[col].iloc[i]
-                        text = "" if pd.isna(v) else str(v).strip()
-                        if text:
-                            info[col] = text
-                if not info:
-                    continue
-                n_filled += 1
-                info["ts"] = ts
-                info["file"] = p.name
-                self.resolved[fp] = info
-            if n_filled:
-                self.save_resolved()
-                self._notify()
-            return {**base, "n_rows": len(df), "n_matched": n_matched,
-                    "n_filled": n_filled}
-        except Exception as e:  # noqa: BLE001 — defensif
-            return {**base, "error": f"{type(e).__name__}: {e}"}

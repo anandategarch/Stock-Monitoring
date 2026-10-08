@@ -9,8 +9,8 @@ Perilaku:
 - Klik sel ✓ di tabel ini = KELUARKAN baris dari daftar.
 - 💾 Export Excel: snapshot + kolom serah-terima kosong (PIC / KATEGORI
   MASALAH / TINDAKAN — diisi petugas, konvensi rekap mentah).
-- 📥 Impor Hasil TL: baca kembali workbook terisi → baris ber-status
-  "Selesai" + PIC tampil (persist followup_resolved.json).
+  (v3.8: fitur 📥 Impor Hasil TL DIHAPUS — permintaan user "gak terlalu
+  perlu".)
 - ✕ Kosongkan: hapus seluruh daftar (konfirmasi).
 - Double-click baris → pop-up detail source (bila data pipeline tersedia).
 - Sort kolom via klik judul (parse angka negatif kurung).
@@ -52,7 +52,7 @@ COLUMNS = [
 
 
 class FollowUpView(tk.Frame):
-    """Tab Follow Up: tabel snapshot baris tercentang + ekspor/impor."""
+    """Tab Follow Up: tabel snapshot baris tercentang + ekspor."""
 
     def __init__(self, parent, store: FollowUpStore,
                  get_data: Optional[Callable[[], Optional[pd.DataFrame]]] = None,
@@ -106,13 +106,7 @@ class FollowUpView(tk.Frame):
                     "kolom snapshot + kolom kosong PIC / KATEGORI\n"
                     "MASALAH / TINDAKAN utk diisi petugas.")
 
-        self.btn_import = GhostButton(r0, text="📥 Impor Hasil TL",
-                                      command=self._on_import)
-        self.btn_import.pack(side="left", padx=(8, 0))
-        add_tooltip(self.btn_import,
-                    "Baca kembali file ekspor yang SUDAH DIISI petugas\n"
-                    "(kolom PIC / KATEGORI MASALAH / TINDAKAN di sheet\n"
-                    "'FOLLOW UP') → baris cocok diberi status Selesai.")
+        self.btn_import = None  # v3.8: Impor Hasil TL DIHAPUS (user)
 
         self.btn_clear = DangerButton(r0, text="✕ Kosongkan",
                                       command=self._on_clear)
@@ -212,7 +206,7 @@ class FollowUpView(tk.Frame):
     # RENDER
     # =========================================================================
     def _on_store_changed(self, store):
-        # dipanggil listener store (toggle dari tab lain / import)
+        # dipanggil listener store (toggle dari tab lain)
         try:
             if self.winfo_exists():
                 self.after(0, self._render)
@@ -356,7 +350,7 @@ class FollowUpView(tk.Frame):
             self.store.toggle(fp, snap)
 
     # =========================================================================
-    # AKSI: EXPORT / IMPOR / KOSONGKAN
+    # AKSI: EXPORT / KOSONGKAN
     # =========================================================================
     def _on_export(self):
         if not self.store.rows:
@@ -381,8 +375,7 @@ class FollowUpView(tk.Frame):
                 "Export Berhasil",
                 f"Daftar follow-up di-export ke:\n{path}\n\n"
                 "Kolom PIC / KATEGORI MASALAH / TINDAKAN\n"
-                "diisi petugas, lalu impor kembali via\n"
-                "📥 Impor Hasil TL.",
+                "diisi petugas.",
                 parent=self)
 
         def on_error(e):
@@ -391,53 +384,6 @@ class FollowUpView(tk.Frame):
 
         run_async(self, work, done, overlay=self.overlay,
                   loading_text="Mengekspor follow-up…", on_error=on_error)
-
-    def _on_import(self):
-        if not self.store.rows:
-            messagebox.showinfo(
-                "Impor", "Daftar follow-up masih kosong — tidak ada yang "
-                         "bisa dicocokkan.", parent=self)
-            return
-        filepath = filedialog.askopenfilename(
-            title="Pilih File Hasil Tindak Lanjut",
-            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-            parent=self,
-        )
-        if not filepath:
-            return
-
-        def work():
-            return self.store.import_workbook(filepath)
-
-        def done(res):
-            if res.get("error"):
-                messagebox.showwarning("Impor Gagal", res["error"],
-                                       parent=self)
-                return
-            n_filled = res.get("n_filled", 0)
-            n_matched = res.get("n_matched", 0)
-            if n_filled:
-                self._render()
-                messagebox.showinfo(
-                    "Impor Berhasil",
-                    f"{n_filled} baris ditandai SELESAI\n"
-                    f"(cocok: {n_matched} dari {res.get('n_rows', 0)} baris "
-                    f"di file).",
-                    parent=self)
-            else:
-                messagebox.showinfo(
-                    "Impor",
-                    "Tidak ada baris terisi (kolom PIC / KATEGORI /\n"
-                    "TINDAKAN masih kosong semua).",
-                    parent=self)
-
-        def on_error(e):
-            messagebox.showerror("Impor Gagal", f"Gagal membaca file:\n{e}",
-                                 parent=self)
-
-        run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Membaca hasil tindak lanjut…",
-                  on_error=on_error)
 
     def _on_clear(self):
         if not self.store.rows:

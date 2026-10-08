@@ -24,7 +24,7 @@ Struktur jendela (ala aplikasi Waste):
                           kolom SO + kolom Hasil Audit (logika macro VBA ×
                           data app — v3.6, tanpa sheet 29) + drill-down
   7. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
-  8. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
+  8. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
   9. 🛒 Rincian PO      : pivot PO dengan search + sort
 
 v3.7 "ENGINE TURBO" + DEEP AUDIT FIXES ringkasan:
@@ -71,9 +71,10 @@ v3.6 ringkasan:
   difilter ⧩. Catatan: kolom Barang Masuk terisi saat rekap memiliki
   input JENIS='BARANG MASUK'; selama belum diinput, baris ber-IN akan
   ditandai deviasi (sesuai logika).
-- DEFAULT TANGGAL: -26 s/d 31 = tgl 26 BULAN LALU s/d 31 BULAN
-  BERJALAN (pivot + rekap selisih IN + reset). Kolom hari bulan lalu
-  berlabel '25•' + urutan kronologis diperbaiki.
+- DEFAULT TANGGAL (v3.8): Pivot Table -31 s/d 31 = kolom tanggal
+  lengkap tgl 25-31 BULAN LALU (label 25• s/d 31•, urut kronologis)
+  lalu 1-31 bulan berjalan; Rekap Selisih IN 1 s/d 31 = bulan BERJALAN
+  saja (tanpa bulan lalu).
 
 Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
@@ -117,23 +118,28 @@ from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.rincian_po_view import RincianPoView
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
+from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.7.0"  # v3.7.0 "ENGINE TURBO" + DEEP AUDIT FIXES:
-# (1) Engine 3,5-4× lebih cepat: running stock vektor (6,6s → 0,19s, 36×),
-# info-group vektor (6,7s → 0,05s, 130×), reader rekap single-parse —
-# output pipeline TERVERIFIKASI IDENTIK baris-per-baris vs v3.6 (A/B
-# real-data 2,79 jt baris + 6/8 edge-case sintetis; bug benchmark awal
-# tertangkap unit-test: akumulasi mulai dari baris pertama tanggal >= 1,
-# bukan awal grup). (2) FIX 9 bug fitur v3.6 (kebingungaan index
-# display-vs-logis setelah kolom disembunyikan): filter clone, auto-fit,
-# drill-down pivot, copy Nomor popup, toggle ✓ (3 view), posisi popup
-# filter, mirror state hide/unhide clone↔sumber.
-# Riwayat: v3.6.0 — fix tombol filter; hide/unhide kolom; audit dari data
-# app (tanpa sheet 29); default tanggal -26..31 + label '25•'. v3.5.0 —
-# LightMode dihapus; header filter semua kolom; KATEGORI. v3.4.0 — lebar
-# kolom drag/auto-fit; SO bulan lalu terbaca; tab Rekap Selisih IN.
+APP_VERSION = "3.8.0"  # v3.8.0 — REKAP SELISIH IN 1-31 + PIVOT EXPORT:
+# (1) Rekap Selisih IN: default periode 1-31 bulan BERJALAN saja (tanpa
+# bulan lalu) + tombol 💾 Export per resto (kolom: Resto, Tanggal, Nama
+# Barang, Kategori, Satuan, Hasil SO, Sheet Barang Masuk, Kiriman HO
+# [42.05], Kiriman Supplier [32.24], Pembelian by Resto [99.01],
+# Selisih). (2) Pivot Table: default -31 s/d 31 → kolom tanggal lengkap
+# kronologis 25•-31• lalu 1-31 (dulu -26 memotong tgl 27-31 bulan lalu
+# sehingga kolomnya "25, 26, lalu 1"). (3) Export Excel: + sheet PIVOT
+# (mirror tab pivot "Mutasi Barang - New": row label nama barang + jenis,
+# kolom tanggal, conditional formatting persis file user — termasuk
+# =AND($A8="1.SO";B8>A8)). (4) Impor Hasil TL DIHAPUS (permintaan user —
+# tidak terlalu perlu).
+# Riwayat: v3.7.0 — ENGINE TURBO (running stock vektor 36×, info-group
+# 130×, reader single-parse; output identik A/B real-data) + fix 9 bug
+# display-vs-logis setelah hide kolom. v3.6.0 — fix tombol filter;
+# hide/unhide kolom; audit dari data app (tanpa sheet 29). v3.5.0 —
+# LightMode dihapus; header filter semua kolom; KATEGORI. v3.4.0 —
+# lebar kolom drag/auto-fit; SO bulan lalu terbaca; tab Rekap Selisih IN.
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -210,9 +216,15 @@ TAB 📤 REKAP SELISIH IN (v3.4 → v3.6)
     per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA + subtotal per
     sumber + total IN.
   • Klik kanan / double-click kolom Nomor di popup = copy nomor.
-  • Rentang tanggal default -26 s/d 31 = tgl 26 BULAN LALU s/d 31 BULAN
-    BERJALAN; angka negatif = bulan lalu. Filter hanya menyembunyikan
-    baris — saldo & status dihitung dari data penuh.
+  • Rentang tanggal default 1 s/d 31 = periode BULAN BERJALAN saja
+    (tanpa bulan lalu — v3.8); angka negatif tetap bisa diketik bila
+    perlu. Filter hanya menyembunyikan baris — saldo & status dihitung
+    dari data penuh.
+  • (v3.8) Tombol 💾 Export: rekap Selisih IN PER RESTO ke Excel —
+    kolom Resto, Tanggal, Nama Barang, Kategori, Satuan, Hasil SO,
+    Sheet Barang Masuk, Kiriman HO (42.05), Kiriman Supplier (32.24),
+    Pembelian by Resto (99.01), Selisih — semua baris dalam rentang
+    tanggal aktif.
 
 SO BULAN LALU (v3.4 — FIX)
   • SO bulan lalu terbaca otomatis dari sheet 'SO BULAN LALU' di
@@ -238,8 +250,6 @@ FOLLOW UP (v3.2 — ala aplikasi Waste)
   • (v3.3) double-click sel ✓ = keluarkan/masukkan cepat.
   • 💾 Export Excel : snapshot + kolom kosong PIC / KATEGORI MASALAH /
     TINDAKAN utk diisi petugas.
-  • 📥 Impor Hasil TL: baca kembali file terisi → baris ber-status
-    "Selesai" + PIC tampil.
   • Double-click baris → pop-up detail source data.
   • Sort kolom apa pun tetap aman: baris yang di-klik/di-keluarkan
     tetap baris yang benar (v3.3).
@@ -278,7 +288,13 @@ SEMUA TABEL
 
 EXPORT
   • Tombol 💾 Export Excel di toolbar atas (aktif setelah pipeline selesai).
-    Sheet: Append1 + Rincian PO + Rincian IN (detail dokumen, v3.4).
+    Sheet: PIVOT (v3.8 — matrix mutasi barang ala tab pivot "Mutasi
+    Barang - New": row label nama barang + jenis × kolom tanggal,
+    conditional formatting persis file user) + Append1 + Rincian PO +
+    Rincian IN (detail dokumen, v3.4) + Laporan Deviasi (Audit, v3.5).
+  • Tab Rekap Selisih IN punya tombol 💾 Export sendiri (v3.8) — rekap
+    per resto dengan kolom Kiriman HO / Kiriman Supplier / Pembelian
+    by Resto / Sheet Barang Masuk.
 """
 
 
@@ -338,7 +354,10 @@ class StockMonitorApp:
         self.btn_export_tb = self.toolbar.add_action(
             "💾 Export Excel", command=self._export_excel, accent=True)
         add_tooltip(self.btn_export_tb,
-                    "Export Append1 + Rincian PO + Rincian IN ke Excel\n(aktif setelah pipeline selesai)")
+                    "Export ke Excel: sheet PIVOT (matrix mutasi barang "
+                    "+ conditional formatting) + Append1 + Rincian PO + "
+                    "Rincian IN + Laporan Deviasi (Audit)\n(aktif setelah "
+                    "pipeline selesai)")
         self.btn_export_tb.configure(state="disabled")
 
         self.toolbar.add_action("❓ Bantuan", command=self._show_help)
@@ -931,6 +950,10 @@ class StockMonitorApp:
 
         def work():
             with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+                # v3.8: sheet PIVOT ditulis DULU → jadi tab pertama
+                # (matrix mutasi barang + conditional formatting ala
+                # tab pivot "Mutasi Barang - New" user)
+                add_pivot_sheet(writer, append1_df)
                 if append1_df is not None and not append1_df.empty:
                     append1_df.to_excel(writer, sheet_name="Append1",
                                         index=False)

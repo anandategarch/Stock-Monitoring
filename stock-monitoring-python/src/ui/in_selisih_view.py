@@ -33,10 +33,12 @@ Drill-down (double-click baris) → popup RINCIAN IN per dokumen:
   - ⛶ Perbesar + ↔ Auto-Fit + Esc
 
 Tanggal -25..-31 = data bulan lalu (selalu terbaca — LightMode dihapus v3.5).
-Default rentang: -26 s/d 31 = tgl 26 BULAN LALU s/d 31 BULAN BERJALAN.
+v3.8: Default rentang 1 s/d 31 = periode BULAN BERJALAN saja (tanpa
+bulan lalu — permintaan user "rekap selisih in hanya periode 1-31").
+v3.6 (lama): default -26 s/d 31.
 """
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox, filedialog
 import pandas as pd
 from typing import Callable, Optional
 
@@ -49,6 +51,7 @@ from .widgets import (
     enable_col_resize, identify_to_column, insert_tree_items,
     open_tree_maximized, run_async, sort_tree_by_column,
 )
+from .export_sheets import build_selisih_export_df, write_selisih_sheet
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
 COLUMNS = [
@@ -539,12 +542,12 @@ class InSelisihView(tk.Frame):
 
         # --- Filter card (v3.5: RESTO combo DIHAPUS → header filter ⧩) ---
         fcard = Card(self.content, title="Filter",
-                     subtitle="Rentang tanggal (default: 26 bulan lalu s/d 31 "
-                              "bulan berjalan). Filter RESTO / KATEGORI / "
-                              "HASIL AUDIT / nilai kolom → klik judul kolom "
-                              "(ikon corong ⧩) di tabel. Filter hanya "
-                              "menyembunyikan baris — saldo & status audit "
-                              "dihitung dari data penuh.")
+                     subtitle="Rentang tanggal (default: 1–31 bulan BERJALAN "
+                              "saja — tanpa bulan lalu). Filter RESTO / "
+                              "KATEGORI / HASIL AUDIT / nilai kolom → klik "
+                              "judul kolom (ikon corong ⧩) di tabel. Filter "
+                              "hanya menyembunyikan baris — saldo & status "
+                              "audit dihitung dari data penuh.")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
@@ -552,7 +555,7 @@ class InSelisihView(tk.Frame):
         r0.pack(fill="x")
         tk.Label(r0, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.tgl_start_var = tk.StringVar(value="-26")  # v3.6: 26 BULAN LALU
+        self.tgl_start_var = tk.StringVar(value="1")  # v3.8: 1–31 berjalan saja
         entry_start = ttk.Entry(r0, textvariable=self.tgl_start_var, width=6)
         entry_start.pack(side="left", padx=(6, 2))
         entry_start.bind("<Return>", lambda e: self._on_tanggal_change())
@@ -563,10 +566,10 @@ class InSelisihView(tk.Frame):
         entry_end.bind("<Return>", lambda e: self._on_tanggal_change())
         add_tooltip(entry_start,
                     "Rentang hari -31..31 (angka NEGATIF = bulan lalu).\n"
-                    "Default -26 s/d 31 = periode resto PENUH: tgl 26 "
-                    "BULAN LALU s/d 31 BULAN BERJALAN.\nHanya menyembunyikan "
-                    "baris (saldo kumulatif tetap dihitung dari data "
-                    "penuh).")
+                    "Default 1 s/d 31 = periode BULAN BERJALAN saja "
+                    "(rekap selisih IN tanpa bulan lalu — v3.8).\nHanya "
+                    "menyembunyikan baris (saldo kumulatif tetap dihitung "
+                    "dari data penuh).")
         GhostButton(r0, text="Apply", command=self._on_tanggal_change).pack(
             side="left", padx=(0, 18))
 
@@ -608,6 +611,18 @@ class InSelisihView(tk.Frame):
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
                              "(filter & sort juga jalan di window besar;\n"
                              "Esc untuk menutup)")
+        # v3.8: export rekap Selisih IN per resto (permintaan user)
+        btn_export = GhostButton(head, text="💾 Export",
+                                 command=self._on_export)
+        btn_export.pack(side="right", padx=(0, 6))
+        add_tooltip(
+            btn_export,
+            "Export rekap Selisih IN PER RESTO ke Excel (.xlsx)\n"
+            "(semua baris dalam rentang tanggal aktif — default 1–31).\n"
+            "Kolom: Resto, Tanggal, Nama Barang, Kategori, Satuan,\n"
+            "Hasil SO, Sheet Barang Masuk, Kiriman HO (42.05),\n"
+            "Kiriman Supplier (32.24), Pembelian by Resto (99.01),\n"
+            "Selisih.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
@@ -817,6 +832,16 @@ class InSelisihView(tk.Frame):
             "Hasil Audit": df["Status Analisis Audit"].astype(str),
             "Catatan Audit": df["Detail & Catatan Audit"].astype(str),
         })
+        # v3.8: komponen IN per sumber (utk 💾 Export per resto — kolom
+        # Kiriman HO / Kiriman Supplier / Pembelian by Resto; tidak
+        # ditampilkan di tabel, hanya dibawa oleh base)
+        for col_out, col_in in (("42.05", "Qty SJ"),
+                                 ("32.24", "Qty RI"),
+                                 ("99.01", "Qty Pembelian")):
+            out[col_out] = pd.to_numeric(df.get(col_in),
+                                         errors="coerce") \
+                if col_in in df.columns else pd.Series(
+                    [pd.NA] * len(out), dtype="Float64")
         out.insert(3, "KATEGORI",
                    [self._kategori_map.get(b, "-")
                     for b in out["Nama Barang"]])
@@ -859,7 +884,7 @@ class InSelisihView(tk.Frame):
         try:
             tgl_start = int(float(self.tgl_start_var.get()))
         except (TypeError, ValueError):
-            tgl_start = -26
+            tgl_start = 1
         try:
             tgl_end = int(float(self.tgl_end_var.get()))
         except (TypeError, ValueError):
@@ -959,6 +984,76 @@ class InSelisihView(tk.Frame):
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
 
+    # --------------------------------------------------------- EXPORT --
+    def _on_export(self):
+        """v3.8 — Export rekap Selisih IN per resto ke Excel.
+
+        Semua baris dalam rentang tanggal aktif (default 1–31 bulan
+        berjalan); filter tampilan (⧩ / Hanya Selisih ≠ 0) tidak ikut —
+        export = REKAP lengkap per resto.
+        """
+        if (self.audit_df is None or self.audit_df.empty) and \
+                (self.data is None or self.data.empty):
+            messagebox.showwarning(
+                "Export", "Belum ada data. Jalankan pipeline dulu.",
+                parent=self.winfo_toplevel())
+            return
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Rekap Selisih IN per Resto",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile="selisih_in_per_resto.xlsx",
+            parent=self.winfo_toplevel(),
+        )
+        if not filepath:
+            return
+        try:
+            tgl_start = int(float(self.tgl_start_var.get()))
+        except (TypeError, ValueError):
+            tgl_start = 1
+        try:
+            tgl_end = int(float(self.tgl_end_var.get()))
+        except (TypeError, ValueError):
+            tgl_end = 31
+        if tgl_start > tgl_end:
+            tgl_start, tgl_end = tgl_end, tgl_start
+
+        def work():
+            base = self._cached_base
+            if base is None:
+                base = self._compute_base()
+            df = build_selisih_export_df(base, tgl_start, tgl_end)
+            if df.empty:
+                return None
+            with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+                write_selisih_sheet(writer, df)
+            return filepath, len(df)
+
+        def done(res):
+            if res is None:
+                messagebox.showwarning(
+                    "Export", "Tidak ada baris dalam rentang tanggal "
+                              f"{tgl_start}–{tgl_end}.",
+                    parent=self.winfo_toplevel())
+                return
+            path, n = res
+            self.status_var.set(
+                f"Export {n:,} baris → {path}")
+            messagebox.showinfo(
+                "Export Berhasil",
+                f"Rekap Selisih IN per resto ({n:,} baris)\n"
+                f"di-export ke:\n{path}",
+                parent=self.winfo_toplevel())
+
+        def on_error(e):
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}",
+                parent=self.winfo_toplevel())
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengekspor rekap Selisih IN…",
+                  on_error=on_error)
+
     # ------------------------------------------------------------ FILTERS
     def _on_tanggal_change(self):
         try:
@@ -975,7 +1070,7 @@ class InSelisihView(tk.Frame):
             self.status_var.set("Tanggal harus angka -31..31 (contoh: 1–31).")
 
     def _reset_filter(self):
-        self.tgl_start_var.set("-26")   # v3.6: 26 bulan lalu → 31 berjalan
+        self.tgl_start_var.set("1")    # v3.8: 1–31 bulan berjalan saja
         self.tgl_end_var.set("31")
         self.only_selisih_var.set(True)
         self._reset_filter_states()

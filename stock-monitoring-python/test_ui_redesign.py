@@ -21,8 +21,8 @@ Memverifikasi:
 9. Loading overlay terpasang di semua view
 10. v3.2 — KPI row DIHAPUS di tab data (tabel besar; ringkasan di footer)
 11. v3.2 — FOLLOW UP: kolom ✓ (toggle via klik sel), badge tab, tab
-    ☑ Follow Up (render snapshot, uncheck=hapus), export xlsx + impor
-    hasil TL (status Selesai + PIC), persistensi followup.json
+    ☑ Follow Up (render snapshot, uncheck=hapus), export xlsx,
+    persistensi followup.json (v3.8: impor hasil TL DIHAPUS)
 13. v3.4 — TAB 📤 REKAP SELISIH IN: render baris (Resto/Tanggal/Barang/
     Satuan/IN/Barang Masuk/Selisih IN), double-click → popup RINCIAN IN
     (dokumen 42.05/32.24/99.01 + Nomor + subtotal per sumber + copy nomor)
@@ -224,7 +224,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.7.0", APP_VERSION == "3.7.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.8.0", APP_VERSION == "3.8.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -286,9 +286,9 @@ def main():
     # ---- PIVOT MODE RESTO (default) ----
     pv = app.pivot_view
     check("Pivot default mode = resto", pv.pivot_mode == "resto")
-    check("(v3.6) Pivot default tanggal = -26 s/d 31 (26 bulan lalu → 31 "
-          "bulan berjalan)",
-          pv.tgl_start_var.get() == "-26" and pv.tgl_end_var.get() == "31",
+    check("(v3.8) Pivot default tanggal = -31 s/d 31 (kolom 25•-31• bulan "
+          "lalu lengkap + 1-31 berjalan)",
+          pv.tgl_start_var.get() == "-31" and pv.tgl_end_var.get() == "31",
           f"got {pv.tgl_start_var.get()}..{pv.tgl_end_var.get()}")
     cols = list(pv.tree["columns"])
     check("Pivot resto: kolom = resto (MLGPAR, SBYKET)",
@@ -698,7 +698,7 @@ def main():
     check("Empty state Follow Up kembali",
           fu.empty.winfo_manager() == "pack")
 
-    # -- toggle dari Laporan + export + import roundtrip --
+    # -- toggle dari Laporan + export (v3.8: Impor Hasil TL DIHAPUS) --
     select_and_wait(root, app, app.tab_laporan, app.laporan_view)
     lap_tree = app.laporan_view.tree
     first_lap = lap_tree.get_children("")[0]
@@ -715,25 +715,18 @@ def main():
         xlsx_path = tf.name
     store.export_xlsx(xlsx_path)
     check("Export FOLLOW UP xlsx", os.path.getsize(xlsx_path) > 0)
-
-    # isi kolom PIC petugas → import → resolved
-    from openpyxl import load_workbook
-    wb = load_workbook(xlsx_path)
-    ws = wb["FOLLOW UP"]
-    pic_col = next(c.column for c in ws[1] if c.value == "PIC")
-    ws.cell(row=2, column=pic_col, value="TEGAR")
-    wb.save(xlsx_path)
-    res = store.import_workbook(xlsx_path)
-    check("Impor hasil TL: 1 baris terisi",
-          res.get("n_filled") == 1, f"got {res}")
-    check("Baris ber-status Selesai", store.resolved_count() == 1)
     os.unlink(xlsx_path)
+
+    # v3.8: fitur impor DIHAPUS — tombol & method tidak ada lagi
+    check("v3.8: tombol Impor Hasil TL dihapus",
+          fu.btn_import is None)
+    check("v3.8: FollowUpStore.import_workbook dihapus",
+          not hasattr(store, "import_workbook"))
 
     # -- persistensi: store baru membaca followup.json --
     from src.ui.followup import FollowUpStore
     store2 = FollowUpStore()
     check("Persistensi: store baru memuat 1 baris", len(store2) == 1)
-    check("Persistensi: resolved ikut tersimpan", store2.resolved_count() == 1)
 
     # -- kosongkan --
     store.clear()
@@ -1385,6 +1378,198 @@ def main():
           list(prom.columns) == ["NAMA RESTO", "JENIS", "NAMA BARANG",
                                  "1", "2", "3"] and len(prom) == 2 and
           prom.iloc[0, 5] == 7)
+
+    # ==================================================================
+    print("== 17. v3.8 — SELISIH IN 1-31 + PIVOT -31..31 + EXPORT + CF ==")
+
+    # (a) default rentang tanggal baru
+    check("(v3.8) Rekap Selisih IN default = 1 s/d 31 (bulan berjalan)",
+          app.in_selisih_view.tgl_start_var.get() == "1" and
+          app.in_selisih_view.tgl_end_var.get() == "31",
+          f"got {app.in_selisih_view.tgl_start_var.get()}.."
+          f"{app.in_selisih_view.tgl_end_var.get()}")
+    app.in_selisih_view.tgl_start_var.set("-5")
+    app.in_selisih_view._reset_filter()
+    check("(v3.8) Reset Selisih IN kembali ke 1–31",
+          app.in_selisih_view.tgl_start_var.get() == "1")
+    app.pivot_view._reset_filter()
+    check("(v3.8) Reset Pivot kembali ke -31–31",
+          app.pivot_view.tgl_start_var.get() == "-31")
+
+    # (b) kolom tanggal pivot mode TANGGAL: -25..-31 lalu 1..3 (kronologis)
+    #     — akar bug user "25, 26, lalu 1": rentang lama -26 memotong
+    #     tgl 27-31 bulan lalu
+    test_df = pd.DataFrame({
+        "Nama Barang": ["AYAM"] * 12,
+        "JENIS": ["1.SO"] * 12,
+        "NAMA RESTO": ["MLGPAR"] * 12,
+        "Tanggal": [-25, -26, -27, -28, -29, -30, -31, 1, 2, 3, 4, 5],
+        "NILAI": [float(i + 1) for i in range(12)],
+        "SATUAN": ["GR"] * 12,
+        "KATEGORI": ["DEVIASI"] * 12,
+        "SOURCE KIRIMAN": ["GUDANG"] * 12,
+    })
+    orig_data = pv.data
+    try:
+        pv.data = test_df
+        st = {"name_selected": None, "resto": "(All)", "source": "(All)",
+              "kategori": "(All)", "tgl_start": -31, "tgl_end": 31,
+              "mode": "tanggal", "hide_empty": False}
+        payload = pv._compute_payload(st)
+        want_cols = ["-25", "-26", "-27", "-28", "-29", "-30", "-31",
+                     "1", "2", "3", "4", "5"]
+        check("(v3.8) Pivot tanggal: kolom -25..-31 + 1..5 urut kronologis "
+              "(bukan '25,26,lalu 1')",
+              payload["columns"] == want_cols,
+              f"got {payload['columns']}")
+        # rentang lama (-26) memang memotong — bukti akar masalah
+        st_old = dict(st, tgl_start=-26)
+        payload_old = pv._compute_payload(st_old)
+        check("(v3.8) Bukti akar bug: rentang lama -26 memotong -27..-31",
+              payload_old["columns"] == ["-25", "-26", "1", "2", "3", "4",
+                                         "5"],
+              f"got {payload_old['columns']}")
+    finally:
+        pv.data = orig_data
+
+    # (c) build_selisih_export_df — kolom PERSIS permintaan user
+    from src.ui.export_sheets import (
+        SELISIH_EXPORT_COLUMNS, build_selisih_export_df, write_selisih_sheet,
+        add_pivot_sheet,
+    )
+    base = pd.DataFrame({
+        "Resto": ["MLGPAR", "MLGPAR", "BDGUKU"],
+        "Tanggal": [5, -25, 5],
+        "Nama Barang": ["AYAM", "AYAM", "KOPI"],
+        "KATEGORI": ["DEVIASI", "DEVIASI", "PCS"],
+        "Satuan": ["GR", "GR", "PCS"],
+        "Hasil SO": [None, 100.0, 50.0],
+        "Barang Masuk": [80.0, None, 30.0],
+        "IN": [60.0, 10.0, 30.0],
+        "Selisih IN": [20.0, -10.0, 0.0],
+        "Saldo": [0.0, 0.0, 0.0],
+        "Hasil Audit": ["OK (Matching)", "OK", "OK"],
+        "Catatan Audit": ["-", "-", "-"],
+        "42.05": [50.0, 0.0, 20.0],
+        "32.24": [10.0, 10.0, 10.0],
+        "99.01": [0.0, 0.0, 0.0],
+    })
+    ex = build_selisih_export_df(base, 1, 31)
+    check("(v3.8) Export selisih: kolom persis (Resto..Selisih, rename "
+          "Sheet Barang Masuk/Kiriman HO/Kiriman Supplier/Pembelian)",
+          list(ex.columns) == SELISIH_EXPORT_COLUMNS and
+          SELISIH_EXPORT_COLUMNS == [
+              "Resto", "Tanggal", "Nama Barang", "Kategori", "Satuan",
+              "Hasil SO", "Sheet Barang Masuk", "Kiriman HO",
+              "Kiriman Supplier", "Pembelian by Resto", "Selisih"],
+          f"got {list(ex.columns)}")
+    check("(v3.8) Export selisih: hanya baris tgl 1-31 (baris -25 keluar)",
+          len(ex) == 2, f"got {len(ex)}")
+    r_mlg = ex[ex["Resto"] == "MLGPAR"].iloc[0]
+    check("(v3.8) Export selisih: nilai rename benar (BM→Sheet BM, "
+          "4205→Kiriman HO, 3224→Kiriman Supplier, 9901→Pembelian)",
+          float(r_mlg["Sheet Barang Masuk"]) == 80.0 and
+          float(r_mlg["Kiriman HO"]) == 50.0 and
+          float(r_mlg["Kiriman Supplier"]) == 10.0 and
+          float(r_mlg["Pembelian by Resto"]) == 0.0 and
+          float(r_mlg["Selisih"]) == 20.0,
+          f"got {r_mlg.to_dict()}")
+    check("(v3.8) Export selisih: urut Resto→Tanggal→Nama Barang "
+          "(BDGUKU dulu, lalu MLGPAR)",
+          list(ex["Resto"]) == ["BDGUKU", "MLGPAR"] and
+          int(ex.iloc[0]["Tanggal"]) == 5,
+          f"got {list(ex['Resto'])}")
+    check("(v3.8) Export selisih: Hasil SO kosong tetap kosong (bukan 0)",
+          pd.isna(r_mlg["Hasil SO"]) and
+          float(ex.iloc[0]["Hasil SO"]) == 50.0)
+    # edge: base TANPA kolom komponen 42.05/32.24/99.01 (defensif —
+    # pd.to_numeric(None) scalar pernah bikin AttributeError .fillna)
+    base_min = base.drop(columns=["42.05", "32.24", "99.01", "Saldo",
+                                  "Hasil Audit", "Catatan Audit"])
+    ex_min = build_selisih_export_df(base_min, 1, 31)
+    check("(v3.8) Export selisih defensif: base tanpa kolom komponen OK",
+          len(ex_min) == 2 and
+          float(ex_min.iloc[0]["Kiriman HO"]) == 0.0 and
+          list(ex_min.columns) == SELISIH_EXPORT_COLUMNS)
+    check("(v3.8) Export selisih defensif: base None/empty → 0 baris",
+          len(build_selisih_export_df(None)) == 0 and
+          len(build_selisih_export_df(pd.DataFrame())) == 0)
+
+    # (d) roundtrip file: sheet selisih + sheet PIVOT + conditional
+    #     formatting dibaca kembali (verifikasi rumus file user)
+    a1_small = pd.DataFrame({
+        "Nama Barang": ["AYAM", "AYAM", "AYAM", "GULA"],
+        "JENIS": ["1.SO", "4.IN", "5.BARANG MASUK", "1.SO"],
+        "NAMA RESTO": ["MLGPAR"] * 4,
+        "Tanggal": [-25, 1, 1, 2],
+        "NILAI": [10.0, 5.0, 5.0, 7.0],
+    })
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".xlsx",
+                                     delete=False) as tf:
+        xlsx_path = tf.name
+    with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+        write_selisih_sheet(writer, ex)
+        ok_pivot = add_pivot_sheet(writer, a1_small)
+    check("(v3.8) add_pivot_sheet: sheet dibuat", ok_pivot)
+
+    from openpyxl import load_workbook
+    wb = load_workbook(xlsx_path)
+    check("(v3.8) File export: sheet 'Selisih IN per Resto' + 'PIVOT'",
+          wb.sheetnames == ["Selisih IN per Resto", "PIVOT"],
+          f"got {wb.sheetnames}")
+    ws_sel = wb["Selisih IN per Resto"]
+    hdrs_sel = [c.value for c in ws_sel[1]]
+    check("(v3.8) Sheet selisih: header = kolom export",
+          hdrs_sel == SELISIH_EXPORT_COLUMNS, f"got {hdrs_sel}")
+    check("(v3.8) Sheet selisih: freeze A2 + autofilter",
+          ws_sel.freeze_panes == "A2" and
+          str(ws_sel.auto_filter.ref).startswith("A1:"), )
+    ws_p = wb["PIVOT"]
+    check("(v3.8) PIVOT: layout baris 1-6 persis file user",
+          ws_p["A1"].value == "NAMA RESTO" and ws_p["B1"].value == "(All)"
+          and ws_p["A2"].value == "SOURCE KIRIMAN" and
+          ws_p["A3"].value == "KATEGORI" and
+          ws_p["A5"].value == "Sum of NILAI" and
+          ws_p["B5"].value == "Column Labels" and
+          ws_p["A6"].value == "Row Labels" and
+          ws_p["B6"].value == -25 and ws_p["C6"].value == 1 and
+          ws_p["D6"].value == 2,
+          f"got A5={ws_p['A5'].value!r} B6={ws_p['B6'].value!r}")
+    check("(v3.8) PIVOT: row label kolom A = nama barang (bold) + jenis",
+          ws_p["A7"].value == "AYAM" and ws_p["A7"].font.bold and
+          ws_p["A8"].value == "1.SO" and
+          not (ws_p["A8"].font.bold or False) and
+          ws_p["A11"].value == "GULA" and ws_p["A12"].value == "1.SO",
+          f"got A7={ws_p['A7'].value!r} A8={ws_p['A8'].value!r} "
+          f"A11={ws_p['A11'].value!r}")
+    check("(v3.8) PIVOT: nilai Sum of NILAI (AYAM 1.SO tgl -25 = 10)",
+          ws_p["B8"].value == 10.0 and ws_p["D12"].value == 7.0,
+          f"got B8={ws_p['B8'].value!r} D12={ws_p['D12'].value!r}")
+
+    all_formulas = []
+    for cf in ws_p.conditional_formatting:
+        for rule in cf.rules:
+            all_formulas.extend(list(rule.formula or []))
+    joined = " || ".join(all_formulas)
+    check("(v3.8) PIVOT CF: =AND($A8=\"1.SO\",B8>A8) persis rumus user",
+          'AND($A8="1.SO",B8>A8)' in joined, f"got {joined}")
+    check("(v3.8) PIVOT CF: $A8=\"3.DEVIASI\" (border bawah)",
+          '$A8="3.DEVIASI"' in joined)
+    check("(v3.8) PIVOT CF: AND($A8=\"7.Selisih IN\",B8<>0) merah",
+          'AND($A8="7.Selisih IN",B8<>0)' in joined)
+    check("(v3.8) PIVOT CF: containsText 4.IN + 5.BARANG MASUK (kolom A)",
+          'SEARCH("4.IN",A7)' in joined and
+          'SEARCH("5.BARANG MASUK",A7)' in joined)
+    rules_zero = [r for cf in ws_p.conditional_formatting for r in cf.rules
+                  if r.type == "cellIs"]
+    check("(v3.8) PIVOT CF: cellIs 0 (font putih) + header < 0 (bulan lalu)",
+          len(rules_zero) == 2, f"got {len(rules_zero)}")
+    os.unlink(xlsx_path)
+
+    # (e) tombol export ada di view Selisih IN + Impor TL hilang
+    check("(v3.8) Handler export Selisih IN ada",
+          callable(app.in_selisih_view._on_export))
 
     # Cleanup
     root.destroy()

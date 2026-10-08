@@ -10,6 +10,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 > **v3.2 — Follow Up + tabel besar + perf**: tab baru **☑ Follow Up** (ala aplikasi *Waste*: centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi, persist `followup.json`, export Excel + impor hasil tindak lanjut), **KPI row di atas tabel DIHAPUS** di semua tab data (tabel jadi lebar & besar; ringkasan pindah ke status footer), dan **aplikasi diperingatkan** (deviasi 16× lebih cepat via vektorisasi numpy; laporan 3.7×; lazy refresh per tab — hanya tab aktif yang dihitung).
 > **v3.3 — Engine cepat + bug fix hasil deep audit**: **sort kolom kini LINEAR** (delete+reinsert — dulu `tree.move` O(n²) membekukan UI 45 detik di 50k baris, kini 0,7 detik), **fix bug follow-up salah baris setelah sort** (iid-based), **fix NameError path error pipeline**, double-click sel ✓ = toggle, cache pivot dibagi GR/PCS, tanpa modal "Selesai", dead code dibersihkan.
 > **v3.3.1 — FIX "Saldo SO kosong semua"** (tab Deviasi GR/PCS & Laporan): dua akar masalah digarap tuntas — **(1) sumber SO gagal terbaca**: data kini berupa **workbook gabungan `.xlsb`** (mis. `01.1 CEK STOCK V2.xlsb`, sheet `1  DEVIASI WEEKLY`, semua resto dalam 1 sheet) padahal reader lama hanya mencari file per-resto `.xlsx` ber-sheet `REKAP MENTAH` → reader baru otomatis mendeteksi sheet ber-schema rekap mentah di file/format apa pun (`*.xlsb` kini ter-glob; NAMA RESTO diambil dari kolom; scan folder + RootPath; `pyxlsb` ditambahkan ke requirements), **(2) bug render vektorisasi v3.2**: kolom matrix `SO_H-2 … SO_H+2 / In / Out / BK` (Deviasi) dan `Saldo Awal / IN / OUT / BK / Saldo Kumulatif` (Laporan) tidak pernah diekstrak ke builder baris → selalu tampil `-` walau datanya ada → kini semua kolom terisi. Divalidasi terhadap sheet `DEVIASI GR` workbook user: 1404/1405 baris identik (2 sel beda = pivot cache Excel user yang stale, bukan app).
+> **v3.8 — Rekap Selisih IN 1–31 + pivot lengkap 25•–31• + export PIVOT/SELISIH + impor TL dihapus**: **(1)** tab 📤 Rekap Selisih IN kini default periode **1–31 bulan BERJALAN saja** (tanpa bulan lalu); **(2) FIX kolom tanggal pivot "25, 26, lalu 1"** — data bulan lalu = tgl 25–31 (−25…−31) tetapi rentang lama `−26…31` memotong tgl 27–31 → kini default `−31…31`, kolom lengkap kronologis **25•, 26•, 27•, 28•, 29•, 30•, 31•, lalu 1, 2, 3…**; **(3)** Export Excel kini menyertakan sheet **PIVOT** (tab pertama) — mirror tab pivot "Mutasi Barang - New" user: row label kolom A = nama barang (bold) + jenis, kolom tanggal −25…−31 lalu 1…31, conditional formatting persis file user (`=AND($A8="1.SO",B8>A8)` bold hijau, `$A8="3.DEVIASI"` border bawah, `AND($A8="7.Selisih IN",B8<>0)` merah, nol = font putih, containsText `4.IN`/`5.BARANG MASUK` di kolom A, header tanggal < 0 biru muda); **(4)** tombol **💾 Export** di tab Rekap Selisih IN — rekap **per resto** dgn kolom Resto · Tanggal · Nama Barang · Kategori · Satuan · Hasil SO · **Sheet Barang Masuk** · **Kiriman HO** (42.05) · **Kiriman Supplier** (32.24) · **Pembelian by Resto** (99.01) · Selisih; **(5)** fitur **📥 Impor Hasil TL DIHAPUS** (user: tidak terlalu perlu).
 > **v3.6 — FIX tombol filter + hide/unhide kolom + audit dari data app + tanggal 26 lalu→31 berjalan**: **(1) BUG FIX KRITIS: tombol filter ⧩ di judul kolom TIDAK BISA DIKLIK dengan mouse** — `identify_column()` mengembalikan ID posisi-display (`#2`) sedangkan filter mencocokkan nama kolom simbolik (`Nama Barang`) → tidak pernah match (popup hanya terbuka via pemanggilan programatik; screenshot dev sebelumnya menipu). Kini klik funnel membuka popup di SEMUA tabel, tetap akurat saat ada kolom disembunyikan; window ⛶ Perbesar juga kini punya filter+sort sendiri (sebelumnya ikon funnel tersalin tapi MATI). **(2) HIDE/UNHIDE KOLOM** — klik kanan judul kolom (Sembunyikan/Auto-fit/Filter/Tampilkan semua) + tombol **◱ Kolom** (panel checklist) di semua tabel & window ⛶. **(3) AUDIT REKONSILIASI dari DATA APP** (permintaan user: tanpa sheet 29): tabel Rekap Selisih IN jadi SATU (segment dihapus) dengan kolom baru **Hasil SO · Saldo · Hasil Audit · Catatan Audit** — semua bisa difilter ⧩. **(4) Default tanggal -26 s/d 31 = tgl 26 BULAN LALU s/d 31 BULAN BERJALAN** + kolom hari bulan lalu berlabel `25•` + urutan kronologis diperbaiki.
 > **v3.5 — Audit Rekonsiliasi (port macro VBA) + semua header ber-filter + LightMode dihapus**: mode **🔍 Audit Rekonsiliasi** di tab Rekap Selisih IN membaca sheet **`29 Rekap Barang Masuk`** langsung dan menjalankan algoritma macro VBA `BuatLaporanDeviasiSampel` (saldo kumulatif, VALID/CUT-OFF/DEVIASI MURNI, KPI chips, baris berwarna — tervalidasi 86.713/86.738 baris identik dgn output macro user; 86.738 baris render 3,4 detik). **LightMode DIHAPUS** (selalu FULL). **Matrix resto tanggal default 26–31**. **SEMUA judul kolom kini punya filter ⧩** (Excel AutoFilter) — filter RESTO/STATUS duplikat di card atas dihapus; kolom **KATEGORI** baru di Rekap Selisih IN.
 > **v3.4 — Lebar kolom + SO bulan lalu + tab Rekap Selisih IN**: **(1)** lebar kolom kini **bisa di-adjust** — drag tepi kanan judul kolom untuk resize manual, double-click tepi = auto-fit 1 kolom, tombol **↔ Auto-Fit** di semua tabel (termasuk window ⛶ dan popup); **(2) FIX "SO bulan lalu gak ke record meskipun LightMode OFF"** — sheet `SO BULAN LALU` di workbook gabungan kini terbaca otomatis (header hari `Sum of N` + tanpa SATUAN didukung; scan RootPath untuk mode `lalu` dibatasi sheet ber-nama "LALU" agar bulan berjalan/lalu tidak tercampur) → tercatat sebagai Tanggal `-25 s/d -31`; **(3) tab BARU 📤 Rekap Selisih IN** — rekap per Resto × Tanggal × Barang × Satuan: **IN** (Accurate: 42.05+32.24+99.01) vs **Barang Masuk** (input rekap SO) + **Selisih IN**, double-click → **popup rincian IN per dokumen 42.05 / 32.24 / 99.01 BESERTA NOMORNYA** (subtotal per sumber + copy nomor); 9901 kini membawa kolom Nomor (PI) & Nomor PO; export Excel + sheet `Rincian IN`.
@@ -52,6 +53,29 @@ Stock Monitoring — Python Edition
 ### 6. Rincian PO (tab ketujuh)
 - Tabel Rincian PO dengan filter Cabang PO & Status.
 - Nomor # sebagai parent row (klik ▸ untuk expand).
+
+---
+
+## Fitur Baru v3.8 — Rekap Selisih IN 1–31 · Pivot 25•–31• · Export PIVOT + Selisih per Resto
+
+### 1. Rekap Selisih IN — periode default 1–31 (bulan berjalan saja)
+Permintaan user: *"untuk rekap selisih in hanya periode 1-31 aja gak perlu bulan lalu"*.
+Default rentang TANGGAL di tab 📤 Rekap Selisih IN kini `1` s/d `31` (dulu `-26` s/d `31`); Reset Filter ikut kembali ke 1–31; angka negatif tetap bisa diketik bila suatu saat perlu. Filter hanya menyembunyikan baris — saldo kumulatif & status audit tetap dihitung dari data penuh.
+
+### 2. FIX kolom tanggal pivot "25, 26, lalu 1" → 25•–31• lengkap
+Permintaan user: *"Tanggal di tab pivot tabel matrix tanggal kenapa dari 25,26 terus 1 ya? harusnya 25,26,27,28,29,30,31 baru kemudian 1,2,3…"*. **Akar masalah**: data bulan lalu mencakup tgl **25–31** (sheet `SO BULAN LALU` → Tanggal −25 s/d −31), tetapi rentang default lama `-26…31` **memotong tgl 27–31** — kolom bulan lalu yang lolos hanya 25• dan 26•, lalu loncat ke 1. Kini default `−31…31` (pivot + Reset): kolom tanggal lengkap urut kronologis **25•, 26•, 27•, 28•, 29•, 30•, 31•, lalu 1, 2, 3…** (dengan data asli: 38 kolom tanggal, 176 barang — kolom tetap data-driven, tanggal tanpa data tidak dibuat).
+
+### 3. Export Excel + sheet PIVOT (mirror tab pivot "Mutasi Barang - New")
+Tombol 💾 Export Excel kini menulis sheet **PIVOT sebagai tab pertama**, meniru tab pivot di file "Mutasi Barang - New" milik user (struktur + conditional formatting dibaca langsung dari XML file tsb):
+- **Layout identik**: baris 1–3 filter `NAMA RESTO / SOURCE KIRIMAN / KATEGORI = (All)` · baris 5 `Sum of NILAI | Column Labels` · baris 6 `Row Labels` + kolom tanggal **−25…−31 lalu 1…31** (numerik, urut kronologis) · baris 7+ kolom A = row label **nama barang (bold) + jenis**, nilai = Sum of NILAI (semua resto = (All)).
+- **Conditional formatting persis file user**: `=AND($A8="1.SO",B8>A8)` → font bold hijau 00B050 · `$A8="3.DEVIASI"` → border bawah tipis · `=AND($A8="7.Selisih IN",B8<>0)` → bold merah + fill FFC9C9 · `cellIs = 0` → font putih (nol "tak terlihat", trik file user) · kolom A containsText `4.IN` → 9C5700/FFEB9C dan `5.BARANG MASUK` → 006100/C6EFCE · header tanggal `< 0` → bold + fill biru muda (bulan lalu). Catatan: file lama memakai `6.Selisih IN` (penomoran pra-v3.4); rumus disesuaikan ke `7.Selisih IN` — 5 rumus lain identik karakter-per-karakter, warna dxf diambil dari file user.
+- Modul baru `src/ui/export_sheets.py` (pure pandas + openpyxl, thread-safe).
+
+### 4. Tombol 💾 Export di tab Rekap Selisih IN — rekap PER RESTO
+Permintaan user: *"export bagian tab selisih IN per resto"* dengan kolom: **Resto · Tanggal · Nama Barang · Kategori · Satuan · Hasil SO · Sheet Barang Masuk · Kiriman HO · Kiriman Supplier · Pembelian by Resto · Selisih** (rename dari user: Barang masuk → *Sheet Barang Masuk*; 4205 → *Kiriman HO*; 3224 → *Kiriman Supplier*; 9901 → *Pembelian by Resto*). Semua baris dalam rentang tanggal aktif (default 1–31), urut Resto → Tanggal → Nama Barang; Hasil SO kosong tetap kosong (bukan 0); sheet `Selisih IN per Resto` (header bold + freeze + autofilter). Tervalidasi real-data 68.098 baris: Kiriman HO/Supplier/Pembelian == rincian dokumen in_detail asli (401 sampel acak) dan == kolom IN.
+
+### 5. 📥 Impor Hasil TL DIHAPUS
+Permintaan user: *"hapus import hasil TL gak terlalu perlu"* — tombol + `FollowUpStore.import_workbook()` dihapus dari tab ☑ Follow Up. Export TL (kolom PIC/KATEGORI MASALAH/TINDAKAN) tetap; status Selesai/PIC yang sudah tersimpan sebelumnya tetap tampil.
 
 ---
 
@@ -281,10 +305,10 @@ Fitur UX per tab:
 ```
 stock-monitoring-python/
 ├── MULAI.bat / SETUP.bat       # entry point Windows
-├── config.json                 # RootPath + LightMode + Folders + Sheets
+├── config.json                 # RootPath + Folders + Sheets
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
-├── test_ui_redesign.py         # test UI v3.7 (174 check — + engine turbo & fix display-vs-logical index)
+├── test_ui_redesign.py         # test UI v3.8 (196 check — + selisih 1-31, pivot -31, export, CF PIVOT)
 ├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
@@ -299,11 +323,12 @@ stock-monitoring-python/
         ├── widgets.py          # Card, tombol, tooltip, empty state, overlay, HeaderFilter(+Group), ColumnManager (v3.6), resize, auto-fit, dll
         ├── followup.py         # (v3.2) FollowUpStore: fingerprint, snapshot, persist, export/import xlsx
         ├── followup_view.py    # (v3.2) tab ☑ Follow Up
-        ├── pivot_view.py       # tab Pivot Table (per resto default; default -26..31)
+        ├── pivot_view.py       # tab Pivot Table (per resto default; default -31..31)
         ├── deviasi_view.py     # tab Deviasi GR & PCS (vektorisasi numpy + kolom ✓)
         ├── laporan_deviasi_view.py  # tab Laporan Deviasi (np.select + kolom ✓)
-        ├── in_selisih_view.py  # (v3.4→v3.6) tab 📤 Rekap Selisih IN + audit data app + popup Rincian IN
+        ├── in_selisih_view.py  # (v3.4→v3.8) tab 📤 Rekap Selisih IN + audit + 💾 Export per resto (default 1-31)
         ├── rincian_po_view.py  # tab Rincian PO
+        ├── export_sheets.py    # (v3.8) sheet PIVOT (CF ala file user) + sheet Selisih IN per resto
         └── details_popup.py    # popup detail source rows (copy Nomor/PO)
 ```
 
@@ -313,7 +338,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3.7: 174 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.8: 196 check (jalankan di bawah Xvfb di Linux)
 ```
 
 > UI test di Linux/headless: `xvfb-run` atau `Xvfb :99` + `DISPLAY=:99 python test_ui_redesign.py`.

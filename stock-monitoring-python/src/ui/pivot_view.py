@@ -10,6 +10,12 @@ Dua mode pivot (segment "PIVOT PER" di atas tabel):
   item tanpa nilai di semua resto disembunyikan.
 - 📅 TANGGAL: kolom = Tanggal (perilaku v3.0) + rentang tanggal.
 
+v3.8:
+- Default rentang tanggal -31 s/d 31 (dulu -26): data bulan lalu mencakup
+  tgl 25-31 (negatif -25 s/d -31) → kolom tanggal kini LENGKAP urut
+  kronologis 25•,26•,27•,28•,29•,30•,31• lalu 1,2,3,... (dulu -27..-31
+  terpotong filter sehingga kolomnya "25,26, lalu 1").
+
 v3.2:
 - KPI row di atas tabel DIHAPUS (tabel lebar & besar; ringkasan di footer)
 - Lazy refresh: compute hanya saat tab terlihat (app → ensure_refreshed)
@@ -147,7 +153,7 @@ class PivotTableView(tk.Frame):
         r1.pack(fill="x")
         tk.Label(r1, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.tgl_start_var = tk.StringVar(value="-26")  # v3.6: 26 BULAN LALU
+        self.tgl_start_var = tk.StringVar(value="-31")  # v3.8: 31 BULAN LALU
         t1 = ttk.Entry(r1, textvariable=self.tgl_start_var, width=6)
         t1.pack(side="left", padx=(6, 2))
         t1.bind("<Return>", lambda e: self._refresh_pivot())
@@ -157,8 +163,10 @@ class PivotTableView(tk.Frame):
         t2.pack(side="left", padx=(2, 6))
         t2.bind("<Return>", lambda e: self._refresh_pivot())
         add_tooltip(t1, "Rentang tanggal -31..31 (angka NEGATIF = bulan "
-                        "lalu).\nDefault -26 s/d 31 = periode resto PENUH: "
-                        "tgl 26 BULAN LALU s/d 31 BULAN BERJALAN.\n"
+                        "lalu, contoh -27 = tgl 27 bulan lalu).\n"
+                        "Default -31 s/d 31: kolom tanggal lengkap 25-31 "
+                        "bulan lalu (label 25• s/d 31•) URUT KRONOLOGIS "
+                        "lalu 1-31 bulan berjalan.\n"
                         "Mode 🏪 Resto: total per resto dihitung HANYA "
                         "dari tanggal dalam rentang ini.\nMode 📅 Tanggal: "
                         "batas kolom tanggal yang tampil.")
@@ -629,7 +637,7 @@ class PivotTableView(tk.Frame):
         self.resto_var.set("(All)")
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
-        self.tgl_start_var.set("-26")  # v3.6: 26 bulan lalu → 31 berjalan
+        self.tgl_start_var.set("-31")  # v3.8: 31 bulan lalu → 31 berjalan
         self.tgl_end_var.set("31")
         self.hide_empty_var.set(True)
         self._name_selected = None
