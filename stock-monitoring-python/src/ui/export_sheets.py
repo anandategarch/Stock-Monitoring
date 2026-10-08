@@ -345,3 +345,167 @@ def add_pivot_sheet(writer, append1_df: pd.DataFrame,
             font=Font(bold=True, color=C_SO_GREEN)))
 
     return True
+
+
+# =============================================================================
+# 3. SHEET PIVOT SESUAI TAMPILAN (v3.9.2 — export tombol 💾 di tab Pivot)
+# =============================================================================
+def _col_label(c) -> str:
+    """Label kolom persis heading UI: tgl bulan lalu = '25•' (legend •)."""
+    try:
+        ci = int(float(str(c)))
+        return f"{abs(ci)}•" if ci < 0 else str(ci)
+    except (TypeError, ValueError):
+        return str(c)
+
+
+def _is_int(v: float) -> bool:
+    try:
+        return float(v) == int(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def write_pivot_display_sheet(filepath: str, payload: dict,
+                              visible_cols: list | None = None,
+                              sheet_name: str = "PIVOT") -> int:
+    """v3.9.2 — Export TABEL PIVOT SESUAI TAMPILAN ke file .xlsx tunggal
+    (permintaan user: "pivot tabel nya bisa export excel").
+
+    payload = hasil PivotTableView._compute_payload — sudah memperhitungkan
+    filter RESTO/SOURCE/KATEGORI + rentang TANGGAL + mode 🏪 resto / 📅
+    tanggal + ☑ sembunyikan baris kosong. visible_cols = daftar kolom yang
+    TAMPIL di tabel (displaycolumns — None = semua kolom payload).
+
+    Style mirror UI v3.9.2 (minus merah PER CELL, bukan per baris):
+    - header kolom tanggal bulan lalu (label 25•) → bold + fill biru muda
+    - baris nama barang → bold + fill abu (ala tag item_header)
+    - baris 4.IN / 5.BARANG MASUK → warna metric utuh (fg+bg)
+    - baris 7.Selisih IN (ada nilai ≠ 0) → fill merah muda (ala anomaly)
+    - nilai MINUS → font merah hanya di CELL itu (kurung ala UI)
+    - nilai 0 → font putih "tak terlihat" (trik file user, CF p4)
+    Return jumlah baris data yang ditulis.
+    """
+    rows = payload.get("rows_data") or []
+    columns = [str(c) for c in payload.get("columns") or []]
+    if not rows or not columns:
+        return 0
+
+    # kolom tampil (urut displaycolumns tree bila diberikan)
+    if visible_cols:
+        vis = [str(c) for c in visible_cols]
+        idx = [i for i, c in enumerate(columns) if c in vis]
+    else:
+        idx = list(range(len(columns)))
+    if not idx:
+        idx = list(range(len(columns)))
+
+    st = payload.get("filters") or {}
+    mode = st.get("mode") or payload.get("col_kind") or "resto"
+    mode_label = "Per Tanggal" if mode == "tanggal" else "Per Resto"
+    t1, t2 = st.get("tgl_start", 1), st.get("tgl_end", 31)
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31]
+
+    # --- baris filter (ala layout "Mutasi Barang - New" + info mode) ---
+    meta = [
+        ("MODE", mode_label),
+        ("NAMA RESTO", str(st.get("resto", "(All)"))),
+        ("SOURCE KIRIMAN", str(st.get("source", "(All)"))),
+        ("KATEGORI", str(st.get("kategori", "(All)"))),
+    ]
+    for i, (k, v) in enumerate(meta, start=1):
+        ws.cell(row=i, column=1, value=k).font = Font(bold=True,
+                                                      color="FF475569")
+        ws.cell(row=i, column=2, value=v)
+    ws.cell(row=5, column=1, value="TANGGAL").font = Font(bold=True,
+                                                          color="FF475569")
+    ws.cell(row=5, column=2,
+            value=f"{t1} s/d {t2} (negatif = bulan lalu)")
+    ws.cell(row=6, column=1, value="Sum of NILAI").font = Font(bold=True)
+    ws.cell(row=6, column=2, value="Column Labels").font = Font(bold=True)
+    hdr = ws.cell(row=7, column=1, value="Row Labels")
+    hdr.font = Font(bold=True)
+    hdr.fill = PatternFill(start_color="FFE2E8F0", end_color="FFE2E8F0",
+                           fill_type="solid")
+
+    # header kolom — label persis UI (25• = bulan lalu → biru muda bold)
+    for j, ci in enumerate(idx, start=2):
+        c = columns[ci]
+        cell = ws.cell(row=7, column=j, value=_col_label(c))
+        cell.font = Font(bold=True)
+        try:
+            if int(float(str(c))) < 0:
+                cell.fill = PatternFill(start_color=C_HDR_FILL,
+                                        end_color=C_HDR_FILL,
+                                        fill_type="solid")
+        except (TypeError, ValueError):
+            pass
+
+    # --- data ---
+    METRIC_BG = {k: v for k, v in PivotTableView.METRIC_BG.items()}
+    fmt_int, fmt_dec = "#,##0;(#,##0)", "#,##0.0;(#,##0.0)"
+    r = 8
+    n_data = 0
+    for iid, label, is_item, metric, vals in rows:
+        cell = ws.cell(row=r, column=1, value=str(label))
+        if is_item:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="FFE2E8F0",
+                                    end_color="FFE2E8F0", fill_type="solid")
+        else:
+            n_data += 1
+            # fill + fg baris metric — mirror tag UI (in/bm/anomaly/bg)
+            fill = None
+            fg = None
+            if metric == "4.IN":
+                fill, fg = C_IN_FILL, C_IN_FONT
+            elif metric == "5.BARANG MASUK":
+                fill, fg = C_BM_FILL, C_BM_FONT
+            elif metric == "7.Selisih IN":
+                fill = C_SELISIH_FILL   # fg dipecah per-cell di bawah
+            else:
+                bg = METRIC_BG.get(metric)
+                if bg:
+                    fill = "FF" + bg.lstrip("#").upper()
+            if fill:
+                cell.fill = PatternFill(start_color=fill, end_color=fill,
+                                        fill_type="solid")
+            if fg:
+                cell.font = Font(color=fg)
+            for j, ci in enumerate(idx, start=2):
+                try:
+                    v = float(vals[ci])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                vc = ws.cell(row=r, column=j, value=v)
+                vc.number_format = fmt_int if _is_int(v) else fmt_dec
+                # MINUS → font merah PER CELL (permintaan v3.9.2);
+                # Selisih IN ≠ 0 → merah (anomaly per cell, mirror UI)
+                red = v < 0 or (metric == "7.Selisih IN" and v != 0)
+                if red:
+                    vc.font = Font(color="FFCC0000",
+                                   bold=metric == "7.Selisih IN")
+                elif v == 0:
+                    vc.font = Font(color=C_WHITE)   # nol tak terlihat
+                elif fg:
+                    vc.font = Font(color=fg)
+        r += 1
+    last_row = r - 1
+
+    # catatan legenda
+    note = ws.cell(row=last_row + 2, column=1,
+                   value="• = tanggal bulan lalu · nilai dalam kurung = minus "
+                         "(font merah) · 0 disembunyikan (font putih)")
+    note.font = Font(italic=True, color="FF94A3B8")
+
+    ws.column_dimensions["A"].width = 30
+    for j in range(2, 2 + len(idx)):
+        ws.column_dimensions[get_column_letter(j)].width = 11
+    ws.freeze_panes = "B8"
+
+    wb.save(filepath)
+    return n_data

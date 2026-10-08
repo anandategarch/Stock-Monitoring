@@ -1784,6 +1784,46 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
     return cancel
 
 
+# --- Per-cell tag (v3.9.2) — minus merah per CELL, bukan per baris -----------
+#
+# ttk.Treeview klasik hanya bisa mewarnai per BARIS (tag item). Tk 9.0
+# menambah API `treeview tag cell add <tag> <cells>` — tag per CELL.
+# Dipakai supaya nilai minus TIDAK mewarnai seluruh baris: hanya cell
+# bernilai negatif yang merah (permintaan user v3.9.2).
+# Tk 8.6 (Python lama di Windows) tidak punya API ini → view memakai
+# fallback tag per-baris (perilaku v3.9.1, lihat CELL_TAGS_SUPPORTED).
+
+CELL_TAGS_SUPPORTED = tk.TkVersion >= 9.0
+
+
+def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
+                   chunk: int = 3000) -> int:
+    """Pasang TAG per-CELL ke daftar sel [(iid, column_id), ...] via
+    `treeview tag cell add` (Tk 9+).
+
+    - Dikirim per-chunk supaya list Tcl tidak terlalu besar.
+    - Item yang sudah tidak ada (re-render terjadi di tengah jalan) →
+      TclError → sisa chunk dibatalkan AMAN (render baru akan memasang
+      ulang seluruh cell).
+    - No-op senyap di Tk 8 (tidak ada `tag cell`) — view wajib menyediakan
+      fallback tag per-baris lewat CELL_TAGS_SUPPORTED.
+    Return jumlah cell yang berhasil ditandai.
+    """
+    if not cells or not CELL_TAGS_SUPPORTED:
+        return 0
+    applied = 0
+    path = str(tree)
+    for i in range(0, len(cells), chunk):
+        part = cells[i:i + chunk]
+        try:
+            tree.tk.call(path, "tag", "cell", "add", tag,
+                         tuple((str(iid), str(col)) for iid, col in part))
+        except tk.TclError:
+            break   # item sudah dihapus (re-render) — sisanya tak relevan
+        applied += len(part)
+    return applied
+
+
 # --- Sort engine linear (v3.3) ------------------------------------------------
 
 def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
@@ -2090,7 +2130,7 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
 def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                         setup_tags=None, on_double_click=None,
                         on_sort_setup=None, on_context_menu=None,
-                        on_filter_setup=None):
+                        on_filter_setup=None, on_render_done=None):
     """Buka window besar berisi clone penuh dari source_tree — tombol ⛶.
 
     setup_tags(new_tree)   : pasang tag styling (mis. self._setup_tags).
@@ -2103,6 +2143,10 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                              (klik funnel = popup filter + sort, ala tabel
                              utama). Sebelumnya funnel clone cuma ikon
                              mati — tidak bisa diklik.
+    on_render_done(new_tree): v3.9.2 — dipanggil SETELAH semua item clone
+                             selesai di-insert (batch async). Dipakai view
+                             utk memasang ulang TAG PER-CELL (minus merah)
+                             di clone — insert ulang menghapus tag cell.
 
     v3.6: displaycolumns (kolom tersembunyian) disalin dari sumber; clone
     punya ColumnManager sendiri (klik kanan heading / tombol ◱ Kolom) yang
@@ -2261,6 +2305,11 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     def done():
         overlay.hide()
         count_var.set(f"{len(items):,} baris · {title}")
+        if on_render_done:
+            # suppress (bukan try/except-pass): callback view defensive di
+            # dalamnya; kegagalan tidak boleh memutus batch insert clone
+            with contextlib.suppress(Exception):
+                on_render_done(new_tree)
 
     insert_cancel = insert_tree_items(new_tree, items, batch=600,
                                       on_done=done,

@@ -51,7 +51,7 @@ from .widgets import (
     ColumnManager, TableExpander, add_tooltip, attach_clone_filters,
     auto_fit_columns, enable_col_resize, identify_to_column,
     insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
-    fmt_int_id, validated_tgl_entry,
+    fmt_int_id, validated_tgl_entry, apply_cell_tag, CELL_TAGS_SUPPORTED,
 )
 from .export_sheets import (
     AUDIT_EXPORT_COLUMNS, build_selisih_export_df, write_selisih_sheet,
@@ -205,6 +205,9 @@ class InDetailPopup(tk.Toplevel):
         self._flash_after = None
         self._base_status = ""
         self._render_df: pd.DataFrame = detail_df
+        # v3.9.2: minus merah PER CELL (kolom Qty) — fallback Tk 8 per baris
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []
 
         self._build_ui(barang, resto, tgl_txt, row_summary)
         self._render()
@@ -324,6 +327,7 @@ class InDetailPopup(tk.Toplevel):
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
+        tree.tag_configure("neg_cell", foreground="#dc2626")  # v3.9.2
         tree.tag_configure("subtotal", background="#f1f5f9",
                            foreground=C_HEADER)
 
@@ -338,6 +342,7 @@ class InDetailPopup(tk.Toplevel):
 
         items = []
         n_docs = 0
+        neg_cells = []   # v3.9.2 — per-cell minus (kolom Qty)
         subtotal_rows = []
         for src, _color in _SOURCES:
             sub = df[df["SOURCE IN"] == src]
@@ -352,7 +357,12 @@ class InDetailPopup(tk.Toplevel):
                 qty_txt, is_neg = _fmt_num(qty), (pd.notna(qty) and qty < 0)
                 tags = []
                 if is_neg:
-                    tags.append("negative")
+                    # v3.9.2: minus merah PER CELL (kolom Qty saja) —
+                    # sebelumnya satu nilai minus membuat SELURUH BARIS merah
+                    if self._cell_tags:
+                        neg_cells.append((f"doc_{len(items)}", "Qty"))
+                    else:
+                        tags.append("negative")
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")
                 items.append(("", f"doc_{len(items)}", {
                     "values": (
@@ -386,7 +396,18 @@ class InDetailPopup(tk.Toplevel):
         self._base_status = (f"{n_docs} dokumen · "
                              f"Total IN: {_fmt_num(df['Value'].sum())}")
         self.status_var.set(self._base_status)
-        insert_tree_items(self.tree, items, batch=400)
+        self._neg_cells = neg_cells
+
+        def _done():
+            # v3.9.2: pasang tag PER-CELL setelah semua baris ter-insert
+            self._reapply_cell_tags(self.tree)
+
+        insert_tree_items(self.tree, items, batch=400, on_done=_done)
+
+    def _reapply_cell_tags(self, tree):
+        """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶)."""
+        if self._cell_tags and self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     # --------------------------------------------------------------- COPY ---
     def _copy_to_clipboard(self, text, label: str = "Nomor"):
@@ -493,7 +514,8 @@ class InDetailPopup(tk.Toplevel):
         return open_tree_maximized(
             self.tree, f"Rincian IN — {self.title().replace('Rincian IN — ', '')}",
             setup_tags=lambda t: self._setup_tags(t),
-            on_context_menu=self._on_context_menu)
+            on_context_menu=self._on_context_menu,
+            on_render_done=self._reapply_cell_tags)  # v3.9.2 per-cell
 
 
 # =============================================================================

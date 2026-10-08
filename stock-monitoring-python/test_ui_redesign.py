@@ -224,7 +224,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.1", APP_VERSION == "3.9.1", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.2", APP_VERSION == "3.9.2", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -1773,6 +1773,234 @@ def main():
     # pulihkan messagebox yang di-patch (section 18b)
     _isv_mod.messagebox.showinfo = _orig_info
     _isv_mod.messagebox.showwarning = _orig_warn
+
+    print("== 21. (v3.9.2) MINUS MERAH PER CELL + EXPORT PIVOT SESUAI TAMPILAN ==")
+
+    # (a) unit: apply_cell_tag — tag per-cell Tk 9 (item hilang → aman)
+    from src.ui.widgets import apply_cell_tag as _act, CELL_TAGS_SUPPORTED
+    if CELL_TAGS_SUPPORTED:
+        _t = ttk.Treeview(root, columns=["a", "b", "c"], show="headings")
+        _t.pack(fill="x")
+        _t.tag_configure("negcell", foreground="#CC0000")
+        _t.insert("", "end", iid="c1", values=("1", "-2", "3"))
+        _t.insert("", "end", iid="c2", values=("-4", "0", "-6"))
+        n_applied = _act(_t, "negcell",
+                         [("c1", "b"), ("c2", "a"), ("c2", "c")])
+        _hc = lambda i, c: root.tk.call(str(_t), "tag", "cell", "has",
+                                         "negcell", (i, c))
+        check("(v3.9.2) apply_cell_tag: cell minus ditandai PER-CELL",
+              n_applied == 3 and _hc("c1", "b") == 1 and
+              _hc("c2", "a") == 1 and _hc("c2", "c") == 1 and
+              _hc("c1", "a") == 0,
+              f"applied={n_applied}")
+        n2 = _act(_t, "negcell", [("ghost", "a")])
+        check("(v3.9.2) apply_cell_tag: item hilang → dibatalkan aman",
+              n2 == 0)
+        # re-insert = tag cell ter-reset (dipasang ulang oleh view)
+        _t.delete("c1")
+        _t.insert("", "end", iid="c1", values=("1", "-2", "3"))
+        check("(v3.9.2) re-insert me-reset tag cell (dasar reapply sort)",
+              _hc("c1", "b") == 0)
+        _act(_t, "negcell", [("c1", "b")])
+        check("(v3.9.2) reapply setelah re-insert bekerja",
+              _hc("c1", "b") == 1)
+        _t.destroy()
+    else:
+        check("(v3.9.2) fallback Tk 8: tag per baris (perilaku lama)",
+              True)   # info saja — sandbox test memakai Tk 9
+
+    # (b) PIVOT standalone — data dengan MINUS (baris TIDAK memerah penuh)
+    # NB: total baris harus > 0 agar tidak disembunyikan hide-empty (ON)
+    neg_rows_src = []
+    for barang, so_v, sa_v, dev_vals, sel_vals in [
+            ("BARANG MINUS", 4.0, 20.0, (-6.0, 10.0), (0.0, 5.0)),
+            ("BARANG PLUS", 30.0, 10.0, (20.0, 20.0), (0.0, 0.0))]:
+        for jenis, vals in [("1.SO", (so_v, so_v)),
+                            ("2.SALDO AKHIR", (sa_v, sa_v)),
+                            ("3.DEVIASI", dev_vals),
+                            ("7.Selisih IN", sel_vals)]:
+            for tgl in (1, 2):
+                neg_rows_src.append({
+                    "Nama Barang": barang, "JENIS": jenis,
+                    "NAMA RESTO": "MLGPAR", "Tanggal": tgl,
+                    "NILAI": float(vals[tgl - 1]), "SATUAN": "GR",
+                    "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                    "SOURCE KIRIMAN": "GUDANG"})
+    neg_df = pd.DataFrame(neg_rows_src)
+    from src.ui.pivot_view import PivotTableView
+    pv2 = PivotTableView(root)
+    pv2.pack(fill="both", expand=True)
+    # set state SEBELUM data → refresh sync deterministik (tanpa race
+    # refresh-async dari load_data)
+    pv2.pivot_mode = "tanggal"
+    pv2.tgl_start_var.set("1")
+    pv2.tgl_end_var.set("2")
+    pv2.data = neg_df
+    pv2._populate_filters()
+    pv2._show_content()
+    pv2._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not pv2._busy and len(pv2.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    _t2 = pv2.tree
+    _hcn = lambda i, c: root.tk.call(str(_t2), "tag", "cell", "has",
+                                      "neg_cell", (i, c))
+    # cari iid baris per (barang, metric)
+    _map = {}
+    for _p in _t2.get_children(""):
+        for _c in _t2.get_children(_p):
+            _map[(_t2.item(_p, "text"), _t2.item(_c, "text"))] = _c
+    _dev = _map[("BARANG MINUS", "3.DEVIASI")]
+    _dev2 = _map[("BARANG PLUS", "3.DEVIASI")]
+    _sel = _map[("BARANG MINUS", "7.Selisih IN")]
+    if CELL_TAGS_SUPPORTED:
+        check("(v3.9.2) Pivot: cell minus (3.DEVIASI tgl 1) merah per-cell",
+              _hcn(_dev, "1") == 1)
+        check("(v3.9.2) Pivot: cell positif (3.DEVIASI tgl 2) TIDAK merah",
+              _hcn(_dev, "2") == 0)
+        check("(v3.9.2) Pivot: baris minus TIDAK tag 'negative' (baris utuh)",
+              "negative" not in _t2.item(_dev, "tags") and
+              "deviasi_row" not in _t2.item(_dev, "tags"))
+        check("(v3.9.2) Pivot: 3.DEVIASI tanpa minus → tak ada cell merah",
+              _hcn(_dev2, "1") == 0 and _hcn(_dev2, "2") == 0)
+        check("(v3.9.2) Pivot: Selisih IN ≠ 0 (tgl 2) merah per-cell",
+              _hcn(_sel, "2") == 1 and _hcn(_sel, "1") == 0)
+        check("(v3.9.2) Pivot: baris Selisih pakai bg-only 'selisih_anomaly_bg'",
+              "selisih_anomaly_bg" in _t2.item(_sel, "tags"))
+    check("(v3.9.2) Pivot: payload membawa red_cells + rows_data + filters",
+          len(pv2._last_payload.get("red_cells", [])) > 0 and
+          len(pv2._last_payload.get("rows_data", [])) > 0 and
+          pv2._last_payload.get("filters", {}).get("mode") == "tanggal")
+    check("(v3.9.2) Pivot: handler 💾 export ada + bisa dipanggil",
+          callable(pv2._on_export_excel) and
+          callable(pv2._do_export_excel) and
+          callable(pv2._visible_columns))
+
+    # (c) export pivot sesuai tampilan → read-back (font merah per cell)
+    from src.ui.export_sheets import write_pivot_display_sheet
+    _exp_path = os.path.join(tempfile.mkdtemp(), "pivot_v392.xlsx")
+    _n_exp = write_pivot_display_sheet(_exp_path, pv2._last_payload,
+                                       visible_cols=None)
+    check("(v3.9.2) Export pivot: file dibuat + baris data > 0",
+          _n_exp > 0 and os.path.exists(_exp_path) and
+          os.path.getsize(_exp_path) > 0, f"n={_n_exp}")
+    from openpyxl import load_workbook as _lw
+    _wb = _lw(_exp_path)
+    _ws = _wb.active
+    check("(v3.9.2) Export pivot: layout meta filter + header + freeze",
+          _ws["A1"].value == "MODE" and _ws["B1"].value == "Per Tanggal"
+          and _ws.cell(row=7, column=1).value == "Row Labels"
+          and _ws.freeze_panes == "B8")
+    _red_n = 0
+    _red_expect = 0
+    for _r in range(8, _ws.max_row + 1):
+        _lab = _ws.cell(row=_r, column=1).value
+        for _cc in range(2, _ws.max_column + 1):
+            _cell = _ws.cell(row=_r, column=_cc)
+            _v = _cell.value
+            if not isinstance(_v, (int, float)):
+                continue
+            _col = _cell.font.color.rgb if (_cell.font and
+                                            _cell.font.color) else None
+            _is_red = _col and "CC0000" in str(_col).upper()
+            _should_red = _v < 0 or (_lab == "7.Selisih IN" and _v != 0)
+            if _is_red:
+                _red_n += 1
+            if _should_red:
+                _red_expect += 1
+                check(f"(v3.9.2) Export pivot: cell minus r{_r}c{_cc} "
+                      "font merah", bool(_is_red),
+                      f"v={_v} col={_col}")
+    check("(v3.9.2) Export pivot: jumlah cell merah == UI red_cells",
+          _red_n == _red_expect == len(pv2._last_payload["red_cells"]),
+          f"red={_red_n} expect={_red_expect} "
+          f"ui={len(pv2._last_payload['red_cells'])}")
+    pv2.destroy()
+
+    # (d) wiring semua view: helper per-cell + reapply (fallback Tk 8 aman)
+    check("(v3.9.2) Deviasi GR: reapply cell + tag neg_cell ada",
+          callable(app.deviasi_gr_view._reapply_cell_tags) and
+          hasattr(app.deviasi_gr_view, "_neg_cells"))
+    check("(v3.9.2) Deviasi PCS: reapply cell ada",
+          callable(app.deviasi_pcs_view._reapply_cell_tags))
+    check("(v3.9.2) Laporan Deviasi: reapply cell ada",
+          callable(app.laporan_view._reapply_cell_tags))
+    check("(v3.9.2) app pivot: export handler ada",
+          callable(app.pivot_view._on_export_excel))
+
+    # (d2) details_popup._prepare_rows (staticmethod) — per_cell param
+    from src.ui.details_popup import DetailsPopup
+    _dp_df = pd.DataFrame([{
+        "Nama Barang": "AYAM", "NAMA RESTO": "MLGPAR", "Tanggal": 5,
+        "JENIS": "4.IN", "NILAI": -7.0, "Nomor": "IT-1",
+        "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+        "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "AYAM", "NAMA RESTO": "MLGPAR", "Tanggal": 6,
+         "JENIS": "4.IN", "NILAI": 3.0, "Nomor": "IT-2",
+         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+         "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG"}])
+    _pl = DetailsPopup._prepare_rows(_dp_df, None, per_cell=True)
+    _pl8 = DetailsPopup._prepare_rows(_dp_df, None, per_cell=False)
+    check("(v3.9.2) DetailsPopup: per_cell=True → neg_cells [(row_0,NILAI)] "
+          "+ tanpa tag baris",
+          _pl.get("neg_cells") == [("row_0", "NILAI")] and
+          "negative" not in _pl["items"][0][2]["tags"])
+    check("(v3.9.2) DetailsPopup: per_cell=False (Tk 8) → tag baris lama",
+          not _pl8.get("neg_cells") and
+          "negative" in _pl8["items"][0][2]["tags"])
+
+    # (e) deviasi view — data minus (SO < SALDO AKHIR di H=25)
+    #     → hanya cell Deviasi yang merah; sort → reapply tetap merah
+    dev_neg_src = []
+    for barang, so_v, sa_v in [("DEV MIN", 4.0, 20.0),
+                               ("DEV PLUS", 30.0, 10.0)]:
+        for jenis, base in [("1.SO", so_v), ("2.SALDO AKHIR", sa_v),
+                            ("SALDO AWAL", 10.0), ("4.IN", 2.0)]:
+            for tgl in range(20, 28):
+                dev_neg_src.append({
+                    "Nama Barang": barang, "JENIS": jenis,
+                    "NAMA RESTO": "MLGPAR", "Tanggal": tgl,
+                    "NILAI": float(base), "SATUAN": "GR",
+                    "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                    "SOURCE KIRIMAN": "GUDANG"})
+    dev_neg_df = pd.DataFrame(dev_neg_src)
+    from src.ui.deviasi_view import DeviasiView
+    dv2 = DeviasiView(root, satuan_mode="GR")
+    dv2.pack(fill="both", expand=True)
+    # set data langsung + refresh sync (deterministik — lihat (b))
+    dv2.data = dev_neg_df
+    dv2._show_content()
+    dv2._refresh(sync=True)
+    for _ in range(80):
+        root.update()
+        if not dv2._busy and len(dv2.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    _t3 = dv2.tree
+    _hcd = lambda i: root.tk.call(str(_t3), "tag", "cell", "has",
+                                   "neg_cell", (i, "Deviasi"))
+    _devmin_iid = None
+    for _iid in _t3.get_children(""):
+        if _t3.set(_iid, "Nama Barang") == "DEV MIN":
+            _devmin_iid = _iid
+    if CELL_TAGS_SUPPORTED and _devmin_iid:
+        check("(v3.9.2) Deviasi: cell Deviasi minus merah PER-CELL "
+              "(baris tidak memerah)",
+              _hcd(_devmin_iid) == 1 and
+              "negative" not in _t3.item(_devmin_iid, "tags"))
+        _devplus_iid = None
+        for _iid in _t3.get_children(""):
+            if _t3.set(_iid, "Nama Barang") == "DEV PLUS":
+                _devplus_iid = _iid
+        check("(v3.9.2) Deviasi: baris tanpa minus → cell Deviasi tidak merah",
+              _devplus_iid is None or _hcd(_devplus_iid) == 0)
+        # sort (delete+reinsert) → reapply memasang ulang tag cell
+        dv2._sort_by("Deviasi", reverse=True)
+        check("(v3.9.2) Deviasi: sort → tag cell minus DIPASANG ULANG",
+              _hcd(_devmin_iid) == 1)
+    dv2.destroy()
 
     # Cleanup
     root.destroy()

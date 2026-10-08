@@ -32,7 +32,7 @@ from .widgets import (
     ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
     attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
-    sort_tree_by_column,
+    sort_tree_by_column, apply_cell_tag, CELL_TAGS_SUPPORTED,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -73,6 +73,10 @@ class LaporanDeviasiView(tk.Frame):
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
+        # v3.9.2: minus merah PER CELL (kolom Deviasi saja) — fallback
+        # Tk 8: tag per baris (perilaku lama)
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []
 
         self._build_ui()
         self._setup_tags()
@@ -299,6 +303,8 @@ class LaporanDeviasiView(tk.Frame):
         tree.tag_configure("cutoff_resolved", foreground="#059669")
         tree.tag_configure("review", foreground="#ea580c")
         tree.tag_configure("negative", foreground="#dc2626")
+        # v3.9.2 — minus merah PER CELL (bukan satu baris penuh)
+        tree.tag_configure("neg_cell", foreground="#dc2626")
 
     # =========================================================================
     # DATA LOADING
@@ -542,6 +548,7 @@ class LaporanDeviasiView(tk.Frame):
         items = []
         fp_map = {}
         row_snaps = {}
+        neg_cells = []   # v3.9.2 — per-cell minus (kolom Deviasi)
         store = self.store
         # v3.3.1 FIX (pola sama dgn deviasi_view): vektorisasi v3.2 lupa
         # memasukkan Saldo Awal/IN/OUT/BK/Saldo Kumulatif ke cols_np → kolom
@@ -589,8 +596,14 @@ class LaporanDeviasiView(tk.Frame):
 
             tags = []
             deviasi = cols_np["Deviasi"][i]
+            # v3.9.2: minus merah PER CELL (kolom Deviasi) — sebelumnya
+            # satu nilai minus membuat SELURUH BARIS merah. Status audit
+            # (ok_match, deviasi_murni, dst) tetap per baris (semantik baris).
             if pd.notna(deviasi) and deviasi < 0:
-                tags.append("negative")
+                if self._cell_tags:
+                    neg_cells.append((f"row_{i}", "Deviasi"))
+                else:
+                    tags.append("negative")
             status_aud = str(cols_np["Status Audit"][i]).strip()
             if status_aud == "OK (Matching)":
                 tags.append("ok_match")
@@ -614,17 +627,21 @@ class LaporanDeviasiView(tk.Frame):
         status = (f"{n} rows · Total |Deviasi|: {self._fmt_num(total_dev)} · "
                   f"{summary}")
         return {"items": items, "status": status,
-                "fp_map": fp_map, "row_snaps": row_snaps}
+                "fp_map": fp_map, "row_snaps": row_snaps,
+                "neg_cells": neg_cells}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
+        self._neg_cells = payload.get("neg_cells", [])   # v3.9.2 per-cell
         # distribusi status ada di status footer (v3.2 — kartu KPI dihapus)
         self.status_var_label.set(payload["status"])
 
         def render_done():
+            # v3.9.2: tag PER-CELL setelah semua item ter-insert
+            self._reapply_cell_tags(self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -632,6 +649,12 @@ class LaporanDeviasiView(tk.Frame):
 
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
+
+    def _reapply_cell_tags(self, tree):
+        """v3.9.2 — pasang ulang tag per-cell minus (sort = delete+
+        reinsert → tag cell ter-reset; dipakai juga utk clone ⛶)."""
+        if self._cell_tags and self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     def _reset_filter(self):
         self.tgl_start_var.set("1")
@@ -658,7 +681,8 @@ class LaporanDeviasiView(tk.Frame):
             self.tree, "Laporan Deviasi — Audit Harian",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            on_render_done=self._reapply_cell_tags)  # v3.9.2 per-cell
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
@@ -673,11 +697,13 @@ class LaporanDeviasiView(tk.Frame):
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         """Sort kolom — engine LINEAR v3.3 (delete+reinsert; tree.move
-        O(n²) dulu membekukan UI 45s saat sort 50k baris)."""
+        O(n²) dulu membekukan UI 45s saat sort 50k baris).
+        v3.9.2: delete+reinsert me-reset tag PER-CELL → dipasang ulang."""
         if self._busy and tree is None:
             return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
         sort_tree_by_column(tree, col, reverse=reverse)
+        self._reapply_cell_tags(tree)
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""

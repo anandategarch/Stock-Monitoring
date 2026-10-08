@@ -24,6 +24,7 @@ from .widgets import (
     AccentButton, GhostButton, HeaderFilter, ColumnManager, LoadingOverlay,
     add_tooltip, attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
+    apply_cell_tag, CELL_TAGS_SUPPORTED,
 )
 
 # Column definitions: (column_id, width, anchor)
@@ -74,6 +75,9 @@ class DetailsPopup(tk.Toplevel):
         self._base_status = ""
         self._flash_after = None
         self._render_df: Optional[pd.DataFrame] = df
+        # v3.9.2: minus merah PER CELL (kolom NILAI) — fallback Tk 8 per baris
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []
 
         # Build UI
         self._build_ui(title, filter_info)
@@ -233,6 +237,7 @@ class DetailsPopup(tk.Toplevel):
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
+        tree.tag_configure("neg_cell", foreground="#dc2626")  # v3.9.2
 
     # =====================================================================
     # RENDER (async + batched)
@@ -245,7 +250,8 @@ class DetailsPopup(tk.Toplevel):
         df = self.df
 
         def work():
-            return self._prepare_rows(df, self._name_selected)
+            return self._prepare_rows(df, self._name_selected,
+                                       per_cell=self._cell_tags)
 
         def done(payload):
             self._render_rows(payload)
@@ -254,8 +260,13 @@ class DetailsPopup(tk.Toplevel):
                   loading_text="Menyiapkan detail…", sync=sync)
 
     @staticmethod
-    def _prepare_rows(df: pd.DataFrame, name_selected: set | None) -> dict:
-        """Pure: filter + format baris → payload render (thread-safe)."""
+    def _prepare_rows(df: pd.DataFrame, name_selected: set | None,
+                      per_cell: bool = False) -> dict:
+        """Pure: filter + format baris → payload render (thread-safe).
+
+        v3.9.2: per_cell=True (Tk 9) → minus dikumpulkan sebagai neg_cells
+        [(iid, 'NILAI')] utk tag PER-CELL; False (Tk 8) → tag per baris
+        (perilaku lama)."""
         if df is None or df.empty:
             return {"items": [], "status": "Tidak ada source data untuk "
                                            "kombinasi ini.", "total": 0}
@@ -278,6 +289,7 @@ class DetailsPopup(tk.Toplevel):
         items = []
         n = len(render_df)
         total_nilai = 0.0
+        neg_cells = []   # v3.9.2 — per-cell minus (kolom NILAI)
         for i in range(n):
             values = []
             has_negative = False
@@ -297,7 +309,12 @@ class DetailsPopup(tk.Toplevel):
                     values.append(DetailsPopup._fmt_cell(val, col_name))
             tags = []
             if has_negative:
-                tags.append("negative")
+                # v3.9.2: minus merah PER CELL (kolom NILAI saja) —
+                # sebelumnya satu nilai minus membuat SELURUH BARIS merah
+                if per_cell:
+                    neg_cells.append((f"row_{i}", "NILAI"))
+                else:
+                    tags.append("negative")
             tags.append("evenrow" if i % 2 == 0 else "oddrow")
             items.append(("", f"row_{i}", {"values": values,
                                            "tags": tuple(tags)}))
@@ -308,7 +325,7 @@ class DetailsPopup(tk.Toplevel):
             total_str = f"{total_nilai:,.1f}"
         status = f"{n} rows · Total NILAI: {total_str}"
         return {"items": items, "status": status, "total": total_nilai,
-                "render_df_len": n}
+                "render_df_len": n, "neg_cells": neg_cells}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -318,8 +335,11 @@ class DetailsPopup(tk.Toplevel):
         # simpan df tampilan saat ini (untuk copy semua unik)
         self._render_df = self._apply_name_filter_df()
         self.header_filter.refresh_icon()
+        self._neg_cells = payload.get("neg_cells", [])   # v3.9.2 per-cell
 
         def render_done():
+            # v3.9.2: tag PER-CELL setelah semua baris ter-insert
+            self._reapply_cell_tags(self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -327,6 +347,11 @@ class DetailsPopup(tk.Toplevel):
 
         insert_tree_items(self.tree, payload["items"], batch=400,
                           on_done=render_done)
+
+    def _reapply_cell_tags(self, tree):
+        """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶)."""
+        if self._cell_tags and self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     def _apply_name_filter_df(self) -> pd.DataFrame:
         df = self.df

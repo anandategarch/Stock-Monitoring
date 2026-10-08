@@ -122,7 +122,23 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.1"  # v3.9.1 — DEEP AUDIT UI/UX → 15 FIX PORT KE v3.9
+APP_VERSION = "3.9.2"  # v3.9.2 — MINUS MERAH PER CELL + EXPORT PIVOT SESUAI TAMPILAN
+# v3.9.2 (permintaan user: "minus harusnya cuman merah per cell bukan per
+# baris dan pivot tabel nya bisa export excel"):
+# (1) MINUS MERAH PER CELL (bukan per baris) di SEMUA tabel: Pivot matrix,
+#     Deviasi GR/PCS, Laporan Deviasi, popup Rincian IN & popup Detail —
+#     Tk 9 API `treeview tag cell add` (helper apply_cell_tag); hanya cell
+#     bernilai negatif yang merah — label baris & cell lain tetap normal.
+#     Baris 3.DEVIASI pivot tidak lagi selalu merah; 7.Selisih ≠ 0 tetap
+#     fill merah muda per baris, font merah per-cell pada nilai ≠ 0.
+#     Tag cell dipasang ulang otomatis setelah sort (delete+reinsert) &
+#     clone ⛶ (hook on_render_done). Fallback Tk 8.6: perilaku lama.
+# (2) Tombol 💾 Export Excel di tab 📊 PIVOT: matrix pivot SESUAI
+#     TAMPILAN (filter RESTO/SOURCE/KATEGORI + rentang Tanggal + mode
+#     🏪/📅 + sembunyikan-baris-kosong + kolom tampil ◱) → .xlsx:
+#     minus = font merah PER CELL (mirror UI), 0 = font putih, metric bg,
+#     header 25• bulan lalu biru, freeze B8 (write_pivot_display_sheet).
+# v3.9.1 — DEEP AUDIT UI/UX → 15 FIX PORT KE v3.9
 # v3.9.1 (hasil audit 39 temuan, 3 high — semua fix ditandai "# FIX <ID>"
 # di kode, bisa di-grep):
 # (1) B-01 (HIGH): _busy di-reset saat compute GAGAL — sebelumnya 1x error
@@ -269,6 +285,11 @@ TAB PIVOT TABLE
     - Tanggal : kolom = tanggal + rentang tanggal.
   • Filter Nama Barang: klik header kolom "Nama Barang" (ikon corong ⧩).
   • Double-click cell → pop-up baris source data pendukung.
+  • (v3.9.2) MINUS MERAH PER CELL: hanya cell bernilai negatif yang
+    ditandai merah (berlaku di semua tabel) — bukan satu baris penuh.
+  • (v3.9.2) Tombol 💾 Export Excel (di atas tabel): simpan matrix pivot
+    SESUAI TAMPILAN ke .xlsx — filter + mode + rentang tanggal + kolom
+    tampil ikut serta; nilai minus tetap font merah per cell di Excel.
 
 FOLLOW UP (v3.2 — ala aplikasi Waste)
   • Centang kolom ✓ di tabel Deviasi GR / Deviasi PCS / Laporan Deviasi

@@ -43,7 +43,7 @@ from .widgets import (
     ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
     attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
-    sort_tree_by_column, fmt_int_id,
+    sort_tree_by_column, fmt_int_id, apply_cell_tag, CELL_TAGS_SUPPORTED,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -170,6 +170,12 @@ class DeviasiView(tk.Frame):
         self.store = followup_store       # shared FollowUpStore (v3.2)
         self._fp_map: dict[str, str] = {}     # iid → fingerprint
         self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw (v3.2)
+        # v3.9.2: minus merah PER CELL (Tk 9 `tag cell`) — fallback Tk 8:
+        # tag per baris (perilaku lama)
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []   # [(iid, 'Deviasi')] — dipasang ulang
+                                     # setelah insert / sort / clone
+        self._zero_cells: list = []  # [(iid, 'Deviasi')] deviasi == 0
         self._tnum = None                 # cache pd.to_numeric(Tanggal)
 
         self._build_ui()
@@ -440,6 +446,9 @@ class DeviasiView(tk.Frame):
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero_dev", foreground="#64748b")
+        # v3.9.2 — minus merah PER CELL (bukan satu baris penuh)
+        tree.tag_configure("neg_cell", foreground="#dc2626")
+        tree.tag_configure("zero_cell", foreground="#64748b")
         # CEK — palet modern (sejalan design system)
         tree.tag_configure("cek_kosong", foreground="#b45309")   # amber
         tree.tag_configure("cek_tanggal", foreground="#2563eb")  # blue
@@ -768,6 +777,8 @@ class DeviasiView(tk.Frame):
         items = []
         fp_map = {}
         row_snaps = {}
+        neg_cells = []    # v3.9.2 — per-cell minus (kolom Deviasi)
+        zero_cells = []   # v3.9.2 — per-cell deviasi == 0
         store = self.store
         asal = f"DEVIASI {self.satuan_mode}"
         # v3.3.1 FIX "Saldo SO kosong semua": vektorisasi v3.2 lupa memasukkan
@@ -818,10 +829,19 @@ class DeviasiView(tk.Frame):
             tags = []
             deviasi = cols_np["Deviasi"][i]
             if pd.notna(deviasi):
+                # v3.9.2: minus merah PER CELL (kolom Deviasi saja) —
+                # sebelumnya SATU nilai minus membuat SELURUH BARIS merah.
+                # Fallback Tk 8: perilaku lama (tag per baris).
                 if deviasi < 0:
-                    tags.append("negative")
+                    if self._cell_tags:
+                        neg_cells.append((f"row_{i}", "Deviasi"))
+                    else:
+                        tags.append("negative")
                 elif deviasi == 0:
-                    tags.append("zero_dev")
+                    if self._cell_tags:
+                        zero_cells.append((f"row_{i}", "Deviasi"))
+                    else:
+                        tags.append("zero_dev")
             cek_val = cek_series.iloc[i]
             if cek_val == "Kosong/Non Aktif":
                 tags.append("cek_kosong")
@@ -843,7 +863,8 @@ class DeviasiView(tk.Frame):
             f"{self._fmt_num(total_dev)} · CEK {cek_count} · "
             f"H={st['tanggal_h']}")
         return {"items": items, "kpi": (n, total_dev, cek_count),
-                "status": status, "fp_map": fp_map, "row_snaps": row_snaps}
+                "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
+                "neg_cells": neg_cells, "zero_cells": zero_cells}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -851,11 +872,16 @@ class DeviasiView(tk.Frame):
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
+        # v3.9.2 — cell minus per-cell (dipasang ulang juga setelah sort/clone)
+        self._neg_cells = payload.get("neg_cells", [])
+        self._zero_cells = payload.get("zero_cells", [])
         # ringkasan (baris · total deviasi · anomali) ada di status footer —
         # KPI row atas tabel sudah dihapus (v3.2)
         self.status_var.set(payload["status"])
 
         def render_done():
+            # v3.9.2: tag PER-CELL setelah semua item ter-insert
+            self._reapply_cell_tags(self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -863,6 +889,17 @@ class DeviasiView(tk.Frame):
 
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
+
+    def _reapply_cell_tags(self, tree):
+        """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
+        (tabel utama / clone ⛶). Sort = delete+reinsert → tag cell hilang
+        → dipanggil lagi dari _sort_by dan on_render_done clone."""
+        if not self._cell_tags:
+            return
+        if self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        if self._zero_cells:
+            apply_cell_tag(tree, "zero_cell", self._zero_cells)
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
@@ -883,7 +920,8 @@ class DeviasiView(tk.Frame):
             self.tree, f"Deviasi {mode_label} — CEK Anomaly",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            on_render_done=self._reapply_cell_tags)  # v3.9.2 per-cell
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
@@ -958,11 +996,13 @@ class DeviasiView(tk.Frame):
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         """Sort kolom — engine LINEAR v3.3 (delete+reinsert, bukan
-        tree.move O(n²) yang membekukan UI di tabel besar)."""
+        tree.move O(n²) yang membekukan UI di tabel besar).
+        v3.9.2: delete+reinsert me-reset tag PER-CELL → dipasang ulang."""
         if self._busy and tree is None:
             return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
         sort_tree_by_column(tree, col, reverse=reverse)
+        self._reapply_cell_tags(tree)
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""

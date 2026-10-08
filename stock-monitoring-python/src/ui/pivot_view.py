@@ -10,6 +10,18 @@ Dua mode pivot (segment "PIVOT PER" di atas tabel):
   item tanpa nilai di semua resto disembunyikan.
 - 📅 TANGGAL: kolom = Tanggal (perilaku v3.0) + rentang tanggal.
 
+v3.9.2 (permintaan user: "minus harusnya cuman merah per cell bukan per
+baris dan pivot tabel nya bisa export excel"):
+- MINUS MERAH PER CELL (bukan per baris) — Tk 9 `treeview tag cell add`
+  (helper apply_cell_tag): hanya cell bernilai < 0 yang font-nya merah;
+  baris 3.DEVIASI tidak lagi selalu merah; 7.Selisih ≠ 0 tetap dapat fill
+  merah muda per baris, font merah per-cell pada nilai ≠ 0. Fallback Tk 8:
+  perilaku lama (tag per baris) via CELL_TAGS_SUPPORTED.
+- Tombol 💾 Export Excel: matrix pivot SESUAI TAMPILAN (filter RESTO/
+  SOURCE/KATEGORI + rentang Tanggal + mode + sembunyikan-baris-kosong +
+  kolom tampil ◱) → .xlsx via write_pivot_display_sheet — minus = font
+  merah per cell (mirror UI), 0 = font putih (trik file user).
+
 v3.8:
 - Default rentang tanggal -31 s/d 31 (dulu -26): data bulan lalu mencakup
   tgl 25-31 (negatif -25 s/d -31) → kolom tanggal kini LENGKAP urut
@@ -26,8 +38,9 @@ compute/render async.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox, filedialog
 import pandas as pd
+from datetime import datetime
 from typing import Optional, Callable
 
 from .theme import (
@@ -38,8 +51,12 @@ from .widgets import (
     LoadingOverlay, SegmentBar, TableExpander, add_tooltip, auto_fit_columns,
     enable_col_resize, identify_to_column, insert_tree_items,
     open_tree_maximized, run_async, fmt_int_id, validated_tgl_entry,
-    ColumnManager, attach_clone_filters,
+    ColumnManager, attach_clone_filters, apply_cell_tag,
+    CELL_TAGS_SUPPORTED,
 )
+# NB: write_pivot_display_sheet di-import LAZY di _do_export_excel —
+# export_sheets mengimpor PivotTableView (METRICS) → import modul-level
+# menciptakan circular import.
 
 
 class PivotTableView(tk.Frame):
@@ -76,7 +93,12 @@ class PivotTableView(tk.Frame):
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
-
+        # v3.9.2: minus merah PER CELL (Tk 9 `tag cell`) — fallback Tk 8:
+        # tag per baris (perilaku lama). Probe di main thread, sekali.
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._last_payload: dict = {}      # utk export sesuai tampilan
+        self._red_cells: list = []         # [(iid, col)] — dipasang ulang
+                                           # setelah insert/sort/clone
         self._build_ui()
         self._setup_tags()
         if data is not None and not data.empty:
@@ -226,6 +248,18 @@ class PivotTableView(tk.Frame):
         add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
                              "(double-click tepi kolom = auto-fit 1 kolom;\n"
                              "drag tepi kolom = atur lebar manual)")
+        # v3.9.2: 💾 Export Excel — matrix pivot SESUAI TAMPILAN (filter +
+        # mode aktif); nilai minus ditandai font merah per cell (mirror UI)
+        btn_export = GhostButton(head, text="💾 Export Excel",
+                                 command=self._on_export_excel)
+        btn_export.pack(side="right", padx=(0, 6))
+        add_tooltip(btn_export,
+                    "Export matrix pivot yang TAMPIL sekarang ke Excel "
+                    "(.xlsx)\n"
+                    "— filter RESTO/SOURCE/KATEGORI + rentang Tanggal + "
+                    "mode Resto/Tanggal +\nsembunyikan-baris-kosong ikut "
+                    "serta; kolom tersembunyi (◱) tidak ikut.\n"
+                    "Nilai minus = font merah per cell (persis tampilan).")
 
         self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="browse")
 
@@ -263,7 +297,7 @@ class PivotTableView(tk.Frame):
         legend = LegendRow(
             self.content,
             [("IN", "#9C5700"), ("BARANG MASUK", "#006100"),
-             ("DEVIASI", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9"),
+             ("Minus / nilai < 0", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9"),
              ("tgl • = bulan lalu", "#94a3b8")])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
@@ -352,7 +386,12 @@ class PivotTableView(tk.Frame):
         self.content.pack(fill="both", expand=True)
 
     def _setup_tags(self, tree=None):
-        """Tag Treeview: warna metric + conditional formatting (identik lama)."""
+        """Tag Treeview: warna metric + conditional formatting (identik lama).
+
+        v3.9.2: 'neg_cell' = tag PER-CELL (minus merah, Tk 9 `tag cell`) —
+        baris TIDAK lagi memerah satu baris penuh; 'selisih_anomaly_bg'
+        = variasi bg-only utk baris Selisih ≠ 0 (font merah per-cell).
+        """
         tree = tree if tree is not None else self.tree
         for metric, color in self.METRIC_BG.items():
             tree.tag_configure(self._metric_tag(metric), background=color)
@@ -363,6 +402,9 @@ class PivotTableView(tk.Frame):
         tree.tag_configure("deviasi_row", foreground="#CC0000")
         tree.tag_configure("selisih_anomaly", foreground="#CC0000",
                            background="#FFC9C9")
+        # v3.9.2 — bg saja (tanpa fg merah): font merah dipasang PER CELL
+        tree.tag_configure("selisih_anomaly_bg", background="#FFC9C9")
+        tree.tag_configure("neg_cell", foreground="#CC0000")
         tree.tag_configure("in_row", foreground="#9C5700",
                            background="#FFEB9C")
         tree.tag_configure("bm_row", foreground="#006100",
@@ -433,10 +475,20 @@ class PivotTableView(tk.Frame):
         }
 
     def _compute_payload(self, st: dict) -> dict:
-        """Compute pivot + siapkan baris tree (pure pandas, thread-safe)."""
+        """Compute pivot + siapkan baris tree (pure pandas, thread-safe).
+
+        v3.9.2: payload juga membawa:
+        - red_cells : [(iid, col)] — cell minus (< 0) + Selisih IN ≠ 0 →
+          dipasang tag PER-CELL 'neg_cell' di main thread setelah insert
+          (minus merah per CELL, bukan per baris — permintaan user).
+        - rows_data : [(iid, label, is_item, metric, vals-float)] — data
+          mentah utk tombol 💾 Export Excel sesuai tampilan.
+        - filters  : snapshot filter aktif (resto/source/kategori/tgl/mode).
+        """
         empty = {"columns": [], "col_kind": st["mode"], "items": [],
                  "kpi": (0, 0, 0), "status": "Belum ada data.",
-                 "filtered_rows": 0}
+                 "filtered_rows": 0, "red_cells": [], "rows_data": [],
+                 "filters": dict(st)}
         df = self.data
         if df is None or df.empty:
             return empty
@@ -516,6 +568,8 @@ class PivotTableView(tk.Frame):
             metrics = [m for m in metrics if m != "6.PEMAKAIAN (COM)"]
 
         tree_items = []
+        rows_data = []          # v3.9.2 — data mentah utk export
+        red_cells = []          # v3.9.2 — cell minus (per-cell merah)
         n_rows = 0
         n_items_shown = 0
         empty_series = pd.Series({c: 0 for c in col_keys})
@@ -552,10 +606,27 @@ class PivotTableView(tk.Frame):
                                               col_keys)
                 values = [self._format_num(row_data.get(c, 0))
                           for c in col_keys]
+                iid = f"{item_iid}_{self._metric_tag(metric)}"
                 child_rows.append((
-                    item_iid, f"{item_iid}_{self._metric_tag(metric)}",
+                    item_iid, iid,
                     {"text": metric, "values": values, "tags": tags,
                      "open": False}))
+
+                # v3.9.2 — nilai mentah utk export + cell minus per-cell
+                raw_vals = []
+                for c in col_keys:
+                    v = row_data.get(c, 0)
+                    try:
+                        v = float(v)
+                        if pd.isna(v):
+                            v = 0.0
+                    except (TypeError, ValueError):
+                        v = 0.0
+                    raw_vals.append(v)
+                    if self._cell_tags and (
+                            v < 0 or (metric == "7.Selisih IN" and v != 0)):
+                        red_cells.append((iid, str(c)))
+                rows_data.append((iid, metric, False, metric, raw_vals))
 
             if not child_rows:
                 continue  # item tanpa metric bernilai → sembunyikan parent
@@ -564,6 +635,7 @@ class PivotTableView(tk.Frame):
                                {"text": item,
                                 "values": ["" for _ in columns],
                                 "tags": ("item_header",), "open": True}))
+            rows_data.append((item_iid, item, True, None, None))
             tree_items.extend(child_rows)
             n_items_shown += 1
             n_rows += 1 + len(child_rows)
@@ -574,7 +646,9 @@ class PivotTableView(tk.Frame):
             f"{'resto' if mode == 'resto' else 'tanggal'} = {n_rows} baris · "
             f"filtered {len(df):,}/{len(self.data):,} rows")
         return {"columns": columns, "col_kind": mode, "items": tree_items,
-                "kpi": kpi, "status": status, "filtered_rows": len(df)}
+                "kpi": kpi, "status": status, "filtered_rows": len(df),
+                "red_cells": red_cells, "rows_data": rows_data,
+                "filters": dict(st)}
 
     # =========================================================================
     # REFRESH (async + render batched)
@@ -609,6 +683,10 @@ class PivotTableView(tk.Frame):
 
     def _render_payload(self, payload: dict):
         cols = payload["columns"]
+        # v3.9.2: simpan payload terakhir — dipakai tombol 💾 Export Excel
+        # (export = SESUAI TAMPILAN: filter + mode + hide-empty aktif)
+        self._last_payload = payload
+        self._red_cells = payload.get("red_cells", [])
         self.tree.delete(*self.tree.get_children())
         # reset displaycolumns SEBELUM re-assign columns — Tk memvalidasi
         # displaycolumns lama terhadap daftar kolom baru (mode resto→tanggal
@@ -643,6 +721,12 @@ class PivotTableView(tk.Frame):
         self.status_var.set(payload["status"])
 
         def render_done():
+            # v3.9.2: pasang tag PER-CELL utk cell minus (SETELAH semua item
+            # ter-insert — insert baru = tag cell ter-reset). Chunked &
+            # fail-safe: bila re-render terjadi di tengah jalan, sisa chunk
+            # dibatalkan (render baru memasang ulang).
+            if self._cell_tags and self._red_cells:
+                apply_cell_tag(self.tree, "neg_cell", self._red_cells)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -653,7 +737,16 @@ class PivotTableView(tk.Frame):
 
     def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series,
                           tanggals: list) -> tuple:
-        """Conditional formatting rules (identik versi lama)."""
+        """Conditional formatting rules.
+
+        v3.9.2 — PER-CELL (Tk 9): minus dimerahkan PER CELL via tag
+        'neg_cell' (dipasang di _render_payload), sehingga baris TIDAK
+        lagi memerah satu baris penuh:
+        - 'negative' per-baris      → TIDAK dipakai (fallback Tk 8 saja)
+        - 'deviasi_row' selalu merah → TIDAK dipakai (bg metric tetap)
+        - 'selisih_anomaly' fg+bg   → bg saja ('selisih_anomaly_bg');
+          font merah dipasang per-cell pada nilai ≠ 0.
+        """
         has_negative = any(
             (row_data.get(t, 0) or 0) < 0 for t in tanggals
         )
@@ -665,11 +758,19 @@ class PivotTableView(tk.Frame):
         if metric == "7.Selisih IN":
             has_nonzero = any(row_data.get(t, 0) != 0 for t in tanggals)
             if has_nonzero:
+                # v3.9.2: bg saja — font merah per-cell (lihat _render)
+                if self._cell_tags:
+                    return ("selisih_anomaly_bg",)
                 return ("selisih_anomaly",)
             return (self._metric_tag(metric),)
         if metric == "3.DEVIASI":
+            # v3.9.2: minus per-cell (baris tidak selalu merah lagi)
+            if self._cell_tags:
+                return (self._metric_tag(metric),)
             return ("deviasi_row",)
         if has_negative:
+            if self._cell_tags:
+                return (self._metric_tag(metric),)
             return ("negative", self._metric_tag(metric))
         return (self._metric_tag(metric),)
 
@@ -685,6 +786,83 @@ class PivotTableView(tk.Frame):
         self._refresh_pivot()
 
     # =========================================================================
+    # 💾 EXPORT EXCEL (v3.9.2 — sesuai tampilan)
+    # =========================================================================
+    def _visible_columns(self) -> list:
+        """Kolom yang TAMPIL di tree (displaycolumns — utk export)."""
+        try:
+            dc = self.tree.cget("displaycolumns")
+            items = [str(x) for x in dc] if isinstance(dc, (tuple, list)) \
+                else str(dc).split()
+        except tk.TclError:
+            items = []
+        if not items or "#all" in items:
+            return list(self.tree["columns"])
+        # hanya kolom yang masih ada (re-render bisa mengganti kolom)
+        have = set(self.tree["columns"])
+        return [c for c in items if c in have]
+
+    def _on_export_excel(self):
+        """v3.9.2 — Export matrix pivot SESUAI TAMPILAN (permintaan user:
+        "pivot tabel nya bisa export excel"): filter + mode + kolom tampil
+        ikut serta; nilai minus = font merah per cell (mirror UI)."""
+        if not self._last_payload.get("items"):
+            messagebox.showwarning(
+                "Export", "Belum ada data pivot. Jalankan pipeline dulu.",
+                parent=self.winfo_toplevel())
+            return
+        mode = "resto" if self.pivot_mode == "resto" else "tanggal"
+        stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Matrix Pivot (sesuai tampilan)",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile=f"pivot_{mode}_{stamp}.xlsx",
+            parent=self.winfo_toplevel(),
+        )
+        if not filepath:
+            return
+        self._do_export_excel(filepath)
+
+    def _do_export_excel(self, filepath: str):
+        """Inti export — dipisah dari _on_export_excel supaya bisa
+        dipanggil langsung oleh test tanpa dialog."""
+        # lazy import — hindari circular import (export_sheets → pivot_view)
+        from .export_sheets import write_pivot_display_sheet
+        payload = dict(self._last_payload)      # snapshot (anti re-render)
+        visible = self._visible_columns()
+
+        def work():
+            return write_pivot_display_sheet(filepath, payload,
+                                             visible_cols=visible)
+
+        def done(n):
+            if not n:
+                messagebox.showwarning(
+                    "Export", "Tidak ada baris pivot untuk diekspor.",
+                    parent=self.winfo_toplevel())
+                return
+            st = payload.get("filters") or {}
+            mode = "Per Tanggal" if st.get("mode") == "tanggal" \
+                else "Per Resto"
+            self.status_var.set(f"Export {n:,} baris pivot ({mode}) → "
+                                f"{filepath}")
+            messagebox.showinfo(
+                "Export Berhasil",
+                f"Matrix pivot ({mode}, {n:,} baris data)\n"
+                f"di-export ke:\n{filepath}",
+                parent=self.winfo_toplevel())
+
+        def on_error(e):
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}",
+                parent=self.winfo_toplevel())
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengekspor matrix pivot…",
+                  on_error=on_error)
+
+    # =========================================================================
     # ⛶ PERBESAR (fullscreen)
     # =========================================================================
     def _maximize(self):
@@ -695,11 +873,18 @@ class PivotTableView(tk.Frame):
             attach_clone_filters(new_tree, ["#0"],
                                  get_values=self._name_values)
 
+        # v3.9.2: clone = insert ulang → tag cell minus ter-reset →
+        # pasang ulang di clone (iid identik dengan tabel sumber)
+        def cells_setup(new_tree):
+            if self._cell_tags and self._red_cells:
+                apply_cell_tag(new_tree, "neg_cell", self._red_cells)
+
         return open_tree_maximized(
             self.tree, f"Pivot Table — {mode}",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            on_render_done=cells_setup)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP DETAILS
