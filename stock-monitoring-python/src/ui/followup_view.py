@@ -26,8 +26,9 @@ from .theme import (
 )
 from .widgets import (
     AccentButton, Card, DangerButton, EmptyState, GhostButton,
-    LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
-    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
+    HeaderFilterGroup, LoadingOverlay, add_tooltip, auto_fit_columns,
+    enable_col_resize, insert_tree_items, open_tree_maximized, run_async,
+    sort_tree_by_column,
 )
 from .followup import CHECK_ON, FollowUpStore
 
@@ -149,12 +150,9 @@ class FollowUpView(tk.Frame):
         for col_name, width, anchor in COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34,
                              anchor=anchor)
-            if col_name == "✓":
-                self.tree.heading(col_name, text=col_name)
-            else:
-                self.tree.heading(
-                    col_name, text=col_name,
-                    command=lambda c=col_name: self._sort_by(c))
+            # v3.5: SEMUA kolom pakai filter header ⧩ (sort via popup);
+            # ✓ = keluarkan via klik sel
+            self.tree.heading(col_name, text=col_name)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
@@ -173,11 +171,20 @@ class FollowUpView(tk.Frame):
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         tk.Label(foot, text="🖱 Double-click baris → detail source · klik ✓ "
-                            "= keluarkan · klik judul kolom = sort",
+                            "= keluarkan · klik judul kolom ⧩ = filter + sort",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         # Loading overlay
         self.overlay = LoadingOverlay(tbody, "Menyiapkan daftar…")
+
+        # v3.5: filter header ⧩ di SEMUA kolom (kecuali ✓)
+        _filter_cols = [c[0] for c in COLUMNS if c[0] != "✓"]
+        self._col_sel: dict = {c: None for c in _filter_cols}
+        self.header_filters = HeaderFilterGroup(
+            self.tree, _filter_cols,
+            get_values=self._col_values,
+            on_apply=self._on_col_filter,
+            on_sort=lambda c, d: self._sort_by(c, reverse=d))
 
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
@@ -208,20 +215,78 @@ class FollowUpView(tk.Frame):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
 
+    def _col_values(self, col: str) -> list:
+        """Nilai unik TERFORMAT utk popup filter header (v3.5)."""
+        rows = list(self.store.rows.values())
+        if not rows:
+            return []
+        idx = [i for i, c in enumerate(COLUMNS) if c[0] == col]
+        if not idx:
+            return []
+        j = idx[0]
+        vals = []
+        for snap in rows:
+            info = self.store.resolved.get(snap.get("fp", ""), {})
+            vals.append(str(self._fu_row_values(snap, bool(info), info)[j]))
+        return sorted(set(vals))
+
+    def _on_col_filter(self, col: str, selected):
+        self._col_sel[col] = selected
+        self._render()
+
+    @staticmethod
+    def _fu_num(v):
+        try:
+            f = float(v)
+            return f"{f:,.0f}" if f == int(f) else f"{f:,.1f}"
+        except (TypeError, ValueError):
+            return str(v or "-")
+
+    def _fu_row_values(self, snap, resolved, info) -> list:
+        """Nilai terformat satu baris follow-up (urutan COLUMNS — dipakai
+        render + filter header supaya nilai popup == yang tampil)."""
+        dev = snap.get("deviasi", 0)
+        try:
+            dev_f = float(dev)
+        except (TypeError, ValueError):
+            dev_f = 0.0
+        dev_txt = self._fu_num(dev) if dev_f else "-"
+        if dev_f < 0:
+            dev_txt = f"({dev_txt[1:] if dev_txt.startswith('-') else dev_txt})"
+        return [
+            CHECK_ON,
+            snap.get("asal", ""), snap.get("resto", ""),
+            snap.get("barang", ""), snap.get("satuan", ""),
+            self._fu_num(snap.get("h")) if snap.get("h") not in ("", None) else "-",
+            self._fu_num(snap.get("so")) if snap.get("so") else "-",
+            self._fu_num(snap.get("sistem")) if snap.get("sistem") else "-",
+            dev_txt,
+            snap.get("cek", "") or "-",
+            "Selesai" if resolved else "Menunggu",
+            info.get("PIC", ""),
+            (snap.get("added_at", "") or "")[:16].replace("T", " "),
+        ]
+
     def _render(self):
         rows = list(self.store.rows.values())
         self.tree.delete(*self.tree.get_children())
         self._iid_fp = {}
+        if self.header_filters is not None:
+            self.header_filters.refresh_icons()
 
         if not rows:
             self._show_empty()
             return
         self._show_content()
 
+        # v3.5: filter header ⧩ (display-only — daftar store tidak berubah)
+        col_idx = {c[0]: j for j, c in enumerate(COLUMNS)}
+        active = [(col_idx[c], s) for c, s in self._col_sel.items() if s]
+
         items = []
+        n_shown = 0
         for i, snap in enumerate(rows):
             fp = snap.get("fp", "")
-            self._iid_fp[f"fu_{i}"] = fp
             info = self.store.resolved.get(fp, {})
             resolved = bool(info)
             dev = snap.get("deviasi", 0)
@@ -230,40 +295,24 @@ class FollowUpView(tk.Frame):
             except (TypeError, ValueError):
                 dev_f = 0.0
 
-            def _num(v):
-                try:
-                    f = float(v)
-                    return f"{f:,.0f}" if f == int(f) else f"{f:,.1f}"
-                except (TypeError, ValueError):
-                    return str(v or "-")
-            dev_txt = _num(dev) if dev_f else "-"
-            if dev_f < 0:
-                dev_txt = f"({dev_txt[1:] if dev_txt.startswith('-') else dev_txt})"
+            values = self._fu_row_values(snap, resolved, info)
+            if active and not all(str(values[j]) in s for j, s in active):
+                continue
 
-            values = [
-                CHECK_ON,
-                snap.get("asal", ""), snap.get("resto", ""),
-                snap.get("barang", ""), snap.get("satuan", ""),
-                _num(snap.get("h")) if snap.get("h") not in ("", None) else "-",
-                _num(snap.get("so")) if snap.get("so") else "-",
-                _num(snap.get("sistem")) if snap.get("sistem") else "-",
-                dev_txt,
-                snap.get("cek", "") or "-",
-                "Selesai" if resolved else "Menunggu",
-                info.get("PIC", ""),
-                (snap.get("added_at", "") or "")[:16].replace("T", " "),
-            ]
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            self._iid_fp[f"fu_{n_shown}"] = fp
+            tags = ["evenrow" if n_shown % 2 == 0 else "oddrow"]
             if dev_f < 0:
                 tags.append("negative")
             tags.append("resolved" if resolved else "pending")
-            items.append(("", f"fu_{i}", {"values": values,
-                                           "tags": tuple(tags)}))
+            items.append(("", f"fu_{n_shown}", {"values": values,
+                                                  "tags": tuple(tags)}))
+            n_shown += 1
 
         n = len(rows)
         selesai = self.store.resolved_count()
         self.status_var.set(
-            f"{n} baris · {selesai} selesai · {n - selesai} menunggu")
+            f"{n} baris · {selesai} selesai · {n - selesai} menunggu"
+            + (f" · {n_shown} tampil (filter ⧩)" if n_shown != n else ""))
         self.btn_clear.set_enabled(n > 0)
         self.btn_export.set_enabled(n > 0)
 

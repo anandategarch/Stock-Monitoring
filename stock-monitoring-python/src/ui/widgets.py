@@ -592,6 +592,13 @@ class SegmentBar(tk.Frame):
     def active(self) -> int:
         return self._active
 
+    def set_active_silent(self, idx: int):
+        """Set opsi aktif TANPA memicu command (dipakai saat inisialisasi
+        / load_data supaya tidak refresh ganda)."""
+        if idx != self._active:
+            self._active = idx
+            self._render()
+
     def _render(self):
         for i, b in enumerate(self._buttons):
             if i == self._active:
@@ -672,7 +679,17 @@ class HeaderFilter:
         self._all_var = tk.BooleanVar(value=True)
         self._count_var = tk.StringVar(value="")
         self.refresh_icon()
-        tree.bind("<Button-1>", self._on_tree_press, add="+")
+        self._bind_id = tree.bind("<Button-1>", self._on_tree_press, add="+")
+
+    def detach(self):
+        """Lepas binding klik-heading dari tree (dipakai saat kolom
+        dikonfigurasi ulang — mencegah binding ganda/orsos)."""
+        if getattr(self, "_bind_id", None):
+            try:
+                self.tree.unbind("<Button-1>", self._bind_id)
+            except Exception:
+                pass
+            self._bind_id = None
 
     # -- ikon corong ---------------------------------------------------------
     def refresh_icon(self):
@@ -901,6 +918,49 @@ class HeaderFilter:
         for var in self._vars.values():
             var.set(True)
         self.refresh_icon()
+
+
+class HeaderFilterGroup:
+    """Pasang HeaderFilter di BANYAK kolom sekaligus (v3.5).
+
+    "Semua header punya filter" — klik judul kolom mana pun membuka popup
+    filter (nilai unik + search + checkbox) ala Excel AutoFilter; sort
+    tersedia di dalam popup (tombol ↕ Sort A→Z / Z→A via on_sort).
+
+    Pemakaian:
+        group = HeaderFilterGroup(tree, cols,
+                                   get_values=view._col_values,
+                                   on_apply=view._on_col_filter,
+                                   on_sort=lambda c, d: view._sort_by(c, reverse=d))
+        # view menyimpan state: self._col_sel[col] = selected_set_or_None
+        group.clear_all()   # dipanggil tombol Reset Filter (tanpa refresh)
+    """
+
+    def __init__(self, tree: ttk.Treeview, cols: list,
+                 *, get_values, on_apply, on_sort=None):
+        self._filters: dict = {}
+        for col in cols:
+            self._filters[col] = HeaderFilter(
+                tree, col,
+                get_values=(lambda c=col: get_values(c)),
+                on_apply=(lambda sel, c=col: on_apply(c, sel)),
+                label=col,
+                on_sort=((lambda desc, c=col: on_sort(c, desc))
+                         if on_sort is not None else None),
+            )
+
+    def clear_all(self):
+        for f in self._filters.values():
+            f.clear()
+
+    def refresh_icons(self):
+        for f in self._filters.values():
+            f.refresh_icon()
+
+    def detach_all(self):
+        """Lepas SEMUA binding klik-heading (saat ganti mode/kolom tree)."""
+        for f in self._filters.values():
+            f.detach()
 
 
 # --- Async + render batched ---------------------------------------------------

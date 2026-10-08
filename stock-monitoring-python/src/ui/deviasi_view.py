@@ -30,7 +30,7 @@ from .theme import (
     font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
+    Card, EmptyState, GhostButton, HeaderFilterGroup, LegendRow,
     LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
     insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
 )
@@ -105,7 +105,6 @@ class DeviasiView(tk.Frame):
         self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
         self._aktif_lookup = {}
         self.go_to_proses = go_to_proses
-        self._name_selected: set | None = None
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
@@ -153,14 +152,7 @@ class DeviasiView(tk.Frame):
 
         r0 = tk.Frame(fbody, bg=C_CARD)
         r0.pack(fill="x")
-        tk.Label(r0, text="RESTO", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.resto_var = tk.StringVar(value="(All)")
-        self.resto_combo = ttk.Combobox(r0, textvariable=self.resto_var,
-                                        state="readonly", width=16)
-        self.resto_combo.pack(side="left", padx=(6, 18))
-        self.resto_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh())
-
+        # v3.5: RESTO combo DIHAPUS (duplikat → filter header kolom Resto ⧩)
         tk.Label(r0, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self.tanggal_h_var = tk.StringVar(value=str(self.tanggal_h))
@@ -205,13 +197,9 @@ class DeviasiView(tk.Frame):
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
             display = self._col_display_name(col_name)
-            # kolom Nama Barang: klik heading = filter (sort via popup filter)
-            # kolom ✓: heading tanpa sort (klik sel = toggle follow-up)
-            if col_name in ("Nama Barang", "✓"):
-                self.tree.heading(col_name, text=display)
-            else:
-                self.tree.heading(col_name, text=display,
-                                  command=lambda c=col_name: self._sort_by(c))
+            # v3.5: SEMUA kolom pakai filter header ⧩ (sort via popup);
+            # ✓ tetap toggle follow-up via klik sel
+            self.tree.heading(col_name, text=display)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
@@ -231,7 +219,7 @@ class DeviasiView(tk.Frame):
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = masuk Follow "
-                            "Up · klik judul kolom = sort · ⧩ Nama Barang = filter",
+                            "Up · klik judul kolom ⧩ = filter + sort",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
@@ -240,13 +228,14 @@ class DeviasiView(tk.Frame):
         # Loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(tbody, "Menghitung deviasi…")
 
-        # Filter "Nama Barang" menempel di header kolom
-        self.header_filter = HeaderFilter(
-            self.tree, "Nama Barang",
-            get_values=self._name_values,
-            on_apply=self._on_name_filter,
-            label="Nama Barang",
-            on_sort=lambda desc: self._sort_by("Nama Barang", reverse=desc))
+        # v3.5: filter header ⧩ di SEMUA kolom (kecuali ✓ = toggle)
+        _filter_cols = [c[0] for c in self.COLUMNS if c[0] != "✓"]
+        self._col_sel: dict = {c: None for c in _filter_cols}
+        self.header_filters = HeaderFilterGroup(
+            self.tree, _filter_cols,
+            get_values=self._col_values,
+            on_apply=self._on_col_filter,
+            on_sort=lambda c, d: self._sort_by(c, reverse=d))
 
         # Legend CEK
         legend = LegendRow(self.content, [
@@ -298,14 +287,19 @@ class DeviasiView(tk.Frame):
             self._dirty = False
             self._refresh()
 
-    def _name_values(self) -> list:
-        if self.data is None or self.data.empty or \
-                "Nama Barang" not in self.data.columns:
+    def _col_values(self, col: str) -> list:
+        """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua kolom)."""
+        pivot_df = self._cached_pivot
+        if pivot_df is None or pivot_df.empty or col not in pivot_df.columns:
             return []
-        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+        return self._format_col_series(col, pivot_df[col]).unique().tolist()
 
-    def _on_name_filter(self, selected):
-        self._name_selected = selected
+    def _format_col_series(self, col: str, series):
+        """Format kolom → string tampilan (identik render tabel)."""
+        return series.map(self._fmt_num)
+
+    def _on_col_filter(self, col: str, selected):
+        self._col_sel[col] = selected
         self._refresh()
 
     def _show_empty(self):
@@ -379,14 +373,13 @@ class DeviasiView(tk.Frame):
         return col_name
 
     def _update_headings(self):
+        # v3.5: heading tanpa command (klik = popup filter ⧩; sort via
+        # popup) — nama display di-refresh per tanggal H
         for col_name, _, _ in self.COLUMNS:
-            display = self._col_display_name(col_name)
-            if col_name in ("Nama Barang", "✓"):
-                # Nama Barang = filter corong (sort via popup) · ✓ = toggle
-                self.tree.heading(col_name, text=display)
-            else:
-                self.tree.heading(col_name, text=display,
-                                  command=lambda c=col_name: self._sort_by(c))
+            self.tree.heading(col_name,
+                              text=self._col_display_name(col_name))
+        if getattr(self, "header_filters", None) is not None:
+            self.header_filters.refresh_icons()
 
     # =========================================================================
     # DATA LOADING
@@ -400,24 +393,15 @@ class DeviasiView(tk.Frame):
         self._aktif_lookup = {}
         self._tnum = None  # reset cache to_numeric(Tanggal)
         self._show_content()
-        self._populate_filters()
-        self._name_selected = None
-        self.header_filter.clear()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         # (v3.2) lazy refresh: hanya compute bila tab ini sedang terlihat;
         # tab lain menunggu dipilih (app memanggil ensure_refreshed).
         if self.winfo_ismapped():
             self._refresh()
         else:
             self._dirty = True
-
-    def _populate_filters(self):
-        if self.data is None or self.data.empty:
-            return
-        for col, combo in [("NAMA RESTO", self.resto_combo)]:
-            if col in self.data.columns:
-                values = ["(All)"] + sorted(
-                    self.data[col].dropna().astype(str).unique().tolist())
-                combo["values"] = values
 
     # =========================================================================
     # PIVOT COMPUTATION (v3.2 — VEKTORISASI numpy, hasil identik versi lama)
@@ -570,8 +554,7 @@ class DeviasiView(tk.Frame):
             return
         self._busy = True
         st = {
-            "resto": self.resto_var.get(),
-            "name_selected": self._name_selected,
+            "col_sel": {c: s for c, s in self._col_sel.items() if s},
             "tanggal_h": self.tanggal_h,
         }
 
@@ -606,13 +589,12 @@ class DeviasiView(tk.Frame):
         else:
             filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() != "GR"]
 
-        resto_val = st["resto"]
-        if resto_val and resto_val != "(All)":
-            filtered = filtered[filtered["Resto"].astype(str) == resto_val]
-
-        if st["name_selected"]:
-            filtered = filtered[filtered["Nama Barang"].astype(str)
-                                .isin(st["name_selected"])]
+        # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
+        # yang tampil di tabel; menggantikan RESTO/Nama Barang combo)
+        for col, sel in st["col_sel"].items():
+            if col in filtered.columns:
+                fmt = self._format_col_series(col, filtered[col])
+                filtered = filtered[fmt.isin(sel)]
 
         if filtered.empty:
             return {"items": [], "kpi": (0, 0.0, 0),
@@ -715,7 +697,7 @@ class DeviasiView(tk.Frame):
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
         self._update_headings()
-        self.header_filter.refresh_icon()
+        self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
         # ringkasan (baris · total deviasi · anomali) ada di status footer —
@@ -739,7 +721,7 @@ class DeviasiView(tk.Frame):
 
         def sort_setup(new_tree):
             for col_name, _, _ in self.COLUMNS:
-                if col_name in ("Nama Barang", "✓"):
+                if col_name == "✓":
                     new_tree.heading(col_name,
                                      text=self._col_display_name(col_name))
                 else:
@@ -774,9 +756,9 @@ class DeviasiView(tk.Frame):
             self.tanggal_h_var.set(str(self.tanggal_h))
 
     def _reset_filter(self):
-        self.resto_var.set("(All)")
-        self._name_selected = None
-        self.header_filter.clear()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):

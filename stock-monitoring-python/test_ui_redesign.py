@@ -184,7 +184,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.4.0", APP_VERSION == "3.4.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.5.0", APP_VERSION == "3.5.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -296,6 +296,9 @@ def main():
     # ---- PIVOT MODE TANGGAL ----
     app.notebook.select(app.tab_pivot)
     root.update()
+    # (v3.5) default rentang kini 26-31 — test mode tanggal perlu 1-31
+    pv.tgl_start_var.set("1")
+    pv.tgl_end_var.set("31")
     pv._on_mode_change(1)
     wait_view(root, pv)
     check("Pivot mode tanggal: 30 kolom tanggal",
@@ -400,7 +403,7 @@ def main():
           "Deviasi" in app.deviasi_gr_view.status_var.get(),
           f"got {app.deviasi_gr_view.status_var.get()!r}")
 
-    app.deviasi_gr_view._on_name_filter({"ADONAN GORENG MEKAR"})
+    app.deviasi_gr_view._on_col_filter("Nama Barang", {"ADONAN GORENG MEKAR"})
     wait_view(root, app.deviasi_gr_view)
     check("Deviasi header filter → 1 row",
           len(app.deviasi_gr_view.tree.get_children("")) == 1)
@@ -440,19 +443,23 @@ def main():
           not hasattr(lap, "_status_kpis"))
     check("(v3.2) Kolom ✓ di laporan", "✓" in [c[0] for c in lap.COLUMNS])
 
-    # filter status via combo (pengganti klik kartu KPI)
-    lap.status_var.set("DEVIASI MURNI")
+    # v3.5: filter status via HEADER FILTER (combo STATUS dihapus)
+    check("(v3.5) Combo RESTO/STATUS dihapus dari laporan",
+          not hasattr(lap, "resto_combo") and not hasattr(lap, "status_combo"))
+    check("(v3.5) HeaderFilterGroup terpasang (semua kolom)",
+          hasattr(lap, "header_filters") and len(lap._col_sel) >= 10)
+    lap._col_sel["Status Audit"] = {"DEVIASI MURNI"}
     lap._refresh()
     wait_view(root, lap)
     n_murni = len(lap.tree.get_children(""))
-    check("Combo status memfilter (rows berkurang / tetap valid)",
+    check("Header filter Status Audit memfilter (rows berkurang/tetap)",
           n_murni <= n_all)
-    lap.status_var.set("(All)")
+    lap._col_sel["Status Audit"] = None
     lap._refresh()
     wait_view(root, lap)
-    check("Status (All) → kembali", len(lap.tree.get_children("")) == n_all)
+    check("Status filter direset → kembali", len(lap.tree.get_children("")) == n_all)
 
-    lap._on_name_filter({"AYAM FILET"})
+    lap._on_col_filter("Nama Barang", {"AYAM FILET"})
     wait_view(root, lap)
     n_ayam = len(lap.tree.get_children(""))
     check("Laporan header filter AYAM FILET → rows berkurang",
@@ -489,7 +496,7 @@ def main():
     n_po = len(app.rincian_view.tree.get_children("")) - 1
     check("Rincian filter cabang → 6 PO", n_po == 6, f"got {n_po}")
 
-    app.rincian_view._on_name_filter({"AYAM FILET"})
+    app.rincian_view._on_col_filter("Nama Barang", {"AYAM FILET"})
     wait_view(root, app.rincian_view)
     n_po = len(app.rincian_view.tree.get_children("")) - 1
     check("Rincian header filter AYAM FILET → 6 PO", n_po == 6,
@@ -821,8 +828,10 @@ def main():
             p.unlink()
 
     # ==================================================================
-    print("== 13. v3.4 — TAB 📤 REKAP SELISIH IN ==")
-    from src.ui.in_selisih_view import InSelisihView, InDetailPopup, COL_IDS
+    print("== 13. v3.4+v3.5 — TAB 📤 REKAP SELISIH IN ==")
+    from src.ui.in_selisih_view import (InDetailPopup, RINGKAS_COLUMNS,
+                                        AUDIT_COLUMNS)
+    COL_IDS = [c[0] for c in RINGKAS_COLUMNS]
     iv = app.in_selisih_view
     select_and_wait(root, app, app.tab_in_selisih, iv)
     tree_in = iv.tree
@@ -830,9 +839,9 @@ def main():
     check("Rekap Selisih IN: ada baris (aktivitas IN≠0)", len(kids_in) > 0,
           f"got {len(kids_in)}")
     hdrs = [tree_in.heading(c)["text"] for c in COL_IDS]
-    check("Kolom = Resto/Tanggal/Nama Barang/Satuan/IN/Barang Masuk/Selisih IN",
-          hdrs == ["Resto", "Tanggal", "Nama Barang", "Satuan", "IN",
-                   "Barang Masuk", "Selisih IN"], f"got {hdrs}")
+    check("Kolom = Resto/Tanggal/Nama Barang/KATEGORI/Satuan/IN/BM/Selisih",
+          hdrs == ["Resto", "Tanggal", "Nama Barang", "KATEGORI", "Satuan",
+                   "IN", "Barang Masuk", "Selisih IN"], f"got {hdrs}")
     # nilai IN ≠ '-' di baris pertama? (mock: tgl % 5 == 0 → IN=5)
     has_in_val = any(tree_in.set(k, "IN") not in ("-", "") for k in kids_in)
     check("Kolom IN terisi (bukan '-' semua)", has_in_val)
@@ -901,8 +910,103 @@ def main():
             root.update()
 
     # ==================================================================
-    print("== 14. v3.4 — LEBAR KOLOM: drag tepi + ↔ Auto-Fit ==")
-    from src.ui.widgets import enable_col_resize, auto_fit_columns
+    print("== 14. v3.5 — AUDIT REKONSILIASI (port macro VBA) ==")
+    from src.pipeline.fn_rekap29 import build_audit_rekap, REKAP29_COLUMNS
+    import pandas as pd
+
+    # --- (a) engine murni: aturan VALID / CUT-OFF / DEVIASI MURNI ---
+    audit_src = pd.DataFrame([
+        # grup 1: OK matching (masuk == penerimaan)
+        ("MLGPAR", "AYAM FILET", "GR", 1, 100.0, 50.0, 50.0, 0.0, 0.0, 0.0),
+        ("MLGPAR", "AYAM FILET", "GR", 2, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        # tgl 3: SO naik + BM=0 + penerimaan>0 → VALID (Sistem Masuk)
+        ("MLGPAR", "AYAM FILET", "GR", 3, 160.0, 0.0, 0.0, 70.0, 0.0, -70.0),
+        # tgl 4: masuk tanpa penerimaan → selisih +70 → saldo gantung
+        ("MLGPAR", "AYAM FILET", "GR", 4, 150.0, 70.0, 0.0, 0.0, 0.0, 70.0),
+        # grup 2: cut-off resolved (tgl1 -50, tgl2 +50 → kembali 0)
+        ("SBYKET", "ADONAN", "GR", 1, 100.0, 0.0, 50.0, 0.0, 0.0, -50.0),
+        ("SBYKET", "ADONAN", "GR", 2, 100.0, 50.0, 0.0, 0.0, 0.0, 50.0),
+    ], columns=REKAP29_COLUMNS)
+    audit_out, audit_kpi = build_audit_rekap(audit_src)
+    sts = audit_out["Status Analisis Audit"].tolist()
+    check("Engine: baris OK (Matching) terdeteksi", sts[0] == "OK (Matching)",
+          f"got {sts[0]}")
+    check("Engine: VALID (Sistem Masuk) terdeteksi (SO naik+BM=0+PS>0)",
+          sts[2] == "VALID (Sistem Masuk)", f"got {sts[2]}")
+    check("Engine: DEVIASI MURNI terdeteksi (sisa gantung akhir grup)",
+          sts[3] == "DEVIASI MURNI", f"got {sts[3]}")
+    check("Engine: CUT-OFF RESOLVED terdeteksi (saldo kembali 0)",
+          sts[4] == "CUT-OFF RESOLVED" and sts[5] == "CUT-OFF RESOLVED",
+          f"got {sts[4:6]}")
+    check("Engine: detail catatan VBA-style (Sisa Gantung +70)",
+          "Sisa Gantung: +70" in str(audit_out.iloc[3]["Detail & Catatan Audit"]),
+          f"got {audit_out.iloc[3]['Detail & Catatan Audit']!r}")
+    check("Engine: KPI lengkap (rows/omit/cutoff/deviasi)",
+          audit_kpi["rows"] == 6 and audit_kpi["omit"] == 1
+          and audit_kpi["cutoff"] == 2 and audit_kpi["deviasi_murni"] == 1,
+          f"got {audit_kpi}")
+
+    # --- (b) mode Audit di UI: muat audit_result → kolom 12 + KPI chips ---
+    iv.load_data(append1, in_detail, audit_result={
+        "df": audit_out, "kpi": audit_kpi, "desc": "mock audit"})
+    select_and_wait(root, app, app.tab_in_selisih, iv)
+    wait_view(root, iv)
+    check("Data audit termuat dari pipeline", iv.audit_df is not None
+          and not iv.audit_df.empty)
+    iv._on_mode_change(1)      # klik segment 🔍 Audit Rekonsiliasi
+    wait_view(root, iv)
+    check("Mode audit aktif setelah klik segment", iv.mode == "audit",
+          f"got {iv.mode}")
+    audit_ids = [c[0] for c in AUDIT_COLUMNS]
+    check("Kolom audit = 12 (mirror laporan VBA)",
+          list(iv.tree["columns"]) == audit_ids,
+          f"got {list(iv.tree['columns'])}")
+    check("KPI chips tampil (mode audit)",
+          iv.kpi_card.winfo_ismapped())
+    kids_a = list(iv.tree.get_children(""))
+    check("Mode audit: baris bermasalah tampil (default Hanya Selisih ≠ 0)",
+          len(kids_a) > 0, f"got {len(kids_a)}")
+    if kids_a:
+        st_cells = {iv.tree.set(k, "Status Analisis Audit") for k in kids_a}
+        check("Mode audit: status VBA tampil di kolom",
+              st_cells & {"VALID (Sistem Masuk)", "CUT-OFF RESOLVED",
+                          "DEVIASI MURNI"}, f"got {st_cells}")
+        tags0 = iv.tree.item(kids_a[0], "tags")
+        check("Mode audit: baris diberi tag warna status",
+              any(t.startswith("st_") for t in tags0), f"got {tags0}")
+
+    # --- (c) header filter semua kolom (mode audit) ---
+    check("(v3.5) Semua kolom audit punya HeaderFilter",
+          hasattr(iv, "header_filters") and
+          len(iv.header_filters._filters) == len(audit_ids))
+    iv._on_col_filter("Resto", {"MLGPAR"})
+    wait_view(root, iv)
+    kids_f = list(iv.tree.get_children(""))
+    check("Filter header Resto=MLGPAR (mode audit) → hanya grup MLGPAR",
+          kids_f and all(iv.tree.set(k, "Resto") == "MLGPAR" for k in kids_f),
+          f"got {len(kids_f)}")
+    iv._reset_filter_states()
+    iv._refresh()
+    wait_view(root, iv)
+
+    # --- (d) toggle ke Ringkas: kembali 8 kolom ---
+    iv._on_mode_change(0)
+    wait_view(root, iv)
+    check("Toggle ke Ringkas → 8 kolom v3.4+v3.5 (dgn KATEGORI)",
+          list(iv.tree["columns"]) == COL_IDS,
+          f"got {list(iv.tree['columns'])}")
+    check("KPI chips hilang saat Ringkas",
+          not iv.kpi_card.winfo_ismapped())
+
+    # --- (e) LightMode dihapus total ---
+    import inspect
+    from src.config import Config as _Cfg
+    check("(v3.5) Config tidak lagi memuat LightMode",
+          "self.LightMode" not in inspect.getsource(_Cfg))
+
+    # ==================================================================
+    print("== 15. v3.4 — LEBAR KOLOM: drag tepi + ↔ Auto-Fit ==")
+    from src.ui.widgets import enable_col_resize
     # (a) drag tepi kanan heading kolom pertama
     # (stretch=False supaya lebar deterministik — dengan stretch Tk
     # redistribusi ruang sisa jendela ke semua kolom)

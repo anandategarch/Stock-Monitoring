@@ -28,23 +28,11 @@ from .theme import (
     font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter,
+    Card, EmptyState, GhostButton, HeaderFilterGroup,
     LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
     insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
-
-# 6 Status Audit (v3.2 — kartu KPI dihapus; dipakai combo filter +
-# pewarnaan baris via tag name)
-_STATUS_NAMES = [
-    ("OK (Matching)", "ok_match"),
-    ("OK (Dalam Cut-off)", "ok_cutoff"),
-    ("DEVIASI MURNI", "deviasi_murni"),
-    ("VALID (Sistem Masuk)", "valid_sistem"),
-    ("CUT-OFF RESOLVED", "cutoff_resolved"),
-    ("REVIEW", "review"),
-]
-
 
 class LaporanDeviasiView(tk.Frame):
     """Long-format daily audit view (LAPORAN DEVIASI) — tampilan baru."""
@@ -80,7 +68,6 @@ class LaporanDeviasiView(tk.Frame):
         self.store = followup_store       # shared FollowUpStore (v3.2)
         self._fp_map: dict[str, str] = {}     # iid → fingerprint
         self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw
-        self._name_selected: set | None = None
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
@@ -106,35 +93,17 @@ class LaporanDeviasiView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # (v3.2) 6 kartu KPI status + intro DIHAPUS — tabel jadi lebar &
-        # besar; filter status tetap di combo STATUS (kartu filter),
-        # distribusi status ada di status footer bawah tabel.
+        # besar; distribusi status ada di status footer bawah tabel
+        # (v3.5: filter STATUS pindah ke header kolom ⧩).
 
-        # --- Filter card ---
+        # --- Filter card (v3.5: RESTO/STATUS combo DIHAPUS → header ⧩) ---
         fcard = Card(self.content, title="Filter",
-                     subtitle="Sort default: |Deviasi| terbesar dulu. Filter "
-                              "Nama Barang → klik header kolom (ikon corong ⧩) "
-                              "di tabel.")
+                     subtitle="Rentang tanggal. Filter RESTO / STATUS / "
+                              "kolom lainnya → klik judul kolom (ikon "
+                              "corong ⧩) di tabel. Sort default: "
+                              "|Deviasi| terbesar dulu.")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
-
-        r0 = tk.Frame(fbody, bg=C_CARD)
-        r0.pack(fill="x", pady=(0, 6))
-        tk.Label(r0, text="RESTO", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.resto_var = tk.StringVar(value="(All)")
-        self.resto_combo = ttk.Combobox(r0, textvariable=self.resto_var,
-                                        state="readonly", width=16)
-        self.resto_combo.pack(side="left", padx=(6, 18))
-        self.resto_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh())
-
-        tk.Label(r0, text="STATUS", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.status_var = tk.StringVar(value="(All)")
-        self.status_combo = ttk.Combobox(r0, textvariable=self.status_var,
-                                         state="readonly", width=22)
-        self.status_combo.pack(side="left", padx=(6, 0))
-        self.status_combo.bind("<<ComboboxSelected>>",
-                               lambda e: self._refresh())
 
         r1 = tk.Frame(fbody, bg=C_CARD)
         r1.pack(fill="x")
@@ -184,12 +153,9 @@ class LaporanDeviasiView(tk.Frame):
 
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
-            # Nama Barang = filter corong · ✓ = toggle follow-up (tanpa sort)
-            if col_name in ("Nama Barang", "✓"):
-                self.tree.heading(col_name, text=col_name)
-            else:
-                self.tree.heading(col_name, text=col_name,
-                                  command=lambda c=col_name: self._sort_by(c))
+            # v3.5: SEMUA kolom pakai filter header ⧩ (sort via popup);
+            # ✓ tetap toggle follow-up via klik sel
+            self.tree.heading(col_name, text=col_name)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
@@ -208,7 +174,7 @@ class LaporanDeviasiView(tk.Frame):
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = masuk Follow "
-                            "Up · klik judul kolom = sort · ⧩ Nama Barang = filter",
+                            "Up · klik judul kolom ⧩ = filter + sort",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var_label = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
@@ -217,13 +183,14 @@ class LaporanDeviasiView(tk.Frame):
         # Loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(tbody, "Menghitung audit harian…")
 
-        # Filter "Nama Barang" menempel di header kolom
-        self.header_filter = HeaderFilter(
-            self.tree, "Nama Barang",
-            get_values=self._name_values,
-            on_apply=self._on_name_filter,
-            label="Nama Barang",
-            on_sort=lambda desc: self._sort_by("Nama Barang", reverse=desc))
+        # v3.5: filter header ⧩ di SEMUA kolom (kecuali ✓ = toggle)
+        _filter_cols = [c[0] for c in self.COLUMNS if c[0] != "✓"]
+        self._col_sel: dict = {c: None for c in _filter_cols}
+        self.header_filters = HeaderFilterGroup(
+            self.tree, _filter_cols,
+            get_values=self._col_values,
+            on_apply=self._on_col_filter,
+            on_sort=lambda c, d: self._sort_by(c, reverse=d))
 
         self.tree.bind("<Double-1>", self._on_double_click)
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
@@ -265,14 +232,24 @@ class LaporanDeviasiView(tk.Frame):
             self._dirty = False
             self._refresh()
 
-    def _name_values(self) -> list:
-        if self.data is None or self.data.empty or \
-                "Nama Barang" not in self.data.columns:
+    def _col_values(self, col: str) -> list:
+        """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua kolom)."""
+        result = self._cached_result
+        if result is None or result.empty or col not in result.columns:
             return []
-        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+        return self._format_col_series(col, result[col]).unique().tolist()
 
-    def _on_name_filter(self, selected):
-        self._name_selected = selected
+    def _format_col_series(self, col: str, series):
+        """Format kolom → string tampilan (identik render tabel — dipakai
+        filter header supaya nilai popup == nilai yang tampil)."""
+        if col == "Tanggal":
+            return series.map(self._fmt_int)
+        if col == "Kontribusi %":
+            return series.map(self._fmt_pct)
+        return series.map(self._fmt_num)
+
+    def _on_col_filter(self, col: str, selected):
+        self._col_sel[col] = selected
         self._refresh()
 
     def _show_empty(self):
@@ -303,24 +280,14 @@ class LaporanDeviasiView(tk.Frame):
         self._cached_result = None
         self._cached_signature = None
         self._show_content()
-        self._populate_filters()
-        self._name_selected = None
-        self.header_filter.clear()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         # (v3.2) lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
         else:
             self._dirty = True
-
-    def _populate_filters(self):
-        if self.data is None or self.data.empty:
-            return
-        for col, combo in [("NAMA RESTO", self.resto_combo)]:
-            if col in self.data.columns:
-                values = ["(All)"] + sorted(
-                    self.data[col].dropna().astype(str).unique().tolist())
-                combo["values"] = values
-        self.status_combo["values"] = ["(All)"] + [s[0] for s in _STATUS_NAMES]
 
     # =========================================================================
     # COMPUTATION (v3.2 — Status Audit VEKTORISASI np.select; hasil identik)
@@ -491,9 +458,7 @@ class LaporanDeviasiView(tk.Frame):
         st = {
             "tgl_start": tgl_start,
             "tgl_end": tgl_end,
-            "resto": self.resto_var.get(),
-            "status": self.status_var.get(),
-            "name_selected": self._name_selected,
+            "col_sel": {c: s for c, s in self._col_sel.items() if s},
         }
 
         def work():
@@ -519,17 +484,12 @@ class LaporanDeviasiView(tk.Frame):
             (result["Tanggal"] >= tgl_start) & (result["Tanggal"] <= tgl_end)
         ]
 
-        resto_val = st["resto"]
-        if resto_val and resto_val != "(All)":
-            filtered = filtered[filtered["Resto"].astype(str) == resto_val]
-
-        if st["name_selected"]:
-            filtered = filtered[filtered["Nama Barang"].astype(str)
-                                .isin(st["name_selected"])]
-
-        status_val = st["status"]
-        if status_val and status_val != "(All)":
-            filtered = filtered[filtered["Status Audit"].astype(str) == status_val]
+        # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
+        # yang tampil di tabel; menggantikan RESTO/STATUS/Nama Barang combo)
+        for col, sel in st["col_sel"].items():
+            if col in filtered.columns:
+                fmt = self._format_col_series(col, filtered[col])
+                filtered = filtered[fmt.isin(sel)]
 
         if filtered.empty:
             return {"items": [],
@@ -627,7 +587,7 @@ class LaporanDeviasiView(tk.Frame):
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
-        self.header_filter.refresh_icon()
+        self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
         # distribusi status ada di status footer (v3.2 — kartu KPI dihapus)
@@ -643,12 +603,11 @@ class LaporanDeviasiView(tk.Frame):
                           on_done=render_done)
 
     def _reset_filter(self):
-        self.resto_var.set("(All)")
-        self.status_var.set("(All)")
         self.tgl_start_var.set("1")
         self.tgl_end_var.set("31")
-        self._name_selected = None
-        self.header_filter.clear()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         self._refresh()
 
     # =========================================================================
@@ -657,7 +616,7 @@ class LaporanDeviasiView(tk.Frame):
     def _maximize(self):
         def sort_setup(new_tree):
             for col_name, _, _ in self.COLUMNS:
-                if col_name in ("Nama Barang", "✓"):
+                if col_name == "✓":
                     new_tree.heading(col_name, text=col_name)
                 else:
                     new_tree.heading(

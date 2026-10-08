@@ -122,7 +122,7 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     IN source = Table.Combine({3224, 3224_Bulan_Lalu, 4205, 9901})
     with JENIS = "IN".
 
-    LightMode: skip 3224_Bulan_Lalu (hemat ~50% data IN).
+    (v3.5: LightMode dihapus — 3224_Bulan_Lalu SELALU dibaca.)
 
     v3.4 — detail_out: bila dict diberikan, diisi DataFrame detail IN
     PER DOKUMEN (untuk tab "Rekap Selisih IN" — rincian 42.05 / 32.24 /
@@ -137,8 +137,7 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     fn_pi.py + fn_konversi_satuan.py sudah dihapus dari codebase.
     """
     q3224 = query_3224(config)
-    # LightMode: skip bulan lalu
-    q3224_lalu = pd.DataFrame() if config.LightMode else query_3224_bulan_lalu(config)
+    q3224_lalu = query_3224_bulan_lalu(config)   # v3.5: selalu baca bulan lalu
     q4205 = query_4205(config)
     q9901 = query_9901(config)
     print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")
@@ -206,13 +205,12 @@ def query_full_rekap_mentah_so(config) -> pd.DataFrame:
         e = select {NAMA RESTO, Nama Barang, JENIS, Tanggal, Value},
         f = Tanggal → Int64
 
-    LightMode: skip b (RekapLalu) — hemat ~50% data.
+    (v3.5: LightMode dihapus — RekapLalu SELALU dibaca.)
     """
     jenis_filter = ["BARANG MASUK", "SO"]
 
     a = fn_rekap_mentah(config.folder("RekapBerjalan"), "berjalan", jenis_filter=jenis_filter)
-    # LightMode: skip bulan lalu
-    b = pd.DataFrame() if config.LightMode else fn_rekap_mentah(config.folder("RekapLalu"), "lalu", jenis_filter=jenis_filter)
+    b = fn_rekap_mentah(config.folder("RekapLalu"), "lalu", jenis_filter=jenis_filter)   # v3.5: selalu
 
     # c = Table.Combine({b, a}) — b first
     parts = []

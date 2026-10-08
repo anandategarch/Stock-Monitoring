@@ -1,7 +1,7 @@
 """
 main.py — Pipeline runner (orchestrator).
-Menjalankan pipeline: build Append1 + Rincian PO → return DataFrames.
-Tidak ada Excel output — data ditampilkan langsung di UI.
+Menjalankan pipeline: build Append1 + Rincian PO + Audit Rekonsiliasi →
+return DataFrames. Tidak ada Excel output — data ditampilkan langsung di UI.
 
 Bisa dipanggil langsung (CLI) atau dari UI Tkinter.
 """
@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import Config
 from src.pipeline.append1 import build_append1
 from src.pipeline.rincian_po import build_rincian_po
+from src.pipeline.fn_rekap29 import build_audit_from_config
 
 
 class PipelineStopped(Exception):
@@ -39,9 +40,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
                     berikutnya dengan raise PipelineStopped
 
     Returns:
-        Tuple (append1_df, rincian_po_df, in_detail_df)
+        Tuple (append1_df, rincian_po_df, in_detail_df, audit_result)
         v3.4: in_detail_df = detail IN per dokumen (42.05 / 32.24 / 99.01
         + nomor) untuk tab "Rekap Selisih IN".
+        v3.5: audit_result = dict {"df": audit_df, "kpi": kpi, "desc": ...}
+        — port macro VBA BuatLaporanDeviasiSampel (input: sheet '29 Rekap
+        Barang Masuk') untuk mode "Audit Rekonsiliasi" tab Rekap Selisih IN.
     """
     start_time = time.time()
 
@@ -55,12 +59,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
 
     if verbose:
         print(f"\n  RootPath: {config.RootPath}")
-        print(f"  Mode: {'LIGHT' if config.LightMode else 'FULL'}")
+        print("  Mode: FULL (LightMode dihapus v3.5 — bulan lalu selalu terbaca)")
 
     # 2. Build Append1 (+ IN detail v3.4)
     if verbose:
         print("\n" + "-" * 60)
-        print("  [1/2] Building Append1 (main pipeline)...")
+        print("  [1/3] Building Append1 (main pipeline)...")
         print("-" * 60)
 
     in_detail_holder: dict = {}
@@ -79,7 +83,7 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # 3. Build Rincian PO
     if verbose:
         print("\n" + "-" * 60)
-        print("  [2/2] Building Rincian PO...")
+        print("  [2/3] Building Rincian PO...")
         print("-" * 60)
 
     rincian_po_df = build_rincian_po(config)
@@ -97,15 +101,34 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     if verbose:
         print(f"  IN detail (v3.4): {len(in_detail_df)} rows")
 
+    # 4. Audit Rekonsiliasi (v3.5 — sheet '29 Rekap Barang Masuk')
+    if verbose:
+        print("\n" + "-" * 60)
+        print("  [3/3] Audit Rekonsiliasi (29 Rekap Barang Masuk)...")
+        print("-" * 60)
+    audit_df, audit_kpi, audit_desc = build_audit_from_config(config)
+    audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
+
+    if stop_event is not None and stop_event.is_set():
+        raise PipelineStopped("Pipeline dihentikan oleh user setelah Audit")
+
+    if verbose:
+        k = audit_kpi
+        print(f"  Audit: {len(audit_df)} rows | OK {k['ok']:,} | "
+              f"Cut-off {k['cutoff']:,} | Valid {k['omit']:,} | "
+              f"Deviasi Murni {k['deviasi_murni']:,} | "
+              f"Sisa Gantung {k['deviasi_qty']:,.0f}")
+
     elapsed = time.time() - start_time
     if verbose:
         print(f"\n{'=' * 60}")
         print(f"  SELESAI dalam {elapsed:.1f} detik")
         print(f"  Append1: {len(append1_df)} rows | Rincian PO: {len(rincian_po_df)} rows"
-              f" | IN detail: {len(in_detail_df)} rows")
+              f" | IN detail: {len(in_detail_df)} rows"
+              f" | Audit: {len(audit_df)} rows")
         print(f"{'=' * 60}")
 
-    return append1_df, rincian_po_df, in_detail_df
+    return append1_df, rincian_po_df, in_detail_df, audit_result
 
 
 if __name__ == "__main__":
@@ -116,11 +139,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        append1_df, rincian_po_df, in_detail_df = run_pipeline(
+        append1_df, rincian_po_df, in_detail_df, audit = run_pipeline(
             config_path=args.config)
         print(f"\nAppend1: {len(append1_df)} rows")
         print(f"Rincian PO: {len(rincian_po_df)} rows")
         print(f"IN detail: {len(in_detail_df)} rows")
+        print(f"Audit: {len(audit['df'])} rows — {audit['kpi']}")
     except Exception as e:
         print(f"\n[ERROR] {e}")
         import traceback

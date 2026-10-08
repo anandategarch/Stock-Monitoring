@@ -21,7 +21,9 @@ class Config:
             data = json.load(f)
 
         self.RootPath = data["RootPath"]
-        self.LightMode = data.get("LightMode", True)  # Default: True (ringan)
+        # v3.5: LightMode DIHAPUS — pipeline selalu mode FULL
+        # (SO bulan lalu tanggal -25..-31 selalu terbaca). Key "LightMode"
+        # lama di config.json diabaikan dengan aman.
         self.Folders = data["Folders"]
         self.Sheets = data["Sheets"]
 

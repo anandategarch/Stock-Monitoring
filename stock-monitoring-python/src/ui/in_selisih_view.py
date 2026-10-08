@@ -1,25 +1,33 @@
 """
-in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4).
+in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 + v3.5).
 
-Permintaan user: "Tambah 1 tab lagi untuk rekap Selisih IN dan kolom
+Permintaan user (v3.4): "Tambah 1 tab lagi untuk rekap Selisih IN dan kolom
 Resto, tanggal, nama barang, satuan, IN, Barang masuk dan selisih IN
 dan bisa drill down atau pop up muncul rincian IN yaitu 42.05, 3224,
 dan 9901 beserta nomor nya."
 
-Tabel utama — 1 baris per (Resto × Tanggal × Barang × Satuan):
-  Resto | Tanggal | Nama Barang | Satuan | IN | Barang Masuk | Selisih IN
-  - IN            = metric "4.IN"  (Accurate: 42.05 + 32.24 + 99.01)
-  - Barang Masuk  = metric "5.BARANG MASUK" (input rekap SO harian)
-  - Selisih IN    = metric "7.Selisih IN"  (= Barang Masuk − IN)
-  Baris ditampilkan bila ada aktivitas (IN ≠ 0 atau BM ≠ 0).
+v3.5:
+- Mode 🔍 AUDIT REKONSILIASI (default bila tersedia): port 1:1 macro VBA
+  "BuatLaporanDeviasiSampel" — input sheet '29 Rekap Barang Masuk' (dibaca
+  pipeline fn_rekap29). 12 kolom (Hasil SO / Qty SO Harian / Penerimaan
+  Sistem / Selisih Harian / Saldo Kumulatif / Status Analisis Audit /
+  Detail & Catatan Audit) + KPI chips + status berwarna (mirror
+  conditional formatting VBA). Filter = display-only; audit dihitung dari
+  sheet penuh (saldo kumulatif tidak terpotong rentang tanggal).
+- Kolom KATEGORI + filter header ⧩ di SEMUA kolom (ala Excel AutoFilter).
+  Filter RESTO combo di card atas DIHAPUS (duplikat → header Resto).
+- Mode 📋 Ringkas (perilaku v3.4):
+    IN            = metric "4.IN"  (Accurate: 42.05 + 32.24 + 99.01)
+    Barang Masuk  = metric "5.BARANG MASUK" (input rekap SO harian)
+    Selisih IN    = metric "7.Selisih IN"  (= Barang Masuk − IN)
 
-Drill-down (double-click baris) → popup RINCIAN IN per dokumen:
+Drill-down (double-click baris, kedua mode) → popup RINCIAN IN per dokumen:
   - ringkasan per sumber: 42.05 / 32.24 / 99.01 (+ 32.24 bulan lalu)
   - tabel dokumen: Source | Nomor | Nomor PO | Qty | #Tgl/Jam
   - copy Nomor (klik kanan / double-click cell / tombol Semua Nomor)
   - ⛶ Perbesar + ↔ Auto-Fit + Esc
 
-Tanggal -25..-31 = data bulan lalu (mode FULL / LightMode OFF).
+Tanggal -25..-31 = data bulan lalu (selalu terbaca — LightMode dihapus v3.5).
 """
 import tkinter as tk
 from tkinter import ttk
@@ -30,23 +38,65 @@ from .theme import (
     C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT_DARK, font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, LoadingOverlay, add_tooltip,
-    auto_fit_columns, enable_col_resize, insert_tree_items,
-    open_tree_maximized, run_async, sort_tree_by_column,
+    Card, EmptyState, GhostButton, HeaderFilterGroup, LoadingOverlay,
+    SegmentBar, add_tooltip, auto_fit_columns, enable_col_resize,
+    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
 )
 
-# Kolom tabel utama: (column_id, width, anchor)
-COLUMNS = [
+# --- Kolom per mode: (column_id, width, anchor) ------------------------------
+RINGKAS_COLUMNS = [
     ("Resto", 74, "w"),
     ("Tanggal", 64, "e"),
     ("Nama Barang", 200, "w"),
+    ("KATEGORI", 110, "w"),
     ("Satuan", 56, "w"),
     ("IN", 96, "e"),
     ("Barang Masuk", 110, "e"),
     ("Selisih IN", 100, "e"),
 ]
 
-COL_IDS = [c[0] for c in COLUMNS]
+# Mirror laporan VBA "LAPORAN_DEVIASI" (nama kolom app-consistent)
+AUDIT_COLUMNS = [
+    ("Resto", 74, "w"),
+    ("Tanggal", 64, "e"),
+    ("Nama Barang", 200, "w"),
+    ("KATEGORI", 110, "w"),
+    ("Satuan", 56, "w"),
+    ("Hasil SO", 90, "e"),
+    ("Qty SO Harian", 110, "e"),
+    ("Penerimaan Sistem", 120, "e"),
+    ("Selisih Harian", 100, "e"),
+    ("Saldo Kumulatif", 110, "e"),
+    ("Status Analisis Audit", 140, "w"),
+    ("Detail & Catatan Audit", 260, "w"),
+]
+
+_ALL_COLS = [c[0] for c in RINGKAS_COLUMNS] + \
+    [c[0] for c in AUDIT_COLUMNS if c[0] not in
+     {c[0] for c in RINGKAS_COLUMNS}]
+
+# Kolom numerik (utk format & filter nilai)
+_NUM_COLS = {"IN", "Barang Masuk", "Selisih IN", "Hasil SO", "Qty SO Harian",
+             "Penerimaan Sistem", "Selisih Harian", "Saldo Kumulatif"}
+
+# Warna status — mirror conditional formatting VBA (soft colors)
+_STATUS_TAG = {
+    "OK (Matching)": "st_ok",
+    "OK (Dalam Cut-off)": "st_ok",
+    "VALID (Sistem Masuk)": "st_valid",
+    "CUT-OFF RESOLVED": "st_cutoff",
+    "DEVIASI MURNI": "st_dev",
+}
+_STATUS_TAG_CFG = {
+    # hijau soft — OK (RGB 226,239,218 / 55,86,35)
+    "st_ok": {"background": "#e2efda", "foreground": "#375623"},
+    # biru soft executive — VALID (RGB 222,235,247 / 31,78,120)
+    "st_valid": {"background": "#deebf7", "foreground": "#1f4e78"},
+    # kuning soft — CUT-OFF (RGB 255,242,204 / 128,96,0)
+    "st_cutoff": {"background": "#fff2cc", "foreground": "#806000"},
+    # merah soft — DEVIASI MURNI (RGB 252,228,214 / 198,89,17)
+    "st_dev": {"background": "#fce4d4", "foreground": "#c65911"},
+}
 
 # Urutan sumber IN di popup rincian (+ warna chip ringkasan)
 _SOURCES = [
@@ -113,6 +163,16 @@ def _fmt_jam(val) -> str:
         return pd.to_datetime(val).strftime("%d/%m/%Y %H:%M:%S")
     except Exception:
         return str(val)
+
+
+def _format_col_values(col: str, series: pd.Series) -> pd.Series:
+    """Format satu kolom DataFrame → string tampilan (dipakai filter header
+    & render — nilai filter selalu identik dgn yang tampil di tabel)."""
+    if col == "Tanggal":
+        return series.map(_fmt_int)
+    if col in _NUM_COLS:
+        return series.map(_fmt_num)
+    return series.astype(str)
 
 
 # =============================================================================
@@ -435,23 +495,33 @@ class InDetailPopup(tk.Toplevel):
 
 
 # =============================================================================
-# VIEW UTAMA — Rekap Selisih IN
+# VIEW UTAMA — Rekap Selisih IN (Ringkas + Audit Rekonsiliasi)
 # =============================================================================
 
 class InSelisihView(tk.Frame):
-    """Rekap Selisih IN: Resto × Tanggal × Barang — IN vs Barang Masuk."""
+    """Rekap Selisih IN: mode 📋 Ringkas (IN vs Barang Masuk) dan mode 🔍
+    Audit Rekonsiliasi (port macro VBA — sheet '29 Rekap Barang Masuk')."""
 
     def __init__(self, parent, go_to_proses: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.in_detail: Optional[pd.DataFrame] = None
+        self.audit_df: Optional[pd.DataFrame] = None
+        self.audit_kpi: dict = {}
+        self.audit_desc: str = ""
         self.go_to_proses = go_to_proses
-        self._name_selected: set | None = None
+        self.mode = "ringkas"        # "ringkas" | "audit"
+        self._mode_initialized = False   # default audit saat load pertama
+        self._col_sel: dict = {c: None for c in _ALL_COLS}   # header filter ⧩
         self._busy = False
         self._pending = False
         self._dirty = False            # lazy refresh (ala v3.2)
-        self._cached_base: pd.DataFrame | None = None
+        self._cached_base: pd.DataFrame | None = None      # ringkas
+        self._cached_audit: pd.DataFrame | None = None     # audit display
         self._satuan_map: dict = {}
+        self._kategori_map: dict = {}
+        self._keys: list = []
+        self.header_filters: HeaderFilterGroup | None = None
 
         self._build_ui()
         self._setup_tags()
@@ -467,7 +537,7 @@ class InSelisihView(tk.Frame):
             self, icon="📤",
             title="Belum ada data Rekap Selisih IN",
             subtitle="Jalankan pipeline untuk memuat rekap IN vs Barang "
-                     "Masuk (dengan rincian dokumen 42.05 / 32.24 / 99.01).",
+                     "Masuk + Audit Rekonsiliasi (29 Rekap Barang Masuk).",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -475,24 +545,18 @@ class InSelisihView(tk.Frame):
         # --- Konten utama ---
         self.content = tk.Frame(self, bg=C_BG)
 
-        # --- Filter card ---
+        # --- Filter card (v3.5: RESTO combo DIHAPUS → header filter ⧩) ---
         fcard = Card(self.content, title="Filter",
-                     subtitle="Rentang tanggal 1-31 (tanggal -25 s/d -31 = "
-                              "data bulan lalu, LightMode OFF). "
-                              "Filter Nama Barang → klik header kolom (⧩).")
+                     subtitle="Rentang tanggal & mode tampilan. Filter "
+                              "RESTO / KATEGORI / STATUS / nilai kolom → "
+                              "klik judul kolom (ikon corong ⧩) di tabel. "
+                              "Mode Audit: filter hanya menyembunyikan "
+                              "baris — audit dihitung dari sheet penuh.")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
         r0 = tk.Frame(fbody, bg=C_CARD)
         r0.pack(fill="x")
-        tk.Label(r0, text="RESTO", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.resto_var = tk.StringVar(value="(All)")
-        self.resto_combo = ttk.Combobox(r0, textvariable=self.resto_var,
-                                        state="readonly", width=16)
-        self.resto_combo.pack(side="left", padx=(6, 18))
-        self.resto_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh())
-
         tk.Label(r0, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self.tgl_start_var = tk.StringVar(value="1")
@@ -506,31 +570,53 @@ class InSelisihView(tk.Frame):
         entry_end.bind("<Return>", lambda e: self._on_tanggal_change())
         add_tooltip(entry_start,
                     "Rentang hari 1..31.\nNilai negatif (-25..-31) = bulan "
-                    "lalu (hanya tersedia saat LightMode OFF).")
+                    "lalu.\nMode Audit: hanya menyembunyikan baris dari "
+                    "tampilan (saldo kumulatif tetap dihitung penuh).")
         GhostButton(r0, text="Apply", command=self._on_tanggal_change).pack(
             side="left", padx=(0, 18))
 
-        self.only_selisih_var = tk.BooleanVar(value=False)
+        self.only_selisih_var = tk.BooleanVar(value=True)
         chk = ttk.Checkbutton(
             r0, text="Hanya Selisih ≠ 0",
             variable=self.only_selisih_var,
             command=self._refresh)
         chk.pack(side="left")
         add_tooltip(chk, "Sembunyikan baris tanpa selisih\n"
-                         "(IN == Barang Masuk)")
+                         "(Ringkas: IN == Barang Masuk ·\n"
+                         "Audit: Qty SO Harian == Penerimaan Sistem)")
 
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left", padx=(18, 0))
 
+        # --- KPI chips (mode Audit — mirror "EXECUTIVE RECONCILIATION
+        #     SUMMARY" VBA) ---
+        self.kpi_card = tk.Frame(self.content, bg=C_CARD,
+                                 highlightbackground="#e2e8f0",
+                                 highlightthickness=1)
+        self.kpi_inner = tk.Frame(self.kpi_card, bg=C_CARD)
+        self.kpi_inner.pack(fill="x", padx=12, pady=8)
+
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+        self._tcard = tcard          # anchor pack utk kpi_card (before=)
         tbody = tcard.body()
 
         head = tk.Frame(tbody, bg=C_CARD)
         head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        tk.Label(head, text="Rekap Selisih IN — IN (Accurate) vs Barang Masuk",
-                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(side="left")
+        self.title_label = tk.Label(
+            head, text="Rekap Selisih IN — IN (Accurate) vs Barang Masuk",
+            bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
+        self.title_label.pack(side="left")
+        self.mode_seg = SegmentBar(
+            head, ["📋 Ringkas", "🔍 Audit Rekonsiliasi"], bg=C_CARD,
+            command=self._on_mode_change)
+        self.mode_seg.pack(side="left", padx=(14, 0))
+        add_tooltip(self.mode_seg,
+                    "📋 Ringkas: IN vs Barang Masuk (metric pipeline).\n"
+                    "🔍 Audit Rekonsiliasi: port macro VBA — sheet '29 "
+                    "Rekap Barang Masuk' (Hasil SO, saldo kumulatif, "
+                    "cut-off, deviasi murni).")
         btn_max = GhostButton(head, text="⛶ Perbesar", command=self._maximize)
         btn_max.pack(side="right")
         add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
@@ -541,16 +627,8 @@ class InSelisihView(tk.Frame):
                              "(double-click tepi kolom = auto-fit 1 kolom;\n"
                              "drag tepi kolom = atur lebar manual)")
 
-        self.tree = ttk.Treeview(tbody, columns=COL_IDS, show="headings",
-                                 selectmode="browse")
-        for col_name, width, anchor in COLUMNS:
-            self.tree.column(col_name, width=width, minwidth=40, anchor=anchor)
-            if col_name == "Nama Barang":
-                # kolom filter corong (sort via popup filter)
-                self.tree.heading(col_name, text=col_name)
-            else:
-                self.tree.heading(col_name, text=col_name,
-                                  command=lambda c=col_name: self._sort_by(c))
+        self.tree = ttk.Treeview(tbody, columns=[c[0] for c in RINGKAS_COLUMNS],
+                                 show="headings", selectmode="browse")
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
@@ -567,24 +645,64 @@ class InSelisihView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → rincian IN (42.05 / "
-                            "32.24 / 99.01 + nomor) · klik judul kolom = sort",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
+        self.hint_label = tk.Label(foot, text="", bg=C_CARD, fg=C_TEXT_MUTED,
+                                   font=font(8))
+        self.hint_label.pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
 
         self.overlay = LoadingOverlay(tbody, "Menghitung rekap Selisih IN…")
 
-        # Filter "Nama Barang" menempel di header kolom
-        self.header_filter = HeaderFilter(
-            self.tree, "Nama Barang",
-            get_values=self._name_values,
-            on_apply=self._on_name_filter,
-            label="Nama Barang",
-            on_sort=lambda desc: self._sort_by("Nama Barang", reverse=desc))
+        self._apply_mode_columns()
 
         self.tree.bind("<Double-1>", self._on_double_click)
+
+    def _apply_mode_columns(self):
+        """(Re)pasang kolom tree + heading + HeaderFilterGroup sesuai mode."""
+        # lepas binding filter lama dulu — mencegah binding ganda saat
+        # kolom dikonfigurasi ulang (HeaderFilter.bind add="+")
+        if self.header_filters is not None:
+            self.header_filters.detach_all()
+            self.header_filters = None
+
+        cols_def = AUDIT_COLUMNS if self.mode == "audit" else RINGKAS_COLUMNS
+        col_ids = [c[0] for c in cols_def]
+        self.tree.delete(*self.tree.get_children())
+        self.tree.configure(columns=col_ids)
+        for col_name, width, anchor in cols_def:
+            self.tree.column(col_name, width=width, minwidth=40, anchor=anchor)
+            # v3.5: SEMUA kolom pakai filter header ⧩ (sort via popup —
+            # klik heading membuka popup, bukan sort langsung)
+            self.tree.heading(col_name, text=col_name)
+
+        # buang state filter kolom yang tidak ada di mode ini
+        for c in list(self._col_sel.keys()):
+            if c not in col_ids:
+                self._col_sel[c] = None
+
+        # v3.5: filter header di SEMUA kolom
+        self.header_filters = HeaderFilterGroup(
+            self.tree, col_ids,
+            get_values=self._col_values,
+            on_apply=self._on_col_filter,
+            on_sort=lambda c, d: self._sort_by(c, reverse=d))
+
+        # judul + hint per mode
+        if self.mode == "audit":
+            self.title_label.configure(
+                text="Audit Rekonsiliasi — LAPORAN DEVIASI (port macro VBA)")
+            self.hint_label.configure(
+                text="🖱 Double-click baris → rincian IN (42.05 / 32.24 / "
+                     "99.01 + nomor) · klik judul kolom ⧩ = filter + sort · "
+                     "status & saldo dihitung dari sheet penuh (filter hanya "
+                     "menyembunyikan baris)")
+        else:
+            self.title_label.configure(
+                text="Rekap Selisih IN — IN (Accurate) vs Barang Masuk")
+            self.hint_label.configure(
+                text="🖱 Double-click baris → rincian IN (42.05 / 32.24 / "
+                     "99.01 + nomor) · klik judul kolom ⧩ = filter + sort")
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
@@ -592,17 +710,44 @@ class InSelisihView(tk.Frame):
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero", foreground="#64748b")
+        # v3.5: warna status audit (mirror conditional formatting VBA)
+        for tag, cfg in _STATUS_TAG_CFG.items():
+            tree.tag_configure(tag, **cfg)
 
     # ------------------------------------------------------------ DATA ----
-    def load_data(self, data: pd.DataFrame, in_detail: pd.DataFrame | None = None):
+    def load_data(self, data: pd.DataFrame, in_detail: pd.DataFrame | None = None,
+                  audit_result: dict | None = None):
         self.data = data
         self.in_detail = in_detail
+        if audit_result:
+            self.audit_df = audit_result.get("df")
+            self.audit_kpi = audit_result.get("kpi") or {}
+            self.audit_desc = audit_result.get("desc") or ""
+        else:
+            self.audit_df = None
+            self.audit_kpi = {}
+            self.audit_desc = ""
         self._cached_base = None
+        self._cached_audit = None
         self._satuan_map = {}
+        self._kategori_map = {}
         self._show_content()
-        self._populate_filters()
-        self._name_selected = None
-        self.header_filter.clear()
+
+        audit_ok = self.audit_df is not None and not self.audit_df.empty
+        if not self._mode_initialized:
+            # default pertama kali: Audit bila tersedia (permintaan user)
+            self.mode = "audit" if audit_ok else "ringkas"
+            self._mode_initialized = True
+        elif self.mode == "audit" and not audit_ok:
+            # audit dipilih tapi datanya hilang → balik ke ringkas
+            self.mode = "ringkas"
+        self.mode_seg.set_active_silent(1 if self.mode == "audit" else 0)
+        # default 'Hanya Selisih ≠ 0': audit ON (fokus anomali, render cepat),
+        # ringkas OFF (perilaku v3.4)
+        self.only_selisih_var.set(self.mode == "audit")
+        self._apply_mode_columns()
+        self._reset_filter_states()
+        self._render_kpi_chips()
         # lazy refresh — hanya compute bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -615,52 +760,93 @@ class InSelisihView(tk.Frame):
             self._dirty = False
             self._refresh()
 
-    def _populate_filters(self):
-        if self.data is None or self.data.empty:
+    def _reset_filter_states(self):
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        if self.header_filters is not None:
+            self.header_filters.clear_all()
+
+    # ------------------------------------------------------- KPI CHIPS ----
+    def _render_kpi_chips(self):
+        """KPI 'EXECUTIVE RECONCILIATION SUMMARY' (mode Audit saja) —
+        dihitung dari sheet penuh (tidak terpengaruh filter tampilan)."""
+        for w in self.kpi_inner.winfo_children():
+            w.destroy()
+        if self.mode != "audit" or not self.audit_kpi:
+            self.kpi_card.pack_forget()
             return
-        if "NAMA RESTO" in self.data.columns:
-            values = ["(All)"] + sorted(
-                self.data["NAMA RESTO"].dropna().astype(str).unique().tolist())
-            self.resto_combo["values"] = values
+        k = self.audit_kpi
+        chips = [
+            ("TOTAL BARIS", f"{k.get('rows', 0):,}", "#0f766e"),
+            ("OK (MATCHING)", f"{k.get('ok', 0):,}", "#16a34a"),
+            ("VALID (SISTEM MASUK)", f"{k.get('omit', 0):,}", "#1f4e78"),
+            ("CUT-OFF RESOLVED", f"{k.get('cutoff', 0):,}", "#806000"),
+            ("DEVIASI MURNI", f"{k.get('deviasi_murni', 0):,}", "#c65911"),
+            ("SISA GANTUNG (NET)",
+             f"{k.get('deviasi_qty', 0.0):,.0f}",
+             "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
+        ]
+        for label, value, color in chips:
+            box = tk.Frame(self.kpi_inner, bg="#f8fafc",
+                           highlightbackground="#e2e8f0", highlightthickness=1)
+            box.pack(side="left", padx=(0, 8))
+            tk.Label(box, text=label, bg="#f8fafc", fg=C_TEXT_MUTED,
+                     font=font(8, "bold")).pack(anchor="w", padx=10,
+                                                pady=(6, 0))
+            tk.Label(box, text=value, bg="#f8fafc", fg=color,
+                     font=font(11, "bold")).pack(anchor="w", padx=10,
+                                                 pady=(0, 6))
+        self.kpi_card.pack(fill="x", padx=12, pady=(10, 0),
+                           before=self._tcard)
 
-    def _name_values(self) -> list:
-        if self.data is None or self.data.empty or \
-                "Nama Barang" not in self.data.columns:
+    # --------------------------------------------------- VALUES & FILTER ---
+    def _base_of_mode(self) -> pd.DataFrame:
+        if self.mode == "audit":
+            if self._cached_audit is None:
+                self._cached_audit = self._compute_audit_display()
+            return self._cached_audit
+        if self._cached_base is None:
+            self._cached_base = self._compute_base()
+        return self._cached_base
+
+    def _col_values(self, col: str) -> list:
+        base = self._base_of_mode()
+        if base is None or base.empty or col not in base.columns:
             return []
-        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+        return _format_col_values(col, base[col]).unique().tolist()
 
-    def _on_name_filter(self, selected):
-        self._name_selected = selected
+    def _on_col_filter(self, col: str, selected):
+        self._col_sel[col] = selected
         self._refresh()
 
-    def _show_empty(self):
-        self.content.pack_forget()
-        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
-
-    def _show_content(self):
-        self.empty.pack_forget()
-        self.content.pack(fill="both", expand=True)
+    # ------------------------------------------------------------- MODES ---
+    def _on_mode_change(self, idx: int):
+        new_mode = "audit" if idx == 1 else "ringkas"
+        if new_mode == "audit" and (self.audit_df is None
+                                    or self.audit_df.empty):
+            # tidak ada data audit — balik ke ringkas + pesan jelas
+            self.mode_seg.set_active_silent(0)
+            self.status_var.set(
+                "⚠ Sheet '29 Rekap Barang Masuk' tidak ditemukan — jalankan "
+                "pipeline / cek RootPath (mode Audit tidak tersedia).")
+            return
+        self.mode = new_mode
+        # default 'Hanya Selisih ≠ 0' per mode (audit: ON — fokus anomali)
+        self.only_selisih_var.set(self.mode == "audit")
+        self._reset_filter_states()
+        self._apply_mode_columns()
+        self._render_kpi_chips()
+        self._refresh()
 
     # ------------------------------------------------------- COMPUTE ----
     def _compute_base(self) -> pd.DataFrame:
-        """Pivot append1 → 1 baris per (Resto, Tanggal, Barang) dengan
-        IN / BM / Selisih + lookup satuan. Pure pandas (thread-safe)."""
+        """Mode Ringkas — pivot append1 → 1 baris per (Resto, Tanggal,
+        Barang) dengan IN / BM / Selisih + satuan + kategori (v3.5)."""
         df = self.data
         if df is None or df.empty:
             return pd.DataFrame()
 
-        # satuan lookup per (Nama Barang, NAMA RESTO) — sumber sama dengan
-        # lookup append1 (kolom SATUAN hasil merge dari rekap SO)
-        if not self._satuan_map and "SATUAN" in df.columns:
-            sat = (df[["Nama Barang", "NAMA RESTO", "SATUAN"]]
-                   .dropna(subset=["SATUAN"])
-                   .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
-                                    keep="first"))
-            self._satuan_map = {
-                (str(b), str(r)): str(s)
-                for b, r, s in zip(sat["Nama Barang"], sat["NAMA RESTO"],
-                                   sat["SATUAN"])
-            }
+        self._ensure_maps(df)
 
         m = df[df["JENIS"].isin(["4.IN", "5.BARANG MASUK", "7.Selisih IN"])]
         if m.empty:
@@ -702,14 +888,72 @@ class InSelisihView(tk.Frame):
         resto_s = piv["Resto"].astype(str)
         piv["Satuan"] = [self._satuan_map.get((b, r), "-")
                          for b, r in zip(barang_s, resto_s)]
+        piv["KATEGORI"] = [self._kategori_map.get(b, "-")
+                           for b in barang_s]
 
         return piv.sort_values(["Resto", "Tanggal", "Nama Barang"],
                                na_position="last").reset_index(drop=True)
 
+    def _compute_audit_display(self) -> pd.DataFrame:
+        """Mode Audit — hasil engine VBA (fn_rekap29) + kolom tampilan.
+
+        Baris & status PERSIS output macro (tidak difilter apa pun);
+        kolom 'Nama Item'/'UoM' VBA ditampilkan sbg 'Nama Barang'/'Satuan'
+        (app-consistent)."""
+        df = self.audit_df
+        if df is None or df.empty:
+            return pd.DataFrame()
+        if self.data is not None and not self.data.empty:
+            self._ensure_maps(self.data)
+
+        out = pd.DataFrame({
+            "Resto": df["Resto"].astype(str),
+            "Tanggal": pd.to_numeric(df["Tanggal"], errors="coerce"),
+            "Nama Barang": df["Nama Item"].astype(str),
+            "Satuan": df["UoM"].astype(str),
+            "Hasil SO": pd.to_numeric(df["Hasil SO"], errors="coerce"),
+            "Qty SO Harian": pd.to_numeric(df["Qty SO Harian"], errors="coerce"),
+            "Penerimaan Sistem": pd.to_numeric(df["Penerimaan Sistem"], errors="coerce"),
+            "Selisih Harian": pd.to_numeric(df["Selisih Harian"], errors="coerce"),
+            "Saldo Kumulatif": pd.to_numeric(df["Saldo Kumulatif"], errors="coerce"),
+            "Status Analisis Audit": df["Status Analisis Audit"].astype(str),
+            "Detail & Catatan Audit": df["Detail & Catatan Audit"].astype(str),
+        })
+        barang_s = out["Nama Barang"]
+        out.insert(3, "KATEGORI",
+                   [self._kategori_map.get(b, "-") for b in barang_s])
+        return out
+
+    def _ensure_maps(self, df):
+        """Lookup satuan per (barang, resto) + kategori per barang (v3.5)."""
+        if not self._satuan_map and "SATUAN" in df.columns:
+            sat = (df[["Nama Barang", "NAMA RESTO", "SATUAN"]]
+                   .dropna(subset=["SATUAN"])
+                   .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+                                    keep="first"))
+            self._satuan_map = {
+                (str(b), str(r)): str(s)
+                for b, r, s in zip(sat["Nama Barang"], sat["NAMA RESTO"],
+                                   sat["SATUAN"])
+            }
+        if not self._kategori_map and "KATEGORI" in df.columns:
+            kat = (df[["Nama Barang", "KATEGORI"]]
+                   .dropna(subset=["KATEGORI"])
+                   .drop_duplicates(subset=["Nama Barang"], keep="first"))
+            self._kategori_map = {
+                str(b): str(k)
+                for b, k in zip(kat["Nama Barang"], kat["KATEGORI"])
+            }
+
     # ------------------------------------------------------------- REFRESH
     def _refresh(self, sync: bool = False):
-        if self.data is None or self.data.empty:
+        audit_ok = self.audit_df is not None and not self.audit_df.empty
+        if (self.data is None or self.data.empty) and not audit_ok:
             self.status_var.set("Belum ada data.")
+            return
+        if self.mode == "audit" and not audit_ok:
+            self.status_var.set("⚠ Sheet '29 Rekap Barang Masuk' tidak "
+                                "ditemukan — mode Audit tidak tersedia.")
             return
         if self._busy:
             self._pending = True
@@ -724,15 +968,18 @@ class InSelisihView(tk.Frame):
         except (TypeError, ValueError):
             tgl_end = 31
         st = {
-            "resto": self.resto_var.get(),
-            "name_selected": self._name_selected,
+            "mode": self.mode,
             "tgl_start": tgl_start,
             "tgl_end": tgl_end,
             "only_selisih": self.only_selisih_var.get(),
+            "col_sel": {c: s for c, s in self._col_sel.items() if s},
         }
 
         def work():
-            if self._cached_base is None:
+            if self.mode == "audit":
+                if self._cached_audit is None:
+                    self._cached_audit = self._compute_audit_display()
+            elif self._cached_base is None:
                 self._cached_base = self._compute_base()
             return self._prepare_rows(st)
 
@@ -743,72 +990,95 @@ class InSelisihView(tk.Frame):
                   loading_text="Menghitung rekap Selisih IN…", sync=sync)
 
     def _prepare_rows(self, st: dict) -> dict:
-        base = self._cached_base
+        base = self._cached_audit if st["mode"] == "audit" else self._cached_base
         if base is None or base.empty:
             return {"items": [], "status": "Tidak ada data."}
 
         f = base
+        # rentang tanggal — display-only (audit tetap dihitung dari sheet
+        # penuh; ini hanya menyembunyikan baris dari tampilan)
         if st["tgl_start"] is not None and st["tgl_end"] is not None:
             t = pd.to_numeric(f["Tanggal"], errors="coerce")
             f = f[(t >= st["tgl_start"]) & (t <= st["tgl_end"])]
-        resto_val = st["resto"]
-        if resto_val and resto_val != "(All)":
-            f = f[f["Resto"].astype(str) == resto_val]
-        if st["name_selected"]:
-            f = f[f["Nama Barang"].astype(str).isin(st["name_selected"])]
-        if st["only_selisih"]:
-            f = f[f["Selisih IN"] != 0]
+
+        # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
+        # yang tampil di tabel)
+        for col, sel in st["col_sel"].items():
+            if col in f.columns:
+                fmt = _format_col_values(col, f[col])
+                f = f[fmt.isin(sel)]
+
+        sel_col = "Selisih Harian" if st["mode"] == "audit" else "Selisih IN"
+        if st["only_selisih"] and sel_col in f.columns:
+            sv = pd.to_numeric(f[sel_col], errors="coerce").fillna(0)
+            f = f[sv != 0]
 
         if f.empty:
             return {"items": [], "status": "Tidak ada data setelah filter."}
 
-        n = len(f)
-        total_in = float(f["IN"].sum())
-        total_bm = float(f["Barang Masuk"].sum())
-        total_sel = float(f["Selisih IN"].sum())
+        is_audit = st["mode"] == "audit"
+        cols_def = AUDIT_COLUMNS if is_audit else RINGKAS_COLUMNS
+        col_ids = [c[0] for c in cols_def]
 
-        cols_np = {
-            "Resto": f["Resto"].astype(str).to_numpy(),
-            "Nama Barang": f["Nama Barang"].astype(str).to_numpy(),
-            "Satuan": f["Satuan"].astype(str).to_numpy(),
-            "Tanggal": pd.to_numeric(f["Tanggal"], errors="coerce").to_numpy(),
-            "IN": pd.to_numeric(f["IN"], errors="coerce").fillna(0).to_numpy(dtype="float64"),
-            "Barang Masuk": pd.to_numeric(f["Barang Masuk"], errors="coerce").fillna(0).to_numpy(dtype="float64"),
-            "Selisih IN": pd.to_numeric(f["Selisih IN"], errors="coerce").fillna(0).to_numpy(dtype="float64"),
-        }
+        # format kolom sekali (vektor per kolom — lebih cepat dari per-sel)
+        formatted = {}
+        for c in col_ids:
+            if c in f.columns:
+                formatted[c] = _format_col_values(c, f[c]).tolist()
+
+        if is_audit:
+            status_s = f["Status Analisis Audit"].astype(str).tolist()
+        else:
+            sel_np = pd.to_numeric(f["Selisih IN"], errors="coerce") \
+                .fillna(0).to_numpy()
+
+        resto_np = f["Resto"].astype(str).to_numpy()
+        barang_np = f["Nama Barang"].astype(str).to_numpy()
+        tgl_np = pd.to_numeric(f["Tanggal"], errors="coerce").to_numpy()
+
+        n = len(f)
         items = []
         keys = []
         for i in range(n):
-            t = cols_np["Tanggal"][i]
-            values = (
-                cols_np["Resto"][i],
-                _fmt_int(t),
-                cols_np["Nama Barang"][i],
-                cols_np["Satuan"][i],
-                _fmt_num(cols_np["IN"][i]),
-                _fmt_num(cols_np["Barang Masuk"][i]),
-                _fmt_num(cols_np["Selisih IN"][i]),
-            )
+            values = tuple(formatted[c][i] for c in col_ids)
             tags = []
-            sel = cols_np["Selisih IN"][i]
-            if sel < 0:
-                tags.append("negative")
-            elif sel == 0:
-                tags.append("zero")
-            tags.append("evenrow" if i % 2 == 0 else "oddrow")
+            if is_audit:
+                st_tag = _STATUS_TAG.get(status_s[i])
+                if st_tag:
+                    tags.append(st_tag)
+                else:
+                    tags.append("evenrow" if i % 2 == 0 else "oddrow")
+            else:
+                sel = sel_np[i]
+                if sel < 0:
+                    tags.append("negative")
+                elif sel == 0:
+                    tags.append("zero")
+                tags.append("evenrow" if i % 2 == 0 else "oddrow")
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
             # key utk drill-down: (resto, barang, tgl asli)
-            keys.append((cols_np["Resto"][i], cols_np["Nama Barang"][i],
+            t = tgl_np[i]
+            keys.append((resto_np[i], barang_np[i],
                          None if pd.isna(t) else int(t)))
 
-        status = (f"{n} baris · Total IN {_fmt_num(total_in)} · "
-                  f"BM {_fmt_num(total_bm)} · Selisih {_fmt_num(total_sel)}")
-        return {"items": items, "status": status, "keys": keys}
+        # ringkasan status (mode audit)
+        if is_audit:
+            status_txt = f"{n} baris · " + " · ".join(
+                f"{k}: {v:,}" for k, v in
+                pd.Series(status_s).value_counts().head(3).items())
+        else:
+            total_in = float(pd.to_numeric(f["IN"], errors="coerce").sum())
+            total_bm = float(pd.to_numeric(f["Barang Masuk"], errors="coerce").sum())
+            total_sel = float(pd.to_numeric(f["Selisih IN"], errors="coerce").sum())
+            status_txt = (f"{n} baris · Total IN {_fmt_num(total_in)} · "
+                          f"BM {_fmt_num(total_bm)} · Selisih {_fmt_num(total_sel)}")
+        return {"items": items, "status": status_txt, "keys": keys}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
-        self.header_filter.refresh_icon()
+        if self.header_filters is not None:
+            self.header_filters.refresh_icons()
         self.status_var.set(payload["status"])
         self._keys = payload.get("keys", [])
 
@@ -837,12 +1107,10 @@ class InSelisihView(tk.Frame):
             self.status_var.set("Tanggal harus angka -31..31 (contoh: 1–31).")
 
     def _reset_filter(self):
-        self.resto_var.set("(All)")
         self.tgl_start_var.set("1")
         self.tgl_end_var.set("31")
-        self.only_selisih_var.set(False)
-        self._name_selected = None
-        self.header_filter.clear()
+        self.only_selisih_var.set(self.mode == "audit")
+        self._reset_filter_states()
         self._refresh()
 
     # -------------------------------------------------------------- SORT
@@ -859,17 +1127,16 @@ class InSelisihView(tk.Frame):
     # ------------------------------------------------- ⛶ PERBESAR (clone)
     def _maximize(self):
         def sort_setup(new_tree):
-            for col_name, _, _ in COLUMNS:
-                if col_name == "Nama Barang":
-                    new_tree.heading(col_name, text=col_name)
-                else:
-                    new_tree.heading(
-                        col_name, text=col_name,
-                        command=lambda c=col_name, t=new_tree:
-                            self._sort_by(c, tree=t))
+            for col_name, _, _ in (AUDIT_COLUMNS if self.mode == "audit"
+                                   else RINGKAS_COLUMNS):
+                new_tree.heading(col_name, text=col_name,
+                                 command=lambda c=col_name, t=new_tree:
+                                 self._sort_by(c, tree=t))
 
+        title = ("Audit Rekonsiliasi — LAPORAN DEVIASI"
+                 if self.mode == "audit" else "Rekap Selisih IN")
         win, new_tree = open_tree_maximized(
-            self.tree, "Rekap Selisih IN",
+            self.tree, title,
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
             on_sort_setup=sort_setup)
@@ -886,7 +1153,8 @@ class InSelisihView(tk.Frame):
         values = tree.item(row_iid, "values")
         if not values:
             return
-        row = dict(zip(COL_IDS, values))
+        col_ids = list(tree["columns"])
+        row = dict(zip(col_ids, values))
         resto = row.get("Resto")
         barang = row.get("Nama Barang")
         tgl_txt = str(row.get("Tanggal") or "")
@@ -897,12 +1165,12 @@ class InSelisihView(tk.Frame):
         except (TypeError, ValueError):
             return
 
-        # baris asli (tree utama maupun clone ⛶) → cari key via iid
-        det = self._detail_for(resto, barang, tgl, tree, row_iid)
+        det = self._detail_for(resto, barang, tgl)
         if det is None:
             return
 
-        # ringkasan utk chip popup
+        # ringkasan utk chip popup (nilai mentah dari baris — audit:
+        # Qty SO Harian & Selisih Harian; ringkas: BM & Selisih IN)
         def _num(v):
             s = str(v).replace(",", "").strip()
             if s in ("", "-", "None"):
@@ -914,16 +1182,21 @@ class InSelisihView(tk.Frame):
             except ValueError:
                 return 0.0
 
-        row_summary = {
-            "bm": _num(row.get("Barang Masuk")),
-            "selisih": _num(row.get("Selisih IN")),
-        }
+        if self.mode == "audit":
+            row_summary = {
+                "bm": _num(row.get("Qty SO Harian")),
+                "selisih": _num(row.get("Selisih Harian")),
+            }
+        else:
+            row_summary = {
+                "bm": _num(row.get("Barang Masuk")),
+                "selisih": _num(row.get("Selisih IN")),
+            }
         InDetailPopup(self.winfo_toplevel(), resto, barang, tgl, det,
                       row_summary=row_summary)
 
-    def _detail_for(self, resto, barang, tgl, tree, row_iid) -> Optional[pd.DataFrame]:
-        """Ambil detail IN utk (resto, barang, tgl). Bila tree adalah clone ⛶,
-        iid cocok dgn tree utama → pakai pemetaan _keys."""
+    def _detail_for(self, resto, barang, tgl) -> Optional[pd.DataFrame]:
+        """Ambil detail IN utk (resto, barang, tgl)."""
         det = self.in_detail
         if det is None or det.empty:
             # tidak ada detail IN (mis. sumber 42.05/3224/9901 kosong) —
@@ -940,3 +1213,14 @@ class InSelisihView(tk.Frame):
         if d.empty:
             return d
         return d.reset_index(drop=True)
+
+    # ------------------------------------------------------------ SHOW ---
+    def _show_empty(self):
+        self.content.pack_forget()
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+    def _show_content(self):
+        self.empty.pack_forget()
+        self.content.pack(fill="both", expand=True)
+        # posisi kpi_card dikelola penuh oleh _render_kpi_chips()
+        # (pack before tabel card / pack_forget)

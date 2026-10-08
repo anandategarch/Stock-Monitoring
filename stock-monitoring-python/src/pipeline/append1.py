@@ -114,18 +114,15 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None) ->
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
 
-    LightMode (config.LightMode=True):
-    - Skip InfoColumns (Nomor, Nomor PO, #Tgl/Jam) — hemat kolom & grouping time
-    - Pre-filter KATEGORI=DEVIASI di awal — hemat ~60% data
+    (v3.5: LightMode DIHAPUS — pipeline selalu FULL: InfoColumns diproses,
+    semua KATEGORI lolos, bulan lalu selalu dibaca.)
 
     v3.4 — in_detail_out: dict opsional; diisi DataFrame detail IN per
-    dokumen (lihat query_in). Filter KATEGORI=DEVIASI (LightMode) yang
-    diterapkan ke source JUGA diterapkan ke detail supaya total rincian
-    di popup Rekap Selisih IN == kolom IN tabel utama.
+    dokumen (lihat query_in).
 
     stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
     """
-    print(f"  [Append1] Mode: {'LIGHT' if config.LightMode else 'FULL'}")
+    print("  [Append1] Mode: FULL (LightMode dihapus v3.5)")
     print("  [Append1] Loading master data...")
     # Pre-load master queries (dipakai multiple times)
     # FIX: query_27_konversi_satuan dihapus — PI sudah digantikan 9901, konversi gak dipakai lagi
@@ -179,29 +176,6 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None) ->
     # Table.Buffer equivalent — just use the DataFrame (already in memory)
     source = pd.concat(parts, ignore_index=True, sort=False)
     print(f"    Combined source: {len(source)} rows")
-
-    # =========================================================================
-    # 1.5 LightMode: Pre-filter KATEGORI=DEVIASI
-    # =========================================================================
-    if config.LightMode and len(dbs_kategori) > 0 and "Nama Barang" in source.columns:
-        # Merge kategori dulu untuk filter
-        kat_filter = dbs_kategori[["NAMA BARANG", "KATEGORI"]].copy()
-        kat_filter = kat_filter.rename(columns={"NAMA BARANG": "Nama Barang"})
-        kat_filter = kat_filter[kat_filter["KATEGORI"] == "DEVIASI"]
-        # Get set of barang with KATEGORI=DEVIASI
-        deviasi_barang = set(kat_filter["Nama Barang"].astype(str).unique())
-        # Filter source
-        before = len(source)
-        source["Nama Barang"] = source["Nama Barang"].astype(str)
-        source = source[source["Nama Barang"].isin(deviasi_barang)].reset_index(drop=True)
-        print(f"    LightMode pre-filter KATEGORI=DEVIASI: {before} → {len(source)} rows")
-        # v3.4: filter identik utk detail IN (konsistensi total rincian)
-        if in_detail_out is not None and "df" in in_detail_out \
-                and not in_detail_out["df"].empty:
-            det = in_detail_out["df"]
-            det["Nama Barang"] = det["Nama Barang"].astype(str)
-            in_detail_out["df"] = det[det["Nama Barang"].isin(deviasi_barang)] \
-                .reset_index(drop=True)
 
     # =========================================================================
     # 2. KONFIGURASI

@@ -145,7 +145,7 @@ class PivotTableView(tk.Frame):
         r1.pack(fill="x")
         tk.Label(r1, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.tgl_start_var = tk.StringVar(value="1")
+        self.tgl_start_var = tk.StringVar(value="26")   # v3.5: default 26-31
         t1 = ttk.Entry(r1, textvariable=self.tgl_start_var, width=5)
         t1.pack(side="left", padx=(6, 2))
         t1.bind("<Return>", lambda e: self._refresh_pivot())
@@ -154,8 +154,10 @@ class PivotTableView(tk.Frame):
         t2 = ttk.Entry(r1, textvariable=self.tgl_end_var, width=5)
         t2.pack(side="left", padx=(2, 6))
         t2.bind("<Return>", lambda e: self._refresh_pivot())
-        add_tooltip(t1, "Rentang tanggal (1-31).\nMode Resto: batas total "
-                        "per resto · Mode Tanggal: batas kolom tanggal.")
+        add_tooltip(t1, "Rentang tanggal (1-31), default 26-31.\n"
+                        "Mode 🏪 Resto: total per resto dihitung HANYA dari "
+                        "tanggal dalam rentang ini.\nMode 📅 Tanggal: batas "
+                        "kolom tanggal yang tampil.")
         GhostButton(r1, text="Apply", command=self._refresh_pivot).pack(
             side="left", padx=(0, 18))
 
@@ -584,7 +586,7 @@ class PivotTableView(tk.Frame):
         self.resto_var.set("(All)")
         self.source_var.set("(All)")
         self.kategori_var.set("(All)")
-        self.tgl_start_var.set("1")
+        self.tgl_start_var.set("26")   # v3.5: reset ke default 26-31
         self.tgl_end_var.set("31")
         self.hide_empty_var.set(True)
         self._name_selected = None

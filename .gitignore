@@ -17,3 +17,6 @@ followup*.json.bad
 # Screenshot / hasil uji sementara
 *.png
 !docs/**/*.png
+
+# Dev tools sandbox (skrip uji real-data — path sandbox, bukan kode app)
+.dev/

@@ -19,7 +19,7 @@ from typing import Optional, Callable
 
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter,
+    Card, EmptyState, GhostButton, HeaderFilterGroup,
     LoadingOverlay, add_tooltip, auto_fit_columns, enable_col_resize,
     insert_tree_items, open_tree_maximized, run_async,
 )
@@ -33,7 +33,6 @@ class RincianPoView(tk.Frame):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.go_to_proses = go_to_proses
-        self._name_selected: set | None = None
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
@@ -67,7 +66,7 @@ class RincianPoView(tk.Frame):
         # --- Filter card ---
         fcard = Card(self.content, title="Filter",
                      subtitle="Filter level PO (page filter). Filter Nama "
-                              "Barang → klik header kolom (ikon corong ⧩) "
+                              "kolom → klik judul kolom (ikon corong ⧩) "
                               "di tabel.")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
@@ -153,7 +152,7 @@ class RincianPoView(tk.Frame):
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         tk.Label(foot, text="🛒 Nomor # = induk PO · klik ▸ untuk buka/tutup "
-                            "detail · ⧩ header Nama Barang = filter",
+                            "detail · klik judul kolom ⧩ = filter",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
@@ -162,25 +161,44 @@ class RincianPoView(tk.Frame):
         # Loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(tbody, "Menyiapkan pivot PO…")
 
-        # Filter "Nama Barang" menempel di header kolom
-        self.header_filter = HeaderFilter(
-            self.tree, "Nama Barang",
-            get_values=self._name_values,
-            on_apply=self._on_name_filter,
-            label="Nama Barang")
+        # v3.5: filter header ⧩ di SEMUA kolom (#0 = Nomor # + 7 kolom data)
+        _filter_cols = ["#0"] + cols
+        self._col_sel: dict = {c: None for c in _filter_cols}
+        self.header_filters = HeaderFilterGroup(
+            self.tree, _filter_cols,
+            get_values=self._col_values,
+            on_apply=self._on_col_filter,
+            on_sort=None)
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""
         auto_fit_columns(self.tree)
 
-    def _name_values(self) -> list:
-        if self.data is None or self.data.empty or \
-                "Nama Barang" not in self.data.columns:
+    def _col_values(self, col: str) -> list:
+        """Nilai unik TERFORMAT utk popup filter header (v3.5)."""
+        df = self.data
+        if df is None or df.empty:
             return []
-        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+        if col == "#0":
+            if "Nomor #" in df.columns:
+                return df["Nomor #"].dropna().astype(str).unique().tolist()
+            return []
+        if col not in df.columns:
+            return []
+        return self._format_col_series(col, df[col]).unique().tolist()
 
-    def _on_name_filter(self, selected):
-        self._name_selected = selected
+    def _format_col_series(self, col: str, series):
+        """Format kolom → string tampilan (identik render tabel)."""
+        if col == "Tanggal":
+            return series.map(self._fmt_date)
+        if col == "Tgl/Jam Pembuatan":
+            return series.map(self._fmt_datetime)
+        if col == "Kuantitas":
+            return series.map(self._fmt_num)
+        return series.astype(str)
+
+    def _on_col_filter(self, col: str, selected):
+        self._col_sel[col] = selected
         self._refresh()
 
     def _show_empty(self):
@@ -211,8 +229,9 @@ class RincianPoView(tk.Frame):
         self.data = data
         self._show_content()
         self._populate_filters()
-        self._name_selected = None
-        self.header_filter.clear()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         # (v3.2) lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -249,7 +268,7 @@ class RincianPoView(tk.Frame):
         st = {
             "cabang": self.cabang_var.get(),
             "status_pesanan": self.status_pesanan_var.get(),
-            "name_selected": self._name_selected,
+            "col_sel": {c: s for c, s in self._col_sel.items() if s},
         }
 
         def work():
@@ -269,8 +288,13 @@ class RincianPoView(tk.Frame):
             if val and val != "(All)" and col in df.columns:
                 df = df[df[col].astype(str) == val]
 
-        if st["name_selected"] and "Nama Barang" in df.columns:
-            df = df[df["Nama Barang"].astype(str).isin(st["name_selected"])]
+        # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (semua kolom;
+        # #0 = Nomor #)
+        for col, sel in st["col_sel"].items():
+            src_col = "Nomor #" if col == "#0" else col
+            if src_col in df.columns:
+                fmt = self._format_col_series(col, df[src_col])
+                df = df[fmt.isin(sel)]
 
         if df.empty:
             return {"items": [], "kpi": (0, 0, 0),
@@ -328,7 +352,7 @@ class RincianPoView(tk.Frame):
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
-        self.header_filter.refresh_icon()
+        self.header_filters.refresh_icons()
         # ringkasan (PO · item · total qty) ada di status footer (v3.2)
         self.status_var.set(payload["status"])
 
@@ -344,8 +368,9 @@ class RincianPoView(tk.Frame):
     def _reset_filter(self):
         self.cabang_var.set("(All)")
         self.status_pesanan_var.set("(All)")
-        self._name_selected = None
-        self.header_filter.clear()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
         self._refresh()
 
     # =========================================================================

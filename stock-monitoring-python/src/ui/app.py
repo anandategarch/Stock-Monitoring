@@ -1,41 +1,42 @@
 """
-app.py — Shell UI Stock Monitoring v3.3 (total redesign).
+app.py — Shell UI Stock Monitoring v3.5.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.3 + [Export] [❓]  │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.5 + [Export] [❓]  │
     ├────────────────────────────────────────────────────┤
-    │ Tab modern ber-ikon (8 tab, fungsi tidak berubah)  │
+    │ Tab modern ber-ikon (9 tab, fungsi tidak berubah)  │
     ├────────────────────────────────────────────────────┤
     │ Konten card-based per view (tabel lebar & besar)   │
     ├────────────────────────────────────────────────────┤
     │ StatusBar: ● status data + ringkasan rows           │
     └────────────────────────────────────────────────────┘
 
-8 tab:
-  1. ⚙️ Config          : RootPath + LightMode + info config
+9 tab:
+  1. ⚙️ Config          : RootPath + info config (LightMode dihapus v3.5)
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
-  3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default)
+  3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default,
+                          tanggal default 26-31 v3.5)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
-  6. 📤 Rekap Selisih IN: IN (Accurate) vs Barang Masuk + rincian dokumen (v3.4)
+  6. 📤 Rekap Selisih IN: IN (Accurate) vs Barang Masuk + rincian dokumen
+                          (v3.4) + mode 🔍 Audit Rekonsiliasi (v3.5 — port
+                          macro VBA, sheet '29 Rekap Barang Masuk')
   7. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
   8. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
   9. 🛒 Rincian PO      : pivot PO dengan search + sort
 
-v3.3 ringkasan (hasil DEEP AUDIT):
-- ENGINE SORT LINEAR: klik judul kolom kini delete+reinsert O(n)
-  (tree.move O(n²) dulu membekukan UI 45 detik di 50k baris)
-- BUG FIX follow-up: klik ✓ / double-click kini iid-based — setelah
-  sort TIDAK lagi mengenai/keluar baris yang salah
-- BUG FIX pipeline error: except-as-e + lambda tertunda → NameError
-  (path error tidak pernah sampai ke handler UI)
-- BUG FIX double-click kolom ✓ = toggle follow-up (bukan popup)
-- Perf: cache pivot Deviasi dibagi GR/PCS (compute 1× bukan 2×),
-  cache Laporan tanpa recompute saat ganti rentang tanggal,
-  insert batch delay adaptif, popup detail tanpa full copy data
-- UX: selesai pipeline → status bar + log (modal "Selesai" dihapus)
-- Dead code dibersihkan (24 unused import, method/konstanta mati)
+v3.5 ringkasan:
+- AUDIT REKONSILIASI: tab Rekap Selisih IN dapat mode baru (port 1:1 macro
+  VBA BuatLaporanDeviasiSampel) — input sheet '29 Rekap Barang Masuk',
+  11 kolom + KPI chips + status berwarna + drill-down tetap jalan.
+  Tervalidasi 99,97% identik dgn sheet LAPORAN_DEVIASI user (sisanya =
+  snapshot data lama).
+- LIGHTMODE DIHAPUS: pipeline selalu FULL — SO bulan lalu (tanggal
+  -25..-31) selalu terbaca; key lama di config.json diabaikan.
+- SEMUA HEADER KOLOM PUNYA FILTER ⧩ (semua view list-style); filter
+  duplikat di card atas (RESTO/STATUS) dihapus, digantikan header filter.
+- Matrix resto: tanggal default 26-31.
 
 Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
@@ -82,15 +83,14 @@ from src.ui.in_selisih_view import InSelisihView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.4.0"  # v3.4.0: (1) lebar kolom bisa di-adjust (drag tepi
-                        # heading) + tombol ↔ Auto-Fit di semua tabel; (2) FIX
-                        # "SO bulan lalu gak ke record" — reader rekap kini
-                        # baca sheet 'SO BULAN LALU' (header 'Sum of N', tanpa
-                        # SATUAN) dari workbook gabungan saat LightMode OFF;
-                        # (3) tab BARU 📤 Rekap Selisih IN (Resto/Tanggal/
-                        # Barang/Satuan/IN/Barang Masuk/Selisih IN) + drill-down
-                        # popup rincian IN per dokumen 42.05/32.24/99.01
-                        # beserta nomornya
+APP_VERSION = "3.5.0"  # v3.5.0: (1) mode Audit Rekonsiliasi (port macro VBA
+# BuatLaporanDeviasiSampel — input sheet '29 Rekap Barang Masuk', KPI +
+# status berwarna), (2) LightMode DIHAPUS (selalu FULL — bulan lalu selalu
+# terbaca), (3) matrix resto default tanggal 26-31, (4) SEMUA header kolom
+# punya filter ⧩ + filter duplikat di card atas dihapus, (5) kolom KATEGORI
+# di Rekap Selisih IN.
+# Riwayat: v3.4.0 — lebar kolom drag/auto-fit; SO bulan lalu terbaca (sheet
+# 'SO BULAN LALU'); tab Rekap Selisih IN + drill-down 42.05/32.24/99.01.
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 
@@ -137,28 +137,40 @@ ALUR KERJA
      📤 Rekap Selisih IN, 📋 Laporan Deviasi, dan 🛒 Rincian PO.
      (v3.2: tab hanya dihitung saat dibuka — app lebih ringan)
 
-LEBAR KOLOM (v3.4 — BARU)
+LEBAR KOLOM (v3.4)
   • Drag tepi kanan judul kolom = atur lebar kolom secara manual.
   • Double-click tepi kolom = auto-fit kolom itu ke lebar konten.
   • Tombol ↔ Auto-Fit di atas tabel = auto-fit SEMUA kolom sekaligus
     (juga tersedia di window ⛶ Perbesar dan di semua popup).
 
-TAB 📤 REKAP SELISIH IN (v3.4 — BARU)
-  • Rekap per (Resto × Tanggal × Barang × Satuan):
+FILTER HEADER ⧩ (v3.5 — SEMUA KOLOM)
+  • SEMUA judul kolom tabel kini punya filter corong ⧩ — klik judul
+    kolom → popup nilai unik + search + checkbox (ala Excel AutoFilter).
+  • Filter duplikat di card atas (RESTO / STATUS) dihapus — pakai
+    filter header kolomnya langsung.
+
+TAB 📤 REKAP SELISIH IN (v3.4 + v3.5)
+  • Mode 📋 Ringkas — rekap per (Resto × Tanggal × Barang × Satuan):
       IN           = barang masuk per dokumen Accurate (42.05 + 32.24 + 99.01)
       Barang Masuk = barang masuk yang dicatat di input SO harian (rekap)
       Selisih IN   = Barang Masuk − IN
-  • Double-click baris → popup RINCIAN IN: daftar dokumen pendukung
-    per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA + subtotal
-    per sumber + total IN.
+  • Mode 🔍 Audit Rekonsiliasi (v3.5 — BARU): port macro VBA
+    BuatLaporanDeviasiSampel — baca sheet '29 Rekap Barang Masuk'
+    langsung, 11 kolom (Hasil SO / Qty SO Harian / Penerimaan Sistem /
+    Selisih Harian / Saldo Kumulatif / Status Analisis Audit / Detail &
+    Catatan Audit), KPI chips + status berwarna. Filter hanya
+    menyembunyikan baris — audit tetap dihitung dari sheet penuh.
+  • Double-click baris (kedua mode) → popup RINCIAN IN: daftar dokumen
+    pendukung per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA +
+    subtotal per sumber + total IN.
   • Klik kanan / double-click kolom Nomor di popup = copy nomor.
   • Rentang tanggal 1–31; tanggal -25 s/d -31 = data bulan lalu
-    (hanya dibaca saat LightMode OFF).
+    (selalu terbaca — LightMode dihapus v3.5).
 
 SO BULAN LALU (v3.4 — FIX)
-  • Dengan LightMode OFF, SO bulan lalu kini terbaca otomatis dari
-    sheet 'SO BULAN LALU' di workbook gabungan (RootPath) → tercatat
-    sebagai Tanggal -25 s/d -31. (Sebelumnya: tidak pernah ke-record.)
+  • SO bulan lalu terbaca otomatis dari sheet 'SO BULAN LALU' di
+    workbook gabungan (RootPath) → tercatat sebagai Tanggal -25 s/d -31.
+    (v3.5: selalu aktif — LightMode dihapus.)
 
 TAB PIVOT TABLE
   • PIVOT PER: 🏪 Resto (default) atau 📅 Tanggal.
@@ -241,6 +253,7 @@ class StockMonitorApp:
         self.append1_df = None
         self.rincian_po_df = None
         self.in_detail_df = None
+        self.audit_result = None      # v3.5: {"df", "kpi", "desc"} audit rekonsiliasi
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
@@ -400,14 +413,9 @@ class StockMonitorApp:
 
         opt = tk.Frame(inner, bg=C_CARD)
         opt.pack(fill="x", pady=(4, 10))
-        self.lightmode_var = tk.BooleanVar(value=True)
-        self.chk_light = ttk.Checkbutton(
-            opt, text="LightMode — pipeline ringan (skip bulan lalu, filter DEVIASI)",
-            variable=self.lightmode_var)
-        self.chk_light.pack(side="left")
-        add_tooltip(self.chk_light,
-                    "ON: skip Rekap bulan lalu + pre-filter KATEGORI=DEVIASI "
-                    "(lebih cepat)\nOFF: proses semua data (mode penuh)")
+        tk.Label(opt, text="Pipeline mode: FULL (v3.5 — LightMode dihapus, "
+                 "bulan lalu selalu terbaca)", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(9)).pack(side="left")
 
         btn_row = tk.Frame(inner, bg=C_CARD)
         btn_row.pack(fill="x")
@@ -459,7 +467,6 @@ class StockMonitorApp:
             return
 
         self.rootpath_var.set(data.get("RootPath", ""))
-        self.lightmode_var.set(data.get("LightMode", True))
         self._render_info_tree(data)
 
     def _render_info_tree(self, data: dict):
@@ -470,9 +477,6 @@ class StockMonitorApp:
             self.info_tree.item(sec_id, open=True)
             for k, v in (data.get(key, {}) or {}).items():
                 self.info_tree.insert(sec_id, "end", values=(k, v))
-        self.info_tree.insert(
-            "", "end", values=("LightMode", str(data.get("LightMode", True))),
-            tags=("bold",))
         self.info_tree.tag_configure("bold", font=font(9, "bold"))
 
     def _set_info_error(self, msg: str):
@@ -500,7 +504,8 @@ class StockMonitorApp:
             return
 
         data["RootPath"] = new_root
-        data["LightMode"] = self.lightmode_var.get()
+        # v3.5: LightMode dihapus — key lama (bila ada) dibuang saat save
+        data.pop("LightMode", None)
 
         backup_path = CONFIG_PATH.with_suffix(".json.bak")
         try:
@@ -521,7 +526,7 @@ class StockMonitorApp:
         messagebox.showinfo(
             "Berhasil",
             f"Config disimpan.\n\nRootPath: {new_root}\n"
-            f"LightMode: {'ON' if data['LightMode'] else 'OFF'}",
+            f"Mode: FULL (LightMode dihapus v3.5)",
             parent=self.root)
         self._load_config_to_form()
 
@@ -725,19 +730,20 @@ class StockMonitorApp:
         Kini error ditangkap ke tuple lokal dulu, lambda bebas closure.
         """
         try:
-            append1_df, rincian_po_df, in_detail_df = run_pipeline(
+            append1_df, rincian_po_df, in_detail_df, audit_result = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
             self.root.after(0, lambda: self._on_pipeline_done(
-                append1_df, rincian_po_df, in_detail_df, None))
+                append1_df, rincian_po_df, in_detail_df, audit_result, None))
         except PipelineStopped as exc:
             err = (exc, None)
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, err))
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, None, err))
         except Exception as exc:
             import traceback
             err = (exc, traceback.format_exc())
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, err))
+            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, None, err))
 
-    def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df, error):
+    def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df,
+                          audit_result, error):
         """Dijadwalkan ke main thread via after()."""
         self.progress.stop()
         self.status_spinner.stop()
@@ -774,14 +780,26 @@ class StockMonitorApp:
             return
 
         # Sukses — simpan + muat data ke semua view
+        # (defensive: caller test boleh pass None — anggap kosong)
+        if append1_df is None:
+            append1_df = pd.DataFrame()
+        if rincian_po_df is None:
+            rincian_po_df = pd.DataFrame()
+        if in_detail_df is None:
+            in_detail_df = pd.DataFrame()
         self.append1_df = append1_df
         self.rincian_po_df = rincian_po_df
         self.in_detail_df = in_detail_df
+        self.audit_result = audit_result
+        audit_df = audit_result.get("df") if audit_result else None
+        audit_kpi = audit_result.get("kpi") if audit_result else None
+        audit_n = len(audit_df) if audit_df is not None else 0
         self.status_var.set("Status: SELESAI.")
         self.statusbar.set_status(
             f"SELESAI — Append1: {len(append1_df):,} rows · "
             f"Rincian PO: {len(rincian_po_df):,} rows · "
-            f"IN detail: {len(in_detail_df):,} rows", C_GREEN)
+            f"IN detail: {len(in_detail_df):,} rows · "
+            f"Audit: {audit_n:,} rows", C_GREEN)
         self.kpi_status.set_value("SELESAI", "data siap dianalisis", C_GREEN)
         self.kpi_append.set_value(f"{len(append1_df):,}",
                                   "baris pivot siap di tab 📊")
@@ -789,13 +807,21 @@ class StockMonitorApp:
                                    "baris PO siap di tab 🛒")
         self._append_log_batched(f"\n  Append1: {len(append1_df)} rows\n")
         self._append_log_batched(f"  Rincian PO: {len(rincian_po_df)} rows\n")
+        if audit_df is not None and audit_n:
+            self._append_log_batched(
+                f"  Audit Rekonsiliasi: {audit_n:,} rows · "
+                f"OK {audit_kpi['ok']:,} · Cut-off {audit_kpi['cutoff']:,} · "
+                f"Valid {audit_kpi['omit']:,} · "
+                f"Deviasi Murni {audit_kpi['deviasi_murni']:,} · "
+                f"Sisa Gantung {audit_kpi['deviasi_qty']:,.0f}\n")
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
         self.pivot_view.load_data(append1_df)
         self.deviasi_gr_view.load_data(append1_df)
         self.deviasi_pcs_view.load_data(append1_df)
-        self.in_selisih_view.load_data(append1_df, in_detail_df)
+        self.in_selisih_view.load_data(append1_df, in_detail_df,
+                                      audit_result=audit_result)
         self.laporan_view.load_data(append1_df)
         self.rincian_view.load_data(rincian_po_df)
         self.btn_export.configure(state="normal")
@@ -846,6 +872,7 @@ class StockMonitorApp:
         append1_df = self.append1_df
         rincian_po_df = self.rincian_po_df
         in_detail_df = self.in_detail_df
+        audit_df = self.audit_result.get("df") if self.audit_result else None
 
         # loading overlay di tengah jendela utama (dibuat lazily)
         if not hasattr(self, "_export_overlay"):
@@ -867,6 +894,11 @@ class StockMonitorApp:
                 if in_detail_df is not None and not in_detail_df.empty:
                     in_detail_df.to_excel(writer, sheet_name="Rincian IN",
                                           index=False)
+                # v3.5: hasil Audit Rekonsiliasi (port macro VBA)
+                if audit_df is not None and not audit_df.empty:
+                    audit_df.to_excel(writer,
+                                      sheet_name="Laporan Deviasi (Audit)",
+                                      index=False)
             return filepath
 
         def done(path):

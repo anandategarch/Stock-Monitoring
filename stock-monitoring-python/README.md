@@ -10,6 +10,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 > **v3.2 — Follow Up + tabel besar + perf**: tab baru **☑ Follow Up** (ala aplikasi *Waste*: centang ✓ baris anomali di Deviasi GR/PCS & Laporan → shortlist investigasi, persist `followup.json`, export Excel + impor hasil tindak lanjut), **KPI row di atas tabel DIHAPUS** di semua tab data (tabel jadi lebar & besar; ringkasan pindah ke status footer), dan **aplikasi diperingatkan** (deviasi 16× lebih cepat via vektorisasi numpy; laporan 3.7×; lazy refresh per tab — hanya tab aktif yang dihitung).
 > **v3.3 — Engine cepat + bug fix hasil deep audit**: **sort kolom kini LINEAR** (delete+reinsert — dulu `tree.move` O(n²) membekukan UI 45 detik di 50k baris, kini 0,7 detik), **fix bug follow-up salah baris setelah sort** (iid-based), **fix NameError path error pipeline**, double-click sel ✓ = toggle, cache pivot dibagi GR/PCS, tanpa modal "Selesai", dead code dibersihkan.
 > **v3.3.1 — FIX "Saldo SO kosong semua"** (tab Deviasi GR/PCS & Laporan): dua akar masalah digarap tuntas — **(1) sumber SO gagal terbaca**: data kini berupa **workbook gabungan `.xlsb`** (mis. `01.1 CEK STOCK V2.xlsb`, sheet `1  DEVIASI WEEKLY`, semua resto dalam 1 sheet) padahal reader lama hanya mencari file per-resto `.xlsx` ber-sheet `REKAP MENTAH` → reader baru otomatis mendeteksi sheet ber-schema rekap mentah di file/format apa pun (`*.xlsb` kini ter-glob; NAMA RESTO diambil dari kolom; scan folder + RootPath; `pyxlsb` ditambahkan ke requirements), **(2) bug render vektorisasi v3.2**: kolom matrix `SO_H-2 … SO_H+2 / In / Out / BK` (Deviasi) dan `Saldo Awal / IN / OUT / BK / Saldo Kumulatif` (Laporan) tidak pernah diekstrak ke builder baris → selalu tampil `-` walau datanya ada → kini semua kolom terisi. Divalidasi terhadap sheet `DEVIASI GR` workbook user: 1404/1405 baris identik (2 sel beda = pivot cache Excel user yang stale, bukan app).
+> **v3.5 — Audit Rekonsiliasi (port macro VBA) + semua header ber-filter + LightMode dihapus**: mode **🔍 Audit Rekonsiliasi** di tab Rekap Selisih IN membaca sheet **`29 Rekap Barang Masuk`** langsung dan menjalankan algoritma macro VBA `BuatLaporanDeviasiSampel` (saldo kumulatif, VALID/CUT-OFF/DEVIASI MURNI, KPI chips, baris berwarna — tervalidasi 86.713/86.738 baris identik dgn output macro user; 86.738 baris render 3,4 detik). **LightMode DIHAPUS** (selalu FULL). **Matrix resto tanggal default 26–31**. **SEMUA judul kolom kini punya filter ⧩** (Excel AutoFilter) — filter RESTO/STATUS duplikat di card atas dihapus; kolom **KATEGORI** baru di Rekap Selisih IN.
 > **v3.4 — Lebar kolom + SO bulan lalu + tab Rekap Selisih IN**: **(1)** lebar kolom kini **bisa di-adjust** — drag tepi kanan judul kolom untuk resize manual, double-click tepi = auto-fit 1 kolom, tombol **↔ Auto-Fit** di semua tabel (termasuk window ⛶ dan popup); **(2) FIX "SO bulan lalu gak ke record meskipun LightMode OFF"** — sheet `SO BULAN LALU` di workbook gabungan kini terbaca otomatis (header hari `Sum of N` + tanpa SATUAN didukung; scan RootPath untuk mode `lalu` dibatasi sheet ber-nama "LALU" agar bulan berjalan/lalu tidak tercampur) → tercatat sebagai Tanggal `-25 s/d -31`; **(3) tab BARU 📤 Rekap Selisih IN** — rekap per Resto × Tanggal × Barang × Satuan: **IN** (Accurate: 42.05+32.24+99.01) vs **Barang Masuk** (input rekap SO) + **Selisih IN**, double-click → **popup rincian IN per dokumen 42.05 / 32.24 / 99.01 BESERTA NOMORNYA** (subtotal per sumber + copy nomor); 9901 kini membawa kolom Nomor (PI) & Nomor PO; export Excel + sheet `Rincian IN`.
 
 ---
@@ -52,6 +53,33 @@ Stock Monitoring — Python Edition
 - Nomor # sebagai parent row (klik ▸ untuk expand).
 
 ---
+
+## Fitur Baru v3.5
+
+### 🔍 Mode "Audit Rekonsiliasi" — port macro VBA BuatLaporanDeviasiSampel
+Tab 📤 Rekap Selisih IN kini punya 2 mode (segment di atas tabel): **📋 Ringkas** (perilaku v3.4) dan **🔍 Audit Rekonsiliasi** (default bila tersedia).
+- **Input = sheet `29 Rekap Barang Masuk`** dibaca LANGSUNG dari workbook user (auto-scan RootPath + folder config; nama sheet dinormalisasi — harus mengandung `REKAP` + `BARANG MASUK`, jadi sheet pivot `Barang Masuk` tidak salah terbaca). 10 kolom persis input macro: Resto/Nama Item/UoM/Tanggal/Hasil SO/Qty Masuk SO Harian/Qty SJ 42.05/Qty RI 32.24/Qty Pembelian 99.01/Selisih Qty.
+- **Algoritma port 1:1** (`src/pipeline/fn_rekap29.py`): Penerimaan Sistem = SJ+RI+Pembelian; Selisih Harian = Qty SO Harian − Penerimaan; grup kontigu (Resto × Item, urut sheet — identik macro); aturan **VALID (Sistem Masuk)** (deltaSO > 0 + SO Harian = 0 + Penerimaan > 0 → omit input harian); **OK (Matching)**; saldo kumulatif; **CUT-OFF RESOLVED** saat saldo kembali ±0,0001 (catatan "Beda X Hari (Periode Tgl A–B)"); sisa gantung akhir bulan → **DEVIASI MURNI** ("Sisa Gantung: ±N (Sejak Tgl X)"); format angka locale Indonesia (titik ribuan) persis output macro.
+- **Tabel 12 kolom**: Resto | Tanggal | Nama Barang | KATEGORI | Satuan | Hasil SO | Qty SO Harian | Penerimaan Sistem | Selisih Harian | Saldo Kumulatif | Status Analisis Audit | Detail & Catatan Audit.
+- **KPI chips** di atas tabel (mirror "EXECUTIVE RECONCILIATION SUMMARY"): Total Baris · OK (Matching) · Valid (Sistem Masuk) · Cut-off Resolved · Deviasi Murni · Sisa Gantung (Net) — dihitung dari sheet penuh, tidak terpengaruh filter tampilan.
+- **Baris berwarna** (mirror conditional formatting VBA): hijau OK, biru VALID, kuning CUT-OFF, merah DEVIASI MURNI.
+- **Filter = display-only**: rentang tanggal / RESTO / KATEGORI / status / nilai kolom hanya menyembunyikan baris — status & saldo kumulatif tetap dihitung dari sheet penuh (dipotong = rekonsiliasi salah).
+- Default "Hanya Selisih ≠ 0" ON di mode audit (langsung fokus baris bermasalah; matikan untuk lihat semua 86k+ baris — render 3,4 detik).
+- **Validasi**: 86.713/86.738 baris **100% identik** dgn sheet `LAPORAN_DEVIASI` (output macro user) — status, saldo kumulatif, selisih, penerimaan, sampai string detail catatan. 25 baris sisanya = 1 grup (SBRTUP SURAI NAGA) yang datanya berubah setelah macro terakhir dijalankan (terbukti: layout LAPORAN lama = header baris 1, macro yang dipaste = header baris 11).
+- Pipeline: `run_pipeline` kini return **4 hasil** (append1, rincian_po, in_detail, audit_result); export Excel + sheet **`Laporan Deviasi (Audit)`**.
+- Double-click baris (kedua mode) tetap membuka popup **Rincian IN 42.05/32.24/99.01 + nomor**.
+
+### ⧩ SEMUA header kolom punya filter (Excel AutoFilter) — duplikat di atas dihapus
+- Klik judul kolom **mana pun** → popup filter: search + checkbox nilai unik + pilih semua + **↕ Sort A→Z / Z→A** + reset (nilai terformat identik dgn yang tampil di tabel).
+- Berlaku di: Rekap Selisih IN (kedua mode), Laporan Deviasi, Deviasi GR/PCS, Rincian PO (termasuk kolom Nomor #), Follow Up. Kolom ✓ tetap toggle follow-up.
+- **Filter duplikat di card atas DIHAPUS**: RESTO (Deviasi GR/PCS, Laporan, Rekap Selisih IN) dan STATUS (Laporan) — digantikan filter header kolomnya. Card atas kini berisi TANGGAL/opsi yang tidak terduplikasi saja.
+- Widget baru `HeaderFilterGroup` (+ `SegmentBar.set_active_silent`, `HeaderFilter.detach` anti binding ganda saat kolom dikonfigurasi ulang).
+
+### 🧹 Lainnya
+- **LightMode DIHAPUS TOTAL** — pipeline selalu FULL (checkbox di tab Config hilang; key `LightMode` lama di config.json diabaikan/dibuang saat save; 3224 bulan lalu & RekapLalu selalu dibaca).
+- **Matrix resto (Pivot): TANGGAL default 26–31** — total per resto dihitung hanya dari tanggal dalam rentang; Reset mengembalikan 26–31.
+- Kolom **KATEGORI** baru di Rekap Selisih IN (map via DBS Kategori).
+- `config.json`: `_comment` diperbarui (tanpa LightMode).
 
 ## Fitur Baru v3.4
 
@@ -206,23 +234,25 @@ stock-monitoring-python/
 ├── config.json                 # RootPath + LightMode + Folders + Sheets
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
-├── test_ui_redesign.py         # test UI v3.4 (135 check — + tab Rekap Selisih IN & lebar kolom)
+├── test_ui_redesign.py         # test UI v3.5 (155 check — + audit rekonsiliasi & filter semua header)
 ├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
     ├── config.py               # loader config.json
     ├── main.py                 # run_pipeline() → (append1_df, rincian_po_df, in_detail_df)
-    ├── pipeline/               # porting fn_* dari M code (TIDAK berubah di v3)
-    └── ui/                     # ← REDESIGN v3.0 (v3.2: +followup, v3.4: +rekap selisih IN)
+    ├── pipeline/               # porting fn_* dari M code + (v3.5) fn_rekap29.py (Audit VBA)
+    │   ├── fn_rekap29.py       # (v3.5) reader sheet '29 Rekap Barang Masuk' + engine rekonsiliasi (port macro VBA)
+    │   └── …                   # fn_rekap_mentah, fn_2205…fn_9901, queries, append1, rincian_po
+    └── ui/                     # ← REDESIGN v3.0 (v3.2: +followup, v3.4: +rekap selisih IN, v3.5: +audit)
         ├── app.py              # shell: toolbar + 9 tab + status bar + kontrol pipeline + lazy tab refresh
         ├── theme.py            # design system (palet + font + ttk style)
-        ├── widgets.py          # Card, tombol, tooltip, empty state, overlay, header filter, enable_col_resize, auto_fit_columns, dll
+        ├── widgets.py          # Card, tombol, tooltip, empty state, overlay, HeaderFilter(+Group v3.5), resize, auto-fit, dll
         ├── followup.py         # (v3.2) FollowUpStore: fingerprint, snapshot, persist, export/import xlsx
         ├── followup_view.py    # (v3.2) tab ☑ Follow Up
         ├── pivot_view.py       # tab Pivot Table (per resto default)
         ├── deviasi_view.py     # tab Deviasi GR & PCS (vektorisasi numpy + kolom ✓)
         ├── laporan_deviasi_view.py  # tab Laporan Deviasi (np.select + kolom ✓)
-        ├── in_selisih_view.py  # (v3.4) tab 📤 Rekap Selisih IN + popup Rincian IN
+        ├── in_selisih_view.py  # (v3.4+v3.5) tab 📤 Rekap Selisih IN + popup Rincian IN + mode 🔍 Audit
         ├── rincian_po_view.py  # tab Rincian PO
         └── details_popup.py    # popup detail source rows (copy Nomor/PO)
 ```
@@ -233,7 +263,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3.4: 135 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.5: 155 check (jalankan di bawah Xvfb di Linux)
 ```
 
 > UI test di Linux/headless: `xvfb-run` atau `Xvfb :99` + `DISPLAY=:99 python test_ui_redesign.py`.

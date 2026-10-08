@@ -381,11 +381,8 @@ def run_test():
 
     # Load config
     config = Config(config_path)
-
-    # Force FULL pipeline mode for the mock test so all 10 InfoColumns
-    # (Nomor, Nomor PO, #Tgl/Jam) are produced — needed for existing
-    # column assertions. The Excel LightMode vs FullMode is tested below.
-    config.LightMode = False
+    # v3.5: LightMode dihapus — pipeline selalu FULL (10 InfoColumns
+    # selalu diproses). Tidak perlu override apa pun.
 
     # Test individual fn modules
     print("\n  [2] Testing individual fn modules...")
@@ -499,8 +496,8 @@ def run_test():
     # Test DataFrame return (no Excel output — data displayed in UI)
     print("\n  [6] Testing pipeline DataFrame return...")
     from src.main import run_pipeline
-    # v3.4: run_pipeline kini return 3 DataFrame (append1, rincian_po, in_detail)
-    append1_result, rincian_result, in_detail_result = run_pipeline(
+    # v3.5: run_pipeline return 4 (append1, rincian_po, in_detail, audit_result)
+    append1_result, rincian_result, in_detail_result, audit_result = run_pipeline(
         config_path=config_path, verbose=False)
     # Verify DataFrames returned with correct columns (not exact row count — LightMode may differ)
     expected_append1_cols = ["Nama Barang", "NAMA RESTO", "Tanggal", "JENIS", "NILAI",
@@ -515,7 +512,7 @@ def run_test():
                             "Nomor", "SOURCE IN"]
     for col in expected_detail_cols:
         assert col in in_detail_result.columns, f"Missing in_detail column: {col}"
-    print(f"    ✓ run_pipeline returns 3 DataFrames correctly (incl. IN detail v3.4)")
+    print(f"    ✓ run_pipeline returns 4 DataFrames correctly (incl. IN detail v3.4 + audit v3.5)")
     print(f"    Append1: {len(append1_result)} rows, cols: {list(append1_result.columns)}")
     print(f"    Rincian PO: {len(rincian_result)} rows")
     print(f"    IN detail: {len(in_detail_result)} rows")
