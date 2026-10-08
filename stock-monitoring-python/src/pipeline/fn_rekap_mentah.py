@@ -173,13 +173,44 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
     return melted[out_cols]
 
 
+def _promote_at(df: pd.DataFrame, hr: int) -> pd.DataFrame:
+    """Baris hr jadi header (duplikat diberi suffix _1/_2, None → ColumnN).
+
+    v3.7 ENGINE TURBO: dipakai jalur single-parse (calamine) — sheet
+    dibaca SEKALI (header=None), deteksi header + promote dilakukan di
+    memori. Ekuivalen pd.read_excel(header=hr) untuk kebutuhan
+    _combined_to_long (pencarian kolom posisional via nama pertama)."""
+    headers = df.iloc[hr].tolist()
+    body = df.iloc[hr + 1:].reset_index(drop=True)
+    new_cols, seen = [], {}
+    for i, h in enumerate(headers):
+        if h is None or (isinstance(h, float) and pd.isna(h)):
+            h = f"Column{i + 1}"
+        h = str(h)
+        if h in seen:
+            seen[h] += 1
+            h = f"{h}_{seen[h]}"
+        else:
+            seen[h] = 0
+        new_cols.append(h)
+    body.columns = new_cols
+    return body
+
+
 def _read_combined_file(file_path: str, mode: str,
                         jenis_filter: Optional[List[str]],
                         sheet_filter=None) -> Optional[pd.DataFrame]:
     """Cari sheet rekap-mentah (combined) dalam satu file; baca → long.
 
     sheet_filter(sn) → bool: filter nama sheet (dipakai pemisah bulan
-    berjalan vs bulan lalu saat scan folder induk/RootPath — v3.4)."""
+    berjalan vs bulan lalu saat scan folder induk/RootPath — v3.4).
+
+    v3.7 ENGINE TURBO: dgn engine calamine, sheet dibaca SEKALI penuh
+    (peek nrows=8 di calamine mem-parse seluruh sheet juga — 0,17s vs
+    full 0,25s — jadi peek+full = 2× parse sia-sia). Deteksi header
+    dilakukan pada 6 baris pertama frame yang SUDAH terbaca, lalu
+    header di-promote di memori (_promote_at). Jalur openpyxl tetap
+    peek-dulu (peek-8 baris murah di openpyxl read-only)."""
     if file_path.lower().endswith(".xlsb") and _xlsb_engine() is None:
         print(f"  [fn_rekap_mentah] SKIP {os.path.basename(file_path)}: file .xlsb "
               "butuh package pyxlsb/python-calamine (pip install pyxlsb)")
@@ -189,12 +220,19 @@ def _read_combined_file(file_path: str, mode: str,
     else:
         engine = _EXCEL_ENGINE           # calamine bila ada, else default
     engine_kwargs = {"engine": engine} if engine else {}
+    single_parse = engine == "calamine"
     for sn in _list_sheet_names(file_path):
         if sheet_filter is not None and not sheet_filter(sn):
             continue
+        raw = None
         try:
-            peek = pd.read_excel(file_path, sheet_name=sn, header=None,
-                                 nrows=8, dtype=object, **engine_kwargs)
+            if single_parse:
+                raw = pd.read_excel(file_path, sheet_name=sn, header=None,
+                                    dtype=object, **engine_kwargs)
+                peek = raw.iloc[:8]
+            else:
+                peek = pd.read_excel(file_path, sheet_name=sn, header=None,
+                                     nrows=8, dtype=object, **engine_kwargs)
         except Exception:
             continue
         det = _detect_rekap_header(peek)
@@ -202,8 +240,12 @@ def _read_combined_file(file_path: str, mode: str,
             continue
         hr, _day_pos = det
         try:
-            df = pd.read_excel(file_path, sheet_name=sn, header=hr,
-                               dtype=object, **engine_kwargs)
+            if single_parse and raw is not None:
+                df = _promote_at(raw, hr)
+                raw = None               # bebaskan memori
+            else:
+                df = pd.read_excel(file_path, sheet_name=sn, header=hr,
+                                   dtype=object, **engine_kwargs)
         except Exception as e:
             print(f"  [fn_rekap_mentah] Gagal baca sheet '{sn}' "
                   f"{os.path.basename(file_path)}: {e}")

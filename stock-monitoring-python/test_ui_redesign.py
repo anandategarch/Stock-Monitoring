@@ -224,7 +224,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.6.0", APP_VERSION == "3.6.0", f"got {APP_VERSION}")
+    check(f"Versi = 3.7.0", APP_VERSION == "3.7.0", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -1139,6 +1139,252 @@ def main():
         enable_col_resize(t)
     check("enable_col_resize terpasang di 7 view (idempotent, tanpa error)",
           True)
+
+    # ==================================================================
+    print("== 16. v3.7 — DEEP AUDIT FIXES (display-vs-logical index dst) ==")
+    from src.ui.widgets import (
+        ColumnManager, apply_tree_row_filters, auto_fit_columns,
+        identify_to_column, _tree_row_passes,
+    )
+    import numpy as np
+
+    # (a) apply_tree_row_filters membaca nilai kolom yang BENAR setelah
+    #     kolom sebelumnya disembunyikan (dulu: index display ≠ logis)
+    tfix = ttk.Treeview(root, columns=["A", "B", "C"], show="headings")
+    for c in ("A", "B", "C"):
+        tfix.heading(c, text=c)
+        tfix.column(c, width=80)
+    tfix.insert("", "end", iid="r1", values=("x", "keep", "1"))
+    tfix.insert("", "end", iid="r2", values=("x", "drop", "2"))
+    tfix.insert("", "end", iid="r3", values=("y", "keep", "3"))
+    tfix.configure(displaycolumns=["B", "C"])          # sembunyikan A
+    apply_tree_row_filters(tfix, {"B": {"keep"}})
+    root.update()
+    kids_a = list(tfix.get_children(""))
+    check("(v3.7) Filter clone membaca kolom BENAR setelah hide",
+          kids_a == ["r1", "r3"],
+          f"kids={kids_a} (harus r1,r3 — dulu membaca kolom A: semua lolos)")
+    apply_tree_row_filters(tfix, {})                     # reset tampilan
+    root.update()
+    check("(v3.7) Reset filter clone → semua baris kembali",
+          len(list(tfix.get_children(""))) == 3)
+    tfix.destroy()
+
+    # (b) filter '#0' di tree 2-level memakai text PARENT (nama barang),
+    #     bukan text anak (nama metric) — dulu: semua baris tersembunyi
+    t2 = ttk.Treeview(root, columns=["V"], show="tree headings")
+    t2.heading("#0", text="Nama Barang")
+    t2.heading("V", text="V")
+    t2.column("#0", width=120)
+    t2.column("V", width=60)
+    t2.insert("", "end", iid="p1", text="AYAM", values=(""))
+    t2.insert("p1", "end", iid="p1_m1", text="1.SO", values=("10"))
+    t2.insert("p1", "end", iid="p1_m2", text="4.IN", values=("5"))
+    t2.insert("", "end", iid="p2", text="GULA", values=(""))
+    t2.insert("p2", "end", iid="p2_m1", text="1.SO", values=("3"))
+    apply_tree_row_filters(t2, {"#0": {"AYAM"}})
+    root.update()
+    kids_b = set(t2.get_children(""))
+    check("(v3.7) Filter #0 clone 2-level → parent+anak metric tampil",
+          "p1" in kids_b and "p2" not in kids_b and
+          len(t2.get_children("p1")) == 2,
+          f"top={kids_b} anak_p1={t2.get_children('p1')}")
+    t2.destroy()
+
+    # (c) auto_fit mengukur nilai kolom yang BENAR setelah hide
+    #     (kolom B berisi teks panjang; kolom A disembunyikan berisi teks
+    #     pendek — lebar B harus mengikuti konten B, bukan A)
+    t3 = ttk.Treeview(root, columns=["SHORT", "LONGVAL"], show="headings")
+    for c in ("SHORT", "LONGVAL"):
+        t3.heading(c, text=c)
+        t3.column(c, width=50, stretch=False)
+    t3.insert("", "end", values=("ab", "NILAI_SANGAT_PANJANG_0123456789"))
+    t3.configure(displaycolumns=["LONGVAL"])           # sembunyikan SHORT
+    auto_fit_columns(t3, columns=["LONGVAL"])
+    w_long = t3.column("LONGVAL", "width")
+    check("(v3.7) Auto-fit ukur kolom BENAR setelah hide (B melebar)",
+          w_long > 100, f"w={w_long} (dulu mengukur SHORT → ~50-60)")
+    t3.destroy()
+
+    # (d) toggle ✓ memakai NAMA kolom — setelah ✓ disembunyikan, klik sel
+    #     kolom lain TIDAK lagi memicu toggle (dulu: posisi '#1' salah)
+    dv = app.deviasi_gr_view
+    dtr = dv.tree
+    dv_store_before = set(dv.store.rows.keys()) if dv.store else set()
+    dtr._column_manager.hide("✓")
+    root.update()
+    # klik sel kolom Resto (posisi display pertama setelah ✓ hidden)
+    first_row = dtr.get_children("")[0]
+    bbox = dtr.bbox(first_row, column="#1")
+    if bbox:
+        ev = tk.Event()
+        ev.x, ev.y = bbox[0] + 5, bbox[1] + 5
+        ev.widget = dtr
+        dv._on_tree_click(ev)
+        root.update()
+        dv_store_after = set(dv.store.rows.keys()) if dv.store else set()
+        check("(v3.7) Klik kolom lain setelah ✓ disembunyikan → tidak toggle",
+              dv_store_after == dv_store_before,
+              f"before={len(dv_store_before)} after={len(dv_store_after)}")
+    else:
+        check("(v3.7) Klik kolom lain setelah ✓ disembunyikan → tidak toggle",
+              False, "bbox kolom tidak tersedia")
+    dtr._column_manager.show_all()
+    root.update()
+
+    # (e) ColumnManager mirror sinkron state hidden (clone → sumber)
+    t4 = ttk.Treeview(root, columns=["A", "B"], show="headings")
+    for c in ("A", "B"):
+        t4.heading(c, text=c)
+        t4.column(c, width=60)
+    t4.insert("", "end", values=("1", "2"))
+    t5 = ttk.Treeview(root, columns=["A", "B"], show="headings")
+    for c in ("A", "B"):
+        t5.heading(c, text=c)
+        t5.column(c, width=60)
+    t5.insert("", "end", values=("1", "2"))
+    cm_main = ColumnManager(t4)
+    cm_clone = ColumnManager(t5, mirror=t4)
+    cm_clone.hide("B")
+    root.update()
+    check("(v3.7) Mirror clone→sumber: displaycolumns sumber ikut",
+          "B" not in [str(x) for x in t4.cget("displaycolumns")])
+    check("(v3.7) Mirror clone→sumber: state hidden colmgr sinkron",
+          cm_main.hidden == ["B"],
+          f"cm_main.hidden={cm_main.hidden} (dulu [] → panel basi)")
+    t4.destroy()
+    t5.destroy()
+
+    # (f) ENGINE v3.7 — running stock vektor == implementasi lama
+    #     (10 edge-case sintetis; loop lama di-inline sebagai oracle)
+    from src.pipeline.fn_running_stock import (
+        fn_running_stock, fn_running_stock_grouped)
+
+    def OLD_grouped(df, gk):
+        srt = df.sort_values(gk + ["Tanggal"], ascending=True,
+                             na_position="last").reset_index(drop=True)
+        res = [fn_running_stock(g) for _, g in
+               srt.groupby(gk, sort=False, dropna=False)]
+        return pd.concat(res, ignore_index=True) if res else srt
+
+    cases = {
+        "normal": pd.DataFrame({
+            "Nama Barang": ["A", "A", "A", "A", "B", "B"],
+            "NAMA RESTO": ["R1", "R1", "R1", "R1", "R2", "R2"],
+            "Tanggal": pd.array([1, 2, 3, 4, 1, 2], dtype="Int64"),
+            "IN": [10.0, 5, 0, 3, 7, 2],
+            "OUT": [2, 1, 4, 0, 1, 1],
+            "BARANG KELUAR": [0, 0, 1, 0, 0, 0],
+            "SALDO AWAL": [100, np.nan, np.nan, np.nan, 50, np.nan],
+        }),
+        "bulan-lalu-net-nol-tidak-ikut": pd.DataFrame({
+            "Nama Barang": ["A"] * 6,
+            "NAMA RESTO": ["R1"] * 6,
+            "Tanggal": pd.array([-25, -26, 1, 2, 3, 31], dtype="Int64"),
+            "IN": [1, 2, 10, 5, 0, 3],
+            "OUT": [0, 1, 2, 1, 4, 0],
+            "BARANG KELUAR": [0, 0, 0, 0, 1, 0],
+            "SALDO AWAL": [100.0] + [np.nan] * 5,
+        }),
+        "tanggal-NaN-ekor": pd.DataFrame({
+            "Nama Barang": ["A", "A", "A", "A"],
+            "NAMA RESTO": ["R1"] * 4,
+            "Tanggal": pd.array([1, 2, None, 3], dtype="Int64"),
+            "IN": [10, 5, 99, 3],
+            "OUT": [2, 1, 5, 0],
+            "BARANG KELUAR": [0, 0, 0, 0],
+            "SALDO AWAL": [100.0, np.nan, np.nan, np.nan],
+        }),
+        "key-NaN-satu-grup": pd.DataFrame({
+            "Nama Barang": [None, None, "B"],
+            "NAMA RESTO": ["R1", "R1", "R2"],
+            "Tanggal": pd.array([1, 2, 1], dtype="Int64"),
+            "IN": [10, 5, 7],
+            "OUT": [2, 1, 1],
+            "BARANG KELUAR": [0, 0, 0],
+            "SALDO AWAL": [100.0, np.nan, 3.0],
+        }),
+        "saldo-awal-negatif": pd.DataFrame({
+            "Nama Barang": ["A", "A", "A"],
+            "NAMA RESTO": ["R1", "R1", "R1"],
+            "Tanggal": pd.array([1, 2, 3], dtype="Int64"),
+            "IN": [1, 1, 1],
+            "OUT": [0, 0, 0],
+            "BARANG KELUAR": [0, 0, 0],
+            "SALDO AWAL": [-5.0, np.nan, -2.0],
+        }),
+        "grup-tanpa-tgl-ge-1": pd.DataFrame({
+            "Nama Barang": ["A", "A", "C"],
+            "NAMA RESTO": ["R1", "R1", "R3"],
+            "Tanggal": pd.array([-25, -20, 5], dtype="Int64"),
+            "IN": [1, 2, 10],
+            "OUT": [0, 1, 2],
+            "BARANG KELUAR": [0, 0, 0],
+            "SALDO AWAL": [100.0, np.nan, 5.0],
+        }),
+    }
+    gk = ["Nama Barang", "NAMA RESTO"]
+    ok_rs = True
+    for cname, cdf in cases.items():
+        old = OLD_grouped(cdf.copy(), gk)
+        new = fn_running_stock_grouped(cdf.copy(), gk)
+        a = pd.to_numeric(old["SALDO AKHIR"], errors="coerce") \
+            .fillna(-777).to_numpy()
+        b = pd.to_numeric(new["SALDO AKHIR"], errors="coerce") \
+            .fillna(-777).to_numpy()
+        same = len(a) == len(b) and np.allclose(a, b, atol=1e-9)
+        ok_rs = ok_rs and same
+        if not same:
+            print(f"    case '{cname}' BEDA: {a} vs {b}")
+    check("(v3.7) ENGINE running stock vektor == lama (6 edge-case)",
+          ok_rs)
+
+    # (g) ENGINE v3.7 — _group_info_columns == UDF lama (edge-case)
+    from src.pipeline.append1 import _group_info_columns
+
+    def OLD_group(ip, KC, IC):
+        def _sj(series):
+            vals = series.dropna()
+            if vals.empty:
+                return None
+            return ", ".join(str(v) for v in pd.unique(vals))
+        return ip.groupby(KC, as_index=False, dropna=False).agg(
+            {c: _sj for c in IC if c in ip.columns})
+
+    KC = ["Nama Barang", "NAMA RESTO", "Tanggal"]
+    IC = ["Nomor", "Nomor PO"]
+    ip = pd.DataFrame({
+        "Nama Barang": ["A", "A", "A", None, None, "A"],
+        "NAMA RESTO": ["R1", "R1", "R1", "R1", "R1", "R1"],
+        "Tanggal": pd.array([1, 1, 2, 1, 2, None], dtype="Int64"),
+        "Nomor": ["IT.2", "IT.1", "IT.1", "IT.5", "IT.6", "IT.7"],
+        "Nomor PO": [None, None, None, "PO.9", None, None],
+    })
+    old = OLD_group(ip, KC, IC)
+    new = _group_info_columns(ip, KC, IC)
+    m = old.merge(new, on=KC, how="outer", suffixes=("_o", "_n"),
+                  indicator=True)
+    ok_keys = (m["_merge"] == "both").all() and len(old) == len(new)
+    ok_vals = all(
+        (m[f"{c}_o"].fillna("<NULL>").astype(str) ==
+         m[f"{c}_n"].fillna("<NULL>").astype(str)).all()
+        for c in IC if f"{c}_o" in m.columns)
+    check("(v3.7) ENGINE info-group vektor == lama (NaN key + kosong)",
+          ok_keys and ok_vals,
+          f"keys={ok_keys} vals={ok_vals}")
+
+    # (h) engine single-parse reader: hasil == jalur read_excel(header=hr)
+    from src.pipeline.fn_rekap_mentah import _promote_at
+    raw = pd.DataFrame([
+        ["NAMA RESTO", "JENIS", "NAMA BARANG", "1", "2", "3"],
+        ["R1", "SO", "AYAM", 5, None, 7],
+        ["R1", "SO", "GULA", 1, 2, None],
+    ])
+    prom = _promote_at(raw, 0)
+    check("(v3.7) Reader _promote_at: header & body benar",
+          list(prom.columns) == ["NAMA RESTO", "JENIS", "NAMA BARANG",
+                                 "1", "2", "3"] and len(prom) == 2 and
+          prom.iloc[0, 5] == 7)
 
     # Cleanup
     root.destroy()

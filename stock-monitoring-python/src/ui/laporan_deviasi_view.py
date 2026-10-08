@@ -30,8 +30,8 @@ from .theme import (
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup,
     ColumnManager, LoadingOverlay, add_tooltip, attach_clone_filters,
-    auto_fit_columns, enable_col_resize, insert_tree_items,
-    open_tree_maximized, run_async, sort_tree_by_column,
+    auto_fit_columns, enable_col_resize, identify_to_column,
+    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
 )
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
@@ -216,8 +216,11 @@ class LaporanDeviasiView(tk.Frame):
         try:
             if tree.identify_region(event.x, event.y) != "cell":
                 return
-            col = tree.identify_column(event.x)
-            if not col or int(col.replace("#", "")) != 1:  # kolom data #1 = ✓
+            # v3.7 FIX: cocokkan NAMA kolom (bukan posisi display '#1') —
+            # setelah kolom ✓ disembunyikan, posisi #1 jatuh ke kolom lain
+            # → toggle follow-up terpicu dari kolom yang salah.
+            col = identify_to_column(tree, tree.identify_column(event.x))
+            if col != "✓":
                 return
             row_iid = tree.identify_row(event.y)
         except Exception:
@@ -677,8 +680,9 @@ class LaporanDeviasiView(tk.Frame):
             return
 
         # v3.3: double-click di sel kolom ✓ = toggle follow-up
+        # v3.7 FIX: cocokkan NAMA kolom (bukan posisi display '#1')
         try:
-            if tree.identify_column(event.x) == "#1":
+            if identify_to_column(tree, tree.identify_column(event.x)) == "✓":
                 self._on_tree_click(event)
                 return
         except Exception:

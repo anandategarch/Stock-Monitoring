@@ -1,5 +1,5 @@
 {
-  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berubah. v3.6: Audit Rekonsiliasi dihitung dari DATA APP (rekap SO + BARANG MASUK + IN per tanggal — sheet '29 Rekap Barang Masuk' TIDAK dibaca lagi). Pipeline selalu mode FULL (semua data, termasuk bulan lalu). Tidak ada Excel output — data ditampilkan langsung di UI.",
+  "_comment": "Konfigurasi path dan sheet name. Ubah RootPath jika lokasi folder berubah. v3.7 ENGINE TURBO: running stock & info-group vektor + reader single-parse (output identik v3.6, pipeline 3-4x lebih cepat; pastikan python-calamine terpasang). v3.6: Audit Rekonsiliasi dihitung dari DATA APP (rekap SO + BARANG MASUK + IN per tanggal - sheet '29 Rekap Barang Masuk' TIDAK dibaca lagi). Pipeline selalu mode FULL (semua data, termasuk bulan lalu). Tidak ada Excel output - data ditampilkan langsung di UI.",
   "RootPath": "C:\\KERJA\\1. RESTO\\9.NEW QUERY\\",
   "Folders": {
     "RekapBerjalan": "1. DEVIASI WEEKLY",

@@ -27,6 +27,34 @@ Struktur jendela (ala aplikasi Waste):
   8. ☑ Follow Up        : daftar baris tercentang + export/impor TL (v3.2)
   9. 🛒 Rincian PO      : pivot PO dengan search + sort
 
+v3.7 "ENGINE TURBO" + DEEP AUDIT FIXES ringkasan:
+- ENGINE 3,5-4× LEBIH CEPAT (output terverifikasi IDENTIK vs v3.6):
+  * fn_running_stock_grouped vektor (global segmented cumsum):
+    6,68s → 0,19s di real-data (36×); 6 edge-case sintetis ==
+    implementasi lama (termasuk kasus baris bulan-lalu ber-net ≠ 0
+    yang terlewat benchmark awal — tertangkap unit-test).
+  * InformationGrouped vektor (pre-dedupe + agg C-level):
+    6,7s → 0,05s (130×); 0/80.069 grup beda di real-data.
+  * Reader rekap single-parse (jalur calamine): peek+full = 2× parse
+    → 1× (peek nrows=8 di calamine mem-parse seluruh sheet juga).
+  Pipeline real-data: 20,6s → 4,9s. Gunakan python-calamine (sudah di
+  requirements.txt) supaya baca Excel pakai engine Rust.
+- FIX 9 BUG fitur v3.6 (akar: setelah kolom disembunyikan, posisi
+  display ≠ index logis values[] Treeview):
+  * filter clone ⛶ membaca nilai kolom yang salah (kini: index logis)
+  * auto-fit mengukur nilai kolom yang salah (kini: index logis)
+  * filter '#0' clone pivot memakai text anak (metric) → semua baris
+    hilang (kini: text parent = nama barang)
+  * drill-down pivot ke resto/tanggal keliru setelah hide (kini:
+    identify_to_column → nama kolom)
+  * double-click copy Nomor/Nomor PO popup ambil kolom salah (2 popup)
+  * toggle ✓ (Deviasi GR/PCS + Laporan + Follow Up) terpicu dari kolom
+    lain setelah ✓ disembunyikan (kini: cocok nama kolom)
+  * posisi popup filter melenceng (dulu ikut menghitung kolom
+    tersembunyi + #0 phantom)
+  * mirror hide/unhide clone↔sumber: state colmgr kini tersinkron
+    (panel Kolom sumber tidak lagi menampilkan checkbox basi)
+
 v3.6 ringkasan:
 - BUG FIX KRITIS: tombol filter ⧩ di header TIDAK BISA DIKLIK dengan
   mouse (identify_column mengembalikan '#N' posisi-display sedangkan
@@ -92,16 +120,20 @@ from src.ui.in_selisih_view import InSelisihView
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.6.0"  # v3.6.0: (1) BUG FIX tombol filter ⧩ tidak bisa
-# diklik (identify_column posisi-display vs nama simbolik) + clone ⛶
-# sekarang punya filter/sort sendiri, (2) hide/unhide kolom (klik kanan
-# heading + tombol ◱ Kolom, semua tabel + clone), (3) Audit Rekonsiliasi
-# dari DATA APP (sheet 29 tidak dibaca; kolom SO + Hasil Audit + Saldo,
-# satu tabel), (4) default tanggal -26 s/d 31 (26 bulan lalu s/d 31 bulan
-# berjalan) + label '25•' utk kolom bulan lalu + urut kronologis.
-# Riwayat: v3.5.0 — LightMode dihapus; mode Audit (sheet 29); header
-# filter semua kolom; KATEGORI. v3.4.0 — lebar kolom drag/auto-fit; SO
-# bulan lalu terbaca; tab Rekap Selisih IN + drill-down 42.05/32.24/99.01.
+APP_VERSION = "3.7.0"  # v3.7.0 "ENGINE TURBO" + DEEP AUDIT FIXES:
+# (1) Engine 3,5-4× lebih cepat: running stock vektor (6,6s → 0,19s, 36×),
+# info-group vektor (6,7s → 0,05s, 130×), reader rekap single-parse —
+# output pipeline TERVERIFIKASI IDENTIK baris-per-baris vs v3.6 (A/B
+# real-data 2,79 jt baris + 6/8 edge-case sintetis; bug benchmark awal
+# tertangkap unit-test: akumulasi mulai dari baris pertama tanggal >= 1,
+# bukan awal grup). (2) FIX 9 bug fitur v3.6 (kebingungaan index
+# display-vs-logis setelah kolom disembunyikan): filter clone, auto-fit,
+# drill-down pivot, copy Nomor popup, toggle ✓ (3 view), posisi popup
+# filter, mirror state hide/unhide clone↔sumber.
+# Riwayat: v3.6.0 — fix tombol filter; hide/unhide kolom; audit dari data
+# app (tanpa sheet 29); default tanggal -26..31 + label '25•'. v3.5.0 —
+# LightMode dihapus; header filter semua kolom; KATEGORI. v3.4.0 — lebar
+# kolom drag/auto-fit; SO bulan lalu terbaca; tab Rekap Selisih IN.
 WINDOW_SIZE = "1280x760"
 WINDOW_MIN = (1020, 640)
 

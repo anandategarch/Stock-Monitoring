@@ -55,6 +55,32 @@ Stock Monitoring — Python Edition
 
 ---
 
+## Fitur Baru v3.7 — "ENGINE TURBO" + Deep Audit Fixes
+
+### ⚡ Engine 3,5–4× lebih cepat (output terverifikasi IDENTIK)
+Deep audit engine (cProfile + wall-time per stage, data asli) menemukan 2 hotspot Python-loop per-grup yang makan ~75% waktu komputasi:
+- **`fn_running_stock_grouped` vektor** — global segmented cumsum (satu sort + `np.cumsum` + offset grup + posisi start per grup): **6,68s → 0,19s (36×)** di real-data 561 rb baris / 14.388 grup. 6 edge-case sintetis == implementasi lama (bulan lalu · tanggal NaN · key NaN · saldo awal negatif/all-NaN · grup tanpa tgl ≥ 1). **Bug benchmark awal tertangkap unit-test**: akumulasi harus mulai dari baris PERTAMA tanggal ≥ 1, bukan awal grup — real-data lama lolos benchmark hanya karena baris bulan-lalunya ber-net 0 (di mesin dengan RI 32.24 Bulan Lalu, versi benchmark awal akan SALAH).
+- **InformationGrouped vektor** (`_group_info_columns` di `append1.py`) — per kolom: dropna → `astype(str)` → `drop_duplicates(key+nilai)` → `groupby().agg(', '.join)` level C: **6,67s → 0,05s (130×)**; paritas 100% dengan UDF `_smart_join` lama (0/80.069 grup beda real-data + 8 edge-case sintetis termasuk key NaN yang membuat groupby menghasilkan kolom float64 → normalisasi dtype sebelum merge).
+- **Reader rekap single-parse** (jalur calamine): `_read_combined_file` membaca sheet SEKALI (header=None penuh), deteksi header dari 6 baris pertama frame yang sudah terbaca, promote di memori (`_promote_at`) — peek `nrows=8` di calamine mem-parse seluruh sheet juga (0,17s vs full 0,25s), jadi peek+full = 2× parse sia-sia. Jalur openpyxl tetap peek-dulu (murah di read-only).
+- **Verifikasi A/B real-data**: append1 **2.792.790 baris** + in_detail 86.057 + audit 80.068 + KPI — **SEMUA IDENTIK** (numeric `np.allclose` maxdiff 8e-08; non-numerik exact). Pipeline real-data: **20,6s → 4,9s (4,2×)**. `python-calamine` (engine Rust) sudah dideklarasikan di `requirements.txt` — pastikan terpasang (`pip install -r requirements.txt`) supaya I/O Excel 2,6–3× lebih cepat dari openpyxl.
+
+### 🐛 FIX 9 bug fitur v3.6 (deep audit)
+Akar sistemik: setelah kolom disembunyikan, **posisi-display ≠ index logis** `values[]` Treeview — beberapa handler masih memetakan `identify_column()` (display) ke daftar kolom logis:
+1. **Filter clone ⛶** (`apply_tree_row_filters`) membaca nilai kolom yang SALAH setelah hide (kini: index logis `tree["columns"]`).
+2. **Auto-fit** mengukur nilai kolom yang salah setelah hide (kini: index logis).
+3. **Filter '#0' clone pivot** mencocokkan text ANAK (nama metric) → pilih nama barang = semua baris hilang (kini: text PARENT — sesuai dokumentasi aslinya).
+4. **Drill-down pivot** double-click → resto/tanggal KELIRU setelah hide (kini: `identify_to_column` → nama kolom).
+5. **Double-click copy Nomor/Nomor PO** di popup Rincian IN & popup detail (clone) mengambil kolom salah (kini: nama kolom).
+6. **Toggle ✓** (Deviasi GR/PCS + Laporan Deviasi + Follow Up) terpicu dari kolom lain setelah ✓ disembunyikan — klik & double-click (kini: cocok NAMA kolom "✓").
+7. **Posisi popup filter** melenceng setelah hide (dulu ikut menjumlahkan lebar kolom tersembunyi + lebar #0 phantom saat show="headings").
+8. **Mirror hide/unhide clone↔sumber** tidak sinkron state — panel Kolom tabel sumber menampilkan checkbox basi & apply() berikutnya menimpa state mirror (kini: colmgr terdaftar di tree, state `hidden` tersinkron).
+9. **in_selisih `_apply_columns`** kini re-apply state kolom tersembunyi setelah reconfigure (defensive).
+
+### ✅ Test
+174/174 UI test (164 lama + **10 regresi baru**: filter-clone-benar-setelah-hide, reset-clone, #0-2-level, auto-fit-benar, klik-bukan-✓-tidak-toggle, mirror-sync×2, running-stock==lama 6 case, info-group==lama, `_promote_at`) + mock + E2E real-data (pipeline 4,9s, render 2,6s, funnel 0,05s, filter 0,2s) PASS.
+
+---
+
 ## Fitur Baru v3.6
 
 ### 🐛 BUG FIX KRITIS — tombol filter ⧩ tidak bisa diklik
@@ -258,7 +284,7 @@ stock-monitoring-python/
 ├── config.json                 # RootPath + LightMode + Folders + Sheets
 ├── requirements.txt
 ├── test_mock.py                # test pipeline end-to-end (mock Accurate export)
-├── test_ui_redesign.py         # test UI v3.6 (164 check — + fix klik filter, hide/unhide kolom, audit data app)
+├── test_ui_redesign.py         # test UI v3.7 (174 check — + engine turbo & fix display-vs-logical index)
 ├── bench_views.py              # benchmark compute per view (dev — ukur perf vektorisasi)
 ├── screenshot_ui.py            # dev tool: screenshot semua tab (butuh Xvfb)
 └── src/
@@ -287,7 +313,7 @@ stock-monitoring-python/
 
 ```
 python test_mock.py          # pipeline end-to-end dgn mock data Accurate
-python test_ui_redesign.py   # UI v3.6: 164 check (jalankan di bawah Xvfb di Linux)
+python test_ui_redesign.py   # UI v3.7: 174 check (jalankan di bawah Xvfb di Linux)
 ```
 
 > UI test di Linux/headless: `xvfb-run` atau `Xvfb :99` + `DISPLAY=:99 python test_ui_redesign.py`.

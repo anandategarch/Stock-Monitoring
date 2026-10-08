@@ -30,7 +30,8 @@ from .theme import (
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
     LoadingOverlay, SegmentBar, add_tooltip, auto_fit_columns,
-    enable_col_resize, insert_tree_items, open_tree_maximized, run_async,
+    enable_col_resize, identify_to_column, insert_tree_items,
+    open_tree_maximized, run_async,
     ColumnManager, attach_clone_filters,
 )
 
@@ -678,17 +679,20 @@ class PivotTableView(tk.Frame):
         active_filters = {}
         tanggal = None
         if col_id and col_id != "#0":
-            try:
-                col_idx = int(col_id.replace("#", "")) - 1
-                tree_cols = list(tree["columns"])
-                if 0 <= col_idx < len(tree_cols):
-                    col_val = tree_cols[col_idx]
+            # v3.7 FIX (deep audit): resolve posisi-display → NAMA kolom
+            # aktual — dulu memakai index posisi untuk membaca
+            # tree["columns"] (urutan LOGIS) → setelah kolom disembunyikan,
+            # double-click cell melakukan drill-down ke kolom yang SALAH
+            # (resto / tanggal keliru).
+            col_name = identify_to_column(tree, col_id)
+            if col_name:
+                try:
                     if self.pivot_mode == "resto":
-                        active_filters["NAMA RESTO"] = str(col_val)
+                        active_filters["NAMA RESTO"] = str(col_name)
                     else:
-                        tanggal = int(col_val)
-            except (ValueError, IndexError):
-                pass
+                        tanggal = int(float(str(col_name)))
+                except (ValueError, TypeError):
+                    pass
 
         # filter kartu tetap diberlaku (RESTO hanya mode Tanggal)
         pairs = ([("NAMA RESTO", self.resto_var),

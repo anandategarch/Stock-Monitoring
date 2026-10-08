@@ -23,7 +23,7 @@ from .theme import (
 from .widgets import (
     AccentButton, GhostButton, HeaderFilter, ColumnManager, LoadingOverlay,
     add_tooltip, attach_clone_filters, auto_fit_columns, enable_col_resize,
-    insert_tree_items, open_tree_maximized, run_async,
+    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
 )
 
 # Column definitions: (column_id, width, anchor)
@@ -446,15 +446,14 @@ class DetailsPopup(tk.Toplevel):
         col = tree.identify_column(event.x)
         if not iid or not col or col == "#0":
             return
-        try:
-            idx = int(col.replace("#", "")) - 1
-        except ValueError:
-            return
-        if 0 <= idx < len(COL_IDS):
-            col_name = COL_IDS[idx]
-            if col_name in ("Nomor", "Nomor PO"):
-                val = tree.set(iid, col_name)
-                self._copy_to_clipboard(val, col_name)
+        # v3.7 FIX (deep audit): resolve posisi-display → NAMA kolom
+        # aktual — dulu memakai index posisi ke COL_IDS (urutan LOGIS) →
+        # setelah kolom disembunyikan, copy mengambil nilai kolom yang
+        # SALAH (mis. hide Source → double-click Nomor men-copy Source).
+        col_name = identify_to_column(tree, col)
+        if col_name in ("Nomor", "Nomor PO"):
+            val = tree.set(iid, col_name)
+            self._copy_to_clipboard(val, col_name)
 
     def _on_copy_key(self, _event):
         """Ctrl+C — copy Nomor baris terpilih (fallback Nomor PO)."""

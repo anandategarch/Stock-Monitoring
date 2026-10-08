@@ -833,7 +833,12 @@ class HeaderFilter:
     def _popup_position(self):
         tree = self.tree
         try:
-            cols = ["#0"] + list(tree["columns"])
+            # v3.7 FIX: posisi x dihitung dari kolom yang TAMPIL saja
+            # (displaycolumns-aware; #0 hanya dihitung bila tree column
+            # memang tampil) — dulu menjumlahkan lebar SEMUA kolom termasuk
+            # yang tersembunyi + phantom #0 → popup melenceng setelah
+            # kolom disembunyikan.
+            cols = _tree_display_columns(tree)
             x = 0
             if self.col_id in cols:
                 x = sum(tree.column(c, "width")
@@ -1000,6 +1005,16 @@ class ColumnManager:
         self.hidden: list[str] = []
         self._panel: tk.Toplevel | None = None
         tree.bind("<Button-3>", self._on_right_click, add="+")
+        # v3.7: daftarkan diri di tree supaya ColumnManager lain (mis. clone
+        # ⛶ yang mirror ke tree ini) bisa sinkron state `hidden` — tanpa ini
+        # hide di clone mengubah displaycolumns tree sumber TAPI state
+        # colmgr sumber tetap kosong → panel Kolom sumber menampilkan
+        # checkbox basi (kolom tampak tercentang padahal tersembunyi) dan
+        # apply() berikutnya menimpa state mirror.
+        try:
+            tree._column_manager = self
+        except Exception:
+            pass
 
     # -- state ---------------------------------------------------------------
     def columns(self) -> list[str]:
@@ -1027,6 +1042,13 @@ class ColumnManager:
                     mv = [c for c in vis if c in same]
                     if mv:
                         self.mirror.configure(displaycolumns=mv)
+                        # v3.7: sinkronkan state colmgr di tree mirror
+                        # supaya panel Kolom-nya konsisten (checkbox =
+                        # kondisi sebenarnya)
+                        mm = getattr(self.mirror, "_column_manager", None)
+                        if mm is not None and mm is not self:
+                            mm.hidden = [c for c in self.hidden
+                                         if c in mm.columns()]
             except Exception:
                 pass
         if self.on_change:
@@ -1201,15 +1223,22 @@ def _tree_row_passes(kw: dict, col_idx: dict, active: dict,
                      parent_text: str = "") -> bool:
     """Cek 1 baris snapshot {text, values} lolos filter kolom aktif.
 
-    '#0' (kolom tree) dicocokkan terhadap TEXT baris — bila baris punya
-    parent (baris metric anak), pakai text PARENT (filter nama barang
-    pivot matrix: pilih nama → parent + semua anak metricnya tampil).
+    '#0' (kolom tree) dicocokkan terhadap TEXT baris — baris ANAK
+    (mis. metric pivot) dicocokkan terhadap text PARENT-nya (nama
+    barang), sehingga pilih nama → parent + semua anak metricnya
+    tampil (v3.7 FIX: dulu memakai text anak [nama metric] → filter
+    nama di clone pivot menyembunyikan SEMUA baris).
+
+    v3.7 FIX (deep audit): col_idx HARUS dari urutan kolom LOGIS
+    (tree["columns"]) — values[] item diindeks secara logis, BUKAN
+    urutan tampilan; setelah kolom disembunyikan, index display ≠
+    index logis → filter membaca nilai kolom yang SALAH.
     """
     vals = kw.get("values") or []
     text = str(kw.get("text") or "")
     for c, sel in active.items():
         if c == "#0":
-            v = text if text else parent_text
+            v = parent_text if parent_text else text
         else:
             k = col_idx.get(c)
             v = str(vals[k]) if (k is not None and 0 <= k < len(vals)) else ""
@@ -1252,8 +1281,13 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict):
     except tk.TclError:
         return
 
-    disp = display_data_columns(tree)
-    col_idx = {c: i for i, c in enumerate(disp)}
+    # v3.7 FIX: index values = urutan kolom LOGIS (bukan display) —
+    # nilai item Treeview diindeks sesuai tree["columns"]
+    try:
+        logical_cols = [str(c) for c in tree["columns"]]
+    except Exception:
+        logical_cols = []
+    col_idx = {c: i for i, c in enumerate(logical_cols)}
     items = []
     if not active:
         items = [(p, i, kw) for (p, i, kw) in cache]
@@ -1725,10 +1759,14 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
         sampled_vals.append(it.get("values") or [])
         sampled_texts.append(str(it.get("text") or ""))
 
-    col_pos = {c: k for k, c in enumerate(_tree_display_columns(tree))}
-    # values[] TIDAK memuat #0 — shift index hanya bila kolom tree tampil
-    disp = _tree_display_columns(tree)
-    tree_shift = 1 if (disp and disp[0] == "#0") else 0
+    # v3.7 FIX (deep audit): index values = urutan kolom LOGIS — values[]
+    # item Treeview diindeks sesuai tree["columns"], bukan urutan display;
+    # setelah kolom disembunyikan, auto-fit dulu mengukur nilai kolom yang
+    # SALAH (lebar kolom tidak sesuai kontennya).
+    try:
+        logical_cols = [str(c) for c in tree["columns"]]
+    except Exception:
+        logical_cols = []
     for col in cols:
         try:
             w = meas(str(tree.heading(col, "text") or "")) + pad + 10
@@ -1738,7 +1776,7 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
             for t in sampled_texts:
                 w = max(w, meas(t) + pad + 18)
         else:
-            k = col_pos.get(col, 0) - tree_shift
+            k = logical_cols.index(col) if col in logical_cols else -1
             for vals in sampled_vals:
                 if 0 <= k < len(vals):
                     w = max(w, meas(str(vals[k])) + pad)

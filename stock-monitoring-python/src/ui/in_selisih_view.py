@@ -46,8 +46,8 @@ from .theme import (
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup, LoadingOverlay,
     ColumnManager, add_tooltip, attach_clone_filters, auto_fit_columns,
-    enable_col_resize, insert_tree_items, open_tree_maximized, run_async,
-    sort_tree_by_column,
+    enable_col_resize, identify_to_column, insert_tree_items,
+    open_tree_maximized, run_async, sort_tree_by_column,
 )
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
@@ -449,15 +449,16 @@ class InDetailPopup(tk.Toplevel):
         iid = tree.identify_row(event.y)
         if not iid:
             return
-        try:
-            col = tree.identify_column(event.x)
-            idx = int(col.replace("#", "")) - 1
-        except (ValueError, AttributeError):
-            idx = -1
-        if 0 <= idx < len(_POPUP_IDS) and _POPUP_IDS[idx] in ("Nomor", "Nomor PO"):
-            val = tree.set(iid, _POPUP_IDS[idx])
+        # v3.7 FIX (deep audit): resolve posisi-display → NAMA kolom
+        # aktual — dulu index posisi ke _POPUP_IDS (urutan LOGIS) → setelah
+        # kolom disembunyikan (clone ⛶ punya ColumnManager), double-click
+        # men-copy nilai kolom yang SALAH.
+        col = tree.identify_column(event.x)
+        col_name = identify_to_column(tree, col)
+        if col_name in ("Nomor", "Nomor PO"):
+            val = tree.set(iid, col_name)
             if val:
-                self._copy_to_clipboard(val, _POPUP_IDS[idx])
+                self._copy_to_clipboard(val, col_name)
                 return
         # double-click baris biasa → copy Nomor (bila ada)
         nomor = tree.set(iid, "Nomor")
@@ -685,6 +686,11 @@ class InSelisihView(tk.Frame):
                 self.tree,
                 open_filter=lambda c: self.header_filters and
                 self.header_filters.open_popup(c))
+        else:
+            # v3.7: pastikan state kolom tersembunyi tetap diterapkan
+            # setelah reconfigure columns (defensive — displaycolumns
+            # bisa di-reset Tk saat kolom dikonfigurasi ulang)
+            self._colmgr.apply()
 
         self.hint_label.configure(
             text="🖱 Double-click baris → rincian IN (42.05 / 32.24 / 99.01 + "
