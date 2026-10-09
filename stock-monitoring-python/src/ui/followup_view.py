@@ -36,7 +36,7 @@ from .theme import (
 from .widgets import (
     AccentButton, Card, DangerButton, EmptyState, GhostButton,
     ColumnManager, HeaderFilterGroup, LoadingOverlay, TableExpander,
-    add_tooltip, attach_clone_filters, auto_fit_columns, enable_col_resize,
+    attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
     sort_tree_by_column,
 )
@@ -100,9 +100,6 @@ class FollowUpView(tk.Frame):
         # --- Empty state ---
         self.empty = EmptyState(
             self, icon="📌", title="Daftar Follow Up masih kosong",
-            subtitle="Centang baris mencurigakan (kolom ✓) di tab Deviasi "
-                     "GR / Deviasi PCS / Laporan Deviasi — baris terkumpul "
-                     "di sini untuk ditindaklanjuti.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -111,10 +108,7 @@ class FollowUpView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # --- Kartu aksi (ringkas — tanpa KPI row) ---
-        ccard = Card(self.content, title="Daftar Follow Up",
-                     subtitle="Baris tercentang (✓) di tab Deviasi & "
-                              "Laporan. Lepas ✓ = keluarkan. Tersimpan "
-                              "otomatis (followup.json).")
+        ccard = Card(self.content, title="Daftar Follow Up")
         ccard.pack(fill="x", padx=12, pady=(12, 0))
         cbody = ccard.body()
 
@@ -123,22 +117,12 @@ class FollowUpView(tk.Frame):
         self.btn_export = AccentButton(r0, text="💾 Export Excel",
                                        command=self._on_export)
         self.btn_export.pack(side="left")
-        add_tooltip(self.btn_export,
-                    "Simpan daftar sebagai workbook Excel (.xlsx) —\n"
-                    "FORMAT FILE SAMPLE: Resto · Nama Barang · SO per\n"
-                    "tanggal (H-2..H+2) · Sistem · Deviasi · Loss\n"
-                    "Surplus to BOM · Keterangan · SO · DEVIASI ·\n"
-                    "Selisih · Selisih Deviasi · Cek FU · PIC (diisi\n"
-                    "petugas follow-up).")
 
         self.btn_import = None  # v3.8: Impor Hasil TL DIHAPUS (user)
 
         self.btn_clear = DangerButton(r0, text="✕ Kosongkan",
                                       command=self._on_clear)
         self.btn_clear.pack(side="left", padx=(8, 0))
-        add_tooltip(self.btn_clear,
-                    "Hapus SEMUA baris dari daftar follow-up\n"
-                    "(centangan di tab Deviasi/Laporan ikut lepas).")
 
         self.status_var = tk.StringVar(value="0 baris.")
         tk.Label(r0, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
@@ -158,26 +142,14 @@ class FollowUpView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(filter & sort juga jalan di window besar;\n"
-                             "Esc untuk menutup)")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu aksi & judul supaya tabel "
-                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
-                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
 
         col_ids = [c[0] for c in COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
@@ -205,9 +177,6 @@ class FollowUpView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → detail source · klik ✓ "
-                            "= keluarkan · klik judul kolom ⧩ = filter + sort",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         # Loading overlay
         self.overlay = LoadingOverlay(tbody, "Menyiapkan daftar…")

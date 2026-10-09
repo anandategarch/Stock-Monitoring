@@ -9,7 +9,6 @@ Semua komponen dipakai lintas view supaya tampilan konsisten:
 - EmptyState      : placeholder saat belum ada data + tombol CTA
 - AccentButton    : tombol teal solid (aksi utama)
 - DangerButton    : tombol putih teks merah (aksi berbahaya)
-- ToolTip         : tooltip hover sederhana
 - make_tree       : Treeview ter-style lengkap dgn scrollbar
 - LegendRow       : chip legenda warna (untuk status/CEK)
 - StatusDot       : titik warna + teks status
@@ -348,8 +347,8 @@ class EmptyState(tk.Frame):
     """
 
     def __init__(self, parent, icon: str = "📭", title: str = "Belum ada data",
-                 subtitle: str = "Jalankan pipeline untuk memuat data ke tampilan ini.",
-                 cta_text: str = "🚀 Jalankan Pipeline", on_cta=None, **kw):
+                 subtitle: str = "", cta_text: str = "🚀 Jalankan Pipeline",
+                 on_cta=None, **kw):
         super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
                          highlightthickness=1, **kw)
         # Frame center fixed 520x260 (place anchor center) — konten dipack
@@ -363,8 +362,10 @@ class EmptyState(tk.Frame):
             pady=(28, 0))
         tk.Label(center, text=title, bg=C_CARD, fg=C_HEADER,
                  font=font(13, "bold")).pack(pady=(6, 2))
-        tk.Label(center, text=subtitle, bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(10), wraplength=420, justify="center").pack()
+        if subtitle:
+            tk.Label(center, text=subtitle, bg=C_CARD, fg=C_TEXT_MUTED,
+                     font=font(10), wraplength=420,
+                     justify="center").pack()
         if on_cta is not None and cta_text:
             AccentButton(center, text=cta_text, command=on_cta).pack(
                 pady=(14, 20))
@@ -388,59 +389,6 @@ class LegendRow(tk.Frame):
             cv.create_oval(0, 0, 8, 8, fill=color, outline=color)
             tk.Label(chip, text=label, bg=bg, fg=C_TEXT_MUTED,
                      font=font(9)).pack(side="left")  # FIX A-08: legend
-
-
-class ToolTip:
-    """Tooltip hover sederhana (Toplevel borderless, muncul ~600ms)."""
-
-    def __init__(self, widget: tk.Widget, text: str, delay: int = 600):
-        self.widget = widget
-        self.text = text
-        self._after_id = None
-        self._tip = None
-        widget.bind("<Enter>", self._schedule, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-        widget.bind("<ButtonPress>", self._hide, add="+")
-
-    def _schedule(self, _e=None):
-        self._cancel()
-        self._after_id = self.widget.after(600, self._show)
-
-    def _cancel(self):
-        if self._after_id:
-            try:
-                self.widget.after_cancel(self._after_id)
-            except Exception:
-                pass
-            self._after_id = None
-
-    def _show(self):
-        if self._tip is not None:
-            return
-        try:
-            x = self.widget.winfo_rootx() + 12
-            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
-        except Exception:
-            return
-        self._tip = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        tk.Label(tw, text=self.text, bg=C_HEADER, fg="#e2e8f0",
-                 font=font(9), padx=10, pady=5, justify="left").pack()
-
-    def _hide(self, _e=None):
-        self._cancel()
-        if self._tip is not None:
-            try:
-                self._tip.destroy()
-            except Exception:
-                pass
-            self._tip = None
-
-
-def add_tooltip(widget: tk.Widget, text: str) -> ToolTip:
-    """Helper singkat: add_tooltip(btn, 'Deskripsi...')"""
-    return ToolTip(widget, text)
 
 
 def make_tree(parent, columns: list[str], show: str = "headings",
@@ -2352,9 +2300,6 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     count_var = tk.StringVar(value="Menyalin tabel…")
     tk.Label(foot, textvariable=count_var, bg=C_CARD, fg=C_TEXT_MUTED,
              font=font(9)).pack(side="left")
-    tk.Label(foot, text="🖱 Double-click = detail · klik kanan = copy "
-                        "(bila tersedia) · Esc = tutup",
-             bg=C_CARD, fg=C_TEXT_SOFT, font=font(9)).pack(side="right")  # FIX A-08
 
     overlay = LoadingOverlay(cin, "Menyalin tabel…")
     overlay.show(delay_ms=120)

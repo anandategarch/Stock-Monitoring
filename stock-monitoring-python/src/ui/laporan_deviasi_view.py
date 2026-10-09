@@ -44,7 +44,7 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup,
-    ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
+    ColumnManager, LoadingOverlay, TableExpander,
     attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
     sort_tree_by_column, apply_cell_tag, CELL_TAGS_SUPPORTED, fmt_int_id,
@@ -127,9 +127,6 @@ class LaporanDeviasiView(tk.Frame):
         # --- Empty state ---
         self.empty = EmptyState(
             self, icon="📋", title="Belum ada daftar Pemakaian (COM)",
-            subtitle="Jalankan pipeline untuk memuat daftar Nama Barang × "
-                     "Resto dengan pemakaian (COM) minus atau lebih tinggi "
-                     "dari median pada kolom H.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -138,16 +135,7 @@ class LaporanDeviasiView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # --- Filter card (v3.9.3: rentang tanggal DIGANTI chip H bersama) ---
-        fcard = Card(
-            self.content, title="Filter",
-            subtitle="Daftar barang × resto dengan pemakaian (COM) MINUS "
-                     "atau LEBIH TINGGI dari MEDIAN com harian pasangan "
-                     "tsb pada kolom H (v3.9.7: median ANTAR TANGGAL 1..H — "
-                     "com = pemakaian aktual harian di resto vs pola "
-                     "harianya sendiri). Tanggal H diatur di "
-                     "tab 📦 Deviasi GR. Filter kolom lain → klik judul "
-                     "kolom (ikon corong ⧩) di tabel. Sort default: Nama "
-                     "Barang lalu COM terbesar.")
+        fcard = Card(self.content, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         self._fcard = fcard
         fbody = fcard.body()
@@ -165,10 +153,6 @@ class LaporanDeviasiView(tk.Frame):
         tk.Label(chip, textvariable=self._h_chip_var, bg="#f1f5f9",
                  fg=C_ACCENT, font=font(11, "bold")).pack(
             padx=10, pady=(2, 3))
-        add_tooltip(chip, "Tanggal fokus H (read-only) — diatur di tab "
-                          "📦 Deviasi GR lewat tombol Apply H.\nKolom yang "
-                          "dipakai: COM di tanggal H. Saat H diubah di tab "
-                          "GR, tab ini ikut refresh otomatis.")
 
         GhostButton(r1, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
@@ -189,26 +173,14 @@ class LaporanDeviasiView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(filter & sort juga jalan di window besar;\n"
-                             "Esc untuk menutup)")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu Filter & judul supaya tabel "
-                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
-                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
 
         col_ids = [c[0] for c in self.COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
@@ -236,10 +208,6 @@ class LaporanDeviasiView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = masuk Follow "
-                            "Up · klik judul kolom ⧩ = filter + sort · "
-                            "(sementara) menggantikan tabel Audit Harian",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var_label = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
                  fg=C_HEADER, font=font(8, "bold")).pack(side="right")
@@ -741,7 +709,7 @@ class LaporanDeviasiView(tk.Frame):
                           {"values": values, "tags": tuple(tags)}))
 
         status = (f"{n} baris · minus: {n_minus} · > median: {n_above} · "
-                  f"H={h} · median antar tanggal (1..{h})")
+                  f"H={h}")
         return {"gen": gen, "items": items, "status": status,
                 "fp_map": fp_map, "row_snaps": row_snaps,
                 "neg_cells": neg_cells, "st_minus_cells": st_minus_cells,

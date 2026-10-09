@@ -48,7 +48,7 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
-    LoadingOverlay, SegmentBar, TableExpander, add_tooltip, auto_fit_columns,
+    LoadingOverlay, SegmentBar, TableExpander, auto_fit_columns,
     enable_col_resize, identify_to_column, insert_tree_items,
     open_tree_maximized, run_async, fmt_int_id, validated_tgl_entry,
     ColumnManager, attach_clone_filters, apply_cell_tag,
@@ -113,8 +113,6 @@ class PivotTableView(tk.Frame):
         # --- Empty state ---
         self.empty = EmptyState(
             self, icon="📊", title="Belum ada data pivot",
-            subtitle="Jalankan pipeline untuk memuat matrix pivot "
-                     "(Nama Barang × Resto / Tanggal) ke tampilan ini.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=self._cta_proses)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -126,9 +124,7 @@ class PivotTableView(tk.Frame):
         # (barang × kolom = baris) ada di status footer.
 
         # --- Filter card ---
-        fcard = Card(self.content, title="Filter",
-                     subtitle="Filter Nama Barang → klik header kolom "
-                              "Nama Barang (ikon corong ⧩) di tabel.")
+        fcard = Card(self.content, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
@@ -146,7 +142,6 @@ class PivotTableView(tk.Frame):
         self.resto_combo.pack(side="left", padx=(6, 0))
         self.resto_combo.bind("<<ComboboxSelected>>",
                               lambda e: self._refresh_pivot())
-        add_tooltip(self.resto_combo, "Filter cabang resto (mode Tanggal)")
 
         self.f_source = tk.Frame(r0, bg=C_CARD)
         tk.Label(self.f_source, text="SOURCE KIRIMAN", bg=C_CARD,
@@ -184,14 +179,6 @@ class PivotTableView(tk.Frame):
         t2 = ttk.Entry(r1, textvariable=self.tgl_end_var, width=6)
         t2.pack(side="left", padx=(2, 6))
         t2.bind("<Return>", lambda e: self._refresh_pivot())
-        add_tooltip(t1, "Rentang tanggal -31..31 (angka NEGATIF = bulan "
-                        "lalu, contoh -27 = tgl 27 bulan lalu).\n"
-                        "Default -31 s/d 31: kolom tanggal lengkap 25-31 "
-                        "bulan lalu (label 25• s/d 31•) URUT KRONOLOGIS "
-                        "lalu 1-31 bulan berjalan.\n"
-                        "Mode 🏪 Resto: total per resto dihitung HANYA "
-                        "dari tanggal dalam rentang ini.\nMode 📅 Tanggal: "
-                        "batas kolom tanggal yang tampil.")
         GhostButton(r1, text="Apply", command=self._refresh_pivot).pack(
             side="left", padx=(0, 18))
 
@@ -201,10 +188,6 @@ class PivotTableView(tk.Frame):
             variable=self.hide_empty_var,
             command=self._refresh_pivot)
         self.chk_hide_empty.pack(side="left", padx=(0, 18))
-        add_tooltip(self.chk_hide_empty,
-                    "ON: hanya tampil (barang × jenis) yang punya nilai total "
-                    "> 0.\nKolom total tidak ditampilkan — hanya dipakai "
-                    "untuk filtering.")
 
         GhostButton(r1, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
@@ -228,38 +211,19 @@ class PivotTableView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(Esc untuk menutup)")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu Filter, judul & legenda supaya "
-                    "tabel memakai seluruh tinggi tampilan.\nKlik lagi "
-                    "(⤡ Tampilkan Filter & KPI) untuk mengembalikan.\n"
-                    "(segment mode & tombol tetap terlihat)")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
         # v3.9.2: 💾 Export Excel — matrix pivot SESUAI TAMPILAN (filter +
         # mode aktif); nilai minus ditandai font merah per cell (mirror UI)
         btn_export = GhostButton(head, text="💾 Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_export,
-                    "Export matrix pivot yang TAMPIL sekarang ke Excel "
-                    "(.xlsx)\n"
-                    "— filter RESTO/SOURCE/KATEGORI + rentang Tanggal + "
-                    "mode Resto/Tanggal +\nsembunyikan-baris-kosong ikut "
-                    "serta; kolom tersembunyi (◱) tidak ikut.\n"
-                    "Nilai minus = font merah per cell (persis tampilan).")
 
         self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="browse")
 
@@ -277,15 +241,9 @@ class PivotTableView(tk.Frame):
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
 
-        # Footer card: hint + status
+        # Footer card: status
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.hint_var = tk.StringVar(
-            value="🖱 Double-click cell → detail source · ⧩ klik header "
-                  "Nama Barang utk filter")
-        tk.Label(foot, textvariable=self.hint_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
-
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
@@ -362,16 +320,6 @@ class PivotTableView(tk.Frame):
             self.f_resto.pack(side="left", padx=(0, 18))
         self.f_source.pack(side="left", padx=(0, 18))
         self.f_kategori.pack(side="left", padx=(0, 18))
-        if self.pivot_mode == "resto":
-            self.hint_var.set(
-                "🖱 Double-click cell (barang×resto) → detail source · "
-                "⧩ klik header Nama Barang utk filter · baris kosong "
-                "disembunyikan")
-        else:
-            self.hint_var.set(
-                "🖱 Double-click cell (barang×tanggal) → detail source · "
-                "⧩ klik header Nama Barang utk filter · 6.PEMAKAIAN (COM) "
-                "hanya di mode Tanggal")
 
     def _cta_proses(self):
         if self.go_to_proses:

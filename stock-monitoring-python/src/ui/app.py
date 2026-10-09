@@ -104,11 +104,11 @@ if str(_BASE) not in sys.path:
 from src.main import run_pipeline, PipelineStopped
 from src.ui.theme import (
     C_BG, C_CARD, C_GREEN, C_HEADER, C_ORANGE, C_AMBER, C_RED, C_TEXT_MUTED,
-    apply_theme, font, mono,
+    apply_theme, font,
 )
 from src.ui.widgets import (
     AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, LoadingOverlay,
-    SegmentBar, Spinner, StatusBar, Toolbar, add_tooltip, make_log_console,
+    SegmentBar, Spinner, StatusBar, Toolbar, make_log_console,
     make_tree, run_async, gc_shield_acquire, gc_shield_release, fmt_int_id,
 )
 from src.ui.followup import FollowUpStore
@@ -123,7 +123,7 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.7"  # v3.9.7 — median Anomali COM ANTAR TANGGAL (koreksi user) + filter minggu Komparasi mengikuti H (STATUS BULAN)
+APP_VERSION = "3.9.8"  # v3.9.8 — UI CLEAN: semua teks instruksi/petunjuk dihapus (Bantuan, subtitle kartu, tooltip, hint footer)
 # v3.9.6 (3 permintaan user sekaligus):
 # (1) "tambah kategori Deviasi pada tab Deviasi PCS dan GR" — 5 kolom
 #     baru (mirror sheet DEVIASI GR/PCS workbook asli): Max Deviasi ·
@@ -233,8 +233,7 @@ APP_VERSION = "3.9.7"  # v3.9.7 — median Anomali COM ANTAR TANGGAL (koreksi us
 #     diarahkan ke filter Nama + status bar menjelaskan.
 # (7) A-01/A-02: tombol toolbar disabled kini terlihat DIM (teal→abu)
 #     lewat Toolbar.add_action.set_enabled; konvensi konsisten.
-# (8) A-04: judul panduan (❓ Bantuan) kini mengikuti APP_VERSION dinamis
-#     (dulu hard-coded "v3.4" — basi 5 versi).
+# (8) A-04: (dihapus v3.9.8 — window Bantuan dihapus, UI clean).
 # (9) A-08: teks fungsional font(8)→font(9): label KPI, legend, counter
 #     filter, counter panel kolom, hint window clone (metadata tetap 8).
 # Riwayat v3.9.0 — SHARED H + EXPORT AUDIT + RINCIAN PO RINGKAS + STYLE WASTE:
@@ -288,209 +287,6 @@ class StreamToQueue:
 
     def flush(self):
         pass
-
-
-# --- Panduan singkat ---------------------------------------------------------
-# FIX A-04: versi di judul panduan kini mengikuti APP_VERSION secara
-# dinamis — sebelumnya tertulis hard-coded "v3.4" sehingga basi 5 versi.
-_HELP_TEXT = f"""PANDUAN SINGKAT — STOCK MONITORING v{APP_VERSION}
-
-ALUR KERJA
-  1. Tab ⚙️ Config   : pastikan RootPath menunjuk folder data export Accurate Online.
-  2. Tab 🚀 Proses   : klik MULAI PROSES → pantau log → tunggu "SELESAI".
-     (semua proses panjang menampilkan animasi loading / progress)
-  3. Data otomatis terisi ke tab 📊 Pivot, 📦 Deviasi GR, 🧩 Deviasi PCS,
-     📤 Rekap Selisih IN, 📋 Laporan Deviasi, dan 🛒 Rincian PO.
-     (v3.2: tab hanya dihitung saat dibuka — app lebih ringan)
-
-LEBAR KOLOM (v3.4)
-  • Drag tepi kanan judul kolom = atur lebar kolom secara manual.
-  • Double-click tepi kolom = auto-fit kolom itu ke lebar konten.
-  • Tombol ↔ Auto-Fit di atas tabel = auto-fit SEMUA kolom sekaligus
-    (juga tersedia di window ⛶ Perbesar dan di semua popup).
-
-FILTER HEADER ⧩ (v3.5 — SEMUA KOLOM)
-  • SEMUA judul kolom tabel kini punya filter corong ⧩ — klik judul
-    kolom → popup nilai unik + search + checkbox (ala Excel AutoFilter).
-  • Filter duplikat di card atas (RESTO / STATUS) dihapus — pakai
-    filter header kolomnya langsung.
-
-TAB 📤 REKAP SELISIH IN (v3.4 → v3.6)
-  • SATU tabel (v3.6) — per (Resto × Tanggal × Barang):
-      IN           = barang masuk per dokumen Accurate (42.05 + 32.24 + 99.01)
-      Barang Masuk = barang masuk yang dicatat di input SO harian (rekap
-                     JENIS='BARANG MASUK')
-      Selisih IN   = Barang Masuk − IN
-      Hasil SO     = hasil stock opname hari itu (rekap JENIS='SO';
-                     '-' = tidak ada SO di tanggal tsb)
-  • Kolom Hasil Audit + Saldo + Catatan = logika macro VBA
-    BuatLaporanDeviasiSampel yang diaplikasikan ke DATA APP (rekap SO +
-    BM + IN per tanggal — v3.6; sheet '29 Rekap Barang Masuk' TIDAK
-    dibaca): VALID (Sistem Masuk) / OK (Matching) / CUT-OFF RESOLVED /
-    OK (Dalam Cut-off) / DEVIASI MURNI + KPI chips. Semua kolom bisa
-    difilter ⧩ (termasuk Hasil Audit & SO).
-    (v3.9.6: baris diurut KRONOLOGIS — bulan lalu 25•→31• lalu 1..31;
-    di TANGGAL 1, cek "SO Naik" (VALID) membanding dengan SO TERAKHIR
-    BULAN LALU — permintaan user "jika tanggal 1 pembanding SO nya SO
-    bulan lalu".)
-  • Double-click baris → popup RINCIAN IN: daftar dokumen pendukung
-    per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA + subtotal per
-    sumber + total IN.
-  • Klik kanan / double-click kolom Nomor di popup = copy nomor.
-  • Rentang tanggal default 1 s/d 31 = periode BULAN BERJALAN saja
-    (tanpa bulan lalu — v3.8); angka negatif tetap bisa diketik bila
-    perlu. Filter hanya menyembunyikan baris — saldo & status dihitung
-    dari data penuh.
-  • (v3.8) Tombol 💾 Export: rekap Selisih IN PER RESTO ke Excel —
-    kolom Resto, Tanggal, Nama Barang, Kategori, Satuan, Hasil SO,
-    Sheet Barang Masuk, Kiriman HO (42.05), Kiriman Supplier (32.24),
-    Pembelian by Resto (99.01), Selisih — semua baris dalam rentang
-    tanggal aktif.
-  • (v3.9) Dialog opsi export menanyakan kolom hasil audit:
-    ☑ Hasil Audit · ☑ Saldo · ☑ Catatan Audit — centang/batal sesuai
-    kebutuhan (bisa tanpa kolom audit sama sekali).
-
-SO BULAN LALU (v3.4 — FIX)
-  • SO bulan lalu terbaca otomatis dari sheet 'SO BULAN LALU' di
-    workbook gabungan (RootPath) → tercatat sebagai Tanggal -25 s/d -31.
-    (v3.5: selalu aktif — LightMode dihapus.)
-
-TAB PIVOT TABLE
-  • PIVOT PER: 🏪 Resto (default) atau 📅 Tanggal.
-    - Resto   : kolom = resto, nilai = total per resto; hanya baris dengan
-      nilai total > 0 yang tampil (baris kosong disembunyikan, kolom Total
-      tidak ditampilkan). Contoh: item yang hanya ada di satu resto tetap
-      muncul di kolom resto tersebut.
-    - Tanggal : kolom = tanggal + rentang tanggal.
-  • Filter Nama Barang: klik header kolom "Nama Barang" (ikon corong ⧩).
-  • Double-click cell → pop-up baris source data pendukung.
-  • (v3.9.2) MINUS MERAH PER CELL: hanya cell bernilai negatif yang
-    ditandai merah (berlaku di semua tabel) — bukan satu baris penuh.
-  • (v3.9.2) Tombol 💾 Export Excel (di atas tabel): simpan matrix pivot
-    SESUAI TAMPILAN ke .xlsx — filter + mode + rentang tanggal + kolom
-    tampil ikut serta; nilai minus tetap font merah per cell di Excel.
-
-FOLLOW UP (v3.2 — ala aplikasi Waste; v3.9.6 FORMAT FILE SAMPLE)
-  • Centang kolom ✓ di tabel Deviasi GR / Deviasi PCS / Laporan Deviasi
-    → baris masuk ke tab ☑ Follow Up (badge jumlah di judul tab).
-    (v3.9.3: dari tab Laporan, snapshot memakai asal LAPORAN-COM —
-    SO = nilai COM, Sistem = median, Deviasi = selisih, CEK = status.)
-  • Daftar MENETAP (tidak ikut filter/H) + tersimpan otomatis
-    (followup.json) — aman walau aplikasi ditutup.
-  • Klik ✓ lagi (di tab mana pun, termasuk window ⛶) = keluarkan baris.
-  • (v3.3) double-click sel ✓ = keluarkan/masukkan cepat.
-  • (v3.9.6) FORMAT TABEL = sheet Follow UP file sample: Resto · Nama
-    Barang · SO PER TANGGAL (H-2..H+2 — judul kolom = angka tanggal,
-    mis. H=25 → 23..27) · Sistem · Deviasi · Loss Surplus to BOM ·
-    Keterangan · kolom kerja FU: SO · DEVIASI · Selisih · Selisih
-    Deviasi · Cek FU · PIC (kolom kerja diisi petugas follow-up).
-  • 💾 Export Excel : format file sample yang sama (heading tanggal =
-    angka tanggal) + kolom pelacakan app (Asal / Status TL /
-    Ditambahkan).
-  • Double-click baris → pop-up detail source data.
-  • Sort kolom apa pun tetap aman: baris yang di-klik/di-keluarkan
-    tetap baris yang benar (v3.3).
-
-FILTER NAMA BARANG (SEMUA TAB)
-  • Klik header kolom "Nama Barang" → popup filter ala Excel AutoFilter:
-    pencarian nilai + daftar checkbox + Pilih semua + sort A→Z/Z→A.
-  • (v3.9 ala Waste) Corong header berubah MERAH saat kolom terfilter.
-
-TOMBOL ⤢ PERBESAR TABEL + ⛶ LAYAR PENUH (v3.9 — ala Waste)
-  • ⤢ Perbesar Tabel : sembunyikan kartu Filter / KPI / judul / legenda
-    supaya TABEL memakai seluruh tinggi tab. Klik lagi (⤡ Tampilkan
-    Filter & KPI) untuk mengembalikan. Tersedia di semua tab tabel.
-  • ⛶ Layar Penuh    : buka tabel di window besar terpisah (Esc =
-    kembali). Sort, filter ⧩, double-click, ✓ follow-up tetap jalan.
-
-TAB DEVIASI GR / PCS (v3.9 — H BERSAMA; v3.9.6 KATEGORI DEVIASI)
-  • 1 baris per (Resto × Barang × Satuan) di sekitar Tanggal H (H-2 … H+2).
-  • TANGGAL H cukup diinput 1× di tab 📦 DEVIASI GR (entry + tombol
-    Apply H) — otomatis berlaku JUGA di tab 🧩 DEVIASI PCS (chip nilai H
-    ter-update + tabel ikut refresh; pivot dihitung 1× via cache
-    bersama). Tab PCS tidak punya input H sendiri.
-  • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Apply.
-  • (v3.9.6) KATEGORI DEVIASI (mirror sheet DEVIASI GR/PCS file asli):
-      Max Deviasi      = deviasi terbesar barang tsb antar resto
-      ACR              = rata-rata penjualan harian (Σ 22.05 / H)
-      Total ACR        = BOM per barang×resto (Σ penjualan 1..H)
-      Dev to BOM%      = Deviasi / Total ACR (Loss Surplus to BOM)
-      Stok Seharusnya  = SO(H-1) − ACR (perkiraan stok hari H)
-    plus kategori CEK ke-5 "ACR to BOM": |Deviasi| > Total ACR → selisih
-    stok melebihi pemakaian teoretis sebulan (pasti salah — ungu).
-  • (v3.2) ringkasan Total |Deviasi| & Anomali CEK ada di footer bawah tabel.
-
-TAB LAPORAN DEVIASI (v3.9.4 — 2 MODE, ganti lewat SegmentBar MODE)
-  • ⚖ KOMPARASI FILE DEVIASI (default — BARU): bandingkan file deviasi
-    resmi (mis. "20.AGUSTUS 2026.xlsx" — kolom STATUS BULAN, RESTO,
-    NAMA BAHAN, QTY BOM, QTY COM, QTY DEVIASI, % TO BOM) dengan
-    hitungan app. Klik 📂 Pilih File Deviasi… → tiap baris file
-    dibandingkan pada KOLOM H menurut minggunya (user: week 1 = 7,
-    week 2 = 14, week = 25): WEEK 1→H 7 · WEEK 2→H 14 · WEEK 3/4→H 25
-    (minggu file = CUT-OFF KUMULATIF dari tanggal 1).
-  • (v3.9.7) FILTER MINGGU MENGIKUTI H (STATUS BULAN dipakai utk
-    filter — user: "misal H aku input 7 maka hanya tampilkan week 1
-    aja"): hanya minggu yang MEMUAT H yang ditampilkan — H 1–7 →
-    WEEK 1 · H 8–14 → WEEK 2 · H 15–25 → WEEK 3/4 · H 26–31 →
-    WEEK 5. H diatur di tab 📦 Deviasi GR (chip read-only + ikut
-    refresh otomatis). File tanpa minggu tsb → 0 baris + daftar
-    minggu file. Centang "Tampilkan semua minggu" utk semua minggu.
-  • KOLOM PER BANDING: BOM/COM/DEVIASI/%TO BOM — File (nilai resmi) vs
-    BOM/COM/DEV TO BOM — App (BOM = Σ penjualan 22.05 / "2205 itu BOM",
-    COM = Σ pemakaian, formula pivot 6.PEMAKAIAN (COM)) + DEVIASI — App
-    (Tab GR) = SO_H − Sistem (PERSIS tab 📦 Deviasi GR pada H minggu
-    tsb) + Selisih (GR App − DEV File) + Status MATCH / SELISIH /
-    TIDAK ADA DI DATA APP / H TIDAK ADA DI DATA.
-  • Selisih MATCH bila |GR App − DEV File| ≤ 1 + 0,01%×|DEV File|.
-    Sel Status: MATCH hijau / SELISIH amber / lainnya merah; angka
-    minus merah per CELL.
-  • Resto file "1041.BDGUKU" / "B.1001.MLGPAR" otomatis dicocokkan ke
-    kode app (BDGUKU / MLGPAR). Default hanya resto yang ada di data
-    app — centang "Tampilkan resto di luar data app" untuk semua
-    cabang. Pastikan BULAN file == bulan data app (cek label BULAN di
-    baris file setelah dimuat). Double-click baris → popup detail di
-    tanggal H minggu tsb.
-  • 🚨 ANOMALI COM (v3.9.3 — masih ada, tinggal ganti segmen): daftar
-    Nama Barang × Resto dengan PEMAKAIAN (COM) pada kolom H yang MINUS
-    (< 0) atau LEBIH TINGGI dari MEDIAN com harian pasangan tsb
-    (v3.9.7 koreksi user: median ANTAR TANGGAL 1..H — com = pemakaian
-    aktual harian di resto vs pola hariannya sendiri; heading kolom
-    "Median (1..H)"); H shared dari tab 📦 Deviasi GR (chip
-    read-only + auto-refresh). Tabel Audit Harian lama (6 Status Audit)
-    tersimpan di git history (commit e20141a).
-
-TAB RINCIAN PO (v3.9 — LAYOUT RINGKAS)
-  • Baris TEAL = PO: Nomor # + Tanggal + Pemasok + Status Pesanan +
-    Keterangan PO + jumlah item + total kuantitas (semua info PO
-    SEKALI — tidak diulang per baris).
-  • Baris putih di bawahnya = item barang: Nama Barang, Satuan,
-    Kuantitas.
-  • Filter Cabang & Status (page filter) + filter header ⧩ semua kolom.
-  • Kolom Tgl/Jam Pembuatan tersembunyi default — aktifkan lewat
-    ◱ Kolom / klik kanan judul kolom.
-
-POP-UP DETAIL — COPY NOMOR / NOMOR PO
-  • Klik kanan baris     : Copy Nomor, Copy Nomor PO, copy baris,
-                          copy SEMUA Nomor / Nomor PO (unik).
-  • Double-click cell Nomor / Nomor PO : langsung copy nilai cell.
-  • Ctrl+C               : copy Nomor baris terpilih.
-
-SEMUA TABEL
-  • Klik judul kolom untuk sort — instan walau puluhan ribu baris (v3.3).
-    Angka negatif (merah); nol = "-".
-  • Lebar kolom bisa diatur: drag tepi judul kolom (v3.4);
-    double-click tepi = auto-fit kolom; ↔ Auto-Fit = semua kolom.
-
-EXPORT
-  • Tombol 💾 Export Excel di toolbar atas (aktif setelah pipeline selesai).
-    Sheet: PIVOT (v3.8 — matrix mutasi barang ala tab pivot "Mutasi
-    Barang - New": row label nama barang + jenis × kolom tanggal,
-    conditional formatting persis file user) + Append1 + Rincian PO +
-    Rincian IN (detail dokumen, v3.4) + Laporan Deviasi (Audit, v3.5).
-  • Tab Rekap Selisih IN punya tombol 💾 Export sendiri (v3.8) — rekap
-    per resto dengan kolom Kiriman HO / Kiriman Supplier / Pembelian
-    by Resto / Sheet Barang Masuk.
-"""
 
 
 # --- Aplikasi utama ---------------------------------------------------------
@@ -551,14 +347,7 @@ class StockMonitorApp:
 
         self.btn_export_tb = self.toolbar.add_action(
             "💾 Export Excel", command=self._export_excel, accent=True)
-        add_tooltip(self.btn_export_tb,
-                    "Export ke Excel: sheet PIVOT (matrix mutasi barang "
-                    "+ conditional formatting) + Append1 + Rincian PO + "
-                    "Rincian IN + Laporan Deviasi (Audit)\n(aktif setelah "
-                    "pipeline selesai)")
         self.btn_export_tb.configure(state="disabled")
-
-        self.toolbar.add_action("❓ Bantuan", command=self._show_help)
 
     def _build_statusbar(self):
         self.statusbar = StatusBar(self.root)
@@ -659,11 +448,6 @@ class StockMonitorApp:
 
         tk.Label(inner, text="Lokasi Data (RootPath)", bg=C_CARD,
                  fg=C_HEADER, font=font(12, "bold")).pack(anchor="w")
-        tk.Label(inner,
-                 text="Ubah RootPath sesuai lokasi folder data Anda. Folder & sheet name "
-                      "harus sesuai export Accurate Online.",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9),
-                 wraplength=760, justify="left").pack(anchor="w", pady=(2, 10))
 
         form = tk.Frame(inner, bg=C_CARD)
         form.pack(fill="x")
@@ -672,18 +456,9 @@ class StockMonitorApp:
         self.rootpath_var = tk.StringVar()
         self.entry_rootpath = ttk.Entry(form, textvariable=self.rootpath_var)
         self.entry_rootpath.grid(row=0, column=1, sticky="ew", padx=(10, 8), pady=6)
-        add_tooltip(self.entry_rootpath,
-                    "Folder utama berisi sub-folder export Accurate Online\n"
-                    "(1. DEVIASI WEEKLY, 2. 22.05, dst. — lihat Info Config)")
         btn_browse = GhostButton(form, text="📂 Browse…", command=self._browse_folder)
         btn_browse.grid(row=0, column=2, pady=6)
         form.columnconfigure(1, weight=1)
-
-        opt = tk.Frame(inner, bg=C_CARD)
-        opt.pack(fill="x", pady=(4, 10))
-        tk.Label(opt, text="Pipeline mode: FULL (v3.5 — LightMode dihapus, "
-                 "bulan lalu selalu terbaca)", bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(9)).pack(side="left")
 
         btn_row = tk.Frame(inner, bg=C_CARD)
         btn_row.pack(fill="x")
@@ -702,10 +477,6 @@ class StockMonitorApp:
 
         tk.Label(info_inner, text="Info Config (read-only)", bg=C_CARD,
                  fg=C_HEADER, font=font(12, "bold")).pack(anchor="w")
-        tk.Label(info_inner,
-                 text="Folder & sheet yang akan dibaca pipeline dari RootPath.",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
-            anchor="w", pady=(2, 8))
 
         self.info_tree = make_tree(info_inner, ["item", "value"], show="headings")
         self.info_tree.column("item", width=260, minwidth=160, anchor="w")
@@ -805,8 +576,7 @@ class StockMonitorApp:
 
         messagebox.showinfo(
             "Berhasil",
-            f"Config disimpan.\n\nRootPath: {new_root}\n"
-            f"Mode: FULL (LightMode dihapus v3.5)",
+            f"Config disimpan.\n\nRootPath: {new_root}",
             parent=self.root)
         self._load_config_to_form()
 
@@ -827,24 +597,16 @@ class StockMonitorApp:
 
         tk.Label(ctrl_inner, text="Kontrol Pipeline", bg=C_CARD, fg=C_HEADER,
                  font=font(12, "bold")).pack(anchor="w")
-        tk.Label(ctrl_inner,
-                 text="Baca seluruh export Accurate Online → gabung → pivot → "
-                      "hitung running stock & deviasi → tampilkan di UI.",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
-            anchor="w", pady=(2, 10))
 
         btns = tk.Frame(ctrl_inner, bg=C_CARD)
         btns.pack(fill="x", pady=(0, 10))
         self.btn_mulai = AccentButton(btns, text="🚀 MULAI PROSES",
                                       command=self._start_pipeline)
         self.btn_mulai.pack(side="left")
-        add_tooltip(self.btn_mulai, "Jalankan pipeline penuh (Append1 + Rincian PO)")
 
         self.btn_stop = DangerButton(btns, text="⏹ Stop", state="disabled",
                                      command=self._stop_pipeline)
         self.btn_stop.pack(side="left", padx=(8, 0))
-        add_tooltip(self.btn_stop,
-                    "Hentikan pipeline secara graceful (dicek di checkpoint major)")
 
         self.btn_bersih = GhostButton(btns, text="🧹 Bersihkan Log",
                                       command=self._clear_log)
@@ -890,8 +652,6 @@ class StockMonitorApp:
         log_head.pack(fill="x", padx=16, pady=(14, 0))
         tk.Label(log_head, text="Log Proses", bg=C_CARD, fg=C_HEADER,
                  font=font(12, "bold")).pack(anchor="w")
-        tk.Label(log_head, text="stdout pipeline real-time (batched, anti-freeze)",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(anchor="w")
 
         log_wrap = tk.Frame(log_card, bg=C_CARD)
         log_wrap.pack(fill="both", expand=True, padx=16, pady=(8, 16))
@@ -1216,48 +976,6 @@ class StockMonitorApp:
 
         run_async(self.root, work, done, overlay=self._export_overlay,
                   loading_text="Mengekspor ke Excel…", on_error=on_error)
-
-    # =====================================================================
-    # BANTUAN
-    # =====================================================================
-    def _show_help(self):
-        win = tk.Toplevel(self.root)
-        win.title(f"Bantuan — {APP_TITLE} v{APP_VERSION}")
-        # Posisikan di tengah parent
-        try:
-            pw, ph = 640, 560
-            px = self.root.winfo_rootx() + (self.root.winfo_width() - pw) // 2
-            py = self.root.winfo_rooty() + (self.root.winfo_height() - ph) // 2
-            win.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
-        except Exception:
-            win.geometry("640x560")
-        win.transient(self.root)
-        win.configure(bg=C_BG)
-
-        head = tk.Frame(win, bg=C_HEADER)
-        head.pack(fill="x")
-        tk.Label(head, text=f"❓ Panduan — {APP_TITLE} v{APP_VERSION}",
-                 bg=C_HEADER, fg="#f1f5f9", font=font(12, "bold")).pack(
-            anchor="w", padx=16, pady=12)
-
-        body = tk.Frame(win, bg=C_CARD, highlightbackground="#e2e8f0",
-                        highlightthickness=1)
-        body.pack(fill="both", expand=True, padx=12, pady=12)
-        txt = tk.Text(body, wrap="word", bg=C_CARD, fg=C_HEADER,
-                      font=mono(10), relief="flat", bd=0, padx=14, pady=12)
-        scroll = ttk.Scrollbar(body, orient="vertical", command=txt.yview)
-        txt.configure(yscrollcommand=scroll.set)
-        txt.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        txt.insert("1.0", _HELP_TEXT)
-        txt.configure(state="disabled")
-
-        foot = tk.Frame(win, bg=C_BG)
-        foot.pack(fill="x", pady=(0, 12))
-        AccentButton(foot, text="Tutup", command=win.destroy).pack(
-            side="right", padx=12)
-        win.bind("<Escape>", lambda e: win.destroy())
-        win.focus_set()
 
     # =====================================================================
     # TAB LAIN (view)

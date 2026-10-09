@@ -97,7 +97,6 @@ from .widgets import (
     HeaderFilterGroup,
     LoadingOverlay,
     TableExpander,
-    add_tooltip,
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
@@ -434,9 +433,6 @@ class KomparasiDeviasiView(tk.Frame):
         # --- Empty state ---
         self.empty = EmptyState(
             self, icon="⚖", title="Belum ada data komparasi",
-            subtitle="Jalankan pipeline untuk memuat data app, lalu pilih "
-                     "file deviasi (mis. \"20.AGUSTUS 2026.xlsx\") untuk "
-                     "dibandingkan dengan Tab 📦 Deviasi GR.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -445,15 +441,8 @@ class KomparasiDeviasiView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # --- Filter card: pemilih file + opsi ---
-        fcard = Card(
-            self.content, title="⚖ Komparasi File Deviasi vs Tab Deviasi GR",
-            subtitle="Pilih file deviasi (laporan resmi per minggu: QTY "
-                     "BOM / QTY COM / QTY DEVIASI / % TO BOM). Tiap minggu "
-                     "dibandingkan pada KOLOM H: WEEK 1→7 · WEEK 2→14 · "
-                     "WEEK 3/4→25. Sisi app: GR = SO_H − Sistem (persis "
-                     "tab 📦 Deviasi GR), BOM = Σ penjualan 22.05 (1..H), "
-                     "COM = Σ pemakaian (1..H) — semua dari data pipeline, "
-                     "tanpa file tambahan.")
+        fcard = Card(self.content,
+                     title="⚖ Komparasi File Deviasi vs Tab Deviasi GR")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         self._fcard = fcard
         fbody = fcard.body()
@@ -463,11 +452,6 @@ class KomparasiDeviasiView(tk.Frame):
         btn_pick = GhostButton(r1, text="📂 Pilih File Deviasi…",
                                command=self._pick_file)
         btn_pick.pack(side="left")
-        add_tooltip(btn_pick,
-                    "Pilih file Excel laporan deviasi (kolom: STATUS BULAN, "
-                    "RESTO, NAMA BAHAN, QTY BOM, QTY COM, QTY DEVIASI).\n"
-                    "Minggu dipetakan ke kolom H: WEEK 1→7, WEEK 2→14, "
-                    "WEEK 3/4→25.")
         self._file_label_var = tk.StringVar(
             value="Belum ada file dipilih.")
         self._file_label = tk.Label(
@@ -475,13 +459,9 @@ class KomparasiDeviasiView(tk.Frame):
             fg=C_TEXT_MUTED, font=font(9), anchor="w", justify="left")
         self._file_label.pack(side="left", padx=(10, 8), fill="x",
                               expand=True)
-        add_tooltip(self._file_label,
-                    "File deviasi aktif + ringkasan isi (baris, minggu, "
-                    "resto, bulan).")
         self._btn_close = GhostButton(r1, text="✕ Tutup File",
                                       command=self._close_file)
         self._btn_close.pack(side="right")
-        add_tooltip(self._btn_close, "Buang file deviasi dari perbandingan.")
         self._btn_close.configure(state="disabled")
 
         # baris ke-2: TANGGAL H (read-only, bersama) + filter minggu +
@@ -499,13 +479,6 @@ class KomparasiDeviasiView(tk.Frame):
         tk.Label(hchip, textvariable=self._h_chip_var, bg="#f1f5f9",
                  fg=C_ACCENT, font=font(11, "bold")).pack(
             padx=10, pady=(2, 3))
-        add_tooltip(hchip, "Tanggal fokus H (read-only) — diatur di tab "
-                           "📦 Deviasi GR lewat tombol Apply H.\nv3.9.7: "
-                           "hanya minggu yang MEMUAT H yang ditampilkan "
-                           "(H 1–7 → WEEK 1 · 8–14 → WEEK 2 · "
-                           "15–25 → WEEK 3/4 · 26–31 → WEEK 5).\nSaat H "
-                           "diubah di tab GR, tabel ini ikut difilter "
-                           "otomatis.")
         # label minggu aktif (dinamis — file & H)
         self._week_filter_var = tk.StringVar(
             value="belum ada file")
@@ -513,31 +486,18 @@ class KomparasiDeviasiView(tk.Frame):
             r2, textvariable=self._week_filter_var, bg=C_CARD,
             fg=C_TEXT_MUTED, font=font(9), anchor="w")
         self._week_filter_label.pack(side="left", padx=(2, 12))
-        add_tooltip(self._week_filter_label,
-                    "Minggu file yang ditampilkan utk H aktif "
-                    "(STATUS BULAN dipakai utk filter).")
         self._chk_all_weeks = tk.Checkbutton(
             r2, text="Tampilkan semua minggu", variable=self._show_all_weeks,
             bg=C_CARD, fg=C_HEADER, font=font(9), selectcolor="#ffffff",
             activebackground=C_CARD, activeforeground=C_HEADER,
             command=self._on_option_changed)
         self._chk_all_weeks.pack(side="left")
-        add_tooltip(self._chk_all_weeks,
-                    "Default (v3.9.7): hanya minggu yang memuat H aktif "
-                    "yang ditampilkan — mis. H=7 → WEEK 1 saja.\nCentang "
-                    "untuk menampilkan SEMUA minggu di file (perilaku "
-                    "sebelum v3.9.7).")
         self._chk_all = tk.Checkbutton(
             r2, text="Tampilkan resto di luar data app",
             variable=self._show_all_resto, bg=C_CARD, fg=C_HEADER,
             font=font(9), selectcolor="#ffffff", activebackground=C_CARD,
             activeforeground=C_HEADER, command=self._on_option_changed)
         self._chk_all.pack(side="left", padx=(16, 0))
-        add_tooltip(self._chk_all,
-                    "Default: hanya resto yang ADA di data app (mis. 20 "
-                    "resto cek stock) yang ditampilkan.\nCentang untuk "
-                    "menampilkan SEMUA resto di file (340 cabang) — baris "
-                    "tanpa data app diberi status TIDAK ADA DI DATA APP.")
 
         GhostButton(r2, text="↻ Muat Ulang File",
                     command=self._reload_file).pack(side="right")
@@ -568,25 +528,13 @@ class KomparasiDeviasiView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(filter & sort juga jalan di window besar;\n"
-                             "Esc untuk menutup)")
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu Filter & judul supaya tabel "
-                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
-                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
 
         col_ids = [c[0] for c in self.COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
@@ -614,10 +562,6 @@ class KomparasiDeviasiView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = Follow Up "
-                            "· klik judul kolom ⧩ = filter + sort · "
-                            "Selisih = GR App − DEV File",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var_label = tk.StringVar(value="Belum ada file.")
         tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
                  fg=C_HEADER, font=font(8, "bold")).pack(side="right")

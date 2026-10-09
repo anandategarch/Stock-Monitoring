@@ -52,6 +52,13 @@ Memverifikasi:
     (STATUS BULAN utk filter: H 1–7 → WEEK 1, 8–14 → W2, 15–25 → W3/4,
     26–31 → W5; chip H read-only + highlight chip minggu aktif + opsi
     "Tampilkan semua minggu").
+20. v3.9.8 — UI CLEAN (§1a): SEMUA teks instruksi dihapus dari UI —
+    tombol "❓ Bantuan" + window panduan (_HELP_TEXT/_show_help),
+    subtitle kartu (Filter/aksi), hint footer (🖱 Double-click…),
+    tooltip hover (class ToolTip/add_tooltip dihapus dari widgets),
+    subtitle EmptyState (default ""), subtitle tab Config/Proses,
+    pertanyaan dialog export IN; footer status tetap (data), legenda
+    tetap (decode nilai CEK/warna).
     (tanggal negatif + pair tanpa bulan-lalu — aljabar GR==DEV), race
     ✕ Tutup File saat compute, GC-shield dilepas walau pemilik job
     di-destroy, tag per-cell setelah filter di clone ⛶, duplikat lintas
@@ -391,8 +398,73 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.7", APP_VERSION == "3.9.7", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.8", APP_VERSION == "3.9.8", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
+
+    print("== 1a. v3.9.8 UI CLEAN — teks instruksi dihapus ==")
+    import src.ui.widgets as _wmod
+    check("(v3.9.8) widgets.ToolTip & add_tooltip DIHAPUS",
+          not hasattr(_wmod, "ToolTip") and not hasattr(_wmod, "add_tooltip"))
+    check("(v3.9.8) app._show_help DIHAPUS (tombol ❓ Bantuan hilang)",
+          not hasattr(app, "_show_help"))
+
+    def _all_labels_text(widget, acc=None):
+        acc = [] if acc is None else acc
+        for ch in widget.winfo_children():
+            if isinstance(ch, tk.Label):
+                t = ch.cget("text") or ""
+                tv = ch.cget("textvariable") or ""
+                if t and not tv:
+                    acc.append(str(t))
+            acc = _all_labels_text(ch, acc)
+        return acc
+
+    _shell_txt = _all_labels_text(root)
+    _tb_btns = [str(b.cget("text")) for b in app.toolbar._actions.winfo_children()
+                if isinstance(b, tk.Button)]
+    check("(v3.9.8) Toolbar tanpa tombol Bantuan",
+          not any("Bantuan" in t for t in _shell_txt + _tb_btns),
+          f"found {[t for t in _shell_txt + _tb_btns if 'Bantuan' in t]}")
+    check("(v3.9.8) Toolbar hanya 💾 Export Excel",
+          _tb_btns == ["💾 Export Excel"], f"got {_tb_btns}")
+
+    def _view_static_labels(view):
+        """Label statis (non textvariable) di view — tanpa legenda & KPI."""
+        out = []
+        for lbl in _all_labels_text(view):
+            if any(k in lbl for k in ("Kosong/Non Aktif", "Beda Tanggal",
+                                      "Hitung Manual", "Turun Drastis",
+                                      "ACR to BOM", "negatif (merah)",
+                                      "IN", "BARANG MASUK",
+                                      "Selisih ≠ 0", "tgl • = bulan lalu")):
+                continue  # legenda (decode data — dipertahankan)
+            out.append(lbl)
+        return out
+
+    for name, view in (("Deviasi GR", app.deviasi_gr_view),
+                       ("Deviasi PCS", app.deviasi_pcs_view),
+                       ("Pivot", app.pivot_view),
+                       ("Rekap Selisih IN", app.in_selisih_view),
+                       ("Laporan", app.laporan_view),
+                       ("Komparasi", app.komparasi_view),
+                       ("Follow Up", app.followup_view),
+                       ("Rincian PO", app.rincian_view)):
+        _txt = _view_static_labels(view)
+        check(f"(v3.9.8) {name}: tanpa hint 'klik'/'double-click'/corong",
+              not any(("klik" in t.lower() or "double-click" in t.lower()
+                       or "corong" in t.lower() or "⧩" in t and "MINGGU" not in t)
+                      for t in _txt),
+              f"found {[t for t in _txt if 'klik' in t.lower()]}")
+        check(f"(v3.9.8) {name}: tanpa panah-instruksi '→'",
+              not any("→" in t and "MINGGU" not in t
+                      and not t.startswith("WEEK ") for t in _txt),
+              f"found {[t for t in _txt if '→' in t and 'MINGGU' not in t]}")
+
+    check("(v3.9.8) EmptyState tanpa subtitle default",
+          app.pivot_view.empty._subtitle_missing
+          if hasattr(app.pivot_view.empty, "_subtitle_missing")
+          else not any("Jalankan pipeline untuk memuat" in t
+                       for t in _all_labels_text(app.pivot_view.empty)))
 
     print("== 2. Empty state semua view ==")
     check("Pivot empty state terpasang (pack)",

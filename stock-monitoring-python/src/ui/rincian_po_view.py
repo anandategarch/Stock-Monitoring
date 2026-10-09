@@ -27,7 +27,7 @@ from typing import Optional, Callable
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup,
-    ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
+    ColumnManager, LoadingOverlay, TableExpander,
     attach_clone_filters, auto_fit_columns, enable_col_resize,
     insert_tree_items, open_tree_maximized, run_async,
 )
@@ -72,8 +72,6 @@ class RincianPoView(tk.Frame):
         # --- Empty state ---
         self.empty = EmptyState(
             self, icon="🛒", title="Belum ada data Rincian PO",
-            subtitle="Jalankan pipeline untuk memuat pivot Rincian PO "
-                     "(Nomor # → detail barang per pemasok).",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -85,10 +83,7 @@ class RincianPoView(tk.Frame):
         # (PO · item · total kuantitas) ada di status footer.
 
         # --- Filter card ---
-        fcard = Card(self.content, title="Filter",
-                     subtitle="Filter level PO (page filter). Filter Nama "
-                              "kolom → klik judul kolom (ikon corong ⧩) "
-                              "di tabel.")
+        fcard = Card(self.content, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
@@ -102,7 +97,6 @@ class RincianPoView(tk.Frame):
         self.cabang_combo.pack(side="left", padx=(6, 18))
         self.cabang_combo.bind("<<ComboboxSelected>>",
                                lambda e: self._refresh())
-        add_tooltip(self.cabang_combo, "Filter cabang PO")
 
         tk.Label(r0, text="STATUS PESANAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
@@ -113,7 +107,6 @@ class RincianPoView(tk.Frame):
         self.status_combo.pack(side="left", padx=(6, 18))
         self.status_combo.bind("<<ComboboxSelected>>",
                                lambda e: self._refresh())
-        add_tooltip(self.status_combo, "Filter status pesanan pembelian")
 
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
@@ -135,29 +128,14 @@ class RincianPoView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(filter juga jalan di window besar;\n"
-                             "Esc untuk menutup)")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu Filter & judul supaya tabel "
-                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
-                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)\n"
-                              "Kolom 'Tgl/Jam Pembuatan' tersembunyi "
-                              "default (v3.9) —\naktifkan dari sini bila "
-                              "perlu)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
 
         # v3.9: expander ⤢ — ciutkan kartu filter + judul
         self._expander = TableExpander(btn_expand, [fcard, title_label])
@@ -194,9 +172,6 @@ class RincianPoView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🛒 Baris TEAL = PO (info lengkap + total) · baris "
-                            "putih = item barang · klik judul kolom ⧩ = filter",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")

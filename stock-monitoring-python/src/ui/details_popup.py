@@ -22,7 +22,7 @@ from .theme import (
 )
 from .widgets import (
     AccentButton, GhostButton, HeaderFilter, ColumnManager, LoadingOverlay,
-    add_tooltip, attach_clone_filters, auto_fit_columns, enable_col_resize,
+    attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
     apply_cell_tag, CELL_TAGS_SUPPORTED,
 )
@@ -117,9 +117,6 @@ class DetailsPopup(tk.Toplevel):
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_fit.pack(side="right", anchor="ne", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
         btn_cols = tk.Button(
             head_in, text="◱ Kolom",
             command=lambda: self._colmgr.open_panel(),
@@ -128,8 +125,6 @@ class DetailsPopup(tk.Toplevel):
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_cols.pack(side="right", anchor="ne", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_max = tk.Button(
             head_in, text="⛶ Perbesar", command=self._maximize,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -137,8 +132,6 @@ class DetailsPopup(tk.Toplevel):
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_max.pack(side="right", anchor="ne")
-        add_tooltip(btn_max, "Buka tabel detail dalam window besar\n"
-                             "(klik kanan di sana juga bisa copy)")
 
         # --- Body: tabel ---
         body = tk.Frame(self, bg=C_BG)
@@ -210,14 +203,10 @@ class DetailsPopup(tk.Toplevel):
             foot, text="📋 Semua Nomor",
             command=lambda: self._copy_all_unique("Nomor"))
         btn_copy_nomor.pack(side="right", padx=(6, 0))
-        add_tooltip(btn_copy_nomor, "Copy SEMUA Nomor unik (newline-separated) "
-                                    "ke clipboard")
         btn_copy_po = GhostButton(
             foot, text="📋 Semua Nomor PO",
             command=lambda: self._copy_all_unique("Nomor PO"))
         btn_copy_po.pack(side="right", padx=(6, 0))
-        add_tooltip(btn_copy_po, "Copy SEMUA Nomor PO unik (newline-separated) "
-                                 "ke clipboard")
 
         AccentButton(foot, text="Tutup (Esc)", command=self.destroy).pack(
             side="right", padx=(6, 0))

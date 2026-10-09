@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.8 — UI CLEAN**: **SEMUA teks instruksi/petunjuk DIHAPUS dari UI** (permintaan user: "kata kata atau kalimat diseluruh aplikasi python hapus semua biar clean tanpa teks teks gak penting") — tombol "❓ Bantuan" + window panduan (±200 baris), subtitle semua kartu (mis. "Filter Nama Barang → klik header kolom (ikon corong ⧩)"), hint footer (🖱 Double-click → …) di semua tabel + window ⛶, **tooltip hover** (class `ToolTip`/`add_tooltip` dihapus dari widgets), subtitle EmptyState, subtitle tab Config/Proses, pertanyaan dialog export IN. Yang tetap: label input, tombol, chip nilai, footer status berisi DATA (n baris · MATCH/SELISIH · Minggu WEEK X), legenda CEK/warna, KPI, pesan error, log proses. 390/390 UI test × 2 + mock + ruff 0 baru + VLM visual PASS.
 > **v3.9.7 — MEDIAN ANOMALI COM ANTAR TANGGAL + FILTER MINGGU KOMPARASI MENGIKUTI H**: **(1) KOREKSI user ("harusnya antar tanggal — com itu pemakaian aktual harian di resto, bom pemakaian harian di sistem")**: median pembanding tab 🚨 Anomali COM kini = **median com(t) tgl 1..H per pasangan (barang × resto)** — pemakaian hari H vs pola harian pasangan itu sendiri, BUKAN antar resto; heading dinamis "Median (1..H)". **(2)** ⚖ Komparasi kini **filter minggu mengikuti H bersama** ("misal H aku input 7 maka hanya tampilkan week 1 aja" — STATUS BULAN dipakai utk filter): H 1–7 → WEEK 1 · 8–14 → WEEK 2 · 15–25 → WEEK 3/4 · 26–31 → WEEK 5; chip H read-only + chip minggu aktif highlight + opsi "Tampilkan semua minggu". FIX ikutan: _dirty basi (tabel komparasi tak refresh saat H diubah setelah load_data saat terlihat). 369/369 UI test × 2 + smoke real-data (oracle 25/25 median per-pasangan; H=7/14/25 → 1.356/1.365/1.367 baris == ekspektasi) + VLM visual PASS.
 > **v3.9.6 — KATEGORI DEVIASI + PEMBANDING SO TGL 1 = SO BULAN LALU + FORMAT FOLLOW UP FILE SAMPLE**: **(1)** tab 📦 Deviasi GR & 🧩 Deviasi PCS kini punya **5 KOLOM KATEGORI DEVIASI** (mirror sheet DEVIASI GR/PCS workbook asli): **Max Deviasi** · **ACR** (rata-rata penjualan harian) · **Total ACR** (BOM = Σ penjualan 1..H) · **Dev to BOM%** (= Deviasi/Total ACR — "Loss Surplus to BOM") · **Stok Seharusnya** (= SO(H−1) − ACR) + **CEK kondisi ke-5 "ACR to BOM"** (|Deviasi| > Total ACR → pasti salah; melengkapi port formula LET 5 kondisi) + parser sort angka Indonesia; **(2)** audit Rekap Selisih IN diurut **kronologis** — di **tanggal 1**, pembanding SO (delta "SO Naik") kini = **SO TERAKHIR bulan lalu** (sort lama terbalik → membanding SO tgl 25•); **(3)** tab ☑ Follow Up + export kini **format sheet Follow UP file asli**: SO per tanggal (H-2..H+2, heading angka tanggal) · Sistem · Deviasi · Loss Surplus to BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC. 358/358 UI test × 2 + smoke real-data (810 baris GR, 97 "ACR to BOM", audit 35.436 baris, komparasi 40.739 baris).
 > **v3.9.5 — DEEP AUDIT BUG (4 agent paralel) → semua P1/P2/P3 diperbaiki**: **(P1) race ✕ Tutup File** saat komparasi menghitung → hasil file lama tak muncul lagi (generation counter); **(P1) kebocoran GC seumur sesi** (popup ditutup di tengah render → gc.disable menempel — poll kini di root app); **(P2) parse file 9,4MB di thread worker** (UI tak membeku 8 detik); **(P2) SALDO AWAL jadi base com(1)** di 3 view sekaligus (pivot/laporan/komparasi — pair tanpa data bulan-lalu tak lagi dapat MINUS PALSU di H=1; GR·App == DEV·App aljabar persis); **(P2) popup detail** pakai nama barang versi APP; **(P2) tag per-cell bertahan setelah filter di clone ⛶**; **(P2) popup filter "Selisih vs Median" hidup**; **(P2) Apply H render 1× (dulu 2×)**; plus duplikat multi-bulan dihitung, scan sheet ke-2, footer = hitungan baris tampil, filter reset saat ganti file, sort diantrekan saat busy, initialdir ikut RootPath, unsubscribe H, dst. **337/337 UI test × 2 run + smoke real-data 342rb baris + VLM visual PASS.**
@@ -82,6 +83,30 @@ Audit menyeluruh fitur terbaru (v3.9.3 Anomali COM + v3.9.4 Komparasi Deviasi) m
 9. **Lainnya (P3)**: duplikat lintas bulan dihitung+dilaporkan; scan sheet ke-2+; footer status = baris tampil (bukan global); filter reset saat file berganti; sort diantrekan saat busy; pane tersembunyi tak di-compute saat H berubah; initialdir komparasi ikut RootPath; `show_laporan_mode` sinkron SegmentBar; snapshot follow-up + kolom AKTIF/NON; `SharedTanggalH.unsubscribe()`; `-0,00%`→`0,00%`; Satuan NaN→`''`; dialog + `*.xlsb`; baris basi dibersihkan saat data kosong.
 
 **Verifikasi**: 337/337 UI test × 2 run (25 check baru §23) + `test_mock` ALL PASS + ruff 0 error baru + oracle SA 3 view + smoke real-data 342.222 baris (tgl −31..31, parse async 8,2s dgn 740 pump = UI hidup, anomali 2.135 baris 0,4s, race & cache-invalidation bersih) + 3 screenshot VLM PASS.
+
+## Fitur Baru v3.9.8 — UI Clean (Hapus Semua Teks Instruksi)
+
+Permintaan user: *"tulisan tulisan seperti: Filter nama barang -> klik header kolom nama
+barang (Ikon corong) di tabel … dan kata kata atau kalimat diseluruh aplikasi
+python hapus semua biar clean tanpa teks teks gak penting".*
+
+UI kini bersih — hanya konten fungsional + data. Yang dihapus:
+
+| Bagian | Dihapus |
+|---|---|
+| Toolbar | tombol **❓ Bantuan** + seluruh window panduan (`_HELP_TEXT`/`_show_help`) |
+| Kartu Filter/aksi | semua **subtitle penjelas** (mis. "Filter Nama Barang → klik header kolom (ikon corong ⧩) di tabel") di 7 view |
+| Footer tabel | hint **"🖱 Double-click baris → detail · ✓ = Follow Up · klik judul kolom ⧩ = filter + sort"** dst. (termasuk window ⛶ Layar Penuh) |
+| Hover | **tooltip** — class `ToolTip` + `add_tooltip` dihapus dari `widgets.py` (±45 panggilan di 10 file) |
+| Empty state | subtitle "Jalankan pipeline untuk memuat…" (judul + CTA tetap) |
+| Tab Config/Proses | subtitle "Ubah RootPath sesuai…", "Pipeline mode: FULL…", "Baca seluruh export → …", "stdout pipeline real-time…" |
+| Dialog export IN | pertanyaan "Tambahkan kolom hasil audit…?" (checkbox + tombol tetap) |
+
+**Yang tetap ada** (bukan teks instruksi — data/fungsional): label input
+(TANGGAL H / RESTO / CABANG PO / STATUS), tombol, chip nilai (H, minggu),
+**footer status berisi hitungan data** (n baris · minus · > median ·
+Minggu WEEK X cut-off H N · MATCH/SELISIH), **legenda CEK & warna**, KPI
+pipeline, pesan error/pesan jujur, log proses.
 
 ## Fitur Baru v3.9.7 — Median Antar Tanggal · Filter Minggu Komparasi
 
@@ -498,7 +523,7 @@ Klik header kolom **Nama Barang** (ikon corong) → popup ala **Excel AutoFilter
 ## UI v3.0 — Design System
 
 Shell aplikasi:
-- **Toolbar gelap** (slate-900) — judul aplikasi, badge versi, aksi cepat `💾 Export Excel` & `❓ Bantuan`
+- **Toolbar gelap** (slate-900) — judul aplikasi, badge versi, aksi cepat `💾 Export Excel`
 - **7 tab ber-ikon**: ⚙️ Config · 🚀 Proses · 📊 Pivot Table · 📦 Deviasi GR · 🧩 Deviasi PCS · 📋 Laporan Deviasi · 🛒 Rincian PO
 - **Status bar** global — indikator status pipeline (● SIAP / MENJALANKAN / SELESAI / ERROR) + ringkasan rows
 - **Empty state** — setiap tab data menampilkan placeholder + tombol CTA "🚀 Jalankan Pipeline" saat belum ada data (auto berganti menjadi tabel saat data termuat)
@@ -506,13 +531,12 @@ Shell aplikasi:
 Komponen inti (`src/ui/theme.py` + `src/ui/widgets.py`):
 | Komponen | Fungsi |
 |---|---|
-| `Card` | kartu putih + border slate, judul & subtitle opsional |
+| `Card` | kartu putih + border slate, judul opsional |
 | `KpiCard` / `KpiRow` | kartu metrik (label kecil, angka besar, aksen warna kiri) |
 | `AccentButton` | tombol teal solid (aksi utama) — MULAI PROSES, Simpan Config |
 | `DangerButton` | tombol putih teks merah — Stop |
 | `EmptyState` | placeholder data kosong + CTA |
 | `make_log_console` | konsol log gelap ala terminal (#0b1220 + monospace) |
-| `ToolTip` | tooltip hover untuk kontrol penting |
 | `StatusDot` | titik warna status di status bar |
 
 Palet: `#f1f5f9` (bg) · `#ffffff` (kartu) · `#0f172a` (toolbar/teks judul) · `#0f766e` (aksen teal) · status: merah/oranye/amber/hijau. Font otomatis resolve: Segoe UI (Windows) → Noto Sans → DejaVu Sans.
@@ -524,7 +548,7 @@ Fitur UX per tab:
 - **Follow Up** *(v3.2)* — tabel snapshot baris tercentang + Export Excel / Impor Hasil TL / Kosongkan
 - **Rekap Selisih IN** *(v3.4)* — rekap IN (Accurate) vs Barang Masuk + drill-down rincian dokumen 42.05/32.24/99.01 + nomor
 - **Semua tabel** — zebra rows, sort kolom (klik header), double-click baris → popup detail source data (header gelap, centered modal, Esc untuk tutup), **lebar kolom bisa di-adjust** *(v3.4: drag tepi judul / double-click tepi = auto-fit / tombol ↔ Auto-Fit)*
-- Popup & jendela Bantuan otomatis **ter-center** di parent
+- Popup otomatis **ter-center** di parent
 
 ---
 
@@ -581,7 +605,7 @@ python test_ui_redesign.py   # UI v3.9.3: 279 check (jalankan di bawah Xvfb di L
 - Empty state + CTA di semua tab data; KPI cards di Proses/Deviasi/Laporan/Rincian.
 - 6 kartu Status Audit klik-untuk-filter di tab Laporan.
 - Konsol log gelap anti-freeze (batch + truncation tetap dari v2.1.1).
-- Popup detail & Bantuan: header gelap, centered modal, Esc untuk tutup.
+- Popup detail: header gelap, centered modal, Esc untuk tutup.
 - Tooltip hover untuk kontrol penting; legenda warna CEK & metric.
 - **Pipeline, logika pivot/deviasi/audit/CEK, dan semua perilaku data 100% dipertahankan** (hanya lapisan UI yang diganti).
 - Fix pre-existing: `test_mock.py` kini konsisten dengan pipeline pasca-refactor hapus PI/Konversi + sumber IN 9901 (mock 9901 + folder `Data9901` ditambahkan).

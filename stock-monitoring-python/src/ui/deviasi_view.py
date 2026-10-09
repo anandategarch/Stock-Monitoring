@@ -57,7 +57,7 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup, LegendRow,
-    ColumnManager, LoadingOverlay, TableExpander, add_tooltip,
+    ColumnManager, LoadingOverlay, TableExpander,
     attach_clone_filters, auto_fit_columns, enable_col_resize,
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
     sort_tree_by_column, fmt_int_id, apply_cell_tag, CELL_TAGS_SUPPORTED,
@@ -225,8 +225,6 @@ class DeviasiView(tk.Frame):
         self.empty = EmptyState(
             self, icon="📦" if self.satuan_mode == "GR" else "🧩",
             title=f"Belum ada data Deviasi {mode_label}",
-            subtitle="Jalankan pipeline untuk memuat matrix deviasi "
-                     f"(satuan {mode_label}) ke tampilan ini.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -238,17 +236,8 @@ class DeviasiView(tk.Frame):
         # (baris · total deviasi · anomali CEK) ada di status footer.
 
         # --- Filter card ---
-        # v3.9: subtitle beda utk tab pengikut (PCS) — H diatur di tab GR
-        if self._h_editable:
-            sub = ("Tanggal H = titik fokus analisis (kolom H-2 … H+2) — "
-                   "berlaku juga di tab 🧩 Deviasi PCS (H dibagi 2 tab, "
-                   "cukup input 1×). Filter Nama Barang → klik header kolom "
-                   "(ikon corong ⧩) di tabel.")
-        else:
-            sub = ("Tanggal H diatur di tab 📦 Deviasi GR (tombol Apply H "
-                   "— cukup input 1×, berlaku di kedua tab). Filter Nama "
-                   "Barang → klik header kolom (ikon corong ⧩) di tabel.")
-        fcard = Card(self.content, title="Filter", subtitle=sub)
+        # v3.9: H diatur di tab GR (edit) / tab PCS chip read-only
+        fcard = Card(self.content, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         self._fcard = fcard
         fbody = fcard.body()
@@ -265,10 +254,6 @@ class DeviasiView(tk.Frame):
             tanggal_h_entry.pack(side="left", padx=(6, 8))
             tanggal_h_entry.bind("<Return>",
                                  lambda e: self._on_tanggal_h_change())
-            add_tooltip(tanggal_h_entry,
-                        "Tanggal fokus (1-31). Kolom tampil: SO di H-2 s/d "
-                        "H+2.\n(v3.9) Nilai H berlaku JUGA di tab 🧩 Deviasi "
-                        "PCS —\ntidak perlu input H dua kali.")
             GhostButton(r0, text="Apply H",
                         command=self._on_tanggal_h_change).pack(
                 side="left", padx=(0, 18))
@@ -282,11 +267,6 @@ class DeviasiView(tk.Frame):
             tk.Label(chip, textvariable=self._h_chip_var, bg="#f1f5f9",
                      fg=C_ACCENT, font=font(11, "bold")).pack(
                 padx=10, pady=(2, 3))
-            add_tooltip(chip, "Tanggal fokus H (read-only) — diatur di tab "
-                              "📦 Deviasi GR lewat tombol Apply H.\n"
-                              "Saat H diubah di tab GR, tab ini ikut "
-                              "refresh otomatis (v3.9: tanpa double input).")
-
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
@@ -307,27 +287,15 @@ class DeviasiView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(filter & sort juga jalan di window besar;\n"
-                             "Esc untuk menutup)")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place — ciutkan baris
         # kontrol supaya tabel memakai seluruh tinggi tab)
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu Filter, judul & legenda supaya "
-                    "tabel memakai seluruh tinggi tampilan.\nKlik lagi "
-                    "(⤡ Tampilkan Filter & KPI) untuk mengembalikan.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
 
         col_ids = [c[0] for c in self.COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
@@ -354,12 +322,9 @@ class DeviasiView(tk.Frame):
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
 
-        # Footer: hint + status
+        # Footer: status
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text="🖱 Double-click baris → detail · ✓ = masuk Follow "
-                            "Up · klik judul kolom ⧩ = filter + sort",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")

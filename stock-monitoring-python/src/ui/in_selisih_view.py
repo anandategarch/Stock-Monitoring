@@ -48,7 +48,7 @@ from .theme import (
 )
 from .widgets import (
     Card, EmptyState, GhostButton, HeaderFilterGroup, LoadingOverlay,
-    ColumnManager, TableExpander, add_tooltip, attach_clone_filters,
+    ColumnManager, TableExpander, attach_clone_filters,
     auto_fit_columns, enable_col_resize, identify_to_column,
     insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
     fmt_int_id, validated_tgl_entry, apply_cell_tag, CELL_TAGS_SUPPORTED,
@@ -308,7 +308,6 @@ class InDetailPopup(tk.Toplevel):
         btn_copy = GhostButton(foot, text="📋 Semua Nomor",
                                command=lambda: self._copy_all_unique())
         btn_copy.pack(side="right", padx=(6, 0))
-        add_tooltip(btn_copy, "Copy SEMUA Nomor unik (newline-separated)")
         from .widgets import AccentButton
         AccentButton(foot, text="Tutup (Esc)", command=self.destroy).pack(
             side="right", padx=(6, 0))
@@ -559,8 +558,6 @@ class InSelisihView(tk.Frame):
         self.empty = EmptyState(
             self, icon="📤",
             title="Belum ada data Rekap Selisih IN",
-            subtitle="Jalankan pipeline untuk memuat rekap IN vs Barang "
-                     "Masuk + Audit Rekonsiliasi (dari data app).",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -569,13 +566,7 @@ class InSelisihView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # --- Filter card (v3.5: RESTO combo DIHAPUS → header filter ⧩) ---
-        fcard = Card(self.content, title="Filter",
-                     subtitle="Rentang tanggal (default: 1–31 bulan BERJALAN "
-                              "saja — tanpa bulan lalu). Filter RESTO / "
-                              "KATEGORI / HASIL AUDIT / nilai kolom → klik "
-                              "judul kolom (ikon corong ⧩) di tabel. Filter "
-                              "hanya menyembunyikan baris — saldo & status "
-                              "audit dihitung dari data penuh.")
+        fcard = Card(self.content, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
@@ -592,12 +583,6 @@ class InSelisihView(tk.Frame):
         entry_end = ttk.Entry(r0, textvariable=self.tgl_end_var, width=6)
         entry_end.pack(side="left", padx=(2, 8))
         entry_end.bind("<Return>", lambda e: self._on_tanggal_change())
-        add_tooltip(entry_start,
-                    "Rentang hari -31..31 (angka NEGATIF = bulan lalu).\n"
-                    "Default 1 s/d 31 = periode BULAN BERJALAN saja "
-                    "(rekap selisih IN tanpa bulan lalu — v3.8).\nHanya "
-                    "menyembunyikan baris (saldo kumulatif tetap dihitung "
-                    "dari data penuh).")
         GhostButton(r0, text="Apply", command=self._on_tanggal_change).pack(
             side="left", padx=(0, 18))
 
@@ -607,8 +592,6 @@ class InSelisihView(tk.Frame):
             variable=self.only_selisih_var,
             command=self._refresh)
         chk.pack(side="left")
-        add_tooltip(chk, "Sembunyikan baris tanpa selisih\n"
-                         "(Barang Masuk == Penerimaan Sistem)")
 
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left", padx=(18, 0))
@@ -638,41 +621,18 @@ class InSelisihView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        add_tooltip(btn_max, "Buka tabel ini dalam window besar\n"
-                             "(filter & sort juga jalan di window besar;\n"
-                             "Esc untuk menutup)")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_expand,
-                    "Sembunyikan kartu Filter, KPI & judul supaya tabel "
-                    "memakai seluruh tinggi tampilan.\nKlik lagi (⤡ "
-                    "Tampilkan Filter & KPI) untuk mengembalikan.")
         # v3.8: export rekap Selisih IN per resto (permintaan user)
         btn_export = GhostButton(head, text="💾 Export",
                                  command=self._on_export)
         btn_export.pack(side="right", padx=(0, 6))
-        add_tooltip(
-            btn_export,
-            "Export rekap Selisih IN PER RESTO ke Excel (.xlsx)\n"
-            "(semua baris dalam rentang tanggal aktif — default 1–31).\n"
-            "Kolom: Resto, Tanggal, Nama Barang, Kategori, Satuan,\n"
-            "Hasil SO, Sheet Barang Masuk, Kiriman HO (42.05),\n"
-            "Kiriman Supplier (32.24), Pembelian by Resto (99.01),\n"
-            "Selisih.\n"
-            "(v3.9) Dialog opsi menanyakan apakah menambahkan kolom\n"
-            "hasil audit (Hasil Audit / Saldo / Catatan) — bisa dipilih\n"
-            "atau tidak.")
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_cols, "Sembunyikan / tampilkan kolom\n"
-                              "(juga bisa: klik kanan judul kolom)")
         btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
-        add_tooltip(btn_fit, "Sesuaikan lebar semua kolom ke konten\n"
-                             "(double-click tepi kolom = auto-fit 1 kolom;\n"
-                             "drag tepi kolom = atur lebar manual)")
 
         self.tree = ttk.Treeview(tbody, columns=[c[0] for c in COLUMNS],
                                  show="headings", selectmode="browse")
@@ -692,9 +652,6 @@ class InSelisihView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.hint_label = tk.Label(foot, text="", bg=C_CARD, fg=C_TEXT_MUTED,
-                                   font=font(8))
-        self.hint_label.pack(side="left")
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
@@ -751,12 +708,6 @@ class InSelisihView(tk.Frame):
             # setelah reconfigure columns (defensive — displaycolumns
             # bisa di-reset Tk saat kolom dikonfigurasi ulang)
             self._colmgr.apply()
-
-        self.hint_label.configure(
-            text="🖱 Double-click baris → rincian IN (42.05 / 32.24 / 99.01 + "
-                 "nomor) · klik judul kolom ⧩ = filter + sort · klik kanan "
-                 "heading = sembunyikan kolom · saldo & status dihitung "
-                 "dari data penuh (filter hanya menyembunyikan baris)")
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
@@ -1068,20 +1019,7 @@ class InSelisihView(tk.Frame):
         tk.Label(body, text="💾 Export Rekap Selisih IN per Resto",
                  bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
             anchor="w")
-        tk.Label(body,
-                 text="Tambahkan kolom hasil audit ke file export?"
-                      " (opsional — v3.9)",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
-            anchor="w", pady=(2, 10))
 
-        tips = {
-            "Hasil Audit": "Status audit rekonsiliasi per baris: VALID / OK / "
-                            "CUT-OFF RESOLVED / DEVIASI MURNI.",
-            "Saldo": "Saldo kumulatif per (Resto × Barang) urut tanggal "
-                      "(dihitung dari data penuh).",
-            "Catatan Audit": "Rincian penyebab status audit (teks panjang "
-                              "— hasil pembandingan dokumen).",
-        }
         vars_ = {}
         for col in AUDIT_EXPORT_COLUMNS:
             v = tk.BooleanVar(value=True)
@@ -1090,7 +1028,6 @@ class InSelisihView(tk.Frame):
             row.pack(fill="x", pady=2)
             cb = ttk.Checkbutton(row, text=col, variable=v)
             cb.pack(side="left")
-            add_tooltip(cb, tips.get(col, ""))
 
         btns = tk.Frame(body, bg=C_CARD)
         btns.pack(fill="x", pady=(12, 0))
