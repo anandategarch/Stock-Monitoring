@@ -1,9 +1,9 @@
 """
-app.py — Shell UI Stock Monitoring v3.9.10.
+app.py — Shell UI Stock Monitoring v3.9.11.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.9.10 + [💾 Export] │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.9.11 + [💾 Export] │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (10 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
@@ -85,6 +85,7 @@ Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
 checkpoint major. Freeze-fix v2.1.1 (batch log + truncate) dipertahankan.
 """
+import contextlib
 import json
 import os
 import queue
@@ -151,7 +152,35 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.10"  # v3.9.10 — DEEP AUDIT UI/UX ROUND 2: fix temuan audit 4-arah (race, cache, konsistensi)
+APP_VERSION = "3.9.11"  # v3.9.11 — TUNTAS: sisa temuan P3 audit 2-b (7 fix) + repo GitHub di-private
+# v3.9.11 (TUNTAS SISA TEMUAN AUDIT — "kerjakan semua & repo pribadi"):
+# (0) P0 D-11 DIEKSEKUSI: repo GitHub anandategarch/Stock-Monitoring
+#     kini PRIVATE (permintaan user "repo untuk pribadi aja") — workbook
+#     produksi + objek 2205.xlsx di history tidak lagi dapat diakses
+#     publik; BFG rewrite tidak diperlukan.
+# (1) FIX B-21 sort kini BERINDIKATOR ARAH di heading (↓ menurun / ↑
+#     menaik; panah lama kolom lain dibersihkan) — sebelumnya sort via
+#     popup ↕ mengubah urutan tanpa jejak kolom mana yang terurut.
+# (2) FIX B-14 toggle filter di clone ⛶ tidak lagi MENGEMBALIKAN urutan
+#     sort (rebuild dulu dari cache urutan asli; sort terakhir kini
+#     dijalankan ulang SEBELUM reapply tag per-cell).
+# (3) FIX B-09 sort_tree_by_column untuk tree BERHIRARKI: jalur baru
+#     tree.move (subtree + text #0 + state open terjaga; jalur lama
+#     delete+reinsert MENGHAPUS anak) — latent utk caller saat ini
+#     (semua datar), jalur flat O(n) tetap + kini pertahankan text/open.
+# (4) FIX B-18 mirror kolom ⛶ DUA ARAH: hide/unhide kolom di tabel
+#     UTAMA kini tercermin juga di window clone yang terbuka (dulu satu
+#     arah clone→source saja).
+# (5) FIX B-17 cursor "watch" LoadingOverlay BER-REFCOUNT per toplevel
+#     — overlay pertama yang selesai tidak lagi me-reset cursor saat
+#     overlay kedua masih loading; + klaim dilepas saat widget destroy.
+# (6) FIX B-16 TableExpander.restore iterasi REVERSE — ≥2 target pack
+#     berturut di akhir urutan tidak lagi terpasang TERBALIK.
+# (7) FIX B-12 validated_tgl_entry + _on_tanggal_change Selisih IN:
+#     pecahan ("7.9") DITOLAK warning+revert — dulu dilantai SENYAP
+#     menjadi 7 oleh int(float()).
+# (8) FIX B-11 EmptyState frame center ADAPTIF (clamp 520×260) — dulu
+#     fixed 520×260: konten CTA terpotong di jendela sempit.
 # v3.9.10 (DEEP AUDIT UI/UX ROUND 2 — 4 agent paralel, 37 temuan):
 # (1) P1 RACE & ROBUSTNESS: FIX A-01 Stop→MULAI kini menghentikan
 #     benar (guard worker masih hidup — dulu 2 pipeline bisa jalan

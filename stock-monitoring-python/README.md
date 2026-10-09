@@ -5,6 +5,8 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.11 — TUNTAS SISA TEMUAN AUDIT + REPO PRIVATE** (user: "kerjakan semua dan repo untuk pribadi aja"): **P0 D-11 — repo GitHub kini PRIVATE** (data produksi + objek 2205.xlsx di history tidak lagi publik; BFG tidak perlu). 7 fix sisa audit 2-b: **B-21 panah arah sort di heading** (↓/↑ — kolom terurut kini terlihat), **B-14 toggle filter clone tidak me-reset urutan sort** (sort terakhir dijalankan ulang sebelum reapply tag), **B-09 sort tree berhirarki aman** (jalur tree.move — anak subtree/text/open terjaga; flat O(n) tetap), **B-18 mirror kolom ⛶ dua arah** (hide kolom di tabel utama tercermin di clone terbuka + backref bersih saat tutup), **B-17 cursor watch ber-refcount** (2 overlay tidak saling me-reset), **B-16 TableExpander restore urutan benar**, **B-12 pecahan tanggal ditolak** ("7.9" tidak lagi dilantai senyap jadi 7), **B-11 EmptyState adaptif** (clamp 520×260). + FIX laten: import contextlib di app.py (F821). **514/514 UI test × 2 run (22 baru §26 satu-per-bug) + mock ALL PASS + ruff 223 < 224.**
+>
 > **v3.9.10 — DEEP AUDIT UI/UX ROUND 2**: audit ulang 4-arah (shell/tabel/view/integritas — 37 temuan) + fix P1-P3 TANPA menyentuh formula bisnis: race restart pipeline (Stop→MULAI tidak lagi dobel thread), cache-poisoning worker (data basi senyap saat pipeline selesai di tengah refresh — capture identitas di awal compute), on_error Rincian PO & popup detail (view tidak mati permanen), sort Rekap Selisih IN parser Indonesia, file Excel di-skip kini TERLIHAT ("SELESAI ⚠ N file dilewati"), tag minus per-cell bertahan di clone ⛶ setelah filter (4 view + popup), auto-fit double-click tepi kolom hidup lagi (bind add="+"), filter header >3000 nilai bisa dicentang via pencarian (lazy), gc_shield thread-safe (Lock), sort-saat-render di-antre, race render Follow Up, tombol disabled tampak dim, DPI-awareness Windows, Ctrl+Tab navigasi tab, routing tab berbasis widget, **tab strip muat di 1020px** (dulu tab kanan terpotong) + WINDOW_MIN 700 (h-scrollbar selalu terlihat), format angka Indonesia di Rincian PO & popup, minus merah per-cell Selisih IN, frasa instruksi dipangkas, footer "baris", tulis atomik config/komparasi_last. **492/492 UI test (55 baru — satu per bug) + mock + ruff 224 < baseline 261 + VLM visual 2 batch + probe piksel/H-1.**
 >
 > **v3.9.9 — TAB 🎯 PARETO (80/20 KONTRIBUTOR DEVIASI TERBESAR)**: tab BARU 🎯 Pareto (setelah Deviasi PCS — app kini 10 tab): semua kombinasi (Barang × Resto × Satuan) **diurut |Deviasi| menurun** + **Kontribusi %** + **Kumulatif %** + **Fokus 🎯** (baris yang diperlukan mencapai CUTOFF % — default 80, input 1–100) → fokus list audit "20% kombinasi menyumbang 80% deviasi". MODE GR/PCS (SegmentBar) · TANGGAL H chip read-only (state bersama, ikut Apply H) · KPI strip (KOMBINASI · TOTAL |DEVIASI| · FOKUS ≤ CUTOFF · TOP 20%) · GRAFIK canvas (top-30 batang teal/amber kumulatif/garis cutoff merah/batas fokus) · ✓ follow-up fingerprint identik tab Deviasi (dedup 1 entri) · export 💾 sheet PARETO. Pivot dihitung 1× (subclass DeviasiView + SharedPivotCache). 438/438 UI test × 2 + smoke real-data 3,5jt baris (oracle 25/25 × 3 konfigurasi; fokus/total == oracle) + VLM visual PASS.
@@ -95,6 +97,29 @@ Audit menyeluruh fitur terbaru (v3.9.3 Anomali COM + v3.9.4 Komparasi Deviasi) m
 9. **Lainnya (P3)**: duplikat lintas bulan dihitung+dilaporkan; scan sheet ke-2+; footer status = baris tampil (bukan global); filter reset saat file berganti; sort diantrekan saat busy; pane tersembunyi tak di-compute saat H berubah; initialdir komparasi ikut RootPath; `show_laporan_mode` sinkron SegmentBar; snapshot follow-up + kolom AKTIF/NON; `SharedTanggalH.unsubscribe()`; `-0,00%`→`0,00%`; Satuan NaN→`''`; dialog + `*.xlsb`; baris basi dibersihkan saat data kosong.
 
 **Verifikasi**: 337/337 UI test × 2 run (25 check baru §23) + `test_mock` ALL PASS + ruff 0 error baru + oracle SA 3 view + smoke real-data 342.222 baris (tgl −31..31, parse async 8,2s dgn 740 pump = UI hidup, anomali 2.135 baris 0,4s, race & cache-invalidation bersih) + 3 screenshot VLM PASS.
+
+## Fitur Baru v3.9.11 — Tuntas Sisa Temuan Audit + Repo Private
+
+Eksekusi instruksi user **"kerjakan semua dan repo untuk pribadi aja"**: P0 D-11 (katalog risiko git dari audit v3.9.10) dieksekusi + semua sisa temuan P3 audit 2-b yang ditunda + 1 fix laten v3.9.10. Tidak ada formula bisnis / fingerprint / pipeline / kontrak export yang disentuh.
+
+**P0 — keamanan data (D-11)**
+- Repo GitHub `anandategarch/Stock-Monitoring` dijadikan **PRIVATE** via API (verifikasi ulang: `private: true`). Workbook produksi + objek `2205.xlsx` di git history tidak lagi dapat diakses publik; **BFG/rewrite history tidak diperlukan** (destruktif — mengubah semua hash commit). Workbook tetap ter-track sesuai kegunaan repo pribadi.
+
+**Fix sisa audit 2-b**
+| Fix | Masalah (v3.9.10) | Perilaku baru |
+|---|---|---|
+| B-21 | Sort via popup ↕ mengubah urutan tabel tanpa jejak kolom mana yang terurut | Heading kolom sort berpanah **↓ menurun / ↑ menaik**; panah kolom lama dibersihkan; ikon funnel (opsi `image`) tidak tersentuh |
+| B-14 | Toggle filter di clone ⛶ mengembalikan urutan asli (rebuild dari cache urutan asli) | Sort terakhir (`tree._last_sort`) dijalankan ulang **sebelum** reapply tag per-cell — tag dipasang pada urutan final |
+| B-09 | `sort_tree_by_column` reinsert hanya values+tags — tree berhirarki kehilangan anak (latent) | Jalur `tree.move` utk tree berhirarki (subtree + text #0 + open terjaga); jalur flat O(n) tetap + mempertahankan text #0/open |
+| B-18 | Mirror kolom clone→source satu arah — hide kolom di tabel utama tidak tercermin di clone terbuka | **Dua arah**: colmgr clone terdaftar di source (`_mirror_backrefs`); apply() sumber mendorong ke semua clone; backref dilepas saat window clone ditutup |
+| B-17 | Overlay pertama yang selesai me-reset cursor saat overlay kedua masih loading | Cursor "watch" **ber-refcount per toplevel** + klaim dilepas saat widget destroy |
+| B-16 | `TableExpander.restore` iterasi maju — ≥2 target pack berturut di akhir terpasang TERBALIK | Iterasi **reverse** (benar utk semua kombinasi anchor after/before) |
+| B-12 | `int(float("7.9"))` melantai pecahan senyap jadi 7 | Pecahan **ditolak** warning+revert (validated_tgl_entry semua view + `_on_tanggal_change` Selisih IN); "7.0" tetap diterima |
+| B-11 | EmptyState frame center fixed 520×260 — konten terpotong di jendela sempit | Center **adaptif** (clamp maks 520×260, ikut event `<Configure>`) |
+
+**+ Fix laten v3.9.10**: `import contextlib` di app.py — F821 (jalur gagal simpan config memakai `contextlib.suppress` tanpa import → NameError menggantikan dialog error).
+
+**Verifikasi**: 514/514 UI test × 2 run stabil (492 v3.9.10 + **22 baru §26 — satu test per bug**) + test_mock ALL PASS × 2 + ruff **223 < baseline 224** (F821 hilang, 0 kelas error baru — S110/BLE001 baru dikonversi `contextlib.suppress` sesuai konvensi v3.9.10) + probe visual Xvfb (panah sort terlihat di heading, EmptyState mengecil di jendela 1020×640).
 
 ## Fitur Baru v3.9.10 — Deep Audit UI/UX Round 2 (37 Temuan → Fix)
 

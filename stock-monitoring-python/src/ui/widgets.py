@@ -106,9 +106,15 @@ def validated_tgl_entry(var, *, lo: int, hi: int, fallback: int,
     fallback senyap di Pivot & Rekap Selisih IN. Panggil dari MAIN thread."""
     raw = (var.get() or "").strip()
     val = None
+    # FIX B-12 (audit 2-b): int(float(raw)) MELANTAI input pecahan secara
+    # senyap ("7.9" → 7 dipakai tanpa memberitahu user). Kini hanya
+    # bilangan BULAT yang diterima ("7", " 25 ", "7.0"); pecahan ditolak
+    # dengan warning + revert — konsisten dengan penolakan "7,9".
     try:
-        val = int(float(raw))
-    except (TypeError, ValueError):
+        f = float(raw)
+        if f == int(f):
+            val = int(f)
+    except (TypeError, ValueError, OverflowError):
         val = None
     if val is None or not (lo <= val <= hi):
         _mb.showwarning("Input tidak valid",
@@ -411,27 +417,47 @@ class EmptyState(tk.Frame):
                  on_cta=None, **kw):
         super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
                          highlightthickness=1, **kw)
-        # Frame center fixed 520x260 (place anchor center) — konten dipack
-        # di dalam, pack_propagate(False) menjaga ukuran frame tetap.
+        # Frame center adaptif (FIX B-11 audit 2-b): dulu FIXED 520x260 —
+        # di jendela sempit (mis. < 560px lebar) konten ikon/judul/CTA
+        # TERPOTONG senyap. Kini ukuran center mengikuti ukuran widget
+        # (clamp maks 520x260) lewat event <Configure>.
         center = tk.Frame(self, bg=C_CARD)
         center.place(relx=0.5, rely=0.5, anchor="center",
                      width=520, height=260)
         center.pack_propagate(False)
+        self._center = center
+        self._subtitle_lbl = None
 
         tk.Label(center, text=icon, bg=C_CARD, font=(font_family(), 40)).pack(
             pady=(28, 0))
         tk.Label(center, text=title, bg=C_CARD, fg=C_HEADER,
                  font=font(13, "bold")).pack(pady=(6, 2))
         if subtitle:
-            tk.Label(center, text=subtitle, bg=C_CARD, fg=C_TEXT_MUTED,
-                     font=font(10), wraplength=420,
-                     justify="center").pack()
+            self._subtitle_lbl = tk.Label(
+                center, text=subtitle, bg=C_CARD, fg=C_TEXT_MUTED,
+                font=font(10), wraplength=420, justify="center")
+            self._subtitle_lbl.pack()
         if on_cta is not None and cta_text:
             AccentButton(center, text=cta_text, command=on_cta).pack(
                 pady=(14, 20))
         else:
             # tanpa CTA: jaga padding bawah agar frame tetap proporsional
             tk.Frame(center, bg=C_CARD, height=20).pack()
+        self.bind("<Configure>", self._resize_center, add="+")
+
+    def _resize_center(self, event=None):
+        """FIX B-11: kecilkan frame center saat widget sempit — konten
+        tetap utuh (ikon/judul/CTA tidak terpotong)."""
+        try:
+            w = max(240, self.winfo_width())
+            h = max(160, self.winfo_height())
+            cw, ch = min(520, w - 24), min(260, h - 24)
+            self._center.place(relx=0.5, rely=0.5, anchor="center",
+                               width=cw, height=ch)
+            if self._subtitle_lbl is not None:
+                self._subtitle_lbl.configure(wraplength=max(160, cw - 100))
+        except tk.TclError:
+            return
 
 
 class LegendRow(tk.Frame):
@@ -587,6 +613,8 @@ class LoadingOverlay(tk.Frame):
                  font=font(11, "bold")).pack(side="left")
         self._show_after = None
         self._visible = False
+        self._cursor_held = False   # FIX B-17: klaim cursor "watch" aktif?
+        self.bind("<Destroy>", self._on_destroy, add="+")
 
     def show(self, text: str | None = None, delay_ms: int = 180):
         if text:
@@ -608,9 +636,38 @@ class LoadingOverlay(tk.Frame):
             self.place(relx=0.5, rely=0.5, anchor="center")
             self.lift()
             self.spinner.start()
-            self.winfo_toplevel().configure(cursor="watch")
+            self._acquire_watch_cursor()
         except tk.TclError:
             pass
+
+    # FIX B-17 (audit 2-b): cursor "watch" kini BER-REFCOUNT per toplevel.
+    # Dulu: overlay A & B sama-sama loading → A selesai duluan me-reset
+    # cursor ke normal padahal B masih berjalan (dan sebaliknya kursor
+    # watch tertinggal bila urutan hide tidak bersih). Tiap overlay yang
+    # benar-benar mem-PLACEd memegang 1 klaim; reset hanya saat klaim
+    # terakhir dilepas.
+    def _acquire_watch_cursor(self):
+        top = self.winfo_toplevel()
+        n = int(getattr(top, "_watch_cursor_refs", 0)) + 1
+        top._watch_cursor_refs = n
+        if n == 1:
+            top.configure(cursor="watch")
+        self._cursor_held = True
+
+    def _release_watch_cursor(self):
+        top = self.winfo_toplevel()
+        n = max(0, int(getattr(top, "_watch_cursor_refs", 1)) - 1)
+        top._watch_cursor_refs = n
+        if n == 0:
+            top.configure(cursor="")
+
+    def _on_destroy(self, _event=None):
+        # widget overlay mati sebelum hide() → lepaskan klaim supaya
+        # cursor tidak tertinggal "watch" seumur sesi.
+        if self._cursor_held:
+            self._cursor_held = False
+            with contextlib.suppress(tk.TclError):
+                self._release_watch_cursor()
 
     def hide(self):
         self._visible = False
@@ -623,9 +680,12 @@ class LoadingOverlay(tk.Frame):
         try:
             self.place_forget()
             self.spinner.stop()
-            self.winfo_toplevel().configure(cursor="")
         except tk.TclError:
             pass
+        if self._cursor_held:
+            self._cursor_held = False
+            with contextlib.suppress(tk.TclError):
+                self._release_watch_cursor()
 
 
 class SegmentBar(tk.Frame):
@@ -779,8 +839,15 @@ class TableExpander:
 
     # -------------------------------------------------------------- restore --
     def restore(self):
-        """Kembalikan semua target ke posisi semula (urutan asli)."""
-        for w, mgr, info, anchor in self._saved:
+        """Kembalikan semua target ke posisi semula (urutan asli).
+
+        FIX B-16 (audit 2-b): iterasi REVERSE. Bug lama: bila ≥2 target
+        pack BERTURUT-turut di AKHIR urutan (semua anchor 'after' widget
+        non-target yang sama), iterasi maju memasang mereka TERBALIK —
+        [A, T1, T2] → [A, T2, T1]. Iterasi mundur menghasilkan urutan
+        benar untuk SEMUA kombinasi anchor after/before (anchor 'before'
+        aman di kedua arah; 'after' butuh mundur)."""
+        for w, mgr, info, anchor in reversed(self._saved):
             try:
                 if mgr == "pack":
                     kw = dict(info)
@@ -1298,6 +1365,16 @@ class ColumnManager:
             tree._column_manager = self
         except Exception:
             pass
+        # FIX B-18 (audit 2-b): mirror DUA ARAH. colmgr clone mendaftarkan
+        # dirinya di tree SUMBER — apply() di sumber kini juga mendorong
+        # konfigurasi kolom ke semua clone yang terbuka (dulu SATU ARAH
+        # clone→source: hide kolom di tabel utama saat window ⛶ clone
+        # masih terbuka TIDAK tercermin di clone).
+        if mirror is not None:
+            with contextlib.suppress(Exception):
+                refs = list(getattr(mirror, "_mirror_backrefs", None) or [])
+                refs.append(self)
+                mirror._mirror_backrefs = refs
 
     # -- state ---------------------------------------------------------------
     def columns(self) -> list[str]:
@@ -1318,22 +1395,35 @@ class ColumnManager:
             self.tree.configure(displaycolumns=vis)
         except tk.TclError:
             return
+        # FIX B-18 (audit 2-b): peer = tree mirror (arah lama clone→source)
+        # + SEMUA clone yang terdaftar di tree ini (arah baru source→clone).
+        # Push langsung configure displaycolumns + sinkron state hidden
+        # colmgr peer — TANPA memanggil peer.apply() (bebas rekursi).
+        peers: list = []
         if self.mirror is not None:
+            peers.append(self.mirror)
+        for mgr in list(getattr(self.tree, "_mirror_backrefs", None) or []):
+            t = getattr(mgr, "tree", None)
+            if t is not None and t not in peers:
+                peers.append(t)
+        for t in peers:
             try:
-                if self.mirror.winfo_exists():
-                    same = [str(c) for c in self.mirror["columns"]]
-                    mv = [c for c in vis if c in same]
-                    if mv:
-                        self.mirror.configure(displaycolumns=mv)
-                        # v3.7: sinkronkan state colmgr di tree mirror
-                        # supaya panel Kolom-nya konsisten (checkbox =
-                        # kondisi sebenarnya)
-                        mm = getattr(self.mirror, "_column_manager", None)
-                        if mm is not None and mm is not self:
-                            mm.hidden = [c for c in self.hidden
-                                         if c in mm.columns()]
-            except Exception:
-                pass
+                if t is self.tree or not t.winfo_exists():
+                    continue
+            except tk.TclError:
+                continue
+            with contextlib.suppress(Exception):
+                same = [str(c) for c in t["columns"]]
+                mv = [c for c in vis if c in same]
+                if mv:
+                    t.configure(displaycolumns=mv)
+                    # v3.7: sinkronkan state colmgr di tree peer supaya
+                    # panel Kolom-nya konsisten (checkbox = kondisi
+                    # sebenarnya)
+                    tm = getattr(t, "_column_manager", None)
+                    if tm is not None and tm is not self:
+                        tm.hidden = [c for c in self.hidden
+                                     if c in tm.columns()]
         if self.on_change:
             try:
                 self.on_change()
@@ -1602,8 +1692,22 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
         tree.delete(*tree.get_children(""))
     except tk.TclError:
         return
+
+    # FIX B-14 (audit 2-b): rebuild dari cache memakai URUTAN ASLI —
+    # toggle filter dulu mengembalikan urutan sort senyap. Kini sort
+    # TERAKHIR tree (tree._last_sort, dicatat sort_tree_by_column)
+    # dijalankan ulang SEBELUM on_done, jadi tag per-cell dipasang pada
+    # URUTAN FINAL (sort dulu, reapply tag sesudahnya).
+    def _done():
+        ls = getattr(tree, "_last_sort", None)
+        if ls is not None:
+            with contextlib.suppress(Exception):
+                sort_tree_by_column(tree, ls[0], reverse=ls[1],
+                                    parse=ls[2])
+        if on_done:
+            on_done()
     tree._row_filter_cancel = insert_tree_items(tree, items, batch=600,
-                                                on_done=on_done)
+                                                on_done=_done)
 
 
 def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
@@ -1999,6 +2103,14 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
     iid dipertahankan → pemetaan iid→fingerprint (_fp_map) dan toggle
     kolom ✓ tetap mengenai baris yang benar setelah sort.
     """
+    # FIX B-14 (audit 2-b): catat sort TERAKHIR di tree — apply_tree_row_
+    # filters (rebuild clone pasca toggle filter) menjalankan ulang sort
+    # ini SEBELUM reapply tag per-cell, supaya toggle filter tidak
+    # mengembalikan urutan ke urutan asli cache secara diam-diam.
+    try:
+        tree._last_sort = (col, bool(reverse), parse)
+    except Exception:
+        pass
     children = list(tree.get_children(""))
     if len(children) < 2:
         return
@@ -2030,16 +2142,38 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
         keys.sort(key=lambda x: str(x[0]), reverse=reverse)
 
     order = [k for _, k in keys]
+    # FIX B-21 (audit 2-b): indikator ARAH sort di heading kolom — sebelumnya
+    # tidak ada tanda kolom mana yang sedang terurut (setelah sort via popup
+    # ↕, tabel berubah urutan tanpa jejak). Panah lama di kolom lain dibersihkan.
+    _set_sort_arrow(tree, col, reverse)
     if order == children:
         return
     try:
         sel = set(tree.selection())
     except tk.TclError:
         sel = set()
+
+    # FIX B-09 (audit 2-b): tree BERHIRARKI → tree.move per baris top-level
+    # (subtree anak, text #0, dan state open IKUT TERJAGA — jalur lama
+    # delete+reinsert hanya values+tags sehingga ANAK-ANAK HILANG).
+    # Latent untuk caller saat ini (semuanya datar), tapi menutup jalur
+    # rusak untuk tabel 2-level (mis. matrix pivot) di masa depan.
+    # Tabel datar tetap memakai jalur O(n) delete+reinsert (benchmark
+    # v3.3 45.1s → 1.1s @50k baris) — kini juga mempertahankan text #0
+    # dan state open.
+    if any(tree.get_children(k) for k in children):
+        for i, k in enumerate(order):
+            try:
+                tree.move(k, "", i)
+            except tk.TclError:
+                pass
+        return
+
     tree.delete(*children)
     for k in order:
         it = info[k]
-        tree.insert("", "end", iid=k, values=it.get("values"),
+        tree.insert("", "end", iid=k, text=it.get("text", ""),
+                    values=it.get("values"), open=it.get("open", False),
                     tags=tuple(it.get("tags") or ()))
     keep = [k for k in order if k in sel]
     if keep:
@@ -2047,6 +2181,36 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
             tree.selection_set(keep)
         except tk.TclError:
             pass
+
+
+def _set_sort_arrow(tree: ttk.Treeview, col: str, descending: bool) -> None:
+    """FIX B-21 (audit 2-b): panah arah sort di heading — ↓ menurun,
+    ↑ menaik; panah lama di kolom LAIN dibersihkan.
+
+    Hanya opsi ``text`` heading yang ditulis (ikon funnel HeaderFilter
+    hidup di opsi ``image`` — tidak tersentuh). Heading yang tidak
+    berubah teksnya tidak dikonfigurasi ulang sama sekali.
+    """
+    marks = (" \u2193", " \u2191")   # " ↓", " ↑"
+    try:
+        cols = [str(c) for c in tree["columns"]]
+    except tk.TclError:
+        return
+    for c in cols:
+        try:
+            cur = str(tree.heading(c, "text") or "")
+        except tk.TclError:
+            continue
+        txt = cur
+        for m in marks:
+            if txt.endswith(m):
+                txt = txt[: -len(m)]
+                break
+        if c == col:
+            txt = txt + (marks[0] if descending else marks[1])
+        if txt != cur:
+            with contextlib.suppress(tk.TclError):
+                tree.heading(c, text=txt)
 
 
 # --- Column resize + auto-fit (v3.4) -------------------------------------------
@@ -2485,6 +2649,14 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         if event.widget is win:
             insert_cancel()
             overlay.hide()
+            # FIX B-18 (audit 2-b): lepas registrasi backref colmgr clone
+            # dari tree sumber — tanpa ini daftar _mirror_backrefs tumbuh
+            # tiap buka/tutup ⛶ (apply() sumber membuang waktu membaca
+            # referensi mati, meski sudah di-skip winfo_exists).
+            with contextlib.suppress(Exception):
+                refs = getattr(source_tree, "_mirror_backrefs", None)
+                if refs and clone_colmgr in refs:
+                    refs.remove(clone_colmgr)
 
     win.bind("<Destroy>", _on_win_destroy, add="+")
 

@@ -84,6 +84,13 @@ Memverifikasi:
     widget (A-11), format ID rincian/popup (C-03), minus merah Selisih
     IN (C-04), frasa instruksi dipangkas (C-06), footer baris (C-10),
     unsubscribe/dirty H (C-07/C-08), atomic write (D-05/D-06).
+23. v3.9.11 — TUNTAS SISA TEMUAN (§26): P0 D-11 repo GitHub di-PRIVATE
+    (user: "repo untuk pribadi aja") + 7 fix sisa audit 2-b: panah arah
+    sort di heading (B-21), toggle filter clone tidak me-reset urutan
+    sort (B-14), sort tree berhirarki jangan hilangkan anak (B-09,
+    jalur tree.move), mirror kolom ⛶ dua arah (B-18), cursor watch
+    refcount (B-17), TableExpander restore urutan (B-16), pecahan input
+    tanggal ditolak tidak dilantai (B-12), EmptyState adaptif (B-11).
 """
 import os
 import sys
@@ -420,7 +427,7 @@ def main():
     check("App + toolbar + 10 tab terbangun (v3.9.9: +🎯 Pareto)",
           len(app.notebook.tabs()) == 10, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.10", APP_VERSION == "3.9.10", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.11", APP_VERSION == "3.9.11", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 1a. v3.9.8 UI CLEAN — teks instruksi dihapus ==")
@@ -3845,6 +3852,242 @@ def main():
           "PERINGATAN (bukan hijau polos)",
           "dilewati" in app.statusbar.dot._var.get(),
           f"got {app.statusbar.dot._var.get()}")
+
+    # =====================================================================
+    print("== 26. (v3.9.11) TUNTAS SISA TEMUAN AUDIT 2-b (7 fix + repo private) ==")
+
+    from src.ui.widgets import (
+        ColumnManager as _ColumnManager,
+    )
+    from src.ui.widgets import (
+        EmptyState as _EmptyState,
+    )
+    from src.ui.widgets import (
+        TableExpander as _TableExpander,
+    )
+    from src.ui.widgets import (
+        apply_tree_row_filters as _atrf,
+    )
+    from src.ui.widgets import (
+        sort_tree_by_column as _stbc26,
+    )
+    from src.ui.widgets import (
+        validated_tgl_entry as _vte,
+    )
+
+    def _dcset(t):
+        dc = t["displaycolumns"]
+        items = [str(x) for x in dc] if isinstance(dc, (tuple, list)) \
+            else str(dc).split()
+        return set(items)
+
+    # ---- B-21: panah arah sort di heading -------------------------------
+    _t21 = ttk.Treeview(root, columns=["a", "b"])
+    _t21.heading("a", text="Kolom A")
+    _t21.heading("b", text="Kolom B")
+    for _i, (_av, _bv) in enumerate([("x", "1"), ("y", "3"), ("z", "2")]):
+        _t21.insert("", "end", iid=f"r21_{_i}", values=(_av, _bv))
+    _stbc26(_t21, "b", reverse=True)
+    check("(v3.9.11) B-21: sort menurun → heading kolom sort berpanah ↓",
+          _t21.heading("b")["text"] == "Kolom B \u2193",
+          f"got {_t21.heading('b')['text']!r}")
+    _stbc26(_t21, "a", reverse=False)
+    check("(v3.9.11) B-21: sort pindah kolom → panah lama hilang, ↑ muncul",
+          _t21.heading("b")["text"] == "Kolom B"
+          and _t21.heading("a")["text"] == "Kolom A \u2191",
+          f"a={_t21.heading('a')['text']!r} b={_t21.heading('b')['text']!r}")
+    _t21.destroy()
+
+    # ---- B-14: toggle filter clone tidak me-reset urutan sort -----------
+    _t14 = ttk.Treeview(root, columns=["nama", "nilai"])
+    for _i, (_nm, _vl) in enumerate([("a", "10"), ("b", "2"),
+                                      ("c", "30"), ("d", "5")]):
+        _t14.insert("", "end", iid=f"r14_{_i}", values=(_nm, _vl))
+    _stbc26(_t14, "nilai", reverse=True)   # 30,10,5,2
+    check("(v3.9.11) B-14: _last_sort tercatat di tree",
+          getattr(_t14, "_last_sort", None) == ("nilai", True, None),
+          f"got {getattr(_t14, '_last_sort', None)}")
+    _snap14 = {"done": False, "order": None}
+
+    def _d14():
+        _snap14["done"] = True
+        _snap14["order"] = [str(_t14.item(k)["values"][1])
+                            for k in _t14.get_children("")]
+    _atrf(_t14, {"nama": {"a", "b", "c", "d"}}, on_done=_d14)
+    for _ in range(40):
+        root.update()
+        time.sleep(0.01)
+    _order14 = [str(_t14.item(k)["values"][1])
+                for k in _t14.get_children("")]
+    check("(v3.9.11) B-14: urutan sort BERTAHAN setelah toggle filter "
+          "(bug lama: kembali urutan asli 10,2,30,5)",
+          _order14 == ["30", "10", "5", "2"],
+          f"got {_order14}")
+    check("(v3.9.11) B-14: sort dijalankan SEBELUM on_done (urutan final "
+          "saat tag dipasang)", _snap14["done"]
+          and _snap14["order"] == ["30", "10", "5", "2"],
+          f"done={_snap14['done']} order={_snap14['order']}")
+    _t14.destroy()
+
+    # ---- B-09: sort tree berhirarki — anak tidak hilang ------------------
+    _t9 = ttk.Treeview(root, columns=["v"], show="tree headings")
+    _t9.heading("#0", text="Nama")
+    _t9.heading("v", text="V")
+    _t9.insert("", "end", iid="p1", text="Parent 1", values=("1",))
+    _t9.insert("", "end", iid="p2", text="Parent 2", values=("2",))
+    _t9.insert("p1", "end", iid="c1", text="Anak 1", values=("9",))
+    _t9.insert("p1", "end", iid="c2", text="Anak 2", values=("3",))
+    _t9.item("p1", open=True)
+    _stbc26(_t9, "v", reverse=True)   # p2 (2) dulu, p1 (1) kemudian
+    check("(v3.9.11) B-09: sort hirarki — urutan top-level benar",
+          list(_t9.get_children("")) == ["p2", "p1"],
+          f"got {list(_t9.get_children(''))}")
+    check("(v3.9.11) B-09: ANAK subtree bertahan (jalur lama: terhapus)",
+          list(_t9.get_children("p1")) == ["c1", "c2"]
+          and _t9.item("c1")["text"] == "Anak 1",
+          f"got {list(_t9.get_children('p1'))}")
+    check("(v3.9.11) B-09: text #0 + state open parent bertahan",
+          _t9.item("p1")["text"] == "Parent 1"
+          and _t9.item("p1")["open"] in (True, 1),
+          f"text={_t9.item('p1')['text']!r} open={_t9.item('p1')['open']}")
+    # jalur flat: text #0 ikut dipertahankan saat reinsert
+    _t9f = ttk.Treeview(root, columns=["v"], show="tree headings")
+    for _i, (_nm, _vl) in enumerate([("n1", "5"), ("n2", "1"), ("n3", "3")]):
+        _t9f.insert("", "end", iid=f"f{_i}", text=_nm, values=(_vl,))
+    _stbc26(_t9f, "v", reverse=True)
+    check("(v3.9.11) B-09: jalur flat — text #0 dipertahankan",
+          [_t9f.item(k)["text"] for k in _t9f.get_children("")]
+          == ["n1", "n3", "n2"],
+          f"got {[_t9f.item(k)['text'] for k in _t9f.get_children('')]}")
+    _t9.destroy()
+    _t9f.destroy()
+
+    # ---- B-18: mirror kolom ⛶ DUA ARAH -----------------------------------
+    _s18 = ttk.Treeview(root, columns=["a", "b"])
+    _c18 = ttk.Treeview(root, columns=["a", "b"])
+    _ColumnManager(_s18)
+    _cm18 = _ColumnManager(_c18, mirror=_s18)
+    _s18_mgr = _s18._column_manager
+    _s18_mgr.hide("b")
+    check("(v3.9.11) B-18: hide di SUMBER → clone ikut (dulu satu arah)",
+          _dcset(_c18) == {"a"},
+          f"clone dc={_dcset(_c18)}")
+    check("(v3.9.11) B-18: state colmgr clone tersinkron (hidden=['b'])",
+          _cm18.hidden == ["b"], f"got {_cm18.hidden}")
+    _s18b = ttk.Treeview(root, columns=["a", "b"])
+    _c18b = ttk.Treeview(root, columns=["a", "b"])
+    _ColumnManager(_s18b)
+    _c18b_mgr = _ColumnManager(_c18b, mirror=_s18b)
+    _c18b_mgr.hide("a")
+    check("(v3.9.11) B-18: arah lama tetap — hide di CLONE → source ikut",
+          _dcset(_s18b) == {"b"}, f"source dc={_dcset(_s18b)}")
+    for _t in (_s18, _c18, _s18b, _c18b):
+        _t.destroy()
+
+    # ---- B-17: cursor watch ber-refcount ----------------------------------
+    _top17 = tk.Toplevel(root)
+    _ov1 = LoadingOverlay(_top17)
+    _ov2 = LoadingOverlay(_top17)
+    _ov1.show(delay_ms=0)
+    _ov2.show(delay_ms=0)
+    root.update()
+    _c_17a = str(_top17.cget("cursor"))
+    _ov1.hide()
+    _c_17b = str(_top17.cget("cursor"))
+    _ov2.hide()
+    _c_17c = str(_top17.cget("cursor"))
+    check("(v3.9.11) B-17: overlay-1 selesai → cursor TETAP watch "
+          "(bug lama: reset saat overlay-2 masih loading)",
+          _c_17a == "watch" and _c_17b == "watch",
+          f"a={_c_17a!r} b={_c_17b!r}")
+    check("(v3.9.11) B-17: klaim terakhir dilepas → cursor normal",
+          _c_17c in ("", "arrow")
+          and getattr(_top17, "_watch_cursor_refs", -1) == 0,
+          f"c={_c_17c!r} refs={getattr(_top17, '_watch_cursor_refs', -1)}")
+    _top17.destroy()
+
+    # ---- B-16: TableExpander restore urutan -------------------------------
+    _host16 = tk.Frame(root)
+    _host16.pack(fill="both", expand=True)
+    _A16 = tk.Frame(_host16, bg="#ff0000")
+    _T1_16 = tk.Frame(_host16, bg="#00ff00")
+    _T2_16 = tk.Frame(_host16, bg="#0000ff")
+    _A16.pack(side="top", fill="x")
+    _T1_16.pack(side="top", fill="x")
+    _T2_16.pack(side="top", fill="x")
+    root.update_idletasks()
+    _btn16 = tk.Button(root)
+    _exp16 = _TableExpander(_btn16, [_T1_16, _T2_16])
+    _exp16.collapse()
+    root.update_idletasks()
+    check("(v3.9.11) B-16: collapse — target tersembunyi",
+          list(_host16.pack_slaves()) == [_A16],
+          f"got {list(_host16.pack_slaves())}")
+    _exp16.restore()
+    root.update_idletasks()
+    check("(v3.9.11) B-16: restore urutan BENAR [A,T1,T2] (bug lama: "
+          "target akhir berturut terpasang TERBALIK [A,T2,T1])",
+          list(_host16.pack_slaves()) == [_A16, _T1_16, _T2_16],
+          f"got {list(_host16.pack_slaves())}")
+    _btn16.destroy()
+    _host16.destroy()
+
+    # ---- B-12: pecahan input tanggal DITOLAK ------------------------------
+    import tkinter.messagebox as _tkmb26
+    _ow26 = _tkmb26.showwarning
+    _tkmb26.showwarning = lambda *a, **k: "ok"
+    try:
+        _v12 = tk.StringVar(value="7.9")
+        _r12 = _vte(_v12, lo=1, hi=31, fallback=25, label="TANGGAL H",
+                    parent=root)
+        check("(v3.9.11) B-12: pecahan '7.9' DITOLAK + revert fallback "
+              "(bug lama: dilantai senyap jadi 7)",
+              _r12 == 25 and _v12.get() == "25",
+              f"r={_r12} var={_v12.get()!r}")
+        _v12b = tk.StringVar(value="7.0")
+        _r12b = _vte(_v12b, lo=1, hi=31, fallback=25, label="X",
+                     parent=root)
+        check("(v3.9.11) B-12: '7.0' tetap diterima sebagai 7",
+              _r12b == 7 and _v12b.get() == "7",
+              f"r={_r12b} var={_v12b.get()!r}")
+        _v12c = tk.StringVar(value=" 25 ")
+        _r12c = _vte(_v12c, lo=1, hi=31, fallback=25, label="X",
+                     parent=root)
+        check("(v3.9.11) B-12: ' 25 ' (spasi) tetap valid → 25",
+              _r12c == 25, f"r={_r12c}")
+    finally:
+        _tkmb26.showwarning = _ow26
+    # in_selisih: jalur _on_tanggal_change kini juga menolak pecahan
+    _iv26 = app.in_selisih_view
+    _iv26.tgl_start_var.set("3.5")
+    _iv26.tgl_end_var.set("10")
+    _iv26._on_tanggal_change()
+    root.update()
+    check("(v3.9.11) B-12: _on_tanggal_change Selisih IN menolak '3.5' "
+          "(pesan status, tanpa refresh)",
+          "harus angka" in (_iv26.status_var.get() or ""),
+          f"got {_iv26.status_var.get()!r}")
+    _iv26.tgl_start_var.set("3")
+    _iv26._on_tanggal_change()
+    wait_view(root, _iv26)   # biarkan refresh valid selesai sebelum cleanup
+
+    # ---- B-11: EmptyState adaptif ------------------------------------------
+    _es11 = _EmptyState(root, title="Belum ada data")
+    _es11.place(x=0, y=0, width=300, height=200)
+    root.update()
+    _pi11 = _es11._center.place_info()
+    check("(v3.9.11) B-11: frame center MENGECIL di widget sempit 300×200 "
+          "(bug lama: fixed 520×260 terpotong)",
+          0 < int(_pi11["width"]) <= 282 and 0 < int(_pi11["height"]) <= 182,
+          f"w={_pi11.get('width')} h={_pi11.get('height')}")
+    _es11.place(x=0, y=0, width=640, height=420)
+    root.update()
+    _pi11b = _es11._center.place_info()
+    check("(v3.9.11) B-11: widget lebar → center clamp maks 520×260",
+          int(_pi11b["width"]) == 520 and int(_pi11b["height"]) == 260,
+          f"w={_pi11b.get('width')} h={_pi11b.get('height')}")
+    _es11.place_forget()
+    _es11.destroy()
 
     os.unlink(xlsx_path)
     if os.path.isfile("komparasi_last.json"):

@@ -1237,18 +1237,26 @@ class InSelisihView(tk.Frame):
 
     # ------------------------------------------------------------ FILTERS
     def _on_tanggal_change(self):
-        try:
-            s = int(float(self.tgl_start_var.get()))
-            e = int(float(self.tgl_end_var.get()))
-            if not (-31 <= s <= 31 and -31 <= e <= 31):
-                raise ValueError
-            if s > e:
-                s, e = e, s
-                self.tgl_start_var.set(str(s))
-                self.tgl_end_var.set(str(e))
-            self._refresh()
-        except ValueError:
+        # FIX B-12 (audit 2-b, kelas yang sama dgn validated_tgl_entry):
+        # int(float()) melantai pecahan SENYAP ("7.9" → 7) — kini pecahan
+        # DITOLAK dengan pesan status (hanya bilangan bulat).
+        def _strict(raw):
+            try:
+                f = float(raw)
+                return int(f) if f == int(f) else None
+            except (TypeError, ValueError, OverflowError):
+                return None
+        s = _strict(self.tgl_start_var.get())
+        e = _strict(self.tgl_end_var.get())
+        if (s is None or e is None
+                or not (-31 <= s <= 31 and -31 <= e <= 31)):
             self.status_var.set("Tanggal harus angka -31..31 (contoh: 1–31).")
+            return
+        if s > e:
+            s, e = e, s
+            self.tgl_start_var.set(str(s))
+            self.tgl_end_var.set(str(e))
+        self._refresh()
 
     def _reset_filter(self):
         self.tgl_start_var.set("1")    # v3.8: 1–31 bulan berjalan saja
