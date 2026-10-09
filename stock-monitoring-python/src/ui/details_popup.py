@@ -13,18 +13,38 @@ LaporanDeviasiView. Fitur v3.1:
 
 import tkinter as tk
 from tkinter import ttk
-import pandas as pd
 from typing import Optional
 
+import contextlib
+import pandas as pd
+
 from .theme import (
-    C_ACCENT_DARK, C_ACCENT_SOFT, C_BG, C_BORDER, C_CARD,
-    C_HEADER, C_TEXT_MUTED, font, font_family,
+    C_ACCENT_DARK,
+    C_ACCENT_SOFT,
+    C_BG,
+    C_BORDER,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
+    font,
+    font_family,
 )
 from .widgets import (
-    AccentButton, GhostButton, HeaderFilter, ColumnManager, LoadingOverlay,
-    attach_clone_filters, auto_fit_columns, enable_col_resize,
-    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
-    apply_cell_tag, CELL_TAGS_SUPPORTED,
+    CELL_TAGS_SUPPORTED,
+    AccentButton,
+    ColumnManager,
+    GhostButton,
+    HeaderFilter,
+    LoadingOverlay,
+    apply_cell_tag,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    fmt_int_id,
+    identify_to_column,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
 )
 
 # Column definitions: (column_id, width, anchor)
@@ -172,8 +192,8 @@ class DetailsPopup(tk.Toplevel):
         self.overlay = LoadingOverlay(card_in, "Menyiapkan detail…")
 
         # interaksi copy
-        self.tree.bind("<Button-3>", self._on_context_menu)
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")  # FIX B-04
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         self.tree.bind("<Control-c>", self._on_copy_key)
         self.tree.bind("<Control-C>", self._on_copy_key)
 
@@ -245,8 +265,19 @@ class DetailsPopup(tk.Toplevel):
         def done(payload):
             self._render_rows(payload)
 
+        # FIX C-02/D-02 (audit 2-c/2-d): on_error — kelas fix B-01 v3.9.1
+        # yang terlewat di popup ini: tanpa reset _busy, satu exception di
+        # _prepare_rows menempel _busy=True selamanya → popup tampak beku,
+        # semua render berikutnya (filter/reset) ditelan guard.
+        def on_error(err):
+            self._busy = False
+            self._pending = False
+            with contextlib.suppress(Exception):
+                self.status_var.set(f"⚠ Gagal menyiapkan detail: {err}")
+
         run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Menyiapkan detail…", sync=sync)
+                  loading_text="Menyiapkan detail…", sync=sync,
+                  on_error=on_error)
 
     @staticmethod
     def _prepare_rows(df: pd.DataFrame, name_selected: set | None,
@@ -309,10 +340,12 @@ class DetailsPopup(tk.Toplevel):
                                            "tags": tuple(tags)}))
 
         if total_nilai == int(total_nilai):
-            total_str = f"{int(total_nilai):,}"
+            total_str = fmt_int_id(int(total_nilai))
         else:
-            total_str = f"{total_nilai:,.1f}"
-        status = f"{n} rows · Total NILAI: {total_str}"
+            total_str = f"{total_nilai:,.1f}".replace(",", "X").replace(
+                ".", ",").replace("X", ".")
+        # FIX C-03/C-10 (audit 2-c): format ID + 'rows' EN → 'baris'
+        status = f"{n} baris · Total NILAI: {total_str}"
         return {"items": items, "status": status, "total": total_nilai,
                 "render_df_len": n, "neg_cells": neg_cells}
 
@@ -373,6 +406,11 @@ class DetailsPopup(tk.Toplevel):
         self.status_label.configure(fg=C_ACCENT_DARK)
 
         def restore():
+            # FIX D-09 (audit 2-d): popup bisa ditutup < 3 detik — jangan
+            # sentuh widget yang sudah mati (dulu TclError → traceback
+            # noise di log konsol tiap kali popup cepat ditutup).
+            if not self.winfo_exists():
+                return
             self.status_var.set(self._base_status)
             self.status_label.configure(fg=C_TEXT_MUTED)
 
@@ -495,22 +533,33 @@ class DetailsPopup(tk.Toplevel):
     def _maximize(self):
         def filter_setup(new_tree):
             # v3.6: funnel Nama Barang jalan juga di window besar
-            attach_clone_filters(new_tree, ["Nama Barang"],
-                                 get_values=self._name_values)
+            # FIX B-02 (audit 2-b): on_after_filter + on_render_done — tag
+            # minus per-cell dipasang ulang setelah filter clone REBUILD;
+            # dulu minus merah TIDAK PERNAH muncul di clone (kedua callback
+            # tidak dipass — fix v3.9.5 19-a #3 terlewat di popup ini).
+            attach_clone_filters(
+                new_tree, ["Nama Barang"],
+                get_values=self._name_values,
+                on_after_filter=lambda t=new_tree:
+                    self._reapply_cell_tags(t))
 
         return open_tree_maximized(
             self.tree, f"Detail — {self._title}",
             setup_tags=lambda t: self._setup_tags(t),
             on_context_menu=self._on_context_menu,
             on_double_click=self._on_double_click,
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            on_render_done=self._reapply_cell_tags)
 
     # =====================================================================
     # FORMAT (identik versi lama)
     # =====================================================================
     @staticmethod
     def _fmt_nilai(val):
-        """Format NILAI: separator ribuan, negatif dalam kurung, 1 desimal."""
+        """Format NILAI: separator ribuan, negatif dalam kurung, 1 desimal.
+        FIX C-03 (audit 2-c): format INDONESIA (1.234,5 · (1.234,5)) — dulu
+        EN "1,234.5"; popup ini drill-down dari view berformat Indonesia,
+        nilai sama harus tampil sama."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return "", False
         try:
@@ -521,9 +570,10 @@ class DetailsPopup(tk.Toplevel):
         if v == 0:
             return "-", False
         if v == int(v):
-            s = f"{v:,.0f}"
+            s = fmt_int_id(v)
         else:
-            s = f"{v:,.1f}"
+            s = f"{v:,.1f}".replace(",", "X").replace(".", ",") \
+                .replace("X", ".")
         if is_neg:
             return f"({s[1:]})", True
         return s, False

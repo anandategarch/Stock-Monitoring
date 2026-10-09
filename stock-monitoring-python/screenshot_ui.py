@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
+
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -16,9 +17,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import tkinter as tk
 
 from src.ui.app import StockMonitorApp
-
-from test_ui_redesign import (make_mock_append1, make_mock_rincian,
-                               select_and_wait, wait_view)
+from test_ui_redesign import (
+    make_mock_append1,
+    make_mock_rincian,
+    select_and_wait,
+    wait_view,
+)
 
 OUT = Path("/tmp/shots")
 OUT.mkdir(exist_ok=True)

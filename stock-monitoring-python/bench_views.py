@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import tkinter as tk
+
 import numpy as np
 import pandas as pd
 
@@ -77,8 +78,9 @@ def main():
     r, t_pt = bench("Pivot tgl   _compute_payload", lambda: pv._compute_payload(st))
 
     # --- tree insert benchmark ---
-    from src.ui.widgets import insert_tree_items
     from tkinter import ttk
+
+    from src.ui.widgets import insert_tree_items
     tree = ttk.Treeview(root, columns=["c1", "c2", "c3"], show="headings")
     for rows_n in (5_000, 20_000):
         items = [("", f"r{i}", {"values": (i, "abc", 12.5)})

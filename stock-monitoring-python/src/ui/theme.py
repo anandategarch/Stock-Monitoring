@@ -149,10 +149,12 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
 
     # --- Notebook (tab) ---
     style.configure("TNotebook", background=C_BG, borderwidth=0,
-                    tabmargins=(10, 8, 10, 0))
-    # v3.9 (ala Waste): tab lebih lapang — padding (18, 9)
+                    tabmargins=(6, 8, 6, 0))
+    # FIX H-1 (audit 2-a — terkonfirmasi Xvfb): padding (18,9)+label
+    # spasi-ganda = ±1280px utk 10 tab > minsize 1020px → tab kanan
+    # terpotong. Kini (12,9): ±912px — muat dgn margin; tinggi tab tetap.
     style.configure("TNotebook.Tab", background="#e2e8f0", foreground=C_TEXT_MUTED,
-                    padding=(18, 9), font=(fam, 10), borderwidth=0)
+                    padding=(12, 9), font=(fam, 10), borderwidth=0)
     style.map("TNotebook.Tab",
               background=[("selected", C_CARD), ("active", "#eef2f7")],
               foreground=[("selected", C_HEADER), ("active", C_HEADER)],

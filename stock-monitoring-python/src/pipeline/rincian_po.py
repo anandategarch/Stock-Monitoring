@@ -3,7 +3,8 @@ rincian_po.py — Mirror persis query #"Rincian PO" di M code.
 Rincian Pesanan Pembelian (modul 32.43) → filter KATEGORI = "DEVIASI".
 """
 import pandas as pd
-from .helpers import fn_combine_folder, safe_to_str, safe_to_numeric
+
+from .helpers import fn_combine_folder, safe_to_numeric, safe_to_str
 from .queries import query_dbs_kategori
 
 

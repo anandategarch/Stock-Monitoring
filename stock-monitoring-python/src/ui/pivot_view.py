@@ -38,22 +38,42 @@ compute/render async.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import pandas as pd
 from datetime import datetime
-from typing import Optional, Callable
+from tkinter import filedialog, messagebox, ttk
+from typing import Callable, Optional
+
+import pandas as pd
 
 from .theme import (
-    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font,
+    C_BG,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
+    font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilter, LegendRow,
-    LoadingOverlay, SegmentBar, TableExpander, auto_fit_columns,
-    enable_col_resize, identify_to_column, insert_tree_items,
-    open_tree_maximized, run_async, fmt_int_id, validated_tgl_entry,
-    ColumnManager, attach_clone_filters, apply_cell_tag,
     CELL_TAGS_SUPPORTED,
+    Card,
+    ColumnManager,
+    EmptyState,
+    GhostButton,
+    HeaderFilter,
+    LegendRow,
+    LoadingOverlay,
+    SegmentBar,
+    TableExpander,
+    apply_cell_tag,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    fmt_int_id,
+    identify_to_column,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
+    validated_tgl_entry,
 )
+
 # NB: write_pivot_display_sheet di-import LAZY di _do_export_excel —
 # export_sheets mengimpor PivotTableView (METRICS) → import modul-level
 # menciptakan circular import.
@@ -265,7 +285,7 @@ class PivotTableView(tk.Frame):
         self._expander = TableExpander(
             btn_expand, [fcard, title_label, legend])
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
 
         # Filter "Nama Barang" menempel di header kolom #0
         self.header_filter = HeaderFilter(
@@ -592,7 +612,8 @@ class PivotTableView(tk.Frame):
         status = (
             f"{n_items_shown} barang × {len(columns)} "
             f"{'resto' if mode == 'resto' else 'tanggal'} = {n_rows} baris · "
-            f"filtered {len(df):,}/{len(self.data):,} rows")
+            f"terfilter {fmt_int_id(len(df))}/{fmt_int_id(len(self.data))} "
+            f"baris")  # FIX C-10: 'rows' EN + koma ribuan EN → ID
         return {"columns": columns, "col_kind": mode, "items": tree_items,
                 "kpi": kpi, "status": status, "filtered_rows": len(df),
                 "red_cells": red_cells, "rows_data": rows_data,
@@ -818,8 +839,13 @@ class PivotTableView(tk.Frame):
 
         def filter_setup(new_tree):
             # funnel #0 (Nama Barang) jalan juga di window besar
-            attach_clone_filters(new_tree, ["#0"],
-                                 get_values=self._name_values)
+            # FIX B-02 (audit 2-b): on_after_filter — tag minus merah matrix
+            # dipasang ulang setelah filter clone REBUILD (mirror deviasi;
+            # fix v3.9.5 19-a #3 dulu terlewat di view ini).
+            attach_clone_filters(
+                new_tree, ["#0"],
+                get_values=self._name_values,
+                on_after_filter=lambda t=new_tree: cells_setup(t))
 
         # v3.9.2: clone = insert ulang → tag cell minus ter-reset →
         # pasang ulang di clone (iid identik dengan tabel sumber)

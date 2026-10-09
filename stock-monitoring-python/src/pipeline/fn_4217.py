@@ -4,6 +4,7 @@ Kuantitas Barang per Gudang (modul 42.17) → SALDO AWAL.
 OPTIMIZED: vectorized text operations.
 """
 import pandas as pd
+
 from .helpers import fn_combine_folder, vec_text_between_delimiters
 
 

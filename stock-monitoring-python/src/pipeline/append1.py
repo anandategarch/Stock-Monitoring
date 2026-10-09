@@ -7,13 +7,18 @@ Output: DataFrame long format dengan kolom:
   Nama Barang, NAMA RESTO, Tanggal, JENIS, NILAI, Nomor, Nomor PO,
   #Tgl/Jam Pembuatan IT, KATEGORI, SOURCE KIRIMAN
 """
-import pandas as pd
 import numpy as np
-from .queries import (
-    query_4217, query_full_rekap_mentah_so, query_out, query_barang_keluar, query_in,
-    query_dbs_kategori
-)
+import pandas as pd
+
 from .fn_running_stock import fn_running_stock_grouped
+from .queries import (
+    query_4217,
+    query_barang_keluar,
+    query_dbs_kategori,
+    query_full_rekap_mentah_so,
+    query_in,
+    query_out,
+)
 
 
 def _value_to_text(val) -> str:

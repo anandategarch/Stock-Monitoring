@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import Config
 from src.pipeline.append1 import build_append1
-from src.pipeline.rincian_po import build_rincian_po
 from src.pipeline.fn_audit import build_audit_from_app
+from src.pipeline.rincian_po import build_rincian_po
 
 
 class PipelineStopped(Exception):

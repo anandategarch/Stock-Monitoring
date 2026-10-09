@@ -35,21 +35,41 @@ bila dibutuhkan):
 import contextlib
 import tkinter as tk
 from tkinter import ttk
-import pandas as pd
-import numpy as np
 from typing import Callable, Optional
 
+import numpy as np
+import pandas as pd
+
+from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 from .theme import (
-    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT, C_AMBER, font,
+    C_ACCENT,
+    C_AMBER,
+    C_BG,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
+    font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilterGroup,
-    ColumnManager, LoadingOverlay, TableExpander,
-    attach_clone_filters, auto_fit_columns, enable_col_resize,
-    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
-    sort_tree_by_column, apply_cell_tag, CELL_TAGS_SUPPORTED, fmt_int_id,
+    CELL_TAGS_SUPPORTED,
+    Card,
+    ColumnManager,
+    EmptyState,
+    GhostButton,
+    HeaderFilterGroup,
+    LoadingOverlay,
+    TableExpander,
+    apply_cell_tag,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    fmt_int_id,
+    identify_to_column,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
+    sort_tree_by_column,
 )
-from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
 
 def _chrono(v):
@@ -241,7 +261,7 @@ class LaporanDeviasiView(tk.Frame):
             # bila view direbuild di masa depan)
             self.bind("<Destroy>", self._on_view_destroy, add="+")
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
 
@@ -369,7 +389,9 @@ class LaporanDeviasiView(tk.Frame):
     # =========================================================================
     # COMPUTATION — matriks COM (H-independen, cache per data)
     # =========================================================================
-    def _compute_com_matrix(self) -> pd.DataFrame:
+    def _compute_com_matrix(self, data: pd.DataFrame | None = None) -> pd.DataFrame:
+        """FIX D-01 (audit 2-d): data bisa di-pass eksplisit (identitas
+        pra-capture worker) — default membaca self.data (kompatibel test)."""
         """Matriks PEMAKAIAN (COM) per (Nama Barang × Nama Resto) × tanggal.
 
         Formula identik dgn baris "6.PEMAKAIAN (COM)" tab 📊 Pivot mode
@@ -389,7 +411,7 @@ class LaporanDeviasiView(tk.Frame):
         654 anomali H=1 pada data real). Kini base com(1) = SA milik pair
         (fallback SO(t-1), fallback 0).
         """
-        df = self.data
+        df = self.data if data is None else data
         if df is None or df.empty:
             return pd.DataFrame()
 
@@ -525,11 +547,18 @@ class LaporanDeviasiView(tk.Frame):
         }
 
         def work():
+            # FIX D-01 (audit 2-d): capture identitas SEKALU di awal job —
+            # dulu _cached_data dibaca ULANG setelah compute; bila self.data
+            # ditukar main thread (load_data pipeline selesai) di tengah
+            # compute, cache berlabel data BARU berisi matrix data LAMA →
+            # refresh berikutnya SKIP recompute (angka basi senyap; gen-guard
+            # hanya membuang RENDER basi, bukan cache salah-label).
+            data = self.data
             if (self._cached_com is None
-                    or self._cached_data is not self.data):
-                self._cached_com = self._compute_com_matrix()
-                self._cached_data = self.data
-                self._cached_signature = id(self.data)
+                    or self._cached_data is not data):
+                self._cached_com = self._compute_com_matrix(data)
+                self._cached_data = data
+                self._cached_signature = id(data)
             return self._prepare_rows(st, gen)
 
         def done(payload):
@@ -635,8 +664,7 @@ class LaporanDeviasiView(tk.Frame):
         if filtered.empty:
             return {"gen": gen, "items": [],
                     "status": "Tidak ada baris COM minus / di atas median "
-                              "setelah filter. Klik '✕ Reset Filter' atau "
-                              "ubah filter."}
+                              "setelah filter."}
 
         # sort default: Nama Barang lalu COM terbesar dulu
         filtered = filtered.sort_values(

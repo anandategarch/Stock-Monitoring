@@ -27,16 +27,31 @@ from __future__ import annotations
 import contextlib
 import gc as _gc
 import math
+import re
 import threading
 import time as _time
-
 import tkinter as tk
-from tkinter import ttk, messagebox as _mb
+from tkinter import messagebox as _mb
+from tkinter import ttk
 
 from .theme import (
-    C_ACCENT, C_ACCENT_HOVER, C_BG, C_BORDER,
-    C_BORDER_DARK, C_CARD, C_GREEN, C_HEADER, C_LOG_BG, C_LOG_FG, C_RED,
-    C_RED_SOFT, C_TEXT_MUTED, C_TEXT_SOFT, font, font_family, mono,
+    C_ACCENT,
+    C_ACCENT_HOVER,
+    C_BG,
+    C_BORDER,
+    C_BORDER_DARK,
+    C_CARD,
+    C_GREEN,
+    C_HEADER,
+    C_LOG_BG,
+    C_LOG_FG,
+    C_RED,
+    C_RED_SOFT,
+    C_TEXT_MUTED,
+    C_TEXT_SOFT,
+    font,
+    font_family,
+    mono,
     setup_tree_tags,
 )
 
@@ -56,6 +71,32 @@ def fmt_int_id(v) -> str:
     except (TypeError, ValueError):
         return str(v)
     return f"{n:,}".replace(",", ".")
+
+
+# FIX B-19 (audit 2-b): key sort utk daftar nilai popup filter — nilai
+# numerik format Indonesia ("1.234" / "12,5" / "(1.234)" / "12,5%")
+# diurutkan secara NUMERIK; dulu leksikografis ("1.000" < "999").
+_VALUE_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$|^\d+(?:,\d+)?$")
+
+
+def _filter_value_sort_key(v: str):
+    """Key tuple (numerik_dulu, angka, teks_asli) — teks non-numerik
+    masuk grup kedua (urut abjad), angka grup pertama (naik)."""
+    s = str(v).strip()
+    if s.endswith("%"):
+        s = s[:-1].strip()
+    neg = False
+    if s.startswith("(") and s.endswith(")"):
+        neg, s = True, s[1:-1].strip()
+    elif s.startswith("-"):
+        neg, s = True, s[1:]
+    if not s or not _VALUE_NUM_RE.match(s):
+        return (1, 0.0, str(v))
+    try:
+        num = float(s.replace(".", "").replace(",", "."))
+    except ValueError:
+        return (1, 0.0, str(v))
+    return (0, -num if neg else num, str(v))
 
 
 def validated_tgl_entry(var, *, lo: int, hi: int, fallback: int,
@@ -132,10 +173,19 @@ class DangerButton(tk.Button):
 
 
 class GhostButton(ttk.Button):
-    """Tombol sekunder — ttk default ter-style (putih + border slate)."""
+    """Tombol sekunder — ttk default ter-style (putih + border slate).
+
+    FIX A-02 (audit 2-a): set_enabled API seragam — visual dim datang
+    dari style.map("TButton", disabled) di theme.py; call-site kini punya
+    satu pola (set_enabled) untuk SEMUA kelas tombol (Accent/Danger/Ghost/
+    Toolbar), bukan campuran configure(state) polos.
+    """
 
     def __init__(self, parent, text: str, command=None, **kw):
         super().__init__(parent, text=text, style="TButton", command=command, **kw)
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.configure(state=("normal" if enabled else "disabled"))
 
 
 class Card(tk.Frame):
@@ -275,7 +325,17 @@ class Toolbar(tk.Frame):
         btn.pack(side="left", padx=(6, 0))
         btn.bind("<Enter>", lambda e: btn.configure(background=hover)
                  if str(btn.cget("state")) != "disabled" else None)
-        btn.bind("<Leave>", lambda e: btn.configure(background=bg))
+
+        def _leave(_e=None):
+            # FIX B-10 (audit 2-b): Leave saat disabled jangan menimpa
+            # warna dim dari _set_enabled — dulu tombol disabled kembali
+            # tampak berwarna normal setelah cursor lewat (tampak aktif
+            # palsu padahal tidak bisa diklik).
+            if str(btn.cget("state")) == "disabled":
+                return
+            btn.configure(background=bg)
+
+        btn.bind("<Leave>", _leave)
 
         def _set_enabled(enabled: bool) -> None:
             # FIX A-01/A-02: state disabled harus terlihat dim & konsisten —
@@ -823,6 +883,10 @@ class HeaderFilter:
 
     MAX_CHECKS = 3000  # FIX B-03: 600→3000 — gunakan 🔍 untuk list sangat besar
 
+    # FIX B-05 (audit 2-b): nilai di luar MAX_CHECKS kini tetap bisa
+    # ditemukan & dicentang via pencarian (checkbox LAZY) — dan nilai
+    # belum dimaterialisasi tidak lagi hilang diam-diam dari hasil filter.
+
     def __init__(self, tree: ttk.Treeview, col_id: str, *, get_values,
                  on_apply, label: str = "Nama Barang", on_sort=None,
                  popup_width: int = 330):
@@ -841,6 +905,10 @@ class HeaderFilter:
         self._search_var = tk.StringVar()
         self._all_var = tk.BooleanVar(value=True)
         self._count_var = tk.StringVar(value="")
+        self._values_list: list[str] | None = None   # FIX B-05
+        self._all_values: set | None = None          # FIX B-05
+        self._list_inner = None                      # FIX B-05
+        self._more_label = None                      # FIX B-05
         self.refresh_icon()
         self._bind_id = tree.bind("<Button-1>", self._on_tree_press, add="+")
 
@@ -890,14 +958,25 @@ class HeaderFilter:
             return
         values = []
         try:
+            # FIX B-19 (audit 2-b): urutkan numerik-aware — "1.000" harus
+            # muncul SETELAH "999" (dulu leksikografis).
             values = sorted({str(v) for v in self.get_values()
-                             if str(v) and str(v) != "nan"})
+                             if str(v) and str(v) != "nan"},
+                            key=_filter_value_sort_key)
         except Exception:
             values = []
         if not values:
             _mb.showinfo("Filter", "Tidak ada nilai yang bisa difilter.",
                          parent=self.tree)
             return
+        # FIX B-13 (audit 2-b): teks pencarian popup SEBELUMNYA menempel —
+        # popup terbuka ulang dgn daftar sudah terfilter (tampak nilai
+        # "hilang"). Reset tiap kali popup dibuka.
+        self._search_var.set("")
+        # FIX B-05: simpan daftar lengkap — nilai di luar cap tetap bisa
+        # ditemukan via pencarian & dihitung benar saat filter diterapkan.
+        self._values_list = values
+        self._all_values = set(values)
 
         root = self.tree.winfo_toplevel()
         win = tk.Toplevel(root)
@@ -949,6 +1028,9 @@ class HeaderFilter:
         # scroll wheel
         cv.bind("<MouseWheel>",
                 lambda e: cv.yview_scroll(-1 * (e.delta // 120), "units"))
+        # FIX B-05: simpan container daftar — checkbox LAZY untuk nilai di
+        # luar cap dibuat di sini saat pencarian menemukannya.
+        self._list_inner = inner
 
         self._vars.clear()
         self._checks.clear()
@@ -960,14 +1042,16 @@ class HeaderFilter:
                                  command=self._on_toggle)
             cb.pack(fill="x", padx=8, pady=1)
             self._checks[v] = cb
+        self._more_label = None
         if len(values) > self.MAX_CHECKS:
             # FIX B-03: label jujur — tampilkan total nilai sebenarnya,
             # bukan hanya jumlah yang tersembunyi.
-            tk.Label(inner, text=f"… menampilkan {self.MAX_CHECKS} dari "
-                                 f"{len(values)} nilai — gunakan 🔍 di atas "
-                                 "untuk mencari nilai lain",
-                     bg=C_CARD, fg=C_TEXT_SOFT, font=font(9)).pack(
-                fill="x", padx=8, pady=4)
+            self._more_label = tk.Label(
+                inner, text=f"… menampilkan {self.MAX_CHECKS} dari "
+                            f"{len(values)} nilai — gunakan 🔍 di atas "
+                            "untuk mencari & mencentang nilai lain",
+                bg=C_CARD, fg=C_TEXT_SOFT, font=font(9))
+            self._more_label.pack(fill="x", padx=8, pady=4)
 
         # tombol aksi
         brow = tk.Frame(body, bg=C_CARD)
@@ -1041,7 +1125,15 @@ class HeaderFilter:
 
     def _emit(self):
         checked = {v for v, var in self._vars.items() if var.get()}
-        if not checked or len(checked) == len(self._vars):
+        total = (len(self._all_values)
+                 if self._all_values is not None else len(self._vars))
+        if self._all_values is not None:
+            # FIX B-05: nilai di luar cap yang BELUM dimaterialisasi jadi
+            # checkbox dianggap TERCENTANG (default) — dulu mereka hilang
+            # dari `selected` sehingga barisnya ikut tersembunyi diam-diam
+            # saat user hanya bermaksud menyembunyikan 1-2 nilai.
+            checked |= (self._all_values - self._vars.keys())
+        if not checked or len(checked) == total:
             self.selected = None
         else:
             self.selected = checked
@@ -1057,6 +1149,31 @@ class HeaderFilter:
 
     def _filter_list(self):
         q = (self._search_var.get() or "").strip().lower()
+        # FIX B-05: pencarian yang menemukan nilai DI LUAR cap → buat
+        # checkbox-nya sekarang (lazy) supaya bisa dilihat & dicentang.
+        if (q and self._values_list is not None
+                and len(self._values_list) > self.MAX_CHECKS
+                and self._list_inner is not None
+                and self._list_inner.winfo_exists()):
+            created = False
+            for v in self._values_list[self.MAX_CHECKS:]:
+                if v in self._checks or q not in v.lower():
+                    continue
+                var = tk.BooleanVar(
+                    value=self.selected is None or v in self.selected)
+                self._vars[v] = var
+                cb = ttk.Checkbutton(self._list_inner, text=v, variable=var,
+                                     command=self._on_toggle)
+                if self._more_label is not None \
+                        and self._more_label.winfo_exists():
+                    cb.pack(fill="x", padx=8, pady=1,
+                            before=self._more_label)
+                else:
+                    cb.pack(fill="x", padx=8, pady=1)
+                self._checks[v] = cb
+                created = True
+            if created:
+                self._update_count()
         for v, cb in self._checks.items():
             if not q or q in v.lower():
                 cb.pack(fill="x", padx=8, pady=1)
@@ -1538,17 +1655,24 @@ _MAX_KEPT_THREADS = 40
 # rawan) dan hanya dinyalakan kembali dari MAIN thread SETELAH thread
 # benar-benar mati (dicek via is_alive + retry 15ms).
 _GC_HOLD = {"depth": 0, "was_enabled": True}
+# FIX B-06 (audit 2-b): acquire dipanggil dari THREAD worker — dua job
+# start hampir bersamaan dapat race read-modify-write `depth` (keduanya
+# membaca 0 → depth akhir 1 padahal 2 job aktif → release pertama
+# menyalakan GC saat worker kedua masih hidup = persis jendela segfault
+# CPython 3.12+Tk yang shield dirancang cegah). Lock kecil menutupnya.
+_GC_LOCK = threading.Lock()
 
 
 def gc_shield_acquire() -> None:
     """Matikan GC otomatis — dipanggil dari thread yang akan bekerja.
 
     Nested-safe: job bersamaan dihitung depth; GC dinyalakan kembali saat
-    job TERAKHIR dilepas."""
-    if _GC_HOLD["depth"] == 0:
-        _GC_HOLD["was_enabled"] = _gc.isenabled()
-        _gc.disable()
-    _GC_HOLD["depth"] += 1
+    job TERAKHIR dilepas (FIX B-06: dihitung atomik lewat _GC_LOCK)."""
+    with _GC_LOCK:
+        if _GC_HOLD["depth"] == 0:
+            _GC_HOLD["was_enabled"] = _gc.isenabled()
+            _gc.disable()
+        _GC_HOLD["depth"] += 1
 
 
 def gc_shield_release(thread_obj=None, retry_widget=None) -> None:
@@ -1557,31 +1681,33 @@ def gc_shield_release(thread_obj=None, retry_widget=None) -> None:
     Bila thread_obj masih hidup, jadwalkan retry (after 15ms) sampai mati —
     thread-exit dengan GC menyala persis kondisi crash yang dihindari.
     retry_widget umumnya widget pemilik job (masih hidup). Bila widget juga
-    mati, join singkat (bounded 0.3s) lalu lepas (app sedang ditutup)."""
-    if _GC_HOLD["depth"] <= 0:
-        return
-    if thread_obj is not None and thread_obj.is_alive():
-        scheduled = False
-        if retry_widget is not None:
-            try:
-                if retry_widget.winfo_exists():
-                    retry_widget.after(
-                        15, lambda: gc_shield_release(thread_obj,
-                                                      retry_widget))
-                    scheduled = True
-            except tk.TclError:
-                scheduled = False
-        if scheduled:
+    mati, join singkat (bounded 0.3s) lalu lepas (app sedang ditutup).
+    FIX B-06: seluruh manipulasi depth di dalam _GC_LOCK (atomik)."""
+    with _GC_LOCK:
+        if _GC_HOLD["depth"] <= 0:
             return
-        # widget mati — tunggu thread mati secara singkat (bounded)
-        thread_obj.join(0.3)
-        if thread_obj.is_alive():
-            # masih terjepit (sangat lama) — lepas; sisa risiko hanya bila
-            # app ditutup di tengah proses (jarang, dapat diterima).
-            pass
-    _GC_HOLD["depth"] -= 1
-    if _GC_HOLD["depth"] == 0 and _GC_HOLD["was_enabled"]:
-        _gc.enable()
+        if thread_obj is not None and thread_obj.is_alive():
+            scheduled = False
+            if retry_widget is not None:
+                try:
+                    if retry_widget.winfo_exists():
+                        retry_widget.after(
+                            15, lambda: gc_shield_release(thread_obj,
+                                                          retry_widget))
+                        scheduled = True
+                except tk.TclError:
+                    scheduled = False
+            if scheduled:
+                return
+            # widget mati — tunggu thread mati secara singkat (bounded)
+            thread_obj.join(0.3)
+            if thread_obj.is_alive():
+                # masih terjepit (sangat lama) — lepas; sisa risiko hanya bila
+                # app ditutup di tengah proses (jarang, dapat diterima).
+                pass
+        _GC_HOLD["depth"] -= 1
+        if _GC_HOLD["depth"] == 0 and _GC_HOLD["was_enabled"]:
+            _gc.enable()
 
 
 def _spawn_worker(target) -> threading.Thread:
@@ -1661,7 +1787,11 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
             import traceback as _tb
             job["error"] = e
             job["traceback"] = _tb.format_exc()
-        job["busy"] = False
+        finally:
+            # FIX B-20 (audit 2-b): BaseException (mis. SystemExit dari
+            # dalam work) tidak boleh melompati reset busy — dulu poll
+            # abadi 70ms + gc.disable() menempel seumur sesi.
+            job["busy"] = False
 
     def runner():
         # PENTING (v3.9): GC dimatikan di sini dan TIDAK dinyalakan ulang di
@@ -1675,7 +1805,15 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
         # sync: work() di MAIN thread — shield dilepas langsung (aman:
         # finalisasi juga terjadi di main thread)
         gc_shield_acquire()
-        _exec_work()
+        try:
+            _exec_work()
+        except BaseException:
+            # FIX B-20 (audit 2-b): BaseException (SystemExit dkk) di jalur
+            # sync tidak boleh meninggalkan shield menempel — lepas dulu
+            # lalu re-raise (job["busy"] sudah di-reset oleh finally di
+            # _exec_work). Jalur worker pulih otomatis via poll→finish.
+            gc_shield_release(None)
+            raise
         finish()
         return job
 
@@ -2090,6 +2228,7 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
     baris merata yang diukur (ukur 400×30 sel < 100ms).
     """
     import tkinter.font as tkfont
+
     from .theme import font_family
 
     cols = list(columns) if columns is not None else _tree_display_columns(tree)
@@ -2321,7 +2460,9 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
 
     def done():
         overlay.hide()
-        count_var.set(f"{len(items):,} baris · {title}")
+        # FIX B-15 (audit 2-b): format ribuan Indonesia — koma EN
+        # ("1,346") terbaca desimal dalam konvensi Indonesia.
+        count_var.set(f"{fmt_int_id(len(items))} baris · {title}")
         if on_render_done:
             # suppress (bukan try/except-pass): callback view defensive di
             # dalamnya; kegagalan tidak boleh memutus batch insert clone
@@ -2331,7 +2472,13 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     insert_cancel = insert_tree_items(new_tree, items, batch=600,
                                       on_done=done,
                                       chunk_callback=lambda n, t: count_var.set(
-                                          f"Menyalin {n:,}/{t:,} baris…"))
+                                          f"Menyalin {fmt_int_id(n)}/"
+                                          f"{fmt_int_id(t)} baris…"))
+    # FIX B-07 (audit 2-b): daftarkan cancel batch ke tree — memfilter /
+    # menyortir clone saat copy awal masih berjalan kini MEMBATALKAN batch
+    # lama dulu (apply_tree_row_filters mengecek atribut ini); dulu cache
+    # filter dibangun dari baris PARSIAL → clone rusak diam-diam.
+    new_tree._row_filter_cancel = insert_cancel
 
     def _on_win_destroy(event):
         # batalkan batch + timer yang masih pending saat window ditutup
@@ -2342,9 +2489,13 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     win.bind("<Destroy>", _on_win_destroy, add="+")
 
     if on_double_click:
-        new_tree.bind("<Double-1>", on_double_click)
+        # FIX B-04 (audit 2-b): add="+" — bind polos MENGGANTI binding
+        # auto-fit tepi kolom (enable_col_resize, v3.4) → double-click
+        # tepi kolom di clone mati; handler view hanya boleh DITAMBAHKAN.
+        new_tree.bind("<Double-1>", on_double_click, add="+")
     if on_context_menu:
-        new_tree.bind("<Button-3>", on_context_menu)
+        # FIX B-04: idem — jangan mengganti menu kolom ColumnManager.
+        new_tree.bind("<Button-3>", on_context_menu, add="+")
     if on_filter_setup:
         try:
             on_filter_setup(new_tree)

@@ -38,8 +38,8 @@ v3.7 "ENGINE TURBO" — fn_running_stock_grouped sepenuhnya vektor
 - fn_running_stock (per grup tunggal) dipertahankan untuk API lama
   (unit test / pemanggilan eksternal).
 """
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def fn_running_stock(t: pd.DataFrame) -> pd.DataFrame:

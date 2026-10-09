@@ -37,24 +37,47 @@ v3.8: Default rentang 1 s/d 31 = periode BULAN BERJALAN saja (tanpa
 bulan lalu — permintaan user "rekap selisih in hanya periode 1-31").
 v3.6 (lama): default -26 s/d 31.
 """
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
 import contextlib
-import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
+import pandas as pd
+
+from .export_sheets import (
+    AUDIT_EXPORT_COLUMNS,
+    build_selisih_export_df,
+    write_selisih_sheet,
+)
 from .theme import (
-    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT_DARK, font,
+    C_ACCENT_DARK,
+    C_BG,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
+    font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilterGroup, LoadingOverlay,
-    ColumnManager, TableExpander, attach_clone_filters,
-    auto_fit_columns, enable_col_resize, identify_to_column,
-    insert_tree_items, open_tree_maximized, run_async, sort_tree_by_column,
-    fmt_int_id, validated_tgl_entry, apply_cell_tag, CELL_TAGS_SUPPORTED,
-)
-from .export_sheets import (
-    AUDIT_EXPORT_COLUMNS, build_selisih_export_df, write_selisih_sheet,
+    CELL_TAGS_SUPPORTED,
+    Card,
+    ColumnManager,
+    EmptyState,
+    GhostButton,
+    HeaderFilterGroup,
+    LoadingOverlay,
+    TableExpander,
+    _filter_value_sort_key,
+    apply_cell_tag,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    fmt_int_id,
+    identify_to_column,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
+    sort_tree_by_column,
+    validated_tgl_entry,
 )
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
@@ -295,8 +318,8 @@ class InDetailPopup(tk.Toplevel):
         self.overlay = LoadingOverlay(cin, "Menyiapkan rincian…")
 
         # interaksi copy
-        self.tree.bind("<Button-3>", self._on_context_menu)
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")  # FIX B-04
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
 
         # --- Footer ---
         foot = tk.Frame(self, bg=C_BG)
@@ -539,6 +562,14 @@ class InSelisihView(tk.Frame):
         self._pending = False
         self._dirty = False            # lazy refresh (ala v3.2)
         self._cached_base: pd.DataFrame | None = None
+        # FIX D-01 (audit 2-d): identitas data pemilik _cached_base —
+        # mencegah worker menempel base data LAMA dengan label data BARU.
+        self._cached_base_data = None
+        # FIX C-04 (audit 2-c): minus merah PER CELL (mirror deviasi v3.9.2)
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []
+        # FIX B-08 (audit 2-b): sort saat render batch → ANTRE, bukan dibuang
+        self._pending_sort = None
         self._satuan_map: dict = {}
         self._kategori_map: dict = {}
         self._keys: list = []
@@ -625,7 +656,7 @@ class InSelisihView(tk.Frame):
         btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
         # v3.8: export rekap Selisih IN per resto (permintaan user)
-        btn_export = GhostButton(head, text="💾 Export",
+        btn_export = GhostButton(head, text="💾 Export Excel",
                                  command=self._on_export)
         btn_export.pack(side="right", padx=(0, 6))
         btn_cols = GhostButton(head, text="◱ Kolom",
@@ -665,7 +696,7 @@ class InSelisihView(tk.Frame):
 
         self._apply_columns()
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
 
     def _apply_columns(self):
         """(Re)pasang kolom tree + heading + HeaderFilterGroup +
@@ -715,6 +746,9 @@ class InSelisihView(tk.Frame):
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero", foreground="#64748b")
+        # FIX C-04: tag per-cell (Tk 9 `tag cell`) minus merah — nama tag
+        # identik dgn deviasi/pareto ('neg_cell').
+        tree.tag_configure("neg_cell", foreground="#dc2626")
         # v3.5: warna status audit (mirror conditional formatting VBA)
         for tag, cfg in _STATUS_TAG_CFG.items():
             tree.tag_configure(tag, **cfg)
@@ -774,7 +808,7 @@ class InSelisihView(tk.Frame):
         # FIX C-03: KPI chips ikut format Indonesia (1.234.567, bukan
         # 1,234,567) — konsisten dgn formatter tabel.
         chips = [
-            ("TOTAL BARIS", f"{k.get('rows', 0):,}", "#0f766e"),
+            ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
             ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
             ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
             ("CUT-OFF RESOLVED", fmt_int_id(k.get('cutoff', 0)), "#806000"),
@@ -800,8 +834,23 @@ class InSelisihView(tk.Frame):
     def _col_values(self, col: str) -> list:
         base = self._cached_base
         if base is None:
-            base = self._compute_base()
-            self._cached_base = base
+            # FIX D-08 (audit 2-d): JANGAN menjalankan _compute_base()
+            # (audit 35 ribu+ baris) di MAIN thread — dulu membuka popup
+            # filter sebelum cache terisi MEMBEKUKAN UI berdetik-detik.
+            # Ambil nilai dari baris yang SUDAH tampil (nilai TERFORMAT —
+            # filter memang mencocokkan nilai terformat, identik
+            # _prepare_rows; cache terisi setelah refresh pertama).
+            vals = set()
+            col_ids = list(self.tree["columns"])
+            if col in col_ids:
+                k = col_ids.index(col)
+                for iid in self.tree.get_children(""):
+                    v = self.tree.item(iid, "values")
+                    if v and k < len(v):
+                        s = str(v[k])
+                        if s:
+                            vals.add(s)
+            return sorted(vals, key=_filter_value_sort_key)
         if base is None or base.empty or col not in base.columns:
             return []
         return _format_col_values(col, base[col]).unique().tolist()
@@ -811,14 +860,18 @@ class InSelisihView(tk.Frame):
         self._refresh()
 
     # ------------------------------------------------------- COMPUTE ----
-    def _compute_base(self) -> pd.DataFrame:
+    def _compute_base(self, data: pd.DataFrame | None = None,
+                      audit_df: pd.DataFrame | None = None) -> pd.DataFrame:
         """Bangun tabel tampilan dari hasil audit fn_audit (data app) +
-        map Satuan/KATEGORI (v3.6)."""
-        df = self.audit_df
+        map Satuan/KATEGORI (v3.6).
+        FIX D-01: data/audit_df bisa di-pass eksplisit (identitas pra-
+        capture worker) — default membaca self.* (kompatibel test)."""
+        df = self.audit_df if audit_df is None else audit_df
         if df is None or df.empty:
             return pd.DataFrame()
-        if self.data is not None and not self.data.empty:
-            self._ensure_maps(self.data)
+        data = self.data if data is None else data
+        if data is not None and not data.empty:
+            self._ensure_maps(data)
 
         out = pd.DataFrame({
             "Resto": df["Resto"].astype(str),
@@ -899,8 +952,18 @@ class InSelisihView(tk.Frame):
         }
 
         def work():
-            if self._cached_base is None:
-                self._cached_base = self._compute_base()
+            # FIX D-01 (audit 2-d): capture identitas SEKALU di awal job —
+            # self.data / self.audit_df bisa ditukar main thread (load_data
+            # saat pipeline selesai) DI TENGAH compute; tanpa capture,
+            # worker menempel base data LAMA dengan label data BARU →
+            # refresh berikutnya SKIP recompute (angka basi, senyap).
+            data = self.data
+            audit_df = self.audit_df
+            if (self._cached_base is None
+                    or self._cached_base_data is not data):
+                base = self._compute_base(data, audit_df)
+                self._cached_base = base
+                self._cached_base_data = data
             return self._prepare_rows(st)
 
         def done(payload):
@@ -960,11 +1023,29 @@ class InSelisihView(tk.Frame):
         n = len(f)
         items = []
         keys = []
+        # FIX C-04 (audit 2-c): minus merah PER CELL di kolom numerik —
+        # mirror pola deviasi v3.9.2 (Tk 9 tag cell; fallback Tk 8 = tag
+        # baris 'negative' yang sudah dikonfigurasi _setup_tags).
+        neg_cells: list = []
+        num_raw = {}
+        for c in _NUM_COLS:
+            if c in f.columns:
+                num_raw[c] = pd.to_numeric(f[c], errors="coerce").to_numpy()
         for i in range(n):
             values = tuple(formatted[c][i] for c in col_ids)
             st_tag = _STATUS_TAG.get(status_s[i])
             tags = [st_tag] if st_tag else \
                 ["evenrow" if i % 2 == 0 else "oddrow"]
+            row_neg = False
+            for c, raw in num_raw.items():
+                v = raw[i]
+                if pd.notna(v) and v < 0:
+                    if self._cell_tags:
+                        neg_cells.append((f"row_{i}", c))
+                    else:
+                        row_neg = True
+            if row_neg:
+                tags.append("negative")
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
             # key utk drill-down: (resto, barang, tgl asli)
@@ -973,10 +1054,13 @@ class InSelisihView(tk.Frame):
                          None if pd.isna(t) else int(t)))
 
         # ringkasan status
+        # FIX C-10 (audit 2-c): koma ribuan EN ("1,234") terbaca desimal
+        # dalam konvensi ID — kini fmt_int_id (⨯ konsistensi footer lain).
         status_txt = f"{n} baris · " + " · ".join(
-            f"{k}: {v:,}" for k, v in
+            f"{k}: {fmt_int_id(v)}" for k, v in
             pd.Series(status_s).value_counts().head(3).items())
-        return {"items": items, "status": status_txt, "keys": keys}
+        return {"items": items, "status": status_txt, "keys": keys,
+                "neg_cells": neg_cells}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -984,15 +1068,30 @@ class InSelisihView(tk.Frame):
             self.header_filters.refresh_icons()
         self.status_var.set(payload["status"])
         self._keys = payload.get("keys", [])
+        self._neg_cells = payload.get("neg_cells", [])  # FIX C-04
 
         def render_done():
+            # FIX C-04: tag per-cell dipasang SETELAH insert batch selesai
+            self._reapply_cell_tags(self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
                 self._refresh()
+            elif self._pending_sort:
+                # FIX B-08: mainkan sort yang mengantre saat render batch
+                col, rev = self._pending_sort
+                self._pending_sort = None
+                self._sort_by(col, reverse=rev)
 
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
+
+    def _reapply_cell_tags(self, tree):
+        """FIX C-04 (audit 2-c): pasang ulang tag per-cell minus — sort /
+        filter = delete+reinsert me-reset tag cell (mirror deviasi v3.9.2;
+        dipakai juga utk clone ⛶ lewat on_after_filter)."""
+        if self._cell_tags and self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     # --------------------------------------------------------- EXPORT --
     def _export_options_dialog(self):
@@ -1120,10 +1219,10 @@ class InSelisihView(tk.Frame):
                 return
             path, n = res
             self.status_var.set(
-                f"Export {n:,} baris → {path}")
+                f"Export {fmt_int_id(n)} baris → {path}")
             messagebox.showinfo(
                 "Export Berhasil",
-                f"Rekap Selisih IN per resto ({n:,} baris)\n"
+                f"Rekap Selisih IN per resto ({fmt_int_id(n)} baris)\n"
                 f"di-export ke:\n{path}",
                 parent=self.winfo_toplevel())
 
@@ -1159,11 +1258,40 @@ class InSelisihView(tk.Frame):
         self._refresh()
 
     # -------------------------------------------------------------- SORT
+    @staticmethod
+    def _parse_num_id(s):
+        """FIX B-01 (audit 2-b): parser sort format Indonesia (copy persis
+        deviasi_view v3.9.6): '1.234' = 1234, '(1.234)' = -1234,
+        '-' = 0, '12,5' = 12.5. Parser default widgets menganggap '1.234'
+        = 1.234 dan '(12,5)' = -125 — SALAH utk format Indonesia; kolom
+        numerik view ini diformat _fmt_num Indonesia."""
+        s = str(s).replace("%", "").replace("—", "").strip()
+        if s in ("-", ""):
+            return 0.0
+        neg = s.startswith("(") and s.endswith(")")
+        if neg:
+            s = s[1:-1]
+        s = s.replace(".", "").replace(",", ".")
+        try:
+            v = float(s)
+        except ValueError:
+            return 0.0
+        return -v if neg else v
+
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
+        # FIX B-08 (audit 2-b): sort saat render batch → ANTRE (pola
+        # _pending_sort komparasi/laporan v3.9.5 — view ini terlewat).
         if self._busy and tree is None:
+            self._pending_sort = (col, reverse)
             return  # render batch masih berjalan — sort ditunda
         tree = tree if tree is not None else self.tree
-        sort_tree_by_column(tree, col, reverse=reverse)
+        # FIX B-01: parser angka Indonesia utk kolom numerik (sort numerik
+        # benar — bukan string/fallback-salah).
+        parse = self._parse_num_id if col in _NUM_COLS else None
+        sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
+        # FIX B-03 (audit 2-b): delete+reinsert me-reset tag PER-CELL →
+        # pasang ulang (identik deviasi/komparasi/laporan/pareto).
+        self._reapply_cell_tags(tree)
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""
@@ -1173,11 +1301,16 @@ class InSelisihView(tk.Frame):
     def _maximize(self):
         def filter_setup(new_tree):
             # v3.6: funnel ⧩ + sort jalan juga di window besar
+            # FIX B-02 (audit 2-b): on_after_filter — tag minus per-cell
+            # dipasang ulang setelah filter clone REBUILD (mirror deviasi;
+            # fix v3.9.5 19-a #3 dulu hanya sampai komparasi/laporan).
             attach_clone_filters(
                 new_tree, [c[0] for c in COLUMNS],
                 get_values=self._col_values,
                 on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
-                                                               tree=t))
+                                                               tree=t),
+                on_after_filter=lambda t=new_tree:
+                    self._reapply_cell_tags(t))
 
         win, new_tree = open_tree_maximized(
             self.tree, "Rekap Selisih IN & Audit Rekonsiliasi",

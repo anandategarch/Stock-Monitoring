@@ -1,33 +1,36 @@
 """
-app.py — Shell UI Stock Monitoring v3.5.
+app.py — Shell UI Stock Monitoring v3.9.10.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.5 + [Export] [❓]  │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.9.10 + [💾 Export] │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (10 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
     │ Konten card-based per view (tabel lebar & besar)   │
     ├────────────────────────────────────────────────────┤
-    │ StatusBar: ● status data + ringkasan rows           │
+    │ StatusBar: ● status data + ringkasan baris          │
     └────────────────────────────────────────────────────┘
 
 10 tab:
-  1. ⚙️ Config          : RootPath + info config (LightMode dihapus v3.5)
+  1. ⚙️ Config          : RootPath + info config
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
   3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default,
                           rentang tanggal default 26 BULAN LALU s/d 31
                           BULAN BERJALAN — v3.6)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
+                          (input TANGGAL H + Apply H — satu-satunya)
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
+                          (chip H read-only, ikut tab GR — v3.9)
   6. 🎯 PARETO          : 80/20 kontributor |Deviasi| terbesar — fokus
                           list ≤ cutoff % + grafik + KPI + export (v3.9.9)
   7. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
                           kolom SO + kolom Hasil Audit (logika macro VBA ×
                           data app — v3.6, tanpa sheet 29) + drill-down
-  8. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
+  8. 📋 Laporan Deviasi : 2 MODE — ⚖ Komparasi File Deviasi (default,
+                          v3.9.4) & 🚨 Anomali COM (v3.9.3) + ✓
   9. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
- 10. 🛒 Rincian PO      : pivot PO dengan search + sort
+ 10. 🛒 Rincian PO      : rekap PO + item (baris teal/putih, v3.9)
 
 v3.7 "ENGINE TURBO" + DEEP AUDIT FIXES ringkasan:
 - ENGINE 3,5-4× LEBIH CEPAT (output terverifikasi IDENTIK vs v3.6):
@@ -82,10 +85,10 @@ Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
 checkpoint major. Freeze-fix v2.1.1 (batch log + truncate) dipertahankan.
 """
-import os
-import sys
 import json
+import os
 import queue
+import sys
 import threading
 import time
 import warnings
@@ -95,7 +98,8 @@ from pathlib import Path
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import filedialog, messagebox, ttk
+
 import pandas as pd
 
 # Pastikan parent folder di sys.path agar `from src...` jalan
@@ -103,30 +107,83 @@ _BASE = Path(__file__).resolve().parent.parent.parent
 if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
-from src.main import run_pipeline, PipelineStopped
-from src.ui.theme import (
-    C_BG, C_CARD, C_GREEN, C_HEADER, C_ORANGE, C_AMBER, C_RED, C_TEXT_MUTED,
-    apply_theme, font,
-)
-from src.ui.widgets import (
-    AccentButton, DangerButton, GhostButton, KpiCard, KpiRow, LoadingOverlay,
-    SegmentBar, Spinner, StatusBar, Toolbar, make_log_console,
-    make_tree, run_async, gc_shield_acquire, gc_shield_release, fmt_int_id,
-)
-from src.ui.followup import FollowUpStore
-from src.ui.pivot_view import PivotTableView
+from src.main import PipelineStopped, run_pipeline
 from src.ui.deviasi_view import DeviasiView, SharedPivotCache, SharedTanggalH
-from src.ui.pareto_view import ParetoDeviasiView
-from src.ui.laporan_deviasi_view import LaporanDeviasiView
-from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
-from src.ui.rincian_po_view import RincianPoView
+from src.ui.export_sheets import add_pivot_sheet
+from src.ui.followup import FollowUpStore
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
-from src.ui.export_sheets import add_pivot_sheet
+from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
+from src.ui.laporan_deviasi_view import LaporanDeviasiView
+from src.ui.pareto_view import ParetoDeviasiView
+from src.ui.pivot_view import PivotTableView
+from src.ui.rincian_po_view import RincianPoView
+from src.ui.theme import (
+    C_AMBER,
+    C_BG,
+    C_CARD,
+    C_GREEN,
+    C_HEADER,
+    C_ORANGE,
+    C_RED,
+    C_TEXT_MUTED,
+    apply_theme,
+    font,
+)
+from src.ui.widgets import (
+    AccentButton,
+    DangerButton,
+    GhostButton,
+    KpiCard,
+    KpiRow,
+    LoadingOverlay,
+    SegmentBar,
+    Spinner,
+    StatusBar,
+    Toolbar,
+    fmt_int_id,
+    gc_shield_acquire,
+    gc_shield_release,
+    make_log_console,
+    make_tree,
+    run_async,
+)
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.9"  # v3.9.9 — TAB 🎯 PARETO: 80/20 kontributor deviasi terbesar (fokus list, grafik, KPI, export)
+APP_VERSION = "3.9.10"  # v3.9.10 — DEEP AUDIT UI/UX ROUND 2: fix temuan audit 4-arah (race, cache, konsistensi)
+# v3.9.10 (DEEP AUDIT UI/UX ROUND 2 — 4 agent paralel, 37 temuan):
+# (1) P1 RACE & ROBUSTNESS: FIX A-01 Stop→MULAI kini menghentikan
+#     benar (guard worker masih hidup — dulu 2 pipeline bisa jalan
+#     paralel & stop_event.clear() membatalkan Stop); FIX D-01 worker
+#     capture data/H di awal compute (cache poisoning — data basi
+#     senyap saat pipeline selesai di tengah refresh view); FIX C-02
+#     rincian_po & details_popup kini punya on_error (view tidak lagi
+#     mati permanen setelah 1 exception — kelas fix B-01 v3.9.1);
+#     FIX B-01 sort Rekap Selisih IN pakai parser angka Indonesia;
+#     FIX D-04 file Excel terkunci/hilang di-skip → KPI/status kini
+#     memberi tahu (dulu "SELESAI" polos menutupi data parsial).
+# (2) P2 TABEL: FIX B-02 tag minus/merah per-cell bertahan di clone ⛶
+#     setelah filter (4 view + popup detail); FIX B-03 sort Selisih
+#     IN tidak lagi menghapus tag minus; FIX B-04 bind add="+" —
+#     auto-fit double-click tepi kolom hidup lagi di semua tabel;
+#     FIX B-05 filter header >3000 nilai: nilai hasil pencarian di
+#     luar cap kini DAPAT dicentang (checkbox lazy); FIX B-06 gc_shield
+#     thread-safe (Lock); FIX B-07 filter clone saat copy awal (cancel
+#     batch); FIX B-08 sort saat render batch → antre (3 view);
+#     FIX D-03 followup render race (cancel insert lama).
+# (3) P2 SHELL: FIX A-02 tombol Export disabled kini tampak DIM
+#     (set_enabled — fix v3.9.1 akhirnya dipakai di semua call-site);
+#     FIX A-03 DPI-awareness Windows 125%/150%; FIX A-04 Ctrl+Tab
+#     navigasi tab (notebook.enable_traversal); FIX A-11 routing tab
+#     berbasis widget (bukan index — tab disisipkan tak merusak).
+# (4) P3 KONSISTENSI: FIX C-03 format angka Indonesia di Rincian PO &
+#     popup detail (dulu EN "1,234.5"); FIX C-04 minus merah per-cell
+#     di tabel Rekap Selisih IN; FIX C-06 sisa frasa instruksi dipangkas;
+#     FIX C-10 footer "rows"→"baris" + fmt Indonesia; FIX C-07/C-08
+#     deviasi unsubscribe-H + refresh saat tersembunyi cukup dirty;
+#     FIX D-05/D-06 config & komparasi_last atomic write; FIX A-09
+#     literal warna → token theme.
 # v3.9.9 (TAB 🎯 PARETO — "mau coba pareto"):
 # (1) tab BARU 🎯 Pareto (index 5, setelah Deviasi PCS): analisis 80/20
 #     kontributor |Deviasi| — semua kombinasi (Barang × Resto × Satuan)
@@ -273,7 +330,9 @@ APP_VERSION = "3.9.9"  # v3.9.9 — TAB 🎯 PARETO: 80/20 kontributor deviasi t
 # v3.5.0 — LightMode dihapus; header filter semua kolom; KATEGORI.
 # v3.4.0 — lebar kolom adjustable; SO bulan lalu; tab Rekap Selisih IN.
 WINDOW_SIZE = "1280x760"
-WINDOW_MIN = (1020, 640)
+# FIX (audit 2-a QA visual): tinggi minimum 640 → 700 — di bawah ~695
+# h-scrollbar tabel tertabrak tepi bawah (tidak bisa scroll horizontal).
+WINDOW_MIN = (1020, 700)
 
 # Path config.json di root project
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config.json"
@@ -329,6 +388,10 @@ class StockMonitorApp:
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
+        # FIX D-04: penghitung file Excel yang di-skip reader (terkunci/
+        # hilang/rusak) — dihitung dari log pipeline, ditampilkan saat
+        # pipeline selesai supaya data parsial tidak disembunyikan.
+        self._skipped_files = 0
 
         # v3.2: store follow-up bersama (persist followup.json)
         self.followup_store = FollowUpStore()
@@ -365,7 +428,9 @@ class StockMonitorApp:
 
         self.btn_export_tb = self.toolbar.add_action(
             "💾 Export Excel", command=self._export_excel, accent=True)
-        self.btn_export_tb.configure(state="disabled")
+        # FIX A-02 (audit 2-a): set_enabled → tombol disabled TAMPAK dim
+        # (abu) — bukan configure(state) yang meninggalkan warna teal.
+        self.btn_export_tb.set_enabled(False)
 
     def _build_statusbar(self):
         self.statusbar = StatusBar(self.root)
@@ -387,21 +452,25 @@ class StockMonitorApp:
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
 
-        self.notebook.add(self.tab_config, text="  ⚙️ Config  ")
-        self.notebook.add(self.tab_proses, text="  🚀 Proses  ")
-        self.notebook.add(self.tab_pivot, text="  📊 Pivot Table  ")
-        self.notebook.add(self.tab_deviasi_gr, text="  📦 Deviasi GR  ")
-        self.notebook.add(self.tab_deviasi_pcs, text="  🧩 Deviasi PCS  ")
-        self.notebook.add(self.tab_pareto, text="  🎯 Pareto  ")
-        self.notebook.add(self.tab_in_selisih, text="  📤 Rekap Selisih IN  ")
-        self.notebook.add(self.tab_laporan, text="  📋 Laporan Deviasi  ")
-        self.notebook.add(self.tab_followup, text="  ☑ Follow Up  ")
-        self.notebook.add(self.tab_rincian, text="  🛒 Rincian PO  ")
+        self.notebook.add(self.tab_config, text="⚙️ Config")
+        self.notebook.add(self.tab_proses, text="🚀 Proses")
+        self.notebook.add(self.tab_pivot, text="📊 Pivot Table")
+        self.notebook.add(self.tab_deviasi_gr, text="📦 Deviasi GR")
+        self.notebook.add(self.tab_deviasi_pcs, text="🧩 Deviasi PCS")
+        self.notebook.add(self.tab_pareto, text="🎯 Pareto")
+        self.notebook.add(self.tab_in_selisih, text="📤 Rekap Selisih IN")
+        self.notebook.add(self.tab_laporan, text="📋 Laporan Deviasi")
+        self.notebook.add(self.tab_followup, text="☑ Follow Up")
+        self.notebook.add(self.tab_rincian, text="🛒 Rincian PO")
         # v3.2: lazy refresh — tab data hanya compute saat TERLIHAT
         # (setelah pipeline selesai hanya tab aktif yang refresh; tab lain
         # menunggu dipilih → app terasa jauh lebih ringan)
         self.notebook.bind("<<NotebookTabChanged>>",
                            self._on_tab_changed)
+        # FIX A-04 (audit 2-a): aktifkan navigasi keyboard antar-tab
+        # (Ctrl+Tab / Ctrl+Shift+Tab) — ttk notebook punya mekanisme ini
+        # tapi harus di-enable eksplisit dari aplikasi.
+        self.notebook.enable_traversal()
         self._update_followup_badge()
 
         self._build_config_tab()
@@ -414,43 +483,59 @@ class StockMonitorApp:
         self._build_laporan_tab()
         self._build_followup_tab()
         self._build_rincian_tab()
+        self._build_tab_views()  # FIX A-11: routing tab berbasis widget
 
     def _on_tab_changed(self, _event=None):
-        """Tab baru dipilih → pastikan view-nya sudah di-refresh."""
+        """Tab baru dipilih → pastikan view-nya sudah di-refresh.
+
+        FIX A-11 (audit 2-a): routing berbasis WIDGET FRAME (bukan index
+        angka) — v3.9.9 terpaksa reindex manual saat Pareto disisipkan;
+        mapping kini dibangun sekali di _build_tab_views() sehingga tab
+        baru cukup menambah satu entry, tidak menggeser angka ajaib.
+        """
         try:
-            cur = self.notebook.index(self.notebook.select())
+            sel = self.notebook.select()  # string nama widget Tk
         except Exception:
             return
-        view = None
-        if cur == 2:
-            view = self.pivot_view
-        elif cur == 3:
-            view = self.deviasi_gr_view
-        elif cur == 4:
-            view = self.deviasi_pcs_view
-        elif cur == 5:
-            # v3.9.9: tab 🎯 Pareto (index bergeser +1 setelah disisipkan)
-            view = self.pareto_view
-        elif cur == 6:
-            view = self.in_selisih_view
-        elif cur == 7:
+        views = getattr(self, "_tab_views", None)
+        if not views:
+            return
+        view = views.get(sel)
+        if view is self._laporan_tab_entry:
             # v3.9.4: refresh pane SESUAI MODE aktif di tab Laporan
             view = (self.komparasi_view
                     if getattr(self, "laporan_segment", None) is not None
                     and self.laporan_segment.active == 0
                     else self.laporan_view)
-        elif cur == 9:
-            view = self.rincian_view
         if view is not None and hasattr(view, "ensure_refreshed"):
             view.ensure_refreshed()
+
+    def _build_tab_views(self):
+        """FIX A-11: peta nama-widget tab → view yang di-lazy-refresh.
+        Follow Up sengaja tanpa entry (reaktif via store listener).
+        """
+        self._laporan_tab_entry = object()  # marker dispatch khusus
+        self._tab_views = {
+            str(self.tab_pivot): self.pivot_view,
+            str(self.tab_deviasi_gr): self.deviasi_gr_view,
+            str(self.tab_deviasi_pcs): self.deviasi_pcs_view,
+            str(self.tab_pareto): self.pareto_view,
+            str(self.tab_in_selisih): self.in_selisih_view,
+            str(self.tab_laporan): self._laporan_tab_entry,
+            str(self.tab_rincian): self.rincian_view,
+        }
 
     def _update_followup_badge(self):
         """Badge jumlah baris di judul tab Follow Up."""
         try:
             n = len(self.followup_store)
+            # FIX H-1 (audit 2-a hipotesis — TERKONFIRMASI): label tab
+            # TANPA spasi ganda + padding ramping → 10 tab muat di lebar
+            # minimum 1020px (dulu ±1280px — tab paling kanan terpotong /
+            # tak terjangkau; kritis juga di Windows 125% scaling).
             self.notebook.tab(
                 self.tab_followup,
-                text=f"  ☑ Follow Up{' (' + str(n) + ')' if n else ''}  ")
+                text=f"☑ Follow Up{' (' + str(n) + ')' if n else ''}")
         except Exception:
             pass
 
@@ -556,7 +641,7 @@ class StockMonitorApp:
     def _set_info_error(self, msg: str):
         self.info_tree.delete(*self.info_tree.get_children())
         self.info_tree.insert("", "end", values=("ERROR", msg), tags=("err",))
-        self.info_tree.tag_configure("err", foreground="#dc2626")
+        self.info_tree.tag_configure("err", foreground=C_RED)
 
     def _save_config(self):
         new_root = self.rootpath_var.get().strip()
@@ -581,6 +666,9 @@ class StockMonitorApp:
         # v3.5: LightMode dihapus — key lama (bila ada) dibuang saat save
         data.pop("LightMode", None)
 
+        # FIX D-05 (audit 2-d): tulis ATOMIK (tmp + os.replace) — crash
+        # di tengah write tidak lagi meninggalkan config.json korup
+        # (pola sama followup.py; .bak tetap dibuat sebagai cadangan).
         backup_path = CONFIG_PATH.with_suffix(".json.bak")
         try:
             with open(backup_path, "w", encoding="utf-8") as f:
@@ -588,10 +676,14 @@ class StockMonitorApp:
         except Exception:
             pass
 
+        tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
         try:
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, CONFIG_PATH)
         except Exception as e:
+            with contextlib.suppress(Exception):
+                tmp_path.unlink(missing_ok=True)
             messagebox.showerror(
                 "Gagal Simpan", f"Tidak bisa menulis config.json:\n{e}",
                 parent=self.root)
@@ -630,6 +722,9 @@ class StockMonitorApp:
         self.btn_stop = DangerButton(btns, text="⏹ Stop", state="disabled",
                                      command=self._stop_pipeline)
         self.btn_stop.pack(side="left", padx=(8, 0))
+        # FIX A-02: state disabled dari constructor tidak memakai styling
+        # dim → panggil set_enabled sekali supaya konsisten visual.
+        self.btn_stop.set_enabled(False)
 
         self.btn_bersih = GhostButton(btns, text="🧹 Bersihkan Log",
                                       command=self._clear_log)
@@ -721,7 +816,14 @@ class StockMonitorApp:
             pass
 
         if chunks:
-            self._append_log_batched("".join(chunks))
+            text = "".join(chunks)
+            # FIX D-04: reader me-log "[WARNING] Skip file ..." ke stdout
+            # (helpers.py) — dihitung di sini (jalur log = satu-satunya
+            # tempat lewat) TANPA mengubah kontrak pipeline.
+            n = text.count("[WARNING] Skip file")
+            if n:
+                self._skipped_files += n
+            self._append_log_batched(text)
 
         self.root.after(LOG_POLL_INTERVAL_MS, self._poll_log_queue)
 
@@ -742,13 +844,30 @@ class StockMonitorApp:
                 f"config.json tidak ditemukan:\n{CONFIG_PATH}", parent=self.root)
             return
 
+        # FIX A-01 (audit 2-a): guard kedua — bila worker LAMA masih hidup
+        # (baru di-Stop, belum sampai checkpoint), JANGAN jalankan thread
+        # kedua: stop_event.clear() akan membatalkan Stop-nya & dua
+        # pipeline berjalan paralel (log tercampur, data last-writer-wins).
+        worker = getattr(self, "worker_thread", None)
+        if worker is not None and worker.is_alive():
+            messagebox.showinfo(
+                "Masih Menghentikan",
+                "Pipeline sebelumnya masih berhenti di checkpoint.\n"
+                "Tunggu sampai status berubah, lalu Mulai lagi.",
+                parent=self.root)
+            return
+
+        # FIX D-04: reset penghitung file yang di-skip reader
+        self._skipped_files = 0
+
         self.notebook.select(self.tab_proses)
         self.is_running = True
         self.stop_event.clear()
         self.btn_mulai.set_enabled(False)
         self.btn_stop.set_enabled(True)
-        self.btn_export.configure(state="disabled")
-        self.btn_export_tb.configure(state="disabled")
+        # FIX A-02: set_enabled (visual dim) — bukan configure(state) polos
+        self.btn_export.set_enabled(False)
+        self.btn_export_tb.set_enabled(False)
         self.status_var.set("Status: menjalankan pipeline…")
         self.status_spinner.start()
         self.statusbar.set_status(*_ST_RUN)
@@ -902,8 +1021,18 @@ class StockMonitorApp:
         self.laporan_view.load_data(append1_df)
         self.komparasi_view.load_data(append1_df)  # v3.9.4 — mode komparasi
         self.rincian_view.load_data(rincian_po_df)
-        self.btn_export.configure(state="normal")
-        self.btn_export_tb.configure(state="normal")
+        self.btn_export.set_enabled(True)
+        self.btn_export_tb.set_enabled(True)
+
+        # FIX D-04 (audit 2-d): file Excel di-skip reader (terkunci/
+        # hilang/rusak) tidak lagi disembunyikan di balik status hijau
+        # "SELESAI" — user berhak tahu datanya parsial.
+        if self._skipped_files:
+            warn = (f"{fmt_int_id(self._skipped_files)} file Excel "
+                    "dilewati (terkunci/hilang/rusak) — lihat log")
+            self.statusbar.set_status(f"SELESAI — ⚠ {warn}", C_AMBER)
+            self.kpi_status.set_value("SELESAI ⚠", warn, C_AMBER)
+            self._append_log_batched(f"\n[PERINGATAN] {warn}\n")
 
         # Switch to Pivot Table tab (default view) — refresh pivot lewat
         # event tab-changed (lazy loading)
@@ -957,8 +1086,8 @@ class StockMonitorApp:
             self._export_overlay = LoadingOverlay(self.root,
                                                   "Mengekspor ke Excel…")
         self._export_overlay.show("Mengekspor ke Excel…", delay_ms=0)
-        self.btn_export.configure(state="disabled")
-        self.btn_export_tb.configure(state="disabled")
+        self.btn_export.set_enabled(False)
+        self.btn_export_tb.set_enabled(False)
 
         def work():
             with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
@@ -985,16 +1114,16 @@ class StockMonitorApp:
 
         def done(path):
             if self.append1_df is not None:
-                self.btn_export.configure(state="normal")
-                self.btn_export_tb.configure(state="normal")
+                self.btn_export.set_enabled(True)
+                self.btn_export_tb.set_enabled(True)
             messagebox.showinfo(
                 "Export Berhasil", f"Data di-export ke:\n{path}",
                 parent=self.root)
 
         def on_error(e):
             if self.append1_df is not None:
-                self.btn_export.configure(state="normal")
-                self.btn_export_tb.configure(state="normal")
+                self.btn_export.set_enabled(True)
+                self.btn_export_tb.set_enabled(True)
             messagebox.showerror(
                 "Export Gagal", f"Tidak bisa export:\n{e}", parent=self.root)
 
@@ -1119,8 +1248,37 @@ class StockMonitorApp:
 
 
 # --- Entry point ------------------------------------------------------------
+def _enable_windows_dpi_awareness(root: tk.Tk) -> None:
+    """FIX A-03 (audit 2-a): Windows DPI-aware (125%/150%) supaya teks &
+    tabel tidak di-bitmap-scale (blur) oleh OS.
+
+    No-op di Linux/macOS. SetProcessDpiAwareness(PER_MONITOR) → ukuran
+    font Tk mengikuti DPI monitor aktual (tk scaling = dpi/72).
+    Catatan: butuh verifikasi visual di mesin Windows asli.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        try:
+            # 1 = PER_MONITOR_DPI_AWARE (tajam di semua monitor campuran)
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            # fallback Windows versi lama (< 8.1)
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        return
+    try:
+        dpi = root.winfo_fpixels("1i")  # piksel per inci fisik
+        if dpi > 0:
+            root.tk.call("tk", "scaling", dpi / 72.0)
+    except Exception:
+        pass
+
+
 def main():
     root = tk.Tk()
+    _enable_windows_dpi_awareness(root)
     StockMonitorApp(root)
     root.mainloop()
 

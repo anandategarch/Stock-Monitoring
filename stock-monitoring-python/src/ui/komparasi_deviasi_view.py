@@ -583,7 +583,7 @@ class KomparasiDeviasiView(tk.Frame):
         self._expander = TableExpander(btn_expand,
                                        [fcard, self._title_label])
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
 
         # v3.9.7: berlangganan perubahan H bersama (filter minggu file
@@ -854,9 +854,14 @@ class KomparasiDeviasiView(tk.Frame):
         if path:
             self._file_path = path
             # simpan path terakhir (initialdir dialog berikutnya)
+            # FIX D-06 (audit 2-d): tulis ATOMIK (tmp + os.replace) — crash
+            # di tengah write tidak meninggalkan json korup (pembacaan sudah
+            # guarded fallback, tapi file korup tetap mengganggu).
             try:
-                with open(_LAST_FILE_JSON, "w", encoding="utf-8") as f:
+                tmp = _LAST_FILE_JSON.with_suffix(".json.tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
                     json.dump({"path": path}, f)
+                os.replace(tmp, _LAST_FILE_JSON)
             except Exception:
                 pass
         self._btn_close.configure(state="normal")
@@ -910,8 +915,7 @@ class KomparasiDeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
-        self.status_var_label.set(
-            "File ditutup — klik 📂 Pilih File Deviasi… untuk memuat.")
+        self.status_var_label.set("File ditutup.")
 
     def _reload_file(self):
         if self._file_path and os.path.isfile(self._file_path):
@@ -922,7 +926,9 @@ class KomparasiDeviasiView(tk.Frame):
     # =========================================================================
     # COMPUTATION — matriks app (H-independen, cache per data)
     # =========================================================================
-    def _compute_matrices(self) -> "dict | None":
+    def _compute_matrices(self, data: pd.DataFrame | None = None) -> "dict | None":
+        """FIX D-01 (audit 2-d): data bisa di-pass eksplisit (identitas
+        pra-capture worker) — default membaca self.data (kompatibel test)."""
         """Pivot data app per (Nama Barang × NAMA RESTO) × tanggal untuk
         JENIS yang dipakai komparasi. Formula com identik
         laporan_deviasi_view._compute_com_matrix / pivot 6.PEMAKAIAN (COM):
@@ -943,7 +949,7 @@ class KomparasiDeviasiView(tk.Frame):
         tempat sekaligus (pivot, laporan, komparasi) supaya formula COM
         tetap identik antar view.
         """
-        df = self.data
+        df = self.data if data is None else data
         if df is None or df.empty:
             return None
 
@@ -1101,9 +1107,7 @@ class KomparasiDeviasiView(tk.Frame):
             except tk.TclError:
                 pass
             self._result_df = None
-            self.status_var_label.set(
-                "Belum ada file — klik '📂 Pilih File Deviasi…' untuk "
-                "memuat file perbandingan.")
+            self.status_var_label.set("Belum ada file deviasi.")
             return
 
         if self._busy:
@@ -1141,11 +1145,18 @@ class KomparasiDeviasiView(tk.Frame):
                 if not res["ok"]:
                     return {"gen": gen, "parse_error": res["error"]}
                 new_file = res
+            # FIX D-01 (audit 2-d): capture identitas SEKALU di awal job —
+            # dulu _cached_data dibaca ULANG setelah compute; bila self.data
+            # ditukar main thread (load_data pipeline selesai) di tengah
+            # compute, cache berlabel data BARU berisi matrix data LAMA →
+            # refresh berikutnya SKIP recompute (angka basi senyap;
+            # gen-guard hanya membuang RENDER basi, bukan cache salah-label).
+            data = self.data
             if (self._cached_mats is None
-                    or self._cached_data is not self.data):
-                self._cached_mats = self._compute_matrices()
-                self._cached_data = self.data
-                self._cached_signature = id(self.data)
+                    or self._cached_data is not data):
+                self._cached_mats = self._compute_matrices(data)
+                self._cached_data = data
+                self._cached_signature = id(data)
             return self._prepare_rows(st, new_file, gen)
 
         def done(payload):
@@ -1338,8 +1349,7 @@ class KomparasiDeviasiView(tk.Frame):
         if filtered.empty:
             return {"gen": gen, "new_file": new_file,
                     "items": [], "status":
-                    "Tidak ada baris setelah filter. Klik '✕ Reset Filter' "
-                    "atau ubah filter."}
+                    "Tidak ada baris setelah filter."}
 
         # v3.9.5 (audit 19-a #7): hitungan status diambil SETELAH filter
         # header — footer "174 baris · MATCH: 7" padahal MATCH=0 di baris
@@ -1447,8 +1457,9 @@ class KomparasiDeviasiView(tk.Frame):
                 status = (f"Minggu {', '.join(wlabels)} (cut-off H "
                           f"{st['week_target']}) · {status}")
         if n_hidden:
-            status += (f" · {n_hidden} resto file disembunyikan "
-                       f"(centang utk lihat)")
+            # FIX C-06 (audit 2-c): "(centang utk lihat)" = instruksi
+            # cara-pakai → cukup data (opsi ada di kartu Filter).
+            status += f" · {n_hidden} resto file disembunyikan"
         if avail_max:
             status += f" · tanggal app s/d {avail_max}"
         return {"gen": gen, "new_file": new_file, "items": items,

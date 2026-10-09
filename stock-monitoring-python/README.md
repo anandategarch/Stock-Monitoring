@@ -5,6 +5,8 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.10 — DEEP AUDIT UI/UX ROUND 2**: audit ulang 4-arah (shell/tabel/view/integritas — 37 temuan) + fix P1-P3 TANPA menyentuh formula bisnis: race restart pipeline (Stop→MULAI tidak lagi dobel thread), cache-poisoning worker (data basi senyap saat pipeline selesai di tengah refresh — capture identitas di awal compute), on_error Rincian PO & popup detail (view tidak mati permanen), sort Rekap Selisih IN parser Indonesia, file Excel di-skip kini TERLIHAT ("SELESAI ⚠ N file dilewati"), tag minus per-cell bertahan di clone ⛶ setelah filter (4 view + popup), auto-fit double-click tepi kolom hidup lagi (bind add="+"), filter header >3000 nilai bisa dicentang via pencarian (lazy), gc_shield thread-safe (Lock), sort-saat-render di-antre, race render Follow Up, tombol disabled tampak dim, DPI-awareness Windows, Ctrl+Tab navigasi tab, routing tab berbasis widget, **tab strip muat di 1020px** (dulu tab kanan terpotong) + WINDOW_MIN 700 (h-scrollbar selalu terlihat), format angka Indonesia di Rincian PO & popup, minus merah per-cell Selisih IN, frasa instruksi dipangkas, footer "baris", tulis atomik config/komparasi_last. **492/492 UI test (55 baru — satu per bug) + mock + ruff 224 < baseline 261 + VLM visual 2 batch + probe piksel/H-1.**
+>
 > **v3.9.9 — TAB 🎯 PARETO (80/20 KONTRIBUTOR DEVIASI TERBESAR)**: tab BARU 🎯 Pareto (setelah Deviasi PCS — app kini 10 tab): semua kombinasi (Barang × Resto × Satuan) **diurut |Deviasi| menurun** + **Kontribusi %** + **Kumulatif %** + **Fokus 🎯** (baris yang diperlukan mencapai CUTOFF % — default 80, input 1–100) → fokus list audit "20% kombinasi menyumbang 80% deviasi". MODE GR/PCS (SegmentBar) · TANGGAL H chip read-only (state bersama, ikut Apply H) · KPI strip (KOMBINASI · TOTAL |DEVIASI| · FOKUS ≤ CUTOFF · TOP 20%) · GRAFIK canvas (top-30 batang teal/amber kumulatif/garis cutoff merah/batas fokus) · ✓ follow-up fingerprint identik tab Deviasi (dedup 1 entri) · export 💾 sheet PARETO. Pivot dihitung 1× (subclass DeviasiView + SharedPivotCache). 438/438 UI test × 2 + smoke real-data 3,5jt baris (oracle 25/25 × 3 konfigurasi; fokus/total == oracle) + VLM visual PASS.
 > **v3.9.8 — UI CLEAN**: **SEMUA teks instruksi/petunjuk DIHAPUS dari UI** (permintaan user: "kata kata atau kalimat diseluruh aplikasi python hapus semua biar clean tanpa teks teks gak penting") — tombol "❓ Bantuan" + window panduan (±200 baris), subtitle semua kartu (mis. "Filter Nama Barang → klik header kolom (ikon corong ⧩)"), hint footer (🖱 Double-click → …) di semua tabel + window ⛶, **tooltip hover** (class `ToolTip`/`add_tooltip` dihapus dari widgets), subtitle EmptyState, subtitle tab Config/Proses, pertanyaan dialog export IN. Yang tetap: label input, tombol, chip nilai, footer status berisi DATA (n baris · MATCH/SELISIH · Minggu WEEK X), legenda CEK/warna, KPI, pesan error, log proses. 390/390 UI test × 2 + mock + ruff 0 baru + VLM visual PASS.
 > **v3.9.7 — MEDIAN ANOMALI COM ANTAR TANGGAL + FILTER MINGGU KOMPARASI MENGIKUTI H**: **(1) KOREKSI user ("harusnya antar tanggal — com itu pemakaian aktual harian di resto, bom pemakaian harian di sistem")**: median pembanding tab 🚨 Anomali COM kini = **median com(t) tgl 1..H per pasangan (barang × resto)** — pemakaian hari H vs pola harian pasangan itu sendiri, BUKAN antar resto; heading dinamis "Median (1..H)". **(2)** ⚖ Komparasi kini **filter minggu mengikuti H bersama** ("misal H aku input 7 maka hanya tampilkan week 1 aja" — STATUS BULAN dipakai utk filter): H 1–7 → WEEK 1 · 8–14 → WEEK 2 · 15–25 → WEEK 3/4 · 26–31 → WEEK 5; chip H read-only + chip minggu aktif highlight + opsi "Tampilkan semua minggu". FIX ikutan: _dirty basi (tabel komparasi tak refresh saat H diubah setelah load_data saat terlihat). 369/369 UI test × 2 + smoke real-data (oracle 25/25 median per-pasangan; H=7/14/25 → 1.356/1.365/1.367 baris == ekspektasi) + VLM visual PASS.
@@ -93,6 +95,36 @@ Audit menyeluruh fitur terbaru (v3.9.3 Anomali COM + v3.9.4 Komparasi Deviasi) m
 9. **Lainnya (P3)**: duplikat lintas bulan dihitung+dilaporkan; scan sheet ke-2+; footer status = baris tampil (bukan global); filter reset saat file berganti; sort diantrekan saat busy; pane tersembunyi tak di-compute saat H berubah; initialdir komparasi ikut RootPath; `show_laporan_mode` sinkron SegmentBar; snapshot follow-up + kolom AKTIF/NON; `SharedTanggalH.unsubscribe()`; `-0,00%`→`0,00%`; Satuan NaN→`''`; dialog + `*.xlsb`; baris basi dibersihkan saat data kosong.
 
 **Verifikasi**: 337/337 UI test × 2 run (25 check baru §23) + `test_mock` ALL PASS + ruff 0 error baru + oracle SA 3 view + smoke real-data 342.222 baris (tgl −31..31, parse async 8,2s dgn 740 pump = UI hidup, anomali 2.135 baris 0,4s, race & cache-invalidation bersih) + 3 screenshot VLM PASS.
+
+## Fitur Baru v3.9.10 — Deep Audit UI/UX Round 2 (37 Temuan → Fix)
+
+Audit ulang menyeluruh kondisi v3.9.9 oleh 4 agen paralel (shell & navigasi / infrastruktur tabel / konsistensi 10 view / integritas data & race). Semua temuan terverifikasi dari kode diperbaiki **tanpa mengubah formula bisnis, fingerprint Follow Up, pipeline, atau kontrak export**.
+
+**P1 — race & robustness**
+| Fix | Masalah (v3.9.9) | Perilaku baru |
+|---|---|---|
+| A-01 | Stop → MULAI menjalankan 2 pipeline paralel & membatalkan Stop (`stop_event.clear` sebelum worker mati) | MULAI saat worker lama masih hidup → ditolak dengan pesan |
+| D-01 | Cache worker berlabel identitas data BARU berisi hasil compute data LAMA (data basi senyap) | Identitas data/H di-capture sekali di awal compute (5 view) |
+| C-02/D-02 | Rincian PO & popup detail tanpa `on_error` → view mati permanen setelah 1 exception | `_busy` di-reset + status error → refresh berikutnya tetap jalan |
+| B-01 | Sort Rekap Selisih IN: parser default salah untuk format Indonesia | Parser `_parse_num_id` (pola deviasi/komparasi) |
+| D-04 | File Excel terkunci/hilang di-skip senyap — status "SELESAI" polos | "SELESAI ⚠ N file Excel dilewati — lihat log" (amber) |
+
+**P2 — tabel & shell**
+- **B-02/B-03**: tag minus-merah per-cell dipasang ulang setelah filter/sort di clone ⛶ (Deviasi/Pareto/Selisih IN/Pivot + popup detail).
+- **B-04**: `bind add="+"` — auto-fit double-click tepi kolom & menu kolom hidup lagi (semua tabel + clone).
+- **B-05/B-13/B-19**: popup filter >3000 nilai — pencarian membuat checkbox LAZY; uncheck tidak lagi menyembunyikan nilai di luar cap; nilai numerik urut numerik; pencarian reset saat popup dibuka ulang.
+- **B-06/B-07/B-08/B-20**: gc_shield pakai Lock; filter/sort clone membatalkan batch copy awal; sort saat render batch di-antre (3 view); BaseException tidak menempel busy/shield.
+- **D-03**: render Follow Up beruntun (toggle ✓ cepat) membatalkan batch lama — dulu baris bisa duplikat/terpotong senyap.
+- **A-02/B-10**: tombol disabled tampak DIM (abu) + hover tidak menimpa warna dim.
+- **A-03**: DPI-awareness Windows 125%/150% (`SetProcessDpiAwareness` — no-op di Linux).
+- **A-04**: Ctrl+Tab / Ctrl+Shift+Tab navigasi antar-tab.
+- **A-11**: routing tab-change berbasis widget (bukan index angka).
+- **H-1 (terkonfirmasi)**: tab strip ±1280px meluap di jendela 1020px → label tanpa spasi ganda + padding 12 → **10/10 tab terjangkau** (probe Xvfb); `WINDOW_MIN` 640→700 (h-scrollbar selalu terlihat).
+
+**P3 — konsistensi**
+C-03 format Indonesia di Rincian PO & popup ("1.234,5") · C-04 minus merah per-cell Selisih IN · C-06 sisa frasa instruksi dipangkas · C-10 footer "baris" + fmt Indonesia · C-07/C-08 DeviasiView unsubscribe-H + pane tersembunyi cukup `_dirty` · D-05/D-06 tulis atomik config.json & komparasi_last.json · A-06 KPI Pareto font 9 · A-07/A-09 docstring & token warna.
+
+**Verifikasi**: 492/492 UI test (437 lama + **55 baru §25 — satu test per bug**, termasuk oracle filter-lazy, oracle neg-cells, guard-restart dengan thread dummy, piksel-dim, rantai-binding) + test_mock ALL PASS + ruff 224 < baseline 261 + VLM visual 2 batch + probe programatik.
 
 ## Fitur Baru v3.9.9 — Tab 🎯 Pareto (80/20 Kontributor Deviasi)
 

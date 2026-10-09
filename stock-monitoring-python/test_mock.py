@@ -3,21 +3,24 @@ test_mock.py — Test pipeline dengan mock data yang match format Accurate Onlin
 Membuat folder + file Excel mock, lalu menjalankan pipeline end-to-end.
 """
 import os
-import sys
 import shutil
+import sys
 import tempfile
+from datetime import datetime
+
 # zipfile + re no longer needed (Excel output removed)
 from pathlib import Path
-from datetime import datetime
 
 # Setup path
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import openpyxl
+
 from src.config import Config
 from src.pipeline.append1 import build_append1
 from src.pipeline.rincian_po import build_rincian_po
+
 # Excel output removed — data displayed in UI
 
 
@@ -387,15 +390,16 @@ def run_test():
     # Test individual fn modules
     print("\n  [2] Testing individual fn modules...")
 
-    from src.pipeline.fn_rekap_mentah import fn_rekap_mentah
     from src.pipeline.fn_2205 import fn_2205
     from src.pipeline.fn_3224 import fn_3224
-    from src.pipeline.fn_4215 import fn_4215
     from src.pipeline.fn_4205 import fn_4205
+    from src.pipeline.fn_4215 import fn_4215
     from src.pipeline.fn_4217 import fn_4217
+
     # NOTE: fn_pi + fn_konversi_satuan dihapus di refactor
     # "hapus PI + Konversi Satuan" — test PI/Konversi dihapus sesuai pipeline.
     from src.pipeline.fn_dbs_kategori import fn_dbs_kategori
+    from src.pipeline.fn_rekap_mentah import fn_rekap_mentah
     from src.pipeline.fn_running_stock import fn_running_stock
 
     # Test fn_dbs_kategori

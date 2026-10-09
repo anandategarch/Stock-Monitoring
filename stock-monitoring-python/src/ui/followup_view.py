@@ -26,21 +26,38 @@ Perilaku:
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import pandas as pd
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
+import pandas as pd
+
+from .followup import CHECK_ON, DATE_COL_IDS, FollowUpStore
 from .theme import (
-    C_BG, C_CARD, C_TEXT_MUTED, C_HEADER, font,
+    C_BG,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
+    font,
 )
 from .widgets import (
-    AccentButton, Card, DangerButton, EmptyState, GhostButton,
-    ColumnManager, HeaderFilterGroup, LoadingOverlay, TableExpander,
-    attach_clone_filters, auto_fit_columns, enable_col_resize,
-    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
+    AccentButton,
+    Card,
+    ColumnManager,
+    DangerButton,
+    EmptyState,
+    GhostButton,
+    HeaderFilterGroup,
+    LoadingOverlay,
+    TableExpander,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    identify_to_column,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
     sort_tree_by_column,
 )
-from .followup import CHECK_ON, DATE_COL_IDS, FollowUpStore
 
 # kolom tabel Follow Up — FORMAT FILE SAMPLE (v3.9.6):
 # ✓ · Resto · Nama Barang · [SO tgl H-2..H+2 — id "T-2".."T+2", heading
@@ -198,7 +215,7 @@ class FollowUpView(tk.Frame):
         # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu aksi + judul
         self._expander = TableExpander(btn_expand, [ccard, title_label])
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
 
     def _setup_tags(self):
@@ -384,7 +401,14 @@ class FollowUpView(tk.Frame):
         self.btn_clear.set_enabled(n > 0)
         self.btn_export.set_enabled(n > 0)
 
-        insert_tree_items(self.tree, items, batch=500)
+        # FIX D-03 (audit 2-d): batalkan batch insert LAMA sebelum render
+        # baru — listener store memicu _render SINKRON tiap toggle ✓;
+        # dulu chunk loop lama tetap berjalan setelah tree.delete →
+        # baris duplikat / TclError iid 'fu_N' sudah ada → render baru
+        # TERPOTONG diam-diam (pola komparasi/laporan: cancel disimpan).
+        if getattr(self, "_insert_cancel", None) is not None:
+            self._insert_cancel()
+        self._insert_cancel = insert_tree_items(self.tree, items, batch=500)
 
     # =========================================================================
     # ✓ KLIK = KELUARKAN (v3.3: iid-based — benar setelah sort)
@@ -433,11 +457,12 @@ class FollowUpView(tk.Frame):
             return self.store.export_xlsx(filepath)
 
         def done(path):
+            # FIX C-06 (audit 2-c): frasa instruksi "Kolom PIC / ...
+            # diisi petugas" dihapus (aturan UI-clean v3.9.8 — dialog
+            # sukses cukup memberi tahu hasil, bukan cara pakai).
             messagebox.showinfo(
                 "Export Berhasil",
-                f"Daftar follow-up di-export ke:\n{path}\n\n"
-                "Kolom PIC / KATEGORI MASALAH / TINDAKAN\n"
-                "diisi petugas.",
+                f"Daftar follow-up di-export ke:\n{path}",
                 parent=self)
 
         def on_error(e):

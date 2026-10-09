@@ -21,15 +21,26 @@ Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 
 import tkinter as tk
 from tkinter import ttk
+from typing import Callable, Optional
+
 import pandas as pd
-from typing import Optional, Callable
 
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilterGroup,
-    ColumnManager, LoadingOverlay, TableExpander,
-    attach_clone_filters, auto_fit_columns, enable_col_resize,
-    insert_tree_items, open_tree_maximized, run_async,
+    Card,
+    ColumnManager,
+    EmptyState,
+    GhostButton,
+    HeaderFilterGroup,
+    LoadingOverlay,
+    TableExpander,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    fmt_int_id,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
 )
 
 # Kolom tabel v3.9 (urutan baru — info PO di kiri, item di kanan):
@@ -308,8 +319,18 @@ class RincianPoView(tk.Frame):
         def done(payload):
             self._render_rows(payload)
 
+        # FIX C-02/D-02 (audit 2-c/2-d): on_error — kelas fix B-01 v3.9.1
+        # yang terlewat di view ini: TANPA reset _busy, satu exception di
+        # _prepare_rows membuat tab 🛒 Rincian PO MATI PERMANEN sesi
+        # (guard `if self._busy` menelan semua refresh berikutnya).
+        def on_error(err):
+            self._busy = False
+            self._pending = False
+            self.status_var.set(f"⚠ Gagal menyiapkan pivot PO: {err}")
+
         run_async(self, work, done, overlay=self.overlay,
-                  loading_text="Menyiapkan pivot PO…", sync=sync)
+                  loading_text="Menyiapkan pivot PO…", sync=sync,
+                  on_error=on_error)
 
     def _prepare_rows(self, st: dict) -> dict:
         """Pure pandas: filter + group → items tree (thread-safe).
@@ -357,14 +378,17 @@ class RincianPoView(tk.Frame):
             return s.iloc[0] if len(s) else ""
 
         def _fmt_qty(v) -> str:
-            """Kuantitas: bulat tanpa desimal, pecahan 1 desimal (v3.9)."""
+            """Kuantitas: bulat tanpa desimal, pecahan 1 desimal (v3.9).
+            FIX C-03 (audit 2-c): format INDONESIA — dulu EN "1,234.5"
+            (koma = ribuan) tidak konsisten dgn 6 view lain."""
             try:
                 f = float(v)
             except (TypeError, ValueError):
                 return str(v)
             if f == int(f):
-                return f"{int(f):,}"
-            return f"{f:,.1f}"
+                return fmt_int_id(f)
+            return f"{f:,.1f}".replace(",", "X").replace(".", ",") \
+                .replace("X", ".")
 
         # nilai per kolom PO: konsisten dalam satu PO → ambil nilai pertama
         for nomor, group in df_sorted.groupby("Nomor #", sort=False):
@@ -469,6 +493,9 @@ class RincianPoView(tk.Frame):
     # =========================================================================
     @staticmethod
     def _fmt_num(val) -> str:
+        """FIX C-03 (audit 2-c): format angka INDONESIA (1.234,5 · negatif
+        kurung · 0 = '-') — dulu gaya EN "1,234.5"; nilai yang sama kini
+        tampil konsisten dgn tabel sumber drill-down-nya."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
         try:
@@ -478,9 +505,10 @@ class RincianPoView(tk.Frame):
         if v == 0:
             return "-"
         if v == int(v):
-            s = f"{v:,.0f}"
+            s = fmt_int_id(v)
         else:
-            s = f"{v:,.1f}"
+            s = f"{v:,.1f}".replace(",", "X").replace(".", ",") \
+                .replace("X", ".")
         if v < 0:
             return f"({s[1:]})"
         return s

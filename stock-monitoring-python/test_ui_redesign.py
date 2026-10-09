@@ -73,11 +73,23 @@ Memverifikasi:
     garis kumulatif amber + garis cutoff) + pivot cache dibagi dgn
     tab Deviasi (subclass) + fingerprint ✓ IDENTIK (dedup Follow
     Up) + export sheet PARETO (read-back openpyxl).
+22. v3.9.10 — AUDIT UI/UX ROUND 2 (§25): 4 agent paralel audit 4 arah
+    (shell/tabel/view/integritas) — 37 temuan → fix P1-P3: race restart
+    pipeline (A-01), cache-poisoning worker D-01, on_error rincian/popup
+    (C-02), parser sort Selisih IN (B-01), tag per-cell di clone + sort
+    (B-02/B-03), bind add="+" auto-fit (B-04), filter >3000 nilai lazy
+    (B-05), gc_shield lock (B-06), cancel batch clone (B-07), pending-sort
+    (B-08), followup render race (D-03), file-skip terlihat (D-04),
+    tombol dim (A-02), DPI Windows (A-03), Ctrl+Tab (A-04), routing tab
+    widget (A-11), format ID rincian/popup (C-03), minus merah Selisih
+    IN (C-04), frasa instruksi dipangkas (C-06), footer baris (C-10),
+    unsubscribe/dirty H (C-07/C-08), atomic write (D-05/D-06).
 """
 import os
 import sys
 import time
 from pathlib import Path
+
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -86,12 +98,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import tkinter as tk
 from tkinter import ttk
 
-from src.ui.app import StockMonitorApp, APP_VERSION
+from src.ui.app import APP_VERSION, StockMonitorApp
+from src.ui.komparasi_deviasi_view import (
+    _h_to_week_target,
+    _norm_name,
+    parse_deviasi_file,
+)
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
-from src.ui.widgets import LoadingOverlay, HeaderFilter, run_async, \
-    _GC_HOLD
-from src.ui.komparasi_deviasi_view import (parse_deviasi_file, _norm_name,
-                                           _h_to_week_target)
+from src.ui.widgets import _GC_HOLD, HeaderFilter, LoadingOverlay, run_async
 
 PASS = []
 FAIL = []
@@ -257,6 +271,7 @@ def make_mock_deviasi_file() -> str:
     1 WEEK 5 (H=31 tidak ada di data 1..25).
     """
     import tempfile
+
     from openpyxl import Workbook
     hdr = ["Akun Penyesuaian Persediaan", "STATUS", "RESTO", "NAMA BAHAN",
            "Satuan", "QTY BOM", "QTY COM", "QTY DEVIASI", "QTY WASTE",
@@ -405,7 +420,7 @@ def main():
     check("App + toolbar + 10 tab terbangun (v3.9.9: +🎯 Pareto)",
           len(app.notebook.tabs()) == 10, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.9", APP_VERSION == "3.9.9", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.10", APP_VERSION == "3.9.10", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 1a. v3.9.8 UI CLEAN — teks instruksi dihapus ==")
@@ -1440,7 +1455,7 @@ def main():
 
     # ==================================================================
     print("== 13. v3.4→v3.6 — TAB 📤 REKAP SELISIH IN (audit data app) ==")
-    from src.ui.in_selisih_view import InDetailPopup, COLUMNS
+    from src.ui.in_selisih_view import COLUMNS, InDetailPopup
     COL_IDS = [c[0] for c in COLUMNS]
     iv = app.in_selisih_view
     select_and_wait(root, app, app.tab_in_selisih, iv)
@@ -1544,9 +1559,11 @@ def main():
 
     # ==================================================================
     print("== 14. v3.6 — AUDIT REKONSILIASI × DATA APP + FIX/KOLOM ==")
-    from src.pipeline.fn_audit import (build_audit_rekap,
-                                       build_audit_input,
-                                       AUDIT_INPUT_COLUMNS)
+    from src.pipeline.fn_audit import (
+        AUDIT_INPUT_COLUMNS,
+        build_audit_input,
+        build_audit_rekap,
+    )
     # (pd sudah di-import di level modul — import lokal membuat 'pd' local
     #  name utk seluruh main() → UnboundLocalError di section sebelumnya)
 
@@ -1691,6 +1708,7 @@ def main():
 
     # --- (f) LightMode dihapus total ---
     import inspect
+
     from src.config import Config as _Cfg
     check("(v3.5) Config tidak lagi memuat LightMode",
           "self.LightMode" not in inspect.getsource(_Cfg))
@@ -1736,11 +1754,15 @@ def main():
 
     # ==================================================================
     print("== 16. v3.7 — DEEP AUDIT FIXES (display-vs-logical index dst) ==")
-    from src.ui.widgets import (
-        ColumnManager, apply_tree_row_filters, auto_fit_columns,
-        identify_to_column, _tree_row_passes,
-    )
     import numpy as np
+
+    from src.ui.widgets import (
+        ColumnManager,
+        _tree_row_passes,
+        apply_tree_row_filters,
+        auto_fit_columns,
+        identify_to_column,
+    )
 
     # (a) apply_tree_row_filters membaca nilai kolom yang BENAR setelah
     #     kolom sebelumnya disembunyikan (dulu: index display ≠ logis)
@@ -1851,8 +1873,7 @@ def main():
 
     # (f) ENGINE v3.7 — running stock vektor == implementasi lama
     #     (10 edge-case sintetis; loop lama di-inline sebagai oracle)
-    from src.pipeline.fn_running_stock import (
-        fn_running_stock, fn_running_stock_grouped)
+    from src.pipeline.fn_running_stock import fn_running_stock, fn_running_stock_grouped
 
     def OLD_grouped(df, gk):
         srt = df.sort_values(gk + ["Tanggal"], ascending=True,
@@ -2035,8 +2056,10 @@ def main():
 
     # (c) build_selisih_export_df — kolom PERSIS permintaan user
     from src.ui.export_sheets import (
-        SELISIH_EXPORT_COLUMNS, build_selisih_export_df, write_selisih_sheet,
+        SELISIH_EXPORT_COLUMNS,
         add_pivot_sheet,
+        build_selisih_export_df,
+        write_selisih_sheet,
     )
     base = pd.DataFrame({
         "Resto": ["MLGPAR", "MLGPAR", "BDGUKU"],
@@ -2252,7 +2275,7 @@ def main():
     check("(v3.9) Tabel diperbesar: heading font size 10 bold",
           _hf_font[-2:] == ["10", "bold"],
           f"got {_hf_font}")
-    from src.ui.widgets import funnel_image, TableExpander
+    from src.ui.widgets import TableExpander, funnel_image
     img_on = funnel_image(active=True)
     img_off = funnel_image(active=False)
     check("(v3.9) Funnel Waste: ikon aktif ≠ idle (merah vs terang)",
@@ -2331,7 +2354,8 @@ def main():
     print("== 21. (v3.9.2) MINUS MERAH PER CELL + EXPORT PIVOT SESUAI TAMPILAN ==")
 
     # (a) unit: apply_cell_tag — tag per-cell Tk 9 (item hilang → aman)
-    from src.ui.widgets import apply_cell_tag as _act, CELL_TAGS_SUPPORTED
+    from src.ui.widgets import CELL_TAGS_SUPPORTED
+    from src.ui.widgets import apply_cell_tag as _act
     if CELL_TAGS_SUPPORTED:
         _t = ttk.Treeview(root, columns=["a", "b", "c"], show="headings")
         _t.pack(fill="x")
@@ -3146,10 +3170,11 @@ def main():
 
     # ==================================================================
     print("== 24. (v3.9.9) TAB 🎯 PARETO — 80/20 KONTRIBUTOR DEVIASI ==")
-    from src.ui.pareto_view import ParetoDeviasiView, NUMERIC_COLS as \
-        _PARETO_NUM
-    from src.ui.export_sheets import write_pareto_sheet as _write_pareto
     import os as _os
+
+    from src.ui.export_sheets import write_pareto_sheet as _write_pareto
+    from src.ui.pareto_view import NUMERIC_COLS as _PARETO_NUM
+    from src.ui.pareto_view import ParetoDeviasiView
 
     # defensive: store kosong (beberapa blok sebelumnya toggle baris)
     app.followup_store.clear()
@@ -3431,6 +3456,395 @@ def main():
     check("(v3.9.9) NUMERIC_COLS pareto (parser sort persen)",
           set(_PARETO_NUM) >= {"Kontribusi %", "Kumulatif %", "Deviasi",
                                "|Deviasi|"})
+
+    # =====================================================================
+    print()
+    print("== 25. (v3.9.10) AUDIT UI/UX ROUND 2 — REGRESSION FIXES ==")
+    import threading as _th
+
+    from src.ui.app import _enable_windows_dpi_awareness as _dpi_fix
+    from src.ui.details_popup import DetailsPopup as _DPcls
+    from src.ui.deviasi_view import DeviasiView as _DV
+    from src.ui.rincian_po_view import RincianPoView as _RPV
+    from src.ui.widgets import _GC_LOCK as _GLOCK
+    from src.ui.widgets import gc_shield_acquire as _gac
+    from src.ui.widgets import gc_shield_release as _grel
+    from src.ui.widgets import sort_tree_by_column as _stbc
+
+    # ---- B-04: handler view tidak lagi MENGGANTI binding infrastruktur ---
+    # (auto-fit tepi kolom v3.4 + menu kolom) — jumlah script binding
+    # harus >= 2 (CHAIN), bukan 1 (REPLACE = bug lama).
+    for _vname, _v in (("Pivot", app.pivot_view),
+                       ("Deviasi GR", app.deviasi_gr_view),
+                       ("Deviasi PCS", app.deviasi_pcs_view),
+                       ("Pareto", app.pareto_view),
+                       ("Selisih IN", app.in_selisih_view),
+                       ("Laporan", app.laporan_view),
+                       ("Komparasi", app.komparasi_view),
+                       ("Follow Up", app.followup_view)):
+        _nb = _v.tree.bind("<Double-1>").count("%# %b")
+        check(f"(v3.9.10) B-04 {_vname}: Double-1 = RANTAI >=2 script "
+              f"(auto-fit tetap hidup)", _nb >= 2, f"scripts={_nb}")
+    # (Button-3 chain diuji di popup detail §25 C-02 — tree utama Selisih
+    #  IN memang tanpa context-menu level view; popup punya ColumnManager
+    #  + menu copy → harus CHAIN setelah fix B-04.)
+
+    # ---- A-02 + B-10: tombol disabled TAMPAK dim; hover tidak menimpa ----
+    app.btn_export_tb.set_enabled(False)
+    root.update()
+    _bg_off = str(app.btn_export_tb.cget("background")).lower()
+    check("(v3.9.10) A-02: toolbar Export disabled = abu dim (#94a3b8)",
+          _bg_off == "#94a3b8", f"got {_bg_off}")
+    app.btn_export_tb.event_generate("<Leave>")
+    root.update()
+    _bg_leave = str(app.btn_export_tb.cget("background")).lower()
+    check("(v3.9.10) B-10: <Leave> saat disabled TIDAK menimpa warna dim",
+          _bg_leave == "#94a3b8", f"got {_bg_leave}")
+    app.btn_export_tb.set_enabled(True)
+    root.update()
+
+    # ---- A-04: navigasi keyboard antar-tab (Ctrl+Tab) ----
+    check("(v3.9.10) A-04: enable_traversal — Ctrl+Tab aktif di toplevel",
+          bool(root.bind("<Control-Tab>")))
+
+    # ---- A-11: routing tab berbasis WIDGET (bukan index) ----
+    check("(v3.9.10) A-11: peta _tab_views 7 entry berbasis nama widget",
+          len(app._tab_views) == 7
+          and app._tab_views.get(str(app.tab_pareto)) is app.pareto_view
+          and app._tab_views.get(str(app.tab_rincian)) is app.rincian_view
+          and app._tab_views.get(str(app.tab_deviasi_pcs))
+          is app.deviasi_pcs_view,
+          f"got {len(app._tab_views)} entry")
+    check("(v3.9.10) A-11: marker tab Laporan → dispatch mode aktif",
+          app._tab_views.get(str(app.tab_laporan))
+          is app._laporan_tab_entry)
+
+    # ---- A-03: DPI-awareness no-op di Linux (tanpa crash) ----
+    try:
+        _dpi_fix(root)
+        _dpi_ok = True
+    except Exception as _e:
+        _dpi_ok = False
+    check("(v3.9.10) A-03: _enable_windows_dpi_awareness aman di Linux",
+          _dpi_ok)
+
+    # ---- B-01: parser sort Indonesia (oracle deterministik) ----
+    _st_tr = ttk.Treeview(root, columns=["x"])
+    for _v in ["(1.234)", "999", "1.000", "12,5", "0"]:
+        _st_tr.insert("", "end", values=(_v,))
+    _stbc(_st_tr, "x", reverse=False,
+          parse=app.in_selisih_view._parse_num_id)
+    _got = [str(_st_tr.item(k)["values"][0])
+            for k in _st_tr.get_children("")]
+    check("(v3.9.10) B-01: parser ID — (1.234) < 0 < 12,5 < 999 < 1.000",
+          _got == ["(1.234)", "0", "12,5", "999", "1.000"], f"got {_got}")
+    _st_tr.destroy()
+
+    # ---- render ulang Selisih IN (state filter deterministik) ----
+    _iv = app.in_selisih_view
+    _iv._reset_filter()
+    ok = select_and_wait(root, app, app.tab_in_selisih, _iv)
+    check("(v3.9.10) render Selisih IN utk §25", ok)
+    _base = _iv._cached_base
+    _fb = _base
+    _tn = pd.to_numeric(_fb["Tanggal"], errors="coerce")
+    _fb = _fb[(_tn >= 1) & (_tn <= 31)]
+    if "Selisih IN" in _fb.columns:
+        _sv2 = pd.to_numeric(_fb["Selisih IN"], errors="coerce").fillna(0)
+        _fb = _fb[_sv2 != 0]
+    _neg_oracle = 0
+    for _c in ("Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo"):
+        if _c in _fb.columns:
+            _neg_oracle += int((pd.to_numeric(_fb[_c], errors="coerce")
+                                .fillna(0) < 0).sum())
+    check(f"(v3.9.10) B-01/C-04: baris tampil == oracle {len(_fb)}",
+          len(_iv.tree.get_children("")) == len(_fb),
+          f"got {len(_iv.tree.get_children(''))} vs {len(_fb)}")
+    check(f"(v3.9.10) C-04: neg_cells == oracle {_neg_oracle} "
+          f"(kolom numerik baris tampil)",
+          len(_iv._neg_cells) == _neg_oracle,
+          f"got {len(_iv._neg_cells)}")
+    _fgn = dict(_iv.tree.tag_configure("neg_cell")).get("foreground", "")
+    check("(v3.9.10) C-04: tag neg_cell terdaftar (merah) di tree utama",
+          _fgn == "#dc2626", f"got {_fgn}")
+
+    # ---- B-03: sort memanggil _reapply_cell_tags ----
+    _rat_calls = []
+    _orig_rat = _iv._reapply_cell_tags
+    _iv._reapply_cell_tags = (
+        lambda tr: (_rat_calls.append(1), _orig_rat(tr))[1])
+    _iv._sort_by("Selisih IN", reverse=True)
+    _iv._reapply_cell_tags = _orig_rat
+    check("(v3.9.10) B-03: sort → tag minus per-cell dipasang ulang",
+          len(_rat_calls) == 1, f"calls={len(_rat_calls)}")
+
+    # ---- D-08: popup filter tanpa cache → dari TREE (no main-thread compute)
+    _saved_cb = _iv._cached_base
+    _iv._cached_base = None
+
+    def _no_call(*_a, **_k):
+        raise RuntimeError("D-08: compute di main thread!")
+    _orig_cb = _iv._compute_base
+    _iv._compute_base = _no_call
+    try:
+        _vals_d08 = _iv._col_values("Resto")
+        _ok_d08 = isinstance(_vals_d08, list) and len(_vals_d08) > 0
+    except RuntimeError:
+        _ok_d08 = False
+    finally:
+        _iv._compute_base = _orig_cb
+        _iv._cached_base = _saved_cb
+    check("(v3.9.10) D-08: popup filter dgn cache kosong → nilai dari "
+          "baris tampil (UI tidak membeku)", _ok_d08)
+
+    # ---- D-01: cache berlabel identitas data yang benar ----
+    check("(v3.9.10) D-01: in_selisih _cached_base_data == data",
+          _iv._cached_base_data is _iv.data)
+    check("(v3.9.10) D-01: laporan _cached_data == data",
+          app.laporan_view._cached_data is app.laporan_view.data)
+    check("(v3.9.10) D-01: komparasi _cached_data == data",
+          app.komparasi_view._cached_data is app.komparasi_view.data)
+    check("(v3.9.10) D-01: deviasi _tnum_data == data",
+          app.deviasi_gr_view._tnum_data is app.deviasi_gr_view.data)
+
+    # ---- B-08: sort saat render batch → ANTRE ----
+    _dv = app.deviasi_gr_view
+    _dv._busy = True
+    _dv._pending_sort = None
+    _dv._sort_by("Deviasi", reverse=True)
+    check("(v3.9.10) B-08: sort saat busy → _pending_sort tersimpan",
+          _dv._pending_sort == ("Deviasi", True),
+          f"got {_dv._pending_sort}")
+    _dv._busy = False
+    _dv._pending_sort = None
+
+    # ---- C-08: H berubah saat pane TERSEMBUNYI → cukup _dirty ----
+    _pv = app.deviasi_pcs_view
+    _pv._dirty = False
+    _before_c08 = len(_pv.tree.get_children(""))
+    _pv._on_shared_h_changed(15)
+    root.update()
+    check("(v3.9.10) C-08: pane tersembunyi → _dirty tanpa render",
+          _pv._dirty is True
+          and len(_pv.tree.get_children("")) == _before_c08)
+    _pv._on_shared_h_changed(25)   # pulihkan H
+    _pv._dirty = False
+
+    # ---- C-07: DeviasiView unsubscribe saat destroy ----
+    _n_h25 = len(app._shared_h._listeners)
+    _dv2 = _DV(root, h_state=app._shared_h, h_editable=False)
+    root.update()
+    check("(v3.9.10) C-07: DeviasiView subscribe → +1 listener",
+          len(app._shared_h._listeners) == _n_h25 + 1)
+    _dv2.destroy()
+    root.update()
+    check("(v3.9.10) C-07: destroy DeviasiView → listener dilepas",
+          len(app._shared_h._listeners) == _n_h25,
+          f"got {len(app._shared_h._listeners)}")
+
+    # ---- B-07 + B-02: clone ⛶ punya cancel + tag dipasang ulang --------
+    _rat2 = []
+    _orig_rat2 = app.deviasi_gr_view._reapply_cell_tags
+    app.deviasi_gr_view._reapply_cell_tags = (
+        lambda tr: (_rat2.append(1), _orig_rat2(tr))[1])
+    _win, _nt = app.deviasi_gr_view._maximize()
+    for _ in range(40):
+        root.update()
+        time.sleep(0.01)
+        if len(_nt.get_children("")) >= \
+                len(app.deviasi_gr_view.tree.get_children("")):
+            break
+    check("(v3.9.10) B-07: clone punya _row_filter_cancel (batch bisa "
+          "dibatalkan saat filter/sort clone)",
+          callable(getattr(_nt, "_row_filter_cancel", None)))
+    check("(v3.9.10) B-04 clone: Double-1 clone = rantai",
+          _nt.bind("<Double-1>").count("%# %b") >= 2)
+    _n_rat_before = len(_rat2)
+    # trigger filter di clone → on_after_filter → reapply tags
+    _resto_vals = [str(app.deviasi_gr_view.tree.item(k)["values"][1])
+                   for k in app.deviasi_gr_view.tree.get_children("")]
+    _one_resto = sorted(set(_resto_vals))[0]
+    _nt._clone_filter_apply("Resto", {_one_resto})
+    for _ in range(60):
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.10) B-02: filter clone → tag per-cell dipasang ulang "
+          "(on_after_filter)", len(_rat2) > _n_rat_before,
+          f"calls {len(_rat2)} vs before {_n_rat_before}")
+    _win.destroy()
+    app.deviasi_gr_view._reapply_cell_tags = _orig_rat2
+    root.update()
+
+    # ---- D-03: followup render beruntun stabil ----
+    _fv = app.followup_view
+    check("(v3.9.10) D-03: _insert_cancel tersimpan di followup",
+          callable(getattr(_fv, "_insert_cancel", None)))
+    _n0 = len(_fv.tree.get_children(""))
+    _fv._render()
+    for _ in range(20):
+        root.update()
+        time.sleep(0.005)
+    _fv._render()
+    for _ in range(40):
+        root.update()
+        time.sleep(0.005)
+    _n1 = len(_fv.tree.get_children(""))
+    check("(v3.9.10) D-03: render ulang beruntun = jumlah baris stabil "
+          "(no duplikat/terpotong)", _n1 == _n0, f"{_n0} → {_n1}")
+
+    # ---- C-03: format angka Indonesia di Rincian PO & DetailsPopup ----
+    check("(v3.9.10) C-03: RincianPo._fmt_num(1234.5) == '1.234,5'",
+          _RPV._fmt_num(1234.5) == "1.234,5",
+          f"got {_RPV._fmt_num(1234.5)}")
+    check("(v3.9.10) C-03: RincianPo._fmt_num(-1234.5) == '(1.234,5)'",
+          _RPV._fmt_num(-1234.5) == "(1.234,5)",
+          f"got {_RPV._fmt_num(-1234.5)}")
+    check("(v3.9.10) C-03: DetailsPopup._fmt_nilai(1234.5) = ('1.234,5', False)",
+          _DPcls._fmt_nilai(1234.5) == ("1.234,5", False))
+    check("(v3.9.10) C-03: DetailsPopup._fmt_nilai(-1234.5) = ('(1.234,5)', True)",
+          _DPcls._fmt_nilai(-1234.5) == ("(1.234,5)", True))
+
+    # ---- C-10: footer 'baris' + format ID ----
+    _pstat = app.pivot_view.status_var.get()
+    check("(v3.9.10) C-10: footer pivot 'baris' (bukan 'rows' EN)",
+          "rows" not in _pstat and "baris" in _pstat, f"got {_pstat}")
+
+    # ---- C-02: DetailsPopup on_error → view tidak mati permanen ----
+    _dp = _DPcls(root, "Uji C-02", append1.head(30))
+    for _ in range(150):
+        if not _dp._busy:
+            break
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.10) C-10: footer popup detail 'baris' + format ID",
+          "rows" not in _dp._base_status and "baris" in _dp._base_status,
+          f"got {_dp._base_status}")
+    check("(v3.9.10) B-04 popup detail: Button-3 = rantai (menu kolom + "
+          "context copy)", _dp.tree.bind("<Button-3>").count("%# %b") >= 2)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("uji-error-detail")
+    _dp._prepare_rows = _boom
+    _dp._render(sync=True)
+    check("(v3.9.10) C-02: DetailsPopup _busy di-reset saat error",
+          _dp._busy is False, f"busy={_dp._busy}")
+    check("(v3.9.10) C-02: status error popup tampil",
+          "Gagal" in _dp.status_var.get())
+    del _dp._prepare_rows
+    _dp._render(sync=True)
+    check("(v3.9.10) C-02: render BERIKUTNYA tetap jalan (popup hidup)",
+          _dp._busy is False and len(_dp.tree.get_children("")) > 0)
+    _dp.destroy()
+    root.update()
+
+    # ---- B-06: gc_shield thread-safe ----
+    _depths = []
+
+    def _gcw():
+        _gac()
+        _depths.append(_GC_HOLD["depth"])
+        _grel()
+    _ths = [_th.Thread(target=_gcw) for _ in range(6)]
+    for _t in _ths:
+        _t.start()
+    for _t in _ths:
+        _t.join(3.0)
+    check("(v3.9.10) B-06: _GC_LOCK ada; 6 thread acquire/release → "
+          "depth kembali 0", hasattr(_GLOCK, "acquire")
+          and _GC_HOLD["depth"] == 0, f"depth={_GC_HOLD['depth']}")
+
+    # ---- B-20: BaseException tidak menempel busy/shield (jalur sync) ----
+    _se = []
+    try:
+        run_async(root, lambda: (_ for _ in ()).throw(SystemExit(9)),
+                  lambda r: None, sync=True, on_error=lambda e: None)
+    except SystemExit:
+        _se.append(True)
+    check("(v3.9.10) B-20: SystemExit di work → busy reset + shield "
+          "dilepas + re-raise",
+          _se == [True] and _GC_HOLD["depth"] == 0,
+          f"se={_se} depth={_GC_HOLD['depth']}")
+
+    # ---- B-05/B-13/B-19: HeaderFilter >cap + pencarian + urut numerik ---
+    _hf_tree = ttk.Treeview(root, columns=["x"])
+    _hf_tree.heading("x", text="X")
+    _hf_vals = ([f"nilai-{i:03d}" for i in range(6)]
+                + ["999", "1.000", "12,5", "(1.234)", "abc"])
+    _hf = HeaderFilter(_hf_tree, "x", get_values=lambda: _hf_vals,
+                       on_apply=lambda sel: None, label="X")
+    _hf.MAX_CHECKS = 8    # instance override — 11 nilai > cap
+    _hf.open_popup()
+    root.update()
+    check("(v3.9.10) B-19: nilai numerik diurut NUMERIK dulu "
+          "('(1.234)' < '12,5' < '999' < '1.000' < teks)",
+          _hf._values_list[:5] == ["(1.234)", "12,5", "999", "1.000",
+                                   "abc"], f"got {_hf._values_list[:5]}")
+    check("(v3.9.10) B-05: hanya MAX_CHECKS checkbox awal + label jujur",
+          len(_hf._checks) == 8 and _hf._more_label is not None,
+          f"checks={len(_hf._checks)}")
+    _hf._search_var.set("nilai-005")
+    _hf._filter_list()
+    root.update()
+    check("(v3.9.10) B-05: pencarian menemukan nilai DI LUAR cap → "
+          "checkbox LAZY dibuat",
+          "nilai-005" in _hf._checks and "nilai-005" in _hf._vars)
+    _hf._search_var.set("zzz")
+    _hf._close()
+    root.update()
+    _hf.open_popup()
+    root.update()
+    check("(v3.9.10) B-13: popup dibuka ulang dgn pencarian KOSONG",
+          _hf._search_var.get() == "")
+    _v0 = _hf._values_list[0]
+    _hf._vars[_v0].set(False)
+    _hf._emit()
+    root.update()
+    check("(v3.9.10) B-05: uncheck 1 nilai → 10 terpilih; nilai di luar "
+          "cap TIDAK hilang senyap (bug lama: 7 saja)",
+          _hf.selected is not None and _v0 not in _hf.selected
+          and "nilai-005" in _hf.selected
+          and len(_hf.selected) == 10,
+          f"n={len(_hf.selected or set())}")
+    _hf._close()
+    root.update()
+    _hf_tree.destroy()
+
+    # ---- A-01: MULAI saat worker lama masih hidup → DITOLAK ----
+    import tkinter.messagebox as _tkmb
+    app.is_running = False
+    app.worker_thread = _th.Thread(target=time.sleep, args=(3.0,),
+                                   daemon=True)
+    app.worker_thread.start()
+    _info_calls = []
+    _orig_info, _orig_err = _tkmb.showinfo, _tkmb.showerror
+    _tkmb.showinfo = lambda *a, **k: (_info_calls.append(a), "ok")[1]
+    _tkmb.showerror = lambda *a, **k: ("ok",)
+    try:
+        app._start_pipeline()
+    finally:
+        _tkmb.showinfo, _tkmb.showerror = _orig_info, _orig_err
+    check("(v3.9.10) A-01: MULAI saat worker lama masih hidup → "
+          "DITOLAK (tanpa thread kedua)",
+          bool(_info_calls) and app.is_running is False,
+          f"info={len(_info_calls)} running={app.is_running}")
+    app.worker_thread.join(4.0)
+
+    # ---- D-04: file di-skip terhitung dari log pipeline ----
+    app._skipped_files = 0
+    app.log_queue.put("[WARNING] Skip file X.xlsx (terkunci)\n")
+    app.log_queue.put("[WARNING] Skip file Y.xlsx (hilang)\n")
+    app._poll_log_queue()
+    check("(v3.9.10) D-04: 2 file skip terhitung dari log",
+          app._skipped_files == 2, f"got {app._skipped_files}")
+
+    # ---- D-04 (display, terakhir — mereset data views) ----
+    app._skipped_files = 2
+    app._on_pipeline_done(None, None, None, None, None)
+    root.update()
+    check("(v3.9.10) D-04: pipeline selesai dgn file skip → status "
+          "PERINGATAN (bukan hijau polos)",
+          "dilewati" in app.statusbar.dot._var.get(),
+          f"got {app.statusbar.dot._var.get()}")
 
     os.unlink(xlsx_path)
     if os.path.isfile("komparasi_last.json"):

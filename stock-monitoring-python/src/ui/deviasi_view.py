@@ -43,26 +43,45 @@ Fitur v3.1 (dipertahankan):
 - Filter Nama Barang menempel di header kolom (corong, Excel-like)
 - Loading overlay + compute/render async (UI tidak membeku)
 """
-import tkinter as tk
-from tkinter import ttk, messagebox
 import contextlib
 import threading
-import pandas as pd
-import numpy as np
-from typing import Optional, Callable
+import tkinter as tk
+from tkinter import messagebox, ttk
+from typing import Callable, Optional
 
+import numpy as np
+import pandas as pd
+
+from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 from .theme import (
-    C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, C_ACCENT,
+    C_ACCENT,
+    C_BG,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
     font,
 )
 from .widgets import (
-    Card, EmptyState, GhostButton, HeaderFilterGroup, LegendRow,
-    ColumnManager, LoadingOverlay, TableExpander,
-    attach_clone_filters, auto_fit_columns, enable_col_resize,
-    identify_to_column, insert_tree_items, open_tree_maximized, run_async,
-    sort_tree_by_column, fmt_int_id, apply_cell_tag, CELL_TAGS_SUPPORTED,
+    CELL_TAGS_SUPPORTED,
+    Card,
+    ColumnManager,
+    EmptyState,
+    GhostButton,
+    HeaderFilterGroup,
+    LegendRow,
+    LoadingOverlay,
+    TableExpander,
+    apply_cell_tag,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    fmt_int_id,
+    identify_to_column,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
+    sort_tree_by_column,
 )
-from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
 
 class SharedPivotCache:
@@ -207,6 +226,10 @@ class DeviasiView(tk.Frame):
                                      # setelah insert / sort / clone
         self._zero_cells: list = []  # [(iid, 'Deviasi')] deviasi == 0
         self._tnum = None                 # cache pd.to_numeric(Tanggal)
+        self._tnum_data = None             # FIX D-01: identitas objek data milik _tnum
+        # FIX B-08 (audit 2-b): sort saat render batch → ANTRE (bukan dibuang
+        # senyap) — pola _pending_sort komparasi/laporan v3.9.5.
+        self._pending_sort = None
 
         self._build_ui()
         self._setup_tags()
@@ -369,10 +392,20 @@ class DeviasiView(tk.Frame):
         # SharedPivotCache ter-lock, pivot tetap dihitung 1×).
         if self._h_state is not None:
             self._h_state.subscribe(self._on_shared_h_changed)
+            # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
+            # (pola laporan/komparasi/pareto) — tanpa ini listener tetap
+            # hidup bila suatu saat view direbuild (dobel-refresh zombie).
+            self.bind("<Destroy>", self._on_view_destroy, add="+")
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+
+    def _on_view_destroy(self, event):
+        if event.widget is not self:
+            return
+        if self._h_state is not None:
+            self._h_state.unsubscribe(self._on_shared_h_changed)
 
     # =========================================================================
     # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
@@ -560,22 +593,32 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     # PIVOT COMPUTATION (v3.2 — VEKTORISASI numpy, hasil identik versi lama)
     # =========================================================================
-    def _compute_pivot(self) -> pd.DataFrame:
-        if self.data is None or self.data.empty:
+    def _compute_pivot(self, data: pd.DataFrame | None = None,
+                       h: int | None = None) -> pd.DataFrame:
+        """FIX D-01 (audit 2-d): data/h bisa di-pass eksplisit (identitas
+        yang dicapture worker) — default membaca self.* (kompatibel
+        pemanggilan lama/test)."""
+        if data is None:
+            data = self.data
+        if h is None:
+            h = self.tanggal_h
+        if data is None or data.empty:
             return pd.DataFrame()
 
-        df = self.data
-        h = self.tanggal_h
+        df = data
 
         tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
         relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.OUT",
                           "8.BARANG KELUAR"]
 
         # cache to_numeric(Tanggal) per objek data (hindari recompute tiap H)
-        tnum = self._tnum
+        # FIX D-01: di-key IDENTITAS objek — reset/reset-silang dari main
+        # thread tidak bisa membuat cache milik data lain terpakai.
+        tnum = self._tnum if self._tnum_data is df else None
         if tnum is None:
             tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
             self._tnum = tnum
+            self._tnum_data = df
         mask = (df["JENIS"].isin(relevant_jenis)) & (tnum.isin(tanggal_range))
         df_filtered = df[mask].assign(Tanggal_num=tnum[mask].to_numpy())
 
@@ -764,6 +807,16 @@ class DeviasiView(tk.Frame):
         }
 
         def work():
+            # FIX D-01 (audit 2-d): capture data & H SEKALI di awal job.
+            # Dulu cache.get/put + _compute_pivot membaca self.data /
+            # self.tanggal_h BERULANG selama compute — main thread
+            # (load_data setelah pipeline / Apply H) bisa menukarnya di
+            # tengah → entry cache (data_baru, h_baru) berisi pivot
+            # (data_lama, h_lama) → refresh berikutnya HIT cache basi:
+            # angka pipeline LAMA tampil dengan data BARU, senyap.
+            # Kini seluruh operasi job memakai identitas pra-capture.
+            data = self.data
+            h = self.tanggal_h
             pivot = None
             cache = self._shared_cache
             if cache is not None:
@@ -771,15 +824,15 @@ class DeviasiView(tk.Frame):
                 # bisa refresh bersamaan (Apply H); tanpa lock kedua thread
                 # sama-sama miss → compute dobel + entry tertimpa.
                 with cache.lock:
-                    pivot = cache.get(self.data, self.tanggal_h)
+                    pivot = cache.get(data, h)
                     if pivot is None:
-                        pivot = self._compute_pivot()
+                        pivot = self._compute_pivot(data, h)
                         if pivot is not None:
-                            cache.put(self.data, self.tanggal_h, pivot)
+                            cache.put(data, h, pivot)
             else:
-                pivot = self._compute_pivot()
+                pivot = self._compute_pivot(data, h)
             self._cached_pivot = pivot
-            self._cached_h = self.tanggal_h
+            self._cached_h = h
             return self._prepare_rows(st)
 
         def done(payload):
@@ -974,6 +1027,13 @@ class DeviasiView(tk.Frame):
             if self._pending:
                 self._pending = False
                 self._refresh()
+            elif self._pending_sort:
+                # FIX B-08 (audit 2-b): mainkan sort yang mengantre saat
+                # render batch — dulu klik sort saat rendering dibuang
+                # SENYAP (tampak "tidak jalan").
+                col, rev = self._pending_sort
+                self._pending_sort = None
+                self._sort_by(col, reverse=rev)
 
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
@@ -997,12 +1057,17 @@ class DeviasiView(tk.Frame):
 
         def filter_setup(new_tree):
             # v3.6: funnel ⧩ + sort jalan juga di window besar
+            # FIX B-02 (audit 2-b): on_after_filter — tag minus per-cell
+            # dipasang ulang setelah filter clone REBUILD (delete+insert);
+            # fix v3.9.5 19-a #3 dulu hanya diterapkan di komparasi/laporan.
             attach_clone_filters(
                 new_tree,
                 [c[0] for c in self.COLUMNS if c[0] != "✓"],
                 get_values=self._col_values,
                 on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
-                                                               tree=t))
+                                                               tree=t),
+                on_after_filter=lambda t=new_tree:
+                    self._reapply_cell_tags(t))
 
         win, new_tree = open_tree_maximized(
             self.tree, f"Deviasi {mode_label} — CEK Anomaly",
@@ -1065,6 +1130,13 @@ class DeviasiView(tk.Frame):
             self.tanggal_h_var.set(str(new_h))
         if self._dirty:
             return          # belum pernah dirender — refresh saat tab dibuka
+        # FIX C-08 (audit 2-c): pane TIDAK terlihat → cukup _dirty (pola
+        # laporan/komparasi/pareto v3.9.5 audit 19-c #3) — dulu _prepare_rows
+        # + render penuh dijalankan untuk tab tersembunyi (pemborosan;
+        # pivot tetap 1× via SharedPivotCache, hanya render yang terbuang).
+        if not self.winfo_ismapped():
+            self._dirty = True
+            return
         if self.data is not None and not self.data.empty:
             self._refresh()
 
@@ -1121,6 +1193,10 @@ class DeviasiView(tk.Frame):
         v3.9.6: parser Indonesia utk kolom numerik + 'Dev to BOM%'
         (persen) — nilai format '1.234.567'/'(5,00)%' kini terurut benar."""
         if self._busy and tree is None:
+            # FIX B-08 (audit 2-b): sort saat render batch → ANTRE, bukan
+            # dibuang senyap (fix v3.9.5 19-b #6 dulu hanya sampai komparasi
+            # & laporan — view ini terlewat).
+            self._pending_sort = (col, reverse)
             return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
         numeric_like = col in (

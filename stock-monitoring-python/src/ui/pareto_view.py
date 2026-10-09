@@ -168,8 +168,11 @@ class ParetoDeviasiView(DeviasiView):
             var = tk.StringVar(value="-")
             self._kpi_vars[key] = var
             tk.Label(box, text=label, bg="#f1f5f9", fg=C_TEXT_MUTED,
-                     font=font(7, "bold")).pack(anchor="w", padx=10,
+                     font=font(9, "bold")).pack(anchor="w", padx=10,
                                                 pady=(4, 0))
+            # FIX A-06 (audit 2-a): label chip KPI font 7 → 9 (teks fungsional
+            # terkecil proyek = 9, FIX A-08 v3.9.1; dulu chip Pareto satu-
+            # satunya yang menyimpang — jauh lebih kecil dari KpiCard lain).
             tk.Label(box, textvariable=var, bg="#f1f5f9", fg=C_HEADER,
                      font=font(11, "bold")).pack(anchor="w", padx=10,
                                                  pady=(0, 4))
@@ -271,7 +274,7 @@ class ParetoDeviasiView(DeviasiView):
             self._h_state.subscribe(self._on_shared_h_changed)
             self.bind("<Destroy>", self._on_view_destroy, add="+")
 
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
 
     def _on_view_destroy(self, event):
@@ -728,7 +731,10 @@ class ParetoDeviasiView(DeviasiView):
     # SORT (kolom numerik pareto — parser Indonesia)
     # =========================================================================
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
+        # FIX B-08 (audit 2-b): sort saat render batch → ANTRE (pola
+        # _pending_sort — render_done diwarisi dari DeviasiView memainkannya).
         if self._busy and tree is None:
+            self._pending_sort = (col, reverse)
             return
         tree = tree if tree is not None else self.tree
         parse = self._parse_num_id if col in NUMERIC_COLS else None
@@ -740,12 +746,17 @@ class ParetoDeviasiView(DeviasiView):
     # =========================================================================
     def _maximize(self):
         def filter_setup(new_tree):
+            # FIX B-02 (audit 2-b): on_after_filter — tag minus/fokus
+            # per-cell dipasang ulang setelah filter clone REBUILD
+            # (mirror deviasi; fix v3.9.5 19-a #3 dulu terlewat di sini).
             attach_clone_filters(
                 new_tree,
                 [c[0] for c in self.COLUMNS if c[0] != "✓"],
                 get_values=self._col_values,
                 on_sort=lambda c, d, t=new_tree: self._sort_by(
-                    c, reverse=d, tree=t))
+                    c, reverse=d, tree=t),
+                on_after_filter=lambda t=new_tree:
+                    self._reapply_cell_tags(t))
 
         win, new_tree = open_tree_maximized(
             self.tree, "Pareto Deviasi — Kontributor Terbesar",
@@ -782,19 +793,20 @@ class ParetoDeviasiView(DeviasiView):
             self._export_overlay = LoadingOverlay(self.winfo_toplevel(),
                                                   "Mengekspor Pareto…")
         self._export_overlay.show("Mengekspor Pareto…", delay_ms=0)
-        self._btn_export.configure(state="disabled")
+        # FIX A-02 (audit 2-a): set_enabled — tombol disabled TAMPAK dim
+        self._btn_export.set_enabled(False)
 
         def work():
             return write_pareto_sheet(filepath, rows_raw, totals)
 
         def done(path):
-            self._btn_export.configure(state="normal")
+            self._btn_export.set_enabled(True)
             messagebox.showinfo(
                 "Export Berhasil", f"Pareto di-export ke:\n{path}",
                 parent=self.winfo_toplevel())
 
         def on_error(e):
-            self._btn_export.configure(state="normal")
+            self._btn_export.set_enabled(True)
             messagebox.showerror(
                 "Export Gagal", f"Tidak bisa export:\n{e}",
                 parent=self.winfo_toplevel())
