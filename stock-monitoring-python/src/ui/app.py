@@ -123,7 +123,7 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.6"  # v3.9.6 — kategori Deviasi di tab Deviasi GR/PCS + pembanding SO tgl 1 = SO bulan lalu + format Follow Up ala file sample
+APP_VERSION = "3.9.7"  # v3.9.7 — median Anomali COM ANTAR TANGGAL (koreksi user) + filter minggu Komparasi mengikuti H (STATUS BULAN)
 # v3.9.6 (3 permintaan user sekaligus):
 # (1) "tambah kategori Deviasi pada tab Deviasi PCS dan GR" — 5 kolom
 #     baru (mirror sheet DEVIASI GR/PCS workbook asli): Max Deviasi ·
@@ -181,8 +181,10 @@ APP_VERSION = "3.9.6"  # v3.9.6 — kategori Deviasi di tab Deviasi GR/PCS + pem
 # (1) Isi tab 📋 LAPORAN DEVIASI DIGANTI (sementara; tabel Audit Harian
 #     lama tersimpan di git history — commit e20141a): kini berisi DAFTAR
 #     (Nama Barang × Resto) dengan nilai PEMAKAIAN (COM) pada kolom H yang
-#     MINUS (< 0) atau LEBIH TINGGI dari MEDIAN barang tsb (median
-#     dihitung antar resto, per barang, pada kolom H).
+#     MINUS (< 0) atau LEBIH TINGGI dari MEDIAN pasangan tsb — v3.9.7
+#     (koreksi user): median dihitung ANTAR TANGGAL (com(t) tgl 1..H
+#     milik pasangan barang×resto; COM = pemakaian aktual harian di
+#     resto, BOM = pemakaian harian versi sistem), BUKAN antar resto.
 # (2) COM dihitung dgn formula identik baris 6.PEMAKAIAN (COM) di pivot
 #     mode Tanggal: com(t) = SO(t-1) + IN(t) - BK(t) - SO(t), tanggal
 #     pertama memakai SALDO AWAL. Matriks COM di-cache per data
@@ -426,6 +428,13 @@ TAB LAPORAN DEVIASI (v3.9.4 — 2 MODE, ganti lewat SegmentBar MODE)
     dibandingkan pada KOLOM H menurut minggunya (user: week 1 = 7,
     week 2 = 14, week = 25): WEEK 1→H 7 · WEEK 2→H 14 · WEEK 3/4→H 25
     (minggu file = CUT-OFF KUMULATIF dari tanggal 1).
+  • (v3.9.7) FILTER MINGGU MENGIKUTI H (STATUS BULAN dipakai utk
+    filter — user: "misal H aku input 7 maka hanya tampilkan week 1
+    aja"): hanya minggu yang MEMUAT H yang ditampilkan — H 1–7 →
+    WEEK 1 · H 8–14 → WEEK 2 · H 15–25 → WEEK 3/4 · H 26–31 →
+    WEEK 5. H diatur di tab 📦 Deviasi GR (chip read-only + ikut
+    refresh otomatis). File tanpa minggu tsb → 0 baris + daftar
+    minggu file. Centang "Tampilkan semua minggu" utk semua minggu.
   • KOLOM PER BANDING: BOM/COM/DEVIASI/%TO BOM — File (nilai resmi) vs
     BOM/COM/DEV TO BOM — App (BOM = Σ penjualan 22.05 / "2205 itu BOM",
     COM = Σ pemakaian, formula pivot 6.PEMAKAIAN (COM)) + DEVIASI — App
@@ -443,8 +452,10 @@ TAB LAPORAN DEVIASI (v3.9.4 — 2 MODE, ganti lewat SegmentBar MODE)
     tanggal H minggu tsb.
   • 🚨 ANOMALI COM (v3.9.3 — masih ada, tinggal ganti segmen): daftar
     Nama Barang × Resto dengan PEMAKAIAN (COM) pada kolom H yang MINUS
-    (< 0) atau LEBIH TINGGI dari MEDIAN barang tsb (median antar resto,
-    per barang, di kolom H); H shared dari tab 📦 Deviasi GR (chip
+    (< 0) atau LEBIH TINGGI dari MEDIAN com harian pasangan tsb
+    (v3.9.7 koreksi user: median ANTAR TANGGAL 1..H — com = pemakaian
+    aktual harian di resto vs pola hariannya sendiri; heading kolom
+    "Median (1..H)"); H shared dari tab 📦 Deviasi GR (chip
     read-only + auto-refresh). Tabel Audit Harian lama (6 Status Audit)
     tersimpan di git history (commit e20141a).
 
@@ -1306,7 +1317,8 @@ class StockMonitorApp:
             followup_store=self.followup_store,
             initial_dir=(self.rootpath_var.get().strip()
                          if getattr(self, "rootpath_var", None) is not None
-                         else ""))
+                         else ""),
+            h_state=self._shared_h)   # v3.9.7: filter minggu file
         self.laporan_view = LaporanDeviasiView(
             self._laporan_container,
             go_to_proses=lambda: self.notebook.select(self.tab_proses),

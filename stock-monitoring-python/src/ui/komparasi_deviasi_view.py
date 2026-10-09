@@ -45,6 +45,17 @@ lengkap, 2205 itu BOM"):
 VERDIK: Selisih = GR·App − DEV·File → Status MATCH (dalam toleransi) /
 SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA DI DATA.
 
+v3.9.7 — FILTER MINGGU MENGIKUTI H BERSAMA (permintaan user:
+"STATUS BULAN itu berguna buat filter. misal H aku input 7 maka
+hanya tampilkan week 1 aja"): view kini berlangganan SharedTanggalH
+(chip read-only, pola tab Anomali COM). Rentang minggu yang MEMUAT H:
+    H 1–7 → WEEK 1 (cut-off 7)      H 8–14  → WEEK 2 (cut-off 14)
+    H 15–25 → WEEK 3/4 (cut-off 25) H 26–31 → WEEK 5 (cut-off 31)
+Default: hanya baris minggu tsb yang tampil (chip minggu aktif
+di-highlight). Centang "Tampilkan semua minggu" utk perilaku lama.
+File tanpa minggu tsb → 0 baris + pesan jujur (minggu di file
+didaftar).
+
 RESTO: file memakai kode bercabang ("1041.BDGUKU", "B.1001.MLGPAR") —
 dinormalkan ke segmen setelah titik terakhir ("BDGUKU") lalu dicocokkan
 ke NAMA RESTO data app (upper + strip).
@@ -108,6 +119,23 @@ WEEK_TO_H = {
     "WEEK 3": 25,   # user: "week = 25"
     "WEEK 4": 25,   # file sampel memakai WEEK 4 utk cut-off 25
 }
+
+
+def _h_to_week_target(h: int) -> int:
+    """v3.9.7: H input → CUT-OFF minggu yang MEMUAT tanggal H
+    (minggu file = rentang kumulatif dari tanggal 1):
+        H 1–7 → 7 (WEEK 1) · H 8–14 → 14 (WEEK 2) ·
+        H 15–25 → 25 (WEEK 3/4) · H 26–31 → 31 (WEEK 5)
+    Total: semua H 1..31 terpetakan (H=7 → WEEK 1 persis permintaan
+    user "H aku input 7 maka hanya tampilkan week 1")."""
+    h = int(h)
+    if h <= 7:
+        return 7
+    if h <= 14:
+        return 14
+    if h <= 25:
+        return 25
+    return 31
 
 # Toleransi MATCH: |selisih| <= TOL_ABS + TOL_REL * |nilai file|
 TOL_ABS = 1.0
@@ -343,12 +371,17 @@ class KomparasiDeviasiView(tk.Frame):
 
     def __init__(self, parent, go_to_proses: Callable | None = None,
                  followup_store: FollowUpStore | None = None,
-                 initial_dir: str = ""):
+                 initial_dir: str = "", h_state=None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
         self.store = followup_store
         self._initial_dir = initial_dir
+        # v3.9.7: TANGGAL H = state bersama (dari tab 📦 Deviasi GR) —
+        # dipakai FILTER MINGGU file (H=7 → hanya WEEK 1; pola chip
+        # read-only tab Anomali COM). Komparasi TIDAK punya input H.
+        self._h_state = h_state
+        self.tanggal_h = int(h_state.h) if h_state is not None else 25
         self._fp_map: dict[str, str] = {}
         self._row_snaps: dict[str, dict] = {}
         self._busy = False
@@ -380,6 +413,9 @@ class KomparasiDeviasiView(tk.Frame):
         self._pair_index: dict = {}
         # opsi tampilan
         self._show_all_resto = tk.BooleanVar(value=False)
+        # v3.9.7: filter minggu mengikuti H bersama (default AKTIF);
+        # checkbox "Tampilkan semua minggu" = perilaku lama (semua minggu)
+        self._show_all_weeks = tk.BooleanVar(value=False)
         # v3.9.2: minus merah PER CELL
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []      # [(iid, col)] nilai < 0
@@ -448,20 +484,55 @@ class KomparasiDeviasiView(tk.Frame):
         add_tooltip(self._btn_close, "Buang file deviasi dari perbandingan.")
         self._btn_close.configure(state="disabled")
 
-        # baris ke-2: chip pemetaan minggu→H + opsi resto
+        # baris ke-2: TANGGAL H (read-only, bersama) + filter minggu +
+        # opsi resto
         r2 = tk.Frame(fbody, bg=C_CARD)
         r2.pack(fill="x", pady=(6, 0))
-        tk.Label(r2, text="MINGGU → H", bg=C_CARD, fg=C_TEXT_MUTED,
+        tk.Label(r2, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self._week_chips = tk.Frame(r2, bg=C_CARD)
-        self._week_chips.pack(side="left", padx=(6, 16))
-        self._render_week_chips()
+        # v3.9.7: chip read-only — H dibagikan dari tab 📦 Deviasi GR
+        # (pola tab Anomali COM; komparasi tanpa input H sendiri)
+        self._h_chip_var = tk.StringVar(value=str(self.tanggal_h))
+        hchip = tk.Frame(r2, bg="#f1f5f9", highlightbackground="#e2e8f0",
+                         highlightthickness=1)
+        hchip.pack(side="left", padx=(6, 8))
+        tk.Label(hchip, textvariable=self._h_chip_var, bg="#f1f5f9",
+                 fg=C_ACCENT, font=font(11, "bold")).pack(
+            padx=10, pady=(2, 3))
+        add_tooltip(hchip, "Tanggal fokus H (read-only) — diatur di tab "
+                           "📦 Deviasi GR lewat tombol Apply H.\nv3.9.7: "
+                           "hanya minggu yang MEMUAT H yang ditampilkan "
+                           "(H 1–7 → WEEK 1 · 8–14 → WEEK 2 · "
+                           "15–25 → WEEK 3/4 · 26–31 → WEEK 5).\nSaat H "
+                           "diubah di tab GR, tabel ini ikut difilter "
+                           "otomatis.")
+        # label minggu aktif (dinamis — file & H)
+        self._week_filter_var = tk.StringVar(
+            value="belum ada file")
+        self._week_filter_label = tk.Label(
+            r2, textvariable=self._week_filter_var, bg=C_CARD,
+            fg=C_TEXT_MUTED, font=font(9), anchor="w")
+        self._week_filter_label.pack(side="left", padx=(2, 12))
+        add_tooltip(self._week_filter_label,
+                    "Minggu file yang ditampilkan utk H aktif "
+                    "(STATUS BULAN dipakai utk filter).")
+        self._chk_all_weeks = tk.Checkbutton(
+            r2, text="Tampilkan semua minggu", variable=self._show_all_weeks,
+            bg=C_CARD, fg=C_HEADER, font=font(9), selectcolor="#ffffff",
+            activebackground=C_CARD, activeforeground=C_HEADER,
+            command=self._on_option_changed)
+        self._chk_all_weeks.pack(side="left")
+        add_tooltip(self._chk_all_weeks,
+                    "Default (v3.9.7): hanya minggu yang memuat H aktif "
+                    "yang ditampilkan — mis. H=7 → WEEK 1 saja.\nCentang "
+                    "untuk menampilkan SEMUA minggu di file (perilaku "
+                    "sebelum v3.9.7).")
         self._chk_all = tk.Checkbutton(
             r2, text="Tampilkan resto di luar data app",
             variable=self._show_all_resto, bg=C_CARD, fg=C_HEADER,
             font=font(9), selectcolor="#ffffff", activebackground=C_CARD,
             activeforeground=C_HEADER, command=self._on_option_changed)
-        self._chk_all.pack(side="left")
+        self._chk_all.pack(side="left", padx=(16, 0))
         add_tooltip(self._chk_all,
                     "Default: hanya resto yang ADA di data app (mis. 20 "
                     "resto cek stock) yang ditampilkan.\nCentang untuk "
@@ -473,6 +544,15 @@ class KomparasiDeviasiView(tk.Frame):
         GhostButton(r2, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="right",
                                                      padx=(0, 6))
+
+        # baris ke-3: chip pemetaan minggu→H (minggu aktif di-highlight)
+        r3 = tk.Frame(fbody, bg=C_CARD)
+        r3.pack(fill="x", pady=(6, 0))
+        tk.Label(r3, text="MINGGU → H", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._week_chips = tk.Frame(r3, bg=C_CARD)
+        self._week_chips.pack(side="left", padx=(6, 16))
+        self._render_week_chips()
 
         # --- Tabel card ---
         tcard = Card(self.content)
@@ -562,21 +642,90 @@ class KomparasiDeviasiView(tk.Frame):
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
 
+        # v3.9.7: berlangganan perubahan H bersama (filter minggu file
+        # mengikuti H — "H aku input 7 maka hanya tampilkan week 1")
+        if self._h_state is not None:
+            self._h_state.subscribe(self._on_shared_h_changed)
+            # pola laporan_deviasi_view (audit 19-b #3): lepas listener
+            # saat view di-destroy (anti listener zombie)
+            self.bind("<Destroy>", self._on_view_destroy, add="+")
+
+    def _on_view_destroy(self, event):
+        """v3.9.7: lepas langganan H bersama saat view di-destroy
+        (hanya event utk view ini sendiri, bukan anak)."""
+        if event.widget is self and self._h_state is not None:
+            with contextlib.suppress(Exception):
+                self._h_state.unsubscribe(self._on_shared_h_changed)
+
+    # =========================================================================
+    # TANGGAL H BERSAMA (v3.9.7) — filter minggu file
+    # =========================================================================
+    def _on_shared_h_changed(self, new_h: int):
+        """Listener H bersama: H di-apply di tab 📦 Deviasi GR → chip H +
+        label minggu + highlight chip diperbarui, tabel di-refresh dgn
+        filter minggu baru (H=7 → WEEK 1 saja). Pane tersembunyi →
+        cukup dirty (pola audit 19-c #3 — tidak compute yang tak terlihat)."""
+        self.tanggal_h = int(new_h)
+        self._update_h_chip()
+        if self._dirty:
+            return          # belum pernah dirender — refresh saat terlihat
+        if not self.winfo_ismapped():
+            self._dirty = True   # tersembunyi — refresh saat terlihat lagi
+            return
+        if (self.data is not None and not self.data.empty
+                and self._file_df is not None):
+            self._refresh()
+
+    def _update_h_chip(self):
+        """Chip H + label minggu aktif + highlight chip minggu."""
+        if hasattr(self, "_h_chip_var"):
+            self._h_chip_var.set(str(self.tanggal_h))
+        self._update_week_filter_label()
+        self._render_week_chips()
+
+    def _update_week_filter_label(self):
+        """Label '→ minggu: WEEK X' di kartu filter (dinamis: file + H)."""
+        if not hasattr(self, "_week_filter_var"):
+            return
+        if self._file_df is None:
+            self._week_filter_var.set("belum ada file")
+        elif self._show_all_weeks.get():
+            self._week_filter_var.set(
+                "filter minggu NONAKTIF — semua minggu tampil")
+        else:
+            wt = _h_to_week_target(self.tanggal_h)
+            weeks = [w for w in (self._file_meta.get("weeks") or [])
+                     if _week_h(w) == wt]
+            if weeks:
+                self._week_filter_var.set(
+                    f"→ minggu: {', '.join(weeks)}")
+            else:
+                self._week_filter_var.set(
+                    f"→ minggu cut-off H {wt} TIDAK ADA di file")
+
     def _render_week_chips(self):
-        """Chip 'WEEK 1→H 7' sesuai minggu yang ada di file (atau default)."""
+        """Chip 'WEEK 1→H 7' sesuai minggu yang ada di file (atau default).
+        v3.9.7: minggu yang MEMUAT H aktif di-highlight teal (bila filter
+        minggu aktif)."""
         for c in self._week_chips.winfo_children():
             c.destroy()
         weeks = (self._file_meta.get("weeks")
                  or ["WEEK 1", "WEEK 2", "WEEK 4"])
+        wt = (None if self._show_all_weeks.get()
+              else _h_to_week_target(self.tanggal_h))
         for w in weeks:
             h = _week_h(w)
-            chip = tk.Frame(self._week_chips, bg="#f1f5f9",
-                            highlightbackground="#e2e8f0",
+            active = wt is not None and h is not None and int(h) == wt
+            bg = C_ACCENT if active else "#f1f5f9"
+            fg = "#ffffff" if active else C_ACCENT
+            chip = tk.Frame(self._week_chips, bg=bg,
+                            highlightbackground=(C_ACCENT if active
+                                                 else "#e2e8f0"),
                             highlightthickness=1)
             chip.pack(side="left", padx=(0, 6))
             tk.Label(chip, text=f"{w} → H {h if h is not None else '?'}",
-                     bg="#f1f5f9", fg=C_ACCENT,
-                     font=font(9, "bold")).pack(padx=8, pady=(2, 3))
+                     bg=bg, fg=fg, font=font(9, "bold")).pack(
+                padx=8, pady=(2, 3))
 
     def _update_headings(self):
         """Heading dua sisi (File vs App) — jelas dari mana angka berasal."""
@@ -650,6 +799,9 @@ class KomparasiDeviasiView(tk.Frame):
         self._refresh()
 
     def _on_option_changed(self):
+        # v3.9.7: label minggu + highlight chip ikut opsi semua-minggu
+        self._update_week_filter_label()
+        self._render_week_chips()
         self._refresh()
 
     def _show_empty(self):
@@ -765,6 +917,8 @@ class KomparasiDeviasiView(tk.Frame):
                 pass
         self._btn_close.configure(state="normal")
         self._render_week_chips()
+        # v3.9.7: label minggu aktif mengikuti file yang baru dimuat
+        self._update_week_filter_label()
         meta = self._file_meta
         info = (f"{meta['file_name']} · {meta['n_rows']} baris · "
                 f"{meta['n_resto']} resto · {', '.join(meta['weeks'])}")
@@ -800,6 +954,8 @@ class KomparasiDeviasiView(tk.Frame):
         self._file_label_var.set("Belum ada file dipilih.")
         self._file_label.configure(fg=C_TEXT_MUTED)
         self._render_week_chips()
+        # v3.9.7: label minggu kembali 'belum ada file'
+        self._update_week_filter_label()
         self.tree.delete(*self.tree.get_children())
         self._result_df = None
         self._neg_cells = []
@@ -1012,6 +1168,12 @@ class KomparasiDeviasiView(tk.Frame):
                 self._pending_path = parse_path
             return
         self._busy = True
+        # v3.9.7 FIX (ditemukan test §22): _dirty di-CLEAR saat refresh
+        # BERJALAN — dulu hanya ensure_refreshed yang me-clear →
+        # load_data saat PANE TERLIHAT me-render tabel tapi _dirty tetap
+        # True → listener H berikutnya salah menganggap 'belum pernah
+        # dirender' & SKIP refresh (tabel basi menampilkan minggu lama).
+        self._dirty = False
         # v3.9.5 (audit 19-a #1): gen naik tiap job — done() membuang job
         # yang kedaluwarsa (file ditutup/diganti/data baru).
         gen = self._render_gen = self._render_gen + 1
@@ -1019,6 +1181,10 @@ class KomparasiDeviasiView(tk.Frame):
         st = {
             "col_sel": {c: s for c, s in self._col_sel.items() if s},
             "show_all": bool(self._show_all_resto.get()),
+            # v3.9.7: filter minggu sesuai H bersama (None = semua minggu)
+            "week_target": (None if self._show_all_weeks.get()
+                            else _h_to_week_target(int(self.tanggal_h))),
+            "h_label": int(self.tanggal_h),
         }
         path = parse_path
 
@@ -1085,6 +1251,8 @@ class KomparasiDeviasiView(tk.Frame):
         v3.9.5: fdf/new_file diteruskan EKSPLISIT (bukan membaca
         self._file_df dari thread — mutasi UI thread di tengah compute
         = sumber race ✕ Tutup File).
+        v3.9.7: FILTER MINGGU sesuai H bersama diterapkan di sini
+        (st['week_target'] — None bila 'Tampilkan semua minggu').
         """
         fdf = new_file["df"] if new_file else self._file_df
         mats = self._cached_mats
@@ -1096,6 +1264,25 @@ class KomparasiDeviasiView(tk.Frame):
             return {"gen": gen, "items": [], "status":
                     "Data app tidak punya JENIS yang dibutuhkan "
                     "(SO / SALDO AKHIR / IN / OUT). Jalankan ulang pipeline."}
+
+        # v3.9.7 (permintaan user "misal H aku input 7 maka hanya
+        # tampilkan week 1 aja" — STATUS BULAN dipakai utk filter):
+        # hanya baris minggu yang MEMUAT H yang diproses/ditampilkan.
+        wt = st.get("week_target")
+        if wt is not None:
+            weeks_in_file = sorted(fdf["Minggu"].unique().tolist())
+            fdf = fdf[fdf["_h"] == wt]
+            if fdf.empty:
+                self._result_df = None
+                return {"gen": gen, "new_file": new_file, "items": [],
+                        "status": (
+                            f"0 baris — file tidak punya minggu cut-off "
+                            f"H {wt} (minggu di file: "
+                            f"{', '.join(weeks_in_file)}). Input H di "
+                            f"tab 📦 Deviasi GR (H sekarang "
+                            f"{st.get('h_label', wt)} → minggu cut-off "
+                            f"{wt}) atau centang 'Tampilkan semua "
+                            f"minggu'.")}
 
         col_keys = mats["col_keys"]
         avail_pos = sorted(int(float(t)) for t in col_keys
@@ -1309,6 +1496,12 @@ class KomparasiDeviasiView(tk.Frame):
 
         status = (f"{m} baris · MATCH: {n_match} · SELISIH: {n_sel} · "
                   f"H tdk ada: {n_noh} · di luar data app: {n_noapp}")
+        # v3.9.7: prefiks minggu aktif (filter minggu sesuai H)
+        if st.get("week_target") is not None:
+            wlabels = sorted({str(v) for v in filtered["Minggu"]})
+            if wlabels:
+                status = (f"Minggu {', '.join(wlabels)} (cut-off H "
+                          f"{st['week_target']}) · {status}")
         if n_hidden:
             status += (f" · {n_hidden} resto file disembunyikan "
                        f"(centang utk lihat)")

@@ -29,8 +29,9 @@ Memverifikasi:
 14. v3.4 — LEBAR KOLOM: drag tepi heading mengubah lebar (enable_col_
     resize), tombol ↔ Auto-Fit menyesuaikan lebar ke konten
 15. v3.9.3 — LAPORAN DEVIASI DIGANTI (sementara): daftar anomali pemakaian
-    (COM) per (Nama Barang × Resto) — COM minus atau > median barang
-    (median antar resto) pada kolom H; H shared dari tab Deviasi GR (chip
+    (COM) per (Nama Barang × Resto) — COM minus atau > median pasangan
+    (v3.9.7: median ANTAR TANGGAL 1..H, koreksi user — bukan antar resto)
+    pada kolom H; H shared dari tab Deviasi GR (chip
     read-only + auto-refresh); minus merah per-cell + sel Status merah/amber
 16. v3.9.4 — TAB LAPORAN DEVIASI 2 MODE (SegmentBar): ⚖ KOMPARASI FILE
     DEVIASI vs TAB DEVIASI GR (pilih file resmi; STATUS BULAN → kolom H:
@@ -45,6 +46,12 @@ Memverifikasi:
     ACR, Total ACR, Dev to BOM%, Stok Seharusnya) + CEK ke-5 "ACR to
     BOM" + pembanding SO tanggal 1 = SO bulan lalu terakhir + tabel/
     export Follow Up ala sheet Follow UP workbook asli.
+19. v3.9.7 — (§7) median Anomali COM ANTAR TANGGAL per pasangan (com =
+    pemakaian aktual harian di resto — koreksi user; window 1..H, heading
+    "Median (1..H)") + (§22) filter minggu Komparasi mengikuti H bersama
+    (STATUS BULAN utk filter: H 1–7 → WEEK 1, 8–14 → W2, 15–25 → W3/4,
+    26–31 → W5; chip H read-only + highlight chip minggu aktif + opsi
+    "Tampilkan semua minggu").
     (tanggal negatif + pair tanpa bulan-lalu — aljabar GR==DEV), race
     ✕ Tutup File saat compute, GC-shield dilepas walau pemilik job
     di-destroy, tag per-cell setelah filter di clone ⛶, duplikat lintas
@@ -69,7 +76,8 @@ from src.ui.app import StockMonitorApp, APP_VERSION
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.widgets import LoadingOverlay, HeaderFilter, run_async, \
     _GC_HOLD
-from src.ui.komparasi_deviasi_view import parse_deviasi_file, _norm_name
+from src.ui.komparasi_deviasi_view import (parse_deviasi_file, _norm_name,
+                                           _h_to_week_target)
 
 PASS = []
 FAIL = []
@@ -383,7 +391,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.6", APP_VERSION == "3.9.6", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.7", APP_VERSION == "3.9.7", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -742,11 +750,20 @@ def main():
     check("(v3.5) HeaderFilterGroup terpasang (semua kolom)",
           hasattr(lap, "header_filters") and len(lap._col_sel) >= 7)
 
-    # mock data: com H=10 identik antar resto (hash per-barang, bukan
-    # per-resto) → 0 anomali = perilaku benar (status jujur, bukan error)
-    check("(v3.9.3) Mock simetris di H=10 → 0 anomali + pesan jujur",
-          n_all == 0 and "0 baris" in lap.status_var_label.get(),
-          f"got {n_all} / {lap.status_var_label.get()!r}")
+    # v3.9.7: median ANTAR TANGGAL per pasangan — mock com(10)=4
+    # (IN(10)=5, SO diff −1) vs median com(1..10) = −1 → pasangan
+    # pemakai '> MEDIAN' (BARANG ACR com(10)=0 == median 0 → tidak)
+    _st_h10 = {lap.tree.set(k, "Status") for k in lap.tree.get_children("")}
+    check("(v3.9.7) Mock H=10 → 9 baris '> MEDIAN' (median antar tanggal)",
+          n_all == 9 and _st_h10 == {"> MEDIAN"},
+          f"got {n_all} / {sorted(_st_h10)}")
+    check("(v3.9.7) Median kolom = median com(1..10) pasangan (−1 → '(1)')",
+          all(lap.tree.set(k, "Median") == "(1)"
+              for k in lap.tree.get_children("")),
+          f"got {sorted({lap.tree.set(k, 'Median') for k in lap.tree.get_children('')})[:4]}")
+    check("(v3.9.7) Heading Median dinamis 'Median (1..10)'",
+          lap.tree.heading("Median")["text"] == "Median (1..10)",
+          f"got {lap.tree.heading('Median')['text']!r}")
 
     # anomali mock: AYAM FILET MLGPAR SO(25)=80 → com(25) besar negatif;
     # Apply H=25 di GR → laporan ikut refresh otomatis (shared H)
@@ -755,13 +772,17 @@ def main():
     wait_view(root, app.deviasi_gr_view)
     wait_view(root, lap)
     n_h25 = len(lap.tree.get_children(""))
-    check("(v3.9.3) H=25 (anomali mock) → 2 baris: MLGPAR MINUS + "
-          "SBYKET > MEDIAN", n_h25 == 2, f"got {n_h25}")
-    if n_h25 == 2:
+    # v3.9.7: 10 pasangan — AYAM MLGPAR MINUS (com(25)=h−62), sisanya
+    # '> MEDIAN' (com(25)=4 > median −1; BARANG ACR 100 > median 0)
+    check("(v3.9.3) H=25 (anomali mock) → 10 baris: MLGPAR MINUS + 9 "
+          "> MEDIAN", n_h25 == 10, f"got {n_h25}")
+    if n_h25 >= 2:
         a_mlg = [k for k in lap.tree.get_children("")
-                 if lap.tree.set(k, "Resto") == "MLGPAR"]
+                 if lap.tree.set(k, "Resto") == "MLGPAR" and
+                 lap.tree.set(k, "Nama Barang") == "AYAM FILET"]
         a_sby = [k for k in lap.tree.get_children("")
-                 if lap.tree.set(k, "Resto") == "SBYKET"]
+                 if lap.tree.set(k, "Resto") == "SBYKET" and
+                 lap.tree.set(k, "Nama Barang") == "AYAM FILET"]
         ok_mlg = (len(a_mlg) == 1 and
                   lap.tree.set(a_mlg[0], "Nama Barang") == "AYAM FILET" and
                   lap.tree.set(a_mlg[0], "Status") == "MINUS" and
@@ -770,8 +791,8 @@ def main():
                   lap.tree.set(a_sby[0], "Status") == "> MEDIAN")
         check("(v3.9.3) AYAM FILET/MLGPAR → MINUS (com negatif '(…)')",
               ok_mlg, f"got {[lap.tree.set(k, 'Status') for k in a_mlg]}")
-        check("(v3.9.3) AYAM FILET/SBYKET → > MEDIAN (median tertarik "
-              "anomali)", ok_sby,
+        check("(v3.9.3) AYAM FILET/SBYKET → > MEDIAN (com 4 > median "
+              "antar tanggal −1)", ok_sby,
               f"got {[lap.tree.set(k, 'Status') for k in a_sby]}")
     # kembali ke H=10 utk blok data deterministik
     app.deviasi_gr_view.tanggal_h_var.set("10")
@@ -780,82 +801,93 @@ def main():
     wait_view(root, lap)
 
     # ---- data deterministik: median / flag / status bisa dihitung tangan ----
-    # com(H=10) = SO(9) − SO(10) (IN=BK=0) → kontrol via pasangan SO.
+    # v3.9.7: median ANTAR TANGGAL per pasangan — kontrol via deret SO
+    # (SA + SO 1..10, IN=BK=0): com(1)=SA−SO(1), com(t)=SO(t−1)−SO(t).
+    # com(1..10) per pasangan (SO = 100 − Σcom(1..t)):
+    #   TEH MELATI  R1 = [5×9, 8]     → median 5,  com(10)=8   → > MEDIAN
+    #   TEH MELATI  R2 = [5×10]       → median 5,  com(10)=5   → TIDAK ter-flag
+    #   KOPI        R1 = [5×9, −5]    → median 5,  com(10)=−5  → MINUS
+    #   KOPI        R2 = [5×9, 100]   → median 5,  com(10)=100 → > MEDIAN
+    #   GULA AREN   R1 = [−30×9, −10] → median −30, com(10)=−10 → MINUS + > MEDIAN
     det_rows = []
+
+    def _sa(barang, resto, val):
+        det_rows.append({"Nama Barang": barang, "JENIS": "SALDO AWAL",
+                         "NAMA RESTO": resto, "Tanggal": 1, "NILAI": val,
+                         "SATUAN": "GR"})
 
     def _so(barang, resto, t, val):
         det_rows.append({"Nama Barang": barang, "JENIS": "1.SO",
                          "NAMA RESTO": resto, "Tanggal": t, "NILAI": val,
                          "SATUAN": "GR"})
 
-    # com @H=10: TEH MELATI = [10, 20, 30] → median 20 → flag: 30 (> MEDIAN)
-    for rs, com in [("R1", 10.0), ("R2", 20.0), ("R3", 30.0)]:
-        _so("TEH MELATI", rs, 9, 100.0)
-        _so("TEH MELATI", rs, 10, 100.0 - com)
-    # KOPI ROBUSTA = [-5, -15, 100] → median -5 → flag: -5, -15 (MINUS), 100
-    for rs, com in [("R1", -5.0), ("R2", -15.0), ("R3", 100.0)]:
-        _so("KOPI ROBUSTA", rs, 9, 100.0)
-        _so("KOPI ROBUSTA", rs, 10, 100.0 - com)
-    # GULA AREN = [-30, -10] → median -20 → flag: -30 (MINUS),
-    # -10 (MINUS + > MEDIAN karena -10 > -20)
-    for rs, com in [("R1", -30.0), ("R2", -10.0)]:
-        _so("GULA AREN", rs, 9, 100.0)
-        _so("GULA AREN", rs, 10, 100.0 - com)
+    def _com_series(barang, resto, series):
+        _sa(barang, resto, 100.0)
+        so = 100.0
+        for t, c in enumerate(series, start=1):
+            so -= c
+            _so(barang, resto, t, so)
+
+    _com_series("TEH MELATI", "R1", [5.0] * 9 + [8.0])
+    _com_series("TEH MELATI", "R2", [5.0] * 10)
+    _com_series("KOPI ROBUSTA", "R1", [5.0] * 9 + [-5.0])
+    _com_series("KOPI ROBUSTA", "R2", [5.0] * 9 + [100.0])
+    _com_series("GULA AREN", "R1", [-30.0] * 9 + [-10.0])
     lap.load_data(pd.DataFrame(det_rows))
     wait_view(root, lap)
     n_det = len(lap.tree.get_children(""))
-    check("(v3.9.3) Baris deterministik = 6 (1+3+2)",
-          n_det == 6, f"got {n_det}")
+    check("(v3.9.7) Baris deterministik = 4 (median antar tanggal)",
+          n_det == 4, f"got {n_det}")
 
     def _rowval(i, col):
         return lap.tree.set(lap.tree.get_children("")[i], col)
 
     # sort default: barang asc, COM desc →
-    # GULA AREN(-10, -30), KOPI ROBUSTA(100, -5, -15), TEH MELATI(30)
-    check("(v3.9.3) COM -10 (GULA AREN R2) tampil '(10)'",
+    # GULA AREN(−10), KOPI ROBUSTA(100, −5), TEH MELATI(8)
+    check("(v3.9.7) COM -10 (GULA AREN R1) tampil '(10)'",
           _rowval(0, "COM") == "(10)", f"got {_rowval(0, 'COM')!r}")
-    check("(v3.9.3) Status 'MINUS + > MEDIAN' (-10 > median -20)",
+    check("(v3.9.7) Status 'MINUS + > MEDIAN' (−10 > median −30)",
           _rowval(0, "Status") == "MINUS + > MEDIAN",
           f"got {_rowval(0, 'Status')!r}")
-    check("(v3.9.3) COM -30 → '(30)' + status MINUS",
-          _rowval(1, "COM") == "(30)" and _rowval(1, "Status") == "MINUS",
-          f"got {_rowval(1, 'COM')!r}/{_rowval(1, 'Status')!r}")
-    check("(v3.9.3) Median kolom = nilai median barang (-20 → '(20)')",
-          _rowval(0, "Median") == "(20)", f"got {_rowval(0, 'Median')!r}")
-    check("(v3.9.3) Selisih vs Median = COM - median",
-          _rowval(0, "Selisih vs Median") == "10",
+    check("(v3.9.7) Median = median com(1..10) pasangan (−30 → '(30)')",
+          _rowval(0, "Median") == "(30)", f"got {_rowval(0, 'Median')!r}")
+    check("(v3.9.7) Selisih vs Median = COM − median (−10−(−30) = 20)",
+          _rowval(0, "Selisih vs Median") == "20",
           f"got {_rowval(0, 'Selisih vs Median')!r}")
-    check("(v3.9.3) KOPI 100 → '> MEDIAN'",
-          _rowval(2, "COM") == "100" and _rowval(2, "Status") == "> MEDIAN",
+    check("(v3.9.7) KOPI 100 → '> MEDIAN' (median 5)",
+          _rowval(1, "COM") == "100" and _rowval(1, "Status") == "> MEDIAN",
+          f"got {_rowval(1, 'COM')!r}/{_rowval(1, 'Status')!r}")
+    check("(v3.9.7) KOPI -5 → '(5)' + status MINUS",
+          _rowval(2, "COM") == "(5)" and _rowval(2, "Status") == "MINUS",
           f"got {_rowval(2, 'COM')!r}/{_rowval(2, 'Status')!r}")
-    check("(v3.9.3) TEH 30 → '> MEDIAN' (median 20)",
-          _rowval(5, "COM") == "30" and _rowval(5, "Status") == "> MEDIAN",
-          f"got {_rowval(5, 'COM')!r}/{_rowval(5, 'Status')!r}")
+    check("(v3.9.7) TEH 8 → '> MEDIAN' (median 5)",
+          _rowval(3, "COM") == "8" and _rowval(3, "Status") == "> MEDIAN",
+          f"got {_rowval(3, 'COM')!r}/{_rowval(3, 'Status')!r}")
     teh_coms = [lap.tree.set(k, "COM")
                 for k in lap.tree.get_children("")
                 if lap.tree.set(k, "Nama Barang") == "TEH MELATI"]
-    check("(v3.9.3) TEH MELATI: hanya com=30 tampil (10/20 tidak ter-flag)",
-          teh_coms == ["30"], f"got {teh_coms}")
+    check("(v3.9.7) TEH MELATI R2 com(10)=5 == median → TIDAK ter-flag",
+          teh_coms == ["8"], f"got {teh_coms}")
 
-    # minus merah PER CELL (v3.9.2 berlanjut): 4 baris minus → 4 cell COM
-    check("(v3.9.3) neg_cells: 4 cell COM minus",
-          len(lap._neg_cells) == 4 and
+    # minus merah PER CELL (v3.9.2 berlanjut): 2 baris minus → 2 cell COM
+    check("(v3.9.3) neg_cells: 2 cell COM minus",
+          len(lap._neg_cells) == 2 and
           all(c[1] == "COM" for c in lap._neg_cells),
           f"got {lap._neg_cells}")
-    check("(v3.9.3) sel Status minus 4 / above 2 (per-cell warna)",
-          len(lap._st_minus_cells) == 4 and len(lap._st_above_cells) == 2,
+    check("(v3.9.3) sel Status minus 2 / above 2 (per-cell warna)",
+          len(lap._st_minus_cells) == 2 and len(lap._st_above_cells) == 2,
           f"got {len(lap._st_minus_cells)}/{len(lap._st_above_cells)}")
 
     # header filter Status = 'MINUS' → kecocokan nilai TERFORMAT (exact):
-    # GULA -30, KOPI -5, KOPI -15 (3 baris; 'MINUS + > MEDIAN' ≠ 'MINUS')
+    # hanya KOPI R1 (status 'MINUS + > MEDIAN' ≠ 'MINUS')
     lap._on_col_filter("Status", {"MINUS"})
     wait_view(root, lap)
-    check("(v3.5) Header filter Status='MINUS' → 3 baris",
-          len(lap.tree.get_children("")) == 3,
+    check("(v3.5) Header filter Status='MINUS' → 1 baris",
+          len(lap.tree.get_children("")) == 1,
           f"got {len(lap.tree.get_children(''))}")
-    lap._on_col_filter("Nama Barang", {"GULA AREN"})
+    lap._on_col_filter("Nama Barang", {"KOPI ROBUSTA"})
     wait_view(root, lap)
-    check("(v3.5) Header filter Nama Barang GULA AREN → 1 row",
+    check("(v3.5) Header filter Nama Barang KOPI ROBUSTA → 1 row",
           len(lap.tree.get_children("")) == 1)
     lap._reset_filter()
     wait_view(root, lap)
@@ -869,17 +901,18 @@ def main():
     wait_view(root, lap)
     check("(v3.9.3) Apply H=9 di tab GR → laporan ikut (chip + heading)",
           lap.tanggal_h == 9 and lap._h_chip_var.get() == "9" and
-          lap.tree.heading("COM")["text"] == "COM (H=9)",
+          lap.tree.heading("COM")["text"] == "COM (H=9)" and
+          lap.tree.heading("Median")["text"] == "Median (1..9)",
           f"got H={lap.tanggal_h}")
-    # com(H=9) = SA(9) + 0 - 0 - SO(9) = -100 semua → 8 baris MINUS
+    # v3.9.7: window 1..9 → com(9) == median utk semua pasangan kecuali
+    # GULA AREN (com(9)=−30 < 0) → 1 baris MINUS
     n_h9 = len(lap.tree.get_children(""))
-    check("(v3.9.3) H=9: COM = -100 semua pasangan → 8 baris MINUS",
-          n_h9 == 8, f"got {n_h9}")
-    ok_all_minus = all(
-        lap.tree.set(k, "Status").startswith("MINUS")
-        for k in lap.tree.get_children(""))
-    check("(v3.9.3) H=9: seluruh baris status MINUS", ok_all_minus)
-    # kembalikan data mock; H=25 (anomali AYAM FILET → 2 baris) supaya
+    _h9_status = [lap.tree.set(k, "Status")
+                  for k in lap.tree.get_children("")]
+    check("(v3.9.7) H=9: 1 baris MINUS (GULA com(9)=−30, == median)",
+          n_h9 == 1 and _h9_status == ["MINUS"],
+          f"got {n_h9} {_h9_status}")
+    # kembalikan data mock; H=25 (anomali AYAM FILET → 10 baris) supaya
     # section 11 (klik ✓ follow-up dari Laporan) punya baris
     lap.load_data(append1)
     wait_view(root, lap)
@@ -890,8 +923,8 @@ def main():
     app.deviasi_gr_view._on_tanggal_h_change()
     wait_view(root, app.deviasi_gr_view)
     wait_view(root, lap)
-    check("(v3.9.3) Mock + H=25 → 2 baris anomali (baris utk section 11)",
-          len(lap.tree.get_children("")) == 2,
+    check("(v3.9.7) Mock + H=25 → 10 baris anomali (baris utk section 11)",
+          len(lap.tree.get_children("")) == 10,
           f"got {len(lap.tree.get_children(''))}")
 
     print("== 8. Rincian PO (v3.9 — layout ringkas) ==")
@@ -2486,6 +2519,79 @@ def main():
 
     xlsx_path = make_mock_deviasi_file()
     kv._load_file(xlsx_path)
+    wait_view(root, kv)
+
+    # --- (v3.9.7) FILTER MINGGU MENGIKUTI H BERSAMA (default aktif) ---
+    # H bersama saat ini 25 (dari §7) → minggu yang MEMUAT H = WEEK 4
+    # (cut-off 25) → hanya baris GULA PASIR/MLGPAR WEEK 4 yang tampil
+    from src.ui.theme import C_ACCENT as _C_ACCENT
+    n_w4 = len(kv.tree.get_children(""))
+    _kv_rows_w4 = [(kv.tree.set(k, "Minggu"),
+                    kv.tree.set(k, "Nama Barang"))
+                   for k in kv.tree.get_children("")]
+    check("(v3.9.7) Default H=25 → hanya minggu WEEK 4 (1 baris GULA "
+          "PASIR)", n_w4 == 1 and _kv_rows_w4 == [("WEEK 4", "GULA PASIR")],
+          f"got {n_w4} {_kv_rows_w4}")
+    check("(v3.9.7) Chip H komparasi read-only = 25 (ikut tab GR)",
+          kv._h_chip_var.get() == "25" and not hasattr(kv, "tanggal_h_var"),
+          f"got {kv._h_chip_var.get()!r}")
+    check("(v3.9.7) Label minggu aktif '→ minggu: WEEK 4'",
+          "WEEK 4" in kv._week_filter_var.get(),
+          f"got {kv._week_filter_var.get()!r}")
+    check("(v3.9.7) Footer prefiks minggu aktif (cut-off H 25)",
+          "Minggu WEEK 4" in kv.status_var_label.get() and
+          "cut-off H 25" in kv.status_var_label.get(),
+          f"got {kv.status_var_label.get()!r}")
+    _chip_bgs = [c.cget("bg") for c in kv._week_chips.winfo_children()]
+    check("(v3.9.7) Chip minggu aktif WEEK 4 di-highlight teal",
+          _chip_bgs.count(_C_ACCENT) == 1 and _chip_bgs[2] == _C_ACCENT,
+          f"got {_chip_bgs}")
+    check("(v3.9.7) Mapping H→minggu: 7→7 · 8..14→14 · 15..25→25 · 26→31",
+          _h_to_week_target(7) == 7 and _h_to_week_target(8) == 14 and
+          _h_to_week_target(14) == 14 and _h_to_week_target(15) == 25 and
+          _h_to_week_target(25) == 25 and _h_to_week_target(26) == 31 and
+          _h_to_week_target(31) == 31)
+
+    # H=7 (input di tab GR, permintaan user) → hanya WEEK 1
+    app.deviasi_gr_view.tanggal_h_var.set("7")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
+    wait_view(root, kv)
+    _minggu_vals = {kv.tree.set(k, "Minggu")
+                    for k in kv.tree.get_children("")}
+    check("(v3.9.7) H=7 → hanya baris WEEK 1 (3 baris: 2 resto AYAM + "
+          "barang tak ada)",
+          len(kv.tree.get_children("")) == 3 and _minggu_vals == {"WEEK 1"},
+          f"got {len(kv.tree.get_children(''))} {sorted(_minggu_vals)}")
+    check("(v3.9.7) Chip H ikut 7 + label minggu WEEK 1",
+          kv._h_chip_var.get() == "7" and
+          "WEEK 1" in kv._week_filter_var.get(),
+          f"got {kv._h_chip_var.get()!r} / {kv._week_filter_var.get()!r}")
+
+    # H=14 → hanya WEEK 2 (1 baris MLGPAR AYAM)
+    app.deviasi_gr_view.tanggal_h_var.set("14")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
+    wait_view(root, kv)
+    _kv_h14 = [(kv.tree.set(k, "Minggu"), kv.tree.set(k, "H"))
+               for k in kv.tree.get_children("")]
+    check("(v3.9.7) H=14 → hanya WEEK 2 (1 baris, kolom H=14)",
+          _kv_h14 == [("WEEK 2", "14")], f"got {_kv_h14}")
+
+    # centang 'Tampilkan semua minggu' → semua minggu (perilaku lama)
+    kv._show_all_weeks.set(True)
+    kv._on_option_changed()
+    wait_view(root, kv)
+    check("(v3.9.7) Centang semua minggu → label NONAKTIF + semua baris",
+          "NONAKTIF" in kv._week_filter_var.get() and
+          len(kv.tree.get_children("")) == 6,
+          f"got {kv._week_filter_var.get()!r} / "
+          f"{len(kv.tree.get_children(''))}")
+    # kembalikan H=25 (state akhir §7) — blok lama berjalan mode semua
+    # minggu agar cek 6-baris/per-minggu tetap valid
+    app.deviasi_gr_view.tanggal_h_var.set("25")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
     wait_view(root, kv)
 
     n_kv = len(kv.tree.get_children(""))

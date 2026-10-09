@@ -9,8 +9,11 @@ Isi tab 📋 Laporan Deviasi DIGANTI (sementara — tabel Audit Harian versi
 lama tersimpan di git history, commit e20141a / v3.9.2, siap dipulihkan
 bila dibutuhkan):
 - Baris = (Nama Barang × Nama Resto) yang nilai PEMAKAIAN (COM) pada
-  kolom H MINUS (< 0) atau LEBIH TINGGI dari MEDIAN COM barang tersebut
-  — median dihitung antar resto untuk barang yang sama, pada kolom H.
+  kolom H MINUS (< 0) atau LEBIH TINGGI dari MEDIAN COM pasangan tsb.
+  v3.9.7 (koreksi user): median dihitung ANTAR TANGGAL — median com(t)
+  tgl 1..H milik pasangan itu sendiri (COM = pemakaian aktual harian di
+  resto, BOM = pemakaian harian versi sistem → pembanding yang tepat =
+  pola pemakaian harian pasangan tsb, BUKAN antar resto).
 - COM dihitung dgn formula yang sama dgn baris "6.PEMAKAIAN (COM)" di
   tab 📊 Pivot (mode Tanggal, port dari M code):
       com(t) = SO(t-1) + IN(t) - BK(t) - SO(t)
@@ -19,7 +22,8 @@ bila dibutuhkan):
   📦 Deviasi GR; tab ini menampilkan chip read-only + auto-refresh saat
   H berubah (tanpa double input).
 - Kolom: ✓ follow-up · Nama Barang · Resto · Satuan · COM (heading
-  dinamis "COM (H=25)") · Median · Selisih vs Median · Status
+  dinamis "COM (H=25)") · Median (heading dinamis "Median (1..25)" —
+  window antar tanggal) · Selisih vs Median · Status
   (MINUS / > MEDIAN / MINUS + > MEDIAN).
 - Minus merah PER CELL (v3.9.2 — Tk 9 `tag cell`; fallback Tk 8 =
   tag per baris); sel Status diberi warna per-cell (merah / amber).
@@ -137,8 +141,10 @@ class LaporanDeviasiView(tk.Frame):
         fcard = Card(
             self.content, title="Filter",
             subtitle="Daftar barang × resto dengan pemakaian (COM) MINUS "
-                     "atau LEBIH TINGGI dari MEDIAN barang tsb pada kolom H "
-                     "(median antar resto, per barang). Tanggal H diatur di "
+                     "atau LEBIH TINGGI dari MEDIAN com harian pasangan "
+                     "tsb pada kolom H (v3.9.7: median ANTAR TANGGAL 1..H — "
+                     "com = pemakaian aktual harian di resto vs pola "
+                     "harianya sendiri). Tanggal H diatur di "
                      "tab 📦 Deviasi GR. Filter kolom lain → klik judul "
                      "kolom (ikon corong ⧩) di tabel. Sort default: Nama "
                      "Barang lalu COM terbesar.")
@@ -533,6 +539,12 @@ class LaporanDeviasiView(tk.Frame):
             self._pending = True
             return
         self._busy = True
+        # v3.9.7 FIX (bareng komparasi): _dirty di-CLEAR saat refresh
+        # BERJALAN — dulu hanya ensure_refreshed yang me-clear →
+        # load_data saat tab TERLIHAT me-render tabel tapi _dirty tetap
+        # True → listener H berikutnya skip refresh (potensi tabel basi;
+        # latent di view ini sejak v3.9.3, terpicu di komparasi §22).
+        self._dirty = False
         # v3.9.5 (audit 19-a #1): gen naik tiap job — done() membuang job
         # kedaluwarsa (data berganti lewat load_data saat compute jalan)
         gen = self._render_gen = self._render_gen + 1
@@ -576,8 +588,12 @@ class LaporanDeviasiView(tk.Frame):
         self.status_var_label.set(f"⚠ Gagal menghitung COM: {err}")
 
     def _prepare_rows(self, st: dict, gen: int = 0) -> dict:
-        """Pure pandas: pilih kolom H, median per barang (antar resto),
-        flag minus / > median, filter header → items tree (thread-safe)."""
+        """Pure pandas: pilih kolom H, median per pasangan ANTAR TANGGAL
+        (com(t) tgl 1..H), flag minus / > median, filter header → items
+        tree (thread-safe).
+
+        v3.9.7 (koreksi user): median tadinya antar resto per barang —
+        kini antar tanggal per pasangan (barang × resto)."""
         com = self._cached_com
         if com is None or com.empty:
             self._result_df = None
@@ -594,13 +610,23 @@ class LaporanDeviasiView(tk.Frame):
                     f"Kolom H={h} tidak ada di data — tanggal tersedia "
                     f"{lo} s/d {hi}. Atur H di tab 📦 Deviasi GR."}
 
-        df = (com[h].rename("COM").reset_index()
+        # v3.9.7 (koreksi user): MEDIAN ANTAR TANGGAL per pasangan —
+        # median com(t) utk t = 1..H (window bulan berjalan s/d cut-off;
+        # nilai com berasal dari matrix yang sama dgn kolom COM).
+        pos_cols = [c for c in com.columns
+                    if isinstance(c, (int, float)) and 1 <= int(c) <= h]
+        if pos_cols:
+            med = com[pos_cols].median(axis=1)
+        else:                       # tidak mungkin (h ada di kolom) — guard
+            med = pd.Series(np.nan, index=com.index)
+
+        df = (pd.DataFrame({"COM": com[h], "Median": med})
+              .reset_index()
               .rename(columns={"NAMA RESTO": "Resto"}))
         # COM float + pasangan tanpa nilai → 0 (konvensi pivot fill_value)
         df["COM"] = pd.to_numeric(df["COM"], errors="coerce").fillna(0.0)
-
-        # MEDIAN per barang — dihitung ANTAR resto pada kolom H
-        df["Median"] = df.groupby("Nama Barang")["COM"].transform("median")
+        df["Median"] = pd.to_numeric(df["Median"],
+                                      errors="coerce").fillna(0.0)
         df["Selisih"] = df["COM"] - df["Median"]
         df["Satuan"] = [self._satuan_lookup.get((nb, rs), "")
                         for nb, rs in zip(df["Nama Barang"].astype(str),
@@ -715,7 +741,7 @@ class LaporanDeviasiView(tk.Frame):
                           {"values": values, "tags": tuple(tags)}))
 
         status = (f"{n} baris · minus: {n_minus} · > median: {n_above} · "
-                  f"H={h} · median per barang (antar resto)")
+                  f"H={h} · median antar tanggal (1..{h})")
         return {"gen": gen, "items": items, "status": status,
                 "fp_map": fp_map, "row_snaps": row_snaps,
                 "neg_cells": neg_cells, "st_minus_cells": st_minus_cells,
@@ -765,8 +791,10 @@ class LaporanDeviasiView(tk.Frame):
             self.tree, payload["items"], batch=500, on_done=render_done)
 
     def _update_headings(self):
-        """Heading COM dinamis mengikuti TANGGAL H (pola Deviasi SO_H)."""
+        """Heading COM/Median dinamis mengikuti TANGGAL H
+        (pola Deviasi SO_H; v3.9.7: Median menampilkan window 1..H)."""
         self.tree.heading("COM", text=f"COM (H={self.tanggal_h})")
+        self.tree.heading("Median", text=f"Median (1..{self.tanggal_h})")
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
 
