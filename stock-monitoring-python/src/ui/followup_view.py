@@ -1,5 +1,14 @@
 """followup_view.py — Tab "☑ Follow Up" (v3.2.0) — ala repo Waste.
 
+v3.9.6 (permintaan user: "Format Follow UP Seperti File Sample"):
+format tabel mengikuti sheet Follow UP workbook asli user (01.1 CEK
+STOCK V2.xlsb): Resto · Nama Barang · SO per tanggal (heading ANGKA
+TANGGAL — H=25 → 23/24/25/26/27, persis kolom "22.0..27.0" sample) ·
+Sistem · Deviasi · Loss Surplus to BOM · Keterangan · kolom kerja FU:
+SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC · Status TL ·
+Ditambahkan. Snapshot lama tanpa field tanggal tetap dimuat (kolom
+  tampil "-"). Export Excel mengikuti format yang sama.
+
 Daftar baris anomali yang di-CENTANG (kolom ✓) di tab DEVIASI GR /
 DEVIASI PCS / LAPORAN DEVIASI — shortlist investigasi berbentuk SNAPSHOT
 (nilai apa adanya saat baris dicentang; TIDAK ikut filter/H aktif).
@@ -7,8 +16,8 @@ DEVIASI PCS / LAPORAN DEVIASI — shortlist investigasi berbentuk SNAPSHOT
 Perilaku:
 - Baris menetap: tertutup aplikasi pun aman (followup.json, atomic write).
 - Klik sel ✓ di tabel ini = KELUARKAN baris dari daftar.
-- 💾 Export Excel: snapshot + kolom serah-terima kosong (PIC / KATEGORI
-  MASALAH / TINDAKAN — diisi petugas, konvensi rekap mentah).
+- 💾 Export Excel: format file sample + kolom kerja FU (SO · DEVIASI ·
+  Selisih · Selisih Deviasi · Cek FU · PIC — diisi petugas).
   (v3.8: fitur 📥 Impor Hasil TL DIHAPUS — permintaan user "gak terlalu
   perlu".)
 - ✕ Kosongkan: hapus seluruh daftar (konfirmasi).
@@ -31,20 +40,33 @@ from .widgets import (
     identify_to_column, insert_tree_items, open_tree_maximized, run_async,
     sort_tree_by_column,
 )
-from .followup import CHECK_ON, FollowUpStore
+from .followup import CHECK_ON, DATE_COL_IDS, FollowUpStore
 
-# kolom tabel Follow Up (✓ pertama — klik = keluarkan)
+# kolom tabel Follow Up — FORMAT FILE SAMPLE (v3.9.6):
+# ✓ · Resto · Nama Barang · [SO tgl H-2..H+2 — id "T-2".."T+2", heading
+# dinamis angka tanggal] · Sistem · Deviasi · Loss Surplus to BOM ·
+# Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC ·
+# Status TL · Ditambahkan (kolom kerja FU dari resolved store; Asal &
+# tracking app tetap dibawa di bagian akhir).
 COLUMNS = [
     ("✓", 34, "center"),
-    ("Asal", 100, "w"),
     ("Resto", 90, "w"),
     ("Nama Barang", 220, "w"),
-    ("Satuan", 55, "w"),
-    ("H", 40, "e"),
-    ("SO", 80, "e"),
+    ("T-2", 64, "e"),
+    ("T-1", 64, "e"),
+    ("T", 64, "e"),
+    ("T+1", 64, "e"),
+    ("T+2", 64, "e"),
     ("Sistem", 80, "e"),
     ("Deviasi", 80, "e"),
-    ("CEK / Status", 140, "w"),
+    ("Loss Surplus to BOM", 105, "e"),
+    ("Keterangan", 140, "w"),
+    ("SO", 80, "e"),
+    ("DEVIASI", 80, "e"),
+    ("Selisih", 70, "e"),
+    ("Selisih Deviasi", 90, "e"),
+    ("Cek FU", 70, "center"),
+    ("Asal", 100, "w"),
     ("Status TL", 90, "w"),
     ("PIC", 110, "w"),
     ("Ditambahkan", 120, "w"),
@@ -102,9 +124,12 @@ class FollowUpView(tk.Frame):
                                        command=self._on_export)
         self.btn_export.pack(side="left")
         add_tooltip(self.btn_export,
-                    "Simpan daftar sebagai workbook Excel (.xlsx):\n"
-                    "kolom snapshot + kolom kosong PIC / KATEGORI\n"
-                    "MASALAH / TINDAKAN utk diisi petugas.")
+                    "Simpan daftar sebagai workbook Excel (.xlsx) —\n"
+                    "FORMAT FILE SAMPLE: Resto · Nama Barang · SO per\n"
+                    "tanggal (H-2..H+2) · Sistem · Deviasi · Loss\n"
+                    "Surplus to BOM · Keterangan · SO · DEVIASI ·\n"
+                    "Selisih · Selisih Deviasi · Cek FU · PIC (diisi\n"
+                    "petugas follow-up).")
 
         self.btn_import = None  # v3.8: Impor Hasil TL DIHAPUS (user)
 
@@ -260,9 +285,26 @@ class FollowUpView(tk.Frame):
         except (TypeError, ValueError):
             return str(v or "-")
 
+    @staticmethod
+    def _fu_pct(v):
+        """Loss Surplus to BOM — rasio gaya file sample (1.0053 → '1.01';
+        0.0524 → '0.05'; minus kurung). Format mengikuti konvensi _fu_num
+        (desimal titik) supaya parser sort _sort_by tetap benar."""
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return "-" if v in ("", None) else str(v)
+        if f == 0:
+            return "-"
+        s = f"{f:,.2f}"
+        return f"({s[1:]})" if f < 0 else s
+
     def _fu_row_values(self, snap, resolved, info) -> list:
         """Nilai terformat satu baris follow-up (urutan COLUMNS — dipakai
-        render + filter header supaya nilai popup == yang tampil)."""
+        render + filter header supaya nilai popup == yang tampil).
+        v3.9.6: urutan FORMAT FILE SAMPLE — SO per tanggal (H-2..H+2),
+        Sistem, Deviasi, Loss Surplus to BOM, Keterangan, kolom kerja FU
+        (SO/DEVIASI salinan + Selisih/Selisih Deviasi/Cek FU dari info)."""
         dev = snap.get("deviasi", 0)
         try:
             dev_f = float(dev)
@@ -271,19 +313,56 @@ class FollowUpView(tk.Frame):
         dev_txt = self._fu_num(dev) if dev_f else "-"
         if dev_f < 0:
             dev_txt = f"({dev_txt[1:] if dev_txt.startswith('-') else dev_txt})"
+
+        def _so(v):
+            try:
+                return self._fu_num(float(v)) if v not in ("", None) else "-"
+            except (TypeError, ValueError):
+                return "-"
+
+        # snapshot lama (pre-v3.9.6) tanpa field tanggal → "-"
         return [
             CHECK_ON,
-            snap.get("asal", ""), snap.get("resto", ""),
-            snap.get("barang", ""), snap.get("satuan", ""),
-            self._fu_num(snap.get("h")) if snap.get("h") not in ("", None) else "-",
-            self._fu_num(snap.get("so")) if snap.get("so") else "-",
-            self._fu_num(snap.get("sistem")) if snap.get("sistem") else "-",
+            snap.get("resto", ""),
+            snap.get("barang", ""),
+            _so(snap.get("so_m2")), _so(snap.get("so_m1")),
+            _so(snap.get("so")), _so(snap.get("so_p1")),
+            _so(snap.get("so_p2")),
+            _so(snap.get("sistem")),
             dev_txt,
+            self._fu_pct(snap.get("loss_bom")),
             snap.get("cek", "") or "-",
+            _so(snap.get("so")),
+            dev_txt,
+            self._fu_num(info.get("Selisih")) if info.get("Selisih")
+            not in ("", None) else "-",
+            self._fu_num(info.get("Selisih Deviasi"))
+            if info.get("Selisih Deviasi") not in ("", None) else "-",
+            str(info.get("Cek FU", "") or "-"),
+            snap.get("asal", ""),
             "Selesai" if resolved else "Menunggu",
             info.get("PIC", ""),
             (snap.get("added_at", "") or "")[:16].replace("T", " "),
         ]
+
+    def _refresh_date_headings(self, rows):
+        """v3.9.6: heading kolom tanggal = ANGKA TANGGAL dari H snapshot
+        terbaru (H=25 → '23'..'27' — persis sheet Follow UP file sample
+        '22.0..27.0'). H tidak ada → id default T-2..T+2."""
+        h_ref = None
+        for snap in reversed(rows):
+            h_val = snap.get("h")
+            if isinstance(h_val, (int, float)) and h_val:
+                h_ref = int(h_val)
+                break
+        if h_ref is None:
+            for col_id in DATE_COL_IDS:
+                self.tree.heading(col_id, text=col_id)
+        else:
+            for col_id, off in zip(DATE_COL_IDS, (-2, -1, 0, 1, 2)):
+                self.tree.heading(col_id, text=str(h_ref + off))
+        if getattr(self, "header_filters", None) is not None:
+            self.header_filters.refresh_icons()
 
     def _render(self):
         rows = list(self.store.rows.values())
@@ -294,8 +373,10 @@ class FollowUpView(tk.Frame):
 
         if not rows:
             self._show_empty()
+            self._refresh_date_headings(rows)
             return
         self._show_content()
+        self._refresh_date_headings(rows)
 
         # v3.5: filter header ⧩ (display-only — daftar store tidak berubah)
         col_idx = {c[0]: j for j, c in enumerate(COLUMNS)}

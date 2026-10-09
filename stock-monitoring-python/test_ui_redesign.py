@@ -40,6 +40,11 @@ Memverifikasi:
     "1041.BDGUKU" dinormalkan; opsi tampil semua resto; minus merah
     per-cell + sel Status hijau/amber/merah) & 🚨 Anomali COM (v3.9.3)
 17. v3.9.5 — AUDIT DEEP REGRESSION (§23): SALDO AWAL jadi base com(1)
+18. v3.9.6 — KATEGORI DEVIASI (§6) + audit kronologis tgl 1 (§14) +
+    FORMAT FOLLOW UP file sample (§11): 5 kolom kategori (Max Deviasi,
+    ACR, Total ACR, Dev to BOM%, Stok Seharusnya) + CEK ke-5 "ACR to
+    BOM" + pembanding SO tanggal 1 = SO bulan lalu terakhir + tabel/
+    export Follow Up ala sheet Follow UP workbook asli.
     (tanggal negatif + pair tanpa bulan-lalu — aljabar GR==DEV), race
     ✕ Tutup File saat compute, GC-shield dilepas walau pemilik job
     di-destroy, tag per-cell setelah filter di clone ⛶, duplikat lintas
@@ -147,6 +152,31 @@ def make_mock_append1() -> pd.DataFrame:
                         "Nomor": f"RI-00{tgl}", "Nomor PO": f"PO-00{tgl}",
                         "#Tgl/Jam Pembuatan IT": None,
                     })
+
+    # v3.9.6: barang uji kategori CEK "ACR to BOM" (kondisi ke-5) —
+    # pola SO bersih (SO flat 200, IN 100 hanya tgl 25, OUT standar
+    # 3 per t%3 → Total ACR 24 di 1..25): satu-satunya kondisi yang
+    # terpicu = |Deviasi 100| > Total ACR 24.
+    for resto in ("MLGPAR",):
+        for jenis in jenis_list:
+            for tgl in range(1, 31):
+                val = 0.0
+                if jenis == "1.SO":
+                    val = 200.0
+                elif jenis == "2.SALDO AKHIR":
+                    val = 100.0
+                elif jenis == "4.IN" and tgl == 25:
+                    val = 100.0
+                elif jenis == "9.OUT" and tgl % 3 == 0:
+                    val = 3.0
+                rows.append({
+                    "Nama Barang": "BARANG ACR", "JENIS": jenis,
+                    "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": val,
+                    "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                    "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                    "Nomor": f"RI-00{tgl}", "Nomor PO": f"PO-00{tgl}",
+                    "#Tgl/Jam Pembuatan IT": None,
+                })
     return pd.DataFrame(rows)
 
 
@@ -353,7 +383,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.5", APP_VERSION == "3.9.5", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.6", APP_VERSION == "3.9.6", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 2. Empty state semua view ==")
@@ -425,8 +455,8 @@ def main():
     check("Tidak ada kolom 'Total'", "Total" not in cols)
 
     n_parent = len(pv.tree.get_children(""))
-    check("Pivot resto: 5 barang (termasuk ADONAN yg hanya MLGPAR)",
-          n_parent == 5, f"got {n_parent}")
+    check("Pivot resto: 6 barang (termasuk ADONAN+BARANG ACR yg hanya MLGPAR)",
+          n_parent == 6, f"got {n_parent}")
 
     # ADONAN GORENG MEKAR — hanya ada di MLGPAR → tetap tampil
     adonan = None
@@ -529,7 +559,7 @@ def main():
         hf._reset()
         wait_view(root, pv)
         n_parent = len(pv.tree.get_children(""))
-        check("Reset di popup → 5 barang kembali", n_parent == 5,
+        check("Reset di popup → 6 barang kembali", n_parent == 6,
               f"got {n_parent}")
         hf._close()
         root.update()
@@ -543,12 +573,12 @@ def main():
     pv._refresh_pivot()
     wait_view(root, pv)
     n_parent = len(pv.tree.get_children(""))
-    check("Pivot filter RESTO=MLGPAR → ADONAN ikut (5 barang)",
-          n_parent == 5, f"got {n_parent}")
+    check("Pivot filter RESTO=MLGPAR → ADONAN ikut (6 barang)",
+          n_parent == 6, f"got {n_parent}")
     pv._reset_filter()
     wait_view(root, pv)
-    check("Pivot reset filter → mode tetap tanggal, 5 barang",
-          len(pv.tree.get_children("")) == 5)
+    check("Pivot reset filter → mode tetap tanggal, 6 barang",
+          len(pv.tree.get_children("")) == 6)
     pv._on_mode_change(0)
     wait_view(root, pv)
 
@@ -561,7 +591,7 @@ def main():
         time.sleep(0.01)
     check("Window perbesar terbuka", win is not None and win.winfo_exists())
     n_clone = len(mtree.get_children(""))
-    check("Clone berisi 5 barang", n_clone == 5, f"got {n_clone}")
+    check("Clone berisi 6 barang", n_clone == 6, f"got {n_clone}")
     check("Clone punya kolom resto",
           list(mtree["columns"]) == ["MLGPAR", "SBYKET"])
     win.destroy()
@@ -570,8 +600,8 @@ def main():
     print("== 6. Deviasi GR / PCS ==")
     select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
     n_gr = len(app.deviasi_gr_view.tree.get_children(""))
-    check("Deviasi GR rows = 5 (ADONAN hanya MLGPAR)", n_gr == 5,
-          f"got {n_gr}")
+    check("Deviasi GR rows = 6 (ADONAN+BARANG ACR hanya MLGPAR)",
+          n_gr == 6, f"got {n_gr}")
     n_pcs = len(app.deviasi_pcs_view.tree.get_children(""))
     check("Deviasi PCS rows = 4", n_pcs == 4, f"got {n_pcs}")
     check("(v3.2) KPI deviasi DIHAPUS (tabel besar)",
@@ -583,14 +613,71 @@ def main():
           "Deviasi" in app.deviasi_gr_view.status_var.get(),
           f"got {app.deviasi_gr_view.status_var.get()!r}")
 
+    # ---- (v3.9.6) KATEGORI DEVIASI — 5 kolom baru + CEK "ACR to BOM" ----
+    gr_cols = [c[0] for c in app.deviasi_gr_view.COLUMNS]
+    check("(v3.9.6) Skema: 5 kolom kategori Deviasi setelah Rank",
+          gr_cols[18:23] == ["Max Deviasi", "ACR", "Total ACR",
+                             "Dev to BOM%", "Stok Seharusnya"] and
+          gr_cols[23] == "CEK", f"got {gr_cols}")
+    gr_idx = {c: i for i, c in enumerate(gr_cols)}
+    acr_row = None
+    for k in app.deviasi_gr_view.tree.get_children(""):
+        v = app.deviasi_gr_view.tree.item(k, "values")
+        if v[gr_idx["Nama Barang"]] == "BARANG ACR":
+            acr_row = v
+            break
+    check("(v3.9.6) BARANG ACR tampil (GR, H=25 default)",
+          acr_row is not None)
+    if acr_row is not None:
+        v = acr_row
+        check("(v3.9.6) Deviasi = SO_H − Sistem = 100",
+              v[gr_idx["Deviasi"]] == "100",
+              f"got {v[gr_idx['Deviasi']]!r}")
+        check("(v3.9.6) Total ACR = Σ OUT 1..25 = 24",
+              v[gr_idx["Total ACR"]] == "24",
+              f"got {v[gr_idx['Total ACR']]!r}")
+        check("(v3.9.6) ACR = 24/25 = 0,96 → '1,0' (1 desimal)",
+              v[gr_idx["ACR"]] == "1,0", f"got {v[gr_idx['ACR']]!r}")
+        check("(v3.9.6) Dev to BOM% = 100/24 = '416,67%'",
+              v[gr_idx["Dev to BOM%"]] == "416,67%",
+              f"got {v[gr_idx['Dev to BOM%']]!r}")
+        check("(v3.9.6) Stok Seharusnya = SO(24) − ACR = '199,0'",
+              v[gr_idx["Stok Seharusnya"]] == "199,0",
+              f"got {v[gr_idx['Stok Seharusnya']]!r}")
+        check("(v3.9.6) Max Deviasi per barang = 100",
+              v[gr_idx["Max Deviasi"]] == "100",
+              f"got {v[gr_idx['Max Deviasi']]!r}")
+        check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24)",
+              v[gr_idx["CEK"]] == "ACR to BOM",
+              f"got {v[gr_idx['CEK']]!r}")
+    # tag cek_acr di baris BARANG ACR
+    acr_tags = None
+    for k in app.deviasi_gr_view.tree.get_children(""):
+        v = app.deviasi_gr_view.tree.item(k, "values")
+        if v[2] == "BARANG ACR":
+            acr_tags = app.deviasi_gr_view.tree.item(k, "tags")
+            break
+    check("(v3.9.6) Tag cek_acr di baris BARANG ACR",
+          acr_tags is not None and "cek_acr" in acr_tags,
+          f"got {acr_tags}")
+    # legenda CEK memuat kategori baru (chip = Frame berisi Label)
+    _legend_txt = []
+    for _chip in app.deviasi_gr_view._legend.winfo_children():
+        for _w in _chip.winfo_children():
+            if isinstance(_w, tk.Label):
+                _legend_txt.append(_w.cget("text"))
+    check("(v3.9.6) Legenda CEK memuat 'ACR to BOM'",
+          any("ACR to BOM" in t for t in _legend_txt),
+          f"got {_legend_txt}")
+
     app.deviasi_gr_view._on_col_filter("Nama Barang", {"ADONAN GORENG MEKAR"})
     wait_view(root, app.deviasi_gr_view)
     check("Deviasi header filter → 1 row",
           len(app.deviasi_gr_view.tree.get_children("")) == 1)
     app.deviasi_gr_view._reset_filter()
     wait_view(root, app.deviasi_gr_view)
-    check("Deviasi reset → 5 rows",
-          len(app.deviasi_gr_view.tree.get_children("")) == 5)
+    check("Deviasi reset → 6 rows",
+          len(app.deviasi_gr_view.tree.get_children("")) == 6)
 
     app.deviasi_gr_view.tanggal_h_var.set("10")
     app.deviasi_gr_view._on_tanggal_h_change()
@@ -796,8 +883,8 @@ def main():
     # section 11 (klik ✓ follow-up dari Laporan) punya baris
     lap.load_data(append1)
     wait_view(root, lap)
-    check("(v3.9.3) Kembali ke mock data: matriks COM terhitung (9 pasangan)",
-          lap._cached_com is not None and lap._cached_com.shape[0] == 9,
+    check("(v3.9.3) Kembali ke mock data: matriks COM terhitung (10 pasangan)",
+          lap._cached_com is not None and lap._cached_com.shape[0] == 10,
           f"got {None if lap._cached_com is None else lap._cached_com.shape}")
     app.deviasi_gr_view.tanggal_h_var.set("25")
     app.deviasi_gr_view._on_tanggal_h_change()
@@ -982,17 +1069,48 @@ def main():
     root.update()
     check("Badge tab 'Follow Up (1)'", "1" in badge, f"got {badge!r}")
 
-    # -- tab Follow Up: render snapshot --
+    # -- tab Follow Up: render snapshot (v3.9.6 FORMAT FILE SAMPLE) --
     select_and_wait(root, app, app.tab_followup, app.followup_view)
     fu = app.followup_view
     root.update()
     n_fu = len(fu.tree.get_children(""))
     check("Tab Follow Up menampilkan 1 baris", n_fu == 1, f"got {n_fu}")
     vals = fu.tree.item(fu.tree.get_children("")[0], "values")
-    check("Snapshot: kolom asal = DEVIASI GR", vals[1] == "DEVIASI GR",
-          f"got {vals[1]!r}")
-    check("Snapshot: ada resto", bool(vals[2]))
-    check("Status TL = Menunggu", vals[10] == "Menunggu", f"got {vals[10]!r}")
+    check("Snapshot: kolom asal = DEVIASI GR", vals[17] == "DEVIASI GR",
+          f"got {vals[17]!r}")
+    check("Snapshot: ada resto", bool(vals[1]))
+    check("Status TL = Menunggu", vals[18] == "Menunggu",
+          f"got {vals[18]!r}")
+    # v3.9.6: urutan format file sample — Resto · Nama Barang · 5 kolom
+    # tanggal · Sistem · Deviasi · Loss Surplus to BOM · Keterangan ·
+    # SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU
+    from src.ui.followup_view import COLUMNS as FU_COLUMNS
+    fu_cols = [c[0] for c in FU_COLUMNS]
+    check("(v3.9.6) Skema FU = format file sample",
+          fu_cols[:3] == ["✓", "Resto", "Nama Barang"] and
+          fu_cols[3:8] == ["T-2", "T-1", "T", "T+1", "T+2"] and
+          fu_cols[8:14] == ["Sistem", "Deviasi", "Loss Surplus to BOM",
+                            "Keterangan", "SO", "DEVIASI"] and
+          fu_cols[14:17] == ["Selisih", "Selisih Deviasi", "Cek FU"],
+          f"got {fu_cols}")
+    snap0 = next(iter(store.rows.values()))
+    check("(v3.9.6) Snapshot FU membawa SO per tanggal",
+          all(k in snap0 for k in
+              ("so_m2", "so_m1", "so_p1", "so_p2", "loss_bom")),
+          f"got keys {sorted(snap0.keys())}")
+    # snapshot berasal dari tab Deviasi GR → kolom tanggal terisi & SO(T)=so
+    check("(v3.9.6) FU: SO kolom T = snapshot so",
+          float(vals[5]) == float(snap0.get("so", 0)),
+          f"got {vals[5]!r} vs {snap0.get('so')!r}")
+    check("(v3.9.6) FU: DEVIASI = snapshot deviasi",
+          vals[13] == vals[9], f"got {vals[13]!r} vs {vals[9]!r}")
+    # heading tanggal dinamis: H snapshot (25) → 23..27
+    headings = [fu.tree.heading(c, "text") for c in ("T-2", "T", "T+2")]
+    check("(v3.9.6) FU heading tanggal dinamis (H=25 → 23/25/27)",
+          headings == ["23", "25", "27"], f"got {headings}")
+    check("(v3.9.6) FU: kolom Selisih/Cek FU kosong (belum dikerjakan)",
+          vals[14] == "-" and vals[16] == "-",
+          f"got {vals[14]!r} / {vals[16]!r}")
 
     # -- lepas ✓ dari tab Follow Up --
     first_fu = fu.tree.get_children("")[0]
@@ -1029,6 +1147,25 @@ def main():
         xlsx_path = tf.name
     store.export_xlsx(xlsx_path)
     check("Export FOLLOW UP xlsx", os.path.getsize(xlsx_path) > 0)
+    # (v3.9.6) FORMAT FILE SAMPLE: header = Resto · Nama Barang ·
+    # [tanggal H-2..H+2 sebagai ANGKA] · Sistem · Deviasi · Loss Surplus
+    # to BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi ·
+    # Cek FU · PIC · Asal · Status TL · Ditambahkan
+    import openpyxl as _oxl
+    _wb = _oxl.load_workbook(xlsx_path)
+    _ws = _wb["FOLLOW UP"]
+    _hdr = [c.value for c in _ws[1]]
+    _h_snap = snap_lap.get("h")
+    _d0 = int(_h_snap) - 2 if isinstance(_h_snap, (int, float)) else None
+    check("(v3.9.6) Export header = format file sample",
+          _hdr[:3] == ["Resto", "Nama Barang", str(_d0)] and
+          _hdr[7:12] == ["Sistem", "Deviasi", "Loss Surplus to BOM",
+                         "Keterangan", "SO"] and
+          _hdr[12:17] == ["DEVIASI", "Selisih", "Selisih Deviasi",
+                          "Cek FU", "PIC"] and
+          _hdr[17:20] == ["Asal", "Status TL", "Ditambahkan"],
+          f"got {_hdr}")
+    _wb.close()
     os.unlink(xlsx_path)
 
     # v3.8: fitur impor DIHAPUS — tombol & method tidak ada lagi
@@ -1126,8 +1263,9 @@ def main():
         fu_kids = list(fu.tree.get_children(""))
         check("Follow Up tampil 2 baris", len(fu_kids) == 2)
 
-        # urutan awal → barang masing-masing (kolom idx 3 = Barang)
-        barang_awal = [fu.tree.item(k, "values")[3] for k in fu_kids]
+        # urutan awal → barang masing-masing (kolom idx 2 = Nama Barang;
+        # v3.9.6 format file sample: 0✓·1Resto·2Nama Barang·3..7 tanggal)
+        barang_awal = [fu.tree.item(k, "values")[2] for k in fu_kids]
 
         # SORT tabel follow-up by Nama Barang Z→A → urutan terbalik
         fu._sort_by("Nama Barang", reverse=True)
@@ -1135,7 +1273,7 @@ def main():
         fu_kids_sorted = list(fu.tree.get_children(""))
         check("FU sort: urutan berubah",
               fu_kids_sorted != fu_kids and len(fu_kids_sorted) == 2)
-        barang_sorted = [fu.tree.item(k, "values")[3]
+        barang_sorted = [fu.tree.item(k, "values")[2]
                          for k in fu_kids_sorted]
         check("FU sort Z→A benar", barang_sorted == sorted(
             barang_awal, reverse=True))
@@ -1144,7 +1282,7 @@ def main():
         # keluar harus baris visual itu (v3.2 buggy: keluar baris index-0
         # lama = kemungkinan baris yang salah)
         first_fu = fu_kids_sorted[0]
-        barang_first = fu.tree.item(first_fu, "values")[3]
+        barang_first = fu.tree.item(first_fu, "values")[2]
         fps_before = set(store.rows)
         snaps_before = dict(store.rows)   # fp → snap (sebelum dihapus)
         bf = fu.tree.bbox(first_fu)
@@ -1333,6 +1471,37 @@ def main():
     check("Engine: catatan Sisa Gantung VBA-style",
           "Sisa Gantung: +80" in str(dm.iloc[0]["Detail & Catatan Audit"]),
           f"got {dm.iloc[0]['Detail & Catatan Audit']!r}")
+
+    # --- (v3.9.6) TANGGAL 1: PEMBANDING SO = SO BULAN LALU (user:
+    #     "tab selisih in jika tanggal 1 pembanding SO nya SO bulan
+    #     lalu") — urutan bulan lalu kini KRONOLOGIS 25•→31• lalu tgl 1;
+    #     delta SO di tanggal 1 membanding SO TERAKHIR bulan lalu (31•),
+    #     bukan SO tgl 25• (bug sort numerik lama). ---
+    _aud_rows = []
+    for _day, _so in [(25, 100.0), (26, 110.0), (27, 120.0), (28, 130.0),
+                      (29, 140.0), (30, 150.0), (31, 160.0)]:
+        _aud_rows.append({"NAMA RESTO": "BKSALT", "Nama Barang": "ITEM X",
+                          "JENIS": "SO", "Tanggal": -_day, "Value": _so})
+    _aud_rows.append({"NAMA RESTO": "BKSALT", "Nama Barang": "ITEM X",
+                      "JENIS": "SO", "Tanggal": 1, "Value": 200.0})
+    _aud_in = [{"Tanggal": 1, "NAMA RESTO": "BKSALT",
+                "Nama Barang": "ITEM X", "SOURCE IN": "42.05",
+                "Value": 50.0}]
+    _raw2 = build_audit_input(pd.DataFrame(_aud_rows),
+                               pd.DataFrame(_aud_in))
+    check("(v3.9.6) Audit: urutan KRONOLOGIS (−25→−31 lalu 1)",
+          _raw2["Tanggal"].tolist() ==
+          [-25, -26, -27, -28, -29, -30, -31, 1],
+          f"got {_raw2['Tanggal'].tolist()}")
+    _audit2, _ = build_audit_rekap(_raw2)
+    _r1 = _audit2[_audit2["Tanggal"] == 1].iloc[0]
+    check("(v3.9.6) Audit tgl 1: delta SO vs SO bulan lalu TERAKHIR "
+          "(SO Naik +40 = 200−160•)",
+          "SO Naik +40" in str(_r1["Detail & Catatan Audit"]),
+          f"got {_r1['Detail & Catatan Audit']!r}")
+    check("(v3.9.6) Audit tgl 1: status VALID (SO naik vs bulan lalu)",
+          _r1["Status Analisis Audit"] == "VALID (Sistem Masuk)",
+          f"got {_r1['Status Analisis Audit']!r}")
 
     # --- (c) BUG FIX v3.6: klik funnel heading → popup TERBUKA ---
     select_and_wait(root, app, app.tab_in_selisih, iv)

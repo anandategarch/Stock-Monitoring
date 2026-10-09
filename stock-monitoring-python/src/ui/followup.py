@@ -5,14 +5,25 @@ DEVIASI PCS / LAPORAN DEVIASI → baris terkumpul di tab "☑ Follow Up" sebagai
 SNAPSHOT baris (nilai apa adanya saat dicentang). Daftar menetap — TIDAK ikut
 filter/H aktif; tertutup aplikasi pun aman (followup.json).
 
+v3.9.6 (permintaan user: "format Follow UP seperti file sample"):
+- Format tabel + export mengikuti sheet Follow UP workbook asli user:
+  Resto · Nama Barang · SO per tanggal (H-2..H+2 — heading angka tanggal,
+  mis. H=25 → 23/24/25/26/27 persis sample "22..27") · Sistem · Deviasi ·
+  Loss Surplus to BOM · Keterangan · kolom kerja FU: SO · DEVIASI ·
+  Selisih · Selisih Deviasi · Cek FU · PIC (+ pelacakan app: Asal ·
+  Status TL · Ditambahkan).
+- SNAPSHOT_FIELDS diperluas: so_m2/so_m1/so_p1/so_p2 (SO per tanggal) +
+  loss_bom (Loss Surplus to BOM = Dev to BOM% tab Deviasi). Snapshot
+  LAMA (tanpa field baru) tetap dimuat — kolom terkait tampil kosong.
+
 Struktur (pola waste_anomaly/followup.py):
 - ``row_fingerprint(fields)`` — md5 identitas baris: Asal|Resto|Barang|Satuan|
   H|SO|Sistem|Deviasi|CEK. Stabil lintas sesi (str(float) dinormalisasi).
 - ``FollowUpStore`` — dict {fp: snapshot} + status tindak lanjut (resolved):
   - toggle(fp, row) → tambah/hapus, return status baru
   - save/load (atomic write + backup .bad utk file korup)
-  - export_xlsx(path) → sheet "FOLLOW UP" + kolom serah-terima kosong
-    (PIC / KATEGORI MASALAH / TINDAKAN — diisi petugas, konvensi rekap)
+  - export_xlsx(path) → sheet "FOLLOW UP" format file sample + kolom
+    kerja FU (diisi petugas; nilai tersimpan ikut terbawa)
   (v3.8: import_workbook DIHAPUS — fitur "Impor Hasil TL" tidak perlu
   lagi, permintaan user; resolved lama tetap dimuat agar status/PIC
   yang sudah tersimpan sebelumnya tetap tampil.)
@@ -31,19 +42,39 @@ import pandas as pd
 
 _LOG = logging.getLogger("stock_monitoring.followup")
 
-# Snapshot row keys (persis kolom tabel Follow Up, tanpa ✓/status TL)
+# Snapshot row keys (persis kolom tabel Follow Up, tanpa ✓/status TL).
+# v3.9.6 (permintaan user: "format Follow UP seperti file sample" — sheet
+# Follow UP workbook asli user): snapshot diperluas — SO per tanggal
+# (H-2..H+2) + Loss Surplus to BOM (= Dev to BOM% tab Deviasi).
 SNAPSHOT_FIELDS = [
     "asal", "resto", "barang", "satuan", "aktif", "h",
     "so", "sistem", "deviasi", "cek",
+    "so_m2", "so_m1", "so_p1", "so_p2", "loss_bom",
 ]
-# Kolom serah-terima di export (diisi petugas follow-up)
-HANDOVER_COLS = ["PIC", "KATEGORI MASALAH", "TINDAKAN"]
+# Kolom tanggal SO di tabel/export (posisi H relatif — heading dinamis
+# menampilkan angka tanggal, mis. H=25 → 23/24/25/26/27)
+DATE_COL_IDS = ["T-2", "T-1", "T", "T+1", "T+2"]
 
-# Nama kolom sheet FOLLOW UP (export) — urutan tetap
+# Kolom serah-terima di export (diisi petugas follow-up) — mengikuti
+# sheet Follow UP file sample: SO · DEVIASI · Selisih · Selisih
+# Deviasi · Cek FU (+ PIC utk pelacakan app).
+HANDOVER_COLS = ["SO", "DEVIASI", "Selisih", "Selisih Deviasi",
+                  "Cek FU", "PIC"]
+
+# Nama kolom sheet FOLLOW UP (export) — urutan PERSIS sheet Follow UP
+# file sample user: Resto · Nama Barang · [SO tgl H-2..H+2] · Sistem ·
+# Deviasi · Loss Surplus to BOM · Keterangan · [kerja FU] (+ kolom
+# pelacakan app: Asal · Status TL · Ditambahkan).
 EXPORT_COLS = [
-    "Asal", "Resto", "Nama Barang", "Satuan", "AKTIF/NON", "H",
-    "SO", "Sistem", "Deviasi", "CEK / Status",
-] + HANDOVER_COLS
+    "Resto", "Nama Barang",
+] + DATE_COL_IDS + [
+    "Sistem", "Deviasi", "Loss Surplus to BOM", "Keterangan",
+] + HANDOVER_COLS + [
+    "Asal", "Status TL", "Ditambahkan",
+]
+
+# Pergeseran kolom tanggal relatif H (T-2 → h−2 … T+2 → h+2)
+DATE_COL_OFFSETS = dict(zip(DATE_COL_IDS, (-2, -1, 0, 1, 2)))
 
 CHECK_ON, CHECK_OFF = "☑", "☐"
 
@@ -230,56 +261,98 @@ class FollowUpStore:
 
     # -- export ------------------------------------------------------------------
     def export_xlsx(self, path: str) -> str:
-        """Tulis sheet 'FOLLOW UP' — snapshot + kolom serah-terima.
+        """Tulis sheet 'FOLLOW UP' — FORMAT FILE SAMPLE (v3.9.6).
 
-        Baris yang sudah resolved membawa nilai PIC/KATEGORI/TINDAKAN
-        tersimpan. Deviasi negatif diberi font merah. Freeze + autofilter.
+        Urutan kolom persis sheet Follow UP workbook asli user:
+        Resto · Nama Barang · [SO tgl H-2..H+2 — heading angka tanggal,
+        mis. H=25 → 23/24/25/26/27] · Sistem · Deviasi · Loss Surplus to
+        BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi ·
+        Cek FU · PIC (+ kolom pelacakan app: Asal · Status TL ·
+        Ditambahkan). Baris resolved membawa nilai kerja FU tersimpan;
+        Deviasi/SO per tanggal negatif diberi font merah. Freeze +
+        autofilter.
         """
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
 
+        # heading kolom tanggal = angka tanggal (dari H snapshot terbaru)
+        h_ref = None
+        for snap in reversed(list(self.rows.values())):
+            h_val = snap.get("h")
+            if isinstance(h_val, (int, float)) and h_val:
+                h_ref = int(h_val)
+                break
+        if h_ref is None:
+            header = list(EXPORT_COLS)
+        else:
+            header = [f"{h_ref + DATE_COL_OFFSETS[c]}" if c in DATE_COL_IDS
+                      else c for c in EXPORT_COLS]
+
         wb = Workbook()
         ws = wb.active
         ws.title = "FOLLOW UP"
-        ws.append(EXPORT_COLS)
+        ws.append(header)
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center")
 
+        # posisi kolom (indeks 0-based) utk pewarnaan
+        idx = {c: header.index(c) for c in header if c in header}
+        dev_col = idx.get("Deviasi")
+        dev2_col = idx.get("DEVIASI")
+        date_cols = [j for j, c in enumerate(header)
+                     if c not in ("Resto", "Nama Barang", "Sistem",
+                                  "Deviasi", "Loss Surplus to BOM",
+                                  "Keterangan", "DEVIASI", "Selisih",
+                                  "Selisih Deviasi", "Cek FU", "PIC",
+                                  "Asal", "Status TL", "Ditambahkan")]
+
         order = list(self.rows.values())
+        n_handover = len(HANDOVER_COLS)
+        handover_start = len(header) - n_handover - 3  # 3 kolom pelacakan app
         for i, snap in enumerate(order):
             r = i + 2
             info = self.resolved.get(snap.get("fp", ""), {})
             vals = [
-                snap.get("asal", ""), snap.get("resto", ""),
-                snap.get("barang", ""), snap.get("satuan", ""),
-                snap.get("aktif", ""), snap.get("h", ""),
-                snap.get("so", ""), snap.get("sistem", ""),
-                snap.get("deviasi", ""), snap.get("cek", ""),
-                info.get("PIC", ""), info.get("KATEGORI MASALAH", ""),
-                info.get("TINDAKAN", ""),
+                snap.get("resto", ""), snap.get("barang", ""),
+                snap.get("so_m2", ""), snap.get("so_m1", ""),
+                snap.get("so", ""), snap.get("so_p1", ""),
+                snap.get("so_p2", ""),
+                snap.get("sistem", ""), snap.get("deviasi", ""),
+                snap.get("loss_bom", ""), snap.get("cek", ""),
+                snap.get("so", ""), snap.get("deviasi", ""),
+                info.get("Selisih", ""), info.get("Selisih Deviasi", ""),
+                info.get("Cek FU", ""), info.get("PIC", ""),
+                snap.get("asal", ""),
+                "Selesai" if info else "Menunggu",
+                (snap.get("added_at", "") or "")[:16].replace("T", " "),
             ]
             for j, v in enumerate(vals):
                 cell = ws.cell(row=r, column=j + 1, value=v)
-                if j == 8 and isinstance(v, (int, float)) and v < 0:
+                neg = (j in date_cols or j in (dev_col, dev2_col)) \
+                    and isinstance(v, (int, float)) and v < 0
+                if neg:
                     cell.font = Font(color="DC2626")
-            # resolved → fill hijau lembut di kolom handover
+            # resolved → fill hijau lembut di kolom kerja FU + PIC
             if info:
                 fill = PatternFill("solid", start_color="ECFDF5")
-                for j in range(11, 14):
-                    ws.cell(row=r, column=j).fill = fill
+                for j in range(handover_start, handover_start + n_handover):
+                    ws.cell(row=r, column=j + 1).fill = fill
 
         ws.freeze_panes = "A2"
         if order:
             ws.auto_filter.ref = (
-                f"A1:{get_column_letter(len(EXPORT_COLS))}{len(order) + 1}")
-        widths = {"Asal": 10, "Resto": 10, "Nama Barang": 30, "Satuan": 8,
-                  "AKTIF/NON": 12, "H": 5, "SO": 10, "Sistem": 10,
-                  "Deviasi": 10, "CEK / Status": 18, "PIC": 14,
-                  "KATEGORI MASALAH": 20, "TINDAKAN": 28}
-        for j, c in enumerate(EXPORT_COLS, start=1):
-            ws.column_dimensions[get_column_letter(j)].width = widths.get(c, 12)
+                f"A1:{get_column_letter(len(header))}{len(order) + 1}")
+        widths = {"Resto": 10, "Nama Barang": 30, "Sistem": 11,
+                  "Deviasi": 11, "DEVIASI": 11, "SO": 10,
+                  "Loss Surplus to BOM": 12, "Keterangan": 18,
+                  "Selisih": 9, "Selisih Deviasi": 12, "Cek FU": 8,
+                  "PIC": 14, "Asal": 12, "Status TL": 10,
+                  "Ditambahkan": 16}
+        for j, c in enumerate(header, start=1):
+            ws.column_dimensions[get_column_letter(j)].width = \
+                widths.get(c, 8 if c.isdigit() else 12)
         wb.save(path)
         return path
 

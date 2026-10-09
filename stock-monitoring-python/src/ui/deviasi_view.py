@@ -5,6 +5,23 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.6 (permintaan user: "tambah kategori Deviasi pada tab Deviasi PCS
+dan GR" — mirror sheet DEVIASI GR/PCS workbook asli user):
+- 5 KOLOM BARU setelah Rank: Max Deviasi (max |Deviasi| per barang,
+  semua resto) · ACR (rata-rata penjualan harian = Σ 9.OUT tgl 1..H / H)
+  · Total ACR (BOM per barang×resto = Σ penjualan 1..H) · Dev to BOM%
+  (= Deviasi / Total ACR — "Loss Surplus to BOM" sheet Follow UP;
+  formula terverifikasi nilai-per-nilai dari sheet DEVIASI GR asli) ·
+  Stok Seharusnya (= SO(H-1) − ACR — perkiraan stok hari H).
+- CEK kondisi ke-5 "ACR to BOM": |Deviasi| > Total ACR > 0 → selisih
+  stok melebihi pemakaian teoretis sebulan → pasti salah (melengkapi
+  port formula LET yang sebelumnya "4 dari 5 kondisi — ACR butuh BOM,
+  TODO"); string kategori sama persis sheet asli user.
+- Parser sort Indonesia (_parse_num_id) utk semua kolom numerik +
+  persen; minus merah per-cell di "Dev to BOM%" & "Stok Seharusnya".
+- Snapshot follow-up diperluas (so_m2/so_m1/so_p1/so_p2/loss_bom) —
+  bahannya format Follow Up "seperti file sample" (v3.9.6 followup_view).
+
 Fitur v3.9 (permintaan user: "kolom apply H atau input H cukup 1 tab aja
 dan berlaku di 2 tab yang berkaitan yaitu Deviasi Gr dan Deviasi PCS
 sehingga tidak double input"):
@@ -148,6 +165,12 @@ class DeviasiView(tk.Frame):
         ("Sistem", 80, "e"),
         ("Deviasi", 80, "e"),
         ("Rank", 50, "e"),
+        # v3.9.6 — kategori Deviasi (mirror sheet DEVIASI GR/PCS file asli):
+        ("Max Deviasi", 80, "e"),      # max |Deviasi| per barang (semua resto)
+        ("ACR", 70, "e"),              # rata-rata penjualan harian (Σ OUT 1..H / H)
+        ("Total ACR", 80, "e"),        # BOM per (barang, resto) = Σ penjualan 1..H
+        ("Dev to BOM%", 85, "e"),      # Deviasi / Total ACR (Loss Surplus to BOM)
+        ("Stok Seharusnya", 90, "e"),  # SO(H-1) − ACR (perkiraan stok hari ini)
         ("CEK", 120, "w"),
     ]
 
@@ -364,6 +387,7 @@ class DeviasiView(tk.Frame):
             ("Beda Tanggal", "#2563eb"),
             ("Hitung Manual", "#ea580c"),
             ("Turun Drastis", "#dc2626"),
+            ("ACR to BOM", "#7c3aed"),   # v3.9.6 — kondisi ke-5
             ("negatif (merah)", "#dc2626"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
@@ -433,6 +457,8 @@ class DeviasiView(tk.Frame):
 
     def _format_col_series(self, col: str, series):
         """Format kolom → string tampilan (identik render tabel)."""
+        if col == "Dev to BOM%":
+            return series.map(self._fmt_pct)
         return series.map(self._fmt_num)
 
     def _on_col_filter(self, col: str, selected):
@@ -468,8 +494,15 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     @staticmethod
     def _compute_cek(aktif_non, so_h, so_h_prev, in_h, out_h,
-                     stok_seharusnya, threshold=1.3):
-        """Port formula LET Excel (4 dari 5 kondisi — ACR butuh BOM, TODO)."""
+                     stok_seharusnya, threshold=1.3, total_acr=None,
+                     deviasi=None):
+        """Port formula LET Excel (5 kondisi — v3.9.6 melengkapi ACR).
+
+        Kondisi ke-5 "ACR to BOM" (butuh BOM — kini tersedia dari 9.OUT):
+        |Deviasi| > Total ACR (BOM penjualan 1..H) → selisih stok lebih
+        besar dari pemakaian teoretis → pasti salah. total_acr/deviasi
+        opsional (None = kondisi dilewati — kompatibilitas v3.2).
+        """
         aktif = str(aktif_non or "").strip().upper()
 
         # 1. KondisiKosong → "Kosong/Non Aktif"
@@ -497,6 +530,11 @@ class DeviasiView(tk.Frame):
         # 4. KondisiTurunDrastis → "Turun Drastis"
         if so_h_prev > 0 and (so_h / so_h_prev) < 0.5:
             return "Turun Drastis"
+
+        # 5. KondisiACR → "ACR to BOM" (v3.9.6)
+        if (total_acr is not None and total_acr > 0
+                and deviasi is not None and abs(deviasi) > total_acr):
+            return "ACR to BOM"
 
         return ""
 
@@ -634,6 +672,39 @@ class DeviasiView(tk.Frame):
         deviasi = so_h - sistem
         stok = sistem + in_h - out_h - bk_h
 
+        # --- v3.9.6: KATEGORI DEVIASI (mirror sheet DEVIASI GR/PCS asli) ---
+        # Total ACR = BOM per (barang, resto, satuan) = Σ penjualan 9.OUT
+        # tanggal 1..H (kolom "Dev to BOM%" sheet asli = Deviasi/Total ACR —
+        # terverifikasi nilai-per-nilai dari sheet DEVIASI GR file user).
+        h_safe = max(1, h)
+        out_mask = (df["JENIS"] == "9.OUT") & (tnum >= 1) & (tnum <= h)
+        out_df = df[out_mask]
+        if not out_df.empty:
+            _nil = pd.to_numeric(out_df["NILAI"], errors="coerce")
+            out_sum = (
+                out_df.assign(_n=_nil)
+                .groupby(["Nama Barang", "NAMA RESTO", "SATUAN"],
+                         as_index=False, dropna=False)["_n"].sum()
+            )
+            # join via key-frame (pivot masih berkolom MultiIndex (JENIS,
+            # Tanggal) — tidak bisa di-merge langsung)
+            keys_df = pd.DataFrame({
+                "Nama Barang": pivot["Nama Barang"].to_numpy(),
+                "NAMA RESTO": pivot["NAMA RESTO"].to_numpy(),
+                "SATUAN": pivot["SATUAN"].to_numpy(),
+            }).merge(out_sum, on=["Nama Barang", "NAMA RESTO", "SATUAN"],
+                     how="left")
+            total_acr = pd.to_numeric(keys_df["_total_acr"] if "_total_acr"
+                                      in keys_df.columns else keys_df["_n"],
+                                      errors="coerce").fillna(0.0) \
+                .to_numpy(dtype="float64")
+        else:
+            total_acr = np.zeros(n, dtype="float64")
+        acr = total_acr / h_safe                    # rata-rata penjualan harian
+        with np.errstate(divide="ignore", invalid="ignore"):
+            dev_to_bom = np.where(total_acr > 0, deviasi / total_acr, 0.0)
+        stok_seharusnya = so_m1 - acr               # SO(H-1) − ACR
+
         # --- CEK vektorisasi (np.select — urutan kondisi PERSIS versi lama) ---
         barang_s = pivot["Nama Barang"].astype(str)
         aktif_s = (barang_s.map(self._aktif_lookup).fillna("")
@@ -656,10 +727,18 @@ class DeviasiView(tk.Frame):
                 so_h, so_m1, out=np.full(n, np.inf), where=so_m1 > 0)
         cond_drastis = (so_m1 > 0) & (drop_ratio < 0.5)
 
+        # v3.9.6: kondisi ke-5 "ACR to BOM" — |Deviasi| melebihi Total ACR
+        # (BOM/penjualan 1..H): selisih stok lebih besar dari pemakaian
+        # teoretis sebulan → pasti salah. Melengkapi port formula LET
+        # (dulu "4 dari 5 kondisi — ACR butuh BOM, TODO"); kategori sama
+        # persis string sheet Follow UP / DEVIASI GR file asli user.
+        cond_acr = (total_acr > 0) & (np.abs(deviasi) > total_acr)
+
         cek = np.select(
-            [cond_kosong, cond_tanggal, cond_manual, cond_drastis],
+            [cond_kosong, cond_tanggal, cond_manual, cond_drastis,
+             cond_acr],
             ["Kosong/Non Aktif", "Beda Tanggal", "Hitung Manual",
-             "Turun Drastis"],
+             "Turun Drastis", "ACR to BOM"],
             default="",
         )
 
@@ -682,6 +761,12 @@ class DeviasiView(tk.Frame):
             "Deviasi": deviasi,
             "_ABS": np.abs(deviasi),
             "CEK": cek,
+            # v3.9.6 — kategori Deviasi:
+            "Max Deviasi": np.abs(deviasi),   # di-update per-barang di bawah
+            "ACR": acr,
+            "Total ACR": total_acr,
+            "Dev to BOM%": dev_to_bom,
+            "Stok Seharusnya": stok_seharusnya,
         })
 
         if result.empty:
@@ -689,6 +774,10 @@ class DeviasiView(tk.Frame):
 
         result["Rank"] = result.groupby("Nama Barang")["_ABS"].rank(
             method="min", ascending=False).astype("Int64")
+        # Max Deviasi = max |Deviasi| per barang (semua resto — terverifikasi
+        # dari sheet DEVIASI GR file asli: kolom == groupby-max ABS Deviasi)
+        result["Max Deviasi"] = result.groupby("Nama Barang")["_ABS"] \
+            .transform("max")
 
         result = result.drop(columns=["_ABS"])
         return result
@@ -756,6 +845,14 @@ class DeviasiView(tk.Frame):
         else:
             filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() != "GR"]
 
+        # v3.9.6: Max Deviasi dihitung ULANG per satuan-mode (identik sheet
+        # asli: DEVIASI GR & DEVIASI PCS punya Max Deviasi masing-masing —
+        # barang dgn satuan campuran antar resto tidak saling mencampur).
+        if not filtered.empty:
+            filtered = filtered.assign(**{
+                "Max Deviasi": filtered.groupby("Nama Barang")["Deviasi"]
+                .transform(lambda s: s.abs().max())})
+
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel; menggantikan RESTO/Nama Barang combo)
         for col, sel in st["col_sel"].items():
@@ -796,7 +893,8 @@ class DeviasiView(tk.Frame):
                    ("Resto", "Nama Barang", "Satuan", "AKTIF/NON", "CEK")}
         for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
                   "Out_H", "BK_H", "SO_H+1", "In_H+1", "SO_H+2",
-                  "Sistem", "Deviasi"):
+                  "Sistem", "Deviasi", "Max Deviasi", "ACR", "Total ACR",
+                  "Dev to BOM%", "Stok Seharusnya"):
             cols_np[c] = pd.to_numeric(
                 filtered[c], errors="coerce").fillna(0).to_numpy(
                 dtype="float64")
@@ -811,10 +909,15 @@ class DeviasiView(tk.Frame):
                 val = cols_np[col_id][i] if col_id in cols_np else 0
                 if col_id == "Rank":
                     values[j] = self._fmt_int(val)
+                elif col_id == "Dev to BOM%":
+                    values[j] = self._fmt_pct(val)
                 else:
                     values[j] = self._fmt_num(val)
 
             # v3.2: fingerprint + snapshot (raw, tanpa format tampilan)
+            # v3.9.6: snapshot diperluas — kolom tanggal SO (H-2..H+2) +
+            # Loss Surplus to BOM (= Dev to BOM%) utk format Follow Up
+            # "seperti file sample" (sheet Follow UP file asli user).
             snap = {
                 "asal": asal,
                 "resto": resto,
@@ -826,6 +929,11 @@ class DeviasiView(tk.Frame):
                 "sistem": float(cols_np["Sistem"][i]),
                 "deviasi": float(cols_np["Deviasi"][i]),
                 "cek": str(cols_np["CEK"][i]),
+                "so_m2": float(cols_np["SO_H-2"][i]),
+                "so_m1": float(cols_np["SO_H-1"][i]),
+                "so_p1": float(cols_np["SO_H+1"][i]),
+                "so_p2": float(cols_np["SO_H+2"][i]),
+                "loss_bom": float(cols_np["Dev to BOM%"][i]),
             }
             fp = row_fingerprint(snap)
             checked = store is not None and store.has(fp)
@@ -849,6 +957,14 @@ class DeviasiView(tk.Frame):
                         zero_cells.append((f"row_{i}", "Deviasi"))
                     else:
                         tags.append("zero_dev")
+            # v3.9.6: kolom kategori Deviasi — minus merah PER CELL juga di
+            # "Dev to BOM%" & "Stok Seharusnya" (ACR/Total ACR/Max Deviasi
+            # non-negatif by construction).
+            if self._cell_tags:
+                if cols_np["Dev to BOM%"][i] < 0:
+                    neg_cells.append((f"row_{i}", "Dev to BOM%"))
+                if cols_np["Stok Seharusnya"][i] < 0:
+                    neg_cells.append((f"row_{i}", "Stok Seharusnya"))
             cek_val = cek_series.iloc[i]
             if cek_val == "Kosong/Non Aktif":
                 tags.append("cek_kosong")
@@ -1014,14 +1130,41 @@ class DeviasiView(tk.Frame):
         if not h_changed or self._dirty:
             self._refresh()
 
+    @staticmethod
+    def _parse_num_id(s):
+        """v3.9.6: parser sort format Indonesia: '1.234' = 1234,
+        '(1.234)' = -1234, '-' = 0, '12,5' = 12.5, '26,97%' = 26.97.
+        (Parser default widgets menganggap '1.234' = 1.234 dan '(5,00)%'
+        = -500 — salah utk format Indonesia; identik fix komparasi v3.9.3.)"""
+        s = str(s).replace("%", "").replace("—", "").strip()
+        if s in ("-", ""):
+            return 0.0
+        neg = s.startswith("(") and s.endswith(")")
+        if neg:
+            s = s[1:-1]
+        s = s.replace(".", "").replace(",", ".")
+        try:
+            v = float(s)
+        except ValueError:
+            return 0.0
+        return -v if neg else v
+
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         """Sort kolom — engine LINEAR v3.3 (delete+reinsert, bukan
         tree.move O(n²) yang membekukan UI di tabel besar).
-        v3.9.2: delete+reinsert me-reset tag PER-CELL → dipasang ulang."""
+        v3.9.2: delete+reinsert me-reset tag PER-CELL → dipasang ulang.
+        v3.9.6: parser Indonesia utk kolom numerik + 'Dev to BOM%'
+        (persen) — nilai format '1.234.567'/'(5,00)%' kini terurut benar."""
         if self._busy and tree is None:
             return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
-        sort_tree_by_column(tree, col, reverse=reverse)
+        numeric_like = col in (
+            "SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H", "Out_H", "BK_H",
+            "SO_H+1", "In_H+1", "SO_H+2", "Sistem", "Deviasi", "Rank",
+            "Max Deviasi", "ACR", "Total ACR", "Dev to BOM%",
+            "Stok Seharusnya")
+        parse = self._parse_num_id if numeric_like else None
+        sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
         self._reapply_cell_tags(tree)
 
     def _auto_fit(self):
@@ -1109,3 +1252,21 @@ class DeviasiView(tk.Frame):
             return str(int(val))
         except (TypeError, ValueError):
             return str(val)
+
+    @staticmethod
+    def _fmt_pct(val) -> str:
+        """v3.9.6: ratio (0.2697) → '26,97%' (kolom Dev to BOM%) — format
+        identik komparasi/laporan (Indonesia, minus kurung, -0.0 → 0,00%)."""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "—"
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            return str(val)
+        if val == 0:
+            return "0,00%"
+        s = f"{val * 100:,.2f}".replace(",", "\u00a0").replace(
+            ".", ",").replace("\u00a0", ".")
+        if val < 0:
+            return f"({s[1:]})%"
+        return f"{s}%"

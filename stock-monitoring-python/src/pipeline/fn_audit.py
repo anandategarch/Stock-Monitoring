@@ -36,6 +36,14 @@ DUA bagian:
    - Sisa gantung akhir grup → "DEVIASI MURNI" / "OK"
    - KPI: rows/cutoff/omit/deviasi_murni/deviasi_qty/ok
 
+v3.9.6 (permintaan user: "tab selisih in jika tanggal 1 pembanding SO nya
+SO bulan lalu"): urutan baris per grup kini KRONOLOGIS — bulan lalu
+(Tanggal −25..−31) urut hari naik 25•→31•, lalu bulan berjalan 1..31.
+Sort numerik lama membalik urutan bulan lalu (−31 duluan) sehingga baris
+tepat sebelum tanggal 1 = Tanggal −25 (SO tgl 25•) — delta SO "SO Naik"
+di tanggal 1 salah membanding. Dengan urutan kronologis, pembanding SO
+tanggal 1 = SO TERAKHIR bulan lalu (31•) = "SO bulan lalu" yang benar.
+
 Riwayat validasi: engine tervalidasi 100% identik dgn sheet
 LAPORAN_DEVIASI user (output macro asli) pada input yang sama
 (86.738 baris; 25 baris beda terbukti snapshot data lama) — port dipakai
@@ -142,10 +150,22 @@ def build_audit_input(rekap_so_df: Optional[pd.DataFrame],
     out["Resto"] = out["Resto"].astype(str)
     out["Nama Item"] = out["Nama Item"].astype(str)
     out = out[AUDIT_INPUT_COLUMNS]
-    # urut per (Resto, Nama Item, Tanggal) → grup kontigu + tanggal naik
-    out = out.sort_values(["Resto", "Nama Item", "Tanggal"],
-                          kind="mergesort", na_position="last") \
-        .reset_index(drop=True)
+    # urut per (Resto, Nama Item) → grup kontigu; tanggal KRONOLOGIS:
+    # bulan lalu (negatif) duluan urut hari NAIK (25•→31• = -25→-31),
+    # lalu bulan berjalan 1..31.
+    # v3.9.6 (permintaan user: "tab selisih in jika tanggal 1 pembanding
+    # SO nya SO bulan lalu"): sort numerik lama membalik urutan bulan lalu
+    # (−31/31• tampil PERTAMA, baris terakhir sebelum tgl 1 = −25/25•) —
+    # delta SO di tanggal 1 membanding SO tgl 25 bulan lalu, BUKAN SO
+    # terakhir bulan lalu (31•). Dengan sort kronologis, baris tepat
+    # sebelum tanggal 1 = SO terakhir bulan lalu → pembanding benar.
+    tgl_num = pd.to_numeric(out["Tanggal"], errors="coerce")
+    _k1 = np.where(tgl_num < 0, 0, 1)          # 0 = bulan lalu, 1 = berjalan
+    _k2 = np.where(tgl_num < 0, -tgl_num, tgl_num)  # hari (25..31 / 1..31)
+    out = out.assign(_k1=_k1, _k2=_k2)
+    out = out.sort_values(["Resto", "Nama Item", "_k1", "_k2"],
+                          kind="mergesort", na_position="last")
+    out = out.drop(columns=["_k1", "_k2"]).reset_index(drop=True)
     return out
 
 

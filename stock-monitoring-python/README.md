@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.6 — KATEGORI DEVIASI + PEMBANDING SO TGL 1 = SO BULAN LALU + FORMAT FOLLOW UP FILE SAMPLE**: **(1)** tab 📦 Deviasi GR & 🧩 Deviasi PCS kini punya **5 KOLOM KATEGORI DEVIASI** (mirror sheet DEVIASI GR/PCS workbook asli): **Max Deviasi** · **ACR** (rata-rata penjualan harian) · **Total ACR** (BOM = Σ penjualan 1..H) · **Dev to BOM%** (= Deviasi/Total ACR — "Loss Surplus to BOM") · **Stok Seharusnya** (= SO(H−1) − ACR) + **CEK kondisi ke-5 "ACR to BOM"** (|Deviasi| > Total ACR → pasti salah; melengkapi port formula LET 5 kondisi) + parser sort angka Indonesia; **(2)** audit Rekap Selisih IN diurut **kronologis** — di **tanggal 1**, pembanding SO (delta "SO Naik") kini = **SO TERAKHIR bulan lalu** (sort lama terbalik → membanding SO tgl 25•); **(3)** tab ☑ Follow Up + export kini **format sheet Follow UP file asli**: SO per tanggal (H-2..H+2, heading angka tanggal) · Sistem · Deviasi · Loss Surplus to BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC. 358/358 UI test × 2 + smoke real-data (810 baris GR, 97 "ACR to BOM", audit 35.436 baris, komparasi 40.739 baris).
 > **v3.9.5 — DEEP AUDIT BUG (4 agent paralel) → semua P1/P2/P3 diperbaiki**: **(P1) race ✕ Tutup File** saat komparasi menghitung → hasil file lama tak muncul lagi (generation counter); **(P1) kebocoran GC seumur sesi** (popup ditutup di tengah render → gc.disable menempel — poll kini di root app); **(P2) parse file 9,4MB di thread worker** (UI tak membeku 8 detik); **(P2) SALDO AWAL jadi base com(1)** di 3 view sekaligus (pivot/laporan/komparasi — pair tanpa data bulan-lalu tak lagi dapat MINUS PALSU di H=1; GR·App == DEV·App aljabar persis); **(P2) popup detail** pakai nama barang versi APP; **(P2) tag per-cell bertahan setelah filter di clone ⛶**; **(P2) popup filter "Selisih vs Median" hidup**; **(P2) Apply H render 1× (dulu 2×)**; plus duplikat multi-bulan dihitung, scan sheet ke-2, footer = hitungan baris tampil, filter reset saat ganti file, sort diantrekan saat busy, initialdir ikut RootPath, unsubscribe H, dst. **337/337 UI test × 2 run + smoke real-data 342rb baris + VLM visual PASS.**
 > **v3.9.4 — KOMPARASI FILE DEVIASI vs TAB DEVIASI GR + "DEV TO BOM" DI APP**: tab 📋 Laporan Deviasi kini **2 MODE** (SegmentBar): **⚖ Komparasi File Deviasi (BARU — default)** — pilih file deviasi resmi (mis. `20.AGUSTUS 2026.xlsx`), tiap baris dibandingkan sisi-app pada **kolom H menurut minggunya (WEEK 1→7 · WEEK 2→14 · WEEK 3/4→25** — permintaan user; minggu file = cut-off kumulatif dari tgl 1); **BOM App = Σ penjualan 22.05** ("2205 itu BOM"), COM App = Σ pemakaian, **GR App = SO_H − Sistem persis tab 📦 Deviasi GR**, DEV App = COM−BOM (formula file); kolom Selisih + Status **MATCH / SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA**; resto file "1041.BDGUKU" dinormalkan otomatis; minus merah per-cell + sel Status hijau/amber/merah — dan **🚨 Anomali COM (v3.9.3, tetap ada tinggal ganti segmen)**.
 > **v3.9.3 — LAPORAN DEVIASI → DAFTAR ANOMALI PEMAKAIAN (COM) (SEMENTARA)**: isi tab 📋 Laporan Deviasi DIGANTI — kini **daftar (Nama Barang × Resto) dengan pemakaian (COM) di kolom H yang MINUS atau LEBIH TINGGI dari MEDIAN barang tsb** (median antar resto, per barang, di kolom H). Formula COM identik baris 6.PEMAKAIAN (COM) pivot (com = SO(t-1) + IN − BK − SO; tanggal pertama = SALDO AWAL — diverifikasi oracle 286 nilai vs pivot, 0 mismatch); matriks COM di-cache (ganti H tanpa recompute); TANGGAL H bersama dari tab 📦 Deviasi GR (chip read-only + auto-refresh); minus merah **per cell** + sel Status merah/amber; tabel Audit Harian lama tersimpan di git history (commit e20141a).
@@ -80,6 +81,56 @@ Audit menyeluruh fitur terbaru (v3.9.3 Anomali COM + v3.9.4 Komparasi Deviasi) m
 9. **Lainnya (P3)**: duplikat lintas bulan dihitung+dilaporkan; scan sheet ke-2+; footer status = baris tampil (bukan global); filter reset saat file berganti; sort diantrekan saat busy; pane tersembunyi tak di-compute saat H berubah; initialdir komparasi ikut RootPath; `show_laporan_mode` sinkron SegmentBar; snapshot follow-up + kolom AKTIF/NON; `SharedTanggalH.unsubscribe()`; `-0,00%`→`0,00%`; Satuan NaN→`''`; dialog + `*.xlsb`; baris basi dibersihkan saat data kosong.
 
 **Verifikasi**: 337/337 UI test × 2 run (25 check baru §23) + `test_mock` ALL PASS + ruff 0 error baru + oracle SA 3 view + smoke real-data 342.222 baris (tgl −31..31, parse async 8,2s dgn 740 pump = UI hidup, anomali 2.135 baris 0,4s, race & cache-invalidation bersih) + 3 screenshot VLM PASS.
+
+## Fitur Baru v3.9.6 — Kategori Deviasi · Pembanding SO Tgl 1 · Format Follow Up
+
+### 1. Kategori Deviasi di tab 📦 Deviasi GR & 🧩 Deviasi PCS
+
+5 kolom baru setelah **Rank** (nama & rumus mirror sheet `DEVIASI GR`/`DEVIASI PCS`
+workbook asli `01.1 CEK STOCK V2.xlsb` — formula diverifikasi nilai-per-nilai
+dari sheet tsb):
+
+| Kolom | Rumus | Keterangan |
+|---|---|---|
+| **Max Deviasi** | max \|Deviasi\| per barang (antar resto) | pembanding cepat: seberapa ekstrem resto ini vs resto lain |
+| **ACR** | Σ penjualan 9.OUT (22.05) tgl 1..H ÷ H | *average consumption rate* — rata-rata pemakaian harian |
+| **Total ACR** | Σ penjualan 9.OUT tgl 1..H | BOM per barang×resto (pemakaian teoretis) |
+| **Dev to BOM%** | Deviasi ÷ Total ACR | = "Loss Surplus to BOM" sheet Follow UP — > 100% = rugi melebihi pemakaian teoretis |
+| **Stok Seharusnya** | SO(H−1) − ACR | perkiraan stok hari H bila pemakaian normal |
+
+Plus **kategori CEK ke-5 "ACR to BOM"**: `|Deviasi| > Total ACR > 0` → selisih
+stok melebihi seluruh pemakaian teoretis sebulan → pasti salah (tag ungu;
+melengkapi port formula LET Excel yang sejak v3.2 baru 4 dari 5 kondisi —
+"ACR butuh BOM, TODO"). Sort kolom numerik kini memakai parser angka
+Indonesia (`1.234.567` / `(5,00)%` terurut benar).
+
+### 2. Tab 📤 Rekap Selisih IN — pembanding SO tanggal 1 = SO bulan lalu
+
+Baris audit per grup kini diurut **kronologis**: bulan lalu (Tanggal −25..−31)
+urut hari naik 25•→31•, lalu bulan berjalan 1..31. Sort numerik lama
+membalik urutan bulan lalu (−31 tampil pertama) sehingga baris tepat sebelum
+tanggal 1 = Tanggal −25 — delta SO aturan **"SO Naik" (VALID Sistem Masuk)**
+di tanggal 1 membanding SO tgl 25• bulan lalu, **bukan SO terakhir bulan
+lalu (31•)**. Kini pembanding tanggal 1 = **SO bulan lalu terakhir** —
+sesuai permintaan "jika tanggal 1 pembanding SO nya SO bulan lalu".
+
+### 3. Tab ☑ Follow Up — format file sample
+
+Tabel & export kini mengikuti sheet **Follow UP** workbook asli:
+
+```
+✓ · Resto · Nama Barang · [SO tgl H-2 · H-1 · H · H+1 · H+2 — heading ANGKA
+TANGGAL (H=25 → 23..27)] · Sistem · Deviasi · Loss Surplus to BOM ·
+Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC ·
+Asal · Status TL · Ditambahkan
+```
+
+- Kolom tanggal SO = snapshot saat baris dicentang (baris dari Laporan/
+  Komparasi yang tak punya nilai per tanggal tampil "-").
+- Kolom kerja **Selisih · Selisih Deviasi · Cek FU** = diisi petugas
+  (dibawa resolved store bila sudah ada).
+- Snapshot lama (v3.9.5 dan sebelumnya) tetap dimuat; fingerprint tidak
+  berubah → `followup.json` lama kompatibel.
 
 ## Fitur Baru v3.9.4 — Komparasi File Deviasi vs Tab Deviasi GR
 

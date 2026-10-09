@@ -123,7 +123,25 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.5"  # v3.9.5 — AUDIT BUG DEEP (4 agent paralel): fix race ✕ Tutup File, parse async, SALDO AWAL base com(1), GC-shield leak, dll
+APP_VERSION = "3.9.6"  # v3.9.6 — kategori Deviasi di tab Deviasi GR/PCS + pembanding SO tgl 1 = SO bulan lalu + format Follow Up ala file sample
+# v3.9.6 (3 permintaan user sekaligus):
+# (1) "tambah kategori Deviasi pada tab Deviasi PCS dan GR" — 5 kolom
+#     baru (mirror sheet DEVIASI GR/PCS workbook asli): Max Deviasi ·
+#     ACR (rata-rata penjualan harian = Σ 9.OUT 1..H / H) · Total ACR
+#     (BOM per barang×resto = Σ penjualan 1..H) · Dev to BOM% (= Deviasi
+#     / Total ACR — "Loss Surplus to BOM") · Stok Seharusnya (= SO(H−1) −
+#     ACR) + CEK kondisi ke-5 "ACR to BOM" (|Deviasi| > Total ACR —
+#     melengkapi port formula LET yang dulu 4/5 kondisi) + parser sort
+#     Indonesia utk semua kolom numerik.
+# (2) "Tab selisih in jika tanggal 1 pembanding SO nya SO bulan lalu" —
+#     urutan baris audit kini KRONOLOGIS (bulan lalu 25•→31• lalu 1..31);
+#     dulu sort numerik membalik urutan bulan lalu sehingga delta SO di
+#     tanggal 1 membanding SO tgl 25• (BUKAN SO terakhir bulan lalu).
+# (3) "Format Follow UP Seperti File Sample" — tabel + export tab ☑
+#     Follow Up kini persis sheet Follow UP file asli: Resto · Nama
+#     Barang · SO per tanggal (H-2..H+2, heading angka tanggal) ·
+#     Sistem · Deviasi · Loss Surplus to BOM · Keterangan · SO · DEVIASI
+#     · Selisih · Selisih Deviasi · Cek FU · PIC (+ pelacakan app).
 # v3.9.4 (permintaan user: "Di file sampel kan ada Dev to bom ini kok gak
 # ada ya? Padahal data udah lengkap 2205 itu bom. Aku barusan upload file
 # deviasi. Nah aku mau compare file deviasi itu dengan yang deviasi di
@@ -309,6 +327,10 @@ TAB 📤 REKAP SELISIH IN (v3.4 → v3.6)
     dibaca): VALID (Sistem Masuk) / OK (Matching) / CUT-OFF RESOLVED /
     OK (Dalam Cut-off) / DEVIASI MURNI + KPI chips. Semua kolom bisa
     difilter ⧩ (termasuk Hasil Audit & SO).
+    (v3.9.6: baris diurut KRONOLOGIS — bulan lalu 25•→31• lalu 1..31;
+    di TANGGAL 1, cek "SO Naik" (VALID) membanding dengan SO TERAKHIR
+    BULAN LALU — permintaan user "jika tanggal 1 pembanding SO nya SO
+    bulan lalu".)
   • Double-click baris → popup RINCIAN IN: daftar dokumen pendukung
     per sumber (42.05 / 32.24 / 99.01) BESERTA NOMORNYA + subtotal per
     sumber + total IN.
@@ -346,7 +368,7 @@ TAB PIVOT TABLE
     SESUAI TAMPILAN ke .xlsx — filter + mode + rentang tanggal + kolom
     tampil ikut serta; nilai minus tetap font merah per cell di Excel.
 
-FOLLOW UP (v3.2 — ala aplikasi Waste)
+FOLLOW UP (v3.2 — ala aplikasi Waste; v3.9.6 FORMAT FILE SAMPLE)
   • Centang kolom ✓ di tabel Deviasi GR / Deviasi PCS / Laporan Deviasi
     → baris masuk ke tab ☑ Follow Up (badge jumlah di judul tab).
     (v3.9.3: dari tab Laporan, snapshot memakai asal LAPORAN-COM —
@@ -355,8 +377,14 @@ FOLLOW UP (v3.2 — ala aplikasi Waste)
     (followup.json) — aman walau aplikasi ditutup.
   • Klik ✓ lagi (di tab mana pun, termasuk window ⛶) = keluarkan baris.
   • (v3.3) double-click sel ✓ = keluarkan/masukkan cepat.
-  • 💾 Export Excel : snapshot + kolom kosong PIC / KATEGORI MASALAH /
-    TINDAKAN utk diisi petugas.
+  • (v3.9.6) FORMAT TABEL = sheet Follow UP file sample: Resto · Nama
+    Barang · SO PER TANGGAL (H-2..H+2 — judul kolom = angka tanggal,
+    mis. H=25 → 23..27) · Sistem · Deviasi · Loss Surplus to BOM ·
+    Keterangan · kolom kerja FU: SO · DEVIASI · Selisih · Selisih
+    Deviasi · Cek FU · PIC (kolom kerja diisi petugas follow-up).
+  • 💾 Export Excel : format file sample yang sama (heading tanggal =
+    angka tanggal) + kolom pelacakan app (Asal / Status TL /
+    Ditambahkan).
   • Double-click baris → pop-up detail source data.
   • Sort kolom apa pun tetap aman: baris yang di-klik/di-keluarkan
     tetap baris yang benar (v3.3).
@@ -373,13 +401,21 @@ TOMBOL ⤢ PERBESAR TABEL + ⛶ LAYAR PENUH (v3.9 — ala Waste)
   • ⛶ Layar Penuh    : buka tabel di window besar terpisah (Esc =
     kembali). Sort, filter ⧩, double-click, ✓ follow-up tetap jalan.
 
-TAB DEVIASI GR / PCS (v3.9 — H BERSAMA)
+TAB DEVIASI GR / PCS (v3.9 — H BERSAMA; v3.9.6 KATEGORI DEVIASI)
   • 1 baris per (Resto × Barang × Satuan) di sekitar Tanggal H (H-2 … H+2).
   • TANGGAL H cukup diinput 1× di tab 📦 DEVIASI GR (entry + tombol
     Apply H) — otomatis berlaku JUGA di tab 🧩 DEVIASI PCS (chip nilai H
     ter-update + tabel ikut refresh; pivot dihitung 1× via cache
     bersama). Tab PCS tidak punya input H sendiri.
   • Kolom CEK = deteksi anomali otomatis. Ubah Tanggal H + Apply.
+  • (v3.9.6) KATEGORI DEVIASI (mirror sheet DEVIASI GR/PCS file asli):
+      Max Deviasi      = deviasi terbesar barang tsb antar resto
+      ACR              = rata-rata penjualan harian (Σ 22.05 / H)
+      Total ACR        = BOM per barang×resto (Σ penjualan 1..H)
+      Dev to BOM%      = Deviasi / Total ACR (Loss Surplus to BOM)
+      Stok Seharusnya  = SO(H-1) − ACR (perkiraan stok hari H)
+    plus kategori CEK ke-5 "ACR to BOM": |Deviasi| > Total ACR → selisih
+    stok melebihi pemakaian teoretis sebulan (pasti salah — ungu).
   • (v3.2) ringkasan Total |Deviasi| & Anomali CEK ada di footer bawah tabel.
 
 TAB LAPORAN DEVIASI (v3.9.4 — 2 MODE, ganti lewat SegmentBar MODE)
