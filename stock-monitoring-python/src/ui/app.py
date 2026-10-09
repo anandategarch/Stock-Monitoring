@@ -5,14 +5,14 @@ Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
     │ ⬛ Toolbar gelap: 📊 judul + v3.5 + [Export] [❓]  │
     ├────────────────────────────────────────────────────┤
-    │ Tab modern ber-ikon (9 tab, fungsi tidak berubah)  │
+    │ Tab modern ber-ikon (10 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
     │ Konten card-based per view (tabel lebar & besar)   │
     ├────────────────────────────────────────────────────┤
     │ StatusBar: ● status data + ringkasan rows           │
     └────────────────────────────────────────────────────┘
 
-9 tab:
+10 tab:
   1. ⚙️ Config          : RootPath + info config (LightMode dihapus v3.5)
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
   3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default,
@@ -20,12 +20,14 @@ Struktur jendela (ala aplikasi Waste):
                           BULAN BERJALAN — v3.6)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
-  6. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
+  6. 🎯 PARETO          : 80/20 kontributor |Deviasi| terbesar — fokus
+                          list ≤ cutoff % + grafik + KPI + export (v3.9.9)
+  7. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
                           kolom SO + kolom Hasil Audit (logika macro VBA ×
                           data app — v3.6, tanpa sheet 29) + drill-down
-  7. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
-  8. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
-  9. 🛒 Rincian PO      : pivot PO dengan search + sort
+  8. 📋 Laporan Deviasi : audit harian + 6-way Status Audit + ✓
+  9. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
+ 10. 🛒 Rincian PO      : pivot PO dengan search + sort
 
 v3.7 "ENGINE TURBO" + DEEP AUDIT FIXES ringkasan:
 - ENGINE 3,5-4× LEBIH CEPAT (output terverifikasi IDENTIK vs v3.6):
@@ -114,6 +116,7 @@ from src.ui.widgets import (
 from src.ui.followup import FollowUpStore
 from src.ui.pivot_view import PivotTableView
 from src.ui.deviasi_view import DeviasiView, SharedPivotCache, SharedTanggalH
+from src.ui.pareto_view import ParetoDeviasiView
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
 from src.ui.rincian_po_view import RincianPoView
@@ -123,7 +126,22 @@ from src.ui.export_sheets import add_pivot_sheet
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.8"  # v3.9.8 — UI CLEAN: semua teks instruksi/petunjuk dihapus (Bantuan, subtitle kartu, tooltip, hint footer)
+APP_VERSION = "3.9.9"  # v3.9.9 — TAB 🎯 PARETO: 80/20 kontributor deviasi terbesar (fokus list, grafik, KPI, export)
+# v3.9.9 (TAB 🎯 PARETO — "mau coba pareto"):
+# (1) tab BARU 🎯 Pareto (index 5, setelah Deviasi PCS): analisis 80/20
+#     kontributor |Deviasi| — semua kombinasi (Barang × Resto × Satuan)
+#     diurut |Deviasi| menurun + Kontribusi % + Kumulatif % + Fokus 🎯
+#     (baris yang diperlukan mencapai CUTOFF %, default 80, input
+#     1-100); (2) MODE GR/PCS via SegmentBar + TANGGAL H chip read-only
+#     (state bersama); (3) KPI: KOMBINASI · TOTAL |DEVIASI| · FOKUS
+#     ≤CUTOFF · TOP 20% → %; (4) GRAFIK canvas (top-30 batang teal +
+#     garis kumulatif amber + garis cutoff merah + batas fokus); (5)
+#     ✓ follow-up fingerprint IDENTIK tab Deviasi (dedup satu entri);
+#     (6) export 💾 sheet PARETO (angka mentah + meta). Pivot dihitung
+#     SEKALI lewat SharedPivotCache (ParetoDeviasiView = subclass
+#     DeviasiView); index tab setelah Pareto bergeser +1 (Selisih IN 6,
+#     Laporan 7, Rincian 9).
+
 # v3.9.6 (3 permintaan user sekaligus):
 # (1) "tambah kategori Deviasi pada tab Deviasi PCS dan GR" — 5 kolom
 #     baru (mirror sheet DEVIASI GR/PCS workbook asli): Max Deviasi ·
@@ -363,6 +381,7 @@ class StockMonitorApp:
         self.tab_pivot = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_gr = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_pcs = tk.Frame(self.notebook, bg=C_BG)
+        self.tab_pareto = tk.Frame(self.notebook, bg=C_BG)
         self.tab_in_selisih = tk.Frame(self.notebook, bg=C_BG)
         self.tab_laporan = tk.Frame(self.notebook, bg=C_BG)
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
@@ -373,11 +392,11 @@ class StockMonitorApp:
         self.notebook.add(self.tab_pivot, text="  📊 Pivot Table  ")
         self.notebook.add(self.tab_deviasi_gr, text="  📦 Deviasi GR  ")
         self.notebook.add(self.tab_deviasi_pcs, text="  🧩 Deviasi PCS  ")
+        self.notebook.add(self.tab_pareto, text="  🎯 Pareto  ")
         self.notebook.add(self.tab_in_selisih, text="  📤 Rekap Selisih IN  ")
         self.notebook.add(self.tab_laporan, text="  📋 Laporan Deviasi  ")
         self.notebook.add(self.tab_followup, text="  ☑ Follow Up  ")
         self.notebook.add(self.tab_rincian, text="  🛒 Rincian PO  ")
-
         # v3.2: lazy refresh — tab data hanya compute saat TERLIHAT
         # (setelah pipeline selesai hanya tab aktif yang refresh; tab lain
         # menunggu dipilih → app terasa jauh lebih ringan)
@@ -390,6 +409,7 @@ class StockMonitorApp:
         self._build_pivot_tab()
         self._build_deviasi_gr_tab()
         self._build_deviasi_pcs_tab()
+        self._build_pareto_tab()
         self._build_in_selisih_tab()
         self._build_laporan_tab()
         self._build_followup_tab()
@@ -409,14 +429,17 @@ class StockMonitorApp:
         elif cur == 4:
             view = self.deviasi_pcs_view
         elif cur == 5:
-            view = self.in_selisih_view
+            # v3.9.9: tab 🎯 Pareto (index bergeser +1 setelah disisipkan)
+            view = self.pareto_view
         elif cur == 6:
+            view = self.in_selisih_view
+        elif cur == 7:
             # v3.9.4: refresh pane SESUAI MODE aktif di tab Laporan
             view = (self.komparasi_view
                     if getattr(self, "laporan_segment", None) is not None
                     and self.laporan_segment.active == 0
                     else self.laporan_view)
-        elif cur == 8:
+        elif cur == 9:
             view = self.rincian_view
         if view is not None and hasattr(view, "ensure_refreshed"):
             view.ensure_refreshed()
@@ -873,6 +896,7 @@ class StockMonitorApp:
         self.pivot_view.load_data(append1_df)
         self.deviasi_gr_view.load_data(append1_df)
         self.deviasi_pcs_view.load_data(append1_df)
+        self.pareto_view.load_data(append1_df)  # v3.9.9 — tab 🎯 Pareto
         self.in_selisih_view.load_data(append1_df, in_detail_df,
                                       audit_result=audit_result)
         self.laporan_view.load_data(append1_df)
@@ -1005,6 +1029,18 @@ class StockMonitorApp:
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=False)
         self.deviasi_pcs_view.pack(fill="both", expand=True)
+
+    def _build_pareto_tab(self):
+        """v3.9.9 — tab 🎯 Pareto: kontributor |Deviasi| terbesar 80/20.
+        Subclass DeviasiView → pivot cache DIBAGI (tanpa recompute) +
+        H bersama (chip read-only, ikut Apply H di tab GR)."""
+        self.pareto_view = ParetoDeviasiView(
+            self.tab_pareto,
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            followup_store=self.followup_store,
+            shared_cache=self._deviasi_pivot_cache,
+            h_state=self._shared_h)
+        self.pareto_view.pack(fill="both", expand=True)
 
     def _build_in_selisih_tab(self):
         """v3.4 — tab 📤 Rekap Selisih IN (drill-down rincian dokumen IN)."""

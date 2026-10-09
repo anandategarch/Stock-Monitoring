@@ -66,6 +66,13 @@ Memverifikasi:
     reset saat reload file, sort diantrekan saat busy, pair index nama
     APP, snapshot 'aktif', show_laporan_mode sinkron SegmentBar, popup
     filter "Selisih vs Median" hidup, Apply H render 1×, unsubscribe H
+21. v3.9.9 — TAB 🎯 PARETO (§24): 80/20 kontributor |Deviasi| — urut
+    |Deviasi| menurun + Kontribusi % + Kumulatif % + Fokus 🎯 (cutoff
+    input 1-100 default 80) + mode GR/PCS (SegmentBar) + KPI strip
+    (KOMBINASI/TOTAL/FOKUS/TOP 20%) + grafik canvas (batang teal +
+    garis kumulatif amber + garis cutoff) + pivot cache dibagi dgn
+    tab Deviasi (subclass) + fingerprint ✓ IDENTIK (dedup Follow
+    Up) + export sheet PARETO (read-back openpyxl).
 """
 import os
 import sys
@@ -395,10 +402,10 @@ def main():
     app = StockMonitorApp(root)
     sys.stdout, sys.stderr = real_stdout, real_stderr
     root.update_idletasks()
-    check("App + toolbar + 9 tab terbangun (v3.4: +Rekap Selisih IN)",
-          len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
+    check("App + toolbar + 10 tab terbangun (v3.9.9: +🎯 Pareto)",
+          len(app.notebook.tabs()) == 10, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.8", APP_VERSION == "3.9.8", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.9", APP_VERSION == "3.9.9", f"got {APP_VERSION}")
     check("Proses tab punya spinner status", app.status_spinner is not None)
 
     print("== 1a. v3.9.8 UI CLEAN — teks instruksi dihapus ==")
@@ -443,6 +450,7 @@ def main():
 
     for name, view in (("Deviasi GR", app.deviasi_gr_view),
                        ("Deviasi PCS", app.deviasi_pcs_view),
+                       ("Pareto", app.pareto_view),
                        ("Pivot", app.pivot_view),
                        ("Rekap Selisih IN", app.in_selisih_view),
                        ("Laporan", app.laporan_view),
@@ -504,6 +512,7 @@ def main():
     app.pivot_view.load_data(append1)
     app.deviasi_gr_view.load_data(append1)
     app.deviasi_pcs_view.load_data(append1)
+    app.pareto_view.load_data(append1)   # v3.9.9 — tab 🎯 Pareto
     app.in_selisih_view.load_data(append1, in_detail,
                                   audit_result=audit_result)
     app.laporan_view.load_data(append1)
@@ -511,11 +520,13 @@ def main():
     root.update()
     check("Lazy: view tak terlihat defer refresh (dirty)",
           app.deviasi_gr_view._dirty and app.laporan_view._dirty and
-          app.rincian_view._dirty and app.in_selisih_view._dirty)
+          app.rincian_view._dirty and app.in_selisih_view._dirty and
+          app.pareto_view._dirty)
 
     for tab, v in [(app.tab_pivot, app.pivot_view),
                    (app.tab_deviasi_gr, app.deviasi_gr_view),
                    (app.tab_deviasi_pcs, app.deviasi_pcs_view),
+                   (app.tab_pareto, app.pareto_view),
                    (app.tab_in_selisih, app.in_selisih_view),
                    (app.tab_laporan, app.laporan_view),
                    (app.tab_rincian, app.rincian_view)]:
@@ -3132,6 +3143,294 @@ def main():
     check("(v3.9.5) destroy view → listener H dilepas (unsubscribe)",
           len(_h_state._listeners) == _n_before,
           f"got {len(_h_state._listeners)} (sebelum {_n_before})")
+
+    # ==================================================================
+    print("== 24. (v3.9.9) TAB 🎯 PARETO — 80/20 KONTRIBUTOR DEVIASI ==")
+    from src.ui.pareto_view import ParetoDeviasiView, NUMERIC_COLS as \
+        _PARETO_NUM
+    from src.ui.export_sheets import write_pareto_sheet as _write_pareto
+    import os as _os
+
+    # defensive: store kosong (beberapa blok sebelumnya toggle baris)
+    app.followup_store.clear()
+    root.update()
+
+    # ---- ORACLE independen: deviasi per pasangan dari mock append1 ----
+    _tgl = pd.to_numeric(append1["Tanggal"], errors="coerce")
+    _gr = append1[append1["SATUAN"].astype(str).str.upper() == "GR"]
+    _so25 = _gr[(_gr["JENIS"] == "1.SO") & (_tgl.reindex(_gr.index) == 25)]
+    _sis25 = _gr[(_gr["JENIS"] == "2.SALDO AKHIR") &
+                 (_tgl.reindex(_gr.index) == 25)]
+    _o = (_so25.groupby(["Nama Barang", "NAMA RESTO"], as_index=False)
+          ["NILAI"].sum().rename(columns={"NILAI": "so"})
+          .merge(_sis25.groupby(["Nama Barang", "NAMA RESTO"],
+                                as_index=False)["NILAI"].sum()
+                 .rename(columns={"NILAI": "sis"}),
+                 on=["Nama Barang", "NAMA RESTO"]))
+    _o["dev"] = pd.to_numeric(_o["so"], errors="coerce") - \
+        pd.to_numeric(_o["sis"], errors="coerce")
+    _o = _o.sort_values(["dev"], key=lambda s: s.abs(), ascending=False,
+                        kind="mergesort").reset_index(drop=True)
+    _tot = float(_o["dev"].abs().sum())
+    _kon = _o["dev"].abs() / _tot
+    _kum = _kon.cumsum()
+    _fok = (_kum - _kon) < 0.80
+    _n20 = max(1, int(np.ceil(0.20 * len(_o))))
+    _top20 = float(_kum.iloc[_n20 - 1] * 100)
+
+    ptv = app.pareto_view
+    ok = select_and_wait(root, app, app.tab_pareto, ptv)
+    check("(v3.9.9) render async selesai (ParetoDeviasiView)", ok)
+    check("(v3.9.9) tab 🎯 Pareto index 5 (setelah Deviasi PCS)",
+          app.notebook.index(app.tab_pareto) == 5)
+    check("(v3.9.9) subclass DeviasiView (mewarisi engine pivot)",
+          isinstance(ptv, DeviasiView))
+    _kids = ptv.tree.get_children()
+    check(f"(v3.9.9) baris GR = {len(_o)} (oracle)", len(_kids) == len(_o),
+          f"got {len(_kids)} vs oracle {len(_o)}")
+    check("(v3.9.9) urutan |Deviasi| MENURUN (baris = oracle berurutan)",
+          all(str(ptv.tree.item(_kids[i], "values")[3]) ==
+              str(_o.iloc[i]["Nama Barang"]) and
+              str(ptv.tree.item(_kids[i], "values")[2]) ==
+              str(_o.iloc[i]["NAMA RESTO"])
+              for i in range(min(len(_kids), len(_o)))))
+    _vals1 = ptv.tree.item(_kids[0], "values")
+    check("(v3.9.9) kolom: No · Resto · Nama Barang · Satuan · Deviasi · "
+          "|Deviasi| · Kontribusi % · Kumulatif % · Fokus · CEK",
+          list(_vals1[1:11]) == [
+              "1", str(_o.iloc[0]["NAMA RESTO"]),
+              str(_o.iloc[0]["Nama Barang"]), "GR",
+              ptv._fmt_num(_o.iloc[0]["dev"]),
+              ptv._fmt_num(abs(_o.iloc[0]["dev"])),
+              ptv._fmt_pct(_kon.iloc[0]), ptv._fmt_pct(_kum.iloc[0]),
+              "🎯" if _fok.iloc[0] else "—",
+              str(ptv._row_snaps[_kids[0]]["cek"])],
+          f"got {list(_vals1[1:11])}")
+    check("(v3.9.9) Kontribusi % = |dev|/total (baris 1, format Indonesia)",
+          _vals1[7] == ptv._fmt_pct(_kon.iloc[0]),
+          f"got {_vals1[7]} vs {ptv._fmt_pct(_kon.iloc[0])}")
+    check("(v3.9.9) Kumulatif % baris terakhir = 100,00%",
+          ptv.tree.item(_kids[-1], "values")[8] == "100,00%",
+          f"got {ptv.tree.item(_kids[-1], 'values')[8]}")
+    check("(v3.9.9) Fokus 🎯 = baris diperlukan mencapai 80% (oracle)",
+          all((ptv.tree.item(_kids[i], "values")[9] ==
+               ("🎯" if _fok.iloc[i] else "—"))
+              for i in range(min(len(_kids), len(_o)))),
+          f"got {[ptv.tree.item(k, 'values')[9] for k in _kids]}")
+    _fok_n = int(_fok.sum())
+    check(f"(v3.9.9) Fokus 80%: {_fok_n} baris (footer)",
+          f"Fokus ≤80%: {_fok_n} baris" in ptv.status_var.get(),
+          f"got {ptv.status_var.get()}")
+    check("(v3.9.9) heading dinamis Deviasi (H=25)",
+          ptv.tree.heading("Deviasi")["text"] == "Deviasi (H=25)",
+          f"got {ptv.tree.heading('Deviasi')['text']}")
+    check("(v3.9.9) heading dinamis Kumulatif % (≤80%)",
+          ptv.tree.heading("Kumulatif %")["text"] == "Kumulatif % (≤80%)")
+
+    # KPI strip
+    check("(v3.9.9) KPI KOMBINASI", ptv._kpi_vars["n"].get() == str(len(_o)),
+          f"got {ptv._kpi_vars['n'].get()}")
+    check("(v3.9.9) KPI TOTAL |DEVIASI|",
+          ptv._kpi_vars["total"].get() == ptv._fmt_num(_tot),
+          f"got {ptv._kpi_vars['total'].get()}")
+    check("(v3.9.9) KPI FOKUS ≤ CUTOFF",
+          ptv._kpi_vars["fokus"].get() ==
+          f"{_fok_n} ({_fok_n / len(_o) * 100:.0f}% dari N)",
+          f"got {ptv._kpi_vars['fokus'].get()}")
+    check("(v3.9.9) KPI TOP 20% → (klasik 80/20)",
+          abs(float(ptv._kpi_vars["top20"].get()[:-1]) - _top20) < 0.15,
+          f"got {ptv._kpi_vars['top20'].get()} vs {_top20:.2f}")
+
+    # tag baris fokus (teal) + zebra non-fokus + CEK
+    _tags0 = ptv.tree.item(_kids[0], "tags")
+    check("(v3.9.9) baris fokus tag focus_row (tanpa zebra)",
+          "focus_row" in _tags0 and "evenrow" not in _tags0
+          and "oddrow" not in _tags0, f"got {_tags0}")
+    _non_fok = [k for k in _kids
+                if ptv.tree.item(k, "values")[9] == "—"]
+    check("(v3.9.9) baris non-fokus tetap zebra",
+          all("focus_row" not in ptv.tree.item(k, "tags")
+              for k in _non_fok))
+    check("(v3.9.9) baris BARANG ACR membawa tag CEK cek_acr",
+          any("cek_acr" in ptv.tree.item(k, "tags")
+              for k in _kids
+              if ptv.tree.item(k, "values")[3] == "BARANG ACR"))
+
+    # grafik canvas
+    check("(v3.9.9) grafik pareto tergambar (canvas items > 50)",
+          len(ptv._chart.find_all()) > 50,
+          f"got {len(ptv._chart.find_all())}")
+    check("(v3.9.9) grafik: n_total + n_fokus_total benar",
+          ptv._chart_data["n_total"] == len(_o)
+          and ptv._chart_data["n_fokus_total"] == _fok_n,
+          f"got {ptv._chart_data['n_total']}/{ptv._chart_data['n_fokus_total']}")
+
+    # pivot DIBAGI dengan tab Deviasi (objek DataFrame SAMA — 1 compute)
+    dv = app.deviasi_gr_view
+    select_and_wait(root, app, app.tab_deviasi_gr, dv)
+    check("(v3.9.9) pivot cache DIBAGI (objek sama dgn tab Deviasi GR)",
+          ptv._cached_pivot is dv._cached_pivot
+          and ptv._cached_pivot is not None)
+    select_and_wait(root, app, app.tab_pareto, ptv)
+
+    # ---- MODE PCS ----
+    ptv._segment._select(1)
+    root.update()
+    wait_view(root, ptv)
+    _pcs = append1[append1["SATUAN"].astype(str).str.upper() != "GR"]
+    _o_pcs = (_pcs[(_pcs["JENIS"] == "1.SO") &
+                   (_tgl.reindex(_pcs.index) == 25)]
+              .groupby(["Nama Barang", "NAMA RESTO"], as_index=False)
+              ["NILAI"].sum())
+    check(f"(v3.9.9) MODE PCS = {len(_o_pcs)} baris",
+          len(ptv.tree.get_children()) == len(_o_pcs),
+          f"got {len(ptv.tree.get_children())} vs {len(_o_pcs)}")
+    check("(v3.9.9) footer mode PCS",
+          "PCS" in ptv.status_var.get(), f"got {ptv.status_var.get()}")
+    ptv._segment._select(0)
+    root.update()
+    wait_view(root, ptv)
+
+    # ---- CUTOFF ----
+    ptv._cutoff_var.set("50")
+    ptv._on_cutoff_change()
+    root.update()
+    wait_view(root, ptv)
+    _kon50 = _o["dev"].abs() / _tot
+    _kum50 = _kon50.cumsum()
+    _fok50 = (_kum50 - _kon50) < 0.50
+    _kids50 = ptv.tree.get_children()
+    check("(v3.9.9) CUTOFF 50 → fokus = baris mencapai 50% (oracle)",
+          all((ptv.tree.item(_kids50[i], "values")[9] ==
+               ("🎯" if _fok50.iloc[i] else "—"))
+              for i in range(min(len(_kids50), len(_o)))),
+          f"got {[ptv.tree.item(k, 'values')[9] for k in _kids50]}")
+    check("(v3.9.9) heading Kumulatif % ikut cutoff (≤50%)",
+          ptv.tree.heading("Kumulatif %")["text"] == "Kumulatif % (≤50%)")
+    ptv._cutoff_var.set("abc")
+    ptv._on_cutoff_change()
+    check("(v3.9.9) CUTOFF invalid → revert (50)",
+          ptv._cutoff_var.get() == "50" and ptv.cutoff_pct == 50.0,
+          f"got {ptv._cutoff_var.get()}/{ptv.cutoff_pct}")
+    ptv._cutoff_var.set("80")
+    ptv._on_cutoff_change()
+    root.update()
+    wait_view(root, ptv)
+    check("(v3.9.9) CUTOFF kembali 80 → fokus oracle 80%",
+          all((ptv.tree.item(ptv.tree.get_children()[i], "values")[9] ==
+               ("🎯" if _fok.iloc[i] else "—"))
+              for i in range(len(_o))))
+
+    # ---- H bersama: chip read-only + auto-refresh ----
+    dv.tanggal_h_var.set("10")
+    dv._on_tanggal_h_change()
+    wait_view(root, dv)
+    wait_view(root, ptv)
+    check("(v3.9.9) H=10 → chip Pareto ikut", ptv._h_chip_var.get() == "10")
+    check("(v3.9.9) H=10 → heading Deviasi (H=10)",
+          ptv.tree.heading("Deviasi")["text"] == "Deviasi (H=10)")
+    _so10 = _gr[(_gr["JENIS"] == "1.SO") & (_tgl.reindex(_gr.index) == 10)]
+    _o10 = (_so10.groupby(["Nama Barang", "NAMA RESTO"], as_index=False)
+            ["NILAI"].sum()
+            .merge(_sis25.groupby(["Nama Barang", "NAMA RESTO"],
+                                  as_index=False)["NILAI"].sum()
+                   .rename(columns={"NILAI": "sis"}),
+                   on=["Nama Barang", "NAMA RESTO"]))
+    _o10["dev"] = _o10["NILAI"] - _o10["sis"]
+    check("(v3.9.9) H=10 → baris + footer ikut H",
+          len(ptv.tree.get_children()) == len(_o10)
+          and "H=10" in ptv.status_var.get(),
+          f"got {len(ptv.tree.get_children())} · {ptv.status_var.get()}")
+    dv.tanggal_h_var.set("25")
+    dv._on_tanggal_h_change()
+    wait_view(root, dv)
+    wait_view(root, ptv)
+
+    # ---- ✓ FOLLOW-UP: fingerprint IDENTIK tab Deviasi GR (dedup) ----
+    _iid = ptv.tree.get_children()[0]
+    _fp = ptv._fp_map[_iid]
+    _iid_gr = [i for i in dv.tree.get_children()
+               if dv._fp_map.get(i) == _fp]
+    check("(v3.9.9) fingerprint Pareto == Deviasi GR (baris sama = satu "
+          "entri Follow Up)",
+          len(_iid_gr) == 1, f"match={len(_iid_gr)}")
+    _snap_before = dict(ptv._row_snaps[_iid])
+    ptv.store.toggle(_fp, _snap_before)
+    root.update()
+    check("(v3.9.9) toggle ✓ Pareto → masuk Follow Up",
+          ptv.store.has(_fp) and len(ptv.store) == 1)
+    # re-render → ✓ tampil tercentang
+    ptv._refresh()
+    wait_view(root, ptv)
+    check("(v3.9.9) re-render → kolom ✓ tercentang",
+          ptv.tree.item(ptv.tree.get_children()[0], "values")[0] == "☑")
+    ptv.store.clear()
+    root.update()
+
+    # ---- SORT (parser Indonesia: persen & kurung) ----
+    ptv._sort_by("Kumulatif %", reverse=False)
+    root.update()
+    _kums = [ptv.tree.item(k, "values")[8] for k in ptv.tree.get_children()]
+    check("(v3.9.9) sort Kumulatif % naik → '100,00%' di akhir",
+          _kums[-1] == "100,00%", f"got {_kums}")
+    ptv._sort_by("No", reverse=False)
+    root.update()
+
+    # ---- MAXIMIZE clone ----
+    _win, _new_tree = ptv._maximize()
+    root.update()
+    check("(v3.9.9) ⛶ Layarn Penuh: clone berisi semua baris",
+          len(_new_tree.get_children()) == len(_o))
+    _win.destroy()
+    root.update()
+
+    # ---- EXPORT xlsx (read-back openpyxl) ----
+    import tempfile as _tf
+    _p_path = _os.path.join(_tf.mkdtemp(), "pareto_test.xlsx")
+    _write_pareto(_p_path, ptv._last_rows_raw, ptv._last_totals)
+    from openpyxl import load_workbook as _lw
+    _wb = _lw(_p_path)
+    _ws = _wb["PARETO"]
+    check("(v3.9.9) export: meta MODE/H/CUTOFF",
+          _ws["A1"].value == "MODE" and _ws["B1"].value == "GR"
+          and _ws["A2"].value == "TANGGAL H" and _ws["B2"].value == 25
+          and _ws["A3"].value == "CUTOFF %"
+          and float(_ws["B3"].value) == 80.0)
+    _hdr_row = 9
+    check("(v3.9.9) export: header tabel",
+          [_ws.cell(row=_hdr_row, column=j).value for j in range(1, 11)] ==
+          ["No", "Resto", "Nama Barang", "Satuan", "Deviasi", "|Deviasi|",
+           "Kontribusi %", "Kumulatif %", "Fokus", "CEK"])
+    _r1 = [_ws.cell(row=_hdr_row + 1, column=j).value for j in range(1, 11)]
+    check("(v3.9.9) export: baris 1 = kontributor teratas (angka mentah)",
+          _r1[0] == 1 and _r1[1] == str(_o.iloc[0]["NAMA RESTO"])
+          and _r1[2] == str(_o.iloc[0]["Nama Barang"])
+          and abs(float(_r1[4]) - float(_o.iloc[0]["dev"])) < 1e-6
+          and abs(float(_r1[6]) - float(_kon.iloc[0])) < 1e-9,
+          f"got {_r1}")
+    check("(v3.9.9) export: fokus 🎯 marker + fill teal",
+          _r1[8] == "🎯"
+          and str(_ws.cell(row=_hdr_row + 1, column=9)
+                  .fill.start_color.rgb) == "FFCCFBF1")
+    check("(v3.9.9) export: number format persen",
+          _ws.cell(row=_hdr_row + 1, column=7).number_format == "0.00%")
+    check("(v3.9.9) export: freeze + autofilter",
+          _ws.freeze_panes == "A10" and _ws.auto_filter.ref is not None)
+    _os.unlink(_p_path)
+
+    # ---- subscribe/unsubscribe listener H ----
+    _n_h = len(app._shared_h._listeners)
+    _ptv2 = ParetoDeviasiView(root, h_state=app._shared_h)
+    check("(v3.9.9) Pareto subscribe menambah listener H",
+          len(app._shared_h._listeners) == _n_h + 1)
+    _ptv2.destroy()
+    root.update()
+    check("(v3.9.9) destroy Pareto → listener H dilepas",
+          len(app._shared_h._listeners) == _n_h,
+          f"got {len(app._shared_h._listeners)}")
+    check("(v3.9.9) NUMERIC_COLS pareto (parser sort persen)",
+          set(_PARETO_NUM) >= {"Kontribusi %", "Kumulatif %", "Deviasi",
+                               "|Deviasi|"})
 
     os.unlink(xlsx_path)
     if os.path.isfile("komparasi_last.json"):

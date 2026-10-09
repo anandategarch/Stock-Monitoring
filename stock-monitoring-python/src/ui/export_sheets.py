@@ -1,7 +1,7 @@
 """
 export_sheets.py — Pembangun sheet export Excel (v3.8).
 
-Dua bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
+Empat bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
 
 1. build_selisih_export_df(base, tgl_start, tgl_end, audit_cols=None)
    Rekap Selisih IN PER RESTO (permintaan user v3.8): kolom
@@ -37,6 +37,12 @@ Dua bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
    Catatan: file lama user memakai "6.Selisih IN" (penomoran pra-v3.4);
    penomoran JENIS sejak v3.4 = "7.Selisih IN" — rumus disesuaikan,
    5 rumut lain identik karakter-per-karakter.
+
+4. write_pareto_sheet(filepath, rows_raw, totals)   (v3.9.9)
+   Sheet "PARETO" — tab 🎯 Pareto: baris meta (MODE/TANGGAL H/CUTOFF %/
+   KPI ringkasan) + tabel angka mentah (No · Resto · Nama Barang ·
+   Satuan · Deviasi · |Deviasi| · Kontribusi % · Kumulatif % · Fokus ·
+   CEK); baris fokus fill teal, Deviasi negatif merah.
 """
 import pandas as pd
 from openpyxl.formatting.rule import CellIsRule, FormulaRule, Rule
@@ -509,3 +515,109 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
 
     wb.save(filepath)
     return n_data
+
+
+# =============================================================================
+# 4. SHEET PARETO (v3.9.9 — export tombol 💾 di tab 🎯 Pareto)
+# =============================================================================
+def write_pareto_sheet(filepath: str, rows_raw: list,
+                       totals: dict | None = None) -> str:
+    """v3.9.9 — Export tabel PARETO ke file .xlsx tunggal.
+
+    rows_raw = daftar dict keluaran ParetoDeviasiView._prepare_rows:
+    {no, resto, barang, satuan, deviasi, abs_dev, kontribusi (0..1),
+    kumulatif (0..1), fokus (bool), cek}. totals = ringkasan KPI
+    (n, total, n_fokus, top20_cover, h, mode, cutoff).
+
+    Layout: baris meta (MODE/H/CUTOFF/ringkasan KPI) → header → data
+    (angka MENTAH — Kontribusi/Kumulatif diformat persen). Baris fokus
+    diberi fill teal lembut; Deviasi negatif font merah per cell.
+    Return path file.
+    """
+    from openpyxl import Workbook
+
+    totals = totals or {}
+    mode = str(totals.get("mode", "GR"))
+    h = totals.get("h", "-")
+    cutoff = totals.get("cutoff", 80)
+    n = totals.get("n", len(rows_raw))
+    total = totals.get("total", 0.0)
+    n_fokus = totals.get("n_fokus", 0)
+    top20 = totals.get("top20_cover", 0.0)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PARETO"
+
+    # --- meta (ala layout pivot: label bold kecil + nilai) ---
+    meta = [
+        ("MODE", mode),
+        ("TANGGAL H", h),
+        ("CUTOFF %", cutoff),
+        ("KOMBINASI", n),
+        ("TOTAL |DEVIASI|", float(total)),
+        ("FOKUS ≤ CUTOFF",
+         f"{n_fokus} ({(n_fokus / n * 100 if n else 0):.0f}% dari N)"),
+        ("TOP 20%", f"{top20:.1f}%"),
+    ]
+    for i, (k, v) in enumerate(meta, start=1):
+        ws.cell(row=i, column=1, value=k).font = Font(bold=True,
+                                                      color="FF475569")
+        ws.cell(row=i, column=2, value=v)
+
+    header = ["No", "Resto", "Nama Barang", "Satuan", "Deviasi",
+              "|Deviasi|", "Kontribusi %", "Kumulatif %", "Fokus", "CEK"]
+    hdr_row = len(meta) + 2
+    for j, name in enumerate(header, start=1):
+        cell = ws.cell(row=hdr_row, column=j, value=name)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="FFE2E8F0",
+                                end_color="FFE2E8F0",
+                                fill_type="solid")
+
+    fmt_num = "#,##0.0;(#,##0.0)"
+    fmt_pct = "0.00%"
+    focus_fill = PatternFill(start_color="FFCCFBF1", end_color="FFCCFBF1",
+                             fill_type="solid")
+
+    r = hdr_row + 1
+    for row in rows_raw:
+        fok = bool(row.get("fokus"))
+        vals = [
+            int(row.get("no", 0)),
+            str(row.get("resto", "")),
+            str(row.get("barang", "")),
+            str(row.get("satuan", "")),
+            float(row.get("deviasi", 0.0)),
+            float(row.get("abs_dev", 0.0)),
+            float(row.get("kontribusi", 0.0)),
+            float(row.get("kumulatif", 0.0)),
+            "🎯" if fok else "—",
+            str(row.get("cek", "")),
+        ]
+        for j, v in enumerate(vals, start=1):
+            cell = ws.cell(row=r, column=j, value=v)
+            if j in (5, 6):
+                cell.number_format = fmt_num
+                if isinstance(v, (int, float)) and v < 0:
+                    cell.font = Font(color="FFDC2626")
+            elif j in (7, 8):
+                cell.number_format = fmt_pct
+            if fok:
+                cell.fill = focus_fill
+        r += 1
+    last_row = r - 1
+
+    ws.freeze_panes = f"A{hdr_row + 1}"
+    if rows_raw:
+        ws.auto_filter.ref = (f"A{hdr_row}:{get_column_letter(len(header))}"
+                              f"{last_row}")
+    widths = {"No": 6, "Resto": 12, "Nama Barang": 30, "Satuan": 9,
+              "Deviasi": 12, "|Deviasi|": 12, "Kontribusi %": 13,
+              "Kumulatif %": 13, "Fokus": 8, "CEK": 18}
+    for j, name in enumerate(header, start=1):
+        ws.column_dimensions[get_column_letter(j)].width = \
+            widths.get(name, 12)
+
+    wb.save(filepath)
+    return filepath

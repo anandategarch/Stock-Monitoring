@@ -5,6 +5,7 @@ Pipeline membaca data export Accurate Online, menggabungkan, memutar (pivot), me
 
 > Versi asli: Power Query M (1.009 baris, 30 query).
 > Versi Python: 10 modul `fn_*` + `queries.py` + `append1.py` + `rincian_po.py` + UI Tkinter.
+> **v3.9.9 — TAB 🎯 PARETO (80/20 KONTRIBUTOR DEVIASI TERBESAR)**: tab BARU 🎯 Pareto (setelah Deviasi PCS — app kini 10 tab): semua kombinasi (Barang × Resto × Satuan) **diurut |Deviasi| menurun** + **Kontribusi %** + **Kumulatif %** + **Fokus 🎯** (baris yang diperlukan mencapai CUTOFF % — default 80, input 1–100) → fokus list audit "20% kombinasi menyumbang 80% deviasi". MODE GR/PCS (SegmentBar) · TANGGAL H chip read-only (state bersama, ikut Apply H) · KPI strip (KOMBINASI · TOTAL |DEVIASI| · FOKUS ≤ CUTOFF · TOP 20%) · GRAFIK canvas (top-30 batang teal/amber kumulatif/garis cutoff merah/batas fokus) · ✓ follow-up fingerprint identik tab Deviasi (dedup 1 entri) · export 💾 sheet PARETO. Pivot dihitung 1× (subclass DeviasiView + SharedPivotCache). 438/438 UI test × 2 + smoke real-data 3,5jt baris (oracle 25/25 × 3 konfigurasi; fokus/total == oracle) + VLM visual PASS.
 > **v3.9.8 — UI CLEAN**: **SEMUA teks instruksi/petunjuk DIHAPUS dari UI** (permintaan user: "kata kata atau kalimat diseluruh aplikasi python hapus semua biar clean tanpa teks teks gak penting") — tombol "❓ Bantuan" + window panduan (±200 baris), subtitle semua kartu (mis. "Filter Nama Barang → klik header kolom (ikon corong ⧩)"), hint footer (🖱 Double-click → …) di semua tabel + window ⛶, **tooltip hover** (class `ToolTip`/`add_tooltip` dihapus dari widgets), subtitle EmptyState, subtitle tab Config/Proses, pertanyaan dialog export IN. Yang tetap: label input, tombol, chip nilai, footer status berisi DATA (n baris · MATCH/SELISIH · Minggu WEEK X), legenda CEK/warna, KPI, pesan error, log proses. 390/390 UI test × 2 + mock + ruff 0 baru + VLM visual PASS.
 > **v3.9.7 — MEDIAN ANOMALI COM ANTAR TANGGAL + FILTER MINGGU KOMPARASI MENGIKUTI H**: **(1) KOREKSI user ("harusnya antar tanggal — com itu pemakaian aktual harian di resto, bom pemakaian harian di sistem")**: median pembanding tab 🚨 Anomali COM kini = **median com(t) tgl 1..H per pasangan (barang × resto)** — pemakaian hari H vs pola harian pasangan itu sendiri, BUKAN antar resto; heading dinamis "Median (1..H)". **(2)** ⚖ Komparasi kini **filter minggu mengikuti H bersama** ("misal H aku input 7 maka hanya tampilkan week 1 aja" — STATUS BULAN dipakai utk filter): H 1–7 → WEEK 1 · 8–14 → WEEK 2 · 15–25 → WEEK 3/4 · 26–31 → WEEK 5; chip H read-only + chip minggu aktif highlight + opsi "Tampilkan semua minggu". FIX ikutan: _dirty basi (tabel komparasi tak refresh saat H diubah setelah load_data saat terlihat). 369/369 UI test × 2 + smoke real-data (oracle 25/25 median per-pasangan; H=7/14/25 → 1.356/1.365/1.367 baris == ekspektasi) + VLM visual PASS.
 > **v3.9.6 — KATEGORI DEVIASI + PEMBANDING SO TGL 1 = SO BULAN LALU + FORMAT FOLLOW UP FILE SAMPLE**: **(1)** tab 📦 Deviasi GR & 🧩 Deviasi PCS kini punya **5 KOLOM KATEGORI DEVIASI** (mirror sheet DEVIASI GR/PCS workbook asli): **Max Deviasi** · **ACR** (rata-rata penjualan harian) · **Total ACR** (BOM = Σ penjualan 1..H) · **Dev to BOM%** (= Deviasi/Total ACR — "Loss Surplus to BOM") · **Stok Seharusnya** (= SO(H−1) − ACR) + **CEK kondisi ke-5 "ACR to BOM"** (|Deviasi| > Total ACR → pasti salah; melengkapi port formula LET 5 kondisi) + parser sort angka Indonesia; **(2)** audit Rekap Selisih IN diurut **kronologis** — di **tanggal 1**, pembanding SO (delta "SO Naik") kini = **SO TERAKHIR bulan lalu** (sort lama terbalik → membanding SO tgl 25•); **(3)** tab ☑ Follow Up + export kini **format sheet Follow UP file asli**: SO per tanggal (H-2..H+2, heading angka tanggal) · Sistem · Deviasi · Loss Surplus to BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC. 358/358 UI test × 2 + smoke real-data (810 baris GR, 97 "ACR to BOM", audit 35.436 baris, komparasi 40.739 baris).
@@ -57,6 +58,15 @@ Stock Monitoring — Python Edition
 - Negative values in parentheses, zero shown as '-'.
 - Double-click cell → pop-up detail source (baris×resto / baris×tanggal).
 
+### 5a. 🎯 Pareto (tab keenam — v3.9.9)
+- Semua kombinasi (Barang × Resto × Satuan) **diurut |Deviasi| MENURUN** — kontributor terbesar masalah deviasi di atas.
+- Kolom: ✓ · No · Resto · Nama Barang · Satuan · Deviasi (H) · |Deviasi| (H) · **Kontribusi %** (|dev| / Σ|dev|) · **Kumulatif %** (jumlah berjalan) · **Fokus** 🎯 · CEK.
+- **Fokus 🎯** = baris yang DIPERLUKAN mencapai **CUTOFF %** (default 80 — prinsip 80/20; baris pelintas ikut): ubah lewat input **CUTOFF %** (1–100) → tabel/grafik/KPI/heading ikut.
+- **MODE GR/PCS** (SegmentBar) — satuan sama dgn tab Deviasi; **TANGGAL H** chip read-only (di-apply di tab 📦 Deviasi GR).
+- KPI strip: **KOMBINASI · TOTAL |DEVIASI| · FOKUS ≤ CUTOFF (n · % dari N) · TOP 20%** (persen deviasi yang ditutup 20% baris teratas).
+- Grafik Pareto: top-30 batang |Deviasi| (teal = fokus) + garis kumulatif amber + garis cutoff merah + garis batas fokus vertikal.
+- ✓ follow-up: fingerprint IDENTIK tab Deviasi → baris sama = satu entri Follow Up. 💾 **Export Excel** → sheet PARETO (angka mentah + meta H/mode/cutoff + fill teal fokus).
+
 ### 6. Laporan Deviasi (v3.9.4 — 2 MODE via SegmentBar MODE)
 - **⚖ Komparasi File Deviasi (default — BARU)**: klik **📂 Pilih File Deviasi…** → bandingkan file deviasi resmi (mis. `20.AGUSTUS 2026.xlsx`) dengan hitungan app per (Resto × Barang × Minggu) pada **kolom H minggunya: WEEK 1→7 · WEEK 2→14 · WEEK 3/4→25**. Kolom: ✓ · Resto · Nama Barang · Satuan · Minggu · H · **BOM/COM/DEVIASI/%TO BOM — File** · **BOM/COM/DEV TO BOM — App** (BOM App = Σ penjualan 22.05 tgl 1..H; COM App = Σ pemakaian) · **DEVIASI — App (Tab GR)** = SO_H − Sistem · **Selisih** (GR App − DEV File) · **Status** (MATCH / SELISIH / TIDAK ADA DI DATA APP / H TIDAK ADA DI DATA). Default hanya resto yang ada di data app — centang *"Tampilkan resto di luar data app"* untuk semua cabang (file sampel 340 resto). Double-click → popup detail di tanggal H minggu tsb. **(v3.9.7) FILTER MINGGU MENGIKUTI H**: hanya minggu yang MEMUAT H yang tampil (H 1–7 → WEEK 1 · 8–14 → WEEK 2 · 15–25 → WEEK 3/4 · 26–31 → WEEK 5 — STATUS BULAN dipakai utk filter; permintaan user "H aku input 7 maka hanya tampilkan week 1 aja"); chip H read-only + chip minggu aktif di-highlight; centang *"Tampilkan semua minggu"* utk semua minggu.
 - **🚨 Anomali COM (v3.9.3 → v3.9.7 median ANTAR TANGGAL, ganti segmen)**: daftar **(Nama Barang × Resto)** dengan **pemakaian (COM) di kolom H** yang **minus** atau **lebih tinggi dari median com harian pasangan tsb** — v3.9.7 (koreksi user): median = **median com(t) tanggal 1..H milik pasangan itu sendiri** (pemakaian aktual harian di resto vs pola hariannya; BOM = pemakaian harian versi sistem), bukan antar resto. Kolom: ✓ · Nama Barang · Resto · Satuan · COM (H) · Median (1..H) · Selisih vs Median · Status (MINUS / > MEDIAN / MINUS + > MEDIAN). **Tanggal H diatur di tab 📦 Deviasi GR** (chip read-only — tabel ikut refresh otomatis saat H berubah).
@@ -83,6 +93,45 @@ Audit menyeluruh fitur terbaru (v3.9.3 Anomali COM + v3.9.4 Komparasi Deviasi) m
 9. **Lainnya (P3)**: duplikat lintas bulan dihitung+dilaporkan; scan sheet ke-2+; footer status = baris tampil (bukan global); filter reset saat file berganti; sort diantrekan saat busy; pane tersembunyi tak di-compute saat H berubah; initialdir komparasi ikut RootPath; `show_laporan_mode` sinkron SegmentBar; snapshot follow-up + kolom AKTIF/NON; `SharedTanggalH.unsubscribe()`; `-0,00%`→`0,00%`; Satuan NaN→`''`; dialog + `*.xlsb`; baris basi dibersihkan saat data kosong.
 
 **Verifikasi**: 337/337 UI test × 2 run (25 check baru §23) + `test_mock` ALL PASS + ruff 0 error baru + oracle SA 3 view + smoke real-data 342.222 baris (tgl −31..31, parse async 8,2s dgn 740 pump = UI hidup, anomali 2.135 baris 0,4s, race & cache-invalidation bersih) + 3 screenshot VLM PASS.
+
+## Fitur Baru v3.9.9 — Tab 🎯 Pareto (80/20 Kontributor Deviasi)
+
+Permintaan user: *"mau coba pareto"*.
+
+Analisis Pareto atas |Deviasi| tab Deviasi GR/PCS: **20% kombinasi
+(barang × resto) biasanya menyumbang 80% total deviasi** — tab ini
+mengurut semua kombinasi dari |Deviasi| terbesar dan menandai **Fokus 🎯**
+= baris minimum yang mencapai CUTOFF % (default 80).
+
+| Kolom | Makna |
+|---|---|
+| No | ranking Pareto (1 = kontributor terbesar) |
+| Deviasi / \|Deviasi\| (H) | deviasi pasangan di tanggal H (SO_H − Sistem) |
+| Kontribusi % | \|dev baris\| ÷ Σ\|dev\| — pangsa kombinasi terhadap total masalah |
+| Kumulatif % | jumlah berjalan kontribusi (baris terakhir = 100,00%) |
+| Fokus 🎯 | baris diperlukan mencapai cutoff (baris pelintas ikut dihitung) |
+| CEK | kategori anomaly (Kosong/Non Aktif · Beda Tanggal · Hitung Manual · Turun Drastis · ACR to BOM) |
+
+- **CUTOFF %** input 1–100 (default 80; invalid → revert) — heading
+  "Kumulatif % (≤X%)" ikut berubah.
+- **KPI strip**: KOMBINASI · TOTAL |DEVIASI| · FOKUS ≤ CUTOFF (n · % dari
+  N) · TOP 20% (berapa persen deviasi yang ditutup 20% baris teratas —
+  cek klasik 80/20 pada data nyata).
+- **Grafik canvas**: top-30 batang |Deviasi| (teal = fokus, teal pudar
+  non-fokus) + garis kumulatif % amber + garis cutoff merah putus-putus
+  + garis batas fokus vertikal (n=) — digambar ulang saat resize.
+- Baris fokus latar teal lembut; minus merah per-cell; tag CEK + legenda.
+- **✓ follow-up**: snapshot & fingerprint IDENTIK tab Deviasi (asal
+  "DEVIASI GR/PCS") — baris yang dicentang dari Pareto maupun Deviasi
+  = SATU entri di tab ☑ Follow Up.
+- **💾 Export Excel** → sheet "PARETO": meta (MODE · TANGGAL H · CUTOFF % ·
+  KOMBINASI · TOTAL |DEVIASI| · FOKUS · TOP 20%) + tabel angka mentah
+  (Kontribusi/Kumulatif format persen) + fill teal baris fokus + minus
+  merah + freeze panes + autofilter (`write_pareto_sheet`).
+- **Arsitektur**: `ParetoDeviasiView` = subclass `DeviasiView` — pivot
+  dihitung SEKALI via `SharedPivotCache` (objek DataFrame sama dibagi
+  tab Deviasi GR/PCS/Pareto); listener H bersama + unsubscribe saat
+  destroy; pane tersembunyi cukup dirty (pola laporan v3.9.5).
 
 ## Fitur Baru v3.9.8 — UI Clean (Hapus Semua Teks Instruksi)
 
