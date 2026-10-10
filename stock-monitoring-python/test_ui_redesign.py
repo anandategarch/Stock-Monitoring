@@ -36,8 +36,8 @@ Memverifikasi:
 16. v3.9.4 — TAB LAPORAN DEVIASI 2 MODE (SegmentBar): ⚖ KOMPARASI FILE
     DEVIASI vs TAB DEVIASI GR (pilih file resmi; STATUS BULAN → kolom H:
     WEEK 1=7, WEEK 2=14, WEEK 3/4=25; BOM App = Σ penjualan 22.05,
-    COM App = Σ pemakaian, GR App = SO_H − Sistem persis tab GR;
-    status MATCH/SELISIH/TIDAK ADA DI DATA APP/H TIDAK ADA; resto file
+    COM Saat Ini = Σ pemakaian, GR Saat Ini = SO_H − Sistem persis tab GR;
+    status MATCH/SELISIH/TIDAK ADA DI DATA SAAT INI/H TIDAK ADA; resto file
     "1041.BDGUKU" dinormalkan; opsi tampil semua resto; minus merah
     per-cell + sel Status hijau/amber/merah) & 🚨 Anomali COM (v3.9.3)
 17. v3.9.5 — AUDIT DEEP REGRESSION (§23): SALDO AWAL jadi base com(1)
@@ -96,8 +96,18 @@ Memverifikasi:
     dihapus dari tabel komparasi + DEV App jadi %TO BOM; path file
     deviasi tersimpan (FIX BUG v3.9.10 json) + entry editable +
     auto-load; multi-file (askopenfilenames + BULAN-num dedup + filter
-    bulan terbaru default); mode 📈 Analisa (Top Selisih + Perubahan
+    mode 📈 Analisa (Top Selisih + Perubahan
     Arah/flip — Sempurna/Dominan/Parsial).
+25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
+    analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
+    saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
+    flip VEKTOR (sort+shift, dulu groupby+sort per grup 4,7 dtk → ±50ms)
+    + nilai app per baris via MERGE vektor (dulu loop Series.get 2,9 dtk
+    → ±60ms — terverifikasi identik); minggu Top Selisih & flip kini
+    ikut H (H=7 → WEEK 1); istilah kolom *File → *Lalu & *App → *Saat
+    Ini (BOM Lalu / DEV Lalu / %TO BOM Lalu / BOM Saat Ini / COM Saat
+    Ini / DEV Saat Ini / GR Saat Ini; status 'TIDAK ADA DI DATA APP' →
+    'TIDAK ADA DI DATA SAAT INI').
 """
 import os
 import sys
@@ -434,7 +444,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.13", APP_VERSION == "3.9.13", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.14", APP_VERSION == "3.9.14", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -2630,20 +2640,22 @@ def main():
     check("(v3.9.4) show_laporan_mode(0) → kembali ke Komparasi",
           kv.winfo_ismapped() and not app.laporan_view.winfo_ismapped())
 
-    check("(v3.9.13) Skema kolom komparasi (14 kolom — Minggu & H DIHAPUS "
-          "permintaan user v3.9.13)",
+    check("(v3.9.14) Skema kolom komparasi (14 kolom — Minggu & H DIHAPUS "
+          "v3.9.13; istilah *Lalu/*Saat Ini v3.9.14)",
           [c[0] for c in kv.COLUMNS] == [
               "✓", "Resto", "Nama Barang", "Satuan",
-              "BOM File", "COM File", "DEV File", "%TO BOM File",
-              "BOM App", "COM App", "DEV App", "GR App", "Selisih",
-              "Status"],
+              "BOM Lalu", "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
+              "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
+              "GR Saat Ini", "Selisih", "Status"],
           f"got {[c[0] for c in kv.COLUMNS]}")
-    check("(v3.9.13) Heading DEV App = % TO BOM — App (persen)",
-          kv.tree.heading("DEV App")["text"] == "% TO BOM — App",
-          f"got {kv.tree.heading('DEV App')['text']!r}")
-    check("(v3.9.4) Heading dua sisi terpasang",
-          kv.tree.heading("GR App")["text"] == "DEVIASI — App (Tab GR)" and
-          kv.tree.heading("BOM App")["text"] == "BOM — App (Σ jual 22.05)")
+    check("(v3.9.14) Heading DEV Saat Ini = % TO BOM — Saat Ini (persen)",
+          kv.tree.heading("DEV Saat Ini")["text"] == "% TO BOM — Saat Ini",
+          f"got {kv.tree.heading('DEV Saat Ini')['text']!r}")
+    check("(v3.9.14) Heading dua sisi terpasang (istilah Lalu/Saat Ini)",
+          kv.tree.heading("GR Saat Ini")["text"] ==
+          "DEVIASI — Saat Ini (Tab GR)" and
+          kv.tree.heading("BOM Saat Ini")["text"] ==
+          "BOM — Saat Ini (Σ jual 22.05)")
 
     # data deterministik: AYAM FILET & GULA PASIR × 2 resto, tgl 1..25
     # AYAM: SA=100, SO(t)=100-3t, IN=10 (t%5==0), OUT=20 (genap)/5 (ganjil)
@@ -2775,56 +2787,57 @@ def main():
     k_match = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 1")
     check("(v3.9.4) Baris MATCH ada", k_match is not None)
     if k_match:
-        check("(v3.9.4) GR App = SO(7)-Sistem = '49' (persis Tab GR)",
-              kv.tree.set(k_match, "GR App") == "49",
-              f"got {kv.tree.set(k_match, 'GR App')!r}")
-        check("(v3.9.4) BOM App = -ΣOUT(1..7) = '(80)' (konvensi file)",
-              kv.tree.set(k_match, "BOM App") == "(80)",
-              f"got {kv.tree.set(k_match, 'BOM App')!r}")
-        check("(v3.9.4) COM App = -Σpemakaian = '(31)'",
-              kv.tree.set(k_match, "COM App") == "(31)",
-              f"got {kv.tree.set(k_match, 'COM App')!r}")
-        check("(v3.9.13) DEV App kini RASIO %TO BOM = '61,25%' "
-              "(49/80 — persen konsisten %TO BOM File; dulu kuantitas '49')",
-              kv.tree.set(k_match, "DEV App") == "61,25%",
-              f"got {kv.tree.set(k_match, 'DEV App')!r}")
+        check("(v3.9.4) GR Saat Ini = SO(7)-Sistem = '49' (persis Tab GR)",
+              kv.tree.set(k_match, "GR Saat Ini") == "49",
+              f"got {kv.tree.set(k_match, 'GR Saat Ini')!r}")
+        check("(v3.9.4) BOM Saat Ini = -ΣOUT(1..7) = '(80)' (konvensi file)",
+              kv.tree.set(k_match, "BOM Saat Ini") == "(80)",
+              f"got {kv.tree.set(k_match, 'BOM Saat Ini')!r}")
+        check("(v3.9.4) COM Saat Ini = -Σpemakaian = '(31)'",
+              kv.tree.set(k_match, "COM Saat Ini") == "(31)",
+              f"got {kv.tree.set(k_match, 'COM Saat Ini')!r}")
+        check("(v3.9.13) DEV Saat Ini kini RASIO %TO BOM = '61,25%' "
+              "(49/80 — persen konsisten %TO BOM Lalu; dulu kuantitas '49')",
+              kv.tree.set(k_match, "DEV Saat Ini") == "61,25%",
+              f"got {kv.tree.set(k_match, 'DEV Saat Ini')!r}")
         check("(v3.9.4) Selisih 0 → status MATCH",
               kv.tree.set(k_match, "Status") == "MATCH" and
               kv.tree.set(k_match, "Selisih") == "-",
               f"got {kv.tree.set(k_match, 'Status')!r} / "
               f"{kv.tree.set(k_match, 'Selisih')!r}")
-        check("(v3.9.4) % TO BOM file = '61,25%'",
-              kv.tree.set(k_match, "%TO BOM File") == "61,25%",
-              f"got {kv.tree.set(k_match, '%TO BOM File')!r}")
+        check("(v3.9.4) % TO BOM Lalu = '61,25%'",
+              kv.tree.set(k_match, "%TO BOM Lalu") == "61,25%",
+              f"got {kv.tree.set(k_match, '%TO BOM Lalu')!r}")
         check("(v3.9.4) H minggu WEEK 1 = 7 (snapshot internal)",
               kv_h(k_match) == "7")
 
     k_w2 = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 2")
-    check("(v3.9.4) WEEK 2 → H 14, GR App = '113' (MATCH)",
+    check("(v3.9.4) WEEK 2 → H 14, GR Saat Ini = '113' (MATCH)",
           k_w2 is not None and kv_h(k_w2) == "14" and
-          kv.tree.set(k_w2, "GR App") == "113" and
+          kv.tree.set(k_w2, "GR Saat Ini") == "113" and
           kv.tree.set(k_w2, "Status") == "MATCH",
           f"got H={kv_h(k_w2) if k_w2 else None} "
-          f"GR={kv.tree.set(k_w2, 'GR App') if k_w2 else None}")
+          f"GR={kv.tree.set(k_w2, 'GR Saat Ini') if k_w2 else None}")
 
     k_gula = kv_row("1001.MLGPAR", "GULA PASIR", "WEEK 4")
-    check("(v3.9.4) WEEK 4 → H 25, GULA GR App = '150' (MATCH)",
+    check("(v3.9.4) WEEK 4 → H 25, GULA GR Saat Ini = '150' (MATCH)",
           k_gula is not None and kv_h(k_gula) == "25" and
-          kv.tree.set(k_gula, "GR App") == "150" and
+          kv.tree.set(k_gula, "GR Saat Ini") == "150" and
           kv.tree.set(k_gula, "Status") == "MATCH")
 
     k_sel = kv_row("1002.SBYKET", "AYAM FILET", "WEEK 1")
-    check("(v3.9.4) DEV File 74 vs GR 49 → SELISIH + selisih '(25)'",
+    check("(v3.9.4) DEV Lalu 74 vs GR 49 → SELISIH + selisih '(25)'",
           k_sel is not None and kv.tree.set(k_sel, "Status") == "SELISIH" and
           kv.tree.set(k_sel, "Selisih") == "(25)",
           f"got {kv.tree.set(k_sel, 'Status') if k_sel else None} / "
           f"{kv.tree.set(k_sel, 'Selisih') if k_sel else None}")
 
     k_noapp = kv_row("1001.MLGPAR", "BARANG TAK ADA", "WEEK 1")
-    check("(v3.9.4) Barang tak ada di app → TIDAK ADA DI DATA APP + '—'",
+    check("(v3.9.14) Barang tak ada di data → TIDAK ADA DI DATA SAAT INI "
+          "+ '—'",
           k_noapp is not None and
-          kv.tree.set(k_noapp, "Status") == "TIDAK ADA DI DATA APP" and
-          kv.tree.set(k_noapp, "GR App") == "—")
+          kv.tree.set(k_noapp, "Status") == "TIDAK ADA DI DATA SAAT INI" and
+          kv.tree.set(k_noapp, "GR Saat Ini") == "—")
 
     k_noh = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 5")
     check("(v3.9.4) WEEK 5 → H 31 tidak ada di data (tgl 1..25) → "
@@ -2840,20 +2853,20 @@ def main():
     k_xzz = kv_row("9999.XYZZZ", "AYAM FILET", "WEEK 1")
     check("(v3.9.4) Centang semua resto → 7 baris + XYZZZ TIDAK ADA",
           n_all_kv == 7 and k_xzz is not None and
-          kv.tree.set(k_xzz, "Status") == "TIDAK ADA DI DATA APP",
+          kv.tree.set(k_xzz, "Status") == "TIDAK ADA DI DATA SAAT INI",
           f"got {n_all_kv}")
     kv._show_all_resto.set(False)
     kv._on_option_changed()
     wait_view(root, kv)
 
-    # per-cell: minus merah di BOM File, status MATCH hijau per-cell
+    # per-cell: minus merah di BOM Lalu, status MATCH hijau per-cell
     if CELL_TAGS_SUPPORTED and k_match:
         _khcd = lambda i, col: root.tk.call(
             str(kv.tree), "tag", "cell", "has", "neg_cell", (i, col))
         _khst = lambda i: root.tk.call(
             str(kv.tree), "tag", "cell", "has", "st_match", (i, "Status"))
-        check("(v3.9.4) Minus merah PER-CELL di sel BOM File (-80)",
-              _khcd(k_match, "BOM File") == 1 and
+        check("(v3.9.4) Minus merah PER-CELL di sel BOM Lalu (-80)",
+              _khcd(k_match, "BOM Lalu") == 1 and
               _khcd(k_match, "Satuan") == 0)
         check("(v3.9.4) Sel Status MATCH hijau per-cell",
               _khst(k_match) == 1 and _khst(k_sel) == 0)
@@ -2861,7 +2874,7 @@ def main():
         check("(v3.9.4) Sort Selisih naik → baris SELISIH (-25) di atas + "
               "tag cell dipasang ulang",
               kv.tree.set(kv.tree.get_children("")[0], "Status") ==
-              "SELISIH" and _khcd(k_match, "BOM File") == 1)
+              "SELISIH" and _khcd(k_match, "BOM Lalu") == 1)
 
     # filter header Status = MATCH → 3 baris
     kv._on_col_filter("Status", ["MATCH"])
@@ -2971,21 +2984,21 @@ def main():
 
     k_lalu = kv_row2("1.R1", "LALU")
     k_nop = kv_row2("1.R1", "NOPAIR")
-    check("(v3.9.5) SA base: GR App utk pair dgn tanggal negatif "
-          "(LALU: '(30)'; DEV App kini RASIO — BOM 0 → '—')",
+    check("(v3.9.5) SA base: GR Saat Ini utk pair dgn tanggal negatif "
+          "(LALU: '(30)'; DEV Saat Ini kini RASIO — BOM 0 → '—')",
           k_lalu is not None and
-          kv.tree.set(k_lalu, "GR App") == "(30)" and
-          kv.tree.set(k_lalu, "DEV App") == "—" and
+          kv.tree.set(k_lalu, "GR Saat Ini") == "(30)" and
+          kv.tree.set(k_lalu, "DEV Saat Ini") == "—" and
           kv.tree.set(k_lalu, "Status") == "MATCH",
-          f"GR={kv.tree.set(k_lalu, 'GR App') if k_lalu else None} "
-          f"DEV={kv.tree.set(k_lalu, 'DEV App') if k_lalu else None}")
+          f"GR={kv.tree.set(k_lalu, 'GR Saat Ini') if k_lalu else None} "
+          f"DEV={kv.tree.set(k_lalu, 'DEV Saat Ini') if k_lalu else None}")
     check("(v3.9.5) SA base: pair TANPA bulan-lalu com(1)=SA-SO (NOPAIR: "
-          "GR '(4)', bukan minus palsu; DEV App RASIO → '—')",
+          "GR '(4)', bukan minus palsu; DEV Saat Ini RASIO → '—')",
           k_nop is not None and
-          kv.tree.set(k_nop, "GR App") == "(4)" and
-          kv.tree.set(k_nop, "DEV App") == "—" and
+          kv.tree.set(k_nop, "GR Saat Ini") == "(4)" and
+          kv.tree.set(k_nop, "DEV Saat Ini") == "—" and
           kv.tree.set(k_nop, "Status") == "MATCH",
-          f"GR={kv.tree.set(k_nop, 'GR App') if k_nop else None}")
+          f"GR={kv.tree.set(k_nop, 'GR Saat Ini') if k_nop else None}")
 
     # pivot COM konsisten (tanggal negatif + SA) — _compute_com langsung
     from src.ui.pivot_view import PivotTableView as _PTV
@@ -3103,7 +3116,7 @@ def main():
                 root.update()
                 time.sleep(0.01)
             _has_neg = root.tk.call(str(ct), "tag", "cell", "has",
-                                    "neg_cell", (k_match2, "BOM File"))
+                                    "neg_cell", (k_match2, "BOM Lalu"))
             check("(v3.9.5) Filter di clone ⛶ → tag minus PER-CELL tetap "
                   "terpasang (dulu hilang)",
                   _has_neg == 1 and len(ct.get_children("")) == 3,
@@ -4012,7 +4025,7 @@ def main():
         _v13 = kv._top_tree.item(kv._top_tree.get_children("")[0],
                                  "values")
         check("(v3.9.13) Top-1 = peringkat 1 + |Selisih| terbesar "
-              "(SEP: GR 49 − DEV -10 = 59)",
+              "(SEP: GR Saat Ini 49 − DEV Lalu -10 = 59)",
               str(_v13[0]) == "1" and str(_v13[7]) == "59",
               f"got peringkat={_v13[0]} selisih={_v13[7]}")
     _flip13n = len(kv._flip_tree.get_children(""))
@@ -4041,6 +4054,49 @@ def main():
     check("(v3.9.13) Top N=3 diterapkan",
           len(kv._top_tree.get_children("")) == 3,
           f"got {len(kv._top_tree.get_children(''))}")
+
+    # --- (5b) v3.9.14: MINGGU di tab Analisa mengikuti kolom H ----------
+    # (permintaan user: "week di tab analisa harusnya menyesuaikan juga
+    # dengan kolom H atau aturan kolom H yaitu jika 7 berarti week 1")
+    kv._topn_var.set("100")
+    kv._show_all_weeks.set(False)
+    app.deviasi_gr_view.tanggal_h_var.set("7")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
+    wait_view(root, kv)
+    _top_w1 = [kv._top_tree.item(k, "values")[1]
+               for k in kv._top_tree.get_children("")]
+    check("(v3.9.14) Analisa H=7 → Top Selisih hanya WEEK 1 (5 dari 8 "
+          "join) + prefiks minggu (H 7)",
+          len(_top_w1) == 5 and all(v.endswith("WEEK 1") for v in _top_w1)
+          and "Minggu WEEK 1" in kv._top_status_var.get() and
+          "(H 7)" in kv._top_status_var.get(),
+          f"rows={len(_top_w1)} {sorted(set(_top_w1))} "
+          f"status={kv._top_status_var.get()!r}")
+    check("(v3.9.14) Analisa H=7 → flip W1 SEP→OKT terdeteksi + prefiks "
+          "minggu di ringkasan",
+          len(kv._flip_tree.get_children("")) == 1 and
+          "Minggu WEEK 1" in kv._flip_summary_var.get(),
+          f"rows={len(kv._flip_tree.get_children(''))} "
+          f"summary={kv._flip_summary_var.get()!r}")
+    app.deviasi_gr_view.tanggal_h_var.set("25")
+    app.deviasi_gr_view._on_tanggal_h_change()
+    wait_view(root, app.deviasi_gr_view)
+    wait_view(root, kv)
+    check("(v3.9.14) Analisa H=25 → hanya minggu W4 (1 baris) + flip 0 "
+          "(SEP hanya W1) + pesan jujur",
+          len(kv._top_tree.get_children("")) == 1 and
+          len(kv._flip_tree.get_children("")) == 0 and
+          "Tidak ada perubahan arah" in kv._flip_status_var.get(),
+          f"top={len(kv._top_tree.get_children(''))} "
+          f"flip={len(kv._flip_tree.get_children(''))} "
+          f"flip_status={kv._flip_status_var.get()!r}")
+    # kembalikan state utk blok (6): semua minggu ON + H 25
+    kv._show_all_weeks.set(True)
+    kv._on_option_changed()
+    wait_view(root, kv)
+    # analisa MALAS: mode ⚖ + refresh → tabel analisa TIDAK dirender ulang
+    _flip_count_l = len(kv._flip_tree.get_children(""))
     kv._on_mode_change(0)
     root.update()
     check("(v3.9.13) Kembali mode ⚖ Tabel",

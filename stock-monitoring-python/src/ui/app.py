@@ -149,7 +149,21 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.13"  # v3.9.13 — FILTER SEARCH-TO-SELECT + KATEGORI DEVIASI + MULTI-FILE + ANALISA LAPORAN DEVIASI
+APP_VERSION = "3.9.14"  # v3.9.14 — PERF TAB ANALISA (flip vektor + merge + render-malas) + MINGGU ANALISA IKUT H + ISTILAH SAAT INI/LALU
+# v3.9.14 (permintaan user: "tab analisa kenapa lemot sekali" deep audit
+# performa + "week di tab analisa harusnya menyesuaikan kolom H — jika 7
+# berarti week 1" + "ganti istilah app menjadi Saat ini dan File menjadi
+# Lalu") — SEMUA di komparasi_deviasi_view.py:
+# (1) PERF: analisa dirender MALAS (hanya saat mode 📈 aktif — dulu ikut
+#     dirender walau tersembunyi: ±4,8 dtk freeze PER refresh di file
+#     40rb baris); flip VEKTOR (sort+shift — dulu groupby+sort per grup
+#     4,7 dtk → ±50ms, hasil identik); nilai app per baris via MERGE
+#     vektor (dulu loop Series.get 2,9 dtk → ±60ms; terverifikasi
+#     identik); Top Selisih tanpa iterrows.
+# (2) MINGGU: Top Selisih & Perubahan Arah difilter minggu yang MEMUAT
+#     H (H=7 → WEEK 1) — konsisten tabel utama.
+# (3) ISTILAH: kolom *File → *Lalu, *App → *Saat Ini; status 'TIDAK ADA
+#     DI DATA APP' → 'TIDAK ADA DI DATA SAAT INI'.
 # v3.9.13 (6 permintaan user + adopsi rumus repo Inventory-Control user):
 # (1) FILTER "HASIL SEARCH = PILIHAN": Enter di popup filter header
 #     (semua tab) menjadikan HASIL PENCARIAN sebagai seleksi — 0 hasil =

@@ -23,6 +23,12 @@ Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
 
+### v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH SAAT INI/LALU (deep audit performa: "tab analisa kenapa lemot sekali")
+- **PERF (akar "lemot" = 3 lapis, data real 40.739 baris)**: tabel analisa dirender **MALAS** — hanya saat mode 📈 Analisa aktif (dulu dirender juga saat TERSEMBUNYI di setiap refresh → **±4,8 dtk freeze per refresh**; kini render 56ms, blok main-thread maks **4.995 → 360ms**); **flip VEKTOR** sort+shift(-1) (dulu groupby+sort per grup: 4.703 → 38ms; **24.810 flip IDENTIK** vs algoritma lama di oracle 67rb baris); **nilai app per baris via MERGE vektor** (dulu loop `Series.get` 2.924ms → ±60ms — join/status/rasio identik baris-per-baris); Top Selisih tanpa iterrows.
+- **Minggu di tab Analisa ikut kolom H** (H=7 → hanya WEEK 1, konsisten tabel utama; opsi semua-minggu tetap ada; prefiks minggu di status + pesan jujur).
+- **Istilah**: *App → **Saat Ini***, *File → **Lalu*** (BOM Lalu · DEV Lalu · %TO BOM Lalu · BOM/COM/DEV/GR Saat Ini · status "TIDAK ADA DI DATA SAAT INI" · judul "Komparasi Deviasi — Lalu vs Saat Ini").
+- Verifikasi: **504/504 UI test × 2** + mock ALL PASS + ruff identik baseline + oracle flip identik + benchmark real-data + VLM visual 3 screenshot PASS.
+
 ### v3.9.13 — FILTER SEARCH-TO-SELECT + KATEGORI + KOLOM + PATH + MULTI-FILE + ANALISA (permintaan user + adopsi rumus repo Inventory-Control user)
 - **Filter "hasil search = pilihan" (SEMUA TAB)**: `Enter` di popup filter header (ikon corong) menjadikan HASIL PENCARIAN sebagai seleksi — 0 hasil = **0 baris** (perilaku Excel). Plus **operator teks** (Mengandung / Diawali / Diakhiri / Tidak mengandung) + tombol **↔ Balik** (invert seleksi). Seleksi kini state EKSAK (nilai >3000 non-materialized ikut); uncheck-semua = 0 baris (dulu tampil semua).
 - **Filter KATEGORI di tab Deviasi GR & PCS**: kolom KATEGORI (data DBS sudah ada di pipeline) + combobox KATEGORI di kartu Filter — post-pivot, SharedPivotCache tetap dihitung 1× untuk GR+PCS.
