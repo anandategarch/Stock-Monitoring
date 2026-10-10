@@ -149,7 +149,26 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.14"  # v3.9.14 — PERF TAB ANALISA (flip vektor + merge + render-malas) + MINGGU ANALISA IKUT H + ISTILAH SAAT INI/LALU
+APP_VERSION = "3.9.15"  # v3.9.15 — GELOMBANG 1 ANALISA: Risiko Flip + Arah Minoritas + Liga Deviasi-Rate + Benchmark Opportunity (mode 📈 Analisa, baris BAGIAN)
+# v3.9.15 — GELOMBANG 1 (adopsi rumus repo Inventory-Control user; 4
+# analisa baru sebagai BAGIAN di mode 📈 Analisa — baris "BAGIAN"
+# SegmentBar: Top & Flip · Risiko Flip · Arah Minoritas · Liga Deviasi ·
+# Benchmark; hanya bagian AKTIF yang dirender — pola malas v3.9.14,
+# komputasi VEKTOR penuh):
+# (1) ⚡ RISIKO FLIP PER BAHAN: skor = min(100, 30×Sempurna + 10×Flip),
+#     Level TINGGI/SEDANG/RENDAH; klik-2× → popup resto kontributor.
+# (2) 🧭 ARAH MINORITAS PER BAHAN: resto yang arah DEV-nya melawan
+#     mayoritas (mayoritas ketat) — kandidat salah-input; klik-2× →
+#     popup resto minoritas.
+# (3) 🏆 LIGA DEVIASI-RATE PER BAHAN: rate = |DEV|/|BOM| per resto;
+#     baseline median+MAD → robust-z = (rate−median)/(1,4826×MAD);
+#     guard ≥5 resto ber-BOM & MAD>0; DEV 0 ikut populasi tak diranking.
+# (4) 💰 BENCHMARK OPPORTUNITY: per resto (kelompok = 3 huruf awal kode
+#     resto) loss = Σ|DEV<0|; opportunity = max(0, loss − median
+#     kelompok) + total.
+# Analisa per-periode (2/3/4) = BULAN TERBARU + SATU minggu snapshot
+# (minggu yang memuat H — minggu file kumulatif: menjumlah lintas minggu
+# = menghitung ganda).
 # v3.9.14 (permintaan user: "tab analisa kenapa lemot sekali" deep audit
 # performa + "week di tab analisa harusnya menyesuaikan kolom H — jika 7
 # berarti week 1" + "ganti istilah app menjadi Saat ini dan File menjadi

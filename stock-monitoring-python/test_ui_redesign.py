@@ -98,6 +98,16 @@ Memverifikasi:
     auto-load; multi-file (askopenfilenames + BULAN-num dedup + filter
     mode 📈 Analisa (Top Selisih + Perubahan
     Arah/flip — Sempurna/Dominan/Parsial).
+26. v3.9.15 — GELOMBANG 1 ANALISA (§26-5c): 4 bagian analisa baru di
+    mode 📈 Analisa (baris BAGIAN SegmentBar — hanya bagian aktif
+    dirender): ⚡ Risiko Flip per bahan (skor = min(100, 30×Sempurna +
+    10×Flip), Level TINGGI/SEDANG/RENDAH, drilldown resto kontributor) ·
+    🧭 Arah Minoritas per bahan (resto melawan mayoritas, drilldown) ·
+    🏆 Liga Deviasi-Rate per bahan (|DEV|/|BOM| vs median+MAD populasi,
+    robust-z 1,4826×MAD, guard ≥5 resto ber-BOM) · 💰 Benchmark
+    Opportunity (loss = Σ|DEV<0| vs median kelompok 3-huruf). Analisa
+    per-periode = bulan terbaru + SATU minggu snapshot (minggu yang
+    memuat H — kumulatif: jumlah lintas minggu = ganda).
 25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
     analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
     saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
@@ -444,7 +454,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.14", APP_VERSION == "3.9.14", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.15", APP_VERSION == "3.9.15", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -4102,6 +4112,211 @@ def main():
     check("(v3.9.13) Kembali mode ⚖ Tabel",
           kv.tcard.winfo_ismapped() and
           not kv._analisa_frame.winfo_ismapped())
+
+    # --- (5c) v3.9.15 — GELOMBANG 1: 4 BAGIAN ANALISA BARU ---------------
+    # File sintetis OKT+NOV · 6 resto (BDG×3, SBY×2, MLG×1) · WEEK 4 —
+    # analisa per-periode bekerja dari FILE (tanpa perlu join app).
+    f5c = os.path.join(_tf13.gettempdir(), "mock_deviasi_gel1.xlsx")
+    _w5c = _WB()
+    _s5c = _w5c.active
+    _s5c.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
+    _rows5c = [
+        # BERAS PREMIUM NOV W4 — rate 50/20/30/5/0/8 %
+        ["1030.BDGUKU", "BERAS PREMIUM", "GR", -100, -50, 50,
+         "WEEK 4", "NOV"],
+        ["1041.BDGABC", "BERAS PREMIUM", "GR", -100, -80, 20,
+         "WEEK 4", "NOV"],
+        ["1042.BDGJAY", "BERAS PREMIUM", "GR", -100, -70, 30,
+         "WEEK 4", "NOV"],
+        ["1050.SBYPQR", "BERAS PREMIUM", "GR", -100, -95, 5,
+         "WEEK 4", "NOV"],
+        ["1051.SBYKLM", "BERAS PREMIUM", "GR", -100, -100, 0,
+         "WEEK 4", "NOV"],
+        ["1060.MLGHIJ", "BERAS PREMIUM", "GR", -100, -92, 8,
+         "WEEK 4", "NOV"],
+        # GULA AREN NOV W4 — 4 minus vs 1 surplus (minoritas MLGHIJ +12)
+        ["1030.BDGUKU", "GULA AREN", "GR", -50, -60, -10,
+         "WEEK 4", "NOV"],
+        ["1041.BDGABC", "GULA AREN", "GR", -50, -70, -20,
+         "WEEK 4", "NOV"],
+        ["1042.BDGJAY", "GULA AREN", "GR", -50, -65, -15,
+         "WEEK 4", "NOV"],
+        ["1050.SBYPQR", "GULA AREN", "GR", -50, -55, -5,
+         "WEEK 4", "NOV"],
+        ["1060.MLGHIJ", "GULA AREN", "GR", -50, -62, 12,
+         "WEEK 4", "NOV"],
+        # KEJU MOZZARELLA OKT→NOV W4 — 2 flip (BDGUKU Sempurna −10→+10;
+        # BDGABC Dominan +5→−4)
+        ["1030.BDGUKU", "KEJU MOZZARELLA", "GR", -80, -90, -10,
+         "WEEK 4", "201.OKT 26"],
+        ["1041.BDGABC", "KEJU MOZZARELLA", "GR", -80, -75, 5,
+         "WEEK 4", "201.OKT 26"],
+        ["1030.BDGUKU", "KEJU MOZZARELLA", "GR", -80, -70, 10,
+         "WEEK 4", "NOV"],
+        ["1041.BDGABC", "KEJU MOZZARELLA", "GR", -80, -84, -4,
+         "WEEK 4", "NOV"],
+    ]
+    for _r5c in _rows5c:
+        _s5c.append(_r5c)
+    _w5c.save(f5c)
+    kv._show_all_weeks.set(False)   # scope analisa = minggu H 25 → WEEK 4
+    kv._load_paths([f5c])
+    wait_view(root, kv)
+    kv._on_mode_change(1)
+    root.update()
+    check("(v3.9.15) Baris BAGIAN ada (5 bagian, aktif = Top & Flip)",
+          hasattr(kv, "_anasec_segment") and
+          len(kv._anasec_frames) == 5 and
+          kv._anasec_idx == 0 and
+          kv._anasec_frames[0].winfo_ismapped(),
+          f"idx={kv._anasec_idx}")
+
+    # ⚡ BAGIAN 1 — Risiko Flip per bahan
+    kv._on_anasec_change(1)
+    root.update()
+    _r5c_n = len(kv._risk_tree.get_children(""))
+    check("(v3.9.15) Risiko Flip: 1 bahan (KEJU) — 2 flip dari 2 pasangan",
+          _r5c_n == 1, f"got {_r5c_n}")
+    if _r5c_n:
+        _v5c = kv._risk_tree.item(kv._risk_tree.get_children("")[0],
+                                  "values")
+        check("(v3.9.15) Risiko Flip KEJU: skor 50 (=30×1+10×2) · "
+              "Sempurna 1 · Dominan 1 · Konsisten 0 · disparitas rerata "
+              "10,00% · Level TINGGI",
+              _v5c[4] == "2" and _v5c[5] == "1" and _v5c[6] == "1" and
+              _v5c[8] == "0" and _v5c[9] == "10,00%" and
+              _v5c[10] == "50" and _v5c[11] == "TINGGI",
+              f"flip={_v5c[4]} semp={_v5c[5]} dom={_v5c[6]} "
+              f"kons={_v5c[8]} disp={_v5c[9]} skor={_v5c[10]} "
+              f"level={_v5c[11]}")
+    _win5c, _tr5c = kv._risk_drilldown("KEJU MOZZARELLA")
+    root.update()
+    _rd5c_n = len(_tr5c.get_children(""))
+    _rd5c_v = (_tr5c.item(_tr5c.get_children("")[0], "values")
+               if _rd5c_n else [])
+    check("(v3.9.15) Drilldown Risiko KEJU: 2 resto — kontributor "
+          "terbesar dulu (BDGUKU |−10|→+10 Sempurna)",
+          _rd5c_n == 2 and _rd5c_v[1] == "1030.BDGUKU" and
+          _rd5c_v[6] == "Sempurna" and _rd5c_v[2] == "(10)" and
+          _rd5c_v[3] == "10",
+          f"n={_rd5c_n} resto={_rd5c_v[1] if _rd5c_v else '-'} "
+          f"kat={_rd5c_v[6] if _rd5c_v else '-'}")
+    _win5c.destroy()
+
+    # 🧭 BAGIAN 2 — Arah Minoritas
+    kv._on_anasec_change(2)
+    root.update()
+    _m5c_n = len(kv._min_tree.get_children(""))
+    check("(v3.9.15) Arah Minoritas: hanya GULA AREN (4 minus vs 1 "
+          "surplus — BERAS/KEJU searah)",
+          _m5c_n == 1, f"got {_m5c_n}")
+    if _m5c_n:
+        _v5c = kv._min_tree.item(kv._min_tree.get_children("")[0],
+                                 "values")
+        check("(v3.9.15) Minoritas GULA: mayoritas 4 MINUS · minoritas 1 "
+              "· Σ|DEV| minoritas 12 · 20,00%",
+              _v5c[1] == "GULA AREN" and _v5c[3] == "4" and
+              _v5c[4] == "1" and _v5c[5] == "MINUS" and
+              _v5c[6] == "12" and _v5c[7] == "20,00%",
+              f"nama={_v5c[1]} may={_v5c[3]} min={_v5c[4]} "
+              f"arah={_v5c[5]} abs={_v5c[6]} pct={_v5c[7]}")
+    _win5c, _tr5c = kv._minoritas_drilldown("GULA AREN")
+    root.update()
+    _md5c_n = len(_tr5c.get_children(""))
+    _md5c_v = (_tr5c.item(_tr5c.get_children("")[0], "values")
+               if _md5c_n else [])
+    check("(v3.9.15) Drilldown Minoritas GULA: 1 resto MLGHIJ DEV 12 "
+          "(minoritas SURPLUS)",
+          _md5c_n == 1 and _md5c_v[0] == "1060.MLGHIJ" and
+          _md5c_v[2] == "12",
+          f"n={_md5c_n} resto={_md5c_v[0] if _md5c_v else '-'} "
+          f"dev={_md5c_v[2] if _md5c_v else '-'}")
+    _win5c.destroy()
+
+    # 🏆 BAGIAN 3 — Liga Deviasi (default bahan Σ|DEV| terbesar = BERAS)
+    kv._on_anasec_change(3)
+    root.update()
+    _comb5c = list(kv._liga_combo["values"])
+    check("(v3.9.15) Liga: combobox bahan urut Σ|DEV| ↓ (BERAS 113 · "
+          "GULA 62 · KEJU 14)",
+          _comb5c[:3] == ["BERAS PREMIUM", "GULA AREN",
+                          "KEJU MOZZARELLA"],
+          f"got {_comb5c[:3]}")
+    _l5c_n = len(kv._liga_tree.get_children(""))
+    check("(v3.9.15) Liga BERAS: 5 resto diranking dari 6 populasi "
+          "(SBYKLM DEV 0 — di populasi, tak diranking)",
+          _l5c_n == 5 and "1 resto rate 0" in kv._liga_base_var.get(),
+          f"got {_l5c_n} · base={kv._liga_base_var.get()!r}")
+    if _l5c_n:
+        _v5c = kv._liga_tree.item(kv._liga_tree.get_children("")[0],
+                                  "values")
+        # median rate = (0,08+0,20)/2 = 14% · |dev|: [.06 .06 .09 .14
+        # .16 .36] → MAD = (0,09+0,14)/2 = 11,5%
+        # z BDGUKU = (0,50−0,14)/(1,4826×0,115) = 2,11 (> 2 → merah)
+        check("(v3.9.15) Liga BERAS rank-1 BDGUKU: rate 50,00% · z 2,11 "
+              "· baseline median 14,00% · MAD 11,50%",
+              _v5c[1] == "1030.BDGUKU" and _v5c[5] == "50,00%" and
+              _v5c[6] == "2,11" and
+              "median rate 14,00%" in kv._liga_base_var.get() and
+              "MAD 11,50%" in kv._liga_base_var.get(),
+              f"resto={_v5c[1]} rate={_v5c[5]} z={_v5c[6]} "
+              f"base={kv._liga_base_var.get()!r}")
+    # ganti bahan → GULA AREN (median 24,00% · rank-1 BDGABC 40,00%)
+    kv._liga_bahan_var.set("GULA AREN")
+    kv._on_liga_bahan_changed()
+    root.update()
+    _lg5c_n = len(kv._liga_tree.get_children(""))
+    _lg5c_v = (kv._liga_tree.item(kv._liga_tree.get_children("")[0],
+                                  "values") if _lg5c_n else [])
+    check("(v3.9.15) Liga GULA AREN: 5 resto diranking · rank-1 BDGABC "
+          "rate 40,00% · median 24,00%",
+          _lg5c_n == 5 and _lg5c_v[1] == "1041.BDGABC" and
+          _lg5c_v[5] == "40,00%" and
+          "median rate 24,00%" in kv._liga_base_var.get(),
+          f"n={_lg5c_n} resto={_lg5c_v[1] if _lg5c_v else '-'} "
+          f"rate={_lg5c_v[5] if _lg5c_v else '-'}")
+
+    # 💰 BAGIAN 4 — Benchmark Opportunity
+    kv._on_anasec_change(4)
+    root.update()
+    _b5c_n = len(kv._bench_tree.get_children(""))
+    # loss NOV W4: BDGUKU 10 · BDGABC 24 · BDGJAY 15 · SBYPQR 5 ·
+    # SBYKLM 0 · MLGHIJ 0 → BDG median 15 (opp BDGABC 9) · SBY median
+    # 2,5 (opp SBYPQR 2,5) · MLG 1 resto (opp 0) → total 11,5
+    check("(v3.9.15) Benchmark: 6 resto · total opportunity 11,5",
+          _b5c_n == 6 and
+          "Total opportunity 11,5" in kv._bench_summary_var.get(),
+          f"got {_b5c_n} · sum={kv._bench_summary_var.get()!r}")
+    if _b5c_n:
+        _v5c = kv._bench_tree.item(kv._bench_tree.get_children("")[0],
+                                   "values")
+        check("(v3.9.15) Benchmark rank-1 BDGABC: loss 24 · median BDG "
+              "15 · opportunity 9",
+              _v5c[1] == "1041.BDGABC" and _v5c[2] == "BDG" and
+              _v5c[4] == "24" and _v5c[5] == "15" and _v5c[6] == "9",
+              f"resto={_v5c[1]} kel={_v5c[2]} loss={_v5c[4]} "
+              f"med={_v5c[5]} opp={_v5c[6]}")
+        _v2 = kv._bench_tree.item(kv._bench_tree.get_children("")[1],
+                                  "values")
+        check("(v3.9.15) Benchmark rank-2 SBYPQR: opportunity 2,5 "
+              "(median SBY 2,5)",
+              _v2[1] == "1050.SBYPQR" and _v2[2] == "SBY" and
+              _v2[6] == "2,5" and _v2[5] == "2,5",
+              f"resto={_v2[1]} opp={_v2[6]} med={_v2[5]}")
+        check("(v3.9.15) Benchmark: kelompok 1-resto dicatat jujur (MLG)",
+              "1 kelompok 1 resto" in kv._bench_status_var.get(),
+              f"got {kv._bench_status_var.get()!r}")
+
+    # --- pulihkan state utk blok (6) ---
+    kv._on_mode_change(0)
+    root.update()
+    kv._show_all_weeks.set(True)
+    kv._on_option_changed()
+    wait_view(root, kv)
+    kv._load_paths([multi2_13, xlsx_path])
+    wait_view(root, kv)
+    os.unlink(f5c)
 
     # --- (6) AUTO-LOAD file terakhir saat pertama terlihat ---------------
     kv._close_file()
