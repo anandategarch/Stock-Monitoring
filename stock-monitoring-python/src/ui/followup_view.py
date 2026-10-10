@@ -366,7 +366,10 @@ class FollowUpView(tk.Frame):
 
         # v3.5: filter header ⧩ (display-only — daftar store tidak berubah)
         col_idx = {c[0]: j for j, c in enumerate(COLUMNS)}
-        active = [(col_idx[c], s) for c, s in self._col_sel.items() if s]
+        # v3.9.13: seleksi kosong (set()) = filter AKTIF → 0 baris
+        # (semantik Excel) — dulu truthiness `if s` menelannya.
+        active = [(col_idx[c], s) for c, s in self._col_sel.items()
+                  if s is not None]
 
         items = []
         n_shown = 0

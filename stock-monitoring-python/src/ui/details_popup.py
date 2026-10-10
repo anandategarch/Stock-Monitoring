@@ -292,7 +292,9 @@ class DetailsPopup(tk.Toplevel):
                                            "kombinasi ini.", "total": 0}
 
         render_df = df
-        if name_selected and "Nama Barang" in df.columns:
+        # v3.9.13: seleksi kosong (set()) = 0 baris (semantik Excel) —
+        # dulu truthiness menelan set() sebagai "tanpa filter".
+        if name_selected is not None and "Nama Barang" in df.columns:
             render_df = df[df["Nama Barang"].astype(str).isin(name_selected)]
 
         if render_df.empty:
@@ -379,7 +381,9 @@ class DetailsPopup(tk.Toplevel):
         df = self.df
         if df is None or df.empty:
             return df
-        if self._name_selected and "Nama Barang" in df.columns:
+        # v3.9.13: seleksi kosong (set()) = 0 baris — `is not None`,
+        # bukan truthiness (set() kosong tetap filter AKTIF).
+        if self._name_selected is not None and "Nama Barang" in df.columns:
             return df[df["Nama Barang"].astype(str).isin(self._name_selected)]
         return df
 

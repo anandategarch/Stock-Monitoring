@@ -543,7 +543,10 @@ class LaporanDeviasiView(tk.Frame):
         # pilihan kolom H + median difilter di _prepare_rows (murah).
         st = {
             "h": int(self.tanggal_h),
-            "col_sel": {c: s for c, s in self._col_sel.items() if s},
+            # v3.9.13: seleksi kosong (set()) = filter AKTIF → 0 baris
+            # (semantik Excel) — dulu truthiness `if s` menelannya.
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
         }
 
         def work():
@@ -657,7 +660,9 @@ class LaporanDeviasiView(tk.Frame):
         filtered = flagged
         for col, sel in st["col_sel"].items():
             out_col = "Selisih" if col == "Selisih vs Median" else col
-            if out_col in filtered.columns and sel:
+            # v3.9.13: seleksi kosong = 0 baris (semantik Excel) — guard
+            # `and sel` dulu menelan set() sebagai "tanpa filter".
+            if out_col in filtered.columns:
                 fmt = self._format_col_series(col, filtered[out_col])
                 filtered = filtered[fmt.isin(sel)]
 

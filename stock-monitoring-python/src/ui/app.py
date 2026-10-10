@@ -1,9 +1,9 @@
 """
-app.py — Shell UI Stock Monitoring v3.9.12.
+app.py — Shell UI Stock Monitoring v3.9.13.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.9.12 + [💾 Export] │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.9.13 + [💾 Export] │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (9 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
@@ -149,7 +149,38 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.12"  # v3.9.12 — TAB 🎯 PARETO DIHAPUS (user: "hapus tab pareto dan dead code nya")
+APP_VERSION = "3.9.13"  # v3.9.13 — FILTER SEARCH-TO-SELECT + KATEGORI DEVIASI + MULTI-FILE + ANALISA LAPORAN DEVIASI
+# v3.9.13 (6 permintaan user + adopsi rumus repo Inventory-Control user):
+# (1) FILTER "HASIL SEARCH = PILIHAN": Enter di popup filter header
+#     (semua tab) menjadikan HASIL PENCARIAN sebagai seleksi — 0 hasil =
+#     0 baris (perilaku Excel) + operator teks (Mengandung/Diawali/
+#     Diakhiri/Tidak mengandung) + tombol ↔ Balik (invert). State
+#     seleksi EKSAK (nilai >3000 non-materialized ikut terhitung);
+#     uncheck-semua kini 0 baris (dulu tampil semua).
+# (2) FILTER KATEGORI di tab 📦 Deviasi GR & 🧩 Deviasi PCS: kolom
+#     KATEGORI (data DBS sudah ada di pipeline) + combobox KATEGORI di
+#     kartu Filter (post-pivot — SharedPivotCache tetap 1× GR+PCS).
+# (3) PATH FILE DEVIASI tersimpan & BISA DIUBAH: entry editable
+#     (multi-file dipisah ";") + 📂 multi-select + ↻; komparasi_last.json
+#     {"paths": [...]} + AUTO-LOAD file terakhir saat tab terlihat.
+#     FIX BUG v3.9.10: .with_suffix pada str → json TIDAK PERNAH tersimpan
+#     sejak v3.9.10 (path file deviasi "tidak pernah teringat").
+# (4) KOLOM LAPORAN DEVIASI (permintaan "hapus kolom H, minggu juga
+#     hapus, Dev to bom harusnya persen"): kolom Minggu & H DIHAPUS dari
+#     tabel (16→14; data internal tetap utk filter minggu/join/popup);
+#     DEV App kini %TO BOM — App = DEV·App / |BOM·App| (persen — dulu
+#     kuantitas; konsisten %TO BOM File & Dev to BOM% tab Deviasi).
+# (5) MODE 📈 ANALISA (adopsi rumus repo Inventory-Control user):
+#     Top Selisih (peringkat |GR App − DEV File| tertinggi, Top-N) +
+#     PERUBAHAN ARAH ("flip": bulan berurutan MINGGU SAMA dengan tanda
+#     DEV berlawanan — minus bulan lalu → surplus sekarang; Disparitas
+#     = |P1+P2|/max(|P1|,|P2|): Sempurna <10% / Dominan 10–40% / Parsial
+#     ≥40%; urut disparitas naik).
+# (6) MULTI-FILE DEVIASI: 📂 askopenfilenames — semua file diparse di
+#     worker & digabung; BULAN ikut dedup-key (baris bulan lain TIDAK
+#     dibuang); default tabel = BULAN TERBARU (checkbox "Tampilkan semua
+#     bulan"); label info per-file; file gagal dilewati (dilaporkan).
+# v3.9.12 — TAB 🎯 PARETO DIHAPUS (user: "hapus tab pareto dan dead code nya")
 # v3.9.11 (TUNTAS SISA TEMUAN AUDIT — "kerjakan semua & repo pribadi"):
 # (0) P0 D-11 DIEKSEKUSI: repo GitHub anandategarch/Stock-Monitoring
 #     kini PRIVATE (permintaan user "repo untuk pribadi aja") — workbook

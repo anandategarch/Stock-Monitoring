@@ -948,7 +948,10 @@ class InSelisihView(tk.Frame):
             "tgl_start": tgl_start,
             "tgl_end": tgl_end,
             "only_selisih": self.only_selisih_var.get(),
-            "col_sel": {c: s for c, s in self._col_sel.items() if s},
+            # v3.9.13: seleksi kosong (set()) = filter AKTIF → 0 baris
+            # (semantik Excel) — dulu truthiness `if s` menelannya.
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
         }
 
         def work():

@@ -940,15 +940,28 @@ class HeaderFilter:
     """Filter kolom yang MENEMPEL DI HEADER Treeview (ala Excel AutoFilter).
 
     - Ikon corong dipasang di heading kolom; klik heading → popup filter.
-    - Popup: pencarian nilai + daftar checkbox nilai unik + pilih-semua
-      + sort A→Z / Z→A (opsional) + reset.
-    - Setiap toggle checkbox langsung memanggil on_apply(selection):
+    - Popup: pencarian nilai + operator teks (Mengandung / Diawali /
+      Diakhiri / Tidak mengandung) + daftar checkbox nilai unik +
+      pilih-semua + sort A→Z / Z→A (opsional) + reset + ↔ Balik (invert).
+    - v3.9.13 (permintaan user: "habis search, hasil search-ku itulah
+      yang jadi pilihan-nya"): tekan **Enter** di kolom pencarian →
+      hasil pencarian MENJADI seleksi. Query kosong + Enter = reset.
+      0 hasil = 0 baris (semantik Excel AutoFilter).
+    - Setiap toggle checkbox / Enter / Balik memanggil on_apply(sel):
         None      → semua nilai tampil (tanpa filter)
         set(...)  → hanya nilai terpilih yang tampil
+        set()     → 0 baris — seleksi kosong = TIDAK ada baris (v3.9.13;
+                    dulu dipetakan None = tampil semua)
+    - ``selected`` = state EKSAK otoritatif: nilai di luar cap
+      MAX_CHECKS mengikuti state ini (bukan lagi heuristik "dianggap
+      tercentang" — v3.9.10 B-05 kini exact).
     - get_values() dipanggil saat popup dibuka (nilai unik terbaru).
     """
 
     MAX_CHECKS = 3000  # FIX B-03: 600→3000 — gunakan 🔍 untuk list sangat besar
+
+    # v3.9.13: operator pencocokan teks (dropdown readonly di samping 🔍).
+    SEARCH_OPS = ("Mengandung", "Diawali", "Diakhiri", "Tidak mengandung")
 
     # FIX B-05 (audit 2-b): nilai di luar MAX_CHECKS kini tetap bisa
     # ditemukan & dicentang via pencarian (checkbox LAZY) — dan nilai
@@ -970,6 +983,8 @@ class HeaderFilter:
         self._checks: dict[str, ttk.Checkbutton] = {}
         self._vars: dict[str, tk.BooleanVar] = {}
         self._search_var = tk.StringVar()
+        # v3.9.13: operator pencocokan teks utk search-to-select (Enter).
+        self._op_var = tk.StringVar(value="Mengandung")
         self._all_var = tk.BooleanVar(value=True)
         self._count_var = tk.StringVar(value="")
         self._values_list: list[str] | None = None   # FIX B-05
@@ -1060,13 +1075,21 @@ class HeaderFilter:
         body = tk.Frame(win, bg=C_CARD)
         body.pack(fill="both", expand=True, padx=14, pady=12)
 
-        # pencarian nilai (menyaring daftar, bukan data)
+        # pencarian nilai (menyaring daftar; Enter = jadikan seleksi)
         srow = tk.Frame(body, bg=C_CARD)
         srow.pack(fill="x")
         tk.Label(srow, text="🔍", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
         entry = ttk.Entry(srow, textvariable=self._search_var)
         entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
         entry.bind("<KeyRelease>", lambda e: self._filter_list())
+        # v3.9.13 (permintaan user: "habis search, hasil search-ku itulah
+        # yang jadi pilihan-nya") — Enter menjadikan hasil pencarian
+        # SELEKSI; operator teks ala Excel AutoFilter di sampingnya.
+        entry.bind("<Return>", self._on_search_enter)
+        op_box = ttk.Combobox(srow, width=11, state="readonly",
+                              textvariable=self._op_var,
+                              values=list(self.SEARCH_OPS))
+        op_box.pack(side="left", padx=(6, 0))
 
         # pilih semua + counter
         arow = tk.Frame(body, bg=C_CARD)
@@ -1124,6 +1147,10 @@ class HeaderFilter:
         brow = tk.Frame(body, bg=C_CARD)
         brow.pack(fill="x")
         GhostButton(brow, text="↺ Reset", command=self._reset).pack(side="left")
+        # v3.9.13: kebalikan seleksi (invert — filter advanced)
+        GhostButton(brow, text="↔ Balik",
+                    command=self._invert_selection).pack(side="left",
+                                                         padx=(6, 0))
         if self.on_sort is not None:
             GhostButton(brow, text="↕ Sort A→Z",
                         command=lambda: self._do_sort(False)).pack(
@@ -1180,39 +1207,118 @@ class HeaderFilter:
 
     # -- aksi popup ------------------------------------------------------------
     def _on_toggle(self):
-        self._update_count()
+        # v3.9.13: _emit DULU — counter kini membaca state EKSAK hasil
+        # emit (bukan hanya checkbox yang termaterialisasi).
         self._emit()
+        self._update_count()
 
     def _toggle_all(self):
         to = self._all_var.get()
         for var in self._vars.values():
             var.set(to)
-        self._update_count()
+        # v3.9.13: "Pilih semua" EKSAK di semua kasus — termasuk nilai
+        # di luar cap MAX_CHECKS yang belum termaterialisasi: nyala =
+        # SEMUA nilai (None), mati = TIDAK ADA nilai (0 baris, Excel).
+        if self._values_list is not None:
+            self._apply_selection(set(self._values_list) if to else set())
+            return
         self._emit()
+        self._update_count()
 
     def _emit(self):
-        checked = {v for v, var in self._vars.items() if var.get()}
+        # v3.9.13: state seleksi EKSAK (selected = set|None) — dasar utk
+        # search-to-select & invert. Checkbox materialized hanya OVERRIDE;
+        # nilai di luar cap MAX_CHECKS mengikuti state (v3.9.10 B-05 kini
+        # exact, bukan heuristik "dianggap tercentang").
         total = (len(self._all_values)
                  if self._all_values is not None else len(self._vars))
         if self._all_values is not None:
-            # FIX B-05: nilai di luar cap yang BELUM dimaterialisasi jadi
-            # checkbox dianggap TERCENTANG (default) — dulu mereka hilang
-            # dari `selected` sehingga barisnya ikut tersembunyi diam-diam
-            # saat user hanya bermaksud menyembunyikan 1-2 nilai.
-            checked |= (self._all_values - self._vars.keys())
-        if not checked or len(checked) == total:
+            base = (set(self._all_values) if self.selected is None
+                    else set(self.selected))
+        else:
+            base = (set(self._vars) if self.selected is None
+                    else set(self.selected))
+        for v, var in self._vars.items():
+            if var.get():
+                base.add(v)
+            else:
+                base.discard(v)
+        if not total or len(base) == total:
             self.selected = None
         else:
-            self.selected = checked
+            # v3.9.13 (permintaan user): seleksi KOSONG = 0 baris (perilaku
+            # Excel) — dulu seleksi kosong dipetakan None (tampil semua).
+            self.selected = base
         self.refresh_icon()
         if self.on_apply:
             self.on_apply(self.selected)
 
     def _update_count(self):
-        checked = sum(1 for var in self._vars.values() if var.get())
-        total = len(self._vars)
+        # v3.9.13: counter EKSAK — nilai di luar cap MAX_CHECKS ikut
+        # dihitung lewat state otoritatif `selected`.
+        if self._values_list is not None:
+            total = len(self._values_list)
+            checked = total if self.selected is None else len(self.selected)
+        else:
+            total = len(self._vars)
+            checked = sum(1 for var in self._vars.values() if var.get())
         self._all_var.set(total > 0 and checked == total)
         self._count_var.set(f"{checked}/{total} dipilih")
+
+    # -- search-to-select (v3.9.13) --------------------------------------------
+    def _on_search_enter(self, _event=None):
+        """v3.9.13: Enter → hasil pencarian menjadi SELEKSI (permintaan
+        user: "habis search, hasil search-ku itulah yang jadi
+        pilihan-nya"). Query kosong + Enter = reset; 0 hasil = 0 baris."""
+        q = (self._search_var.get() or "").strip().lower()
+        if self._values_list is None:
+            return
+        if not q:
+            self._reset()
+            return
+        op = str(self._op_var.get() or "Mengandung")
+
+        def _contains(v: str) -> bool:
+            return q in v.lower()
+
+        def _starts(v: str) -> bool:
+            return v.lower().startswith(q)
+
+        def _ends(v: str) -> bool:
+            return v.lower().endswith(q)
+
+        def _excludes(v: str) -> bool:
+            return q not in v.lower()
+
+        pred = {"Diawali": _starts, "Diakhiri": _ends,
+                "Tidak mengandung": _excludes}.get(op, _contains)
+        matches = {v for v in self._values_list if pred(v)}
+        self._apply_selection(matches)
+
+    def _apply_selection(self, matches: set):
+        """v3.9.13: terapkan seleksi EKSAK (dipakai Enter-search, Balik,
+        Pilih-semua) — seluruh hasil = satu-satunya nilai terpilih;
+        checkbox + counter di-sync; on_apply dipanggil (0 hasil = 0
+        baris; semua nilai = None/tampil semua)."""
+        total = len(self._values_list) if self._values_list else 0
+        self.selected = (None if (not total or len(matches) == total)
+                         else set(matches))
+        for v, var in self._vars.items():
+            var.set(self.selected is None or v in self.selected)
+        self._filter_list()   # daftar tetap menampilkan hasil pencarian
+        self._update_count()
+        self.refresh_icon()
+        if self.on_apply:
+            self.on_apply(self.selected)
+
+    def _invert_selection(self):
+        """v3.9.13: kebalikan seleksi (invert — filter advanced): nilai
+        terpilih ↔ tidak terpilih; None (semua) → kosong (0 baris)."""
+        if not self._values_list:
+            return
+        allv = set(self._values_list)
+        cur = allv if self.selected is None else set(self.selected)
+        self._apply_selection(allv - cur)
 
     def _filter_list(self):
         q = (self._search_var.get() or "").strip().lower()
@@ -1242,16 +1348,25 @@ class HeaderFilter:
             if created:
                 self._update_count()
         for v, cb in self._checks.items():
+            # v3.9.13: _apply_selection (Enter/Balik/Pilih-semua) kini juga
+            # bisa dipanggil programatik SETELAH popup ditutup — lewati
+            # checkbox milik popup yang sudah mati (state tetap otoritatif).
+            if not cb.winfo_exists():
+                continue
             if not q or q in v.lower():
                 cb.pack(fill="x", padx=8, pady=1)
             else:
                 cb.pack_forget()
 
     def _reset(self):
+        # v3.9.13: reset EKSAK — `selected` dibersihkan DULU (state
+        # otoritatif) supaya nilai di luar cap MAX_CHECKS ikut kembali
+        # terhitung "terpilih" (bukan hanya yang termaterialisasi).
+        self.selected = None
         for var in self._vars.values():
             var.set(True)
-        self._update_count()
         self._emit()
+        self._update_count()
 
     def _do_sort(self, descending: bool):
         if self.on_sort is not None:
@@ -1635,7 +1750,9 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
     selesai di-insert ulang supaya view bisa memasang ulang tag cell
     (minus merah / warna Status) di clone ⛶.
     """
-    active = {c: s for c, s in filters.items() if s}
+    # v3.9.13: seleksi KOSONG = filter AKTIF (0 baris, semantik Excel) —
+    # dulu truthiness `if s` menelan set() sebagai "tanpa filter".
+    active = {c: s for c, s in filters.items() if s is not None}
     try:
         cache = getattr(tree, "_row_filter_cache", None)
         if cache is None:

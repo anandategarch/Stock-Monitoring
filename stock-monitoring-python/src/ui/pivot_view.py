@@ -461,7 +461,9 @@ class PivotTableView(tk.Frame):
         if df is None or df.empty:
             return empty
 
-        if st["name_selected"] and "Nama Barang" in df.columns:
+        # v3.9.13: seleksi kosong (set()) = 0 baris (semantik Excel) —
+        # dulu truthiness menelan set() sebagai "tanpa filter".
+        if st["name_selected"] is not None and "Nama Barang" in df.columns:
             df = df[df["Nama Barang"].astype(str).isin(st["name_selected"])]
         if st["resto"] and st["resto"] != "(All)" and \
                 "NAMA RESTO" in df.columns and st["mode"] == "tanggal":

@@ -659,6 +659,16 @@ python test_ui_redesign.py   # UI v3.9.3: 279 check (jalankan di bawah Xvfb di L
 
 ## Changelog
 
+### v3.9.13 — FILTER SEARCH-TO-SELECT + KATEGORI + KOLOM + PATH + MULTI-FILE + ANALISA (permintaan user + adopsi rumus repo Inventory-Control user)
+- **Filter "hasil search = pilihan" (SEMUA TAB)**: `Enter` di popup filter header (ikon corong) menjadikan HASIL PENCARIAN sebagai seleksi — 0 hasil = **0 baris** (perilaku Excel). Plus **operator teks** (Mengandung / Diawali / Diakhiri / Tidak mengandung) + tombol **↔ Balik** (invert seleksi). Seleksi kini state EKSAK (nilai >3000 non-materialized ikut); uncheck-semua = 0 baris (dulu tampil semua).
+- **Filter KATEGORI di tab Deviasi GR & PCS**: kolom KATEGORI (data DBS sudah ada di pipeline) + combobox KATEGORI di kartu Filter — post-pivot, SharedPivotCache tetap dihitung 1× untuk GR+PCS.
+- **Path file deviasi tersimpan & bisa diubah**: entry path editable (multi-file dipisah `;`) + 📂 multi-select + ↻ Muat Ulang + **AUTO-LOAD** file terakhir saat tab pertama terlihat. **FIX BUG v3.9.10**: `komparasi_last.json` tidak pernah tersimpan sejak v3.9.10 (`str.with_suffix` ditelan `except`) — kini json format `{"paths": [...]}`.
+- **Kolom Laporan Deviasi** (permintaan "hapus kolom H, minggu juga hapus, Dev to bom harusnya persen"): kolom **Minggu & H DIHAPUS** dari tabel (16→14; data internal tetap untuk filter minggu/join/popup/snapshot); **DEV App kini PERSEN** = DEV·App / |BOM·App| (dulu kuantitas — konsisten %TO BOM File & Dev to BOM% tab Deviasi).
+- **Mode 📈 ANALISA** (SegmentBar ⚖ Tabel / 📈 Analisa di kartu Filter — adopsi rumus repo Inventory-Control user): **Top Selisih** (peringkat |Selisih| tertinggi, Top-N) + **Perubahan Arah** (flip: bulan berurutan MINGGU SAMA dengan tanda DEV berlawanan — minus bulan lalu → surplus sekarang; Disparitas = |P1+P2|/max(|P1|,|P2|): **Sempurna** <10% / **Dominan** 10–40% / **Parsial** ≥40%; urut disparitas naik).
+- **MULTI-FILE deviasi**: pilih beberapa file sekaligus (parse di worker, digabung); **BULAN** (nomor bulan via token-scan — termasuk singkatan OKT/SEP/AGU pada kode periode "201.OKT 26") masuk dedup-key → baris bulan lain TIDAK dibuang; default tabel = **BULAN TERBARU** (checkbox "Tampilkan semua bulan"); label info per-file; file gagal dibaca dilewati (dilaporkan).
+- Verifikasi: UI test **501/501 × 2 run stabil** (469 v3.9.12 + 32 baru §26 & update kontrak kolom) + test_mock ALL PASS + ruff 189 (0 kelas error baru vs baseline 188).
+
+
 ### v3.0.0 — Total UI/UX Redesign
 - Design system baru (`theme.py` + `widgets.py`): slate/teal ala aplikasi Waste, card-based, dark toolbar, status bar global.
 - Empty state + CTA di semua tab data; KPI cards di Proses/Deviasi/Laporan/Rincian.

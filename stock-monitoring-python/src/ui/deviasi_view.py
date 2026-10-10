@@ -170,6 +170,9 @@ class DeviasiView(tk.Frame):
         ("Resto", 70, "w"),
         ("Nama Barang", 180, "w"),
         ("Satuan", 50, "w"),
+        # v3.9.13 — filter kategori (user: "tambah filter kategori di tab
+        # deviasi pcs dan gr").
+        ("KATEGORI", 110, "w"),
         ("AKTIF/NON", 70, "w"),
         ("SO_H-2", 70, "e"),
         ("SO_H-1", 70, "e"),
@@ -212,6 +215,10 @@ class DeviasiView(tk.Frame):
         self._cached_h = None
         self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
         self._aktif_lookup = {}
+        # v3.9.13: lookup KATEGORI per barang (pola _aktif_lookup) + seleksi
+        # combobox KATEGORI (None = "Semua" = tanpa filter).
+        self._kategori_lookup = {}
+        self._kategori_sel: str | None = None
         self.go_to_proses = go_to_proses
         self._busy = False
         self._pending = False
@@ -292,6 +299,21 @@ class DeviasiView(tk.Frame):
                 padx=10, pady=(2, 3))
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
+
+        # v3.9.13 — filter KATEGORI (user: "tambah filter kategori di tab
+        # deviasi pcs dan gr"); diterapkan POST-PIVOT di _prepare_rows
+        # supaya SharedPivotCache GR+PCS tetap dihitung 1×.
+        r0b = tk.Frame(fbody, bg=C_CARD)
+        r0b.pack(fill="x", pady=(6, 0))
+        tk.Label(r0b, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._kategori_var = tk.StringVar(value="Semua")
+        self._kategori_combo = ttk.Combobox(
+            r0b, textvariable=self._kategori_var, state="readonly",
+            width=18, font=font(9))
+        self._kategori_combo.pack(side="left", padx=(6, 0))
+        self._kategori_combo.bind(
+            "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
 
         # --- Tabel card ---
         tcard = Card(self.content)
@@ -463,6 +485,16 @@ class DeviasiView(tk.Frame):
         self._col_sel[col] = selected
         self._refresh()
 
+    # v3.9.13 — combobox KATEGORI ("Semua" = tanpa filter).
+    def _on_kategori_changed(self):
+        val = self._kategori_var.get()
+        self._kategori_sel = None if (not val or val == "Semua") else val
+        self._refresh()
+
+    def _reset_kategori(self):
+        self._kategori_var.set("Semua")
+        self._kategori_sel = None
+
     def _show_empty(self):
         self.content.pack_forget()
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -567,6 +599,7 @@ class DeviasiView(tk.Frame):
         if self._shared_cache is not None:
             self._shared_cache.clear()
         self._aktif_lookup = {}
+        self._kategori_lookup = {}   # v3.9.13 — diisi ulang di _compute_pivot
         self._tnum = None  # reset cache to_numeric(Tanggal)
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢ (data baru =
         # layout baru — jangan terjebak setengah-collapse)
@@ -583,6 +616,15 @@ class DeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # v3.9.13: isi combobox KATEGORI dari kolom data (merge "21. DBS
+        # Kategori" di append1) + reset seleksi — "Semua" = tanpa filter.
+        if data is not None and "KATEGORI" in getattr(data, "columns", []):
+            _kv = data["KATEGORI"].dropna().astype(str).str.strip()
+            kategori_vals = sorted(v for v in _kv.unique() if v)
+        else:
+            kategori_vals = []
+        self._kategori_combo["values"] = ["Semua"] + kategori_vals
+        self._reset_kategori()
         # (v3.2) lazy refresh: hanya compute bila tab ini sedang terlihat;
         # tab lain menunggu dipilih (app memanggil ensure_refreshed).
         if self.winfo_ismapped():
@@ -634,6 +676,22 @@ class DeviasiView(tk.Frame):
             ))
         else:
             self._aktif_lookup = {}
+
+        # v3.9.13: lookup KATEGORI per barang (pola _aktif_lookup — kolom
+        # KATEGORI hasil merge "21. DBS Kategori", 1:1 per Nama Barang).
+        # Nilai di-strip supaya cocok dgn nilai combobox (juga di-strip).
+        if "KATEGORI" in df.columns and "Nama Barang" in df.columns:
+            kategori_df = (
+                df[["Nama Barang", "KATEGORI"]]
+                .dropna(subset=["KATEGORI"])
+                .drop_duplicates(subset=["Nama Barang"], keep="first")
+            )
+            self._kategori_lookup = dict(zip(
+                kategori_df["Nama Barang"].astype(str),
+                kategori_df["KATEGORI"].astype(str).str.strip()
+            ))
+        else:
+            self._kategori_lookup = {}
 
         if df_filtered.empty:
             return pd.DataFrame()
@@ -717,6 +775,10 @@ class DeviasiView(tk.Frame):
         barang_s = pivot["Nama Barang"].astype(str)
         aktif_s = (barang_s.map(self._aktif_lookup).fillna("")
                    .astype(str).str.strip().str.upper())
+        # v3.9.13: KATEGORI per barang (kolom + filter; konvensi tampil '-'
+        # bila kosong — identik in_selisih_view).
+        kategori_s = (barang_s.map(self._kategori_lookup).fillna("-")
+                      .astype(str))
         a = aktif_s.to_numpy()
 
         cond_kosong = ((a == "AKTIF") & (so_h < 0)) | \
@@ -755,6 +817,7 @@ class DeviasiView(tk.Frame):
             "Nama Barang": barang_s.to_numpy(),
             "Satuan": pivot["SATUAN"].astype(str).to_numpy(),
             "AKTIF/NON": aktif_s.to_numpy(),
+            "KATEGORI": kategori_s.to_numpy(),   # v3.9.13
             "SO_H-2": so_m2,
             "SO_H-1": so_m1,
             "In_H-1": in_m1,
@@ -802,8 +865,13 @@ class DeviasiView(tk.Frame):
             return
         self._busy = True
         st = {
-            "col_sel": {c: s for c, s in self._col_sel.items() if s},
+            # v3.9.13: seleksi kosong = filter aktif (0 baris) — jangan
+            # ditelan truthiness `if s` (set() dari HeaderFilter baru
+            # berarti "tidak ada baris", bukan "tanpa filter").
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
             "tanggal_h": self.tanggal_h,
+            "kategori": self._kategori_sel,   # v3.9.13
         }
 
         def work():
@@ -863,6 +931,18 @@ class DeviasiView(tk.Frame):
         else:
             filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() != "GR"]
 
+        # v3.9.13: filter KATEGORI POST-PIVOT (SharedPivotCache tetap dihitung
+        # 1× utk GR+PCS — permintaan user: "tambah filter kategori di tab
+        # deviasi pcs dan gr"). KATEGORI per-barang (1:1) → filter ini
+        # barang-granular: Max Deviasi per barang (recompute di bawah)
+        # tidak berubah semantiknya.
+        if st.get("kategori") and "KATEGORI" in filtered.columns:
+            filtered = filtered[filtered["KATEGORI"].astype(str)
+                                == str(st["kategori"])]
+            if filtered.empty:
+                return {"items": [], "kpi": (0, 0.0, 0),
+                        "status": "Tidak ada baris untuk kategori ini."}
+
         # v3.9.6: Max Deviasi dihitung ULANG per satuan-mode (identik sheet
         # asli: DEVIASI GR & DEVIASI PCS punya Max Deviasi masing-masing —
         # barang dgn satuan campuran antar resto tidak saling mencampur).
@@ -908,7 +988,8 @@ class DeviasiView(tk.Frame):
         # SO_H-2 … SO_H+2, In, Out, BK jatuh ke `else 0` → selalu tampil "-".
         # Kini SEMUA kolom numerik diekstrak (identik perilaku v3.1 row.get).
         cols_np = {c: filtered[c].to_numpy() for c in
-                   ("Resto", "Nama Barang", "Satuan", "AKTIF/NON", "CEK")}
+                   ("Resto", "Nama Barang", "Satuan", "KATEGORI",
+                    "AKTIF/NON", "CEK")}
         for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
                   "Out_H", "BK_H", "SO_H+1", "In_H+1", "SO_H+2",
                   "Sistem", "Deviasi", "Max Deviasi", "ACR", "Total ACR",
@@ -1144,6 +1225,7 @@ class DeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        self._reset_kategori()   # v3.9.13 — combobox kategori ikut di-reset
         # FIX B-07: ✕ Reset Filter kini juga me-reset TANGGAL H ke default
         # (25) — sebelumnya nilai H lama tetap aktif, semantik reset tidak
         # total dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya

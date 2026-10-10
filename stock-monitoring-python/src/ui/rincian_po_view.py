@@ -310,7 +310,10 @@ class RincianPoView(tk.Frame):
         st = {
             "cabang": self.cabang_var.get(),
             "status_pesanan": self.status_pesanan_var.get(),
-            "col_sel": {c: s for c, s in self._col_sel.items() if s},
+            # v3.9.13: seleksi kosong (set()) = filter AKTIF → 0 baris
+            # (semantik Excel) — dulu truthiness `if s` menelannya.
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
         }
 
         def work():
