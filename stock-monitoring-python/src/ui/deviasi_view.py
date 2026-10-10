@@ -393,7 +393,7 @@ class DeviasiView(tk.Frame):
         if self._h_state is not None:
             self._h_state.subscribe(self._on_shared_h_changed)
             # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
-            # (pola laporan/komparasi/pareto) — tanpa ini listener tetap
+            # (pola laporan/komparasi) — tanpa ini listener tetap
             # hidup bila suatu saat view direbuild (dobel-refresh zombie).
             self.bind("<Destroy>", self._on_view_destroy, add="+")
 
@@ -1131,7 +1131,7 @@ class DeviasiView(tk.Frame):
         if self._dirty:
             return          # belum pernah dirender — refresh saat tab dibuka
         # FIX C-08 (audit 2-c): pane TIDAK terlihat → cukup _dirty (pola
-        # laporan/komparasi/pareto v3.9.5 audit 19-c #3) — dulu _prepare_rows
+        # laporan/komparasi v3.9.5 audit 19-c #3) — dulu _prepare_rows
         # + render penuh dijalankan untuk tab tersembunyi (pemborosan;
         # pivot tetap 1× via SharedPivotCache, hanya render yang terbuang).
         if not self.winfo_ismapped():

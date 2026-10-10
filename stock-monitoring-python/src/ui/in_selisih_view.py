@@ -747,7 +747,7 @@ class InSelisihView(tk.Frame):
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero", foreground="#64748b")
         # FIX C-04: tag per-cell (Tk 9 `tag cell`) minus merah — nama tag
-        # identik dgn deviasi/pareto ('neg_cell').
+        # identik dgn deviasi ('neg_cell').
         tree.tag_configure("neg_cell", foreground="#dc2626")
         # v3.5: warna status audit (mirror conditional formatting VBA)
         for tag, cfg in _STATUS_TAG_CFG.items():
@@ -1298,7 +1298,7 @@ class InSelisihView(tk.Frame):
         parse = self._parse_num_id if col in _NUM_COLS else None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
         # FIX B-03 (audit 2-b): delete+reinsert me-reset tag PER-CELL →
-        # pasang ulang (identik deviasi/komparasi/laporan/pareto).
+        # pasang ulang (identik deviasi/komparasi/laporan).
         self._reapply_cell_tags(tree)
 
     def _auto_fit(self):
