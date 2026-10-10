@@ -632,6 +632,12 @@ class KomparasiDeviasiView(tk.Frame):
         # (hanya bagian AKTIF yang dirender — pola malas v3.9.14).
         self._anasec_idx = 0
         self._anasec_stale = {0, 1, 2, 3, 4}
+        # v3.9.15a (audit P1-2): handle cancel batch insert per tabel
+        # analisa — render ulang tabel yg sama membatalkan sisa batch
+        # LAMA (batch 400-baris berjalan via after() bisa menambahkan
+        # baris basi ke render baru bila re-render menembak di tengah
+        # jendela antar-batch; pola _render_rows_inner tabel utama).
+        self._anasec_cancel = {}
         # v3.9.13: file terakhir di-auto-load SEKALI saat tab terlihat
         self._auto_loaded = False
         # cache matriks app — per objek data + file
@@ -1096,6 +1102,11 @@ class KomparasiDeviasiView(tk.Frame):
         self.data = data
         # v3.9.5 (audit 19-a #1): data berganti → job lama dibuang
         self._render_gen += 1
+        # v3.9.15a (audit P2-6): data app berganti → tabel analisa ikut
+        # basi (join GR/BOM/COM Saat Ini) — _refresh jalur data-kosong
+        # TIDAK menyentuh analisa; tandai dirty + stale semua bagian.
+        self._analisa_dirty = True
+        self._anasec_stale = {0, 1, 2, 3, 4}
         if self._insert_cancel is not None:
             self._insert_cancel()
             self._insert_cancel = None
@@ -1297,6 +1308,11 @@ class KomparasiDeviasiView(tk.Frame):
         self._liga_bahan_norm = None
         self._bench_df = None
         self._anasec_stale = {0, 1, 2, 3, 4}
+        # v3.9.15a (audit P1-2): batalkan sisa batch insert tabel analisa.
+        for _c in self._anasec_cancel.values():
+            if _c is not None:
+                _c()
+        self._anasec_cancel = {}
         if self._analisa_mode:
             self._refresh_analisa()
         else:
@@ -2121,8 +2137,10 @@ class KomparasiDeviasiView(tk.Frame):
             bg=C_BG)
         self._anasec_segment.pack(side="left", padx=(6, 0))
         # wadah bagian — frame per bagian di-pack/di-swap
+        # v3.9.15a (audit P2-4): padx 12 — kartu bagian kembali sejajar
+        # margin kartu lain (dulu flush x=0 saat kartu pindah parent).
         self._anaview = tk.Frame(self._analisa_frame, bg=C_BG)
-        self._anaview.pack(fill="both", expand=True)
+        self._anaview.pack(fill="both", expand=True, padx=12)
         self._anasec_frames = [
             tk.Frame(self._anaview, bg=C_BG),
             tk.Frame(self._anaview, bg=C_BG),
@@ -2398,9 +2416,8 @@ class KomparasiDeviasiView(tk.Frame):
         self._top_st_match = st_match
         self._top_st_diff = st_diff
         self._top_st_missing = st_missing
-        insert_tree_items(
-            tree, items, batch=400,
-            on_done=lambda: self._reapply_top_tags(tree))
+        self._anasec_insert(
+            tree, items, on_done=lambda: self._reapply_top_tags(tree))
 
     # -- Perubahan Arah (flip) ----------------------------------------------
     def _flip_col_values(self, col: str) -> list:
@@ -2610,9 +2627,8 @@ class KomparasiDeviasiView(tk.Frame):
                                     "tags": tuple(tags)}))
         self._flip_neg_cells = neg_cells
         self._flip_kat_cells = kat_cells
-        insert_tree_items(
-            tree, items, batch=400,
-            on_done=lambda: self._reapply_flip_tags(tree))
+        self._anasec_insert(
+            tree, items, on_done=lambda: self._reapply_flip_tags(tree))
 
 
     # =========================================================================
@@ -2863,6 +2879,19 @@ class KomparasiDeviasiView(tk.Frame):
         if idx in self._anasec_stale:
             self._render_analisa_section(idx)
 
+    def _anasec_insert(self, tree, items, on_done):
+        """v3.9.15a (audit P1-2): insert batch utk tabel analisa + simpan
+        handle cancel per tabel — render ulang tabel YANG SAMA
+        membatalkan sisa batch lama dulu (tanpa ini, re-render yang
+        menembak di tengah jendela 10ms antar-batch meninggalkan baris
+        basi dari render sebelumnya; tabel utama sudah ber-guard sejak
+        v3.9.5 — kini keenam tabel analisa juga)."""
+        cancel = self._anasec_cancel.get(tree)
+        if cancel is not None:
+            cancel()
+        self._anasec_cancel[tree] = insert_tree_items(
+            tree, items, batch=400, on_done=on_done)
+
     def _render_analisa_section(self, idx: int):
         """Render SATU bagian analisa. Tiap render menghitung ulang dari
         _file_df/_join_df (semua vektor ±10-60ms — stateless: tidak ada
@@ -2914,6 +2943,16 @@ class KomparasiDeviasiView(tk.Frame):
         if wk_sel is None:
             wk_sel = int(hs.max())
         d = d.loc[hs == wk_sel]
+        # v3.9.15a (audit ulang P1-1): >1 label Minggu bisa memetakan ke
+        # H SAMA (WEEK 3 & WEEK 4 → 25; file bisa memuat keduanya) —
+        # agregat per-resto WAJIB SATU snapshot (menjumlahkan W3+W4 =
+        # menghitung ganda, krn minggu file kumulatif). Pertahankan label
+        # TERAKHIR (snapshot paling lengkap) — dilaporkan di label.
+        wl_all = sorted({str(v) for v in d["Minggu"]})
+        if len(wl_all) > 1:
+            d = d.loc[d["Minggu"] == wl_all[-1]]
+            note += (f" (H {wk_sel} memuat {len(wl_all)} minggu — dipakai "
+                     f"{wl_all[-1]} saja)")
         wl = ", ".join(sorted({str(v) for v in d["Minggu"]}))
         label = f"Bulan {bulan_lbl} · Minggu {wl} (H {wk_sel}){note}"
         return d, label
@@ -2957,7 +2996,11 @@ class KomparasiDeviasiView(tk.Frame):
         p1 = pairs["DEV Lalu"].to_numpy(dtype=float)
         p2 = pairs["_dev_next"].to_numpy(dtype=float)
         is_flip = msk.loc[pairs.index].to_numpy()
-        disp = np.abs(p1 + p2) / np.maximum(np.abs(p1), np.abs(p2))
+        # v3.9.15a (audit P2-2): pasangan P1=P2=0 (dua bulan nol) →
+        # 0/0 NaN + RuntimeWarning di stderr — errstate membungkam (NaN
+        # dibuang jalur Konsisten; hasil tak berubah).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            disp = np.abs(p1 + p2) / np.maximum(np.abs(p1), np.abs(p2))
         kat = np.select([disp < 0.10, disp < 0.40],
                         ["Sempurna", "Dominan"], default="Parsial")
         # label Periode utk drilldown (jumlah pasangan — kecil)
@@ -3069,9 +3112,8 @@ class KomparasiDeviasiView(tk.Frame):
             items.append(("", iid, {"values": values, "tags": tuple(tags)}))
         self._risk_level_cells = level_cells
         self._risk_bahan_map = bahan_map
-        insert_tree_items(
-            tree, items, batch=400,
-            on_done=lambda: self._reapply_risk_tags(tree))
+        self._anasec_insert(
+            tree, items, on_done=lambda: self._reapply_risk_tags(tree))
 
     def _risk_col_values(self, col: str) -> list:
         d = self._risk_df
@@ -3278,9 +3320,8 @@ class KomparasiDeviasiView(tk.Frame):
             items.append(("", iid, {"values": values, "tags": tuple(tags)}))
         self._min_arah_cells = arah_cells
         self._min_bahan_map = bahan_map
-        insert_tree_items(
-            tree, items, batch=400,
-            on_done=lambda: self._reapply_min_tags(tree))
+        self._anasec_insert(
+            tree, items, on_done=lambda: self._reapply_min_tags(tree))
 
     def _min_col_values(self, col: str) -> list:
         d = self._min_df
@@ -3377,6 +3418,11 @@ class KomparasiDeviasiView(tk.Frame):
         if d is None:
             self._liga_status_var.set(label)
             self._liga_base_var.set("")
+            # v3.9.15a (audit P2-3): combobox ikut dikosongkan (dulu
+            # menampilkan daftar bahan file yang sudah ditutup).
+            self._liga_combo["values"] = []
+            self._liga_bahan_var.set("")
+            self._liga_bahan_norm = None
             return
         bom = pd.to_numeric(d["BOM Lalu"], errors="coerce").fillna(0.0)
         dev = pd.to_numeric(d["DEV Lalu"], errors="coerce").fillna(0.0)
@@ -3387,7 +3433,9 @@ class KomparasiDeviasiView(tk.Frame):
         if not bool(pop_mask.any()):
             self._liga_status_var.set(f"{label} · tidak ada baris ber-BOM.")
             self._liga_base_var.set("")
+            self._liga_combo["values"] = []
             self._liga_bahan_var.set("")
+            self._liga_bahan_norm = None
             return
         # urutan bahan combobox: Σ|DEV| menurun (populasi ber-BOM saja)
         tmp = pd.DataFrame({"b": b_arr, "abs": np.abs(dev_n)})
@@ -3416,7 +3464,12 @@ class KomparasiDeviasiView(tk.Frame):
         rate = np.abs(dev_s) / bom_s
         med = float(np.median(rate))
         mad = float(np.median(np.abs(rate - med)))
-        z = np.where(mad > 0, (rate - med) / (LIGA_MAD_SCALE * mad), np.nan)
+        # v3.9.15a (audit P2-1): np.where mengevaluasi KEDUA cabang →
+        # pembagian MAD=0 memuntahkan RuntimeWarning walau hasil benar —
+        # errstate membungkam (NaN tetap dihasilkan utk jalur guard).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z = np.where(mad > 0, (rate - med) / (LIGA_MAD_SCALE * mad),
+                         np.nan)
         league_mask = dev_s != 0
         orphan = int(((b_arr == b) & ~pop_mask
                       & (dev_n != 0)).sum())
@@ -3432,6 +3485,14 @@ class KomparasiDeviasiView(tk.Frame):
                             "zero": int((~league_mask).sum()),
                             "orphan": orphan}
         ldf = ldf.loc[league_mask]
+        # v3.9.15a (audit P2-7): pesan jujur saat liga kosong KARENA semua
+        # DEV 0 (bukan salah dibaca '0 baris setelah filter').
+        if ldf.empty and not any(v is not None
+                                 for v in self._liga_sel.values()):
+            self._liga_df = ldf
+            self._liga_status_var.set(
+                f"{label} · semua DEV 0 — tak ada resto utk diranking")
+            return
         ldf = ldf.sort_values(["Rate", "_resto_norm"],
                               ascending=[False, True], kind="stable")
         self._liga_df = ldf
@@ -3489,9 +3550,8 @@ class KomparasiDeviasiView(tk.Frame):
             items.append(("", iid, {"values": values, "tags": tuple(tags)}))
         self._liga_z_cells = z_cells
         self._liga_neg_cells = neg_cells
-        insert_tree_items(
-            tree, items, batch=400,
-            on_done=lambda: self._reapply_liga_tags(tree))
+        self._anasec_insert(
+            tree, items, on_done=lambda: self._reapply_liga_tags(tree))
 
     def _liga_col_values(self, col: str) -> list:
         d = self._liga_df
@@ -3612,9 +3672,8 @@ class KomparasiDeviasiView(tk.Frame):
                 opp_cells.append((iid, "Opportunity"))
             items.append(("", iid, {"values": values, "tags": tuple(tags)}))
         self._bench_opp_cells = opp_cells
-        insert_tree_items(
-            tree, items, batch=400,
-            on_done=lambda: self._reapply_bench_tags(tree))
+        self._anasec_insert(
+            tree, items, on_done=lambda: self._reapply_bench_tags(tree))
 
     def _bench_col_values(self, col: str) -> list:
         d = self._bench_df
@@ -3694,6 +3753,10 @@ class KomparasiDeviasiView(tk.Frame):
             win.destroy()
 
         win.bind("<Escape>", _close)
+        # v3.9.15a (audit P2-5): ambil fokus supaya ESC langsung bekerja
+        # tanpa harus mengetik area popup dulu (pola open_tree_maximized).
+        with contextlib.suppress(tk.TclError):
+            win.focus_set()
         return win, tree
 
     @staticmethod

@@ -4308,6 +4308,92 @@ def main():
               "1 kelompok 1 resto" in kv._bench_status_var.get(),
               f"got {kv._bench_status_var.get()!r}")
 
+    # --- (5d) v3.9.15a — AUDIT P1-1: W3+W4 ber-H sama → SATU snapshot --
+    # (WEEK 3 & WEEK 4 sama-sama cut-off 25 — tanpa kolaps, agregat
+    # per-resto MENJUMLAH dua snapshot kumulatif = menghitung ganda)
+    f5d = os.path.join(_tf13.gettempdir(), "mock_deviasi_w3w4.xlsx")
+    _w5d = _WB()
+    _s5d = _w5d.active
+    _s5d.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
+    for _r5d in [
+        ["BDGAAA", "TEH CELUP", "GR", -100, -110, -10, "WEEK 3", "NOV"],
+        ["BDGBBB", "TEH CELUP", "GR", -100, -105, -5, "WEEK 3", "NOV"],
+        ["BDGCCC", "TEH CELUP", "GR", -100, -103, -3, "WEEK 3", "NOV"],
+        ["SBYDDD", "TEH CELUP", "GR", -100, -101, -1, "WEEK 3", "NOV"],
+        ["SBYEEE", "TEH CELUP", "GR", -100, -98, 2, "WEEK 3", "NOV"],
+        ["BDGAAA", "TEH CELUP", "GR", -100, -120, -20, "WEEK 4", "NOV"],
+        ["BDGBBB", "TEH CELUP", "GR", -100, -108, -8, "WEEK 4", "NOV"],
+        ["BDGCCC", "TEH CELUP", "GR", -100, -104, -4, "WEEK 4", "NOV"],
+        ["SBYDDD", "TEH CELUP", "GR", -100, -102, -2, "WEEK 4", "NOV"],
+        ["SBYEEE", "TEH CELUP", "GR", -100, -97, 3, "WEEK 4", "NOV"],
+    ]:
+        _s5d.append(_r5d)
+    _w5d.save(f5d)
+    kv._load_paths([f5d])
+    wait_view(root, kv)
+    kv._on_anasec_change(2)
+    root.update()
+    check("(v3.9.15a) W3+W4 ber-H sama: minoritas SATU snapshot (mayoritas "
+          "4, bukan 8) + catatan kolaps di status",
+          len(kv._min_tree.get_children("")) == 1 and
+          kv._min_tree.item(kv._min_tree.get_children("")[0],
+                            "values")[3] == "4" and
+          "dipakai WEEK 4 saja" in kv._min_status_var.get(),
+          f"rows={len(kv._min_tree.get_children(''))} "
+          f"status={kv._min_status_var.get()!r}")
+    kv._on_anasec_change(4)
+    root.update()
+    _bd5d_n = len(kv._bench_tree.get_children(""))
+    _bd5d_v = (kv._bench_tree.item(kv._bench_tree.get_children("")[0],
+                                   "values") if _bd5d_n else [])
+    # loss snapshot W4: BDGAAA 20 · BDGBBB 8 · BDGCCC 4 · SBYDDD 2 ·
+    # SBYEEE 0 (TANPA kolaps: BDGAAA 30 = -10 + -20 = ganda) → BDG
+    # median 8 → opp BDGAAA 12 · SBY median 1 → opp SBYDDD 1 → total 13
+    check("(v3.9.15a) W3+W4: benchmark loss = snapshot WEEK 4 saja "
+          "(BDGAAA 20, bukan 30) · total opportunity 13",
+          _bd5d_n == 5 and _bd5d_v[1] == "BDGAAA" and _bd5d_v[4] == "20"
+          and "Total opportunity 13" in kv._bench_summary_var.get(),
+          f"n={_bd5d_n} resto={_bd5d_v[1] if _bd5d_v else '-'} "
+          f"loss={_bd5d_v[4] if _bd5d_v else '-'} "
+          f"sum={kv._bench_summary_var.get()!r}")
+    kv._on_anasec_change(3)
+    root.update()
+    check("(v3.9.15a) W3+W4: liga 5 resto diranking (bukan 10 ganda)",
+          len(kv._liga_tree.get_children("")) == 5,
+          f"got {len(kv._liga_tree.get_children(''))}")
+    os.unlink(f5d)
+
+    # --- (5e) v3.9.15a — AUDIT P1-2: render ulang tabel analisa
+    # membatalkan sisa batch insert lama (500 bahan > batch 400 — tanpa
+    # cancel, 100 baris basi nempel kembali setelah re-render) --------
+    f5e = os.path.join(_tf13.gettempdir(), "mock_deviasi_batch.xlsx")
+    _w5e = _WB()
+    _s5e = _w5e.active
+    _s5e.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
+    for _i5e in range(500):
+        _b5e = f"BAHAN UJI {(_i5e + 1):04d}"
+        _s5e.append(["MLGAAA", _b5e, "GR", -80, -90, -10,
+                     "WEEK 4", "201.OKT 26"])
+        _s5e.append(["MLGAAA", _b5e, "GR", -80, -70, 10,
+                     "WEEK 4", "NOV"])
+    _w5e.save(f5e)
+    kv._load_paths([f5e])
+    wait_view(root, kv)
+    kv._on_anasec_change(1)      # risiko: 500 bahan → 400 sync + 100 antre
+    _n5e_a = len(kv._risk_tree.get_children(""))   # 400 (batch berjalan)
+    kv._render_risk()            # re-render SEGERA (batch lama masih antre)
+    root.update()                # pump — chunk lama harus sudah dibatalkan
+    wait_view(root, kv)
+    _n5e_b = len(kv._risk_tree.get_children(""))
+    check("(v3.9.15a) Render ulang tabel analisa membatalkan sisa batch "
+          "insert lama (500 bahan: 400 sync + 100 antre → tanpa fix 100 "
+          "baris basi nempel kembali → 600)",
+          _n5e_a == 400 and _n5e_b == 500,
+          f"render-1={_n5e_a} render-2={_n5e_b}")
+    os.unlink(f5e)
+
     # --- pulihkan state utk blok (6) ---
     kv._on_mode_change(0)
     root.update()
