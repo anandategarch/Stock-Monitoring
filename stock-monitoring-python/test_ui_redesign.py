@@ -108,6 +108,15 @@ Memverifikasi:
     Opportunity (loss = Σ|DEV<0| vs median kelompok 3-huruf). Analisa
     per-periode = bulan terbaru + SATU minggu snapshot (minggu yang
     memuat H — kumulatif: jumlah lintas minggu = ganda).
+27. v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (§26-5g, khusus
+    mode 📈 Analisa): Selisih = |GR Saat Ini| − |DEV Lalu| (kedua nilai
+    diabsolutkan DULU — pembalikan tanda tak menggembungkan selisih;
+    kolom DEV Lalu/GR Saat Ini tetap NILAI ASLI); file deviasi >1 →
+    DEV Lalu = MEDIAN antar-file per pasangan (SATU baris per pasangan,
+    bukan satu baris per file — yang ditampilkan nilai median saja);
+    Periode 'Median n file · Minggu' (≥2) / 'BULAN · Minggu' (1);
+    Status MATCH/SELISIH atas Selisih absolut; kolom Periode NYATA
+    (filter header bekerja).
 25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
     analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
     saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
@@ -454,7 +463,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.15", APP_VERSION == "3.9.15", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.16", APP_VERSION == "3.9.16", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -4029,14 +4038,17 @@ def main():
           kv._analisa_frame.winfo_ismapped() and
           not kv.tcard.winfo_ismapped())
     _top13n = len(kv._top_tree.get_children(""))
-    check("(v3.9.13) Top Selisih terisi (join PENUH — 8 baris semua bulan)",
-          _top13n == 8, f"got {_top13n}")
+    check("(v3.9.16) Top Selisih terisi (join PENUH; 2 file → 7 "
+          "PASANGAN — SEP+OKT W1 MLG AYAM tergabung 1 baris median, "
+          "bukan 8 baris per-file)",
+          _top13n == 7, f"got {_top13n}")
     if _top13n:
         _v13 = kv._top_tree.item(kv._top_tree.get_children("")[0],
                                  "values")
-        check("(v3.9.13) Top-1 = peringkat 1 + |Selisih| terbesar "
-              "(SEP: GR Saat Ini 49 − DEV Lalu -10 = 59)",
-              str(_v13[0]) == "1" and str(_v13[7]) == "59",
+        check("(v3.9.16) Top-1 = peringkat 1 + Selisih ABSOLUT "
+              "|GR 49| − |median(−10, 49) = 19,5| = 29,5 (dulu "
+              "49 − (−10) = 59)",
+              str(_v13[0]) == "1" and str(_v13[7]) == "29,5",
               f"got peringkat={_v13[0]} selisih={_v13[7]}")
     _flip13n = len(kv._flip_tree.get_children(""))
     check("(v3.9.13) Perubahan Arah: flip AYAM MLGPAR W1 (SEP -10 → "
@@ -4065,6 +4077,65 @@ def main():
           len(kv._top_tree.get_children("")) == 3,
           f"got {len(kv._top_tree.get_children(''))}")
 
+    # --- (5g) v3.9.16: TOP SELISIH — ABSOLUT + MEDIAN MULTI-FILE -----
+    # (permintaan user: "nilai dev lalu dan dev saat ini di absolutkan
+    # dulu agar selisih tidak terlalu besar. Namun nilai dev lalu dan
+    # dev saat ini yang ditampilkan nilai asli bukan absolut" + "jika
+    # file deviasi lebih dari 1 file atau 2 misal nya nilai deviasi
+    # pakai median aja dan yang ditampilkan jangan semua file tapi
+    # nilai median nya aja" — khusus tab 📋 Laporan Deviasi · 📈 Analisa)
+    kv._topn_var.set("0")
+    kv._render_top_selisih()
+    root.update()
+    _t16 = [kv._top_tree.item(k, "values")
+            for k in kv._top_tree.get_children("")]
+    check("(v3.9.16) Multi-file: 7 pasangan — bukan 8 baris per-file "
+          "(SEP+OKT W1 MLG AYAM tergabung median)",
+          len(_t16) == 7, f"got {len(_t16)}")
+    check("(v3.9.16) Top-1 Periode = 'Median 2 file · WEEK 1' "
+          "(nilai median ditampilkan — bukan semua file)",
+          bool(_t16) and str(_t16[0][1]) == "Median 2 file · WEEK 1",
+          f"got {(_t16[0][1] if _t16 else None)!r}")
+    check("(v3.9.16) Top-1 DEV Lalu = median(−10, 49) = 19,5",
+          bool(_t16) and str(_t16[0][5]) == "19,5",
+          f"got {(_t16[0][5] if _t16 else None)!r}")
+    check("(v3.9.16) Top-1 GR Saat Ini tetap NILAI ASLI 49 "
+          "(bukan absolut)",
+          bool(_t16) and str(_t16[0][6]) == "49",
+          f"got {(_t16[0][6] if _t16 else None)!r}")
+    check("(v3.9.16) Top-1 Selisih = |49| − |19,5| = 29,5 — dulu "
+          "49 − (−10) = 59 (tanda berlawanan tak menggembungkan)",
+          bool(_t16) and str(_t16[0][7]) == "29,5",
+          f"got {(_t16[0][7] if _t16 else None)!r}")
+    check("(v3.9.16) Top-1 Status = SELISIH (toleransi atas Selisih "
+          "absolut)",
+          bool(_t16) and str(_t16[0][8]) == "SELISIH",
+          f"got {(_t16[0][8] if _t16 else None)!r}")
+    check("(v3.9.16) Rank-2 SBYKET (pasangan 1-file): Periode format "
+          "lama '201.OKT 26 · WEEK 1' + DEV 74 asli + Selisih "
+          "|49| − |74| = (25)",
+          len(_t16) > 1 and str(_t16[1][1]) == "201.OKT 26 · WEEK 1"
+          and str(_t16[1][5]) == "74" and str(_t16[1][7]) == "(25)",
+          f"got periode={(_t16[1][1] if len(_t16) > 1 else None)!r} "
+          f"dev={(_t16[1][5] if len(_t16) > 1 else None)!r} "
+          f"sel={(_t16[1][7] if len(_t16) > 1 else None)!r}")
+    check("(v3.9.16) Rank-3 MLG AYAM W2 (1 file): |113| − |113| = 0 "
+          "→ '-' + Status MATCH (absolut)",
+          len(_t16) > 2 and str(_t16[2][7]) == "-"
+          and str(_t16[2][8]) == "MATCH",
+          f"got sel={(_t16[2][7] if len(_t16) > 2 else None)!r} "
+          f"st={(_t16[2][8] if len(_t16) > 2 else None)!r}")
+    check("(v3.9.16) Rank-5 XYZZZ (resto di luar data app): GR '—' + "
+          "Status join lama TIDAK ADA DI DATA SAAT INI dipertahankan",
+          len(_t16) > 4 and str(_t16[4][6]) == "—"
+          and str(_t16[4][8]) == "TIDAK ADA DI DATA SAAT INI",
+          f"got gr={(_t16[4][6] if len(_t16) > 4 else None)!r} "
+          f"st={(_t16[4][8] if len(_t16) > 4 else None)!r}")
+    check("(v3.9.16) Status bar: 'Lalu = median antar-file' muncul "
+          "saat multi-file",
+          "Lalu = median antar-file" in kv._top_status_var.get(),
+          f"got {kv._top_status_var.get()!r}")
+
     # --- (5b) v3.9.14: MINGGU di tab Analisa mengikuti kolom H ----------
     # (permintaan user: "week di tab analisa harusnya menyesuaikan juga
     # dengan kolom H atau aturan kolom H yaitu jika 7 berarti week 1")
@@ -4076,9 +4147,10 @@ def main():
     wait_view(root, kv)
     _top_w1 = [kv._top_tree.item(k, "values")[1]
                for k in kv._top_tree.get_children("")]
-    check("(v3.9.14) Analisa H=7 → Top Selisih hanya WEEK 1 (5 dari 8 "
-          "join) + prefiks minggu (H 7)",
-          len(_top_w1) == 5 and all(v.endswith("WEEK 1") for v in _top_w1)
+    check("(v3.9.14) Analisa H=7 → Top Selisih hanya WEEK 1 (v3.9.16: "
+          "4 pasangan dari 7 — SEP W1 + OKT W1 tergabung median) + "
+          "prefiks minggu (H 7)",
+          len(_top_w1) == 4 and all(v.endswith("WEEK 1") for v in _top_w1)
           and "Minggu WEEK 1" in kv._top_status_var.get() and
           "(H 7)" in kv._top_status_var.get(),
           f"rows={len(_top_w1)} {sorted(set(_top_w1))} "

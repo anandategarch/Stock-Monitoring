@@ -149,7 +149,20 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.15"  # v3.9.15 — GELOMBANG 1 ANALISA: Risiko Flip + Arah Minoritas + Liga Deviasi-Rate + Benchmark Opportunity (mode 📈 Analisa, baris BAGIAN)
+APP_VERSION = "3.9.16"  # v3.9.16 — TOP SELISIH ANALISA: Selisih absolut (|GR|−|DEV|) + median multi-file (khusus mode 📈 Analisa)
+# v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (permintaan user,
+# khusus mode 📈 Analisa di tab 📋 Laporan Deviasi — tabel utama ⚖ &
+# bagian analisa lain TIDAK berubah):
+# (1) ABSOLUT: Selisih = |GR Saat Ini| − |DEV Lalu| (kedua nilai
+#     diabsolutkan DULU — pembalikan tanda −50 → +30 tidak lagi
+#     menggembungkan selisih: dulu 80 kini 20); kolom DEV Lalu / GR
+#     Saat Ini tetap NILAI ASLI; Status MATCH/SELISIH (khusus tabel
+#     Top Selisih) ikut toleransi Selisih absolut.
+# (2) MEDIAN MULTI-FILE: file deviasi >1 → nilai Lalu per pasangan
+#     (resto×bahan×minggu sama) = MEDIAN antar-file — SATU baris per
+#     pasangan (bukan satu baris per file); yang ditampilkan nilai
+#     median saja; Periode 'Median n file · Minggu' (≥2 file) /
+#     'BULAN · Minggu' (1 file); kolom Periode kini kolom NYATA.
 # v3.9.15 — GELOMBANG 1 (adopsi rumus repo Inventory-Control user; 4
 # analisa baru sebagai BAGIAN di mode 📈 Analisa — baris "BAGIAN"
 # SegmentBar: Top & Flip · Risiko Flip · Arah Minoritas · Liga Deviasi ·

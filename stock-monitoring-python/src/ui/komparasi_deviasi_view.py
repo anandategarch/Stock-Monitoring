@@ -1,6 +1,23 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (permintaan user,
+khusus mode 📈 Analisa di tab 📋 Laporan Deviasi; tabel utama ⛖ &
+bagian analisa lain TIDAK berubah):
+    (1) ABSOLUT: Selisih = |GR Saat Ini| − |DEV Lalu| — DEV Lalu &
+        GR Saat Ini DIABSOLUTKAN DULU saat menghitung Selisih
+        (pembalikan tanda mis. −50 → +30 tidak lagi menggembungkan
+        selisih: dulu 80, kini 20); kolom DEV Lalu / GR Saat Ini yang
+        DITAMPILKAN tetap NILAI ASLI (bukan absolut). Status
+        MATCH/SELISIH (hanya tabel Top Selisih) ikut toleransi Selisih
+        absolut; status TIDAK ADA DI DATA SAAT INI / H TIDAK ADA tetap.
+    (2) MEDIAN MULTI-FILE: file deviasi >1 → nilai Lalu per pasangan
+        (resto × bahan × minggu sama) = MEDIAN antar-file — SATU baris
+        per pasangan (bukan satu baris per file); yang ditampilkan
+        nilai median saja, bukan semua file. Kolom Periode kini kolom
+        NYATA: 'Median n file · Minggu' (≥2 nilai) / 'BULAN · Minggu'
+        (1 nilai — format lama). Rumus bisnis lain 0 berubah.
+
 v3.9.15 — GELOMBANG 1 ANALISA (adopsi rumus repo Inventory-Control
 user; 4 analisa baru sebagai BAGIAN di mode 📈 Analisa — baris
 "BAGIAN" SegmentBar: Top & Flip · Risiko Flip · Arah Minoritas ·
@@ -524,7 +541,9 @@ class KomparasiDeviasiView(tk.Frame):
         ("DEV Lalu", 95, "e"),
         ("GR Saat Ini", 95, "e"),
         ("Selisih", 95, "e"),
-        ("Status", 120, "w"),
+        # v3.9.16: 165 — memuat 'TIDAK ADA DI DATA SAAT INI' utuh
+        # (156px @ font 10; dulu 120 → terpotong)
+        ("Status", 165, "w"),
     ]
     FLIP_COLS = [
         ("Periode", 190, "w"),
@@ -2325,13 +2344,81 @@ class KomparasiDeviasiView(tk.Frame):
         if self._top_st_missing:
             apply_cell_tag(tree, "st_missing", self._top_st_missing)
 
+    def _top_aggregate(self, d: pd.DataFrame) -> pd.DataFrame:
+        """v3.9.16 — agregat join → SATU baris per pasangan (resto ×
+        bahan × minggu sama) utk tabel Top Selisih (khusus mode 📈
+        Analisa — permintaan user):
+        - DEV Lalu = MEDIAN antar-file/bulan (1 file → nilai itu
+          sendiri; ≥2 file → median — "nilai deviasi pakai median aja,
+          jangan semua file"); minggu tetap kunci grup (aturan minggu
+          sama antar bulan);
+        - Selisih = |GR Saat Ini| − |DEV Lalu| — kedua nilai
+          DIABSOLUTKAN dulu (pembalikan tanda tidak menggembungkan
+          selisih); kolom DEV Lalu / GR Saat Ini tetap NILAI ASLI;
+        - Status: pasangan tak ada di data app → status join lama
+          (TIDAK ADA DI DATA SAAT INI / H TIDAK ADA DI DATA — konstanta
+          per grup: sisi app digabung per resto × bahan × H); ada →
+          MATCH/SELISIH atas Selisih absolut (toleransi sama);
+        - Periode: 'Median n file · Minggu' (≥2 nilai) / 'BULAN ·
+          Minggu' (1 nilai — format lama) — kolom NYATA (filter header
+          Periode kini bekerja).
+        VEKTOR penuh (groupby + numpy, tanpa iterrows — pola PERF
+        v3.9.14)."""
+        g = d.groupby(["_resto_norm", "_bahan_norm", "Minggu"],
+                      sort=False)
+        agg = g.agg(
+            dev=("DEV Lalu", "median"),
+            n=("DEV Lalu", "count"),
+            gr=("GR Saat Ini", "first"),
+            st=("Status", "first"),
+            bln=("BULAN", "first"),
+            resto=("Resto", "first"),
+            bahan=("Nama Barang", "first"),
+            sat=("Satuan", "first"),
+        ).reset_index()
+        gr = agg["gr"].to_numpy(dtype="float64")
+        dev = agg["dev"].to_numpy(dtype="float64")
+        # v3.9.16: absolut DULU — tanda berlawanan tidak menggembungkan
+        # selisih (kolom DEV Lalu / GR Saat Ini tetap nilai ASLI)
+        sel = np.abs(gr) - np.abs(dev)
+        tol = TOL_ABS + TOL_REL * np.abs(dev)
+        st0 = agg["st"].astype(str).to_numpy()
+        status = np.where(
+            np.isnan(gr), st0,
+            np.where(np.abs(sel) <= tol, "MATCH", "SELISIH"))
+        n = agg["n"].to_numpy(dtype="int64")
+        bln = agg["bln"].astype(str).to_numpy()
+        mg = agg["Minggu"].astype(str).to_numpy()
+        # label periode: pasangan ada di >1 bulan/file → nilai median
+        # (file didedup per bulan — jumlah nilai = jumlah file)
+        periode = [f"Median {int(c)} file · {m}" if c > 1
+                   else f"{b} · {m}"
+                   for c, b, m in zip(n, bln, mg)]
+        return pd.DataFrame({
+            "Periode": periode,
+            "Resto": agg["resto"].to_numpy(),
+            "Nama Barang": agg["bahan"].to_numpy(),
+            "Satuan": agg["sat"].to_numpy(),
+            "DEV Lalu": dev,
+            "GR Saat Ini": gr,
+            "Selisih": sel,
+            "Status": status,
+        })
+
     def _render_top_selisih(self):
-        """Top-N |Selisih| (GR Saat Ini − DEV Lalu) TERTINGGI — dari join
-        PENUH, kini DIFILTER MINGGU yang memuat H (v3.9.14 — aturan
-        kolom H: H=7 → hanya WEEK 1; "Tampilkan semua minggu" = semua
-        minggu). N = 0 → semua.
+        """Top-N |Selisih| TERTINGGI — dari join PENUH, kini DIFILTER
+        MINGGU yang memuat H (v3.9.14 — aturan kolom H: H=7 → hanya
+        WEEK 1; "Tampilkan semua minggu" = semua minggu). N = 0 → semua.
         v3.9.14 (PERF): tanpa copy penuh + tanpa iterrows (argsort numpy
-        + kolom to_numpy)."""
+        + kolom to_numpy).
+        v3.9.16 (permintaan user, khusus mode 📈 Analisa): (1) DEV Lalu
+        & GR Saat Ini DIABSOLUTKAN dulu saat menghitung Selisih —
+        pembalikan tanda (mis. −50 → +30) tidak lagi menggembungkan
+        selisih (dulu 80, kini 20); kolom DEV Lalu / GR Saat Ini tetap
+        menampilkan NILAI ASLI (bukan absolut). (2) Bila file deviasi
+        >1: nilai Lalu = MEDIAN antar-file per pasangan (resto × bahan
+        × minggu sama) — SATU baris per pasangan; yang ditampilkan
+        nilai median saja, bukan semua file (lihat _top_aggregate)."""
         tree = self._top_tree
         tree.delete(*tree.get_children())
         j = self._join_df
@@ -2355,6 +2442,11 @@ class KomparasiDeviasiView(tk.Frame):
                 return
             wlab = ", ".join(sorted({str(v) for v in d["Minggu"]}))
             prefix = f"Minggu {wlab} (H {wt}) · "
+        # v3.9.16: agregat per pasangan — DEV Lalu = median antar-file,
+        # Selisih = |GR Saat Ini| − |DEV Lalu| (absolut dulu)
+        d = self._top_aggregate(d)
+        multi = bool(d["Periode"].astype(str)
+                     .str.startswith("Median").any())
         # urut |Selisih| menurun — numpy argsort (tanpa kolom _abs)
         _abs = (pd.to_numeric(d["Selisih"], errors="coerce")
                 .fillna(0).abs().to_numpy())
@@ -2378,12 +2470,14 @@ class KomparasiDeviasiView(tk.Frame):
             self._top_status_var.set("0 baris setelah filter.")
             return
         m = len(d)
+        # v3.9.16: catatan median bila Lalu digabung antar >1 file
         self._top_status_var.set(
-            f"{prefix}{m} baris · Top {'semua' if n <= 0 else n}")
+            f"{prefix}{m} baris · Top {'semua' if n <= 0 else n}"
+            + (" · Lalu = median antar-file" if multi else ""))
         # v3.9.14 (PERF): values dari kolom numpy (dulu iterrows —
         # Series per baris)
         cols_np = {c: d[c].to_numpy() for c in
-                   ("BULAN", "Minggu", "Resto", "Nama Barang", "Satuan",
+                   ("Periode", "Resto", "Nama Barang", "Satuan",
                     "DEV Lalu", "GR Saat Ini", "Selisih", "Status")}
         items = []
         neg_cells = []
@@ -2393,7 +2487,7 @@ class KomparasiDeviasiView(tk.Frame):
         for i in range(m):
             iid = f"top_{i}"
             values = [str(i + 1),
-                      f"{cols_np['BULAN'][i]} · {cols_np['Minggu'][i]}",
+                      str(cols_np["Periode"][i]),
                       str(cols_np["Resto"][i]),
                       str(cols_np["Nama Barang"][i]),
                       str(cols_np["Satuan"][i]),
