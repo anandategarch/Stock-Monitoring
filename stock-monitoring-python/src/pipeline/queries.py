@@ -76,6 +76,18 @@ def query_4205(config) -> pd.DataFrame:
     return fn_4205(config.folder("Pemindahan4205"), sheet_name=sheet_name)
 
 
+def query_4205_bulan_lalu(config) -> pd.DataFrame:
+    """v3.9.17 — mirror pola shared #"3224_Bulan Lalu": fn_4205(mode="lalu")
+    atas folder Pemindahan4205Lalu ("4.1 4205 Bulan Lalu") → penambah IN
+    periode ujung bulan lalu (5 hari terakhir file, Tanggal dinegasikan —
+    "sama seperti 32.24 bulan lalu"). Key config di-default di Config
+    (config lama pra-v3.9.17 tetap aman); folder kosong/tidak ada → 0
+    baris senyap."""
+    sheet_name = config.sheet("Pemindahan4205")
+    return fn_4205(config.folder("Pemindahan4205Lalu"),
+                   sheet_name=sheet_name, mode="lalu")
+
+
 def query_9901(config) -> pd.DataFrame:
     """Process 9901 file (mutasi tanpa nomor penerimaan) → sumber IN tambahan.
 
@@ -119,7 +131,9 @@ def query_barang_keluar(config) -> pd.DataFrame:
 
 def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     """
-    IN source = Table.Combine({3224, 3224_Bulan_Lalu, 4205, 9901})
+    IN source = Table.Combine({3224, 3224_Bulan_Lalu, 4205,
+    4205_Bulan_Lalu (v3.9.17 — folder "4.1 4205 Bulan Lalu", penambah IN
+    ujung bulan lalu, mirror 32.24 bulan lalu), 9901})
     with JENIS = "IN".
 
     (v3.5: LightMode dihapus — 3224_Bulan_Lalu SELALU dibaca.)
@@ -139,6 +153,7 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     q3224 = query_3224(config)
     q3224_lalu = query_3224_bulan_lalu(config)   # v3.5: selalu baca bulan lalu
     q4205 = query_4205(config)
+    q4205_lalu = query_4205_bulan_lalu(config)  # v3.9.17: penambah IN ujung bulan lalu
     q9901 = query_9901(config)
     print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")
 
@@ -146,6 +161,7 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
         ("32.24", q3224),
         ("32.24 (Bulan Lalu)", q3224_lalu),
         ("42.05", q4205),
+        ("42.05 (Bulan Lalu)", q4205_lalu),
         ("99.01", q9901),
     ]
 

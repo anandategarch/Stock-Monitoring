@@ -4,7 +4,10 @@ in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 Permintaan user (v3.4): "Tambah 1 tab lagi untuk rekap Selisih IN dan kolom
 Resto, tanggal, nama barang, satuan, IN, Barang masuk dan selisih IN
 dan bisa drill down atau pop up muncul rincian IN yaitu 42.05, 3224,
-dan 9901 beserta nomor nya."
+dan 9901 beserta nomor nya.
+v3.9.17: sumber IN tambahan "42.05 (Bulan Lalu)" — folder
+"4.1 4205 Bulan Lalu" (penambah IN periode ujung bulan lalu, mirror
+32.24 bulan lalu).
 
 v3.6 (permintaan user: "audit rekonsiliasi tidak perlu ambil dari sheet
 29 — aplikasikan logika nya dengan tambah kolom SO dan kolom hasil audit
@@ -12,7 +15,8 @@ nya, bisa difilter"):
 - SATU tabel (segment Ringkas|Audit dihapus) — baris per (Resto, Tanggal,
   Barang) dihitung pipeline fn_audit dari DATA APP (rekap SO + BARANG
   MASUK + IN per tanggal; sheet '29 Rekap Barang Masuk' TIDAK dibaca):
-    IN            = Penerimaan Sistem (Accurate: 42.05 + 32.24 + 99.01)
+    IN            = Penerimaan Sistem (Accurate: 42.05 + 32.24 + 99.01
+                    — incl. 42.05/32.24 bulan lalu, v3.9.17)
     Barang Masuk  = Qty SO Harian (input rekap JENIS='BARANG MASUK')
     Selisih IN    = Barang Masuk − IN
     Hasil SO      = kolom SO (rekap JENIS='SO'; hadir hanya di tanggal
@@ -27,7 +31,7 @@ nya, bisa difilter"):
   kolom; window ⛶ punya filter + sort sendiri.
 
 Drill-down (double-click baris) → popup RINCIAN IN per dokumen:
-  - ringkasan per sumber: 42.05 / 32.24 / 99.01 (+ 32.24 bulan lalu)
+  - ringkasan per sumber: 42.05 / 32.24 / 99.01 (+ 42.05 & 32.24 bulan lalu)
   - tabel dokumen: Source | Nomor | Nomor PO | Qty | #Tgl/Jam
   - copy Nomor (klik kanan / double-click cell / tombol Semua Nomor)
   - ⛶ Perbesar + ↔ Auto-Fit + Esc
@@ -123,6 +127,7 @@ _STATUS_TAG_CFG = {
 # Urutan sumber IN di popup rincian (+ warna chip ringkasan)
 _SOURCES = [
     ("42.05", "#b45309"),              # amber — pemindahan/SJ
+    ("42.05 (Bulan Lalu)", "#0e7490"), # teal — pemindahan bulan lalu (v3.9.17)
     ("32.24", "#2563eb"),              # biru — rincian penerimaan/RI
     ("32.24 (Bulan Lalu)", "#7c3aed"), # ungu — RI bulan lalu
     ("99.01", "#9C5700"),              # oranye — pembelian tanpa penerimaan
@@ -205,7 +210,7 @@ def _format_col_values(col: str, series: pd.Series) -> pd.Series:
 
 class InDetailPopup(tk.Toplevel):
     """Popup rincian IN per (Resto, Barang, Tanggal): breakdown dokumen
-    42.05 / 32.24 / 99.01 (+ 32.24 bulan lalu) beserta nomornya."""
+    42.05 / 32.24 / 99.01 (+ 42.05 & 32.24 bulan lalu) beserta nomornya."""
 
     def __init__(self, parent, resto: str, barang: str, tanggal,
                  detail_df: pd.DataFrame, row_summary: dict | None = None):

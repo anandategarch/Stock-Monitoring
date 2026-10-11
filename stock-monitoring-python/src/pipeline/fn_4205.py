@@ -2,6 +2,9 @@
 fn_4205.py — Mirror persis fn4205 di M code.
 Pemindahan Barang (modul 42.05) → sumber IN.
 OPTIMIZED: vectorized text operations + removed redundant pd.to_datetime.
+v3.9.17: mode "lalu" — mirror fn_3224(mode="lalu"): 5 hari terakhir file
+bulan lalu + Tanggal dinegasikan (folder "4.1 4205 Bulan Lalu" = penambah
+IN periode ujung bulan lalu, "sama seperti 32.24 bulan lalu").
 """
 import pandas as pd
 
@@ -14,9 +17,12 @@ from .helpers import (
 )
 
 
-def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara") -> pd.DataFrame:
+def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara",
+            mode: str = "berjalan") -> pd.DataFrame:
     """
     Mirror M: fn4205(folderPath).
+    mode: "berjalan" (as-is) atau "lalu" (v3.9.17 — 5 hari terakhir +
+    Tanggal dinegasikan, mirror fn_3224).
     Output columns: Nomor, NAMA RESTO, Tanggal, Nama Barang, Value, #Tgl/Jam Pembuatan IT
     """
     # Source + Skip(3) + Promote = header=4
@@ -63,5 +69,23 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
         if c not in sel.columns:
             sel[c] = pd.NA
     final = sel[final_cols].reset_index(drop=True)
+
+    # v3.9.17: mode "lalu" — MIRROR PERSIS fn_3224(mode="lalu"): 5 hari
+    # terakhir file bulan lalu (Tanggal >= maxT - 4) + Tanggal dinegasikan
+    # (hari negatif = bulan lalu) → penambah IN periode ujung bulan lalu
+    # (folder "4.1 4205 Bulan Lalu", permintaan user: "sama seperti 32.24
+    # bulan lalu").
+    if mode == "lalu":
+        # maxT = List.Max(fil[Tanggal])
+        max_t = final["Tanggal"].max()
+        if pd.isna(max_t):
+            return final.iloc[0:0].copy()
+        # fil5 = Table.SelectRows(fil, each [Tanggal] >= maxT - 4)
+        # NA-safe mask: .fillna(False) for pandas < 2.1 compatibility
+        mask5 = (final["Tanggal"] >= (max_t - 4)).fillna(False)
+        fil5 = final[mask5].copy()
+        # neg = Tanggal → -Tanggal
+        fil5["Tanggal"] = (-fil5["Tanggal"]).astype("Int64")
+        return fil5.reset_index(drop=True)
 
     return final

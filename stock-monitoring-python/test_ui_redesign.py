@@ -117,6 +117,14 @@ Memverifikasi:
     Periode 'Median n file · Minggu' (≥2) / 'BULAN · Minggu' (1);
     Status MATCH/SELISIH atas Selisih absolut; kolom Periode NYATA
     (filter header bekerja).
+28. v3.9.17 — SUMBER IN 42.05 BULAN LALU + FOLLOW UP MINUS PER-CELL
+    (§27): (1) folder config Pemindahan4205Lalu ("4.1 4205 Bulan Lalu")
+    dibaca fn_4205(mode="lalu") — MIRROR fn_3224 "lalu": 5 hari terakhir
+    file bulan lalu + Tanggal dinegasikan; masuk query_in (SOURCE IN
+    "42.05 (Bulan Lalu)") + Qty SJ audit + popup Rincian IN (grup/chip).
+    (2) tab ☑ Follow Up: minus merah PER CELL semua kolom numerik (Tk 9
+    tag cell; fallback Tk 8 tag baris); tag negative tak lagi menimpa
+    resolved/pending; sort & clone ⛶ memasang ulang tag.
 25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
     analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
     saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
@@ -463,7 +471,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.16", APP_VERSION == "3.9.16", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.17", APP_VERSION == "3.9.17", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -4525,6 +4533,132 @@ def main():
     os.unlink(xlsx_path)
     if os.path.isfile("komparasi_last.json"):
         os.unlink("komparasi_last.json")
+
+    # ==================================================================
+    print("== 27. (v3.9.17) SUMBER IN 42.05 BULAN LALU + FOLLOW UP PER-CELL ==")
+
+    # --- (a) fn_audit: Qty SJ menggabung 42.05 + 42.05 (Bulan Lalu) ------
+    from src.pipeline.fn_audit import build_audit_input as _bai
+    _det17 = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "AYAM FILET",
+         "Tanggal": 10, "Value": 100.0, "Nomor": "IT.1",
+         "Nomor PO": pd.NA, "#Tgl/Jam Pembuatan IT": pd.NA,
+         "SOURCE IN": "42.05", "JENIS": "IN"},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "AYAM FILET",
+         "Tanggal": 10, "Value": 40.0, "Nomor": "IT.2",
+         "Nomor PO": pd.NA, "#Tgl/Jam Pembuatan IT": pd.NA,
+         "SOURCE IN": "42.05 (Bulan Lalu)", "JENIS": "IN"},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "AYAM FILET",
+         "Tanggal": 10, "Value": 7.0, "Nomor": "RI.1",
+         "Nomor PO": pd.NA, "#Tgl/Jam Pembuatan IT": pd.NA,
+         "SOURCE IN": "32.24", "JENIS": "IN"},
+    ])
+    _raw17 = _bai(None, _det17)
+    _sj17 = _raw17["Qty SJ"]
+    check("(v3.9.17) Qty SJ = 42.05 + 42.05 (Bulan Lalu) = 140",
+          len(_raw17) == 1 and float(_sj17.iloc[0]) == 140.0,
+          f"got {_sj17.tolist()} rows={len(_raw17)}")
+    check("(v3.9.17) Qty RI tetap 32.24 saja = 7",
+          float(_raw17["Qty RI"].iloc[0]) == 7.0,
+          f"got {_raw17['Qty RI'].tolist()}")
+
+    # --- (b) InDetailPopup: grup + subtotal sumber baru -------------------
+    from src.ui.in_selisih_view import _SOURCES, InDetailPopup
+    check("(v3.9.17) _SOURCES memuat '42.05 (Bulan Lalu)'",
+          any(s == "42.05 (Bulan Lalu)" for s, _c in _SOURCES))
+    _pop17 = InDetailPopup(root, "MLGPAR", "AYAM FILET", 10, _det17)
+    root.update()
+    _kids17 = list(_pop17.tree.get_children(""))
+    _srcs17 = {_pop17.tree.set(k, "Source") for k in _kids17}
+    check("(v3.9.17) Popup: dokumen grup '42.05 (Bulan Lalu)' tampil",
+          "42.05 (Bulan Lalu)" in _srcs17, f"got {sorted(_srcs17)}")
+    check("(v3.9.17) Popup: subtotal TOTAL 42.05 (Bulan Lalu) = 40",
+          any(_pop17.tree.set(k, "Source") == "TOTAL 42.05 (Bulan Lalu)"
+              and _pop17.tree.set(k, "Qty") == "40" for k in _kids17))
+    _tot17 = [_pop17.tree.set(k, "Qty") for k in _kids17
+              if _pop17.tree.set(k, "Source") == "TOTAL IN"]
+    check("(v3.9.17) Popup: TOTAL IN = 147 (42.05:100 + lalu:40 + 32.24:7)",
+          bool(_tot17) and _tot17[0] == "147", f"got {_tot17}")
+    _pop17.destroy()
+    root.update()
+
+    # --- (c) FollowUpView: minus merah PER CELL ---------------------------
+    from src.ui.followup import FollowUpStore
+    from src.ui.followup_view import FollowUpView
+    _store17 = FollowUpStore()
+    _snap_neg17 = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                   "barang": "AYAM 17 NEG", "satuan": "KG",
+                   "aktif": "AKTIF", "h": 25, "so": 10.0,
+                   "sistem": 120.0, "deviasi": -25.0, "cek": "OK",
+                   "so_m2": 5.0, "so_m1": 6.0, "so_p1": 7.0,
+                   "so_p2": 8.0, "loss_bom": -0.5}
+    _snap_pos17 = {"asal": "DEVIASI GR", "resto": "BDGUKU",
+                   "barang": "AYAM 17 POS", "satuan": "KG",
+                   "aktif": "AKTIF", "h": 25, "so": 20.0,
+                   "sistem": 100.0, "deviasi": 25.0, "cek": "OK",
+                   "so_m2": 5.0, "so_m1": 6.0, "so_p1": 7.0,
+                   "so_p2": 8.0, "loss_bom": 0.25}
+    _store17.toggle("fpneg17", _snap_neg17)
+    _store17.toggle("fppos17", _snap_pos17)
+    _fv17 = FollowUpView(root, store=_store17)
+    _fv17.pack(fill="both", expand=True)
+    root.update()
+    _neg_iid17 = _pos_iid17 = None
+    for _k17 in _fv17.tree.get_children(""):
+        if _fv17.tree.set(_k17, "Nama Barang") == "AYAM 17 NEG":
+            _neg_iid17 = _k17
+        elif _fv17.tree.set(_k17, "Nama Barang") == "AYAM 17 POS":
+            _pos_iid17 = _k17
+    check("(v3.9.17) FU: 2 baris uji (neg & pos) tampil",
+          _neg_iid17 is not None and _pos_iid17 is not None)
+    _hc17 = lambda i, c: root.tk.call(str(_fv17.tree), "tag", "cell",
+                                      "has", "neg_cell", (i, c))
+    if CELL_TAGS_SUPPORTED and _neg_iid17 and _pos_iid17:
+        check("(v3.9.17) FU: baris minus TIDAK tag 'negative' (baris utuh)",
+              "negative" not in _fv17.tree.item(_neg_iid17, "tags"),
+              f"got {_fv17.tree.item(_neg_iid17, 'tags')}")
+        check("(v3.9.17) FU: sel Deviasi minus MERAH per-cell",
+              _hc17(_neg_iid17, "Deviasi") == 1)
+        check("(v3.9.17) FU: sel DEVIASI (kolom kerja) ikut merah",
+              _hc17(_neg_iid17, "DEVIASI") == 1)
+        check("(v3.9.17) FU: sel Loss Surplus to BOM minus ikut merah",
+              _hc17(_neg_iid17, "Loss Surplus to BOM") == 1)
+        check("(v3.9.17) FU: kolom non-minus TIDAK merah",
+              _hc17(_neg_iid17, "Resto") == 0 and
+              _hc17(_neg_iid17, "Sistem") == 0)
+        check("(v3.9.17) FU: baris positif tanpa sel merah",
+              _hc17(_pos_iid17, "Deviasi") == 0)
+        check("(v3.9.17) FU: status pending tetap di tag (tak tertimpa)",
+              "pending" in _fv17.tree.item(_neg_iid17, "tags"))
+        # sort delete+reinsert → tag per-cell dipasang ulang (iid sama)
+        _fv17._sort_by("Deviasi", reverse=True)
+        root.update()
+        check("(v3.9.17) FU: sort → tag per-cell dipasang ulang",
+              _hc17(_neg_iid17, "Deviasi") == 1)
+        # resolved: hijau tak tertimpa; sel minus tetap merah
+        _store17.resolved["fpneg17"] = {"PIC": "T17"}
+        _fv17._render()
+        root.update()
+        _neg_iid17 = None
+        for _k17 in _fv17.tree.get_children(""):
+            if _fv17.tree.set(_k17, "Nama Barang") == "AYAM 17 NEG":
+                _neg_iid17 = _k17
+        check("(v3.9.17) FU: resolved hijau tak tertimpa negative",
+              _neg_iid17 is not None and
+              "resolved" in _fv17.tree.item(_neg_iid17, "tags") and
+              "negative" not in _fv17.tree.item(_neg_iid17, "tags"))
+        check("(v3.9.17) FU: resolved + sel Deviasi tetap merah",
+              _neg_iid17 is not None and
+              _hc17(_neg_iid17, "Deviasi") == 1)
+    elif _neg_iid17:
+        check("(v3.9.17) FU fallback Tk 8: tag baris 'negative' (perilaku lama)",
+              "negative" in _fv17.tree.item(_neg_iid17, "tags"))
+    # bersihkan baris uji + view
+    _store17.toggle("fpneg17", _snap_neg17)
+    _store17.toggle("fppos17", _snap_pos17)
+    _fv17.destroy()
+    root.update()
+
 
     # Cleanup
     root.destroy()

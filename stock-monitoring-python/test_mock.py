@@ -133,19 +133,21 @@ def create_mock_4215(filepath, resto_code, barang_list):
     create_mock_file(filepath, "#42.15. Pemindahan Barang (KIRI", headers, data_rows, metadata_rows=4)
 
 
-def create_mock_4205(filepath, resto_code, barang_list):
-    """Create #42.05 sheet."""
+def create_mock_4205(filepath, resto_code, barang_list, mode="berjalan"):
+    """Create #42.05 sheet (mode 'lalu': tanggal ujung bulan = 28)."""
     headers = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima", "Nama Barang",
                "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"]
     data_rows = []
+    tgl = 5 if mode == "berjalan" else 28
+    nomor_base = 4000 if mode == "berjalan" else 5000
     for i, (barang, _) in enumerate(barang_list):
         data_rows.append([
-            f"IT.2026.09.{4000+i}",
+            f"IT.2026.09.{nomor_base+i}",
             f"GUDANG BANDUNG ({resto_code})",
-            datetime(2026, 9, 5),
+            datetime(2026, 9, tgl),
             barang,
             15 + i,
-            datetime(2026, 9, 4, 10, 30, 0)
+            datetime(2026, 9, tgl - 1, 10, 30, 0)
         ])
     create_mock_file(filepath, "#42.05. Rincian Pemindahan Bara", headers, data_rows, metadata_rows=4)
 
@@ -332,6 +334,8 @@ def run_test():
     create_mock_3224(os.path.join(root_path, "13.2 3224 RI Bulan Lalu", "ri_lalu.xlsx"), resto, barbar_list, "lalu")
     create_mock_4215(os.path.join(root_path, "3.1 42.15 Kirim", "kirim.xlsx"), resto, barbar_list)
     create_mock_4205(os.path.join(root_path, "4. 42.05", "pemindahan.xlsx"), resto, barbar_list)
+    # v3.9.17: sumber IN baru — 4.1 4205 Bulan Lalu (mirror 32.24 lalu)
+    create_mock_4205(os.path.join(root_path, "4.1 4205 Bulan Lalu", "pemindahan_lalu.xlsx"), resto, barbar_list, "lalu")
     create_mock_4217(os.path.join(root_path, "6.1 42.17 Saldo Awal", "saldo.xlsx"), resto, barbar_list)
     create_mock_pi(os.path.join(root_path, "26.Rincian PI", "pi.xlsx"), resto, barbar_list)
     create_mock_konversi(os.path.join(root_path, "27.Konversi Satuan Dex", "konversi.xlsx"), barbar_list)
@@ -359,6 +363,7 @@ def run_test():
             "KonversiSatuan": "27.Konversi Satuan Dex",
             "DBSKategori":    "21. DBS Kategori",
             "Pemindahan4205": "4. 42.05",
+            "Pemindahan4205Lalu": "4.1 4205 Bulan Lalu",
             "RincianPO":      "25. Rincian PO",
             "Data9901":       "30. 9901"
         },
@@ -435,6 +440,46 @@ def run_test():
     q4205 = fn_4205(config.folder("Pemindahan4205"))
     print(f"    fn_4205: {len(q4205)} rows, cols={list(q4205.columns)}")
     assert len(q4205) > 0, "4205 should have data"
+
+    # v3.9.17: fn_4205 mode "lalu" — 5 hari terakhir + Tanggal negatif
+    q4205_lalu = fn_4205(config.folder("Pemindahan4205Lalu"), mode="lalu")
+    print(f"    fn_4205 (lalu): {len(q4205_lalu)} rows")
+    assert len(q4205_lalu) > 0, "4205 lalu should have data"
+    assert (q4205_lalu["Tanggal"] < 0).all(), "4205 lalu Tanggal should be negative"
+    assert (q4205_lalu["Tanggal"] == -28).all(), "4205 lalu = max tanggal (28) negated"
+    # query_in: sumber baru masuk gabungan + detail per dokumen
+    from src.pipeline.queries import query_in
+    _det = {}
+    qin = query_in(config, detail_out=_det)
+    _srcs = set(_det["df"]["SOURCE IN"].unique())
+    assert "42.05 (Bulan Lalu)" in _srcs, f"42.05 (Bulan Lalu) missing: {_srcs}"
+    assert (qin["JENIS"] == "IN").all()
+    print(f"    query_in (v3.9.17): {len(qin)} rows; sources={sorted(_srcs)}")
+
+    # v3.9.17: folder tidak ada → 0 baris senyap (bulan tanpa file lalu)
+    q4205_missing = fn_4205(
+        os.path.join(root_path, "4.1 4205 Bulan Lalu TIDAK ADA"), mode="lalu")
+    assert len(q4205_missing) == 0, "missing folder should return 0 rows"
+    print("    fn_4205 (folder tidak ada): 0 rows — senyap OK")
+
+    # v3.9.17: config lama TANPA key Pemindahan4205Lalu → Config men-default
+    # key kanonis (anti KeyError saat git pull config ter-modifikasi)
+    from src.pipeline.queries import query_4205_bulan_lalu
+    _cfg_lama_data = json.loads(json.dumps(config_data))
+    _cfg_lama_data["Folders"] = {
+        k: v for k, v in config_data["Folders"].items()
+        if k != "Pemindahan4205Lalu"}
+    _tmp_cfg = os.path.join(test_dir, "config_lama.json")
+    with open(_tmp_cfg, "w", encoding="utf-8") as _f:
+        json.dump(_cfg_lama_data, _f)
+    _cfg_from_file = Config(config_path=_tmp_cfg)
+    assert _cfg_from_file.folder("Pemindahan4205Lalu") == \
+        os.path.join(root_path, "4.1 4205 Bulan Lalu"), \
+        "Config harus men-default key baru"
+    q4205_lama = query_4205_bulan_lalu(_cfg_from_file)
+    assert len(q4205_lama) > 0, "config lama (default) harus tetap menemukan folder"
+    os.unlink(_tmp_cfg)
+    print("    config lama tanpa key baru → default kanonis (0 KeyError)")
 
     # Test fn_4217
     q4217 = fn_4217(config.folder("SaldoAwal4217"))

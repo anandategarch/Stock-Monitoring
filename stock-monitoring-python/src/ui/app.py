@@ -149,7 +149,23 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.16"  # v3.9.16 — TOP SELISIH ANALISA: Selisih absolut (|GR|−|DEV|) + median multi-file (khusus mode 📈 Analisa)
+APP_VERSION = "3.9.17"  # v3.9.17 — SUMBER IN 42.05 BULAN LALU + FOLLOW UP MINUS PER-CELL
+# v3.9.17 — (1) SUMBER IN BARU (permintaan user: "tambahkan juga di
+# alamat C:\KERJA\1. RESTO\9.NEW QUERY\4.1 4205 Bulan Lalu — ini
+# sebagai penambah IN untuk periode 25-31 bulan lalu sama seperti 32.24
+# bulanlalu"): folder baru config Pemindahan4205Lalu dibaca
+# fn_4205(mode="lalu") — MIRROR PERSIS fn_3224 "lalu": 5 hari terakhir
+# file bulan lalu (Tanggal >= maxT-4) + Tanggal dinegasikan (hari
+# negatif = bulan lalu) → masuk query_in sebagai sumber IN tag
+# "42.05 (Bulan Lalu)" + Qty SJ audit (Kiriman HO / export) + popup
+# Rincian IN (grup tabel & chip teal). Folder kosong/tidak ada → 0 baris
+# senyap (tidak wajib ada tiap bulan). (2) FOLLOW UP MINUS PER-CELL:
+# tab ☑ Follow Up kini mewarnai HANYA sel bernilai minus (semua kolom
+# numerik — Tk 9 `tag cell`; fallback Tk 8 tag baris, konsisten view
+# lain sejak v3.9.2) — dulu tab ini TIDAK punya jalur per-cell: satu
+# Deviasi minus mewarnai SELURUH baris + tag 'negative' (menang
+# pertama) menimpa warna status resolved/pending; sort & clone ⛶
+# memasang ulang tag (pola FIX B-03/B-12).
 # v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (permintaan user,
 # khusus mode 📈 Analisa di tab 📋 Laporan Deviasi — tabel utama ⚖ &
 # bagian analisa lain TIDAK berubah):

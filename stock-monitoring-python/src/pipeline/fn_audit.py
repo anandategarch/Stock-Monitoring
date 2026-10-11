@@ -17,7 +17,7 @@ DUA bagian:
    - Qty SO Harian ← rekap mentah JENIS='BARANG MASUK' (input resto di
                      rekap; kosong selama belum diinput — audit akan
                      menandai baris IN sebagai deviasi sampai terisi)
-   - Qty SJ        ← in_detail SOURCE IN='42.05'  per (resto, barang, tgl)
+   - Qty SJ        ← in_detail SOURCE IN='42.05' + '42.05 (Bulan Lalu)'
    - Qty RI        ← in_detail SOURCE IN='32.24' + '32.24 (Bulan Lalu)'
    - Qty Pembelian ← in_detail SOURCE IN='99.01'
    Baris = union tanggal dgn aktivitas (SO direkam / BM / IN ≠ 0),
@@ -79,8 +79,8 @@ def build_audit_input(rekap_so_df: Optional[pd.DataFrame],
     rekap_so_df : rekap mentah long (JENIS 'SO' / 'BARANG MASUK') —
                   keluaran query_full_rekap_mentah_so (dipapankan dari
                   build_append1 via rekap_so_out).
-    in_detail_df: detail IN per dokumen (SOURCE IN 42.05 / 32.24 /
-                  32.24 (Bulan Lalu) / 99.01).
+    in_detail_df: detail IN per dokumen (SOURCE IN 42.05 / 42.05 (Bulan
+                  Lalu) / 32.24 / 32.24 (Bulan Lalu) / 99.01).
     """
     empty = pd.DataFrame(columns=AUDIT_INPUT_COLUMNS)
 
@@ -102,7 +102,8 @@ def build_audit_input(rekap_so_df: Optional[pd.DataFrame],
     if in_detail_df is not None and not in_detail_df.empty \
             and "SOURCE IN" in in_detail_df.columns:
         src = in_detail_df["SOURCE IN"].fillna("").astype(str).str.strip()
-        sj = in_detail_df[src == "42.05"]
+        # v3.9.17: 42.05 bulan lalu ikut Qty SJ (Kiriman HO) — sumber IN
+        sj = in_detail_df[src.isin(["42.05", "42.05 (Bulan Lalu)"])]
         ri = in_detail_df[src.isin(["32.24", "32.24 (Bulan Lalu)"])]
         pb = in_detail_df[src == "99.01"]
     sj_agg = _agg_sum(sj, "Value").rename(columns={"Value": "Qty SJ"}) \
@@ -349,7 +350,8 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
                .notna().sum())
     n_in = int((pd.to_numeric(audit["Penerimaan Sistem"], errors="coerce")
                 .fillna(0) != 0).sum())
-    desc = (f"Data app (rekap SO + BM + IN 42.05/32.24/99.01) · "
+    desc = (f"Data app (rekap SO + BM + IN 42.05/32.24/99.01 "
+            f"incl. bulan lalu) · "
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
             f"SO {n_so:,} · IN {n_in:,}")
     return audit, kpi, desc

@@ -23,6 +23,10 @@ Perilaku:
 - ✕ Kosongkan: hapus seluruh daftar (konfirmasi).
 - Double-click baris → pop-up detail source (bila data pipeline tersedia).
 - Sort kolom via klik judul (parse angka negatif kurung).
+- v3.9.17: minus merah PER CELL (semua kolom numerik — Tk 9 tag cell;
+  fallback Tk 8 = tag baris, konsisten view lain v3.9.2). Dulu SATU
+  nilai minus mewarnai seluruh baris + menimpa warna status
+  resolved/pending.
 """
 
 import tkinter as tk
@@ -40,6 +44,7 @@ from .theme import (
     font,
 )
 from .widgets import (
+    CELL_TAGS_SUPPORTED,
     AccentButton,
     Card,
     ColumnManager,
@@ -49,6 +54,7 @@ from .widgets import (
     HeaderFilterGroup,
     LoadingOverlay,
     TableExpander,
+    apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
@@ -104,6 +110,9 @@ class FollowUpView(tk.Frame):
         # mengenai baris yang benar WALAUPUN tabel sudah di-sort/di-reorder
         # (bug v3.2: tree.index() + _fp_order → salah baris setelah sort)
         self._iid_fp: dict[str, str] = {}
+        # v3.9.17: minus merah PER CELL (konsisten view lain sejak v3.9.2)
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []
 
         self._build_ui()
         self._setup_tags()
@@ -222,6 +231,7 @@ class FollowUpView(tk.Frame):
         self.tree.tag_configure("evenrow", background="#ffffff")
         self.tree.tag_configure("oddrow", background="#f8fafc")
         self.tree.tag_configure("negative", foreground="#dc2626")
+        self.tree.tag_configure("neg_cell", foreground="#dc2626")  # v3.9.17
         self.tree.tag_configure("resolved", foreground="#059669")
         self.tree.tag_configure("pending", foreground="#b45309")
 
@@ -372,6 +382,7 @@ class FollowUpView(tk.Frame):
                   if s is not None]
 
         items = []
+        neg_cells = []   # v3.9.17 — sel minus (iid, kolom)
         n_shown = 0
         for i, snap in enumerate(rows):
             fp = snap.get("fp", "")
@@ -389,7 +400,35 @@ class FollowUpView(tk.Frame):
 
             self._iid_fp[f"fu_{n_shown}"] = fp
             tags = ["evenrow" if n_shown % 2 == 0 else "oddrow"]
-            if dev_f < 0:
+            # v3.9.17: minus merah PER CELL (semua kolom numerik — Tk 9 tag
+            # cell; fallback Tk 8 = tag baris 'negative', perilaku v3.9.1).
+            # Dulu: tags.append("negative") TANPA jalur per-cell → satu
+            # nilai minus mewarnai SELURUH baris + tag pertama-menang
+            # menimpa warna status resolved/pending.
+            row_neg = False
+            for col, raw in (
+                    ("T-2", snap.get("so_m2")),
+                    ("T-1", snap.get("so_m1")),
+                    ("T", snap.get("so")),
+                    ("T+1", snap.get("so_p1")),
+                    ("T+2", snap.get("so_p2")),
+                    ("Sistem", snap.get("sistem")),
+                    ("Deviasi", dev_f),
+                    ("DEVIASI", dev_f),
+                    ("Loss Surplus to BOM", snap.get("loss_bom")),
+                    ("SO", snap.get("so")),
+                    ("Selisih", info.get("Selisih")),
+                    ("Selisih Deviasi", info.get("Selisih Deviasi"))):
+                try:
+                    rv = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if rv < 0:
+                    if self._cell_tags:
+                        neg_cells.append((f"fu_{n_shown}", col))
+                    else:
+                        row_neg = True
+            if row_neg:
                 tags.append("negative")
             tags.append("resolved" if resolved else "pending")
             items.append(("", f"fu_{n_shown}", {"values": values,
@@ -409,9 +448,20 @@ class FollowUpView(tk.Frame):
         # dulu chunk loop lama tetap berjalan setelah tree.delete →
         # baris duplikat / TclError iid 'fu_N' sudah ada → render baru
         # TERPOTONG diam-diam (pola komparasi/laporan: cancel disimpan).
+        # v3.9.17: simpan sel minus utk reapply (sort/clone — insert ulang
+        # me-reset tag cell) + pasang SETELAH batch insert selesai.
+        self._neg_cells = neg_cells
         if getattr(self, "_insert_cancel", None) is not None:
             self._insert_cancel()
-        self._insert_cancel = insert_tree_items(self.tree, items, batch=500)
+        self._insert_cancel = insert_tree_items(
+            self.tree, items, batch=500,
+            on_done=lambda: self._reapply_cell_tags(self.tree))
+
+    def _reapply_cell_tags(self, tree):
+        """v3.9.17 — pasang ulang tag per-cell minus (sort delete+reinsert
+        dan clone ⛶ me-reset tag cell; pola deviasi/in-selisih)."""
+        if self._cell_tags and self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     # =========================================================================
     # ✓ KLIK = KELUARKAN (v3.3: iid-based — benar setelah sort)
@@ -503,7 +553,8 @@ class FollowUpView(tk.Frame):
             self.tree, "Daftar Follow Up",
             setup_tags=lambda t: self._setup_tags(),
             on_double_click=self._on_double_click,
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            on_render_done=self._reapply_cell_tags)  # v3.9.17 tag per-cell
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
 
@@ -528,6 +579,9 @@ class FollowUpView(tk.Frame):
             return float(s)
 
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse_fu)
+        # v3.9.17: delete+reinsert me-reset tag PER-CELL → pasang ulang
+        # (identik deviasi/in-selisih — FIX B-03 audit 2-b).
+        self._reapply_cell_tags(tree)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP DETAIL (v3.3: iid-based — benar setelah sort;

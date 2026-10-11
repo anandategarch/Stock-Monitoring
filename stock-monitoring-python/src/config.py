@@ -25,6 +25,11 @@ class Config:
         # (SO bulan lalu tanggal -25..-31 selalu terbaca). Key "LightMode"
         # lama di config.json diabaikan dengan aman.
         self.Folders = data["Folders"]
+        # v3.9.17: key baru di-DEFAULT (config lokal pra-v3.9.17 yang belum
+        # memuat 'Pemindahan4205Lalu' — mis. hasil git pull dgn config
+        # ter-modifikasi — tetap jalan tanpa KeyError; nama folder kanonis).
+        self.Folders.setdefault("Pemindahan4205Lalu",
+                                "4.1 4205 Bulan Lalu")
         self.Sheets = data["Sheets"]
 
     # --- Helper: gabungkan RootPath + subfolder ---
