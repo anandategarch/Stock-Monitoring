@@ -2,6 +2,9 @@
 fn_3224.py — Mirror persis fn3224 di M code.
 Rincian Penerimaan Barang (modul 32.24) → sumber IN.
 OPTIMIZED: vectorized text operations + NA-safe mask.
+v3.9.20: param sheet_name (default konstanta) — resolusi sheet folder
+bulan-lalu (fallback prefiks "#32.24" — sheet lalu beda nama ≠ 0 baris
+senyap; zero behavior change utk pemanggil lama).
 """
 import pandas as pd
 
@@ -13,14 +16,21 @@ from .helpers import (
     vec_text_between_delimiters,
 )
 
+# Nama sheet standar 32.24 (export Accurate) — konstanta M-mirror,
+# dipakai bersama oleh folder berjalan & bulan lalu.
+SHEET_3224 = "#32.24. Rincian Penerimaan Bara"
 
-def fn_3224(folder_path: str, mode: str) -> pd.DataFrame:
+
+def fn_3224(folder_path: str, mode: str,
+            sheet_name: str = SHEET_3224) -> pd.DataFrame:
     """
     Mirror M: fn3224(folderPath, mode).
     mode: "berjalan" atau "lalu".
+    sheet_name: default SHEET_3224 (FIX R-3 audit 34-d — query lalu bisa
+    me-resolve nama sheet folder bulan lalu; jalur berjalan tak berubah).
     """
     # expand = fnCombineFolder + Skip(3) + PromoteHeaders = header=4
-    prom = fn_combine_folder(folder_path, "#32.24. Rincian Penerimaan Bara", header_row=4)
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value",
                                       "Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT"])

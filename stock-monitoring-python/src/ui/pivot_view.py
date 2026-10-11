@@ -1,6 +1,11 @@
 """
 pivot_view.py — Pivot matrix view (v3.2).
 
+v3.9.20 (deep audit 34-e/fix 35-c2): popup Nama Barang = barang yang
+TAMPIL (RESTO mode Tanggal + SOURCE + KATEGORI + rentang Tanggal +
+☑ hide-empty; filter sendiri dikecualikan) + merah negatif #dc2626
+(seragam 11 view — dulu #CC0000 satu-satunya yang beda).
+
 Dua mode pivot (segment "PIVOT PER" di atas tabel):
 - 🏪 RESTO (default): baris = Nama Barang × JENIS, kolom = NAMA RESTO,
   nilai = total NILAI per resto dalam rentang Tanggal. Hanya baris dengan
@@ -275,7 +280,7 @@ class PivotTableView(tk.Frame):
         legend = LegendRow(
             self.content,
             [("IN", "#9C5700"), ("BARANG MASUK", "#006100"),
-             ("Minus / nilai < 0", "#CC0000"), ("Selisih ≠ 0", "#FFC9C9"),
+             ("Minus / nilai < 0", "#dc2626"), ("Selisih ≠ 0", "#FFC9C9"),
              ("tgl • = bulan lalu", "#94a3b8")])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
@@ -318,10 +323,59 @@ class PivotTableView(tk.Frame):
         auto_fit_columns(self.tree)
 
     def _name_values(self) -> list:
-        if self.data is None or self.data.empty or \
-                "Nama Barang" not in self.data.columns:
+        """Nilai popup filter Nama Barang.
+
+        v3.9.19 (penuntasan "berlaku untuk semua filter"): sumber nilai =
+        barang yang TAMPIL SAAT INI (perilaku AutoFilter Excel — filter
+        kolom lain diterapkan dulu, kolom sendiri dikecualikan): RESTO
+        (mode Tanggal saja) + SOURCE + KATEGORI + rentang Tanggal + ☑
+        "Sembunyikan baris kosong" (barang tanpa metric ber-total > 0
+        memang tak ditampilkan). Dulu: semua nama di data mentah — nama
+        barang yang barisnya sudah terfilter tetap muncul di popup.
+        Vektor (tanpa pivot tree) — murah, dipanggil saat popup dibuka."""
+        df = self.data
+        if df is None or df.empty or "Nama Barang" not in df.columns:
             return []
-        return self.data["Nama Barang"].dropna().astype(str).unique().tolist()
+        resto = self.resto_var.get()
+        if self.pivot_mode == "tanggal" and resto and resto != "(All)" \
+                and "NAMA RESTO" in df.columns:
+            df = df[df["NAMA RESTO"].astype(str) == resto]
+        source = self.source_var.get()
+        if source and source != "(All)" and "SOURCE KIRIMAN" in df.columns:
+            df = df[df["SOURCE KIRIMAN"].astype(str) == source]
+        kategori = self.kategori_var.get()
+        if kategori and kategori != "(All)" and "KATEGORI" in df.columns:
+            df = df[df["KATEGORI"].astype(str) == kategori]
+        # rentang tanggal berlaku untuk kedua mode (identik _compute_payload;
+        # parse longgar tanpa dialog — pola in_selisih _col_values)
+        if "Tanggal" in df.columns and not df.empty:
+            try:
+                t1 = int(float(self.tgl_start_var.get()))
+                t2 = int(float(self.tgl_end_var.get()))
+            except (TypeError, ValueError):
+                t1 = t2 = None
+            if t1 is not None and t2 is not None:
+                if t1 > t2:
+                    t1, t2 = t2, t1
+                tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+                df = df[tnum.between(t1, t2)]
+        if df.empty:
+            return []
+        if self.hide_empty_var.get() and {"JENIS", "NILAI"} <= set(df.columns):
+            # barang tampil = punya ≥1 metric ber-total > 0 (aturan
+            # hide-empty di _compute_payload — total per (barang × JENIS))
+            metrics = [m for m in self.METRICS
+                       if m != "6.PEMAKAIAN (COM)"
+                       or self.pivot_mode == "tanggal"]
+            f = df[df["Nama Barang"].notna()]
+            f = f[f["JENIS"].astype(str).isin(metrics)]
+            if f.empty:
+                return []
+            vals = pd.to_numeric(f["NILAI"], errors="coerce").fillna(0)
+            grp = vals.groupby([f["Nama Barang"].astype(str),
+                                f["JENIS"].astype(str)]).sum()
+            return sorted({nb for nb, _m in grp[grp > 0].index})
+        return df["Nama Barang"].dropna().astype(str).unique().tolist()
 
     def _on_name_filter(self, selected):
         self._name_selected = selected
@@ -367,17 +421,19 @@ class PivotTableView(tk.Frame):
         tree.tag_configure(
             "item_header", font=font(9, "bold"), background="#e2e8f0",
             foreground=C_HEADER)
-        tree.tag_configure("deviasi_row", foreground="#CC0000")
-        tree.tag_configure("selisih_anomaly", foreground="#CC0000",
+        tree.tag_configure("deviasi_row", foreground="#dc2626")
+        tree.tag_configure("selisih_anomaly", foreground="#dc2626",
                            background="#FFC9C9")
         # v3.9.2 — bg saja (tanpa fg merah): font merah dipasang PER CELL
         tree.tag_configure("selisih_anomaly_bg", background="#FFC9C9")
-        tree.tag_configure("neg_cell", foreground="#CC0000")
+        # v3.9.19: merah gelap #dc2626 (C_RED) — konsisten 10 view lain
+        # (dulu #CC0000, satu-satunya yang beda — audit 34-e NIT-4)
+        tree.tag_configure("neg_cell", foreground="#dc2626")
         tree.tag_configure("in_row", foreground="#9C5700",
                            background="#FFEB9C")
         tree.tag_configure("bm_row", foreground="#006100",
                            background="#C6EFCE")
-        tree.tag_configure("negative", foreground="#CC0000")
+        tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero_value", foreground="#999999")
 
     # =========================================================================

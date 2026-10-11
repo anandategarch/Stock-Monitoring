@@ -6,6 +6,12 @@ deviasi, merge kategori, dan unpivot ke format long.
 Output: DataFrame long format dengan kolom:
   Nama Barang, NAMA RESTO, Tanggal, JENIS, NILAI, Nomor, Nomor PO,
   #Tgl/Jam Pembuatan IT, KATEGORI, SOURCE KIRIMAN
+
+v3.9.20 (deep audit 34-d/fix 35-d): LANGKAH 9 SOURCE DATA — tie-break
+DETERMINISTIK (mergesort + kunci sekunder bentuk-string; tie →
+"input so harian" menang, konservatif utk CEK Promix 04) +
+na_position="first" (NA-Tanggal tak pernah menang) + SOURCE DATA
+di-strip (NA-safe, tanpa lower-case).
 """
 import numpy as np
 import pandas as pd
@@ -487,6 +493,17 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # (Tanggal positif; rekap bulan lalu di-negasi → sort ascending lalu
     # keep LAST = tanggal tertinggi). Nilai dipakai deviasi_view utk
     # kondisi CEK "Promix 04" (SO bukan bersumber "input so harian").
+    # FIX audit 34-d (R-1/R-2/N-1):
+    # - SOURCE DATA di-strip saat membangun tabel merge (NA-safe: hanya
+    #   string non-null; nilai non-string apa adanya; JANGAN lower-case —
+    #   perbandingan downstream sudah strip+lower di deviasi_view).
+    # - sort STABIL (mergesort) + na_position="first" → baris Tanggal NA
+    #   tidak pernah menang atas baris ber-tanggal (keep LAST; defensive —
+    #   Tanggal selalu header hari via fn_rekap_mentah).
+    # - kunci sekunder bentuk-string SOURCE DATA → pemenang TIE (pasangan
+    #   & tanggal sama, dua baris JENIS SO) TIDAK bergantung urutan baris
+    #   sheet: string terbesar menang ('input so harian' > 'input promix
+    #   04 ...' → tie memilih sumber so-harian).
     if (full_rekap_so is not None
             and "SOURCE DATA" in full_rekap_so.columns
             and "Nama Barang" in final.columns
@@ -497,13 +514,21 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             & full_rekap_so["SOURCE DATA"].notna()
         ]
         if not so_rows.empty:
+            # _src = nilai output (strip hanya utk string non-null),
+            # _s = bentuk string utk kunci sort sekunder (type-safe —
+            # sort multi-kunci dgn nilai campur str/non-str bisa TypeError).
+            _src = so_rows["SOURCE DATA"].map(
+                lambda v: v.strip() if isinstance(v, str) else v)
             src_map = (
                 so_rows.assign(
-                    _t=pd.to_numeric(so_rows["Tanggal"], errors="coerce"))
-                .sort_values("_t")
+                    _t=pd.to_numeric(so_rows["Tanggal"], errors="coerce"),
+                    _src=_src, _s=_src.astype(str))
+                .sort_values(["_t", "_s"], kind="mergesort",
+                             na_position="first")
                 .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
                                  keep="last")
-                [["Nama Barang", "NAMA RESTO", "SOURCE DATA"]]
+                [["Nama Barang", "NAMA RESTO", "_src"]]
+                .rename(columns={"_src": "SOURCE DATA"})
             )
             if "SOURCE DATA" in final.columns:
                 final = final.merge(

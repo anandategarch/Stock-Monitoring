@@ -1,6 +1,10 @@
 """
 deviasi_popup.py — Popup RINGKAS tab Deviasi GR/PCS (v3.9.18).
 
+v3.9.20 (deep audit 34-b/fix 35-b): popup memfilter SATUAN (angka =
+baris GR/PCS yang DIKLIK — dulu menjumlah lintas satuan) + _chrono_key
+float-safe (urutan 25•..31• benar utk Tanggal float64).
+
 Permintaan user: "pop up di deviasi GR ataupun PCS hanya tampilkan:
 nama barang, nama resto, nilai saldo akhir, nilai SO, nilai IN,
 nilai deviasi."
@@ -270,22 +274,46 @@ def _fmt_tanggal(t) -> str:
 def _chrono_key(t):
     """Kunci urut numerik: bulan lalu (25•…31•) dulu, lalu 1..31 —
     negatif → abs(d) (25..31), positif → 100+d (101..131); ascending
-    kronologis: 25•, 26•, … 31•, 1, 2, … 31 (konvensi pivot_view)."""
+    kronologis: 25•, 26•, … 31•, 1, 2, … 31 (konvensi pivot_view).
+
+    FIX 35-b (audit 34-b RISK-3): parse via float — Tanggal float64
+    (mis. ada NaN → pd.to_numeric menghasilkan float) membuat str(t)
+    = '-25.0' yang GAGAL di int() → guard 999999 → bulan lalu TERBALIK
+    senyap (31• dulu). int(float(...)) menerima '-25.0'/'-25' sama
+    saja; guard 999999 tetap sbg fallback terakhir (NA/label non-angka).
+    """
     try:
-        d = int(str(t).rstrip("•"))
+        d = int(float(str(t).rstrip("•")))
     except (TypeError, ValueError):
         return 999999
     return abs(d) if d < 0 else 100 + d
 
 
 def build_popup_rows(data: pd.DataFrame, nama_barang: str,
-                     nama_resto: str) -> pd.DataFrame:
+                     nama_resto: str, satuan: str | None = None
+                     ) -> pd.DataFrame:
     """Pure pandas (thread-safe) — siapkan baris popup per Tanggal.
 
     Hanya 3 JENIS yang dipakai (permintaan user: nilai saldo akhir, SO,
     IN, deviasi — TANPA OUT/BARANG KELUAN/BARANG MASUK):
       Saldo Akhir = Σ 2.SALDO AKHIR · SO = Σ 1.SO · IN = Σ 4.IN
       Deviasi = SO − Saldo Akhir (identik 3.DEVIASI & tabel utama).
+
+    satuan (FIX 35-b / audit 34-b RISK-2): tabel utama memivot per
+    (Nama Barang × NAMA RESTO × SATUAN) — pasangan yang punya baris GR
+    DAN PCS menghasilkan 2 baris terpisah, jadi popup HARUS mengagregasi
+    grup satuan yang sama dgn BARIS YANG DIKLIK (dulu jumlah lintas-
+    satuan: GR Dev 2 + PCS Dev 5 → popup 7, tak cocok dgn keduanya).
+    KEPUTUSAN kesamaan STRICT (TANPA OR satuan-NA): pivot utama
+    (pivot_table dropna default) MENGHAPUS baris ber-SATUAN NA dari
+    semua grup — baris NA tidak pernah menyumbang nilai baris tabel
+    utama manapun (probe 35b_probe_na_satuan), jadi memasukkannya akan
+    membuat popup LEBIH BESAR dari baris utama DAN terhitung ganda di
+    popup GR maupun PCS. Di output pipeline append1 SATUAN memang
+    konstan per pasangan (lookup LANGKAH 8 fillna per pasangan) — bentuk
+    2-satuan hanya dari data satuan eksplisit, persis bentuk yang
+    dimodelkan indeks pivot. None = tanpa filter satuan (perilaku lama
+    utk pemanggil lain).
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
                                   "Deviasi"])
@@ -298,6 +326,10 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         & (df["NAMA RESTO"].astype(str) == str(nama_resto))
         & (df["JENIS"].isin((_JENIS_SALDO, _JENIS_SO, _JENIS_IN)))
     )
+    # FIX 35-b — filter SATUAN grup yang diklik (astype(str) dua sisi:
+    # encoding identik dgn nilai kolom Satuan yang dirender tree).
+    if satuan is not None:
+        mask &= df["SATUAN"].astype(str) == str(satuan)
     sub = df[mask]
     if sub.empty:
         return empty
@@ -351,7 +383,7 @@ def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
     if satuan:
         title += f"  ({satuan})"
 
-    rows = build_popup_rows(data, nama_barang, nama_resto)
+    rows = build_popup_rows(data, nama_barang, nama_resto, satuan=satuan)
     h_label = _fmt_tanggal(h) if h is not None else ""
     popup = DeviasiPopup(parent, title, rows, h_label=h_label)
     return popup

@@ -5,6 +5,11 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.20 (deep audit 34-b/fix 35-b): _hl_cells di-init di __init__ (sort/
+reapply tag sebelum render pertama tidak crash di Tk 9) +
+_so_source_lookup keep-LAST sort-Tanggal (preferensi append1 LANGKAH 9)
++ _compute_cek (kode mati) dihapus.
+
 v3.9.18 (permintaan user: "resto yang dianalisa hanya berfokus pada resto
 yang ada di folder 1. DEVIASI WEEKLY aja jangan semua" + "look up nama
 barang ini pakai dua arah ... tapi juga sebaliknya" + popup ringkas +
@@ -280,6 +285,11 @@ class DeviasiView(tk.Frame):
         self._neg_cells: list = []   # [(iid, 'Deviasi')] — dipasang ulang
                                      # setelah insert / sort / clone
         self._zero_cells: list = []  # [(iid, 'Deviasi')] deviasi == 0
+        # v3.9.18 — highlight kolom Deviasi & SO_H. FIX 35-b (audit 34-b
+        # RISK-1): WAJIB diinisialisasi di __init__ — _sort_by /
+        # _reapply_cell_tags bisa jalan SEBELUM render pertama (clone ⛶ /
+        # pemanggil program) → AttributeError di Tk 9 tanpa ini.
+        self._hl_cells: list = []
         self._tnum = None                 # cache pd.to_numeric(Tanggal)
         self._tnum_data = None             # FIX D-01: identitas objek data milik _tnum
         # FIX B-08 (audit 2-b): sort saat render batch → ANTRE (bukan dibuang
@@ -629,52 +639,6 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     # LOGIKA (identik versi lama)
     # =========================================================================
-    @staticmethod
-    def _compute_cek(aktif_non, so_h, so_h_prev, in_h, out_h,
-                     stok_seharusnya, threshold=1.3, total_acr=None,
-                     deviasi=None):
-        """Port formula LET Excel (5 kondisi — v3.9.6 melengkapi ACR).
-
-        Kondisi ke-5 "ACR to BOM" (butuh BOM — kini tersedia dari 9.ACR):
-        |Deviasi| > Total ACR (BOM penjualan 1..H) → selisih stok lebih
-        besar dari pemakaian teoretis → pasti salah. total_acr/deviasi
-        opsional (None = kondisi dilewati — kompatibilitas v3.2).
-        """
-        aktif = str(aktif_non or "").strip().upper()
-
-        # 1. KondisiKosong → "Kosong/Non Aktif"
-        if aktif == "AKTIF" and so_h < 0:
-            return "Kosong/Non Aktif"
-        if aktif == "NON AKTIF" and so_h > 0:
-            return "Kosong/Non Aktif"
-
-        # 2. KondisiNaikturun → "Beda Tanggal"
-        if in_h > 0 and so_h < so_h_prev and out_h == 0:
-            return "Beda Tanggal"
-        if so_h_prev > 0:
-            if so_h > so_h_prev + (0.5 * so_h_prev) and in_h == 0 and out_h == 0:
-                return "Beda Tanggal"
-
-        # 3. KondisiHitungManual → "Hitung Manual"
-        if stok_seharusnya == 0:
-            if so_h != 0:
-                return "Hitung Manual"
-        else:
-            ratio = abs(so_h - stok_seharusnya) / abs(stok_seharusnya)
-            if ratio > threshold:
-                return "Hitung Manual"
-
-        # 4. KondisiTurunDrastis → "Turun Drastis"
-        if so_h_prev > 0 and (so_h / so_h_prev) < 0.5:
-            return "Turun Drastis"
-
-        # 5. KondisiACR → "ACR to BOM" (v3.9.6)
-        if (total_acr is not None and total_acr > 0
-                and deviasi is not None and abs(deviasi) > total_acr):
-            return "ACR to BOM"
-
-        return ""
-
     def _col_display_name(self, col_name: str) -> str:
         import re
         h = self.tanggal_h
@@ -811,10 +775,25 @@ class DeviasiView(tk.Frame):
         if "SOURCE DATA" in df.columns:
             so_src = df[
                 (df["JENIS"] == "1.SO") & df["SOURCE DATA"].notna()
-            ][["Nama Barang", "NAMA RESTO", "SOURCE DATA"]]
+            ][["Nama Barang", "NAMA RESTO", "Tanggal", "SOURCE DATA"]]
             if not so_src.empty:
-                so_src = so_src.drop_duplicates(
-                    subset=["Nama Barang", "NAMA RESTO"], keep="first")
+                # FIX 35-b (audit 34-b NIT-1): preferensi = baris BERJALAN,
+                # persis append1 LANGKAH 9 — sort Tanggal (NA di awal
+                # supaya keep="last" memilih tanggal TERTINGGI = positif/
+                # berjalan) lalu keep="last"; mergesort = stabil utk TIE
+                # tanggal sama. Dulu keep="first" urutan df — netral di
+                # data pipeline (SOURCE DATA konstan per pasangan hasil
+                # merge broadcast append1), menyimpang hanya di input
+                # buatan/heterogen (probe 34b V_DUP).
+                so_src = (
+                    so_src.assign(
+                        _t=pd.to_numeric(so_src["Tanggal"],
+                                         errors="coerce"))
+                    .sort_values("_t", na_position="first",
+                                 kind="mergesort")
+                    .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+                                     keep="last")
+                )
                 self._so_source_lookup = {
                     (str(b), str(r)): str(v).strip()
                     for b, r, v in zip(so_src["Nama Barang"],

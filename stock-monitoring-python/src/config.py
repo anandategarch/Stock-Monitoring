@@ -2,6 +2,10 @@
 config.py — Load konfigurasi dari config.json.
 Menggantikan record Config di Power Query M code.
 Path bisa diubah user tanpa mengubah kode.
+
+v3.9.20 (deep audit 34-d/fix 35-d): setdefault
+Sheets["Pemindahan4205Lalu"] (default = nilai sheet berjalan — config
+lama tanpa key tetap jalan tanpa KeyError).
 """
 import json
 import os
@@ -31,6 +35,14 @@ class Config:
         self.Folders.setdefault("Pemindahan4205Lalu",
                                 "4.1 4205 Bulan Lalu")
         self.Sheets = data["Sheets"]
+        # FIX R-3 (audit 34-d): key sheet khusus folder 42.05 bulan lalu —
+        # di-default ke nilai sheet berjalan (pola 32.24: nama sheet sama utk
+        # folder berjalan & lalu; config lama tanpa key tetap aman — tidak
+        # KeyError; default in-memory, mirror pola Folders di atas).
+        self.Sheets.setdefault(
+            "Pemindahan4205Lalu",
+            self.Sheets.get("Pemindahan4205",
+                            "#42.05. Rincian Pemindahan Bara"))
 
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:

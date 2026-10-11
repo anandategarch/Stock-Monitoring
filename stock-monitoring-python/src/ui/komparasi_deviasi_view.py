@@ -1,6 +1,11 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+v3.9.20 (deep audit 34-a/fix 35-a): reset filter 4 tabel analisa di SEMUA
+    jalur reset tabel utama (dulu filter basi → 0 baris senyap) + nilai
+    popup filter tabel utama/Minoritas/Liga = baris yang tampil (param
+    fmt_fn) + 4 entri format kolom mati Risk/Bench dibersihkan.
+
 v3.9.19 — KOLOM ANALISA + HAPUS 2 BAGIAN (permintaan user):
     (1) KOLOM ANALISA (1 kolom saja) di bagian 📊 Top & Flip — tabel
         Top Selisih & Perubahan Arah kini punya keterangan analisa
@@ -1056,7 +1061,17 @@ class KomparasiDeviasiView(tk.Frame):
         result = self._result_df
         if result is None or result.empty or col not in result.columns:
             return []
-        return self._format_col_series(col, result[col]).unique().tolist()
+        # v3.9.19a (audit 34-a FIX 2): nilai popup = baris yang TAMPIL
+        # (filter kolom LAIN diterapkan dulu; kolom sendiri dikecualikan
+        # — AutoFilter Excel; permintaan user "berlaku untuk semua
+        # filter"). Format tetap _format_col_series (tabel utama) supaya
+        # konsisten dgn jalur APPLY _prepare_rows (mis. DEV Saat Ini
+        # persen, bukan _fmt_analisa_series).
+        d = self._filtered_analisa_df(result, self._col_sel, col,
+                                      fmt_fn=self._format_col_series)
+        if d is None or d.empty or col not in d.columns:
+            return []
+        return self._format_col_series(col, d[col]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
         if col in self.NUMERIC_COLS:
@@ -1154,6 +1169,10 @@ class KomparasiDeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # v3.9.19a (audit 34-a FIX 1): filter 4 tabel analisa ikut
+        # direset — mirror tabel utama (dulu filter basi senyap
+        # diterapkan ke data baru).
+        self._reset_analisa_filters()
         # lazy refresh — compute hanya bila pane terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -1229,6 +1248,9 @@ class KomparasiDeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # v3.9.19a (audit 34-a FIX 1): filter 4 tabel analisa ikut
+        # direset SEBELUM job (payload memakai snapshot state).
+        self._reset_analisa_filters()
         self._refresh(parse_paths=paths, interactive=interactive)
 
     def _apply_file_state(self, new_file: dict, paths: list | None):
@@ -1322,6 +1344,12 @@ class KomparasiDeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # v3.9.19a (audit 34-a FIX 1): filter 4 tabel analisa ikut
+        # direset — mirror tabel utama (dulu _top_sel/_flip_sel/
+        # _min_sel/_liga_sel + ikon corong bertahan → filter basi
+        # senyap diterapkan ke file berikutnya, mis. Status=MATCH →
+        # 0 baris).
+        self._reset_analisa_filters()
         self.status_var_label.set("File ditutup.")
         # v3.9.13: tabel analisa ikut dibersihkan.
         # v3.9.14 (PERF): hanya render bila mode Analisa aktif — tersembunyi
@@ -2140,7 +2168,25 @@ class KomparasiDeviasiView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # v3.9.19a (audit 34-a FIX 1): ✕ Reset Filter juga me-reset
+        # filter tabel analisa (4 bagian) — mirror tabel utama.
+        self._reset_analisa_filters()
         self._refresh()
+
+    def _reset_analisa_filters(self):
+        """v3.9.19a (audit 34-a FIX 1): reset state filter header 4 tabel
+        analisa (Top Selisih / Perubahan Arah / Arah Minoritas / Liga
+        Deviasi) — dipanggil di SEMUA jalur reset tabel utama
+        (load_data / _load_paths / _close_file / ✕ Reset Filter).
+        clear_all() juga me-refresh ikon corong header (aktif →
+        nonaktif) — dulu hanya tabel utama yang direset."""
+        for sel_map, grp in ((self._top_sel, self._top_filters),
+                             (self._flip_sel, self._flip_filters),
+                             (self._min_sel, self._min_filters),
+                             (self._liga_sel, self._liga_filters)):
+            for c in sel_map:
+                sel_map[c] = None
+            grp.clear_all()
 
     # =========================================================================
     # v3.9.13 — MODE 📈 ANALISA (Top Selisih + Perubahan Arah)
@@ -2330,18 +2376,23 @@ class KomparasiDeviasiView(tk.Frame):
         return self._fmt_analisa_series(col, d[col]).unique().tolist()
 
     @staticmethod
-    def _filtered_analisa_df(d, sel_map: dict, col: str):
+    def _filtered_analisa_df(d, sel_map: dict, col: str, fmt_fn=None):
         """v3.9.19 — baris tabel analisa yang TAMPIL SAAT INI (filter
         kolom LAIN diterapkan; kolom `col` sendiri dikecualikan —
         perilaku AutoFilter Excel; permintaan user: "isi filter harus
-        menampilkan data yang ada aja")."""
+        menampilkan data yang ada aja").
+        v3.9.19a (audit 34-a FIX 2): fmt_fn opsional — tabel utama ⚖
+        memakai _format_col_series (format persen/angka per-tabel,
+        konsisten jalur APPLY _prepare_rows); tabel analisa tetap
+        default _fmt_analisa_series."""
         if d is None or d.empty:
             return d
         f = d
         for c, sel in sel_map.items():
             if sel is None or c == col or c not in f.columns:
                 continue
-            fmt = KomparasiDeviasiView._fmt_analisa_series(c, f[c])
+            fmt = (fmt_fn or KomparasiDeviasiView._fmt_analisa_series)(
+                c, f[c])
             f = f[fmt.isin(sel)]
         return f
 
@@ -3160,7 +3211,10 @@ class KomparasiDeviasiView(tk.Frame):
             tree, items, on_done=lambda: self._reapply_min_tags(tree))
 
     def _min_col_values(self, col: str) -> list:
-        d = self._min_df
+        # v3.9.19a (audit 34-a FIX 2): nilai popup = baris yang TAMPIL
+        # (filter kolom lain diterapkan dulu; kolom sendiri dikecualikan
+        # — AutoFilter Excel; pola _top_col_values/_flip_col_values).
+        d = self._filtered_analisa_df(self._min_df, self._min_sel, col)
         if d is None or d.empty or col not in d.columns:
             return []
         return self._fmt_analisa_series(col, d[col]).unique().tolist()
@@ -3395,7 +3449,10 @@ class KomparasiDeviasiView(tk.Frame):
             tree, items, on_done=lambda: self._reapply_liga_tags(tree))
 
     def _liga_col_values(self, col: str) -> list:
-        d = self._liga_df
+        # v3.9.19a (audit 34-a FIX 2): nilai popup = baris yang TAMPIL
+        # (filter kolom lain diterapkan dulu; kolom sendiri dikecualikan
+        # — AutoFilter Excel; pola _top_col_values/_flip_col_values).
+        d = self._filtered_analisa_df(self._liga_df, self._liga_sel, col)
         if d is None or d.empty or col not in d.columns:
             return []
         return self._fmt_analisa_series(col, d[col]).unique().tolist()
@@ -3492,13 +3549,13 @@ class KomparasiDeviasiView(tk.Frame):
     def _fmt_analisa_series(col, series):
         """Format kolom tabel analisa (filter/sort konsisten tampilan).
         v3.9.15: kolom tabel analisa (Min/Liga; Risk/Bench dihapus
-        v3.9.19)."""
-        if col in ("Disparitas", "Disparitas Rerata", "Rate",
-                   "% Minoritas"):
+        v3.9.19). v3.9.19a (audit 34-a FIX 3): 4 kolom mati bagian
+        terhapus (Disparitas Rerata / Loss / Median Kelompok /
+        Opportunity) dibersihkan dari daftar."""
+        if col in ("Disparitas", "Rate", "% Minoritas"):
             return series.map(KomparasiDeviasiView._fmt_pct)
         if col in ("DEV Lalu", "GR Saat Ini", "Selisih", "DEV Bulan Lalu",
                    "DEV Saat Ini", "Δ", "BOM", "DEV",
-                   "Loss (Σ|DEV−|)", "Median Kelompok", "Opportunity",
                    "Σ|DEV| Minoritas"):
             return series.map(KomparasiDeviasiView._fmt_num)
         if col in ("z",):

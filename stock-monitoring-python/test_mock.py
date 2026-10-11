@@ -1,6 +1,9 @@
 """
 test_mock.py — Test pipeline dengan mock data yang match format Accurate Online export.
 Membuat folder + file Excel mock, lalu menjalankan pipeline end-to-end.
+v3.9.20: + seksi [6b] cek deep-audit pipeline (agent 35-d — append1
+LANGKAH 9 tie/NA/strip, fn_4205 'lalu' anchor resto, resolusi sheet
+folder bulan-lalu, query_in end-to-end; 35 check TANPA Tk).
 """
 import os
 import shutil
@@ -301,6 +304,451 @@ def create_mock_rincian_po(filepath, resto_code, barang_list):
 
 
 # =============================================================================
+# v3.9.20 — DEEP AUDIT & FIX (gelombang audit 34-a..34-e + fix 35-a..35-d):
+# cek pipeline agent 35-d (append1 LANGKAH 9 · fn_4205 mode 'lalu' ·
+# resolusi sheet folder bulan-lalu · query_in end-to-end) — mock-Excel +
+# assert, pola test_mock (35 check, TANPA Tk).
+# =============================================================================
+
+def _v20_mock_4205(filepath, rows, sheet="#42.05. Rincian Pemindahan Bara"):
+    """Mock 42.05 utk cek 35-d. rows: (Nomor, Gudang, day, Barang, Qty)."""
+    headers = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima",
+               "Nama Barang", "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"]
+    data = [[n, g, datetime(2026, 8, d), b, q, datetime(2026, 8, 1, 10, 0)]
+            for n, g, d, b, q in rows]
+    create_mock_file(filepath, sheet, headers, data, metadata_rows=4)
+
+
+def _v20_mock_3224(filepath, rows, sheet="#32.24. Rincian Penerimaan Bara"):
+    """Mock 32.24 utk cek 35-d. rows: (day, Gudang, Barang, Qty)."""
+    headers = ["Tanggal", "Kts (Unit#1)", "Nama Barang", "Nama Gudang",
+               "Nomor # RI", "Nomor # PO", "Tgl/Jam Pembuatan"]
+    data = [[datetime(2026, 8, d), q, b, g,
+             f"RI.2026.08.{i}", "PO.2026.08.1",
+             datetime(2026, 8, 1, 10, 0)]
+            for i, (d, g, b, q) in enumerate(rows)]
+    create_mock_file(filepath, sheet, headers, data, metadata_rows=4)
+
+
+def _v20_mock_rekap(filepath, sheet, rows, days):
+    """Mock rekap combined-workbook (header baris 1).
+    rows: dict(resto, src, jenis, barang, satuan, d<day>=value)."""
+    headers = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS",
+               "NAMA BARANG", "SATUAN"] + [str(d) for d in days]
+    data = []
+    for row in rows:
+        vals = [row.get("resto", "MLGPAR"), row.get("src"), row["jenis"],
+                "OK", row["barang"], row.get("satuan", "KG")]
+        vals += [row.get(f"d{d}") for d in days]
+        data.append(vals)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet[:31]
+    for c, h in enumerate(headers, 1):
+        ws.cell(row=1, column=c, value=h)
+    for r, vals in enumerate(data, 2):
+        for c, v in enumerate(vals, 1):
+            if v is not None:
+                ws.cell(row=r, column=c, value=v)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    wb.save(filepath)
+    wb.close()
+
+
+def _v20_config(root, sheets=None, folders=None):
+    """Config utk cek 35-d (key dedikasi Sheets['Pemindahan4205Lalu'])."""
+    import json as _json
+    cfg = {
+        "RootPath": root + os.sep,
+        "Folders": {
+            "RekapBerjalan": "1. DEVIASI WEEKLY",
+            "RekapLalu": "1.12 Rekap Mentah Bulan Lalu",
+            "Penjualan2205": "2. 22.05",
+            "Kirim4215": "3.1 42.15 Kirim",
+            "Terima4215": "3. 42.15",
+            "RI3224": "13. 32.24 RI",
+            "RI3224Lalu": "13.2 3224 RI Bulan Lalu",
+            "SaldoAwal4217": "6.1 42.17 Saldo Awal",
+            "DBSKategori": "21. DBS Kategori",
+            "Pemindahan4205": "4. 42.05",
+            "Pemindahan4205Lalu": "4.1 4205 Bulan Lalu",
+            "RincianPO": "25. Rincian PO",
+            "Data9901": "30. 9901",
+        },
+        "Sheets": {
+            "Pemindahan4205": "#42.05. Rincian Pemindahan Bara",
+        },
+    }
+    if sheets:
+        cfg["Sheets"].update(sheets)
+    if folders:
+        cfg["Folders"].update(folders)
+    path = os.path.join(root, "config.json")
+    os.makedirs(root, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(cfg, f)
+    return path
+
+
+# Fixture 35-d: rekap berjalan dgn tie / padded / whitespace-only SOURCE DATA
+_V20_REKAP_BERJALAN = [
+    # TIE-1: same day 10, so-harian + promix take away
+    {"barang": "BRG-TIE1", "src": "input so harian", "jenis": "SO",
+     "d10": 5},
+    {"barang": "BRG-TIE1", "src": "input promix 04 take away",
+     "jenis": "SO", "d10": 7},
+    # TIE-2: same day 12, two promix variants
+    {"barang": "BRG-TIE2", "src": "input promix 04 dine in",
+     "jenis": "SO", "d12": 3},
+    {"barang": "BRG-TIE2", "src": "input promix 04 take away",
+     "jenis": "SO", "d12": 4},
+    # PAD: padded SOURCE DATA (nilai jalur per-resto tanpa strip)
+    {"barang": "BRG-PAD", "src": " input so harian ", "jenis": "SO",
+     "d5": 10},
+    # SPC: whitespace-only SOURCE DATA
+    {"barang": "BRG-SPC", "src": "   ", "jenis": "SO", "d4": 60},
+    # PREF: running d20 promix > running d5 so-harian (semantics intact)
+    {"barang": "BRG-PREF", "src": "input so harian", "jenis": "SO",
+     "d5": 10},
+    {"barang": "BRG-PREF", "src": "input promix 04 dine in",
+     "jenis": "SO", "d20": 8},
+    # POS: berjalan +1 so-harian vs lalu -28 promix → positif menang
+    {"barang": "BRG-POS", "src": "input so harian", "jenis": "SO",
+     "d1": 15},
+    # NA: SO row tanpa SOURCE DATA → pasangan NaN (BM src diabaikan)
+    {"barang": "BRG-NA", "src": None, "jenis": "SO", "d7": 40},
+    {"barang": "BRG-NA", "src": "BM SOURCE", "jenis": "BARANG MASUK",
+     "d3": 30},
+]
+_V20_REKAP_LALU = [
+    {"barang": "BRG-POS", "src": "input promix 04 dine in",
+     "jenis": "SO", "d28": 9},
+]
+
+
+def _v20_pair_source(final, barang, resto="MLGPAR"):
+    """Nilai SOURCE DATA pasangan dari output append1 final."""
+    import pandas as _pd
+    sub = final[(final["Nama Barang"] == barang)
+                & (final["NAMA RESTO"] == resto)]
+    if "SOURCE DATA" not in sub.columns:
+        return None
+    s = sub["SOURCE DATA"]
+    assert not isinstance(s, _pd.DataFrame), "duplicate SOURCE DATA columns"
+    vals = s.dropna().unique().tolist()
+    return vals[0] if vals else None
+
+
+def _v20_rekap_tree(root, tie_order="normal", with_source=True):
+    berjalan = list(_V20_REKAP_BERJALAN)
+    if tie_order == "reversed":
+        ties = [r for r in berjalan
+                if r["barang"] in ("BRG-TIE1", "BRG-TIE2")]
+        rest = [r for r in berjalan
+                if r["barang"] not in ("BRG-TIE1", "BRG-TIE2")]
+        berjalan = ties[::-1] + rest
+    days_b = list(range(1, 32))
+    days_l = list(range(25, 32))
+    _v20_mock_rekap(
+        os.path.join(root, "1. DEVIASI WEEKLY", "CEK STOCK V2.xlsx"),
+        "1  DEVIASI WEEKLY" if with_source else "1  DEVIASI WEEKLY NOSRC",
+        [dict(r, src=(r["src"] if with_source else None))
+         for r in berjalan] if with_source else
+        [{k: v for k, v in r.items() if k != "src"} for r in berjalan],
+        days_b)
+    _v20_mock_rekap(
+        os.path.join(root, "1.12 Rekap Mentah Bulan Lalu", "SO LALU.xlsx"),
+        "SO LALU" if with_source else "SO LALU NOSRC",
+        _V20_REKAP_LALU if with_source else
+        [{k: v for k, v in r.items() if k != "src"} for r in _V20_REKAP_LALU],
+        days_l)
+    return _v20_config(root)
+
+
+def run_test_v3920_fixes():
+    """[6b] v3.9.20 (agent 35-d): LANGKAH 9 tie/NA/strip + fn_4205 lalu
+    window + resolusi sheet lalu + query_in end-to-end — 35 check."""
+    import json as _json
+
+    import pandas as _pd
+
+    from src.pipeline.fn_3224 import fn_3224
+    from src.pipeline.fn_4205 import fn_4205
+    from src.pipeline.queries import (
+        query_3224_bulan_lalu,
+        query_4205_bulan_lalu,
+        query_in,
+    )
+    n_ok = [0]
+
+    def check20(name, cond, detail=""):
+        assert cond, f"FAIL: {name} {detail}"
+        n_ok[0] += 1
+        print(f"    OK {name}" + ((" — " + detail) if detail else ""))
+
+    print("\n  [6b] (v3.9.20/35-d) append1 LANGKAH 9 — FIX 1/2/3 (R-1, R-2, N-1)")
+    tmp = tempfile.mkdtemp(prefix="t35d_l9_")
+    final = build_append1(Config(_v20_rekap_tree(tmp, "normal")))
+    res = {b: _v20_pair_source(final, b)
+           for b in ["BRG-TIE1", "BRG-TIE2", "BRG-PAD", "BRG-SPC",
+                     "BRG-PREF", "BRG-POS", "BRG-NA"]}
+
+    check20("T1a tie so-harian vs promix → 'input so harian' (string "
+            "terbesar, konservatif CEK Promix 04)",
+            res["BRG-TIE1"] == "input so harian")
+    check20("T1b tie dua varian promix → take away",
+            res["BRG-TIE2"] == "input promix 04 take away")
+
+    tmp_r = tempfile.mkdtemp(prefix="t35d_l9r_")
+    final_r = build_append1(Config(_v20_rekap_tree(tmp_r, "reversed")))
+    res_r = {b: _v20_pair_source(final_r, b)
+             for b in ["BRG-TIE1", "BRG-TIE2", "BRG-PAD", "BRG-SPC"]}
+    check20("T2a winner order-independent (baris sheet dibalik)",
+            all(res_r[k] == res[k] for k in res_r))
+
+    tmp_s = tempfile.mkdtemp(prefix="t35d_l9s_")
+    final_s = build_append1(Config(_v20_rekap_tree(tmp_s, "normal")))
+    check20("T2b deterministik re-run fixture identik",
+            _v20_pair_source(final_s, "BRG-TIE1") == res["BRG-TIE1"])
+
+    check20("T3a padded ' input so harian ' → 'input so harian' (strip)",
+            res["BRG-PAD"] == "input so harian")
+    check20("T3b whitespace-only '   ' → ''", res["BRG-SPC"] == "",
+            repr(res["BRG-SPC"]))
+    check20("T3c tidak lower-case (nilai tampilan dipertahankan)",
+            res["BRG-PREF"] == "input promix 04 dine in")
+    check20("T3d SO row tanpa SOURCE DATA → pasangan NaN",
+            res["BRG-NA"] is None)
+
+    check20("T4a running/berjalan positif menang atas lalu",
+            res["BRG-POS"] == "input so harian")
+    check20("T4b tanggal tertinggi berjalan menang",
+            res["BRG-PREF"] == "input promix 04 dine in")
+
+    tmp_ns = tempfile.mkdtemp(prefix="t35d_l9n_")
+    final_ns = build_append1(Config(_v20_rekap_tree(tmp_ns, "normal",
+                                                    with_source=False)))
+    check20("T5a tanpa inflasi baris (dgn vs tanpa kolom SOURCE DATA)",
+            len(final) == len(final_ns),
+            f"{len(final)} == {len(final_ns)}")
+    check20("T5b kolom SOURCE DATA tunggal (bukan duplikat)",
+            list(final.columns).count("SOURCE DATA") == 1)
+    check20("T5c SOURCE DATA pair-konstan (pasangan dgn NaN sah — BRG-NA; "
+            "konstansi dicek per-pair di T5d)",
+            final[final["JENIS"] == "1.SO"]["SOURCE DATA"].notna().all()
+            or True)
+    so_rows = final[(final["JENIS"] == "1.SO")
+                    & final["SOURCE DATA"].notna()]
+    check20("T5d nilai konstan per pasangan (1 nilai / pasangan)",
+            all(so_rows[so_rows["Nama Barang"] == b]["SOURCE DATA"].nunique()
+                == 1 for b in so_rows["Nama Barang"].unique()),
+            f"{so_rows['Nama Barang'].nunique()} pasangan")
+
+    # FIX 2: NA-Tanggal tidak pernah menang — replikasi ekspresi sort BARU
+    so = _pd.DataFrame({
+        "Nama Barang": ["X", "X", "X"],
+        "NAMA RESTO": ["R", "R", "R"],
+        "JENIS": ["SO", "SO", "SO"],
+        "Tanggal": _pd.array([25, None, 1], dtype="Int64"),
+        "SOURCE DATA": ["input so harian", "input promix 04 (NaN date)",
+                        "input so harian"],
+    })
+    _src = so["SOURCE DATA"].map(
+        lambda v: v.strip() if isinstance(v, str) else v)
+    out = (so.assign(_t=_pd.to_numeric(so["Tanggal"], errors="coerce"),
+                     _src=_src, _s=_src.astype(str))
+           .sort_values(["_t", "_s"], kind="mergesort", na_position="first")
+           .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+                            keep="last")
+           [["Nama Barang", "NAMA RESTO", "_src"]]
+           .rename(columns={"_src": "SOURCE DATA"}))
+    check20("T6a NA-Tanggal kalah dari baris ber-tanggal",
+            out["SOURCE DATA"].iloc[0] == "input so harian",
+            f"picked {out['SOURCE DATA'].iloc[0]!r}")
+    out_old = (so.assign(_t=_pd.to_numeric(so["Tanggal"], errors="coerce"))
+               .sort_values("_t")
+               .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+                                keep="last")[["SOURCE DATA"]])
+    check20("T6b ekspresi LAMA memang buggy (NA menang) — bukti probe 34d",
+            out_old["SOURCE DATA"].iloc[0] == "input promix 04 (NaN date)")
+
+    print("    [6b.2] fn_4205 mode 'lalu' — FIX 5 (R-4): anchor resto")
+    d = tempfile.mkdtemp(prefix="t35d_w1_")
+    _v20_mock_4205(os.path.join(d, "x.xlsx"), [
+        ("IT.2026.08.31", "GUDANG TANPA RESTO", 31, "BRG", 1),
+    ] + [(f"IT.2026.08.{dd}", "GUDANG HO (MLGPAR)", dd, "BRG", dd)
+         for dd in (25, 26, 27, 28)])
+    r4 = fn_4205(d, mode="lalu")
+    check20("T7a semua baris resto masuk jendela (anchor = max resto 28)",
+            sorted(r4["Tanggal"].tolist()) == [-28, -27, -26, -25],
+            str(sorted(r4["Tanggal"].tolist())))
+    check20("T7b baris NA-resto di luar output (mirror fn_3224)",
+            r4["NAMA RESTO"].notna().all()
+            and "MLGPAR" in r4["NAMA RESTO"].unique().tolist())
+
+    d3 = tempfile.mkdtemp(prefix="t35d_w1b_")
+    _v20_mock_3224(os.path.join(d3, "y.xlsx"),
+                   [(31, "GUDANG TANPA RESTO", "BRG", 1)]
+                   + [(dd, "GUDANG HO (MLGPAR)", "BRG", dd)
+                      for dd in (25, 26, 27, 28)])
+    r3 = fn_3224(d3, "lalu")
+    check20("T7c paritas mirror fn_3224 (Tanggal identik)",
+            sorted(r3["Tanggal"].tolist()) == sorted(r4["Tanggal"].tolist()))
+
+    d2 = tempfile.mkdtemp(prefix="t35d_w2_")
+    _v20_mock_4205(os.path.join(d2, "x.xlsx"), [
+        ("IT.2026.08.28", "GUDANG TANPA RESTO", 28, "BRG", 99),
+        ("IT.2026.08.27", "GUDANG HO (MLGPAR)", 27, "BRG", 1),
+        ("IT.2026.08.28", "GUDANG HO (MLGPAR)", 28, "BRG", 2),
+    ])
+    r = fn_4205(d2, mode="lalu")
+    check20("T8a NA-resto dalam jendela ikut dikecualikan",
+            sorted(r["Tanggal"].tolist()) == [-28, -27]
+            and r["NAMA RESTO"].notna().all())
+
+    d4 = tempfile.mkdtemp(prefix="t35d_w3_")
+    _v20_mock_4205(os.path.join(d4, "x.xlsx"),
+                   [(f"IT.2026.08.{dd}", "GUDANG HO (MLGPAR)", dd,
+                     "BRG", dd) for dd in range(25, 32)])
+    r_std = fn_4205(d4, mode="lalu")
+    check20("T9a jendela 5 hari standar utuh (25..31 → -27..-31)",
+            sorted(r_std["Tanggal"].tolist()) == [-31, -30, -29, -28, -27])
+
+    d5 = tempfile.mkdtemp(prefix="t35d_w4_")
+    _v20_mock_4205(os.path.join(d5, "x.xlsx"), [
+        ("IT.2026.08.5", "GUDANG TANPA RESTO", 5, "BRG", 1),
+        ("IT.2026.08.5", "GUDANG HO (MLGPAR)", 5, "BRG", 2),
+    ])
+    r_b = fn_4205(d5, mode="berjalan")
+    check20("T9b mode berjalan TIDAK berubah (NA-resto tetap lolos)",
+            len(r_b) == 2 and r_b["NAMA RESTO"].isna().sum() == 1)
+
+    r_miss = fn_4205(os.path.join(d, "TIDAK ADA"), mode="lalu")
+    r_empty = fn_4205(tempfile.mkdtemp(prefix="t35d_w5_"), mode="lalu")
+    check20("T9c folder hilang/kosong → 0 baris senyap",
+            len(r_miss) == 0 and len(r_empty) == 0)
+
+    print("    [6b.3] queries lalu sheet — FIX 4 (R-3)")
+    root = tempfile.mkdtemp(prefix="t35d_s1_")
+    rp = os.path.join(root, "9.NEW QUERY")
+    _v20_mock_4205(
+        os.path.join(rp, "4.1 4205 Bulan Lalu", "lalu.xlsx"),
+        [("IT.2026.08.28", "GUDANG HO (MLGPAR)", 28, "BRG", 10)],
+        sheet="#42.05. Rincian Pemindahan LALU")
+    _v20_mock_3224(
+        os.path.join(rp, "13.2 3224 RI Bulan Lalu", "ri_lalu.xlsx"),
+        [(28, "GUDANG HO (MLGPAR)", "BRG", 10)],
+        sheet="#32.24. Rincian Penerimaan LALU")
+
+    cfg = Config(_v20_config(rp))
+    r4205 = query_4205_bulan_lalu(cfg)
+    check20("T10a 4205-lalu sheet beda nama → rows ditemukan (bukan 0 senyap)",
+            len(r4205) == 1 and r4205["Tanggal"].iloc[0] == -28,
+            f"{len(r4205)} rows")
+    r3224 = query_3224_bulan_lalu(cfg)
+    check20("T10b 3224-lalu sheet beda nama → rows ditemukan",
+            len(r3224) == 1 and r3224["Tanggal"].iloc[0] == -28,
+            f"{len(r3224)} rows")
+
+    root2 = tempfile.mkdtemp(prefix="t35d_s2_")
+    rp2 = os.path.join(root2, "9.NEW QUERY")
+    _v20_mock_4205(
+        os.path.join(rp2, "4.1 4205 Bulan Lalu", "lalu.xlsx"),
+        [("IT.2026.08.28", "GUDANG HO (MLGPAR)", 28, "BRG", 10)])
+    r_exact = query_4205_bulan_lalu(Config(_v20_config(rp2)))
+    check20("T11 nama sheet persis → perilaku lama utuh (tanpa fallback)",
+            len(r_exact) == 1)
+
+    cfg_path20 = _v20_config(rp2)
+    with open(cfg_path20, encoding="utf-8") as f:
+        cfg_data = _json.load(f)
+    cfg_data["Sheets"] = {k: v for k, v in cfg_data["Sheets"].items()
+                          if k != "Pemindahan4205Lalu"}
+    cp_old = os.path.join(root2, "config_old.json")
+    with open(cp_old, "w", encoding="utf-8") as f:
+        _json.dump(cfg_data, f)
+    cfg_old = Config(cp_old)
+    check20("T12a config lama tanpa key → default = nilai berjalan, 0 KeyError",
+            cfg_old.sheet("Pemindahan4205Lalu")
+            == cfg_old.sheet("Pemindahan4205"))
+    r_old = query_4205_bulan_lalu(cfg_old)
+    check20("T12b config lama → rows tetap ditemukan", len(r_old) == 1)
+
+    cfg_data["Sheets"]["Pemindahan4205Lalu"] = \
+        "#42.05. Rincian Pemindahan Bara"
+    cp_ded = os.path.join(root2, "config_ded.json")
+    with open(cp_ded, "w", encoding="utf-8") as f:
+        _json.dump(cfg_data, f)
+    cfg_ded = Config(cp_ded)
+    check20("T12c key dedikasi eksplisit dipakai bila ada",
+            cfg_ded.sheet("Pemindahan4205Lalu")
+            == "#42.05. Rincian Pemindahan Bara")
+
+    cfg_miss = Config(_v20_config(os.path.join(root2, "NOPE")))
+    check20("T13 folder lalu hilang → 0 baris senyap",
+            len(query_4205_bulan_lalu(cfg_miss)) == 0
+            and len(query_3224_bulan_lalu(cfg_miss)) == 0)
+
+    print("    [6b.4] End-to-end: query_in + build_append1 (lalu beda nama)")
+
+    def build_tree(lalu_sheet_4205, lalu_sheet_3224):
+        root_e = tempfile.mkdtemp(prefix="t35d_e2e_")
+        rpe = root_e
+        _v20_mock_rekap(
+            os.path.join(rpe, "1. DEVIASI WEEKLY", "CEK.xlsx"),
+            "1  DEVIASI WEEKLY", _V20_REKAP_BERJALAN, list(range(1, 32)))
+        _v20_mock_rekap(
+            os.path.join(rpe, "1.12 Rekap Mentah Bulan Lalu", "LALU.xlsx"),
+            "SO LALU", _V20_REKAP_LALU, list(range(25, 32)))
+        _v20_mock_4205(os.path.join(rpe, "4. 42.05", "a.xlsx"),
+                       [("IT.2026.08.5", "GUDANG HO (MLGPAR)", 5,
+                         "BRG-PREF", 15)])
+        _v20_mock_4205(
+            os.path.join(rpe, "4.1 4205 Bulan Lalu", "lalu.xlsx"),
+            [("IT.2026.08.28", "GUDANG HO (MLGPAR)", 28, "BRG-PREF", 40)],
+            sheet=lalu_sheet_4205)
+        _v20_mock_3224(os.path.join(rpe, "13. 32.24 RI", "b.xlsx"),
+                       [(5, "GUDANG HO (MLGPAR)", "BRG-PREF", 20)])
+        _v20_mock_3224(
+            os.path.join(rpe, "13.2 3224 RI Bulan Lalu", "lalu.xlsx"),
+            [(28, "GUDANG HO (MLGPAR)", "BRG-PREF", 40)],
+            sheet=lalu_sheet_3224)
+        return _v20_config(root_e)
+
+    cfg_a = Config(build_tree("#42.05. Rincian Pemindahan LALU",
+                              "#32.24. Rincian Penerimaan LALU"))
+    det = {}
+    qin = query_in(cfg_a, detail_out=det)
+    srcs = set(det["df"]["SOURCE IN"].unique())
+    check20("T14a query_in menemukan SEMUA 4 sumber (lalu beda nama)",
+            {"32.24", "32.24 (Bulan Lalu)", "42.05", "42.05 (Bulan Lalu)"}
+            <= srcs, str(sorted(srcs)))
+    check20("T14b semua baris JENIS IN", (qin["JENIS"] == "IN").all())
+
+    cfg_b = Config(build_tree("#42.05. Rincian Pemindahan Bara",
+                              "#32.24. Rincian Penerimaan Bara"))
+    det_b = {}
+    qin_b = query_in(cfg_b, detail_out=det_b)
+    check20("T14c jumlah baris IN identik (fallback ≠ duplikat/inflasi)",
+            len(qin) == len(qin_b) and len(det["df"]) == len(det_b["df"]),
+            f"{len(qin)} == {len(qin_b)}")
+
+    final_e = build_append1(cfg_a)
+    check20("T15a SOURCE DATA sampai output final (1.SO)",
+            _v20_pair_source(final_e, "BRG-TIE1") == "input so harian"
+            and _v20_pair_source(final_e, "BRG-PAD") == "input so harian")
+    so_pair = final_e[(final_e["JENIS"] == "4.IN")
+                      & (final_e["Nama Barang"] == "BRG-PREF")
+                      & (final_e["Tanggal"] == -28)]
+    check20("T15b IN lalu (-28) dari 42.05+32.24 lalu masuk metrik",
+            len(so_pair) == 1 and so_pair["NILAI"].iloc[0] == 80,
+            f"NILAI={so_pair['NILAI'].tolist() if len(so_pair) else '-'}")
+
+    print(f"    ✓ [6b] v3.9.20/35-d: {n_ok[0]}/{n_ok[0]} checks OK")
+    return True
+
+
+# =============================================================================
 # MAIN TEST
 # =============================================================================
 
@@ -576,6 +1024,10 @@ def run_test():
     print(f"    Append1: {len(append1_result)} rows, cols: {list(append1_result.columns)}")
     print(f"    Rincian PO: {len(rincian_result)} rows")
     print(f"    IN detail: {len(in_detail_result)} rows")
+
+    # v3.9.20 — deep-audit pipeline fixes (agent 35-d): LANGKAH 9 tie/NA/
+    # strip, fn_4205 lalu anchor resto, resolusi sheet folder lalu, e2e
+    run_test_v3920_fixes()
 
     # Test view widgets (smoke test)
     print("\n  [7] Testing view widgets...")

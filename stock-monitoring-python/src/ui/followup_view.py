@@ -1,5 +1,9 @@
 """followup_view.py — Tab "☑ Follow Up" (v3.2.0) — ala repo Waste.
 
+v3.9.20 (deep audit 34-e/fix 35-c2): nilai popup kolom = baris yang
+TAMPIL (filter kolom lain dulu; kolom sendiri dikecualikan) + import
+C_TEXT_MUTED tidak-terpakai dibersihkan (F401).
+
 v3.9.6 (permintaan user: "Format Follow UP Seperti File Sample"):
 format tabel mengikuti sheet Follow UP workbook asli user (01.1 CEK
 STOCK V2.xlsb): Resto · Nama Barang · SO per tanggal (heading ANGKA
@@ -40,7 +44,6 @@ from .theme import (
     C_BG,
     C_CARD,
     C_HEADER,
-    C_TEXT_MUTED,
     font,
 )
 from .widgets import (
@@ -255,7 +258,13 @@ class FollowUpView(tk.Frame):
         self.content.pack(fill="both", expand=True)
 
     def _col_values(self, col: str) -> list:
-        """Nilai unik TERFORMAT utk popup filter header (v3.5)."""
+        """Nilai unik TERFORMAT utk popup filter header (v3.5).
+
+        v3.9.19 (penuntasan "berlaku untuk semua filter"): sumber nilai =
+        baris yang TAMPIL SAAT INI — filter header kolom LAIN diterapkan
+        dulu (kolom ini sendiri dikecualikan — perilaku AutoFilter
+        Excel); dulu semua baris store → nilai baris yang sudah
+        terfilter kolom lain tetap muncul di popup."""
         rows = list(self.store.rows.values())
         if not rows:
             return []
@@ -263,10 +272,16 @@ class FollowUpView(tk.Frame):
         if not idx:
             return []
         j = idx[0]
+        col_idx = {c[0]: k for k, c in enumerate(COLUMNS)}
+        other = [(col_idx[c], s) for c, s in self._col_sel.items()
+                 if s is not None and c != col and c in col_idx]
         vals = []
         for snap in rows:
             info = self.store.resolved.get(snap.get("fp", ""), {})
-            vals.append(str(self._fu_row_values(snap, bool(info), info)[j]))
+            values = self._fu_row_values(snap, bool(info), info)
+            if other and not all(str(values[k]) in s for k, s in other):
+                continue
+            vals.append(str(values[j]))
         return sorted(set(vals))
 
     def _on_col_filter(self, col: str, selected):

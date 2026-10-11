@@ -115,7 +115,7 @@ from src.ui.in_selisih_view import InSelisihView
 from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.pivot_view import PivotTableView
-from src.ui.rincian_po_view import RincianPoView
+from src.ui.rincian_po_view import RincianPoView, _resto_name
 from src.ui.theme import (
     C_AMBER,
     C_BG,
@@ -149,7 +149,51 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.19"  # v3.9.19 — KOLOM ANALISA + HAPUS RISIKO/BENCHMARK + DEFAULT KATEGORI + NAMA RESTO PO + FILTER DATA-ADA + PROMIX 04 + 9.ACR + RI BALANCING
+APP_VERSION = "3.9.20"  # v3.9.20 — DEEP AUDIT & FIX (5 agen audit + 5 agen fix): 1 BUG + 15 RISK diperbaiki + penuntasan "semua filter = data yang ada" (komparasi reset/popup · deviasi satuan/chrono/source · rincian NA/float/NaT/periode · pivot/FU/export · pipeline LANGKAH 9/sheet lalu/fn_4205)
+# v3.9.20 — DEEP AUDIT & FIX (gelombang audit 34-a..34-e + fix 35-a..35-d,
+# 25 perbaikan; 1 BUG + 15 RISK + 9 hardening/NIT):
+# (1) KOMPARASI (35-a/audit 34-a): reset filter 4 tabel analisa (Top/Flip/
+#     Minoritas/Liga) di SEMUA jalur reset tabel utama (load_data /
+#     _load_paths / _close_file / ✕ Reset Filter — dulu filter basi
+#     senyap → 0 baris di file baru); nilai popup filter tabel utama ⚖
+#     + Arah Minoritas + Liga Deviasi kini BARIS YANG TAMPIL (param
+#     fmt_fn di _filtered_analisa_series — penuntasan "berlaku untuk
+#     semua filter"); 4 entri format kolom mati Risk/Bench dibersihkan.
+# (2) DEVIASI + POPUP (35-b/audit 34-b): _hl_cells diinisialisasi di
+#     __init__ (sort/reapply tag sebelum render pertama tidak lagi
+#     AttributeError di Tk 9); popup ringkas memfilter SATUAN — angka
+#     GR/PCS = BARIS YANG DIKLIK (dulu menjumlahkan lintas satuan);
+#     _chrono_key float-safe (urutan 25•..31• benar utk Tanggal
+#     float64); _so_source_lookup keep-LAST sort-Tanggal (preferensi
+#     append1 LANGKAH 9 — baris berjalan menang); _compute_cek (kode
+#     mati) dihapus penuh.
+# (3) RINCIAN PO + RINCIAN IN (35-c1/audit 34-c+34-e): BUG clone ⛶
+#     InSelisihView kini reapply tag neg per-cell (on_render_done —
+#     dulu minus kehilangan warna di Layar Penuh); _resto_name pd.NA-
+#     safe + float integral (1370.0 → "1370", dulu "0"); _fmt_date/
+#     _fmt_datetime NaT-safe (dulu ValueError → tab mati); load_data
+#     reset combo Cabang/Status (dulu filter basi → 0 baris senyap);
+#     RI Balancing membandingkan PERIODE (tahun, bulan) dgn bulan
+#     1-2 digit numerik — lintas-tahun-same-month kini terflag;
+#     literal "None"/"nan"/"NaT" dibuang dari daftar nilai popup.
+# (4) PIVOT + FOLLOWUP + EXPORT (35-c2/audit 34-e): popup Nama Barang
+#     pivot = barang yang TAMPIL (RESTO mode Tanggal + SOURCE +
+#     KATEGORI + rentang Tanggal + ☑ sembunyikan-baris-kosong; filter
+#     sendiri dikecualikan); popup kolom FollowUp = baris tampil; F401
+#     C_TEXT_MUTED dibersihkan; merah negatif pivot #CC0000 → #dc2626
+#     (seragam 11 view); export sheet "Rincian PO" + kolom Nama Resto
+#     (import _resto_name — tanpa duplikasi helper).
+# (5) PIPELINE (35-d/audit 34-d): append1 LANGKAH 9 tie-break
+#     DETERMINISTIK (mergesort + kunci sekunder bentuk-string SOURCE
+#     DATA — tie → "input so harian" menang, konservatif utk CEK
+#     Promix 04) + na_position="first" (NA-Tanggal tak pernah menang)
+#     + SOURCE DATA di-strip (NA-safe); resolusi sheet folder bulan-
+#     lalu: key dedikasi Sheets["Pemindahan4205Lalu"] + fallback
+#     prefiks modul "#42.05"/"#32.24" (sheet lalu beda nama ≠ lagi 0
+#     baris senyap — 32.24 & 42.05 konsisten); fn_4205 mode "lalu"
+#     filter baris resto SEBELUM max_t (mirror persis fn_3224 — NA-
+#     resto tak lagi menggeser jendela 5 hari).
+# v3.9.19 — KOLOM ANALISA + HAPUS RISIKO/BENCHMARK + DEFAULT KATEGORI + NAMA RESTO PO + FILTER DATA-ADA + PROMIX 04 + 9.ACR + RI BALANCING
 # v3.9.19 — 8 permintaan user:
 # (1) KOLOM ANALISA (user: "tambah kolom baru untuk keterangan kenaikan
 #     tertinggi, penurunan tertinggi, stabil, berubah arah, potensi
@@ -1288,8 +1332,21 @@ class StockMonitorApp:
                     append1_df.to_excel(writer, sheet_name="Append1",
                                         index=False)
                 if rincian_po_df is not None and not rincian_po_df.empty:
-                    rincian_po_df.to_excel(writer, sheet_name="Rincian PO",
-                                           index=False)
+                    # v3.9.19 (paritas UI): kolom "Nama Resto" — derivasi
+                    # sama dgn rincian_po_view (Cabang PO → kode resto,
+                    # rsplit titik terakhir; tanpa Cabang PO → "") —
+                    # disisipkan tepat setelah Tanggal. Baris tanpa kode
+                    # Cabang PO (parent tak terisi / NA) → "".
+                    po_export = rincian_po_df.copy()
+                    nama_resto = (po_export["Cabang PO"].map(_resto_name)
+                                  if "Cabang PO" in po_export.columns
+                                  else "")
+                    po_cols = list(po_export.columns)
+                    pos = (po_cols.index("Tanggal") + 1
+                           if "Tanggal" in po_cols else 0)
+                    po_export.insert(pos, "Nama Resto", nama_resto)
+                    po_export.to_excel(writer, sheet_name="Rincian PO",
+                                       index=False)
                 # v3.4: detail IN per dokumen (42.05 / 32.24 / 99.01 + nomor)
                 if in_detail_df is not None and not in_detail_df.empty:
                     in_detail_df.to_excel(writer, sheet_name="Rincian IN",

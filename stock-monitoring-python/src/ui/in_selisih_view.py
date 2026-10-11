@@ -12,6 +12,12 @@ v3.9.19: popup Rincian IN punya KOLOM CEK — "RI Balancing" bila bulan
 Nomor RI ≠ bulan Nomor PO (struktur kode PO.2026.08.00571 /
 RI.2026.10.10354: segmen 2 = tahun, segmen 3 = bulan; permintaan user:
 RI dibuat beda bulan dari PO-nya = entries balancing).
+FIX 35-c1: periode dibandingkan PENUH (tahun, bulan) — bulan sama
+beda tahun = periode beda → tetap "RI Balancing"; bulan 1-2 digit
+dibandingkan numerik.
+v3.9.20 (deep audit 34-c+34-e/fix 35-c1): clone ⛶ reapply tag neg
+per-cell (on_render_done — dulu minus kehilangan warna di Layar
+Penuh) + buang literal None/nan/NaT dari daftar nilai popup filter.
 
 v3.6 (permintaan user: "audit rekonsiliasi tidak perlu ambil dari sheet
 29 — aplikasikan logika nya dengan tambah kolom SO dan kolom hasil audit
@@ -150,8 +156,9 @@ _POPUP_IDS = [c[0] for c in _POPUP_COLUMNS]
 
 # v3.9.19 — struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR
 # (mis. "PO.2026.08.00571" / "RI.2026.10.10354" — 2026 tahun, 08/10
-# bulan). Cukup ambil segmen bulan (index 2).
-_DOC_CODE_RE = re.compile(r"^[A-Za-z]+\.(\d{4})\.(\d{2})\.")
+# bulan). FIX 35-c1: bulan boleh 1-2 digit ("RI.2026.8.10354" non-
+# zero-pad dulu gagal pola → CEK senyap kosong) + validasi 1..12.
+_DOC_CODE_RE = re.compile(r"^[A-Za-z]+\.(\d{4})\.(\d{1,2})\.")
 
 
 def _doc_code_str(code) -> str:
@@ -166,30 +173,49 @@ def _doc_code_str(code) -> str:
     return str(code).strip()
 
 
-def _doc_month(code) -> "int | None":
-    """Bulan dari kode dokumen PO.2026.08.00571 → 8; None bila pola
-    tidak cocok / nilai kosong."""
+def _doc_period(code):
+    """FIX 35-c1 — (tahun, bulan) dari kode dokumen
+    "PO.2026.08.00571" → (2026, 8); None bila pola tidak cocok /
+    bulan di luar 1..12 ("RI.2026.13.1" → None). Bulan 1-2 digit
+    dibandingkan NUMERIK (8 == 08)."""
     m = _DOC_CODE_RE.match(_doc_code_str(code))
     if not m:
         return None
     try:
-        return int(m.group(2))
+        year = int(m.group(1))
+        month = int(m.group(2))
     except ValueError:
         return None
+    if not 1 <= month <= 12:
+        return None
+    return (year, month)
+
+
+def _doc_month(code) -> "int | None":
+    """Bulan dari kode dokumen PO.2026.08.00571 → 8; None bila pola
+    tidak cocok / nilai kosong (FIX 35-c1: bulan 1-2 digit + sanity
+    1..12 via _doc_period)."""
+    period = _doc_period(code)
+    return period[1] if period is not None else None
 
 
 def _ri_balancing(nomor, nomor_po) -> str:
     """v3.9.19 — keterangan CEK popup Rincian IN: bulan Nomor (dokumen
     penerimaan RI) ≠ bulan Nomor PO → "RI Balancing" (RI dibuat beda
     bulan dari pesanannya — entries balancing; contoh user: PO Agustus
-    ↔ RI Oktober). Hanya berlaku utk dokumen RI (Nomor berprefiks "RI."
-    — dokumen PI 9901 adalah invoice pembelian, bukan balancing)."""
+    ↔ RI Oktober). FIX 35-c1 (RISK C3+C4): bandingkan PERIODE PENUH
+    (tahun, bulan) — "RI.2027.08" vs "PO.2026.08" (bulan sama, tahun
+    beda) kini di-flag: periode beda = entries balancing; dulu tahun
+    diabaikan → lolos senyap. Bulan 1-2 digit cocok numerik
+    ("RI.2026.8" == "PO.2026.08"). Hanya berlaku utk dokumen RI
+    (Nomor berprefiks "RI." — dokumen PI 9901 adalah invoice
+    pembelian, bukan balancing)."""
     n = _doc_code_str(nomor)
     if not n.upper().startswith("RI."):
         return ""
-    m_ri = _doc_month(n)
-    m_po = _doc_month(nomor_po)
-    if m_ri is None or m_po is None or m_ri == m_po:
+    p_ri = _doc_period(n)
+    p_po = _doc_period(nomor_po)
+    if p_ri is None or p_po is None or p_ri == p_po:
         return ""
     return "RI Balancing"
 
@@ -919,7 +945,11 @@ class InSelisihView(tk.Frame):
                         s = str(v[k])
                         if s:
                             vals.add(s)
-            return sorted(vals, key=_filter_value_sort_key)
+            # FIX 35-c1 (NIT C1): buang literal 'None'/'nan'/'NaT' juga di
+            # jalur fallback D-08 (nilai string hasil render tree).
+            return sorted(
+                (v for v in vals if v not in ("None", "nan", "NaT")),
+                key=_filter_value_sort_key)
         if base is None or base.empty:
             return []
         # v3.9.19 — sumber nilai = baris yang TAMPIL SAAT INI (permintaan
@@ -949,7 +979,11 @@ class InSelisihView(tk.Frame):
             f = f[sv != 0]
         if f.empty or col not in f.columns:
             return []
-        return _format_col_values(col, f[col]).unique().tolist()
+        # FIX 35-c1 (NIT C1): literal 'None'/'nan'/'NaT' (object cols dgn
+        # None/pd.NA asli → astype(str)) jangan bocor ke daftar nilai
+        # popup filter; '' tetap dipertahankan.
+        vals = _format_col_values(col, f[col]).unique().tolist()
+        return [v for v in vals if v not in ("None", "nan", "NaT")]
 
     def _on_col_filter(self, col: str, selected):
         self._col_sel[col] = selected
@@ -1423,7 +1457,12 @@ class InSelisihView(tk.Frame):
             self.tree, "Rekap Selisih IN & Audit Rekonsiliasi",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            # FIX 35-c1 (BUG-E1/audit 34-e): clone ⛶ re-insert baris →
+            # tag per-cell minus TERRESET; tanpa hook ini clone Layar
+            # Penuh kehilangan merah per-sel (mirror deviasi_view:1330
+            # / InDetailPopup._maximize).
+            on_render_done=self._reapply_cell_tags)
         return win, new_tree
 
     # ------------------------------------------------- DOUBLE-CLICK POPUP

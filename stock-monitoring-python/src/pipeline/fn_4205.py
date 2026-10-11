@@ -5,6 +5,9 @@ OPTIMIZED: vectorized text operations + removed redundant pd.to_datetime.
 v3.9.17: mode "lalu" — mirror fn_3224(mode="lalu"): 5 hari terakhir file
 bulan lalu + Tanggal dinegasikan (folder "4.1 4205 Bulan Lalu" = penambah
 IN periode ujung bulan lalu, "sama seperti 32.24 bulan lalu").
+v3.9.20 (deep audit 34-d/fix 35-d): mode "lalu" filter baris resto-valid
+SEBELUM max_t (mirror PERSIS fn_3224 — baris NA-resto tak lagi menggeser
+jendela 5 hari).
 """
 import pandas as pd
 
@@ -75,15 +78,25 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
     # (hari negatif = bulan lalu) → penambah IN periode ujung bulan lalu
     # (folder "4.1 4205 Bulan Lalu", permintaan user: "sama seperti 32.24
     # bulan lalu").
+    # FIX R-4 (audit 34-d): mirror fn_3224 — baris resto-valid difilter
+    # DULU sebelum max_t (filter & window identik fn_3224.py:54,68):
+    # baris tanpa NAMA RESTO bertanggal akhir bulan tidak lagi menggeser
+    # jendela 5 hari dan membuang semua baris resto. Output lalu = baris
+    # resto-valid dalam jendela (identik bentuk output fn_3224 lalu);
+    # mode berjalan TIDAK berubah (NA-resto tetap lolos — M-mirror asal).
     if mode == "lalu":
+        # fil = Table.SelectRows(final, each [NAMA RESTO] <> null and <> "")
+        mask = final["NAMA RESTO"].notna() & (
+            final["NAMA RESTO"].astype(str).str.strip() != "")
+        fil = final[mask].copy()
         # maxT = List.Max(fil[Tanggal])
-        max_t = final["Tanggal"].max()
+        max_t = fil["Tanggal"].max()
         if pd.isna(max_t):
-            return final.iloc[0:0].copy()
+            return fil.iloc[0:0].copy()
         # fil5 = Table.SelectRows(fil, each [Tanggal] >= maxT - 4)
         # NA-safe mask: .fillna(False) for pandas < 2.1 compatibility
-        mask5 = (final["Tanggal"] >= (max_t - 4)).fillna(False)
-        fil5 = final[mask5].copy()
+        mask5 = (fil["Tanggal"] >= (max_t - 4)).fillna(False)
+        fil5 = fil[mask5].copy()
         # neg = Tanggal → -Tanggal
         fil5["Tanggal"] = (-fil5["Tanggal"]).astype("Int64")
         return fil5.reset_index(drop=True)

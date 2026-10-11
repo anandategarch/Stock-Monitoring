@@ -140,6 +140,33 @@ Memverifikasi:
     pertama; append1 bawa SOURCE DATA per pasangan); (7) istilah 9.OUT
     → 9.ACR; (8) kolom CEK popup Rincian IN — "RI Balancing" bila
     bulan Nomor RI ≠ bulan Nomor PO (PREFIKS.TAHUN.BULAN.NOMOR).
+31. v3.9.20 — DEEP AUDIT & FIX (§30; 5 agen audit 34-a..34-e + 5 agen fix
+    35-a/b/c1/c2/d): 1 BUG + 15 RISK diperbaiki + penuntasan "semua
+    filter = data yang ada": (35-a komparasi) reset filter 4 tabel
+    analisa (Top/Flip/Minoritas/Liga) di SEMUA jalur reset tabel utama
+    (load_data/_load_paths/_close_file/✕ Reset — dulu filter basi →
+    0 baris senyap) + nilai popup tabel utama ⚖/Minoritas/Liga = baris
+    tampil + 4 entri format kolom mati Risk/Bench dibersihkan; (35-b
+    deviasi+popup) _hl_cells di-init di __init__ (sort sebelum render
+    Tk 9 tidak lagi AttributeError) + popup ringkas memfilter SATUAN
+    (angka = baris GR/PCS yang DIKLIK, bukan jumlah lintas satuan) +
+    _chrono_key float-safe + _so_source_lookup keep-LAST sort-Tanggal
+    (preferensi append1 LANGKAH 9) + _compute_cek dead-code dihapus;
+    (35-c1 rincian PO+IN) BUG clone ⛶ InSelisihView reapply tag neg
+    per-cell (on_render_done) + _resto_name pd.NA/float-safe (1370.0
+    → '1370') + _fmt_date/_fmt_datetime NaT-safe (tab tidak mati) +
+    load_data reset combo Cabang/Status + RI Balancing banding PERIODE
+    (tahun, bulan) — lintas-tahun sama-bulan terflag + literal
+    'None'/'nan'/'NaT' dibuang dari popup filter; (35-c2 pivot/FU/
+    export) popup Nama Barang pivot = baris tampil (RESTO/SOURCE/
+    KATEGORI/rentang tanggal/hide-empty) + popup kolom FollowUp =
+    baris tampil + F401 dibersihkan + merah neg pivot #dc2626 seragam
+    11 view + export sheet Rincian PO bawa kolom Nama Resto (import
+    _resto_name); (35-d pipeline — cek di test_mock.py) tie-break
+    LANGKAH 9 deterministik + NA-Tanggal tak menang + SOURCE DATA
+    strip + resolusi sheet folder lalu (fallback prefiks modul + key
+    dedikasi config) + fn_4205 lalu anchor resto-valid (mirror
+    fn_3224).
 29. v3.9.18 — FOKUS RESTO REKAP + POPUP RINGKAS + KOLOM + HIGHLIGHT
     (§28, 5 permintaan user tab Deviasi GR/PCS): (1) pivot HANYA resto
     yang ada di folder "1. DEVIASI WEEKLY" (JENIS 1.SO/5.BARANG MASUK
@@ -499,7 +526,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.19", APP_VERSION == "3.9.19", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.20", APP_VERSION == "3.9.20", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -5184,6 +5211,1238 @@ def main():
           _resto_vals29 == ["SBYKET"], f"got {_resto_vals29}")
     _rv29._reset_filter()
     wait_view(root, _rv29)
+
+    # ==================================================================
+    print()
+    print("== 30. (v3.9.20) DEEP AUDIT & FIX — 5 AGEN AUDIT + 5 AGEN FIX: "
+          "KOMPARASI RESET/POPUP · DEVIASI SATUAN/CHRONO/SOURCE · RINCIAN "
+          "NA/FLOAT/NaT/PERIODE · PIVOT/FU/EXPORT ==")
+
+    def _pump30(sec=0.5):
+        _t0p = time.time()
+        while time.time() - _t0p < sec:
+            root.update()
+            time.sleep(0.005)
+
+    # --- (a) 35-a — Komparasi: reset filter analisa + popup data-ada -----
+    from src.ui.komparasi_deviasi_view import (
+        KomparasiDeviasiView as _KDV30,
+    )
+
+    def _jrow30(resto, bahan, dev, gr, status):
+        # baris join sintetis (pola probe 34-a — tanpa parse file)
+        return {"_resto_norm": resto, "_bahan_norm": bahan,
+                "Minggu": "WEEK 4", "H": 25, "DEV Lalu": dev,
+                "GR Saat Ini": gr, "Status": status, "BULAN": "NOV",
+                "Resto": resto, "Nama Barang": bahan, "Satuan": "GR"}
+
+    _JOIN_A30 = pd.DataFrame([
+        _jrow30("R_STAB", "B2", 10.0, 10.5, "MATCH"),
+        _jrow30("R_TURUN", "B3", 10.0, 2.0, "SELISIH"),
+        _jrow30("R_FFLOP", "B5", -100.0, 10.0, "SELISIH"),
+    ])
+    _JOIN_B30 = pd.DataFrame([
+        _jrow30("R_NAIK", "B1", 10.0, 50.0, "SELISIH"),
+        _jrow30("R_STAB", "B7", 10.0, 10.5, "MATCH"),
+    ])
+    _SURF30 = (
+        ("Top", "_top_sel", "_top_filters", "Status"),
+        ("Flip", "_flip_sel", "_flip_filters", "Kategori"),
+        ("Minoritas", "_min_sel", "_min_filters", "Arah Mayoritas"),
+        ("Liga", "_liga_sel", "_liga_filters", "Arah"),
+    )
+
+    _top30a = tk.Toplevel(root)
+    _top30a.geometry("1400x900+0+0")
+    kv30 = _KDV30(_top30a)
+    kv30.pack(fill="both", expand=True)
+    kv30._show_content()
+    root.update()
+
+    def _kv_state30():
+        # state bersih per tes (tanpa memakai method yang dites)
+        for _l30, _sel30, _grp30, _c30 in _SURF30:
+            for _c2_30 in getattr(kv30, _sel30):
+                getattr(kv30, _sel30)[_c2_30] = None
+            for _f30 in getattr(kv30, _grp30)._filters.values():
+                _f30.selected = None
+        for _c2_30 in kv30._col_sel:
+            kv30._col_sel[_c2_30] = None
+        kv30._join_df = _JOIN_A30.copy()
+        kv30._topn_var.set("0")
+        kv30._show_all_weeks.set(True)
+        kv30._anasec_idx = 0
+        kv30._on_mode_change(1)     # mode 📈 Analisa (jalur user nyata)
+        kv30._refresh_analisa()
+        root.update()
+
+    def _kv_set_filters30():
+        kv30._top_sel["Status"] = {"MATCH"}
+        kv30._flip_sel["Kategori"] = {"Parsial"}
+        kv30._min_sel["Arah Mayoritas"] = {"MINUS"}
+        kv30._liga_sel["Arah"] = {"SURPLUS"}
+        kv30._top_filters._filters["Status"].selected = {"MATCH"}
+        kv30._flip_filters._filters["Kategori"].selected = {"Parsial"}
+        kv30._min_filters._filters["Arah Mayoritas"].selected = {"MINUS"}
+        kv30._liga_filters._filters["Arah"].selected = {"SURPLUS"}
+
+    def _kv_stale30():
+        _stale30 = []
+        for _l30, _sel30, _grp30, _c30 in _SURF30:
+            for _c2_30, _s30 in getattr(kv30, _sel30).items():
+                if _s30 is not None:
+                    _stale30.append(f"{_l30}:{_c2_30}")
+            _ic30 = getattr(kv30, _grp30)._filters[_c30].selected
+            if _ic30 is not None:
+                _stale30.append(f"{_l30}:icon-{_c30}")
+        return _stale30
+
+    _kv_state30()
+    _kv_set_filters30()
+    kv30._close_file()
+    root.update()
+    check("(v3.9.20/35-a) ✕ Tutup File: filter 4 tabel analisa (sel + ikon "
+          "corong) ikut ter-reset",
+          not _kv_stale30() and
+          len(kv30._top_tree.get_children("")) == 0,
+          f"stale={_kv_stale30()}")
+    _kv_state30()
+    _kv_set_filters30()
+    kv30._close_file()
+    root.update()
+    kv30._join_df = _JOIN_B30.copy()   # file BARU dimuat → render ulang
+    kv30._refresh_analisa()
+    root.update()
+    check("(v3.9.20/35-a) Tutup File → muat file baru: TIDAK 0 baris senyap "
+          "(dulu filter basi Status) + nilai popup segar",
+          len(kv30._top_tree.get_children("")) == len(_JOIN_B30) and
+          sorted(kv30._top_col_values("Status")) == ["MATCH", "SELISIH"],
+          f"rows={len(kv30._top_tree.get_children(''))} "
+          f"vals={kv30._top_col_values('Status')}")
+    _kv_state30()
+    _kv_set_filters30()
+    kv30.load_data(pd.DataFrame({"JENIS": [], "NILAI": [], "Tanggal": [],
+                                 "Nama Barang": [], "NAMA RESTO": []}))
+    root.update()
+    check("(v3.9.20/35-a) load_data: filter analisa + _col_sel ter-reset",
+          not _kv_stale30() and
+          all(s is None for s in kv30._col_sel.values()),
+          f"stale={_kv_stale30()}")
+    _kv_state30()
+    _kv_set_filters30()
+    kv30.data = _JOIN_A30.copy()   # non-empty supaya tidak early-return
+    kv30._load_paths([str(PROJECT_ROOT / "tidak-ada-35a.xlsx")],
+                     interactive=False)
+    check("(v3.9.20/35-a) _load_paths: filter analisa ter-reset SINKRON "
+          "sebelum job worker (payload snapshot saat job mulai)",
+          not _kv_stale30(), f"stale={_kv_stale30()}")
+    wait_view(root, kv30)   # biarkan job worker (parse gagal) selesai damai
+    _kv_state30()
+    _kv_set_filters30()
+    kv30._reset_filter()
+    wait_view(root, kv30)
+    check("(v3.9.20/35-a) ✕ Reset Filter: 4 tabel analisa + kolom utama "
+          "ter-reset",
+          not _kv_stale30() and
+          all(s is None for s in kv30._col_sel.values()),
+          f"stale={_kv_stale30()}")
+
+    # FIX 2 — nilai popup filter = baris yang TAMPIL (AutoFilter Excel)
+    def _kv_clear_sel30():
+        for _l30, _sel30, _grp30, _c30 in _SURF30:
+            for _c2_30 in getattr(kv30, _sel30):
+                getattr(kv30, _sel30)[_c2_30] = None
+        for _c2_30 in kv30._col_sel:
+            kv30._col_sel[_c2_30] = None
+
+    _kv_clear_sel30()
+    kv30._result_df = pd.DataFrame({
+        "Resto": ["RA", "RB", "RC"],
+        "Nama Barang": ["AYAM", "AYAM", "GULA"],
+        "Status": ["MATCH", "SELISIH", "TIDAK ADA DI DATA SAAT INI"],
+        "Selisih": [0.0, 5.0, 7.0],
+        "DEV Saat Ini": [0.5, 0.25, 0.75],
+    })
+    _vals30a = kv30._col_values("Resto")
+    kv30._col_sel["Status"] = {"MATCH"}
+    check("(v3.9.20/35-a) Popup tabel utama ⚖: nilai kolom lain mengikuti "
+          "filter Status (dulu tak tersaring)",
+          _vals30a == ["RA", "RB", "RC"] and
+          kv30._col_values("Resto") == ["RA"] and
+          kv30._col_values("Nama Barang") == ["AYAM"],
+          f"got {kv30._col_values('Resto')}")
+    kv30._col_sel["Status"] = None
+
+    kv30._result_df = pd.DataFrame({
+        "Resto": ["RA", "RB", "RC"],
+        "Status": ["MATCH", "SELISIH", "TIDAK ADA DI DATA SAAT INI"],
+    })
+    kv30._col_sel["Resto"] = {"RA"}
+    check("(v3.9.20/35-a) Popup tabel utama: kolom SENDIRI dikecualikan "
+          "(daftar nilai tetap semua; kolom lain tersaring)",
+          kv30._col_values("Resto") == ["RA", "RB", "RC"] and
+          kv30._col_values("Status") == ["MATCH"],
+          f"got {kv30._col_values('Resto')}")
+    kv30._col_sel["Resto"] = None
+
+    kv30._result_df = pd.DataFrame({
+        "Resto": ["RA", "RB", "RC"],
+        "Status": ["MATCH", "SELISIH", "TIDAK ADA DI DATA SAAT INI"],
+        "DEV Saat Ini": [0.5, 0.25, 0.75],
+    })
+    kv30._col_sel["DEV Saat Ini"] = {"50,00%"}
+    _pct30 = (kv30._col_values("DEV Saat Ini") ==
+              ["50,00%", "25,00%", "75,00%"] and
+              kv30._col_values("Resto") == ["RA"])
+    kv30._col_sel["DEV Saat Ini"] = None
+    kv30._result_df = pd.DataFrame({
+        "Resto": ["RA", "RB"], "Selisih": [0.0, 5.0]})
+    kv30._col_sel["Selisih"] = {"5"}
+    _num30 = kv30._col_values("Resto") == ["RB"]
+    kv30._col_sel["Selisih"] = None
+    check("(v3.9.20/35-a) Popup tabel utama: format persen/angka konsisten "
+          "jalur APPLY _prepare_rows (dulu fmt salah → daftar nilai kolom "
+          "lain kosong senyap)",
+          _pct30 and _num30, f"pct={_pct30} num={_num30}")
+
+    kv30._result_df = pd.DataFrame({
+        "Resto": ["RA", "RB"], "Status": ["MATCH", "SELISIH"]})
+    kv30._col_sel["Status"] = set()   # seleksi kosong = filter aktif
+    check("(v3.9.20/35-a) Popup tabel utama: seleksi kosong → daftar nilai "
+          "kosong (semantik Excel 0 baris)",
+          kv30._col_values("Resto") == [],
+          f"got {kv30._col_values('Resto')}")
+    kv30._col_sel["Status"] = None
+
+    _kv_clear_sel30()
+    kv30._min_df = pd.DataFrame({
+        "Nama Barang": ["GULA", "GULA", "BERAS", "BERAS"],
+        "Satuan": ["GR", "PCS", "GR", "PCS"],
+        "Arah Mayoritas": ["MINUS", "SURPLUS", "MINUS", "SURPLUS"],
+        "% Minoritas": [0.1, 0.2, 0.3, 0.4],
+    })
+    _min30 = (kv30._min_col_values("Satuan") == ["GR", "PCS"])
+    kv30._min_sel["Arah Mayoritas"] = {"MINUS"}
+    _min30 = (_min30 and kv30._min_col_values("Satuan") == ["GR"] and
+              sorted(kv30._min_col_values("Nama Barang")) ==
+              ["BERAS", "GULA"])
+    kv30._min_sel["Satuan"] = {"GR"}
+    _min30 = _min30 and kv30._min_col_values("Satuan") == ["GR"]
+    kv30._min_sel["Arah Mayoritas"] = None
+    kv30._min_sel["Satuan"] = {"GR"}
+    _min30 = _min30 and kv30._min_col_values("Satuan") == ["GR", "PCS"]
+    kv30._min_sel["Satuan"] = None
+    _min30 = (_min30 and kv30._min_col_values("% Minoritas") ==
+              ["10,00%", "20,00%", "30,00%", "40,00%"])
+    check("(v3.9.20/35-a) Popup Arah Minoritas: nilai = baris tampil + "
+          "kolom sendiri dikecualikan + format persen utuh",
+          _min30, f"min={_min30}")
+
+    kv30._liga_df = pd.DataFrame({
+        "Resto": ["R1", "R2", "R3"],
+        "BOM": [100.0, 200.0, 300.0],
+        "DEV": [-10.0, 20.0, 30.0],
+        "Arah": ["MINUS", "SURPLUS", "SURPLUS"],
+        "Rate": [0.1, 0.2, 0.3],
+        "z": [1.5, 2.5, 3.5],
+    })
+    _liga30 = kv30._liga_col_values("Resto") == ["R1", "R2", "R3"]
+    kv30._liga_sel["Arah"] = {"MINUS"}
+    _liga30 = (_liga30 and kv30._liga_col_values("Resto") == ["R1"] and
+               kv30._liga_col_values("Rate") == ["10,00%"])
+    kv30._liga_sel["Arah"] = None
+    kv30._liga_sel["Resto"] = {"R3"}
+    _liga30 = (_liga30 and
+               kv30._liga_col_values("Resto") == ["R1", "R2", "R3"] and
+               kv30._liga_col_values("Arah") == ["SURPLUS"])
+    kv30._liga_sel["Resto"] = None
+    kv30._liga_sel["Arah"] = {"SURPLUS"}
+    _liga30 = _liga30 and kv30._liga_col_values("BOM") == ["200", "300"]
+    kv30._liga_sel["Arah"] = None
+    check("(v3.9.20/35-a) Popup Liga Deviasi: nilai = baris tampil + "
+          "kolom sendiri dikecualikan + format angka utuh",
+          _liga30, f"liga={_liga30}")
+
+    # FIX 3 — dead-code format kolom Risk/Bench dibersihkan
+    _dead30 = ("Disparitas Rerata", "Loss (Σ|DEV−|)", "Median Kelompok",
+               "Opportunity")
+    _dead_fmt30 = [
+        _KDV30._fmt_analisa_series(_d30, pd.Series([0.4, 1.2])).tolist()
+        for _d30 in _dead30]
+    check("(v3.9.20/35-a) 4 kolom mati Risk/Bench (bagian dihapus v3.9.19) "
+          "tak lagi diformat _fmt_analisa_series",
+          all(_f30 == ["0.4", "1.2"] for _f30 in _dead_fmt30),
+          f"got {_dead_fmt30}")
+    _live30 = (
+        _KDV30._fmt_analisa_series("Rate", pd.Series([0.25])).tolist() ==
+        ["25,00%"] and
+        _KDV30._fmt_analisa_series("Disparitas",
+                                   pd.Series([0.4])).tolist() == ["40,00%"] and
+        _KDV30._fmt_analisa_series("% Minoritas",
+                                   pd.Series([0.5])).tolist() == ["50,00%"] and
+        _KDV30._fmt_analisa_series(
+            "Σ|DEV| Minoritas", pd.Series([1234.5])).tolist() == ["1.234,5"] and
+        _KDV30._fmt_analisa_series("z", pd.Series([2.5])).tolist() == ["2,50"] and
+        _KDV30._fmt_analisa_series("Selisih",
+                                   pd.Series([7.0])).tolist() == ["7"] and
+        _KDV30._fmt_analisa_series("ANALISA",
+                                   pd.Series(["Stabil"])).tolist() == ["Stabil"])
+    check("(v3.9.20/35-a) Kolom hidup tetap terformat (Rate/Disparitas/"
+          "%Minoritas/Σ|DEV|/z/Selisih/ANALISA)",
+          _live30, f"got {_live30}")
+    _top30a.destroy()
+    root.update()
+
+    # --- (b) 35-b — Deviasi view + popup: SATUAN, chrono, source ---------
+    from src.ui.deviasi_popup import _chrono_key as _ck30
+    from src.ui.deviasi_view import DeviasiView as _DV30
+
+    def _row30b(barang, resto, jenis, tgl, nilai, satuan="GR", source=None):
+        return {"Nama Barang": barang, "JENIS": jenis, "NAMA RESTO": resto,
+                "Tanggal": tgl, "NILAI": nilai, "SATUAN": satuan,
+                "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                "SOURCE KIRIMAN": "GUDANG", "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None, "SOURCE DATA": source}
+
+    # pasangan 2-satuan (B, R): GR dan PCS punya data per-tanggal 24 & 25
+    _DUAL_ROWS30 = [
+        # GR: SO 24=10/25=12, Saldo 24=8/25=9, IN 25=2 → Deviasi(H=25) = 3
+        _row30b("B", "R", "1.SO", 24, 10.0, "GR"),
+        _row30b("B", "R", "1.SO", 25, 12.0, "GR"),
+        _row30b("B", "R", "2.SALDO AKHIR", 24, 8.0, "GR"),
+        _row30b("B", "R", "2.SALDO AKHIR", 25, 9.0, "GR"),
+        _row30b("B", "R", "4.IN", 25, 2.0, "GR"),
+        # PCS: SO 24=5/25=7, Saldo 24=2/25=3, IN 25=1 → Deviasi(H=25) = 4
+        _row30b("B", "R", "1.SO", 24, 5.0, "PCS"),
+        _row30b("B", "R", "1.SO", 25, 7.0, "PCS"),
+        _row30b("B", "R", "2.SALDO AKHIR", 24, 2.0, "PCS"),
+        _row30b("B", "R", "2.SALDO AKHIR", 25, 3.0, "PCS"),
+        _row30b("B", "R", "4.IN", 25, 1.0, "PCS"),
+        # pasangan (D, R): GR + baris 4.IN ber-SATUAN NA (dibuang pivot)
+        _row30b("D", "R", "1.SO", 25, 6.0, "GR"),
+        _row30b("D", "R", "2.SALDO AKHIR", 25, 4.0, "GR"),
+        _row30b("D", "R", "4.IN", 25, 100.0, None),
+    ]
+    _DUAL_DF30 = pd.DataFrame(_DUAL_ROWS30)
+
+    check("(v3.9.20/35-b) _chrono_key float: '-25.0' valid (dulu int(str) "
+          "ValueError → guard 999999)",
+          _ck30(-25.0) == 25 and _ck30(25.0) == 125 and
+          _ck30(1.0) == 101 and _ck30(-31.0) == 31)
+    check("(v3.9.20/35-b) _chrono_key int tak berubah (25→125)",
+          _ck30(-25) == 25 and _ck30(25) == 125)
+    check("(v3.9.20/35-b) _chrono_key guard NA/non-angka tetap 999999",
+          _ck30(None) == 999999 and _ck30(pd.NA) == 999999)
+
+    _rows30f = []
+    for _t30f in (-31.0, -30.0, -25.0, 1.0, 24.0, 25.0):
+        _rows30f.append(_row30b("B", "R", "1.SO", _t30f, 10.0 + _t30f))
+        _rows30f.append(_row30b("B", "R", "2.SALDO AKHIR", _t30f, 3.0))
+    _df30f = pd.DataFrame(_rows30f)
+    _df30f["Tanggal"] = _df30f["Tanggal"].astype("float64")
+    check("(v3.9.20/35-b) Popup urut kronologis utk Tanggal float64 "
+          "(25•..31• dulu, lalu 1..31)",
+          list(build_popup_rows(_df30f, "B", "R")["Tanggal"]) ==
+          ["25•", "30•", "31•", "1", "24", "25"],
+          f"got {list(build_popup_rows(_df30f, 'B', 'R')['Tanggal'])}")
+    _rows30i = []
+    for _t30i in (-31, -25, 1, 24, 25):
+        _rows30i.append(_row30b("B", "R", "1.SO", _t30i, 10.0 + _t30i))
+        _rows30i.append(_row30b("B", "R", "2.SALDO AKHIR", _t30i, 3.0))
+    _df30i = pd.DataFrame(_rows30i)
+    _df30i["Tanggal"] = _df30i["Tanggal"].astype("int64")
+    check("(v3.9.20/35-b) Popup urut int64 tak berubah",
+          list(build_popup_rows(_df30i, "B", "R")["Tanggal"]) ==
+          ["25•", "31•", "1", "24", "25"])
+
+    _out30g = build_popup_rows(_DUAL_DF30, "B", "R", satuan="GR")
+    _r2430g, _r2530g = _out30g.iloc[0], _out30g.iloc[1]
+    check("(v3.9.20/35-b) Popup GR: agregat per-tanggal GR persis (dulu "
+          "menjumlah lintas satuan)",
+          len(_out30g) == 2 and
+          (_r2430g["Tanggal"], _r2430g["Saldo Akhir"], _r2430g["SO"],
+           _r2430g["IN"], _r2430g["Deviasi"]) == ("24", "8", "10", "-", "2") and
+          (_r2530g["Tanggal"], _r2530g["Saldo Akhir"], _r2530g["SO"],
+           _r2530g["IN"], _r2530g["Deviasi"]) == ("25", "9", "12", "2", "3"),
+          f"got {_out30g.to_dict('records')}")
+    _out30p = build_popup_rows(_DUAL_DF30, "B", "R", satuan="PCS")
+    _r2430p, _r2530p = _out30p.iloc[0], _out30p.iloc[1]
+    check("(v3.9.20/35-b) Popup PCS: agregat per-tanggal PCS persis",
+          len(_out30p) == 2 and
+          (_r2430p["Tanggal"], _r2430p["Saldo Akhir"], _r2430p["SO"],
+           _r2430p["IN"], _r2430p["Deviasi"]) == ("24", "2", "5", "-", "3") and
+          (_r2530p["Tanggal"], _r2530p["Saldo Akhir"], _r2530p["SO"],
+           _r2530p["IN"], _r2530p["Deviasi"]) == ("25", "3", "7", "1", "4"),
+          f"got {_out30p.to_dict('records')}")
+    check("(v3.9.20/35-b) Popup TIDAK menjumlah lintas satuan: Deviasi(H) "
+          "GR='3' ≠ PCS='4' (dulu 3+4+2 tak cocok baris manapun)",
+          _out30g.iloc[1]["Deviasi"] != _out30p.iloc[1]["Deviasi"] and
+          _out30g.iloc[1]["Deviasi"] == "3" and
+          _out30p.iloc[1]["Deviasi"] == "4")
+    _out30n = build_popup_rows(_DUAL_DF30, "B", "R")
+    check("(v3.9.20/35-b) Popup tanpa satuan (None): perilaku lama utk "
+          "pemanggil lain (gabungan GR+PCS)",
+          _out30n.iloc[0]["Saldo Akhir"] == "10" and
+          _out30n.iloc[0]["SO"] == "15",
+          f"got {_out30n.iloc[0].to_dict()}")
+    _out30d = build_popup_rows(_DUAL_DF30, "D", "R", satuan="GR")
+    check("(v3.9.20/35-b) Popup GR pasangan dgn IN ber-SATUAN NA: baris NA "
+          "tidak bocor (pivot utama membuang grup NA)",
+          len(_out30d) == 1 and
+          (_out30d.iloc[0]["Tanggal"], _out30d.iloc[0]["Saldo Akhir"],
+           _out30d.iloc[0]["SO"], _out30d.iloc[0]["IN"],
+           _out30d.iloc[0]["Deviasi"]) == ("25", "4", "6", "-", "2"),
+          f"got {_out30d.to_dict('records')}")
+
+    check("(v3.9.20/35-b) _compute_cek (kode mati) dihapus penuh (rg: 0 "
+          "referensi)",
+          not hasattr(_DV30, "_compute_cek"))
+    check("(v3.9.20/35-b) Jalur CEK hidup _compute_pivot tak tersentuh",
+          hasattr(_DV30, "_compute_pivot"))
+
+    # FIX 1 — sort sebelum render pertama tidak crash (Tk 9)
+    _top30b1 = tk.Toplevel(root)
+    _dv30b1 = _DV30(_top30b1, satuan_mode="GR")   # TANPA pack → lazy
+    _dv30b1.load_data(_DUAL_DF30)                  # unmapped → dirty
+    _err30b1 = None
+    try:
+        _dv30b1._sort_by("Deviasi")
+        _dv30b1._reapply_cell_tags(_dv30b1.tree)
+    except AttributeError as _e30b1:
+        _err30b1 = _e30b1
+    check("(v3.9.20/35-b) Sort/reapply tag SEBELUM render pertama tidak "
+          "AttributeError (dulu _hl_cells belum di-init)",
+          _err30b1 is None and isinstance(_dv30b1._hl_cells, list) and
+          _dv30b1._hl_cells == [], f"err={_err30b1}")
+    _top30b1.destroy()
+    root.update()
+
+    def _make_dv30(df, mode="GR"):
+        _top30b = tk.Toplevel(root)
+        _top30b.geometry("1250x700+15+15")
+        _dv30b = _DV30(_top30b, satuan_mode=mode)
+        _dv30b.pack(fill="both", expand=True)
+        root.update()
+        root.update_idletasks()
+        root.update()
+        _dv30b.load_data(df)
+        wait_view(root, _dv30b)
+        return _top30b, _dv30b
+
+    def _row_vals30(dv, barang):
+        for _k30b in dv.tree.get_children(""):
+            if dv.tree.set(_k30b, "Nama Barang") == barang:
+                return _k30b, {c: dv.tree.set(_k30b, c) for c in
+                               ("Satuan", "SO_H", "In_H", "Sistem",
+                                "Deviasi", "CEK")}
+        return None, None
+
+    _top30bg, _dv30bg = _make_dv30(_DUAL_DF30, mode="GR")
+    _top30bp, _dv30bp = _make_dv30(_DUAL_DF30, mode="PCS")
+    _, _gr30v = _row_vals30(_dv30bg, "B")
+    _, _pcs30v = _row_vals30(_dv30bp, "B")
+    _pop30g = show_deviasi_popup(root, _DUAL_DF30, "B", "R", satuan="GR",
+                                 h=25)
+    root.update()
+    _rows30gp = [_pop30g.tree.set(_k30b, "Deviasi")
+                 for _k30b in _pop30g.tree.get_children("")]
+    _r25g30v = {c: _pop30g.tree.set(_pop30g.tree.get_children("")[1], c)
+                for c in ("Saldo Akhir", "SO", "IN", "Deviasi")}
+    _ok30g = (_gr30v is not None and _gr30v["Satuan"] == "GR" and
+              _gr30v["Deviasi"] == "3" and
+              isinstance(_pop30g, DeviasiPopup) and
+              _rows30gp == ["2", "3"] and
+              _r25g30v == {"Saldo Akhir": "9", "SO": "12", "IN": "2",
+                           "Deviasi": "3"} and
+              _r25g30v["Deviasi"] == _gr30v["Deviasi"] and
+              "(GR)" in _pop30g._title)
+    _pop30g.destroy()
+    root.update()
+    _pop30p = show_deviasi_popup(root, _DUAL_DF30, "B", "R", satuan="PCS",
+                                 h=25)
+    root.update()
+    _rows30pp = [_pop30p.tree.set(_k30b, "Deviasi")
+                 for _k30b in _pop30p.tree.get_children("")]
+    _r25p30v = {c: _pop30p.tree.set(_pop30p.tree.get_children("")[1], c)
+                for c in ("Saldo Akhir", "SO", "IN", "Deviasi")}
+    _ok30p = (_pcs30v is not None and _pcs30v["Satuan"] == "PCS" and
+              _pcs30v["Deviasi"] == "4" and
+              _rows30pp == ["3", "4"] and
+              _r25p30v == {"Saldo Akhir": "3", "SO": "7", "IN": "1",
+                           "Deviasi": "4"} and
+              _r25p30v["Deviasi"] == _pcs30v["Deviasi"] and
+              "(PCS)" in _pop30p._title)
+    _pop30p.destroy()
+    root.update()
+    check("(v3.9.20/35-b) Popup end-to-end GR & PCS: angka SATUAN BARIS "
+          "YANG DIKLIK (Dev(H) popup == Deviasi baris utama)",
+          _ok30g and _ok30p, f"gr={_ok30g} pcs={_ok30p}")
+
+    # jalur asli user: double-click baris tabel utama → popup satuan tsb.
+    _iid30dc, _ = _row_vals30(_dv30bg, "B")
+    _ok30dc = _iid30dc is not None
+    if _ok30dc:
+        _b30dc = _dv30bg.tree.bbox(_iid30dc)
+        _ev30dc = _Ev()
+        _ev30dc.widget = _dv30bg.tree
+        _ev30dc.x, _ev30dc.y = _b30dc[0] + 60, _b30dc[1] + _b30dc[3] // 2
+        _dv30bg._on_double_click(_ev30dc)
+        root.update()
+        _host30dc = _dv30bg.winfo_toplevel()
+        _pops30dc = [w for w in _host30dc.winfo_children()
+                     if isinstance(w, DeviasiPopup) and w.winfo_exists()]
+        _ok30dc = len(_pops30dc) == 1
+        if _pops30dc:
+            _popdc30 = _pops30dc[0]
+            _devs30dc = [_popdc30.tree.set(_k30b, "Deviasi")
+                         for _k30b in _popdc30.tree.get_children("")]
+            _ok30dc = ("(GR)" in _popdc30._title and
+                       _devs30dc == ["2", "3"])
+            _popdc30.destroy()
+            root.update()
+    check("(v3.9.20/35-b) Double-click baris GR → popup membawa satuan baris "
+          "tsb (grup GR saja, bukan gabungan 2+3+4+4)",
+          _ok30dc, f"ok={_ok30dc}")
+    _top30bg.destroy()
+    _top30bp.destroy()
+    root.update()
+
+    # FIX 4 — _so_source_lookup preferensi keep-LAST sort-Tanggal
+    _rows30v = [
+        _row30b("V_DUP", "R", "1.SO", 24, 30.0, source="input so harian"),
+        _row30b("V_DUP", "R", "1.SO", 25, 60.0,
+                source="input promix 04 dine in"),
+        _row30b("V_DUP", "R", "2.SALDO AKHIR", 25, 0.0,
+                source="input so harian"),
+    ]
+    _top30v1, _dv30v1 = _make_dv30(pd.DataFrame(_rows30v))
+    _, _vv30v1 = _row_vals30(_dv30v1, "V_DUP")
+    check("(v3.9.20/35-b) _so_source_lookup keep-LAST sort-Tanggal (baris "
+          "berjalan menang — persis append1 LANGKAH 9) → CEK Promix 04",
+          _dv30v1._so_source_lookup.get(("V_DUP", "R")) ==
+          "input promix 04 dine in" and
+          _vv30v1 is not None and _vv30v1["CEK"] == "Promix 04",
+          f"src={_dv30v1._so_source_lookup.get(('V_DUP', 'R'))!r} "
+          f"cek={None if _vv30v1 is None else _vv30v1['CEK']!r}")
+    _top30v1.destroy()
+    root.update()
+    _rows30v = [
+        _row30b("V_REV", "R", "1.SO", 25, 60.0,
+                source="input promix 04 dine in"),
+        _row30b("V_REV", "R", "1.SO", 24, 30.0, source="input so harian"),
+        _row30b("V_REV", "R", "2.SALDO AKHIR", 25, 0.0,
+                source="input promix 04 dine in"),
+    ]
+    _top30v2, _dv30v2 = _make_dv30(pd.DataFrame(_rows30v))
+    check("(v3.9.20/35-b) _so_source_lookup tak bergantung urutan baris df "
+          "(urutan dibalik → hasil sama)",
+          _dv30v2._so_source_lookup.get(("V_REV", "R")) ==
+          "input promix 04 dine in")
+    _top30v2.destroy()
+    root.update()
+    _rows30v = [
+        _row30b("V_NA", "R", "1.SO", 25, 60.0,
+                source="input promix 04 dine in"),
+        _row30b("V_NA", "R", "2.SALDO AKHIR", 25, 0.0, source=None),
+    ]
+    _df30v3 = pd.DataFrame(_rows30v)
+    _na_row30 = pd.DataFrame([_row30b("V_NA", "R", "1.SO", None, 30.0,
+                                      source="input so harian")])
+    _df30v3 = pd.concat([_na_row30, _df30v3], ignore_index=True)
+    _top30v3, _dv30v3 = _make_dv30(_df30v3)
+    check("(v3.9.20/35-b) _so_source_lookup: baris Tanggal NA tidak pernah "
+          "menang (na_position=first)",
+          _dv30v3._so_source_lookup.get(("V_NA", "R")) ==
+          "input promix 04 dine in")
+    _top30v3.destroy()
+    root.update()
+
+    # --- (c) 35-c1 — Rincian PO + Rincian IN: NA/float/NaT/periode --------
+    from src.ui.in_selisih_view import (
+        InSelisihView as _ISV30,
+    )
+    from src.ui.in_selisih_view import (
+        _doc_month as _dm30,
+    )
+    from src.ui.in_selisih_view import (
+        _doc_period as _dp30,
+    )
+    from src.ui.rincian_po_view import RincianPoView as _RPV30
+
+    check("(v3.9.20/35-c1) _resto_name pd.NA-safe (dulu TypeError bool(NA) "
+          "ambiguous)",
+          _rn29(pd.NA) == "" and _rn29(None) == "" and
+          _rn29(float("nan")) == "" and _rn29("") == "" and
+          pd.Series(["1370.MLGPAR", pd.NA, None, "SBYKET"],
+                    dtype=object).map(_rn29).tolist() ==
+          ["MLGPAR", "", "", "SBYKET"])
+    check("(v3.9.20/35-c1) _resto_name nilai normal tak berubah",
+          _rn29("1370.MLGPAR") == "MLGPAR" and _rn29("1.2.3.4") == "4" and
+          _rn29("MLGPAR") == "MLGPAR" and _rn29(" 1370.MLGPAR ") == "MLGPAR")
+    check("(v3.9.20/35-c1) _resto_name numeric: 1370.0 → '1370' (dulu '0' "
+          "via rsplit); 1370.5 tetap rsplit '5'; 0 → ''",
+          _rn29(1370.0) == "1370" and _rn29(1370) == "1370" and
+          _rn29(1370.5) == "5" and _rn29(0) == "" and _rn29(0.0) == "")
+    _mat30 = [
+        ("1370.MLGPAR", "MLGPAR"), ("1.2.3.4", "4"), ("MLGPAR", "MLGPAR"),
+        (1370, "1370"), (1370.0, "1370"), (pd.NA, ""), (None, ""),
+        (float("nan"), ""), ("", ""),
+    ]
+    check("(v3.9.20/35-c1) _resto_name matrix 9 kasus",
+          all(_rn29(_v30) == _w30 for _v30, _w30 in _mat30),
+          f"got {[(repr(_v30), _rn29(_v30)) for _v30, _w30 in _mat30 if _rn29(_v30) != _w30]}")
+
+    check("(v3.9.20/35-c1) _fmt_date/_fmt_datetime NaT/pd.NA-safe (dulu "
+          "ValueError strftime → tab mati) + nilai normal utuh",
+          _RPV30._fmt_date(pd.NaT) == "" and
+          _RPV30._fmt_datetime(pd.NaT) == "" and
+          _RPV30._fmt_date(pd.NA) == "" and
+          _RPV30._fmt_date(pd.Timestamp("2026-08-14")) == "2026-08-14" and
+          _RPV30._fmt_datetime(
+              pd.Timestamp("2026-08-14 07:30:05")) == "2026-08-14 07:30:05" and
+          _RPV30._fmt_date("2026-08-14") == "2026-08-14")
+    check("(v3.9.20/35-c1) _fmt_date series map: NaT → '' (render baris NaT "
+          "tetap jalan)",
+          pd.Series([pd.Timestamp("2026-08-01"), pd.NaT]).map(
+              _RPV30._fmt_date).tolist() == ["2026-08-01", ""])
+
+    check("(v3.9.20/35-c1) _ri_balancing: RI Okt vs PO Agt → 'RI Balancing' "
+          "(kasus spec user)",
+          _rib29("RI.2026.10.10354", "PO.2026.08.00571") == "RI Balancing")
+    check("(v3.9.20/35-c1) _ri_balancing: periode sama (bulan & tahun) → ''",
+          _rib29("RI.2026.08.10354", "PO.2026.08.00571") == "")
+    check("(v3.9.20/35-c1) _ri_balancing: LINTAS-TAHUN bulan sama kini "
+          "terflag (dulu tahun diabaikan → lolos senyap) + Des→Jan",
+          _rib29("RI.2027.08.2", "PO.2026.08.1") == "RI Balancing" and
+          _rib29("RI.2026.12.1", "PO.2027.01.1") == "RI Balancing")
+    check("(v3.9.20/35-c1) _ri_balancing: bulan 1-2 digit numerik (8 == 08 "
+          "→ ''; 8 ≠ 10 → flag)",
+          _rib29("RI.2026.8.1", "PO.2026.08.2") == "" and
+          _rib29("RI.2026.8.10354", "PO.2026.10.00571") == "RI Balancing" and
+          _rib29("RI.2026.10.10354", "PO.2026.8.00571") == "RI Balancing")
+    check("(v3.9.20/35-c1) _ri_balancing: bulan invalid (13/00/081) tak "
+          "match",
+          _rib29("RI.2026.13.1", "PO.2026.08.1") == "" and
+          _rib29("RI.2026.00.1", "PO.2026.08.1") == "" and
+          _rib29("RI.2026.081.5", "PO.2026.08.1") == "")
+    check("(v3.9.20/35-c1) _ri_balancing: dokumen PI/SJ bukan RI → ''; "
+          "tanpa Nomor PO → ''",
+          _rib29("PI.2026.10.5", "PO.2026.08.1") == "" and
+          _rib29("SJ.2026.10.5", "PO.2026.08.1") == "" and
+          _rib29("RI.2026.10.10354", None) == "" and
+          _rib29("RI.2026.10.10354", pd.NA) == "")
+    check("(v3.9.20/35-c1) helper _doc_period (tahun, bulan) + _doc_month "
+          "delegasi",
+          _dp30("PO.2026.08.00571") == (2026, 8) and
+          _dp30("RI.2026.8.1") == (2026, 8) and
+          _dp30("RI.2026.13.1") is None and
+          _dm30("RI.2026.8.10354") == 8 and
+          _dm30("RI.2026.13.1") is None)
+
+    # FIX 1 (BUG audit 34-e) — clone ⛶ InSelisihView mempertahankan tag
+    _top30c = tk.Toplevel(root)
+    _top30c.geometry("1200x700+10+10")
+    _isv30 = _ISV30(_top30c)
+    _isv30.pack(fill="both", expand=True)
+    _isv30.load_data(append1, in_detail, audit_result=audit_result)
+    _pump30(1.0)
+    _isv30._refresh(sync=True)
+    wait_view(root, _isv30)
+
+    def _tag_has30(tree, iid, col, tag):
+        return bool(root.tk.call(str(tree), "tag", "cell", "has", tag,
+                                 (str(iid), str(col))))
+
+    check("(v3.9.20/35-c1) InSelisihView: sel minus bertag neg_cell "
+          "(pre-clone)",
+          len(_isv30._neg_cells) > 0 and
+          all(_tag_has30(_isv30.tree, _i30c, _c30c, "neg_cell")
+              for _i30c, _c30c in _isv30._neg_cells),
+          f"n={len(_isv30._neg_cells)}")
+    _win30c, _clone30c = _isv30._maximize()
+    _pump30(1.5)
+    _n_src30c = len(_isv30._neg_cells)
+    _n_tagged30c = sum(_tag_has30(_clone30c, _i30c, _c30c, "neg_cell")
+                       for _i30c, _c30c in _isv30._neg_cells)
+    check("(v3.9.20/35-c1) BUG fix: clone ⛶ InSelisihView kini mempertahankan "
+          "tag neg_cell per-cell (on_render_done — dulu 0/2)",
+          len(_clone30c.get_children("")) ==
+          len(_isv30.tree.get_children("")) and
+          _n_tagged30c == _n_src30c,
+          f"tagged={_n_tagged30c}/{_n_src30c}")
+    _win30c.destroy()
+    _pump30(0.3)
+    _top30c.destroy()
+    root.update()
+
+    # FIX 4 GUI — render NaT tanpa ⚠
+    def _po_df30(nomor, tanggal, cabang, tgl_jam, barang="AYAM", qty=5.0):
+        return pd.DataFrame([{
+            "Nomor #": nomor, "Tanggal": tanggal, "Cabang PO": cabang,
+            "Pemasok": "PT A", "Status Pesanan Pembelian": "Selesai",
+            "Keterangan PO": "R", "Nama Barang": barang, "Satuan": "GR",
+            "Kuantitas": qty, "Tgl/Jam Pembuatan": tgl_jam,
+        }])
+
+    _top30r1 = tk.Toplevel(root)
+    _rv30r1 = _RPV30(_top30r1, data=_po_df30("PO-103", pd.NaT,
+                                             "1370.MLGPAR", pd.NaT))
+    _rv30r1.pack(fill="both", expand=True)
+    _pump30(0.2)
+    _rv30r1.ensure_refreshed()
+    wait_view(root, _rv30r1)
+    _parents30r = [k for k in _rv30r1.tree.get_children("")
+                   if k != "grand_total"]
+    _vals30r = _rv30r1.tree.item(_parents30r[0], "values") \
+        if _parents30r else None
+    check("(v3.9.20/35-c1) Rincian PO: Tanggal/Tgl-Jam NaT render '' tanpa "
+          "⚠ (dulu ValueError → 'Gagal menyiapkan pivot PO')",
+          "⚠" not in _rv30r1.status_var.get() and
+          len(_parents30r) == 1 and _vals30r is not None and
+          _vals30r[0] == "" and _vals30r[8] == "" and
+          _vals30r[1] == "MLGPAR",
+          f"status={_rv30r1.status_var.get()!r} vals={_vals30r}")
+    _top30r1.destroy()
+    root.update()
+
+    _rows30r2 = [_po_df30("PO-101", pd.NaT, "1370.MLGPAR", pd.NaT).iloc[0]
+                 .to_dict()]
+    _rows30r2.append(_po_df30("PO-101", pd.Timestamp("2026-09-02"),
+                              "1370.MLGPAR",
+                              pd.Timestamp("2026-09-02 08:00"),
+                              barang="GULA").iloc[0].to_dict())
+    _top30r2 = tk.Toplevel(root)
+    _rv30r2 = _RPV30(_top30r2, data=pd.DataFrame(_rows30r2))
+    _rv30r2.pack(fill="both", expand=True)
+    _pump30(0.2)
+    _rv30r2.ensure_refreshed()
+    wait_view(root, _rv30r2)
+    check("(v3.9.20/35-c1) Rincian PO: campuran NaT/terisi render tanpa ⚠ + "
+          "'NaT' tak masuk daftar nilai filter",
+          "⚠" not in _rv30r2.status_var.get() and
+          "NaT" not in _rv30r2._col_values("Tanggal"),
+          f"status={_rv30r2.status_var.get()!r} "
+          f"vals={_rv30r2._col_values('Tanggal')}")
+    _df30r3 = pd.concat([
+        _po_df30("PO-A", pd.NaT, "1370.MLGPAR", pd.NaT),
+        _po_df30("PO-B", pd.Timestamp("2026-09-02"), "2000.SBYKET",
+                 pd.Timestamp("2026-09-02 08:00")),
+    ], ignore_index=True)
+    _rv30r2.load_data(_df30r3)
+    _pump30(0.1)
+    _rv30r2.ensure_refreshed()
+    wait_view(root, _rv30r2)
+    check("(v3.9.20/35-c1) Rincian PO: nilai filter Tanggal = ['', "
+          "'2026-09-02'] ('' sah — baris anak kosong; hanya literal "
+          "'None'/'nan'/'NaT' yang dibuang)",
+          _rv30r2._col_values("Tanggal") == ["", "2026-09-02"],
+          f"got {_rv30r2._col_values('Tanggal')}")
+    _top30r2.destroy()
+    root.update()
+
+    # FIX 5 — load_data reset combo Cabang/Status (filter basi)
+    _r30s1 = _po_df30("PO-001", pd.Timestamp("2026-08-01"), "CKGPAH",
+                      pd.Timestamp("2026-08-01 09:00"), barang="KOPI")
+    _r30s2 = _po_df30("PO-002", pd.Timestamp("2026-09-01"), "1370.MLGPAR",
+                      pd.Timestamp("2026-09-01 09:00"), barang="AYAM",
+                      qty=3.0)
+    _top30s = tk.Toplevel(root)
+    _rv30s = _RPV30(_top30s, data=_r30s1)
+    _rv30s.pack(fill="both", expand=True)
+    _pump30(0.1)
+    _rv30s.ensure_refreshed()
+    wait_view(root, _rv30s)
+    _rv30s.cabang_var.set("CKGPAH")
+    _rv30s._refresh()
+    wait_view(root, _rv30s)
+    _rv30s.load_data(_r30s2)
+    _pump30(0.1)
+    _rv30s.ensure_refreshed()
+    wait_view(root, _rv30s)
+    check("(v3.9.20/35-c1) load_data: combo CABANG kembali '(All)' (var + "
+          "widget) — semua baris file baru render (dulu filter basi → 0 "
+          "baris senyap)",
+          _rv30s.cabang_var.get() == "(All)" and
+          _rv30s.cabang_combo.get() == "(All)" and
+          len([k for k in _rv30s.tree.get_children("")
+               if k != "grand_total"]) == 1 and
+          not _rv30s.status_var.get().startswith("Tidak ada data") and
+          _rv30s._col_values("Nama Resto") == ["MLGPAR"],
+          f"cabang={_rv30s.cabang_var.get()!r}")
+    _rv30s.status_pesanan_var.set("Dibatalkan")   # nilai basi (tak ada)
+    _rv30s.load_data(_r30s1)
+    _pump30(0.1)
+    _rv30s.ensure_refreshed()
+    wait_view(root, _rv30s)
+    check("(v3.9.20/35-c1) load_data: combo STATUS juga di-reset ke '(All)'",
+          _rv30s.status_pesanan_var.get() == "(All)" and
+          _rv30s.status_combo.get() == "(All)" and
+          len([k for k in _rv30s.tree.get_children("")
+               if k != "grand_total"]) == 1)
+    _top30s.destroy()
+    root.update()
+
+    # FIX 7 — literal 'None'/'nan'/'NaT' tak bocor ke daftar nilai popup
+    _rows30p = [
+        _po_df30("PO-003", pd.Timestamp("2026-09-03"), "1370.MLGPAR",
+                 pd.Timestamp("2026-09-03 09:00")).iloc[0].to_dict(),
+        _po_df30("PO-004", pd.Timestamp("2026-09-04"), "1137.CKGPAH",
+                 pd.Timestamp("2026-09-04 09:00"),
+                 barang="GULA").iloc[0].to_dict(),
+    ]
+    _rows30p[0]["Pemasok"] = None        # object col dgn None asli
+    _rows30p[1]["Keterangan PO"] = None
+    _top30p = tk.Toplevel(root)
+    _rv30p = _RPV30(_top30p, data=pd.DataFrame(_rows30p))
+    _rv30p.pack(fill="both", expand=True)
+    _pump30(0.1)
+    _rv30p.ensure_refreshed()
+    wait_view(root, _rv30p)
+    check("(v3.9.20/35-c1) Rincian PO: literal 'None' tak masuk daftar nilai "
+          "popup (Pemasok/Keterangan PO)",
+          "None" not in _rv30p._col_values("Pemasok") and
+          _rv30p._col_values("Pemasok") == ["PT A"] and
+          "None" not in _rv30p._col_values("Keterangan PO"),
+          f"got {_rv30p._col_values('Pemasok')}")
+    _top30p.destroy()
+    root.update()
+    _top30i = tk.Toplevel(root)
+    _iv30 = _ISV30(_top30i)
+    _iv30.pack(fill="both", expand=True)
+    _pump30(0.2)
+    _base30i = pd.DataFrame({
+        "Resto": ["MLGPAR", "SBYKET"],
+        "Tanggal": [3, 10],
+        "Nama Barang": ["AYAM", "GULA"],
+        "KATEGORI": ["K1", "K2"],
+        "Satuan": ["GR", "GR"],
+        "Hasil SO": [1.0, 2.0],
+        "Barang Masuk": [10.0, 4.0],
+        "IN": [8.0, 4.0],
+        "Selisih IN": [2.0, 0.0],
+        "Saldo": [2.0, 0.0],
+        "Hasil Audit": ["DEVIASI MURNI", "OK (Matching)"],
+        "Catatan Audit": [None, "c2"],
+    })
+    _iv30._cached_base = _base30i
+    _iv30._cached_base_data = object()
+    _iv30.only_selisih_var.set(False)
+    check("(v3.9.20/35-c1) Selisih IN: literal 'None' tak masuk daftar "
+          "nilai popup Catatan Audit",
+          _iv30._col_values("Catatan Audit") == ["c2"],
+          f"got {_iv30._col_values('Catatan Audit')}")
+    _iv30._cached_base = None
+    _iv30.tree.insert("", "end", iid="r030i",
+                      values=("MLGPAR", "3", "AYAM", "K1", "GR", "1", "10",
+                              "8", "2", "2", "DEVIASI MURNI", "None"))
+    _vals30i = _iv30._col_values("Catatan Audit")
+    check("(v3.9.20/35-c1) Selisih IN fallback D-08 (tanpa cache): 'None' "
+          "dibuang juga",
+          "None" not in _vals30i, f"got {_vals30i}")
+    _iv30.destroy()
+    _top30i.destroy()
+    root.update()
+
+    # FIX 6 GUI — popup Rincian IN: CEK periode + clone tetap jalan
+    def _det_row30(nomor, po, qty=5.0):
+        return {"NAMA RESTO": "MLGPAR", "Nama Barang": "AYAM FILET",
+                "Tanggal": 10, "Value": qty, "Nomor": nomor,
+                "Nomor PO": po, "#Tgl/Jam Pembuatan IT": pd.NA,
+                "SOURCE IN": "32.24", "JENIS": "IN"}
+
+    _det30 = pd.DataFrame([
+        _det_row30("RI.2027.08.1", "PO.2026.08.1"),   # cross-year → flag
+        _det_row30("RI.2026.8.2", "PO.2026.08.1"),    # 8==08 → ''
+    ])
+    _pop30c2 = InDetailPopup(root, "MLGPAR", "AYAM FILET", 10, _det30)
+    _pump30(0.5)
+    _cek30p = {_pop30c2.tree.set(k, "Nomor"): _pop30c2.tree.set(k, "CEK")
+               for k in _pop30c2.tree.get_children("")}
+    check("(v3.9.20/35-c1) Popup Rincian IN: RI lintas-tahun bulan sama → "
+          "CEK 'RI Balancing'; 8==08 → ''",
+          _cek30p.get("RI.2027.08.1") == "RI Balancing" and
+          _cek30p.get("RI.2026.8.2") == "", f"got {_cek30p}")
+    if CELL_TAGS_SUPPORTED:
+        _tagged30p = [
+            k for k in _pop30c2.tree.get_children("")
+            if _pop30c2.tree.set(k, "CEK") == "RI Balancing" and
+            _tag_has30(_pop30c2.tree, k, "CEK", "cek_ri_bal")]
+        check("(v3.9.20/35-c1) Popup: sel CEK lintas-tahun bertag amber "
+              "per-cell (cek_ri_bal)",
+              len(_tagged30p) == 1, f"got {len(_tagged30p)}")
+    _pop30c2.destroy()
+    root.update()
+    _pop30c3 = InDetailPopup(root, "MLGPAR", "AYAM FILET", 10,
+                             pd.DataFrame([_det_row30("RI.2026.13.1",
+                                                      "PO.2026.08.1")]))
+    _pump30(0.5)
+    _ceks30c3 = [_pop30c3.tree.set(k, "CEK")
+                 for k in _pop30c3.tree.get_children("")]
+    check("(v3.9.20/35-c1) Popup: bulan invalid (13) → semua CEK kosong",
+          set(_ceks30c3) == {""}, f"got {set(_ceks30c3)}")
+    _pop30c3.destroy()
+    root.update()
+
+    # --- (d) 35-c2 — Pivot/FollowUp popup data-ada + merah + export ------
+    from src.ui.pivot_view import PivotTableView as _PV30
+
+    def _row30d(barang, resto, jenis, tgl, nilai, src="GUDANG", kat="BAHAN"):
+        return {"Nama Barang": barang, "JENIS": jenis, "NAMA RESTO": resto,
+                "Tanggal": tgl, "NILAI": nilai, "SATUAN": "GR",
+                "AKTIF/NON": "AKTIF", "KATEGORI": kat,
+                "SOURCE KIRIMAN": src, "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None}
+
+    _PIVOT_ROWS30 = (
+        # 2 barang ber-resto eksklusif + 1 barang di dua resto
+        [_row30d("BRG MLG", "MLGPAR", "1.SO", t, 10.0) for t in (1, 2)] +
+        [_row30d("BRG MLG", "MLGPAR", "2.SALDO AKHIR", t, 5.0)
+         for t in (1, 2)] +
+        [_row30d("BRG SBY", "SBYKET", "1.SO", t, 7.0) for t in (1, 2)] +
+        [_row30d("BRG SBY", "SBYKET", "2.SALDO AKHIR", t, 3.0)
+         for t in (1, 2)] +
+        [_row30d("BRG BOTH", "MLGPAR", "1.SO", t, 2.0) for t in (1, 2)] +
+        [_row30d("BRG BOTH", "SBYKET", "1.SO", t, 2.0) for t in (1, 2)] +
+        # kategori lain (filter KATEGORI)
+        [_row30d("BRG KAT", "MLGPAR", "1.SO", 1, 9.0, kat="CEK"),
+         _row30d("BRG KAT", "MLGPAR", "2.SALDO AKHIR", 1, 4.0, kat="CEK")] +
+        # semua nilai 0 → disembunyikan hide-empty (default ON)
+        [_row30d("BRG NOL", "MLGPAR", "1.SO", 1, 0.0),
+         _row30d("BRG NOL", "MLGPAR", "2.SALDO AKHIR", 1, 0.0)] +
+        # hanya tgl 5 → lenyap saat rentang 1..2
+        [_row30d("BRG T5", "MLGPAR", "1.SO", 5, 8.0)] +
+        # sumber kiriman lain (filter SOURCE)
+        [_row30d("BRG SRC", "MLGPAR", "1.SO", 1, 6.0, src="SUPPLIER")]
+    )
+    _ALL_SHOWN30 = ["BRG BOTH", "BRG KAT", "BRG MLG", "BRG SBY", "BRG SRC",
+                    "BRG T5"]
+
+    def _load_pivot30(rows, mode="resto", tgl=("1", "31")):
+        _top30d = tk.Toplevel(root)
+        _top30d.geometry("1100x640+40+40")
+        _pv30 = _PV30(_top30d)
+        _pv30.pack(fill="both", expand=True)
+        _pv30.pivot_mode = mode
+        _pv30.tgl_start_var.set(tgl[0])
+        _pv30.tgl_end_var.set(tgl[1])
+        _pv30.data = pd.DataFrame(rows)
+        _pv30._populate_filters()
+        _pv30._show_content()
+        _pv30._refresh_pivot(sync=True)
+        for _ in range(80):
+            root.update()
+            if (not _pv30._busy and
+                    len(_pv30.tree.get_children(""))):
+                break
+            time.sleep(0.01)
+        _pump30(0.4)
+        return _top30d, _pv30
+
+    _top30d1, _pv30d1 = _load_pivot30(_PIVOT_ROWS30)
+    _vals30d1 = _pv30d1._name_values()
+    check("(v3.9.20/35-c2) Popup Nama Barang pivot: barang total-0 keluar "
+          "(hide-empty ikut dihitung — AutoFilter sejati)",
+          sorted(set(_vals30d1)) == _ALL_SHOWN30 and
+          "BRG NOL" not in _vals30d1,
+          f"got {sorted(set(_vals30d1))}")
+    _pv30d1.source_var.set("SUPPLIER")
+    check("(v3.9.20/35-c2) Popup Nama Barang pivot: filter SOURCE "
+          "menyempitkan daftar (konsisten dgn tampilan)",
+          _pv30d1._name_values() == ["BRG SRC"],
+          f"got {_pv30d1._name_values()}")
+    _pv30d1.source_var.set("(All)")
+    _pv30d1.kategori_var.set("CEK")
+    check("(v3.9.20/35-c2) Popup Nama Barang pivot: filter KATEGORI "
+          "menyempitkan daftar",
+          _pv30d1._name_values() == ["BRG KAT"],
+          f"got {_pv30d1._name_values()}")
+    _pv30d1.kategori_var.set("(All)")
+    _pv30d1.tgl_end_var.set("2")            # BRG T5 hanya ada di tgl 5
+    check("(v3.9.20/35-c2) Popup Nama Barang pivot: rentang Tanggal "
+          "menyempitkan daftar",
+          "BRG T5" not in _pv30d1._name_values() and
+          sorted(set(_pv30d1._name_values())) ==
+          ["BRG BOTH", "BRG KAT", "BRG MLG", "BRG SBY", "BRG SRC"],
+          f"got {sorted(set(_pv30d1._name_values()))}")
+    _pv30d1.tgl_end_var.set("31")
+    _pv30d1._name_selected = {"BRG MLG"}
+    check("(v3.9.20/35-c2) Popup Nama Barang pivot: filter SENDIRI "
+          "dikecualikan",
+          sorted(set(_pv30d1._name_values())) == _ALL_SHOWN30)
+    _pv30d1._name_selected = None
+    _top30d1.destroy()
+    root.update()
+
+    _top30d2, _pv30d2 = _load_pivot30(_PIVOT_ROWS30, mode="tanggal")
+    _pv30d2.resto_var.set("SBYKET")
+    check("(v3.9.20/35-c2) Popup Nama Barang pivot: mode Tanggal — filter "
+          "RESTO menyempitkan daftar",
+          sorted(_pv30d2._name_values()) == ["BRG BOTH", "BRG SBY"],
+          f"got {sorted(_pv30d2._name_values())}")
+    _pv30d2.resto_var.set("(All)")
+    _top30d2.destroy()
+    root.update()
+
+    _top30d3, _pv30d3 = _load_pivot30(_PIVOT_ROWS30)
+    _pv30d3.kategori_var.set("CEK")
+    _hf30 = _pv30d3.header_filter
+    _hf30.open_popup()
+    try:
+        _hfv30 = list(_hf30._values_list)
+    finally:
+        _hf30._close()
+        root.update()
+    check("(v3.9.20/35-c2) Kontrak end-to-end HeaderFilter: open_popup "
+          "membawa nilai terfilter (KATEGORI=CEK → ['BRG KAT'])",
+          _hfv30 == ["BRG KAT"], f"got {_hfv30}")
+    _pv30d3._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _pv30d3._busy:
+            break
+        time.sleep(0.01)
+    _win30d3, _tree2_30d3 = _pv30d3._maximize()
+    _pump30(0.4)
+    check("(v3.9.20/35-c2) Clone ⛶ pivot: get_values = _name_values "
+          "terfilter (share filter view sumber)",
+          _pv30d3._name_values() == ["BRG KAT"] and
+          callable(getattr(_tree2_30d3, "_clone_filter_apply", None)))
+    _win30d3.destroy()
+    root.update()
+    _top30d3.destroy()
+    root.update()
+
+    # FIX 3 — neg_cell (dan literal merah pivot) = #dc2626
+    _top30d4 = tk.Toplevel(root)
+    _pv30d4 = _PV30(_top30d4)
+    _pv30d4.pack(fill="both", expand=True)
+    _tags30d4 = ("neg_cell", "negative", "deviasi_row", "selisih_anomaly")
+    check("(v3.9.20/35-c2) Pivot: 4 tag merah kini #dc2626 (seragam 11 view "
+          "— dulu #CC0000)",
+          all(str(_pv30d4.tree.tag_configure(_t30d4, "foreground")).lower()
+              == "#dc2626" for _t30d4 in _tags30d4),
+          f"got {[(t, str(_pv30d4.tree.tag_configure(t, 'foreground'))) for t in _tags30d4]}")
+    _pv30d4.destroy()
+    _top30d4.destroy()
+    root.update()
+    _neg30 = [_row30d("BRG NEG", "MLGPAR", "3.DEVIASI", 1, -6.0),
+              _row30d("BRG NEG", "MLGPAR", "3.DEVIASI", 2, 10.0),
+              _row30d("BRG NEG", "MLGPAR", "2.SALDO AKHIR", 1, 10.0)]
+    _top30d5, _pv30d5 = _load_pivot30(_neg30, mode="tanggal", tgl=("1", "2"))
+    _dev_iid30 = None
+    for _p30d in _pv30d5.tree.get_children(""):
+        if _pv30d5.tree.item(_p30d, "text") != "BRG NEG":
+            continue
+        for _c30d in _pv30d5.tree.get_children(_p30d):
+            if _pv30d5.tree.item(_c30d, "text") == "3.DEVIASI":
+                _dev_iid30 = _c30d
+    _neg_ok30 = _dev_iid30 is not None
+    if _neg_ok30 and CELL_TAGS_SUPPORTED:
+        _neg_ok30 = bool(root.tk.call(str(_pv30d5.tree), "tag", "cell",
+                                      "has", "neg_cell",
+                                      (_dev_iid30, "1"))) and \
+            str(_pv30d5.tree.tag_configure("neg_cell",
+                                           "foreground")).lower() == "#dc2626"
+    check("(v3.9.20/35-c2) Pivot: sel minus bertag neg_cell #dc2626 "
+          "(baris ber-total > 0)",
+          _neg_ok30, f"dev_iid={_dev_iid30}")
+    _top30d5.destroy()
+    root.update()
+
+    # FIX 1b — FollowUp: nilai popup kolom = baris yang TAMPIL
+    _FU_SNAPS30 = {
+        "fpA": {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                "barang": "AYAM FP", "satuan": "KG", "aktif": "AKTIF",
+                "h": 25, "so": 10.0, "sistem": 120.0, "deviasi": -25.0,
+                "cek": "OK", "so_m2": 5.0, "so_m1": 6.0, "so_p1": 7.0,
+                "so_p2": 8.0, "loss_bom": 0.25},
+        "fpB": {"asal": "DEVIASI GR", "resto": "BDGUKU",
+                "barang": "GULA FP", "satuan": "KG", "aktif": "AKTIF",
+                "h": 25, "so": 20.0, "sistem": 100.0, "deviasi": 25.0,
+                "cek": "OK", "so_m2": 5.0, "so_m1": 6.0, "so_p1": 7.0,
+                "so_p2": 8.0, "loss_bom": 0.25},
+        "fpC": {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                "barang": "GULA FP", "satuan": "KG", "aktif": "AKTIF",
+                "h": 25, "so": 12.0, "sistem": 90.0, "deviasi": 5.0,
+                "cek": "OK", "so_m2": 5.0, "so_m1": 6.0, "so_p1": 7.0,
+                "so_p2": 8.0, "loss_bom": 0.25},
+    }
+    _fu_snap30 = {}
+    for _p30fu in (followup_path(), resolved_path()):
+        _fu_snap30[_p30fu] = (_p30fu.read_bytes()
+                              if _p30fu.exists() else None)
+        if _p30fu.exists():
+            _p30fu.unlink()
+    try:
+        _top30fu = tk.Toplevel(root)
+        _top30fu.geometry("1100x640+10+10")
+        _store30fu = FollowUpStore()
+        for _fp30, _sn30 in _FU_SNAPS30.items():
+            _store30fu.toggle(_fp30, _sn30)
+        _fv30 = FollowUpView(_top30fu, store=_store30fu)
+        _fv30.pack(fill="both", expand=True)
+        root.update()
+        _fv30._col_sel["Resto"] = {"MLGPAR"}
+        check("(v3.9.20/35-c2) FollowUp: popup kolom lain mengikuti filter "
+              "Resto (dulu tak tersaring)",
+              _fv30._col_values("Nama Barang") == ["AYAM FP", "GULA FP"],
+              f"got {_fv30._col_values('Nama Barang')}")
+        check("(v3.9.20/35-c2) FollowUp: kolom SENDIRI dikecualikan",
+              _fv30._col_values("Resto") == ["BDGUKU", "MLGPAR"],
+              f"got {_fv30._col_values('Resto')}")
+        _fv30._col_sel["Nama Barang"] = {"GULA FP"}
+        check("(v3.9.20/35-c2) FollowUp: dua filter irisan (Resto + Nama "
+              "Barang → Deviasi ['5'])",
+              _fv30._col_values("Deviasi") == ["5"],
+              f"got {_fv30._col_values('Deviasi')}")
+        _fv30._render()
+        root.update()
+        check("(v3.9.20/35-c2) FollowUp: render & daftar nilai konsisten "
+              "(irisan → 1 baris; kolom Asal = ['DEVIASI GR'])",
+              len(_fv30.tree.get_children("")) == 1 and
+              _fv30._col_values("Asal") == ["DEVIASI GR"],
+              f"rows={len(_fv30.tree.get_children(''))}")
+        _hf30fu = _fv30.header_filters._filters["Nama Barang"]
+        _hf30fu.open_popup()
+        try:
+            _hfv30fu = list(_hf30fu._values_list)
+        finally:
+            _hf30fu._close()
+            root.update()
+        check("(v3.9.20/35-c2) FollowUp: kontrak open_popup membawa nilai "
+              "terfilter (['AYAM FP', 'GULA FP'])",
+              _hfv30fu == ["AYAM FP", "GULA FP"], f"got {_hfv30fu}")
+        _fv30._col_sel["Resto"] = None
+        _fv30._col_sel["Nama Barang"] = None
+        _fv30.destroy()
+        root.update()
+        for _fp30, _sn30 in _FU_SNAPS30.items():
+            _store30fu.toggle(_fp30, _sn30)
+        _top30fu.destroy()
+        root.update()
+    finally:
+        for _p30fu, _blob30 in _fu_snap30.items():
+            if _blob30 is not None:
+                _p30fu.write_bytes(_blob30)
+            elif _p30fu.exists():
+                _p30fu.unlink()
+
+    # FIX 4 — export sheet "Rincian PO" + kolom Nama Resto
+    _PO_ROWS30 = [
+        {"Nomor #": "PO-001", "Tanggal": pd.Timestamp("2024-06-02"),
+         "Cabang PO": "1370.MLGPAR", "Pemasok": "PT Sumber",
+         "Nama Barang": "AYAM FILET", "Satuan": "GR", "Kuantitas": 10.0,
+         "@Harga": 1000.0, "Total Harga": 10000.0, "Keterangan PO": "Rutin",
+         "Status Pesanan Pembelian": "Selesai",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2024-06-01 09:00"),
+         "DBS_Kategori.KATEGORI": "DEVIASI"},
+        {"Nomor #": "PO-001", "Tanggal": pd.Timestamp("2024-06-02"),
+         "Cabang PO": "1370.MLGPAR", "Pemasok": "PT Sumber",
+         "Nama Barang": "GULA PASIR", "Satuan": "GR", "Kuantitas": 5.0,
+         "@Harga": 2000.0, "Total Harga": 10000.0, "Keterangan PO": "Rutin",
+         "Status Pesanan Pembelian": "Selesai",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2024-06-01 09:00"),
+         "DBS_Kategori.KATEGORI": "DEVIASI"},
+        {"Nomor #": "PO-002", "Tanggal": pd.Timestamp("2024-06-03"),
+         "Cabang PO": "2000.SBYKET", "Pemasok": "CV Maju",
+         "Nama Barang": "SUSU UHT 1L", "Satuan": "PCS", "Kuantitas": 3.0,
+         "@Harga": 15000.0, "Total Harga": 45000.0, "Keterangan PO": "",
+         "Status Pesanan Pembelian": "Selesai",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2024-06-02 10:00"),
+         "DBS_Kategori.KATEGORI": "DEVIASI"},
+        {"Nomor #": "PO-003", "Tanggal": pd.Timestamp("2024-06-04"),
+         "Cabang PO": None, "Pemasok": "UD Jaya",
+         "Nama Barang": "KOPI BUBUK 100G", "Satuan": "PCS", "Kuantitas": 2.0,
+         "@Harga": 3000.0, "Total Harga": 6000.0, "Keterangan PO": "",
+         "Status Pesanan Pembelian": "Selesai",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2024-06-03 11:00"),
+         "DBS_Kategori.KATEGORI": "DEVIASI"},
+        {"Nomor #": "PO-004", "Tanggal": pd.Timestamp("2024-06-05"),
+         "Cabang PO": "1370.MLGPAR.CKGPAH", "Pemasok": "PT Sumber",
+         "Nama Barang": "AYAM FILET", "Satuan": "GR", "Kuantitas": 8.0,
+         "@Harga": 1100.0, "Total Harga": 8800.0, "Keterangan PO": "",
+         "Status Pesanan Pembelian": "Selesai",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2024-06-04 12:00"),
+         "DBS_Kategori.KATEGORI": "DEVIASI"},
+    ]
+    import tempfile as _tf30
+
+    import src.ui.app as _appmod30
+    _app_saved30 = {k: getattr(app, k, None)
+                    for k in ("append1_df", "rincian_po_df",
+                              "in_detail_df", "audit_result")}
+
+    def _export30(po_df, append1_df=None):
+        app.append1_df = append1_df
+        app.rincian_po_df = po_df
+        app.in_detail_df = None
+        app.audit_result = None
+        _out30e = os.path.join(_tf30.mkdtemp(prefix="v3920_export_"),
+                               "35c2_export.xlsx")
+        _ask30 = _appmod30.filedialog.asksaveasfilename
+        _info30 = _appmod30.messagebox.showinfo
+        _err30e = _appmod30.messagebox.showerror
+        _appmod30.filedialog.asksaveasfilename = lambda **kw: _out30e
+        _appmod30.messagebox.showinfo = lambda *a, **k: None
+        _appmod30.messagebox.showerror = lambda *a, **k: None
+        try:
+            app._export_excel()
+            _t030e = time.time()
+            while not os.path.exists(_out30e) and time.time() - _t030e < 20:
+                root.update()
+                time.sleep(0.02)
+            _pump30(0.1)
+        finally:
+            _appmod30.filedialog.asksaveasfilename = _ask30
+            _appmod30.messagebox.showinfo = _info30
+            _appmod30.messagebox.showerror = _err30e
+        return _out30e
+
+    from openpyxl import load_workbook as _lw30
+    _po_df30e = pd.DataFrame(_PO_ROWS30)
+    _out30e1 = _export30(_po_df30e)
+    _wb30e = _lw30(_out30e1)
+    _hdr30e = [c.value for c in _wb30e["Rincian PO"][1]]
+    _col30e = {n: i + 1 for i, n in enumerate(_hdr30e)}
+    _got30e = [str(_wb30e["Rincian PO"].cell(row=r,
+                                             column=_col30e["Nama Resto"])
+                   .value or "")
+               for r in range(2, _wb30e["Rincian PO"].max_row + 1)]
+    _exp30e = [str(v or "") for v in _po_df30e["Cabang PO"].map(_rn29)]
+    check("(v3.9.20/35-c2) Export: sheet 'Rincian PO' membawa kolom Nama "
+          "Resto (setelah Tanggal; import _resto_name — tanpa duplikasi)",
+          "Rincian PO" in _wb30e.sheetnames and "Nama Resto" in _hdr30e and
+          _hdr30e.index("Nama Resto") == _hdr30e.index("Tanggal") + 1 and
+          _hdr30e[0] == "Nomor #" and
+          _hdr30e[-1] == "DBS_Kategori.KATEGORI" and
+          _got30e == _exp30e and
+          _exp30e == ["MLGPAR", "MLGPAR", "SBYKET", "", "CKGPAH"] and
+          "Nama Resto" not in app.rincian_po_df.columns,
+          f"hdr={_hdr30e[:3]} got={_got30e}")
+    _wb30e.close()
+    _append1_30e = pd.DataFrame([
+        {"Nama Barang": "AYAM FILET", "JENIS": "1.SO", "NAMA RESTO": "MLGPAR",
+         "Tanggal": 1, "NILAI": 10.0, "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+         "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG", "Nomor": None,
+         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None},
+        {"Nama Barang": "AYAM FILET", "JENIS": "2.SALDO AKHIR",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 1, "NILAI": 8.0, "SATUAN": "GR",
+         "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG", "Nomor": None, "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None},
+    ])
+    _out30e2 = _export30(_po_df30e, append1_df=_append1_30e)
+    _wb30e2 = _lw30(_out30e2)
+    check("(v3.9.20/35-c2) Export: sheet lain tak tersentuh (PIVOT tetap "
+          "duluan; Append1 tanpa kolom Nama Resto)",
+          _wb30e2.sheetnames[0] == "PIVOT" and
+          "Append1" in _wb30e2.sheetnames and
+          [c.value for c in _wb30e2["Append1"][1]] ==
+          list(_append1_30e.columns) and
+          "Nama Resto" not in [c.value for c in _wb30e2["Append1"][1]])
+    _wb30e2.close()
+    for _k30e, _v30e in _app_saved30.items():
+        setattr(app, _k30e, _v30e)
 
     # Cleanup
     root.destroy()

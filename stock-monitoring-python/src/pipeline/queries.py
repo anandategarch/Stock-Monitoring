@@ -1,17 +1,24 @@
 """
 queries.py — Semua query antara (mirror M code shared queries).
 Setiap function = 1 shared query di M code.
+
+v3.9.20 (deep audit 34-d/fix 35-d): query_4205_bulan_lalu /
+query_3224_bulan_lalu me-resolve sheet folder bulan-lalu — key
+dedikasi Sheets["Pemindahan4205Lalu"] (default = nilai berjalan) +
+fallback prefiks modul "#42.05"/"#32.24" (sheet lalu beda nama ≠
+lagi 0 baris senyap).
 """
 import pandas as pd
 
 from .fn_2205 import fn_2205
-from .fn_3224 import fn_3224
+from .fn_3224 import SHEET_3224, fn_3224
 from .fn_4205 import fn_4205
 from .fn_4215 import fn_4215
 from .fn_4217 import fn_4217
 from .fn_9901 import fn_9901
 from .fn_dbs_kategori import fn_dbs_kategori
 from .fn_rekap_mentah import fn_rekap_mentah
+from .helpers import _list_excel_files, _list_sheet_names
 
 # =============================================================================
 # MASTER QUERIES (dari Config)
@@ -63,11 +70,51 @@ def query_3224_bulan_lalu(config) -> pd.DataFrame:
     """
     Mirror M: shared #"3224_Bulan Lalu" = let
         fn3224(RI3224Lalu, "lalu"), Changed Type #Tgl/Jam Pembuatan IT → datetime
+
+    FIX R-3 (audit 34-d): sheet folder lalu di-resolve via
+    _resolve_lalu_sheet (fallback deterministik prefiks modul '#32.24') —
+    folder lalu dgn sheet bernama beda tidak lagi 0 baris senyap.
     """
-    result = fn_3224(config.folder("RI3224Lalu"), "lalu")
+    folder = config.folder("RI3224Lalu")
+    sheet_name = _resolve_lalu_sheet(folder, SHEET_3224, "#32.24")
+    result = fn_3224(folder, "lalu", sheet_name=sheet_name)
     if "#Tgl/Jam Pembuatan IT" in result.columns:
         result["#Tgl/Jam Pembuatan IT"] = pd.to_datetime(result["#Tgl/Jam Pembuatan IT"], errors="coerce")
     return result
+
+
+def _resolve_lalu_sheet(folder_path: str, sheet_name: str,
+                        module_prefix: str) -> str:
+    """FIX R-3 (audit 34-d): resolusi nama sheet folder bulan-lalu.
+
+    Folder bulan lalu yang sheet-nya bernama beda (mis. '#42.05. Rincian
+    Pemindahan LALU') dulu menghasilkan 0 baris SENYAP (fn_combine_folder
+    me-skip file tanpa sheet tsb). Resolusi sekarang:
+    1. bila ada ≥1 file Excel di folder yang memuat <sheet_name> persis
+       → pakai <sheet_name> (perilaku lama, file lain tetap di-skip dgn
+       WARNING oleh fn_combine_folder);
+    2. bila TIDAK ADA → fallback DETERMINISTIK: sheet pertama (file
+       ter-sort nama, urutan workbook) yang namanya diawali
+       <module_prefix> (mis. '#42.05' / '#32.24') + INFO di log;
+    3. bila tidak ada sheet berprefiks modul juga → <sheet_name>
+       dipertahankan (0 baris, tapi WARNING per-file tetap tercetak —
+       bukan senyap total; folder kosong/tak ada tetap 0 baris senyap
+       sesuai spec v3.9.17).
+    """
+    files = _list_excel_files(folder_path)
+    if not files:
+        return sheet_name
+    for f in files:
+        if sheet_name in _list_sheet_names(f):
+            return sheet_name
+    pref = module_prefix.strip().lower()
+    for f in files:
+        for name in _list_sheet_names(f):
+            if str(name).strip().lower().startswith(pref):
+                print(f"    [INFO] Sheet lalu '{name}' dipakai "
+                      f"(nama '{sheet_name}' tidak ada di folder)")
+                return str(name)
+    return sheet_name
 
 
 def query_4205(config) -> pd.DataFrame:
@@ -82,10 +129,15 @@ def query_4205_bulan_lalu(config) -> pd.DataFrame:
     periode ujung bulan lalu (5 hari terakhir file, Tanggal dinegasikan —
     "sama seperti 32.24 bulan lalu"). Key config di-default di Config
     (config lama pra-v3.9.17 tetap aman); folder kosong/tidak ada → 0
-    baris senyap."""
-    sheet_name = config.sheet("Pemindahan4205")
-    return fn_4205(config.folder("Pemindahan4205Lalu"),
-                   sheet_name=sheet_name, mode="lalu")
+    baris senyap.
+    FIX R-3 (audit 34-d): sheet folder lalu kini dari key DEDIKASI
+    'Pemindahan4205Lalu' (di-default ke nilai berjalan — pola 32.24)
+    + fallback deterministik prefiks modul '#42.05' via
+    _resolve_lalu_sheet → sheet lalu bernama beda ≠ 0 baris senyap."""
+    folder = config.folder("Pemindahan4205Lalu")
+    sheet_name = _resolve_lalu_sheet(
+        folder, config.sheet("Pemindahan4205Lalu"), "#42.05")
+    return fn_4205(folder, sheet_name=sheet_name, mode="lalu")
 
 
 def query_9901(config) -> pd.DataFrame:

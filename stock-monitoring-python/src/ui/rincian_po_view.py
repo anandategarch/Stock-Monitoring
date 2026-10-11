@@ -1,6 +1,11 @@
 """
 rincian_po_view.py — Pivot table view untuk Rincian PO (v3.2 → v3.9).
 
+v3.9.20 (deep audit 34-c/fix 35-c1): _resto_name pd.NA/float-safe
+(1370.0 → '1370') + _fmt_date/_fmt_datetime NaT-safe (tab tidak mati) +
+load_data reset combo Cabang/Status (filter basi) + literal
+None/nan/NaT dibuang dari daftar nilai popup filter.
+
 v3.9 — LAYOUT DISEDERHANAKAN (permintaan user: "tampilan rincian PO
 apakah bisa lebih dipermudah lagi biar mudah dibaca?"):
 - Baris INDUK (teal) kini memuat SEMUA info PO SEKALI: Nomor #, Tanggal,
@@ -68,10 +73,25 @@ COL_SRC = {
 
 def _resto_name(val) -> str:
     """v3.9.19 — Cabang PO → nama resto: bagian setelah titik TERAKHIR
-    ("1370.MLGPAR" → "MLGPAR"; tanpa titik → nilai apa adanya)."""
+    ("1370.MLGPAR" → "MLGPAR"; tanpa titik → nilai apa adanya).
+    FIX 35-c1 (RISK C1+C2): pd.NA-safe (mirror _doc_code_str — dulu
+    `str(val or "")` mengevaluasi bool(pd.NA) → TypeError) + float
+    integral di-stringify TANPA ".0" (1370.0 → "1370"; dulu "1370.0"
+    → rsplit titik terakhir → "0")."""
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, float) and val.is_integer():
+        val = int(val)
     s = str(val or "").strip()
     if not s or s.lower() in ("none", "nan"):
         return ""
+    # float non-integral (mis. 1370.5): perilaku lama dipertahankan —
+    # rsplit titik terakhir ("1370.5" → "5")
     return s.rsplit(".", 1)[-1].strip() if "." in s else s
 
 
@@ -245,12 +265,17 @@ class RincianPoView(tk.Frame):
             return []
         if col == "#0":
             if "Nomor #" in df.columns:
-                return df["Nomor #"].dropna().astype(str).unique().tolist()
+                vals = df["Nomor #"].dropna().astype(str).unique().tolist()
+                return [v for v in vals if v not in ("None", "nan", "NaT")]
             return []
         src = COL_SRC.get(col, col)
         if src not in df.columns:
             return []
-        return self._format_col_series(col, df[src]).unique().tolist()
+        # FIX 35-c1 (NIT C1): literal 'None'/'nan'/'NaT' (object cols dgn
+        # None asli via safe_to_str) jangan bocor ke daftar nilai popup
+        # filter — '' tetap dipertahankan (baris anak sah bernilai kosong).
+        vals = self._format_col_series(col, df[src]).unique().tolist()
+        return [v for v in vals if v not in ("None", "nan", "NaT")]
 
     def _filtered_data(self, exclude_col: str | None = None):
         """v3.9.19 — df setelah filter combobox + header kolom lain
@@ -319,6 +344,12 @@ class RincianPoView(tk.Frame):
             self._expander.reset()
         self._show_content()
         self._populate_filters()
+        # FIX 35-c1 (RISK C5): combo CABANG/STATUS ikut di-reset saat data
+        # berganti — dulu hanya _col_sel + header ⧩; var basi (mis. data baru
+        # tanpa cabang itu) membuat tabel 0 baris SENYAP ("Tidak ada data
+        # setelah filter.") & popup filter kolom mati.
+        self.cabang_var.set("(All)")
+        self.status_pesanan_var.set("(All)")
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
@@ -570,8 +601,16 @@ class RincianPoView(tk.Frame):
 
     @staticmethod
     def _fmt_date(val) -> str:
+        # FIX 35-c1 (RISK C6): NaT-safe — NaT.strftime RAISES ValueError di
+        # pandas 2.2.3 (to_datetime(errors="coerce") bisa menghasilkan NaT)
+        # → dulu satu baris NaT mematikan seluruh tab (mirror _fmt_jam).
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         if hasattr(val, "strftime"):
             return val.strftime("%Y-%m-%d")
         try:
@@ -581,8 +620,14 @@ class RincianPoView(tk.Frame):
 
     @staticmethod
     def _fmt_datetime(val) -> str:
+        # FIX 35-c1 (RISK C6): NaT-safe (mirror _fmt_jam — lihat _fmt_date)
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         if hasattr(val, "strftime"):
             return val.strftime("%Y-%m-%d %H:%M:%S")
         try:
