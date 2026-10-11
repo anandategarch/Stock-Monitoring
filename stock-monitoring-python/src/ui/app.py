@@ -149,7 +149,42 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.17"  # v3.9.17 — SUMBER IN 42.05 BULAN LALU + FOLLOW UP MINUS PER-CELL
+APP_VERSION = "3.9.18"  # v3.9.18 — FOKUS RESTO 1. DEVIASI WEEKLY + POPUP RINGKAS + KOLOM + HIGHLIGHT (tab Deviasi GR/PCS)
+# v3.9.18 — 5 permintaan user utk tab 📦 Deviasi GR & 🧩 Deviasi PCS:
+# (1) FOKUS RESTO (user: "resto yang dianalisa hanya berfokus pada
+#     resto yang ada di folder 1. DEVIASI WEEKLY aja jangan semua"):
+#     pivot hanya memuat pasangan (barang × resto) yang RESTOnya punya
+#     data rekap berjalan — JENIS 1.SO / 5.BARANG MASUK dgn Tanggal
+#     POSITIF (= sheet '1  DEVIASI WEEKLY' folder RekapBerjalan; rekap
+#     bulan lalu bernomor NEGATIF & berasal dari folder lain — tidak
+#     ikut menentukan scope). Resto yang hanya ada di sumber app
+#     (32.24/42.05/9901/22.05/42.15) dikeluarkan — barisnya dulu
+#     menampilkan Deviasi = 0 − Sistem = minus palsu.
+# (2) LOOKUP BARANG DUA ARAH (user: "look up nama barang ini pakai dua
+#     arah ... tidak hanya barang di folder deviasi weekly aja tapi
+#     juga sebaliknya"): barang TIDAK difilter — utk resto rekap,
+#     barang ber-SO rekap MAUPUN barang yang HANYA ada di data app
+#     (IN/OUT/SALDO AKHIR saja, SO = 0) keduanya tampil.
+# (3) POPUP RINGKAS (user: "pop up di deviasi GR ataupun PCS hanya
+#     tampilkan: nama barang, nama resto, nilai saldo akhir, nilai SO,
+#     nilai IN, nilai deviasi"): double-click kini membuka popup
+#     ringkas BARU (src/ui/deviasi_popup.py — judul 'Nama Barang —
+#     Nama Resto (satuan)', tabel per Tanggal hanya Tanggal · Saldo
+#     Akhir · SO · IN · Deviasi; '25•' = bulan lalu; baris H latar
+#     lembut; minus merah per-cell + fallback Tk 8). Popup source
+#     rows lama (JENIS/Nomor/Nomor PO/Tgl-Jam/KATEGORI/SOURCE) TIDAK
+#     lagi terbuka dari tab ini — tetap dipakai tab Pivot/Laporan.
+# (4) KOLOM DIHAPUS (user: "tab deviasi GR dan PCS hapus kolom: max
+#     dev, acr, total acr"): kolom Max Deviasi / ACR / Total ACR
+#     dihapus dari TAMPILAN GR & PCS — hitungan internal TETAP persis
+#     v3.9.6 (CEK kondisi ke-5 'ACR to BOM' · Dev to BOM% · Stok
+#     Seharusnya · snapshot loss_bom Follow Up tetap benar).
+# (5) HIGHLIGHT (user: "highlight kolom deviasi dan kolom SO H"):
+#     latar lembut #fef3c7 di SEMUA sel kolom Deviasi & SO_H via tag
+#     cell (Tk 9 — terukur pixel: bg cell-tag menang atas bg
+#     evenrow/oddrow; fg minus merah tetap hidup di atasnya; dipasang
+#     ulang setelah sort/filter/clone). Fallback Tk 8: tanpa tint
+#     kolom. Legenda + chip 'kolom Deviasi/SO_H'.
 # v3.9.17 — (1) SUMBER IN BARU (permintaan user: "tambahkan juga di
 # alamat C:\KERJA\1. RESTO\9.NEW QUERY\4.1 4205 Bulan Lalu — ini
 # sebagai penambah IN untuk periode 25-31 bulan lalu sama seperti 32.24

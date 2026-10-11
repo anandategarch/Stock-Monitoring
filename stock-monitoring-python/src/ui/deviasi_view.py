@@ -5,6 +5,35 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.18 (permintaan user: "resto yang dianalisa hanya berfokus pada resto
+yang ada di folder 1. DEVIASI WEEKLY aja jangan semua" + "look up nama
+barang ini pakai dua arah ... tapi juga sebaliknya" + popup ringkas +
+hapus 3 kolom + highlight 2 kolom):
+- FOKUS RESTO rekap: pivot kini hanya memuat pasangan (barang × resto)
+  yang RESTOnya punya data rekap berjalan (JENIS 1.SO / 5.BARANG MASUK
+  dengan Tanggal POSITIF — data sheet '1  DEVIASI WEEKLY' folder
+  "1. DEVIASI WEEKLY"/RekapBerjalan; rekap bulan lalu bernomor negatif
+  dan berasal dari folder lain). Resto yang hanya ada di sumber app
+  (32.24/42.05/9901/22.05/42.15) tanpa rekap → TIDAK dianalisa lagi
+  (barisnya dulu menampilkan Deviasi = 0 − Sistem = minus palsu).
+- LOOKUP BARANG DUA ARAH: barang TIDAK difilter — utk resto rekap,
+  barang ber-SO rekap MAUPUN barang yang hanya ada di data app
+  (IN/OUT/SALDO AKHIR saja, SO = 0) keduanya tetap tampil (arah
+  rekap→app dan arah app→rekap).
+- KOLOM DIHAPUS dari tampilan GR & PCS (permintaan user): Max Deviasi,
+  ACR, Total ACR. HITUNGAN INTERNAL TETAP dihitung persis v3.9.6 —
+  Total ACR & ACR tetap dipakai CEK kondisi ke-5 "ACR to BOM", Dev to
+  BOM% (= Deviasi/Total ACR) dan Stok Seharusnya (= SO(H-1) − ACR)
+  tetap tampil + tetap masuk snapshot Follow Up (loss_bom).
+- HIGHLIGHT KOLOM Deviasi & SO_H (permintaan user: "highlight kolom
+  deviasi dan kolom SO H"): latar lembut #fef3c7 (amber-100) di SEMUA
+  sel kedua kolom via tag cell (Tk 9; terukur probe: bg cell-tag
+  MENANG atas bg item-tag evenrow/oddrow, fg merah minus tetap hidup
+  di atasnya). Fallback Tk 8: tanpa tint kolom (tag cell tak tersedia).
+- DOUBLE-CLICK → POPUP RINGKAS (bukan lagi popup source rows): hanya
+  Nama Barang · Nama Resto · Saldo Akhir · SO · IN · Deviasi per
+  Tanggal (lihat deviasi_popup.py).
+
 v3.9.6 (permintaan user: "tambah kategori Deviasi pada tab Deviasi PCS
 dan GR" — mirror sheet DEVIASI GR/PCS workbook asli user):
 - 5 KOLOM BARU setelah Rank: Max Deviasi (max |Deviasi| per barang,
@@ -13,6 +42,7 @@ dan GR" — mirror sheet DEVIASI GR/PCS workbook asli user):
   (= Deviasi / Total ACR — "Loss Surplus to BOM" sheet Follow UP;
   formula terverifikasi nilai-per-nilai dari sheet DEVIASI GR asli) ·
   Stok Seharusnya (= SO(H-1) − ACR — perkiraan stok hari H).
+  (v3.9.18: 3 kolom pertama DIHAPUS dari tampilan — lihat atas.)
 - CEK kondisi ke-5 "ACR to BOM": |Deviasi| > Total ACR > 0 → selisih
   stok melebihi pemakaian teoretis sebulan → pasti salah (melengkapi
   port formula LET yang sebelumnya "4 dari 5 kondisi — ACR butuh BOM,
@@ -187,14 +217,18 @@ class DeviasiView(tk.Frame):
         ("Sistem", 80, "e"),
         ("Deviasi", 80, "e"),
         ("Rank", 50, "e"),
-        # v3.9.6 — kategori Deviasi (mirror sheet DEVIASI GR/PCS file asli):
-        ("Max Deviasi", 80, "e"),      # max |Deviasi| per barang (semua resto)
-        ("ACR", 70, "e"),              # rata-rata penjualan harian (Σ OUT 1..H / H)
-        ("Total ACR", 80, "e"),        # BOM per (barang, resto) = Σ penjualan 1..H
+        # v3.9.18 — kolom Max Deviasi / ACR / Total ACR DIHAPUS dari
+        # tampilan (permintaan user); nilainya TETAP dihitung internal
+        # (CEK "ACR to BOM" · Dev to BOM% · Stok Seharusnya ikut pakai).
         ("Dev to BOM%", 85, "e"),      # Deviasi / Total ACR (Loss Surplus to BOM)
         ("Stok Seharusnya", 90, "e"),  # SO(H-1) − ACR (perkiraan stok hari ini)
         ("CEK", 120, "w"),
     ]
+
+    # v3.9.18 — kolom yang di-HIGHLIGHT latar lembut (permintaan user:
+    # "highlight kolom deviasi dan kolom SO H") — tag cell Tk 9.
+    HIGHLIGHT_COLS = ("Deviasi", "SO_H")
+    HIGHLIGHT_BG = "#fef3c7"   # amber-100 — latar lembut, teks tetap terbaca
 
     CEK_THRESHOLD = 1.3
 
@@ -399,6 +433,8 @@ class DeviasiView(tk.Frame):
             ("Turun Drastis", "#dc2626"),
             ("ACR to BOM", "#7c3aed"),   # v3.9.6 — kondisi ke-5
             ("negatif (merah)", "#dc2626"),
+            # v3.9.18 — highlight kolom Deviasi & SO_H
+            ("kolom Deviasi/SO_H", self.HIGHLIGHT_BG),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
@@ -512,6 +548,8 @@ class DeviasiView(tk.Frame):
         # v3.9.2 — minus merah PER CELL (bukan satu baris penuh)
         tree.tag_configure("neg_cell", foreground="#dc2626")
         tree.tag_configure("zero_cell", foreground="#64748b")
+        # v3.9.18 — highlight latar lembut kolom Deviasi & SO_H
+        tree.tag_configure("hl_cell", background=self.HIGHLIGHT_BG)
         # CEK — palet modern (sejalan design system)
         tree.tag_configure("cek_kosong", foreground="#b45309")   # amber
         tree.tag_configure("cek_tanggal", foreground="#2563eb")  # blue
@@ -711,6 +749,27 @@ class DeviasiView(tk.Frame):
             return pd.DataFrame()
 
         pivot = pivot.reset_index()
+
+        # v3.9.18 — FOKUS RESTO FOLDER "1. DEVIASI WEEKLY" (permintaan
+        # user: "resto yang dianalisa hanya berfokus pada resto yang ada
+        # di folder 1. DEVIASI WEEKLY aja jangan semua"). JENIS 1.SO /
+        # 5.BARANG MASUK hanya bersumber dari rekap mentah; Tanggal POSITIF
+        # = rekap berjalan (sheet '1  DEVIASI WEEKLY' folder RekapBerjalan)
+        # — rekap bulan lalu dinegasikan (negatif) dan berasal dari folder
+        # lain (1.12 Rekap Mentah Bulan Lalu), jadi TIDAK ikut menentukan
+        # scope. Resto tanpa rekap (hanya ada di 32.24/42.05/9901/22.05/
+        # 42.15) dikeluarkan — dulu barisnya menampilkan Deviasi =
+        # 0 − Sistem = minus palsu.
+        # BARANG tetap DUA ARAH (permintaan user: "look up nama barang ini
+        # pakai dua arah ... tidak hanya barang di folder deviasi weekly
+        # aja tapi juga sebaliknya"): barang ber-rekap MAUPUN barang yang
+        # hanya ada di data app utk resto rekap — keduanya tampil.
+        rekap_mask = df["JENIS"].isin(("1.SO", "5.BARANG MASUK")) & (tnum >= 1)
+        rekap_restos = pd.Index(
+            df.loc[rekap_mask, "NAMA RESTO"].astype(str).unique())
+        pivot = pivot[
+            pivot["NAMA RESTO"].astype(str).isin(rekap_restos)]
+
         n = len(pivot)
 
         def arr(jenis: str, tgl) -> np.ndarray:
@@ -934,22 +993,13 @@ class DeviasiView(tk.Frame):
         # v3.9.13: filter KATEGORI POST-PIVOT (SharedPivotCache tetap dihitung
         # 1× utk GR+PCS — permintaan user: "tambah filter kategori di tab
         # deviasi pcs dan gr"). KATEGORI per-barang (1:1) → filter ini
-        # barang-granular: Max Deviasi per barang (recompute di bawah)
-        # tidak berubah semantiknya.
+        # barang-granular.
         if st.get("kategori") and "KATEGORI" in filtered.columns:
             filtered = filtered[filtered["KATEGORI"].astype(str)
                                 == str(st["kategori"])]
             if filtered.empty:
                 return {"items": [], "kpi": (0, 0.0, 0),
                         "status": "Tidak ada baris untuk kategori ini."}
-
-        # v3.9.6: Max Deviasi dihitung ULANG per satuan-mode (identik sheet
-        # asli: DEVIASI GR & DEVIASI PCS punya Max Deviasi masing-masing —
-        # barang dgn satuan campuran antar resto tidak saling mencampur).
-        if not filtered.empty:
-            filtered = filtered.assign(**{
-                "Max Deviasi": filtered.groupby("Nama Barang")["Deviasi"]
-                .transform(lambda s: s.abs().max())})
 
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel; menggantikan RESTO/Nama Barang combo)
@@ -981,6 +1031,7 @@ class DeviasiView(tk.Frame):
         row_snaps = {}
         neg_cells = []    # v3.9.2 — per-cell minus (kolom Deviasi)
         zero_cells = []   # v3.9.2 — per-cell deviasi == 0
+        hl_cells = []     # v3.9.18 — highlight kolom Deviasi & SO_H
         store = self.store
         asal = f"DEVIASI {self.satuan_mode}"
         # v3.3.1 FIX "Saldo SO kosong semua": vektorisasi v3.2 lupa memasukkan
@@ -992,8 +1043,7 @@ class DeviasiView(tk.Frame):
                     "AKTIF/NON", "CEK")}
         for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
                   "Out_H", "BK_H", "SO_H+1", "In_H+1", "SO_H+2",
-                  "Sistem", "Deviasi", "Max Deviasi", "ACR", "Total ACR",
-                  "Dev to BOM%", "Stok Seharusnya"):
+                  "Sistem", "Deviasi", "Dev to BOM%", "Stok Seharusnya"):
             cols_np[c] = pd.to_numeric(
                 filtered[c], errors="coerce").fillna(0).to_numpy(
                 dtype="float64")
@@ -1064,6 +1114,14 @@ class DeviasiView(tk.Frame):
                     neg_cells.append((f"row_{i}", "Dev to BOM%"))
                 if cols_np["Stok Seharusnya"][i] < 0:
                     neg_cells.append((f"row_{i}", "Stok Seharusnya"))
+            # v3.9.18 — highlight latar lembut kolom Deviasi & SO_H
+            # (permintaan user: "highlight kolom deviasi dan kolom SO H")
+            # utk SEMUA baris; dikumpulkan utk tag cell (Tk 9 — terukur
+            # probe: bg cell-tag menang atas bg evenrow/oddrow; fallback
+            # Tk 8 tanpa tint kolom).
+            if self._cell_tags:
+                for hl_col in self.HIGHLIGHT_COLS:
+                    hl_cells.append((f"row_{i}", hl_col))
             cek_val = cek_series.iloc[i]
             if cek_val == "Kosong/Non Aktif":
                 tags.append("cek_kosong")
@@ -1086,7 +1144,8 @@ class DeviasiView(tk.Frame):
             f"H={st['tanggal_h']}")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
-                "neg_cells": neg_cells, "zero_cells": zero_cells}
+                "neg_cells": neg_cells, "zero_cells": zero_cells,
+                "hl_cells": hl_cells}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -1097,6 +1156,9 @@ class DeviasiView(tk.Frame):
         # v3.9.2 — cell minus per-cell (dipasang ulang juga setelah sort/clone)
         self._neg_cells = payload.get("neg_cells", [])
         self._zero_cells = payload.get("zero_cells", [])
+        # v3.9.18 — highlight kolom Deviasi & SO_H (dipasang ulang juga
+        # setelah sort/clone — delete+reinsert me-reset tag cell)
+        self._hl_cells = payload.get("hl_cells", [])
         # ringkasan (baris · total deviasi · anomali) ada di status footer —
         # KPI row atas tabel sudah dihapus (v3.2)
         self.status_var.set(payload["status"])
@@ -1129,6 +1191,9 @@ class DeviasiView(tk.Frame):
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
         if self._zero_cells:
             apply_cell_tag(tree, "zero_cell", self._zero_cells)
+        # v3.9.18 — highlight kolom Deviasi & SO_H (Tk 9; no-op Tk 8)
+        if self._hl_cells:
+            apply_cell_tag(tree, "hl_cell", self._hl_cells)
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
@@ -1284,8 +1349,7 @@ class DeviasiView(tk.Frame):
         numeric_like = col in (
             "SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H", "Out_H", "BK_H",
             "SO_H+1", "In_H+1", "SO_H+2", "Sistem", "Deviasi", "Rank",
-            "Max Deviasi", "ACR", "Total ACR", "Dev to BOM%",
-            "Stok Seharusnya")
+            "Dev to BOM%", "Stok Seharusnya")
         parse = self._parse_num_id if numeric_like else None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
         self._reapply_cell_tags(tree)
@@ -1325,23 +1389,27 @@ class DeviasiView(tk.Frame):
         row_data = dict(zip(col_ids, values))
         nama_barang = row_data.get("Nama Barang")
         nama_resto = row_data.get("Resto")
+        satuan = row_data.get("Satuan")
 
         if not nama_barang:
             return
 
-        from src.ui.details_popup import show_details_popup
+        # v3.9.18 — POPUP RINGKAS (permintaan user: "pop up di deviasi GR
+        # ataupun PCS hanya tampilkan: nama barang, nama resto, nilai
+        # saldo akhir, nilai SO, nilai IN, nilai deviasi"): popup source
+        # rows lama (JENIS/Nomor/Nomor PO/Tgl-Jam/KATEGORI/SOURCE) DIGANTI
+        # tabel ringkas per Tanggal — hanya Nama Barang · Nama Resto ·
+        # Saldo Akhir · SO · IN · Deviasi. Popup source rows lama tetap
+        # dipakai tab lain (Pivot/Laporan) — tidak tersentuh.
+        from src.ui.deviasi_popup import show_deviasi_popup
         root = self.winfo_toplevel()
 
-        active_filters = {}
-        if nama_resto and nama_resto != "(All)":
-            active_filters["NAMA RESTO"] = nama_resto
-
-        show_details_popup(
+        show_deviasi_popup(
             root, self.data,
             nama_barang=nama_barang,
-            jenis=None,
-            tanggal=None,
-            filters=active_filters,
+            nama_resto=nama_resto,
+            satuan=satuan,
+            h=self.tanggal_h,
         )
 
     # =========================================================================

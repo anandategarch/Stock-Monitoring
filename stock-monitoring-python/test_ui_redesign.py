@@ -125,6 +125,19 @@ Memverifikasi:
     (2) tab ☑ Follow Up: minus merah PER CELL semua kolom numerik (Tk 9
     tag cell; fallback Tk 8 tag baris); tag negative tak lagi menimpa
     resolved/pending; sort & clone ⛶ memasang ulang tag.
+29. v3.9.18 — FOKUS RESTO REKAP + POPUP RINGKAS + KOLOM + HIGHLIGHT
+    (§28, 5 permintaan user tab Deviasi GR/PCS): (1) pivot HANYA resto
+    yang ada di folder "1. DEVIASI WEEKLY" (JENIS 1.SO/5.BARANG MASUK
+    Tanggal positif; resto hanya-di-app dikeluarkan — dulu minus palsu
+    0−Sistem); (2) LOOKUP BARANG DUA ARAH: barang ber-rekap MAUPUN
+    barang hanya-di-app utk resto rekap — keduanya tampil; (3) popup
+    double-click DIGANTI popup ringkas (bukan DetailsPopup source
+    rows): judul = Nama Barang — Nama Resto, tabel per Tanggal hanya
+    Saldo Akhir/SO/IN/Deviasi ('25•' = bulan lalu, baris H berlatar
+    lembut); (4) kolom Max Deviasi/ACR/Total ACR DIHAPUS dari tampilan
+    — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
+    Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
+    & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
 25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
     analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
     saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
@@ -471,7 +484,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.17", APP_VERSION == "3.9.17", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.18", APP_VERSION == "3.9.18", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -781,13 +794,16 @@ def main():
           "Deviasi" in app.deviasi_gr_view.status_var.get(),
           f"got {app.deviasi_gr_view.status_var.get()!r}")
 
-    # ---- (v3.9.6) KATEGORI DEVIASI — 5 kolom baru + CEK "ACR to BOM" ----
+    # ---- (v3.9.6) KATEGORI DEVIASI — kolom + CEK "ACR to BOM" ----
+    # (v3.9.18: kolom Max Deviasi / ACR / Total ACR DIHAPUS dari tampilan
+    # — permintaan user; hitungan internal TETAP — CEK ke-5 & Dev to BOM%
+    # & Stok Seharusnya tetap diuji di bawah)
     gr_cols = [c[0] for c in app.deviasi_gr_view.COLUMNS]
-    check("(v3.9.6) Skema: 5 kolom kategori Deviasi setelah Rank "
-          "(v3.9.13: +1 — kolom KATEGORI index 4)",
-          gr_cols[19:24] == ["Max Deviasi", "ACR", "Total ACR",
-                             "Dev to BOM%", "Stok Seharusnya"] and
-          gr_cols[24] == "CEK", f"got {gr_cols}")
+    check("(v3.9.6→v3.9.18) Skema: Dev to BOM% + Stok Seharusnya + CEK "
+          "setelah Rank; Max Deviasi/ACR/Total ACR DIHAPUS",
+          gr_cols[19:22] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
+          "Max Deviasi" not in gr_cols and "ACR" not in gr_cols and
+          "Total ACR" not in gr_cols, f"got {gr_cols}")
     gr_idx = {c: i for i, c in enumerate(gr_cols)}
     acr_row = None
     for k in app.deviasi_gr_view.tree.get_children(""):
@@ -802,21 +818,16 @@ def main():
         check("(v3.9.6) Deviasi = SO_H − Sistem = 100",
               v[gr_idx["Deviasi"]] == "100",
               f"got {v[gr_idx['Deviasi']]!r}")
-        check("(v3.9.6) Total ACR = Σ OUT 1..25 = 24",
-              v[gr_idx["Total ACR"]] == "24",
-              f"got {v[gr_idx['Total ACR']]!r}")
-        check("(v3.9.6) ACR = 24/25 = 0,96 → '1,0' (1 desimal)",
-              v[gr_idx["ACR"]] == "1,0", f"got {v[gr_idx['ACR']]!r}")
+        # (v3.9.18) Total ACR = Σ OUT 1..25 = 24 — kolom dihapus tapi
+        # HITUNGAN TETAP hidup: terbukti lewat Dev to BOM% & CEK di bawah.
         check("(v3.9.6) Dev to BOM% = 100/24 = '416,67%'",
               v[gr_idx["Dev to BOM%"]] == "416,67%",
               f"got {v[gr_idx['Dev to BOM%']]!r}")
         check("(v3.9.6) Stok Seharusnya = SO(24) − ACR = '199,0'",
               v[gr_idx["Stok Seharusnya"]] == "199,0",
               f"got {v[gr_idx['Stok Seharusnya']]!r}")
-        check("(v3.9.6) Max Deviasi per barang = 100",
-              v[gr_idx["Max Deviasi"]] == "100",
-              f"got {v[gr_idx['Max Deviasi']]!r}")
-        check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24)",
+        check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24 — "
+              "kolom terhapus, hitungan internal v3.9.18 tetap)",
               v[gr_idx["CEK"]] == "ACR to BOM",
               f"got {v[gr_idx['CEK']]!r}")
     # tag cek_acr di baris BARANG ACR
@@ -4659,6 +4670,254 @@ def main():
     _fv17.destroy()
     root.update()
 
+    print("== 28. (v3.9.18) FOKUS RESTO 1. DEVIASI WEEKLY + POPUP RINGKAS + "
+          "KOLOM + HIGHLIGHT ==")
+
+    # --- (a) FOKUS RESTO folder "1. DEVIASI WEEKLY" + barang DUA ARAH ----
+    from src.ui.deviasi_popup import (
+        DeviasiPopup,
+        build_popup_rows,
+        show_deviasi_popup,
+    )
+    from src.ui.deviasi_view import DeviasiView as _DV18
+
+    def _row18(barang, resto, jenis, tgl, nilai):
+        return {"Nama Barang": barang, "JENIS": jenis, "NAMA RESTO": resto,
+                "Tanggal": tgl, "NILAI": nilai, "SATUAN": "GR",
+                "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                "SOURCE KIRIMAN": "GUDANG", "Nomor": None,
+                "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None}
+
+    rows18 = []
+    # (1) pasangan lengkap rekap (1.SO tanggal positif) → TAMPIL
+    for t in range(23, 28):
+        rows18.append(_row18("BRG REKAP", "REKAP01", "1.SO", t, 10.0))
+        rows18.append(_row18("BRG REKAP", "REKAP01", "2.SALDO AKHIR", t, 8.0))
+        rows18.append(_row18("BRG REKAP", "REKAP01", "4.IN", t, 2.0))
+    # (2) DUA ARAH: barang HANYA di data app (tanpa 1.SO) utk resto
+    #     rekap → TETAP tampil (arah app→rekap ikut arah rekap→app)
+    for t in range(23, 28):
+        rows18.append(_row18("BRG APP ONLY", "REKAP01", "2.SALDO AKHIR",
+                             t, 5.0))
+        rows18.append(_row18("BRG APP ONLY", "REKAP01", "4.IN", t, 1.0))
+        rows18.append(_row18("BRG APP ONLY", "REKAP01", "9.OUT", t, 0.0))
+    # (3) resto TANPA rekap (hanya sumber app) → DIKELUARKAN
+    for t in range(23, 28):
+        rows18.append(_row18("BRG NOREKAP", "NOREKAP9", "2.SALDO AKHIR",
+                             t, 7.0))
+        rows18.append(_row18("BRG NOREKAP", "NOREKAP9", "4.IN", t, 3.0))
+    # (4) resto dgn rekap LALU saja (1.SO tanggal NEGATIF — folder
+    #     1.12 Rekap Mentah Bulan Lalu, BUKAN folder 1. DEVIASI WEEKLY)
+    #     → DIKELUARKAN
+    rows18.append(_row18("BRG LALU", "LALUONLY", "1.SO", -26, 6.0))
+    for t in range(23, 28):
+        rows18.append(_row18("BRG LALU", "LALUONLY", "2.SALDO AKHIR", t, 6.0))
+    # (5) 5.BARANG MASUK rekap berjalan (positif) = penanda folder juga
+    rows18.append(_row18("BRG BM", "BMREKAP", "5.BARANG MASUK", 25, 4.0))
+    rows18.append(_row18("BRG BM", "BMREKAP", "2.SALDO AKHIR", 25, 4.0))
+
+    df18 = pd.DataFrame(rows18)
+    # host Toplevel terpisah — root utama sudah penuh oleh app (widget
+    # ke-2 yang di-pack ke root tak kebagian ruang → unmapped → lazy
+    # refresh tak pernah jalan; Toplevel punya window sendiri)
+    _top18 = tk.Toplevel(root)
+    _top18.geometry("1150x680+20+20")
+    dv18 = _DV18(_top18, satuan_mode="GR")
+    dv18.pack(fill="both", expand=True)
+    root.update()
+    root.update_idletasks()
+    root.update()
+    dv18.load_data(df18)
+    wait_view(root, dv18)
+
+    pairs18 = {
+        (dv18.tree.set(k, "Resto"), dv18.tree.set(k, "Nama Barang"))
+        for k in dv18.tree.get_children("")
+    }
+    check("(v3.9.18) Resto rekap berjalan: 3 pasangan tampil",
+          len(pairs18) == 3, f"got {sorted(pairs18)}")
+    check("(v3.9.18) Resto NOREKAP9 (hanya app) DIKELUARKAN",
+          all(r != "NOREKAP9" for r, _b in pairs18), f"got {sorted(pairs18)}")
+    check("(v3.9.18) Resto LALUONLY (rekap lalu, tgl negatif) DIKELUARKAN",
+          all(r != "LALUONLY" for r, _b in pairs18), f"got {sorted(pairs18)}")
+    check("(v3.9.18) LOOKUP DUA ARAH: barang tanpa-SO utk resto rekap "
+          "TETAP tampil",
+          ("REKAP01", "BRG APP ONLY") in pairs18, f"got {sorted(pairs18)}")
+    check("(v3.9.18) BARANG MASUK positif = penanda folder rekap",
+          ("BMREKAP", "BRG BM") in pairs18, f"got {sorted(pairs18)}")
+    _app_only_iid = None
+    for k in dv18.tree.get_children(""):
+        if dv18.tree.set(k, "Nama Barang") == "BRG APP ONLY":
+            _app_only_iid = k
+    check("(v3.9.18) Dua arah: Deviasi barang tanpa-SO = 0−Sistem = (5)",
+          _app_only_iid is not None and
+          dv18.tree.set(_app_only_iid, "Deviasi") == "(5)",
+          f"got {None if _app_only_iid is None
+                else dv18.tree.set(_app_only_iid, 'Deviasi')!r}")
+
+    # --- (b) HIGHLIGHT kolom Deviasi & SO_H ------------------------------
+    check("(v3.9.18) _hl_cells: 2 sel per baris (Deviasi + SO_H)",
+          len(dv18._hl_cells) == 2 * len(pairs18),
+          f"got {len(dv18._hl_cells)} vs {2 * len(pairs18)}")
+    _hl18 = lambda i, c: root.tk.call(str(dv18.tree), "tag", "cell",
+                                      "has", "hl_cell", (i, c))
+    _any_iid18 = next(iter(dv18.tree.get_children("")))
+    if CELL_TAGS_SUPPORTED:
+        check("(v3.9.18) Highlight: sel Deviasi bertag hl_cell (Tk 9)",
+              _hl18(_any_iid18, "Deviasi") == 1)
+        check("(v3.9.18) Highlight: sel SO_H bertag hl_cell (Tk 9)",
+              _hl18(_any_iid18, "SO_H") == 1)
+        check("(v3.9.18) Highlight HANYA 2 kolom — Sistem bersih",
+              _hl18(_any_iid18, "Sistem") == 0 and
+              _hl18(_any_iid18, "Resto") == 0)
+        # minus merah TETAP hidup di atas highlight (fg neg_cell + bg
+        # hl_cell koexist — sama sel BRG APP ONLY/Deviasi)
+        _neg18 = lambda i, c: root.tk.call(str(dv18.tree), "tag", "cell",
+                                           "has", "neg_cell", (i, c))
+        check("(v3.9.18) Minus merah koexist dgn highlight "
+              "(BRG APP ONLY Deviasi = (5))",
+              _app_only_iid is not None and
+              _neg18(_app_only_iid, "Deviasi") == 1 and
+              _hl18(_app_only_iid, "Deviasi") == 1)
+    else:
+        check("(v3.9.18) Fallback Tk 8: tint kolom dilewati (no-op)",
+              not dv18._hl_cells)
+    _leg18 = []
+    for _chip in dv18._legend.winfo_children():
+        for _w in _chip.winfo_children():
+            if isinstance(_w, tk.Label):
+                _leg18.append(_w.cget("text"))
+    check("(v3.9.18) Legenda memuat chip 'kolom Deviasi/SO_H'",
+          any("Deviasi/SO_H" in t for t in _leg18), f"got {_leg18}")
+
+    # --- (c) build_popup_rows: pure — per tanggal + bulan lalu ----------
+    pop_df18 = pd.DataFrame([
+        _row18("BRG X", "RESTO Y", "1.SO", -26, 5.0),
+        _row18("BRG X", "RESTO Y", "2.SALDO AKHIR", -26, 3.0),
+        _row18("BRG X", "RESTO Y", "4.IN", -26, 2.0),
+        _row18("BRG X", "RESTO Y", "1.SO", 24, 10.0),
+        _row18("BRG X", "RESTO Y", "2.SALDO AKHIR", 24, 12.0),
+        _row18("BRG X", "RESTO Y", "1.SO", 25, 8.0),
+        _row18("BRG X", "RESTO Y", "2.SALDO AKHIR", 25, 4.0),
+        _row18("BRG X", "RESTO Y", "4.IN", 25, 1.0),
+        # pasangan LAIN — harus terfilter keluar (lookup tepat 1 pasangan)
+        _row18("BRG X", "RESTO LAIN", "1.SO", 25, 99.0),
+        _row18("BRG Z", "RESTO Y", "1.SO", 25, 77.0),
+    ])
+    pr18 = build_popup_rows(pop_df18, "BRG X", "RESTO Y")
+    check("(v3.9.18) Popup rows: skema 5 kolom "
+          "(Tanggal/Saldo Akhir/SO/IN/Deviasi)",
+          list(pr18.columns) == ["Tanggal", "Saldo Akhir", "SO", "IN",
+                                 "Deviasi"], f"got {list(pr18.columns)}")
+    check("(v3.9.18) Popup rows: 3 tanggal (pasangan lain terfilter)",
+          len(pr18) == 3, f"got {len(pr18)}")
+    check("(v3.9.18) Popup rows: urut kronologis — bulan lalu dulu",
+          list(pr18["Tanggal"]) == ["26•", "24", "25"],
+          f"got {list(pr18['Tanggal'])}")
+    _r24 = pr18.iloc[1]
+    check("(v3.9.18) Popup: Saldo Akhir/SO tgl 24 = 12/10; IN absen = '-'",
+          _r24["Saldo Akhir"] == "12" and _r24["SO"] == "10" and
+          _r24["IN"] == "-", f"got {_r24.to_dict()}")
+    check("(v3.9.18) Popup: Deviasi = SO − Saldo Akhir = (2) minus kurung",
+          _r24["Deviasi"] == "(2)", f"got {_r24['Deviasi']!r}")
+    _r25 = pr18.iloc[2]
+    check("(v3.9.18) Popup: tgl 25 lengkap (8/4/1 → Dev 4)",
+          _r25["SO"] == "8" and _r25["Saldo Akhir"] == "4" and
+          _r25["IN"] == "1" and _r25["Deviasi"] == "4",
+          f"got {_r25.to_dict()}")
+
+    # --- (d) Popup GUI: judul barang+resto + baris H + neg per-cell ------
+    pop18 = show_deviasi_popup(root, pop_df18, "BRG X", "RESTO Y",
+                               satuan="GR", h=25)
+    root.update()
+    check("(v3.9.18) Popup terbuka = DeviasiPopup (BUKAN DetailsPopup)",
+          isinstance(pop18, DeviasiPopup))
+    check("(v3.9.18) Popup judul memuat Nama Barang — Nama Resto (satuan)",
+          pop18._title == "BRG X — RESTO Y  (GR)", f"got {pop18._title!r}")
+    check("(v3.9.18) Popup tabel: 5 kolom persis",
+          list(pop18.tree["columns"]) == ["Tanggal", "Saldo Akhir", "SO",
+                                          "IN", "Deviasi"],
+          f"got {list(pop18.tree['columns'])}")
+    _pk18 = list(pop18.tree.get_children(""))
+    check("(v3.9.18) Popup tabel: 3 baris; baris-1 bulan lalu '26•'",
+          len(_pk18) == 3 and pop18.tree.set(_pk18[0], "Tanggal") == "26•",
+          f"got {[pop18.tree.set(k, 'Tanggal') for k in _pk18]}")
+    _h_iid18 = [k for k in _pk18 if "h_row" in pop18.tree.item(k, "tags")]
+    check("(v3.9.18) Popup: baris Tanggal H (=25) berlatar lembut (h_row)",
+          len(_h_iid18) == 1 and
+          pop18.tree.set(_h_iid18[0], "Tanggal") == "25",
+          f"got {[pop18.tree.set(k, 'Tanggal') for k in _h_iid18]}")
+    _negp18 = lambda i, c: root.tk.call(str(pop18.tree), "tag", "cell",
+                                        "has", "neg_cell", (i, c))
+    _iid24 = next(k for k in _pk18
+                  if pop18.tree.set(k, "Tanggal") == "24")
+    if CELL_TAGS_SUPPORTED:
+        check("(v3.9.18) Popup: Deviasi minus merah PER CELL (tgl 24)",
+              _negp18(_iid24, "Deviasi") == 1 and
+              _negp18(_iid24, "SO") == 0)
+    check("(v3.9.18) Popup footer: jumlah baris + legenda bulan lalu + H",
+          "3 baris" in pop18.status_var.get() and
+          "• = bulan lalu" in pop18.status_var.get() and
+          "H=25" in pop18.status_var.get(),
+          f"got {pop18.status_var.get()!r}")
+    # fallback Tk 8: tag baris 'negative' (perilaku lama)
+    pop18._cell_tags = False
+    pop18._render()
+    root.update()
+    _iid24b = next(k for k in pop18.tree.get_children("")
+                   if pop18.tree.set(k, "Tanggal") == "24")
+    check("(v3.9.18) Popup fallback Tk 8: tag baris negative",
+          "negative" in pop18.tree.item(_iid24b, "tags"),
+          f"got {pop18.tree.item(_iid24b, 'tags')}")
+    pop18.destroy()
+    root.update()
+
+    # --- (e) Double-click app GR view → popup BARU (bukan source rows) ---
+    select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
+    _grv18 = app.deviasi_gr_view
+    _iid_af18 = None
+    for k in _grv18.tree.get_children(""):
+        if (_grv18.tree.set(k, "Nama Barang") == "AYAM FILET" and
+                _grv18.tree.set(k, "Resto") == "MLGPAR"):
+            _iid_af18 = k
+            break
+    check("(v3.9.18) Dapat baris AYAM FILET/MLGPAR utk uji double-click",
+          _iid_af18 is not None)
+    if _iid_af18 is not None:
+        _b18 = _grv18.tree.bbox(_iid_af18)
+        _ev18 = _Ev()
+        _ev18.widget = _grv18.tree
+        _ev18.x, _ev18.y = _b18[0] + 60, _b18[1] + _b18[3] // 2
+        _grv18._on_double_click(_ev18)
+        root.update()
+        _pops18 = [w for w in root.winfo_children()
+                   if isinstance(w, DeviasiPopup) and w.winfo_exists()]
+        check("(v3.9.18) Double-click GR → popup RINGKAS terbuka",
+              len(_pops18) == 1, f"got {len(_pops18)}")
+        if _pops18:
+            _p18 = _pops18[0]
+            check("(v3.9.18) Popup GR: judul = barang — resto",
+                  "AYAM FILET" in _p18._title and "MLGPAR" in _p18._title,
+                  f"got {_p18._title!r}")
+            check("(v3.9.18) Popup GR: ada baris tanggal (data mock 1..30)",
+                  len(_p18.tree.get_children("")) >= 20,
+                  f"got {len(_p18.tree.get_children(''))}")
+            _hrows18 = [k for k in _p18.tree.get_children("")
+                        if "h_row" in _p18.tree.item(k, "tags")]
+            check("(v3.9.18) Popup GR: tepat 1 baris H berlatar lembut",
+                  len(_hrows18) == 1, f"got {len(_hrows18)}")
+            _p18.destroy()
+            root.update()
+
+    # --- (f) KOLOM DIHAPUS di view PCS juga (COLUMNS dipakai bersama) ----
+    _pcs_cols18 = [c[0] for c in app.deviasi_pcs_view.COLUMNS]
+    check("(v3.9.18) PCS juga tanpa Max Deviasi/ACR/Total ACR",
+          "Max Deviasi" not in _pcs_cols18 and "ACR" not in _pcs_cols18 and
+          "Total ACR" not in _pcs_cols18, f"got {_pcs_cols18}")
+
+    # cleanup view standalone (Toplevel host ikut hancur)
+    _top18.destroy()
+    root.update()
 
     # Cleanup
     root.destroy()
