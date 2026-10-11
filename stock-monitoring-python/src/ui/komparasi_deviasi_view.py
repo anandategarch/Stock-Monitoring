@@ -1,6 +1,22 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+v3.9.19 — KOLOM ANALISA + HAPUS 2 BAGIAN (permintaan user):
+    (1) KOLOM ANALISA (1 kolom saja) di bagian 📊 Top & Flip — tabel
+        Top Selisih & Perubahan Arah kini punya keterangan analisa
+        per baris: Kenaikan Tertinggi (tanda sama, |saat ini| >
+        |lalu|) · Penurunan Tertinggi (tanda sama, |saat ini| <
+        |lalu|) · Stabil (Selisih dalam toleransi MATCH) · Berubah
+        Arah (tanda berlawanan, disparitas < 40% — pembalikan tuntas)
+        · Potensi Flip Flop (tanda berlawanan, disparitas ≥ 40% —
+        pembalikan parsial: sisi dominan besar, arah baru rawan
+        berbalik lagi; ambang sama dgn Kategori flip Sempurna/
+        Dominan vs Parsial).
+    (2) BAGIAN ⚡ Risiko Flip & 💰 Benchmark DIHAPUS (permintaan
+        user: "hapus tab resiko flip dan bencmark") — baris BAGIAN
+        kini 3 bagian: Top & Flip · Arah Minoritas · Liga Deviasi.
+        Arah Minoritas & Liga Deviasi TIDAK berubah.
+
 v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (permintaan user,
 khusus mode 📈 Analisa di tab 📋 Laporan Deviasi; tabel utama ⛖ &
 bagian analisa lain TIDAK berubah):
@@ -19,29 +35,21 @@ bagian analisa lain TIDAK berubah):
         (1 nilai — format lama). Rumus bisnis lain 0 berubah.
 
 v3.9.15 — GELOMBANG 1 ANALISA (adopsi rumus repo Inventory-Control
-user; 4 analisa baru sebagai BAGIAN di mode 📈 Analisa — baris
-"BAGIAN" SegmentBar: Top & Flip · Risiko Flip · Arah Minoritas ·
-Liga Deviasi · Benchmark; hanya bagian AKTIF yang dirender):
-    (1) RISIKO FLIP PER BAHAN — agregat event perubahan arah:
-        skor = min(100, 30×Sempurna + 10×Flip); level TINGGI
-        (ada Sempurna) / SEDANG (ada flip) / RENDAH; urut skor.
-        Klik-2× baris → popup resto kontributor (flip dulu, lalu
-        |DEV| terbesar).
-    (2) ARAH MINORITAS PER BAHAN — resto yang arah DEV-nya
+user; analisa tambahan sebagai BAGIAN di mode 📈 Analisa — baris
+"BAGIAN" SegmentBar v3.9.19: Top & Flip · Arah Minoritas · Liga
+Deviasi [Risiko Flip & Benchmark DIHAPUS v3.9.19]; hanya bagian
+AKTIF yang dirender):
+    (1) ARAH MINORITAS PER BAHAN — resto yang arah DEV-nya
         MELAWAN mayoritas resto lain pada bahan sama (mayoritas
         ketat: mayoritas > minoritas) — kandidat salah-input/
         salah-satuan. Klik-2× → popup resto minoritas.
-    (3) LIGA DEVIASI-RATE PER BAHAN — rate = |DEV| / |BOM| per
+    (2) LIGA DEVIASI-RATE PER BAHAN — rate = |DEV| / |BOM| per
         resto pada bahan sama (adil antar resto); baseline populasi
         MEDIAN + MAD → robust-z = (rate − median) / (1,4826 × MAD)
         (kebal outlier); guard populasi ≥ 5 resto ber-BOM & MAD > 0
         (z "—" bila tak terdefinisi); resto ber-BOM dengan DEV 0
         ikut populasi (jujur) tapi tidak diranking.
-    (4) BENCHMARK OPPORTUNITY — per resto (kelompok = 3 huruf awal
-        kode resto): loss = Σ|DEV<0|; opportunity =
-        max(0, loss − median loss kelompok) → total = potensi loss
-        yang bisa ditekan bila tiap resto jadi median kelompoknya.
-    Semua analisa per-periode (2/3/4) memakai BULAN TERBARU + SATU
+    Semua analisa per-periode (1/2) memakai BULAN TERBARU + SATU
     minggu snapshot (preferensi minggu yang memuat H — minggu file
     kumulatif sehingga menjumlah lintas minggu = menghitung ganda).
     Semua komputasi VEKTOR (pola PERF v3.9.14 — tanpa iterrows).
@@ -117,7 +125,7 @@ dengan semantik TANGGAL H di aplikasi:
 
 SISI SAAT INI (dari data pipeline / append1, tanpa file tambahan —
 "data udah lengkap, 2205 itu BOM"; dulu dilabel *App):
-    BOM·Saat Ini = −Σ 9.OUT (penjualan 22.05) tanggal 1..H — konvensi file
+    BOM·Saat Ini = −Σ 9.ACR (penjualan 22.05) tanggal 1..H — konvensi file
     COM·Saat Ini = −Σ pemakaian com(t) tanggal 1..H, dengan
                 com(1) = SALDO AWAL + IN(1) − BK(1) − SO(1)  (SA pair,
                           baris ber-Tanggal=1 — fn_4217; fallback
@@ -544,6 +552,10 @@ class KomparasiDeviasiView(tk.Frame):
         # v3.9.16: 165 — memuat 'TIDAK ADA DI DATA SAAT INI' utuh
         # (156px @ font 10; dulu 120 → terpotong)
         ("Status", 165, "w"),
+        # v3.9.19 — keterangan analisa per baris (1 kolom saja):
+        # Kenaikan Tertinggi · Penurunan Tertinggi · Stabil ·
+        # Berubah Arah · Potensi Flip Flop
+        ("ANALISA", 150, "w"),
     ]
     FLIP_COLS = [
         ("Periode", 190, "w"),
@@ -555,23 +567,21 @@ class KomparasiDeviasiView(tk.Frame):
         ("Δ", 90, "e"),
         ("Disparitas", 85, "e"),
         ("Kategori", 90, "w"),
+        # v3.9.19 — keterangan analisa per baris (1 kolom saja);
+        # baris flip = semua perubahan arah → hanya Berubah Arah
+        # (disparitas < 40%) / Potensi Flip Flop (≥ 40%)
+        ("ANALISA", 150, "w"),
     ]
 
-    # v3.9.15 — GELOMBANG 1: kolom 4 tabel analisa baru
-    RISK_COLS = [
-        ("Peringkat", 64, "e"),
-        ("Nama Barang", 190, "w"),
-        ("Satuan", 50, "w"),
-        ("Pasangan", 80, "e"),
-        ("Flip", 60, "e"),
-        ("Sempurna", 80, "e"),
-        ("Dominan", 75, "e"),
-        ("Parsial", 70, "e"),
-        ("Konsisten", 80, "e"),
-        ("Disparitas Rerata", 110, "e"),
-        ("Skor Risiko", 90, "e"),
-        ("Level", 90, "w"),
-    ]
+    # v3.9.19 — label & warna kolom ANALISA (Top Selisih & Flip)
+    ANALISA_NAIK = "Kenaikan Tertinggi"
+    ANALISA_TURUN = "Penurunan Tertinggi"
+    ANALISA_STABIL = "Stabil"
+    ANALISA_ARAH = "Berubah Arah"
+    ANALISA_FFLOP = "Potensi Flip Flop"
+
+    # v3.9.15 — GELOMBANG 1: kolom tabel analisa (bagian Risiko Flip &
+    # Benchmark DIHAPUS v3.9.19 — RISK_COLS/BENCH_COLS ikut dihapus)
     MIN_COLS = [
         ("Peringkat", 64, "e"),
         ("Nama Barang", 190, "w"),
@@ -590,15 +600,6 @@ class KomparasiDeviasiView(tk.Frame):
         ("Arah", 70, "w"),
         ("Rate", 85, "e"),
         ("z", 70, "e"),
-    ]
-    BENCH_COLS = [
-        ("Peringkat", 64, "e"),
-        ("Resto", 110, "w"),
-        ("Kelompok", 85, "w"),
-        ("Resto di Kelompok", 100, "e"),
-        ("Loss (Σ|DEV−|)", 110, "e"),
-        ("Median Kelompok", 110, "e"),
-        ("Opportunity", 100, "e"),
     ]
 
     def __init__(self, parent, go_to_proses: Callable | None = None,
@@ -645,12 +646,12 @@ class KomparasiDeviasiView(tk.Frame):
         # file baru; dirender saat mode 📈 Analisa aktif (dulu dirender
         # walau tersembunyi → freeze per refresh).
         self._analisa_dirty = True
-        # v3.9.15 — GELOMBANG 1: bagian analisa aktif (0=Top&Flip,
-        # 1=Risiko Flip, 2=Arah Minoritas, 3=Liga Deviasi, 4=Benchmark)
+        # v3.9.19 — bagian analisa aktif (0=Top&Flip, 1=Arah Minoritas,
+        # 2=Liga Deviasi — Risiko Flip & Benchmark DIHAPUS v3.9.19)
         # + set bagian yang perlu render ulang saat data berubah
         # (hanya bagian AKTIF yang dirender — pola malas v3.9.14).
         self._anasec_idx = 0
-        self._anasec_stale = {0, 1, 2, 3, 4}
+        self._anasec_stale = {0, 1, 2}
         # v3.9.15a (audit P1-2): handle cancel batch insert per tabel
         # analisa — render ulang tabel yg sama membatalkan sisa batch
         # LAMA (batch 400-baris berjalan via after() bisa menambahkan
@@ -1113,6 +1114,16 @@ class KomparasiDeviasiView(tk.Frame):
         tree.tag_configure("st_match", foreground="#15803d")
         tree.tag_configure("st_diff", foreground=C_AMBER)
         tree.tag_configure("st_missing", foreground="#dc2626")
+        # v3.9.19 — warna keterangan kolom ANALISA (Top Selisih & Flip;
+        # dipasang di sini supaya clone ⛶ kedua tabel + tabel utama juga
+        # punya definisi tag — _setup_flip_tags memanggil _setup_tags):
+        # kenaikan = merah (deviasi membesar), penurunan = hijau,
+        # stabil = abu, berubah arah = ungu, potensi flip flop = amber.
+        tree.tag_configure("ana_naik", foreground="#dc2626")
+        tree.tag_configure("ana_turun", foreground="#15803d")
+        tree.tag_configure("ana_stabil", foreground="#64748b")
+        tree.tag_configure("ana_arah", foreground="#7c3aed")
+        tree.tag_configure("ana_fflop", foreground="#b45309")
 
     # =========================================================================
     # DATA LOADING
@@ -1125,7 +1136,7 @@ class KomparasiDeviasiView(tk.Frame):
         # basi (join GR/BOM/COM Saat Ini) — _refresh jalur data-kosong
         # TIDAK menyentuh analisa; tandai dirty + stale semua bagian.
         self._analisa_dirty = True
-        self._anasec_stale = {0, 1, 2, 3, 4}
+        self._anasec_stale = {0, 1, 2}
         if self._insert_cancel is not None:
             self._insert_cancel()
             self._insert_cancel = None
@@ -1315,18 +1326,15 @@ class KomparasiDeviasiView(tk.Frame):
         # v3.9.13: tabel analisa ikut dibersihkan.
         # v3.9.14 (PERF): hanya render bila mode Analisa aktif — tersembunyi
         # → dirty (dibersihkan saat pengguna masuk mode Analisa).
-        # v3.9.15: state 4 bagian baru ikut dikosongkan.
-        self._risk_df = None
-        self._risk_pairs_df = None
-        self._risk_bahan_map = {}
+        # v3.9.15: state bagian analisa ikut dikosongkan (Risiko Flip &
+        # Benchmark dihapus v3.9.19).
         self._min_df = None
         self._min_scope_df = None
         self._min_maj_sign = None
         self._liga_df = None
         self._liga_stats = {}
         self._liga_bahan_norm = None
-        self._bench_df = None
-        self._anasec_stale = {0, 1, 2, 3, 4}
+        self._anasec_stale = {0, 1, 2}
         # v3.9.15a (audit P1-2): batalkan sisa batch insert tabel analisa.
         for _c in self._anasec_cancel.values():
             if _c is not None:
@@ -1361,7 +1369,7 @@ class KomparasiDeviasiView(tk.Frame):
         laporan_deviasi_view._compute_com_matrix / pivot 6.PEMAKAIAN (COM):
             com(t=1)  = SALDO AWAL + IN(1) − BK(1) − SO(1)   (bila SA ada)
             com(t>1)  = SO(t-1) + IN(t) − BK(t) − SO(t)
-        Ditambah matriks so / sis (2.SALDO AKHIR) / out (9.OUT).
+        Ditambah matriks so / sis (2.SALDO AKHIR) / out (9.ACR).
 
         v3.9.5 FIX (audit 19-a #6 / 19-b #2): base com di TANGGAL 1 kini
         SALDO AWAL milik pair (baris SA ber-Tanggal=1, fn_4217) bila ada;
@@ -1381,7 +1389,7 @@ class KomparasiDeviasiView(tk.Frame):
             return None
 
         jenis_needed = ["SALDO AWAL", "1.SO", "2.SALDO AKHIR", "4.IN",
-                        "8.BARANG KELUAR", "9.OUT"]
+                        "8.BARANG KELUAR", "9.ACR"]
         d = df[df["JENIS"].astype(str).isin(jenis_needed)].copy()
         if d.empty:
             self._build_satuan_lookup(df)
@@ -1422,7 +1430,7 @@ class KomparasiDeviasiView(tk.Frame):
         sis = jenis_df("2.SALDO AKHIR")
         bm = jenis_df("4.IN")
         bk = jenis_df("8.BARANG KELUAR")
-        out = jenis_df("9.OUT")
+        out = jenis_df("9.ACR")
 
         so_prev = so.shift(1, axis=1).fillna(0.0)
         # v3.9.5 (audit 19-a #6 / 19-b #2): base com tanggal 1 = SALDO
@@ -2141,21 +2149,23 @@ class KomparasiDeviasiView(tk.Frame):
     def _build_analisa_ui(self):
         """Bangun semua kartu analisa SEKALI (di-pack hanya saat sub-mode
         📈 Analisa aktif — _on_mode_change).
-        v3.9.15: baris BAGIAN (SegmentBar) — 5 bagian; hanya frame
+        v3.9.19: baris BAGIAN (SegmentBar) — 3 bagian (Risiko Flip &
+        Benchmark dihapus); hanya frame
         bagian aktif yang di-pack di _anaview (render-malas per
         bagian: data baru → semua bagian stale, dirender saat
         ditampilkan)."""
         self._analisa_frame = tk.Frame(self.content, bg=C_BG)
 
-        # v3.9.15 — baris BAGIAN: pemilih 5 bagian analisa
+        # v3.9.19 — baris BAGIAN: pemilih bagian analisa (3 bagian)
         rsec = tk.Frame(self._analisa_frame, bg=C_BG)
         rsec.pack(fill="x", padx=12, pady=(10, 0))
         tk.Label(rsec, text="BAGIAN", bg=C_BG, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self._anasec_segment = SegmentBar(
             rsec,
-            ["📊 Top & Flip", "⚡ Risiko Flip", "🧭 Arah Minoritas",
-             "🏆 Liga Deviasi", "💰 Benchmark"],
+            # v3.9.19: Risiko Flip & Benchmark DIHAPUS (permintaan user
+            # "hapus tab resiko flip dan bencmark") — 3 bagian tersisa.
+            ["📊 Top & Flip", "🧭 Arah Minoritas", "🏆 Liga Deviasi"],
             command=lambda idx: self._on_anasec_change(idx),
             bg=C_BG)
         self._anasec_segment.pack(side="left", padx=(6, 0))
@@ -2165,8 +2175,6 @@ class KomparasiDeviasiView(tk.Frame):
         self._anaview = tk.Frame(self._analisa_frame, bg=C_BG)
         self._anaview.pack(fill="both", expand=True, padx=12)
         self._anasec_frames = [
-            tk.Frame(self._anaview, bg=C_BG),
-            tk.Frame(self._anaview, bg=C_BG),
             tk.Frame(self._anaview, bg=C_BG),
             tk.Frame(self._anaview, bg=C_BG),
             tk.Frame(self._anaview, bg=C_BG),
@@ -2218,6 +2226,7 @@ class KomparasiDeviasiView(tk.Frame):
         self._top_st_match = []
         self._top_st_diff = []
         self._top_st_missing = []
+        self._top_ana_cells = {}   # v3.9.19 — warna kolom ANALISA
         self._top_filters = HeaderFilterGroup(
             self._top_tree, cols,
             get_values=self._top_col_values,
@@ -2264,17 +2273,17 @@ class KomparasiDeviasiView(tk.Frame):
         self._flip_neg_cells = []
         self._flip_kat_cells = {"Sempurna": [], "Dominan": [],
                                 "Parsial": []}
+        self._flip_ana_cells = {}   # v3.9.19 — warna kolom ANALISA
         self._flip_filters = HeaderFilterGroup(
             self._flip_tree, cols,
             get_values=self._flip_col_values,
             on_apply=self._on_flip_filter,
             on_sort=lambda c, d: self._sort_flip(c, reverse=d))
 
-        # v3.9.15 — GELOMBANG 1: bangun 4 bagian analisa baru.
-        self._build_risk_ui()
+        # v3.9.19 — bangun 2 bagian analisa tersisa (Risiko Flip &
+        # Benchmark dihapus).
         self._build_min_ui()
         self._build_liga_ui()
-        self._build_bench_ui()
 
     def _setup_flip_tags(self, tree):
         """Tag tabel flip — dasar + warna kategori per-cell."""
@@ -2310,15 +2319,31 @@ class KomparasiDeviasiView(tk.Frame):
         ditandai stale — dirender saat ditampilkan — pola malas).
         """
         self._analisa_dirty = False
-        self._anasec_stale = {0, 1, 2, 3, 4}
+        self._anasec_stale = {0, 1, 2}
         self._render_analisa_section(self._anasec_idx)
 
     # -- Top Selisih -------------------------------------------------------
     def _top_col_values(self, col: str) -> list:
-        d = self._top_df
+        d = self._filtered_analisa_df(self._top_df, self._top_sel, col)
         if d is None or d.empty or col not in d.columns:
             return []
         return self._fmt_analisa_series(col, d[col]).unique().tolist()
+
+    @staticmethod
+    def _filtered_analisa_df(d, sel_map: dict, col: str):
+        """v3.9.19 — baris tabel analisa yang TAMPIL SAAT INI (filter
+        kolom LAIN diterapkan; kolom `col` sendiri dikecualikan —
+        perilaku AutoFilter Excel; permintaan user: "isi filter harus
+        menampilkan data yang ada aja")."""
+        if d is None or d.empty:
+            return d
+        f = d
+        for c, sel in sel_map.items():
+            if sel is None or c == col or c not in f.columns:
+                continue
+            fmt = KomparasiDeviasiView._fmt_analisa_series(c, f[c])
+            f = f[fmt.isin(sel)]
+        return f
 
     def _on_top_filter(self, col: str, selected):
         self._top_sel[col] = selected
@@ -2343,6 +2368,31 @@ class KomparasiDeviasiView(tk.Frame):
             apply_cell_tag(tree, "st_diff", self._top_st_diff)
         if self._top_st_missing:
             apply_cell_tag(tree, "st_missing", self._top_st_missing)
+        self._reapply_ana_tags(tree, self._top_ana_cells)   # v3.9.19
+
+    def _ana_empty_cells(self) -> dict:
+        """v3.9.19 — wadah sel ANALISA per label (Top Selisih & Flip)."""
+        return {
+            self.ANALISA_NAIK: [],
+            self.ANALISA_TURUN: [],
+            self.ANALISA_STABIL: [],
+            self.ANALISA_ARAH: [],
+            self.ANALISA_FFLOP: [],
+        }
+
+    def _reapply_ana_tags(self, tree, cells: dict):
+        """v3.9.19 — pasang ulang warna per-cell kolom ANALISA (juga utk
+        clone ⛶ — pola FIX B-03/B-12)."""
+        if not self._cell_tags:
+            return
+        for label, tag in ((self.ANALISA_NAIK, "ana_naik"),
+                           (self.ANALISA_TURUN, "ana_turun"),
+                           (self.ANALISA_STABIL, "ana_stabil"),
+                           (self.ANALISA_ARAH, "ana_arah"),
+                           (self.ANALISA_FFLOP, "ana_fflop")):
+            cl = cells.get(label) or []
+            if cl:
+                apply_cell_tag(tree, tag, cl)
 
     def _top_aggregate(self, d: pd.DataFrame) -> pd.DataFrame:
         """v3.9.16 — agregat join → SATU baris per pasangan (resto ×
@@ -2362,6 +2412,13 @@ class KomparasiDeviasiView(tk.Frame):
         - Periode: 'Median n file · Minggu' (≥2 nilai) / 'BULAN ·
           Minggu' (1 nilai — format lama) — kolom NYATA (filter header
           Periode kini bekerja).
+        - v3.9.19 ANALISA (1 kolom keterangan): Kenaikan Tertinggi ·
+          Penurunan Tertinggi · Stabil · Berubah Arah · Potensi Flip
+          Flop — prioritas: tanda berlawanan (disparitas = |P1+P2|/
+          max(|P1|,|P2|) — ambang sama dgn Kategori flip: < 40% →
+          Berubah Arah, ≥ 40% → Potensi Flip Flop) → Stabil (|Selisih|
+          ≤ toleransi MATCH) → Kenaikan/Penurunan Tertinggi (arah
+          Selisih). Pasangan tanpa data app → '—'.
         VEKTOR penuh (groupby + numpy, tanpa iterrows — pola PERF
         v3.9.14)."""
         g = d.groupby(["_resto_norm", "_bahan_norm", "Minggu"],
@@ -2394,6 +2451,26 @@ class KomparasiDeviasiView(tk.Frame):
         periode = [f"Median {int(c)} file · {m}" if c > 1
                    else f"{b} · {m}"
                    for c, b, m in zip(n, bln, mg)]
+        # v3.9.19 — keterangan ANALISA per pasangan (VEKTOR):
+        # tanda berlawanan → disparitas (rumus flip) dgn ambang 40%
+        # (sama dgn Kategori Sempurna/Dominan vs Parsial) →
+        # Berubah Arah / Potensi Flip Flop; tanda sama → Stabil bila
+        # Selisih dalam toleransi MATCH, selain itu arah Selisih →
+        # Kenaikan / Penurunan Tertinggi; tanpa data app → '—'.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            disp = (np.abs(dev + gr)
+                    / np.maximum(np.abs(dev), np.abs(gr)))
+        sign_flip = (dev * gr) < 0.0
+        ana = np.where(
+            np.isnan(gr), "—",
+            np.where(
+                sign_flip,
+                np.where(disp >= 0.40, self.ANALISA_FFLOP,
+                         self.ANALISA_ARAH),
+                np.where(
+                    np.abs(sel) <= tol, self.ANALISA_STABIL,
+                    np.where(sel > 0, self.ANALISA_NAIK,
+                             self.ANALISA_TURUN))))
         return pd.DataFrame({
             "Periode": periode,
             "Resto": agg["resto"].to_numpy(),
@@ -2403,6 +2480,7 @@ class KomparasiDeviasiView(tk.Frame):
             "GR Saat Ini": gr,
             "Selisih": sel,
             "Status": status,
+            "ANALISA": ana,   # v3.9.19
         })
 
     def _render_top_selisih(self):
@@ -2478,12 +2556,14 @@ class KomparasiDeviasiView(tk.Frame):
         # Series per baris)
         cols_np = {c: d[c].to_numpy() for c in
                    ("Periode", "Resto", "Nama Barang", "Satuan",
-                    "DEV Lalu", "GR Saat Ini", "Selisih", "Status")}
+                    "DEV Lalu", "GR Saat Ini", "Selisih", "Status",
+                    "ANALISA")}
         items = []
         neg_cells = []
         st_match = []
         st_diff = []
         st_missing = []
+        ana_cells = self._ana_empty_cells()   # v3.9.19 — warna ANALISA
         for i in range(m):
             iid = f"top_{i}"
             values = [str(i + 1),
@@ -2494,7 +2574,8 @@ class KomparasiDeviasiView(tk.Frame):
                       self._fmt_num(cols_np["DEV Lalu"][i]),
                       self._fmt_num(cols_np["GR Saat Ini"][i]),
                       self._fmt_num(cols_np["Selisih"][i]),
-                      str(cols_np["Status"][i])]
+                      str(cols_np["Status"][i]),
+                      str(cols_np["ANALISA"][i])]   # v3.9.19
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             for col in ("DEV Lalu", "GR Saat Ini", "Selisih"):
                 v = cols_np[col][i]
@@ -2508,18 +2589,23 @@ class KomparasiDeviasiView(tk.Frame):
                 st_diff.append((iid, "Status"))
             elif stv:
                 st_missing.append((iid, "Status"))
+            # v3.9.19: warna per-cell keterangan ANALISA
+            av = str(cols_np["ANALISA"][i])
+            if av in ana_cells:
+                ana_cells[av].append((iid, "ANALISA"))
             items.append(("", iid, {"values": values,
                                     "tags": tuple(tags)}))
         self._top_neg_cells = neg_cells
         self._top_st_match = st_match
         self._top_st_diff = st_diff
         self._top_st_missing = st_missing
+        self._top_ana_cells = ana_cells   # v3.9.19
         self._anasec_insert(
             tree, items, on_done=lambda: self._reapply_top_tags(tree))
 
     # -- Perubahan Arah (flip) ----------------------------------------------
     def _flip_col_values(self, col: str) -> list:
-        d = self._flip_df
+        d = self._filtered_analisa_df(self._flip_df, self._flip_sel, col)
         if d is None or d.empty or col not in d.columns:
             return []
         return self._fmt_analisa_series(col, d[col]).unique().tolist()
@@ -2547,11 +2633,12 @@ class KomparasiDeviasiView(tk.Frame):
             cells = self._flip_kat_cells.get(kat) or []
             if cells:
                 apply_cell_tag(tree, tag, cells)
+        self._reapply_ana_tags(tree, self._flip_ana_cells)   # v3.9.19
 
     def _flip_pair_core(self):
         """v3.9.15 — inti VEKTOR komputasi pasangan bulan-berurutan
-        minggu-sama (v3.9.14), diekstrak supaya dipakai bersama
-        _render_flip (event flip) & _render_risk (agregat per bahan):
+        minggu-sama (v3.9.14); dipakai _render_flip (event flip;
+        dulu juga _render_risk — bagian itu dihapus v3.9.19):
         satu sumber kebenaran pasangan — sort (resto, bahan, minggu,
         bulan) sekali + shift(-1) dalam grup.
 
@@ -2602,7 +2689,8 @@ class KomparasiDeviasiView(tk.Frame):
                & ((d["DEV Lalu"] > 0) != (d["_dev_next"] > 0))
                & (d["_bulan_num"] != d["_bnum_next"]))
         # v3.9.15: SEMUA pasangan bulan berurutan (flip ATAU konsisten) —
-        # dasar agregat Risiko Flip (msk ⊂ pm: flip butuh next-baris ada).
+        # pm = pasangan bulan berurutan semuanya (dulu dasar agregat
+        # Risiko Flip — bagian dihapus v3.9.19; msk ⊂ pm).
         pm = (d["_bnum_next"].notna()
               & (d["_bulan_num"] != d["_bnum_next"]))
         return {"ok": True, "d": d, "msk": msk, "pm": pm, "prefix": prefix}
@@ -2619,11 +2707,14 @@ class KomparasiDeviasiView(tk.Frame):
         berurutan via shift(-1) dalam grup (dulu groupby + sort_values
         PER GRUP + zip per baris = 4,7 dtk di file 40rb baris; vektor =
         ±50ms — pasangan/urutan identik); (MINGGU) hanya pasangan pada
-        minggu yang MEMUAT H (aturan kolom H — H=7 → WEEK 1)."""
+        minggu yang MEMUAT H (aturan kolom H — H=7 → WEEK 1).
+        v3.9.19: kolom ANALISA (1 keterangan) — Berubah Arah (Sempurna/
+        Dominan, disparitas < 40%) vs Potensi Flip Flop (Parsial,
+        disparitas ≥ 40%)."""
         tree = self._flip_tree
         tree.delete(*tree.get_children())
         # v3.9.15: inti komputasi pasangan diekstrak ke _flip_pair_core
-        # (dipakai bersama _render_risk — satu sumber kebenaran; pesan
+        # (satu sumber kebenaran; pesan
         # status & hasil IDENTIK v3.9.14).
         res = self._flip_pair_core()
         if not res["ok"]:
@@ -2655,6 +2746,11 @@ class KomparasiDeviasiView(tk.Frame):
         disp = np.abs(p1 + p2) / np.maximum(np.abs(p1), np.abs(p2))
         kat = np.select([disp < 0.10, disp < 0.40],
                         ["Sempurna", "Dominan"], default="Parsial")
+        # v3.9.19 — keterangan ANALISA (1 kolom saja): semua baris flip
+        # = perubahan arah; pembalikan PARSIAL (disparitas ≥ 40% —
+        # sisi dominan besar) rawan berbalik lagi → Potensi Flip Flop.
+        ana = np.where(disp >= 0.40, self.ANALISA_FFLOP,
+                       self.ANALISA_ARAH)
         fd = pd.DataFrame({
             "Periode": [
                 f"{_BULAN_NAME.get(int(n1), str(b1))} {mg} → "
@@ -2670,6 +2766,7 @@ class KomparasiDeviasiView(tk.Frame):
             "Δ": p2 - p1,
             "Disparitas": disp,
             "Kategori": kat,
+            "ANALISA": ana,   # v3.9.19
         })
         fd = fd.sort_values("Disparitas", ascending=True, kind="stable")
         self._flip_df = fd
@@ -2697,10 +2794,11 @@ class KomparasiDeviasiView(tk.Frame):
         cols_np = {c: fd[c].to_numpy() for c in
                    ("Periode", "Resto", "Nama Barang", "Satuan",
                     "DEV Bulan Lalu", "DEV Saat Ini", "Δ", "Disparitas",
-                    "Kategori")}
+                    "Kategori", "ANALISA")}
         items = []
         neg_cells = []
         kat_cells = {"Sempurna": [], "Dominan": [], "Parsial": []}
+        ana_cells = self._ana_empty_cells()   # v3.9.19
         for i in range(m):
             iid = f"flip_{i}"
             values = [str(cols_np["Periode"][i]),
@@ -2711,11 +2809,15 @@ class KomparasiDeviasiView(tk.Frame):
                       self._fmt_num(cols_np["DEV Saat Ini"][i]),
                       self._fmt_num(cols_np["Δ"][i]),
                       self._fmt_pct(cols_np["Disparitas"][i]),
-                      str(cols_np["Kategori"][i])]
+                      str(cols_np["Kategori"][i]),
+                      str(cols_np["ANALISA"][i])]   # v3.9.19
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             kv = str(cols_np["Kategori"][i])
             if kv in kat_cells:
                 kat_cells[kv].append((iid, "Kategori"))
+            av = str(cols_np["ANALISA"][i])   # v3.9.19
+            if av in ana_cells:
+                ana_cells[av].append((iid, "ANALISA"))
             for col in ("DEV Bulan Lalu", "DEV Saat Ini", "Δ"):
                 v = cols_np[col][i]
                 if v is not None and not (isinstance(v, float)
@@ -2725,80 +2827,24 @@ class KomparasiDeviasiView(tk.Frame):
                                     "tags": tuple(tags)}))
         self._flip_neg_cells = neg_cells
         self._flip_kat_cells = kat_cells
+        self._flip_ana_cells = ana_cells   # v3.9.19
         self._anasec_insert(
             tree, items, on_done=lambda: self._reapply_flip_tags(tree))
 
 
     # =========================================================================
-    # v3.9.15 — GELOMBANG 1: 4 BAGIAN ANALISA BARU
-    # (⚡ Risiko Flip · 🧭 Arah Minoritas · 🏆 Liga Deviasi · 💰 Benchmark)
+    # v3.9.15 — GELOMBANG 1: BAGIAN ANALISA TAMBAHAN
+    # (🧭 Arah Minoritas · 🏆 Liga Deviasi — bagian ⚡ Risiko Flip & 💰
+    # Benchmark DIHAPUS v3.9.19; Top & Flip dibangun di atas)
     # Semua komputasi VEKTOR (pola PERF v3.9.14 — tanpa iterrows); hanya
     # bagian AKTIF yang dirender (render-malas per bagian).
     # =========================================================================
 
     # -- Bangun UI bagian ----------------------------------------------------
-    def _build_risk_ui(self):
-        """Bagian 1 — ⚡ Risiko Flip per Bahan (skor = min(100,
-        30×Sempurna + 10×Flip) — rumus flip-ranking repo Inventory-
-        Control user)."""
-        rc = Card(self._anasec_frames[1],
-                  title="⚡ Risiko Flip per Bahan — skor = min(100, "
-                        "30×Sempurna + 10×Flip)")
-        rc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
-        rb = rc.body()
-        rhead = tk.Frame(rb, bg=C_CARD)
-        rhead.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self._risk_status_var = tk.StringVar(value="Belum ada file deviasi.")
-        tk.Label(rhead, textvariable=self._risk_status_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(
-            side="left", fill="x", expand=True)
-        cols = [c[0] for c in self.RISK_COLS]
-        self._risk_tree = ttk.Treeview(rb, columns=cols, show="headings",
-                                       selectmode="browse")
-        for name, width, anchor in self.RISK_COLS:
-            self._risk_tree.column(name, width=width, minwidth=34,
-                                   anchor=anchor)
-            self._risk_tree.heading(name, text=name)
-        vsb = ttk.Scrollbar(rb, orient="vertical",
-                            command=self._risk_tree.yview)
-        self._risk_tree.configure(yscrollcommand=vsb.set)
-        self._risk_tree.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-        rb.grid_rowconfigure(1, weight=1)
-        rb.grid_columnconfigure(0, weight=1)
-        enable_col_resize(self._risk_tree)
-        self._setup_risk_tags(self._risk_tree)
-        self._risk_df = None
-        self._risk_pairs_df = None
-        self._risk_bahan_map = {}
-        self._risk_sel = {c: None for c in cols}
-        self._risk_level_cells = {"TINGGI": [], "SEDANG": [], "RENDAH": []}
-        self._risk_filters = HeaderFilterGroup(
-            self._risk_tree, cols,
-            get_values=self._risk_col_values,
-            on_apply=self._on_risk_filter,
-            on_sort=lambda c, d: self._sort_risk(c, reverse=d))
-        rfoot = tk.Frame(rb, bg=C_CARD)
-        rfoot.grid(row=2, column=0, columnspan=2, sticky="ew")
-        tk.Label(
-            rfoot,
-            text="Pasangan = bulan berurutan minggu sama · skor = "
-                 "30×Sempurna + 10×Flip (maks 100)",
-            bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
-        self._risk_tree.bind("<Double-1>", self._on_risk_double_click,
-                             add="+")
-
-    def _setup_risk_tags(self, tree):
-        """Tag tabel risiko — dasar + warna Level per-cell."""
-        self._setup_tags(tree)
-        tree.tag_configure("risk_tinggi", foreground="#dc2626")
-        tree.tag_configure("risk_sedang", foreground=C_AMBER)
-        tree.tag_configure("risk_rendah", foreground="#15803d")
-
     def _build_min_ui(self):
         """Bagian 2 — 🧭 Arah Minoritas per Bahan (resto yang melawan
         mayoritas — pola item-anomali-outlets repo)."""
-        mc = Card(self._anasec_frames[2],
+        mc = Card(self._anasec_frames[1],
                   title="🧭 Arah Minoritas per Bahan — resto melawan "
                         "mayoritas")
         mc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
@@ -2851,7 +2897,7 @@ class KomparasiDeviasiView(tk.Frame):
     def _build_liga_ui(self):
         """Bagian 3 — 🏆 Liga Deviasi-Rate per Bahan (|DEV|/|BOM| vs
         median + MAD populasi — pola waste-rate-league repo)."""
-        lc = Card(self._anasec_frames[3],
+        lc = Card(self._anasec_frames[2],
                   title="🏆 Liga Deviasi-Rate per Bahan — |DEV| / |BOM| "
                         "vs median populasi resto")
         lc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
@@ -2910,58 +2956,6 @@ class KomparasiDeviasiView(tk.Frame):
             on_apply=self._on_liga_filter,
             on_sort=lambda c, d: self._sort_liga(c, reverse=d))
 
-    def _build_bench_ui(self):
-        """Bagian 4 — 💰 Benchmark Opportunity (gap loss ke median
-        kelompok kota — pola benchmark-opportunity repo)."""
-        bc = Card(self._anasec_frames[4],
-                  title="💰 Benchmark Opportunity — gap loss ke median "
-                        "kelompok resto")
-        bc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
-        bb = bc.body()
-        bhead = tk.Frame(bb, bg=C_CARD)
-        bhead.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self._bench_summary_var = tk.StringVar(value="")
-        tk.Label(bhead, textvariable=self._bench_summary_var, bg=C_CARD,
-                 fg=C_HEADER, font=font(9, "bold"), anchor="w").pack(
-            side="left", fill="x", expand=True)
-        self._bench_status_var = tk.StringVar(value="Belum ada file deviasi.")
-        tk.Label(bhead, textvariable=self._bench_status_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(
-            side="left", padx=(10, 0))
-        cols = [c[0] for c in self.BENCH_COLS]
-        self._bench_tree = ttk.Treeview(bb, columns=cols, show="headings",
-                                        selectmode="browse")
-        for name, width, anchor in self.BENCH_COLS:
-            self._bench_tree.column(name, width=width, minwidth=34,
-                                    anchor=anchor)
-            self._bench_tree.heading(name, text=name)
-        vsb = ttk.Scrollbar(bb, orient="vertical",
-                            command=self._bench_tree.yview)
-        self._bench_tree.configure(yscrollcommand=vsb.set)
-        self._bench_tree.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-        bb.grid_rowconfigure(1, weight=1)
-        bb.grid_columnconfigure(0, weight=1)
-        enable_col_resize(self._bench_tree)
-        self._setup_tags(self._bench_tree)
-        self._bench_tree.tag_configure("opp_cell", foreground=C_AMBER)
-        self._bench_df = None
-        self._bench_sel = {c: None for c in cols}
-        self._bench_opp_cells = []
-        self._bench_filters = HeaderFilterGroup(
-            self._bench_tree, cols,
-            get_values=self._bench_col_values,
-            on_apply=self._on_bench_filter,
-            on_sort=lambda c, d: self._sort_bench(c, reverse=d))
-        bfoot = tk.Frame(bb, bg=C_CARD)
-        bfoot.grid(row=2, column=0, columnspan=2, sticky="ew")
-        tk.Label(
-            bfoot,
-            text="Loss = Σ|DEV<0| · kelompok = 3 huruf awal kode resto · "
-                 "opportunity = max(0, loss − median kelompok) · total = "
-                 "potensi loss yang bisa ditekan",
-            bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
-
     # -- Pergantian bagian ---------------------------------------------------
     def _on_anasec_change(self, idx: int):
         """v3.9.15: ganti bagian analisa (SegmentBar BAGIAN) — tampilkan
@@ -2995,21 +2989,18 @@ class KomparasiDeviasiView(tk.Frame):
         _file_df/_join_df (semua vektor ±10-60ms — stateless: tidak ada
         state basi antar bagian)."""
         self._anasec_stale.discard(idx)
+        # v3.9.19: 0=Top&Flip, 1=Arah Minoritas, 2=Liga Deviasi
         if idx == 0:
             self._render_top_selisih()
             self._render_flip()
         elif idx == 1:
-            self._render_risk()
-        elif idx == 2:
             self._render_minoritas()
-        elif idx == 3:
+        elif idx == 2:
             self._render_liga()
-        elif idx == 4:
-            self._render_benchmark()
 
     def _anasec_scope(self):
         """v3.9.15: baris file utk analisa per-periode (Arah Minoritas /
-        Liga Deviasi / Benchmark): BULAN TERBARU + SATU minggu snapshot.
+        Liga Deviasi): BULAN TERBARU + SATU minggu snapshot.
         Minggu file KUMULATIF (WEEK 2 ⊇ WEEK 1) → menjumlah lintas minggu
         = menghitung ganda — karena itu agregat per-resto SELALU satu
         minggu: preferensi minggu yang MEMUAT H (aturan kolom H); bila
@@ -3054,259 +3045,6 @@ class KomparasiDeviasiView(tk.Frame):
         wl = ", ".join(sorted({str(v) for v in d["Minggu"]}))
         label = f"Bulan {bulan_lbl} · Minggu {wl} (H {wk_sel}){note}"
         return d, label
-
-    # -- ⚡ Risiko Flip (A2) -------------------------------------------------
-    def _render_risk(self):
-        """⚡ Risiko Flip per Bahan (v3.9.15 — rumus flip-ranking repo
-        Inventory-Control user): agregat event flip v3.9.13 PER BAHAN —
-        skor = min(100, 30×Sempurna + 10×Flip); Level TINGGI bila ada
-        Sempurna · SEDANG bila ada flip · RENDAH bila semua konsisten;
-        urut skor ↓ · Sempurna ↓ · Flip ↓ · bahan ↑. VEKTOR penuh
-        (crosstab + groupby — tanpa loop per baris)."""
-        tree = self._risk_tree
-        tree.delete(*tree.get_children())
-        self._risk_df = None
-        self._risk_pairs_df = None
-        self._risk_bahan_map = {}
-        self._risk_level_cells = {"TINGGI": [], "SEDANG": [], "RENDAH": []}
-        res = self._flip_pair_core()
-        if not res["ok"]:
-            if res["reason"] == "no_bulan":
-                self._risk_status_var.set(
-                    "File tanpa kolom BULAN — muat ≥2 bulan utk skor risiko.")
-            elif res["reason"] == "no_week":
-                wt = _h_to_week_target(int(self.tanggal_h))
-                self._risk_status_var.set(
-                    f"File tidak punya minggu cut-off H {wt} (minggu di "
-                    f"file: {', '.join(res.get('weeks_all') or [])}).")
-            else:
-                self._risk_status_var.set("Belum ada file deviasi.")
-            return
-        d, pm, msk, prefix = (res["d"], res["pm"], res["msk"],
-                              res["prefix"])
-        pairs = d.loc[pm]
-        if pairs.empty:
-            self._risk_status_var.set(
-                "Tidak ada pasangan bulan berurutan pada minggu sama — "
-                "muat ≥2 bulan.")
-            return
-        # pasangan (flip ATAU konsisten) + klasifikasi — VEKTOR
-        p1 = pairs["DEV Lalu"].to_numpy(dtype=float)
-        p2 = pairs["_dev_next"].to_numpy(dtype=float)
-        is_flip = msk.loc[pairs.index].to_numpy()
-        # v3.9.15a (audit P2-2): pasangan P1=P2=0 (dua bulan nol) →
-        # 0/0 NaN + RuntimeWarning di stderr — errstate membungkam (NaN
-        # dibuang jalur Konsisten; hasil tak berubah).
-        with np.errstate(divide="ignore", invalid="ignore"):
-            disp = np.abs(p1 + p2) / np.maximum(np.abs(p1), np.abs(p2))
-        kat = np.select([disp < 0.10, disp < 0.40],
-                        ["Sempurna", "Dominan"], default="Parsial")
-        # label Periode utk drilldown (jumlah pasangan — kecil)
-        periode = [
-            f"{_BULAN_NAME.get(int(n1), str(b1))} {mg} → "
-            f"{_BULAN_NAME.get(int(n2), str(b2))} {mg}"
-            for n1, b1, n2, b2, mg in zip(
-                pairs["_bulan_num"], pairs["BULAN"],
-                pairs["_bnum_next"], pairs["_blbl_next"],
-                pairs["Minggu"])]
-        pdf = pd.DataFrame({
-            "_bahan_norm": pairs["_bahan_norm"].to_numpy(),
-            "Nama Barang": pairs["_barang_d"].to_numpy(),
-            "Satuan": pairs["_satuan_d"].to_numpy(),
-            "Resto": pairs["_resto_d"].to_numpy(),
-            "Periode": periode,
-            "P1": p1, "P2": p2,
-            "is_flip": is_flip,
-            "Disparitas": disp,
-            "Kategori": np.where(is_flip, kat, "Konsisten"),
-        })
-        self._risk_pairs_df = pdf
-        # agregat per bahan — vektor (crosstab kategori + groupby)
-        fl = pdf.loc[pdf["is_flip"]]
-        ct = (pd.crosstab(fl["_bahan_norm"], fl["Kategori"])
-              if not fl.empty else pd.DataFrame())
-        n_pairs = pdf.groupby("_bahan_norm").size()
-        n_flip = fl.groupby("_bahan_norm").size()
-        idx = n_pairs.index
-        flip_r = n_flip.reindex(idx).fillna(0).astype(int)
-
-        def _ct(col: str) -> pd.Series:
-            s = ct[col] if col in ct.columns else pd.Series(dtype="int64")
-            return s.reindex(idx).fillna(0).astype(int)
-
-        semp = _ct("Sempurna")
-        dom = _ct("Dominan")
-        par = _ct("Parsial")
-        kons = n_pairs - flip_r
-        avg_disp = fl.groupby("_bahan_norm")["Disparitas"].mean().reindex(idx)
-        nama = pdf.groupby("_bahan_norm")["Nama Barang"].first()
-        sat = pdf.groupby("_bahan_norm")["Satuan"].first()
-        skor = np.minimum(100, 30 * semp.to_numpy() + 10 * flip_r.to_numpy())
-        level = np.select([(semp.to_numpy() > 0), (flip_r.to_numpy() > 0)],
-                          ["TINGGI", "SEDANG"], default="RENDAH")
-        rdf = pd.DataFrame({
-            "_bahan_norm": idx.to_numpy(),
-            "Nama Barang": nama.reindex(idx).to_numpy(),
-            "Satuan": sat.reindex(idx).to_numpy(),
-            "Pasangan": n_pairs.to_numpy(),
-            "Flip": flip_r.to_numpy(),
-            "Sempurna": semp.to_numpy(),
-            "Dominan": dom.to_numpy(),
-            "Parsial": par.to_numpy(),
-            "Konsisten": kons.to_numpy(),
-            "Disparitas Rerata": avg_disp.to_numpy(),
-            "Skor Risiko": skor,
-            "Level": level,
-        })
-        rdf = rdf.sort_values(
-            ["Skor Risiko", "Sempurna", "Flip", "_bahan_norm"],
-            ascending=[False, False, False, True], kind="stable")
-        self._risk_df = rdf
-        # filter header ⧩ (seleksi kosong = 0 baris — v3.9.13)
-        df = rdf
-        for col, sel in self._risk_sel.items():
-            if df.empty:
-                break
-            if col in df.columns and sel is not None:
-                fmt = self._fmt_analisa_series(col, df[col])
-                df = df[fmt.isin(sel)]
-        if df.empty:
-            self._risk_status_var.set("0 baris setelah filter.")
-            return
-        self._risk_status_var.set(
-            f"{prefix}{len(df)} bahan · {int(df['Pasangan'].sum())} "
-            f"pasangan · {int(df['Flip'].sum())} flip · "
-            f"{int(df['Sempurna'].sum())} Sempurna · "
-            f"{int(df['Dominan'].sum())} Dominan · "
-            f"{int(df['Parsial'].sum())} Parsial")
-        m = len(df)
-        cols_np = {c: df[c].to_numpy() for c in
-                   ("Nama Barang", "Satuan", "Pasangan", "Flip", "Sempurna",
-                    "Dominan", "Parsial", "Konsisten",
-                    "Disparitas Rerata", "Skor Risiko", "Level",
-                    "_bahan_norm")}
-        items = []
-        level_cells = {"TINGGI": [], "SEDANG": [], "RENDAH": []}
-        bahan_map = {}
-        for i in range(m):
-            iid = f"risk_{i}"
-            values = [str(i + 1),
-                      str(cols_np["Nama Barang"][i]),
-                      str(cols_np["Satuan"][i]),
-                      str(int(cols_np["Pasangan"][i])),
-                      str(int(cols_np["Flip"][i])),
-                      str(int(cols_np["Sempurna"][i])),
-                      str(int(cols_np["Dominan"][i])),
-                      str(int(cols_np["Parsial"][i])),
-                      str(int(cols_np["Konsisten"][i])),
-                      self._fmt_pct(cols_np["Disparitas Rerata"][i]),
-                      str(int(cols_np["Skor Risiko"][i])),
-                      str(cols_np["Level"][i])]
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-            lv = str(cols_np["Level"][i])
-            if lv in level_cells:
-                level_cells[lv].append((iid, "Level"))
-            bahan_map[iid] = str(cols_np["_bahan_norm"][i])
-            items.append(("", iid, {"values": values, "tags": tuple(tags)}))
-        self._risk_level_cells = level_cells
-        self._risk_bahan_map = bahan_map
-        self._anasec_insert(
-            tree, items, on_done=lambda: self._reapply_risk_tags(tree))
-
-    def _risk_col_values(self, col: str) -> list:
-        d = self._risk_df
-        if d is None or d.empty or col not in d.columns:
-            return []
-        return self._fmt_analisa_series(col, d[col]).unique().tolist()
-
-    def _on_risk_filter(self, col: str, selected):
-        self._risk_sel[col] = selected
-        self._render_risk()
-
-    def _sort_risk(self, col: str, reverse: bool = True, tree=None):
-        tree = tree if tree is not None else self._risk_tree
-        parse = (self._parse_num_id if col in
-                 ("Peringkat", "Pasangan", "Flip", "Sempurna", "Dominan",
-                  "Parsial", "Konsisten", "Disparitas Rerata",
-                  "Skor Risiko") else None)
-        sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
-        self._reapply_risk_tags(tree)
-
-    def _reapply_risk_tags(self, tree):
-        if not self._cell_tags:
-            return
-        for lv, tag in (("TINGGI", "risk_tinggi"),
-                        ("SEDANG", "risk_sedang"),
-                        ("RENDAH", "risk_rendah")):
-            cells = self._risk_level_cells.get(lv) or []
-            if cells:
-                apply_cell_tag(tree, tag, cells)
-
-    def _on_risk_double_click(self, event):
-        tree = event.widget
-        iid = tree.identify_row(event.y)
-        if not iid:
-            return
-        bahan = self._risk_bahan_map.get(iid)
-        if bahan:
-            self._risk_drilldown(bahan)
-
-    def _risk_drilldown(self, bahan_norm: str):
-        """Popup resto kontributor utk satu bahan — flip dulu (driver
-        risiko) lalu |DEV| terbesar (pola drilldown repo: kontributor
-        terbesar di atas)."""
-        pdf = self._risk_pairs_df
-        if pdf is None or pdf.empty:
-            return
-        sub = pdf[pdf["_bahan_norm"] == bahan_norm]
-        if sub.empty:
-            return
-        nama = str(sub["Nama Barang"].iloc[0])
-        sub = sub.copy()
-        sub["_maxabs"] = np.maximum(np.abs(sub["P1"].to_numpy(dtype=float)),
-                                    np.abs(sub["P2"].to_numpy(dtype=float)))
-        sub = sub.sort_values(["is_flip", "_maxabs"],
-                              ascending=[False, False], kind="stable")
-        cols_spec = [
-            ("Periode", 190, "w"), ("Resto", 110, "w"),
-            ("DEV Bulan Lalu", 100, "e"), ("DEV Saat Ini", 100, "e"),
-            ("Δ", 90, "e"), ("Disparitas", 85, "e"), ("Kategori", 90, "w"),
-        ]
-        p1n = sub["P1"].to_numpy(dtype=float)
-        p2n = sub["P2"].to_numpy(dtype=float)
-        dispn = sub["Disparitas"].to_numpy(dtype=float)
-        katn = sub["Kategori"].to_numpy()
-        pern = sub["Periode"].to_numpy()
-        resn = sub["Resto"].to_numpy()
-        rows = []
-        neg = []
-        kat_cells = {"Sempurna": [], "Dominan": [], "Parsial": []}
-        for i in range(len(sub)):
-            iid = f"rd{i}"
-            kv = str(katn[i])
-            rows.append([str(pern[i]), str(resn[i]),
-                         self._fmt_num(p1n[i]), self._fmt_num(p2n[i]),
-                         self._fmt_num(p2n[i] - p1n[i]),
-                         (self._fmt_pct(dispn[i]) if kv != "Konsisten"
-                          else "—"),
-                         kv])
-            for col, v in (("DEV Bulan Lalu", p1n[i]),
-                           ("DEV Saat Ini", p2n[i]),
-                           ("Δ", p2n[i] - p1n[i])):
-                if v is not None and not (isinstance(v, float)
-                                          and np.isnan(v)) and v < 0:
-                    neg.append((iid, col))
-            if kv in kat_cells:
-                kat_cells[kv].append((iid, "Kategori"))
-        cell_tags = {"neg_cell": neg,
-                     "flip_sempurna": kat_cells["Sempurna"],
-                     "flip_dominan": kat_cells["Dominan"],
-                     "flip_parsial": kat_cells["Parsial"]}
-        tag_colors = {"flip_sempurna": "#dc2626", "flip_dominan": C_AMBER,
-                      "flip_parsial": C_ACCENT}
-        return self._popup_table(f"⚡ Risiko Flip — {nama}", cols_spec,
-                                  rows, cell_tags=cell_tags,
-                                  tag_colors=tag_colors)
 
     # -- 🧭 Arah Minoritas (A4) ----------------------------------------------
     def _render_minoritas(self):
@@ -3690,124 +3428,12 @@ class KomparasiDeviasiView(tk.Frame):
             self._liga_bahan_norm = b
         self._render_liga()
 
-    # -- 💰 Benchmark (A8) ---------------------------------------------------
-    def _render_benchmark(self):
-        """💰 Benchmark Opportunity (v3.9.15 — pola benchmark-opportunity
-        repo): per resto (kelompok = 3 huruf awal kode resto), loss =
-        Σ|DEV<0|; opportunity = max(0, loss − median loss kelompok);
-        total = potensi loss yang bisa ditekan bila tiap resto mencapai
-        median kelompoknya. Urut opportunity ↓ · resto ↑. VEKTOR penuh."""
-        tree = self._bench_tree
-        tree.delete(*tree.get_children())
-        self._bench_df = None
-        self._bench_opp_cells = []
-        d, label = self._anasec_scope()
-        if d is None:
-            self._bench_summary_var.set("")
-            self._bench_status_var.set(label)
-            return
-        dev = pd.to_numeric(d["DEV Lalu"], errors="coerce").fillna(0.0)
-        dev_n = dev.to_numpy(dtype=float)
-        loss_row = np.where(dev_n < 0, -dev_n, 0.0)
-        resto_n = d["_resto_norm"].to_numpy()
-        kel = pd.Series(resto_n).str[:3].to_numpy()
-        t = pd.DataFrame({"resto": resto_n, "kel": kel, "loss": loss_row})
-        r = t.groupby("resto")["loss"].sum()
-        kk = t.groupby("resto")["kel"].first()
-        rk = pd.DataFrame({"resto": r.index.to_numpy(),
-                           "loss": r.to_numpy()})
-        rk["kel"] = kk.loc[r.index].to_numpy()
-        med = rk.groupby("kel")["loss"].median()
-        nk = rk.groupby("kel").size()
-        rk["median"] = rk["kel"].map(med)
-        rk["nkel"] = rk["kel"].map(nk)
-        rk["opp"] = (rk["loss"] - rk["median"]).clip(lower=0)
-        rraw = (pd.Series(d["Resto"].to_numpy(), index=resto_n)
-                .groupby(level=0).first())
-        rk["Resto"] = rraw.loc[rk["resto"]].to_numpy()
-        total = float(rk["opp"].sum())
-        # nama kolom df = nama kolom TABEL (filter header ⧩ bekerja)
-        bdf = rk.rename(columns={
-            "kel": "Kelompok", "nkel": "Resto di Kelompok",
-            "loss": "Loss (Σ|DEV−|)", "median": "Median Kelompok",
-            "opp": "Opportunity"})
-        bdf = bdf.sort_values(["Opportunity", "resto"],
-                              ascending=[False, True], kind="stable")
-        self._bench_df = bdf
-        # filter header ⧩
-        df = bdf
-        for col, sel in self._bench_sel.items():
-            if df.empty:
-                break
-            if col in df.columns and sel is not None:
-                fmt = self._fmt_analisa_series(col, df[col])
-                df = df[fmt.isin(sel)]
-        if df.empty:
-            self._bench_summary_var.set("")
-            self._bench_status_var.set("0 baris setelah filter.")
-            return
-        solo = int((nk == 1).sum())
-        note = (f" · {solo} kelompok 1 resto (median = loss sendiri)"
-                if solo else "")
-        self._bench_summary_var.set(
-            f"{label} · Total opportunity {self._fmt_num(total)} · "
-            f"{rk['kel'].nunique()} kelompok · {len(rk)} resto")
-        self._bench_status_var.set(f"Loss = sisi minus saja{note}")
-        m = len(df)
-        cols_np = {c: df[c].to_numpy() for c in
-                   ("Resto", "Kelompok", "Resto di Kelompok",
-                    "Loss (Σ|DEV−|)", "Median Kelompok", "Opportunity")}
-        items = []
-        opp_cells = []
-        for i in range(m):
-            iid = f"bench_{i}"
-            values = [str(i + 1),
-                      str(cols_np["Resto"][i]),
-                      str(cols_np["Kelompok"][i]),
-                      str(int(cols_np["Resto di Kelompok"][i])),
-                      self._fmt_num(cols_np["Loss (Σ|DEV−|)"][i]),
-                      self._fmt_num(cols_np["Median Kelompok"][i]),
-                      self._fmt_num(cols_np["Opportunity"][i])]
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-            ov = cols_np["Opportunity"][i]
-            if ov is not None and not (isinstance(ov, float)
-                                       and np.isnan(ov)) and ov > 0:
-                opp_cells.append((iid, "Opportunity"))
-            items.append(("", iid, {"values": values, "tags": tuple(tags)}))
-        self._bench_opp_cells = opp_cells
-        self._anasec_insert(
-            tree, items, on_done=lambda: self._reapply_bench_tags(tree))
-
-    def _bench_col_values(self, col: str) -> list:
-        d = self._bench_df
-        if d is None or d.empty or col not in d.columns:
-            return []
-        return self._fmt_analisa_series(col, d[col]).unique().tolist()
-
-    def _on_bench_filter(self, col: str, selected):
-        self._bench_sel[col] = selected
-        self._render_benchmark()
-
-    def _sort_bench(self, col: str, reverse: bool = True, tree=None):
-        tree = tree if tree is not None else self._bench_tree
-        parse = (self._parse_num_id if col in
-                 ("Peringkat", "Resto di Kelompok", "Loss (Σ|DEV−|)",
-                  "Median Kelompok", "Opportunity") else None)
-        sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
-        self._reapply_bench_tags(tree)
-
-    def _reapply_bench_tags(self, tree):
-        if not self._cell_tags:
-            return
-        if self._bench_opp_cells:
-            apply_cell_tag(tree, "opp_cell", self._bench_opp_cells)
-
     # -- Popup drilldown generik ----------------------------------------------
     def _popup_table(self, title: str, cols_spec: list, rows: list,
                      cell_tags: dict | None = None,
                      tag_colors: dict | None = None,
                      geometry: str = "1000x430"):
-        """Popup drill-down generik (v3.9.15 — dipakai Risiko Flip & Arah
+        """Popup drill-down generik (v3.9.15 — dipakai Arah
         Minoritas): Toplevel + tree (heading, resize) + footer jumlah +
         ✕ Tutup + ESC. rows = nilai TERFORMAT per baris; cell_tags =
         {tag: [(iid, kolom)]} (tag warna via tag_colors / _setup_tags)."""
@@ -3865,7 +3491,8 @@ class KomparasiDeviasiView(tk.Frame):
     @staticmethod
     def _fmt_analisa_series(col, series):
         """Format kolom tabel analisa (filter/sort konsisten tampilan).
-        v3.9.15: kolom 4 tabel analisa baru (Risk/Min/Liga/Bench)."""
+        v3.9.15: kolom tabel analisa (Min/Liga; Risk/Bench dihapus
+        v3.9.19)."""
         if col in ("Disparitas", "Disparitas Rerata", "Rate",
                    "% Minoritas"):
             return series.map(KomparasiDeviasiView._fmt_pct)

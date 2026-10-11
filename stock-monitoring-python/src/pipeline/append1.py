@@ -352,7 +352,7 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # renamed — beri prefix nomor (NEW numbering scheme after OUT/BK split)
     #   7.Selisih IN (was 6.Selisih IN)
     #   8.BARANG KELUAR (NEW — was not in rename_map before)
-    #   9.OUT (was 7.OUT)
+    #   9.ACR (was 9.OUT / 7.OUT — istilah user v3.9.19: "Ganti istilah 9.OUT menjadi 9.ACR")
     rename_map = {
         "SALDO AKHIR": "2.SALDO AKHIR",
         "SO": "1.SO",
@@ -361,7 +361,7 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         "BARANG MASUK": "5.BARANG MASUK",
         "Selisih IN": "7.Selisih IN",
         "BARANG KELUAR": "8.BARANG KELUAR",
-        "OUT": "9.OUT",
+        "OUT": "9.ACR",
     }
     # Only rename columns that exist
     valid_rename = {old: new for old, new in rename_map.items() if old in combined.columns}
@@ -413,10 +413,10 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # =========================================================================
     print("  [Append1] Unpivoting metrics...")
     # FIX: include 8.BARANG KELUAR (was missing → all BK data lost)
-    # FIX: use new numbering 7.Selisih IN + 9.OUT (matches pivot_view METRICS)
+    # FIX: use new numbering 7.Selisih IN + 9.ACR (matches pivot_view METRICS)
     unpivot_columns = [
         "2.SALDO AKHIR", "1.SO", "3.DEVIASI", "4.IN",
-        "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.OUT", "SALDO AWAL"
+        "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.ACR", "SALDO AWAL"
     ]
     available_unpivot = [c for c in unpivot_columns if c in expanded_kategori.columns]
 
@@ -477,6 +477,45 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                 final = final.drop(columns=["_SATUAN_LOOKUP"])
             else:
                 final = final.merge(satuan_map, on=["Nama Barang", "NAMA RESTO"], how="left")
+
+    # =========================================================================
+    # 9. LOOKUP SOURCE DATA (v3.9.19 — CEK "Promix 04" di tab Deviasi)
+    # =========================================================================
+    # SOURCE DATA hanya ada di Full Rekap Mentah (JENIS 'SO': "input so
+    # harian" / "input promix 04 dine in" / "input promix 04 take away").
+    # Merge per (Nama Barang, NAMA RESTO) — preferensi baris BERJALAN
+    # (Tanggal positif; rekap bulan lalu di-negasi → sort ascending lalu
+    # keep LAST = tanggal tertinggi). Nilai dipakai deviasi_view utk
+    # kondisi CEK "Promix 04" (SO bukan bersumber "input so harian").
+    if (full_rekap_so is not None
+            and "SOURCE DATA" in full_rekap_so.columns
+            and "Nama Barang" in final.columns
+            and "NAMA RESTO" in final.columns):
+        so_rows = full_rekap_so[
+            (full_rekap_so["JENIS"].astype(str).str.strip().str.upper()
+             == "SO")
+            & full_rekap_so["SOURCE DATA"].notna()
+        ]
+        if not so_rows.empty:
+            src_map = (
+                so_rows.assign(
+                    _t=pd.to_numeric(so_rows["Tanggal"], errors="coerce"))
+                .sort_values("_t")
+                .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+                                 keep="last")
+                [["Nama Barang", "NAMA RESTO", "SOURCE DATA"]]
+            )
+            if "SOURCE DATA" in final.columns:
+                final = final.merge(
+                    src_map.rename(columns={"SOURCE DATA": "_SRC_LOOKUP"}),
+                    on=["Nama Barang", "NAMA RESTO"], how="left")
+                final["SOURCE DATA"] = final["SOURCE DATA"].fillna(
+                    final["_SRC_LOOKUP"])
+                final = final.drop(columns=["_SRC_LOOKUP"])
+            else:
+                final = final.merge(
+                    src_map, on=["Nama Barang", "NAMA RESTO"], how="left")
+            print(f"    SOURCE DATA (rekap SO): {len(src_map)} pasangan")
 
     print(f"  [Append1] DONE: {len(final)} rows")
     return final

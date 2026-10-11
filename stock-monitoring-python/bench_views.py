@@ -22,7 +22,7 @@ BARANG = [f"BARANG {i:03d} (V.20)" for i in range(120)]
 RESTO = ["MLGPAR", "BDGUKU", "KWGGAL", "DPKMAR", "PWKTAM", "CKGPAH",
          "BKSALT", "GGPDAA", "SBRTUP", "KWGTEL", "BJMHAS", "TGRBIN"]
 JENIS = ["SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI", "4.IN",
-         "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.OUT"]
+         "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.ACR"]
 
 
 def make_append1(n: int) -> pd.DataFrame:

@@ -34,10 +34,24 @@ hapus 3 kolom + highlight 2 kolom):
   Nama Barang · Nama Resto · Saldo Akhir · SO · IN · Deviasi per
   Tanggal (lihat deviasi_popup.py).
 
+v3.9.19 (3 permintaan user utk tab GR/PCS):
+- DEFAULT KATEGORI = "Deviasi" (case-insensitive; fallback "Semua"
+  bila tidak ada) saat load data & ✕ Reset Filter.
+- CEK kondisi ke-0 "Promix 04" (PRIORITAS PERTAMA): SOURCE DATA rekap
+  JENIS SO (kolom SOURCE DATA sheet REKAP MENTAH — "input so harian" /
+  "input promix 04 dine in" / "input promix 04 take away"; dibawa
+  append1 merge per pasangan) BUKAN "input so harian" → CEK = Promix
+  04 (SO turunan sistem — pola CEK lain tidak bermakna); tanpa SOURCE
+  DATA → kondisi tidak berlaku.
+- ISI FILTER HEADER = data yang ADA saja (Excel-like): daftar nilai
+  dihitung dari baris yang tampil saat ini (mode Satuan + KATEGORI +
+  filter kolom LAIN — kolom sendiri dikecualikan), bukan pivot mentah
+  (dulu: PCS bisa menampilkan nilai CEK yang hanya ada di baris GR).
+
 v3.9.6 (permintaan user: "tambah kategori Deviasi pada tab Deviasi PCS
 dan GR" — mirror sheet DEVIASI GR/PCS workbook asli user):
 - 5 KOLOM BARU setelah Rank: Max Deviasi (max |Deviasi| per barang,
-  semua resto) · ACR (rata-rata penjualan harian = Σ 9.OUT tgl 1..H / H)
+  semua resto) · ACR (rata-rata penjualan harian = Σ 9.ACR tgl 1..H / H)
   · Total ACR (BOM per barang×resto = Σ penjualan 1..H) · Dev to BOM%
   (= Deviasi / Total ACR — "Loss Surplus to BOM" sheet Follow UP;
   formula terverifikasi nilai-per-nilai dari sheet DEVIASI GR asli) ·
@@ -427,6 +441,7 @@ class DeviasiView(tk.Frame):
 
         # Legend CEK
         legend = LegendRow(self.content, [
+            ("Promix 04", "#0e7490"),     # v3.9.19 — kondisi ke-0
             ("Kosong/Non Aktif", "#b45309"),
             ("Beda Tanggal", "#2563eb"),
             ("Hitung Manual", "#ea580c"),
@@ -504,9 +519,48 @@ class DeviasiView(tk.Frame):
             self._dirty = False
             self._refresh()
 
-    def _col_values(self, col: str) -> list:
-        """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua kolom)."""
+    def _filtered_pivot(self, exclude_col: str | None = None):
+        """v3.9.19 — baris pivot YANG TAMPIL SAAT INI (permintaan user:
+        "isi filter harus menampilkan data yang ada aja bukan termasuk
+        data yang tidak ada"): mode Satuan + filter KATEGORI + filter
+        header kolom LAIN (kolom `exclude_col` sendiri dikecualikan —
+        perilaku AutoFilter Excel: daftar nilai = nilai yang TERLIHAT).
+        VEKTOR (pivot di-cache) — murah, dipanggil saat popup dibuka."""
         pivot_df = self._cached_pivot
+        if pivot_df is None or pivot_df.empty:
+            return pivot_df
+        filtered = pivot_df
+        # mode Satuan (GR / non-GR) — baris tampil per tab
+        if self.satuan_mode == "GR":
+            filtered = filtered[
+                filtered["Satuan"].astype(str).str.upper() == "GR"]
+        else:
+            filtered = filtered[
+                filtered["Satuan"].astype(str).str.upper() != "GR"]
+        # filter KATEGORI combobox
+        if self._kategori_sel and "KATEGORI" in filtered.columns:
+            filtered = filtered[
+                filtered["KATEGORI"].astype(str) == str(self._kategori_sel)]
+        # filter header kolom lain (nilai TERFORMAT — identik render)
+        for col, sel in self._col_sel.items():
+            if sel is None or col == exclude_col:
+                continue
+            if col in filtered.columns:
+                fmt = self._format_col_series(col, filtered[col])
+                filtered = filtered[fmt.isin(sel)]
+        return filtered
+
+    def _col_values(self, col: str) -> list:
+        """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua
+        kolom).
+
+        v3.9.19: sumber nilai = baris yang TAMPIL SAAT INI (_filtered_
+        pivot — mode Satuan + KATEGORI + filter kolom lain; kolom ini
+        sendiri dikecualikan) — dulu pivot MENTAH: tab PCS bisa
+        menampilkan nilai CEK yang hanya ada di baris GR (mis. "Beda
+        Tanggal" padahal tidak ada baris PCS ber-CEK itu) dan KATEGORI
+        Deviasi menampilkan nilai dari kategori lain."""
+        pivot_df = self._filtered_pivot(exclude_col=col)
         if pivot_df is None or pivot_df.empty or col not in pivot_df.columns:
             return []
         return self._format_col_series(col, pivot_df[col]).unique().tolist()
@@ -522,14 +576,26 @@ class DeviasiView(tk.Frame):
         self._refresh()
 
     # v3.9.13 — combobox KATEGORI ("Semua" = tanpa filter).
+    # v3.9.19 — DEFAULT seleksi = kategori "Deviasi" (permintaan user:
+    # "secara default kategori terfilter ke kategori Deviasi") —
+    # dicocokkan case-insensitive dgn nilai data (mis. "DEVIASI");
+    # fallback "Semua" bila kategori itu tidak ada di data.
     def _on_kategori_changed(self):
         val = self._kategori_var.get()
         self._kategori_sel = None if (not val or val == "Semua") else val
         self._refresh()
 
+    def _default_kategori_value(self) -> str:
+        values = list(self._kategori_combo["values"] or [])
+        for v in values:
+            if str(v).strip().lower() == "deviasi":
+                return str(v)
+        return "Semua"
+
     def _reset_kategori(self):
-        self._kategori_var.set("Semua")
-        self._kategori_sel = None
+        val = self._default_kategori_value()
+        self._kategori_var.set(val)
+        self._kategori_sel = None if val == "Semua" else val
 
     def _show_empty(self):
         self.content.pack_forget()
@@ -556,6 +622,9 @@ class DeviasiView(tk.Frame):
         tree.tag_configure("cek_manual", foreground="#ea580c")   # orange
         tree.tag_configure("cek_drastis", foreground="#dc2626")  # red
         tree.tag_configure("cek_acr", foreground="#7c3aed")      # purple
+        # v3.9.19 — kondisi ke-0 "Promix 04" (SO bersumber non input so
+        # harian): teal
+        tree.tag_configure("cek_promix", foreground="#0e7490")
 
     # =========================================================================
     # LOGIKA (identik versi lama)
@@ -566,7 +635,7 @@ class DeviasiView(tk.Frame):
                      deviasi=None):
         """Port formula LET Excel (5 kondisi — v3.9.6 melengkapi ACR).
 
-        Kondisi ke-5 "ACR to BOM" (butuh BOM — kini tersedia dari 9.OUT):
+        Kondisi ke-5 "ACR to BOM" (butuh BOM — kini tersedia dari 9.ACR):
         |Deviasi| > Total ACR (BOM penjualan 1..H) → selisih stok lebih
         besar dari pemakaian teoretis → pasti salah. total_acr/deviasi
         opsional (None = kondisi dilewati — kompatibilitas v3.2).
@@ -638,6 +707,7 @@ class DeviasiView(tk.Frame):
             self._shared_cache.clear()
         self._aktif_lookup = {}
         self._kategori_lookup = {}   # v3.9.13 — diisi ulang di _compute_pivot
+        self._so_source_lookup = {}  # v3.9.19 — diisi ulang di _compute_pivot
         self._tnum = None  # reset cache to_numeric(Tanggal)
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢ (data baru =
         # layout baru — jangan terjebak setengah-collapse)
@@ -688,7 +758,7 @@ class DeviasiView(tk.Frame):
         df = data
 
         tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
-        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.OUT",
+        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.ACR",
                           "8.BARANG KELUAR"]
 
         # cache to_numeric(Tanggal) per objek data (hindari recompute tiap H)
@@ -730,6 +800,27 @@ class DeviasiView(tk.Frame):
             ))
         else:
             self._kategori_lookup = {}
+
+        # v3.9.19 — lookup SOURCE DATA per (barang, resto) dari baris
+        # JENIS 1.SO (kolom SOURCE DATA hasil merge append1 dari REKAP
+        # MENTAH; konstanta per pasangan — append1 sudah preferensi
+        # baris berjalan). Dipakai kondisi CEK ke-0 "Promix 04": SO
+        # bersumber BUKAN "input so harian" (mis. "input promix 04 dine
+        # in" / "take away") → CEK = Promix 04.
+        self._so_source_lookup = {}
+        if "SOURCE DATA" in df.columns:
+            so_src = df[
+                (df["JENIS"] == "1.SO") & df["SOURCE DATA"].notna()
+            ][["Nama Barang", "NAMA RESTO", "SOURCE DATA"]]
+            if not so_src.empty:
+                so_src = so_src.drop_duplicates(
+                    subset=["Nama Barang", "NAMA RESTO"], keep="first")
+                self._so_source_lookup = {
+                    (str(b), str(r)): str(v).strip()
+                    for b, r, v in zip(so_src["Nama Barang"],
+                                       so_src["NAMA RESTO"],
+                                       so_src["SOURCE DATA"])
+                }
 
         if df_filtered.empty:
             return pd.DataFrame()
@@ -787,7 +878,7 @@ class DeviasiView(tk.Frame):
         in_m1 = arr("4.IN", h - 1)
         so_h = arr("1.SO", h)
         in_h = arr("4.IN", h)
-        out_h = arr("9.OUT", h)
+        out_h = arr("9.ACR", h)
         bk_h = arr("8.BARANG KELUAR", h)
         so_p1 = arr("1.SO", h + 1)
         in_p1 = arr("4.IN", h + 1)
@@ -798,11 +889,11 @@ class DeviasiView(tk.Frame):
         stok = sistem + in_h - out_h - bk_h
 
         # --- v3.9.6: KATEGORI DEVIASI (mirror sheet DEVIASI GR/PCS asli) ---
-        # Total ACR = BOM per (barang, resto, satuan) = Σ penjualan 9.OUT
+        # Total ACR = BOM per (barang, resto, satuan) = Σ penjualan 9.ACR
         # tanggal 1..H (kolom "Dev to BOM%" sheet asli = Deviasi/Total ACR —
         # terverifikasi nilai-per-nilai dari sheet DEVIASI GR file user).
         h_safe = max(1, h)
-        out_mask = (df["JENIS"] == "9.OUT") & (tnum >= 1) & (tnum <= h)
+        out_mask = (df["JENIS"] == "9.ACR") & (tnum >= 1) & (tnum <= h)
         out_df = df[out_mask]
         if not out_df.empty:
             _nil = pd.to_numeric(out_df["NILAI"], errors="coerce")
@@ -863,11 +954,25 @@ class DeviasiView(tk.Frame):
         # persis string sheet Follow UP / DEVIASI GR file asli user.
         cond_acr = (total_acr > 0) & (np.abs(deviasi) > total_acr)
 
+        # v3.9.19 — kondisi ke-0 "Promix 04" (PRIORITAS PERTAMA):
+        # SO pasangan ini bersumber BUKAN "input so harian" (mis. promix
+        # 04 dine in / take away — SO turunan sistem penjualan) → pola
+        # CEK lain (naik/turun SO, rasio stok) tidak bermakna utk SO
+        # turunan; tampilkan sumbernya. Tanpa data SOURCE DATA (pasangan
+        # tanpa rekap SO) → kondisi tidak berlaku (bukan promix).
+        so_src_s = pd.Series(
+            [self._so_source_lookup.get((b, r), "")
+             for b, r in zip(barang_s, pivot["NAMA RESTO"].astype(str))],
+            index=barang_s.index,
+        )
+        cond_promix = so_src_s.str.strip().str.lower().ne("") \
+            & so_src_s.str.strip().str.lower().ne("input so harian")
+
         cek = np.select(
-            [cond_kosong, cond_tanggal, cond_manual, cond_drastis,
-             cond_acr],
-            ["Kosong/Non Aktif", "Beda Tanggal", "Hitung Manual",
-             "Turun Drastis", "ACR to BOM"],
+            [cond_promix, cond_kosong, cond_tanggal, cond_manual,
+             cond_drastis, cond_acr],
+            ["Promix 04", "Kosong/Non Aktif", "Beda Tanggal",
+             "Hitung Manual", "Turun Drastis", "ACR to BOM"],
             default="",
         )
 
@@ -1123,7 +1228,9 @@ class DeviasiView(tk.Frame):
                 for hl_col in self.HIGHLIGHT_COLS:
                     hl_cells.append((f"row_{i}", hl_col))
             cek_val = cek_series.iloc[i]
-            if cek_val == "Kosong/Non Aktif":
+            if cek_val == "Promix 04":           # v3.9.19 — kondisi ke-0
+                tags.append("cek_promix")
+            elif cek_val == "Kosong/Non Aktif":
                 tags.append("cek_kosong")
             elif cek_val == "Beda Tanggal":
                 tags.append("cek_tanggal")

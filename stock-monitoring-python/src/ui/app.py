@@ -149,7 +149,49 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.18"  # v3.9.18 — FOKUS RESTO 1. DEVIASI WEEKLY + POPUP RINGKAS + KOLOM + HIGHLIGHT (tab Deviasi GR/PCS)
+APP_VERSION = "3.9.19"  # v3.9.19 — KOLOM ANALISA + HAPUS RISIKO/BENCHMARK + DEFAULT KATEGORI + NAMA RESTO PO + FILTER DATA-ADA + PROMIX 04 + 9.ACR + RI BALANCING
+# v3.9.19 — 8 permintaan user:
+# (1) KOLOM ANALISA (user: "tambah kolom baru untuk keterangan kenaikan
+#     tertinggi, penurunan tertinggi, stabil, berubah arah, potensi
+#     flip flop pada laporan deviasi tab TOP and FLIP. 1 kolom aja"):
+#     bagian 📊 Top & Flip mode 📈 Analisa (tab 📋 Laporan Deviasi) —
+#     tabel Top Selisih & Perubahan Arah kini berkolom ANALISA:
+#     Kenaikan Tertinggi · Penurunan Tertinggi · Stabil · Berubah Arah
+#     · Potensi Flip Flop (tanda berlawanan + disparitas ambang 40%
+#     sama dgn Kategori flip; warna per-cell).
+# (2) HAPUS BAGIAN (user: "hapus tab resiko flip dan bencmark"):
+#     baris BAGIAN kini 3 bagian (Top & Flip · Arah Minoritas · Liga
+#     Deviasi) — render/UI/metode ⚡ Risiko Flip & 💰 Benchmark
+#     dihapus penuh.
+# (3) DEFAULT KATEGORI (user: "secara default kategori terfilter ke
+#     kategori Deviasi"): combobox KATEGORI tab Deviasi GR/PCS default
+#     "Deviasi" (case-insensitive; fallback "Semua") saat load data &
+#     ✕ Reset Filter.
+# (4) NAMA RESTO DI RINCIAN PO (user: "tambahkan kolom nama resto di
+#     rincian PO"): kolom baru di baris induk — dari Cabang PO
+#     ("1370.MLGPAR" → "MLGPAR"), ikut filter header ⧩.
+# (5) FILTER = DATA YANG ADA (user: "isi filter harus menampilkan data
+#     yang ada aja bukan termasuk data yang tidak ada — berlaku untuk
+#     semua filter"): daftar nilai filter header dihitung dari baris
+#     yang TAMPIL (mode Satuan + KATEGORI + filter kolom lain — kolom
+#     sendiri dikecualikan; perilaku AutoFilter Excel) di tab Deviasi
+#     GR/PCS, Rincian PO, Rekap Selisih IN (juga rentang tanggal +
+#     hanya-selisih), Anomali COM, dan tabel Top/Flip komparasi.
+# (6) CEK "Promix 04" (user: "jika SO nya bersumber tanpa input so
+#     harian maka tampilkan Promix 04"): SOURCE DATA REKAP MENTAH
+#     JENIS SO ("input so harian" / "input promix 04 dine in" /
+#     "take away") dibawa append1 per pasangan; CEK kondisi ke-0
+#     (prioritas pertama — pola CEK lain tak bermakna utk SO turunan
+#     sistem): bukan "input so harian" → "Promix 04".
+# (7) ISTILAH 9.OUT → 9.ACR (user: "ganti istilah 9.OUT menjadi
+#     9.ACR"): JENIS penjualan 22.05 kini "9.ACR" (rename_map append1,
+#     METRICS pivot, deviasi/komparasi/tests) — data mentah tak berubah.
+# (8) CEK "RI Balancing" (user: "jika bulan PO dan bulan RI tidak sama
+#     ... kasih aja keterangannya RI Balancing"): popup Rincian IN
+#     (tab 📤) berkolom CEK — dokumen RI.2026.10.10354 vs
+#     PO.2026.08.00571 (struktur PREFIKS.TAHUN.BULAN.NOMOR): bulan
+#     beda → "RI Balancing" (amber per-cell).
+# v3.9.18 — FOKUS RESTO 1. DEVIASI WEEKLY + POPUP RINGKAS + KOLOM + HIGHLIGHT (tab Deviasi GR/PCS)
 # v3.9.18 — 5 permintaan user utk tab 📦 Deviasi GR & 🧩 Deviasi PCS:
 # (1) FOKUS RESTO (user: "resto yang dianalisa hanya berfokus pada
 #     resto yang ada di folder 1. DEVIASI WEEKLY aja jangan semua"):
@@ -354,7 +396,7 @@ APP_VERSION = "3.9.18"  # v3.9.18 — FOKUS RESTO 1. DEVIASI WEEKLY + POPUP RING
 # v3.9.6 (3 permintaan user sekaligus):
 # (1) "tambah kategori Deviasi pada tab Deviasi PCS dan GR" — 5 kolom
 #     baru (mirror sheet DEVIASI GR/PCS workbook asli): Max Deviasi ·
-#     ACR (rata-rata penjualan harian = Σ 9.OUT 1..H / H) · Total ACR
+#     ACR (rata-rata penjualan harian = Σ 9.ACR 1..H / H) · Total ACR
 #     (BOM per barang×resto = Σ penjualan 1..H) · Dev to BOM% (= Deviasi
 #     / Total ACR — "Loss Surplus to BOM") · Stok Seharusnya (= SO(H−1) −
 #     ACR) + CEK kondisi ke-5 "ACR to BOM" (|Deviasi| > Total ACR —
@@ -384,7 +426,7 @@ APP_VERSION = "3.9.18"  # v3.9.18 — FOKUS RESTO 1. DEVIASI WEEKLY + POPUP RING
 #     user; file sampel memakai WEEK 4, minggu = CUT-OFF KUMULATIF dari
 #     tgl 1 — WEEK 2 ≈ 2× WEEK 1, konsisten semantik H).
 # (3) "DEV TO BOM" kini ADA di app: BOM·App = Σ penjualan 22.05 (JENIS
-#     9.OUT, tgl 1..H — "2205 itu bom"), COM·App = Σ pemakaian com(t)
+#     9.ACR, tgl 1..H — "2205 itu bom"), COM·App = Σ pemakaian com(t)
 #     tgl 1..H (com(t) = SO(t-1)+IN(t)−BK(t)−SO(t), formula identik
 #     pivot 6.PEMAKAIAN & tab Anomali COM), DEV·App = COM−BOM (formula
 #     identik file), GR·App = SO_H − Sistem_H (PERSIS kolom Deviasi di

@@ -17,6 +17,12 @@ Struktur mirror pivotTable di sample Excel (logika identik versi lama):
 - Page filters: Cabang PO, Status Pesanan Pembelian
 - Tree rows: Nomor# (parent) → detail children
 - Value: Sum of Kuantitas per row + grand total row
+
+v3.9.19 — KOLOM NAMA RESTO (permintaan user: "tambahkan kolom nama
+resto di rincian PO"): diambil dari kolom Cabang PO ("1370.MLGPAR" →
+"MLGPAR" — kode resto sesuai kolom Resto tab lain; tanpa titik →
+nilai apa adanya). Diisi pada BARIS INDUK (info level-PO — konsisten
+layout v3.9: anak hanya item); ikut filter header ⧩.
 """
 
 import tkinter as tk
@@ -47,14 +53,26 @@ from .widgets import (
 # baris induk mengisi kolom PO (Tanggal…Keterangan PO) + ringkasan;
 # baris anak hanya mengisi Nama Barang / Satuan / Kuantitas.
 PO_COLUMNS = [
-    "Tanggal", "Pemasok", "Status Pesanan", "Keterangan PO",
+    "Tanggal", "Nama Resto", "Pemasok", "Status Pesanan", "Keterangan PO",
     "Nama Barang", "Satuan", "Kuantitas", "Tgl/Jam Pembuatan",
 ]
 
 # Pemetaan nama kolom tampilan → kolom DataFrame sumber
+# v3.9.19: "Nama Resto" bersumber kolom Cabang PO (kode resto = bagian
+# setelah titik terakhir, mis. "1370.MLGPAR" → "MLGPAR").
 COL_SRC = {
     "Status Pesanan": "Status Pesanan Pembelian",
+    "Nama Resto": "Cabang PO",
 }
+
+
+def _resto_name(val) -> str:
+    """v3.9.19 — Cabang PO → nama resto: bagian setelah titik TERAKHIR
+    ("1370.MLGPAR" → "MLGPAR"; tanpa titik → nilai apa adanya)."""
+    s = str(val or "").strip()
+    if not s or s.lower() in ("none", "nan"):
+        return ""
+    return s.rsplit(".", 1)[-1].strip() if "." in s else s
 
 
 class RincianPoView(tk.Frame):
@@ -158,9 +176,10 @@ class RincianPoView(tk.Frame):
         self.tree.column("#0", width=130, minwidth=110)
         self.tree.heading("#0", text="Nomor #")
         col_widths = {
-            "Tanggal": 92, "Pemasok": 200, "Status Pesanan": 110,
-            "Keterangan PO": 110, "Nama Barang": 200, "Satuan": 64,
-            "Kuantitas": 90, "Tgl/Jam Pembuatan": 140,
+            "Tanggal": 92, "Nama Resto": 90, "Pemasok": 200,
+            "Status Pesanan": 110, "Keterangan PO": 110,
+            "Nama Barang": 200, "Satuan": 64, "Kuantitas": 90,
+            "Tgl/Jam Pembuatan": 140,
         }
         for c in cols:
             self.tree.column(c, width=col_widths.get(c, 100), minwidth=50,
@@ -213,8 +232,15 @@ class RincianPoView(tk.Frame):
 
     def _col_values(self, col: str) -> list:
         """Nilai unik TERFORMAT utk popup filter header (v3.5; v3.9 —
-        mapping nama kolom tampilan → kolom df sumber)."""
-        df = self.data
+        mapping nama kolom tampilan → kolom df sumber).
+
+        v3.9.19 — sumber nilai = baris yang TAMPIL SAAT INI (permintaan
+        user: "isi filter harus menampilkan data yang ada aja"): filter
+        CABANG PO + STATUS PESANAN + filter header kolom LAIN diterapkan
+        dulu (kolom ini sendiri dikecualikan — perilaku AutoFilter Excel);
+        dulu df mentah → nilai kategori/barang cabang lain ikut tampil
+        meski barisnya sudah terfilter."""
+        df = self._filtered_data(exclude_col=col)
         if df is None or df.empty:
             return []
         if col == "#0":
@@ -226,6 +252,26 @@ class RincianPoView(tk.Frame):
             return []
         return self._format_col_series(col, df[src]).unique().tolist()
 
+    def _filtered_data(self, exclude_col: str | None = None):
+        """v3.9.19 — df setelah filter combobox + header kolom lain
+        (vektor; dipanggil saat popup filter dibuka)."""
+        df = self.data
+        if df is None or df.empty:
+            return df
+        for c, val in [("Cabang PO", self.cabang_var.get()),
+                       ("Status Pesanan Pembelian",
+                        self.status_pesanan_var.get())]:
+            if val and val != "(All)" and c in df.columns:
+                df = df[df[c].astype(str) == val]
+        for c, sel in self._col_sel.items():
+            if sel is None or c == exclude_col:
+                continue
+            src_col = "Nomor #" if c == "#0" else COL_SRC.get(c, c)
+            if src_col in df.columns:
+                fmt = self._format_col_series(c, df[src_col])
+                df = df[fmt.isin(sel)]
+        return df
+
     def _format_col_series(self, col: str, series):
         """Format kolom → string tampilan (identik render tabel)."""
         if col == "Tanggal":
@@ -234,6 +280,8 @@ class RincianPoView(tk.Frame):
             return series.map(self._fmt_datetime)
         if col == "Kuantitas":
             return series.map(self._fmt_num)
+        if col == "Nama Resto":   # v3.9.19 — Cabang PO → kode resto
+            return series.map(_resto_name)
         return series.astype(str)
 
     def _on_col_filter(self, col: str, selected):
@@ -402,11 +450,15 @@ class RincianPoView(tk.Frame):
             total_qty += po_qty
             parent_iid = f"po_{po_count}"
             # BARIS INDUK = info PO lengkap + ringkasan (v3.9)
+            # v3.9.19: NAMA RESTO (dari Cabang PO — level-PO; anak baris
+            # tetap hanya item, konsisten layout ringkas v3.9)
             items.append(("", parent_iid,
                           {"text": str(nomor),
                            "values": [
                                self._fmt_date(group["Tanggal"].iloc[0])
                                if "Tanggal" in group.columns else "",
+                               _resto_name(_first_str(group["Cabang PO"]))
+                               if "Cabang PO" in group.columns else "",
                                _first_str(group["Pemasok"])
                                if "Pemasok" in group.columns else "",
                                _first_str(group["Status Pesanan Pembelian"])
@@ -432,7 +484,7 @@ class RincianPoView(tk.Frame):
                     parent_iid, f"{parent_iid}_{item_count}",
                     {"text": "",
                      "values": [
-                         "", "", "", "",
+                         "", "", "", "", "",
                          str(row.get("Nama Barang", "")),
                          str(row.get("Satuan", "")),
                          self._fmt_num(row.get("Kuantitas")),
@@ -440,10 +492,10 @@ class RincianPoView(tk.Frame):
                      ],
                      "tags": (tag,), "open": False}))
 
-        # 8 kolom nilai (grand total sejajar kolom Kuantitas)
+        # 9 kolom nilai (grand total sejajar kolom Kuantitas)
         items.append(("", "grand_total",
                       {"text": "GRAND TOTAL",
-                       "values": ["", "", "", "",
+                       "values": ["", "", "", "", "",
                                    f"{po_count} PO", "",
                                    _fmt_qty(total_qty), ""],
                        "tags": ("grand_total",), "open": False}))

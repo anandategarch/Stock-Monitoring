@@ -8,6 +8,10 @@ dan 9901 beserta nomor nya.
 v3.9.17: sumber IN tambahan "42.05 (Bulan Lalu)" — folder
 "4.1 4205 Bulan Lalu" (penambah IN periode ujung bulan lalu, mirror
 32.24 bulan lalu).
+v3.9.19: popup Rincian IN punya KOLOM CEK — "RI Balancing" bila bulan
+Nomor RI ≠ bulan Nomor PO (struktur kode PO.2026.08.00571 /
+RI.2026.10.10354: segmen 2 = tahun, segmen 3 = bulan; permintaan user:
+RI dibuat beda bulan dari PO-nya = entries balancing).
 
 v3.6 (permintaan user: "audit rekonsiliasi tidak perlu ambil dari sheet
 29 — aplikasikan logika nya dengan tambah kolom SO dan kolom hasil audit
@@ -42,6 +46,7 @@ bulan lalu — permintaan user "rekap selisih in hanya periode 1-31").
 v3.6 (lama): default -26 s/d 31.
 """
 import contextlib
+import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
@@ -137,10 +142,56 @@ _POPUP_COLUMNS = [
     ("Source", 130, "w"),
     ("Nomor", 160, "w"),
     ("Nomor PO", 160, "w"),
+    ("CEK", 110, "w"),            # v3.9.19 — "RI Balancing"
     ("Qty", 90, "e"),
     ("#Tgl/Jam Pembuatan IT", 150, "w"),
 ]
 _POPUP_IDS = [c[0] for c in _POPUP_COLUMNS]
+
+# v3.9.19 — struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR
+# (mis. "PO.2026.08.00571" / "RI.2026.10.10354" — 2026 tahun, 08/10
+# bulan). Cukup ambil segmen bulan (index 2).
+_DOC_CODE_RE = re.compile(r"^[A-Za-z]+\.(\d{4})\.(\d{2})\.")
+
+
+def _doc_code_str(code) -> str:
+    """Kode dokumen → teks aman (None/pd.NA/NaN → "")."""
+    if code is None:
+        return ""
+    try:
+        if pd.isna(code):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(code).strip()
+
+
+def _doc_month(code) -> "int | None":
+    """Bulan dari kode dokumen PO.2026.08.00571 → 8; None bila pola
+    tidak cocok / nilai kosong."""
+    m = _DOC_CODE_RE.match(_doc_code_str(code))
+    if not m:
+        return None
+    try:
+        return int(m.group(2))
+    except ValueError:
+        return None
+
+
+def _ri_balancing(nomor, nomor_po) -> str:
+    """v3.9.19 — keterangan CEK popup Rincian IN: bulan Nomor (dokumen
+    penerimaan RI) ≠ bulan Nomor PO → "RI Balancing" (RI dibuat beda
+    bulan dari pesanannya — entries balancing; contoh user: PO Agustus
+    ↔ RI Oktober). Hanya berlaku utk dokumen RI (Nomor berprefiks "RI."
+    — dokumen PI 9901 adalah invoice pembelian, bukan balancing)."""
+    n = _doc_code_str(nomor)
+    if not n.upper().startswith("RI."):
+        return ""
+    m_ri = _doc_month(n)
+    m_po = _doc_month(nomor_po)
+    if m_ri is None or m_po is None or m_ri == m_po:
+        return ""
+    return "RI Balancing"
 
 
 def _fmt_num(val) -> str:
@@ -218,13 +269,13 @@ class InDetailPopup(tk.Toplevel):
         tgl_txt = _fmt_int(tanggal)
         self.title(f"Rincian IN — {barang} · {resto} · Tgl {tgl_txt}")
         try:
-            pw, ph = 880, 560
+            pw, ph = 1000, 560   # v3.9.19: 880 → 1000 (kolom CEK baru)
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
             self.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
         except Exception:
-            self.geometry("880x560")
-        self.minsize(640, 340)
+            self.geometry("1000x560")
+        self.minsize(700, 340)
         self.configure(bg=C_BG)
         self.transient(parent)
         self.grab_set()
@@ -236,6 +287,7 @@ class InDetailPopup(tk.Toplevel):
         # v3.9.2: minus merah PER CELL (kolom Qty) — fallback Tk 8 per baris
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
+        self._cek_cells: list = []   # v3.9.19 — sel CEK "RI Balancing"
 
         self._build_ui(barang, resto, tgl_txt, row_summary)
         self._render()
@@ -355,6 +407,8 @@ class InDetailPopup(tk.Toplevel):
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("neg_cell", foreground="#dc2626")  # v3.9.2
+        # v3.9.19 — CEK "RI Balancing" (amber)
+        tree.tag_configure("cek_ri_bal", foreground="#b45309")
         tree.tag_configure("subtotal", background="#f1f5f9",
                            foreground=C_HEADER)
 
@@ -370,6 +424,7 @@ class InDetailPopup(tk.Toplevel):
         items = []
         n_docs = 0
         neg_cells = []   # v3.9.2 — per-cell minus (kolom Qty)
+        cek_cells = []   # v3.9.19 — per-cell CEK "RI Balancing"
         subtotal_rows = []
         for src, _color in _SOURCES:
             sub = df[df["SOURCE IN"] == src]
@@ -390,12 +445,17 @@ class InDetailPopup(tk.Toplevel):
                         neg_cells.append((f"doc_{len(items)}", "Qty"))
                     else:
                         tags.append("negative")
+                # v3.9.19 — CEK "RI Balancing" (bulan Nomor RI ≠ bulan PO)
+                cek = _ri_balancing(row.get("Nomor"), row.get("Nomor PO"))
+                if cek and self._cell_tags:
+                    cek_cells.append((f"doc_{len(items)}", "CEK"))
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")
                 items.append(("", f"doc_{len(items)}", {
                     "values": (
                         str(row.get("SOURCE IN") or ""),
                         str(row.get("Nomor") or "") if pd.notna(row.get("Nomor")) else "",
                         str(row.get("Nomor PO") or "") if pd.notna(row.get("Nomor PO")) else "",
+                        cek,
                         qty_txt,
                         _fmt_jam(row.get("#Tgl/Jam Pembuatan IT")),
                     ),
@@ -410,13 +470,13 @@ class InDetailPopup(tk.Toplevel):
         # sisipkan subtotal mundur supaya index stabil
         for pos, label, total in reversed(subtotal_rows):
             items.insert(pos, ("", f"sub_{pos}", {
-                "values": (label, "", "", _fmt_num(total), ""),
+                "values": (label, "", "", "", _fmt_num(total), ""),
                 "tags": ("subtotal",),
             }))
         if items:
             total_in = float(df["Value"].sum())
             items.append(("", "grand_total", {
-                "values": ("TOTAL IN", "", "", _fmt_num(total_in), ""),
+                "values": ("TOTAL IN", "", "", "", _fmt_num(total_in), ""),
                 "tags": ("subtotal",),
             }))
 
@@ -424,6 +484,7 @@ class InDetailPopup(tk.Toplevel):
                              f"Total IN: {_fmt_num(df['Value'].sum())}")
         self.status_var.set(self._base_status)
         self._neg_cells = neg_cells
+        self._cek_cells = cek_cells   # v3.9.19
 
         def _done():
             # v3.9.2: pasang tag PER-CELL setelah semua baris ter-insert
@@ -432,9 +493,12 @@ class InDetailPopup(tk.Toplevel):
         insert_tree_items(self.tree, items, batch=400, on_done=_done)
 
     def _reapply_cell_tags(self, tree):
-        """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶)."""
+        """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶);
+        v3.9.19 — + sel CEK "RI Balancing" (amber)."""
         if self._cell_tags and self._neg_cells:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        if self._cell_tags and self._cek_cells:
+            apply_cell_tag(tree, "cek_ri_bal", self._cek_cells)
 
     # --------------------------------------------------------------- COPY ---
     def _copy_to_clipboard(self, text, label: str = "Nomor"):
@@ -856,9 +920,36 @@ class InSelisihView(tk.Frame):
                         if s:
                             vals.add(s)
             return sorted(vals, key=_filter_value_sort_key)
-        if base is None or base.empty or col not in base.columns:
+        if base is None or base.empty:
             return []
-        return _format_col_values(col, base[col]).unique().tolist()
+        # v3.9.19 — sumber nilai = baris yang TAMPIL SAAT INI (permintaan
+        # user: "isi filter harus menampilkan data yang ada aja"):
+        # rentang tanggal + filter kolom LAIN + checkbox hanya-selisih
+        # (kolom ini sendiri dikecualikan — perilaku AutoFilter Excel).
+        # Dulu base mentah → tanggal bulan lalu / nilai baris tersembunyi
+        # ikut muncul di daftar filter.
+        f = base
+        try:
+            t_start = int(self.tgl_start_var.get())
+            t_end = int(self.tgl_end_var.get())
+        except (AttributeError, TypeError, ValueError):
+            t_start = t_end = None
+        if t_start is not None and t_end is not None:
+            t = pd.to_numeric(f["Tanggal"], errors="coerce")
+            f = f[(t >= t_start) & (t <= t_end)]
+        for c, sel in self._col_sel.items():
+            if sel is None or c == col or c not in f.columns:
+                continue
+            fmt = _format_col_values(c, f[c])
+            f = f[fmt.isin(sel)]
+        if (getattr(self, "only_selisih_var", None) is not None
+                and self.only_selisih_var.get()
+                and "Selisih IN" in f.columns):
+            sv = pd.to_numeric(f["Selisih IN"], errors="coerce").fillna(0)
+            f = f[sv != 0]
+        if f.empty or col not in f.columns:
+            return []
+        return _format_col_values(col, f[col]).unique().tolist()
 
     def _on_col_filter(self, col: str, selected):
         self._col_sel[col] = selected

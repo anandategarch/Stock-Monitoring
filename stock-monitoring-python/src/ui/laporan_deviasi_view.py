@@ -321,9 +321,24 @@ class LaporanDeviasiView(tk.Frame):
         ("Tidak ada nilai yang bisa difilter")."""
         key = "Selisih" if col == "Selisih vs Median" else col
         result = self._result_df
-        if result is None or result.empty or key not in result.columns:
+        if result is None or result.empty:
             return []
-        return self._format_col_series(col, result[key]).unique().tolist()
+        # v3.9.19 — sumber nilai = baris yang TAMPIL SAAT INI (permintaan
+        # user: "isi filter harus menampilkan data yang ada aja"): filter
+        # header kolom LAIN diterapkan dulu (kolom ini sendiri
+        # dikecualikan — perilaku AutoFilter Excel); dulu result mentah →
+        # nilai baris yang sudah terfilter kolom lain tetap muncul.
+        f = result
+        for c, sel in self._col_sel.items():
+            if sel is None or c == col:
+                continue
+            out_col = "Selisih" if c == "Selisih vs Median" else c
+            if out_col in f.columns:
+                fmt = self._format_col_series(c, f[out_col])
+                f = f[fmt.isin(sel)]
+        if f.empty or key not in f.columns:
+            return []
+        return self._format_col_series(col, f[key]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
         """Format kolom → string tampilan (identik render tabel — dipakai

@@ -245,7 +245,11 @@ def query_full_rekap_mentah_so(config) -> pd.DataFrame:
 
     # e = select {NAMA RESTO, Nama Barang, JENIS, Tanggal, Value, SATUAN}
     # SATUAN ditambahkan untuk DEVIASI GR/PCS split (perlu satuan per barang)
-    needed = ["NAMA RESTO", "Nama Barang", "JENIS", "Tanggal", "Value", "SATUAN"]
+    # v3.9.19: SOURCE DATA ikut dibawa (REKAP MENTAH JENIS SO — "input so
+    # harian" / "input promix 04 dine in" / "input promix 04 take away")
+    # utk CEK "Promix 04" di tab Deviasi GR/PCS (append1 merge per pasangan).
+    needed = ["NAMA RESTO", "Nama Barang", "JENIS", "Tanggal", "Value",
+              "SATUAN", "SOURCE DATA"]
     available = [col for col in needed if col in c.columns]
     e = c[available].copy()
 

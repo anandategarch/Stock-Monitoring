@@ -62,12 +62,13 @@ def create_mock_rekap_mentah(filepath, resto_code, barang_list, mode="berjalan")
 
     data_rows = []
     for barang, satuan in barang_list:
-        # SO row
-        row = [f"{resto_code}.001", "DATA", "SO", "OK", barang, satuan]
+        # SO row (v3.9.19: SOURCE DATA realistis — "input so harian";
+        # varian promix dites di test_ui §29 via kolom SOURCE DATA app)
+        row = [f"{resto_code}.001", "input so harian", "SO", "OK", barang, satuan]
         row += [100 if d == 1 else 0 for d in (range(1, 32) if mode == "berjalan" else range(25, 32))]
         data_rows.append(row)
         # BARANG MASUK row
-        row = [f"{resto_code}.001", "DATA", "BARANG MASUK", "OK", barang, satuan]
+        row = [f"{resto_code}.001", "input so harian", "BARANG MASUK", "OK", barang, satuan]
         row += [50 if d == 1 else 0 for d in (range(1, 32) if mode == "berjalan" else range(25, 32))]
         data_rows.append(row)
 
@@ -526,13 +527,23 @@ def run_test():
     # Check JENIS values
     jenis_values = set(append1_df["JENIS"].unique())
     print(f"    JENIS values: {jenis_values}")
-    expected_jenis = {"1.SO", "2.SALDO AKHIR", "3.DEVIASI", "4.IN", "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.OUT", "SALDO AWAL"}
+    expected_jenis = {"1.SO", "2.SALDO AKHIR", "3.DEVIASI", "4.IN", "5.BARANG MASUK", "7.Selisih IN", "8.BARANG KELUAR", "9.ACR", "SALDO AWAL"}
     assert jenis_values == expected_jenis, f"JENIS mismatch: expected {expected_jenis}, got {jenis_values}"
 
     # Check KATEGORI
     kat_values = set(append1_df["KATEGORI"].dropna().unique())
     print(f"    KATEGORI values: {kat_values}")
     assert "DEVIASI" in kat_values
+
+    # v3.9.19 — SOURCE DATA rekap mentah (JENIS SO) dibawa sampai output
+    # append1 (merge per pasangan barang×resto — bahan CEK "Promix 04"
+    # di deviasi_view; mock menulis "input so harian")
+    assert "SOURCE DATA" in append1_df.columns, "Missing column: SOURCE DATA"
+    _so_rows = append1_df[append1_df["JENIS"] == "1.SO"]
+    _src_vals = set(_so_rows["SOURCE DATA"].dropna().astype(str))
+    print(f"    SOURCE DATA (1.SO): {_src_vals}")
+    assert _src_vals == {"input so harian"}, \
+        f"SOURCE DATA mismatch: got {_src_vals}"
 
     print("\n  [5] Testing Rincian PO...")
     rincian_po_df = build_rincian_po(config)

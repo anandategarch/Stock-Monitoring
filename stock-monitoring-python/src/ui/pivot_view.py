@@ -86,7 +86,7 @@ class PivotTableView(tk.Frame):
     METRICS = [
         "SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
         "4.IN", "5.BARANG MASUK", "6.PEMAKAIAN (COM)",
-        "7.Selisih IN", "8.BARANG KELUAR", "9.OUT",
+        "7.Selisih IN", "8.BARANG KELUAR", "9.ACR",
     ]
 
     # Soft pastel background per metric (identik versi lama)
@@ -100,7 +100,7 @@ class PivotTableView(tk.Frame):
         "6.PEMAKAIAN (COM)": "#E8E0F0",
         "7.Selisih IN": "#FCEEE8",
         "8.BARANG KELUAR": "#FFF0E0",
-        "9.OUT": "#F8F0F0",
+        "9.ACR": "#F8F0F0",
     }
 
     def __init__(self, parent, data: pd.DataFrame = None,
