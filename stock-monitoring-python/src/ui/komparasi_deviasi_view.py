@@ -1804,7 +1804,11 @@ class KomparasiDeviasiView(tk.Frame):
         df = df.merge(app_long, on=["_bahan_norm", "_resto_norm", "H"],
                       how="left")
         in_app = df["has_h"].notna().to_numpy()
-        has_h = df["has_h"].fillna(False).to_numpy(dtype=bool)
+        # v3.9.15b (audit-2 FIX): .eq(True) — NaN → False TANPA fillna
+        # (pandas 2.2: fillna pada kolom object hasil merge memuntahkan
+        # FutureWarning downcasting di stderr; hasil identik: True→True,
+        # False→False, NaN→False).
+        has_h = df["has_h"].eq(True).to_numpy(dtype=bool)
         bom_app = df["bom_app"].to_numpy(dtype="float64")
         com_app = df["com_app"].to_numpy(dtype="float64")
         dev_app = df["dev_app"].to_numpy(dtype="float64")
@@ -3485,17 +3489,11 @@ class KomparasiDeviasiView(tk.Frame):
                             "zero": int((~league_mask).sum()),
                             "orphan": orphan}
         ldf = ldf.loc[league_mask]
-        # v3.9.15a (audit P2-7): pesan jujur saat liga kosong KARENA semua
-        # DEV 0 (bukan salah dibaca '0 baris setelah filter').
-        if ldf.empty and not any(v is not None
-                                 for v in self._liga_sel.values()):
-            self._liga_df = ldf
-            self._liga_status_var.set(
-                f"{label} · semua DEV 0 — tak ada resto utk diranking")
-            return
-        ldf = ldf.sort_values(["Rate", "_resto_norm"],
-                              ascending=[False, True], kind="stable")
-        self._liga_df = ldf
+        # v3.9.15b (audit-2 FIX): baseline populasi DISUSUN & DITAMPILKAN
+        # SEBELUM cabang kosong — pindah ke bahan lain dgn semua DEV 0
+        # tidak lagi MEMBIARKAN baseline BAHAN LAMA tampil (stale — median/
+        # MAD bahan sebelumnya, menyesatkan; status benar tapi baseline
+        # salah bahan).
         base = (f"Populasi {n} resto ber-BOM · median rate "
                 f"{self._fmt_pct(med)} · MAD {self._fmt_pct(mad)} · "
                 f"z = (rate − median)/(1,4826 × MAD)")
@@ -3507,6 +3505,17 @@ class KomparasiDeviasiView(tk.Frame):
         if orphan:
             base += f" · {orphan} resto DEV≠0 tanpa BOM (tak masuk liga)"
         self._liga_base_var.set(base)
+        # v3.9.15a (audit P2-7): pesan jujur saat liga kosong KARENA semua
+        # DEV 0 (bukan salah dibaca '0 baris setelah filter').
+        if ldf.empty and not any(v is not None
+                                 for v in self._liga_sel.values()):
+            self._liga_df = ldf
+            self._liga_status_var.set(
+                f"{label} · semua DEV 0 — tak ada resto utk diranking")
+            return
+        ldf = ldf.sort_values(["Rate", "_resto_norm"],
+                              ascending=[False, True], kind="stable")
+        self._liga_df = ldf
         # filter header ⧩
         df = ldf
         for col, sel in self._liga_sel.items():

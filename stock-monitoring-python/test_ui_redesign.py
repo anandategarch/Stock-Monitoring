@@ -4394,6 +4394,41 @@ def main():
           f"render-1={_n5e_a} render-2={_n5e_b}")
     os.unlink(f5e)
 
+    # --- (5f) v3.9.15b — AUDIT-2 FIX: baseline liga TIDAK BASI saat
+    # pindah ke bahan dgn semua DEV 0 (dulu: median/MAD bahan LAMA tetap
+    # tampil — menyesatkan; status benar tapi baseline salah bahan) -----
+    f5f = os.path.join(_tf13.gettempdir(), "mock_deviasi_liga0.xlsx")
+    _w5f = _WB()
+    _s5f = _w5f.active
+    _s5f.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
+    for _i5f in range(5):
+        _s5f.append([f"BDG{_i5f:03d}",
+                     "BERAS", "GR", -100, -90, -10, "WEEK 4", "NOV"])
+    for _i5f in range(5):
+        _s5f.append([f"MLG{_i5f:03d}", "GARAM", "GR", -50, -50, 0,
+                     "WEEK 4", "NOV"])
+    _w5f.save(f5f)
+    kv._load_paths([f5f])
+    wait_view(root, kv)
+    kv._on_anasec_change(3)          # 🏆 Liga — bahan pertama = BERAS
+    root.update()
+    _base5f_beras = kv._liga_base_var.get()
+    kv._liga_bahan_norm = "GARAM"    # pindah ke bahan semua-DEV-0
+    kv._render_liga()
+    root.update()
+    _base5f_garam = kv._liga_base_var.get()
+    check("(v3.9.15b) Liga pindah ke bahan semua-DEV-0: baseline ikut "
+          "BAHAN BARU (median 0,00% · 5 resto rate 0) — bukan baseline "
+          "bahan lama (median 10,00%)",
+          "semua DEV 0" in kv._liga_status_var.get() and
+          "median rate 0,00%" in _base5f_garam and
+          "5 resto rate 0" in _base5f_garam and
+          "median rate 10,00%" in _base5f_beras and
+          _base5f_garam != _base5f_beras,
+          f"beras={_base5f_beras!r} garam={_base5f_garam!r}")
+    os.unlink(f5f)
+
     # --- pulihkan state utk blok (6) ---
     kv._on_mode_change(0)
     root.update()
