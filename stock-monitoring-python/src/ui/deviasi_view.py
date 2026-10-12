@@ -5,6 +5,22 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.23 (user: "kerjakan poin 6") — CEK "RI Balancing" DI KOLOM UTAMA:
+pasangan barang×resto yang punya ≥1 dokumen IN dgn PERIODE Nomor RI ≠
+periode Nomor PO (struktur PREFIKS.TAHUN.BULAN.NNNNN) dan tanggal
+dokumen ≤ H kini TERFLAG "RI Balancing" langsung di tabel — dulu hanya
+terlihat di popup Rincian IN (harus double-click baris per baris).
+Sumber = in_detail (query_in, per-dokumen — pemetaan Nomor↔Nomor PO
+bersih; frame final menggabungkan info kolom sehingga pemetaannya bisa
+ter-campur). Prioritas np.select: Promix 04 → RI Balancing →
+Kosong/Non Aktif → Beda Tanggal → Hitung Manual → Turun Drastis →
+ACR to BOM (anomali struktural dokumen di atas heuristik pola angka;
+"Beda Tanggal" stale mendominasi data real — di urutan terakhir RI
+Balancing nyaris tak pernah tampil). Helper periode = doc_codes.py
+(modul bersama, logika sama popup & Catatan Audit). Detail IN
+diteruskan app.load_data → view ini; None (test/pemanggil lama) →
+kondisi tidak berlaku (semua perilaku lama utuh).
+
 v3.9.21 (2 permintaan user):
 - AMBANG ACR to BOM yang BISA DIATUR (user: "di bagian ACR to BOM itu
   harusnya ada threshold > 80% absolute dan aku bisa atur"): CEK
@@ -123,6 +139,7 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
+from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 from .theme import (
     C_ACCENT,
@@ -370,6 +387,8 @@ class DeviasiView(tk.Frame):
                  acr_state: SharedACRThreshold | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
+        self.in_detail: pd.DataFrame | None = None   # v3.9.23 (poin 6)
+        self._ri_bal_cache = None   # v3.9.23 — (df-id, h) → pasangan RI Bal
         self.satuan_mode = satuan_mode
         # v3.9: H dibagi GR & PCS — sumber nilai = SharedTanggalH bila ada
         self._h_state = h_state
@@ -588,6 +607,7 @@ class DeviasiView(tk.Frame):
         # Legend CEK
         legend = LegendRow(self.content, [
             ("Promix 04", "#0e7490"),     # v3.9.19 — kondisi ke-0
+            ("RI Balancing", "#92400e"),  # v3.9.23 (poin 6) — kondisi ke-1
             ("Kosong/Non Aktif", "#b45309"),
             ("Beda Tanggal", "#2563eb"),
             ("Hitung Manual", "#ea580c"),
@@ -822,6 +842,10 @@ class DeviasiView(tk.Frame):
         # v3.9.19 — kondisi ke-0 "Promix 04" (SO bersumber non input so
         # harian): teal
         tree.tag_configure("cek_promix", foreground="#0e7490")
+        # v3.9.23 (poin 6) — kondisi ke-1 "RI Balancing": amber gelap
+        # (keluarga warna sama dgn popup Rincian IN v3.9.19 #b45309,
+        # dgn nuansa lebih tua supaya terbedakan dari Kosong/Non Aktif)
+        tree.tag_configure("cek_ri_bal", foreground="#92400e")
 
     # =========================================================================
     # LOGIKA (identik versi lama)
@@ -873,8 +897,16 @@ class DeviasiView(tk.Frame):
         h = int(t[m].max())
         return max(1, min(h, 31))
 
-    def load_data(self, data: pd.DataFrame):
+    def load_data(self, data: pd.DataFrame,
+                  in_detail: pd.DataFrame | None = None):
         self.data = data
+        # v3.9.23 (poin 6) — detail dokumen IN per-dokumen (query_in):
+        # sumber CEK "RI Balancing" kolom utama (bulan Nomor RI ≠ bulan
+        # Nomor PO; pemetaan Nomor↔Nomor PO BERSIH per baris dokumen,
+        # tidak ter-campur seperti kolom gabungan di frame final).
+        # None (pemanggil lama/test) → kondisi tidak berlaku.
+        self.in_detail = in_detail
+        self._ri_bal_cache = None   # v3.9.23 — cache pasangan per (df, h)
         self._cached_pivot = None
         self._cached_h = None
         if self._shared_cache is not None:
@@ -1024,6 +1056,31 @@ class DeviasiView(tk.Frame):
                                        so_src["NAMA RESTO"],
                                        so_src["SOURCE DATA"])
                 }
+
+        # v3.9.23 (poin 6) — CEK "RI Balancing" KOLOM UTAMA: pasangan
+        # (barang, resto) yang punya ≥1 dokumen IN ber-periode Nomor RI ≠
+        # periode Nomor PO dgn TANGGAL DOKUMEN ≤ H (scope analisa —
+        # dokumen tercatat setelah H belum termasuk; tanggal bulan-lalu
+        # negatif tetap masuk, kronologis sebelum tanggal 1). Logika
+        # periode = _ri_balancing (doc_codes — sama dgn popup Rincian IN
+        # & Catatan Audit, FIX 35-c1: periode penuh tahun+bulan, bulan
+        # 1-2 digit numerik, hanya dokumen berprefiks "RI.").
+        # Cache per (identitas in_detail, h) — scan O(n) regex hanya saat
+        # data/H berubah, bukan tiap refresh.
+        _rib = self._ri_bal_cache
+        _det = self.in_detail
+        if _rib is not None and _rib[0] is _det and _rib[1] == h:
+            self._ri_bal_pairs = _rib[2]
+        else:
+            if _det is not None and not _det.empty \
+                    and "Tanggal" in getattr(_det, "columns", []):
+                _t = pd.to_numeric(_det["Tanggal"], errors="coerce")
+                _det_in_scope = _det[_t <= h]
+            else:
+                _det_in_scope = None
+            self._ri_bal_pairs = frozenset(
+                ri_balancing_docs(_det_in_scope).keys())
+            self._ri_bal_cache = (_det, h, self._ri_bal_pairs)
 
         if df_filtered.empty:
             return pd.DataFrame()
@@ -1203,11 +1260,29 @@ class DeviasiView(tk.Frame):
         cond_promix = so_src_s.str.strip().str.lower().ne("") \
             & so_src_s.str.strip().str.lower().ne("input so harian")
 
+        # v3.9.23 (poin 6) — kondisi ke-1 "RI Balancing": pasangan punya
+        # dokumen IN (bulan Nomor RI ≠ bulan Nomor PO, tanggal dok ≤ H).
+        # PRIORITAS: tetap di bawah Promix 04 (SO turunan sistem — by
+        # design v3.9.19), di ATAS kondisi pola numerik (Kosong/Tanggal/
+        # Manual/Drastis/ACR): anomali STRUKTUR DOKUMEN (faktual — RI
+        # benar-benar dibuat beda bulan dari PO) lebih pasti & lebih
+        # actionable daripada heuristik pola angka; dan visibilitas:
+        # "Beda Tanggal" SO-stale mendominasi data real (97,8% pasangan
+        # GR) — di urutan terakhir RI Balancing nyaris tak pernah tampil.
+        # Pasangan stale TANPA dokumen balancing tetap "Beda Tanggal".
+        _ri_bal_pairs = getattr(self, "_ri_bal_pairs", frozenset())
+        cond_ri_bal = np.array(
+            [(b, r) in _ri_bal_pairs
+             for b, r in zip(barang_s, pivot["NAMA RESTO"].astype(str))],
+            dtype=bool,
+        )
+
         cek = np.select(
-            [cond_promix, cond_kosong, cond_tanggal, cond_manual,
-             cond_drastis, cond_acr],
-            ["Promix 04", "Kosong/Non Aktif", "Beda Tanggal",
-             "Hitung Manual", "Turun Drastis", "ACR to BOM"],
+            [cond_promix, cond_ri_bal, cond_kosong, cond_tanggal,
+             cond_manual, cond_drastis, cond_acr],
+            ["Promix 04", "RI Balancing", "Kosong/Non Aktif",
+             "Beda Tanggal", "Hitung Manual", "Turun Drastis",
+             "ACR to BOM"],
             default="",
         )
 
@@ -1465,6 +1540,8 @@ class DeviasiView(tk.Frame):
             cek_val = cek_series.iloc[i]
             if cek_val == "Promix 04":           # v3.9.19 — kondisi ke-0
                 tags.append("cek_promix")
+            elif cek_val == "RI Balancing":      # v3.9.23 (poin 6) — ke-1
+                tags.append("cek_ri_bal")
             elif cek_val == "Kosong/Non Aktif":
                 tags.append("cek_kosong")
             elif cek_val == "Beda Tanggal":

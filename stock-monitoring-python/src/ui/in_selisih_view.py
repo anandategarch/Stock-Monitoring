@@ -1,6 +1,22 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.9.23 (user: "kerjakan semua poin B") — CATATAN AUDIT OTOMATIS:
+kolom Catatan Audit diperkaya catatan app per baris, di-APPEND ke
+catatan engine VBA (dipisah " | " — catatan VBA asli tetap PERTAMA,
+isi lama tidak berubah; baris tanpa temuan tetap sendirian):
+- B1 "RI Balancing: RI.2026.10.10354 (PO 2026-08)" — dokumen IN baris
+  itu ber-periode Nomor RI ≠ Nomor PO (logika sama popup v3.9.19,
+  kini modul bersama doc_codes.py);
+- B2 "Nomor dobel: IT.2026.09.00123 ×2" — nomor dokumen sama muncul
+  >1 baris utk pasangan yang sama (input ganda / sheet kembar);
+- B3 "Selisih IN −3 (IN 13 > BM 10)" — BM ≠ IN dgn arah perbedaan;
+- B4 "BM 0 padahal IN 13 (input rekap belum diisi)" — data quality
+  (mirror temuan audit 37-a R1: workbook gabungan user tanpa baris BM).
+Catatan ikut ke 💾 Export (kolom Catatan Audit sudah termasuk
+AUDIT_EXPORT_COLUMNS). Helper kode dokumen diangkat ke doc_codes.py
+(re-export nama lama — test §29/§30 tetap jalan).
+
 Permintaan user (v3.4): "Tambah 1 tab lagi untuk rekap Selisih IN dan kolom
 Resto, tanggal, nama barang, satuan, IN, Barang masuk dan selisih IN
 dan bisa drill down atau pop up muncul rincian IN yaitu 42.05, 3224,
@@ -52,13 +68,19 @@ bulan lalu — permintaan user "rekap selisih in hanya periode 1-31").
 v3.6 (lama): default -26 s/d 31.
 """
 import contextlib
-import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
 import pandas as pd
 
+from .doc_codes import (
+    _doc_code_str,  # v3.9.23 — helper kode dokumen diangkat ke modul
+    _doc_month,  # noqa: F401 — re-export nama lama (test §29/§30)
+    _doc_period,  # bersama doc_codes (logika RI Balancing tidak
+    _ri_balancing,  # diduplikasi antar view; dipakai juga deviasi_view)
+    duplicated_doc_numbers,
+)
 from .export_sheets import (
     AUDIT_EXPORT_COLUMNS,
     build_selisih_export_df,
@@ -154,70 +176,117 @@ _POPUP_COLUMNS = [
 ]
 _POPUP_IDS = [c[0] for c in _POPUP_COLUMNS]
 
-# v3.9.19 — struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR
-# (mis. "PO.2026.08.00571" / "RI.2026.10.10354" — 2026 tahun, 08/10
-# bulan). FIX 35-c1: bulan boleh 1-2 digit ("RI.2026.8.10354" non-
-# zero-pad dulu gagal pola → CEK senyap kosong) + validasi 1..12.
-_DOC_CODE_RE = re.compile(r"^[A-Za-z]+\.(\d{4})\.(\d{1,2})\.")
+# v3.9.19 — struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR — kini
+# tidak di sini (diangkat ke modul bersama .doc_codes v3.9.23 supaya
+# logika RI Balancing TIDAK diduplikasi antar view; re-import di atas).
 
 
-def _doc_code_str(code) -> str:
-    """Kode dokumen → teks aman (None/pd.NA/NaN → "")."""
-    if code is None:
-        return ""
+def _tgl_key(t):
+    """v3.9.23 — kunci tanggal numerik utk catatan audit (NaN → None;
+    int supaya 25.0 == 25 cocok dgn key dict)."""
     try:
-        if pd.isna(code):
-            return ""
+        if pd.isna(t):
+            return None
     except (TypeError, ValueError):
-        pass
-    return str(code).strip()
-
-
-def _doc_period(code):
-    """FIX 35-c1 — (tahun, bulan) dari kode dokumen
-    "PO.2026.08.00571" → (2026, 8); None bila pola tidak cocok /
-    bulan di luar 1..12 ("RI.2026.13.1" → None). Bulan 1-2 digit
-    dibandingkan NUMERIK (8 == 08)."""
-    m = _DOC_CODE_RE.match(_doc_code_str(code))
-    if not m:
         return None
     try:
-        year = int(m.group(1))
-        month = int(m.group(2))
-    except ValueError:
+        return int(float(t))
+    except (TypeError, ValueError):
         return None
-    if not 1 <= month <= 12:
-        return None
-    return (year, month)
 
 
-def _doc_month(code) -> "int | None":
-    """Bulan dari kode dokumen PO.2026.08.00571 → 8; None bila pola
-    tidak cocok / nilai kosong (FIX 35-c1: bulan 1-2 digit + sanity
-    1..12 via _doc_period)."""
-    period = _doc_period(code)
-    return period[1] if period is not None else None
+def _join_notes(vba: str, notes) -> str:
+    """v3.9.23 (poin B) — gabung catatan engine VBA + catatan otomatis
+    app: VBA tetap PERTAMA (isi lama tidak berubah), catatan app
+    di-append dipisah ' | '. Catatan VBA '-' dianggap kosong."""
+    vba = str(vba).strip() if vba is not None else ""
+    if not notes:
+        return vba
+    app = " | ".join(notes)
+    if vba in ("", "-", "nan", "None"):
+        return app
+    return f"{vba} | {app}"
 
 
-def _ri_balancing(nomor, nomor_po) -> str:
-    """v3.9.19 — keterangan CEK popup Rincian IN: bulan Nomor (dokumen
-    penerimaan RI) ≠ bulan Nomor PO → "RI Balancing" (RI dibuat beda
-    bulan dari pesanannya — entries balancing; contoh user: PO Agustus
-    ↔ RI Oktober). FIX 35-c1 (RISK C3+C4): bandingkan PERIODE PENUH
-    (tahun, bulan) — "RI.2027.08" vs "PO.2026.08" (bulan sama, tahun
-    beda) kini di-flag: periode beda = entries balancing; dulu tahun
-    diabaikan → lolos senyap. Bulan 1-2 digit cocok numerik
-    ("RI.2026.8" == "PO.2026.08"). Hanya berlaku utk dokumen RI
-    (Nomor berprefiks "RI." — dokumen PI 9901 adalah invoice
-    pembelian, bukan balancing)."""
-    n = _doc_code_str(nomor)
-    if not n.upper().startswith("RI."):
-        return ""
-    p_ri = _doc_period(n)
-    p_po = _doc_period(nomor_po)
-    if p_ri is None or p_po is None or p_ri == p_po:
-        return ""
-    return "RI Balancing"
+def _ri_balancing_by_date(in_detail: pd.DataFrame | None) -> dict:
+    """v3.9.23 (poin B1) — dokumen RI Balancing per
+    {(barang, resto): {tgl: [(nomor, po_period), ...]}} — nomor dokumen
+    RI yang bulannya ≠ bulan PO-nya + periode PO-nya ("2026-08"),
+    dikelompokkan PER TANGGAL dokumennya (catatan menempel pada baris
+    tabel bertanggal sama; urut nomor). Logika periode = _ri_balancing
+    (doc_codes, FIX 35-c1: periode penuh tahun+bulan)."""
+    out: dict = {}
+    if in_detail is None or getattr(in_detail, "empty", True):
+        return out
+    need = {"Nomor", "Nomor PO", "Nama Barang", "NAMA RESTO", "Tanggal"}
+    if not need <= set(getattr(in_detail, "columns", [])):
+        return out
+    for nomor, nomor_po, b, r, t in zip(in_detail["Nomor"],
+                                        in_detail["Nomor PO"],
+                                        in_detail["Nama Barang"],
+                                        in_detail["NAMA RESTO"],
+                                        in_detail["Tanggal"]):
+        if _ri_balancing(nomor, nomor_po) == "":
+            continue
+        n = _doc_code_str(nomor)
+        if not n:
+            continue
+        tkey = _tgl_key(t)
+        if tkey is None:
+            continue
+        p_po = _doc_period(nomor_po)
+        po_txt = (f" (PO {p_po[0]:04d}-{p_po[1]:02d})"
+                  if p_po is not None else "")
+        per_pair = out.setdefault((str(b), str(r)), {})
+        lst = per_pair.setdefault(tkey, [])
+        item = (n, po_txt)
+        if item not in lst:
+            lst.append(item)
+    for per_pair in out.values():
+        for lst in per_pair.values():
+            lst.sort()
+    return out
+
+
+def _duplicated_doc_dates(in_detail: pd.DataFrame | None,
+                          dup: dict) -> dict:
+    """v3.9.23 (poin B2) — tanggal kemunculan nomor dobel: dari hasil
+    duplicated_doc_numbers (pasangan → {nomor: jumlah}), petakan ke
+    {(barang, resto): {tgl: [(nomor, jumlah), ...]}} supaya catatan
+    "Nomor dobel" menempel pada baris tabel bertanggal dokumen itu
+    (urut nomor)."""
+    out: dict = {}
+    if in_detail is None or getattr(in_detail, "empty", True) or not dup:
+        return out
+    need = {"Nomor", "Nama Barang", "NAMA RESTO", "Tanggal"}
+    if not need <= set(getattr(in_detail, "columns", [])):
+        return out
+    d = in_detail[in_detail["Nomor"].notna()].copy()
+    if d.empty:
+        return out
+    d["_nomor"] = d["Nomor"].map(_doc_code_str)
+    d = d[d["_nomor"].ne("")]
+    if d.empty:
+        return out
+    d["_tgl"] = d["Tanggal"].map(_tgl_key)
+    d = d[d["_tgl"].notna()]
+    for (b, r), nomors in dup.items():
+        sub = d[(d["Nama Barang"].astype(str) == str(b))
+                & (d["NAMA RESTO"].astype(str) == str(r))
+                & (d["_nomor"].isin(nomors))]
+        if sub.empty:
+            continue
+        for t, nomor in zip(sub["_tgl"], sub["_nomor"]):
+            out.setdefault((str(b), str(r)), {}).setdefault(
+                int(t), []).append((str(nomor), int(nomors[str(nomor)])))
+    for per_pair in out.values():
+        for lst in per_pair.values():
+            lst.sort()
+            # dedup (dokumen dobel muncul di >1 tanggal → tiap tanggal
+            # cukup satu entri)
+            seen = set()
+            lst[:] = [x for x in lst if not (x[0] in seen or seen.add(x[0]))]
+    return out
 
 
 def _fmt_num(val) -> str:
@@ -660,6 +729,7 @@ class InSelisihView(tk.Frame):
         # FIX D-01 (audit 2-d): identitas data pemilik _cached_base —
         # mencegah worker menempel base data LAMA dengan label data BARU.
         self._cached_base_data = None
+        self._cached_base_detail = None   # v3.9.23 (poin B)
         # FIX C-04 (audit 2-c): minus merah PER CELL (mirror deviasi v3.9.2)
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
@@ -1020,15 +1090,26 @@ class InSelisihView(tk.Frame):
 
     # ------------------------------------------------------- COMPUTE ----
     def _compute_base(self, data: pd.DataFrame | None = None,
-                      audit_df: pd.DataFrame | None = None) -> pd.DataFrame:
+                      audit_df: pd.DataFrame | None = None,
+                      in_detail: pd.DataFrame | None | bool = False
+                      ) -> pd.DataFrame:
         """Bangun tabel tampilan dari hasil audit fn_audit (data app) +
         map Satuan/KATEGORI (v3.6).
         FIX D-01: data/audit_df bisa di-pass eksplisit (identitas pra-
-        capture worker) — default membaca self.* (kompatibel test)."""
+        capture worker) — default membaca self.* (kompatibel test).
+        v3.9.23 (poin B — "catatan Audit pada tab rekap selisih IN"):
+        kolom Catatan Audit DIPERKAYA catatan otomatis app (RI
+        Balancing / Nomor Dobel / Selisih IN / BM kosong) —
+        ditambahkan SETELAH catatan engine VBA (dipisah ' | '),
+        sehingga isi VBA asli tidak berubah; in_detail default =
+        self.in_detail (sentinel False = tanpa enrichment, utk
+        pemanggil lama/test yang tak peduli)."""
         df = self.audit_df if audit_df is None else audit_df
         if df is None or df.empty:
             return pd.DataFrame()
         data = self.data if data is None else data
+        if in_detail is False:
+            in_detail = self.in_detail
         if data is not None and not data.empty:
             self._ensure_maps(data)
 
@@ -1062,7 +1143,107 @@ class InSelisihView(tk.Frame):
         out["Satuan"] = [self._satuan_map.get((b, r), "-")
                           for b, r in zip(out["Nama Barang"],
                                           out["Resto"])]
+        # v3.9.23 (poin B) — CATATAN AUDIT OTOMATIS: catatan app
+        # (RI Balancing · Nomor Dobel · Selisih IN · BM kosong)
+        # di-APPEND ke catatan engine VBA (" | "); catatan VBA asli
+        # tetap di posisi pertama — isi lama tidak berubah.
+        _notes = self._build_audit_notes(out, in_detail)
+        if _notes:
+            out["Catatan Audit"] = [
+                _join_notes(vba, _notes.get((r, t, b)))
+                for vba, r, t, b in zip(out["Catatan Audit"],
+                                        out["Resto"], out["Tanggal"],
+                                        out["Nama Barang"])
+            ]
         return out
+
+    def _build_audit_notes(self, out: pd.DataFrame,
+                           in_detail: pd.DataFrame | None) -> dict:
+        """v3.9.23 (poin B — user: "catatan Audit pada tab rekap
+        selisih IN") — catatan audit OTOMATIS per baris tabel
+        (Resto, Tanggal, Nama Barang), dihitung dari detail dokumen
+        IN per-dokumen + angka baris itu sendiri:
+
+        B1 · RI Balancing — dokumen IN pada baris itu yang bulan
+            Nomor RI-nya ≠ bulan Nomor PO-nya (logika sama popup
+            Rincian IN v3.9.19, kini di modul bersama doc_codes):
+            "RI Balancing: RI.2026.10.10354 (PO 2026-08)" — maks 2
+            nomor dituliskan, sisanya dihitung.
+        B2 · Nomor Dobel — nomor dokumen sama muncul >1 baris utk
+            pasangan (barang, resto) yang sama = input ganda /
+            sheet kembar (gejala audit 37-a R2 — fn_9901 membaca
+            semua sheet): "Nomor dobel: IT.2026.09.00123 ×2".
+        B3 · Selisih IN — BM (input rekap harian) ≠ IN (penerimaan
+            sistem): "Selisih IN −3 (IN 13 > BM 10)" — tanda & arah
+            perbedaan langsung terbaca tanpa buka popup.
+        B4 · BM kosong — BM 0 padahal IN sistem > 0 (input rekap
+            belum diisi — data quality, mirror temuan audit 37-a
+            R1): "BM 0 padahal IN 13 (input rekap belum diisi)".
+
+        Return dict {(resto, tgl_num, barang): [note, ...]} — baris
+        tanpa temuan tidak masuk (catatan VBA tetap sendirian).
+        Angka mengikuti format Indonesia _fmt_num (identik kolom
+        tabel, filter ⧩ tetap konsisten dgn tampilan).
+        """
+        if out is None or out.empty:
+            return {}
+        notes: dict = {}
+
+        def _add(r, t, b, note):
+            notes.setdefault((str(r), _tgl_key(t), str(b)), []).append(note)
+
+        # --- B1: RI Balancing (per tanggal — dokumen milik baris itu) ---
+        rib = _ri_balancing_by_date(in_detail)
+        if rib:
+            for (b, r), per_tgl in rib.items():
+                for t, docs in per_tgl.items():
+                    shown = [f"{n}{po}" for n, po in docs[:2]]
+                    extra = len(docs) - len(shown)
+                    txt = ", ".join(shown)
+                    if extra > 0:
+                        txt += f" (+{extra})"
+                    _add(r, t, b, f"RI Balancing: {txt}")
+
+        # --- B2: Nomor dobel (level pasangan; baris bertanggal dokumen
+        #     itu yang diberi catatan — dobel berdampak di tanggal itu) ---
+        dup = duplicated_doc_numbers(in_detail)
+        if dup:
+            _dup_at = _duplicated_doc_dates(in_detail, dup)
+            for (b, r), per_tgl in _dup_at.items():
+                for t, items_ in per_tgl.items():
+                    shown = [f"{n} ×{c}" for n, c in items_[:2]]
+                    extra = len(items_) - len(shown)
+                    txt = ", ".join(shown)
+                    if extra > 0:
+                        txt += f" (+{extra})"
+                    _add(r, t, b, f"Nomor dobel: {txt}")
+
+        # --- B3 + B4: dari angka baris tabel itu sendiri (vektor) ---
+        # B4 DIDAHULUKAN dari B3: Selisih = BM − IN identitas aljabar —
+        # bila BM 0 & IN > 0 maka selisih PASTI ≠ 0, dan diagnosis yang
+        # benar bukan "selisih angka" melainkan "input rekap belum
+        # diisi" (B3 umum hanya bila BM & IN sama-sama terisi).
+        bm = pd.to_numeric(out["Barang Masuk"], errors="coerce") \
+            .fillna(0).to_numpy(dtype="float64")
+        ins = pd.to_numeric(out["IN"], errors="coerce") \
+            .fillna(0).to_numpy(dtype="float64")
+        sel = pd.to_numeric(out["Selisih IN"], errors="coerce") \
+            .fillna(0).to_numpy(dtype="float64")
+        for i in range(len(out)):
+            r = out["Resto"].iat[i]
+            b = out["Nama Barang"].iat[i]
+            t = out["Tanggal"].iat[i]
+            if bm[i] == 0 and ins[i] > 0:
+                _add(r, t, b,
+                     f"BM 0 padahal IN {_fmt_num(ins[i])} "
+                     f"(input rekap belum diisi)")
+            elif sel[i] != 0:
+                arah = (f"IN {_fmt_num(ins[i])} > BM {_fmt_num(bm[i])}"
+                        if sel[i] < 0 else
+                        f"BM {_fmt_num(bm[i])} > IN {_fmt_num(ins[i])}")
+                _add(r, t, b,
+                     f"Selisih IN {_fmt_num(sel[i])} ({arah})")
+        return notes
 
     def _ensure_maps(self, df):
         """Lookup satuan per (barang, resto) + kategori per barang (v3.5)."""
@@ -1121,11 +1302,14 @@ class InSelisihView(tk.Frame):
             # refresh berikutnya SKIP recompute (angka basi, senyap).
             data = self.data
             audit_df = self.audit_df
+            in_detail = self.in_detail   # v3.9.23 (poin B) — capture sama
             if (self._cached_base is None
-                    or self._cached_base_data is not data):
-                base = self._compute_base(data, audit_df)
+                    or self._cached_base_data is not data
+                    or self._cached_base_detail is not in_detail):
+                base = self._compute_base(data, audit_df, in_detail)
                 self._cached_base = base
                 self._cached_base_data = data
+                self._cached_base_detail = in_detail
             return self._prepare_rows(st)
 
         def done(payload):

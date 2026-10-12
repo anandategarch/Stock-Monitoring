@@ -157,7 +157,22 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.22"  # v3.9.22 — OVERLAY PER-CELL TK 8.6 + HAPUS LIGA/MINORITAS + CEK BEDA TANGGAL + H DINAMIS 26 + POPUP NOMOR + DEFAULT KATEGORI REKAP IN + DEEP AUDIT
+APP_VERSION = "3.9.23"  # v3.9.23 — CEK RI BALANCING KOLOM UTAMA + CATATAN AUDIT OTOMATIS REKAP IN (poin 6 + semua poin B)
+# v3.9.23 (user: "kerjakan poin 6 dan kerjakan semua poin B"):
+# (1) POIN 6 — CEK "RI Balancing" DI KOLOM CEK UTAMA tab Deviasi GR & PCS:
+#     pasangan barang×resto yang punya ≥1 dokumen IN dgn periode Nomor RI
+#     ≠ periode Nomor PO (tanggal dokumen ≤ H) kini TERFLAG langsung di
+#     tabel utama — dulu hanya terlihat di popup Rincian IN (harus buka
+#     baris per baris). Prioritas: Promix 04 → RI Balancing → kondisi
+#     pola numerik (Kosong/Tanggal/Manual/Drastis/ACR) — anomali
+#     struktural dokumen (faktual) di atas heuristik pola; helper
+#     diangkat ke modul bersama doc_codes.py (tidak diduplikasi).
+# (2) SEMUA POIN B — CATATAN AUDIT OTOMATIS tab Rekap Selisih IN: kolom
+#     Catatan Audit diperkaya catatan app per baris (di-append ke catatan
+#     engine VBA, dipisah " | " — isi VBA tidak berubah): B1 RI
+#     Balancing (nomor dokumen + bulan beda), B2 Nomor Dobel (input
+#     ganda/sheet kembar), B3 Selisih IN ≠ 0 (arah & besar perbedaan),
+#     B4 BM 0 padahal IN > 0 (input rekap belum diisi). Ikut ke 💾 Export.
 # v3.9.22 — 7 permintaan user + deep audit semua perhitungan:
 # (1) PER-CELL WARNA DI SEMUA VERSI Tk (user: "Saat ini disemua tab
 #     warna masih tidak per cell tapi per row. coba cari alternatif
@@ -1323,8 +1338,11 @@ class StockMonitorApp:
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
         self.pivot_view.load_data(append1_df)
-        self.deviasi_gr_view.load_data(append1_df)
-        self.deviasi_pcs_view.load_data(append1_df)
+        # v3.9.23 (poin 6): detail dokumen IN ikut diteruskan ke tab
+        # Deviasi GR & PCS — sumber CEK "RI Balancing" kolom utama
+        # (bulan Nomor RI ≠ bulan Nomor PO, tanggal dok ≤ H).
+        self.deviasi_gr_view.load_data(append1_df, in_detail_df)
+        self.deviasi_pcs_view.load_data(append1_df, in_detail_df)
         self.in_selisih_view.load_data(append1_df, in_detail_df,
                                       audit_result=audit_result)
         self.laporan_view.load_data(append1_df)

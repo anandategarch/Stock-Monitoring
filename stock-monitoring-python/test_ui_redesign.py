@@ -178,6 +178,17 @@ Memverifikasi:
     — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
     Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
     & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
+34. v3.9.23 — CEK RI BALANCING KOLOM UTAMA + CATATAN AUDIT OTOMATIS
+    REKAP IN (§33; user: "kerjakan poin 6 dan kerjakan semua poin
+    B"): (1) POIN 6 — CEK "RI Balancing" di kolom CEK utama tab
+    Deviasi GR & PCS: pasangan ber-dokumen IN periode RI ≠ PO (tgl
+    dok ≤ H) TERFLAG; prioritas Promix → RI Balancing → pola numerik;
+    helper diangkat ke doc_codes.py (modul bersama); (2) SEMUA POIN B —
+    Catatan Audit Rekap Selisih IN diperkaya otomatis (append ke VBA,
+    " | "): B1 RI Balancing (+periode PO), B2 Nomor dobel (×N),
+    B3 Selisih IN arah, B4 BM 0 padahal IN>0; ikut export; in_detail
+    diteruskan app ke kedua tab Deviasi.
+
 33. v3.9.22 — OVERLAY PER-CELL TK 8.6 + ANALISA TUNGGAL + CEK BEDA
     TANGGAL + H DINAMIS 26 + POPUP NOMOR + DEFAULT KATEGORI REKAP IN +
     BUG KARTESIAN append1 (§32, 7 permintaan user + deep audit):
@@ -555,7 +566,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.22", APP_VERSION == "3.9.22", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.23", APP_VERSION == "3.9.23", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -6774,6 +6785,332 @@ def main():
           "dipulihkan)",
           _W32.CELL_TAGS_NATIVE is True and
           _W32.CELL_TAGS_SUPPORTED is True)
+
+    # =====================================================================
+    # §33 v3.9.23 — CEK "RI Balancing" KOLOM UTAMA (poin 6) + CATATAN
+    #      AUDIT OTOMATIS REKAP SELISIH IN (semua poin B)
+    #      (user: "kerjakan poin 6 dan kerjakan semua poin B")
+    # =====================================================================
+    print("== 33. v3.9.23 — CEK RI Balancing kolom utama + Catatan Audit "
+          "otomatis ==")
+
+    # --- (a) doc_codes — modul bersama (logika tidak diduplikasi) -------
+    from src.ui import doc_codes as _DC33
+    from src.ui.doc_codes import (
+        duplicated_doc_numbers as _dupn33,
+        ri_balancing_docs as _rbd33,
+    )
+    from src.ui.in_selisih_view import (
+        InSelisihView as _ISV33,
+        _join_notes as _jn33,
+        _ri_balancing as _rib33,
+        _tgl_key as _tk33,
+    )
+    check("(v3.9.23) Helper kode dokumen diangkat ke modul bersama: "
+          "_ri_balancing dari in_selisih_view ADALAH doc_codes._ri_balancing "
+          "(re-export — logika tidak diduplikasi antar view)",
+          _rib33 is _DC33._ri_balancing)
+
+    _det33 = pd.DataFrame([
+        # RBAL — RI Okt vs PO Agt (balancing), tgl 20 ≤ H 25
+        {"NAMA RESTO": "R", "Nama Barang": "RBAL", "Tanggal": 20,
+         "Value": 5, "Nomor": "RI.2026.10.001",
+         "Nomor PO": "PO.2026.08.001", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # FUTR — balancing TAPI tgl 27 > H 25 (di luar scope analisa)
+        {"NAMA RESTO": "R", "Nama Barang": "FUTR", "Tanggal": 27,
+         "Value": 5, "Nomor": "RI.2026.10.002",
+         "Nomor PO": "PO.2026.08.002", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # SAME — periode sama (bukan balancing)
+        {"NAMA RESTO": "R", "Nama Barang": "SAME", "Tanggal": 20,
+         "Value": 5, "Nomor": "RI.2026.08.003",
+         "Nomor PO": "PO.2026.08.003", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # DUPX — nomor kembar 2 baris (pasangan sama)
+        {"NAMA RESTO": "R", "Nama Barang": "DUPX", "Tanggal": 21,
+         "Value": 6, "Nomor": "IT.2026.09.001",
+         "Nomor PO": "PO.2026.09.001", "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+        {"NAMA RESTO": "R", "Nama Barang": "DUPX", "Tanggal": 21,
+         "Value": 7, "Nomor": "IT.2026.09.001",
+         "Nomor PO": "PO.2026.09.001", "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+        # PROMIXRB — balancing TAPI pasangan promix → Promix 04 tetap
+        # prioritas ke-1 (uji prioritas nyata: kondisi keduanya aktif)
+        {"NAMA RESTO": "R", "Nama Barang": "PROMIXRB", "Tanggal": 20,
+         "Value": 5, "Nomor": "RI.2026.10.004",
+         "Nomor PO": "PO.2026.08.004", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # MULTIITEM — dokumen SAH 1 nomor 2 barang beda (bukan dobel)
+        {"NAMA RESTO": "R", "Nama Barang": "ITM A", "Tanggal": 21,
+         "Value": 1, "Nomor": "IT.2026.09.777",
+         "Nomor PO": "PO.2026.09.777", "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+        {"NAMA RESTO": "R", "Nama Barang": "ITM B", "Tanggal": 21,
+         "Value": 2, "Nomor": "IT.2026.09.777",
+         "Nomor PO": "PO.2026.09.777", "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+    ])
+    _rbd33res = _rbd33(_det33)
+    check("(v3.9.23) ri_balancing_docs: SEMUA pasangan ber-dokumen "
+          "balancing terdeteksi (RBAL + FUTR + PROMIXRB — fungsi murni "
+          "pair-level, TIDAK memfilter tanggal; filter scope ≤ H adalah "
+          "tugas view), dokumen periode-sama tidak",
+          set(_rbd33res.keys()) ==
+          {("RBAL", "R"), ("FUTR", "R"), ("PROMIXRB", "R")} and
+          _rbd33res[("RBAL", "R")] == ["RI.2026.10.001"] and
+          _rbd33res[("FUTR", "R")] == ["RI.2026.10.002"] and
+          _rbd33res[("PROMIXRB", "R")] == ["RI.2026.10.004"],
+          f"got {dict(_rbd33res)}")
+    check("(v3.9.23) ri_balancing_docs: None/empty/frame tanpa kolom → {} "
+          "(defensif)",
+          _rbd33(None) == {} and
+          _rbd33(pd.DataFrame()) == {} and
+          _rbd33(pd.DataFrame({"Nomor": ["RI.2026.10.1"]})) == {})
+    _dupn33res = _dupn33(_det33)
+    check("(v3.9.23) duplicated_doc_numbers: nomor kembar ×2 terdeteksi "
+          "per pasangan (gejala input ganda / sheet kembar)",
+          _dupn33res == {("DUPX", "R"): {"IT.2026.09.001": 2}},
+          f"got {dict(_dupn33res)}")
+    check("(v3.9.23) duplicated_doc_numbers: dokumen sah ber-2 ITEM beda "
+          "barang TIDAK dianggap dobel; None → {}",
+          ("ITM A", "R") not in _dupn33res and
+          ("ITM B", "R") not in _dupn33res and _dupn33(None) == {})
+    check("(v3.9.23) _tgl_key: 25.0→25, '24'→24, NaN/None→None",
+          _tk33(25.0) == 25 and _tk33("24") == 24 and
+          _tk33(float("nan")) is None and _tk33(None) is None)
+    check("(v3.9.23) _join_notes: catatan VBA tetap PERTAMA + ' | '; VBA "
+          "'-' diganti catatan app; tanpa catatan app → VBA utuh",
+          _jn33("Sisa Gantung: -13", ["B1", "B2"]) ==
+          "Sisa Gantung: -13 | B1 | B2" and
+          _jn33("-", ["B1"]) == "B1" and
+          _jn33("", ["B1"]) == "B1" and
+          _jn33("VBA saja", None) == "VBA saja" and
+          _jn33("VBA saja", []) == "VBA saja")
+
+    # --- (b) CEK "RI Balancing" KOLOM UTAMA tab Deviasi GR (poin 6) ----
+    from src.ui.deviasi_view import DeviasiView as _DV33
+
+    def _row33(barang, resto, jenis, tgl, nilai, satuan="GR",
+               source=None):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": nilai,
+                "SATUAN": satuan, "AKTIF/NON": "AKTIF",
+                "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None, "SOURCE DATA": source}
+
+    _ROWS33 = [
+        # RBAL: SO stale (24 < H 25) + dokumen balancing tgl 20 → RI
+        # Balancing MENGALAHKAN Beda Tanggal (anomali dokumen faktual
+        # di atas heuristik pola)
+        _row33("RBAL", "R", "1.SO", 24, 10.0),
+        _row33("RBAL", "R", "2.SALDO AKHIR", 25, 10.0),
+        # STALE: SO stale TANPA dokumen → Beda Tanggal (perilaku lama)
+        _row33("STALE", "R", "1.SO", 24, 10.0),
+        _row33("STALE", "R", "1.SO", 25, 0.0),
+        _row33("STALE", "R", "2.SALDO AKHIR", 25, 10.0),
+        # FUTR: dokumen balancing tgl 27 > H 25 → DI LUAR scope analisa
+        # (tidak terflag; SO fresh)
+        _row33("FUTR", "R", "1.SO", 25, 10.0),
+        _row33("FUTR", "R", "2.SALDO AKHIR", 25, 10.0),
+        # PROMIXRB: promix + dokumen balancing → Promix 04 TETAP no. 1
+        _row33("PROMIXRB", "R", "1.SO", 25, 5.0,
+               source="input promix 04"),
+        _row33("PROMIXRB", "R", "2.SALDO AKHIR", 25, 10.0),
+    ]
+
+    def _make_dv33(df, det=None):
+        _top33 = tk.Toplevel(root)
+        _top33.geometry("1250x700+15+15")
+        _dv33 = _DV33(_top33, satuan_mode="GR")
+        _dv33.pack(fill="both", expand=True)
+        root.update()
+        root.update_idletasks()
+        root.update()
+        _dv33.load_data(df, det)
+        wait_view(root, _dv33)
+        return _top33, _dv33
+
+    def _cek33(dv, barang):
+        for _k33 in dv.tree.get_children(""):
+            if dv.tree.set(_k33, "Nama Barang") == barang:
+                return dv.tree.set(_k33, "CEK")
+        return "<missing>"
+
+    _top33a, _dv33a = _make_dv33(pd.DataFrame(_ROWS33), _det33)
+    check("(v3.9.23) CEK RI Balancing: pasangan ber-dokumen balancing "
+          "(tgl dok 20 ≤ H 25) TERFLAG 'RI Balancing' di kolom utama — "
+          "dulu hanya terlihat di popup Rincian IN",
+          _cek33(_dv33a, "RBAL") == "RI Balancing",
+          f"cek={_cek33(_dv33a, 'RBAL')!r}")
+    check("(v3.9.23) Prioritas: RI Balancing MENGALAHKAN Beda Tanggal "
+          "(dokumen faktual di atas heuristik pola — stale tanpa dokumen "
+          "tetap 'Beda Tanggal')",
+          _cek33(_dv33a, "STALE") == "Beda Tanggal",
+          f"cek={_cek33(_dv33a, 'STALE')!r}")
+    check("(v3.9.23) Scope analisa: dokumen balancing bertanggal 27 > "
+          "H 25 TIDAK terflag (belum termasuk analisa)",
+          _cek33(_dv33a, "FUTR") == "",
+          f"cek={_cek33(_dv33a, 'FUTR')!r}")
+    check("(v3.9.23) Prioritas Promix 04 TETAP pertama (by design "
+          "v3.9.19 — SO sistem-turunan) meski pasangan JUGA punya "
+          "dokumen balancing (kedua kondisi aktif)",
+          _cek33(_dv33a, "PROMIXRB") == "Promix 04",
+          f"cek={_cek33(_dv33a, 'PROMIXRB')!r}")
+    check("(v3.9.23) Tag warna cek_ri_bal terpasang (amber gelap #92400e "
+          "— keluarga popup Rincian IN, terbedakan dari Kosong/Non Aktif)",
+          str(_dv33a.tree.tag_configure("cek_ri_bal",
+                                        "foreground")).lower() ==
+          "#92400e")
+    _vals33 = _dv33a._col_values("CEK")
+    check("(v3.9.23) Filter ⧩ CEK memuat 'RI Balancing' (nilai = data "
+          "yang ada — tidak ada opsi kosong)",
+          "RI Balancing" in [v for v in _vals33],
+          f"vals={_vals33}")
+    # H berubah → scope dokumen ikut (dokumen tgl 27 masuk saat H=27)
+    _dv33a.tanggal_h_var.set("27")
+    _dv33a._on_tanggal_h_change()
+    wait_view(root, _dv33a)
+    root.update()
+    check("(v3.9.23) H naik ke 27 → dokumen balancing tgl 27 kini DI "
+          "DALAM scope → pasangan terflag (analisa mengikuti H)",
+          _cek33(_dv33a, "FUTR") == "RI Balancing",
+          f"cek={_cek33(_dv33a, 'FUTR')!r}")
+    _top33a.destroy()
+    root.update()
+
+    # --- (b2) KOMPATIBILITAS: tanpa in_detail → kondisi tidak berlaku --
+    _top33b, _dv33b = _make_dv33(pd.DataFrame(_ROWS33), None)
+    check("(v3.9.23) Kompatibel: load_data TANPA in_detail (pemanggil "
+          "lama/test) → kondisi tidak berlaku, perilaku lama utuh "
+          "(RBAL kembali 'Beda Tanggal')",
+          _cek33(_dv33b, "RBAL") == "Beda Tanggal",
+          f"cek={_cek33(_dv33b, 'RBAL')!r}")
+    _top33b.destroy()
+    root.update()
+
+    # --- (c) app wiring: in_detail diteruskan ke KEDUA tab Deviasi -----
+    append1_33 = make_mock_append1()
+    rincian_33 = make_mock_rincian()
+    in_detail_33 = make_mock_in_detail()
+    rekap_so_33 = make_mock_rekap_so()
+    from src.pipeline.fn_audit import build_audit_from_app as _baf33
+    _audit_df33, _akpi33, _adesc33 = _baf33(rekap_so_33, in_detail_33)
+    _ares33 = {"df": _audit_df33, "kpi": _akpi33, "desc": _adesc33}
+    app._on_pipeline_done(append1_33, rincian_33, in_detail_33,
+                          _ares33, None)
+    root.update()
+    check("(v3.9.23) app wiring: in_detail diteruskan ke tab Deviasi GR "
+          "& PCS (sumber CEK RI Balancing — sama seperti tab Rekap IN)",
+          app.deviasi_gr_view.in_detail is in_detail_33 and
+          app.deviasi_pcs_view.in_detail is in_detail_33)
+
+    # --- (d) CATATAN AUDIT OTOMATIS Rekap Selisih IN (semua poin B) ----
+    _audit33 = pd.DataFrame({
+        "Resto": ["R", "R", "R", "R"],
+        "Tanggal": [20, 21, 22, 23],
+        "Nama Item": ["BRG B1", "BRG B2", "BRG B4", "BRG CLEAN"],
+        "Hasil SO": [5.0, 2.0, 1.0, 3.0],
+        "Qty SO Harian": [0.0, 10.0, 0.0, 8.0],
+        "Penerimaan Sistem": [13.0, 13.0, 13.0, 8.0],
+        "Selisih Harian": [-13.0, -3.0, -13.0, 0.0],
+        "Saldo Kumulatif": [-13.0, -3.0, -13.0, 0.0],
+        "Status Analisis Audit": ["DEVIASI MURNI", "DEVIASI MURNI",
+                                  "DEVIASI MURNI", "OK (Matching)"],
+        "Detail & Catatan Audit": ["Sisa Gantung: -13", "-", "", ""],
+    })
+    _det33b = pd.DataFrame([
+        # B1: RI Okt vs PO Agt di tgl 20 (baris BRG B1)
+        {"NAMA RESTO": "R", "Nama Barang": "BRG B1", "Tanggal": 20,
+         "Value": 5, "Nomor": "RI.2026.10.001",
+         "Nomor PO": "PO.2026.08.001", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # B2: nomor kembar di tgl 21 (baris BRG B2)
+        {"NAMA RESTO": "R", "Nama Barang": "BRG B2", "Tanggal": 21,
+         "Value": 6, "Nomor": "IT.2026.09.001",
+         "Nomor PO": "PO.2026.09.001", "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+        {"NAMA RESTO": "R", "Nama Barang": "BRG B2", "Tanggal": 21,
+         "Value": 7, "Nomor": "IT.2026.09.001",
+         "Nomor PO": "PO.2026.09.001", "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+    ])
+    _top33c = tk.Toplevel(root)
+    _top33c.geometry("1350x700+10+10")
+    _isv33 = _ISV33(_top33c)
+    _isv33.pack(fill="both", expand=True)
+    _data33 = pd.DataFrame({
+        "Nama Barang": ["BRG B1", "BRG B2", "BRG B4", "BRG CLEAN"],
+        "NAMA RESTO": ["R", "R", "R", "R"],
+        "SATUAN": ["GR", "GR", "GR", "GR"],
+        "KATEGORI": ["DEVIASI", "DEVIASI", "DEVIASI", "DEVIASI"],
+        "JENIS": ["1.SO", "1.SO", "1.SO", "1.SO"],
+        "Tanggal": [20, 21, 22, 23],
+        "NILAI": [10.0, 10.0, 10.0, 10.0],
+    })
+    _isv33.load_data(_data33, _det33b,
+                     audit_result={"df": _audit33, "kpi": {},
+                                   "desc": ""})
+    _pump30(1.0)
+    _isv33._refresh(sync=True)
+    wait_view(root, _isv33)
+    root.update()
+
+    def _cat33(isv, barang):
+        for _k33 in isv.tree.get_children(""):
+            if isv.tree.set(_k33, "Nama Barang") == barang:
+                return isv.tree.set(_k33, "Catatan Audit")
+        return "<missing>"
+
+    _c_b1 = _cat33(_isv33, "BRG B1")
+    check("(v3.9.23) B1: catatan RI Balancing dgn nomor dokumen + periode "
+          "PO, di-append SETELAH catatan VBA (VBA tetap pertama)",
+          _c_b1.startswith("Sisa Gantung: -13 | ") and
+          "RI Balancing: RI.2026.10.001 (PO 2026-08)" in _c_b1,
+          f"got {_c_b1!r}")
+    _c_b2 = _cat33(_isv33, "BRG B2")
+    check("(v3.9.23) B2: catatan Nomor dobel (×N) + B3 Selisih IN dgn "
+          "arah perbedaan; VBA '-' diganti (bukan dobel separator)",
+          _c_b2.startswith("Nomor dobel: IT.2026.09.001 ×2") and
+          "Selisih IN (3) (IN 13 > BM 10)" in _c_b2 and
+          " | " in _c_b2,
+          f"got {_c_b2!r}")
+    _c_b4 = _cat33(_isv33, "BRG B4")
+    check("(v3.9.23) B4: BM 0 padahal IN > 0 → diagnosis 'input rekap "
+          "belum diisi' (data quality — tidak ditulis 'Selisih IN')",
+          _c_b4 == "BM 0 padahal IN 13 (input rekap belum diisi)",
+          f"got {_c_b4!r}")
+    # matikan filter "hanya selisih" (default ON) supaya baris selisih-0
+    # (BRG CLEAN) ikut tampil — catatan BERSIH diperiksa juga
+    _isv33.only_selisih_var.set(False)
+    _isv33._refresh(sync=True)
+    wait_view(root, _isv33)
+    root.update()
+    _c_clean = _cat33(_isv33, "BRG CLEAN")
+    check("(v3.9.23) Baris BERSIH (BM == IN, tanpa dokumen anomali) → "
+          "catatan tetap kosong (tidak ada noise)",
+          _c_clean == "",
+          f"got {_c_clean!r}")
+
+    # catatan ikut ke 💾 Export (kolom Catatan Audit di AUDIT_EXPORT_COLUMNS)
+    from src.ui.export_sheets import build_selisih_export_df as _bse33
+    _base33 = _isv33._cached_base
+    _exp33 = _bse33(_base33, 1, 31,
+                    audit_cols=["Hasil Audit", "Saldo", "Catatan Audit"])
+    _exp_cat33 = ""
+    if "Catatan Audit" in _exp33.columns:
+        _rowb1 = _exp33[_exp33["Nama Barang"] == "BRG B1"]
+        _exp_cat33 = (str(_rowb1["Catatan Audit"].iloc[0])
+                      if not _rowb1.empty else "")
+    check("(v3.9.23) Export: catatan audit terkaya ikut ke file Excel "
+          "(build_selisih_export_df membawa kolom Catatan Audit hasil "
+          "enrichment)",
+          "RI Balancing: RI.2026.10.001 (PO 2026-08)" in _exp_cat33,
+          f"got {_exp_cat33!r}")
+    _top33c.destroy()
+    root.update()
 
     # Cleanup
     root.destroy()
