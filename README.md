@@ -23,6 +23,17 @@ Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
 
+### v3.9.24 — RI BALANCING: PERIODE BISNIS 26→25 (definisi diperbaiki)
+> 1 klarifikasi user: *"jika saat ini bulan oktober maka 1 periode nya mulai dari 26 september - 25 oktober nah untuk cek RI balancing berarti dengan NO. PO yang bukan bulan september dan oktober. Seperti misal nya AIR MINERAL punya resto TGRGEL transaksi tanggal 1 oktober ada RI RI.2026.10.10354 dengan PO PO.2026.08.00571 nah ini yang aku maksud RI balancing"*.
+
+- **DEFINISI DIPERBAIKI (dari v3.9.19-23 "bulan Nomor RI ≠ bulan Nomor PO" → PERIODE BISNIS 26→25)** — satu periode bisnis = **tgl 26 bulan lalu s/d tgl 25 bulan ini** (cut-off 25/26), mencakup **DUA bulan kalender**. Nomor dokumen RI (`RI.2026.10.10354` → 2026-10) + **tanggal transaksi** menentukan dua bulan periodenya: **tgl 1-25 → {bulan-1, bulan}** (RI 1 Okt → periode 26 Sep–25 Okt → {Sep, Okt}); **tgl 26-31 → {bulan, bulan+1}** (RI 26 Sep & RI 1 Okt SATU periode; wrap tahun Des↔Jan ditangani; tanggal **bulan-lalu negatif** dibaca absolut, mis. `-28` = tgl 28 bulan lalu). **Balancing = Nomor PO dari periode DI LUAR dua bulan itu**:
+  - Contoh user: **RI 1 Okt ↔ PO Agustus → "RI Balancing"** (`PO.2026.08` ∉ {2026-09, 2026-10}) ✔
+  - **RI 1 Okt ↔ PO September → BUKAN balancing** — PO bulan sebelumnya masih **satu periode** dengan RI-nya; v3.9.19-23 **SALAH FLAG** kasus ini (bulan beda → flag) → kini benar
+  - RI 26 Sep (bulan lalu, kolom negatif) ↔ PO Okt → satu periode → tidak terflag; ↔ PO Agu/Jul → balancing
+- **SATU LOGIKA di 3 permukaan** — `doc_codes._ri_balancing(nomor, po, tanggal)` (param `tanggal` baru) dipakai **CEK kolom utama** Deviasi GR/PCS (`ri_balancing_docs` kini membawa kolom Tanggal per baris), **popup Rincian IN** (kolom CEK per dokumen), dan **Catatan Audit B1** (`_ri_balancing_by_date`) — tidak ada cabang logika kedua (audit 34/37: duplikasi rumus = bug senyap).
+- **Fallback defensif** — dokumen tanpa tanggal valid (NaN/kolom Tanggal absen/invalid 0/32): kembali ke aturan lama **bulan≠bulan tahun-aware** (konservatif — tanggal tak terverifikasi tetap dianggap mencurigakan; test lama §29/§30 2-arg tetap hijau).
+- **Verifikasi**: **742/742 UI test × 2 run** (729 + §34 baru 13 check: contoh user persis, inti perbaikan PO-Sep, batas 25/26, tanggal lalu negatif, wrap Des↔Jan, fallback, frame-level `ri_balancing_docs`/`_ri_balancing_by_date` [termasuk frame tanpa kolom Tanggal], CEK kolom utama GUI SEPPO-tidak-terflag vs AGUPO-terflag, filter ⧩, popup CEK) + test_mock ALL PASS + **probe data real** (rekap workbook user + injeksi **contoh PERSIS user** `AIR MINERAL BOTOL (V.20) × TGRGEL tgl 1 RI.2026.10.10354 + PO.2026.08.00571` → pasangan TERFLAG; kontrol **RI Okt tgl 5 + PO Sep TIDAK terflag** [dulu salah-flag]; RI `-28` + PO Okt tidak terflag; RI `-28` + PO Jul terflag; catatan B1 `"RI Balancing: RI.2026.10.10354 (PO 2026-08)"` menempel tgl 1; baseline 0 phantom) + PIXEL-QA 3 screenshot (kolom CEK discroll ke viewport; **VLM visual 2×YES**) + **ruff 187 == baseline 187 (0 temuan baru)**.
+
 ### v3.9.23 — CEK "RI BALANCING" KOLOM UTAMA + CATATAN AUDIT OTOMATIS REKAP IN
 > 2 permintaan user (lanjutan analisa "tanpa kode" v3.9.22): *"kerjakan poin 6 dan kerjakan semua poin B"* — poin 6 dari daftar usulan **potensi analisa tambahan kolom CEK**, dan SEMUA poin B dari usulan **catatan Audit tab Rekap Selisih IN**.
 

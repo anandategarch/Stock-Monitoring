@@ -178,6 +178,18 @@ Memverifikasi:
     — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
     Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
     & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
+35. v3.9.24 — RI BALANCING PERIODE BISNIS 26→25 (§34; user: "jika
+    saat ini bulan oktober maka 1 periode nya mulai dari 26 september
+    - 25 oktober nah untuk cek RI balancing berarti dengan NO. PO yang
+    bukan bulan september dan oktober"): definisi diperbaiki dari
+    "bulan RI ≠ bulan PO" → PO di luar DUA BULAN periode bisnis RI
+    (tgl 1-25 → {bulan-1, bulan}; tgl 26-31 → {bulan, bulan+1}; wrap
+    tahun Des↔Jan; tanggal bulan-lalu negatif dibaca absolut). RI
+    1 Okt + PO Agu → balancing (contoh user); RI 1 Okt + PO Sep →
+    '' (satu periode — v3.9.19-23 SALAH FLAG kasus ini); fallback
+    tanpa tanggal valid → aturan lama bulan≠bulan. Berlaku di CEK
+    kolom utama + popup Rincian IN + Catatan Audit B1 (satu logika
+    doc_codes._ri_balancing).
 34. v3.9.23 — CEK RI BALANCING KOLOM UTAMA + CATATAN AUDIT OTOMATIS
     REKAP IN (§33; user: "kerjakan poin 6 dan kerjakan semua poin
     B"): (1) POIN 6 — CEK "RI Balancing" di kolom CEK utama tab
@@ -566,7 +578,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.23", APP_VERSION == "3.9.23", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.24", APP_VERSION == "3.9.24", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -6360,6 +6372,7 @@ def main():
 
     # --- (b) persistensi settings.json (round-trip + clamp) --------------
     import tempfile as _tf31
+
     import src.ui.deviasi_view as _dvmod31
     _tmpdir31 = _tf31.mkdtemp(prefix="t31_acr_")
     _origpath31 = _dvmod31.acr_settings_path()
@@ -6798,12 +6811,20 @@ def main():
     from src.ui import doc_codes as _DC33
     from src.ui.doc_codes import (
         duplicated_doc_numbers as _dupn33,
+    )
+    from src.ui.doc_codes import (
         ri_balancing_docs as _rbd33,
     )
     from src.ui.in_selisih_view import (
         InSelisihView as _ISV33,
+    )
+    from src.ui.in_selisih_view import (
         _join_notes as _jn33,
+    )
+    from src.ui.in_selisih_view import (
         _ri_balancing as _rib33,
+    )
+    from src.ui.in_selisih_view import (
         _tgl_key as _tk33,
     )
     check("(v3.9.23) Helper kode dokumen diangkat ke modul bersama: "
@@ -7110,6 +7131,168 @@ def main():
           "RI Balancing: RI.2026.10.001 (PO 2026-08)" in _exp_cat33,
           f"got {_exp_cat33!r}")
     _top33c.destroy()
+    root.update()
+
+    # =====================================================================
+    # §34 v3.9.24 — RI BALANCING PERIODE BISNIS 26→25 (klarifikasi user)
+    # =====================================================================
+    print("== 34. v3.9.24 — RI Balancing periode bisnis 26→25 ==")
+
+    # --- (a) unit: _ri_balancing tanggal-aware (doc_codes) --------------
+    from src.ui.doc_codes import (
+        _day_of as _day34,
+    )
+    from src.ui.doc_codes import (
+        _ri_period_months as _rpm34,
+    )
+    from src.ui.doc_codes import (
+        _shift_period as _shp34,
+    )
+    from src.ui.doc_codes import (
+        ri_balancing_docs as _rbd34,
+    )
+    from src.ui.in_selisih_view import _ri_balancing as _rib34
+    from src.ui.in_selisih_view import _ri_balancing_by_date as _rbd34d
+
+    check("(v3.9.24) Contoh user PERSIS: RI.2026.10.10354 transaksi "
+          "tgl 1 Okt (periode 26 Sep–25 Okt) + PO.2026.08.00571 (Agu "
+          "∉ {Sep, Okt}) → 'RI Balancing'",
+          _rib34("RI.2026.10.10354", "PO.2026.08.00571", 1) ==
+          "RI Balancing")
+    check("(v3.9.24) INTI PERBAIKAN: RI 1 Okt + PO September → '' "
+          "(satu periode dgn RI — v3.9.19-23 salah-flag); + PO Oktober "
+          "→ ''",
+          _rib34("RI.2026.10.10354", "PO.2026.09.00571", 1) == "" and
+          _rib34("RI.2026.10.10354", "PO.2026.10.00571", 1) == "")
+    check("(v3.9.24) Batas 25/26: RI Sep tgl 26 satu periode dgn Okt "
+          "(26 Sep–25 Okt) → PO Okt ''; RI Sep tgl 25 = periode 26 "
+          "Agu–25 Sep → PO Okt di luar → flag",
+          _rib34("RI.2026.09.5", "PO.2026.10.1", 26) == "" and
+          _rib34("RI.2026.09.5", "PO.2026.08.1", 26) == "RI Balancing" and
+          _rib34("RI.2026.09.5", "PO.2026.10.1", 25) == "RI Balancing" and
+          _rib34("RI.2026.09.5", "PO.2026.08.1", 25) == "")
+    check("(v3.9.24) Tanggal bulan-lalu NEGATIF dibaca absolut: -26 = "
+          "tgl 26 (RI Sep -26 + PO Okt '')",
+          _rib34("RI.2026.09.5", "PO.2026.10.1", -26) == "" and
+          _rib34("RI.2026.09.5", "PO.2026.10.1", -25) == "RI Balancing")
+    check("(v3.9.24) Wrap tahun Des↔Jan: RI 28 Des (periode 26 Des–25 "
+          "Jan) + PO Jan-thn-depan '' — sekalian bulan 1-2 digit",
+          _rib34("RI.2026.12.1", "PO.2027.1.1", 28) == "" and
+          _rib34("RI.2027.1.1", "PO.2026.12.1", 10) == "" and
+          _rib34("RI.2027.01.15", "PO.2026.11.30", 10) == "RI Balancing")
+    check("(v3.9.24) Fallback TANPA tanggal valid → aturan lama "
+          "bulan≠bulan (tahun-aware): 2-arg / None / NaN / 0 / 32 / 'x'",
+          _rib34("RI.2026.10.1", "PO.2026.08.1") == "RI Balancing" and
+          _rib34("RI.2026.10.1", "PO.2026.09.1") == "RI Balancing" and
+          _rib34("RI.2026.10.1", "PO.2026.10.1") == "" and
+          _rib34("RI.2026.10.1", "PO.2026.08.1", None) ==
+          "RI Balancing" and
+          _rib34("RI.2026.10.1", "PO.2026.08.1", float("nan")) ==
+          "RI Balancing" and
+          _rib34("RI.2026.10.1", "PO.2026.09.1", 0) == "RI Balancing" and
+          _rib34("RI.2026.10.1", "PO.2026.09.1", 32) == "RI Balancing" and
+          _rib34("RI.2026.10.1", "PO.2026.09.1", "x") == "RI Balancing")
+    check("(v3.9.24) _ri_period_months / _shift_period / _day_of "
+          "(unit — batas 25/26, wrap Des↔Jan, hari absolut 1..31)",
+          _rpm34((2026, 10), 1) == {(2026, 9), (2026, 10)} and
+          _rpm34((2026, 9), 26) == {(2026, 9), (2026, 10)} and
+          _shp34(2026, 12, 1) == (2027, 1) and
+          _shp34(2027, 1, -1) == (2026, 12) and
+          _day34(20.0) == 20 and _day34("24") == 24 and
+          _day34(-26) == 26 and _day34(None) is None and
+          _day34(float("nan")) is None and _day34(0) is None and
+          _day34(32) is None)
+
+    # --- (b) frame-level: ri_balancing_docs + _ri_balancing_by_date ---
+    _det34 = pd.DataFrame([
+        # SEPPO — dulu salah-flag (RI Okt vs PO Sep), kini satu periode
+        {"NAMA RESTO": "TGRGEL", "Nama Barang": "SEPPO",
+         "Tanggal": 20, "Value": 5, "Nomor": "RI.2026.10.201",
+         "Nomor PO": "PO.2026.09.201", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # AGUPO — contoh user (RI Okt tgl 1 vs PO Agu) → balancing
+        {"NAMA RESTO": "TGRGEL", "Nama Barang": "AGUPO",
+         "Tanggal": 1, "Value": 5, "Nomor": "RI.2026.10.10354",
+         "Nomor PO": "PO.2026.08.00571", "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+        # LALUOK — RI bulan-lalu tgl 28 (26 Sep–25 Okt) + PO Okt → ''
+        {"NAMA RESTO": "TGRGEL", "Nama Barang": "LALUOK",
+         "Tanggal": -28, "Value": 5, "Nomor": "RI.2026.09.301",
+         "Nomor PO": "PO.2026.10.301",
+         "SOURCE IN": "32.24 (Bulan Lalu)", "JENIS": "IN"},
+        # LALUJUL — RI bulan-lalu tgl 28 + PO Jul → balancing
+        {"NAMA RESTO": "TGRGEL", "Nama Barang": "LALUJUL",
+         "Tanggal": -28, "Value": 5, "Nomor": "RI.2026.09.302",
+         "Nomor PO": "PO.2026.07.302",
+         "SOURCE IN": "32.24 (Bulan Lalu)", "JENIS": "IN"},
+    ])
+    _rbd34res = _rbd34(_det34)
+    check("(v3.9.24) ri_balancing_docs TANGGAL-AWARE: hanya AGUPO "
+          "(RI 1 Okt + PO Agu, contoh user) & LALUJUL (RI -28 + PO Jul) "
+          "terdeteksi; SEPPO (PO Sep — satu periode) & LALUOK (RI 26 Sep "
+          "+ PO Okt — satu periode) TIDAK",
+          set(_rbd34res.keys()) ==
+          {("AGUPO", "TGRGEL"), ("LALUJUL", "TGRGEL")} and
+          _rbd34res[("AGUPO", "TGRGEL")] == ["RI.2026.10.10354"],
+          f"got {dict(_rbd34res)}")
+    _rbd34noTgl = _rbd34(_det34.drop(columns=["Tanggal"]))
+    check("(v3.9.24) Defensif: frame TANPA kolom Tanggal → fallback "
+          "aturan lama bulan≠bulan (SEPPO ikut terflag — tanggal tak "
+          "terverifikasi dianggap mencurigakan)",
+          ("SEPPO", "TGRGEL") in _rbd34noTgl and
+          ("AGUPO", "TGRGEL") in _rbd34noTgl and
+          ("LALUOK", "TGRGEL") in _rbd34noTgl and
+          ("LALUJUL", "TGRGEL") in _rbd34noTgl,
+          f"got {dict(_rbd34noTgl)}")
+    _rbdd34 = _rbd34d(_det34)
+    check("(v3.9.24) _ri_balancing_by_date (catatan B1): SEPPO & "
+          "LALUOK tanpa entri (PO satu periode); AGUPO menempel tgl 1 "
+          "+ periode PO; LALUJUL menempel tgl -28",
+          ("SEPPO", "TGRGEL") not in _rbdd34 and
+          ("LALUOK", "TGRGEL") not in _rbdd34 and
+          _rbdd34.get(("AGUPO", "TGRGEL"), {}).get(1) ==
+          [("RI.2026.10.10354", " (PO 2026-08)")] and
+          _rbdd34.get(("LALUJUL", "TGRGEL"), {}).get(-28) ==
+          [("RI.2026.09.302", " (PO 2026-07)")],
+          f"got {dict(_rbdd34)}")
+
+    # --- (c) CEK kolom utama DeviasiView (GUI, H=25) -------------------
+    _ROWS34 = [
+        _row33("SEPPO", "TGRGEL", "1.SO", 25, 10.0),
+        _row33("SEPPO", "TGRGEL", "2.SALDO AKHIR", 25, 10.0),
+        _row33("AGUPO", "TGRGEL", "1.SO", 25, 10.0),
+        _row33("AGUPO", "TGRGEL", "2.SALDO AKHIR", 25, 10.0),
+    ]
+    _top34, _dv34 = _make_dv33(pd.DataFrame(_ROWS34), _det34)
+    check("(v3.9.24) CEK kolom utama: AGUPO (dok contoh user, tgl 1 ≤ "
+          "H) TERFLAG 'RI Balancing' — SEPPO (dok PO Sep tgl 20 ≤ H) "
+          "TIDAK terflag (satu periode — dulu salah-flag)",
+          _cek33(_dv34, "AGUPO") == "RI Balancing" and
+          _cek33(_dv34, "SEPPO") == "",
+          f"AGUPO={_cek33(_dv34, 'AGUPO')!r} "
+          f"SEPPO={_cek33(_dv34, 'SEPPO')!r}")
+    _vals34 = _dv34._col_values("CEK")
+    check("(v3.9.24) Filter ⧩ CEK: nilai = baris yang tampil (RI "
+          "Balancing ada)",
+          "RI Balancing" in _vals34,
+          f"vals={_vals34}")
+    _top34.destroy()
+    root.update()
+
+    # --- (d) popup Rincian IN: kolom CEK per dokumen -------------------
+    from src.ui.in_selisih_view import InDetailPopup as _IDP34
+    _pop34 = _IDP34(root, "TGRGEL", "AGUPO", 1, _det34)
+    root.update()
+    _cekmap34 = {_pop34.tree.set(k, "Nomor"): _pop34.tree.set(k, "CEK")
+                 for k in _pop34.tree.get_children("")}
+    check("(v3.9.24) Popup Rincian IN: dokumen contoh user (RI 1 Okt + "
+          "PO Agu) → CEK 'RI Balancing'; dokumen PO Sep / PO Okt satu "
+          "periode → CEK kosong (dulu salah-flag)",
+          _cekmap34.get("RI.2026.10.10354") == "RI Balancing" and
+          _cekmap34.get("RI.2026.10.201") == "" and
+          _cekmap34.get("RI.2026.09.301") == "",
+          f"got {_cekmap34}")
+    _pop34.destroy()
     root.update()
 
     # Cleanup

@@ -5,9 +5,17 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.24 (klarifikasi user: "jika saat ini bulan oktober maka 1 periode
+nya mulai dari 26 september - 25 oktober nah untuk cek RI balancing
+berarti dengan NO. PO yang bukan bulan september dan oktober") —
+definisi RI Balancing = PERIODE BISNIS 26→25 (dokumen tanggal-aware):
+PO di luar dua bulan periodenya → flag; PO bulan sebelum RI = satu
+periode → tidak (dulu salah-flag). Logika = doc_codes._ri_balancing
+(nomor, po, tanggal) — tanggal dokumen dipakai utk batas 25/26.
+
 v3.9.23 (user: "kerjakan poin 6") — CEK "RI Balancing" DI KOLOM UTAMA:
-pasangan barang×resto yang punya ≥1 dokumen IN dgn PERIODE Nomor RI ≠
-periode Nomor PO (struktur PREFIKS.TAHUN.BULAN.NNNNN) dan tanggal
+pasangan barang×resto yang punya ≥1 dokumen IN dgn PERIODE Nomor PO di
+luar periode bisnis RI-nya (struktur PREFIKS.TAHUN.BULAN.NNNNN) dan tanggal
 dokumen ≤ H kini TERFLAG "RI Balancing" langsung di tabel — dulu hanya
 terlihat di popup Rincian IN (harus double-click baris per baris).
 Sumber = in_detail (query_in, per-dokumen — pemetaan Nomor↔Nomor PO
@@ -1058,13 +1066,16 @@ class DeviasiView(tk.Frame):
                 }
 
         # v3.9.23 (poin 6) — CEK "RI Balancing" KOLOM UTAMA: pasangan
-        # (barang, resto) yang punya ≥1 dokumen IN ber-periode Nomor RI ≠
-        # periode Nomor PO dgn TANGGAL DOKUMEN ≤ H (scope analisa —
-        # dokumen tercatat setelah H belum termasuk; tanggal bulan-lalu
-        # negatif tetap masuk, kronologis sebelum tanggal 1). Logika
-        # periode = _ri_balancing (doc_codes — sama dgn popup Rincian IN
-        # & Catatan Audit, FIX 35-c1: periode penuh tahun+bulan, bulan
-        # 1-2 digit numerik, hanya dokumen berprefiks "RI.").
+        # (barang, resto) yang punya ≥1 dokumen IN ber-PERIODE Nomor PO
+        # DI LUAR periode bisnis RI-nya (v3.9.24 klarifikasi user: satu
+        # periode = tgl 26 bulan lalu s/d 25 bulan RI — RI 1 Okt ↔ PO
+        # Sep TETAP satu periode [tak di-flag]; PO Agu di luar periode
+        # → balancing) dgn TANGGAL DOKUMEN ≤ H (scope analisa — dokumen
+        # tercatat setelah H belum termasuk; tanggal bulan-lalu negatif
+        # tetap masuk, kronologis sebelum tanggal 1). Logika periode =
+        # _ri_balancing (doc_codes — sama dgn popup Rincian IN & Catatan
+        # Audit, tanggal-aware batas 25/26 + wrap tahun, hanya dokumen
+        # berprefiks "RI.").
         # Cache per (identitas in_detail, h) — scan O(n) regex hanya saat
         # data/H berubah, bukan tiap refresh.
         _rib = self._ri_bal_cache

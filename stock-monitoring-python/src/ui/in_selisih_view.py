@@ -1,13 +1,19 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.9.24 (klarifikasi user: periode bisnis 26→25) — RI BALANCING kini
+TANGGAL-AWARE: satu periode = tgl 26 bulan lalu s/d tgl 25 bulan ini
+(dua bulan kalender); PO bulan SEBELUM bulan RI tetap satu periode →
+TIDAK dihitung balancing (dulu salah-flag). Logika = doc_codes.
+_ri_balancing(nomor, po, tanggal).
+
 v3.9.23 (user: "kerjakan semua poin B") — CATATAN AUDIT OTOMATIS:
 kolom Catatan Audit diperkaya catatan app per baris, di-APPEND ke
 catatan engine VBA (dipisah " | " — catatan VBA asli tetap PERTAMA,
 isi lama tidak berubah; baris tanpa temuan tetap sendirian):
 - B1 "RI Balancing: RI.2026.10.10354 (PO 2026-08)" — dokumen IN baris
-  itu ber-periode Nomor RI ≠ Nomor PO (logika sama popup v3.9.19,
-  kini modul bersama doc_codes.py);
+  itu ber-periode PO di luar periode bisnis RI-nya (logika sama popup
+  v3.9.19, kini modul bersama doc_codes.py);
 - B2 "Nomor dobel: IT.2026.09.00123 ×2" — nomor dokumen sama muncul
   >1 baris utk pasangan yang sama (input ganda / sheet kembar);
 - B3 "Selisih IN −3 (IN 13 > BM 10)" — BM ≠ IN dgn arah perbedaan;
@@ -24,8 +30,9 @@ dan 9901 beserta nomor nya.
 v3.9.17: sumber IN tambahan "42.05 (Bulan Lalu)" — folder
 "4.1 4205 Bulan Lalu" (penambah IN periode ujung bulan lalu, mirror
 32.24 bulan lalu).
-v3.9.19: popup Rincian IN punya KOLOM CEK — "RI Balancing" bila bulan
-Nomor RI ≠ bulan Nomor PO (struktur kode PO.2026.08.00571 /
+v3.9.19: popup Rincian IN punya KOLOM CEK — "RI Balancing" bila
+Nomor PO di luar periode bisnis RI-nya (v3.9.24; dulu: bulan Nomor
+RI ≠ bulan Nomor PO) (struktur kode PO.2026.08.00571 /
 RI.2026.10.10354: segmen 2 = tahun, segmen 3 = bulan; permintaan user:
 RI dibuat beda bulan dari PO-nya = entries balancing).
 FIX 35-c1: periode dibandingkan PENUH (tahun, bulan) — bulan sama
@@ -211,10 +218,11 @@ def _join_notes(vba: str, notes) -> str:
 def _ri_balancing_by_date(in_detail: pd.DataFrame | None) -> dict:
     """v3.9.23 (poin B1) — dokumen RI Balancing per
     {(barang, resto): {tgl: [(nomor, po_period), ...]}} — nomor dokumen
-    RI yang bulannya ≠ bulan PO-nya + periode PO-nya ("2026-08"),
-    dikelompokkan PER TANGGAL dokumennya (catatan menempel pada baris
-    tabel bertanggal sama; urut nomor). Logika periode = _ri_balancing
-    (doc_codes, FIX 35-c1: periode penuh tahun+bulan)."""
+    RI ber-periode PO di luar periode bisnisnya (v3.9.24: 26→25 —
+    PO bulan SEBELUM RI tetap satu periode, tak dihitung) + periode
+    PO-nya ("2026-08"), dikelompokkan PER TANGGAL dokumennya (catatan
+    menempel pada baris tabel bertanggal sama; urut nomor). Logika
+    periode = _ri_balancing (doc_codes, tanggal-aware)."""
     out: dict = {}
     if in_detail is None or getattr(in_detail, "empty", True):
         return out
@@ -226,7 +234,7 @@ def _ri_balancing_by_date(in_detail: pd.DataFrame | None) -> dict:
                                         in_detail["Nama Barang"],
                                         in_detail["NAMA RESTO"],
                                         in_detail["Tanggal"]):
-        if _ri_balancing(nomor, nomor_po) == "":
+        if _ri_balancing(nomor, nomor_po, t) == "":
             continue
         n = _doc_code_str(nomor)
         if not n:
@@ -540,8 +548,11 @@ class InDetailPopup(tk.Toplevel):
                         neg_cells.append((f"doc_{len(items)}", "Qty"))
                     else:
                         tags.append("negative")
-                # v3.9.19 — CEK "RI Balancing" (bulan Nomor RI ≠ bulan PO)
-                cek = _ri_balancing(row.get("Nomor"), row.get("Nomor PO"))
+                # v3.9.19 — CEK "RI Balancing" (v3.9.24: periode
+                # bisnis 26→25 tanggal-aware — PO bulan sebelum RI
+                # tetap satu periode, tak dihitung)
+                cek = _ri_balancing(row.get("Nomor"), row.get("Nomor PO"),
+                                    row.get("Tanggal"))
                 if cek and self._cell_tags:
                     cek_cells.append((f"doc_{len(items)}", "CEK"))
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")

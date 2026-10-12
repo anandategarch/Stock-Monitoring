@@ -1,5 +1,5 @@
 """
-doc_codes.py — Parsing & analisa kode dokumen IN (SHARED, v3.9.23).
+doc_codes.py — Parsing & analisa kode dokumen IN (SHARED, v3.9.24).
 
 Dipakai bersama oleh in_selisih_view (popup Rincian IN + Catatan Audit)
 dan deviasi_view (CEK "RI Balancing" kolom utama tab Deviasi GR/PCS).
@@ -13,6 +13,19 @@ Struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR
   "PO.2026.08.00571" / "RI.2026.10.10354" / "IT.2026.09.00123"
 (segmen 2 = tahun, segmen 3 = bulan — bulan 1-2 digit, dibandingkan
 NUMERIK; "8" == "08").
+
+v3.9.24 (user: "jika saat ini bulan oktober maka 1 periode nya mulai
+dari 26 september - 25 oktober nah untuk cek RI balancing berarti
+dengan NO. PO yang bukan bulan september dan oktober … RI.2026.10.10354
+dengan PO PO.2026.08.00571") — DEFINISI RI BALANCING DIPERBAIKI dari
+"bulan RI ≠ bulan PO" (v3.9.19-23) menjadi PERIODE BISNIS 26→25:
+satu periode = tgl 26 bulan lalu s/d tgl 25 bulan ini, mencakup DUA
+bulan kalender. Dokumen RI tanggal 1-25 → bulan periodenya {bulan-1,
+bulan}; tanggal 26-31 → {bulan, bulan+1} (wrap tahun Des↔Jan).
+Balancing = Nomor PO dari periode DI LUAR dua bulan itu (contoh user:
+RI 1 Okt ↔ PO Agustus → balancing; RI 1 Okt ↔ PO September → BUKAN
+balancing — PO September masih satu periode dgn RI-nya). Tanpa tanggal
+dokumen (NaN/invalid) → fallback aturan lama bulan≠bulan (konservatif).
 
 v3.9.23 (user: "kerjakan poin 6 dan kerjakan semua poin B"):
 - CEK "RI Balancing" diangkat ke kolom CEK utama Deviasi GR/PCS
@@ -69,33 +82,84 @@ def _doc_month(code) -> "int | None":
     return period[1] if period is not None else None
 
 
-def _ri_balancing(nomor, nomor_po) -> str:
-    """v3.9.19 — keterangan CEK popup Rincian IN: bulan Nomor (dokumen
-    penerimaan RI) ≠ bulan Nomor PO → "RI Balancing" (RI dibuat beda
-    bulan dari pesanannya — entries balancing; contoh user: PO Agustus
-    ↔ RI Oktober). FIX 35-c1 (RISK C3+C4): bandingkan PERIODE PENUH
-    (tahun, bulan) — "RI.2027.08" vs "PO.2026.08" (bulan sama, tahun
-    beda) kini di-flag: periode beda = entries balancing; dulu tahun
-    diabaikan → lolos senyap. Bulan 1-2 digit cocok numerik
-    ("RI.2026.8" == "PO.2026.08"). Hanya berlaku utk dokumen RI
-    (Nomor berprefiks "RI." — dokumen PI 9901 adalah invoice
-    pembelian, bukan balancing)."""
+def _shift_period(y: int, m: int, delta: int):
+    """v3.9.24 — geser (tahun, bulan) sebanyak delta bulan, year-aware
+    (Des + 1 → Jan tahun depan; Jan − 1 → Des tahun lalu)."""
+    idx = (y * 12) + (m - 1) + delta
+    return (idx // 12, idx % 12 + 1)
+
+
+def _ri_period_months(p_ri, day: int) -> set:
+    """v3.9.24 (klarifikasi user) — dua (tahun, bulan) yang dicakup
+    PERIODE BISNIS dokumen RI: satu periode = tgl 26 bulan lalu s/d
+    tgl 25 bulan RI (cut-off 25/26). RI bertanggal 1-25 → periodenya
+    {bulan-1, bulan} (mis. RI Okt tgl 1 → periode 26 Sep–25 Okt →
+    {Sep, Okt}); RI bertanggal 26-31 → {bulan, bulan+1} (RI 26 Sep
+    & RI 1 Okt satu periode). Wrap tahun Des↔Jan ditangani."""
+    y, m = p_ri
+    if day <= 25:
+        return {(y, m), _shift_period(y, m, -1)}
+    return {(y, m), _shift_period(y, m, +1)}
+
+
+def _day_of(tanggal):
+    """v3.9.24 — tanggal dokumen (kolom Tanggal = HARI bulan; bulan-lalu
+    NEGATIF, mis. -28 = tgl 28 bulan lalu) → hari absolut 1..31;
+    None bila kosong/NaN/bukan angka/di luar 1..31 (→ fallback aturan
+    lama). Float '20.0' / teks '24' diterima."""
+    if tanggal is None:
+        return None
+    try:
+        if pd.isna(tanggal):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        day = abs(int(float(tanggal)))
+    except (TypeError, ValueError):
+        return None
+    return day if 1 <= day <= 31 else None
+
+
+def _ri_balancing(nomor, nomor_po, tanggal=None) -> str:
+    """v3.9.24 (klarifikasi user) — "RI Balancing" bila PERIODE Nomor PO
+    DI LUAR dua bulan periode bisnis RI-nya (26 bulan lalu – 25 bulan
+    RI). Contoh user: RI.2026.10.10354 transaksi 1 Okt (periodennya
+    26 Sep–25 Okt) + PO.2026.08.00571 (Agustus ∉ {Sep, Okt}) →
+    "RI Balancing"; PO September / Oktober → "" (satu periode dgn
+    RI-nya, BUKAN balancing — v3.9.19-23 salah flag kasus ini).
+    tanggal = kolom Tanggal baris dokumen (hari bulan; bulan-lalu
+    negatif); menentukan sisi batas 25/26 periode.
+    Tanpa tanggal valid (NaN/invalid/None — panggilan test lama §29/§30
+    2-arg) → FALLBACK aturan lama v3.9.19-23: periode RI ≠ periode PO
+    (bulan ≠ bulan, tahun-aware FIX 35-c1) → flag (konservatif: tanggal
+    tak terverifikasi tetap dianggap mencurigakan).
+    Tetap hanya dokumen RI (prefiks "RI." — PI = invoice pembelian,
+    bukan balancing); bulan 1-2 digit numerik ("8" == "08")."""
     n = _doc_code_str(nomor)
     if not n.upper().startswith("RI."):
         return ""
     p_ri = _doc_period(n)
     p_po = _doc_period(nomor_po)
-    if p_ri is None or p_po is None or p_ri == p_po:
+    if p_ri is None or p_po is None:
         return ""
-    return "RI Balancing"
+    day = _day_of(tanggal)
+    if day is None:
+        # fallback aturan lama: bulan (tahun-aware) beda → balancing
+        return "RI Balancing" if p_ri != p_po else ""
+    return "RI Balancing" if p_po not in _ri_period_months(p_ri, day) \
+        else ""
 
 
 def ri_balancing_docs(in_detail: pd.DataFrame | None):
     """v3.9.23 — daftar dokumen IN "RI Balancing" per pasangan
     (Nama Barang, NAMA RESTO) dari frame detail IN per-dokumen.
+    v3.9.24: kolom Tanggal baris ikut dipakai (periode bisnis 26→25 —
+    lihat _ri_balancing); frame tanpa kolom Tanggal → fallback aturan
+    lama bulan≠bulan.
 
     Return dict {(barang, resto): [nomor, ...]} — nomor dokumen RI
-    yang bulannya ≠ bulan Nomor PO-nya (urut, unik). Frame in_detail
+    ber-periode PO di luar periode bisnisnya (urut, unik). Frame in_detail
     berasal dari query_in: kolom NAMA RESTO · Nama Barang · Tanggal ·
     Value · Nomor · Nomor PO · SOURCE IN · JENIS (per dokumen × item —
     pemetaan Nomor↔Nomor PO BERSIH, tidak ter-campur seperti kolom
@@ -107,14 +171,18 @@ def ri_balancing_docs(in_detail: pd.DataFrame | None):
     out: dict = {}
     if in_detail is None or getattr(in_detail, "empty", True):
         return out
-    if not {"Nomor", "Nomor PO", "Nama Barang", "NAMA RESTO"} <= set(
-            getattr(in_detail, "columns", [])):
+    cols = set(getattr(in_detail, "columns", []))
+    if not {"Nomor", "Nomor PO", "Nama Barang", "NAMA RESTO"} <= cols:
         return out
-    for nomor, nomor_po, b, r in zip(in_detail["Nomor"],
-                                     in_detail["Nomor PO"],
-                                     in_detail["Nama Barang"],
-                                     in_detail["NAMA RESTO"]):
-        if _ri_balancing(nomor, nomor_po) == "":
+    has_tgl = "Tanggal" in cols
+    tgl_iter = (in_detail["Tanggal"] if has_tgl
+                else [None] * len(in_detail))
+    for nomor, nomor_po, b, r, t in zip(in_detail["Nomor"],
+                                       in_detail["Nomor PO"],
+                                       in_detail["Nama Barang"],
+                                       in_detail["NAMA RESTO"],
+                                       tgl_iter):
+        if _ri_balancing(nomor, nomor_po, t) == "":
             continue
         key = (str(b), str(r))
         n = _doc_code_str(nomor)

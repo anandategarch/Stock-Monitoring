@@ -157,7 +157,24 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.23"  # v3.9.23 — CEK RI BALANCING KOLOM UTAMA + CATATAN AUDIT OTOMATIS REKAP IN (poin 6 + semua poin B)
+APP_VERSION = "3.9.24"  # v3.9.24 — RI BALANCING PERIODE BISNIS 26→25 (klarifikasi user: PO di luar 2 bulan periode)
+# v3.9.24 (user: "jika saat ini bulan oktober maka 1 periode nya mulai
+# dari 26 september - 25 oktober nah untuk cek RI balancing berarti
+# dengan NO. PO yang bukan bulan september dan oktober … AIR MINERAL
+# punya resto TGRGEL transaksi tanggal 1 oktober ada RI RI.2026.10.10354
+# dengan PO PO.2026.08.00571"):
+# DEFINISI RI BALANCING DIPERBAIKI — dari "bulan Nomor RI ≠ bulan
+# Nomor PO" (v3.9.19-23) menjadi PERIODE BISNIS 26→25: satu periode =
+# tgl 26 bulan lalu s/d tgl 25 bulan ini (mencakup DUA bulan kalender).
+# Dokumen RI tgl 1-25 → PO periodenya {bulan-1, bulan}; tgl 26-31 →
+# {bulan, bulan+1} (wrap tahun Des↔Jan; tanggal bulan-lalu negatif
+# dibaca absolut). Balancing = Nomor PO dari periode DI LUAR dua bulan
+# itu — contoh user: RI 1 Okt ↔ PO Agu → balancing; RI 1 Okt ↔ PO Sep
+# → BUKAN balancing (v3.9.19-23 SALAH FLAG kasus ini — PO bulan
+# sebelumnya satu periode dgn RI-nya). Satu logika doc_codes._ri_
+# balancing(nomor, po, tanggal) dipakai CEK kolom utama Deviasi +
+# popup Rincian IN + Catatan Audit B1; tanpa tanggal valid (NaN/
+# invalid) → fallback aturan lama bulan≠bulan (konservatif).
 # v3.9.23 (user: "kerjakan poin 6 dan kerjakan semua poin B"):
 # (1) POIN 6 — CEK "RI Balancing" DI KOLOM CEK UTAMA tab Deviasi GR & PCS:
 #     pasangan barang×resto yang punya ≥1 dokumen IN dgn periode Nomor RI
