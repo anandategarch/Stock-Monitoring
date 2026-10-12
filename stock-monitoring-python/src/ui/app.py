@@ -157,7 +157,26 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.25"  # v3.9.25 — POPUP DEVIASI GR/PCS PERBESAR + KOLOM Nomor PO & COM
+APP_VERSION = "3.9.26"  # v3.9.26 — POTENSI FLIP FLOP = SELISIH MAGNITUDO KECIL (dibalance dari v3.9.19)
+# v3.9.26 (user: "potensi flip flop itu harusnya yang selisih nya
+# dikit aja"): ARAH LABEL ANALISA 'Potensi Flip Flop' DIBALIK —
+# audit 41-a (logika hanya di 2 titik komparasi_deviasi_view) +
+# 41-b data real (87,9% pasangan flip = Parsial; aturan lama
+# melabeli flip miring/noise [DEV 0,1 → GR −780] sbg 'Potensi Flip
+# Flop' sedang cermin sejati [−9.525 → +9.551, selisih 26] cuma
+# 'Berubah Arah'). DEFINISI BARU: pasangan flip (tanda DEV
+# berlawanan) dgn SELISIH MAGNITUDO KECIL (disparitas <
+# FFLOP_DISP_MAX 40% — Kategori Sempurna/Dominan; nilai bercermin ±,
+# mis. −50 → +55: deviasi sama besarnya cuma pindah sisi → rawan
+# bolak-balik) = 'Potensi Flip Flop'; disparitas ≥ 40% (Parsial —
+# sisi dominan jauh lebih besar, mis. −100 → +10: deviasi nyaris
+# hilang/membesar, arah benar-benar berganti) = 'Berubah Arah'.
+# SATU konstanta FFLOP_DISP_MAX 0.40 utk TABEL TOP SELISIH
+# (_top_aggregate) & PERUBAHAN ARAH (_render_flip + batas Kategori
+# flip — FFLOP ⟺ Sempurna/Dominan, ARAH ⟺ Parsial; batas 0.40
+# PERSIS mengikuti Kategori: strictly <). Prioritas np.select utuh
+# (flip > Stabil); tanda sama tidak pernah FFLOP; label string,
+# warna tag, filter, sort, export TIDAK berubah.
 # v3.9.25 (user: "POP UP DI tab deviasi gr dan deviasi pcs perbesar
 # lagi dan tambah kolom nomor po dan COM"): popup ringkas Deviasi GR/PCS
 # (double-click baris) DIPERBESAR 880×480 → 1180×640 (minsize 820×340;

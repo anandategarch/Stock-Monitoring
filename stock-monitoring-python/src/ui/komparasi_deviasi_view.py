@@ -1,6 +1,21 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+v3.9.26 (permintaan user: "potensi flip flop itu harusnya yang
+    selisih nya dikit aja"): ARAH LABEL ANALISA 'Potensi Flip Flop'
+    DIBALIK (v3.9.19-3.9.25 salah arah — audit 41-a/41-b): pasangan
+    flip (tanda DEV berlawanan) dgn SELISIH MAGNITUDO KECIL kini
+    dilabel 'Potensi Flip Flop' — disparitas < FFLOP_DISP_MAX 40%
+    (Kategori Sempurna/Dominan; nilai bercermin ±, mis. −50 → +55:
+    deviasi sama besarnya cuma pindah sisi → rawan bolak-balik);
+    disparitas ≥ 40% (Parsial — sisi dominan jauh lebih besar, mis.
+    −100 → +10: deviasi nyaris hilang/membesar, arah benar-benar
+    berganti) = 'Berubah Arah'. Data real 41-b: 87,9% pasangan flip
+    = Parsial — aturan lama melabeli flip miring/noise (DEV 0,1 →
+    GR −780) sbg FFLOP sedang cermin sejati (−9.525 → +9.551) cuma
+    'Berubah Arah'. Satu konstanta FFLOP_DISP_MAX utk tabel Top
+    Selisih & Perubahan Arah (ambang sama Kategori flip).
+
 v3.9.22 (permintaan user: "hapus tab liga deviasi" + "hapus arah
     minoritas" + "dead code nya juga hapus"): bagian 🧭 Arah Minoritas
     dan 🏆 Liga Deviasi DIHAPUS PENUH dari mode 📈 Analisa — baris
@@ -20,11 +35,12 @@ v3.9.19 — KOLOM ANALISA + HAPUS 2 BAGIAN (permintaan user):
         per baris: Kenaikan Tertinggi (tanda sama, |saat ini| >
         |lalu|) · Penurunan Tertinggi (tanda sama, |saat ini| <
         |lalu|) · Stabil (Selisih dalam toleransi MATCH) · Berubah
-        Arah (tanda berlawanan, disparitas < 40% — pembalikan tuntas)
-        · Potensi Flip Flop (tanda berlawanan, disparitas ≥ 40% —
-        pembalikan parsial: sisi dominan besar, arah baru rawan
-        berbalik lagi; ambang sama dgn Kategori flip Sempurna/
-        Dominan vs Parsial).
+        Arah (tanda berlawanan, disparitas ≥ 40% — Parsial; v3.9.26)
+        · Potensi Flip Flop (tanda berlawanan, disparitas < 40% —
+        selisih magnitudo kecil, nilai bercermin ±; v3.9.26 MEMBALIK
+        arah label: v3.9.19-3.9.25 dulu ≥ 40% (pembalikan parsial)
+        yang dilabel FFLOP — kebalikan dari maksud user; ambang
+        tetap sama dgn Kategori flip Sempurna/Dominan vs Parsial).
     (2) BAGIAN ⚡ Risiko Flip & 💰 Benchmark DIHAPUS (permintaan
         user: "hapus tab resiko flip dan bencmark"); v3.9.22: 🧭 Arah
         Minoritas & 🏆 Liga Deviasi ikut dihapus — tersisa Top & Flip.
@@ -284,6 +300,17 @@ def _h_to_week_target(h: int) -> int:
 # Toleransi MATCH: |selisih| <= TOL_ABS + TOL_REL * |nilai file|
 TOL_ABS = 1.0
 TOL_REL = 0.0001
+
+# v3.9.26 — ambang "Potensi Flip Flop" (permintaan user: "potensi
+# flip flop itu harusnya yang selisih nya dikit aja"): pasangan flip
+# dgn SELISIH MAGNITUDO KECIL (disparitas < FFLOP_DISP_MAX — nilai
+# bercermin ±, mis. −50 → +55: masalah sama besarnya cuma pindah
+# sisi → rawan bolak-balik) = Potensi Flip Flop; disparitas ≥
+# ambang (Parsial — sisi dominan jauh lebih besar, mis. −100 → +10)
+# = Berubah Arah. Ambang SAMA dgn Kategori flip (Sempurna/Dominan
+# vs Parsial) — SATU konstanta dipakai tabel Top Selisih
+# (_top_aggregate) & Perubahan Arah (_render_flip + Kategori).
+FFLOP_DISP_MAX = 0.40
 
 # v3.9.15 — konstanta analisa Gelombang 1 (pola repo Inventory-
 # Control user): liga robust-z butuh populasi minimal & skala MAD.
@@ -566,8 +593,9 @@ class KomparasiDeviasiView(tk.Frame):
         ("Disparitas", 85, "e"),
         ("Kategori", 90, "w"),
         # v3.9.19 — keterangan analisa per baris (1 kolom saja);
-        # baris flip = semua perubahan arah → hanya Berubah Arah
-        # (disparitas < 40%) / Potensi Flip Flop (≥ 40%)
+        # v3.9.26: baris flip → Potensi Flip Flop (disparitas <
+        # FFLOP_DISP_MAX — selisih magnitudo kecil, cermin ±) /
+        # Berubah Arah (≥ ambang — Parsial)
         ("ANALISA", 150, "w"),
     ]
 
@@ -2406,10 +2434,11 @@ class KomparasiDeviasiView(tk.Frame):
         - v3.9.19 ANALISA (1 kolom keterangan): Kenaikan Tertinggi ·
           Penurunan Tertinggi · Stabil · Berubah Arah · Potensi Flip
           Flop — prioritas: tanda berlawanan (disparitas = |P1+P2|/
-          max(|P1|,|P2|) — ambang sama dgn Kategori flip: < 40% →
-          Berubah Arah, ≥ 40% → Potensi Flip Flop) → Stabil (|Selisih|
-          ≤ toleransi MATCH) → Kenaikan/Penurunan Tertinggi (arah
-          Selisih). Pasangan tanpa data app → '—'.
+          max(|P1|,|P2|) — v3.9.26: selisih magnitudo KECIL
+          (< FFLOP_DISP_MAX, nilai bercermin ±) → Potensi Flip Flop,
+          selisih BESAR (≥ ambang, Parsial) → Berubah Arah) → Stabil
+          (|Selisih| ≤ toleransi MATCH) → Kenaikan/Penurunan Tertinggi
+          (arah Selisih). Pasangan tanpa data app → '—'.
         VEKTOR penuh (groupby + numpy, tanpa iterrows — pola PERF
         v3.9.14)."""
         g = d.groupby(["_resto_norm", "_bahan_norm", "Minggu"],
@@ -2443,11 +2472,14 @@ class KomparasiDeviasiView(tk.Frame):
                    else f"{b} · {m}"
                    for c, b, m in zip(n, bln, mg)]
         # v3.9.19 — keterangan ANALISA per pasangan (VEKTOR):
-        # tanda berlawanan → disparitas (rumus flip) dgn ambang 40%
-        # (sama dgn Kategori Sempurna/Dominan vs Parsial) →
-        # Berubah Arah / Potensi Flip Flop; tanda sama → Stabil bila
-        # Selisih dalam toleransi MATCH, selain itu arah Selisih →
-        # Kenaikan / Penurunan Tertinggi; tanpa data app → '—'.
+        # v3.9.26 — tanda berlawanan → disparitas (rumus flip) dgn
+        # ambang FFLOP_DISP_MAX (sama dgn Kategori Sempurna/Dominan
+        # vs Parsial): SELISIH MAGNITUDO KECIL (cermin ±, mis.
+        # −50 → +55) → Potensi Flip Flop (rawan bolak-balik), selisih
+        # besar (Parsial, mis. −100 → +10) → Berubah Arah; tanda sama
+        # → Stabil bila Selisih dalam toleransi MATCH, selain itu
+        # arah Selisih → Kenaikan / Penurunan Tertinggi; tanpa data
+        # app → '—'.
         with np.errstate(divide="ignore", invalid="ignore"):
             disp = (np.abs(dev + gr)
                     / np.maximum(np.abs(dev), np.abs(gr)))
@@ -2456,7 +2488,7 @@ class KomparasiDeviasiView(tk.Frame):
             np.isnan(gr), "—",
             np.where(
                 sign_flip,
-                np.where(disp >= 0.40, self.ANALISA_FFLOP,
+                np.where(disp < FFLOP_DISP_MAX, self.ANALISA_FFLOP,
                          self.ANALISA_ARAH),
                 np.where(
                     np.abs(sel) <= tol, self.ANALISA_STABIL,
@@ -2699,9 +2731,10 @@ class KomparasiDeviasiView(tk.Frame):
         PER GRUP + zip per baris = 4,7 dtk di file 40rb baris; vektor =
         ±50ms — pasangan/urutan identik); (MINGGU) hanya pasangan pada
         minggu yang MEMUAT H (aturan kolom H — H=7 → WEEK 1).
-        v3.9.19: kolom ANALISA (1 keterangan) — Berubah Arah (Sempurna/
-        Dominan, disparitas < 40%) vs Potensi Flip Flop (Parsial,
-        disparitas ≥ 40%)."""
+        v3.9.19: kolom ANALISA (1 keterangan) — v3.9.26: Potensi Flip
+        Flop (Sempurna/Dominan, disparitas < FFLOP_DISP_MAX 40% —
+        selisih magnitudo kecil, nilai bercermin ±) vs Berubah Arah
+        (Parsial, disparitas ≥ 40%)."""
         tree = self._flip_tree
         tree.delete(*tree.get_children())
         # v3.9.15: inti komputasi pasangan diekstrak ke _flip_pair_core
@@ -2735,12 +2768,16 @@ class KomparasiDeviasiView(tk.Frame):
         p1 = md["DEV Lalu"].to_numpy(dtype=float)
         p2 = md["_dev_next"].to_numpy(dtype=float)
         disp = np.abs(p1 + p2) / np.maximum(np.abs(p1), np.abs(p2))
-        kat = np.select([disp < 0.10, disp < 0.40],
+        kat = np.select([disp < 0.10, disp < FFLOP_DISP_MAX],
                         ["Sempurna", "Dominan"], default="Parsial")
-        # v3.9.19 — keterangan ANALISA (1 kolom saja): semua baris flip
-        # = perubahan arah; pembalikan PARSIAL (disparitas ≥ 40% —
-        # sisi dominan besar) rawan berbalik lagi → Potensi Flip Flop.
-        ana = np.where(disp >= 0.40, self.ANALISA_FFLOP,
+        # v3.9.26 — keterangan ANALISA (1 kolom saja): semua baris flip
+        # = perubahan arah; SELISIH MAGNITUDO KECIL (disparitas <
+        # FFLOP_DISP_MAX — Sempurna/Dominan, nilai bercermin ±, mis.
+        # −50 → +55: deviasi sama besarnya cuma pindah sisi) →
+        # Potensi Flip Flop (rawan bolak-balik); selisih besar
+        # (Parsial — sisi dominan jauh lebih besar) → Berubah Arah.
+        # (v3.9.19-3.9.25 dulu KEBALIKAN: ≥ 40% yang dilabel FFLOP.)
+        ana = np.where(disp < FFLOP_DISP_MAX, self.ANALISA_FFLOP,
                        self.ANALISA_ARAH)
         fd = pd.DataFrame({
             "Periode": [

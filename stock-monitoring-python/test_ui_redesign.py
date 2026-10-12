@@ -129,7 +129,9 @@ Memverifikasi:
     saja) di tabel Top Selisih & Perubahan Arah bagian Top & Flip —
     Kenaikan/Penurunan Tertinggi · Stabil · Berubah Arah · Potensi Flip
     Flop (tanda berlawanan + disparitas 40% — ambang sama Kategori
-    flip; warna per-cell; bagian Risiko Flip & Benchmark DIHAPUS → 3
+    flip; v3.9.26: ARAH DIBALIK — disparitas < 40% [selisih magnitudo
+    kecil, nilai bercermin ±] = Potensi Flip Flop, ≥ 40% = Berubah
+    Arah; warna per-cell; bagian Risiko Flip & Benchmark DIHAPUS → 3
     bagian); (3) default KATEGORI Deviasi (fallback Semua); (4) kolom
     Nama Resto di Rincian PO (Cabang PO → kode resto); (5) isi filter
     header = data yang ada (mode Satuan + KATEGORI + kolom lain —
@@ -178,6 +180,20 @@ Memverifikasi:
     — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
     Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
     & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
+37. v3.9.26 — POTENSI FLIP FLOP = SELISIH MAGNITUDO KECIL (§36; user:
+    "potensi flip flop itu harusnya yang selisih nya dikit aja"):
+    arah label ANALISA DIBALIK (audit 41-a: logika di 2 titik;
+    41-b data real: 87,9% pasangan flip = Parsial — aturan lama
+    melabeli flip miring/noise [DEV 0,1 → GR −780] sbg FFLOP,
+    cermin sejati [−9.525 → +9.551] cuma 'Berubah Arah'):
+    disparitas < FFLOP_DISP_MAX 40% (Sempurna/Dominan — nilai
+    bercermin ±, mis. −50 → +55: deviasi sama besarnya cuma pindah
+    sisi → rawan bolak-balik) = 'Potensi Flip Flop'; disparitas
+    ≥ 40% (Parsial — sisi dominan jauh lebih besar, mis. −100 →
+    +10) = 'Berubah Arah'. SATU konstanta FFLOP_DISP_MAX utk
+    tabel Top Selisih (_top_aggregate) & Perubahan Arah
+    (_render_flip + batas Kategori); prioritas flip > Stabil utuh;
+    tanda sama tidak pernah FFLOP.
 35. v3.9.25 — POPUP DEVIASI GR/PCS PERBESAR + Nomor PO + COM (§35;
     user: "POP UP DI tab deviasi gr dan deviasi pcs perbesar lagi
     dan tambah kolom nomor po dan COM"): jendela popup 880×480 →
@@ -592,7 +608,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.25", APP_VERSION == "3.9.25", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.26", APP_VERSION == "3.9.26", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -4427,10 +4443,11 @@ def main():
           f"got {_ana_vals5c}")
     _fana5c = {kv._flip_tree.set(k, "ANALISA"): kv._flip_tree.set(k, "Kategori")
                for k in kv._flip_tree.get_children("")}
-    check("(v3.9.19) ANALISA flip: Sempurna/Dominan → 'Berubah Arah' "
-          "(2 flip KEJU; label 1 kolom saja)",
+    check("(v3.9.26) ANALISA flip: Sempurna/Dominan (selisih magnitudo "
+          "kecil — cermin ±) → 'Potensi Flip Flop' (2 flip KEJU; label "
+          "1 kolom saja; dulu 'Berubah Arah' sebelum v3.9.26)",
           _fana5c and set(_fana5c.values()) <= {"Sempurna", "Dominan"}
-          and set(_fana5c.keys()) == {kv.ANALISA_ARAH},
+          and set(_fana5c.keys()) == {kv.ANALISA_FFLOP},
           f"got {_fana5c}")
 
     # --- (5e) v3.9.15a — AUDIT-1 FIX: render ulang tabel analisa
@@ -5035,12 +5052,13 @@ def main():
           _ana29["R2"] == kv.ANALISA_STABIL, f"got {_ana29['R2']!r}")
     check("(v3.9.19) ANALISA Penurunan Tertinggi (tanda sama, |GR|<|Lalu|)",
           _ana29["R3"] == kv.ANALISA_TURUN, f"got {_ana29['R3']!r}")
-    check("(v3.9.19) ANALISA Berubah Arah (tanda berlawanan, disparitas "
-          "< 40%)",
-          _ana29["R4"] == kv.ANALISA_ARAH, f"got {_ana29['R4']!r}")
-    check("(v3.9.19) ANALISA Potensi Flip Flop (tanda berlawanan, "
-          "disparitas ≥ 40%)",
-          _ana29["R5"] == kv.ANALISA_FFLOP, f"got {_ana29['R5']!r}")
+    check("(v3.9.26) ANALISA Potensi Flip Flop (tanda berlawanan, "
+          "disparitas < 40% — selisih magnitudo kecil; R4 −10 → +10 "
+          "cermin)",
+          _ana29["R4"] == kv.ANALISA_FFLOP, f"got {_ana29['R4']!r}")
+    check("(v3.9.26) ANALISA Berubah Arah (tanda berlawanan, disparitas "
+          "≥ 40% — R5 −100 → +10 selisih besar)",
+          _ana29["R5"] == kv.ANALISA_ARAH, f"got {_ana29['R5']!r}")
 
     # --- (f) Req 1 — flip Parsial → 'Potensi Flip Flop' (GUI) ------------
     import tempfile as _tf29
@@ -5067,9 +5085,9 @@ def main():
     _ffa29 = {kv._flip_tree.set(k, "Kategori"):
               kv._flip_tree.set(k, "ANALISA")
               for k in kv._flip_tree.get_children("")}
-    check("(v3.9.19) Flip Parsial (disparitas ≥ 40%) → ANALISA 'Potensi "
-          "Flip Flop'",
-          _ffa29.get("Parsial") == kv.ANALISA_FFLOP, f"got {_ffa29}")
+    check("(v3.9.26) Flip Parsial (disparitas ≥ 40% — selisih besar) → "
+          "ANALISA 'Berubah Arah' (dulu 'Potensi Flip Flop' — v3.9.25)",
+          _ffa29.get("Parsial") == kv.ANALISA_ARAH, f"got {_ffa29}")
     kv._on_mode_change(0)
     root.update()
     os.unlink(f29)
@@ -7441,6 +7459,142 @@ def main():
           "negative" in _pop35.tree.item(_k35_3, "tags"),
           f"tags={_pop35.tree.item(_k35_3, 'tags')}")
     _pop35.destroy()
+    root.update()
+
+    print()
+    print("== 36. (v3.9.26) POTENSI FLIP FLOP = SELISIH MAGNITUDO KECIL "
+          "(cermin ± — dulu kebalikan) ==")
+
+    # --- (a) Konstanta — 1 sumber kebenaran utk 2 tabel ------------------
+    from src.ui.komparasi_deviasi_view import (
+        FFLOP_DISP_MAX as _FD36,
+    )
+    from src.ui.komparasi_deviasi_view import (
+        KomparasiDeviasiView as _KDV36,
+    )
+    check("(v3.9.26) Konstanta FFLOP_DISP_MAX = 0.40 (Top Selisih & "
+          "Perubahan Arah; ambang sama Kategori Parsial)",
+          _FD36 == 0.40, f"got {_FD36!r}")
+
+    # --- (b) Unit _top_aggregate: cermin → FFLOP; batas 0.40 → ARAH -----
+    _top36 = tk.Frame(root)
+    kv36 = _KDV36(_top36)
+    kv36.pack(fill="both", expand=True)
+    kv36._show_content()
+    root.update()
+    _d36 = pd.DataFrame({
+        "_resto_norm": ["R_MIRROR36", "R_BATAS36", "R_BATAS36M",
+                        "R_STABILF36", "R_NAIK36", "R_STAB36"],
+        "_bahan_norm": ["B"] * 6,
+        "Minggu": ["WEEK 4"] * 6,
+        "DEV Lalu": [-50.0, -100.0, -100.0, -10.0, 10.0, 10.0],
+        "GR Saat Ini": [55.0, 60.0, 61.0, 10.0, 50.0, 10.5],
+        "Status": ["SELISIH", "SELISIH", "SELISIH", "MATCH", "SELISIH",
+                   "MATCH"],
+        "BULAN": ["NOV"] * 6,
+        "Resto": ["R_MIRROR36", "R_BATAS36", "R_BATAS36M", "R_STABILF36",
+                  "R_NAIK36", "R_STAB36"],
+        "Nama Barang": ["B"] * 6,
+        "Satuan": ["GR"] * 6,
+    })
+    _agg36 = kv36._top_aggregate(_d36)
+    _ana36 = dict(zip(_agg36["Resto"], _agg36["ANALISA"]))
+    check("(v3.9.26) ANALISA Top: cermin −50 → +55 (selisih magnitudo 5 "
+          "— DIKIT) → 'Potensi Flip Flop' (dulu 'Berubah Arah')",
+          _ana36["R_MIRROR36"] == kv36.ANALISA_FFLOP,
+          f"got {_ana36['R_MIRROR36']!r}")
+    check("(v3.9.26) ANALISA Top: batas PERSIS disparitas 0.40 "
+          "(−100 → +60) → 'Berubah Arah' (FFLOP strictly < — selaras "
+          "Kategori Parsial)",
+          _ana36["R_BATAS36"] == kv36.ANALISA_ARAH,
+          f"got {_ana36['R_BATAS36']!r}")
+    check("(v3.9.26) ANALISA Top: disparitas 0.39 (−100 → +61) → "
+          "'Potensi Flip Flop'",
+          _ana36["R_BATAS36M"] == kv36.ANALISA_FFLOP,
+          f"got {_ana36['R_BATAS36M']!r}")
+    check("(v3.9.26) ANALISA Top: prioritas flip > Stabil — cermin "
+          "−10 → +10 (Selisih 0, status MATCH) tetap 'Potensi Flip "
+          "Flop' (bukan Stabil)",
+          _ana36["R_STABILF36"] == kv36.ANALISA_FFLOP,
+          f"got {_ana36['R_STABILF36']!r}")
+    check("(v3.9.26) ANALISA Top: tanda SAMA tidak pernah flip-flop "
+          "(Kenaikan/Stabil utuh)",
+          _ana36["R_NAIK36"] == kv36.ANALISA_NAIK and
+          _ana36["R_STAB36"] == kv36.ANALISA_STABIL,
+          f"got {_ana36['R_NAIK36']!r}/{_ana36['R_STAB36']!r}")
+
+    # --- (c) GUI flip: Sempurna/Dominan → FFLOP; Parsial → ARAH ---------
+    import tempfile as _tf36
+
+    from openpyxl import Workbook as _WB36
+
+    f36 = os.path.join(_tf36.gettempdir(), "mock_deviasi_fflop36.xlsx")
+    _w36 = _WB36()
+    _s36 = _w36.active
+    _s36.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
+    _rows36 = [
+        # SEMPURNA — cermin ± (selisih 5): −50 → +55 (disp 0,0909)
+        ["MLGFF1", "BFF SEMPURNA", "GR", -80, -90, -50, "WEEK 4",
+         "201.OKT 26"],
+        ["MLGFF1", "BFF SEMPURNA", "GR", -80, -70, 55, "WEEK 4", "NOV"],
+        # DOMINAN — selisih 15: −50 → +35 (disp 0,3)
+        ["MLGFF2", "BFF DOMINAN", "GR", -80, -90, -50, "WEEK 4",
+         "201.OKT 26"],
+        ["MLGFF2", "BFF DOMINAN", "GR", -80, -70, 35, "WEEK 4", "NOV"],
+        # PARSIAL — selisih 90 (banyak): −100 → +10 (disp 0,9)
+        ["MLGFF3", "BFF PARSIAL", "GR", -80, -90, -100, "WEEK 4",
+         "201.OKT 26"],
+        ["MLGFF3", "BFF PARSIAL", "GR", -80, -70, 10, "WEEK 4", "NOV"],
+        # BATAS PERSIS 0.40 — selisih 40: −100 → +60 → Parsial/ARAH
+        ["MLGFF4", "BFF BATAS", "GR", -80, -90, -100, "WEEK 4",
+         "201.OKT 26"],
+        ["MLGFF4", "BFF BATAS", "GR", -80, -70, 60, "WEEK 4", "NOV"],
+    ]
+    for _r36 in _rows36:
+        _s36.append(_r36)
+    _w36.save(f36)
+    # bypass _load_paths (butuh data app) — pola §30: _file_df langsung
+    # dari parse_deviasi_file (kolom _flip_pair_core lengkap)
+    _res36 = parse_deviasi_file(f36)
+    kv36._file_df = _res36["df"]
+    kv36._file_meta = _res36["meta"]
+    kv36._show_all_weeks.set(False)
+    kv36._render_flip()
+    _t036 = time.time()
+    while time.time() - _t036 < 0.4:
+        root.update()
+        time.sleep(0.005)
+    _fkat36 = {}
+    for _k36 in kv36._flip_tree.get_children(""):
+        _b36 = str(kv36._flip_tree.set(_k36, "Nama Barang"))
+        _fkat36[_b36] = (str(kv36._flip_tree.set(_k36, "Kategori")),
+                         str(kv36._flip_tree.set(_k36, "ANALISA")))
+    check("(v3.9.26) Flip GUI: Sempurna (−50 → +55, selisih 5 — dikit) "
+          "→ 'Potensi Flip Flop' (dulu 'Berubah Arah')",
+          _fkat36.get("BFF SEMPURNA", ("", "")) ==
+          ("Sempurna", kv36.ANALISA_FFLOP), f"got {_fkat36}")
+    check("(v3.9.26) Flip GUI: Dominan (−50 → +35, selisih 15) → "
+          "'Potensi Flip Flop'",
+          _fkat36.get("BFF DOMINAN", ("", "")) ==
+          ("Dominan", kv36.ANALISA_FFLOP), f"got {_fkat36}")
+    check("(v3.9.26) Flip GUI: Parsial (−100 → +10, selisih 90 — "
+          "banyak) → 'Berubah Arah' (dulu 'Potensi Flip Flop')",
+          _fkat36.get("BFF PARSIAL", ("", "")) ==
+          ("Parsial", kv36.ANALISA_ARAH), f"got {_fkat36}")
+    check("(v3.9.26) Flip GUI: batas PERSIS disparitas 0.40 (−100 → "
+          "+60) → Parsial/'Berubah Arah' — FFLOP strictly < ambang",
+          _fkat36.get("BFF BATAS", ("", "")) ==
+          ("Parsial", kv36.ANALISA_ARAH), f"got {_fkat36}")
+    _aff36 = kv36._flip_col_values("ANALISA")
+    check("(v3.9.26) Flip filter ⧩ ANALISA: kedua label tampil (data "
+          "yang ada)",
+          kv36.ANALISA_FFLOP in _aff36 and kv36.ANALISA_ARAH in _aff36,
+          f"got {_aff36}")
+    os.unlink(f36)
+    kv36._on_mode_change(0)
+    root.update()
+    _top36.destroy()
     root.update()
 
     # Cleanup
