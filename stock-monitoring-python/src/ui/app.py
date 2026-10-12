@@ -1,9 +1,9 @@
 """
-app.py — Shell UI Stock Monitoring v3.9.21.
+app.py — Shell UI Stock Monitoring v3.9.22.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.9.21 + [💾 Export] │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.9.22 + [💾 Export] │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (9 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
@@ -157,7 +157,35 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.21"  # v3.9.21 — AMBANG ACR to BOM BISA DIATUR + PROMIX 04 PER-TANGGAL + MINUS PER-CELL LAPORAN
+APP_VERSION = "3.9.22"  # v3.9.22 — OVERLAY PER-CELL TK 8.6 + HAPUS LIGA/MINORITAS + CEK BEDA TANGGAL + H DINAMIS 26 + POPUP NOMOR + DEFAULT KATEGORI REKAP IN + DEEP AUDIT
+# v3.9.22 — 7 permintaan user + deep audit semua perhitungan:
+# (1) PER-CELL WARNA DI SEMUA VERSI Tk (user: "Saat ini disemua tab
+#     warna masih tidak per cell tapi per row. coba cari alternatif
+#     lain"): Tk 8.6 (Python standar Windows) tidak punya API tag cell
+#     → ALTERNATIF overlay tk.Label per sel (CellColorOverlay,
+#     widgets.py — virtual, event forwarding, double-click manual,
+#     merge 2 tag; clone ⛶ & hierarki pivot didukung).
+# (2) ANALISA KOMPARASI TUNGGAL (user: "hapus tab liga deviasi" +
+#     "hapus arah minoritas" + "dead code nya juga hapus"): bagian
+#     Minoritas & Liga dihapus penuh — tersisa Top & Flip.
+# (3) CEK "Beda Tanggal" SO-STAEL (user: "Dikolom CEK analisa Beda
+#     tanggal kok tidak ada ya"): pasangan dgn tanggal SO nonzero
+#     terakhir < H terflag (belum SO tanggal analisa); prioritas
+#     Promix 04 tetap pertama.
+# (4) POPUP + KOLOM NOMOR (user: "Pop up di tab Deviasi GR dan PCS ada
+#     Nomor nya juga Misal IT...... atau RI......"): nomor dokumen IN
+#     per tanggal (dedup+urut+koma).
+# (5) TANGGAL H DINAMIS (user: "Tanggal harusnya tanggal 26 bukan dari
+#     tanggal 25"): H = tanggal SO nonzero terakhir saat data dimuat
+#     (fallback 26; reset di ✕ Reset Filter; minggu komparasi 15..31 →
+#     WEEK 4 — dulu 26..31 → "WEEK 5" tak pernah ada di file).
+# (6) REKAP SELISIH IN default KATEGORI = Deviasi (user: "Rekap selisih
+#     IN Default Kategori Deviasi") — di load & reset, tetap fleksibel.
+# (7) DEEP AUDIT (user: "deep audit semua perhitungan apakah sudah
+#     benar dan sesuai dan valid?"): BUG append1 pivot_table(dropna=
+#     False) KOMBINASI KARTESIAN pasangan×tanggal (baris fantom) →
+#     groupby+pivot (data real 768.000 → 527.528 baris); JENIS
+#     case-drift dinormalisasi; export None → literal 'None' dibersihkan.
 # v3.9.21 — 4 permintaan user:
 # (1) AMBANG ACR to BOM (user: "di bagian ACR to BOM itu harusnya ada
 #     threshold > 80% absolute dan aku bisa atur"): CEK kondisi ke-5 kini
@@ -678,7 +706,10 @@ class StockMonitorApp:
         self._deviasi_pivot_cache = SharedPivotCache()
         # v3.9: TANGGAL H dibagi GR & PCS — input 1× (di tab GR), berlaku
         # di kedua tab (permintaan user: tidak double input)
-        self._shared_h = SharedTanggalH(25)
+        # v3.9.22: fallback awal 26 (user: "Tanggal harusnya tanggal 26
+        # bukan dari tanggal 25"); setelah data dimuat DeviasiView mengatur
+        # H DINAMIS ke tanggal SO nonzero terakhir (data user sampai 26).
+        self._shared_h = SharedTanggalH(26)
         # v3.9.21: AMBANG ACR to BOM dibagi GR & PCS (user: "threshold
         # > 80% absolute dan aku bisa atur") — spinbox kedua tab sinkron;
         # nilai bertahan lintas sesi (settings.json), default 80.

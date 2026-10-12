@@ -99,11 +99,9 @@ Memverifikasi:
     mode 📈 Analisa (Top Selisih + Perubahan
     Arah/flip — Sempurna/Dominan/Parsial).
 26. v3.9.15 — GELOMBANG 1 ANALISA (§26-5c): 4 bagian analisa baru di
-    mode 📈 Analisa (baris BAGIAN SegmentBar — hanya bagian aktif
-    dirender): ⚡ Risiko Flip per bahan (skor = min(100, 30×Sempurna +
+    mode 📈 Analisa (v3.9.22: TUNGGAL Top & Flip — Minoritas/Liga
+    dihapus): ⚡ Risiko Flip per bahan (skor = min(100, 30×Sempurna +
     10×Flip), Level TINGGI/SEDANG/RENDAH, drilldown resto kontributor) ·
-    🧭 Arah Minoritas per bahan (resto melawan mayoritas, drilldown) ·
-    🏆 Liga Deviasi-Rate per bahan (|DEV|/|BOM| vs median+MAD populasi,
     robust-z 1,4826×MAD, guard ≥5 resto ber-BOM) · 💰 Benchmark
     Opportunity (loss = Σ|DEV<0| vs median kelompok 3-huruf). Analisa
     per-periode = bulan terbaru + SATU minggu snapshot (minggu yang
@@ -143,9 +141,9 @@ Memverifikasi:
 31. v3.9.20 — DEEP AUDIT & FIX (§30; 5 agen audit 34-a..34-e + 5 agen fix
     35-a/b/c1/c2/d): 1 BUG + 15 RISK diperbaiki + penuntasan "semua
     filter = data yang ada": (35-a komparasi) reset filter 4 tabel
-    analisa (Top/Flip/Minoritas/Liga) di SEMUA jalur reset tabel utama
+    analisa (Top/Flip) di SEMUA jalur reset tabel utama
     (load_data/_load_paths/_close_file/✕ Reset — dulu filter basi →
-    0 baris senyap) + nilai popup tabel utama ⚖/Minoritas/Liga = baris
+    0 baris senyap) + nilai popup tabel utama ⚖/analisa = baris
     tampil + 4 entri format kolom mati Risk/Bench dibersihkan; (35-b
     deviasi+popup) _hl_cells di-init di __init__ (sort sebelum render
     Tk 9 tidak lagi AttributeError) + popup ringkas memfilter SATUAN
@@ -180,6 +178,20 @@ Memverifikasi:
     — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
     Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
     & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
+33. v3.9.22 — OVERLAY PER-CELL TK 8.6 + ANALISA TUNGGAL + CEK BEDA
+    TANGGAL + H DINAMIS 26 + POPUP NOMOR + DEFAULT KATEGORI REKAP IN +
+    BUG KARTESIAN append1 (§32, 7 permintaan user + deep audit):
+    (1) CellColorOverlay widgets.py — per-cell di Tk 8.6 via Label
+    overlay (virtual, event forwarding, double-click manual, merge 2
+    tag); (2) Arah Minoritas & Liga Deviasi dihapus penuh + dead code;
+    (3) CEK 'Beda Tanggal' SO-stale (tanggal SO nonzero terakhir < H;
+    pasangan tanpa SO juga; prioritas Promix tetap; (4) popup 6 kolom
+    + Nomor IT./RI. dedup+urut; (5) H dinamis = tanggal SO nonzero
+    terakhir (fallback 26; reset di load & ✕ Reset; minggu 15..31→25);
+    (6) Rekap Selisih IN default KATEGORI Deviasi (load + reset, tetap
+    fleksibel); (7) append1 pivot kartesian → groupby+pivot (baris
+    fantom hilang; JENIS case-drift dinormalisasi; export None → '').
+
 32. v3.9.21 — AMBANG ACR to BOM BISA DIATUR + PROMIX 04 PER-TANGGAL +
     MINUS PER-CELL LAPORAN (§31, 4 permintaan user): (1) CEK 'ACR to
     BOM' kini |Deviasi| > (ambang/100) × Total ACR (dulu kaku >100%);
@@ -196,7 +208,7 @@ Memverifikasi:
     campuran; v3.9.20 swing kebalikan); (3) prioritas Promix tetap
     PERTAMA — tidak bertabrakan: pasangan so-harian dievaluasi CEK
     normal penuh; (4) minus per-cell diperluas: Anomali COM (Median +
-    Selisih vs Median — dulu hanya COM) + Liga Deviasi (Rate).
+    Selisih vs Median — dulu hanya COM).
 25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
     analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
     saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
@@ -543,7 +555,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.21", APP_VERSION == "3.9.21", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.22", APP_VERSION == "3.9.22", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -879,11 +891,14 @@ def main():
               f"got {v[gr_idx['Deviasi']]!r}")
         # (v3.9.18) Total ACR = Σ OUT 1..25 = 24 — kolom dihapus tapi
         # HITUNGAN TETAP hidup: terbukti lewat Dev to BOM% & CEK di bawah.
-        check("(v3.9.6) Dev to BOM% = 100/24 = '416,67%'",
-              v[gr_idx["Dev to BOM%"]] == "416,67%",
+        check("(v3.9.6→v3.9.22) Dev to BOM% = 100/30 = '333,33%' "
+              "(H default DINAMIS = tanggal SO nonzero terakhir = 30 di "
+              "fixture ini — dulu H=25 → 100/24 = '416,67%')",
+              v[gr_idx["Dev to BOM%"]] == "333,33%",
               f"got {v[gr_idx['Dev to BOM%']]!r}")
-        check("(v3.9.6) Stok Seharusnya = SO(24) − ACR = '199,0'",
-              v[gr_idx["Stok Seharusnya"]] == "199,0",
+        check("(v3.9.6→v3.9.22) Stok Seharusnya = SO(29) − ACR(30/30=1) "
+              "= '199' (H dinamis 30; dulu H=25 → SO(24)−0,96 = '199,0')",
+              v[gr_idx["Stok Seharusnya"]] == "199",
               f"got {v[gr_idx['Stok Seharusnya']]!r}")
         check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24 — "
               "kolom terhapus, hitungan internal v3.9.18 tetap)",
@@ -2822,11 +2837,14 @@ def main():
     check("(v3.9.7) Chip minggu aktif WEEK 4 di-highlight teal",
           _chip_bgs.count(_C_ACCENT) == 1 and _chip_bgs[2] == _C_ACCENT,
           f"got {_chip_bgs}")
-    check("(v3.9.7) Mapping H→minggu: 7→7 · 8..14→14 · 15..25→25 · 26→31",
+    check("(v3.9.7→v3.9.22) Mapping H→minggu: 7→7 · 8..14→14 · "
+          "15..31→25 (26..31 dulu → 31 'WEEK 5' — label tak pernah ada, "
+          "tabel analisa kosong saat H=26)",
           _h_to_week_target(7) == 7 and _h_to_week_target(8) == 14 and
           _h_to_week_target(14) == 14 and _h_to_week_target(15) == 25 and
-          _h_to_week_target(25) == 25 and _h_to_week_target(26) == 31 and
-          _h_to_week_target(31) == 31)
+          _h_to_week_target(21) == 25 and
+          _h_to_week_target(25) == 25 and _h_to_week_target(26) == 25 and
+          _h_to_week_target(31) == 25)
 
     # H=7 (input di tab GR, permintaan user) → hanya WEEK 1
     app.deviasi_gr_view.tanggal_h_var.set("7")
@@ -4335,13 +4353,13 @@ def main():
     wait_view(root, kv)
     kv._on_mode_change(1)
     root.update()
-    check("(v3.9.15/v3.9.19) Baris BAGIAN ada (3 bagian, aktif = Top & "
-          "Flip — Risiko Flip & Benchmark DIHAPUS)",
-          hasattr(kv, "_anasec_segment") and
-          len(kv._anasec_frames) == 3 and
+    check("(v3.9.22) Baris BAGIAN DIHAPUS — analisa TUNGGAL Top & Flip "
+          "(user: 'hapus tab liga deviasi' + 'hapus arah minoritas')",
+          not hasattr(kv, "_anasec_segment") and
+          len(kv._anasec_frames) == 1 and
           kv._anasec_idx == 0 and
           kv._anasec_frames[0].winfo_ismapped(),
-          f"idx={kv._anasec_idx}")
+          f"frames={len(kv._anasec_frames)}")
     check("(v3.9.19) Bagian Risiko Flip & Benchmark dihapus penuh "
           "(tree/attribute/method tak ada)",
           not hasattr(kv, "_risk_tree") and
@@ -4378,124 +4396,9 @@ def main():
           and set(_fana5c.keys()) == {kv.ANALISA_ARAH},
           f"got {_fana5c}")
 
-    # 🧭 BAGIAN 1 — Arah Minoritas (v3.9.19: indeks 1)
-    kv._on_anasec_change(1)
-    root.update()
-    _m5c_n = len(kv._min_tree.get_children(""))
-    check("(v3.9.15) Arah Minoritas: hanya GULA AREN (4 minus vs 1 "
-          "surplus — BERAS/KEJU searah)",
-          _m5c_n == 1, f"got {_m5c_n}")
-    if _m5c_n:
-        _v5c = kv._min_tree.item(kv._min_tree.get_children("")[0],
-                                 "values")
-        check("(v3.9.15) Minoritas GULA: mayoritas 4 MINUS · minoritas 1 "
-              "· Σ|DEV| minoritas 12 · 20,00%",
-              _v5c[1] == "GULA AREN" and _v5c[3] == "4" and
-              _v5c[4] == "1" and _v5c[5] == "MINUS" and
-              _v5c[6] == "12" and _v5c[7] == "20,00%",
-              f"nama={_v5c[1]} may={_v5c[3]} min={_v5c[4]} "
-              f"arah={_v5c[5]} abs={_v5c[6]} pct={_v5c[7]}")
-    _win5c, _tr5c = kv._minoritas_drilldown("GULA AREN")
-    root.update()
-    _md5c_n = len(_tr5c.get_children(""))
-    _md5c_v = (_tr5c.item(_tr5c.get_children("")[0], "values")
-               if _md5c_n else [])
-    check("(v3.9.15) Drilldown Minoritas GULA: 1 resto MLGHIJ DEV 12 "
-          "(minoritas SURPLUS)",
-          _md5c_n == 1 and _md5c_v[0] == "1060.MLGHIJ" and
-          _md5c_v[2] == "12",
-          f"n={_md5c_n} resto={_md5c_v[0] if _md5c_v else '-'} "
-          f"dev={_md5c_v[2] if _md5c_v else '-'}")
-    _win5c.destroy()
-
-    # 🏆 BAGIAN 2 — Liga Deviasi (default bahan Σ|DEV| terbesar = BERAS;
-    # v3.9.19: indeks 2)
-    kv._on_anasec_change(2)
-    root.update()
-    _comb5c = list(kv._liga_combo["values"])
-    check("(v3.9.15) Liga: combobox bahan urut Σ|DEV| ↓ (BERAS 113 · "
-          "GULA 62 · KEJU 14)",
-          _comb5c[:3] == ["BERAS PREMIUM", "GULA AREN",
-                          "KEJU MOZZARELLA"],
-          f"got {_comb5c[:3]}")
-    _l5c_n = len(kv._liga_tree.get_children(""))
-    check("(v3.9.15) Liga BERAS: 5 resto diranking dari 6 populasi "
-          "(SBYKLM DEV 0 — di populasi, tak diranking)",
-          _l5c_n == 5 and "1 resto rate 0" in kv._liga_base_var.get(),
-          f"got {_l5c_n} · base={kv._liga_base_var.get()!r}")
-    if _l5c_n:
-        _v5c = kv._liga_tree.item(kv._liga_tree.get_children("")[0],
-                                  "values")
-        # median rate = (0,08+0,20)/2 = 14% · |dev|: [.06 .06 .09 .14
-        # .16 .36] → MAD = (0,09+0,14)/2 = 11,5%
-        # z BDGUKU = (0,50−0,14)/(1,4826×0,115) = 2,11 (> 2 → merah)
-        check("(v3.9.15) Liga BERAS rank-1 BDGUKU: rate 50,00% · z 2,11 "
-              "· baseline median 14,00% · MAD 11,50%",
-              _v5c[1] == "1030.BDGUKU" and _v5c[5] == "50,00%" and
-              _v5c[6] == "2,11" and
-              "median rate 14,00%" in kv._liga_base_var.get() and
-              "MAD 11,50%" in kv._liga_base_var.get(),
-              f"resto={_v5c[1]} rate={_v5c[5]} z={_v5c[6]} "
-              f"base={kv._liga_base_var.get()!r}")
-    # ganti bahan → GULA AREN (median 24,00% · rank-1 BDGABC 40,00%)
-    kv._liga_bahan_var.set("GULA AREN")
-    kv._on_liga_bahan_changed()
-    root.update()
-    _lg5c_n = len(kv._liga_tree.get_children(""))
-    _lg5c_v = (kv._liga_tree.item(kv._liga_tree.get_children("")[0],
-                                  "values") if _lg5c_n else [])
-    check("(v3.9.15) Liga GULA AREN: 5 resto diranking · rank-1 BDGABC "
-          "rate 40,00% · median 24,00%",
-          _lg5c_n == 5 and _lg5c_v[1] == "1041.BDGABC" and
-          _lg5c_v[5] == "40,00%" and
-          "median rate 24,00%" in kv._liga_base_var.get(),
-          f"n={_lg5c_n} resto={_lg5c_v[1] if _lg5c_v else '-'} "
-          f"rate={_lg5c_v[5] if _lg5c_v else '-'}")
-
-    # --- (5d) v3.9.15a — AUDIT P1-1: W3+W4 ber-H sama → SATU snapshot --
-    # (WEEK 3 & WEEK 4 sama-sama cut-off 25 — tanpa kolaps, agregat
-    # per-resto MENJUMLAH dua snapshot kumulatif = menghitung ganda)
-    f5d = os.path.join(_tf13.gettempdir(), "mock_deviasi_w3w4.xlsx")
-    _w5d = _WB()
-    _s5d = _w5d.active
-    _s5d.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
-                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
-    for _r5d in [
-        ["BDGAAA", "TEH CELUP", "GR", -100, -110, -10, "WEEK 3", "NOV"],
-        ["BDGBBB", "TEH CELUP", "GR", -100, -105, -5, "WEEK 3", "NOV"],
-        ["BDGCCC", "TEH CELUP", "GR", -100, -103, -3, "WEEK 3", "NOV"],
-        ["SBYDDD", "TEH CELUP", "GR", -100, -101, -1, "WEEK 3", "NOV"],
-        ["SBYEEE", "TEH CELUP", "GR", -100, -98, 2, "WEEK 3", "NOV"],
-        ["BDGAAA", "TEH CELUP", "GR", -100, -120, -20, "WEEK 4", "NOV"],
-        ["BDGBBB", "TEH CELUP", "GR", -100, -108, -8, "WEEK 4", "NOV"],
-        ["BDGCCC", "TEH CELUP", "GR", -100, -104, -4, "WEEK 4", "NOV"],
-        ["SBYDDD", "TEH CELUP", "GR", -100, -102, -2, "WEEK 4", "NOV"],
-        ["SBYEEE", "TEH CELUP", "GR", -100, -97, 3, "WEEK 4", "NOV"],
-    ]:
-        _s5d.append(_r5d)
-    _w5d.save(f5d)
-    kv._load_paths([f5d])
-    wait_view(root, kv)
-    kv._on_anasec_change(1)   # v3.9.19: minoritas = indeks 1
-    root.update()
-    check("(v3.9.15a) W3+W4 ber-H sama: minoritas SATU snapshot (mayoritas "
-          "4, bukan 8) + catatan kolaps di status",
-          len(kv._min_tree.get_children("")) == 1 and
-          kv._min_tree.item(kv._min_tree.get_children("")[0],
-                            "values")[3] == "4" and
-          "dipakai WEEK 4 saja" in kv._min_status_var.get(),
-          f"rows={len(kv._min_tree.get_children(''))} "
-          f"status={kv._min_status_var.get()!r}")
-    kv._on_anasec_change(2)   # v3.9.19: liga = indeks 2
-    root.update()
-    check("(v3.9.15a) W3+W4: liga 5 resto diranking (bukan 10 ganda)",
-          len(kv._liga_tree.get_children("")) == 5,
-          f"got {len(kv._liga_tree.get_children(''))}")
-    os.unlink(f5d)
-
-    # --- (5e) v3.9.15a — AUDIT P1-2: render ulang tabel analisa
+    # --- (5e) v3.9.15a — AUDIT-1 FIX: render ulang tabel analisa
     # membatalkan sisa batch insert lama (500 bahan > batch 400 — tanpa
-    # cancel, 100 baris basi nempel kembali setelah re-render) --------
+    # fix, 100 baris basi nempel kembali → 600) ----
     f5e = os.path.join(_tf13.gettempdir(), "mock_deviasi_batch.xlsx")
     _w5e = _WB()
     _s5e = _w5e.active
@@ -4510,9 +4413,10 @@ def main():
     _w5e.save(f5e)
     kv._load_paths([f5e])
     wait_view(root, kv)
-    # v3.9.19: tabel risiko dihapus — batch-cancel diuji lewat tabel FLIP
+    kv._on_mode_change(1)
+    root.update()
     # (500 pasangan bahan OKT→NOV semua flip → 500 baris)
-    kv._on_anasec_change(0)      # Top & Flip: flip 500 → 400 sync + 100 antre
+    kv._render_analisa_section(0)  # v3.9.22: bagian tunggal Top & Flip
     root.update()
     _n5e_a = len(kv._flip_tree.get_children(""))   # 400 (batch berjalan)
     kv._render_flip()            # re-render SEGERA (batch lama masih antre)
@@ -4525,41 +4429,6 @@ def main():
           _n5e_a == 400 and _n5e_b == 500,
           f"render-1={_n5e_a} render-2={_n5e_b}")
     os.unlink(f5e)
-
-    # --- (5f) v3.9.15b — AUDIT-2 FIX: baseline liga TIDAK BASI saat
-    # pindah ke bahan dgn semua DEV 0 (dulu: median/MAD bahan LAMA tetap
-    # tampil — menyesatkan; status benar tapi baseline salah bahan) -----
-    f5f = os.path.join(_tf13.gettempdir(), "mock_deviasi_liga0.xlsx")
-    _w5f = _WB()
-    _s5f = _w5f.active
-    _s5f.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
-                 "QTY DEVIASI", "STATUS BULAN", "BULAN"])
-    for _i5f in range(5):
-        _s5f.append([f"BDG{_i5f:03d}",
-                     "BERAS", "GR", -100, -90, -10, "WEEK 4", "NOV"])
-    for _i5f in range(5):
-        _s5f.append([f"MLG{_i5f:03d}", "GARAM", "GR", -50, -50, 0,
-                     "WEEK 4", "NOV"])
-    _w5f.save(f5f)
-    kv._load_paths([f5f])
-    wait_view(root, kv)
-    kv._on_anasec_change(2)          # 🏆 Liga (v3.9.19: indeks 2) — BERAS
-    root.update()
-    _base5f_beras = kv._liga_base_var.get()
-    kv._liga_bahan_norm = "GARAM"    # pindah ke bahan semua-DEV-0
-    kv._render_liga()
-    root.update()
-    _base5f_garam = kv._liga_base_var.get()
-    check("(v3.9.15b) Liga pindah ke bahan semua-DEV-0: baseline ikut "
-          "BAHAN BARU (median 0,00% · 5 resto rate 0) — bukan baseline "
-          "bahan lama (median 10,00%)",
-          "semua DEV 0" in kv._liga_status_var.get() and
-          "median rate 0,00%" in _base5f_garam and
-          "5 resto rate 0" in _base5f_garam and
-          "median rate 10,00%" in _base5f_beras and
-          _base5f_garam != _base5f_beras,
-          f"beras={_base5f_beras!r} garam={_base5f_garam!r}")
-    os.unlink(f5f)
 
     # --- pulihkan state utk blok (6) ---
     kv._on_mode_change(0)
@@ -4846,10 +4715,11 @@ def main():
         _row18("BRG Z", "RESTO Y", "1.SO", 25, 77.0),
     ])
     pr18 = build_popup_rows(pop_df18, "BRG X", "RESTO Y")
-    check("(v3.9.18) Popup rows: skema 5 kolom "
-          "(Tanggal/Saldo Akhir/SO/IN/Deviasi)",
+    check("(v3.9.18→v3.9.22) Popup rows: skema 6 kolom "
+          "(Tanggal/Saldo Akhir/SO/IN/Nomor/Deviasi)",
           list(pr18.columns) == ["Tanggal", "Saldo Akhir", "SO", "IN",
-                                 "Deviasi"], f"got {list(pr18.columns)}")
+                                 "Nomor", "Deviasi"],
+          f"got {list(pr18.columns)}")
     check("(v3.9.18) Popup rows: 3 tanggal (pasangan lain terfilter)",
           len(pr18) == 3, f"got {len(pr18)}")
     check("(v3.9.18) Popup rows: urut kronologis — bulan lalu dulu",
@@ -4875,9 +4745,9 @@ def main():
           isinstance(pop18, DeviasiPopup))
     check("(v3.9.18) Popup judul memuat Nama Barang — Nama Resto (satuan)",
           pop18._title == "BRG X — RESTO Y  (GR)", f"got {pop18._title!r}")
-    check("(v3.9.18) Popup tabel: 5 kolom persis",
+    check("(v3.9.18→v3.9.22) Popup tabel: 6 kolom persis (+Nomor)",
           list(pop18.tree["columns"]) == ["Tanggal", "Saldo Akhir", "SO",
-                                          "IN", "Deviasi"],
+                                          "IN", "Nomor", "Deviasi"],
           f"got {list(pop18.tree['columns'])}")
     _pk18 = list(pop18.tree.get_children(""))
     check("(v3.9.18) Popup tabel: 3 baris; baris-1 bulan lalu '26•'",
@@ -5153,7 +5023,7 @@ def main():
     wait_view(root, kv)
     kv._on_mode_change(1)
     root.update()
-    kv._on_anasec_change(0)   # v3.9.19: render bagian Top & Flip dulu
+    kv._render_analisa_section(0)   # v3.9.22: bagian tunggal Top & Flip
     root.update()
     _ffa29 = {kv._flip_tree.set(k, "Kategori"):
               kv._flip_tree.set(k, "ANALISA")
@@ -5277,8 +5147,6 @@ def main():
     _SURF30 = (
         ("Top", "_top_sel", "_top_filters", "Status"),
         ("Flip", "_flip_sel", "_flip_filters", "Kategori"),
-        ("Minoritas", "_min_sel", "_min_filters", "Arah Mayoritas"),
-        ("Liga", "_liga_sel", "_liga_filters", "Arah"),
     )
 
     _top30a = tk.Toplevel(root)
@@ -5308,12 +5176,8 @@ def main():
     def _kv_set_filters30():
         kv30._top_sel["Status"] = {"MATCH"}
         kv30._flip_sel["Kategori"] = {"Parsial"}
-        kv30._min_sel["Arah Mayoritas"] = {"MINUS"}
-        kv30._liga_sel["Arah"] = {"SURPLUS"}
         kv30._top_filters._filters["Status"].selected = {"MATCH"}
         kv30._flip_filters._filters["Kategori"].selected = {"Parsial"}
-        kv30._min_filters._filters["Arah Mayoritas"].selected = {"MINUS"}
-        kv30._liga_filters._filters["Arah"].selected = {"SURPLUS"}
 
     def _kv_stale30():
         _stale30 = []
@@ -5443,55 +5307,6 @@ def main():
           f"got {kv30._col_values('Resto')}")
     kv30._col_sel["Status"] = None
 
-    _kv_clear_sel30()
-    kv30._min_df = pd.DataFrame({
-        "Nama Barang": ["GULA", "GULA", "BERAS", "BERAS"],
-        "Satuan": ["GR", "PCS", "GR", "PCS"],
-        "Arah Mayoritas": ["MINUS", "SURPLUS", "MINUS", "SURPLUS"],
-        "% Minoritas": [0.1, 0.2, 0.3, 0.4],
-    })
-    _min30 = (kv30._min_col_values("Satuan") == ["GR", "PCS"])
-    kv30._min_sel["Arah Mayoritas"] = {"MINUS"}
-    _min30 = (_min30 and kv30._min_col_values("Satuan") == ["GR"] and
-              sorted(kv30._min_col_values("Nama Barang")) ==
-              ["BERAS", "GULA"])
-    kv30._min_sel["Satuan"] = {"GR"}
-    _min30 = _min30 and kv30._min_col_values("Satuan") == ["GR"]
-    kv30._min_sel["Arah Mayoritas"] = None
-    kv30._min_sel["Satuan"] = {"GR"}
-    _min30 = _min30 and kv30._min_col_values("Satuan") == ["GR", "PCS"]
-    kv30._min_sel["Satuan"] = None
-    _min30 = (_min30 and kv30._min_col_values("% Minoritas") ==
-              ["10,00%", "20,00%", "30,00%", "40,00%"])
-    check("(v3.9.20/35-a) Popup Arah Minoritas: nilai = baris tampil + "
-          "kolom sendiri dikecualikan + format persen utuh",
-          _min30, f"min={_min30}")
-
-    kv30._liga_df = pd.DataFrame({
-        "Resto": ["R1", "R2", "R3"],
-        "BOM": [100.0, 200.0, 300.0],
-        "DEV": [-10.0, 20.0, 30.0],
-        "Arah": ["MINUS", "SURPLUS", "SURPLUS"],
-        "Rate": [0.1, 0.2, 0.3],
-        "z": [1.5, 2.5, 3.5],
-    })
-    _liga30 = kv30._liga_col_values("Resto") == ["R1", "R2", "R3"]
-    kv30._liga_sel["Arah"] = {"MINUS"}
-    _liga30 = (_liga30 and kv30._liga_col_values("Resto") == ["R1"] and
-               kv30._liga_col_values("Rate") == ["10,00%"])
-    kv30._liga_sel["Arah"] = None
-    kv30._liga_sel["Resto"] = {"R3"}
-    _liga30 = (_liga30 and
-               kv30._liga_col_values("Resto") == ["R1", "R2", "R3"] and
-               kv30._liga_col_values("Arah") == ["SURPLUS"])
-    kv30._liga_sel["Resto"] = None
-    kv30._liga_sel["Arah"] = {"SURPLUS"}
-    _liga30 = _liga30 and kv30._liga_col_values("BOM") == ["200", "300"]
-    kv30._liga_sel["Arah"] = None
-    check("(v3.9.20/35-a) Popup Liga Deviasi: nilai = baris tampil + "
-          "kolom sendiri dikecualikan + format angka utuh",
-          _liga30, f"liga={_liga30}")
-
     # FIX 3 — dead-code format kolom Risk/Bench dibersihkan
     _dead30 = ("Disparitas Rerata", "Loss (Σ|DEV−|)", "Median Kelompok",
                "Opportunity")
@@ -5503,21 +5318,17 @@ def main():
           all(_f30 == ["0.4", "1.2"] for _f30 in _dead_fmt30),
           f"got {_dead_fmt30}")
     _live30 = (
-        _KDV30._fmt_analisa_series("Rate", pd.Series([0.25])).tolist() ==
-        ["25,00%"] and
         _KDV30._fmt_analisa_series("Disparitas",
                                    pd.Series([0.4])).tolist() == ["40,00%"] and
-        _KDV30._fmt_analisa_series("% Minoritas",
-                                   pd.Series([0.5])).tolist() == ["50,00%"] and
         _KDV30._fmt_analisa_series(
-            "Σ|DEV| Minoritas", pd.Series([1234.5])).tolist() == ["1.234,5"] and
-        _KDV30._fmt_analisa_series("z", pd.Series([2.5])).tolist() == ["2,50"] and
+            "DEV Lalu", pd.Series([1234.5])).tolist() == ["1.234,5"] and
         _KDV30._fmt_analisa_series("Selisih",
                                    pd.Series([7.0])).tolist() == ["7"] and
         _KDV30._fmt_analisa_series("ANALISA",
                                    pd.Series(["Stabil"])).tolist() == ["Stabil"])
-    check("(v3.9.20/35-a) Kolom hidup tetap terformat (Rate/Disparitas/"
-          "%Minoritas/Σ|DEV|/z/Selisih/ANALISA)",
+    check("(v3.9.20/35-a → v3.9.22) Kolom hidup tetap terformat "
+          "(Disparitas/DEV Lalu/Selisih/ANALISA — Rate/%Minoritas/Σ|DEV|/"
+          "BOM/DEV/z ikut dihapus bersama bagian Minoritas/Liga)",
           _live30, f"got {_live30}")
     _top30a.destroy()
     root.update()
@@ -6648,6 +6459,321 @@ def main():
           f"cek={None if _vv31s is None else _vv31s['CEK']!r}")
     _top31r.destroy()
     root.update()
+
+    # =====================================================================
+    # §32 v3.9.22 — CEK BEDA TANGGAL (SO stale) + H DINAMIS + POPUP NOMOR
+    #      + DEFAULT KATEGORI REKAP IN + OVERLAY PER-CELL TK 8.6
+    # =====================================================================
+    print("== 32. v3.9.22 — CEK Beda Tanggal stale + H dinamis 26 + "
+          "popup Nomor + default KATEGORI + overlay Tk 8.6 ==")
+
+    # --- (a) CEK "Beda Tanggal" SO-STAEL (user: "Dikolom CEK analisa Beda
+    #     tanggal kok tidak ada ya") -------------------------------------
+    def _row32(barang, resto, jenis, tgl, nilai, satuan="GR",
+               nomor=None, source=None):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": nilai,
+                "SATUAN": satuan, "AKTIF/NON": "AKTIF",
+                "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": nomor, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None, "SOURCE DATA": source}
+
+    _ROWS32 = [
+        # FRESH: SO nonzero di 25 (=H dinamis) — tidak terflag (kontrol)
+        _row32("FRESH", "R", "1.SO", 25, 10.0),
+        _row32("FRESH", "R", "2.SALDO AKHIR", 25, 10.0),
+        # STALE: SO nonzero TERAKHIR 24 (< H 25) — SO belum diinput H
+        _row32("STALE", "R", "1.SO", 24, 10.0),
+        _row32("STALE", "R", "1.SO", 25, 0.0),
+        _row32("STALE", "R", "2.SALDO AKHIR", 25, 10.0),
+        # NOSO: tanpa baris 1.SO sama sekali (barang hanya-app) — terflag
+        _row32("NOSO", "R", "2.SALDO AKHIR", 25, 7.0),
+    ]
+    _df32 = pd.DataFrame(_ROWS32)
+    _top32a, _dv32a = _make_dv30(_df32)
+    _, _fresh32 = _row_vals30(_dv32a, "FRESH")
+    _, _stale32 = _row_vals30(_dv32a, "STALE")
+    _, _noso32 = _row_vals30(_dv32a, "NOSO")
+    check("(v3.9.22) CEK Beda Tanggal: pasangan SO stale (SO terakhir 24 "
+          "< H 25) TERFLAG — dulu kondisi ini tak pernah muncul di data "
+          "mingguan",
+          _stale32 is not None and _stale32["CEK"] == "Beda Tanggal",
+          f"cek={None if _stale32 is None else _stale32['CEK']!r}")
+    check("(v3.9.22) CEK Beda Tanggal: pasangan NOSO (tanpa baris SO) "
+          "juga terflag",
+          _noso32 is not None and _noso32["CEK"] == "Beda Tanggal",
+          f"cek={None if _noso32 is None else _noso32['CEK']!r}")
+    check("(v3.9.22) CEK Beda Tanggal: pasangan FRESH (SO nonzero di H) "
+          "TIDAK terflag",
+          _fresh32 is not None and _fresh32["CEK"] == "",
+          f"cek={None if _fresh32 is None else _fresh32['CEK']!r}")
+    # prioritas Promix 04 tetap di atas Beda Tanggal
+    _ROWS32B = [
+        _row32("PROMIX", "R", "1.SO", 24, 5.0, source="input promix 04"),
+        _row32("PROMIX", "R", "2.SALDO AKHIR", 25, 10.0),
+    ]
+    _top32b, _dv32b = _make_dv30(pd.DataFrame(_ROWS32B))
+    _, _pm32 = _row_vals30(_dv32b, "PROMIX")
+    check("(v3.9.22) Prioritas np.select utuh: Promix 04 tetap MENGALAHKAN "
+          "Beda Tanggal (SO stale promix → label Promix 04)",
+          _pm32 is not None and _pm32["CEK"] == "Promix 04",
+          f"cek={None if _pm32 is None else _pm32['CEK']!r}")
+    _top32a.destroy()
+    _top32b.destroy()
+    root.update()
+
+    # --- (b) DEFAULT H DINAMIS (user: "Tanggal harusnya tanggal 26 bukan
+    #     dari tanggal 25") ----------------------------------------------
+    from src.ui.deviasi_view import DeviasiView as _DV32
+    _dv32u = _DV32(tk.Toplevel(root))
+    check("(v3.9.22) _default_h_from_data: tanggal SO NONZERO terakhir",
+          _dv32u._default_h_from_data(pd.DataFrame(_ROWS32)) == 25 and
+          _dv32u._default_h_from_data(pd.DataFrame(
+              [_row32("X", "R", "1.SO", 26, 3.0)])) == 26,
+          "h=25/26")
+    check("(v3.9.22) _default_h_from_data: tanpa SO / SO semua-0 / None → "
+          "None (fallback 26 dipakai pemanggil)",
+          _dv32u._default_h_from_data(pd.DataFrame(
+              [_row32("X", "R", "2.SALDO AKHIR", 25, 1.0)])) is None and
+          _dv32u._default_h_from_data(pd.DataFrame(
+              [_row32("X", "R", "1.SO", 26, 0.0),
+               _row32("X", "R", "1.SO", 27, 0.0)])) is None and
+          _dv32u._default_h_from_data(None) is None)
+    _dv32u.destroy()
+    _ROWS32C = [
+        _row32("H26", "R", "1.SO", 26, 4.0),
+        _row32("H26", "R", "2.SALDO AKHIR", 26, 3.0),
+    ]
+    _top32c, _dv32c = _make_dv30(pd.DataFrame(_ROWS32C))
+    check("(v3.9.22) Data dgn SO s/d 26 → H dinamis = 26 otomatis saat "
+          "load_data (dulu konstan 25)",
+          _dv32c.tanggal_h == 26 and
+          (hasattr(_dv32c, "_h_chip_var") is False or
+           _dv32c._h_chip_var.get() == "26"),
+          f"H={_dv32c.tanggal_h}")
+    _dv32c.tanggal_h_var.set("20")
+    _dv32c._on_tanggal_h_change()
+    wait_view(root, _dv32c)
+    root.update()
+    _dv32c._reset_filter()
+    wait_view(root, _dv32c)
+    root.update()
+    check("(v3.9.22) ✕ Reset Filter → H kembali ke default DINAMIS (26, "
+          "dulu konstan 25)",
+          _dv32c.tanggal_h == 26, f"H={_dv32c.tanggal_h}")
+    _top32c.destroy()
+    root.update()
+
+    # --- (c) POPUP NOMOR (user: "Pop up di tab Deviasi GR dan PCS ada
+    #     Nomor nya juga Misal IT...... atau RI......") -----------------
+    _ROWS32D = [
+        # tanggal 23: TANPA baris 4.IN → kolom Nomor harus kosong
+        _row32("BRG N", "R", "1.SO", 23, 5.0),
+        _row32("BRG N", "R", "2.SALDO AKHIR", 23, 5.0),
+        _row32("BRG N", "R", "1.SO", 24, 10.0),
+        _row32("BRG N", "R", "2.SALDO AKHIR", 24, 12.0),
+        _row32("BRG N", "R", "4.IN", 24, 2.0,
+               nomor="IT.2026.09.5123, IT.2026.09.2123"),
+        _row32("BRG N", "R", "4.IN", 24, 1.0,
+               nomor="IT.2026.09.2123, IT.2026.09.0007"),
+        _row32("BRG N", "R", "1.SO", 25, 8.0),
+        _row32("BRG N", "R", "2.SALDO AKHIR", 25, 4.0),
+        _row32("BRG N", "R", "4.IN", 25, 1.0,
+               nomor="RI.2026.08.10354"),
+    ]
+    _pr32 = build_popup_rows(pd.DataFrame(_ROWS32D), "BRG N", "R")
+    _nom24 = list(_pr32[_pr32["Tanggal"] == "24"]["Nomor"])
+    _nom25 = list(_pr32[_pr32["Tanggal"] == "25"]["Nomor"])
+    check("(v3.9.22) Popup Nomor: tanggal 24 = IT. nomor DIDEDUP + "
+          "DIURUT + digabung koma (2 baris IN tumpang-tindih)",
+          _nom24 == ["IT.2026.09.0007, IT.2026.09.2123, "
+                     "IT.2026.09.5123"],
+          f"got {_nom24}")
+    check("(v3.9.22) Popup Nomor: tanggal 25 = nomor RI.",
+          _nom25 == ["RI.2026.08.10354"], f"got {_nom25}")
+    _nom23 = list(_pr32[_pr32["Tanggal"] == "23"]["Nomor"])
+    check("(v3.9.22) Popup Nomor: tanggal TANPA IN → kosong (bukan "
+          "'nan')",
+          _nom23 == [""], f"got {_nom23}")
+    _pop32 = show_deviasi_popup(root, pd.DataFrame(_ROWS32D), "BRG N",
+                                "R", satuan="GR", h=25)
+    root.update()
+    _k32 = [k for k in _pop32.tree.get_children("")
+            if _pop32.tree.set(k, "Tanggal") == "24"]
+    check("(v3.9.22) Popup GUI: kolom Nomor tampil di tabel + nilai "
+          "dedup/urut",
+          bool(_k32) and
+          _pop32.tree.set(_k32[0], "Nomor") ==
+          "IT.2026.09.0007, IT.2026.09.2123, IT.2026.09.5123",
+          f"got {_pop32.tree.set(_k32[0], 'Nomor') if _k32 else '-'}")
+    _pop32.destroy()
+    root.update()
+
+    # --- (d) DEFAULT KATEGORI DEVIASI Rekap Selisih IN (user: "Rekap
+    #     selisih IN Default Kategori Deviasi") ------------------------
+    _audit32 = pd.DataFrame({
+        "Resto": ["RA", "RA", "RB"],
+        "Tanggal": [24, 25, 24],
+        "Nama Item": ["DEVI BRG", "DEVI BRG", "REJ BRG"],
+        "Hasil SO": [10.0, 10.0, 5.0],
+        "Qty SO Harian": [0.0, 0.0, 0.0],
+        "Penerimaan Sistem": [2.0, 1.0, 1.0],
+        "Selisih Harian": [2.0, 1.0, 1.0],
+        "Saldo Kumulatif": [12.0, 11.0, 6.0],
+        "Status Analisis Audit": ["SELISIH", "SELISIH", "SELISIH"],
+        "Detail & Catatan Audit": ["", "", ""],
+    })
+    _data32 = pd.DataFrame({
+        "Nama Barang": ["DEVI BRG", "REJ BRG"],
+        "NAMA RESTO": ["RA", "RB"],
+        "SATUAN": ["GR", "GR"],
+        "KATEGORI": ["DEVIASI", "REJECT"],
+        "JENIS": ["1.SO", "1.SO"],
+        "Tanggal": [25, 25],
+        "NILAI": [10.0, 5.0],
+    })
+    _top32d = tk.Toplevel(root)
+    _top32d.geometry("1200x700+10+10")
+    _isv32 = _ISV30(_top32d)
+    _isv32.pack(fill="both", expand=True)
+    _isv32.load_data(_data32, None,
+                     audit_result={"df": _audit32, "kpi": {},
+                                   "desc": ""})
+    _pump30(1.0)
+    _isv32._refresh(sync=True)
+    wait_view(root, _isv32)
+    root.update()
+    check("(v3.9.22) Rekap Selisih IN: default KATEGORI = Deviasi "
+          "(state _col_sel + ikon corong aktif)",
+          _isv32._col_sel.get("KATEGORI") == ["DEVIASI"] and
+          _isv32.header_filters._filters["KATEGORI"].selected ==
+          {"DEVIASI"},
+          f"sel={_isv32._col_sel.get('KATEGORI')}")
+    _bars32 = {_isv32.tree.set(_k32d, "KATEGORI")
+               for _k32d in _isv32.tree.get_children("")}
+    check("(v3.9.22) Rekap Selisih IN: baris tampil TERFILTER ke "
+          "DEVIASI saja (baris REJECT tersembunyi — audit 2 baris "
+          "DEVIASI + 1 REJECT)",
+          _bars32 == {"DEVIASI"},
+          f"got {_bars32}")
+    _isv32._reset_filter()
+    wait_view(root, _isv32)
+    root.update()
+    check("(v3.9.22) ✕ Reset Filter Rekap IN → default Deviasi "
+          "dipasang LAGI (bukan 'Semua')",
+          _isv32._col_sel.get("KATEGORI") == ["DEVIASI"],
+          f"sel={_isv32._col_sel.get('KATEGORI')}")
+    _isv32._col_sel["KATEGORI"] = None
+    _isv32.header_filters.clear_all()
+    _isv32._refresh()
+    wait_view(root, _isv32)
+    root.update()
+    _bars32b = {_isv32.tree.set(_k32d, "KATEGORI")
+                for _k32d in _isv32.tree.get_children("")}
+    check("(v3.9.22) Tanpa default (filter dibuka manual) → semua "
+          "kategori tampil — filter tetap fleksibel",
+          _bars32b == {"DEVIASI", "REJECT"}, f"got {_bars32b}")
+    _top32d.destroy()
+    root.update()
+
+    # --- (e) OVERLAY PER-CELL TK 8.6 (user: "Saat ini disemua tab warna
+    #     masih tidak per cell tapi per row. coba cari alternatif lain")
+    #     — paksa jalur overlay (Tk sandbox = 9; user = 8.6) ----------
+    import src.ui.widgets as _W32
+    _native32 = _W32.CELL_TAGS_NATIVE
+    try:
+        _W32.CELL_TAGS_NATIVE = False
+        _ov32 = _dv32c if False else None   # (view 32c sudah didestroy)
+        _top32e, _dv32e = _make_dv30(pd.DataFrame([
+            _row32("BRG OVL", "R", "1.SO", 25, 12.0),
+            _row32("BRG OVL", "R", "2.SALDO AKHIR", 25, 9.0),
+            _row32("BRG OVL2", "R", "1.SO", 25, 4.0),
+            _row32("BRG OVL2", "R", "2.SALDO AKHIR", 25, 6.0),
+        ]))
+        _ov32 = _dv32e.tree._cell_color_overlay
+        check("(v3.9.22) Overlay per-cell TERPASANG di tree (jalur Tk "
+              "8.6 — CELL_TAGS_NATIVE dipaksa False)",
+              _ov32 is not None and _ov32._alive,
+              f"overlay={_ov32}")
+        # kolom Deviasi ada di ujung kanan — geser xscroll supaya
+        # terlihat (label overlay hanya utk sel TERLIHAT — virtual)
+        _dv32e.tree.xview_moveto(1.0)
+        root.update()
+        _pump30(0.3)
+        _negkeys32 = [k for k, lab in _ov32._labels.items()
+                      if str(lab["fg"]) == "#dc2626"]
+        check("(v3.9.22) Overlay: sel minus merah PER CELL (label overlay "
+              "fg #dc2626 — hanya sel Deviasi minus, bukan seluruh baris)",
+              bool(_negkeys32) and all(k[1] == "Deviasi"
+                                       for k in _negkeys32),
+              f"keys={_negkeys32[:4]}")
+        _hlkeys32 = [k for k, lab in _ov32._labels.items()
+                     if str(lab["bg"]) == "#fef3c7"]
+        check("(v3.9.22) Overlay: highlight kolom Deviasi/SO_H amber "
+              "PER CELL koexist dgn minus (merge 2 tag: bg amber + fg "
+              "merah di sel sama)",
+              bool(_hlkeys32),
+              f"keys={len(_hlkeys32)}")
+        _merg32 = [k for k, lab in _ov32._labels.items()
+                   if str(lab["bg"]) == "#fef3c7" and
+                   str(lab["fg"]) == "#dc2626"]
+        check("(v3.9.22) Overlay: merge warna tag sel (amber bg + merah "
+              "fg di sel minus kolom highlight — meniru Tk 9)",
+              _merg32 == _negkeys32, f"merge={_merg32}")
+        # label teks identik dgn isi sel
+        _k32e = _negkeys32[0] if _negkeys32 else None
+        check("(v3.9.22) Overlay: teks label == nilai sel tree (identik "
+              "tampilan)",
+              _k32e is not None and
+              _ov32._labels[_k32e]["text"] ==
+              _dv32e.tree.set(_k32e[0], _k32e[1]),
+              f"text={_ov32._labels[_k32e]['text'] if _k32e else '-'}")
+        # klik label → seleksi baris (penerusan event)
+        _dv32e.tree.selection_set()
+        root.update()
+        if _k32e is not None:
+            _ov32._labels[_k32e].event_generate("<Button-1>", x=5, y=5)
+            root.update()
+        check("(v3.9.22) Overlay: klik sel warna → SELEKSI baris tetap "
+              "jalan (event diteruskan ke tree)",
+              list(_dv32e.tree.selection()) == [_k32e[0]] if _k32e
+              else False,
+              f"sel={list(_dv32e.tree.selection())}")
+        # double-click label → popup terbuka (deteksi manual + fire
+        # binding tree)
+        from src.ui.deviasi_popup import DeviasiPopup as _DP32
+        _dbl32 = {"n": 0}
+        _dv32e.tree.bind("<Double-1>",
+                         lambda e: _dbl32.update(n=_dbl32["n"] + 1),
+                         add="+")
+        if _k32e is not None:
+            _lab32e = _ov32._labels[_k32e]
+            _lab32e.event_generate("<Button-1>", x=5, y=5)
+            root.update()
+            import time as _t32
+            _t32.sleep(0.45)
+            _lab32e.event_generate("<Button-1>", x=5, y=5)
+            root.update()
+        check("(v3.9.22) Overlay: DOUBLE-CLICK sel warna → binding "
+              "<Double-1> tree terpanggil (popup detail jalan)",
+              _dbl32["n"] >= 1, f"n={_dbl32['n']}")
+        # scroll → label ikut / diganti (label hanya utk sel terlihat)
+        _dv32e.tree.yview_moveto(1.0)
+        root.update()
+        _pump30(0.2)
+        check("(v3.9.22) Overlay: label virtual — hanya sel TERLIHAT di "
+              "viewport (scroll mengganti label, bukan 1-per-baris "
+              "tabel)",
+              len(_ov32._labels) <= 6, f"labels={len(_ov32._labels)}")
+        _top32e.destroy()
+        root.update()
+    finally:
+        _W32.CELL_TAGS_NATIVE = _native32
+    # jalur native Tk 9 tetap utuh (sandbox)
+    check("(v3.9.22) Jalur native Tk 9 tidak tersentuh (CELL_TAGS_NATIVE "
+          "dipulihkan)",
+          _W32.CELL_TAGS_NATIVE is True and
+          _W32.CELL_TAGS_SUPPORTED is True)
 
     # Cleanup
     root.destroy()

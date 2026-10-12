@@ -1004,6 +1004,14 @@ class HeaderFilter:
                 pass
             self._bind_id = None
 
+    def set_selected(self, values):
+        """v3.9.22 — set state seleksi SECARA PROGRAMATIK (default filter,
+        mis. KATEGORI=DEVIASI di Rekap Selisih IN) + refresh ikon corong.
+        None/kosong = tampil semua (tanpa filter)."""
+        vals = list(values) if values else None
+        self.selected = set(vals) if vals is not None else None
+        self.refresh_icon()
+
     # -- ikon corong ---------------------------------------------------------
     def refresh_icon(self):
         active = self.selected is not None
@@ -1427,6 +1435,12 @@ class HeaderFilterGroup:
     def clear_all(self):
         for f in self._filters.values():
             f.clear()
+
+    def set_selected(self, col: str, values):
+        """v3.9.22 — set seleksi kolom tertentu secara programatik."""
+        f = self._filters.get(col)
+        if f is not None:
+            f.set_selected(values)
 
     def refresh_icons(self):
         for f in self._filters.values():
@@ -2143,10 +2157,433 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
 # menambah API `treeview tag cell add <tag> <cells>` — tag per CELL.
 # Dipakai supaya nilai minus TIDAK mewarnai seluruh baris: hanya cell
 # bernilai negatif yang merah (permintaan user v3.9.2).
-# Tk 8.6 (Python lama di Windows) tidak punya API ini → view memakai
-# fallback tag per-baris (perilaku v3.9.1, lihat CELL_TAGS_SUPPORTED).
+# v3.9.22 (user: "Saat ini disemua tab warna masih tidak per cell tapi
+# per row. coba cari alternatif lain"): Tk 8.6 (Python standar Windows)
+# TIDAK punya API `tag cell` — semua warna jatuh ke fallback tag per BARIS.
+# ALTERNATIF: overlay tk.Label per sel — Label di-place PERSIS di atas sel
+# warna (bbox per sel) dgn teks + warna tag sel & latar baris efektif.
+# Label hanya utk sel warna yang TERLIHAT (virtual — murah di tabel 6k+),
+# dipasang ulang tiap scroll/resize/seleksi, dan meneruskan klik/wheel ke
+# tree (event_generate) supaya seleksi, ✓ checkbox, klik-kanan copy, dan
+# double-click popup tetap jalan.
+#
+# Konstanta:
+# - CELL_TAGS_NATIVE    : API native `tag cell` tersedia (Tk >= 9.0).
+# - CELL_TAGS_SUPPORTED : per-cell warna AKTIF di SEMUA versi Tk (native
+#   Tk 9 / overlay Label Tk 8.6 — nama lama dipertahankan supaya view &
+#   test yang mengimpornya tetap kompatibel).
 
-CELL_TAGS_SUPPORTED = tk.TkVersion >= 9.0
+CELL_TAGS_NATIVE = tk.TkVersion >= 9.0
+CELL_TAGS_SUPPORTED = True
+
+
+def _style_rowheight(style) -> int:
+    """rowheight style Treeview (int) — fallback 20 bila kosong."""
+    try:
+        v = style.lookup("Treeview", "rowheight")
+        return int(v) if str(v).strip() else 20
+    except (ValueError, TypeError, tk.TclError):
+        return 20
+
+
+def _style_map_value(style, option: str, state: str) -> str:
+    """Nilai style.map Treeview utk state tertentu (mis. 'selected')."""
+    try:
+        pairs = style.map("Treeview", option)
+    except tk.TclError:
+        return ""
+    if isinstance(pairs, str):
+        pairs = [tuple(pairs.split())] if pairs else []
+    for pair in pairs or ():
+        if len(pair) >= 2 and pair[0] == state:
+            return str(pair[1])
+    return ""
+
+
+class CellColorOverlay:
+    """v3.9.22 — per-cell warna di Tk 8.6 via OVERLAY Label.
+
+    Satu overlay per Treeview (dibuat lazy `_overlay_for_tree`); dipakai
+    `apply_cell_tag` bila `CELL_TAGS_NATIVE` False. Semantik mengikuti
+    `treeview tag cell` Tk 9: `set_cells(tag, cells)` MENGGANTI anggota
+    tag (replace — view selalu memanggil ulang dgn daftar lengkap setelah
+    render/sort/filter/clone).
+
+    Prioritas warna per sel (meniru Tk 9 — probe v3.9.18: bg cell-tag
+    MENGALAHKAN bg item-tag; dua cell-tag beda opsi KOEXIST di sel sama):
+      background: bg tag-SEL → bg tag BARIS (evenrow/oddrow/…) →
+                  fieldbackground style
+      foreground: fg tag-SEL → fg tag BARIS → fg style
+    Baris TERSELEKSI: bg/fg seleksi (style.map 'selected') dipakai HANYA
+    bila sel tidak punya opsi tag-nya sendiri (sel berwarna tetap tampak
+    berwarna saat barisnya dipilih).
+    """
+
+    # <Button-1> ditangani handler `press` khusus (deteksi double manual)
+    _FORWARD_SEQS = (
+        "<Button-3>", "<ButtonRelease-1>",
+        "<B1-Motion>", "<MouseWheel>", "<Button-4>", "<Button-5>",
+    )
+
+    def __init__(self, tree: ttk.Treeview):
+        self.tree = tree
+        self._tag_cells: dict = {}      # tag -> set[(iid, col)]
+        self._tag_opts: dict = {}       # tag -> {background/foreground}
+        self._by_iid: dict = {}         # iid -> [(col, opts), ...]
+        self._labels: dict = {}         # (iid, col) -> tk.Label
+        self._pending = None
+        self._alive = True
+        # deteksi double-click manual (label press + press terforward
+        # saat ini berjalan rekursif → sintesis <Double-1> Tk tidak bisa
+        # diandalkan; timer 400ms ala Tk default)
+        self._dbl_t = 0.0
+        self._dbl_lab = None
+        self._wrap_scroll("yscrollcommand")
+        self._wrap_scroll("xscrollcommand")
+        tree.bind("<Configure>", self._schedule, add="+")
+        tree.bind("<<TreeviewSelect>>", self._schedule, add="+")
+        tree.bind("<ButtonRelease-1>", self._schedule, add="+")
+        tree.bind("<Destroy>", self._on_destroy, add="+")
+
+    # -- lifecycle -----------------------------------------------------------
+    def _on_destroy(self, _event=None):
+        self._alive = False
+        if self._pending is not None:
+            with contextlib.suppress(tk.TclError):
+                self.tree.after_cancel(self._pending)
+            self._pending = None
+
+    def _wrap_scroll(self, opt: str):
+        """Bungkus y/xscrollcommand tree supaya redraw terjadwal tiap
+        scroll / insert / delete / resize kolom (perubahan layout sel)."""
+        try:
+            orig = str(self.tree.cget(opt))
+        except tk.TclError:
+            return
+
+        def wrap(first, last, _orig=orig):
+            if _orig:
+                with contextlib.suppress(tk.TclError):
+                    self.tree.tk.call(_orig, first, last)
+            self._schedule()
+
+        with contextlib.suppress(tk.TclError):
+            self.tree.configure(**{opt: wrap})
+
+    # -- API (dipakai apply_cell_tag) ---------------------------------------
+    def set_cells(self, tag: str, cells) -> None:
+        """GANTI daftar sel utk satu tag (semantik replace ala Tk 9)."""
+        if not self._alive:
+            return
+        tag = str(tag)
+        spec = {(str(iid), str(col)) for iid, col in (cells or [])}
+        self._tag_cells[tag] = spec
+        opts = {}
+        try:
+            cfg = self.tree.tag_configure(tag)
+        except tk.TclError:
+            cfg = {}
+        bg = str((cfg or {}).get("background") or "")
+        fg = str((cfg or {}).get("foreground") or "")
+        if bg:
+            opts["background"] = bg
+        if fg:
+            opts["foreground"] = fg
+        self._tag_opts[tag] = opts
+        self._rebuild()
+        self._schedule()
+
+    def _rebuild(self):
+        """Gabungkan semua tag sel → indeks per iid (hanya sel dgn opsi
+        warna — tag tanpa background/foreground tak digambar)."""
+        merged: dict = {}
+        for tag, spec in self._tag_cells.items():
+            opts = self._tag_opts.get(tag) or {}
+            if not opts:
+                continue
+            for key in spec:
+                cell = merged.setdefault(key, {})
+                for k, v in opts.items():
+                    cell[k] = v
+        by: dict = {}
+        for (iid, col), opts in merged.items():
+            by.setdefault(iid, []).append((col, opts))
+        self._by_iid = by
+        stale = [k for k in self._labels if k not in merged]
+        for k in stale:
+            self._destroy_label(k)
+
+    # -- redraw ---------------------------------------------------------------
+    def _schedule(self, *_args):
+        if not self._alive or self._pending is not None:
+            return
+        with contextlib.suppress(tk.TclError):
+            self._pending = self.tree.after_idle(self._redraw)
+
+    def _visible_iids(self, rowheight: int) -> list:
+        """iid baris yang terlihat di viewport — probe identify_row tiap
+        rowheight (menangani tree hierarki + baris terpotong; area
+        heading mengembalikan '' dan diabaikan)."""
+        tree = self.tree
+        out: list = []
+        seen = set()
+        try:
+            height = tree.winfo_height()
+        except tk.TclError:
+            return out
+        if height <= 1:
+            return out
+        y = 0
+        while y < height:
+            try:
+                iid = tree.identify_row(y)
+            except tk.TclError:
+                iid = ""
+            if iid and iid not in seen:
+                seen.add(iid)
+                out.append(iid)
+            y += rowheight
+        return out
+
+    def _redraw(self):
+        self._pending = None
+        if not self._alive or not self._by_iid:
+            return
+        tree = self.tree
+        try:
+            if not tree.winfo_exists():
+                self._alive = False
+                return
+        except tk.TclError:
+            self._alive = False
+            return
+        style = ttk.Style(tree)
+        rowheight = _style_rowheight(style)
+        visible = self._visible_iids(rowheight)
+        if not visible:
+            return
+        try:
+            font = style.lookup("Treeview", "font") or "TkDefaultFont"
+        except tk.TclError:
+            font = "TkDefaultFont"
+        field_bg = style.lookup("Treeview", "background") or "#ffffff"
+        base_fg = style.lookup("Treeview", "foreground") or "#000000"
+        sel_bg = _style_map_value(style, "background", "selected")
+        sel_fg = _style_map_value(style, "foreground", "selected")
+        try:
+            sel_set = set(tree.selection())
+        except tk.TclError:
+            sel_set = set()
+
+        tree_width = tree.winfo_width()
+        placed = set()
+        for iid in visible:
+            entries = self._by_iid.get(iid)
+            if not entries:
+                continue
+            # latar/teks baris efektif: tag BARIS (urutan item — opsi
+            # pertama yang terisi menang, meniru Treeview) → seleksi.
+            row_bg, row_fg = "", ""
+            try:
+                tags = tree.item(iid, "tags") or ()
+            except tk.TclError:
+                tags = ()
+            for t in tags:
+                try:
+                    cfg = tree.tag_configure(t)
+                except tk.TclError:
+                    continue
+                if not row_bg and cfg.get("background"):
+                    row_bg = str(cfg["background"])
+                if not row_fg and cfg.get("foreground"):
+                    row_fg = str(cfg["foreground"])
+            sel = iid in sel_set
+            bg_row = sel_bg if (sel and sel_bg) else (row_bg or field_bg)
+            fg_row = sel_fg if (sel and sel_fg) else (row_fg or base_fg)
+            for col, opts in entries:
+                try:
+                    box = tree.bbox(iid, col)
+                except tk.TclError:
+                    box = ""
+                if not box:
+                    continue
+                # FIX: bbox mengembalikan koordinat kolom yang BELUM
+                # ter-xscroll (x di luar lebar widget — Tk 9 tetap
+                # memberi koordinat) → label melayang di luar tree.
+                # Sel di luar viewport horizontal dilewati; sel TERPOTONG
+                # di tepi kanan dipotong lebarnya (teks terklip — sama
+                # perilaku tree yang menggambar sampai tepi widget).
+                bx, by, bw, bh = box
+                if bx + bw <= 0 or bx >= tree_width:
+                    continue
+                if bx + bw > tree_width:
+                    bw = tree_width - bx
+                    box = (bx, by, bw, bh)
+                key = (iid, col)
+                if col == "#0":
+                    try:
+                        text = str(tree.item(iid, "text") or "")
+                    except tk.TclError:
+                        continue
+                else:
+                    try:
+                        text = str(tree.set(iid, col))
+                    except tk.TclError:
+                        continue
+                lab = self._label_for(key)
+                try:
+                    anchor = tree.column(col, "anchor") or "w"
+                except tk.TclError:
+                    anchor = "w"
+                lab.configure(
+                    text=text, font=font, anchor=anchor,
+                    background=opts.get("background") or bg_row,
+                    foreground=opts.get("foreground") or fg_row)
+                lab.place(x=box[0], y=box[1], width=box[2], height=box[3])
+                placed.add(key)
+        # label sel yang tak lagi terlihat / itemnya hilang → bersihkan
+        for key in list(self._labels):
+            if key not in placed:
+                self._destroy_label(key)
+
+    # -- label pool + penerusan event -----------------------------------------
+    def _label_for(self, key):
+        lab = self._labels.get(key)
+        if lab is None or not lab.winfo_exists():
+            lab = tk.Label(self.tree, bd=0, highlightthickness=0,
+                           takefocus=0, padx=5, pady=0)
+            self._bind_forward(lab)
+            self._labels[key] = lab
+        return lab
+
+    def _destroy_label(self, key):
+        lab = self._labels.pop(key, None)
+        if lab is not None:
+            with contextlib.suppress(tk.TclError):
+                lab.destroy()
+
+    def _bind_forward(self, lab):
+        """Teruskan klik/wheel dari Label ke tree supaya seleksi, binding
+        view (✓ checkbox, klik-kanan copy), dan scroll tetap bekerja di
+        sel warna.
+
+        - Press direlay via event_generate (when=now): terbukti TIDAK
+          menyentuh penghitung klik Tk → tidak pernah memicu double-click
+          palsu di sel normal sekitarnya.
+        - <Double-1> TIDAK bisa direlay — Tcl menolak modifier Double di
+          `event generate`, dan dispatch rekursif press terforward
+          mereset penghitung klik Label sehingga sintesis double-click Tk
+          tidak terjadi. Solusi: DOUBLE-CLICK DIDETEKSI MANUAL (timer
+          400ms ala Tk pada label yang sama) lalu skrip binding
+          <Double-1> milik TREE dipanggil langsung lewat
+          _fire_tree_bindings (parser skrip wrapper tkinter + skrip kelas
+          ttk) — handler popup view menerima event.widget/x/y yang benar.
+        """
+        tree = self.tree
+
+        def fwd(seq):
+            def handler(event, _seq=seq):
+                try:
+                    lx, ly = lab.winfo_x(), lab.winfo_y()
+                    tree.event_generate(_seq, x=lx + event.x,
+                                        y=ly + event.y, warp=False)
+                except tk.TclError:
+                    pass
+            return handler
+
+        for seq in self._FORWARD_SEQS:
+            lab.bind(seq, fwd(seq), add="+")
+
+        def press(event):
+            now = _time.time()
+            is_dbl = (self._dbl_lab is lab
+                      and now - self._dbl_t <= 0.4)
+            self._dbl_t, self._dbl_lab = now, lab
+            try:
+                lx, ly = lab.winfo_x(), lab.winfo_y()
+                tree.event_generate("<Button-1>", x=lx + event.x,
+                                    y=ly + event.y, warp=False)
+            except tk.TclError:
+                return
+            if is_dbl:
+                try:
+                    _fire_tree_bindings(tree, "<Double-1>",
+                                        lx + event.x, ly + event.y)
+                except tk.TclError:
+                    pass
+
+        lab.bind("<Button-1>", press, add="+")
+
+
+def _fire_tree_bindings(tree: ttk.Treeview, seq: str, x: int, y: int) -> int:
+    """Panggil SEMUA binding `seq` milik tree (bindtags: widget, kelas,
+    toplevel, all) seolah-olah event terjadi di (x, y) pada tree.
+
+    Dipakai overlay per-cell utk meneruskan <Double-1> — `event generate`
+    Tcl menolak modifier Double/Triple, jadi skrip binding dipanggil
+    langsung:
+    - skrip wrapper tkinter  'if {"[CMD %# %b ...]" == "break"} break'
+      → CMD dipanggil dgn nilai substitusi %-field (event.widget, x, y
+      benar — handler python menerima Event lengkap);
+    - skrip Tcl polos (mis. kelas ttk 'ttk::treeview::DoubleClick %W %x
+      %y') → di-eval dgn substitusi manual.
+
+    Return jumlah skrip yang terpanggil.
+    """
+    rootw = tree.winfo_toplevel()
+    vals = {
+        "%W": str(tree), "%x": str(int(x)), "%y": str(int(y)),
+        "%X": str(rootw.winfo_rootx() + int(x)),
+        "%Y": str(rootw.winfo_rooty() + int(y)),
+        "%t": "0", "%T": "6", "%#": "0", "%b": "1", "%s": "0",
+        "%w": "0", "%h": "0", "%k": "0", "%f": "0",
+        "%A": "", "%E": "", "%K": "", "%N": "", "%D": "",
+    }
+    fired = 0
+    for tag in tree.bindtags():
+        try:
+            script = str(tree.tk.call("bind", str(tag), seq)).strip()
+        except tk.TclError:
+            continue
+        if not script:
+            continue
+        for chunk in script.split("\n"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            if chunk.startswith('if {"'):
+                # skrip wrapper tkinter: if {"[CMD %-fields...]" == "break"} break
+                try:
+                    inner = chunk[chunk.index('{"') + 2: chunk.rindex(']"')]
+                except ValueError:
+                    continue
+                parts = inner.split()
+                if len(parts) < 2:
+                    continue
+                cmd = parts[0].removeprefix("[")
+                args = [vals.get(f, "") for f in parts[1:]]
+                with contextlib.suppress(tk.TclError):
+                    tree.tk.call(cmd, *args)
+                    fired += 1
+            else:
+                # skrip Tcl polos — substitusi %-field manual lalu eval
+                sub = chunk
+                for f, v in vals.items():
+                    sub = sub.replace(f, v)
+                with contextlib.suppress(tk.TclError):
+                    tree.tk.eval(sub)
+                    fired += 1
+    return fired
+
+
+def _overlay_for_tree(tree: ttk.Treeview) -> CellColorOverlay:
+    """Ambil/buat overlay per-cell milik tree (lazy — satu per tree)."""
+    ov = getattr(tree, "_cell_color_overlay", None)
+    if ov is None or not getattr(ov, "_alive", False):
+        ov = CellColorOverlay(tree)
+        with contextlib.suppress(AttributeError, tk.TclError):
+            tree._cell_color_overlay = ov
+    return ov
 
 
 def _collect_iids(tree, parent="") -> set:
@@ -2165,19 +2602,30 @@ def _collect_iids(tree, parent="") -> set:
 
 def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
                    chunk: int = 3000) -> int:
-    """Pasang TAG per-CELL ke daftar sel [(iid, column_id), ...] via
-    `treeview tag cell add` (Tk 9+).
+    """Pasang TAG per-CELL ke daftar sel [(iid, column_id), ...]
+    (native Tk 9 / overlay Label Tk 8.6).
 
     - Dikirim per-chunk supaya list Tcl tidak terlalu besar.
     - Item yang sudah tidak ada (re-render/filter terjadi di tengah
       jalan) → v3.9.5: chunk di-fallback ke pemasangan utk iid yang MASIH
       ADA (dulu SATU item hilang membatalkan SELURUH chunk — mis. clone ⛶
       yang difilter hanya memuat sebagian baris → semua tag gagal).
-    - No-op senyap di Tk 8 (tidak ada `tag cell`) — view wajib menyediakan
-      fallback tag per-baris lewat CELL_TAGS_SUPPORTED.
+    - Tk 8.6 (v3.9.22): via OVERLAY Label (`CellColorOverlay`) — sel
+      warna ditimpa Label ber-teks identik (alternatif fallback
+      tag-per-baris; permintaan user "coba cari alternatif lain").
+      Semantik replace per tag: panggil ulang dgn daftar lengkap tiap
+      reapply (pola yang sudah dipakai semua view).
     Return jumlah cell yang berhasil ditandai.
     """
-    if not cells or not CELL_TAGS_SUPPORTED:
+    if not CELL_TAGS_NATIVE:
+        # v3.9.22 — Tk 8.6: OVERLAY Label per sel (alternatif fallback
+        # tag-baris; list kosong = bersihkan anggota tag — replace).
+        try:
+            _overlay_for_tree(tree).set_cells(tag, list(cells or []))
+            return len(cells or [])
+        except tk.TclError:
+            return 0
+    if not cells:
         return 0
     applied = 0
     path = str(tree)

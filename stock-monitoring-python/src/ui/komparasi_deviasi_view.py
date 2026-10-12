@@ -1,10 +1,18 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
-v3.9.20 (deep audit 34-a/fix 35-a): reset filter 4 tabel analisa di SEMUA
+v3.9.22 (permintaan user: "hapus tab liga deviasi" + "hapus arah
+    minoritas" + "dead code nya juga hapus"): bagian 🧭 Arah Minoritas
+    dan 🏆 Liga Deviasi DIHAPUS PENUH dari mode 📈 Analisa — baris
+    pemilih BAGIAN (SegmentBar) dihapus (analisa kini TUNGGAL: 📊 Top &
+    Flip), semua metode render/filter/sort/build/drildown/state-nya
+    dihapus, MIN_COLS/LIGA_COLS + kolom format matinya (Rate, %
+    Minoritas, Σ|DEV| Minoritas, BOM, DEV, z) dibersihkan.
+
+v3.9.20 (deep audit 34-a/fix 35-a): reset filter tabel analisa di SEMUA
     jalur reset tabel utama (dulu filter basi → 0 baris senyap) + nilai
-    popup filter tabel utama/Minoritas/Liga = baris yang tampil (param
-    fmt_fn) + 4 entri format kolom mati Risk/Bench dibersihkan.
+    popup filter tabel analisa = baris yang tampil (param fmt_fn) + 4
+    entri format kolom mati Risk/Bench dibersihkan.
 
 v3.9.19 — KOLOM ANALISA + HAPUS 2 BAGIAN (permintaan user):
     (1) KOLOM ANALISA (1 kolom saja) di bagian 📊 Top & Flip — tabel
@@ -18,9 +26,8 @@ v3.9.19 — KOLOM ANALISA + HAPUS 2 BAGIAN (permintaan user):
         berbalik lagi; ambang sama dgn Kategori flip Sempurna/
         Dominan vs Parsial).
     (2) BAGIAN ⚡ Risiko Flip & 💰 Benchmark DIHAPUS (permintaan
-        user: "hapus tab resiko flip dan bencmark") — baris BAGIAN
-        kini 3 bagian: Top & Flip · Arah Minoritas · Liga Deviasi.
-        Arah Minoritas & Liga Deviasi TIDAK berubah.
+        user: "hapus tab resiko flip dan bencmark"); v3.9.22: 🧭 Arah
+        Minoritas & 🏆 Liga Deviasi ikut dihapus — tersisa Top & Flip.
 
 v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (permintaan user,
 khusus mode 📈 Analisa di tab 📋 Laporan Deviasi; tabel utama ⛖ &
@@ -40,24 +47,10 @@ bagian analisa lain TIDAK berubah):
         (1 nilai — format lama). Rumus bisnis lain 0 berubah.
 
 v3.9.15 — GELOMBANG 1 ANALISA (adopsi rumus repo Inventory-Control
-user; analisa tambahan sebagai BAGIAN di mode 📈 Analisa — baris
-"BAGIAN" SegmentBar v3.9.19: Top & Flip · Arah Minoritas · Liga
-Deviasi [Risiko Flip & Benchmark DIHAPUS v3.9.19]; hanya bagian
-AKTIF yang dirender):
-    (1) ARAH MINORITAS PER BAHAN — resto yang arah DEV-nya
-        MELAWAN mayoritas resto lain pada bahan sama (mayoritas
-        ketat: mayoritas > minoritas) — kandidat salah-input/
-        salah-satuan. Klik-2× → popup resto minoritas.
-    (2) LIGA DEVIASI-RATE PER BAHAN — rate = |DEV| / |BOM| per
-        resto pada bahan sama (adil antar resto); baseline populasi
-        MEDIAN + MAD → robust-z = (rate − median) / (1,4826 × MAD)
-        (kebal outlier); guard populasi ≥ 5 resto ber-BOM & MAD > 0
-        (z "—" bila tak terdefinisi); resto ber-BOM dengan DEV 0
-        ikut populasi (jujur) tapi tidak diranking.
-    Semua analisa per-periode (1/2) memakai BULAN TERBARU + SATU
-    minggu snapshot (preferensi minggu yang memuat H — minggu file
-    kumulatif sehingga menjumlah lintas minggu = menghitung ganda).
-    Semua komputasi VEKTOR (pola PERF v3.9.14 — tanpa iterrows).
+user; v3.9.22: Arah Minoritas & Liga Deviasi DIHAPUS — hanya Top &
+Flip yang tersisa; deskripsi historis di bawah utk jejak audit):
+    (1) ARAH MINORITAS PER BAHAN — [DIHAPUS v3.9.22]
+    (2) LIGA DEVIASI-RATE PER BAHAN — [DIHAPUS v3.9.22]
 
 v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (permintaan user:
 "tab analisa kenapa lemot sekali" / "week di tab analisa harusnya
@@ -273,20 +266,20 @@ def _bulan_label(v) -> str:
 
 
 def _h_to_week_target(h: int) -> int:
-    """v3.9.7: H input → CUT-OFF minggu yang MEMUAT tanggal H
-    (minggu file = rentang kumulatif dari tanggal 1):
+    """H input → CUT-OFF minggu yang MEMUAT tanggal H (minggu file =
+    rentang kumulatif dari tanggal 1; bulan bisnis berakhir tanggal 25):
         H 1–7 → 7 (WEEK 1) · H 8–14 → 14 (WEEK 2) ·
-        H 15–25 → 25 (WEEK 3/4) · H 26–31 → 31 (WEEK 5)
-    Total: semua H 1..31 terpetakan (H=7 → WEEK 1 persis permintaan
-    user "H aku input 7 maka hanya tampilkan week 1")."""
+        H 15–31 → 25 (WEEK 3/4 — rentang 15..akhir bulan bisnis)
+    v3.9.22: 26..31 kini juga → 25 (dulu → 31 "WEEK 5" — label minggu
+    yang tak pernah ada di file → tabel analisa minggu-terfilter KOSONG
+    saat H default dinamis 26 dari data user; minggu yang memuat H 26
+    = WEEK 4)."""
     h = int(h)
     if h <= 7:
         return 7
     if h <= 14:
         return 14
-    if h <= 25:
-        return 25
-    return 31
+    return 25
 
 # Toleransi MATCH: |selisih| <= TOL_ABS + TOL_REL * |nilai file|
 TOL_ABS = 1.0
@@ -585,28 +578,6 @@ class KomparasiDeviasiView(tk.Frame):
     ANALISA_ARAH = "Berubah Arah"
     ANALISA_FFLOP = "Potensi Flip Flop"
 
-    # v3.9.15 — GELOMBANG 1: kolom tabel analisa (bagian Risiko Flip &
-    # Benchmark DIHAPUS v3.9.19 — RISK_COLS/BENCH_COLS ikut dihapus)
-    MIN_COLS = [
-        ("Peringkat", 64, "e"),
-        ("Nama Barang", 190, "w"),
-        ("Satuan", 50, "w"),
-        ("Resto Mayoritas", 95, "e"),
-        ("Resto Minoritas", 95, "e"),
-        ("Arah Mayoritas", 105, "w"),
-        ("Σ|DEV| Minoritas", 115, "e"),
-        ("% Minoritas", 85, "e"),
-    ]
-    LIGA_COLS = [
-        ("Peringkat", 64, "e"),
-        ("Resto", 110, "w"),
-        ("BOM", 90, "e"),
-        ("DEV", 90, "e"),
-        ("Arah", 70, "w"),
-        ("Rate", 85, "e"),
-        ("z", 70, "e"),
-    ]
-
     def __init__(self, parent, go_to_proses: Callable | None = None,
                  followup_store: FollowUpStore | None = None,
                  initial_dir: str = "", h_state=None):
@@ -619,7 +590,8 @@ class KomparasiDeviasiView(tk.Frame):
         # dipakai FILTER MINGGU file (H=7 → hanya WEEK 1; pola chip
         # read-only tab Anomali COM). Komparasi TIDAK punya input H.
         self._h_state = h_state
-        self.tanggal_h = int(h_state.h) if h_state is not None else 25
+        # v3.9.22: fallback 26 (state diatur dinamis saat data dimuat)
+        self.tanggal_h = int(h_state.h) if h_state is not None else 26
         self._fp_map: dict[str, str] = {}
         self._row_snaps: dict[str, dict] = {}
         self._busy = False
@@ -651,12 +623,11 @@ class KomparasiDeviasiView(tk.Frame):
         # file baru; dirender saat mode 📈 Analisa aktif (dulu dirender
         # walau tersembunyi → freeze per refresh).
         self._analisa_dirty = True
-        # v3.9.19 — bagian analisa aktif (0=Top&Flip, 1=Arah Minoritas,
-        # 2=Liga Deviasi — Risiko Flip & Benchmark DIHAPUS v3.9.19)
-        # + set bagian yang perlu render ulang saat data berubah
-        # (hanya bagian AKTIF yang dirender — pola malas v3.9.14).
+        # v3.9.22 — bagian analisa TUNGGAL: Top & Flip (user: "hapus tab
+        # liga deviasi" + "hapus arah minoritas" — Arah Minoritas & Liga
+        # Deviasi DIHAPUS penuh, termasuk dead code-nya).
         self._anasec_idx = 0
-        self._anasec_stale = {0, 1, 2}
+        self._anasec_stale = {0}
         # v3.9.15a (audit P1-2): handle cancel batch insert per tabel
         # analisa — render ulang tabel yg sama membatalkan sisa batch
         # LAMA (batch 400-baris berjalan via after() bisa menambahkan
@@ -1354,15 +1325,7 @@ class KomparasiDeviasiView(tk.Frame):
         # v3.9.13: tabel analisa ikut dibersihkan.
         # v3.9.14 (PERF): hanya render bila mode Analisa aktif — tersembunyi
         # → dirty (dibersihkan saat pengguna masuk mode Analisa).
-        # v3.9.15: state bagian analisa ikut dikosongkan (Risiko Flip &
-        # Benchmark dihapus v3.9.19).
-        self._min_df = None
-        self._min_scope_df = None
-        self._min_maj_sign = None
-        self._liga_df = None
-        self._liga_stats = {}
-        self._liga_bahan_norm = None
-        self._anasec_stale = {0, 1, 2}
+        self._anasec_stale = {0}
         # v3.9.15a (audit P1-2): batalkan sisa batch insert tabel analisa.
         for _c in self._anasec_cancel.values():
             if _c is not None:
@@ -2174,16 +2137,14 @@ class KomparasiDeviasiView(tk.Frame):
         self._refresh()
 
     def _reset_analisa_filters(self):
-        """v3.9.19a (audit 34-a FIX 1): reset state filter header 4 tabel
-        analisa (Top Selisih / Perubahan Arah / Arah Minoritas / Liga
-        Deviasi) — dipanggil di SEMUA jalur reset tabel utama
-        (load_data / _load_paths / _close_file / ✕ Reset Filter).
-        clear_all() juga me-refresh ikon corong header (aktif →
-        nonaktif) — dulu hanya tabel utama yang direset."""
+        """v3.9.19a (audit 34-a FIX 1): reset state filter header tabel
+        analisa (Top Selisih / Perubahan Arah) — dipanggil di SEMUA jalur
+        reset tabel utama (load_data / _load_paths / _close_file / ✕
+        Reset Filter). clear_all() juga me-refresh ikon corong header
+        (aktif → nonaktif) — dulu hanya tabel utama yang direset.
+        v3.9.22: Arah Minoritas & Liga Deviasi dihapus — cukup 2 tabel."""
         for sel_map, grp in ((self._top_sel, self._top_filters),
-                             (self._flip_sel, self._flip_filters),
-                             (self._min_sel, self._min_filters),
-                             (self._liga_sel, self._liga_filters)):
+                             (self._flip_sel, self._flip_filters)):
             for c in sel_map:
                 sel_map[c] = None
             grp.clear_all()
@@ -2195,34 +2156,17 @@ class KomparasiDeviasiView(tk.Frame):
     def _build_analisa_ui(self):
         """Bangun semua kartu analisa SEKALI (di-pack hanya saat sub-mode
         📈 Analisa aktif — _on_mode_change).
-        v3.9.19: baris BAGIAN (SegmentBar) — 3 bagian (Risiko Flip &
-        Benchmark dihapus); hanya frame
-        bagian aktif yang di-pack di _anaview (render-malas per
-        bagian: data baru → semua bagian stale, dirender saat
-        ditampilkan)."""
+        v3.9.22: SATU bagian — Top & Flip (Arah Minoritas & Liga Deviasi
+        dihapus penuh per permintaan user; baris pemilih BAGIAN dihapus)."""
         self._analisa_frame = tk.Frame(self.content, bg=C_BG)
 
-        # v3.9.19 — baris BAGIAN: pemilih bagian analisa (3 bagian)
-        rsec = tk.Frame(self._analisa_frame, bg=C_BG)
-        rsec.pack(fill="x", padx=12, pady=(10, 0))
-        tk.Label(rsec, text="BAGIAN", bg=C_BG, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self._anasec_segment = SegmentBar(
-            rsec,
-            # v3.9.19: Risiko Flip & Benchmark DIHAPUS (permintaan user
-            # "hapus tab resiko flip dan bencmark") — 3 bagian tersisa.
-            ["📊 Top & Flip", "🧭 Arah Minoritas", "🏆 Liga Deviasi"],
-            command=lambda idx: self._on_anasec_change(idx),
-            bg=C_BG)
-        self._anasec_segment.pack(side="left", padx=(6, 0))
-        # wadah bagian — frame per bagian di-pack/di-swap
-        # v3.9.15a (audit P2-4): padx 12 — kartu bagian kembali sejajar
-        # margin kartu lain (dulu flush x=0 saat kartu pindah parent).
+        # v3.9.22 — bagian analisa TUNGGAL (user: "hapus tab liga deviasi"
+        # + "hapus arah minoritas"): baris pemilih BAGIAN (SegmentBar)
+        # dihapus — hanya Top & Flip yang tersisa.
+        # v3.9.15a (audit P2-4): padx 12 — kartu sejajar margin kartu lain.
         self._anaview = tk.Frame(self._analisa_frame, bg=C_BG)
         self._anaview.pack(fill="both", expand=True, padx=12)
         self._anasec_frames = [
-            tk.Frame(self._anaview, bg=C_BG),
-            tk.Frame(self._anaview, bg=C_BG),
             tk.Frame(self._anaview, bg=C_BG),
         ]
         self._anasec_frames[0].pack(fill="both", expand=True)
@@ -2326,10 +2270,6 @@ class KomparasiDeviasiView(tk.Frame):
             on_apply=self._on_flip_filter,
             on_sort=lambda c, d: self._sort_flip(c, reverse=d))
 
-        # v3.9.19 — bangun 2 bagian analisa tersisa (Risiko Flip &
-        # Benchmark dihapus).
-        self._build_min_ui()
-        self._build_liga_ui()
 
     def _setup_flip_tags(self, tree):
         """Tag tabel flip — dasar + warna kategori per-cell."""
@@ -2365,7 +2305,7 @@ class KomparasiDeviasiView(tk.Frame):
         ditandai stale — dirender saat ditampilkan — pola malas).
         """
         self._analisa_dirty = False
-        self._anasec_stale = {0, 1, 2}
+        self._anasec_stale = {0}
         self._render_analisa_section(self._anasec_idx)
 
     # -- Top Selisih -------------------------------------------------------
@@ -2884,144 +2824,9 @@ class KomparasiDeviasiView(tk.Frame):
 
 
     # =========================================================================
-    # v3.9.15 — GELOMBANG 1: BAGIAN ANALISA TAMBAHAN
-    # (🧭 Arah Minoritas · 🏆 Liga Deviasi — bagian ⚡ Risiko Flip & 💰
-    # Benchmark DIHAPUS v3.9.19; Top & Flip dibangun di atas)
-    # Semua komputasi VEKTOR (pola PERF v3.9.14 — tanpa iterrows); hanya
-    # bagian AKTIF yang dirender (render-malas per bagian).
+    # v3.9.22 — MODE 📈 ANALISA TUNGGAL (Top & Flip); utilitas insert batch
+    # v3.9.15a (audit P1-2): cancel per tabel analisa tetap dipakai 2 tabel.
     # =========================================================================
-
-    # -- Bangun UI bagian ----------------------------------------------------
-    def _build_min_ui(self):
-        """Bagian 2 — 🧭 Arah Minoritas per Bahan (resto yang melawan
-        mayoritas — pola item-anomali-outlets repo)."""
-        mc = Card(self._anasec_frames[1],
-                  title="🧭 Arah Minoritas per Bahan — resto melawan "
-                        "mayoritas")
-        mc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
-        mb = mc.body()
-        mhead = tk.Frame(mb, bg=C_CARD)
-        mhead.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self._min_status_var = tk.StringVar(value="Belum ada file deviasi.")
-        tk.Label(mhead, textvariable=self._min_status_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(
-            side="left", fill="x", expand=True)
-        cols = [c[0] for c in self.MIN_COLS]
-        self._min_tree = ttk.Treeview(mb, columns=cols, show="headings",
-                                      selectmode="browse")
-        for name, width, anchor in self.MIN_COLS:
-            self._min_tree.column(name, width=width, minwidth=34,
-                                  anchor=anchor)
-            self._min_tree.heading(name, text=name)
-        vsb = ttk.Scrollbar(mb, orient="vertical",
-                            command=self._min_tree.yview)
-        self._min_tree.configure(yscrollcommand=vsb.set)
-        self._min_tree.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-        mb.grid_rowconfigure(1, weight=1)
-        mb.grid_columnconfigure(0, weight=1)
-        enable_col_resize(self._min_tree)
-        self._setup_tags(self._min_tree)
-        self._min_tree.tag_configure("min_minus", foreground="#dc2626")
-        self._min_tree.tag_configure("min_surplus", foreground="#15803d")
-        self._min_df = None
-        self._min_scope_df = None
-        self._min_maj_sign = None
-        self._min_bahan_map = {}
-        self._min_sel = {c: None for c in cols}
-        self._min_arah_cells = {"MINUS": [], "SURPLUS": []}
-        self._min_filters = HeaderFilterGroup(
-            self._min_tree, cols,
-            get_values=self._min_col_values,
-            on_apply=self._on_min_filter,
-            on_sort=lambda c, d: self._sort_min(c, reverse=d))
-        mfoot = tk.Frame(mb, bg=C_CARD)
-        mfoot.grid(row=2, column=0, columnspan=2, sticky="ew")
-        tk.Label(
-            mfoot,
-            text="Mayoritas ketat (mayoritas > minoritas) · bulan terbaru "
-                 "+ satu minggu snapshot",
-            bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
-        self._min_tree.bind("<Double-1>", self._on_min_double_click,
-                            add="+")
-
-    def _build_liga_ui(self):
-        """Bagian 3 — 🏆 Liga Deviasi-Rate per Bahan (|DEV|/|BOM| vs
-        median + MAD populasi — pola waste-rate-league repo)."""
-        lc = Card(self._anasec_frames[2],
-                  title="🏆 Liga Deviasi-Rate per Bahan — |DEV| / |BOM| "
-                        "vs median populasi resto")
-        lc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
-        lb = lc.body()
-        lhead = tk.Frame(lb, bg=C_CARD)
-        lhead.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self._liga_status_var = tk.StringVar(value="Belum ada file deviasi.")
-        tk.Label(lhead, textvariable=self._liga_status_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(
-            side="left", fill="x", expand=True)
-        tk.Label(lhead, text="BAHAN", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left", padx=(10, 0))
-        self._liga_bahan_var = tk.StringVar(value="")
-        self._liga_combo = ttk.Combobox(
-            lhead, textvariable=self._liga_bahan_var, state="readonly",
-            width=32)
-        self._liga_combo.pack(side="left", padx=(4, 0))
-        self._liga_combo.bind("<<ComboboxSelected>>",
-                              self._on_liga_bahan_changed)
-        # baris kedua: baseline populasi (metode — jujur)
-        lbase = tk.Frame(lb, bg=C_CARD)
-        lbase.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self._liga_base_var = tk.StringVar(value="")
-        tk.Label(lbase, textvariable=self._liga_base_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(8), anchor="w",
-                 wraplength=860, justify="left").pack(
-            side="left", fill="x", expand=True)
-        cols = [c[0] for c in self.LIGA_COLS]
-        self._liga_tree = ttk.Treeview(lb, columns=cols, show="headings",
-                                       selectmode="browse")
-        for name, width, anchor in self.LIGA_COLS:
-            self._liga_tree.column(name, width=width, minwidth=34,
-                                   anchor=anchor)
-            self._liga_tree.heading(name, text=name)
-        vsb = ttk.Scrollbar(lb, orient="vertical",
-                            command=self._liga_tree.yview)
-        self._liga_tree.configure(yscrollcommand=vsb.set)
-        self._liga_tree.grid(row=2, column=0, sticky="nsew")
-        vsb.grid(row=2, column=1, sticky="ns")
-        lb.grid_rowconfigure(2, weight=1)
-        lb.grid_columnconfigure(0, weight=1)
-        enable_col_resize(self._liga_tree)
-        self._setup_tags(self._liga_tree)
-        # zTone (pola repo): z > 2 merah · z > 1 amber
-        self._liga_tree.tag_configure("z_high", foreground="#dc2626")
-        self._liga_tree.tag_configure("z_warn", foreground=C_AMBER)
-        self._liga_df = None
-        self._liga_stats = {}
-        self._liga_bahan_norm = None
-        self._liga_sel = {c: None for c in cols}
-        self._liga_z_cells = {"high": [], "warn": []}
-        self._liga_neg_cells = []
-        self._liga_filters = HeaderFilterGroup(
-            self._liga_tree, cols,
-            get_values=self._liga_col_values,
-            on_apply=self._on_liga_filter,
-            on_sort=lambda c, d: self._sort_liga(c, reverse=d))
-
-    # -- Pergantian bagian ---------------------------------------------------
-    def _on_anasec_change(self, idx: int):
-        """v3.9.15: ganti bagian analisa (SegmentBar BAGIAN) — tampilkan
-        frame bagian; bila bagian belum dirender dengan data sekarang
-        (stale) → render sekarang (render-malas per bagian: data baru
-        menandai SEMUA bagian stale; hanya bagian aktif dihitung)."""
-        self._anasec_idx = idx
-        for i, fr in enumerate(self._anasec_frames):
-            if i == idx:
-                fr.pack(fill="both", expand=True)
-            else:
-                fr.pack_forget()
-        if idx in self._anasec_stale:
-            self._render_analisa_section(idx)
-
     def _anasec_insert(self, tree, items, on_done):
         """v3.9.15a (audit P1-2): insert batch utk tabel analisa + simpan
         handle cancel per tabel — render ulang tabel YANG SAMA
@@ -3035,538 +2840,24 @@ class KomparasiDeviasiView(tk.Frame):
         self._anasec_cancel[tree] = insert_tree_items(
             tree, items, batch=400, on_done=on_done)
 
-    def _render_analisa_section(self, idx: int):
-        """Render SATU bagian analisa. Tiap render menghitung ulang dari
-        _file_df/_join_df (semua vektor ±10-60ms — stateless: tidak ada
-        state basi antar bagian)."""
+    def _render_analisa_section(self, idx: int = 0):
+        """Render bagian analisa (v3.9.22: TUNGGAL — Top & Flip). Tiap
+        render menghitung ulang dari _file_df/_join_df (vektor —
+        stateless)."""
         self._anasec_stale.discard(idx)
-        # v3.9.19: 0=Top&Flip, 1=Arah Minoritas, 2=Liga Deviasi
-        if idx == 0:
-            self._render_top_selisih()
-            self._render_flip()
-        elif idx == 1:
-            self._render_minoritas()
-        elif idx == 2:
-            self._render_liga()
-
-    def _anasec_scope(self):
-        """v3.9.15: baris file utk analisa per-periode (Arah Minoritas /
-        Liga Deviasi): BULAN TERBARU + SATU minggu snapshot.
-        Minggu file KUMULATIF (WEEK 2 ⊇ WEEK 1) → menjumlah lintas minggu
-        = menghitung ganda — karena itu agregat per-resto SELALU satu
-        minggu: preferensi minggu yang MEMUAT H (aturan kolom H); bila
-        tidak ada di bulan tsb → minggu terakhir (dgn catatan jujur).
-        Return (df | None, label | pesan)."""
-        fdf = self._file_df
-        if fdf is None or fdf.empty:
-            return None, "Belum ada file deviasi."
-        bl = pd.to_numeric(fdf["_bulan_num"], errors="coerce").fillna(0)
-        if not bool((bl > 0).any()):
-            return None, ("File tanpa kolom BULAN — analisa per-periode "
-                          "butuh label bulan.")
-        bmax = int(bl.max())
-        d = fdf.loc[bl == bmax]
-        bulan_lbl = _BULAN_NAME.get(bmax, str(bmax))
-        hs = pd.to_numeric(d["_h"], errors="coerce")
-        note = ""
-        wk_sel = None
-        if not self._show_all_weeks.get():
-            wt = _h_to_week_target(int(self.tanggal_h))
-            if bool((hs == wt).any()):
-                wk_sel = wt
-            else:
-                note = (f" (minggu cut-off H {wt} tak ada di bulan ini — "
-                        "pakai minggu terakhir)")
-        else:
-            note = (" (snapshot satu minggu — minggu file kumulatif, "
-                    "menjumlah lintas minggu = menghitung ganda)")
-        if wk_sel is None:
-            wk_sel = int(hs.max())
-        d = d.loc[hs == wk_sel]
-        # v3.9.15a (audit ulang P1-1): >1 label Minggu bisa memetakan ke
-        # H SAMA (WEEK 3 & WEEK 4 → 25; file bisa memuat keduanya) —
-        # agregat per-resto WAJIB SATU snapshot (menjumlahkan W3+W4 =
-        # menghitung ganda, krn minggu file kumulatif). Pertahankan label
-        # TERAKHIR (snapshot paling lengkap) — dilaporkan di label.
-        wl_all = sorted({str(v) for v in d["Minggu"]})
-        if len(wl_all) > 1:
-            d = d.loc[d["Minggu"] == wl_all[-1]]
-            note += (f" (H {wk_sel} memuat {len(wl_all)} minggu — dipakai "
-                     f"{wl_all[-1]} saja)")
-        wl = ", ".join(sorted({str(v) for v in d["Minggu"]}))
-        label = f"Bulan {bulan_lbl} · Minggu {wl} (H {wk_sel}){note}"
-        return d, label
-
-    # -- 🧭 Arah Minoritas (A4) ----------------------------------------------
-    def _render_minoritas(self):
-        """🧭 Arah Minoritas per Bahan (v3.9.15 — pola item-anomali-outlets
-        repo): resto yang arah DEV-nya MELAWAN mayoritas resto lain pada
-        bahan sama (mayoritas ketat: mayoritas > minoritas — kandidat
-        salah-input/salah-satuan). Scope = bulan terbaru + satu minggu
-        (lihat _anasec_scope). VEKTOR penuh."""
-        tree = self._min_tree
-        tree.delete(*tree.get_children())
-        self._min_df = None
-        self._min_scope_df = None
-        self._min_maj_sign = None
-        self._min_bahan_map = {}
-        self._min_arah_cells = {"MINUS": [], "SURPLUS": []}
-        d, label = self._anasec_scope()
-        if d is None:
-            self._min_status_var.set(label)
-            return
-        if d.empty:
-            self._min_status_var.set(f"{label} · 0 baris.")
-            return
-        dev = pd.to_numeric(d["DEV Lalu"], errors="coerce").fillna(0.0)
-        dev_n = dev.to_numpy(dtype=float)
-        sgn = np.sign(dev_n)
-        tmp = pd.DataFrame({
-            "b": d["_bahan_norm"].to_numpy(),
-            "sgn": sgn,
-            "abs": np.abs(dev_n),
-            "is_pos": sgn > 0,
-            "is_neg": sgn < 0,
-        })
-        agg = tmp.groupby("b").agg(pos=("is_pos", "sum"),
-                                   neg=("is_neg", "sum"))
-        pos_a = agg["pos"].to_numpy()
-        neg_a = agg["neg"].to_numpy()
-        maj = np.where(neg_a > pos_a, -1,
-                       np.where(pos_a > neg_a, 1, 0))
-        min_cnt = np.minimum(pos_a, neg_a)
-        keep = (maj != 0) & (min_cnt >= 1)
-        if not bool(keep.any()):
-            self._min_status_var.set(
-                f"{label} · tidak ada bahan dengan arah minoritas "
-                "(semua bahan searah).")
-            return
-        maj_map = pd.Series(maj, index=agg.index)
-        tmp["maj"] = tmp["b"].map(maj_map)
-        msk_min = (tmp["maj"] != 0) & (tmp["sgn"] == -tmp["maj"])
-        abs_min = tmp.loc[msk_min].groupby("b")["abs"].sum()
-        idx = agg.index[keep]
-        nama = d.groupby("_bahan_norm")["Nama Barang"].first().reindex(idx)
-        sat = d.groupby("_bahan_norm")["Satuan"].first().reindex(idx)
-        pos_r = agg["pos"].reindex(idx).to_numpy()
-        neg_r = agg["neg"].reindex(idx).to_numpy()
-        maj_r = maj_map.reindex(idx).to_numpy()
-        mcount = min_cnt[keep]
-        tot = pos_r + neg_r
-        mdf = pd.DataFrame({
-            "_bahan_norm": idx.to_numpy(),
-            "Nama Barang": nama.to_numpy(),
-            "Satuan": sat.to_numpy(),
-            "Resto Mayoritas": np.maximum(pos_r, neg_r),
-            "Resto Minoritas": mcount,
-            "Arah Mayoritas": np.where(maj_r < 0, "MINUS", "SURPLUS"),
-            "Σ|DEV| Minoritas": abs_min.reindex(idx).fillna(0.0).to_numpy(),
-            "% Minoritas": mcount / tot,
-        })
-        mdf = mdf.sort_values(["Σ|DEV| Minoritas", "_bahan_norm"],
-                              ascending=[False, True], kind="stable")
-        self._min_df = mdf
-        self._min_scope_df = d
-        self._min_maj_sign = maj_map
-        # filter header ⧩
-        df = mdf
-        for col, sel in self._min_sel.items():
-            if df.empty:
-                break
-            if col in df.columns and sel is not None:
-                fmt = self._fmt_analisa_series(col, df[col])
-                df = df[fmt.isin(sel)]
-        if df.empty:
-            self._min_status_var.set("0 baris setelah filter.")
-            return
-        self._min_status_var.set(
-            f"{label} · {len(df)} bahan ber-arah-minoritas")
-        m = len(df)
-        cols_np = {c: df[c].to_numpy() for c in
-                   ("Nama Barang", "Satuan", "Resto Mayoritas",
-                    "Resto Minoritas", "Arah Mayoritas",
-                    "Σ|DEV| Minoritas", "% Minoritas", "_bahan_norm")}
-        items = []
-        arah_cells = {"MINUS": [], "SURPLUS": []}
-        bahan_map = {}
-        for i in range(m):
-            iid = f"min_{i}"
-            values = [str(i + 1),
-                      str(cols_np["Nama Barang"][i]),
-                      str(cols_np["Satuan"][i]),
-                      str(int(cols_np["Resto Mayoritas"][i])),
-                      str(int(cols_np["Resto Minoritas"][i])),
-                      str(cols_np["Arah Mayoritas"][i]),
-                      self._fmt_num(cols_np["Σ|DEV| Minoritas"][i]),
-                      self._fmt_pct(cols_np["% Minoritas"][i])]
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-            av = str(cols_np["Arah Mayoritas"][i])
-            if av in arah_cells:
-                arah_cells[av].append((iid, "Arah Mayoritas"))
-            bahan_map[iid] = str(cols_np["_bahan_norm"][i])
-            items.append(("", iid, {"values": values, "tags": tuple(tags)}))
-        self._min_arah_cells = arah_cells
-        self._min_bahan_map = bahan_map
-        self._anasec_insert(
-            tree, items, on_done=lambda: self._reapply_min_tags(tree))
-
-    def _min_col_values(self, col: str) -> list:
-        # v3.9.19a (audit 34-a FIX 2): nilai popup = baris yang TAMPIL
-        # (filter kolom lain diterapkan dulu; kolom sendiri dikecualikan
-        # — AutoFilter Excel; pola _top_col_values/_flip_col_values).
-        d = self._filtered_analisa_df(self._min_df, self._min_sel, col)
-        if d is None or d.empty or col not in d.columns:
-            return []
-        return self._fmt_analisa_series(col, d[col]).unique().tolist()
-
-    def _on_min_filter(self, col: str, selected):
-        self._min_sel[col] = selected
-        self._render_minoritas()
-
-    def _sort_min(self, col: str, reverse: bool = True, tree=None):
-        tree = tree if tree is not None else self._min_tree
-        parse = (self._parse_num_id if col in
-                 ("Peringkat", "Resto Mayoritas", "Resto Minoritas",
-                  "Σ|DEV| Minoritas", "% Minoritas") else None)
-        sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
-        self._reapply_min_tags(tree)
-
-    def _reapply_min_tags(self, tree):
-        if not self._cell_tags:
-            return
-        for av, tag in (("MINUS", "min_minus"), ("SURPLUS", "min_surplus")):
-            cells = self._min_arah_cells.get(av) or []
-            if cells:
-                apply_cell_tag(tree, tag, cells)
-
-    def _on_min_double_click(self, event):
-        tree = event.widget
-        iid = tree.identify_row(event.y)
-        if not iid:
-            return
-        bahan = self._min_bahan_map.get(iid)
-        if bahan:
-            self._minoritas_drilldown(bahan)
-
-    def _minoritas_drilldown(self, bahan_norm: str):
-        """Popup resto minoritas utk satu bahan (klik-2×)."""
-        scope = self._min_scope_df
-        maj = self._min_maj_sign
-        if scope is None or maj is None or bahan_norm not in maj.index:
-            return
-        m = float(maj.loc[bahan_norm])
-        if m == 0:
-            return
-        dev = pd.to_numeric(scope["DEV Lalu"],
-                            errors="coerce").fillna(0.0).to_numpy(float)
-        sel = ((scope["_bahan_norm"].to_numpy() == bahan_norm)
-               & (np.sign(dev) == -m))
-        sub = scope.loc[sel]
-        if sub.empty:
-            return
-        nama = str(sub["Nama Barang"].iloc[0])
-        dev_s = dev[sel]
-        ordd = np.argsort(-np.abs(dev_s), kind="stable")
-        sub = sub.iloc[ordd]
-        dev_s = dev_s[ordd]
-        arah_min = "SURPLUS" if -m > 0 else "MINUS"
-        arah_may = "MINUS" if m < 0 else "SURPLUS"
-        cols_spec = [("Resto", 110, "w"), ("Minggu", 90, "w"),
-                     ("DEV", 100, "e"), ("Arah", 110, "w")]
-        rows = []
-        neg = []
-        resn = sub["Resto"].to_numpy()
-        mgn = sub["Minggu"].to_numpy()
-        for i in range(len(sub)):
-            iid = f"md{i}"
-            rows.append([str(resn[i]), str(mgn[i]),
-                         self._fmt_num(dev_s[i]),
-                         f"MINORITAS ({arah_min})"])
-            if dev_s[i] < 0:
-                neg.append((iid, "DEV"))
-        return self._popup_table(
-            f"🧭 Arah Minoritas — {nama} (mayoritas {arah_may})",
-            cols_spec, rows, cell_tags={"neg_cell": neg})
-
-    # -- 🏆 Liga Deviasi (A1) ------------------------------------------------
-    def _render_liga(self):
-        """🏆 Liga Deviasi-Rate per Bahan (v3.9.15 — pola waste-rate-league
-        repo): rate = |DEV|/|BOM| per resto pada SATU bahan (adil antar
-        resto); baseline populasi MEDIAN + MAD → robust-z = (rate −
-        median)/(1,4826 × MAD) — kebal outlier. Guard: populasi ≥ 5 resto
-        ber-BOM (MIN_OUTLETS) & MAD > 0 (z "—" bila tak terdefinisi);
-        resto ber-BOM dengan DEV 0 ikut populasi (jujur — feed median)
-        tapi tidak diranking; resto DEV≠0 tanpa BOM = orphan (dilaporkan).
-        Urut rate ↓ · resto ↑. VEKTOR penuh."""
-        tree = self._liga_tree
-        tree.delete(*tree.get_children())
-        self._liga_df = None
-        self._liga_stats = {}
-        self._liga_z_cells = {"high": [], "warn": []}
-        self._liga_neg_cells = []
-        d, label = self._anasec_scope()
-        if d is None:
-            self._liga_status_var.set(label)
-            self._liga_base_var.set("")
-            # v3.9.15a (audit P2-3): combobox ikut dikosongkan (dulu
-            # menampilkan daftar bahan file yang sudah ditutup).
-            self._liga_combo["values"] = []
-            self._liga_bahan_var.set("")
-            self._liga_bahan_norm = None
-            return
-        bom = pd.to_numeric(d["BOM Lalu"], errors="coerce").fillna(0.0)
-        dev = pd.to_numeric(d["DEV Lalu"], errors="coerce").fillna(0.0)
-        bom_abs = bom.abs().to_numpy(dtype=float)
-        dev_n = dev.to_numpy(dtype=float)
-        pop_mask = bom_abs > 0
-        b_arr = d["_bahan_norm"].to_numpy()
-        if not bool(pop_mask.any()):
-            self._liga_status_var.set(f"{label} · tidak ada baris ber-BOM.")
-            self._liga_base_var.set("")
-            self._liga_combo["values"] = []
-            self._liga_bahan_var.set("")
-            self._liga_bahan_norm = None
-            return
-        # urutan bahan combobox: Σ|DEV| menurun (populasi ber-BOM saja)
-        tmp = pd.DataFrame({"b": b_arr, "abs": np.abs(dev_n)})
-        tmp = tmp.loc[pop_mask]
-        order = (tmp.groupby("b")["abs"].sum()
-                 .sort_values(ascending=False, kind="stable"))
-        vals = order.index.tolist()
-        cur = list(self._liga_combo["values"])
-        if cur != vals:
-            self._liga_combo["values"] = vals
-        if self._liga_bahan_norm not in vals:
-            self._liga_bahan_norm = vals[0]
-        self._liga_bahan_var.set(self._liga_bahan_norm)
-        b = self._liga_bahan_norm
-        bmask = (b_arr == b) & pop_mask
-        sub = d.loc[bmask]
-        bom_s = bom_abs[bmask]
-        dev_s = dev_n[bmask]
-        n = len(sub)
-        if n < LIGA_MIN_POPULASI:
-            self._liga_status_var.set(
-                f"Populasi {n} resto ber-BOM < {LIGA_MIN_POPULASI} — liga "
-                f"dilewati (MIN_OUTLETS).")
-            self._liga_base_var.set("")
-            return
-        rate = np.abs(dev_s) / bom_s
-        med = float(np.median(rate))
-        mad = float(np.median(np.abs(rate - med)))
-        # v3.9.15a (audit P2-1): np.where mengevaluasi KEDUA cabang →
-        # pembagian MAD=0 memuntahkan RuntimeWarning walau hasil benar —
-        # errstate membungkam (NaN tetap dihasilkan utk jalur guard).
-        with np.errstate(divide="ignore", invalid="ignore"):
-            z = np.where(mad > 0, (rate - med) / (LIGA_MAD_SCALE * mad),
-                         np.nan)
-        league_mask = dev_s != 0
-        orphan = int(((b_arr == b) & ~pop_mask
-                      & (dev_n != 0)).sum())
-        ldf = pd.DataFrame({
-            "Resto": sub["Resto"].to_numpy(),
-            "_resto_norm": sub["_resto_norm"].to_numpy(),
-            "BOM": bom_s, "DEV": dev_s,
-            "Arah": np.where(dev_s < 0, "MINUS",
-                             np.where(dev_s > 0, "SURPLUS", "NOL")),
-            "Rate": rate, "z": z,
-        })
-        self._liga_stats = {"n": n, "median": med, "mad": mad, "sel": b,
-                            "zero": int((~league_mask).sum()),
-                            "orphan": orphan}
-        ldf = ldf.loc[league_mask]
-        # v3.9.15b (audit-2 FIX): baseline populasi DISUSUN & DITAMPILKAN
-        # SEBELUM cabang kosong — pindah ke bahan lain dgn semua DEV 0
-        # tidak lagi MEMBIARKAN baseline BAHAN LAMA tampil (stale — median/
-        # MAD bahan sebelumnya, menyesatkan; status benar tapi baseline
-        # salah bahan).
-        base = (f"Populasi {n} resto ber-BOM · median rate "
-                f"{self._fmt_pct(med)} · MAD {self._fmt_pct(mad)} · "
-                f"z = (rate − median)/(1,4826 × MAD)")
-        if mad <= 0:
-            base += " · MAD 0 → z tak terdefinisi (tampil '—')"
-        if self._liga_stats["zero"]:
-            base += (f" · {self._liga_stats['zero']} resto rate 0 "
-                     "(DEV 0 — dihitung di populasi, tak diranking)")
-        if orphan:
-            base += f" · {orphan} resto DEV≠0 tanpa BOM (tak masuk liga)"
-        self._liga_base_var.set(base)
-        # v3.9.15a (audit P2-7): pesan jujur saat liga kosong KARENA semua
-        # DEV 0 (bukan salah dibaca '0 baris setelah filter').
-        if ldf.empty and not any(v is not None
-                                 for v in self._liga_sel.values()):
-            self._liga_df = ldf
-            self._liga_status_var.set(
-                f"{label} · semua DEV 0 — tak ada resto utk diranking")
-            return
-        ldf = ldf.sort_values(["Rate", "_resto_norm"],
-                              ascending=[False, True], kind="stable")
-        self._liga_df = ldf
-        # filter header ⧩
-        df = ldf
-        for col, sel in self._liga_sel.items():
-            if df.empty:
-                break
-            if col in df.columns and sel is not None:
-                fmt = self._fmt_analisa_series(col, df[col])
-                df = df[fmt.isin(sel)]
-        if df.empty:
-            self._liga_status_var.set("0 baris setelah filter.")
-            return
-        self._liga_status_var.set(
-            f"{label} · {len(df)} resto diranking (dari {n} populasi)")
-        m = len(df)
-        cols_np = {c: df[c].to_numpy() for c in
-                   ("Resto", "BOM", "DEV", "Arah", "Rate", "z")}
-        items = []
-        z_cells = {"high": [], "warn": []}
-        neg_cells = []
-        for i in range(m):
-            iid = f"liga_{i}"
-            zv = cols_np["z"][i]
-            values = [str(i + 1),
-                      str(cols_np["Resto"][i]),
-                      self._fmt_num(cols_np["BOM"][i]),
-                      self._fmt_num(cols_np["DEV"][i]),
-                      str(cols_np["Arah"][i]),
-                      self._fmt_pct(cols_np["Rate"][i]),
-                      self._fmt_dec2(zv)]
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-            if zv is not None and not (isinstance(zv, float)
-                                       and np.isnan(zv)):
-                if zv > 2:
-                    z_cells["high"].append((iid, "z"))
-                elif zv > 1:
-                    z_cells["warn"].append((iid, "z"))
-            dv = cols_np["DEV"][i]
-            if dv is not None and not (isinstance(dv, float)
-                                       and np.isnan(dv)) and dv < 0:
-                neg_cells.append((iid, "DEV"))
-            # v3.9.21 (user: "nilai minus juga diberi warna merah pada
-            # cell aja di tab laporan deviasi") — Rate minus (⟺ DEV minus
-            # pada BOM positif) ikut merah per-cell.
-            rv = cols_np["Rate"][i]
-            if rv is not None and not (isinstance(rv, float)
-                                       and np.isnan(rv)) and rv < 0:
-                neg_cells.append((iid, "Rate"))
-            items.append(("", iid, {"values": values, "tags": tuple(tags)}))
-        self._liga_z_cells = z_cells
-        self._liga_neg_cells = neg_cells
-        self._anasec_insert(
-            tree, items, on_done=lambda: self._reapply_liga_tags(tree))
-
-    def _liga_col_values(self, col: str) -> list:
-        # v3.9.19a (audit 34-a FIX 2): nilai popup = baris yang TAMPIL
-        # (filter kolom lain diterapkan dulu; kolom sendiri dikecualikan
-        # — AutoFilter Excel; pola _top_col_values/_flip_col_values).
-        d = self._filtered_analisa_df(self._liga_df, self._liga_sel, col)
-        if d is None or d.empty or col not in d.columns:
-            return []
-        return self._fmt_analisa_series(col, d[col]).unique().tolist()
-
-    def _on_liga_filter(self, col: str, selected):
-        self._liga_sel[col] = selected
-        self._render_liga()
-
-    def _sort_liga(self, col: str, reverse: bool = True, tree=None):
-        tree = tree if tree is not None else self._liga_tree
-        parse = (self._parse_num_id if col in
-                 ("Peringkat", "BOM", "DEV", "Rate", "z") else None)
-        sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
-        self._reapply_liga_tags(tree)
-
-    def _reapply_liga_tags(self, tree):
-        if not self._cell_tags:
-            return
-        if self._liga_neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._liga_neg_cells)
-        for k, tag in (("high", "z_high"), ("warn", "z_warn")):
-            cells = self._liga_z_cells.get(k) or []
-            if cells:
-                apply_cell_tag(tree, tag, cells)
-
-    def _on_liga_bahan_changed(self, _event=None):
-        """Combobox bahan liga berganti → render ulang liga bahan tsb."""
-        b = (self._liga_bahan_var.get() or "").strip()
-        if b:
-            self._liga_bahan_norm = b
-        self._render_liga()
-
-    # -- Popup drilldown generik ----------------------------------------------
-    def _popup_table(self, title: str, cols_spec: list, rows: list,
-                     cell_tags: dict | None = None,
-                     tag_colors: dict | None = None,
-                     geometry: str = "1000x430"):
-        """Popup drill-down generik (v3.9.15 — dipakai Arah
-        Minoritas): Toplevel + tree (heading, resize) + footer jumlah +
-        ✕ Tutup + ESC. rows = nilai TERFORMAT per baris; cell_tags =
-        {tag: [(iid, kolom)]} (tag warna via tag_colors / _setup_tags)."""
-        win = tk.Toplevel(self.winfo_toplevel())
-        win.title(title)
-        win.geometry(geometry)
-        win.configure(bg=C_BG)
-        with contextlib.suppress(tk.TclError):
-            win.transient(self.winfo_toplevel())
-        body = tk.Frame(win, bg=C_BG)
-        body.pack(fill="both", expand=True, padx=10, pady=10)
-        cols = [c[0] for c in cols_spec]
-        tree = ttk.Treeview(body, columns=cols, show="headings",
-                            selectmode="browse")
-        for name, width, anchor in cols_spec:
-            tree.column(name, width=width, minwidth=34, anchor=anchor)
-            tree.heading(name, text=name)
-        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
-        hsb = ttk.Scrollbar(body, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(0, weight=1)
-        enable_col_resize(tree)
-        self._setup_tags(tree)
-        if tag_colors:
-            for tag, color in tag_colors.items():
-                tree.tag_configure(tag, foreground=color)
-        for i, vals in enumerate(rows):
-            tree.insert("", "end", iid=f"p{i}", values=vals,
-                        tags=("evenrow" if i % 2 == 0 else "oddrow",))
-        if cell_tags:
-            for tag, cells in cell_tags.items():
-                if cells:
-                    apply_cell_tag(tree, tag, cells)
-        foot = tk.Frame(body, bg=C_BG)
-        foot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(foot, text=f"{len(rows)} baris", bg=C_BG,
-                 fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
-        GhostButton(foot, text="✕ Tutup",
-                    command=win.destroy).pack(side="right")
-
-        def _close(_e=None):
-            win.destroy()
-
-        win.bind("<Escape>", _close)
-        # v3.9.15a (audit P2-5): ambil fokus supaya ESC langsung bekerja
-        # tanpa harus mengetik area popup dulu (pola open_tree_maximized).
-        with contextlib.suppress(tk.TclError):
-            win.focus_set()
-        return win, tree
+        self._render_top_selisih()
+        self._render_flip()
 
     @staticmethod
     def _fmt_analisa_series(col, series):
         """Format kolom tabel analisa (filter/sort konsisten tampilan).
-        v3.9.15: kolom tabel analisa (Min/Liga; Risk/Bench dihapus
-        v3.9.19). v3.9.19a (audit 34-a FIX 3): 4 kolom mati bagian
-        terhapus (Disparitas Rerata / Loss / Median Kelompok /
-        Opportunity) dibersihkan dari daftar."""
-        if col in ("Disparitas", "Rate", "% Minoritas"):
+        v3.9.22: kolom Arah Minoritas & Liga Deviasi (Rate, % Minoritas,
+        Σ|DEV| Minoritas, BOM, DEV, z) dihapus bersama bagiannya."""
+        if col in ("Disparitas",):
             return series.map(KomparasiDeviasiView._fmt_pct)
         if col in ("DEV Lalu", "GR Saat Ini", "Selisih", "DEV Bulan Lalu",
-                   "DEV Saat Ini", "Δ", "BOM", "DEV",
-                   "Σ|DEV| Minoritas"):
+                   "DEV Saat Ini", "Δ"):
             return series.map(KomparasiDeviasiView._fmt_num)
-        if col in ("z",):
-            return series.map(KomparasiDeviasiView._fmt_dec2)
         return series.astype(str)
 
     def _maximize_top(self):

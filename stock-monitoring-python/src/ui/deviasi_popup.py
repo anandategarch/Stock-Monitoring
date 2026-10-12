@@ -9,15 +9,21 @@ Permintaan user: "pop up di deviasi GR ataupun PCS hanya tampilkan:
 nama barang, nama resto, nilai saldo akhir, nilai SO, nilai IN,
 nilai deviasi."
 
+v3.9.22 (permintaan user: "Pop up di tab Deviasi GR dan PCS ada Nomor
+nya juga Misal IT...... atau RI......"): kolom NOMOR DOKUMEN IN per
+tanggal (IT. = pemindahan 42.05, RI. = penerimaan 32.24; >1 dokumen
+digabung koma, didedup + diurut).
+
 Mengganti popup source rows (details_popup.DetailsPopup — JENIS/Nomor/
 Nomor PO/#Tgl-Jam/KATEGORI/SOURCE KIRIMAN) yang DULU terbuka dari tab
 Deviasi GR/PCS:
 
 - NAMA BARANG + NAMA RESTO tampil di judul popup (dua-duanya).
-- Tabel ringkas PER TANGGAL — hanya 5 kolom:
+- Tabel ringkas PER TANGGAL — 6 kolom:
     Tanggal · Saldo Akhir (2.SALDO AKHIR / sistem) · SO (1.SO) ·
-    IN (4.IN) · Deviasi (= SO − Saldo Akhir, identik kolom Deviasi
-    tab Deviasi GR/PCS & JENIS 3.DEVIASI pipeline).
+    IN (4.IN) · Nomor (dokumen IN — v3.9.22) · Deviasi (= SO −
+    Saldo Akhir, identik kolom Deviasi tab Deviasi GR/PCS & JENIS
+    3.DEVIASI pipeline).
 - Baris Tanggal H diberi latar lembut (#fef3c7 — sama dgn highlight
   kolom Deviasi/SO_H di tabel utama v3.9.18) supaya mudah ditemukan.
 - Tanggal bulan lalu (negatif) diberi label '25•' (konvensi pivot_view
@@ -50,11 +56,16 @@ from .widgets import (
 
 # (column_id, width, anchor) — persis daftar user: saldo akhir, SO, IN,
 # deviasi (+ kolom Tanggal sbg sumbu baris; barang & resto di judul).
+# v3.9.22 — kolom Nomor (permintaan user: "Pop up di tab Deviasi GR dan
+# PCS ada Nomor nya juga Misal IT...... atau RI......"): nomor dokumen
+# transaksi IN (IT. = pemindahan 42.05 / RI. = penerimaan 32.24) per
+# tanggal — gabungan bila >1 dokumen.
 COLUMNS = [
     ("Tanggal", 76, "e"),
     ("Saldo Akhir", 110, "e"),
     ("SO", 110, "e"),
     ("IN", 110, "e"),
+    ("Nomor", 210, "w"),
     ("Deviasi", 110, "e"),
 ]
 
@@ -76,13 +87,13 @@ class DeviasiPopup(tk.Toplevel):
         self._title = title
         self.title(f"Detail Deviasi — {title}")
         try:
-            pw, ph = 640, 460
+            pw, ph = 880, 480   # v3.9.22: 640 → 880 (kolom Nomor baru)
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
             self.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
         except tk.TclError:
-            self.geometry("640x460")
-        self.minsize(460, 260)
+            self.geometry("880x480")
+        self.minsize(560, 260)
         self.configure(bg=C_BG)
 
         # Modal — block parent sampai ditutup (pola DetailsPopup)
@@ -116,7 +127,7 @@ class DeviasiPopup(tk.Toplevel):
                  fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
         # judul = NAMA BARANG — NAMA RESTO (dua-duanya, permintaan user)
         tk.Label(head_in, text=title, bg=C_HEADER, fg="#f1f5f9",
-                 font=font(12, "bold"), wraplength=560,
+                 font=font(12, "bold"), wraplength=760,
                  justify="left").pack(anchor="w", pady=(2, 0))
 
         btn_fit = tk.Button(
@@ -194,16 +205,16 @@ class DeviasiPopup(tk.Toplevel):
             return
 
         for i, rec in enumerate(rows.to_dict("records")):
-            values = [rec["Tanggal"], rec["Saldo Akhir"], rec["SO"],
-                      rec["IN"], rec["Deviasi"]]
+            # v3.9.22 — kolom Nomor ikut (posisi mengikuti COLUMNS)
+            values = [rec.get(c, "") for c in COL_IDS]
             tags = []
             if self._h_label and rec["Tanggal"] == self._h_label:
                 tags.append("h_row")       # baris Tanggal H — latar lembut
             else:
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")
             has_neg = False
-            for j, col in enumerate(("Saldo Akhir", "SO", "IN", "Deviasi")):
-                if _is_neg_display(values[j + 1]):
+            for col in ("Saldo Akhir", "SO", "IN", "Deviasi"):
+                if _is_neg_display(rec.get(col, "")):
                     has_neg = True
                     if self._cell_tags:
                         self._neg_cells.append((f"row_{i}", col))
@@ -316,7 +327,7 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     utk pemanggil lain).
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
-                                  "Deviasi"])
+                                  "Nomor", "Deviasi"])
     if data is None or data.empty:
         return empty
 
@@ -341,6 +352,22 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     if sub.empty:
         return empty
 
+    # v3.9.22 — Nomor dokumen IN per tanggal (user: "Pop up di tab
+    # Deviasi GR dan PCS ada Nomor nya juga Misal IT...... atau
+    # RI......"): kumpulkan Nomor baris 4.IN per tanggal (satu baris
+    # bisa memuat beberapa nomor sekaligus, dipisah koma di data sumber
+    # → dipecah, didedup, diurut, digabung kembali).
+    _nomor_per_tgl: dict = {}
+    if "Nomor" in sub.columns:
+        in_rows = sub[sub["JENIS"] == _JENIS_IN]
+        for _t, _no in zip(in_rows["_t"], in_rows["Nomor"]):
+            if pd.isna(_no):
+                continue
+            for part in str(_no).split(","):
+                part = part.strip()
+                if part:
+                    _nomor_per_tgl.setdefault(_t, set()).add(part)
+
     wide = sub.pivot_table(index="_t", columns="JENIS", values="_v",
                            aggfunc="sum", fill_value=0.0)
 
@@ -356,6 +383,8 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     })
     # Deviasi = SO − Saldo Akhir (identik kolom Deviasi tabel utama)
     out["Deviasi"] = out["SO"] - out["Saldo Akhir"]
+    out["Nomor"] = [", ".join(sorted(_nomor_per_tgl.get(t, ())))
+                    for t in out["_t"]]
 
     # label tampilan + urut kronologis (numerik — negatif abs 25..31
     # < positif 101..131, jadi bulan lalu dulu lalu 1..31)
@@ -368,7 +397,7 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     for col in ("Saldo Akhir", "SO", "IN", "Deviasi"):
         out[col] = out[col].map(DeviasiPopup._fmt_num)
 
-    return out[["Tanggal", "Saldo Akhir", "SO", "IN", "Deviasi"]]
+    return out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor", "Deviasi"]]
 
 
 def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,

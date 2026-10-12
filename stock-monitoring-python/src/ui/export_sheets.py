@@ -114,10 +114,15 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
         "Tanggal": pd.to_numeric(f["Tanggal"], errors="coerce")
                       .astype("Int64"),
         "Nama Barang": f["Nama Barang"].astype(str),
-        "Kategori": f["KATEGORI"].astype(str) if "KATEGORI" in f.columns
-                    else pd.Series(["-"] * len(f), index=f.index),
-        "Satuan": f["Satuan"].astype(str) if "Satuan" in f.columns
-                  else pd.Series(["-"] * len(f), index=f.index),
+        # FIX R7 (audit 37-a): None/pd.NA jangan menjadi literal "None"
+        # di Excel — bersihkan dgn fillna("") (astype(str) saja menulis
+        # 'None'/'<NA>').
+        "Kategori": (f["KATEGORI"].fillna("").astype(str)
+                     if "KATEGORI" in f.columns else
+                     pd.Series(["-"] * len(f), index=f.index)),
+        "Satuan": (f["Satuan"].fillna("").astype(str)
+                   if "Satuan" in f.columns else
+                   pd.Series(["-"] * len(f), index=f.index)),
         "Hasil SO": _num_col(f, "Hasil SO"),
         "Sheet Barang Masuk": _num_col(f, "Barang Masuk").fillna(0.0),
         "Kiriman HO": _num_col(f, "42.05").fillna(0.0),

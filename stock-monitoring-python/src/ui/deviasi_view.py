@@ -197,7 +197,11 @@ class SharedTanggalH:
       diperbarui + view di-refresh (pivot cache dibagi, jadi hitung 1×).
     """
 
-    def __init__(self, initial: int = 25):
+    def __init__(self, initial: int = 26):
+        """v3.9.22: fallback awal 26 (user: "Tanggal harusnya tanggal 26
+        bukan dari tanggal 25" — data rekap user kini sampai tanggal 26;
+        setelah data dimuat nilai di-reset DINAMIS ke tanggal SO nonzero
+        terakhir oleh DeviasiView.load_data)."""
         self._h = int(initial)
         self._listeners: list[Callable] = []
 
@@ -370,7 +374,9 @@ class DeviasiView(tk.Frame):
         # v3.9: H dibagi GR & PCS — sumber nilai = SharedTanggalH bila ada
         self._h_state = h_state
         self._h_editable = h_editable
-        self.tanggal_h = h_state.h if h_state is not None else 25
+        # v3.9.22: fallback 26 (dynamics: di-reset oleh load_data ke
+        # tanggal SO nonzero terakhir — lihat _default_h_from_data)
+        self.tanggal_h = h_state.h if h_state is not None else 26
         # v3.9.21 — ambang ACR to BOM dibagi GR & PCS (persen |Deviasi| vs
         # Total ACR); tanpa acr_state (standalone/test) → 80.0.
         self._acr_state = acr_state
@@ -844,6 +850,29 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     # DATA LOADING
     # =========================================================================
+    def _default_h_from_data(self, data) -> "int | None":
+        """v3.9.22 — tanggal SO NONZERO terakhir (positif) dari data:
+        default TANGGAL H saat data dimuat (permintaan user: "Tanggal
+        harusnya tanggal 26 bukan dari tanggal 25" — rekap mingguan
+        mereka kini berdata sampai 26). Baris template 0 tidak dihitung
+        (kalau dihitung, kolom template 27..31 akan melompatkan H ke 31).
+        Return None bila tidak ada baris SO → pemanggil memakai nilai
+        state/fallback 26."""
+        if data is None or getattr(data, "empty", True):
+            return None
+        if "JENIS" not in getattr(data, "columns", []):
+            return None
+        so = data[data["JENIS"] == "1.SO"]
+        if so.empty:
+            return None
+        t = pd.to_numeric(so["Tanggal"], errors="coerce")
+        v = pd.to_numeric(so["NILAI"], errors="coerce").fillna(0)
+        m = (t >= 1) & (v != 0)
+        if not bool(m.any()):
+            return None
+        h = int(t[m].max())
+        return max(1, min(h, 31))
+
     def load_data(self, data: pd.DataFrame):
         self.data = data
         self._cached_pivot = None
@@ -858,11 +887,22 @@ class DeviasiView(tk.Frame):
         # layout baru — jangan terjebak setengah-collapse)
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
-        # v3.9: sinkron nilai H bersama (data baru dari pipeline ulang)
-        if self._h_state is not None and self.tanggal_h != self._h_state.h:
+        # v3.9.22 — DEFAULT H DINAMIS (user: "Tanggal harusnya tanggal 26
+        # bukan dari tanggal 25"): data baru → H di-reset ke tanggal SO
+        # NONZERO terakhir (rekap user kini mencakup 1..26 → H=26; pola
+        # reset kategori default DEVIASI). set() men-trigger listener tab
+        # lain (chip PCS/Laporan/Komparasi ikut); nilai sama → no-op.
+        _new_h = self._default_h_from_data(data)
+        if _new_h is not None:
+            if self._h_state is not None:
+                self._h_state.set(_new_h)
+                self.tanggal_h = self._h_state.h
+            else:
+                self.tanggal_h = _new_h
+        elif self._h_state is not None and self.tanggal_h != self._h_state.h:
             self.tanggal_h = self._h_state.h
-            if hasattr(self, "_h_chip_var"):
-                self._h_chip_var.set(str(self.tanggal_h))
+        if hasattr(self, "_h_chip_var"):
+            self._h_chip_var.set(str(self.tanggal_h))
         if self._h_editable and hasattr(self, "tanggal_h_var"):
             self.tanggal_h_var.set(str(self.tanggal_h))
         self._show_content()
@@ -1097,9 +1137,36 @@ class DeviasiView(tk.Frame):
         cond_kosong = ((a == "AKTIF") & (so_h < 0)) | \
                       ((a == "NON AKTIF") & (so_h > 0))
 
-        cond_tanggal = ((in_h > 0) & (so_h < so_m1) & (out_h == 0)) | \
-                       ((so_m1 > 0) & (so_h > so_m1 + 0.5 * so_m1) &
-                        (in_h == 0) & (out_h == 0))
+        # v3.9.22 — "Beda Tanggal" diperluas: SO STALE (permintaan user:
+        # "Dikolom CEK analisa Beda tanggal kok tidak ada ya" — kondisi
+        # pola lama hampir tak pernah terpicu di data mingguan). Pasangan
+        # dgn tanggal SO NONZERO terakhir < H = SO belum diinput tanggal H
+        # (analisa vs data beda tanggal) → CEK Beda Tanggal. Pasangan tanpa
+        # baris SO positif sama sekali (barang hanya-app) juga terflag.
+        # Terhitung setelah resolusi Promix 04 per-tanggal (v3.9.21) —
+        # prioritas np.select tetap: Promix > Kosong > Beda Tanggal > …
+        so_pos = df[(df["JENIS"] == "1.SO")].assign(_t=tnum)
+        _v = pd.to_numeric(so_pos["NILAI"], errors="coerce").fillna(0)
+        so_pos = so_pos[(so_pos["_t"] >= 1) & (_v != 0)]
+        if so_pos.empty:
+            _last_so_arr = np.full(n, -1, dtype="float64")
+        else:
+            _last_map: dict = {}
+            for _b, _r, _t in zip(so_pos["Nama Barang"].astype(str),
+                                   so_pos["NAMA RESTO"].astype(str),
+                                   so_pos["_t"]):
+                _t = int(_t)
+                _k = (_b, _r)
+                if _last_map.get(_k, -1) < _t:
+                    _last_map[_k] = _t
+            _last_so_arr = np.array(
+                [_last_map.get((b, r), -1)
+                 for b, r in zip(barang_s, pivot["NAMA RESTO"].astype(str))],
+                dtype="float64")
+        cond_tanggal = (((in_h > 0) & (so_h < so_m1) & (out_h == 0)) |
+                        ((so_m1 > 0) & (so_h > so_m1 + 0.5 * so_m1) &
+                         (in_h == 0) & (out_h == 0)) |
+                        (_last_so_arr < h))
 
         stok_safe = np.where(stok == 0, 1.0, stok)
         ratio = np.abs(so_h - stok) / np.abs(stok_safe)
@@ -1567,25 +1634,29 @@ class DeviasiView(tk.Frame):
         self.header_filters.clear_all()
         self._reset_kategori()   # v3.9.13 — combobox kategori ikut di-reset
         # FIX B-07: ✕ Reset Filter kini juga me-reset TANGGAL H ke default
-        # (25) — sebelumnya nilai H lama tetap aktif, semantik reset tidak
-        # total dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya
-        # KEDUA tab Deviasi GR & PCS ikut kembali ke 25.)
+        # — sebelumnya nilai H lama tetap aktif, semantik reset tidak total
+        # dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya KEDUA
+        # tab Deviasi GR & PCS ikut kembali.)
+        # v3.9.22: default = tanggal SO nonzero terakhir (dulu konstan 25;
+        # user: "Tanggal harusnya tanggal 26 bukan dari tanggal 25") —
+        # fallback 26 bila data tak ber-SO.
         # v3.9.5 FIX (audit 19-c #2): H berubah → listener GR sendiri sudah
         # me-render; refresh eksplisit hanya bila H TIDAK berubah (dulu:
         # dobel render tiap reset).
-        h_changed = self.tanggal_h != 25
+        _default_h = self._default_h_from_data(self.data) or 26
+        h_changed = self.tanggal_h != _default_h
         if h_changed:
-            self.tanggal_h = 25
+            self.tanggal_h = _default_h
             self._cached_pivot = None
             self._cached_h = None
             if self._h_state is not None:
                 # set() men-trigger listener tab lain (termasuk entry/chip H);
                 # pivot dihitung ulang 1× lewat SharedPivotCache.
-                self._h_state.set(25)
+                self._h_state.set(_default_h)
             if self._h_editable and hasattr(self, "tanggal_h_var"):
-                self.tanggal_h_var.set("25")
+                self.tanggal_h_var.set(str(_default_h))
             if hasattr(self, "_h_chip_var"):
-                self._h_chip_var.set("25")
+                self._h_chip_var.set(str(_default_h))
         if not h_changed or self._dirty:
             self._refresh()
 

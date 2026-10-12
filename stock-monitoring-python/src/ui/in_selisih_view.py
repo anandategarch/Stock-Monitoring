@@ -871,12 +871,41 @@ class InSelisihView(tk.Frame):
             self._expander.reset()
         self._apply_columns()
         self._reset_filter_states()
+        # v3.9.22 — DEFAULT KATEGORI DEVIASI (user: "Rekap selisih IN
+        # Default Kategori Deviasi"): filter header ⧩ kolom KATEGORI
+        # otomatis terseleksi ke nilai 'Deviasi' (case-insensitive) saat
+        # data dimuat — mirror default KATEGORI tab Deviasi GR/PCS
+        # (v3.9.19). Nilai lain tetap bisa dipilih lewat popup ⧩.
+        self._apply_default_kategori()
         self._render_kpi_chips()
         # lazy refresh — hanya compute bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
         else:
             self._dirty = True
+
+    def _default_kategori_value(self) -> "str | None":
+        """v3.9.22 — nilai KATEGORI 'Deviasi' persis seperti tertulis di
+        data (case-insensitive; None bila tidak ada)."""
+        for df in (self.audit_df, self.data):
+            if df is None or getattr(df, "empty", True):
+                continue
+            if "KATEGORI" not in getattr(df, "columns", []):
+                continue
+            for v in df["KATEGORI"].dropna().astype(str).str.strip():
+                if v and v.lower() == "deviasi":
+                    return v
+        return None
+
+    def _apply_default_kategori(self):
+        """v3.9.22 — terapkan seleksi default KATEGORI=Deviasi (state
+        _col_sel + ikon corong aktif)."""
+        val = self._default_kategori_value()
+        if val is None:
+            return
+        self._col_sel["KATEGORI"] = [val]
+        if self.header_filters is not None:
+            self.header_filters.set_selected("KATEGORI", [val])
 
     def ensure_refreshed(self):
         """Lazy refresh: compute hanya saat tab ini terlihat."""
@@ -1396,6 +1425,7 @@ class InSelisihView(tk.Frame):
         self.tgl_end_var.set("31")
         self.only_selisih_var.set(True)
         self._reset_filter_states()
+        self._apply_default_kategori()   # v3.9.22 — default Deviasi
         self._refresh()
 
     # -------------------------------------------------------------- SORT

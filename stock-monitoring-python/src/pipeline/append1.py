@@ -304,6 +304,14 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     calc_columns = KeyColumns + ["JENIS", "Value"]
     calc_available = [c for c in calc_columns if c in source.columns]
     calculation_source = source[calc_available].copy()
+    # FIX R5 (audit 37-a): filter rekap fn_rekap_mentah CASE-INSENSITIVE
+    # ('so' lolos) tapi rename/pivot append1 EXACT-CASE — JENIS case-
+    # variant ('So') hilang SENYAP dari output (SO pasangan lenyap).
+    # Normalisasi: JENIS di-strip + di-upper supaya konsisten dgn filter
+    # rekap (probe: rekap 'So' → dulu 1.SO = 0, kini nilai utuh).
+    if "JENIS" in calculation_source.columns:
+        calculation_source["JENIS"] = (
+            calculation_source["JENIS"].astype(str).str.strip().str.upper())
 
     # pivoted = Table.Pivot(CalculationSource, distinct JENIS, "JENIS", "Value", List.Sum)
     if len(calculation_source) > 0 and "JENIS" in calculation_source.columns:
@@ -311,14 +319,23 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         calculation_source["Value"] = pd.to_numeric(calculation_source["Value"], errors="coerce").fillna(0)
 
         # Pivot: group by KeyColumns, columns = JENIS, values = sum(Value)
-        pivoted = calculation_source.pivot_table(
-            index=KeyColumns,
-            columns="JENIS",
-            values="Value",
-            aggfunc="sum",
-            dropna=False
+        # FIX B1 (audit 37-a): pivot_table(dropna=False) MENGHITUNG ULANG
+        # kombinasi KARTESIAN level index (pasangan × tanggal yang TIDAK
+        # pernah ada di data — pandas me-reindex ke produk level; terbukti
+        # probe: 3 kombinasi teramati → 8 baris) → baris FANTOM dgn
+        # SO=0/SALDO ter-ffill → 3.DEVIASI = −SALDO muncul di tanggal
+        # tanpa data. M `Table.Pivot` hanya memutarkan KOMBINASI TERAMATI.
+        # Pengganti: groupby-sum (dropna=False — kunci NA-resto tetap
+        # dipertahankan, mirror M) + pivot ulang kolom JENIS — kombinasi
+        # index tetap TERAMATI, sel JENIS kosong → NaN (nol-kan oleh
+        # ReplaceValue step di bawah, persis perilaku M).
+        _grouped = calculation_source.groupby(
+            KeyColumns + ["JENIS"], as_index=False, dropna=False,
+            sort=False)["Value"].sum()
+        pivoted = _grouped.pivot(
+            index=KeyColumns, columns="JENIS", values="Value"
         ).reset_index()
-        # Flatten column index (pivot_table creates MultiIndex column when using columns param)
+        # Flatten column index (pivot creates MultiIndex column name)
         pivoted.columns.name = None
     else:
         pivoted = pd.DataFrame(columns=KeyColumns)
