@@ -23,6 +23,14 @@ Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
 
+### v3.9.25 — POPUP DEVIASI GR/PCS DIPERBESAR + KOLOM Nomor PO & COM
+> 1 permintaan user: *"POP UP DI tab deviasi gr dan deviasi pcs perbesar lagi dan tambah kolom nomor po dan COM"*.
+
+- **JENDELA POPUP DIPERBESAR** — popup ringkas Detail Deviasi (double-click baris tab Deviasi GR/PCS) **880×480 → 1180×640** (minsize 820×340; judul wraplength 1020 — nama barang panjang tidak terpotong).
+- **KOLOM "Nomor PO"** — nomor pesanan pembelian (`PO.2026.08.00571`) baris 4.IN **per tanggal**, split koma → dedup → urut → gabung (pola kolom Nomor v3.9.22; IT. pemindahan 42.05 biasanya tanpa PO → kosong). Skema tabel kini **8 kolom**: Tanggal · Saldo Akhir · SO · IN · Nomor · **Nomor PO** · **COM** · Deviasi.
+- **KOLOM "COM" (pemakaian harian)** — `_compute_com_series` di deviasi_popup.py = **PORT PERSIS matrix Anomali COM** (`laporan_deviasi_view._compute_com_matrix`, formula v3.9.5): `com(t) = so_prev(t) + IN(t) − BK(t) − SO(t)`; **kolom tanggal GLOBAL** (union baris 4 JENIS — SALDO AWAL/1.SO/4.IN/8.BARANG KELUAR — dari SEMUA pasangan di frame, persis col_keys laporan; pasangan tanpa baris SO di kolom global t−1 dibaca 0 — identik perilaku Anomali COM); tanggal 1 → base **SALDO AWAL pasangan** bila ada (dibaca TANPA fill — "SA ada nilainya 0" ≠ "SA tidak ada"), fallback so_prev (tanggal negatif bulan lalu); tanggal di luar kolom global (mis. hanya 2.SALDO AKHIR) → COM **kosong**. Dihitung **dalam grup satuan yang diklik** (pola FIX 35-b — angka cocok dgn baris GR/PCS yang diklik; matrix Anomali COM level pasangan → identik utk pasangan 1-satuan). **COM minus ikut merah PER CELL** (Tk 9; fallback Tk 8 tag baris) + format angka Indonesia (`(10)`).
+- **Verifikasi**: **756/756 UI test × 2 run** (742 + §35 baru 14 check: Nomor PO dedup/urut/kosong, COM t1-SA-base/t2-so_prev/t3-BK-minus/t4-luar-kolom-kosong, semantik kolom global, **PARITY vs matrix Anomali COM langsung**, geometry 1180×640, GUI kolom+nilai+merah per-cell, fallback Tk 8) + test_mock ALL PASS + **probe data real** (rekap workbook user: **60 pasangan real × 1.920 nilai COM — 0 mismatch vs matrix Anomali COM**; injeksi contoh PERSIS user `AIR MINERAL BOTOL (V.20) × TGRGEL tgl 1 RI.2026.10.10354 + PO.2026.08.00571` → popup menampilkan Nomor + Nomor PO + COM di tree; geometry 1180×640; screenshot + **VLM visual 4×YES**) + **ruff src 187 == baseline 187 + test 16 == baseline 16 (0 temuan baru)**.
+
 ### v3.9.24 — RI BALANCING: PERIODE BISNIS 26→25 (definisi diperbaiki)
 > 1 klarifikasi user: *"jika saat ini bulan oktober maka 1 periode nya mulai dari 26 september - 25 oktober nah untuk cek RI balancing berarti dengan NO. PO yang bukan bulan september dan oktober. Seperti misal nya AIR MINERAL punya resto TGRGEL transaksi tanggal 1 oktober ada RI RI.2026.10.10354 dengan PO PO.2026.08.00571 nah ini yang aku maksud RI balancing"*.
 

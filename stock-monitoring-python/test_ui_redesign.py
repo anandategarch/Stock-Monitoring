@@ -178,7 +178,21 @@ Memverifikasi:
     — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
     Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
     & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
-35. v3.9.24 — RI BALANCING PERIODE BISNIS 26→25 (§34; user: "jika
+35. v3.9.25 — POPUP DEVIASI GR/PCS PERBESAR + Nomor PO + COM (§35;
+    user: "POP UP DI tab deviasi gr dan deviasi pcs perbesar lagi
+    dan tambah kolom nomor po dan COM"): jendela popup 880×480 →
+    1180×640 (minsize 820×340; judul wraplength 1020) + 2 kolom
+    baru: "Nomor PO" (pesanan pembelian baris 4.IN per tanggal —
+    split koma → dedup → urut → gabung, pola Nomor v3.9.22) & "COM"
+    (pemakaian harian — _compute_com_series PORT PERSIS matrix
+    Anomali COM laporan_deviasi_view: com(t) = so_prev + IN − BK −
+    SO; kolom tanggal GLOBAL union 4 JENIS SEMUA pasangan [fill 0
+    utk pair tanpa SO di kolom itu]; tanggal 1 base SALDO AWAL pair
+    bila ada [tanpa fill — 'SA ada' ≠ 'SA tidak ada'], fallback
+    so_prev; parity 48/48 + test parity vs matrix langsung; tanggal
+    di luar kolom global → COM kosong). COM minus ikut merah per-cell
+    (Tk 9; fallback Tk 8 tag baris).
+36. v3.9.24 — RI BALANCING PERIODE BISNIS 26→25 (§34; user: "jika
     saat ini bulan oktober maka 1 periode nya mulai dari 26 september
     - 25 oktober nah untuk cek RI balancing berarti dengan NO. PO yang
     bukan bulan september dan oktober"): definisi diperbaiki dari
@@ -578,7 +592,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.24", APP_VERSION == "3.9.24", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.25", APP_VERSION == "3.9.25", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -4738,10 +4752,10 @@ def main():
         _row18("BRG Z", "RESTO Y", "1.SO", 25, 77.0),
     ])
     pr18 = build_popup_rows(pop_df18, "BRG X", "RESTO Y")
-    check("(v3.9.18→v3.9.22) Popup rows: skema 6 kolom "
-          "(Tanggal/Saldo Akhir/SO/IN/Nomor/Deviasi)",
+    check("(v3.9.18→v3.9.25) Popup rows: skema 8 kolom "
+          "(Tanggal/Saldo Akhir/SO/IN/Nomor/Nomor PO/COM/Deviasi)",
           list(pr18.columns) == ["Tanggal", "Saldo Akhir", "SO", "IN",
-                                 "Nomor", "Deviasi"],
+                                 "Nomor", "Nomor PO", "COM", "Deviasi"],
           f"got {list(pr18.columns)}")
     check("(v3.9.18) Popup rows: 3 tanggal (pasangan lain terfilter)",
           len(pr18) == 3, f"got {len(pr18)}")
@@ -4768,9 +4782,11 @@ def main():
           isinstance(pop18, DeviasiPopup))
     check("(v3.9.18) Popup judul memuat Nama Barang — Nama Resto (satuan)",
           pop18._title == "BRG X — RESTO Y  (GR)", f"got {pop18._title!r}")
-    check("(v3.9.18→v3.9.22) Popup tabel: 6 kolom persis (+Nomor)",
+    check("(v3.9.18→v3.9.25) Popup tabel: 8 kolom persis "
+          "(+Nomor PO & COM — v3.9.25)",
           list(pop18.tree["columns"]) == ["Tanggal", "Saldo Akhir", "SO",
-                                          "IN", "Nomor", "Deviasi"],
+                                          "IN", "Nomor", "Nomor PO",
+                                          "COM", "Deviasi"],
           f"got {list(pop18.tree['columns'])}")
     _pk18 = list(pop18.tree.get_children(""))
     check("(v3.9.18) Popup tabel: 3 baris; baris-1 bulan lalu '26•'",
@@ -7293,6 +7309,138 @@ def main():
           _cekmap34.get("RI.2026.09.301") == "",
           f"got {_cekmap34}")
     _pop34.destroy()
+    root.update()
+
+    # =================================================================
+    print("== 35. (v3.9.25) POPUP DEVIASI GR/PCS: PERBESAR + KOLOM Nomor "
+          "PO & COM (user: \"POP UP DI tab deviasi gr dan deviasi pcs "
+          "perbesar lagi dan tambah kolom nomor po dan COM\") ==")
+
+    from src.ui.deviasi_popup import _compute_com_series as _ccs35
+    from src.ui.laporan_deviasi_view import LaporanDeviasiView as _LDV35
+
+    def _row35(barang, resto, jenis, tgl, nilai, satuan="GR",
+               nomor=None, po=None):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": nilai,
+                "SATUAN": satuan, "AKTIF/NON": "AKTIF",
+                "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": nomor, "Nomor PO": po,
+                "#Tgl/Jam Pembuatan IT": None}
+
+    _ROWS35 = [
+        # pair P: SA t1 + SO harian + 2 dokumen IN t2 (PO dobel → dedup)
+        # + BK t3; t4 HANYA 2.SALDO AKHIR (di luar kolom global 4 JENIS)
+        _row35("BRG P", "R", "SALDO AWAL", 1, 50.0),
+        _row35("BRG P", "R", "1.SO", 1, 45.0),
+        _row35("BRG P", "R", "2.SALDO AKHIR", 1, 4.0),
+        _row35("BRG P", "R", "1.SO", 2, 40.0),
+        _row35("BRG P", "R", "2.SALDO AKHIR", 2, 3.0),
+        _row35("BRG P", "R", "4.IN", 2, 10.0,
+               nomor="RI.2026.10.10354", po="PO.2026.08.00571, PO.2026.08.00999"),
+        _row35("BRG P", "R", "4.IN", 2, 5.0,
+               nomor="IT.2026.10.5123", po="PO.2026.08.00571"),
+        _row35("BRG P", "R", "1.SO", 3, 42.0),
+        _row35("BRG P", "R", "2.SALDO AKHIR", 3, 5.0),
+        _row35("BRG P", "R", "8.BARANG KELUAR", 3, 8.0),
+        _row35("BRG P", "R", "2.SALDO AKHIR", 4, 2.0),
+        # pair Q: SO t1 & t3 (kolom global t2 ADA dari pair P → so_prev
+        # t3 = 0 — semantik kolom global, bukan SO tanggal pair sendiri)
+        _row35("BRG Q", "R", "1.SO", 1, 10.0),
+        _row35("BRG Q", "R", "1.SO", 3, 8.0),
+        _row35("BRG Q", "R", "2.SALDO AKHIR", 3, 9.0),
+    ]
+    _df35 = pd.DataFrame(_ROWS35)
+
+    # --- (a) build_popup_rows: Nomor PO + COM per tanggal --------------
+    _pr35 = build_popup_rows(_df35, "BRG P", "R")
+    _p35 = {r["Tanggal"]: r for _, r in _pr35.iterrows()}
+    check("(v3.9.25) Popup Nomor PO: tgl 2 = PO DIDEDUP + DIURUT (2 "
+          "baris IN tumpang-tindih — PO.2026.08.00571 muncul 2×)",
+          _p35["2"]["Nomor PO"] == "PO.2026.08.00571, PO.2026.08.00999",
+          f"got {_p35['2']['Nomor PO']!r}")
+    check("(v3.9.25) Popup Nomor PO: tanggal TANPA IN → kosong (bukan "
+          "'nan')",
+          _p35["1"]["Nomor PO"] == "" and _p35["3"]["Nomor PO"] == "",
+          f"got {_p35['1']['Nomor PO']!r}/{_p35['3']['Nomor PO']!r}")
+    check("(v3.9.25) Popup COM: tgl 1 = SA(50) + IN(0) − BK(0) − SO(45) "
+          "= 5 (base SALDO AWAL pair — audit fix v3.9.5)",
+          _p35["1"]["COM"] == "5", f"got {_p35['1']['COM']!r}")
+    check("(v3.9.25) Popup COM: tgl 2 = SO(1)(45) + IN(15) − BK(0) − "
+          "SO(2)(40) = 20",
+          _p35["2"]["COM"] == "20", f"got {_p35['2']['COM']!r}")
+    check("(v3.9.25) Popup COM: tgl 3 = SO(2)(40) + IN(0) − BK(8) − "
+          "SO(3)(42) = (10) minus kurung",
+          _p35["3"]["COM"] == "(10)", f"got {_p35['3']['COM']!r}")
+    check("(v3.9.25) Popup COM: tgl 4 HANYA 2.SALDO AKHIR (di luar "
+          "kolom global 4 JENIS) → COM KOSONG (bukan '-'/'0')",
+          _p35["4"]["COM"] == "", f"got {_p35['4']['COM']!r}")
+    _q35 = build_popup_rows(_df35, "BRG Q", "R")
+    _q35m = {r["Tanggal"]: r for _, r in _q35.iterrows()}
+    check("(v3.9.25) Popup COM semantik KOLOM GLOBAL: pair Q SO t1&t3 — "
+          "kolom global t2 (dari pair P) membuat so_prev(3)=0 → com(3) "
+          "=(8); com(1) kolom pertama =(10)",
+          _q35m["1"]["COM"] == "(10)" and _q35m["3"]["COM"] == "(8)",
+          f"got {_q35m['1']['COM']!r}/{_q35m['3']['COM']!r}")
+
+    # --- (b) PARITY: _compute_com_series vs matrix Anomali COM ---------
+    _lv35 = _LDV35.__new__(_LDV35)
+    _m35 = _lv35._compute_com_matrix(_df35)
+    _ok35 = True
+    _n35 = 0
+    for _pair35 in ("BRG P", "BRG Q"):
+        _popc35 = _ccs35(_df35, _pair35, "R")
+        _mrow35 = _m35.loc[(_pair35, "R")]
+        for _t35, _v35 in sorted(_popc35.items()):
+            _col35 = int(_t35) if int(_t35) in _mrow35.index else float(_t35)
+            _mv35 = _mrow35.get(_col35) if _col35 in _mrow35.index else None
+            _n35 += 1
+            if _mv35 is None or pd.isna(_mv35) or \
+                    abs(float(_mv35) - _v35) > 1e-9:
+                _ok35 = False
+                print(f"    MISMATCH pair {_pair35} t={_t35}: "
+                      f"popup={_v35} matrix={_mv35}")
+    check("(v3.9.25) PARITY COM popup vs matrix Anomali COM "
+          "(laporan_deviasi_view._compute_com_matrix) — semua tanggal "
+          "identik",
+          _ok35 and _n35 >= 6, f"{_n35} nilai dibandingkan")
+
+    # --- (c) GUI popup: 8 kolom + geometry 1180×640 + nilai + merah ----
+    _pop35 = show_deviasi_popup(root, _df35, "BRG P", "R", satuan="GR",
+                                h=3)
+    root.update()
+    check("(v3.9.25) Popup DIPERBESAR: geometry 1180×640 (dulu 880×480)",
+          _pop35.geometry().split("+")[0] == "1180x640",
+          f"got {_pop35.geometry()!r}")
+    _k35_2 = next(k for k in _pop35.tree.get_children("")
+                  if _pop35.tree.set(k, "Tanggal") == "2")
+    _k35_3 = next(k for k in _pop35.tree.get_children("")
+                  if _pop35.tree.set(k, "Tanggal") == "3")
+    _k35_4 = next(k for k in _pop35.tree.get_children("")
+                  if _pop35.tree.set(k, "Tanggal") == "4")
+    check("(v3.9.25) Popup GUI: kolom Nomor PO tampil + nilai dedup/urut",
+          _pop35.tree.set(_k35_2, "Nomor PO") ==
+          "PO.2026.08.00571, PO.2026.08.00999",
+          f"got {_pop35.tree.set(_k35_2, 'Nomor PO')!r}")
+    check("(v3.9.25) Popup GUI: kolom COM tampil — tgl 3 minus (10)",
+          _pop35.tree.set(_k35_3, "COM") == "(10)",
+          f"got {_pop35.tree.set(_k35_3, 'COM')!r}")
+    check("(v3.9.25) Popup GUI: COM tgl di luar kolom global = kosong",
+          _pop35.tree.set(_k35_4, "COM") == "",
+          f"got {_pop35.tree.set(_k35_4, 'COM')!r}")
+    if CELL_TAGS_SUPPORTED:
+        _neg35 = root.tk.call(str(_pop35.tree), "tag", "cell", "has",
+                              "neg_cell", (_k35_3, "COM"))
+        check("(v3.9.25) Popup GUI: COM minus merah PER CELL (tgl 3)",
+              _neg35 == 1, f"tag={_neg35}")
+    _pop35._cell_tags = False
+    _pop35._render()
+    root.update()
+    check("(v3.9.25) Popup fallback Tk 8: baris COM minus → tag baris "
+          "negative",
+          "negative" in _pop35.tree.item(_k35_3, "tags"),
+          f"tags={_pop35.tree.item(_k35_3, 'tags')}")
+    _pop35.destroy()
     root.update()
 
     # Cleanup

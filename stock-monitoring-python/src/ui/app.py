@@ -157,7 +157,27 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.24"  # v3.9.24 — RI BALANCING PERIODE BISNIS 26→25 (klarifikasi user: PO di luar 2 bulan periode)
+APP_VERSION = "3.9.25"  # v3.9.25 — POPUP DEVIASI GR/PCS PERBESAR + KOLOM Nomor PO & COM
+# v3.9.25 (user: "POP UP DI tab deviasi gr dan deviasi pcs perbesar
+# lagi dan tambah kolom nomor po dan COM"): popup ringkas Deviasi GR/PCS
+# (double-click baris) DIPERBESAR 880×480 → 1180×640 (minsize 820×340;
+# judul wraplength 1020) + DUA kolom baru:
+# (1) "Nomor PO" — nomor pesanan pembelian (PO......) baris 4.IN per
+#     tanggal, split koma → dedup → urut → gabung (pola kolom Nomor
+#     v3.9.22; IT. pemindahan biasanya tanpa PO → kosong);
+# (2) "COM" — pemakaian harian per tanggal, formula PERSIS baris
+#     6.PEMAKAIAN (COM) tab Pivot / 🚨 Anomali COM:
+#         com(t) = so_prev(t) + IN(t) − BK(t) − SO(t)
+#     _compute_com_series (deviasi_popup) = PORT laporan_deviasi_view.
+#     _compute_com_matrix: kolom tanggal GLOBAL (union 4 JENIS — SALDO
+#     AWAL/1.SO/4.IN/8.BARANG KELUAR — SEMUA pasangan di frame, persis
+#     col_keys laporan; pasangan tanpa baris SO di kolom global t−1
+#     dibaca 0); tanggal 1 → base SALDO AWAL pasangan bila ada (audit
+#     fix v3.9.5, dibaca TANPA fill), fallback so_prev; parity 48/48
+#     nilai vs matrix Anomali COM (diverifikasi test §35 langsung vs
+#     matrix). Tanggal di luar kolom global (mis. hanya 2.SALDO AKHIR)
+#     → COM kosong. Dihitung DALAM grup satuan yang diklik (FIX 35-b).
+#     COM minus ikut merah PER CELL (Tk 9; fallback Tk 8 tag baris).
 # v3.9.24 (user: "jika saat ini bulan oktober maka 1 periode nya mulai
 # dari 26 september - 25 oktober nah untuk cek RI balancing berarti
 # dengan NO. PO yang bukan bulan september dan oktober … AIR MINERAL

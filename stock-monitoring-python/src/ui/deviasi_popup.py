@@ -14,16 +14,34 @@ nya juga Misal IT...... atau RI......"): kolom NOMOR DOKUMEN IN per
 tanggal (IT. = pemindahan 42.05, RI. = penerimaan 32.24; >1 dokumen
 digabung koma, didedup + diurut).
 
+v3.9.25 (permintaan user: "POP UP DI tab deviasi gr dan deviasi pcs
+perbesar lagi dan tambah kolom nomor po dan COM"): jendela diperbesar
+880×480 → 1180×640 (judul wraplength ikut melebar) + DUA kolom baru:
+- "Nomor PO" — nomor pesanan pembelian (PO......) baris 4.IN per
+  tanggal, didedup + diurut (pola kolom Nomor v3.9.22);
+- "COM" — pemakaian harian per tanggal, FORMULA IDENTIK baris
+  6.PEMAKAIAN (COM) tab Pivot / 🚨 Anomali COM (port
+  laporan_deviasi_view._compute_com_matrix → _compute_com_series;
+  kolom tanggal GLOBAL union 4 JENIS — parity 48/48 nilai):
+      com(t) = so_prev(t) + IN(t) − BK(t) − SO(t)
+  so_prev(t) = SO pasangan di tanggal kolom global sebelumnya
+  (SALDO AWAL/1.SO/4.IN/8.BARANG KELUAR — kolom pertama 0), tanggal 1
+  memakai SALDO AWAL pasangan bila ada (audit fix v3.9.5), fallback
+  so_prev. Tanggal yang TIDAK ada di kolom global (mis. hanya baris
+  2.SALDO AKHIR) → COM kosong (tab lain juga tak punya nilainya).
+  Dihitung DALAM grup satuan yang diklik (pola FIX 35-b).
+
 Mengganti popup source rows (details_popup.DetailsPopup — JENIS/Nomor/
 Nomor PO/#Tgl-Jam/KATEGORI/SOURCE KIRIMAN) yang DULU terbuka dari tab
 Deviasi GR/PCS:
 
 - NAMA BARANG + NAMA RESTO tampil di judul popup (dua-duanya).
-- Tabel ringkas PER TANGGAL — 6 kolom:
+- Tabel ringkas PER TANGGAL — 8 kolom (v3.9.25):
     Tanggal · Saldo Akhir (2.SALDO AKHIR / sistem) · SO (1.SO) ·
-    IN (4.IN) · Nomor (dokumen IN — v3.9.22) · Deviasi (= SO −
-    Saldo Akhir, identik kolom Deviasi tab Deviasi GR/PCS & JENIS
-    3.DEVIASI pipeline).
+    IN (4.IN) · Nomor (dokumen IN — v3.9.22) · Nomor PO (pesanan
+    pembelian — v3.9.25) · COM (pemakaian harian — v3.9.25) ·
+    Deviasi (= SO − Saldo Akhir, identik kolom Deviasi tab Deviasi
+    GR/PCS & JENIS 3.DEVIASI pipeline).
 - Baris Tanggal H diberi latar lembut (#fef3c7 — sama dgn highlight
   kolom Deviasi/SO_H di tabel utama v3.9.18) supaya mudah ditemukan.
 - Tanggal bulan lalu (negatif) diberi label '25•' (konvensi pivot_view
@@ -60,12 +78,17 @@ from .widgets import (
 # PCS ada Nomor nya juga Misal IT...... atau RI......"): nomor dokumen
 # transaksi IN (IT. = pemindahan 42.05 / RI. = penerimaan 32.24) per
 # tanggal — gabungan bila >1 dokumen.
+# v3.9.25 — kolom Nomor PO (permintaan user: "tambah kolom nomor po dan
+# COM"): nomor pesanan pembelian baris 4.IN per tanggal (pola Nomor) +
+# kolom COM (pemakaian harian — formula identik Anomali COM).
 COLUMNS = [
     ("Tanggal", 76, "e"),
     ("Saldo Akhir", 110, "e"),
     ("SO", 110, "e"),
     ("IN", 110, "e"),
-    ("Nomor", 210, "w"),
+    ("Nomor", 200, "w"),
+    ("Nomor PO", 190, "w"),
+    ("COM", 100, "e"),
     ("Deviasi", 110, "e"),
 ]
 
@@ -77,6 +100,12 @@ _JENIS_SALDO = "2.SALDO AKHIR"
 _JENIS_SO = "1.SO"
 _JENIS_IN = "4.IN"
 
+# v3.9.25 — JENIS input formula COM (persis jenis_needed
+# laporan_deviasi_view._compute_com_matrix / pivot 6.PEMAKAIAN).
+_JENIS_SA = "SALDO AWAL"
+_JENIS_BK = "8.BARANG KELUAR"
+_COM_JENIS = (_JENIS_SA, _JENIS_SO, _JENIS_IN, _JENIS_BK)
+
 
 class DeviasiPopup(tk.Toplevel):
     """Popup ringkas: nilai kunci per Tanggal utk 1 pasangan (barang, resto)."""
@@ -87,13 +116,15 @@ class DeviasiPopup(tk.Toplevel):
         self._title = title
         self.title(f"Detail Deviasi — {title}")
         try:
-            pw, ph = 880, 480   # v3.9.22: 640 → 880 (kolom Nomor baru)
+            # v3.9.25: 880×480 → 1180×640 (permintaan user "perbesar
+            # lagi" + 2 kolom baru Nomor PO & COM)
+            pw, ph = 1180, 640
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
             self.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
         except tk.TclError:
-            self.geometry("880x480")
-        self.minsize(560, 260)
+            self.geometry("1180x640")
+        self.minsize(820, 340)
         self.configure(bg=C_BG)
 
         # Modal — block parent sampai ditutup (pola DetailsPopup)
@@ -127,7 +158,7 @@ class DeviasiPopup(tk.Toplevel):
                  fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
         # judul = NAMA BARANG — NAMA RESTO (dua-duanya, permintaan user)
         tk.Label(head_in, text=title, bg=C_HEADER, fg="#f1f5f9",
-                 font=font(12, "bold"), wraplength=760,
+                 font=font(12, "bold"), wraplength=1020,
                  justify="left").pack(anchor="w", pady=(2, 0))
 
         btn_fit = tk.Button(
@@ -213,7 +244,8 @@ class DeviasiPopup(tk.Toplevel):
             else:
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")
             has_neg = False
-            for col in ("Saldo Akhir", "SO", "IN", "Deviasi"):
+            # v3.9.25 — COM ikut minus merah per-cell (kolom numerik)
+            for col in ("Saldo Akhir", "SO", "IN", "COM", "Deviasi"):
                 if _is_neg_display(rec.get(col, "")):
                     has_neg = True
                     if self._cell_tags:
@@ -300,6 +332,110 @@ def _chrono_key(t):
     return abs(d) if d < 0 else 100 + d
 
 
+def _compute_com_series(df: pd.DataFrame, nama_barang: str,
+                        nama_resto: str, satuan: str | None = None) -> dict:
+    """v3.9.25 — COM (pemakaian) per tanggal utk 1 pasangan (barang, resto).
+
+    PORT PERSIS laporan_deviasi_view._compute_com_matrix (tab 🚨 Anomali
+    COM / baris 6.PEMAKAIAN (COM) — formula v3.9.5):
+        com(t) = so_prev(t) + IN(t) − BK(t) − SO(t)
+
+    SEMANTIK KOLOM GLOBAL (diverifikasi parity vs matrix laporan):
+    so_prev(t) = SO pasangan di tanggal kolom GLOBAL SEBELUM t — kolom
+    global = union tanggal baris 4 JENIS (SALDO AWAL · 1.SO · 4.IN ·
+    8.BARANG KELUAR) dari SEMUA pasangan di frame (persis col_keys
+    laporan). Pasangan TANPA baris SO di kolom global t−1 dibaca 0
+    (fillna — BUKAN SO tanggal pair-sebelumnya): pair dgn SO di t=1 &
+    t=3 mendapat com(3) = 0 − SO(3) bila kolom global t=2 ada (dari
+    pasangan lain), = SO(1) − SO(3) bila t=2 tidak ada di frame —
+    identik perilaku Anomali COM (dan M Table.Pivot atas kolom yang
+    sama). Tanggal pertama kolom → so_prev 0; tanggal 1 → SALDO AWAL
+    pasangan BILA ada (dibaca TANPA fill — 'SA ada nilainya 0' ≠
+    'SA tidak ada'), fallback so_prev (tanggal negatif bulan lalu).
+
+    Dihitung DALAM grup satuan yang diklik (pola FIX 35-b — konsisten
+    dgn angka popup GR/PCS; matriks Anomali COM level pasangan tanpa
+    satuan → identik utk pasangan 1-satuan, seluruh data real).
+    Return: {tanggal(float) → nilai com} — kosong bila tak ada baris.
+    """
+    if df is None or df.empty:
+        return {}
+
+    jenis_s = df["JENIS"].astype(str)
+    # kolom GLOBAL (semua pasangan — mirror col_keys laporan)
+    glob_t = pd.to_numeric(
+        df.loc[jenis_s.isin(_COM_JENIS), "Tanggal"], errors="coerce")
+    col_keys = sorted(set(glob_t.dropna().tolist()), key=_chrono_key)
+    if not col_keys:
+        return {}
+
+    # baris pasangan (+satuan) 4 JENIS
+    mask = (
+        (df["Nama Barang"].astype(str) == str(nama_barang))
+        & (df["NAMA RESTO"].astype(str) == str(nama_resto))
+        & jenis_s.isin(_COM_JENIS)
+    )
+    if satuan is not None:
+        mask &= df["SATUAN"].astype(str) == str(satuan)
+    sub = df[mask]
+    if sub.empty:
+        return {}
+
+    tgl = pd.to_numeric(sub["Tanggal"], errors="coerce")
+    nilai = pd.to_numeric(sub["NILAI"], errors="coerce")
+    sub = sub.assign(_t=tgl, _v=nilai).dropna(subset=["_t"])
+    if sub.empty:
+        return {}
+
+    # SALDO AWAL mentah per tanggal (TANPA fill — bedakan 'SA ada' dari
+    # 'SA tidak ada'; mirror jenis_df(..., fill=False) laporan; dobel
+    # SA dijumlahkan defensif — pivot laporan memakai aggfunc sum).
+    sa_raw: dict = {}
+    sa_rows = sub[sub["JENIS"].astype(str) == _JENIS_SA] \
+        .dropna(subset=["_v"])
+    for t, v in zip(sa_rows["_t"], sa_rows["_v"]):
+        sa_raw[t] = sa_raw.get(t, 0.0) + float(v)
+
+    # pivot SO/IN/BK per tanggal pasangan (fill 0 — mirror jenis_df
+    # fill=True laporan; reindex ke kolom GLOBAL dilakukan via .get)
+    piv = sub[sub["JENIS"].astype(str)
+              .isin((_JENIS_SO, _JENIS_IN, _JENIS_BK))] \
+        .pivot_table(index="_t", columns="JENIS", values="_v",
+                     aggfunc="sum", fill_value=0.0)
+    for col in (_JENIS_SO, _JENIS_IN, _JENIS_BK):
+        if col not in piv.columns:
+            piv[col] = 0.0
+
+    def _num(v) -> float:
+        """float() NaN/invalid-safe → 0.0 (defensif — pivot sudah
+        fill 0, jalur .get default 0.0)."""
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        return 0.0 if pd.isna(f) else f
+
+    so_s = piv[_JENIS_SO]
+    in_s = piv[_JENIS_IN]
+    bk_s = piv[_JENIS_BK]
+
+    com: dict = {}
+    for i, t in enumerate(col_keys):
+        try:
+            is_t1 = int(float(t)) == 1
+        except (TypeError, ValueError):
+            is_t1 = False
+        if is_t1 and t in sa_raw:
+            base = sa_raw[t]           # base com(1) = SA pair (audit fix)
+        elif i == 0:
+            base = 0.0
+        else:
+            base = _num(so_s.get(col_keys[i - 1], 0.0))
+        com[t] = (base + _num(in_s.get(t, 0.0)) - _num(bk_s.get(t, 0.0))
+                  - _num(so_s.get(t, 0.0)))
+    return com
+
+
 def build_popup_rows(data: pd.DataFrame, nama_barang: str,
                      nama_resto: str, satuan: str | None = None
                      ) -> pd.DataFrame:
@@ -309,6 +445,16 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     IN, deviasi — TANPA OUT/BARANG KELUAN/BARANG MASUK):
       Saldo Akhir = Σ 2.SALDO AKHIR · SO = Σ 1.SO · IN = Σ 4.IN
       Deviasi = SO − Saldo Akhir (identik 3.DEVIASI & tabel utama).
+
+    v3.9.25 — dua kolom baru (user: "tambah kolom nomor po dan COM"):
+      Nomor PO = nomor pesanan pembelian baris 4.IN per tanggal
+                 (split koma → dedup → urut → gabung — pola Nomor);
+      COM      = pemakaian harian, formula PERSIS
+                 laporan_deviasi_view._compute_com_matrix
+                 (_compute_com_series — kolom tanggal GLOBAL, parity
+                 48/48 nilai vs matrix Anomali COM). Tanggal tampil di
+                 luar kolom global (mis. hanya 2.SALDO AKHIR) → COM
+                 kosong (tab Anomali COM juga tak punya nilainya).
 
     satuan (FIX 35-b / audit 34-b RISK-2): tabel utama memivot per
     (Nama Barang × NAMA RESTO × SATUAN) — pasangan yang punya baris GR
@@ -327,7 +473,7 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     utk pemanggil lain).
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
-                                  "Nomor", "Deviasi"])
+                                  "Nomor", "Nomor PO", "COM", "Deviasi"])
     if data is None or data.empty:
         return empty
 
@@ -358,6 +504,9 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     # bisa memuat beberapa nomor sekaligus, dipisah koma di data sumber
     # → dipecah, didedup, diurut, digabung kembali).
     _nomor_per_tgl: dict = {}
+    # v3.9.25 — Nomor PO baris 4.IN per tanggal (pola Nomor: split koma
+    # → dedup → urut → gabung; IT. pemindahan biasanya tanpa PO → kosong).
+    _po_per_tgl: dict = {}
     if "Nomor" in sub.columns:
         in_rows = sub[sub["JENIS"] == _JENIS_IN]
         for _t, _no in zip(in_rows["_t"], in_rows["Nomor"]):
@@ -367,6 +516,19 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
                 part = part.strip()
                 if part:
                     _nomor_per_tgl.setdefault(_t, set()).add(part)
+        if "Nomor PO" in in_rows.columns:
+            for _t, _po in zip(in_rows["_t"], in_rows["Nomor PO"]):
+                if pd.isna(_po):
+                    continue
+                for part in str(_po).split(","):
+                    part = part.strip()
+                    if part:
+                        _po_per_tgl.setdefault(_t, set()).add(part)
+
+    # v3.9.25 — COM per tanggal (formula identik Anomali COM; dihitung
+    # TERPISAH dari pivot tampilan 3 JENIS supaya union tanggal-nya =
+    # persis union 4 JENIS laporan — baris tampilan tidak berubah).
+    _com_by_t = _compute_com_series(df, nama_barang, nama_resto, satuan)
 
     wide = sub.pivot_table(index="_t", columns="JENIS", values="_v",
                            aggfunc="sum", fill_value=0.0)
@@ -385,6 +547,12 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     out["Deviasi"] = out["SO"] - out["Saldo Akhir"]
     out["Nomor"] = [", ".join(sorted(_nomor_per_tgl.get(t, ())))
                     for t in out["_t"]]
+    out["Nomor PO"] = [", ".join(sorted(_po_per_tgl.get(t, ())))
+                       for t in out["_t"]]
+    # v3.9.25 — COM: numerik mentah (belum diformat) supaya minus tetap
+    # terdeteksi _is_neg_display setelah diformat; tanggal di luar union
+    # 4 JENIS → NaN (kolom kosong, bukan 0).
+    out["COM"] = [_com_by_t.get(t, float("nan")) for t in out["_t"]]
 
     # label tampilan + urut kronologis (numerik — negatif abs 25..31
     # < positif 101..131, jadi bulan lalu dulu lalu 1..31)
@@ -394,10 +562,11 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         .drop(columns=["_k"]).reset_index(drop=True)
 
     # format angka Indonesia (string — siap render)
-    for col in ("Saldo Akhir", "SO", "IN", "Deviasi"):
+    for col in ("Saldo Akhir", "SO", "IN", "COM", "Deviasi"):
         out[col] = out[col].map(DeviasiPopup._fmt_num)
 
-    return out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor", "Deviasi"]]
+    return out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor",
+                "Nomor PO", "COM", "Deviasi"]]
 
 
 def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
