@@ -427,7 +427,9 @@ _V20_REKAP_LALU = [
 
 
 def _v20_pair_source(final, barang, resto="MLGPAR"):
-    """Nilai SOURCE DATA pasangan dari output append1 final."""
+    """Nilai SOURCE DATA pasangan dari output append1 final (semua nilai
+    unik — v3.9.21 per-tanggal: satu pasangan bisa punya >1 sumber utk
+    tanggal berbeda)."""
     import pandas as _pd
     sub = final[(final["Nama Barang"] == barang)
                 & (final["NAMA RESTO"] == resto)]
@@ -436,6 +438,18 @@ def _v20_pair_source(final, barang, resto="MLGPAR"):
     s = sub["SOURCE DATA"]
     assert not isinstance(s, _pd.DataFrame), "duplicate SOURCE DATA columns"
     vals = s.dropna().unique().tolist()
+    return vals if vals else None
+
+
+def _v20_source_at(final, barang, tanggal, resto="MLGPAR"):
+    """v3.9.21 — SOURCE DATA pasangan PADA TANGGAL tertentu (semantik
+    per-tanggal: sumber menempel baris final per (pasangan, Tanggal))."""
+    sub = final[(final["Nama Barang"] == barang)
+                & (final["NAMA RESTO"] == resto)
+                & (final["Tanggal"] == tanggal)]
+    if sub.empty or "SOURCE DATA" not in sub.columns:
+        return None
+    vals = sub["SOURCE DATA"].dropna().unique().tolist()
     return vals[0] if vals else None
 
 
@@ -486,44 +500,51 @@ def run_test_v3920_fixes():
         n_ok[0] += 1
         print(f"    OK {name}" + ((" — " + detail) if detail else ""))
 
-    print("\n  [6b] (v3.9.20/35-d) append1 LANGKAH 9 — FIX 1/2/3 (R-1, R-2, N-1)")
+    print("\n  [6b] (v3.9.20/35-d + v3.9.21 per-tanggal) append1 LANGKAH 9")
     tmp = tempfile.mkdtemp(prefix="t35d_l9_")
     final = build_append1(Config(_v20_rekap_tree(tmp, "normal")))
-    res = {b: _v20_pair_source(final, b)
-           for b in ["BRG-TIE1", "BRG-TIE2", "BRG-PAD", "BRG-SPC",
-                     "BRG-PREF", "BRG-POS", "BRG-NA"]}
 
-    check20("T1a tie so-harian vs promix → 'input so harian' (string "
-            "terbesar, konservatif CEK Promix 04)",
-            res["BRG-TIE1"] == "input so harian")
-    check20("T1b tie dua varian promix → take away",
-            res["BRG-TIE2"] == "input promix 04 take away")
+    check20("T1a tie so-harian vs promix TANGGAL SAMA → 'input so harian' "
+            "(hitungan manual menang — v3.9.21)",
+            _v20_source_at(final, "BRG-TIE1", 10) == "input so harian",
+            repr(_v20_source_at(final, "BRG-TIE1", 10)))
+    check20("T1b tie dua varian promix → take away (string terbesar)",
+            _v20_source_at(final, "BRG-TIE2", 12)
+            == "input promix 04 take away")
 
     tmp_r = tempfile.mkdtemp(prefix="t35d_l9r_")
     final_r = build_append1(Config(_v20_rekap_tree(tmp_r, "reversed")))
-    res_r = {b: _v20_pair_source(final_r, b)
-             for b in ["BRG-TIE1", "BRG-TIE2", "BRG-PAD", "BRG-SPC"]}
     check20("T2a winner order-independent (baris sheet dibalik)",
-            all(res_r[k] == res[k] for k in res_r))
+            all(_v20_source_at(final_r, b, t) == _v20_source_at(final, b, t)
+                for b, t in (("BRG-TIE1", 10), ("BRG-TIE2", 12),
+                             ("BRG-PAD", 5), ("BRG-SPC", 4),
+                             ("BRG-PREF", 5), ("BRG-PREF", 20))))
 
     tmp_s = tempfile.mkdtemp(prefix="t35d_l9s_")
     final_s = build_append1(Config(_v20_rekap_tree(tmp_s, "normal")))
     check20("T2b deterministik re-run fixture identik",
-            _v20_pair_source(final_s, "BRG-TIE1") == res["BRG-TIE1"])
+            _v20_source_at(final_s, "BRG-TIE1", 10) == "input so harian")
 
     check20("T3a padded ' input so harian ' → 'input so harian' (strip)",
-            res["BRG-PAD"] == "input so harian")
-    check20("T3b whitespace-only '   ' → ''", res["BRG-SPC"] == "",
-            repr(res["BRG-SPC"]))
+            _v20_source_at(final, "BRG-PAD", 5) == "input so harian")
+    check20("T3b whitespace-only '   ' → TANPA sumber (v3.9.21: dibuang)",
+            _v20_source_at(final, "BRG-SPC", 4) is None,
+            repr(_v20_source_at(final, "BRG-SPC", 4)))
     check20("T3c tidak lower-case (nilai tampilan dipertahankan)",
-            res["BRG-PREF"] == "input promix 04 dine in")
-    check20("T3d SO row tanpa SOURCE DATA → pasangan NaN",
-            res["BRG-NA"] is None)
+            _v20_source_at(final, "BRG-PREF", 20)
+            == "input promix 04 dine in")
+    check20("T3d SO row tanpa SOURCE DATA → tanpa sumber (NaN)",
+            _v20_source_at(final, "BRG-NA", 7) is None)
 
-    check20("T4a running/berjalan positif menang atas lalu",
-            res["BRG-POS"] == "input so harian")
-    check20("T4b tanggal tertinggi berjalan menang",
-            res["BRG-PREF"] == "input promix 04 dine in")
+    check20("T4a berjalan & lalu PUNYA sumber masing-masing per tanggal "
+            "(d1 so-harian; -28 promix — v3.9.21)",
+            _v20_source_at(final, "BRG-POS", 1) == "input so harian"
+            and _v20_source_at(final, "BRG-POS", -28)
+            == "input promix 04 dine in")
+    check20("T4b pasangan campuran: d5 so-harian, d20 promix (per-tanggal)",
+            _v20_source_at(final, "BRG-PREF", 5) == "input so harian"
+            and _v20_source_at(final, "BRG-PREF", 20)
+            == "input promix 04 dine in")
 
     tmp_ns = tempfile.mkdtemp(prefix="t35d_l9n_")
     final_ns = build_append1(Config(_v20_rekap_tree(tmp_ns, "normal",
@@ -533,44 +554,67 @@ def run_test_v3920_fixes():
             f"{len(final)} == {len(final_ns)}")
     check20("T5b kolom SOURCE DATA tunggal (bukan duplikat)",
             list(final.columns).count("SOURCE DATA") == 1)
-    check20("T5c SOURCE DATA pair-konstan (pasangan dgn NaN sah — BRG-NA; "
-            "konstansi dicek per-pair di T5d)",
-            final[final["JENIS"] == "1.SO"]["SOURCE DATA"].notna().all()
-            or True)
     so_rows = final[(final["JENIS"] == "1.SO")
                     & final["SOURCE DATA"].notna()]
-    check20("T5d nilai konstan per pasangan (1 nilai / pasangan)",
-            all(so_rows[so_rows["Nama Barang"] == b]["SOURCE DATA"].nunique()
-                == 1 for b in so_rows["Nama Barang"].unique()),
+    check20("T5d sumber konstan per (pasangan, tanggal) — v3.9.21",
+            so_rows.groupby(["Nama Barang", "NAMA RESTO", "Tanggal"])
+            ["SOURCE DATA"].nunique().max() == 1,
             f"{so_rows['Nama Barang'].nunique()} pasangan")
 
-    # FIX 2: NA-Tanggal tidak pernah menang — replikasi ekspresi sort BARU
+    # v3.9.21 — replikasi ekspresi LANGKAH 9 BARU (per-tanggal, non-nol,
+    # harian menang): baris nilai 0 & whitespace-only dibuang; NA-Tanggal
+    # tak pernah match kunci merge.
     so = _pd.DataFrame({
-        "Nama Barang": ["X", "X", "X"],
-        "NAMA RESTO": ["R", "R", "R"],
-        "JENIS": ["SO", "SO", "SO"],
-        "Tanggal": _pd.array([25, None, 1], dtype="Int64"),
-        "SOURCE DATA": ["input so harian", "input promix 04 (NaN date)",
-                        "input so harian"],
+        "Nama Barang": ["X", "X", "X", "X", "X"],
+        "NAMA RESTO": ["R", "R", "R", "R", "R"],
+        "JENIS": ["SO", "SO", "SO", "SO", "SO"],
+        "Tanggal": _pd.array([25, 25, 25, None, 24], dtype="Int64"),
+        "Value": [10.0, 0.0, 7.0, 9.0, 5.0],
+        "SOURCE DATA": ["input promix 04 take away", "input so harian",
+                        "input so harian", "input promix NaN-date",
+                        "   "],
     })
+    _val = _pd.to_numeric(so["Value"], errors="coerce")
     _src = so["SOURCE DATA"].map(
         lambda v: v.strip() if isinstance(v, str) else v)
-    out = (so.assign(_t=_pd.to_numeric(so["Tanggal"], errors="coerce"),
-                     _src=_src, _s=_src.astype(str))
-           .sort_values(["_t", "_s"], kind="mergesort", na_position="first")
-           .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+    _s = _src.astype(str)
+    _t0 = _pd.to_numeric(so["Tanggal"], errors="coerce")
+    out = (so.assign(_src=_src, _s=_s,
+                    _harian=_s.str.strip().str.lower() == "input so harian")
+           .loc[(_val.fillna(0) != 0) & _s.str.strip().ne("")
+                & _t0.notna()]
+           .sort_values(["_harian", "_s"], kind="mergesort")
+           .drop_duplicates(subset=["Nama Barang", "NAMA RESTO", "Tanggal"],
                             keep="last")
-           [["Nama Barang", "NAMA RESTO", "_src"]]
+           [["Nama Barang", "NAMA RESTO", "Tanggal", "_src"]]
            .rename(columns={"_src": "SOURCE DATA"}))
-    check20("T6a NA-Tanggal kalah dari baris ber-tanggal",
-            out["SOURCE DATA"].iloc[0] == "input so harian",
-            f"picked {out['SOURCE DATA'].iloc[0]!r}")
-    out_old = (so.assign(_t=_pd.to_numeric(so["Tanggal"], errors="coerce"))
-               .sort_values("_t")
-               .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
-                                keep="last")[["SOURCE DATA"]])
-    check20("T6b ekspresi LAMA memang buggy (NA menang) — bukti probe 34d",
-            out_old["SOURCE DATA"].iloc[0] == "input promix 04 (NaN date)")
+    check20("T6a baris nilai-0 & whitespace & NA-Tanggal dibuang; tie d25 "
+            "harian menang",
+            len(out) == 1 and out["SOURCE DATA"].iloc[0] == "input so harian"
+            and out["Tanggal"].iloc[0] == 25,
+            str(out.to_dict("records")))
+
+    # bukti ekspresi v3.9.20 (pair-level) memang tak melihat nilai — baris
+    # template promix nilai-0 memenangkan race pair-level → label Promix
+    # TANPA data promix aktual (persis phantom user; diganti v3.9.21)
+    so_old = _pd.DataFrame({
+        "Nama Barang": ["Y", "Y"],
+        "NAMA RESTO": ["R", "R"],
+        "JENIS": ["SO", "SO"],
+        "Tanggal": _pd.array([25, 24], dtype="Int64"),
+        "Value": [0.0, 10.0],
+        "SOURCE DATA": ["input promix 04 take away", "input so harian"],
+    })
+    out_old = (so_old.assign(
+        _t=_pd.to_numeric(so_old["Tanggal"], errors="coerce"),
+        _s=so_old["SOURCE DATA"].astype(str))
+        .sort_values(["_t", "_s"], kind="mergesort", na_position="first")
+        .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"], keep="last"))
+    check20("T6b ekspresi LAMA: baris promix nilai-0 menang pair-level → "
+            "label Promix tanpa data (phantom — diganti v3.9.21)",
+            out_old["SOURCE DATA"].iloc[0] == "input promix 04 take away"
+            and float(out_old["Value"].iloc[0]) == 0.0,
+            str(out_old[["Tanggal", "Value", "SOURCE DATA"]].to_dict("records")))
 
     print("    [6b.2] fn_4205 mode 'lalu' — FIX 5 (R-4): anchor resto")
     d = tempfile.mkdtemp(prefix="t35d_w1_")
@@ -734,9 +778,9 @@ def run_test_v3920_fixes():
             f"{len(qin)} == {len(qin_b)}")
 
     final_e = build_append1(cfg_a)
-    check20("T15a SOURCE DATA sampai output final (1.SO)",
-            _v20_pair_source(final_e, "BRG-TIE1") == "input so harian"
-            and _v20_pair_source(final_e, "BRG-PAD") == "input so harian")
+    check20("T15a SOURCE DATA sampai output final (1.SO per tanggal)",
+            _v20_source_at(final_e, "BRG-TIE1", 10) == "input so harian"
+            and _v20_source_at(final_e, "BRG-PAD", 5) == "input so harian")
     so_pair = final_e[(final_e["JENIS"] == "4.IN")
                       & (final_e["Nama Barang"] == "BRG-PREF")
                       & (final_e["Tanggal"] == -28)]

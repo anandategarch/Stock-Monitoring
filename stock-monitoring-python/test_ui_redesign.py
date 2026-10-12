@@ -180,6 +180,23 @@ Memverifikasi:
     — hitungan internal TETAP (CEK 'ACR to BOM', Dev to BOM%, Stok
     Seharusnya tetap benar); (5) HIGHLIGHT latar #fef3c7 kolom Deviasi
     & SO_H (tag cell Tk 9; fallback Tk 8 tanpa tint).
+32. v3.9.21 — AMBANG ACR to BOM BISA DIATUR + PROMIX 04 PER-TANGGAL +
+    MINUS PER-CELL LAPORAN (§31, 4 permintaan user): (1) CEK 'ACR to
+    BOM' kini |Deviasi| > (ambang/100) × Total ACR (dulu kaku >100%);
+    ambang default 80, spinbox di kartu Filter KEDUA tab GR & PCS
+    (sinkron SharedACRThreshold — pola TANGGAL H; ubah → pivot cache
+    di-clear + recompute; settings.json persist atomic; clamp 1..200);
+    (2) CEK 'Promix 04' PER-TANGGAL: append1 LANGKAH 9 resolve sumber
+    per (pasangan × tanggal) atas baris rekap ber-NILAI non-nol ('input
+    so harian' menang atas promix di tanggal sama; 0/NaN/whitespace
+    tidak menentukan; NA-Tanggal dibuang) → deviasi_view membaca sumber
+    baris 1.SO TANGGAL H — label muncul HANYA bila SO tanggal H benar
+    bersumber promix (fix phantom "muncul di filter tapi data tidak
+    ada" — v3.9.19 tie urutan baris bisa melabel semua pasangan
+    campuran; v3.9.20 swing kebalikan); (3) prioritas Promix tetap
+    PERTAMA — tidak bertabrakan: pasangan so-harian dievaluasi CEK
+    normal penuh; (4) minus per-cell diperluas: Anomali COM (Median +
+    Selisih vs Median — dulu hanya COM) + Liga Deviasi (Rate).
 25. v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (§22/§26):
     analisa dirender MALAS (hanya saat mode 📈 aktif — dulu dirender juga
     saat tersembunyi → ±4,8 dtk freeze per refresh di file 40rb baris);
@@ -526,7 +543,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.20", APP_VERSION == "3.9.20", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.21", APP_VERSION == "3.9.21", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -1083,11 +1100,23 @@ def main():
     check("(v3.9.7) TEH MELATI R2 com(10)=5 == median → TIDAK ter-flag",
           teh_coms == ["8"], f"got {teh_coms}")
 
-    # minus merah PER CELL (v3.9.2 berlanjut): 2 baris minus → 2 cell COM
-    check("(v3.9.3) neg_cells: 2 cell COM minus",
-          len(lap._neg_cells) == 2 and
-          all(c[1] == "COM" for c in lap._neg_cells),
+    # minus merah PER CELL (v3.9.2 berlanjut; v3.9.21 user: "nilai minus
+    # juga diberi warna merah pada cell aja di tab laporan deviasi" —
+    # SEMUA kolom numerik): GULA AREN COM(−10)+Median(−30); KOPI R1
+    # COM(−5)+Selisih(−10−5=−15 → '(15)'? — minus terformat kurung).
+    check("(v3.9.21) neg_cells: 4 cell minus (COM+Median GULA; COM+"
+          "Selisih KOPI)",
+          len(lap._neg_cells) == 4 and
+          {c[1] for c in lap._neg_cells} == {"COM", "Median",
+                                             "Selisih vs Median"},
           f"got {lap._neg_cells}")
+    _neg_pairs = {(lap.tree.set(c[0], 'Nama Barang'), c[1])
+                  for c in lap._neg_cells}
+    check("(v3.9.21) neg_cells tepat: GULA→COM+Median, KOPI→COM+Selisih",
+          _neg_pairs == {("GULA AREN", "COM"), ("GULA AREN", "Median"),
+                         ("KOPI ROBUSTA", "COM"),
+                         ("KOPI ROBUSTA", "Selisih vs Median")},
+          f"got {_neg_pairs}")
     check("(v3.9.3) sel Status minus 2 / above 2 (per-cell warna)",
           len(lap._st_minus_cells) == 2 and len(lap._st_above_cells) == 2,
           f"got {len(lap._st_minus_cells)}/{len(lap._st_above_cells)}")
@@ -5707,7 +5736,8 @@ def main():
     _top30bp.destroy()
     root.update()
 
-    # FIX 4 — _so_source_lookup preferensi keep-LAST sort-Tanggal
+    # FIX 4 — _so_source_lookup: v3.9.21 PER-TANGGAL (sumber = baris
+    # 1.SO TANGGAL H; v3.9.20 dulu keep-LAST sort-Tanggal pair-level)
     _rows30v = [
         _row30b("V_DUP", "R", "1.SO", 24, 30.0, source="input so harian"),
         _row30b("V_DUP", "R", "1.SO", 25, 60.0,
@@ -5717,8 +5747,8 @@ def main():
     ]
     _top30v1, _dv30v1 = _make_dv30(pd.DataFrame(_rows30v))
     _, _vv30v1 = _row_vals30(_dv30v1, "V_DUP")
-    check("(v3.9.20/35-b) _so_source_lookup keep-LAST sort-Tanggal (baris "
-          "berjalan menang — persis append1 LANGKAH 9) → CEK Promix 04",
+    check("(v3.9.21) _so_source_lookup PER-TANGGAL H (sumber tgl-25 promix "
+          "dipakai; tgl-24 so-harian tak menimpa) → CEK Promix 04",
           _dv30v1._so_source_lookup.get(("V_DUP", "R")) ==
           "input promix 04 dine in" and
           _vv30v1 is not None and _vv30v1["CEK"] == "Promix 04",
@@ -5734,7 +5764,7 @@ def main():
                 source="input promix 04 dine in"),
     ]
     _top30v2, _dv30v2 = _make_dv30(pd.DataFrame(_rows30v))
-    check("(v3.9.20/35-b) _so_source_lookup tak bergantung urutan baris df "
+    check("(v3.9.21) _so_source_lookup tak bergantung urutan baris df "
           "(urutan dibalik → hasil sama)",
           _dv30v2._so_source_lookup.get(("V_REV", "R")) ==
           "input promix 04 dine in")
@@ -5750,8 +5780,8 @@ def main():
                                       source="input so harian")])
     _df30v3 = pd.concat([_na_row30, _df30v3], ignore_index=True)
     _top30v3, _dv30v3 = _make_dv30(_df30v3)
-    check("(v3.9.20/35-b) _so_source_lookup: baris Tanggal NA tidak pernah "
-          "menang (na_position=first)",
+    check("(v3.9.21) _so_source_lookup: baris Tanggal NA tak pernah "
+          "dipakai (tak match tanggal H)",
           _dv30v3._so_source_lookup.get(("V_NA", "R")) ==
           "input promix 04 dine in")
     _top30v3.destroy()
@@ -6443,6 +6473,181 @@ def main():
     _wb30e2.close()
     for _k30e, _v30e in _app_saved30.items():
         setattr(app, _k30e, _v30e)
+
+    # =====================================================================
+    # §31 — v3.9.21: AMBANG ACR to BOM bisa diatur + Promix 04 PER-TANGGAL
+    # (2 permintaan user: "di bagian ACR to BOM itu harusnya ada threshold
+    # > 80% absolute dan aku bisa atur" + "Promix 04 muncul di filter tapi
+    # data nya tidak ada").
+    # =====================================================================
+    from src.ui.deviasi_view import SharedACRThreshold as _SAT31
+
+    def _acr_df31(dev=85.0):
+        """Data GR: Total ACR (9.ACR tgl 1..25 × 4) = 100; SO(25) = 100;
+        SALDO(25) = 100 − dev → Deviasi = dev. IN(25) = dev − 10 supaya
+        kondisi Hitung Manual (rasio stok) TIDAK terpicu — hanya kondisi
+        ACR to BOM yang bervariasi dgn ambang."""
+        rows = [
+            _row30b("ACR TH", "R", "1.SO", 25, 100.0),
+            _row30b("ACR TH", "R", "1.SO", 24, 100.0),
+            _row30b("ACR TH", "R", "2.SALDO AKHIR", 25, 100.0 - dev),
+            _row30b("ACR TH", "R", "4.IN", 25, dev - 10.0),
+        ]
+        for d in range(1, 26):
+            rows.append(_row30b("ACR TH", "R", "9.ACR", d, 4.0))
+        return pd.DataFrame(rows)
+
+    _st31 = _SAT31(80.0)
+    _top31a, _dv31a = _make_dv30(_acr_df31(85.0))
+    check("(v3.9.21) Default ambang ACR = 80.0 (view tanpa shared state)",
+          _dv31a.acr_threshold == 80.0, f"got {_dv31a.acr_threshold}")
+    _dv31a._acr_state = _st31          # pasang state utk uji listener
+    _st31.subscribe(_dv31a._on_shared_acr_changed)
+    _, _vv31a = _row_vals30(_dv31a, "ACR TH")
+    check("(v3.9.21) Ambang 80%: |Dev 85| > 0,8 × ACR 100 → CEK 'ACR "
+          "to BOM' (dulu kaku >100% — tak terpicu)",
+          _vv31a is not None and _vv31a["CEK"] == "ACR to BOM",
+          f"cek={None if _vv31a is None else _vv31a['CEK']!r}")
+
+    # batas persis: |Dev| == ambang×ACR → TIDAK terpicu (strict >)
+    _top31b, _dv31b = _make_dv30(_acr_df31(80.0))
+    _, _vv31b = _row_vals30(_dv31b, "ACR TH")
+    check("(v3.9.21) Batas persis |Dev| == 80%×ACR → TIDAK terpicu "
+          "(strict >)",
+          _vv31b is not None and _vv31b["CEK"] != "ACR to BOM",
+          f"cek={None if _vv31b is None else _vv31b['CEK']!r}")
+    _top31b.destroy()
+    root.update()
+
+    # ubah ambang via state bersama → view ikut (pivot di-recompute)
+    _st31.set(90.0)
+    wait_view(root, _dv31a)
+    root.update()
+    _, _vv31c = _row_vals30(_dv31a, "ACR TH")
+    check("(v3.9.21) Ubah ambang 80→90 via SharedACRThreshold: |Dev 85| ≤ "
+          "0,9×ACR → CEK 'ACR to BOM' HILANG (recompute live)",
+          _vv31c is not None and _vv31c["CEK"] != "ACR to BOM",
+          f"cek={None if _vv31c is None else _vv31c['CEK']!r} "
+          f"thr={_dv31a.acr_threshold}")
+    check("(v3.9.21) Spinbox var ikut state bersama (90 tampil)",
+          _dv31a._acr_var.get() == "90",
+          f"got {_dv31a._acr_var.get()!r}")
+    _st31.unsubscribe(_dv31a._on_shared_acr_changed)
+    _top31a.destroy()
+    root.update()
+
+    # --- (b) persistensi settings.json (round-trip + clamp) --------------
+    import tempfile as _tf31
+    import src.ui.deviasi_view as _dvmod31
+    _tmpdir31 = _tf31.mkdtemp(prefix="t31_acr_")
+    _origpath31 = _dvmod31.acr_settings_path()
+    _dvmod31.acr_settings_path = lambda: __import__("pathlib").Path(
+        _tmpdir31) / "settings.json"
+    try:
+        _dvmod31.save_acr_threshold(55.5)
+        check("(v3.9.21) settings.json round-trip: save 55,5 → load 55,5",
+              _dvmod31.load_acr_threshold() == 55.5,
+              f"got {_dvmod31.load_acr_threshold()}")
+        import json as _j31
+        with open(_dvmod31.acr_settings_path(), "r", encoding="utf-8") as _f31:
+            _jdata31 = _j31.load(_f31)
+        _jdata31["lain"] = "tetap"
+        with open(_dvmod31.acr_settings_path(), "w",
+                  encoding="utf-8") as _f31:
+            _j31.dump(_jdata31, _f31)
+        _dvmod31.save_acr_threshold(120.0)
+        with open(_dvmod31.acr_settings_path(), "r", encoding="utf-8") as _f31:
+            _jdata31b = _j31.load(_f31)
+        check("(v3.9.21) Key lain di settings.json dipertahankan + nilai "
+              "baru",
+              _jdata31b.get("acr_threshold_pct") == 120.0
+              and _jdata31b.get("lain") == "tetap",
+              f"got {_jdata31b}")
+        _dvmod31.save_acr_threshold(0.5)   # di luar 1..200 → load clamp 80
+        check("(v3.9.21) Nilai tak valid di file → load clamp default 80",
+              _dvmod31.load_acr_threshold() == 80.0,
+              f"got {_dvmod31.load_acr_threshold()}")
+    finally:
+        _dvmod31.acr_settings_path = _origpath31
+
+    # --- (c) Promix 04 PER-TANGGAL — label ikut sumber tanggal H ---------
+    # pasangan: SO tgl-24 promix + SO tgl-25 so-harian → CEK TIDAK Promix
+    # (sumber tanggal H yang dipakai — bukan tanggal tertinggi/urutan)
+    _rows31p = [
+        _row30b("P-DATE", "R", "1.SO", 24, 30.0,
+                source="input promix 04 take away"),
+        _row30b("P-DATE", "R", "1.SO", 25, 60.0,
+                source="input so harian"),
+        _row30b("P-DATE", "R", "2.SALDO AKHIR", 25, 0.0,
+                source="input so harian"),
+    ]
+    _top31p, _dv31p = _make_dv30(pd.DataFrame(_rows31p))
+    _, _vv31p = _row_vals30(_dv31p, "P-DATE")
+    check("(v3.9.21) SO tanggal-24 promix + tanggal-25 so-harian → CEK "
+          "TIDAK Promix (sumber tanggal H yang dipakai — bukan tanggal "
+          "tertinggi/urutan)",
+          _vv31p is not None and _vv31p["CEK"] != "Promix 04"
+          and _dv31p._so_source_lookup.get(("P-DATE", "R"))
+          == "input so harian",
+          f"cek={None if _vv31p is None else _vv31p['CEK']!r} "
+          f"src={_dv31p._so_source_lookup.get(('P-DATE', 'R'))!r}")
+
+    # campuran SATU TANGGAL: so-harian + promix → harian menang
+    _rows31q = [
+        _row30b("P-MIX", "R", "1.SO", 25, 60.0, source="input so harian"),
+        _row30b("P-MIX", "R", "1.SO", 25, 10.0,
+                source="input promix 04 dine in"),
+        _row30b("P-MIX", "R", "2.SALDO AKHIR", 25, 0.0,
+                source="input so harian"),
+    ]
+    _top31q, _dv31q = _make_dv30(pd.DataFrame(_rows31q))
+    _, _vv31q = _row_vals30(_dv31q, "P-MIX")
+    check("(v3.9.21) Tanggal sama: so-harian + promix → 'input so harian' "
+          "menang (hitungan manual) — CEK normal",
+          _vv31q is not None and _vv31q["CEK"] != "Promix 04"
+          and _dv31q._so_source_lookup.get(("P-MIX", "R"))
+          == "input so harian",
+          f"cek={None if _vv31q is None else _vv31q['CEK']!r}")
+
+    # konsistensi filter CEK: nilai popup == nilai baris yang dirender
+    _vals31 = _dv31p._col_values("CEK")
+    _rendered31 = {_dv31p.tree.set(k, "CEK")
+                   for k in _dv31p.tree.get_children("")} - {""}
+    check("(v3.9.21) Konsistensi filter CEK: nilai popup == nilai baris "
+          "yang dirender (tanpa phantom)",
+          set(_vals31) == _rendered31,
+          f"popup={_vals31} rendered={sorted(_rendered31)}")
+    _top31p.destroy()
+    _top31q.destroy()
+    root.update()
+
+    # label mengikuti H: SO tgl-25 promix → Promix; Apply H=24 → hilang
+    _rows31r = [
+        _row30b("P-H", "R", "1.SO", 23, 20.0, source="input so harian"),
+        _row30b("P-H", "R", "1.SO", 24, 30.0, source="input so harian"),
+        _row30b("P-H", "R", "1.SO", 25, 60.0,
+                source="input promix 04 dine in"),
+        _row30b("P-H", "R", "2.SALDO AKHIR", 25, 0.0,
+                source="input so harian"),
+        _row30b("P-H", "R", "2.SALDO AKHIR", 24, 5.0,
+                source="input so harian"),
+    ]
+    _top31r, _dv31r = _make_dv30(pd.DataFrame(_rows31r))
+    _, _vv31r = _row_vals30(_dv31r, "P-H")
+    check("(v3.9.21) H=25: SO tgl-25 promix → CEK Promix 04",
+          _vv31r is not None and _vv31r["CEK"] == "Promix 04",
+          f"cek={None if _vv31r is None else _vv31r['CEK']!r}")
+    _dv31r.tanggal_h_var.set("24")
+    _dv31r._on_tanggal_h_change()
+    wait_view(root, _dv31r)
+    root.update()
+    _, _vv31s = _row_vals30(_dv31r, "P-H")
+    check("(v3.9.21) Apply H=24: sumber tgl-24 so-harian → label Promix "
+          "HILANG (mengikuti tanggal analisa)",
+          _vv31s is not None and _vv31s["CEK"] != "Promix 04",
+          f"cek={None if _vv31s is None else _vv31s['CEK']!r}")
+    _top31r.destroy()
+    root.update()
 
     # Cleanup
     root.destroy()

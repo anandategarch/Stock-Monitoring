@@ -1,6 +1,10 @@
 """
 laporan_deviasi_view.py — v3.9.3: DAFTAR ANOMALI PEMAKAIAN (COM).
 
+v3.9.21 (user: "nilai minus juga diberi warna merah pada cell aja di tab
+laporan deviasi"): minus merah PER CELL kini mencakup SEMUA kolom numerik
+(COM · Median · Selisih vs Median — dulu hanya COM).
+
 Permintaan user: "hapus isi data pada tab laporan deviasi dan sementara
 ganti dengan list nama barang dan resto yang pemakaian (com) nya minus
 atau lebih tinggi dari median pada pada kolom H".
@@ -752,6 +756,19 @@ class LaporanDeviasiView(tk.Frame):
                     st_above_cells.append((f"row_{i}", "Status"))
                 else:
                     tags.append("above_median")
+            # v3.9.21 (user: "nilai minus juga diberi warna merah pada
+            # cell aja di tab laporan deviasi") — minus merah PER CELL di
+            # SEMUA kolom numerik (bukan hanya COM): Median & Selisih vs
+            # Median yang bernilai minus kini ikut merah (komparasi & view
+            # lain sudah pola ini sejak v3.9.2).
+            if self._cell_tags:
+                if med_val < 0:
+                    neg_cells.append((f"row_{i}", "Median"))
+                if sel_val < 0:
+                    neg_cells.append((f"row_{i}", "Selisih vs Median"))
+            elif any(v < 0 for v in (com_val, med_val, sel_val)) \
+                    and "negative" not in tags:
+                tags.append("negative")
 
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))

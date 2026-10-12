@@ -1,9 +1,9 @@
 """
-app.py — Shell UI Stock Monitoring v3.9.13.
+app.py — Shell UI Stock Monitoring v3.9.21.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.9.13 + [💾 Export] │
+    │ ⬛ Toolbar gelap: 📊 judul + v3.9.21 + [💾 Export] │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (9 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
@@ -19,9 +19,11 @@ Struktur jendela (ala aplikasi Waste):
                           rentang tanggal default 26 BULAN LALU s/d 31
                           BULAN BERJALAN — v3.6)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
-                          (input TANGGAL H + Apply H — satu-satunya)
+                          (input TANGGAL H + Apply H — satu-satunya;
+                          spinbox AMBANG ACR to BOM — v3.9.21)
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
-                          (chip H read-only, ikut tab GR — v3.9)
+                          (chip H read-only, ikut tab GR — v3.9;
+                          spinbox ambang ACR sinkron — v3.9.21)
   6. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
                           kolom SO + kolom Hasil Audit (logika macro VBA ×
                           data app — v3.6, tanpa sheet 29) + drill-down
@@ -107,7 +109,13 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 from src.main import PipelineStopped, run_pipeline
-from src.ui.deviasi_view import DeviasiView, SharedPivotCache, SharedTanggalH
+from src.ui.deviasi_view import (
+    DeviasiView,
+    SharedACRThreshold,
+    SharedPivotCache,
+    SharedTanggalH,
+    load_acr_threshold,
+)
 from src.ui.export_sheets import add_pivot_sheet
 from src.ui.followup import FollowUpStore
 from src.ui.followup_view import FollowUpView
@@ -149,7 +157,40 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.20"  # v3.9.20 — DEEP AUDIT & FIX (5 agen audit + 5 agen fix): 1 BUG + 15 RISK diperbaiki + penuntasan "semua filter = data yang ada" (komparasi reset/popup · deviasi satuan/chrono/source · rincian NA/float/NaT/periode · pivot/FU/export · pipeline LANGKAH 9/sheet lalu/fn_4205)
+APP_VERSION = "3.9.21"  # v3.9.21 — AMBANG ACR to BOM BISA DIATUR + PROMIX 04 PER-TANGGAL + MINUS PER-CELL LAPORAN
+# v3.9.21 — 4 permintaan user:
+# (1) AMBANG ACR to BOM (user: "di bagian ACR to BOM itu harusnya ada
+#     threshold > 80% absolute dan aku bisa atur"): CEK kondisi ke-5 kini
+#     |Deviasi| > (ambang/100) × Total ACR — dulu kaku > 100% × Total
+#     ACR. Ambang default 80, spinbox "AMBANG ACR to BOM" di kartu Filter
+#     KEDUA tab Deviasi GR & PCS (sinkron via SharedACRThreshold — pola
+#     TANGGAL H); ubah ambang → pivot cache di-clear + recompute live;
+#     nilai bertahan lintas sesi (settings.json, atomic write; file
+#     hilang/korup → default 80 senyap).
+# (2) PROMIX 04 PER-TANGGAL (user: "pada bagian CEK ada muncul nilai
+#     Promix 04 di filter tapi kenapa data nya tidak ada?"): sumber SO
+#     kini diresolve PER (pasangan × tanggal) atas baris rekap ber-NILAI
+#     NON-NOL (append1 LANGKAH 9 merge per (pasangan, Tanggal); 'input
+#     so harian' menang atas promix pada tanggal sama — hitungan manual;
+#     baris template bernilai 0/NaN & sumber whitespace-only tidak
+#     menentukan). deviasi_view membaca sumber baris 1.SO TANGGAL H —
+#     label "Promix 04" muncul HANYA bila SO tanggal analisa BENAR
+#     bersumber promix. Menggantikan resolusi pair-level "tanggal
+#     tertinggi" yang rapuh: v3.9.19 bisa melabel SEMUA pasangan campuran
+#     Promix (tie urutan baris — persis phantom yang user lihat);
+#     v3.9.20 swing kebalikan (tak pernah Promix meski SO tanggal H
+#     memang turunan promix — data real 01.1 CEK STOCK V2: 12 pasangan
+#     promix di tgl 25 kini terlabel benar, 0 phantom).
+# (3) TIDAK BERTABRAKAN dgn CEK lain (user: "Promix 04 bakal bertabrakan
+#     gak logika nya dengan analisa CEK yang lain?"): prioritas tetap —
+#     Promix 04 kondisi PERTAMA (SO sistem-turunan → pola naik/turun SO
+#     tak bermakna); dgn resolusi per-tanggal label jadi AKURAT sehingga
+#     pasangan so-harian dievaluasi CEK normal sepenuhnya.
+# (4) MINUS PER-CELL LAPORAN DEVIASI (user: "nilai minus juga diberi
+#     warna merah pada cell aja di tab laporan deviasi"): Anomali COM —
+#     Median & Selisih vs Median kini ikut merah per-cell (dulu hanya
+#     COM); Liga Deviasi — Rate minus ikut merah (⟺ DEV minus).
+# v3.9.20 — DEEP AUDIT & FIX (5 agen audit + 5 agen fix): 1 BUG + 15 RISK diperbaiki + penuntasan "semua filter = data yang ada" (komparasi reset/popup · deviasi satuan/chrono/source · rincian NA/float/NaT/periode · pivot/FU/export · pipeline LANGKAH 9/sheet lalu/fn_4205)
 # v3.9.20 — DEEP AUDIT & FIX (gelombang audit 34-a..34-e + fix 35-a..35-d,
 # 25 perbaikan; 1 BUG + 15 RISK + 9 hardening/NIT):
 # (1) KOMPARASI (35-a/audit 34-a): reset filter 4 tabel analisa (Top/Flip/
@@ -638,6 +679,10 @@ class StockMonitorApp:
         # v3.9: TANGGAL H dibagi GR & PCS — input 1× (di tab GR), berlaku
         # di kedua tab (permintaan user: tidak double input)
         self._shared_h = SharedTanggalH(25)
+        # v3.9.21: AMBANG ACR to BOM dibagi GR & PCS (user: "threshold
+        # > 80% absolute dan aku bisa atur") — spinbox kedua tab sinkron;
+        # nilai bertahan lintas sesi (settings.json), default 80.
+        self._shared_acr = SharedACRThreshold(load_acr_threshold())
 
         # Style ttk (design system global)
         apply_theme(self.root)
@@ -1391,7 +1436,8 @@ class StockMonitorApp:
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache,
-            h_state=self._shared_h, h_editable=True)
+            h_state=self._shared_h, h_editable=True,
+            acr_state=self._shared_acr)   # v3.9.21 — ambang ACR bersama
         self.deviasi_gr_view.pack(fill="both", expand=True)
 
     def _build_deviasi_pcs_tab(self):
@@ -1402,7 +1448,8 @@ class StockMonitorApp:
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache,
-            h_state=self._shared_h, h_editable=False)
+            h_state=self._shared_h, h_editable=False,
+            acr_state=self._shared_acr)   # v3.9.21 — ambang ACR bersama
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     def _build_in_selisih_tab(self):

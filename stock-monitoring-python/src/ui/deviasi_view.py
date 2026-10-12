@@ -5,6 +5,25 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.21 (2 permintaan user):
+- AMBANG ACR to BOM yang BISA DIATUR (user: "di bagian ACR to BOM itu
+  harusnya ada threshold > 80% absolute dan aku bisa atur"): CEK
+  kondisi ke-5 kini |Deviasi| > (ambang/100) × Total ACR — dulu kaku
+  > 100% × Total ACR. Ambang default 80, spinbox di kartu Filter KEDUA
+  tab (GR & PCS) sinkron via SharedACRThreshold (pola SharedTanggalH),
+  tersimpan di settings.json (bertahan lintas sesi); ubah ambang →
+  pivot cache di-clear + refresh (CEK hidup di pivot ter-cache).
+- CEK "Promix 04" PER-TANGGAL (fix user: "ada muncul nilai Promix 04 di
+  filter tapi kenapa data nya tidak ada"): sumber SO kini dibaca dari
+  baris 1.SO TANGGAL ANALISA H (append1 LANGKAH 9 resolve sumber per
+  (pasangan × tanggal) atas baris rekap ber-NILAI non-nol — 'input so
+  harian' menang atas promix pada tanggal sama; baris 0 = template
+  kosong, tidak ikut menentukan). Label muncul HANYA bila SO tanggal H
+  BENAR bersumber promix — tidak lagi pair-level race tanggal-tertinggi
+  (dulu: v3.9.19 bisa melabel SEMUA pasangan campuran sbg Promix krn
+  tie urutan baris; v3.9.20 swing kebalikan: tak pernah Promix meski
+  SO tanggal H memang turunan promix).
+
 v3.9.20 (deep audit 34-b/fix 35-b): _hl_cells di-init di __init__ (sort/
 reapply tag sebelum render pertama tidak crash di Tk 9) +
 _so_source_lookup keep-LAST sort-Tanggal (preferensi append1 LANGKAH 9)
@@ -93,8 +112,11 @@ Fitur v3.1 (dipertahankan):
 - Loading overlay + compute/render async (UI tidak membeku)
 """
 import contextlib
+import json
+import os
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable, Optional
 
@@ -207,6 +229,90 @@ class SharedTanggalH:
         return True
 
 
+class SharedACRThreshold:
+    """State AMBANG ACR to BOM (%) yang DIBAGI antar tab Deviasi GR & PCS
+    (v3.9.21 — permintaan user: "di bagian ACR to BOM itu harusnya ada
+    threshold > 80% absolute dan aku bisa atur").
+
+    CEK "ACR to BOM" terpicu bila |Deviasi| > (ambang/100) × Total ACR —
+    dulu kaku > 100% × Total ACR. Default 80; diatur 1..200 via spinbox
+    di kartu Filter kedua tab (sinkron seperti TANGGAL H).
+
+    Nilai dibaca/ditulis ke settings.json folder aplikasi (pola
+    followup.json: atomic save; file hilang/korup → default 80 senyap).
+    """
+
+    def __init__(self, initial: float = 80.0):
+        self._pct = float(initial)
+        self._listeners: list[Callable] = []
+
+    @property
+    def pct(self) -> float:
+        return self._pct
+
+    def subscribe(self, fn: Callable):
+        self._listeners.append(fn)
+
+    def unsubscribe(self, fn: Callable) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def set(self, new_pct) -> bool:
+        """Ubah ambang + panggil SEMUA listener. Return True bila berubah."""
+        try:
+            new_pct = float(new_pct)
+        except (TypeError, ValueError):
+            return False
+        if not (1.0 <= new_pct <= 200.0) or new_pct == self._pct:
+            return False
+        self._pct = new_pct
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):
+                fn(new_pct)
+        return True
+
+
+# --- persistensi ambang ACR (settings.json — pola followup.json) ----------
+_SETTINGS_BASE = Path(__file__).resolve().parent.parent.parent
+
+
+def acr_settings_path() -> Path:
+    return _SETTINGS_BASE / "settings.json"
+
+
+def load_acr_threshold() -> float:
+    """Ambang tersimpan (default 80.0 bila file hilang/korup/nilai di luar
+    1..200 — senyap, tidak menjatuhkan app)."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = float(json.load(f).get("acr_threshold_pct", 80.0))
+        return val if 1.0 <= val <= 200.0 else 80.0
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 80.0
+
+
+def save_acr_threshold(pct: float) -> None:
+    """Simpan atomik (tmp → replace); kegagalan I/O senyap; key lain di
+    settings.json dipertahankan (read-modify-write)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["acr_threshold_pct"] = round(float(pct), 2)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
 class DeviasiView(tk.Frame):
     """Wide matrix view untuk DEVIASI GR/PCS.
 
@@ -256,7 +362,8 @@ class DeviasiView(tk.Frame):
                  followup_store: FollowUpStore | None = None,
                  shared_cache: SharedPivotCache | None = None,
                  h_state: SharedTanggalH | None = None,
-                 h_editable: bool = True):
+                 h_editable: bool = True,
+                 acr_state: SharedACRThreshold | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.satuan_mode = satuan_mode
@@ -264,6 +371,10 @@ class DeviasiView(tk.Frame):
         self._h_state = h_state
         self._h_editable = h_editable
         self.tanggal_h = h_state.h if h_state is not None else 25
+        # v3.9.21 — ambang ACR to BOM dibagi GR & PCS (persen |Deviasi| vs
+        # Total ACR); tanpa acr_state (standalone/test) → 80.0.
+        self._acr_state = acr_state
+        self.acr_threshold = acr_state.pct if acr_state is not None else 80.0
         self._cached_pivot = None
         self._cached_h = None
         self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
@@ -373,6 +484,25 @@ class DeviasiView(tk.Frame):
         self._kategori_combo.bind(
             "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
 
+        # v3.9.21 — AMBANG ACR to BOM (user: "di bagian ACR to BOM itu
+        # harusnya ada threshold > 80% absolute dan aku bisa atur"):
+        # CEK terpicu bila |Deviasi| > ambang% × Total ACR. Spinbox kedua
+        # tab sinkron (SharedACRThreshold — pola TANGGAL H); ubah →
+        # pivot cache dibersihkan + refresh (CEK hidup di pivot ter-cache).
+        tk.Label(r0b, text="AMBANG ACR to BOM", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._acr_var = tk.StringVar(value=str(int(self.acr_threshold))
+                                     if float(self.acr_threshold).is_integer()
+                                     else str(self.acr_threshold))
+        acr_spin = ttk.Spinbox(
+            r0b, textvariable=self._acr_var, from_=1, to=200,
+            increment=1, width=5, font=font(9),
+            command=self._on_acr_threshold_change)
+        acr_spin.pack(side="left", padx=(6, 0))
+        acr_spin.bind("<Return>", lambda e: self._on_acr_threshold_change())
+        tk.Label(r0b, text="% ×BOM", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 0))
+
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
@@ -475,6 +605,11 @@ class DeviasiView(tk.Frame):
         # SharedPivotCache ter-lock, pivot tetap dihitung 1×).
         if self._h_state is not None:
             self._h_state.subscribe(self._on_shared_h_changed)
+        # v3.9.21 — ambang ACR dibagi GR & PCS (spinbox kedua tab);
+        # unsubscribe defensif pola H (lihat _on_view_destroy).
+        if self._acr_state is not None:
+            self._acr_state.subscribe(self._on_shared_acr_changed)
+        if self._h_state is not None or self._acr_state is not None:
             # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
             # (pola laporan/komparasi) — tanpa ini listener tetap
             # hidup bila suatu saat view direbuild (dobel-refresh zombie).
@@ -489,6 +624,52 @@ class DeviasiView(tk.Frame):
             return
         if self._h_state is not None:
             self._h_state.unsubscribe(self._on_shared_h_changed)
+        if self._acr_state is not None:
+            self._acr_state.unsubscribe(self._on_shared_acr_changed)
+
+    # v3.9.21 — handler spinbox ambang ACR (dipanggil tombol spin / Enter).
+    def _on_acr_threshold_change(self):
+        try:
+            val = float(str(self._acr_var.get()).strip().replace(",", "."))
+        except ValueError:
+            self._acr_var.set(self._fmt_threshold(self.acr_threshold))
+            return
+        if not (1.0 <= val <= 200.0):
+            messagebox.showwarning(
+                "Ambang ACR to BOM",
+                "Ambang harus angka 1–200 (persen × Total ACR).",
+                parent=self.winfo_toplevel())
+            self._acr_var.set(self._fmt_threshold(self.acr_threshold))
+            return
+        if self._acr_state is not None:
+            # jalur utama: state bersama → listener kedua tab + persist
+            self._acr_state.set(val)
+            save_acr_threshold(val)
+        else:
+            # standalone (tanpa shared state): refresh instance ini saja
+            self.acr_threshold = val
+            self._cached_pivot = None
+            self._refresh()
+
+    @staticmethod
+    def _fmt_threshold(pct: float) -> str:
+        f = float(pct)
+        return str(int(f)) if f.is_integer() else str(f)
+
+    # v3.9.21 — listener state bersama (dipanggil SharedACRThreshold saat
+    # ambang diubah dari tab mana pun — termasuk tab ini sendiri).
+    def _on_shared_acr_changed(self, new_pct):
+        self.acr_threshold = float(new_pct)
+        if hasattr(self, "_acr_var"):
+            self._acr_var.set(self._fmt_threshold(self.acr_threshold))
+        # CEK hidup di pivot ter-cache → invalidasi + recompute (H tetap).
+        self._cached_pivot = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
 
     # =========================================================================
     # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
@@ -766,31 +947,34 @@ class DeviasiView(tk.Frame):
             self._kategori_lookup = {}
 
         # v3.9.19 — lookup SOURCE DATA per (barang, resto) dari baris
-        # JENIS 1.SO (kolom SOURCE DATA hasil merge append1 dari REKAP
-        # MENTAH; konstanta per pasangan — append1 sudah preferensi
-        # baris berjalan). Dipakai kondisi CEK ke-0 "Promix 04": SO
-        # bersumber BUKAN "input so harian" (mis. "input promix 04 dine
-        # in" / "take away") → CEK = Promix 04.
+        # JENIS 1.SO. v3.9.21 — PER-TANGGAL (fix "Promix 04 muncul di
+        # filter tapi data tidak ada"): sumber = baris 1.SO pada
+        # TANGGAL ANALISA H saja (append1 LANGKAH 9 kini merge sumber per
+        # (pasangan × tanggal) atas baris rekap ber-NILAI non-nol — 'input
+        # so harian' menang atas promix pada tanggal sama; baris template
+        # bernilai 0 tidak ikut menentukan). Pasangan tanpa SO ber-sumber
+        # di tanggal H → tak berlabel Promix (kondisi tak berlaku).
         self._so_source_lookup = {}
         if "SOURCE DATA" in df.columns:
             so_src = df[
                 (df["JENIS"] == "1.SO") & df["SOURCE DATA"].notna()
             ][["Nama Barang", "NAMA RESTO", "Tanggal", "SOURCE DATA"]]
             if not so_src.empty:
-                # FIX 35-b (audit 34-b NIT-1): preferensi = baris BERJALAN,
-                # persis append1 LANGKAH 9 — sort Tanggal (NA di awal
-                # supaya keep="last" memilih tanggal TERTINGGI = positif/
-                # berjalan) lalu keep="last"; mergesort = stabil utk TIE
-                # tanggal sama. Dulu keep="first" urutan df — netral di
-                # data pipeline (SOURCE DATA konstan per pasangan hasil
-                # merge broadcast append1), menyimpang hanya di input
-                # buatan/heterogen (probe 34b V_DUP).
+                _t = pd.to_numeric(so_src["Tanggal"], errors="coerce")
+                so_src = so_src[_t == int(h)]
+            if not so_src.empty:
+                # dedup defensif per pasangan: 'input so harian' menang
+                # (sudah unik per (pasangan×tanggal) dari LANGKAH 9 —
+                # jalur ini hanya utk input df buatan/test).
+                so_src = so_src.assign(
+                    _s=so_src["SOURCE DATA"].astype(str))
+                so_src = so_src[
+                    so_src["_s"].str.strip().ne("")]
                 so_src = (
                     so_src.assign(
-                        _t=pd.to_numeric(so_src["Tanggal"],
-                                         errors="coerce"))
-                    .sort_values("_t", na_position="first",
-                                 kind="mergesort")
+                        _harian=so_src["_s"].str.strip().str.lower()
+                        == "input so harian")
+                    .sort_values("_harian", kind="mergesort")
                     .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
                                      keep="last")
                 )
@@ -926,12 +1110,17 @@ class DeviasiView(tk.Frame):
                 so_h, so_m1, out=np.full(n, np.inf), where=so_m1 > 0)
         cond_drastis = (so_m1 > 0) & (drop_ratio < 0.5)
 
-        # v3.9.6: kondisi ke-5 "ACR to BOM" — |Deviasi| melebihi Total ACR
-        # (BOM/penjualan 1..H): selisih stok lebih besar dari pemakaian
-        # teoretis sebulan → pasti salah. Melengkapi port formula LET
-        # (dulu "4 dari 5 kondisi — ACR butuh BOM, TODO"); kategori sama
-        # persis string sheet Follow UP / DEVIASI GR file asli user.
-        cond_acr = (total_acr > 0) & (np.abs(deviasi) > total_acr)
+        # v3.9.6: kondisi ke-5 "ACR to BOM" — |Deviasi| melebihi ambang%
+        # × Total ACR (BOM/penjualan 1..H): selisih stok lebih besar dari
+        # pemakaian teoretis sebulan → pasti salah. Melengkapi port
+        # formula LET (dulu "4 dari 5 kondisi — ACR butuh BOM, TODO");
+        # kategori sama persis string sheet Follow UP / DEVIASI GR file
+        # asli user.
+        # v3.9.21 (user: "harusnya ada threshold > 80% absolute dan aku
+        # bisa atur"): dulu kaku > 100% × Total ACR — kini ambang bisa
+        # diatur (default 80; spinbox kedua tab; SharedACRThreshold).
+        _acr_cut = float(self.acr_threshold) / 100.0
+        cond_acr = (total_acr > 0) & (np.abs(deviasi) > _acr_cut * total_acr)
 
         # v3.9.19 — kondisi ke-0 "Promix 04" (PRIORITAS PERTAMA):
         # SO pasangan ini bersumber BUKAN "input so harian" (mis. promix

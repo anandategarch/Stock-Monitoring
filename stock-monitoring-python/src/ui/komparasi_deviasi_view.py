@@ -3442,6 +3442,13 @@ class KomparasiDeviasiView(tk.Frame):
             if dv is not None and not (isinstance(dv, float)
                                        and np.isnan(dv)) and dv < 0:
                 neg_cells.append((iid, "DEV"))
+            # v3.9.21 (user: "nilai minus juga diberi warna merah pada
+            # cell aja di tab laporan deviasi") — Rate minus (⟺ DEV minus
+            # pada BOM positif) ikut merah per-cell.
+            rv = cols_np["Rate"][i]
+            if rv is not None and not (isinstance(rv, float)
+                                       and np.isnan(rv)) and rv < 0:
+                neg_cells.append((iid, "Rate"))
             items.append(("", iid, {"values": values, "tags": tuple(tags)}))
         self._liga_z_cells = z_cells
         self._liga_neg_cells = neg_cells

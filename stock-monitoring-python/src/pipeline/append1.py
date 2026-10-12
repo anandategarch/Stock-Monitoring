@@ -5,11 +5,20 @@ deviasi, merge kategori, dan unpivot ke format long.
 
 Output: DataFrame long format dengan kolom:
   Nama Barang, NAMA RESTO, Tanggal, JENIS, NILAI, Nomor, Nomor PO,
-  #Tgl/Jam Pembuatan IT, KATEGORI, SOURCE KIRIMAN
+  #Tgl/Jam Pembuatan IT, KATEGORI, SOURCE KIRIMAN (+ SOURCE DATA v3.9.19)
 
-v3.9.20 (deep audit 34-d/fix 35-d): LANGKAH 9 SOURCE DATA — tie-break
-DETERMINISTIK (mergesort + kunci sekunder bentuk-string; tie →
-"input so harian" menang, konservatif utk CEK Promix 04) +
+v3.9.21: LANGKAH 9 SOURCE DATA kini PER-(pasangan × Tanggal) atas baris
+rekap ber-NILAI non-nol (fix user "Promix 04 muncul di filter tapi data
+tidak ada"): tanggal sama ada 'input so harian' + promix → harian menang
+(hitungan manual > turunan sistem); hanya promix non-nol → sumber promix;
+baris template bernilai 0/NaN & sumber whitespace-only tidak menentukan.
+Sumber menempel pada baris final per (pasangan, Tanggal) — deviasi_view
+membaca sumber baris 1.SO tanggal H. Deterministik (mergesort, kunci
+eksplisit); menggantikan resolusi pair-level "tanggal tertinggi" yang
+rapuh (v3.9.19 melabel semua pasangan campuran Promix krn tie urutan
+baris; v3.9.20 swing kebalikannya — tak pernah Promix).
+
+v3.9.20 (deep audit 34-d/fix 35-d): LANGKAH 9 tie-break deterministik +
 na_position="first" (NA-Tanggal tak pernah menang) + SOURCE DATA
 di-strip (NA-safe, tanpa lower-case).
 """
@@ -485,62 +494,89 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                 final = final.merge(satuan_map, on=["Nama Barang", "NAMA RESTO"], how="left")
 
     # =========================================================================
-    # 9. LOOKUP SOURCE DATA (v3.9.19 — CEK "Promix 04" di tab Deviasi)
+    # 9. LOOKUP SOURCE DATA (v3.9.19 — CEK "Promix 04" di tab Deviasi;
+    # v3.9.21 — PER-TANGGAL, fix "Promix 04 muncul di filter tapi data
+    # tidak ada")
     # =========================================================================
     # SOURCE DATA hanya ada di Full Rekap Mentah (JENIS 'SO': "input so
-    # harian" / "input promix 04 dine in" / "input promix 04 take away").
-    # Merge per (Nama Barang, NAMA RESTO) — preferensi baris BERJALAN
-    # (Tanggal positif; rekap bulan lalu di-negasi → sort ascending lalu
-    # keep LAST = tanggal tertinggi). Nilai dipakai deviasi_view utk
-    # kondisi CEK "Promix 04" (SO bukan bersumber "input so harian").
-    # FIX audit 34-d (R-1/R-2/N-1):
-    # - SOURCE DATA di-strip saat membangun tabel merge (NA-safe: hanya
-    #   string non-null; nilai non-string apa adanya; JANGAN lower-case —
-    #   perbandingan downstream sudah strip+lower di deviasi_view).
-    # - sort STABIL (mergesort) + na_position="first" → baris Tanggal NA
-    #   tidak pernah menang atas baris ber-tanggal (keep LAST; defensive —
-    #   Tanggal selalu header hari via fn_rekap_mentah).
-    # - kunci sekunder bentuk-string SOURCE DATA → pemenang TIE (pasangan
-    #   & tanggal sama, dua baris JENIS SO) TIDAK bergantung urutan baris
-    #   sheet: string terbesar menang ('input so harian' > 'input promix
-    #   04 ...' → tie memilih sumber so-harian).
+    # harian" / "input promix jam 4 dine in" / "input promix jam 4 take
+    # away" / "input penjualan dine in/take away 04"). Struktur rekap
+    # real: SATU pasangan punya BEBERAPA baris sumber (manual + promix
+    # dine in + promix take away) — template baris dengan sel hari 0 di
+    # tanggal tanpa hitungan; sel bernilai = sumber SO aktual tanggal itu.
+    #
+    # v3.9.21 RESOLUSI PER (Nama Barang, NAMA RESTO, Tanggal) atas baris
+    # ber-NILAI NON-NOL saja:
+    # - tanggal sama ada baris 'input so harian' + promix → SO HARIAN
+    #   menang (hitungan manual mengalahkan turunan sistem);
+    # - hanya promix (nilai non-nol) → sumber promix → CEK "Promix 04"
+    #   di tanggal itu (deviasi_view membaca baris 1.SO tanggal H);
+    # - nilai 0/NaN → TIDAK ikut menentukan sumber (baris template);
+    # - sumber whitespace-only ('   ') → dianggap TIDAK ada sumber.
+    # Deterministik penuh (mergesort + kunci eksplisit; tidak bergantung
+    # urutan baris sheet) dan bebas race "tanggal tertinggi" pair-level
+    # (v3.9.19 bisa melabel semua pasangan campuran sbg Promix krn tie
+    # urutan baris di tanggal tertinggi; v3.9.20 swing kebalikannya).
     if (full_rekap_so is not None
             and "SOURCE DATA" in full_rekap_so.columns
             and "Nama Barang" in final.columns
-            and "NAMA RESTO" in final.columns):
+            and "NAMA RESTO" in final.columns
+            and "Tanggal" in final.columns):
         so_rows = full_rekap_so[
             (full_rekap_so["JENIS"].astype(str).str.strip().str.upper()
              == "SO")
             & full_rekap_so["SOURCE DATA"].notna()
         ]
         if not so_rows.empty:
-            # _src = nilai output (strip hanya utk string non-null),
-            # _s = bentuk string utk kunci sort sekunder (type-safe —
-            # sort multi-kunci dgn nilai campur str/non-str bisa TypeError).
+            # nilai non-nol saja + strip sumber (whitespace-only → ''
+            # dibuang — bukan sumber). Kolom nilai = "Value" (schema
+            # query rekap); fallback "NILAI" utk input buatan.
+            _val_col = ("Value" if "Value" in so_rows.columns
+                        else ("NILAI" if "NILAI" in so_rows.columns
+                              else None))
+            if _val_col is not None:
+                _val = pd.to_numeric(so_rows[_val_col], errors="coerce")
+                _src0 = so_rows["SOURCE DATA"].map(
+                    lambda v: v.strip() if isinstance(v, str) else v)
+                _t0 = pd.to_numeric(so_rows["Tanggal"], errors="coerce")
+                _keep = ((_val.fillna(0) != 0)
+                         & _src0.astype(str).str.strip().ne("")
+                         & _t0.notna())   # NA-Tanggal tak match kunci merge
+                so_rows = so_rows[_keep]
+        if not so_rows.empty:
             _src = so_rows["SOURCE DATA"].map(
                 lambda v: v.strip() if isinstance(v, str) else v)
+            _s = _src.astype(str)
             src_map = (
-                so_rows.assign(
-                    _t=pd.to_numeric(so_rows["Tanggal"], errors="coerce"),
-                    _src=_src, _s=_src.astype(str))
-                .sort_values(["_t", "_s"], kind="mergesort",
-                             na_position="first")
-                .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
-                                 keep="last")
-                [["Nama Barang", "NAMA RESTO", "_src"]]
+                so_rows.assign(_src=_src, _s=_s,
+                               _harian=_s.str.strip().str.lower()
+                               == "input so harian")
+                .sort_values(["_harian", "_s"], kind="mergesort")
+                .drop_duplicates(
+                    subset=["Nama Barang", "NAMA RESTO", "Tanggal"],
+                    keep="last")
+                [["Nama Barang", "NAMA RESTO", "Tanggal", "_src"]]
                 .rename(columns={"_src": "SOURCE DATA"})
             )
+            # samakan tipe kunci Tanggal dgn final (Int64; NA tak match —
+            # memang tanpa sumber)
+            src_map = src_map.assign(
+                Tanggal=pd.to_numeric(
+                    src_map["Tanggal"], errors="coerce").astype("Int64"))
+            _merge_on = ["Nama Barang", "NAMA RESTO", "Tanggal"]
             if "SOURCE DATA" in final.columns:
                 final = final.merge(
                     src_map.rename(columns={"SOURCE DATA": "_SRC_LOOKUP"}),
-                    on=["Nama Barang", "NAMA RESTO"], how="left")
+                    on=_merge_on, how="left")
                 final["SOURCE DATA"] = final["SOURCE DATA"].fillna(
                     final["_SRC_LOOKUP"])
                 final = final.drop(columns=["_SRC_LOOKUP"])
             else:
-                final = final.merge(
-                    src_map, on=["Nama Barang", "NAMA RESTO"], how="left")
-            print(f"    SOURCE DATA (rekap SO): {len(src_map)} pasangan")
+                final = final.merge(src_map, on=_merge_on, how="left")
+            print(f"    SOURCE DATA (rekap SO per tanggal): "
+                  f"{len(src_map)} pasangan-tanggal")
+        else:
+            print("    SOURCE DATA (rekap SO): 0 baris ber-sumber non-nol")
 
     print(f"  [Append1] DONE: {len(final)} rows")
     return final

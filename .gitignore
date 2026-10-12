@@ -21,3 +21,7 @@ followup*.json.bad
 
 # Dev tools sandbox (skrip uji real-data — path sandbox, bukan kode app)
 .dev/
+
+# v3.9.21 — ambang ACR to BOM (persist lokal per instalasi)
+settings.json
+settings.json.tmp
