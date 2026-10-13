@@ -6,6 +6,12 @@ Path bisa diubah user tanpa mengubah kode.
 v3.9.20 (deep audit 34-d/fix 35-d): setdefault
 Sheets["Pemindahan4205Lalu"] (default = nilai sheet berjalan — config
 lama tanpa key tetap jalan tanpa KeyError).
+
+v3.9.33 — AUDIT FIX (48-f): validasi ramah — config.json valid-JSON
+tapi KURANG key wajib dulu melempar KeyError mentah (English,
+membingungkan user). Sekarang: RuntimeError pesan Indonesia yang
+menyebut HANYA key yang benar-benar hilang + instruksi perbaikan
+(app.py on_error menampilkan pesan ini ke user).
 """
 import json
 import os
@@ -23,6 +29,19 @@ class Config:
 
         with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        # v3.9.33 — AUDIT FIX (48-f): key wajib hilang → pesan ramah
+        # (bukan KeyError mentah). Sebut HANYA key yang benar-benar
+        # hilang; data bukan dict (mis. list) → semua key dianggap
+        # hilang. app.py on_error menampilkan pesan ini.
+        _wajib_hilang = [k for k in ("RootPath", "Folders", "Sheets")
+                         if not isinstance(data, dict) or k not in data]
+        if _wajib_hilang:
+            raise RuntimeError(
+                "config.json tidak lengkap — key berikut hilang: "
+                + ", ".join(_wajib_hilang)
+                + ". Perbaiki di tab ⚙ Pengaturan atau hapus config.json "
+                "untuk regenerasi.")
 
         self.RootPath = data["RootPath"]
         # v3.5: LightMode DIHAPUS — pipeline selalu mode FULL

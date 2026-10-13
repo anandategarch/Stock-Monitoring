@@ -25,6 +25,11 @@ import pandas as pd
 
 from .helpers import fn_combine_folder
 
+# Nama sheet standar 42.17 (export Accurate) — v3.9.33 default param;
+# queries.py me-resolve key config Sheets['SaldoAwal4217'] (config lama
+# tanpa key tetap dapat nilai ini).
+SHEET_4217 = "#42.17. Kuantitas Barang per Gu"
+
 # Kandidat nama kolom (beda versi export Accurate — resolusi defensive)
 _KANDIDAT_KATEGORI = ["Kategori Barang", "Kategori"]
 _KANDIDAT_SATUAN = ["Nama Satuan", "Satuan"]
@@ -72,18 +77,28 @@ def _find_col(prom_columns, kandidat):
     return None
 
 
-def fn_4217(folder_path: str, kategori_whitelist: list | None = None) -> pd.DataFrame:
+def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
+            sheet_name: str = SHEET_4217) -> pd.DataFrame:
     """
     Mirror M: fn4217(folderPath).
 
     kategori_whitelist: list kategori yang LOLOS (prefix-match normalisasi;
     None/kosong → tanpa filter). Sumber default: config "KategoriBarang4217".
 
+    sheet_name: v3.9.33 — AUDIT FIX (48-a): nama sheet bisa diatur dari
+    config.json key Sheets['SaldoAwal4217'] (dihantarkan queries.query_4217;
+    default = nama sheet export standar — pemanggil lama tak berubah).
+
     Output columns: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS, SATUAN
     (SATUAN = 'Nama Satuan' file per barang; file tanpa kolom → '').
     """
     # expand + Skip(3) + Promote = header=4
-    prom = fn_combine_folder(folder_path, "#42.17. Kuantitas Barang per Gu", header_row=4)
+    # v3.9.33 — AUDIT FIX (48-a): ffill kategori PER FILE (ffill_cols) —
+    # dulu ffill pada frame CONCAT membuat grup pertama file-2 mewarisi
+    # kategori TERAKHIR file-1 (bleed lintas file). Mirror pola per-file
+    # fn_4109.
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4,
+                             ffill_cols=_KANDIDAT_KATEGORI)
     if prom.empty:
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
@@ -114,9 +129,10 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None) -> pd.Data
         sat_col = "SATUAN AWAL"
 
     # Kategori ber-pola header grup: nilai hanya di baris pertama grup →
-    # forward-fill (mirror pembacaan kategori 41.09).
-    if kat_col is not None:
-        prom[kat_col] = prom[kat_col].ffill()
+    # forward-fill PER FILE (v3.9.33 — AUDIT FIX 48-a, ffill_cols di
+    # fn_combine_folder di atas — BUKAN ffill frame concat: file-2 tidak
+    # boleh mewarisi kategori ekor file-1; baris leading-NaN pra-grup
+    # pertama per file dibiarkan NaN → terbuang oleh filter whitelist).
 
     # --- FILTER KATEGORI WHITELIST (SEBELUM melt — "lebih awal") ---
     prom_raw = prom.copy()          # utk safety-net bypass di bawah

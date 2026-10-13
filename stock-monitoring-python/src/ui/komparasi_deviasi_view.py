@@ -1,6 +1,22 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+v3.9.33 — AUDIT FIX (48-d/48-e/48-f, fix 49-a):
+- (P0) clone ⛶ basi: re-render (tabel utama / Top / Flip) MENUTUP
+  clone milik tabel tsb + generasi render dicatat di tree clone —
+  klik ✓ / double-click clone generasi lama diabaikan (dulu
+  men-toggle pasangan SALAH / snapshot H salah).
+- (MEDIUM) _sort_top/_sort_flip saat batch insert tabel analisa masih
+  berjalan kini DIANTREKAN per tabel (pola _pending_sort) — dulu sort
+  di tengah batch = prefix terurut + ekor tak terurut.
+- (MEDIUM) label Periode 'Median n file' → 'Median n bulan' (n
+  menghitung BULAN — file History multi-bulan salah label) + status
+  'median antar-bulan'.
+- (LOW) Top-N negatif di-clamp ke 0 + peringatan status.
+- (P1) sinkron ✓ lintas tab: listener FollowUpStore memperbarui sel ✓
+  tanpa re-render penuh; 0 baris pasca-pipeline → empty state +
+  status berpenjelasan; chip H diberi petunjuk "atur di 📦 Deviasi GR".
+
 v3.9.26 (permintaan user: "potensi flip flop itu harusnya yang
     selisih nya dikit aja"): ARAH LABEL ANALISA 'Potensi Flip Flop'
     DIBALIK (v3.9.19-3.9.25 salah arah — audit 41-a/41-b): pasangan
@@ -59,7 +75,8 @@ bagian analisa lain TIDAK berubah):
         (resto × bahan × minggu sama) = MEDIAN antar-file — SATU baris
         per pasangan (bukan satu baris per file); yang ditampilkan
         nilai median saja, bukan semua file. Kolom Periode kini kolom
-        NYATA: 'Median n file · Minggu' (≥2 nilai) / 'BULAN · Minggu'
+        NYATA: 'Median n bulan · Minggu' (≥2 nilai; v3.9.33 label
+        benar — n = jumlah BULAN) / 'BULAN · Minggu'
         (1 nilai — format lama). Rumus bisnis lain 0 berubah.
 
 v3.9.15 — GELOMBANG 1 ANALISA (adopsi rumus repo Inventory-Control
@@ -663,6 +680,16 @@ class KomparasiDeviasiView(tk.Frame):
         # baris basi ke render baru bila re-render menembak di tengah
         # jendela antar-batch; pola _render_rows_inner tabel utama).
         self._anasec_cancel = {}
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0) -------------------------------
+        # clone ⛶ basi: catat window clone hidup (tabel utama + Top + Flip)
+        # + generasi render — re-render menutup clone tabel tsb & handler
+        # ✓/double-click clone generasi lama diabaikan (defense-in-depth).
+        self._clone_wins: list = []
+        # v3.9.33 — AUDIT FIX (48-d MEDIUM): tabel analisa yang sedang
+        # batch-insert (sort saat insert = urutan campuran) + sort yang
+        # mengantre per tabel (pola _pending_sort tabel utama).
+        self._ana_inserting: set = set()
+        self._pending_ana_sort: dict = {}
         # v3.9.13: file terakhir di-auto-load SEKALI saat tab terlihat
         self._auto_loaded = False
         # cache matriks app — per objek data + file
@@ -693,6 +720,12 @@ class KomparasiDeviasiView(tk.Frame):
         self._build_ui()
         self._setup_tags()
         self._show_empty()
+        # v3.9.33 — AUDIT FIX (48-e P1): sinkron ✓ lintas tab — baris
+        # ditambah/dikeluarkan dari tab ☑ Follow Up (atau tab GR/PCS)
+        # memperbarui sel ✓ di sini TANPA re-render penuh (dulu sel basi
+        # ☑ bertahan sampai render berikutnya). add_listener idempoten.
+        if self.store is not None:
+            self.store.add_listener(self._on_followup_store_changed)
 
     # =========================================================================
     # UI BUILD
@@ -764,7 +797,12 @@ class KomparasiDeviasiView(tk.Frame):
         hchip.pack(side="left", padx=(6, 8))
         tk.Label(hchip, textvariable=self._h_chip_var, bg="#f1f5f9",
                  fg=C_ACCENT, font=font(11, "bold")).pack(
-            padx=10, pady=(2, 3))
+            side="left", padx=(10, 0), pady=(2, 3))
+        # v3.9.33 — AUDIT FIX (48-f UX): chip H read-only kini ber-petunjuk
+        # di mana mengubahnya (dulu angka H tanpa penjelasan).
+        tk.Label(hchip, text="· atur di 📦 Deviasi GR", bg="#f1f5f9",
+                 fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="left", padx=(4, 10), pady=(2, 3))
         # label minggu aktif (dinamis — file & H)
         self._week_filter_var = tk.StringVar(
             value="belum ada file")
@@ -1017,6 +1055,12 @@ class KomparasiDeviasiView(tk.Frame):
     # =========================================================================
     def _on_tree_click(self, event):
         tree = event.widget
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): clone ⛶ generasi lama
+        # (dibuka sebelum re-render terakhir) → handler DIABAIKAN senyap —
+        # dulu klik ✓ di clone basi men-toggle pasangan/ baris SALAH
+        # (persist followup.json).
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         try:
             if tree.identify_region(event.x, event.y) != "cell":
                 return
@@ -1041,6 +1085,38 @@ class KomparasiDeviasiView(tk.Frame):
         self.status_var_label.set(
             f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
             f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
+
+    # v3.9.33 — AUDIT FIX (48-e P1) -------------------------------------------
+    def _on_followup_store_changed(self, store=None):
+        """Listener FollowUpStore (toggle/clear dari tab mana pun):
+        jadwalkan pembaruan sel ✓ di main thread — tanpa re-render
+        penuh (pola followup_view; view bisa sudah mati → telan TclError)."""
+        try:
+            if not self.winfo_exists():
+                return
+            self.after(0, self._refresh_check_cells)
+        except tk.TclError:
+            pass
+
+    def _refresh_check_cells(self):
+        """Perbarui SEMUA sel kolom ✓ dari state store saat ini (iid →
+        fingerprint via _fp_map; baris tanpa fp di-skip)."""
+        if self.store is None or not self._fp_map:
+            return
+        try:
+            children = self.tree.get_children("")
+        except tk.TclError:
+            return
+        for iid in children:
+            fp = self._fp_map.get(iid)
+            if fp is None:
+                continue
+            try:
+                self.tree.set(
+                    iid, "✓",
+                    CHECK_ON if self.store.has(fp) else CHECK_OFF)
+            except tk.TclError:
+                return   # tree/view mati di tengah loop — batal
 
     def ensure_refreshed(self):
         """Lazy refresh: compute hanya saat pane terlihat.
@@ -1164,9 +1240,20 @@ class KomparasiDeviasiView(tk.Frame):
         self._result_df = None
         self._join_df = None
         self._pair_index = {}
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): data berganti → clone ⛶
+        # basi (salinan baris lama, iid sama) DITUTUP (gen sudah dinaik-
+        # kan di atas — guard handler clone ikut aktif).
+        self._close_stale_clones()
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
-        self._show_content()
+        # v3.9.33 — AUDIT FIX (48-f HIGH sebagian): 0 baris pasca-pipeline →
+        # EMPTY STATE + status berpenjelasan aksi (dulu _show_content()
+        # TANPA SYARAT → tabel kosong senyap di belakang pipeline
+        # "SELESAI" hijau; reset filter di bawah tetap dijalankan supaya
+        # state tidak basi saat data berikutnya datang).
+        _data_empty = data is None or getattr(data, "empty", True)
+        if not _data_empty:
+            self._show_content()
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
@@ -1174,6 +1261,12 @@ class KomparasiDeviasiView(tk.Frame):
         # direset — mirror tabel utama (dulu filter basi senyap
         # diterapkan ke data baru).
         self._reset_analisa_filters()
+        if _data_empty:
+            self._show_empty()
+            self.status_var_label.set(
+                "Belum ada data — 0 baris terbaca dari pipeline "
+                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+            return
         # lazy refresh — compute hanya bila pane terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -1315,6 +1408,9 @@ class KomparasiDeviasiView(tk.Frame):
         # baris + footer file lama muncul lagi padahal label "Belum ada
         # file"). Generation counter + pembatalan batch insert.
         self._render_gen += 1
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): file ditutup → clone ⛶
+        # menampilkan salinan baris file lama → DITUTUP (gen sudah naik).
+        self._close_stale_clones()
         self._pending = False
         self._pending_paths = None
         self._pending_sort = None
@@ -2101,6 +2197,13 @@ class KomparasiDeviasiView(tk.Frame):
             # batch insert lama masih berjalan (race) → stop dulu
             self._insert_cancel()
             self._insert_cancel = None
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): re-render tabel utama
+        # (_fp_map/_row_snaps segera diganti di bawah) → clone ⛶ milik
+        # tabel ini DITUTUP (klik ✓/double-click clone basi men-toggle
+        # pasangan SALAH). Clone Top/Flip ditutup oleh render tabelnya
+        # sendiri (mode 📈 aktif → keduanya di-render ulang tepat
+        # setelah ini).
+        self._close_stale_clones(self.tree)
         self.tree.delete(*self.tree.get_children())
         self._update_headings()
         self._fp_map = payload.get("fp_map", {})
@@ -2374,6 +2477,12 @@ class KomparasiDeviasiView(tk.Frame):
 
     def _sort_top(self, col: str, reverse: bool = True, tree=None):
         tree = tree if tree is not None else self._top_tree
+        if tree in self._ana_inserting:
+            # v3.9.33 — AUDIT FIX (48-d MEDIUM): batch insert masih
+            # berjalan → ANTRE (dibuang = urutan campuran; pola
+            # _pending_sort tabel utama).
+            self._pending_ana_sort[tree] = (col, reverse)
+            return
         parse = (self._parse_num_id if col in
                  ("DEV Lalu", "GR Saat Ini", "Selisih", "Peringkat")
                  else None)
@@ -2421,8 +2530,8 @@ class KomparasiDeviasiView(tk.Frame):
         """v3.9.16 — agregat join → SATU baris per pasangan (resto ×
         bahan × minggu sama) utk tabel Top Selisih (khusus mode 📈
         Analisa — permintaan user):
-        - DEV Lalu = MEDIAN antar-file/bulan (1 file → nilai itu
-          sendiri; ≥2 file → median — "nilai deviasi pakai median aja,
+        - DEV Lalu = MEDIAN antar-bulan (1 file/bulan → nilai itu
+          sendiri; ≥2 bulan → median — "nilai deviasi pakai median aja,
           jangan semua file"); minggu tetap kunci grup (aturan minggu
           sama antar bulan);
         - Selisih = |GR Saat Ini| − |DEV Lalu| — kedua nilai
@@ -2432,9 +2541,10 @@ class KomparasiDeviasiView(tk.Frame):
           (TIDAK ADA DI DATA SAAT INI / H TIDAK ADA DI DATA — konstanta
           per grup: sisi app digabung per resto × bahan × H); ada →
           MATCH/SELISIH atas Selisih absolut (toleransi sama);
-        - Periode: 'Median n file · Minggu' (≥2 nilai) / 'BULAN ·
-          Minggu' (1 nilai — format lama) — kolom NYATA (filter header
-          Periode kini bekerja).
+        - Periode: 'Median n bulan · Minggu' (≥2 nilai; v3.9.33 — n
+          menghitung BULAN, dulu 'Median n file' salah label utk file
+          History multi-bulan) / 'BULAN · Minggu' (1 nilai — format
+          lama) — kolom NYATA (filter header Periode kini bekerja).
         - v3.9.19 ANALISA (1 kolom keterangan): Kenaikan Tertinggi ·
           Penurunan Tertinggi · Stabil · Berubah Arah · Potensi Flip
           Flop — prioritas: tanda berlawanan (disparitas = |P1+P2|/
@@ -2471,8 +2581,10 @@ class KomparasiDeviasiView(tk.Frame):
         bln = agg["bln"].astype(str).to_numpy()
         mg = agg["Minggu"].astype(str).to_numpy()
         # label periode: pasangan ada di >1 bulan/file → nilai median
-        # (file didedup per bulan — jumlah nilai = jumlah file)
-        periode = [f"Median {int(c)} file · {m}" if c > 1
+        # (v3.9.33 — AUDIT FIX 48-d: n menghitung BULAN — file History
+        # multi-bulan bukan banyak file → 'Median n bulan', dulu salah
+        # label 'Median n file')
+        periode = [f"Median {int(c)} bulan · {m}" if c > 1
                    else f"{b} · {m}"
                    for c, b, m in zip(n, bln, mg)]
         # v3.9.19 — keterangan ANALISA per pasangan (VEKTOR):
@@ -2521,10 +2633,16 @@ class KomparasiDeviasiView(tk.Frame):
         pembalikan tanda (mis. −50 → +30) tidak lagi menggembungkan
         selisih (dulu 80, kini 20); kolom DEV Lalu / GR Saat Ini tetap
         menampilkan NILAI ASLI (bukan absolut). (2) Bila file deviasi
-        >1: nilai Lalu = MEDIAN antar-file per pasangan (resto × bahan
+        >1: nilai Lalu = MEDIAN antar-bulan per pasangan (resto × bahan
         × minggu sama) — SATU baris per pasangan; yang ditampilkan
-        nilai median saja, bukan semua file (lihat _top_aggregate)."""
+        nilai median saja, bukan semua file (lihat _top_aggregate).
+        v3.9.33 — AUDIT FIX (48-d LOW): Top-N NEGATIF di-clamp ke 0
+        (= semua baris) + peringatan status — dulu nilai negatif
+        menampilkan SEMUA baris diam-diam (head() tak dipanggil)."""
         tree = self._top_tree
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): re-render tabel Top →
+        # clone ⛶-nya menampilkan salinan baris LAMA → DITUTUP.
+        self._close_stale_clones(self._top_tree)
         tree.delete(*tree.get_children())
         j = self._join_df
         if j is None or j.empty:
@@ -2547,8 +2665,8 @@ class KomparasiDeviasiView(tk.Frame):
                 return
             wlab = ", ".join(sorted({str(v) for v in d["Minggu"]}))
             prefix = f"Minggu {wlab} (H {wt}) · "
-        # v3.9.16: agregat per pasangan — DEV Lalu = median antar-file,
-        # Selisih = |GR Saat Ini| − |DEV Lalu| (absolut dulu)
+        # v3.9.16: agregat per pasangan — DEV Lalu = median antar-bulan
+        # (v3.9.33 label), Selisih = |GR Saat Ini| − |DEV Lalu| (absolut dulu)
         d = self._top_aggregate(d)
         multi = bool(d["Periode"].astype(str)
                      .str.startswith("Median").any())
@@ -2560,6 +2678,14 @@ class KomparasiDeviasiView(tk.Frame):
             n = int(float(self._topn_var.get() or 0))
         except (TypeError, ValueError):
             n = 100
+        _n_warn = False
+        if n < 0:
+            # v3.9.33 — AUDIT FIX (48-d LOW): clamp + revert entry +
+            # peringatan (pola validated_tgl_entry — input invalid tidak
+            # diterima senyap).
+            n = 0
+            _n_warn = True
+            self._topn_var.set("0")
         if n > 0:
             d = d.head(n)
         self._top_df = d
@@ -2575,10 +2701,13 @@ class KomparasiDeviasiView(tk.Frame):
             self._top_status_var.set("0 baris setelah filter.")
             return
         m = len(d)
-        # v3.9.16: catatan median bila Lalu digabung antar >1 file
+        # v3.9.16: catatan median bila Lalu digabung antar >1 bulan
+        # (v3.9.33: label "antar-bulan" — n menghitung BULAN, file
+        # History multi-bulan bukan banyak file)
         self._top_status_var.set(
             f"{prefix}{m} baris · Top {'semua' if n <= 0 else n}"
-            + (" · Lalu = median antar-file" if multi else ""))
+            + (" · Lalu = median antar-bulan" if multi else "")
+            + (" · ⚠ Top N negatif → 0 (semua baris)" if _n_warn else ""))
         # v3.9.14 (PERF): values dari kolom numpy (dulu iterrows —
         # Series per baris)
         cols_np = {c: d[c].to_numpy() for c in
@@ -2628,7 +2757,8 @@ class KomparasiDeviasiView(tk.Frame):
         self._top_st_missing = st_missing
         self._top_ana_cells = ana_cells   # v3.9.19
         self._anasec_insert(
-            tree, items, on_done=lambda: self._reapply_top_tags(tree))
+            tree, items, on_done=lambda: self._reapply_top_tags(tree),
+            sort_fn=self._sort_top)   # v3.9.33 — AUDIT FIX (48-d)
 
     # -- Perubahan Arah (flip) ----------------------------------------------
     def _flip_col_values(self, col: str) -> list:
@@ -2643,6 +2773,11 @@ class KomparasiDeviasiView(tk.Frame):
 
     def _sort_flip(self, col: str, reverse: bool = True, tree=None):
         tree = tree if tree is not None else self._flip_tree
+        if tree in self._ana_inserting:
+            # v3.9.33 — AUDIT FIX (48-d MEDIUM): antre saat batch insert
+            # berjalan (pola _sort_top).
+            self._pending_ana_sort[tree] = (col, reverse)
+            return
         parse = (self._parse_num_id if col in ("DEV Bulan Lalu",
                                               "DEV Saat Ini", "Δ",
                                               "Disparitas") else None)
@@ -2740,6 +2875,9 @@ class KomparasiDeviasiView(tk.Frame):
         selisih magnitudo kecil, nilai bercermin ±) vs Berubah Arah
         (Parsial, disparitas ≥ 40%)."""
         tree = self._flip_tree
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): re-render tabel Flip →
+        # clone ⛶-nya menampilkan salinan baris LAMA → DITUTUP.
+        self._close_stale_clones(self._flip_tree)
         tree.delete(*tree.get_children())
         # v3.9.15: inti komputasi pasangan diekstrak ke _flip_pair_core
         # (satu sumber kebenaran; pesan
@@ -2861,25 +2999,43 @@ class KomparasiDeviasiView(tk.Frame):
         self._flip_kat_cells = kat_cells
         self._flip_ana_cells = ana_cells   # v3.9.19
         self._anasec_insert(
-            tree, items, on_done=lambda: self._reapply_flip_tags(tree))
+            tree, items, on_done=lambda: self._reapply_flip_tags(tree),
+            sort_fn=self._sort_flip)   # v3.9.33 — AUDIT FIX (48-d)
 
 
     # =========================================================================
     # v3.9.22 — MODE 📈 ANALISA TUNGGAL (Top & Flip); utilitas insert batch
     # v3.9.15a (audit P1-2): cancel per tabel analisa tetap dipakai 2 tabel.
     # =========================================================================
-    def _anasec_insert(self, tree, items, on_done):
+    def _anasec_insert(self, tree, items, on_done, sort_fn=None):
         """v3.9.15a (audit P1-2): insert batch utk tabel analisa + simpan
         handle cancel per tabel — render ulang tabel YANG SAMA
         membatalkan sisa batch lama dulu (tanpa ini, re-render yang
         menembak di tengah jendela 10ms antar-batch meninggalkan baris
         basi dari render sebelumnya; tabel utama sudah ber-guard sejak
-        v3.9.5 — kini keenam tabel analisa juga)."""
+        v3.9.5 — kini keenam tabel analisa juga).
+        v3.9.33 — AUDIT FIX (48-d MEDIUM): tabel dicatat sedang-insert;
+        sort yang diklik di tengah batch DIANTREKAN per tabel
+        (sort_fn — pola _pending_sort tabel utama) & dimainkan saat
+        batch selesai — dulu sort mengurutkan baris yang SUDAH masuk
+        saja lalu sisa batch menempel TAK TERURUT di ekor."""
         cancel = self._anasec_cancel.get(tree)
         if cancel is not None:
             cancel()
+            # cancel() TIDAK memanggil on_done (widgets) → bersihkan
+            # flag inserting secara eksplisit supaya tidak macet.
+            self._ana_inserting.discard(tree)
+        self._ana_inserting.add(tree)
+
+        def _done():
+            self._ana_inserting.discard(tree)
+            on_done()
+            pend = self._pending_ana_sort.pop(tree, None)
+            if pend is not None and sort_fn is not None:
+                sort_fn(pend[0], reverse=pend[1])
+
         self._anasec_cancel[tree] = insert_tree_items(
-            tree, items, batch=400, on_done=on_done)
+            tree, items, batch=400, on_done=_done)
 
     def _render_analisa_section(self, idx: int = 0):
         """Render bagian analisa (v3.9.22: TUNGGAL — Top & Flip). Tiap
@@ -2910,11 +3066,15 @@ class KomparasiDeviasiView(tk.Frame):
                     c, reverse=d, tree=t),
                 on_after_filter=lambda t=new_tree: self._reapply_top_tags(t))
 
-        return open_tree_maximized(
+        win, new_tree = open_tree_maximized(
             self._top_tree, "Analisa — Top Selisih",
             setup_tags=lambda t: self._setup_tags(t),
             on_filter_setup=filter_setup,
             on_render_done=self._reapply_top_tags)
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat clone hidup (sumber
+        # _top_tree) + generasi render — ditutup saat tabel Top re-render.
+        self._register_clone(win, new_tree, self._top_tree)
+        return win, new_tree
 
     def _maximize_flip(self):
         def filter_setup(new_tree):
@@ -2925,11 +3085,15 @@ class KomparasiDeviasiView(tk.Frame):
                     c, reverse=d, tree=t),
                 on_after_filter=lambda t=new_tree: self._reapply_flip_tags(t))
 
-        return open_tree_maximized(
+        win, new_tree = open_tree_maximized(
             self._flip_tree, "Analisa — Perubahan Arah",
             setup_tags=lambda t: self._setup_flip_tags(t),
             on_filter_setup=filter_setup,
             on_render_done=self._reapply_flip_tags)
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat clone hidup (sumber
+        # _flip_tree) + generasi render — ditutup saat tabel Flip re-render.
+        self._register_clone(win, new_tree, self._flip_tree)
+        return win, new_tree
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
@@ -2954,8 +3118,40 @@ class KomparasiDeviasiView(tk.Frame):
             on_double_click=self._on_double_click,
             on_filter_setup=filter_setup,
             on_render_done=self._reapply_cell_tags)
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat clone hidup (sumber
+        # tabel utama) + generasi render — guard handler ✓/double-click
+        # (klik clone basi dulu men-toggle pasangan SALAH) + penutupan
+        # saat re-render.
+        self._register_clone(win, new_tree, self.tree)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
+
+    def _register_clone(self, win, new_tree, source_tree):
+        """v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat window clone ⛶ yang
+        hidup (sumber = tabel asalnya) + generasi render di tree clone
+        (atribut _view_gen — handler ✓/double-click memeriksanya)."""
+        new_tree._view_gen = self._render_gen
+        win._clone_source = source_tree
+        self._clone_wins.append(win)
+
+    def _close_stale_clones(self, source_tree=None):
+        """v3.9.33 — AUDIT FIX (48-d HIGH / P0): tutup clone ⛶ yang masih
+        hidup — dipanggil saat baris tabel sumbernya di-render ulang / data
+        berganti (clone basi menampilkan pasangan lama di iid sama).
+        source_tree=None → SEMUA clone (data berganti); selain itu hanya
+        clone milik tabel tsb."""
+        alive = []
+        for w in self._clone_wins:
+            try:
+                if not w.winfo_exists():
+                    continue   # sudah ditutup user — buang dari daftar
+                if source_tree is None or w._clone_source is source_tree:
+                    w.destroy()
+                    continue
+                alive.append(w)
+            except tk.TclError:
+                continue
+        self._clone_wins = alive
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         if self._busy and tree is None:
@@ -2978,6 +3174,11 @@ class KomparasiDeviasiView(tk.Frame):
         if self.data is None or self.data.empty:
             return
         tree = event.widget
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): clone ⛶ generasi lama
+        # (dibuka sebelum re-render terakhir) → snapshot H/_row_snaps
+        # tidak lagi cocok dgn baris clone → DIABAIKAN senyap.
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return

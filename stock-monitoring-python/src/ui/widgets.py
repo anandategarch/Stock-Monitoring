@@ -57,9 +57,14 @@ from .theme import (
 
 # Tombol aksen/berbahaya pakai tk.Button murni: kontrol penuh atas warna
 # (ttk button tidak bisa diwarnai per-widget tanpa mendaftarkan style baru).
+# v3.9.33 — AUDIT FIX (48-c HIGH-1): TANPA font di sini — dulu
+# `font=font(10, "bold")` dipanggil di IMPORT TIME (sebelum tk.Tk()
+# ada) → theme.font_family() memaksa resolusi pre-root dan mengunci
+# fallback "DejaVu Sans" (Segoe UI/Noto tak pernah terpakai di Windows).
+# Kini family di-resolve LAZY di konstruktor tombol (selalu pasca-root).
 _BTN_BASE = dict(
     bd=0, highlightthickness=0, relief="flat",
-    font=font(10, "bold"), cursor="hand2",
+    cursor="hand2",
     activeforeground="#ffffff", padx=14, pady=7,
 )
 
@@ -130,8 +135,11 @@ class AccentButton(tk.Button):
     """Tombol aksi utama — teal solid, putih teks, hover teal-800."""
 
     def __init__(self, parent, text: str, command=None, **kw):
+        # v3.9.33 — AUDIT FIX: font lazy (pasca-root) — _BTN_BASE tak lagi
+        # membekukan family fallback di import time.
         cfg = dict(_BTN_BASE, bg=C_ACCENT, fg="#ffffff",
-                   activebackground=C_ACCENT_HOVER, text=text, command=command)
+                   activebackground=C_ACCENT_HOVER, text=text,
+                   command=command, font=font(10, "bold"))
         cfg.update(kw)
         super().__init__(parent, **cfg)
         self.bind("<Enter>", lambda e: self._set_bg(C_ACCENT_HOVER, enabled=True))
@@ -156,9 +164,10 @@ class DangerButton(tk.Button):
     """Tombol stop/batal — putih, teks merah, hover latar merah lembut."""
 
     def __init__(self, parent, text: str, command=None, **kw):
+        # v3.9.33 — AUDIT FIX: font lazy (pasca-root), pola AccentButton.
         cfg = dict(_BTN_BASE, bg=C_CARD, fg=C_RED,
                    activebackground=C_RED_SOFT, activeforeground=C_RED,
-                   text=text, command=command)
+                   text=text, command=command, font=font(10, "bold"))
         cfg.update(kw)
         super().__init__(parent, **cfg)
         self.bind("<Enter>", lambda e: self._set_bg(C_RED_SOFT))
@@ -505,6 +514,65 @@ def make_tree(parent, columns: list[str], show: str = "headings",
     return tree
 
 
+def _tsv_cell(v) -> str:
+    """v3.9.33 — AUDIT FIX (48-f HIGH-#7): nilai ber-tab/newline diratakan
+    ke spasi supaya satu baris TSV tetap = satu record."""
+    return str(v).replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
+def tree_selection_tsv(tree: ttk.Treeview) -> str:
+    """v3.9.33 — AUDIT FIX (48-f HIGH-#7): susun seleksi tree jadi teks TSV.
+
+    Baris pertama = HEADER: label '#0' (bila tree hierarki menampilkannya)
+    + display-name tiap kolom (tree.heading(col)["text"] utk
+    tree["columns"]). Baris berikut = SATU baris per iid terpilih
+    (tree.item(iid, "values") di-tab-join). Tree hierarki (pivot parent):
+    baris parent disalin APA ADANYA (values-nya sudah agregat) + teks #0
+    sebagai sel pertama — anak TIDAK di-flatten ke baris parent."""
+    cols = [str(c) for c in (tree["columns"] or [])]
+    use_tree_col = False
+    try:
+        # deteksi kolom #0 (kompatibel Tk 8 & 9 — cget tuple vs string)
+        raw = tree.cget("show")
+        parts = (" ".join(str(x) for x in raw)
+                 if isinstance(raw, (tuple, list)) else str(raw))
+        if "tree" in parts and str(tree.heading("#0", "text") or "").strip():
+            use_tree_col = True
+    except tk.TclError:
+        pass
+    headers = []
+    if use_tree_col:
+        headers.append(_tsv_cell(tree.heading("#0", "text")))
+    for c in cols:
+        try:
+            headers.append(_tsv_cell(tree.heading(c, "text") or c))
+        except tk.TclError:
+            headers.append(_tsv_cell(c))
+    lines = ["\t".join(headers)]
+    for iid in tree.selection():
+        vals = [_tsv_cell(v) for v in tree.item(iid, "values")]
+        if use_tree_col:
+            vals = [_tsv_cell(tree.item(iid, "text"))] + vals
+        lines.append("\t".join(vals))
+    return "\n".join(lines)
+
+
+def copy_tree_selection_tsv(tree: ttk.Treeview) -> int:
+    """v3.9.33 — AUDIT FIX (48-f HIGH-#7): salin SEMUA baris terpilih ke
+    clipboard sebagai TSV. Return jumlah baris DATA yang tersalin (0 bila
+    tidak ada seleksi / widget sudah mati — TclError ditelan)."""
+    try:
+        sel = tree.selection()
+        if not sel:
+            return 0
+        text = tree_selection_tsv(tree)
+        tree.clipboard_clear()
+        tree.clipboard_append(text)
+        return len(sel)
+    except tk.TclError:
+        return 0
+
+
 def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
     """v3.9.32 — MULTI-SELECT + Ctrl+A semua tabel (user: "kenapa aku
     tidak bisa select ya untuk semua data?").
@@ -515,16 +583,30 @@ def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
       (rentang), drag;
     - <Control-A> → pilih SEMUA baris (termasuk anak subtree utk tabel
       hierarki tab Pivot);
-    Dipanggil ulang aman (idempoten) & dipasang juga ke clone Layar
-    Penuh / popup (open_tree_maximized).
+    - <Control-c>/<Control-C> → SALIN semua baris terpilih sebagai TSV
+      ke clipboard (v3.9.33 — AUDIT FIX 48-f HIGH-#7: multi-select kini
+      punya AKSI KONSUMSI di 9 tabel utama + popup + clone ⛶; sukses
+      senyap — semantik clipboard standar; binding TREE-SCOPED, bukan
+      bind_all — Entry/Combobox tidak terganggu).
+
+    v3.9.33 — AUDIT FIX (48-c MEDIUM): IDEMPOTEN beneran (klaim lama
+    salah) — bind add="+" MENUMPUK tiap panggilan ulang; kini flag
+    `_multi_select_bound` (pola `_smooth_wheel_bound`). Dipasang juga ke
+    clone Layar Penuh / popup (open_tree_maximized — tree BARU, jadi
+    flag tidak terbawa → binding tetap terpasang di sana).
 
     Interaksi lama TIDAK berubah: double-click detail, klik ✓ follow-up,
-    klik-kanan menu — semuanya memakai identify_row/event → tetap benar.
+    klik-kanan menu — semuanya memakai identify_row/event → tetap benar
+    (popup yang mem-bind Ctrl+C sendiri MENGGANTI binding ini di
+    tree-nya — details_popup: 1 baris = Nomor, >1 baris = TSV).
     """
     try:
         tree.configure(selectmode="extended")
     except tk.TclError:
         pass
+    if getattr(tree, "_multi_select_bound", False):
+        return tree
+    tree._multi_select_bound = True
 
     def _select_all(_event=None):
         try:
@@ -542,13 +624,29 @@ def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
         except tk.TclError:
             pass
 
+    def _copy_rows(_event=None):
+        # v3.9.33 — Ctrl+C = aksi konsumsi multi-select (TSV ke clipboard)
+        try:
+            copy_tree_selection_tsv(tree)
+        except tk.TclError:
+            pass
+
     tree.bind("<Control-a>", _select_all, add="+")
     tree.bind("<Control-A>", _select_all, add="+")
+    tree.bind("<Control-c>", _copy_rows, add="+")
+    tree.bind("<Control-C>", _copy_rows, add="+")
     return tree
 
 
 def make_log_console(parent, **kw) -> tuple[tk.Text, tk.Frame]:
-    """Konsol log gelap ala Waste (#0b1220 + Consolas). Return (text, frame)."""
+    """Konsol log gelap ala Waste (#0b1220 + Consolas). Return (text, frame).
+
+    v3.9.33 — AUDIT FIX (48-f MEDIUM): state tetap "disabled" (isi tidak
+    bisa diedit) TAPI seleksi kini bisa di-COPY — binding <Control-c>/
+    <Control-C> di Text menyalin seleksi mouse aktif ke clipboard
+    (traceback pipeline tidak lagi terjebak di konsol read-only; salin
+    SELURUH log via tombol "📋 Salin Log" di tab Proses — app.py).
+    """
     frame = tk.Frame(parent, bg=C_LOG_BG, highlightbackground=C_BORDER,
                      highlightthickness=1)
     frame.pack(fill="both", expand=True, **kw)
@@ -561,6 +659,20 @@ def make_log_console(parent, **kw) -> tuple[tk.Text, tk.Frame]:
 
     text.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
+
+    def _copy_selection(_event=None):
+        # v3.9.33 — copy seleksi Text disabled (widget mati → senyap).
+        try:
+            content = text.get("sel.first", "sel.last")
+            if content:
+                text.clipboard_clear()
+                text.clipboard_append(content)
+        except tk.TclError:
+            pass  # tidak ada seleksi aktif / widget sudah di-destroy
+        return "break"
+
+    text.bind("<Control-c>", _copy_selection)
+    text.bind("<Control-C>", _copy_selection)
     return text, frame
 
 

@@ -346,6 +346,13 @@ class RincianPoView(tk.Frame):
             self._refresh()
         else:
             self._dirty = True
+        # v3.9.33 — AUDIT FIX (48-f P0#6 sebagian): pipeline 0 baris →
+        # footer INFORMATIF (teks lama diperpanjang; kata kunci 'Belum
+        # ada data' tetap ada supaya assertion lama tetap lolos).
+        if data is None or len(data) == 0:
+            self.status_var.set(
+                "Belum ada data — 0 baris terbaca dari pipeline "
+                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
@@ -447,6 +454,16 @@ class RincianPoView(tk.Frame):
             s = s[s != ""]
             return s.iloc[0] if len(s) else ""
 
+        def _first_fmt(series, fmt) -> str:
+            """v3.9.33 — AUDIT FIX (48-e FIX 13): nilai TERFORMAT non-kosong
+            PERTAMA dari series (pola _first_str, utk kolom datetime) —
+            'Tgl/Jam Pembuatan' dulu memakai .iloc[0]: baris PERTAMA
+            NaT/kosong menampilkan kolom kosong padahal baris lain di PO
+            yang sama punya nilai."""
+            s = series.map(fmt).astype(str).str.strip()
+            s = s[s != ""]
+            return s.iloc[0] if len(s) else ""
+
         def _fmt_qty(v) -> str:
             """Kuantitas: bulat tanpa desimal, pecahan 1 desimal (v3.9).
             FIX C-03 (audit 2-c): format INDONESIA — dulu EN "1,234.5"
@@ -488,8 +505,12 @@ class RincianPoView(tk.Frame):
                                f"▸ {n_items} item",
                                "",
                                f"Total: {_fmt_qty(po_qty)}",
-                               self._fmt_datetime(
-                                   group["Tgl/Jam Pembuatan"].iloc[0])
+                               # v3.9.33 — AUDIT FIX (48-e FIX 13): nilai
+                               # non-kosong PERTAMA (bukan .iloc[0]) —
+                               # baris pertama NaT tak lagi menyembunyikan
+                               # tgl/jam baris lain di PO yang sama.
+                               _first_fmt(group["Tgl/Jam Pembuatan"],
+                                          self._fmt_datetime)
                                if "Tgl/Jam Pembuatan" in group.columns
                                else "",
                            ],

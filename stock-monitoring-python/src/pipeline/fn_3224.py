@@ -11,6 +11,10 @@ ter-cover peta 42.05) ikut terbaca → dibakukan SATUAN DOK / RASIO
 SATUAN / SATUAN TERKECIL (peta konversi PO Menunggu → satuan terkecil
 — konversi_satuan.build_konversi_map; kolom ekstra TIDAK ikut pivot
 append1, pola 'SOURCE IN' v3.9.29).
+v3.9.33 — AUDIT FIX (48-a): guard kolom — identitas ('Nama Barang'/
+'Nama Gudang') hilang → WARNING keras + baris dibuang (degradasi
+per-sumber, bukan KeyError total); VALUE ('Kts (Unit#1)'/'Tanggal')
+hilang → NA (schema output tetap identik — pola fn_4205).
 """
 import pandas as pd
 
@@ -30,7 +34,14 @@ from .konversi_satuan import (
 
 # Nama sheet standar 32.24 (export Accurate) — konstanta M-mirror,
 # dipakai bersama oleh folder berjalan & bulan lalu.
+# v3.9.33: queries.query_3224 me-resolve key config Sheets['Penerimaan3224']
+# (config lama tanpa key tetap dapat nilai ini).
 SHEET_3224 = "#32.24. Rincian Penerimaan Bara"
+
+# Schema output kosong (degradasi per-sumber — v3.9.33 AUDIT FIX 48-a)
+_EMPTY_COLUMNS_3224 = ["Tanggal", "NAMA RESTO", "Nama Barang", "Value",
+                       "Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT",
+                       KOL_SATUAN_DOK, KOL_RASIO, KOL_TERKECIL]
 
 
 def fn_3224(folder_path: str, mode: str,
@@ -44,9 +55,7 @@ def fn_3224(folder_path: str, mode: str,
     # expand = fnCombineFolder + Skip(3) + PromoteHeaders = header=4
     prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
     if prom.empty:
-        return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value",
-                                      "Nomor", "Nomor PO", "#Tgl/Jam Pembuatan IT",
-                                      KOL_SATUAN_DOK, KOL_RASIO, KOL_TERKECIL])
+        return pd.DataFrame(columns=_EMPTY_COLUMNS_3224)
 
     # v3.9.31 — resolusi kolom konversi ('Satuan' + 'Rasio Satuan';
     # terkecil biasanya tak ada di export 32.24 → kolom NA tetap dibuat)
@@ -58,15 +67,41 @@ def fn_3224(folder_path: str, mode: str,
     available = [c for c in needed if c in prom.columns]
     sel = prom[available].copy()
 
+    # v3.9.33 — AUDIT FIX (48-a): kolom IDENTITAS hilang (header file
+    # bergeser/versi export beda) → dulu KeyError di bawah mematikan
+    # SELURUH pipeline. Sekarang: WARNING keras (nama kolom + jumlah
+    # baris) + baris dibuang → frame kosong ber-schema standar
+    # (degradasi per-sumber: sumber lain tetap jalan, output concat
+    # append1/queries tak berubah). Kolom VALUE hilang → NA (schema
+    # tetap konsisten) — pola guard fn_4205.
+    _ident_hilang = [c for c in ("Nama Barang", "Nama Gudang")
+                     if c not in sel.columns]
+    if _ident_hilang:
+        print(f"  [fn_3224] WARNING: kolom identitas hilang "
+              f"{_ident_hilang} — {len(sel)} baris dibuang (header file "
+              f"bergeser? pipeline lanjut tanpa sumber 32.24 ini)")
+        return pd.DataFrame(columns=_EMPTY_COLUMNS_3224)
+
     # typed: vectorized
     sel["Nama Barang"] = safe_to_str(sel["Nama Barang"])
     sel["Nama Gudang"] = safe_to_str(sel["Nama Gudang"])
-    sel["Kts (Unit#1)"] = safe_to_numeric(sel["Kts (Unit#1)"])
+    # v3.9.33 — AUDIT FIX (48-a): VALUE hilang → NA (bukan KeyError)
+    if "Kts (Unit#1)" in sel.columns:
+        sel["Kts (Unit#1)"] = safe_to_numeric(sel["Kts (Unit#1)"])
+    else:
+        sel["Kts (Unit#1)"] = pd.Series(
+            [float("nan")] * len(sel), index=sel.index)
 
     # ext: Nama Gudang → BetweenDelimiters("(", ")"), Tanggal → Date.Day
     # Vectorized
     sel["NAMA RESTO"] = vec_text_between_delimiters(sel["Nama Gudang"], "(", ")")
-    sel["Tanggal"] = date_to_day(sel["Tanggal"])
+    if "Tanggal" in sel.columns:
+        sel["Tanggal"] = date_to_day(sel["Tanggal"])
+    else:
+        # v3.9.33 — AUDIT FIX (48-a): Tanggal hilang → Int64-NA (dtype
+        # konsisten dgn date_to_day supaya concat query_in tak berganti
+        # dtype)
+        sel["Tanggal"] = pd.array([pd.NA] * len(sel), dtype="Int64")
 
     # ren
     rename_map = {

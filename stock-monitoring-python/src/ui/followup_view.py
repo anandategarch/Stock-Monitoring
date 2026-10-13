@@ -57,6 +57,7 @@ from .widgets import (
     HeaderFilterGroup,
     LoadingOverlay,
     TableExpander,
+    _filter_value_sort_key,
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
@@ -284,7 +285,10 @@ class FollowUpView(tk.Frame):
             if other and not all(str(values[k]) in s for k, s in other):
                 continue
             vals.append(str(values[j]))
-        return sorted(set(vals))
+        # v3.9.33 — AUDIT FIX (48-e FIX 14): sort numerik-aware (pola
+        # widgets._filter_value_sort_key ala in_selisih — "10" harus
+        # muncul SETELAH "2"; dulu leksikografis).
+        return sorted(set(vals), key=_filter_value_sort_key)
 
     def _on_col_filter(self, col: str, selected):
         self._col_sel[col] = selected

@@ -1,6 +1,18 @@
 """
 pivot_view.py — Pivot matrix view (v3.2).
 
+v3.9.33 — AUDIT FIX (48-d/48-f, fix 49-a):
+- (LOW) fallback validasi TANGGAL AWAL kini -31 (dulu 1 — input
+  invalid SENYAP mempersempit rentang; kini revert ke batas kiri
+  default v3.8).
+- (MEDIUM) _populate_filters me-reset seleksi RESTO/SOURCE/KATEGORI
+  ke "(All)" saat reload data (dulu seleksi lama tetap terpasang
+  senyap — nilai tak ada lagi di data baru → 0 baris senyap) +
+  membersihkan daftar nilai bila kolom hilang di schema baru.
+- (HIGH sebagian / 48-f) 0 baris pasca-pipeline → EMPTY STATE +
+  status berpenjelasan aksi (dulu tabel kosong senyap di belakang
+  pipeline "SELESAI" hijau).
+
 v3.9.20 (deep audit 34-e/fix 35-c2): popup Nama Barang = barang yang
 TAMPIL (RESTO mode Tanggal + SOURCE + KATEGORI + rentang Tanggal +
 ☑ hide-empty; filter sendiri dikecualikan) + merah negatif #dc2626
@@ -446,6 +458,23 @@ class PivotTableView(tk.Frame):
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
+        # v3.9.33 — AUDIT FIX (48-f HIGH sebagian): 0 baris pasca-pipeline
+        # → EMPTY STATE + status berpenjelasan aksi (dulu _show_content()
+        # TANPA SYARAT → tabel kosong senyap di belakang pipeline
+        # "SELESAI" hijau — user tak tahu harus cek folder data/RootPath).
+        if data is None or getattr(data, "empty", True):
+            self._show_empty()
+            self._name_selected = None
+            self.header_filter.clear()
+            # v3.9.33 — AUDIT FIX (48-d MEDIUM, lanjutan _populate_filters):
+            # data kosong = kolom "hilang" → seleksi combo di-reset (dulu
+            # nilai lama terpasang senyap di tabel kosong).
+            for var in (self.resto_var, self.source_var, self.kategori_var):
+                var.set("(All)")
+            self.status_var.set(
+                "Belum ada data — 0 baris terbaca dari pipeline "
+                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+            return
         self._show_content()
         self._populate_filters()
         self._name_selected = None
@@ -465,15 +494,25 @@ class PivotTableView(tk.Frame):
     def _populate_filters(self):
         if self.data is None or self.data.empty:
             return
-        for col, combo in [
-            ("NAMA RESTO", self.resto_combo),
-            ("SOURCE KIRIMAN", self.source_combo),
-            ("KATEGORI", self.kategori_combo),
+        for col, combo, var in [
+            ("NAMA RESTO", self.resto_combo, self.resto_var),
+            ("SOURCE KIRIMAN", self.source_combo, self.source_var),
+            ("KATEGORI", self.kategori_combo, self.kategori_var),
         ]:
+            # v3.9.33 — AUDIT FIX (48-d MEDIUM): reload data dengan schema /
+            # himpunan nilai berbeda TIDAK lagi meninggalkan seleksi lama
+            # terpasang senyap (nilai tak ada di data baru → filter 0
+            # baris senyap): seleksi di-reset ke "(All)" bila tak valid;
+            # kolom hilang → daftar nilai dikosongkan + reset.
             if col in self.data.columns:
                 values = ["(All)"] + sorted(
                     self.data[col].dropna().astype(str).unique().tolist())
                 combo["values"] = values
+                if var.get() not in values:
+                    var.set("(All)")
+            else:
+                combo["values"] = []
+                var.set("(All)")
 
     # =========================================================================
     # FILTER STATE + COMPUTE (pure — berjalan di thread)
@@ -481,8 +520,11 @@ class PivotTableView(tk.Frame):
     def _filter_state(self) -> dict:
         # FIX B-02: validasi input konsisten (warning + revert) — sebelumnya
         # input invalid difallback SENYAP ke 1/31 tanpa memberi tahu user.
+        # v3.9.33 — AUDIT FIX (48-d LOW): fallback TANGGAL AWAL kini -31
+        # (batas kiri default v3.8) — dulu fallback 1 MEMPERSEMPIT rentang
+        # secara senyap setelah satu kali input invalid.
         t1 = validated_tgl_entry(self.tgl_start_var, lo=-31, hi=31,
-                                 fallback=1, label="Tanggal awal",
+                                 fallback=-31, label="Tanggal awal",
                                  parent=self)
         t2 = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
                                  fallback=31, label="Tanggal akhir",

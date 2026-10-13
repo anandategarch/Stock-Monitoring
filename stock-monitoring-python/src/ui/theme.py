@@ -67,12 +67,17 @@ _font_family: str | None = None
 _mono_family: str | None = None
 
 
-def _pick_family(candidates: list[str], fallback: str) -> str:
-    """Pilih family font pertama yang tersedia di platform ini."""
+def _pick_family(candidates: list[str], fallback: str) -> str | None:
+    """Pilih family font pertama yang tersedia di platform ini.
+
+    v3.9.33 — AUDIT FIX (48-c HIGH-1): return None bila daftar family
+    TIDAK bisa di-query (belum ada Tk root — tkfont.families() raise).
+    None = sinyal "belum bisa resolve" bagi pemanggil supaya fallback
+    TIDAK di-cache (lihat font_family/mono_family)."""
     try:
         available = set(tkfont.families())
     except Exception:
-        return fallback
+        return None
     for name in candidates:
         if name in available:
             return name
@@ -80,18 +85,38 @@ def _pick_family(candidates: list[str], fallback: str) -> str:
 
 
 def font_family() -> str:
-    """Family font UI utama (resolve sekali, cache hasilnya)."""
+    """Family font UI utama (resolve sekali setelah root ada, lalu cache).
+
+    v3.9.33 — AUDIT FIX (48-c HIGH-1): dulu fallback "DejaVu Sans"
+    ter-CACHE PERMANEN saat resolusi dipanggil SEBELUM tk.Tk() ada
+    (import-time, mis. widgets._BTN_BASE) → rantai kandidat
+    "Segoe UI → Noto Sans → DejaVu" tidak pernah jalan di Windows
+    produksi. Kini: kegagalan resolve (belum ada root) TIDAK di-cache —
+    fallback dikembalikan sebagai nilai HIDUP dan resolusi dicoba ulang
+    tiap pemanggilan sampai berhasil SEKALI (apply_theme pasca-root),
+    baru hasilnya di-cache."""
     global _font_family
     if _font_family is None:
-        _font_family = _pick_family(_FONT_CANDIDATES, "DejaVu Sans")
+        fam = _pick_family(_FONT_CANDIDATES, "DejaVu Sans")
+        if fam is None:
+            # Belum ada root — JANGAN cache; kembalikan fallback hidup.
+            return "DejaVu Sans"
+        _font_family = fam
     return _font_family
 
 
 def mono_family() -> str:
-    """Family font monospace untuk log konsol."""
+    """Family font monospace untuk log konsol.
+
+    v3.9.33 — AUDIT FIX (48-c HIGH-1): pola lazy yang sama (jalur ini
+    memang baru terpakai pasca-root via make_log_console, tapi dibuat
+    konsisten + defensive)."""
     global _mono_family
     if _mono_family is None:
-        _mono_family = _pick_family(_MONO_CANDIDATES, "Courier New")
+        fam = _pick_family(_MONO_CANDIDATES, "Courier New")
+        if fam is None:
+            return "Courier New"
+        _mono_family = fam
     return _mono_family
 
 

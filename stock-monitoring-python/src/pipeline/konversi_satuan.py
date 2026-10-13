@@ -65,11 +65,23 @@ _KANDIDAT_3224 = {
 def resolve_konversi_kolom(prom_columns, sumber: str) -> dict:
     """{nama kolom BAKU: nama kolom ASLI di sheet} — first-match dari
     kandidat; kolom tak ada → tidak masuk dict (frame final diberi
-    kolom NA oleh pemanggil supaya schema concat konsisten)."""
+    kolom NA oleh pemanggil supaya schema concat konsisten).
+
+    v3.9.33 — AUDIT FIX (48-a): dict-comprehension lama menimpa nilai per
+    kandidat → LAST-match menang ('Satuan' menimpa '#Sat. Kirim' bila
+    keduanya ada — KONTRA janji first-match docstring ini). Loop
+    eksplisit: kandidat PERTAMA yang ditemukan per kolom baku menang
+    (break) — fallback kandidat kedua tetap terpakai bila utama absen
+    (salinan lama workbook 'Satuan')."""
     kandidat = _KANDIDAT_4205 if sumber == "4205" else _KANDIDAT_3224
     cols = set(prom_columns) if prom_columns is not None else set()
-    return {std: c for std, cands in kandidat.items()
-            for c in cands if c in cols}
+    out: dict = {}
+    for std, cands in kandidat.items():
+        for c in cands:
+            if c in cols:
+                out[std] = c
+                break  # first-match — kandidat berikutnya TIDAK menimpa
+    return out
 
 
 def _norm_sat(v) -> str:

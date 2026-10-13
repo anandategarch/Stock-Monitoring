@@ -7,16 +7,21 @@ query_3224_bulan_lalu me-resolve sheet folder bulan-lalu — key
 dedikasi Sheets["Pemindahan4205Lalu"] (default = nilai berjalan) +
 fallback prefiks modul "#42.05"/"#32.24" (sheet lalu beda nama ≠
 lagi 0 baris senyap).
+
+v3.9.33 — AUDIT FIX (48-a): 5 key Sheets config yang dulu di-HARDCODE
+reader kini benar-benar dipakai — Penjualan2205 / Pemindahan4215 /
+SaldoAwal4217 / Penerimaan3224 / DBSKategori (dibaca defensif via
+_sheet_cfg: config lama/mock tanpa key tetap dapat nilai default).
 """
 import pandas as pd
 
-from .fn_2205 import fn_2205
+from .fn_2205 import SHEET_2205, fn_2205
 from .fn_3224 import SHEET_3224, fn_3224
 from .fn_4205 import fn_4205
-from .fn_4215 import fn_4215
-from .fn_4217 import fn_4217
+from .fn_4215 import SHEET_4215, fn_4215
+from .fn_4217 import SHEET_4217, fn_4217
 from .fn_9901 import fn_9901
-from .fn_dbs_kategori import fn_dbs_kategori
+from .fn_dbs_kategori import SHEET_DBS_KATEGORI, fn_dbs_kategori
 from .fn_rekap_mentah import fn_rekap_mentah
 from .helpers import _list_excel_files, _list_sheet_names, to_datetime_robust
 
@@ -24,19 +29,47 @@ from .helpers import _list_excel_files, _list_sheet_names, to_datetime_robust
 # MASTER QUERIES (dari Config)
 # =============================================================================
 
+
+def _sheet_cfg(config, key: str, default: str) -> str:
+    """v3.9.33 — AUDIT FIX (48-a): baca Sheets[key] DEFENSIF.
+
+    config.sheet(key) raise KeyError utk config lama tanpa key; mock
+    config test bahkan tak punya atribut Sheets. Di sini:
+    Sheets.get(key, default) → nilai default hardcode reader tetap
+    terpakai (config.json lama tanpa key baru TIDAK rusak)."""
+    sheets = getattr(config, "Sheets", None)
+    if not sheets:
+        return default
+    try:
+        val = sheets.get(key, default)
+    except AttributeError:
+        return default
+    return str(val) if val else default
+
+
 def query_dbs_kategori(config) -> pd.DataFrame:
-    """Mirror M: shared DBS_Kategori = fnDBSKategori(Config[RootPath] & Config[Folders][DBSKategori])"""
-    return fn_dbs_kategori(config.folder("DBSKategori"))
+    """Mirror M: shared DBS_Kategori = fnDBSKategori(Config[RootPath] & Config[Folders][DBSKategori])
+
+    v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['DBSKategori']
+    (default 'Sheet1' — perilaku lama)."""
+    return fn_dbs_kategori(config.folder("DBSKategori"),
+                           sheet_name=_sheet_cfg(config, "DBSKategori",
+                                                 SHEET_DBS_KATEGORI))
 
 
 def query_4217(config) -> pd.DataFrame:
     """Mirror M: shared #"4217" = fn4217(Config[RootPath] & Config[Folders][SaldoAwal4217])
 
     v3.9.32: whitelist kategori dari config ("KategoriBarang4217") ikut
-    diteruskan — filter diterapkan SEBELUM melt di fn_4217 (lebih awal)."""
+    diteruskan — filter diterapkan SEBELUM melt di fn_4217 (lebih awal).
+
+    v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['SaldoAwal4217']
+    (default '#42.17. Kuantitas Barang per Gu' — perilaku lama)."""
     return fn_4217(config.folder("SaldoAwal4217"),
                    kategori_whitelist=getattr(config, "KategoriBarang4217",
-                                              None))
+                                              None),
+                   sheet_name=_sheet_cfg(config, "SaldoAwal4217",
+                                         SHEET_4217))
 
 
 # =============================================================================
@@ -44,16 +77,26 @@ def query_4217(config) -> pd.DataFrame:
 # =============================================================================
 
 def query_2205(config) -> pd.DataFrame:
-    """Mirror M: shared #"2205" = fn2205(Config[RootPath] & Config[Folders][Penjualan2205])"""
-    return fn_2205(config.folder("Penjualan2205"))
+    """Mirror M: shared #"2205" = fn2205(Config[RootPath] & Config[Folders][Penjualan2205])
+
+    v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['Penjualan2205']
+    (default '#22.05. Rincian Penjualan per B' — perilaku lama)."""
+    return fn_2205(config.folder("Penjualan2205"),
+                   sheet_name=_sheet_cfg(config, "Penjualan2205",
+                                         SHEET_2205))
 
 
 def query_4215_gudang_kirim(config) -> pd.DataFrame:
     """
     Mirror M: shared #"4215_Gudang Kirim" = let
         fn4215(Kirim4215, "kirim"), filter NAMA RESTO <> ""
+
+    v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['Pemindahan4215']
+    (default '#42.15. Pemindahan Barang (KIRI' — perilaku lama).
     """
-    result = fn_4215(config.folder("Kirim4215"), "kirim")
+    result = fn_4215(config.folder("Kirim4215"), "kirim",
+                     sheet_name=_sheet_cfg(config, "Pemindahan4215",
+                                           SHEET_4215))
     if not result.empty and "NAMA RESTO" in result.columns:
         mask = result["NAMA RESTO"].notna() & (result["NAMA RESTO"].astype(str).str.strip() != "")
         result = result[mask].reset_index(drop=True)
@@ -64,8 +107,14 @@ def query_3224(config) -> pd.DataFrame:
     """
     Mirror M: shared #"3224" = let
         fn3224(RI3224, "berjalan"), Changed Type #Tgl/Jam Pembuatan IT → datetime
+
+    v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['Penerimaan3224']
+    (default SHEET_3224 — perilaku lama; query lalu memakai nilai yang
+    sama sebagai probe _resolve_lalu_sheet, mirror pola 42.05).
     """
-    result = fn_3224(config.folder("RI3224"), "berjalan")
+    result = fn_3224(config.folder("RI3224"), "berjalan",
+                     sheet_name=_sheet_cfg(config, "Penerimaan3224",
+                                           SHEET_3224))
     if "#Tgl/Jam Pembuatan IT" in result.columns:
         # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah
         result["#Tgl/Jam Pembuatan IT"] = to_datetime_robust(result["#Tgl/Jam Pembuatan IT"])
@@ -82,7 +131,11 @@ def query_3224_bulan_lalu(config) -> pd.DataFrame:
     folder lalu dgn sheet bernama beda tidak lagi 0 baris senyap.
     """
     folder = config.folder("RI3224Lalu")
-    sheet_name = _resolve_lalu_sheet(folder, SHEET_3224, "#32.24")
+    # v3.9.33 — AUDIT FIX (48-a): probe nama sheet lalu memakai key config
+    # 'Penerimaan3224' (default SHEET_3224 — resolusi prefiks #32.24 tetap
+    # jadi fallback bila nama tak ada di folder lalu).
+    sheet_name = _resolve_lalu_sheet(
+        folder, _sheet_cfg(config, "Penerimaan3224", SHEET_3224), "#32.24")
     result = fn_3224(folder, "lalu", sheet_name=sheet_name)
     if "#Tgl/Jam Pembuatan IT" in result.columns:
         # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah

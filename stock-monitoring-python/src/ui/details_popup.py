@@ -40,6 +40,7 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    copy_tree_selection_tsv,  # v3.9.33 — AUDIT FIX 48-c (Ctrl+C multi-baris)
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -443,7 +444,12 @@ class DetailsPopup(tk.Toplevel):
         if not iid:
             return
         try:
-            tree.selection_set(iid)
+            # v3.9.33 — AUDIT FIX (48-c LOW): bila baris yang diklik SUDAH
+            # bagian seleksi (multi-select) → PERTAHANKAN seleksi (perilaku
+            # standar multi-select); dulu selection_set(iid) selalu
+            # MENGECOLAPSKAN seleksi ke satu baris yang diklik.
+            if iid not in tree.selection():
+                tree.selection_set(iid)
             tree.focus(iid)
         except Exception:
             pass
@@ -530,10 +536,21 @@ class DetailsPopup(tk.Toplevel):
             self._copy_to_clipboard(val, col_name)
 
     def _on_copy_key(self, _event):
-        """Ctrl+C — copy Nomor baris terpilih (fallback Nomor PO)."""
+        """Ctrl+C — copy Nomor baris terpilih (fallback Nomor PO).
+
+        v3.9.33 — AUDIT FIX (48-c LOW): dulu hanya sel[0] padahal tree ini
+        multi-select — seleksi >1 baris kini disalin SEMUA sebagai TSV
+        (pola shared widgets.copy_tree_selection_tsv: header + satu baris
+        per iid terpilih)."""
         tree = self.tree
         sel = tree.selection()
         if not sel:
+            return
+        if len(sel) > 1:
+            n = copy_tree_selection_tsv(tree)
+            if n:
+                self._flash_status(
+                    f"📋 {n} baris TERSALIN (tab-separated) ke clipboard.")
             return
         values = tree.item(sel[0], "values")
         if not values:

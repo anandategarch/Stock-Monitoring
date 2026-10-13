@@ -226,7 +226,8 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
 
 
 def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
-                       raw: bool = False, add_name_col: bool = False) -> pd.DataFrame:
+                       raw: bool = False, add_name_col: bool = False,
+                       ffill_cols: "list[str] | None" = None) -> pd.DataFrame:
     """
     Mirror M: fnCombineFolder(folderPath, sheetName, doPromote).
 
@@ -237,6 +238,16 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
 
     add_name_col: jika True, tambah kolom "Name" berisi nama file (basename).
                   Diperlukan untuk fnRekapMentah (NAMA RESTO dari file name).
+
+    ffill_cols: v3.9.33 — AUDIT FIX (48-a): list nama kolom yang di-ffill
+                PER FILE sebelum concat. Nilai ber-pola grup header (mis.
+                kolom 'Kategori Barang' 42.17 — hanya terisi di baris
+                pertama grup) harus di-ffill DALAM file yang sama; ffill
+                pada frame hasil CONCAT membuat file berikutnya mewarisi
+                nilai EKOR file sebelumnya (kategori lintas file bleed —
+                uji 48-a: file-2 grup pertama mewarisi kategori terakhir
+                file-1). Bisa berisi beberapa kandidat nama kolom — semua
+                yang ada di file di-ffill. Default None = perilaku lama.
     """
     files = _list_excel_files(folder_path)
     if not files:
@@ -253,6 +264,13 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
                 if add_name_col:
                     # Insert Name column at position 0
                     df.insert(0, "Name", os.path.basename(f))
+                if ffill_cols:
+                    # v3.9.33 — AUDIT FIX (48-a): ffill PER FILE sebelum
+                    # concat (mirror pola per-file fn_4109) — grup kategori
+                    # file berikutnya TIDAK mewarisi ekor file sebelumnya.
+                    for c in ffill_cols:
+                        if c in df.columns:
+                            df[c] = df[c].ffill()
                 dfs.append(df)
         except Exception as e:
             print(f"  [WARNING] Skip file {os.path.basename(f)}: {e}")
@@ -310,6 +328,43 @@ def table_skip(df: pd.DataFrame, n: int) -> pd.DataFrame:
     if df.empty or n <= 0:
         return df
     return df.iloc[n:].reset_index(drop=True)
+
+
+# =============================================================================
+# v3.9.33 — PRE-FLIGHT FOLDER DATA (kontrak — dipanggil app.py agent 49-c)
+# =============================================================================
+
+def preflight_folders(cfg) -> tuple[list[tuple[str, str]], list[tuple[str, int]]]:
+    """v3.9.33 — pre-flight validasi folder data SEBELUM pipeline jalan.
+
+    Return (missing, counts):
+    - missing: [(key, full_path)] utk folder Folders[key] yang path-nya
+      TIDAK ada (RootPath sendiri invalid → label 'RootPath').
+    - counts: [(key, jumlah file .xls*)] per key Folders (folder hilang → 0).
+
+    Audit 48-f HIGH: folder data hilang / RootPath salah dulu membuat
+    pipeline 'SELESAI' hijau + tabel kosong SENYAP. app.py memanggil ini
+    sebelum run_pipeline utk menampilkan peringatan eksplisit ke user
+    (folder mana yang hilang + berapa file yang akan terbaca).
+    """
+    root = str(getattr(cfg, "RootPath", "") or "")
+    missing: list = []
+    counts: list = []
+    if not os.path.isdir(root):
+        # RootPath sendiri invalid → semua subfolder ikut hilang; catat
+        # sebagai entri khusus 'RootPath' di depan.
+        missing.append(("RootPath", root))
+    folders = getattr(cfg, "Folders", None) or {}
+    for key in sorted(folders):
+        try:
+            full = cfg.folder(key)
+        except Exception:  # noqa: BLE001 — cfg duck-typed/mock: fallback join
+            full = os.path.join(root, str(folders[key]))
+        # hitung file utk SEMUA key (folder hilang → 0, kontrak)
+        counts.append((key, len(_list_excel_files(full))))
+        if not os.path.isdir(full):
+            missing.append((key, full))
+    return missing, counts
 
 
 # =============================================================================

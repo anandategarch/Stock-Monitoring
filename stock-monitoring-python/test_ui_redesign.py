@@ -727,7 +727,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.32", APP_VERSION == "3.9.32", f"got {APP_VERSION}")
+    check("Versi = 3.9.33", APP_VERSION == "3.9.33", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -4396,9 +4396,9 @@ def main():
     check("(v3.9.16) Multi-file: 7 pasangan — bukan 8 baris per-file "
           "(SEP+OKT W1 MLG AYAM tergabung median)",
           len(_t16) == 7, f"got {len(_t16)}")
-    check("(v3.9.16) Top-1 Periode = 'Median 2 file · WEEK 1' "
+    check("(v3.9.16→3.9.33) Top-1 Periode = 'Median 2 bulan · WEEK 1' "
           "(nilai median ditampilkan — bukan semua file)",
-          bool(_t16) and str(_t16[0][1]) == "Median 2 file · WEEK 1",
+          bool(_t16) and str(_t16[0][1]) == "Median 2 bulan · WEEK 1",
           f"got {(_t16[0][1] if _t16 else None)!r}")
     check("(v3.9.16) Top-1 DEV Lalu = median(−10, 49) = 19,5",
           bool(_t16) and str(_t16[0][5]) == "19,5",
@@ -4435,9 +4435,9 @@ def main():
           and str(_t16[4][8]) == "TIDAK ADA DI DATA SAAT INI",
           f"got gr={(_t16[4][6] if len(_t16) > 4 else None)!r} "
           f"st={(_t16[4][8] if len(_t16) > 4 else None)!r}")
-    check("(v3.9.16) Status bar: 'Lalu = median antar-file' muncul "
+    check("(v3.9.16→3.9.33) Status bar: 'Lalu = median antar-bulan' muncul "
           "saat multi-file",
-          "Lalu = median antar-file" in kv._top_status_var.get(),
+          "Lalu = median antar-bulan" in kv._top_status_var.get(),
           f"got {kv._top_status_var.get()!r}")
 
     # --- (5b) v3.9.14: MINGGU di tab Analisa mengikuti kolom H ----------
@@ -8796,11 +8796,11 @@ def main():
     _aud43, _kpi43, _desc43 = _baf43(_rk43, None, po_pending_df=_po43,
                                      konversi=_km43)
     _air43r = _aud43[_aud43["Nama Item"] == "AIR MINERAL BOTOL (V.20)"]
-    check("(v3.9.31) audit: kolom 'Qty PO Menunggu' = nilai TERKONVERSI "
-          "(disetujui user 'tampilkan nilai terkonversi' — 123 BOTOL: "
-          "120 konversi + 3 fallback)",
+    check("(v3.9.31→3.9.33) audit: kolom 'Qty PO Menunggu' = jumlah item "
+          "TERKONVERSI SAJA utk pasangan campur (120 BOTOL — 3 DUS "
+          "fallback tak dijumlahkan, tampak di catatan; audit 48-b FIX 4)",
           "Qty PO Menunggu" in _aud43.columns and
-          float(_air43r["Qty PO Menunggu"].iloc[0]) == 123.0,
+          float(_air43r["Qty PO Menunggu"].iloc[0]) == 120.0,
           f"got {_air43r['Qty PO Menunggu'].tolist()}")
     check("(v3.9.31) audit: catatan DEVIASI MURNI berlabel satuan "
           "terkecil + penanda fallback",
@@ -8850,10 +8850,10 @@ def main():
     _val43 = ""
     for _k43 in _isv43.tree.get_children(""):
         _val43 = _isv43.tree.set(_k43, "PO Menunggu")
-    check("(v3.9.31) view: kolom 'PO Menunggu' = 123 (nilai terkonversi "
-          "BOTOL — format Indonesia) di samping Selisih/Saldo satuan "
-          "terkecil",
-          _val43 == "123", f"got {_val43!r}")
+    check("(v3.9.31→3.9.33) view: kolom 'PO Menunggu' = 120 (jumlah "
+          "terkonversi BOTOL — format Indonesia; fallback 3 DUS hanya di "
+          "catatan) di samping Selisih/Saldo satuan terkecil",
+          _val43 == "120", f"got {_val43!r}")
     _top43.destroy()
     root.update()
 
@@ -9277,6 +9277,277 @@ def main():
     # cleanup §44
     import shutil as _sh44
     _sh44.rmtree(_tmp44, ignore_errors=True)
+
+    # ==================================================================
+    print()
+    print("== 45. (v3.9.33) AUDIT FIX WAVE (Task 48 deep audit 6 agent: "
+          "8 HIGH / 31 MED / ~54 LOW) ==")
+
+    import json as _json45
+    import os as _os45
+    import shutil as _sh45
+    import subprocess as _sp45
+    import tempfile as _tf45
+    _tmp45 = _tf45.mkdtemp(prefix="t45_")
+
+    # --- (a) konversi_satuan FIRST-match (dulu last-match — audit 48) ---
+    from src.pipeline.konversi_satuan import (
+        resolve_konversi_kolom as _rkc45,
+    )
+    _map45 = _rkc45(["Nama Barang", "#Sat. Kirim", "Rasio Satuan",
+                     "#Sat. Terkecil", "Satuan"], "4205")
+    check("(v3.9.33) resolve_konversi_kolom FIRST-match: sheet 42.05 dgn "
+          "'#Sat. Kirim' + 'Satuan' → SATUAN DOK = '#Sat. Kirim' "
+          "(dulu last-match 'Satuan' — rasio nyasar key)",
+          _map45.get("SATUAN DOK") == "#Sat. Kirim"
+          and _map45.get("SATUAN TERKECIL") == "#Sat. Terkecil",
+          f"got {_map45}")
+    _map45c = _rkc45(["Nama Barang", "Satuan", "Rasio Satuan"], "3224")
+    _map45b = _rkc45(["Nama Barang", "Satuan", "Rasio Satuan"], "4205")
+    check("(v3.9.33) resolve fallback tunggal 'Satuan' tetap kompatibel "
+          "(§43 tak berubah; 3224 pakai 'Satuan' utk SATUAN DOK)",
+          _map45b.get("SATUAN DOK") == "Satuan"
+          and _map45c.get("SATUAN DOK") == "Satuan",
+          f"got 4205={_map45b} 3224={_map45c}")
+
+    # --- (b) preflight_folders (kontrak app.py FIX 3 — audit 48-f HIGH) ---
+    from src.pipeline.helpers import preflight_folders as _pf45
+
+    class _Cfg45:
+        RootPath = _tmp45
+        Folders = {"Ada": "folder_ada", "Hilang": "folder_hilang"}
+
+        def folder(self, key):
+            return _os45.path.join(self.RootPath, self.Folders[key])
+
+    _os45.makedirs(_os45.path.join(_tmp45, "folder_ada"))
+    for _f45 in ("a.xlsx", "b.xls"):
+        open(_os45.path.join(_tmp45, "folder_ada", _f45), "w").close()
+    _miss45, _cnt45 = _pf45(_Cfg45())
+    check("(v3.9.33) preflight_folders: folder hilang terdeteksi + jumlah "
+          "file per folder (folder hilang → 0)",
+          [k for k, _ in _miss45] == ["Hilang"]
+          and dict(_cnt45).get("Ada") == 2
+          and dict(_cnt45).get("Hilang") == 0,
+          f"missing={_miss45} counts={_cnt45}")
+
+    class _CfgBad45(_Cfg45):
+        RootPath = _os45.path.join(_tmp45, "root_tidak_ada")
+
+    _miss45b, _ = _pf45(_CfgBad45())
+    check("(v3.9.33) preflight_folders: RootPath invalid → entri "
+          "'RootPath' di daftar missing",
+          "RootPath" in [k for k, _ in _miss45b], f"missing={_miss45b}")
+
+    # --- (c) config.py pesan error ramah (dulu KeyError mentah) ---------
+    _cfgbad45 = _os45.path.join(_tmp45, "config_kurang.json")
+    with open(_cfgbad45, "w", encoding="utf-8") as _fh45:
+        _fh45.write(_json45.dumps({"RootPath": "X:\\data"}))
+    _err45 = None
+    try:
+        from src.config import Config as _CfgCls45
+        _CfgCls45(_cfgbad45)
+    except RuntimeError as _e45:
+        _err45 = str(_e45)
+    except KeyError as _e45:
+        _err45 = f"KeyError mentah: {_e45}"
+    check("(v3.9.33) config.json kurang key → RuntimeError bahasa "
+          "Indonesia dgn nama key (bukan KeyError 'Folders' mentah)",
+          _err45 is not None and "tidak lengkap" in _err45
+          and "Folders" in _err45, f"got {_err45!r}")
+
+    # --- (d) fn_9901 dedup baris duplikat lintas sheet (audit 48-a HIGH)
+    # Workbook 2 sheet ISI IDENTIK → tanpa dedup IN dobel senyap; dgn
+    # fix → output = 2 baris valid (sama dgn 1 sheet). Pola mock: persis
+    # create_mock_9901 (header + 2 baris valid + 1 baris ber-nomor).
+    import openpyxl as _ox45
+    _dir9901 = _os45.path.join(_tmp45, "30.9901")
+    _os45.makedirs(_dir9901)
+    _wb9901 = _ox45.Workbook()
+    _hdr9901 = ["Nomor # Penerimaan Barang", "Jenis Barang Barang & Jasa",
+                "#Prime.Qty", "Nama barang", "Nama cabang", "Tanggal"]
+    for _sn45 in ("Data", "Data (2)"):     # sheet kedua = salinan backup
+        _ws45 = _wb9901.active if _sn45 == "Data" \
+            else _wb9901.create_sheet(_sn45)
+        _ws45.title = _sn45
+        for _c45, _h45 in enumerate(_hdr9901, 1):
+            _ws45.cell(row=1, column=_c45, value=_h45)
+        _rows9901 = [
+            [None, "Persediaan", 5.0, "AYAM FILET", "1137.MLGPAR", 5],
+            [None, "Persediaan", 10.0, "GULA PASIR", "1137.MLGPAR", 6],
+            ["RI-900", "Persediaan", 99.0, "AYAM FILET", "1137.MLGPAR", 7],
+        ]
+        for _r45, _rw45 in enumerate(_rows9901, 2):
+            for _c45, _v45 in enumerate(_rw45, 1):
+                _ws45.cell(row=_r45, column=_c45, value=_v45)
+    _wb9901.save(_os45.path.join(_dir9901, "9901.xlsx"))
+    _wb9901.close()
+    from src.pipeline.fn_9901 import fn_9901 as _fn9901_45
+    _df9901 = _fn9901_45(_dir9901)
+    check("(v3.9.33) fn_9901 dedup: 2 sheet isi identik → IN TIDAK dobel "
+          "(output 2 baris valid, bukan 4 — audit 48-a HIGH)",
+          len(_df9901) == 2, f"got {len(_df9901)} rows")
+
+    # --- (e) theme font lazy-resolve (audit 48-c HIGH) -------------------
+    # Pra-root (subprocess bersih): _font_family TIDAK di-cache fallback.
+    _sub45 = _sp45.run(
+        [sys.executable, "-c",
+         "import src.ui.theme as t; print(t._font_family)"],
+        capture_output=True, text=True, timeout=60, check=False)
+    check("(v3.9.33) theme pra-root: fallback TIDAK terkunci di cache "
+          "(subprocess import → _font_family None)",
+        _sub45.returncode == 0 and _sub45.stdout.strip() == "None",
+        f"rc={_sub45.returncode} out={_sub45.stdout.strip()!r}")
+    from src.ui import theme as _th45
+    _th45._font_family = None          # simulasi pra-root
+    _fam45 = _th45.font_family()       # root HIDUP → resolve asli
+    check("(v3.9.33) theme font_family: resolve SETELAH root ada + cache "
+          "sekali (rantai Windows Segoe UI→Noto→DejaVu kini hidup)",
+          _th45._font_family is not None and isinstance(_fam45, str)
+          and len(_fam45) > 0,
+          f"got family={_fam45!r} cached={_th45._font_family!r}")
+
+    # --- (f) widgets: Ctrl+C salin baris multi-select + idempoten -------
+    from src.ui.widgets import enable_multi_select as _ems45
+    _top45w = tk.Toplevel(root)
+    _tree45 = ttk.Treeview(_top45w, columns=("A", "B"),
+                           selectmode="extended", show="headings")
+    _tree45.heading("A", text="Barang")
+    _tree45.heading("B", text="Nilai")
+    _ems45(_tree45)
+    _ems45(_tree45)        # 2× — klaim idempoten kini BENAR (audit 48-c)
+    _ems45(_tree45)
+    _tree45.insert("", "end", iid="r0", values=("AYAM", 120))
+    _tree45.insert("", "end", iid="r1", values=("GULA", 80))
+    _tree45.pack(fill="both", expand=True)
+    _top45w.update()
+    _tree45.selection_set(("r0", "r1"))
+    _tree45.focus_set()
+    _top45w.update()
+    _tree45.event_generate("<Control-c>")
+    _top45w.update()
+    _clip45 = ""
+    try:
+        _clip45 = root.clipboard_get()
+    except tk.TclError:
+        pass
+    check("(v3.9.33) Ctrl+C multi-select: clipboard = header + 2 baris TSV "
+          "(multi-select kini punya aksi konsumsi — audit 48-f HIGH)",
+          "Barang" in _clip45 and "AYAM" in _clip45 and "GULA" in _clip45
+          and _clip45.count("\n") >= 2, f"got {_clip45!r}")
+    check("(v3.9.33) enable_multi_select IDEMPOTEN (flag "
+          "_multi_select_bound; 3× install)",
+          bool(getattr(_tree45, "_multi_select_bound", False)))
+    _tree45.selection_remove("r0")      # bersih sebelum Ctrl+A
+    _tree45.event_generate("<Control-a>")
+    _top45w.update()
+    check("(v3.9.33) Ctrl+A masih jalan setelah install 3× (tak dobel-bind)",
+          set(_tree45.selection()) == {"r0", "r1"},
+          f"got {set(_tree45.selection())}")
+    _top45w.destroy()
+    root.update()
+
+    # --- (g) deviasi_view: clone ⛶ BASI ditutup saat re-render ----------
+    # (audit 48-d HIGH — toggle ✓ di clone basi men-hit pasangan SALAH)
+    from src.ui.deviasi_view import DeviasiView as _DV45
+    _top45d = tk.Toplevel(root)
+    _top45d.geometry("1400x750+10+10")
+    _dv45 = _DV45(_top45d, satuan_mode="GR")
+    _dv45.pack(fill="both", expand=True)
+    _dv45.load_data(make_mock_append1())
+    _dv45.tanggal_h = 25
+    _dv45._refresh(sync=True)
+    wait_view(root, _dv45)
+    _gen45a = _dv45._render_gen
+    _fake45 = tk.Toplevel(root)
+    _dv45._clone_wins.append(_fake45)
+    _dv45.tanggal_h = 26              # ganti H → re-render → clone ditutup
+    _dv45._refresh(sync=True)
+    wait_view(root, _dv45)
+    check("(v3.9.33) clone ⛶ basi DITUTUP otomatis saat re-render "
+          "(ganti H/filter) — toggle ✓ baris salah tak mungkin lagi",
+          not _fake45.winfo_exists(),
+          "clone masih hidup setelah re-render")
+    check("(v3.9.33) gen-guard aktif: _render_gen bertambah tiap render",
+          _dv45._render_gen > _gen45a,
+          f"got {_gen45a} → {_dv45._render_gen}")
+    _top45d.destroy()
+    root.update()
+
+    # --- (h) nominal: filter ⧩ 'Harga' = string TERFORMAT (audit 48-e
+    # HIGH — dulu value list kosong/numerik → tabel kosong saat filter) --
+    from src.ui.nominal_deviasi_view import NominalDeviasiView as _NDV45
+    _top45n = tk.Toplevel(root)
+    _top45n.geometry("1400x750+10+10")
+    _nv45 = _NDV45(_top45n)
+    _nv45.pack(fill="both", expand=True)
+    _kmap45n = {"rasio": {("AYAM FILET", "GR"): 1.0,
+                          ("GULA PASIR", "KG"): 1000.0},
+                "terkecil": {"AYAM FILET": "GR", "GULA PASIR": "GR"}}
+    _hmap45n = {"AYAM FILET": (10.0, "GR"),
+                "GULA PASIR": (15.0, "GR"),
+                "KOPI BUBUK 100G": (None, "PCS")}
+    _dn45 = pd.DataFrame([
+        {"Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": s,
+         "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": v}
+        for b, s, v in [("AYAM FILET", "GR", 2.0),
+                        ("GULA PASIR", "KG", 12.0),
+                        ("KOPI BUBUK 100G", "PCS", -5.0)]
+    ])
+    _nv45.load_data(_dn45, harga_map=_hmap45n, konversi_map=_kmap45n)
+    _nv45.ensure_refreshed()
+    wait_view(root, _nv45)
+    _vals45h = _nv45._col_values("Harga")
+    _cells45h = [
+        _nv45.tree.set(_i45, "Harga")
+        for _i45 in _nv45.tree.get_children("")
+        if _i45 != "row_total"
+    ]
+    check("(v3.9.33) nominal filter ⧩ 'Harga': value list = string "
+          "TERFORMAT persis sel tampil (dulu numerik mentah → filter "
+          "mengosongkan tabel)",
+          bool(_vals45h)
+          and all(_c45 in _vals45h for _c45 in _cells45h if _c45),
+          f"values={_vals45h} cells={_cells45h}")
+
+    # --- (i) nominal: baris TOTAL DIPIN setelah sort (audit 48-e MED) ---
+    _nv45._sort_by("Nominal", reverse=False)
+    root.update()
+    _kids45n = list(_nv45.tree.get_children(""))
+    check("(v3.9.33) nominal sort: baris TOTAL tetap di UJUNG (dipin; "
+          "dulu ikut ter-sort ke tengah data)",
+          bool(_kids45n) and _kids45n[-1] == "row_total",
+          f"last={_kids45n[-1] if _kids45n else None!r}")
+    _top45n.destroy()
+    root.update()
+
+    # --- (j) followup: toggle-remove ikut buang resolved orphan ---------
+    from src.ui import followup as _fu45
+    from pathlib import Path as _P45
+    _fu45.followup_path = lambda: _P45(_tmp45) / "followup.json"
+    _fu45.resolved_path = lambda: _P45(_tmp45) / "followup_resolved.json"
+    _st45 = _fu45.FollowUpStore()
+    _row45 = {"asal": "GR", "resto": "MLGPAR", "barang": "AYAM FILET",
+              "satuan": "GR", "aktif": "AKTIF", "h": 25, "so": 10,
+              "sistem": 8, "deviasi": 2, "cek": ""}
+    _fp45 = _fu45.row_fingerprint(_row45)
+    _st45.toggle(_fp45, _row45)               # tambah
+    _st45.resolved[_fp45] = {"PIC": "Budi"}
+    _st45.save_resolved()
+    _st45.toggle(_fp45, _row45)               # hapus → resolved ikut
+    _rel45 = _fu45.resolved_path().read_text(encoding="utf-8")
+    check("(v3.9.33) followup toggle-remove: resolved ORPHAN ikut "
+          "dihapus dari file (save_resolved — audit 48-e)",
+          _fp45 not in _rel45, "orphan fp masih ada di file resolved")
+
+    # --- (k) app: Salin Log + guard close-window (audit 48-c/48-f) ------
+    check("(v3.9.33) app: tombol 📋 Salin Log ada (log pipeline kini "
+          "bisa di-copy) + handler WM_DELETE_WINDOW terpasang",
+          getattr(app, "btn_salin_log", None) is not None
+          and callable(getattr(app, "_on_close_window", None)))
+
+    # cleanup §45
+    _sh45.rmtree(_tmp45, ignore_errors=True)
 
     # Cleanup
     root.destroy()

@@ -516,7 +516,21 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         # Ensure Nama Barang is string for merge
         expanded_information["Nama Barang"] = expanded_information["Nama Barang"].astype(str)
         kat["Nama Barang"] = kat["Nama Barang"].astype(str)
-        expanded_kategori = expanded_information.merge(kat, on="Nama Barang", how="left")
+        # v3.9.33 — AUDIT FIX (48-a): join pada key TER-NORMALISASI
+        # (strip + upper) — trailing-space/case drift antara file data
+        # dan master DBS Kategori dulu menjatuhkan KATEGORI SENYAP
+        # (left-join no-match). Nilai kolom asli tetap utk display;
+        # duplikat key hasil normalisasi di master dibuang supaya
+        # kardinalitas left-join tetap 1:1 (tanpa multiplikasi baris);
+        # kolom key temp dibuang setelah merge (schema tak berubah).
+        _KEY = "__key_nama_barang__"
+        expanded_information[_KEY] = (
+            expanded_information["Nama Barang"].str.strip().str.upper())
+        kat[_KEY] = kat["Nama Barang"].str.strip().str.upper()
+        kat = kat.drop_duplicates(subset=[_KEY], keep="first")
+        expanded_kategori = expanded_information.merge(
+            kat.drop(columns=["Nama Barang"]), on=_KEY, how="left")
+        expanded_kategori = expanded_kategori.drop(columns=[_KEY])
     else:
         expanded_kategori = expanded_information.copy()
         expanded_kategori["KATEGORI"] = None

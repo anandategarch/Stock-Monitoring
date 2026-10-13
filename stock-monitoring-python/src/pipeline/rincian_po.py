@@ -8,6 +8,14 @@ filter KATEGORI (semua item, semua status) disimpan ke
 (fn_audit.extract_po_pending: status 'Menunggu diproses' per
 resto+barang — penjelas deviasi murni; query utama TETAP difilter
 DEVIASI persis mirror M supaya tab 🛒 Rincian PO tidak berubah).
+
+v3.9.33 — AUDIT FIX (48-a): merge kategori + filter DEVIASI kini
+CASE/WHITESPACE-INSENSITIVE — key join 'Nama Barang' dinormalisasi
+(strip + upper) di KEDUA sisi (kolom key temp dibuang setelah merge;
+nilai asli tetap utk display) dan perbandingan KATEGORI pakai
+strip+upper == 'DEVIASI'. Dulu trailing-space/case drift antara file
+PO dan master DBS Kategori menjatuhkan baris PO SENYAP (left-join
+no-match → kategori kosong → terfilter).
 """
 import pandas as pd
 
@@ -82,7 +90,19 @@ def build_rincian_po(config, semua_out: dict | None = None) -> pd.DataFrame:
         kat = kat.rename(columns={"NAMA BARANG": "Nama Barang", "KATEGORI": "DBS_Kategori.KATEGORI"})
         sel["Nama Barang"] = sel["Nama Barang"].astype(str)
         kat["Nama Barang"] = kat["Nama Barang"].astype(str)
-        merged = sel.merge(kat, on="Nama Barang", how="left")
+        # v3.9.33 — AUDIT FIX (48-a): join pada key TER-NORMALISASI
+        # (strip + upper) — "Air Mineral " vs "AIR MINERAL" kini nyambung.
+        # Nilai kolom asli dipertahankan utk display; duplikat key hasil
+        # normalisasi di master dibuang (kardinalitas left-join tetap
+        # 1:1 — mirror dedup fn_dbs_kategori, cegah multiplikasi baris);
+        # kolom key temp dibuang setelah merge.
+        _KEY = "__key_nama_barang__"
+        sel[_KEY] = sel["Nama Barang"].str.strip().str.upper()
+        kat[_KEY] = kat["Nama Barang"].str.strip().str.upper()
+        kat = kat.drop_duplicates(subset=[_KEY], keep="first")
+        merged = sel.merge(
+            kat.drop(columns=["Nama Barang"]), on=_KEY, how="left")
+        merged = merged.drop(columns=[_KEY])
     else:
         merged = sel.copy()
         merged["DBS_Kategori.KATEGORI"] = None
@@ -95,7 +115,12 @@ def build_rincian_po(config, semua_out: dict | None = None) -> pd.DataFrame:
 
     # Filtered = Table.SelectRows(Expanded, each [DBS_Kategori.KATEGORI] = "DEVIASI")
     if "DBS_Kategori.KATEGORI" in merged.columns:
-        filtered = merged[merged["DBS_Kategori.KATEGORI"] == "DEVIASI"].reset_index(drop=True)
+        # v3.9.33 — AUDIT FIX (48-a): bandingkan normalisasi strip+upper —
+        # "DEVIASI " / "deviasi" dulu gagal match (baris hilang senyap);
+        # NaN/None tetap tidak lolos (mirror perilaku lama).
+        _kat_norm = (merged["DBS_Kategori.KATEGORI"].astype(str)
+                     .str.strip().str.upper())
+        filtered = merged[_kat_norm == "DEVIASI"].reset_index(drop=True)
     else:
         filtered = merged.iloc[0:0].copy()
 

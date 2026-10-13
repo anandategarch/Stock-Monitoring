@@ -509,6 +509,13 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
       aktif (disetujui user "tampilkan nilai terkonversi") — baris
       tak terkonversi tampil qty satuan PO asli (penanda '*' di
       catatan).
+      v3.9.33 — AUDIT FIX (48-b): pasangan CAMPURAN (sebagian PO
+      terkonversi, sebagian fallback satuan PO asli) → kolom menjumlah
+      baris TERKONVERSI SAJA (jumlah mentah '120 BOTOL + 3 KARTON =
+      123' mencampur dua satuan — bukan angka apple-to-apple dgn
+      Selisih/Saldo). Semua-terkonversi / semua-fallback → total
+      persis perilaku lama; mix tetap tampil utuh di catatan (qty
+      per-PO + penanda '*') dan desc ('N tdk terkonversi').
     - catatan 'PO Menunggu: …' di-append ke 'Detail & Catatan Audit'
       HANYA baris DEVIASI MURNI yang pasangannya punya PO menunggu —
       membedakan deviasi murni EXPLAINABLE (menunggu PO diproses →
@@ -529,7 +536,18 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
         items = pairs.get((resto.iat[i], item.iat[i]))
         if not items:
             continue
-        qty[i] = sum(q for _, q, _, _ in items)
+        # v3.9.33 — AUDIT FIX (48-b): jangan campur satuan di kolom TOTAL.
+        # Semua PO satu kondisi (semua terkonversi / semua fallback) →
+        # jumlah seluruh baris (perilaku lama). Pasangan CAMPURAN →
+        # hanya baris TERKONVERSI (satuan terkecil) yang dijumlahkan
+        # supaya tetap apple-to-apple dgn Selisih/Saldo; baris fallback
+        # (satuan PO asli) tetap tampil di CATATAN '(qty 3 KARTON*)' +
+        # desc 'N tdk terkonversi' — mix tetap transparan.
+        _n_unconv = sum(1 for _n, _q, _s, u in items if u)
+        if _n_unconv == 0 or _n_unconv == len(items):
+            qty[i] = sum(q for _, q, _, _ in items)
+        else:
+            qty[i] = sum(q for _n, q, _s, u in items if not u)
         if status.iat[i] == ST_DEV_MURNI:
             detail[i] = _join_engine_note(
                 detail[i], _po_menunggu_note(items))

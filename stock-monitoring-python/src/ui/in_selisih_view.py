@@ -830,6 +830,12 @@ class InSelisihView(tk.Frame):
         # mencegah worker menempel base data LAMA dengan label data BARU.
         self._cached_base_data = None
         self._cached_base_detail = None   # v3.9.23 (poin B)
+        # v3.9.33 — AUDIT FIX (48-e FIX 6): identitas VARIAN audit pemilik
+        # _cached_base — MODE HITUNG menukar audit_df TANPA mengganti objek
+        # data/in_detail; tanpa identitas ini worker in-flight dapat
+        # menulis ulang cache varian LAMA setelah reset mode (tabel varian
+        # basi + KPI chips varian baru).
+        self._cached_base_audit = None
         # FIX C-04 (audit 2-c): minus merah PER CELL (mirror deviasi v3.9.2)
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
@@ -1069,6 +1075,12 @@ class InSelisihView(tk.Frame):
         self.tgl_end_var.set("31")
         self._apply_audit_mode()
         self._cached_base = None
+        # v3.9.33 — AUDIT FIX (48-e FIX 6): seluruh identitas cache ikut
+        # di-null (bukan hanya _cached_base) — worker yang masih in-flight
+        # tidak bisa menimpa label cache dgn data baru.
+        self._cached_base_data = None
+        self._cached_base_detail = None
+        self._cached_base_audit = None
         self._satuan_map = {}
         self._kategori_map = {}
         self._show_content()
@@ -1090,6 +1102,14 @@ class InSelisihView(tk.Frame):
             self._refresh()
         else:
             self._dirty = True
+        # v3.9.33 — AUDIT FIX (48-f P0#6 sebagian): pipeline 0 baris
+        # (data + audit kosong) → footer INFORMATIF (teks lama
+        # diperpanjang; kata kunci 'Belum ada data' tetap ada).
+        if (data is None or len(data) == 0) and \
+                (self.audit_df is None or self.audit_df.empty):
+            self.status_var.set(
+                "Belum ada data — 0 baris terbaca dari pipeline "
+                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
 
     # ------------------------------------------------ MODE HITUNG (v3.9.27) --
     def _apply_audit_mode(self):
@@ -1110,6 +1130,14 @@ class InSelisihView(tk.Frame):
         else:
             self.audit_df, self.audit_kpi, self.audit_desc = src
         self._cached_base = None
+        # v3.9.33 — AUDIT FIX (48-e FIX 6, P1): null SEMUA field identitas
+        # cache (dulu hanya _cached_base) — worker yang masih in-flight
+        # dan menulis ulang cache varian LAMA setelah reset ini tidak
+        # lagi meninggalkan identitas cache yang 'tampak valid' bagi
+        # refresh berikutnya (race ganti-mode saat compute berjalan).
+        self._cached_base_data = None
+        self._cached_base_detail = None
+        self._cached_base_audit = None
 
     def _on_mode_change(self, idx: int):
         """v3.9.27 — toggle MODE HITUNG (SegmentBar). idx 0 = 📅 Bulan Ini
@@ -1179,7 +1207,7 @@ class InSelisihView(tk.Frame):
             # v3.9.27 — chip mode di depan: varian audit yang menopang
             # angka-angka di bawahnya (Bulan Ini = baris negatif dibuang).
             ("MODE HITUNG",
-             "📅 BULAN INI" if not self._mode_bulan_lalu else "📆 LAU + INI",
+             "📅 BULAN INI" if not self._mode_bulan_lalu else "📆 LALU + INI",
              "#0e7490"),
             ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
             ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
@@ -1317,7 +1345,16 @@ class InSelisihView(tk.Frame):
                              pd.Series([pd.NA] * len(df),
                                        index=df.index, dtype="Float64")),
             "Hasil Audit": df["Status Analisis Audit"].astype(str),
-            "Catatan Audit": df["Detail & Catatan Audit"].astype(str),
+            # v3.9.33 — AUDIT FIX (48-e): NaN/None di kolom catatan engine
+            # jangan jadi literal 'nan'/'None' setelah astype(str) —
+            # dinolkan di SUMBER (sel tampil kosong, export bersih, dan
+            # _join_notes konsisten di kedua jalur dgn/tanpa catatan app;
+            # dulu baris tanpa catatan tampil 'nan' di kolom Catatan
+            # Audit + ikut ke export).
+            "Catatan Audit": (df["Detail & Catatan Audit"]
+                              .where(df["Detail & Catatan Audit"].notna(),
+                                     "")
+                              .astype(str)),
         })
         # v3.8: komponen IN per sumber (utk 💾 Export per resto — kolom
         # Kiriman HO / Kiriman Supplier / Pembelian by Resto; tidak
@@ -1497,11 +1534,21 @@ class InSelisihView(tk.Frame):
             in_detail = self.in_detail   # v3.9.23 (poin B) — capture sama
             if (self._cached_base is None
                     or self._cached_base_data is not data
-                    or self._cached_base_detail is not in_detail):
+                    or self._cached_base_detail is not in_detail
+                    # v3.9.33 — AUDIT FIX (48-e FIX 6): identitas cache
+                    # kini ikut membandingkan VARIAN audit (audit_df) —
+                    # ganti MODE HITUNG saat worker lama masih menghitung
+                    # tidak lagi bisa meninggalkan cache varian basi yang
+                    # dianggap 'valid' oleh refresh berikutnya (dulu:
+                    # worker lama menulis ulang cache varian A pasca-reset
+                    # → pending refresh SKIP recompute → tabel varian A,
+                    # KPI chips varian B).
+                    or self._cached_base_audit is not audit_df):
                 base = self._compute_base(data, audit_df, in_detail)
                 self._cached_base = base
                 self._cached_base_data = data
                 self._cached_base_detail = in_detail
+                self._cached_base_audit = audit_df
             return self._prepare_rows(st)
 
         def done(payload):

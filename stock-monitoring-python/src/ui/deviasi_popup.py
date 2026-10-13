@@ -118,12 +118,21 @@ class DeviasiPopup(tk.Toplevel):
         self.title(f"Detail Deviasi — {title}")
         try:
             # v3.9.25: 880×480 → 1180×640 (permintaan user "perbesar
-            # lagi" + 2 kolom baru Nomor PO & COM)
-            pw, ph = 1180, 640
+            # lagi" + 2 kolom baru Nomor PO & COM).
+            # v3.9.33 — AUDIT FIX (48-c MEDIUM): ukuran ADAPTIF + clamp
+            # posisi KEDUA SISI (mirror DetailsPopup v3.9.32) — dulu
+            # fixed 1180×640 hanya clamp batas 0 → di layar kecil popup
+            # melebihi layar / posisi off-screen kanan-bawah.
+            sw = max(int(self.winfo_screenwidth()), 1024)
+            sh = max(int(self.winfo_screenheight()), 640)
+            pw = min(1180, int(sw * 0.90))
+            ph = min(640, int(sh * 0.86))
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
-            self.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
-        except tk.TclError:
+            px = max(0, min(px, sw - pw))
+            py = max(0, min(py, sh - ph))
+            self.geometry(f"{pw}x{ph}+{px}+{py}")
+        except Exception:
             self.geometry("1180x640")
         self.minsize(820, 340)
         self.configure(bg=C_BG)

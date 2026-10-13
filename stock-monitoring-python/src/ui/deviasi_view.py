@@ -1,6 +1,24 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.9.33 — AUDIT FIX (48-b/48-d/48-e/48-f, fix 49-a):
+- (P0) clone ⛶ basi: re-render/load_data MENUTUP semua clone hidup +
+  generasi render dicatat di tree clone (klik ✓/double-click clone
+  generasi lama diabaikan) — dulu klik ✓ clone basi men-toggle
+  pasangan SALAH (persist followup.json).
+- (P1) H=1/H=2: SO(H−1)/SO(H−2) kini membaca kunci −1 (saldo
+  penutupan bulan lalu) — dulu kunci 0 (tak pernah ada) → selalu 0.
+- (P1-LOW) saldo-only 42.17 saat H≤3: Sistem = saldo t=1 juga utk
+  pasangan TANPA baris ('2.SALDO AKHIR', H) — fix v3.9.32 tak lagi
+  inert (dulu Deviasi 0−0).
+- (MEDIUM) pasangan IN-only ber-SATUAN NaN tidak lagi lenyap dari
+  pivot_table (SATUAN NaN → "").
+- (P1) sinkron ✓ lintas tab: listener FollowUpStore memperbarui sel
+  ✓ tanpa re-render penuh.
+- (UX) chip H tab PCS diberi petunjuk "atur di 📦 Deviasi GR"; 0 baris
+  pasca-pipeline → empty state + status berpenjelasan aksi; panah sort
+  dipasang ulang setelah _update_headings.
+
 1 row per (Barang × Resto) di sekitar Tanggal H (H-2 … H+2) — logika
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
@@ -198,6 +216,7 @@ from .widgets import (
     LegendRow,
     LoadingOverlay,
     TableExpander,
+    _set_sort_arrow,  # v3.9.33 — AUDIT FIX (48-d): pasang ulang panah sort
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
@@ -472,9 +491,27 @@ class DeviasiView(tk.Frame):
         # FIX B-08 (audit 2-b): sort saat render batch → ANTRE (bukan dibuang
         # senyap) — pola _pending_sort komparasi/laporan v3.9.5.
         self._pending_sort = None
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0) -------------------------------
+        # Clone ⛶ basi: window clone memegang SALINAN baris saat dibuka
+        # (iid identik dgn tabel utama). Saat view re-render, _fp_map/
+        # _row_snaps DIGANTI → klik ✓ / double-click di clone lama
+        # men-toggle pasangan SALAH (persist followup.json) & membaca
+        # snapshot H salah. Kini: (1) setiap re-render MENUTUP semua
+        # clone hidup, (2) generasi render dicatat di tree clone saat
+        # dibuka — handler ✓/double-click mengabaikan clone generasi
+        # lama (defense-in-depth).
+        self._render_gen = 0
+        self._clone_wins: list = []
 
         self._build_ui()
         self._setup_tags()
+        # v3.9.33 — AUDIT FIX (48-e P1): sinkron ✓ lintas tab — baris
+        # ditambah/dikeluarkan dari tab ☑ Follow Up (atau tab GR↔PCS)
+        # memperbarui sel ✓ di sini TANPA re-render penuh (dulu sel
+        # basi ☑ bertahan sampai render berikutnya). add_listener
+        # idempoten (bound method dicek ==).
+        if self.store is not None:
+            self.store.add_listener(self._on_followup_store_changed)
         if self.data is not None:
             self._refresh()
         else:
@@ -531,7 +568,13 @@ class DeviasiView(tk.Frame):
             chip.pack(side="left", padx=(6, 18))
             tk.Label(chip, textvariable=self._h_chip_var, bg="#f1f5f9",
                      fg=C_ACCENT, font=font(11, "bold")).pack(
-                padx=10, pady=(2, 3))
+                side="left", padx=(10, 0), pady=(2, 3))
+            # v3.9.33 — AUDIT FIX (48-f UX): chip H read-only kini ber-
+            # petunjuk di mana mengubahnya (dulu angka H berdiri sendiri
+            # tanpa penjelasan — user tidak tahu harus ke tab GR).
+            tk.Label(chip, text="· atur di 📦 Deviasi GR", bg="#f1f5f9",
+                     fg=C_TEXT_MUTED, font=font(8)).pack(
+                side="left", padx=(4, 10), pady=(2, 3))
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
@@ -744,6 +787,11 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     def _on_tree_click(self, event):
         tree = event.widget
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): clone ⛶ generasi lama
+        # (dibuka sebelum re-render terakhir) → handler DIABAIKAN senyap —
+        # dulu klik ✓ di clone basi men-toggle pasangan/ baris SALAH.
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         try:
             if tree.identify_region(event.x, event.y) != "cell":
                 return
@@ -771,6 +819,38 @@ class DeviasiView(tk.Frame):
         self.status_var.set(
             f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
             f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
+
+    # v3.9.33 — AUDIT FIX (48-e P1) -------------------------------------------
+    def _on_followup_store_changed(self, store=None):
+        """Listener FollowUpStore (dipanggil toggle/clear dari tab mana
+        pun): jadwalkan pembaruan sel ✓ di main thread — tanpa re-render
+        penuh (pola followup_view; view bisa sudah mati → telan TclError)."""
+        try:
+            if not self.winfo_exists():
+                return
+            self.after(0, self._refresh_check_cells)
+        except tk.TclError:
+            pass
+
+    def _refresh_check_cells(self):
+        """Perbarui SEMUA sel kolom ✓ dari state store saat ini (iid →
+        fingerprint via _fp_map; baris tanpa fp di-skip)."""
+        if self.store is None or not self._fp_map:
+            return
+        try:
+            children = self.tree.get_children("")
+        except tk.TclError:
+            return
+        for iid in children:
+            fp = self._fp_map.get(iid)
+            if fp is None:
+                continue
+            try:
+                self.tree.set(
+                    iid, "✓",
+                    CHECK_ON if self.store.has(fp) else CHECK_OFF)
+            except tk.TclError:
+                return   # tree/view mati di tengah loop — batal
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
@@ -912,6 +992,14 @@ class DeviasiView(tk.Frame):
                               text=self._col_display_name(col_name))
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
+        # v3.9.33 — AUDIT FIX (48-d LOW): menulis ulang teks heading (per
+        # ganti H) MENGHAPUS panah indikator sort ↓/↑ — pasang ulang dari
+        # state sort terakhir tree (sort_tree_by_column menyimpannya di
+        # tree._last_sort; dulu indikator hilang diam-diam tiap Apply H).
+        _ls = getattr(self.tree, "_last_sort", None)
+        if _ls is not None:
+            with contextlib.suppress(tk.TclError):
+                _set_sort_arrow(self.tree, _ls[0], _ls[1])
 
     # =========================================================================
     # DATA LOADING
@@ -957,6 +1045,11 @@ class DeviasiView(tk.Frame):
         self._kategori_lookup = {}   # v3.9.13 — diisi ulang di _compute_pivot
         self._so_source_lookup = {}  # v3.9.19 — diisi ulang di _compute_pivot
         self._tnum = None  # reset cache to_numeric(Tanggal)
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): data berganti → semua clone
+        # ⛶ hidup menampilkan salinan baris LAMA (iid sama, pasangan beda)
+        # → DITUTUP + generasi naik (guard handler ✓/double-click clone).
+        self._render_gen += 1
+        self._close_stale_clones()
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢ (data baru =
         # layout baru — jangan terjebak setengah-collapse)
         if getattr(self, "_expander", None) is not None:
@@ -979,7 +1072,14 @@ class DeviasiView(tk.Frame):
             self._h_chip_var.set(str(self.tanggal_h))
         if self._h_editable and hasattr(self, "tanggal_h_var"):
             self.tanggal_h_var.set(str(self.tanggal_h))
-        self._show_content()
+        # v3.9.33 — AUDIT FIX (48-f HIGH sebagian): 0 baris pasca-pipeline →
+        # EMPTY STATE + status berpenjelasan aksi (dulu _show_content()
+        # TANPA SYARAT → tabel kosong senyap di belakang pipeline
+        # "SELESAI" hijau — user tak tahu harus cek folder data/RootPath;
+        # pola teks lama "Belum ada data." dipertahankan di awal).
+        _data_empty = data is None or getattr(data, "empty", True)
+        if not _data_empty:
+            self._show_content()
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
@@ -992,6 +1092,12 @@ class DeviasiView(tk.Frame):
             kategori_vals = []
         self._kategori_combo["values"] = ["Semua"] + kategori_vals
         self._reset_kategori()
+        if _data_empty:
+            self._show_empty()
+            self.status_var.set(
+                "Belum ada data — 0 baris terbaca dari pipeline "
+                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+            return
         # (v3.2) lazy refresh: hanya compute bila tab ini sedang terlihat;
         # tab lain menunggu dipilih (app memanggil ensure_refreshed).
         if self.winfo_ismapped():
@@ -1017,6 +1123,12 @@ class DeviasiView(tk.Frame):
         df = data
 
         tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
+        # v3.9.33 — AUDIT FIX (48-b P1): H=2 → kunci −1 (penutupan bulan
+        # lalu — rekap lalu dinegasikan) ikut window supaya lookup
+        # _day_key SO(H−2) menemukan barisnya (H=1 sudah termuat alami:
+        # range −1..3). H≥3 tak berubah.
+        if h == 2:
+            tanggal_range.append(-1)
         relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.ACR",
                           "8.BARANG KELUAR"]
 
@@ -1046,6 +1158,14 @@ class DeviasiView(tk.Frame):
         _mask_saldo_only = _saldo_t1 & ~_pair_key.isin(_window_pairs)
         mask = mask | _mask_saldo_only
         df_filtered = df[mask].assign(Tanggal_num=tnum[mask].to_numpy())
+        # v3.9.33 — AUDIT FIX (48-d MEDIUM): pasangan IN-only (42.05/
+        # 32.24/9901 — tanpa rekap-SO & tanpa 42.17) ber-SATUAN NaN lenyap
+        # SENYAP dari pivot_table (index NaN di-drop secara default) →
+        # janji lookup barang dua arah v3.9.18 tak penuh. SATUAN NaN →
+        # "" (string kosong); pasangan ber-SATUAN asli tak tersentuh.
+        if "SATUAN" in df_filtered.columns:
+            df_filtered = df_filtered.assign(
+                SATUAN=df_filtered["SATUAN"].fillna(""))
 
         if "AKTIF/NON" in df.columns and "Nama Barang" in df.columns:
             aktif_df = (
@@ -1184,6 +1304,17 @@ class DeviasiView(tk.Frame):
 
         n = len(pivot)
 
+        # v3.9.33 — AUDIT FIX (48-b P1): kunci tanggal SO bulan-lalu. Rekap
+        # bulan lalu bernomor NEGATIF (−1 = saldo penutupan bulan lalu) dan
+        # Tanggal 0 TIDAK PERNAH ada (baris template kosong). Lookup
+        # SO(H−1)/SO(H−2) lama membaca kunci 0 saat H≤2 → SELALU 0: di H=1,
+        # SO bulan lalu (kunci −1) hanya terbaca sebagai SO(H−2) sehingga
+        # W/CEK/Stok Seharusnya salah. Pemetaan 0 → −1: H=1 → SO(H−1) =
+        # penutupan bulan lalu; H=2 → SO(H−2) = penutupan; H≥3 tak berubah
+        # (konsisten fix fn_audit v3.9.6).
+        def _day_key(t) -> int:
+            return -1 if t == 0 else t
+
         def arr(jenis: str, tgl) -> np.ndarray:
             """Kolom (JENIS, Tanggal) sebagai array float64 (0 bila absen) —
             semantik identik get_val versi lama (NaN → 0)."""
@@ -1194,8 +1325,8 @@ class DeviasiView(tk.Frame):
                     dtype="float64")
             return np.zeros(n, dtype="float64")
 
-        so_m2 = arr("1.SO", h - 2)
-        so_m1 = arr("1.SO", h - 1)
+        so_m2 = arr("1.SO", _day_key(h - 2))
+        so_m1 = arr("1.SO", _day_key(h - 1))
         in_m1 = arr("4.IN", h - 1)
         so_h = arr("1.SO", h)
         in_h = arr("4.IN", h)
@@ -1210,11 +1341,21 @@ class DeviasiView(tk.Frame):
         # ('2.SALDO AKHIR', t=1) → Sistem = saldo running-stock t=1
         # (= saldo 42.17; tidak ada mutasi sesudahnya). Deviasi = SO_H
         # (0) − saldo → pasangan tampil dgn selisih nyata, bukan 0−0.
+        # v3.9.33 — AUDIT FIX (48-b P1-LOW): dulu mask hanya mencakup
+        # pasangan TANPA baris window (efektif saat H>3) — untuk H≤3
+        # baris t=1 42.17 MASUK window → Sistem = arr('2.SALDO AKHIR',
+        # H) = 0 → fix v3.9.32 INERT (Deviasi 0−0). Kini cabang np.where
+        # juga mencakup pasangan TANPA baris saldo ('2.SALDO AKHIR', H)
+        # — Sistem = saldo t=1 juga (Deviasi = SO_H − saldo). Pasangan
+        # BER baris saldo di H (AYAM-style) tetap jalur normal — nilai
+        # tabel tak berubah (regresi diuji /tmp).
         _sistem_t1 = arr("2.SALDO AKHIR", 1)
-        _saldo_only_rows = ~(
-            (pivot["Nama Barang"].astype(str) + "\x1f"
-             + pivot["NAMA RESTO"].astype(str)
-             ).isin(_window_pairs).to_numpy())
+        _saldo_h_pairs = pd.Index(_pair_key[
+            (df["JENIS"] == "2.SALDO AKHIR") & (tnum == h)].unique())
+        _pk_pivot = (pivot["Nama Barang"].astype(str) + "\x1f"
+                     + pivot["NAMA RESTO"].astype(str))
+        _saldo_only_rows = ~(_pk_pivot.isin(_window_pairs)
+                             & _pk_pivot.isin(_saldo_h_pairs)).to_numpy()
         if _saldo_only_rows.any():
             sistem = np.where(_saldo_only_rows, _sistem_t1, sistem)
 
@@ -1230,7 +1371,10 @@ class DeviasiView(tk.Frame):
         if not out_df.empty:
             _nil = pd.to_numeric(out_df["NILAI"], errors="coerce")
             out_sum = (
-                out_df.assign(_n=_nil)
+                # v3.9.33 — AUDIT FIX (48-d): SATUAN NaN → "" (join Total
+                # ACR konsisten dgn pivot yang kini ber-SATUAN "")
+                out_df.assign(_n=_nil,
+                              SATUAN=out_df["SATUAN"].fillna(""))
                 .groupby(["Nama Barang", "NAMA RESTO", "SATUAN"],
                          as_index=False, dropna=False)["_n"].sum()
             )
@@ -1658,6 +1802,13 @@ class DeviasiView(tk.Frame):
                 "hl_cells": hl_cells}
 
     def _render_rows(self, payload: dict):
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): baris/iid di-render ulang
+        # (_fp_map/_row_snaps segera diganti di bawah) → clone ⛶ yang
+        # masih hidup memegang salinan LAMA (iid sama, pasangan berbeda)
+        # → DITUTUP (clone basi lebih buruk daripada tertutup) + generasi
+        # naik (guard handler ✓/double-click clone).
+        self._render_gen += 1
+        self._close_stale_clones()
         self.tree.delete(*self.tree.get_children())
         self._update_headings()
         self.header_filters.refresh_icons()
@@ -1731,9 +1882,33 @@ class DeviasiView(tk.Frame):
             on_double_click=self._on_double_click,
             on_filter_setup=filter_setup,
             on_render_done=self._reapply_cell_tags)  # v3.9.2 per-cell
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat clone hidup +
+        # generasi render saat dibuka (guard handler + penutupan saat
+        # re-render — lihat _close_stale_clones).
+        self._register_clone(win, new_tree)
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
+
+    def _register_clone(self, win, new_tree):
+        """v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat window clone ⛶ yang
+        hidup + generasi render saat dibuka (tree clone diberi atribut
+        _view_gen; handler ✓/double-click memeriksanya)."""
+        new_tree._view_gen = self._render_gen
+        self._clone_wins.append(win)
+
+    def _close_stale_clones(self):
+        """v3.9.33 — AUDIT FIX (48-d HIGH / P0): tutup SEMUA clone ⛶ yang
+        masih hidup — dipanggil saat data/re-render mengganti baris (iid
+        dipetakan ulang; clone basi men-toggle pasangan SALAH). Window
+        yang sudah ditutup user cukup dibersihkan dari daftar."""
+        for w in self._clone_wins:
+            try:
+                if w.winfo_exists():
+                    w.destroy()
+            except tk.TclError:
+                pass
+        self._clone_wins = []
 
     def _on_tanggal_h_change(self):
         """Apply H dari tab GR (v3.9: satu-satunya jalur ubah H).
@@ -1880,6 +2055,11 @@ class DeviasiView(tk.Frame):
             return
 
         tree = event.widget
+        # v3.9.33 — AUDIT FIX (48-d HIGH / P0): clone ⛶ generasi lama
+        # (dibuka sebelum re-render terakhir) → snapshot H/_row_snaps
+        # tidak lagi cocok dgn baris clone → DIABAIKAN senyap.
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return

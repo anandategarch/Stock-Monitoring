@@ -158,7 +158,19 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.32"  # v3.9.32 — MULTI-SELECT + POPUP PIVOT BESAR + BARANG 42.17-ONLY + FILTER KATEGORI 42.17 + HARGA 41.09 + MODE NOMINAL
+APP_VERSION = "3.9.33"  # v3.9.33 — AUDIT FIX WAVE (Task 48 deep audit)
+# v3.9.33 — AUDIT FIX WAVE (Task 48: deep audit 6 agent → 8 HIGH / 31 MED / ~54 LOW):
+# (1) clone ⛶ basi ditutup saat re-render + gen-guard (toggle ✓ baris salah);
+# (2) fn_9901 dedup baris duplikat lintas sheet/file + log per-sheet;
+# (3) filter ⧩ Harga Nominal diperbaiki (mapping 'Harga Tampil');
+# (4) font tema lazy-resolve (fallback tidak lagi terkunci sejak import);
+# (5) _on_pipeline_done isolasi error per-view + pre-flight folder data;
+# (6) H=1 kini resolve SO bulan lalu (key 0 → -1) + saldo-only H<=3;
+# (7) Qty PO Menunggu campur satuan → jumlah terkonversi saja;
+# (8) konversi_satuan first-match + in_selisih cache race + Nominal pending/busy/TOTAL pin;
+# (9) Ctrl+C salin baris multi-select (semua tabel) + Salin Log + ☑ sync lintas tab;
+# (10) kolom guard fn_3224/2205/4215 + key Sheets config dihubungkan + ffill kategori per-file;
+# (11) README Cara Pakai rewrite + SETUP.bat cek errorlevel + MULAI.bat pythonw.
 # v3.9.32 (user: 6 permintaan — "YA KERJAKAN SEMUA DAN PUSH TO GIT HUB"):
 # (1) MULTI-SELECT SEMUA TABEL (user: "kenapa aku tidak bisa select ya
 #     untuk semua data?"): semua tree selectmode browse → EXTENDED +
@@ -981,6 +993,11 @@ class StockMonitorApp:
         # Load config awal ke tab Config
         self._load_config_to_form()
 
+        # v3.9.33 — AUDIT FIX (48-c LOW): tombol X / WM_DELETE_WINDOW — dulu
+        # TANPA handler (48-f: tidak ada WM_DELETE_WINDOW) → pipeline hidup
+        # saat window ditutup → after() TclError ganda di thread daemon.
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_window)
+
     # =====================================================================
     # SHELL: TOOLBAR + STATUSBAR + NOTEBOOK
     # =====================================================================
@@ -1291,6 +1308,12 @@ class StockMonitorApp:
                                       command=self._clear_log)
         self.btn_bersih.pack(side="left", padx=(8, 0))
 
+        # v3.9.33 — AUDIT FIX (48-f MEDIUM): log konsol (state disabled) tidak
+        # bisa di-copy — tombol salin SELURUH isi log ke clipboard.
+        self.btn_salin_log = GhostButton(btns, text="📋 Salin Log",
+                                         command=self._copy_log)
+        self.btn_salin_log.pack(side="left", padx=(8, 0))
+
         self.btn_export = GhostButton(btns, text="💾 Export ke Excel",
                                       state="disabled",
                                       command=self._export_excel)
@@ -1342,6 +1365,34 @@ class StockMonitorApp:
         self.log_text.configure(state="disabled")
         self._log_line_count = 0
 
+    def _copy_log(self):
+        """v3.9.33 — AUDIT FIX (48-f MEDIUM): salin SELURUH isi konsol log ke
+        clipboard (traceback pipeline jadi bisa dibagikan) + feedback singkat
+        di baris status kartu Kontrol Pipeline."""
+        try:
+            content = self.log_text.get("1.0", "end-1c")
+        except tk.TclError:
+            return
+        if not content.strip():
+            messagebox.showinfo("Salin Log", "Log masih kosong.",
+                                parent=self.root)
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(content)
+        n_baris = len(content.splitlines())
+        prev = self.status_var.get()
+        self.status_var.set(
+            f"📋 Log TERSALIN ke clipboard ({fmt_int_id(n_baris)} baris).")
+        if getattr(self, "_log_flash_after", None):
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._log_flash_after)
+
+        def _restore():
+            if self.root.winfo_exists():
+                self.status_var.set(prev)
+
+        self._log_flash_after = self.root.after(2500, _restore)
+
     # =====================================================================
     # LOG QUEUE (freeze fix dipertahankan)
     # =====================================================================
@@ -1356,8 +1407,15 @@ class StockMonitorApp:
         self._log_line_count += new_lines
 
         if self._log_line_count > MAX_LOG_LINES:
+            # v3.9.33 — AUDIT FIX (48-f LOW): baris awal dibuang TANPA jejak —
+            # user tidak tahu lognya terpangkas. Sisipkan SATU baris marker
+            # di puncak supaya jelas (+1 ke hitungan baris).
             self.log_text.delete("1.0", "1001.0")
             self._log_line_count -= 1000
+            self.log_text.insert("1.0",
+                                 f"(log dipangkas — {fmt_int_id(1000)} "
+                                 "baris awal dibuang)\n")
+            self._log_line_count += 1
 
         self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
@@ -1421,6 +1479,44 @@ class StockMonitorApp:
         # FIX D-04: reset penghitung file yang di-skip reader
         self._skipped_files = 0
 
+        # v3.9.33 — AUDIT FIX (48-f HIGH-#6): PRE-FLIGHT folder data SEBELUM
+        # pipeline — dulu folder hilang / RootPath salah → pipeline berjalan
+        # dan berakhir "SELESAI" HIJAU + tabel kosong SENYAP tanpa pesan aksi.
+        # Kini kegagalan di-surface AWAL (log + dialog + status amber) lalu
+        # run tetap lanjut (perilaku degrade yang sama, kini terlihat).
+        # Kontrak: src/pipeline/helpers.preflight_folders(cfg) —
+        # missing [(key, full_path)] folder Folders yang tidak ada;
+        # counts [(key, n_file_excel)] per folder (folder hilang → 0).
+        pre_missing: list = []
+        try:
+            from src.config import Config
+            from src.pipeline.helpers import preflight_folders
+            pre_missing, pre_counts = preflight_folders(Config(str(CONFIG_PATH)))
+            for key, n in pre_counts:
+                self._append_log_batched(f"  Pre-flight {key}: "
+                                         f"{fmt_int_id(n)} file excel\n")
+        except ImportError:
+            # helper belum tersedia saat runtime → skip pre-flight graceful
+            pre_missing = []
+        except Exception as exc:  # defensive: config rusak dll — jangan blokir run
+            pre_missing = []
+            self._append_log_batched(
+                f"\n[PERINGATAN] Pre-flight folder dilewati: {exc}\n")
+
+        if pre_missing:
+            daftar = "\n".join(f"  • {key} → {path}"
+                               for key, path in pre_missing)
+            self._append_log_batched(
+                "\n[PERINGATAN] Folder data TIDAK DITEMUKAN —\n"
+                + daftar +
+                "\n  Pipeline tetap dijalankan (data jadi parsial/kosong).\n")
+            messagebox.showwarning(
+                "Folder data tidak ditemukan",
+                "Folder data berikut TIDAK DITEMUKAN:\n\n" + daftar +
+                "\n\nPipeline tetap dijalankan (data bisa parsial/kosong).\n"
+                "Perbaiki RootPath / Folders di tab ⚙ Pengaturan.",
+                parent=self.root)
+
         self.notebook.select(self.tab_proses)
         self.is_running = True
         self.stop_event.clear()
@@ -1432,6 +1528,12 @@ class StockMonitorApp:
         self.status_var.set("Status: menjalankan pipeline…")
         self.status_spinner.start()
         self.statusbar.set_status(*_ST_RUN)
+        if pre_missing:
+            # v3.9.33 — status AMBER sebelum run: folder data bermasalah jangan
+            # tertutup status "berjalan" polos (48-f: kegagalan senyap).
+            self.statusbar.set_status(
+                "Pipeline berjalan… ⚠ folder data tidak ditemukan — lihat log",
+                C_AMBER)
         self.kpi_status.set_value("MENJALANKAN", "pipeline sedang diproses…",
                                   C_ORANGE)
         self.progress.start(12)
@@ -1464,6 +1566,17 @@ class StockMonitorApp:
                 pass
             self._elapsed_after_id = None
 
+    def _schedule_to_main(self, fn):
+        """v3.9.33 — AUDIT FIX (48-c LOW): root.after() dari thread worker
+        saat window sudah DITUTUP melempar TclError; jalur except lama
+        memanggil after() LAGI → TclError tak tertangkap di thread daemon.
+        Kini: root sudah mati → menyerah senyap (proses ikut mati bersama
+        main thread — worker memang daemon)."""
+        try:
+            self.root.after(0, fn)
+        except tk.TclError:
+            pass
+
     def _run_pipeline_worker(self):
         """Worker thread: jalankan run_pipeline, tangkap error.
 
@@ -1482,15 +1595,17 @@ class StockMonitorApp:
         try:
             append1_df, rincian_po_df, in_detail_df, audit_result = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
-            self.root.after(0, lambda: self._on_pipeline_done(
+            self._schedule_to_main(lambda: self._on_pipeline_done(
                 append1_df, rincian_po_df, in_detail_df, audit_result, None))
         except PipelineStopped as exc:
             err = (exc, None)
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, None, err))
+            self._schedule_to_main(lambda: self._on_pipeline_done(
+                None, None, None, None, err))
         except Exception as exc:
             import traceback
             err = (exc, traceback.format_exc())
-            self.root.after(0, lambda: self._on_pipeline_done(None, None, None, None, err))
+            self._schedule_to_main(lambda: self._on_pipeline_done(
+                None, None, None, None, err))
 
     def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df,
                           audit_result, error):
@@ -1588,25 +1703,49 @@ class StockMonitorApp:
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
-        self.pivot_view.load_data(append1_df)
+        # v3.9.33 — AUDIT FIX (48-c HIGH-2): ISOLASI ERROR PER-VIEW — dulu
+        # 8 load_data berurutan TANPA try/except: satu view exception →
+        # view sisanya data BASI + tombol Export tetap mati + log
+        # "[SELESAI]" tak pernah tercetak (padahal status bar sudah hijau).
+        # Kini tiap view punya try/except sendiri → error DIBISINGKAN ke
+        # log dan sisanya tetap dimuat; jalur error pipeline (on_error)
+        # tetap terpisah — tidak tertelan di sini.
+        def _load_view(nama: str, fn) -> None:
+            try:
+                fn()
+            except Exception as exc:  # view gagal ≠ pipeline gagal — lanjut
+                self._append_log_batched(
+                    f"\n[ERROR] Gagal memuat view {nama}: {exc}\n")
+
+        _load_view("📊 Pivot Table",
+                   lambda: self.pivot_view.load_data(append1_df))
         # v3.9.23 (poin 6): detail dokumen IN ikut diteruskan ke tab
         # Deviasi GR & PCS — sumber CEK "RI Balancing" kolom utama
         # (bulan Nomor RI ≠ bulan Nomor PO, tanggal dok ≤ H).
-        self.deviasi_gr_view.load_data(append1_df, in_detail_df)
-        self.deviasi_pcs_view.load_data(append1_df, in_detail_df)
-        self.in_selisih_view.load_data(append1_df, in_detail_df,
-                                      audit_result=audit_result)
-        self.laporan_view.load_data(append1_df)
-        self.komparasi_view.load_data(append1_df)  # v3.9.4 — mode komparasi
+        _load_view("📦 Deviasi GR",
+                   lambda: self.deviasi_gr_view.load_data(append1_df,
+                                                          in_detail_df))
+        _load_view("🧩 Deviasi PCS",
+                   lambda: self.deviasi_pcs_view.load_data(append1_df,
+                                                           in_detail_df))
+        _load_view("📤 Rekap Selisih IN",
+                   lambda: self.in_selisih_view.load_data(
+                       append1_df, in_detail_df, audit_result=audit_result))
+        _load_view("🚨 Anomali COM",
+                   lambda: self.laporan_view.load_data(append1_df))
+        _load_view("⚖ Komparasi File Deviasi",
+                   lambda: self.komparasi_view.load_data(append1_df))
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
         # rasio konversi (dari audit_result — pipeline v3.9.32)
-        self.nominal_view.load_data(
-            append1_df,
-            harga_map=(audit_result.get("harga_map")
-                       if audit_result else None),
-            konversi_map=(audit_result.get("konversi_map")
-                          if audit_result else None))
-        self.rincian_view.load_data(rincian_po_df)
+        _load_view("💰 Nominal (H)",
+                   lambda: self.nominal_view.load_data(
+                       append1_df,
+                       harga_map=(audit_result.get("harga_map")
+                                  if audit_result else None),
+                       konversi_map=(audit_result.get("konversi_map")
+                                     if audit_result else None)))
+        _load_view("🛒 Rincian PO",
+                   lambda: self.rincian_view.load_data(rincian_po_df))
         self.btn_export.set_enabled(True)
         self.btn_export_tb.set_enabled(True)
 
@@ -1631,6 +1770,24 @@ class StockMonitorApp:
             "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
             "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
             "📤 Rekap Selisih IN / 📋 Laporan / ☑ Follow Up / 🛒 Rincian PO.\n")
+
+    def _on_close_window(self):
+        """v3.9.33 — AUDIT FIX (48-c LOW): handler tombol X.
+
+        Pipeline masih berjalan → konfirmasi dulu (worker daemon mati
+        bersama proses bila user tetap keluar; tidak ada cleanup khusus
+        lain di close path — state persist antara-sesi disimpan oleh
+        mekanisme masing-masing saat berubah). Idle → langsung tutup."""
+        worker = getattr(self, "worker_thread", None)
+        pipeline_hIDup = (self.is_running
+                          or (worker is not None and worker.is_alive()))
+        if pipeline_hIDup and not messagebox.askyesno(
+                "Pipeline Masih Berjalan",
+                "Pipeline masih berjalan.\n\nTetap keluar? (proses akan "
+                "dihentikan paksa)",
+                parent=self.root):
+            return
+        self.root.destroy()
 
     def _stop_pipeline(self):
         """Stop graceful — set stop_event, pipeline memeriksa di checkpoint."""

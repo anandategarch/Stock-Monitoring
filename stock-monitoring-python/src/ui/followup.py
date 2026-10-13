@@ -198,7 +198,12 @@ class FollowUpStore:
         """Tambah/hapus baris. Return True bila kini TERDAFTAR."""
         if fp in self.rows:
             del self.rows[fp]
+            # v3.9.33 — AUDIT FIX (48-e FIX 9): resolved dihapus dari
+            # memori tapi TIDAK ditulis ke followup_resolved.json → fp
+            # orphan tetap hidup di file dan muncul lagi setelah restart.
+            # Simpan sekarang (baris yang ditambah ulang mulai bersih).
             self.resolved.pop(fp, None)
+            self.save_resolved()
             self.save()
             self._notify()
             return False

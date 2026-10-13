@@ -70,6 +70,9 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         audit_result['konversi_map'] (peta rasio v3.9.31) — input mode
         'Nominal (H)' tab Laporan Deviasi (Harga × Qty Deviasi; harga
         dinormalkan ke satuan rekap via peta rasio).
+    v3.9.33 — AUDIT FIX (48-b): harga 41.09 dibaca dalam try/except — 1
+        file harga rusak kini hanya menonaktifkan peta harga (warning
+        log + harga_map kosong), BUKAN menggagalkan seluruh pipeline.
     """
     start_time = time.time()
 
@@ -169,8 +172,17 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # 09.Harga [alamat bisa diubah] — kolom harga = Nilai/Kuantitas
     # Saldo Akhir") + peta konversi v3.9.31 → input mode 'Nominal (H)'
     # tab Laporan Deviasi. Folder/sheet diatur config (setdefault).
-    harga_df = fn_4109(config.folder("Harga"), config.sheet("Harga"))
-    audit_result["harga_map"] = build_harga_map(harga_df)
+    # v3.9.33 — AUDIT FIX (48-b): baca harga SETELAH append1+audit selesai
+    # — 1 file harga rusak/struktur aneh dulu menggagalkan SELURUH run
+    # (hasil append1+audit yang SUDAH dihitung ikut terbuang). Bungkus
+    # try/except → log warning + peta harga kosong (mode Nominal (H)
+    # menonaktifkan diri dgn anggun; view lain tetap jalan).
+    try:
+        harga_df = fn_4109(config.folder("Harga"), config.sheet("Harga"))
+        audit_result["harga_map"] = build_harga_map(harga_df)
+    except Exception as e:  # noqa: BLE001 — degradasi anggun by design
+        print(f"  [WARNING] Harga 41.09 dilewati: {e}")
+        audit_result["harga_map"] = {}
     audit_result["konversi_map"] = konversi_holder.get("map")
     if verbose and audit_result["harga_map"]:
         _nh = len(audit_result["harga_map"])

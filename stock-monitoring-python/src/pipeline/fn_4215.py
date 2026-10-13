@@ -2,6 +2,17 @@
 fn_4215.py — Mirror persis fn4215 di M code.
 Pemindahan Barang (modul 42.15) → sumber OUT (kirim) atau IN (terima).
 OPTIMIZED: vectorized text operations.
+
+v3.9.33 — AUDIT FIX (48-a):
+- guard kolom — identitas ('Gudang Pengirim'/'Gudang Tujuan' → NAMA
+  RESTO, 'Nama Barang') hilang → WARNING keras + baris dibuang
+  (degradasi per-sumber, bukan KeyError total); VALUE ('Kts Diterima'/
+  'Tanggal') hilang → NA. Loop NA-fill final_cols (dulu DEAD CODE —
+  KeyError selalu terjadi lebih dulu) kini benar-benar reachable —
+  schema output tetap IDENTIK.
+- sheet_name param — queries.query_4215_gudang_kirim me-resolve key
+  config Sheets['Pemindahan4215'] (config lama tanpa key tetap dapat
+  default).
 """
 import pandas as pd
 
@@ -13,49 +24,90 @@ from .helpers import (
     vec_text_between_delimiters,
 )
 
+# Nama sheet standar 42.15 (export Accurate) — v3.9.33 default param
+SHEET_4215 = "#42.15. Pemindahan Barang (KIRI"
 
-def fn_4215(folder_path: str, side: str) -> pd.DataFrame:
+
+def fn_4215(folder_path: str, side: str,
+            sheet_name: str = SHEET_4215) -> pd.DataFrame:
     """
     Mirror M: fn4215(folderPath, side).
     side: "kirim" (Gudang Pengirim → NAMA RESTO) atau "terima" (Gudang Tujuan → NAMA RESTO).
+
+    sheet_name: v3.9.33 — AUDIT FIX (48-a): default SHEET_4215; query
+    me-resolve config Sheets['Pemindahan4215'].
     """
-    prom = fn_combine_folder(folder_path, "#42.15. Pemindahan Barang (KIRI", header_row=4)
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
+    # v3.9.33 — AUDIT FIX (48-a): kolom IDENTITAS hilang (header bergeser)
+    # → dulu KeyError mematikan SELURUH pipeline. Sekarang: WARNING keras
+    # (nama kolom + jumlah baris) + baris dibuang → frame kosong
+    # ber-schema standar (degradasi per-sumber; schema output IDENTIK).
     if side == "kirim":
         needed = ["Tanggal", "Gudang Pengirim", "Nama Barang", "Kts Diterima"]
         available = [c for c in needed if c in prom.columns]
         sel = prom[available].copy()
+        _ident_hilang = [c for c in ("Gudang Pengirim", "Nama Barang")
+                         if c not in sel.columns]
+        if _ident_hilang:
+            print(f"  [fn_4215] WARNING: kolom identitas hilang "
+                  f"{_ident_hilang} — {len(sel)} baris dibuang (header file "
+                  f"bergeser? pipeline lanjut tanpa sumber 42.15 kirim ini)")
+            return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
         # typed: vectorized
         sel["Gudang Pengirim"] = safe_to_str(sel["Gudang Pengirim"])
         sel["Nama Barang"] = safe_to_str(sel["Nama Barang"])
-        sel["Kts Diterima"] = safe_to_numeric(sel["Kts Diterima"])
+        # v3.9.33 — AUDIT FIX (48-a): VALUE hilang → NA (bukan KeyError)
+        if "Kts Diterima" in sel.columns:
+            sel["Kts Diterima"] = safe_to_numeric(sel["Kts Diterima"])
 
         # ext: vectorized
-        sel["Tanggal"] = date_to_day(sel["Tanggal"])
+        if "Tanggal" in sel.columns:
+            sel["Tanggal"] = date_to_day(sel["Tanggal"])
         sel["NAMA RESTO"] = vec_text_between_delimiters(sel["Gudang Pengirim"], "(", ")")
 
-        sel = sel.rename(columns={"Kts Diterima": "Value"})
+        if "Kts Diterima" in sel.columns:
+            sel = sel.rename(columns={"Kts Diterima": "Value"})
     else:
         needed = ["Tanggal", "Nama Barang", "Kts Diterima", "Gudang Tujuan"]
         available = [c for c in needed if c in prom.columns]
         sel = prom[available].copy()
+        _ident_hilang = [c for c in ("Gudang Tujuan", "Nama Barang")
+                         if c not in sel.columns]
+        if _ident_hilang:
+            print(f"  [fn_4215] WARNING: kolom identitas hilang "
+                  f"{_ident_hilang} — {len(sel)} baris dibuang (header file "
+                  f"bergeser? pipeline lanjut tanpa sumber 42.15 terima ini)")
+            return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
         sel["Nama Barang"] = safe_to_str(sel["Nama Barang"])
-        sel["Kts Diterima"] = safe_to_numeric(sel["Kts Diterima"])
+        # v3.9.33 — AUDIT FIX (48-a): VALUE hilang → NA (bukan KeyError)
+        if "Kts Diterima" in sel.columns:
+            sel["Kts Diterima"] = safe_to_numeric(sel["Kts Diterima"])
         sel["Gudang Tujuan"] = safe_to_str(sel["Gudang Tujuan"])
 
-        sel["Tanggal"] = date_to_day(sel["Tanggal"])
+        if "Tanggal" in sel.columns:
+            sel["Tanggal"] = date_to_day(sel["Tanggal"])
         sel["NAMA RESTO"] = vec_text_between_delimiters(sel["Gudang Tujuan"], "(", ")")
 
-        sel = sel.rename(columns={"Kts Diterima": "Value"})
+        if "Kts Diterima" in sel.columns:
+            sel = sel.rename(columns={"Kts Diterima": "Value"})
 
     final_cols = ["Tanggal", "NAMA RESTO", "Nama Barang", "Value"]
     for c in final_cols:
         if c not in sel.columns:
-            sel[c] = pd.NA
+            # v3.9.33 — AUDIT FIX (48-a): loop NA-fill kini REACHABLE
+            # (dulu dead code — KeyError terjadi lebih awal); dtype
+            # disesuaikan kolomnya supaya concat query tetap konsisten.
+            if c == "Tanggal":
+                sel[c] = pd.array([pd.NA] * len(sel), dtype="Int64")
+            elif c == "Value":
+                sel[c] = pd.Series([float("nan")] * len(sel), index=sel.index)
+            else:
+                sel[c] = pd.NA
     result = sel[final_cols].reset_index(drop=True)
 
     return result

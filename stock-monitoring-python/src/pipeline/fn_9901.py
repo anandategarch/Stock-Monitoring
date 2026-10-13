@@ -18,7 +18,20 @@ Column mapping:
 
 v3.4: kolom Nomor / Nomor PO ditambahkan untuk tab "Rekap Selisih IN"
 (rincian IN per dokumen 42.05 / 32.24 / 99.01 beserta nomornya).
+
+v3.9.33 — AUDIT FIX (48-a, deep audit):
+- SEMUA sheet × SEMUA file dibaca lalu di-concat TANPA dedup → sheet
+  backup/ringkasan/file salinan masuk IN DUA KALI (groupby-SUM append1
+  mendobel qty senyap). Sekarang: baris duplikat PERSIS dibuang + log
+  mencolok + kontribusi baris per sheet dicatat (double-read terlihat).
+- fallback kolom qty: "jumlah" dibuang dari kandidat + kandidat bernama
+  'harga'/'nilai' di-exclude (dulu bisa nyasar kolom uang "Jumlah Harga").
+- filter yang di-skip karena kolom hilang kini WAJIB teriak WARNING
+  lengkap dengan jumlah baris yang dianggap lolos (risiko dobel hitung
+  vs 32.24 jadi eksplisit, bukan senyap).
 """
+import os
+
 import pandas as pd
 
 from .helpers import date_to_day, safe_to_numeric, safe_to_str, vec_text_after_delimiter
@@ -101,11 +114,27 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
                     continue
             if df is not None and len(df) > 0:
                 dfs.append(df)
+                # v3.9.33 — AUDIT FIX (48-a): kontribusi baris per sheet
+                # (file + sheet + jumlah baris) — sheet backup/salinan
+                # yang kebaca dobel jadi KELIHATAN di log.
+                print(f"  [fn_9901] {os.path.basename(f)} :: sheet "
+                      f"'{sn}': {len(df)} baris")
 
     if not dfs:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
     prom = pd.concat(dfs, ignore_index=True, sort=False)
+
+    # v3.9.33 — AUDIT FIX (48-a HIGH): concat SEMUA sheet × SEMUA file tanpa
+    # dedup → baris identik masuk 2× (sheet backup / ringkasan / file
+    # salinan di folder bulan) → qty IN terhitung DOBEL senyap di pivot
+    # append1. Buang baris duplikat PERSIS (semua kolom sama); jika ada
+    # yang terbuang → log KERAS supaya user cek foldernya.
+    n_before = len(prom)
+    prom = prom.drop_duplicates()
+    if n_before > len(prom):
+        print(f"  [fn_9901] 9901 v3.9.33: {n_before - len(prom)} baris "
+              f"duplikat persis dibuang (sheet backup/salinan?)")
 
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
@@ -123,10 +152,14 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         candidates=["Jenis Barang Barang & Jasa", "Jenis Barang", "Barang & Jasa"],
         contains_any=["jenis", "barang & jasa", "barang jasa"]
     )
+    # v3.9.33 — AUDIT FIX (48-a): "jumlah" DIHAPUS dari kandidat fallback
+    # (bisa nyasar kolom uang "Jumlah Harga") + exclude nama kolom yang
+    # mengandung 'harga'/'nilai' (kolom nilai rupiah, bukan qty).
     col_qty = _find_column(
         prom.columns,
         candidates=["#Prime.Qty", "Prime.Qty", "Prime Qty", "#Prime Qty"],
-        contains_any=["prime", "qty", "kuantiti", "kuantitas", "jumlah"]
+        contains_any=["prime", "qty", "kuantiti", "kuantitas"],
+        exclude=["harga", "nilai"]
     )
     # Nama Barang: exclude Jenis column to avoid collision. Also accept 'Barang' alone.
     col_nama_barang = _find_column(
@@ -200,8 +233,14 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         prom = prom[is_blank].copy()
         print(f"  [fn_9901] After filter Nomor # Penerimaan Barang = Blank: {len(prom)} rows")
     else:
-        # If column missing, assume all rows match (no filter applied)
-        print(f"  [fn_9901] 'Nomor # Penerimaan Barang' column not found — skipping blank filter")
+        # If column missing, assume all rows match (no filter applied).
+        # v3.9.33 — AUDIT FIX (48-a): skip tetap dipertahankan (perilaku
+        # lama) tapi TIDAK lagi senyap — WARNING mencolok + jumlah baris
+        # yang dianggap lolos (risiko dobel hitung vs 32.24: baris
+        # ber-penerimaan ikut terbaca sebagai IN 99.01).
+        print(f"  [fn_9901] 9901 WARNING: kolom 'Nomor # Penerimaan' "
+              f"tidak ditemukan — {len(prom)} baris dianggap tanpa "
+              f"penerimaan (risiko dobel hitung vs 32.24)")
 
     # --- Filter 2: Jenis Barang Barang & Jasa = Persediaan ---
     if col_jenis is not None:
@@ -210,7 +249,12 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         prom = prom[mask_persediaan].copy()
         print(f"  [fn_9901] After filter Jenis = Persediaan: {len(prom)} rows")
     else:
-        print(f"  [fn_9901] 'Jenis Barang Barang & Jasa' column not found — skipping jenis filter")
+        # v3.9.33 — AUDIT FIX (48-a): mirror warning filter penerimaan —
+        # baris jasa/aset ikut dianggap Persediaan (skip tidak senyap).
+        print(f"  [fn_9901] 9901 WARNING: kolom 'Jenis Barang Barang & "
+              f"Jasa' tidak ditemukan — {len(prom)} baris dianggap "
+              f"Persediaan (risiko baris jasa/aset ikut terhitung vs "
+              f"32.24)")
 
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])

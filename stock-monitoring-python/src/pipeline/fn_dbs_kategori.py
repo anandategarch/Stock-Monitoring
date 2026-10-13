@@ -2,21 +2,32 @@
 fn_dbs_kategori.py — Mirror persis fnDBSKategori di M code.
 Master kategori barang (Sheet1) → dipakai untuk merge KATEGORI & SOURCE KIRIMAN.
 + Column E: AKTIF/NON status (added for CEK anomaly detection).
+
+v3.9.33 — AUDIT FIX (48-a): sheet_name param — queries.query_dbs_kategori
+me-resolve key config Sheets['DBSKategori'] (config lama tanpa key
+tetap dapat default 'Sheet1').
 """
 import pandas as pd
 
 from .helpers import fn_combine_folder, safe_to_str
 
+# Nama sheet standar master DBS Kategori — v3.9.33 default param
+SHEET_DBS_KATEGORI = "Sheet1"
 
-def fn_dbs_kategori(folder_path: str) -> pd.DataFrame:
+
+def fn_dbs_kategori(folder_path: str,
+                    sheet_name: str = SHEET_DBS_KATEGORI) -> pd.DataFrame:
     """
     Mirror M: fnDBSKategori(folderPath).
+
+    sheet_name: v3.9.33 — AUDIT FIX (48-a): default 'Sheet1'; query
+    me-resolve config Sheets['DBSKategori'].
 
     Output columns: NAMA BARANG, KATEGORI, JENIS, SOURCE KIRIMAN, AKTIF/NON (all text)
     """
     # src = fnCombineFolder(folderPath, "Sheet1", false) + PromoteHeaders
     # = pandas header=0
-    src = fn_combine_folder(folder_path, "Sheet1", header_row=0)
+    src = fn_combine_folder(folder_path, sheet_name, header_row=0)
     if src.empty:
         return pd.DataFrame(columns=["NAMA BARANG", "KATEGORI", "JENIS", "SOURCE KIRIMAN", "AKTIF/NON"])
 

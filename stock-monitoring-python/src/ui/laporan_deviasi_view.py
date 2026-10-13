@@ -144,6 +144,12 @@ class LaporanDeviasiView(tk.Frame):
         self._build_ui()
         self._setup_tags()
         self._show_empty()
+        # v3.9.33 — AUDIT FIX (48-e FIX 11): dengarkan perubahan store —
+        # dulu hanya FollowUpView yang mendengarkan: keluarkan baris /
+        # ✕ Kosongkan dari tab ☑ Follow Up meninggalkan ✓ basi di tab
+        # ini sampai refresh berikutnya (add_listener idempoten).
+        if self.store is not None:
+            self.store.add_listener(self._on_store_changed)
 
     # =========================================================================
     # UI BUILD
@@ -167,8 +173,11 @@ class LaporanDeviasiView(tk.Frame):
 
         r1 = tk.Frame(fbody, bg=C_CARD)
         r1.pack(fill="x")
-        tk.Label(r1, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
+        # v3.9.33 — AUDIT FIX (48-f MEDIUM UX): chip H read-only diberi
+        # petunjuk singkat di mana H bisa diatur (kata kunci 'TANGGAL H'
+        # dipertahankan supaya assertion lama tetap lolos).
+        tk.Label(r1, text="TANGGAL H · atur di 📦 Deviasi GR", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         # v3.9.3: chip read-only — H dibagikan dari tab 📦 Deviasi GR
         # (pola tab 🧩 Deviasi PCS; tanpa double input)
         self._h_chip_var = tk.StringVar(value=str(self.tanggal_h))
@@ -311,6 +320,34 @@ class LaporanDeviasiView(tk.Frame):
             f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
             f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
 
+    def _on_store_changed(self, store):
+        """v3.9.33 — AUDIT FIX (48-e FIX 11): listener FollowUpStore —
+        toggle/✕ Kosongkan dari tab LAIN (termasuk tab ☑ Follow Up)
+        → perbarui sel ✓ baris yang tampil TANPA re-render penuh (pola
+        followup_view._on_store_changed; guard TclError bila view/iid
+        sudah tiada)."""
+        try:
+            if self.winfo_exists():
+                self.after(0, self._sync_check_cells)
+        except tk.TclError:
+            pass
+
+    def _sync_check_cells(self):
+        """v3.9.33 — AUDIT FIX (48-e FIX 11): sinkron sel kolom ✓ dari
+        _fp_map ↔ store (iid aman pasca sort — _fp_map keyed by iid)."""
+        try:
+            if not self.winfo_exists() or self.store is None:
+                return
+            for iid, fp in self._fp_map.items():
+                try:
+                    self.tree.set(iid, "✓",
+                                  CHECK_ON if self.store.has(fp)
+                                  else CHECK_OFF)
+                except tk.TclError:
+                    continue   # iid sudah dibuang (render/sort berjalan)
+        except tk.TclError:
+            pass   # view di-destroy di tengah sinkronisasi
+
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
         if self._dirty and self.data is not None and not self.data.empty:
@@ -406,6 +443,15 @@ class LaporanDeviasiView(tk.Frame):
             self._refresh()
         else:
             self._dirty = True
+        # v3.9.33 — AUDIT FIX (48-f P0#6 sebagian): pipeline 0 baris →
+        # footer INFORMATIF (teks lama diperpanjang, kata kunci 'Belum
+        # ada data' + 'Jalankan pipeline' tetap ada supaya assertion
+        # lama tetap lolos).
+        if data is None or len(data) == 0:
+            self.status_var_label.set(
+                "Belum ada data. Jalankan pipeline di tab Proses — 0 baris "
+                "terbaca dari pipeline (cek folder data / RootPath di tab "
+                "⚙ Pengaturan).")
 
     # =========================================================================
     # COMPUTATION — matriks COM (H-independen, cache per data)
