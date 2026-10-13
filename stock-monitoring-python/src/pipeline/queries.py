@@ -199,6 +199,14 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     Baris detail identik 1:1 dengan baris IN di source (belum difilter
     KATEGORI — filter yang sama diterapkan build_append1).
 
+    v3.9.29 — SEMUA baris IN kini juga membawa kolom 'SOURCE IN' (bukan
+    hanya detail): append1 LANGKAH 5b menurunkan klasifikasi SOURCE
+    KIRIMAN per pasangan (Nama Barang × NAMA RESTO) dari tag sumber ini
+    (user: 42.05 → Internal; 32.24 & 9901 → Eksternal; campuran →
+    'Campuran'; mengganti nilai master DBS Kategori). Kolom ekstra ini
+    TIDAK ikut pivot/informasi append1 (hanya KeyColumns/InfoColumns/
+    JENIS/Value yang diseleksi) — aman untuk pemanggil lama.
+
     FIX: query_pi (folder 26.Rincian PI) + query_27_konversi_satuan DIHAPUS
     dari pipeline karena sudah digantikan oleh 9901 (folder 30. 9901).
     9901 pakai #Prime.Qty (sudah unit utama) — tidak perlu konversi satuan.
@@ -224,15 +232,17 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     for tag, df in tagged:
         if df is None or df.empty:
             continue
-        parts.append(df)
+        # v3.9.29 — tag SOURCE IN pada SEMUA baris (dulu hanya salinan
+        # detail): satu copy dipakai bersama parts + detail_parts.
+        d = df.copy()
+        d["SOURCE IN"] = tag
+        parts.append(d)
         if detail_out is not None:
-            d = df.copy()
-            d["SOURCE IN"] = tag
             detail_parts.append(d)
 
     if not parts:
         empty = pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang",
-                                      "Value", "JENIS"])
+                                      "Value", "JENIS", "SOURCE IN"])
         if detail_out is not None:
             detail_out["df"] = pd.DataFrame(columns=IN_DETAIL_COLUMNS)
         return empty

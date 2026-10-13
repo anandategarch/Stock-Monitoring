@@ -2225,12 +2225,21 @@ class CellColorOverlay:
         "<B1-Motion>", "<MouseWheel>", "<Button-4>", "<Button-5>",
     )
 
+    # v3.9.29 — LABEL POOL: label yang keluar dari viewport dikembalikan
+    # ke pool & DI-REUSE (bukan destroy/create tk.Label baru). Pembuatan
+    # widget saat scroll beruntun = mahal + label 'pop-in' telat 1 frame
+    # (= 'patah-patah' yang dikeluhkan user); reuse hanya reconfigure+
+    # place (orde µs).
+    _POOL_MAX = 96
+
     def __init__(self, tree: ttk.Treeview):
         self.tree = tree
         self._tag_cells: dict = {}      # tag -> set[(iid, col)]
         self._tag_opts: dict = {}       # tag -> {background/foreground}
         self._by_iid: dict = {}         # iid -> [(col, opts), ...]
-        self._labels: dict = {}         # (iid, col) -> tk.Label
+        self._labels: dict = {}         # (iid, col) -> tk.Label (AKTIF)
+        self._pool: list = []           # v3.9.29 — label nganggur (reuse)
+        self._last_frac: dict = {}      # v3.9.29 — frac terakhir per opt
         self._pending = None
         self._alive = True
         # deteksi double-click manual (label press + press terforward
@@ -2252,20 +2261,36 @@ class CellColorOverlay:
             with contextlib.suppress(tk.TclError):
                 self.tree.after_cancel(self._pending)
             self._pending = None
+        # v3.9.29 — label (aktif + pool) adalah anak tree: ikut musnah
+        # bersama tree; bersihkan referensi saja.
+        self._labels.clear()
+        self._pool.clear()
 
     def _wrap_scroll(self, opt: str):
-        """Bungkus y/xscrollcommand tree supaya redraw terjadwal tiap
-        scroll / insert / delete / resize kolom (perubahan layout sel)."""
+        """Bungkus y/xscrollcommand tree supaya redraw terjadi tiap
+        scroll / insert / delete / resize kolom (perubahan layout sel).
+
+        v3.9.29 — SINKRON saat view BERUBAH (bukan menunggu idle):
+        yscrollcommand dipanggil widget SETELAH state internal ter-update
+        (bbox saat itu sudah benar). Menunggu after_idle membuat label
+        tertinggal 1 frame di posisi lama → label 'melayang' di atas
+        baris salah saat scroll (tearing / patah-patah). Redraw langsung
+        kini murah berkat label pool. Frac TIDAK berubah → tetap idle
+        (mis. callback ulang tanpa scroll — murah dan tetap aman)."""
         try:
             orig = str(self.tree.cget(opt))
         except tk.TclError:
             return
 
-        def wrap(first, last, _orig=orig):
+        def wrap(first, last, _orig=orig, _opt=opt):
             if _orig:
                 with contextlib.suppress(tk.TclError):
                     self.tree.tk.call(_orig, first, last)
-            self._schedule()
+            if self._alive and self._last_frac.get(_opt) != (first, last):
+                self._last_frac[_opt] = (first, last)
+                self._redraw()
+            else:
+                self._schedule()
 
         with contextlib.suppress(tk.TclError):
             self.tree.configure(**{opt: wrap})
@@ -2450,15 +2475,30 @@ class CellColorOverlay:
     def _label_for(self, key):
         lab = self._labels.get(key)
         if lab is None or not lab.winfo_exists():
-            lab = tk.Label(self.tree, bd=0, highlightthickness=0,
-                           takefocus=0, padx=5, pady=0)
-            self._bind_forward(lab)
+            # v3.9.29 — ambil dari POOL dulu (reuse, tanpa buat widget
+            # baru — pembuatan label saat scroll = pop-in telat 1 frame)
+            if self._pool:
+                lab = self._pool.pop()
+            else:
+                lab = tk.Label(self.tree, bd=0, highlightthickness=0,
+                               takefocus=0, padx=5, pady=0)
+                self._bind_forward(lab)
             self._labels[key] = lab
         return lab
 
     def _destroy_label(self, key):
         lab = self._labels.pop(key, None)
         if lab is not None:
+            with contextlib.suppress(tk.TclError):
+                lab.place_forget()
+            # v3.9.29 — kembalikan ke pool (reuse) bila masih hidup;
+            # pool penuh → benar-benar destroy.
+            try:
+                if lab.winfo_exists() and len(self._pool) < self._POOL_MAX:
+                    self._pool.append(lab)
+                    return
+            except tk.TclError:
+                pass
             with contextlib.suppress(tk.TclError):
                 lab.destroy()
 
@@ -2854,6 +2894,61 @@ def _tree_content_x(tree: ttk.Treeview, event_x: int) -> float:
     return event_x + offset
 
 
+def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
+    """v3.9.29 — SCROLL RODA HALUS (user: "perbaiki animasi scroll seperti
+    tidak smooth dan patah patah").
+
+    Akar patah-patah pada binding default Tk:
+    1. Binding kelas ttk::treeview menggulir 3 BARIS per notch roda —
+       lompatan besar terlihat kasar. Kini 1 baris per notch (3× lebih
+       halus) dengan AKUMULATOR delta pecahan: roda/trackpad resolusi
+       tinggi (delta < 120 per event, mis. trackpad macOS) dijumlahkan
+       dulu — tanpa akumulator delta kecil dibulatkan 0 = tidak pernah
+       menggulir (perilaku lama di beberapa tempat memakai trik
+       `or -1` yang justru memaksa 1 baris per event kecil).
+    2. (Tk 8.6 + overlay per-cell) label warna tertinggal 1 frame di
+       posisi lama saat scroll → label 'melayang' di atas baris salah
+       (tearing). Diperbaiki di CellColorOverlay (label pool + reposisi
+       sinkron di _wrap_scroll).
+
+    `return "break"` pada binding WIDGET mematikan binding kelas default
+    supaya tidak menggulir DOBEL (default 3 baris + binding ini).
+    Idempoten (flag `_smooth_wheel_bound`) — dipanggil dari
+    enable_col_resize yang dipasang sekali per tree (termasuk clone ⛶).
+    """
+    if getattr(tree, "_smooth_wheel_bound", False):
+        return
+    tree._smooth_wheel_bound = True
+
+    def _on_wheel(event):
+        d = getattr(event, "delta", 0) or 0
+        if d == 0:
+            return None
+        acc = getattr(tree, "_smooth_wheel_acc", 0.0)
+        acc += (-d / 120.0) * units_per_notch
+        steps = int(acc)              # potong menuju nol; sisa diakumulasi
+        tree._smooth_wheel_acc = acc - steps
+        if steps:
+            try:
+                tree.yview_scroll(steps, "units")
+            except tk.TclError:
+                pass
+        return "break"
+
+    def _on_btn45(event):
+        # X11: <Button-4> = roda naik, <Button-5> = turun (1 notch/event)
+        try:
+            tree.yview_scroll(-1 if getattr(event, "num", 4) == 4 else 1,
+                              "units")
+        except tk.TclError:
+            pass
+        return "break"
+
+    tree.bind("<MouseWheel>", _on_wheel, add="+")
+    tree.bind("<Button-4>", _on_btn45, add="+")
+    tree.bind("<Button-5>", _on_btn45, add="+")
+
+
 def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):
     """v3.4 — Resize lebar kolom MANUAL via drag + AUTO-FIT double-click.
 
@@ -2869,7 +2964,13 @@ def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):
       → mulai drag-resize kolom itu.
     - Drag (B1-Motion) → lebar mengikuti mouse (clamp minwidth).
     - Double-click di tepi kolom → auto-fit kolom itu ke lebar konten.
+
+    v3.9.29 — juga memasang scroll roda HALUS (enable_smooth_wheel):
+    choke-point tunggal — fungsi ini dipanggil sekali per tree di SEMUA
+    view + clone ⛶ + popup (14 call site), jadi smooth wheel otomatis
+    aktif di semua tabel tanpa harus menyentuh tiap view.
     """
+    enable_smooth_wheel(tree)   # v3.9.29 — idempoten (flag)
     state = {"col": None, "start_x": 0, "start_w": 0}
 
     def _edges():

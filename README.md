@@ -23,6 +23,23 @@ Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
 
+### v3.9.29 — SOURCE KIRIMAN PER PASANGAN (42.05→Internal / 32.24+9901→Eksternal / Campuran) + SCROLL HALUS + KOLOM KATEGORI DEVIASI DIHAPUS
+> User: *"nama barang + resto yang berasal dari 42.05 harusnya kategori internal. dari 32.24 eksternal dan 9901 juga eksternal ... aku mau ganti"* + konfirmasi 4 poin (campuran → "Campuran" · 9901 → Eksternal · tanpa IN → kosong · **mengganti nilai source kiriman**) + *"perbaiki animasi scroll seperti tidak smooth dan patah patah"* + *"hapus kolom kategori di tab deviasi gr dan pcs karna sudah ada filter di atasnya"*.
+
+- **SOURCE KIRIMAN kini DITURUNKAN dari sumber IN aktual per pasangan (Nama Barang × NAMA RESTO)** — menggantikan nilai statis master "21. DBS Kategori" (merge lama per Nama Barang saja, sama untuk semua resto, tidak sinkron dengan kiriman nyata):
+  - `queries.query_in` men-tag **SEMUA baris IN** dengan kolom `SOURCE IN` (dulu hanya salinan detail untuk tab Rekap Selisih IN; kolom ekstra aman — tidak ikut pivot/informasi append1);
+  - **`append1._source_kiriman_per_pair` + LANGKAH 5b**: hanya `42.05`/`42.05 (Bulan Lalu)` → **"Internal"**; hanya `32.24`/`32.24 (Bulan Lalu)`/`99.01` → **"Eksternal"**; campuran → **"Campuran"**; **pasangan tanpa dokumen IN → kosong** (None);
+  - Merge di frame LEBAR (1 baris = 1 pasangan) → nilai konstan per pasangan terbawa utuh ke format long → combobox filter PIVOT, kolom popup detail, dan export kini menampilkan Internal / Eksternal / Campuran;
+  - Master DBS Kategori tetap menyuplai **KATEGORI + AKTIF/NON** (hanya kolom SOURCE KIRIMAN yang tidak diambil lagi).
+- **Basis verifikasi workbook referensi** (`01.1 CEK STOCK V2.xlsb`): sheet 'Barang Masuk' kolom 'Jenis Kiriman' — **Internal ⟺ nomor IT. (42.05) 3.682 baris · Eksternal ⟺ nomor RI. (32.24) 3.377 baris — 100% konsisten**; 985 pasangan unik = 687 Internal / 273 Eksternal / **25 campuran** (IT+RI); sheet terhide 'Data Base Cek Deviasi' kolom Z "Kiriman" = INDEX/MATCH jenis kiriman baris pertama pasangan — 2.120/2.120 eksak (pasangan campuran → "Internal" karena baris Internal selalu urut pertama di pivot; app memilih label eksplisit "Campuran" sesuai konfirmasi user).
+- **SCROLL HALUS** (rodent terasa "patah-patah" — 3 akar diperbaiki):
+  - `widgets.enable_smooth_wheel` (BARU; dipasang otomatis oleh `enable_col_resize` di **SEMUA tabel + clone ⛶ + popup**, idempoten): **1 baris per notch** (binding kelas ttk::treeview default = 3 baris per notch = lompatan kasar) + **akumulator delta pecahan** (trackpad / roda resolusi tinggi — tanpa ini delta < 120 dibulatkan 0 = tidak pernah menggulir) + `return "break"` mematikan binding kelas default (tanpa dobel-gulir) + X11 `<Button-4/5>`;
+  - **`CellColorOverlay` LABEL POOL** (jalur per-cell warna Tk 8.6 — Windows standar): label yang keluar viewport dikembalikan ke pool dan di-**reuse** — pembuatan widget `tk.Label` saat scroll beruntun mahal + label "pop-in" telat 1 frame;
+  - **Reposisi SINKRON** di `_wrap_scroll` (saat fraction view berubah): label overlay diposisikan ulang dalam event yang sama dengan scroll — bbox sudah valid saat `yscrollcommand` — label tidak lagi "melayang" di atas baris salah sambil menunggu redraw idle (tearing).
+- **Kolom KATEGORI DIHAPUS dari tabel Deviasi GR & PCS** (COLUMNS 21→20 kolom): combobox KATEGORI di kartu Filter, filter post-pivot, dan data pivot internal tetap utuh — nilainya tidak hilang, hanya kolom tabel yang redundan dengan filter di atasnya.
+- **VERIFIKASI**: **823/823 UI test** (808 + §41 16 check baru: unit klasifikasi 4 kasus + input kosong; query_in tag semua baris IN + detail 1:1; wheel 1-notch eksak / akumulator 3×(-40)=1 baris / arah naik / idempoten; overlay label menempel PERSIS bbox sel + reposisi sinkron pasca-scroll + label pool aktif) + 3 assertion skema lama diperbarui (KATEGORI dihapus, skema 20 kolom) + test_mock ALL PASS + probe E2E mock (IT+RI → Campuran · murni IT → Internal · IT+9901 → Campuran · nilai master "INTERNAL" tergantikan turunan) + ruff src 187 == baseline.
+- 6 file: `queries.py`, `append1.py` (5b + helper), `widgets.py` (smooth wheel + overlay pool/sinkron), `deviasi_view.py` (kolom KATEGORI), `app.py` (v3.9.29), `test_ui_redesign.py` (§41 + 3 assertion).
+
 ### v3.9.28 — TANGGAL SERIAL EXCEL (.xlsb/pyxlsb) ROBUST → STOK SEHARUSNYA & HITUNG MANUAL BENAR
 > User: *"push to git hub dan perbaiki stock seharusnya dan hitung manual"*. (v3.9.27 ter-push di sesi yang sama.)
 

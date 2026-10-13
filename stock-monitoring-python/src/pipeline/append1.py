@@ -186,6 +186,50 @@ def _group_info_columns(info_prep: pd.DataFrame, key_columns: list,
     return result
 
 
+# Tag SOURCE IN yang tergolong kiriman INTERNAL (pemindahan antar-gudang /
+# cabang sendiri — modul 42.05). Semua tag lain (32.24, 32.24 Bulan Lalu,
+# 99.01) = kiriman EKSTERNAL (penerimaan supplier / pembelian tanpa
+# penerimaan). V3.9.29 — dasar klasifikasi SOURCE KIRIMAN per pasangan.
+_INTERNAL_IN_TAGS = ("42.05", "42.05 (Bulan Lalu)")
+
+
+def _source_kiriman_per_pair(in_df: "pd.DataFrame | None") -> pd.DataFrame:
+    """v3.9.29 — klasifikasi SOURCE KIRIMAN per pasangan (Nama Barang ×
+    NAMA RESTO) dari SUMBER IN aktual (konfirmasi user):
+      - hanya dokumen 42.05 / 42.05 (Bulan Lalu)      → "Internal"
+      - hanya 32.24 / 32.24 (Bulan Lalu) / 99.01      → "Eksternal"
+      - campuran keduanya                              → "Campuran"
+      - pasangan TANPA dokumen IN                      → tidak mengeluarkan
+        baris (merge left → None = kosong, mirror kolom Z 'Kiriman' sheet
+        'Data Base Cek Deviasi' yang kosong utk pasangan tanpa kiriman).
+
+    Input: in_df = gabungan sumber IN hasil query_in (SEMUA baris kini
+    bertag 'SOURCE IN', v3.9.29). Pre-KATEGORI-filter — identik dgn
+    in_detail (klasifikasi mengikuti sumber dokumen apa adanya).
+    """
+    empty = pd.DataFrame(columns=["Nama Barang", "NAMA RESTO",
+                                   "SOURCE KIRIMAN"])
+    cols = ("Nama Barang", "NAMA RESTO", "SOURCE IN")
+    if in_df is None or in_df.empty or any(c not in in_df.columns for c in cols):
+        return empty
+    d = in_df[list(cols)].copy()
+    d["SOURCE IN"] = d["SOURCE IN"].fillna("").astype(str).str.strip()
+    d["_int"] = d["SOURCE IN"].isin(_INTERNAL_IN_TAGS)
+    g = d.groupby(["Nama Barang", "NAMA RESTO"], dropna=False, sort=False)["_int"] \
+        .agg(has_int="any",
+             has_eks=lambda s: bool((~s).any())).reset_index()
+
+    def _cls(row) -> str:
+        if row["has_int"] and row["has_eks"]:
+            return "Campuran"
+        if row["has_int"]:
+            return "Internal"
+        return "Eksternal"
+
+    g["SOURCE KIRIMAN"] = g.apply(_cls, axis=1)
+    return g[["Nama Barang", "NAMA RESTO", "SOURCE KIRIMAN"]]
+
+
 def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                  rekap_so_out: dict | None = None) -> pd.DataFrame:
     """
@@ -237,6 +281,15 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     print(f"    IN: {len(in_df)} rows")
     if in_detail_out is not None:
         print(f"    IN detail (per dokumen, v3.4): {len(in_detail_out.get('df'))} rows")
+    # v3.9.29 — peta klasifikasi SOURCE KIRIMAN per pasangan (dipakai
+    # LANGKAH 5b; mengganti nilai master DBS Kategori)
+    _src_kiriman = _source_kiriman_per_pair(in_df)
+    if not _src_kiriman.empty:
+        _n_int = int((_src_kiriman["SOURCE KIRIMAN"] == "Internal").sum())
+        _n_eks = int((_src_kiriman["SOURCE KIRIMAN"] == "Eksternal").sum())
+        _n_mix = int((_src_kiriman["SOURCE KIRIMAN"] == "Campuran").sum())
+        print(f"    SOURCE KIRIMAN per pasangan: {_n_int} Internal / "
+              f"{_n_eks} Eksternal / {_n_mix} Campuran")
 
     # FIX: Stop checkpoint after IN load
     if stop_event is not None and stop_event.is_set():
@@ -423,9 +476,15 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
 
     # mergedKategori = LeftOuter join × DBS_Kategori on Nama Barang = NAMA BARANG
     # FIX: also bring AKTIF/NON column (was missing → AKTIF/NON always empty in UI)
+    # v3.9.29: kolom SOURCE KIRIMAN TIDAK diambil dari master lagi — nilainya
+    # kini DITURUNKAN per pasangan dari SUMBER IN aktual (LANGKAH 5b di
+    # bawah; konfirmasi user: "nama barang + resto yang berasal dari 42.05
+    # harusnya kategori internal, dari 32.24 eksternal dan 9901 juga
+    # eksternal — mengganti nilai source kiriman"). Master DBS Kategori
+    # tetap menyuplai KATEGORI + AKTIF/NON (per Nama Barang).
     if len(dbs_kategori) > 0 and "Nama Barang" in expanded_information.columns:
         # Prepare DBS_Kategori for merge — include AKTIF/NON if present
-        kat_cols = ["NAMA BARANG", "KATEGORI", "SOURCE KIRIMAN"]
+        kat_cols = ["NAMA BARANG", "KATEGORI"]
         if "AKTIF/NON" in dbs_kategori.columns:
             kat_cols.append("AKTIF/NON")
         kat = dbs_kategori[kat_cols].copy()
@@ -437,8 +496,29 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     else:
         expanded_kategori = expanded_information.copy()
         expanded_kategori["KATEGORI"] = None
-        expanded_kategori["SOURCE KIRIMAN"] = None
         expanded_kategori["AKTIF/NON"] = None
+
+    # =========================================================================
+    # 5b. SOURCE KIRIMAN PER PASANGAN (v3.9.29 — MENGGANTI nilai master)
+    # =========================================================================
+    # Klasifikasi dari sumber IN AKTUAL per (Nama Barang, NAMA RESTO):
+    #   hanya 42.05/42.05-Lalu → "Internal"; hanya 32.24(-Lalu)/99.01 →
+    #   "Eksternal"; campuran → "Campuran"; tanpa dokumen IN → kosong
+    #   (None — mirror perilaku kolom Z 'Kiriman' sheet terhide 'Data Base
+    #   Cek Deviasi' workbook referensi: pasangan tanpa kiriman kosong).
+    # Merge terjadi pada frame LEBAR (1 baris = 1 pasangan) → nilai konstan
+    # per pasangan, terbawa utuh ke format long setelah unpivot.
+    if {"Nama Barang", "NAMA RESTO"} <= set(expanded_kategori.columns):
+        if _src_kiriman is not None and not _src_kiriman.empty:
+            expanded_kategori = expanded_kategori.merge(
+                _src_kiriman, on=["Nama Barang", "NAMA RESTO"], how="left")
+        else:
+            expanded_kategori["SOURCE KIRIMAN"] = None
+    else:
+        expanded_kategori["SOURCE KIRIMAN"] = None
+        if "NAMA RESTO" not in expanded_kategori.columns:
+            print("  [Append1] WARNING: kolom NAMA RESTO absen — "
+                  "SOURCE KIRIMAN per pasangan dilewati (semua kosong)")
 
     # =========================================================================
     # 6. UNPIVOT — 8 metric columns + SALDO AWAL → (JENIS, NILAI)

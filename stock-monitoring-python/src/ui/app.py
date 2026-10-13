@@ -157,7 +157,31 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.28"  # v3.9.28 — TANGGAL SERIAL EXCEL (.xlsb/pyxlsb) ROBUST → Stok Seharusnya & Hitung Manual benar
+APP_VERSION = "3.9.29"  # v3.9.29 — SOURCE KIRIMAN PER PASANGAN (42.05 Internal/32.24+9901 Eksternal/Campuran) + SCROLL HALUS + KOLOM KATEGORI DEVIASI DIHAPUS
+# v3.9.29 (user: "nama barang + resto yang berasal dari 42.05 harusnya
+# kategori internal. dari 32.24 eksternal dan 9901 juga eksternal ... aku
+# mau ganti" + konfirmasi: campuran→'Campuran'; tanpa IN→kosong; MENGGANTI
+# nilai source kiriman + "perbaiki animasi scroll seperti tidak smooth dan
+# patah patah" + "hapus kolom kategori di tab deviasi gr dan pcs karna
+# sudah ada filter di atasnya"): (1) SOURCE KIRIMAN kini DITURUNKAN per
+# pasangan (Nama Barang × NAMA RESTO) dari SUMBER IN AKTUAL — query_in
+# men-tag SEMUA baris IN dgn 'SOURCE IN' (dulu hanya detail); append1
+# LANGKAH 5b _source_kiriman_per_pair: hanya 42.05/42.05-Lalu → 'Internal',
+# hanya 32.24(-Lalu)/99.01 → 'Eksternal', campuran → 'Campuran', pasangan
+# tanpa dokumen IN → kosong (None — mirror kolom Z 'Kiriman' sheet terhide
+# 'Data Base Cek Deviasi' workbook referensi; verifikasi data referensi:
+# IT.=Internal 3.682 baris / RI.=Eksternal 3.377 baris 100% konsisten, 985
+# pasangan: 687 Internal / 273 Eksternal / 25 campuran). Merge di frame
+# LEBAR → nilai konstan per pasangan terbawa ke format long; kolom master
+# DBS Kategori 'SOURCE KIRIMAN' TIDAK diambil lagi (master tetap suplai
+# KATEGORI + AKTIF/NON) → filter combobox pivot/popup/export kini
+# Internal/Eksternal/Campuran. (2) SCROLL HALUS: enable_smooth_wheel BARU
+# (dipasang enable_col_resize = semua tabel + clone ⛶ + popup) — 1 baris
+# per notch (default Tk 3 baris = lompatan patah-patah) + akumulator delta
+# pecahan utk trackpad/roda resolusi tinggi + 'break' mematikan binding
+# kelas (tanpa dobel); CellColorOverlay (Tk 8.6) LABEL POOL (reuse label,
+# bukan destroy/create = pop-in telat 1 frame) + reposisi SINKRON di
+# _wrap_scroll saat frac berubah (label tidak 'melayang' di baris salah).
 # v3.9.28 (user: "push to git hub dan perbaiki stock seharusnya dan hitung
 # manual"): AKAR BUG BARU DITEMUKAN & DIFIKS — file .xlsb dibaca engine
 # pyxlsb menghasilkan sel TANGGAL sebagai SERIAL MENTAH (46290 = 2026-09-25);

@@ -385,9 +385,10 @@ class DeviasiView(tk.Frame):
         ("Resto", 70, "w"),
         ("Nama Barang", 180, "w"),
         ("Satuan", 50, "w"),
-        # v3.9.13 — filter kategori (user: "tambah filter kategori di tab
-        # deviasi pcs dan gr").
-        ("KATEGORI", 110, "w"),
+        # v3.9.29 — kolom KATEGORI DIHAPUS dari tabel (user: "hapus kolom
+        # kategori di tab deviasi gr dan pcs karna sudah ada filter di
+        # atasnya") — combobox KATEGORI di kartu Filter tetap; nilai tetap
+        # hidup di pivot internal (filter post-pivot baris 1471).
         ("AKTIF/NON", 70, "w"),
         ("SO_H-2", 70, "e"),
         ("SO_H-1", 70, "e"),
@@ -1234,7 +1235,8 @@ class DeviasiView(tk.Frame):
         barang_s = pivot["Nama Barang"].astype(str)
         aktif_s = (barang_s.map(self._aktif_lookup).fillna("")
                    .astype(str).str.strip().str.upper())
-        # v3.9.13: KATEGORI per barang (kolom + filter; konvensi tampil '-'
+        # v3.9.13: KATEGORI per barang (v3.9.29: kolom TABEL dihapus —
+        # nilai tetap dipakai filter combobox post-pivot; konvensi '-'
         # bila kosong — identik in_selisih_view).
         kategori_s = (barang_s.map(self._kategori_lookup).fillna("-")
                       .astype(str))
@@ -1513,8 +1515,8 @@ class DeviasiView(tk.Frame):
         # SO_H-2 … SO_H+2, In, Out, BK jatuh ke `else 0` → selalu tampil "-".
         # Kini SEMUA kolom numerik diekstrak (identik perilaku v3.1 row.get).
         cols_np = {c: filtered[c].to_numpy() for c in
-                   ("Resto", "Nama Barang", "Satuan", "KATEGORI",
-                    "AKTIF/NON", "CEK")}
+                   ("Resto", "Nama Barang", "Satuan",
+                    "AKTIF/NON", "CEK")}   # v3.9.29 — KATEGORI keluar tampilan
         for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
                   "Out_H", "BK_H", "SO_H+1", "In_H+1", "SO_H+2",
                   "Sistem", "Deviasi", "Dev to BOM%", "Stok Seharusnya"):

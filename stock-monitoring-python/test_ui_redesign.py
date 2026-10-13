@@ -209,6 +209,23 @@ Memverifikasi:
     tanggal Rincian PO ikut robust. Pipeline mock 464.205 baris IDENTIK
     (0 beda); parity sheet H=25: Hitung Manual 3=3 overlap penuh,
     Stok Seharusnya 12/1.405 sisa = inkonsistensi internal workbook.
+41. v3.9.29 — SOURCE KIRIMAN PER PASANGAN + SCROLL HALUS + KOLOM
+    KATEGORI DEVIASI DIHAPUS (§41 + skema §6/§26 diperbarui; user:
+    "nama barang + resto yang berasal dari 42.05 harusnya kategori
+    internal. dari 32.24 eksternal dan 9901 juga eksternal ... aku mau
+    ganti" + konfirmasi campuran→'Campuran' / 9901→Eksternal / tanpa
+    IN→kosong / MENGGANTI nilai source kiriman + "perbaiki animasi
+    scroll seperti tidak smooth dan patah patah" + "hapus kolom
+    kategori di tab deviasi gr dan pcs karna sudah ada filter di atas
+    nya"): (1) _source_kiriman_per_pair: 42.05(-Lalu)→Internal,
+    32.24(-Lalu)/99.01→Eksternal, campuran→Campuran, tanpa IN→kosong;
+    query_in men-tag SEMUA baris IN dgn 'SOURCE IN'; detail 1:1.
+    (2) enable_smooth_wheel (1 baris per notch + akumulator delta
+    pecahan + break anti-dobel + idempoten). (3) CellColorOverlay:
+    label menempel PERSIS bbox sel, reposisi SINKRON pasca-scroll
+    (bbox valid saat yscrollcommand), LABEL POOL reuse. (4) Kolom
+    KATEGORI dihapus dari tabel Deviasi GR & PCS (COLUMNS 21→20 —
+    combobox + filter post-pivot tetap).
 38. v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET
     'Data Base Cek Deviasi' (§37 + §38; user: "pada rekap selisih in
     bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi
@@ -655,7 +672,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.28", APP_VERSION == "3.9.28", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.29", APP_VERSION == "3.9.29", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -969,12 +986,16 @@ def main():
     # (v3.9.18: kolom Max Deviasi / ACR / Total ACR DIHAPUS dari tampilan
     # — permintaan user; hitungan internal TETAP — CEK ke-5 & Dev to BOM%
     # & Stok Seharusnya tetap diuji di bawah)
+    # (v3.9.29: kolom KATEGORI juga DIHAPUS dari tabel — user: "sudah ada
+    # filter di atasnya" → skema kini 20 kolom, Dev to BOM% dst. bergeser
+    # dari indeks 19..21 → 18..20.)
     gr_cols = [c[0] for c in app.deviasi_gr_view.COLUMNS]
-    check("(v3.9.6→v3.9.18) Skema: Dev to BOM% + Stok Seharusnya + CEK "
-          "setelah Rank; Max Deviasi/ACR/Total ACR DIHAPUS",
-          gr_cols[19:22] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
+    check("(v3.9.6→v3.9.29) Skema: Dev to BOM% + Stok Seharusnya + CEK "
+          "setelah Rank; Max Deviasi/ACR/Total ACR/KATEGORI DIHAPUS",
+          gr_cols[18:21] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
           "Max Deviasi" not in gr_cols and "ACR" not in gr_cols and
-          "Total ACR" not in gr_cols, f"got {gr_cols}")
+          "Total ACR" not in gr_cols and "KATEGORI" not in gr_cols,
+          f"got {gr_cols}")
     gr_idx = {c: i for i, c in enumerate(gr_cols)}
     acr_row = None
     for k in app.deviasi_gr_view.tree.get_children(""):
@@ -4148,10 +4169,17 @@ def main():
     # --- (2) FILTER KATEGORI di tab Deviasi GR & PCS ---------------------
     grv13 = app.deviasi_gr_view
     _cols13 = [c[0] for c in grv13.COLUMNS]
-    check("(v3.9.13) Kolom KATEGORI di Deviasi GR (setelah Satuan)",
-          "KATEGORI" in _cols13 and
-          _cols13.index("KATEGORI") == _cols13.index("Satuan") + 1,
-          f"got index={_cols13.index('KATEGORI')}")
+    # v3.9.29 (user: "hapus kolom kategori di tab deviasi gr dan pcs karna
+    # sudah ada filter di atas nya") — kolom TABEL dihapus; dulu (v3.9.13)
+    # berada tepat setelah Satuan.
+    check("(v3.9.29) Kolom KATEGORI DIHAPUS dari tabel Deviasi GR",
+          "KATEGORI" not in _cols13 and
+          "AKTIF/NON" in _cols13 and
+          _cols13.index("AKTIF/NON") == _cols13.index("Satuan") + 1,
+          f"got cols={_cols13}")
+    check("(v3.9.29) Kolom KATEGORI juga hilang di tree (displaycolumns)",
+          "KATEGORI" not in list(grv13.tree["columns"]),
+          f"got {list(grv13.tree['columns'])}")
     check("(v3.9.13) Combobox KATEGORI ada (GR) + default 'Semua'",
           hasattr(grv13, "_kategori_var") and
           grv13._kategori_var.get() == "Semua")
@@ -4180,12 +4208,13 @@ def main():
     check("(v3.9.13) ✕ Reset Filter mengembalikan kategori 'Semua'",
           grv13._kategori_var.get() == "Semua" and
           len(grv13.tree.get_children("")) == _gr_all13)
-    # kolom KATEGORI tampil di tabel + filter header otomatis
-    check("(v3.9.13) Nilai KATEGORI tampil di tabel",
-          any("SAYURAN" in str(grv13.tree.set(k, "KATEGORI"))
-              for k in grv13.tree.get_children("")) or
-          any("BAHAN" in str(grv13.tree.set(k, "KATEGORI"))
-              for k in grv13.tree.get_children("")))
+    # v3.9.29: nilai KATEGORI TIDAK lagi tampil di kolom tabel (dihapus
+    # user) — kategori tetap hidup lewat combobox (terbukti filter
+    # SAYURAN di atas) + pivot internal.
+    check("(v3.9.29) Nilai KATEGORI TIDAK tampil di tabel (kolom dihapus)",
+          all("KATEGORI" not in str(grv13.tree.set(k))
+              for k in grv13.tree.get_children("")) and
+          "KATEGORI" not in list(grv13.tree["columns"]))
     grv13.load_data(append1)
     wait_view(root, grv13)
 
@@ -8085,6 +8114,167 @@ def main():
           next(iter(_out39["NAMA RESTO"])) == "MLGPAR",
           f"got {_out39['NAMA RESTO'].tolist()}")
     shutil.rmtree(_tmp39, ignore_errors=True)
+
+    # ==================================================================
+    # §41 (v3.9.29) — SOURCE KIRIMAN PER PASANGAN + SCROLL HALUS
+    # ==================================================================
+    print("\n== 41. (v3.9.29) SOURCE KIRIMAN PER PASANGAN + SCROLL HALUS ==")
+    from src.pipeline.append1 import _source_kiriman_per_pair
+    _sk41 = pd.DataFrame({
+        "Nama Barang": ["A", "A", "B", "B", "C", "D", "D"],
+        "NAMA RESTO": ["R1", "R1", "R1", "R1", "R2", "R2", "R2"],
+        "SOURCE IN": ["42.05", "42.05 (Bulan Lalu)", "32.24", "99.01",
+                      "42.05", "42.05", "32.24"],
+    })
+    _skm41 = _source_kiriman_per_pair(_sk41)
+    _skv41 = {(r["Nama Barang"], r["NAMA RESTO"]): r["SOURCE KIRIMAN"]
+              for _i, r in _skm41.iterrows()}
+    check("(v3.9.29) _source_kiriman_per_pair: murni 42.05 → Internal",
+          _skv41[("A", "R1")] == "Internal" and
+          _skv41[("C", "R2")] == "Internal", f"got {_skv41}")
+    check("(v3.9.29) _source_kiriman_per_pair: 32.24/99.01 → Eksternal",
+          _skv41[("B", "R1")] == "Eksternal", f"got {_skv41}")
+    check("(v3.9.29) _source_kiriman_per_pair: campuran IT+RI → Campuran",
+          _skv41[("D", "R2")] == "Campuran", f"got {_skv41}")
+    check("(v3.9.29) _source_kiriman_per_pair: input kosong/None → frame "
+          "kosong (merge left → semua pasangan kosong)",
+          _source_kiriman_per_pair(None).empty and
+          _source_kiriman_per_pair(pd.DataFrame()).empty)
+
+    # query_in: SEMUA baris IN kini bertag SOURCE IN (bukan hanya detail)
+    from src.pipeline.queries import query_in
+    _qi41 = pd.DataFrame({
+        "Tanggal": [5, 5, 5],
+        "NAMA RESTO": ["R1", "R1", "R2"],
+        "Nama Barang": ["A", "A", "C"],
+        "Value": [10.0, 20.0, 30.0],
+        "JENIS": ["IN", "IN", "IN"],
+    })
+    class _Cfg41:
+        def folder(self, name):
+            return os.path.join(_tf13.gettempdir(), f"nosuch_{name}")
+    import unittest.mock as _mk41
+    with _mk41.patch("src.pipeline.queries.query_3224", return_value=_qi41.iloc[[0, 1]]), \
+         _mk41.patch("src.pipeline.queries.query_3224_bulan_lalu",
+                     return_value=pd.DataFrame()), \
+         _mk41.patch("src.pipeline.queries.query_4205",
+                     return_value=_qi41.iloc[[2]]), \
+         _mk41.patch("src.pipeline.queries.query_4205_bulan_lalu",
+                     return_value=pd.DataFrame()), \
+         _mk41.patch("src.pipeline.queries.query_9901",
+                     return_value=pd.DataFrame()):
+        _det41 = {}
+        _in41 = query_in(_Cfg41(), detail_out=_det41)
+    check("(v3.9.29) query_in: baris IN gabungan bertag SOURCE IN "
+          "('32.24' ×2 + '42.05' ×1)",
+          "SOURCE IN" in _in41.columns and
+          sorted(_in41["SOURCE IN"].dropna()) == ["32.24", "32.24", "42.05"],
+          f"got {_in41.get('SOURCE IN').tolist() if 'SOURCE IN' in _in41.columns else None}")
+    check("(v3.9.29) query_in: detail per dokumen tetap 1:1 dgn sumber",
+          len(_det41["df"]) == 3 and
+          set(_det41["df"]["SOURCE IN"]) == {"32.24", "42.05"},
+          f"got {len(_det41.get('df', pd.DataFrame()))}")
+
+    # --- SMOOTH WHEEL: 1 baris per notch + akumulator + tidak dobel ---
+    from src.ui.widgets import CellColorOverlay, enable_smooth_wheel
+    _tw41 = tk.Toplevel(root)          # jendela terpisah — widget di root
+    _tw41.geometry("240x260+8+8")     # utama bisa tergegeser layout
+    _wt41 = ttk.Treeview(_tw41, columns=["c0"], show="headings", height=8)
+    _wt41.column("c0", width=120)
+    _wt41.heading("c0", text="X")
+    _wids41 = [f"r{i}" for i in range(60)]
+    for _i41, _wid41 in enumerate(_wids41):
+        _wt41.insert("", "end", iid=_wid41, values=[f"v{_i41}"])
+    _wt41.pack(fill="both", expand=True)
+    _tw41.update_idletasks()
+    root.update_idletasks()
+    enable_smooth_wheel(_wt41)
+    check("(v3.9.29) enable_smooth_wheel idempoten (binding tidak dobel)",
+          (enable_smooth_wheel(_wt41) is None and
+           _wt41._smooth_wheel_bound is True))
+    # y di AREA BARIS (bukan heading — identify_row(2) mengenai heading
+    # saat show="headings"; area baris tetap konstant saat scroll)
+    _body_y41 = _wt41.bbox("r0")[1] + 2
+    _wt41.yview_moveto(0.0)
+    root.update_idletasks()
+    _top41 = _wt41.identify_row(_body_y41)
+    _wt41.event_generate("<MouseWheel>", delta=-120, when="now")
+    root.update_idletasks()
+    _top41b = _wt41.identify_row(_body_y41)
+    _moved41 = _wids41.index(_top41b) - _wids41.index(_top41)
+    check("(v3.9.29) 1 notch roda = TEPAT 1 baris (default Tk 3 baris = "
+          "patah-patah; 1+3=4 bila binding kelas ikut jalan = dobel)",
+          _moved41 == 1, f"moved={_moved41}")
+    # akumulator: delta pecahan kecil terakumulasi (trackpad)
+    _wt41.yview_moveto(0.0)
+    root.update_idletasks()
+    _acc0_41 = _wids41.index(_wt41.identify_row(_body_y41))
+    for _ in range(3):
+        _wt41.event_generate("<MouseWheel>", delta=-40, when="now")
+        root.update_idletasks()
+    _acc1_41 = _wids41.index(_wt41.identify_row(_body_y41))
+    check("(v3.9.29) akumulator delta pecahan: 3×(-40) = 1 baris total "
+          "(dulu dibulatkan 0 = tidak pernah menggulir)",
+          _acc1_41 - _acc0_41 == 1,
+          f"moved={_acc1_41 - _acc0_41}")
+    # roda ke atas
+    _before41 = _wids41.index(_wt41.identify_row(_body_y41))
+    _wt41.event_generate("<MouseWheel>", delta=120, when="now")
+    root.update_idletasks()
+    check("(v3.9.29) roda ke atas: 1 baris (arah terjaga, tanpa dobel)",
+          _before41 - _wids41.index(_wt41.identify_row(_body_y41)) == 1)
+    _tw41.destroy()
+
+    # --- OVERLAY: label pool + reposisi SINKRON saat scroll ---
+    _to41 = tk.Toplevel(root)
+    _to41.geometry("240x220+8+8")
+    _ov41 = ttk.Treeview(_to41, columns=["c0"], show="headings", height=6)
+    _ov41.column("c0", width=140)
+    _ov41.heading("c0", text="Y")
+    for _i41 in range(40):
+        _ov41.insert("", "end", iid=f"o{_i41}", values=[f"w{_i41}"])
+    _ov41.pack(fill="both", expand=True)
+    _to41.update_idletasks()
+    root.update_idletasks()
+    _ovl41 = CellColorOverlay(_ov41)
+    _ov41.tag_configure("neg41", foreground="#dc2626")
+    _ovl41.set_cells("neg41", [(f"o{i41}", "c0") for i41 in range(40)])
+    root.update_idletasks()
+    _lab41 = _ovl41._labels.get(("o0", "c0"))
+    check("(v3.9.29) overlay: label terpasang utk sel berwarna terlihat",
+          _lab41 is not None and _lab41.winfo_ismapped())
+    _bbox41 = _ov41.bbox("o0", "c0")
+    check("(v3.9.29) overlay: label menempel PERSIS di bbox sel "
+          "(reposisi sinkron — tidak melayang)",
+          _lab41 is not None and
+          (_lab41.winfo_x(), _lab41.winfo_y()) == (_bbox41[0], _bbox41[1]),
+          f"lab=({_lab41.winfo_x()},{_lab41.winfo_y()}) "
+          f"bbox=({_bbox41[0]},{_bbox41[1]})")
+    # scroll 5 baris → label ikut baris (sinkron dalam event yang sama)
+    _ov41.yview_scroll(5, "units")
+    root.update_idletasks()
+    _lab41b = _ovl41._labels.get(("o5", "c0"))
+    _bbox41b = _ov41.bbox("o5", "c0")
+    check("(v3.9.29) overlay: setelah scroll label baru terposisi BENAR "
+          "(bbox valid saat yscrollcommand — bukan menunggu idle)",
+          _lab41b is not None and _lab41b.winfo_ismapped() and
+          (_lab41b.winfo_x(), _lab41b.winfo_y()) == (_bbox41b[0], _bbox41b[1]),
+          f"lab=({_lab41b.winfo_x() if _lab41b else None},"
+          f"{_lab41b.winfo_y() if _lab41b else None}) "
+          f"bbox=({_bbox41b[0]},{_bbox41b[1]})")
+    # label pool: baris keluar viewport → label masuk POOL (reuse), bukan
+    # destroy; total label widget TIDAK tumbuh melebihi viewport+pool
+    _nchild41 = len([w for w in _ov41.winfo_children()
+                     if isinstance(w, tk.Label)])
+    _ov41.yview_scroll(30, "units")
+    root.update_idletasks()
+    _nchild41b = len([w for w in _ov41.winfo_children()
+                      if isinstance(w, tk.Label)])
+    check("(v3.9.29) overlay: LABEL POOL — jumlah widget label tetap "
+          "setelah scroll jauh (reuse, bukan buang-buat = patah-patah)",
+          _nchild41b <= max(12, _nchild41) and len(_ovl41._pool) > 0,
+          f"before={_nchild41} after={_nchild41b} pool={len(_ovl41._pool)}")
+    _to41.destroy()
 
     # Cleanup
     root.destroy()
