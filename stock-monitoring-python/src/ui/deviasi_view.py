@@ -202,6 +202,7 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -597,7 +598,7 @@ class DeviasiView(tk.Frame):
 
         col_ids = [c[0] for c in self.COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
-                                 selectmode="browse")
+                                 selectmode="extended")
 
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
@@ -619,6 +620,7 @@ class DeviasiView(tk.Frame):
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         # Footer: status
         foot = tk.Frame(tbody, bg=C_CARD)
@@ -1027,6 +1029,22 @@ class DeviasiView(tk.Frame):
             self._tnum = tnum
             self._tnum_data = df
         mask = (df["JENIS"].isin(relevant_jenis)) & (tnum.isin(tanggal_range))
+
+        # v3.9.32 — BARANG 42.17-ONLY (user: "kenapa barang yang hanya ada
+        # di 42.17, mis. BUMBU PASTA KUAH, tidak muncul di Deviasi GR?"):
+        # fn_4217 HARDCODE Tanggal=1 untuk semua baris saldo → pasangan
+        # yang SATU-SATUNYA datanya saldo 42.17 (tanpa rekap SO/IN/out)
+        # hanya punya baris t=1 → TIDAK PERNAH masuk window H±2 (H>3)
+        # → lenyap dari tabel. FIX: baris ('2.SALDO AKHIR', t=1) pasangan
+        # yang TIDAK punya baris window mana pun SELALU ikut (pair
+        # muncul) + Sistem pasangan itu = saldo t=1 (lihat bawah).
+        # Pasangan ber-window TIDAK tersentuh (nilai tabel tak berubah).
+        _pair_key = (df["Nama Barang"].astype(str) + "\x1f"
+                     + df["NAMA RESTO"].astype(str))
+        _window_pairs = pd.Index(_pair_key[mask].unique())
+        _saldo_t1 = (df["JENIS"] == "2.SALDO AKHIR") & (tnum == 1)
+        _mask_saldo_only = _saldo_t1 & ~_pair_key.isin(_window_pairs)
+        mask = mask | _mask_saldo_only
         df_filtered = df[mask].assign(Tanggal_num=tnum[mask].to_numpy())
 
         if "AKTIF/NON" in df.columns and "Nama Barang" in df.columns:
@@ -1187,6 +1205,18 @@ class DeviasiView(tk.Frame):
         in_p1 = arr("4.IN", h + 1)
         so_p2 = arr("1.SO", h + 2)
         sistem = arr("2.SALDO AKHIR", h)
+
+        # v3.9.32 — pasangan SALDO-ONLY (42.17): satu-satunya barisnya
+        # ('2.SALDO AKHIR', t=1) → Sistem = saldo running-stock t=1
+        # (= saldo 42.17; tidak ada mutasi sesudahnya). Deviasi = SO_H
+        # (0) − saldo → pasangan tampil dgn selisih nyata, bukan 0−0.
+        _sistem_t1 = arr("2.SALDO AKHIR", 1)
+        _saldo_only_rows = ~(
+            (pivot["Nama Barang"].astype(str) + "\x1f"
+             + pivot["NAMA RESTO"].astype(str)
+             ).isin(_window_pairs).to_numpy())
+        if _saldo_only_rows.any():
+            sistem = np.where(_saldo_only_rows, _sistem_t1, sistem)
 
         deviasi = so_h - sistem
 

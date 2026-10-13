@@ -264,6 +264,25 @@ Memverifikasi:
     terkonversi', kompatibel pemanggil tanpa peta (perilaku v3.9.30).
     E2E konversi via test_mock (mock 42.05/32.24 ber-kolom Rasio
     KG→GR 1000 → PO 12 KG = 12.000 GR + catatan berlabel).
+44. v3.9.32 — MULTI-SELECT + POPUP PIVOT BESAR + BARANG 42.17-ONLY +
+    FILTER KATEGORI 42.17 + HARGA 41.09 + MODE NOMINAL (§44; user: 6
+    permintaan + "YA KERJAKAN SEMUA DAN PUSH TO GIT HUB"):
+    (1) MULTI-SELECT semua tabel: selectmode browse → extended +
+    binding Ctrl+A pilih semua (widgets.enable_multi_select; clone ⛶ +
+    popup ikut) — user "kenapa aku tidak bisa select ya untuk semua
+    data?"; (2) DetailsPopup ±90% layar adaptif + tombol ⛶ & item menu
+    DIHAPUS KHUSUS jalur pivot (show_maximize=False; jalur lain tetap);
+    (3) barang 42.17-only (BUMBU PASTA KUAH) tampil di Deviasi GR/PCS:
+    mask baris ('2.SALDO AKHIR', t=1) pasangan TANPA window rows selalu
+    ikut + Sistem = saldo 42.17 + SATUAN fallback 'Nama Satuan' 42.17
+    (append1); (4) fn_4217 filter whitelist kategori SEBELUM melt
+    (kolom id 'Kategori Barang' ffill + 'Nama Satuan'; config
+    'KategoriBarang4217' prefix-match normalisasi; 0-baris → bypass);
+    (5) fn_4109 harga 41.09 (header per-NAMA; subtotal dibuang; guard
+    div-0; audit_result harga_map/konversi_map); (6) mode '💰 Nominal
+    (H)' tab Laporan (NominalDeviasiView: 3.DEVIASI tanggal H × harga
+    dinormalkan peta rasio; baris TOTAL; penanda tanpa harga; H bersama;
+    app 3 mode + dispatch + load_data).
 38. v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET
     'Data Base Cek Deviasi' (§37 + §38; user: "pada rekap selisih in
     bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi
@@ -489,9 +508,7 @@ def make_mock_append1() -> pd.DataFrame:
                 val = 0.0
                 if jenis == "1.SO":
                     val = 200.0
-                elif jenis == "2.SALDO AKHIR":
-                    val = 100.0
-                elif jenis == "4.IN" and tgl == 25:
+                elif jenis == "2.SALDO AKHIR" or jenis == "4.IN" and tgl == 25:
                     val = 100.0
                 elif jenis == "9.ACR" and tgl % 3 == 0:
                     val = 3.0
@@ -710,7 +727,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.31", APP_VERSION == "3.9.31", f"got {APP_VERSION}")
+    check("Versi = 3.9.32", APP_VERSION == "3.9.32", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -2090,10 +2107,8 @@ def main():
 
     from src.ui.widgets import (
         ColumnManager,
-        _tree_row_passes,
         apply_tree_row_filters,
         auto_fit_columns,
-        identify_to_column,
     )
 
     # (a) apply_tree_row_filters membaca nilai kolom yang BENAR setelah
@@ -6931,7 +6946,6 @@ def main():
               f"sel={list(_dv32e.tree.selection())}")
         # double-click label → popup terbuka (deteksi manual + fire
         # binding tree)
-        from src.ui.deviasi_popup import DeviasiPopup as _DP32
         _dbl32 = {"n": 0}
         _dv32e.tree.bind("<Double-1>",
                          lambda e: _dbl32.update(n=_dbl32["n"] + 1),
@@ -7788,8 +7802,8 @@ def main():
           f"tgl={_tgl_bi37}")
     check("(v3.9.27) fn_audit bulan_lalu=False: IN bulan lalu ikut "
           "dibuang (baris -26 tanpa penerimaan)",
-          not any((pd.to_numeric(_aud37_bi["Tanggal"], errors="coerce")
-                   < 0)), "ada baris negatif tersisa")
+          not any(pd.to_numeric(_aud37_bi["Tanggal"], errors="coerce")
+                   < 0), "ada baris negatif tersisa")
     check("(v3.9.27) fn_audit desc: cakupan ikut mode",
           "incl. bulan lalu" in _desc37_full and
           "bulan berjalan saja" in _desc37_bi,
@@ -8842,6 +8856,427 @@ def main():
           _val43 == "123", f"got {_val43!r}")
     _top43.destroy()
     root.update()
+
+    # ==================================================================
+    print()
+    print("== 44. (v3.9.32) MULTI-SELECT + POPUP PIVOT BESAR + 42.17-ONLY + "
+          "KATEGORI 42.17 + HARGA 41.09 + MODE NOMINAL ==")
+
+    # --- (a) MULTI-SELECT semua tree (user: "kenapa aku tidak bisa
+    #     select ya untuk semua data?") ---
+    from src.ui.widgets import enable_multi_select
+    # Toplevel terpisah — app memenuhi root, tree test harus MAPPED utk
+    # menerima fokus keyboard + event syntetik
+    _top44a = tk.Toplevel(root)
+    _top44a.geometry("600x400+20+20")
+    _t44 = ttk.Treeview(_top44a, columns=["A", "B"], show="headings")
+    _t44.pack(fill="both", expand=True)
+    _t44.column("A", width=80)
+    _t44.heading("A", text="A")
+    _t44.column("B", width=80)
+    _t44.heading("B", text="B")
+    for _i44 in range(5):
+        _t44.insert("", "end", iid=f"m{_i44}", values=(f"a{_i44}", _i44))
+    enable_multi_select(_t44)
+    check("(v3.9.32) enable_multi_select: selectmode browse→extended",
+          str(_t44.cget("selectmode")) == "extended",
+          f"got {_t44.cget('selectmode')!r}")
+    _t44.selection_set("m0")
+    _t44.focus("m0")
+    _t44.focus_force()         # keyboard focus ke tree — Ctrl+A terkirim
+    root.update()
+    _t44.event_generate("<Control-a>", when="now")
+    root.update()
+    check("(v3.9.32) Ctrl+A → SEMUA baris terpilih (5/5)",
+          len(_t44.selection()) == 5, f"got {len(_t44.selection())}")
+    # tree hierarki: Ctrl+A menyertai anak subtree
+    _h44 = ttk.Treeview(_top44a, columns=["V"], show="tree headings")
+    _h44.pack(fill="both", expand=True)  # mapped utk focus keyboard
+    _h44.column("#0", width=100)
+    _h44.column("V", width=60)
+    _h44.heading("#0", text="Item")
+    _h44.heading("V", text="V")
+    _p44 = _h44.insert("", "end", text="parent", values=(1,))
+    for _k44 in range(3):
+        _h44.insert(_p44, "end", text=f"ch{_k44}", values=(2,))
+    enable_multi_select(_h44)
+    _h44.focus_force()
+    root.update()
+    _h44.event_generate("<Control-a>", when="now")
+    root.update()
+    check("(v3.9.32) Ctrl+A hierarki: parent + anak subtree (4/4)",
+          len(_h44.selection()) == 4, f"got {len(_h44.selection())}")
+    _t44.destroy()
+    _h44.destroy()
+    _top44a.destroy()
+    root.update()
+    # semua view utama + popup + clone: extended
+    _views44 = [app.pivot_view, app.deviasi_gr_view, app.deviasi_pcs_view,
+                app.in_selisih_view, app.laporan_view, app.komparasi_view,
+                app.followup_view, app.rincian_view, app.nominal_view]
+    _n_ext44 = sum(1 for v in _views44
+                   if str(v.tree.cget("selectmode")) == "extended")
+    check("(v3.9.32) SEMUA 9 view utama: tree selectmode extended",
+          _n_ext44 == 9, f"got {_n_ext44}/9")
+
+    # --- (b) POPUP PIVOT besar + tombol ⛶ dihapus khusus pivot ---
+    from src.ui.details_popup import DetailsPopup
+    _df44 = pd.DataFrame({
+        "Nama Barang": ["AYAM FILET"] * 3,
+        "NAMA RESTO": ["MLGPAR"] * 3,
+        "Tanggal": [1, 2, 3],
+        "JENIS": ["1.SO", "4.IN", "2.SALDO AKHIR"],
+        "NILAI": [10.0, 5.0, 100.0],
+        "Nomor": ["RI-1", "RI-2", "RI-3"],
+        "Nomor PO": ["PO-1", "PO-2", "PO-3"],
+        "#Tgl/Jam Pembuatan IT": [None] * 3,
+        "KATEGORI": ["BAHAN"] * 3,
+        "SOURCE KIRIMAN": ["GUDANG"] * 3,
+    })
+    _pop44 = DetailsPopup(root, "Test §44 pivot", _df44,
+                          show_maximize=False)
+    _pump44_t0 = time.time()
+    while time.time() - _pump44_t0 < 1.0:
+        root.update()
+        time.sleep(0.01)
+    _w44 = _pop44.winfo_width()
+    _hgt44 = _pop44.winfo_height()
+    _sw44 = max(_pop44.winfo_screenwidth(), 1024)
+    _sh44 = max(_pop44.winfo_screenheight(), 640)
+    check("(v3.9.32) popup pivot: ukuran ±90% layar (≥ 0.8× screen)",
+          _w44 >= int(_sw44 * 0.8) and _hgt44 >= int(_sh44 * 0.8),
+          f"got {_w44}x{_hgt44} vs {_sw44}x{_sh44}")
+    check("(v3.9.32) popup pivot: TOMBOL ⛶ Perbesar DIHAPUS "
+          "(_btn_max is None)",
+          getattr(_pop44, "_btn_max", "missing") is None)
+    check("(v3.9.32) popup: tree extended (Ctrl+A jalan di popup)",
+          str(_pop44.tree.cget("selectmode")) == "extended")
+    _pop44.destroy()
+    root.update()
+    _pop44b = DetailsPopup(root, "Test §44 non-pivot", _df44)
+    _pump44_t0 = time.time()
+    while time.time() - _pump44_t0 < 0.8:
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.32) popup jalur NON-PIVOT: tombol ⛶ tetap ada + besar",
+          getattr(_pop44b, "_btn_max", None) is not None
+          and _pop44b._btn_max.winfo_exists()
+          and _pop44b.winfo_width() >= int(_sw44 * 0.8))
+    _pop44b.destroy()
+    root.update()
+
+    # --- (c) fn_4217: whitelist kategori + kolom SATUAN (mock xlsx) ---
+    import tempfile as _tf44
+
+    import openpyxl as _oxl44
+    _tmp44 = _tf44.mkdtemp(prefix="t44_")
+    _f417 = os.path.join(_tmp44, "saldo.xlsx")
+    _wb417 = _oxl44.Workbook()
+    _ws417 = _wb417.active
+    _ws417.title = "#42.17. Kuantitas Barang per Gu"
+    for _i417 in range(4):
+        _ws417.cell(row=_i417 + 1, column=1, value=f"MD {_i417}")
+    _ws417.cell(row=5, column=1, value="Nama Barang")
+    _ws417.cell(row=5, column=2, value="Kode Barang")
+    _ws417.cell(row=5, column=3, value="Kategori Barang")
+    _ws417.cell(row=5, column=4, value="Nama Satuan")
+    _ws417.cell(row=5, column=5, value="RESTO MALANG (MLGPAR)")
+    _rows417 = [
+        ["ITEM A", 101, "00.COST", "GR", 100],
+        ["ITEM B", 102, None, "PCS", 50],           # ffill 00.COST
+        ["ITEM C", 103, "SUPPLIES [OTHERS]", "UNIT", 999],  # difilter
+        ["ITEM D", 104, "10.FOOD [RM] - COM V.2", "GR", 70],
+    ]
+    for _r417, _row417 in enumerate(_rows417, 6):
+        for _c417, _v417 in enumerate(_row417, 1):
+            _ws417.cell(row=_r417, column=_c417, value=_v417)
+    _wb417.save(_f417)
+    _wb417.close()
+    from src.pipeline.fn_4217 import (
+        DEFAULT_KATEGORI_WHITELIST as _WL44,
+    )
+    from src.pipeline.fn_4217 import (
+        _norm_kat as _nk44,
+    )
+    from src.pipeline.fn_4217 import (
+        fn_4217 as _fn4217_44,
+    )
+    check("(v3.9.32) _norm_kat: whitespace/case-insensitive "
+          "('01. COST - PACKAGING - TIDAK BOLEH' == '01.COST-PACKAGING-TIDAKBOLEH')",
+          _nk44("01. COST - PACKAGING - TIDAK BOLEH")
+          == _nk44("01.COST-PACKAGING-TIDAKBOLEH")
+          and _nk44(None) == "" and _nk44(float("nan")) == "")
+    _q44 = _fn4217_44(_tmp44, kategori_whitelist=_WL44)
+    _names44 = set(_q44["Nama Barang"].astype(str))
+    check("(v3.9.32) fn_4217 whitelist: 'SUPPLIES [OTHERS]' TERFILTER "
+          "(prefix-match normalisasi), 00.COST & RM V.2 lolos",
+          _names44 == {"ITEM A", "ITEM B", "ITEM D"},
+          f"got {_names44}")
+    _sat44 = dict(zip(_q44["Nama Barang"].astype(str),
+                      _q44["SATUAN"].astype(str)))
+    check("(v3.9.32) fn_4217: kolom 'Nama Satuan' keluar sebagai SATUAN",
+          _sat44 == {"ITEM A": "GR", "ITEM B": "PCS", "ITEM D": "GR"},
+          f"got {_sat44}")
+    check("(v3.9.32) fn_4217 kompatibel: TANPA whitelist → tanpa filter "
+          "(4 barang, perilaku lama)",
+          set(_fn4217_44(_tmp44)["Nama Barang"].astype(str))
+          == {"ITEM A", "ITEM B", "ITEM C", "ITEM D"})
+    # safety-net: whitelist salah total (0 baris) → auto-bypass
+    _q44net = _fn4217_44(_tmp44, kategori_whitelist=["KATEGORI TAK Dikenal"])
+    check("(v3.9.32) fn_4217 safety-net: whitelist 0-baris → filter "
+          "di-bypass (saldo TIDAK kosong)",
+          len(_q44net) == 4, f"got {len(_q44net)}")
+
+    # --- (d) fn_4109 harga 41.09 (mock xlsx pola file user) ---
+    os.makedirs(os.path.join(_tmp44, "harga_dir"), exist_ok=True)
+    _f4109 = os.path.join(_tmp44, "harga_dir", "4109.xlsx")
+    _wb4109 = _oxl44.Workbook()
+    _ws4109 = _wb4109.active
+    _ws4109.title = "#41.09. Nilai Persediaan ALL"
+    _ws4109.cell(row=1, column=4, value="PPA")
+    _ws4109.cell(row=2, column=4, value="#41.09. Nilai Persediaan [ALL]")
+    _ws4109.cell(row=3, column=4, value="Dari 01 Okt 2026 s/d 07 Okt 2026")
+    _ws4109.cell(row=4, column=4, value="Cabang : [Semua Cabang]")
+    _ws4109.cell(row=5, column=1, value="Kategori Barang")
+    _ws4109.cell(row=5, column=2, value="Nama Barang")
+    _ws4109.cell(row=5, column=5, value="Kode Barang")
+    _ws4109.cell(row=5, column=6, value="Nama Satuan")
+    _ws4109.cell(row=5, column=7, value="Saldo Awal")
+    _ws4109.cell(row=5, column=9, value="Masuk")
+    _ws4109.cell(row=5, column=11, value="Keluar")
+    _ws4109.cell(row=5, column=14, value="Saldo Akhir")
+    _ws4109.cell(row=6, column=7, value="Kuantitas")
+    _ws4109.cell(row=6, column=8, value="Nilai")
+    _ws4109.cell(row=6, column=9, value="Kuantitas")
+    _ws4109.cell(row=6, column=10, value="Nilai")
+    _ws4109.cell(row=6, column=11, value="Kuantitas")
+    _ws4109.cell(row=6, column=13, value="Nilai")
+    _ws4109.cell(row=6, column=14, value="Kuantitas")
+    _ws4109.cell(row=6, column=15, value="Nilai")
+    _rows4109 = [
+        # (kategori, nama, kode, satuan, sa_qty, sa_nilai) — ditulis ke
+        # kolom sesuai layout header di atas
+        ("00.COST", "AYAM FILET", 9001, "GR", 100, 1000),
+        (None, "GULA PASIR", 9002, "KG", 500, 7500),
+        (None, "KOPI BUBUK 100G", 9003, "PCS", 0, 0),
+        ("21.COST.ASSET", "BARANG X", 9004, "UNIT", 5, 5000),
+    ]
+    _r4109 = 7
+    for _kat4109, _nm4109, _kd4109, _st4109, _q4109, _ni4109 in _rows4109:
+        if _kat4109 is not None:
+            _ws4109.cell(row=_r4109, column=1, value=_kat4109)
+        _ws4109.cell(row=_r4109, column=2, value=_nm4109)
+        _ws4109.cell(row=_r4109, column=5, value=_kd4109)
+        _ws4109.cell(row=_r4109, column=6, value=_st4109)
+        _ws4109.cell(row=_r4109, column=7, value=_q4109)
+        _ws4109.cell(row=_r4109, column=8, value=_ni4109)
+        _ws4109.cell(row=_r4109, column=14, value=_q4109)   # Saldo Akhir
+        _ws4109.cell(row=_r4109, column=15, value=_ni4109)
+        _r4109 += 1
+    # subtotal grup (dibuang fn_4109)
+    _ws4109.cell(row=_r4109, column=2, value="Total Nama Barang")
+    _ws4109.cell(row=_r4109, column=14, value=605)
+    _ws4109.cell(row=_r4109, column=15, value=13500)
+    _wb4109.save(_f4109)
+    _wb4109.close()
+    from src.pipeline.fn_4109 import build_harga_map, fn_4109
+    _h44df = fn_4109(os.path.join(_tmp44, "harga_dir"),
+                     "#41.09. Nilai Persediaan [ALL]")
+    _hm44 = build_harga_map(_h44df)
+    check("(v3.9.32) fn_4109: harga = Nilai÷Kuantitas Saldo Akhir "
+          "(AYAM 10/GR, GULA 15/KG) + subtotal 'Total' DIBUANG",
+          _hm44.get("AYAM FILET") == (10.0, "GR")
+          and _hm44.get("GULA PASIR") == (15.0, "KG")
+          and "Total Nama Barang" not in _hm44,
+          f"got {_hm44}")
+    check("(v3.9.32) fn_4109 guard div-0: Qty 0 → harga None (tetap ada "
+          "di peta — 'tanpa harga' eksplisit)",
+          "KOPI BUBUK 100G" in _hm44
+          and _hm44["KOPI BUBUK 100G"][0] is None)
+    check("(v3.9.32) fn_4109: kategori ffilled sampai baris terakhir grup",
+          set(_h44df["Kategori"].astype(str)) == {"00.COST", "21.COST.ASSET"},
+          f"got {set(_h44df['Kategori'].astype(str))}")
+    check("(v3.9.32) fn_4109: folder kosong → DataFrame kosong (senyap)",
+          fn_4109(os.path.join(_tmp44, "folder_kosong")).empty)
+
+    # --- (e) DeviasiView: barang 42.17-only TAMPIL (mask saldo t=1) ---
+    from src.ui.deviasi_view import DeviasiView as _DV44
+    _d44 = make_mock_append1()
+    _extra44 = []
+    for _j44 in ("2.SALDO AKHIR", "SALDO AWAL"):
+        _extra44.append({
+            "Nama Barang": "BUMBU PASTA KUAH", "JENIS": _j44,
+            "NAMA RESTO": "MLGPAR", "Tanggal": 1, "NILAI": 84.0,
+            "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+            "SOURCE KIRIMAN": "GUDANG", "Nomor": None, "Nomor PO": None,
+            "#Tgl/Jam Pembuatan IT": None,
+        })
+    _d44 = pd.concat([_d44, pd.DataFrame(_extra44)],
+                     ignore_index=True, sort=False)
+    _top44 = tk.Toplevel(root)
+    _top44.geometry("1400x750+10+10")
+    _dv44 = _DV44(_top44, satuan_mode="GR")
+    _dv44.pack(fill="both", expand=True)
+    _dv44.load_data(_d44)
+    _dv44.tanggal_h = 25          # window 23..27 — dulu pair lenyap
+    _dv44._refresh(sync=True)
+    wait_view(root, _dv44)
+    _bp44 = None
+    for _iid44 in _dv44.tree.get_children(""):
+        if "BUMBU PASTA KUAH" in str(_dv44.tree.item(_iid44, "values")):
+            _bp44 = _iid44
+            break
+    check("(v3.9.32) Deviasi GR H=25: barang 42.17-ONLY (BUMBU PASTA "
+          "KUAH) TAMPIL (dulu hilang — window H±2 tak memuat t=1)",
+          _bp44 is not None)
+    if _bp44 is not None:
+        check("(v3.9.32) ...Sistem = saldo 42.17 (84) + Deviasi = (84)",
+              _dv44.tree.set(_bp44, "Sistem") == "84"
+              and _dv44.tree.set(_bp44, "Deviasi") == "(84)",
+              f"got {_dv44.tree.set(_bp44, 'Sistem')!r} / "
+              f"{_dv44.tree.set(_bp44, 'Deviasi')!r}")
+    # pasangan ber-window TIDAK berubah (regresi): AYAM FILET MLGPAR
+    # Sistem tetap 10 (2.SALDO AKHIR konstanta mock)
+    _ay44 = None
+    for _iid44 in _dv44.tree.get_children(""):
+        if "AYAM FILET" in str(_dv44.tree.item(_iid44, "values")) \
+                and "MLGPAR" in str(_dv44.tree.item(_iid44, "values")):
+            _ay44 = _iid44
+            break
+    check("(v3.9.32) REGRESI: pasangan ber-window nilai TIDAK berubah "
+          "(AYAM FILET MLGPAR Sistem 10 / SO 12)",
+          _ay44 is not None
+          and _dv44.tree.set(_ay44, "Sistem") == "10",
+          f"got {None if _ay44 is None else _dv44.tree.set(_ay44, 'Sistem')!r}")
+    _top44.destroy()
+    root.update()
+
+    # --- (f) NominalDeviasiView: Harga × Qty Deviasi + TOTAL ---
+    # Data khusus: baris 3.DEVIASI tgl 25 (make_mock_append1 memang
+    # ber-DEVIASI 0 — nilai Deviasi tab GR dihitung live, tidak dari
+    # baris ini; view Nominal membaca baris 3.DEVIASI persis).
+    from src.ui.nominal_deviasi_view import NominalDeviasiView as _NDV44
+    _top44n = tk.Toplevel(root)
+    _top44n.geometry("1400x750+10+10")
+    _nv44 = _NDV44(_top44n)
+    _nv44.pack(fill="both", expand=True)
+    _kmap44 = {"rasio": {("AYAM FILET", "GR"): 1.0,
+                         ("GULA PASIR", "KG"): 1000.0},
+               "terkecil": {"AYAM FILET": "GR", "GULA PASIR": "GR"}}
+    _hmap44 = {"AYAM FILET": (10.0, "GR"),   # satuan sama → langsung
+               "GULA PASIR": (15.0, "GR"),   # rekap KG → 15.000/KG
+               "KOPI BUBUK 100G": (None, "PCS")}
+    _dev44rows = [
+        ("AYAM FILET", "MLGPAR", "GR", 25, 2.0),
+        ("GULA PASIR", "MLGPAR", "KG", 25, 12.0),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", 25, -5.0),
+    ]
+    _dn44 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": t,
+        "JENIS": "3.DEVIASI", "NILAI": v,
+    } for b, r, s, t, v in _dev44rows])
+    _nv44.load_data(_dn44, harga_map=_hmap44, konversi_map=_kmap44)
+    _nv44.ensure_refreshed()
+    wait_view(root, _nv44)
+    _nv_rows44 = {str(_nv44.tree.set(_i44, "Nama Barang")):
+                  _nv44.tree.item(_i44, "values")
+                  for _i44 in _nv44.tree.get_children("")}
+    _ayn44 = _nv_rows44.get("AYAM FILET")
+    check("(v3.9.32) Nominal: satuan SAMA → harga langsung (AYAM 10 GR) "
+          "& nominal = 10 × DEV 2 = 20",
+          _ayn44 is not None and _ayn44[3] == "10 GR"
+          and _ayn44[4] == "2" and _ayn44[5] == "20",
+          f"got {_ayn44}")
+    _gl44 = _nv_rows44.get("GULA PASIR")
+    check("(v3.9.32) Nominal: normalisasi satuan (GULA 15/GR → rekap KG "
+          "→ 15.000/KG; DEV 12 → 180.000)",
+          _gl44 is not None and _gl44[3] == "15.000 KG"
+          and _gl44[4] == "12" and _gl44[5] == "180.000",
+          f"got {_gl44}")
+    _kf44 = _nv_rows44.get("KOPI BUBUK 100G")
+    check("(v3.9.32) Nominal: tanpa harga → nominal '-' (tak dihitung "
+          "ke total) + status 'tanpa harga'",
+          _kf44 is not None and _kf44[5] == "-"
+          and "tanpa harga" in _nv44.status_var_label.get(),
+          f"got {_kf44} · {_nv44.status_var_label.get()!r}")
+    _tot44 = _nv_rows44.get("TOTAL")
+    check("(v3.9.32) Nominal: baris TOTAL = qty 2+12−5=9 & nominal "
+          "20+180.000=180.020 (KOPI tak ikut nominal)",
+          _tot44 is not None and _tot44[0] == "TOTAL"
+          and _tot44[4] == "9" and _tot44[5] == "180.020",
+          f"got {_tot44}")
+    # urutan default: |Nominal| menurun (180.000 → 20 → tanpa harga)
+    _order44 = [str(_nv44.tree.set(_i44, "Nama Barang"))
+                for _i44 in _nv44.tree.get_children("")
+                if str(_nv44.tree.set(_i44, "Nama Barang")) != "TOTAL"]
+    check("(v3.9.32) Nominal: urutan default |Nominal| MENURUN",
+          _order44 == ["GULA PASIR", "AYAM FILET", "KOPI BUBUK 100G"],
+          f"got {_order44}")
+    # harga tak terkonversi (rasio absen) → berpenanda '*' + nominal '-'
+    _hmap44b = {"AYAM FILET": (10.0, "BOTOL")}   # BOTOL tanpa rasio utk GR
+    _nv44.load_data(_dn44, harga_map=_hmap44b, konversi_map=_kmap44)
+    _nv44.ensure_refreshed()
+    wait_view(root, _nv44)
+    _ayn44b = None
+    for _i44 in _nv44.tree.get_children(""):
+        if str(_nv44.tree.set(_i44, "Nama Barang")) == "AYAM FILET":
+            _ayn44b = _nv44.tree.item(_i44, "values")
+            break
+    check("(v3.9.32) Nominal fallback: rasio tak men-cover → harga as-is "
+          "berpenanda '*' + nominal '-'",
+          _ayn44b is not None and _ayn44b[3] == "10 BOTOL*"
+          and _ayn44b[5] == "-",
+          f"got {_ayn44b}")
+    # H berubah → recompute (heading dinamis Qty Deviasi (H=…))
+    _nv44.load_data(_dn44, harga_map=_hmap44, konversi_map=_kmap44)
+    _nv44.ensure_refreshed()
+    wait_view(root, _nv44)
+    _nv44.tanggal_h = 9
+    _nv44._refresh(sync=True)
+    wait_view(root, _nv44)
+    check("(v3.9.32) Nominal: heading dinamis mengikuti H "
+          "('Qty Deviasi (H=9)')",
+          "H=9" in str(_nv44.tree.heading("Qty Deviasi")["text"]),
+          f"got {_nv44.tree.heading('Qty Deviasi')['text']!r}")
+    _top44n.destroy()
+    root.update()
+
+    # --- (g) app: mode ke-3 '💰 Nominal (H)' + dispatch + load_data ---
+    _labels44 = [str(b.cget("text"))
+                 for b in app.laporan_segment._buttons]
+    check("(v3.9.32) app: SegmentBar Laporan kini 3 mode (Komparasi · "
+          "Anomali COM · Nominal)",
+          len(_labels44) == 3 and "Nominal" in _labels44[2],
+          f"got {_labels44}")
+    app.notebook.select(app.tab_laporan)   # tab harus terlihat utk mapped
+    root.update()
+    app.show_laporan_mode(2)
+    root.update()
+    check("(v3.9.32) show_laporan_mode(2) → Nominal TERLIHAT, Komparasi & "
+          "COM tersembunyi + segment.active == 2",
+          app.nominal_view.winfo_ismapped()
+          and not app.komparasi_view.winfo_ismapped()
+          and not app.laporan_view.winfo_ismapped()
+          and app.laporan_segment.active == 2)
+    app.show_laporan_mode(0)
+    root.update()
+    check("(v3.9.32) kembali mode 0 → Komparasi terlihat (kompatibel)",
+          app.komparasi_view.winfo_ismapped()
+          and not app.nominal_view.winfo_ismapped())
+    # _on_tab_changed dispatch utk mode 2 (routing lazy-refresh)
+    app.show_laporan_mode(2)
+    root.update()
+    app.notebook.select(app.tab_laporan)
+    root.update()
+    check("(v3.9.32) _on_tab_changed: mode aktif 2 → nominal_view yang "
+          "di-refresh (dispatch benar)",
+          app.nominal_view.winfo_ismapped())
+    app.show_laporan_mode(0)
+    root.update()
+
+    # cleanup §44
+    import shutil as _sh44
+    _sh44.rmtree(_tmp44, ignore_errors=True)
 
     # Cleanup
     root.destroy()

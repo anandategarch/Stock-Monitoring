@@ -71,6 +71,7 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -250,7 +251,7 @@ class PivotTableView(tk.Frame):
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
 
-        self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="browse")
+        self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="extended")
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
@@ -265,6 +266,7 @@ class PivotTableView(tk.Frame):
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         # Footer card: status
         foot = tk.Frame(tbody, bg=C_CARD)
@@ -979,6 +981,10 @@ class PivotTableView(tk.Frame):
             jenis=jenis,
             tanggal=tanggal,
             filters=active_filters,
+            # v3.9.32 — popup pivot: sudah ±90% layar; tombol ⛶ Perbesar
+            # DIHAPUS (user: "besarkan lagi dan HAPUS tombol perbesar
+            # popup pivot")
+            show_maximize=False,
         )
 
     # =========================================================================

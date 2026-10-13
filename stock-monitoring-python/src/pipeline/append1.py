@@ -614,6 +614,38 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             else:
                 final = final.merge(satuan_map, on=["Nama Barang", "NAMA RESTO"], how="left")
 
+    # v3.9.32 — FALLBACK SATUAN 42.17 ('Nama Satuan' file per barang):
+    # pasangan TANPA rekap SO (barang 42.17-only — saldo tanpa SO, contoh
+    # user: BUMBU PASTA KUAH) kini punya SATUAN. Tanpa ini barisnya
+    # dibuang senyap oleh pivot_table Deviasi GR/PCS (index SATUAN NaN)
+    # — inilah separuh akar "barang 42.17 tidak muncul". Rekap tetap
+    # menang (urutan fillna), 42.17 hanya menambung yang kosong.
+    if q4217 is not None and not q4217.empty \
+            and "SATUAN" in q4217.columns \
+            and "Nama Barang" in final.columns \
+            and "NAMA RESTO" in final.columns:
+        _sat4217 = q4217[["Nama Barang", "NAMA RESTO", "SATUAN"]].copy()
+        _sat4217["Nama Barang"] = _sat4217["Nama Barang"].astype(str)
+        _sat4217["NAMA RESTO"] = _sat4217["NAMA RESTO"].astype(str)
+        _sat4217["SATUAN"] = _sat4217["SATUAN"].astype(str).str.strip()
+        _sat4217 = _sat4217[_sat4217["SATUAN"] != ""]
+        _sat4217 = (
+            _sat4217.dropna(subset=["Nama Barang", "NAMA RESTO"])
+            .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
+                             keep="first")
+        )
+        if not _sat4217.empty:
+            if "SATUAN" in final.columns:
+                final = final.merge(
+                    _sat4217.rename(columns={"SATUAN": "_SAT4217"}),
+                    on=["Nama Barang", "NAMA RESTO"], how="left")
+                final["SATUAN"] = final["SATUAN"].fillna(final["_SAT4217"])
+                final = final.drop(columns=["_SAT4217"])
+            else:
+                final = final.merge(_sat4217,
+                                    on=["Nama Barang", "NAMA RESTO"],
+                                    how="left")
+
     # =========================================================================
     # 9. LOOKUP SOURCE DATA (v3.9.19 — CEK "Promix 04" di tab Deviasi;
     # v3.9.21 — PER-TANGGAL, fix "Promix 04 muncul di filter tapi data

@@ -69,6 +69,7 @@ from .widgets import (
     apply_cell_tag,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
 )
 
@@ -180,7 +181,7 @@ class DeviasiPopup(tk.Toplevel):
         card_in.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.tree = ttk.Treeview(card_in, columns=COL_IDS, show="headings",
-                                 selectmode="browse")
+                                 selectmode="extended")
         for col_name, width, anchor in COLUMNS:
             self.tree.column(col_name, width=width, minwidth=50,
                              anchor=anchor)
@@ -201,6 +202,7 @@ class DeviasiPopup(tk.Toplevel):
         self._setup_tags(self.tree)
         # v3.4 (pola): drag tepi heading = resize; double-click = auto-fit
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         # --- Footer: status + tutup ---
         foot = tk.Frame(self, bg=C_BG)

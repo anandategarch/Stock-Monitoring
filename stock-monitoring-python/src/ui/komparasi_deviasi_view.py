@@ -216,6 +216,7 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -853,7 +854,7 @@ class KomparasiDeviasiView(tk.Frame):
 
         col_ids = [c[0] for c in self.COLUMNS]
         self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
-                                 selectmode="browse")
+                                 selectmode="extended")
 
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34,
@@ -874,6 +875,7 @@ class KomparasiDeviasiView(tk.Frame):
         tbody.grid_columnconfigure(0, weight=1)
 
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
@@ -2224,7 +2226,7 @@ class KomparasiDeviasiView(tk.Frame):
 
         cols = [c[0] for c in self.TOP_COLS]
         self._top_tree = ttk.Treeview(tb, columns=cols, show="headings",
-                                      selectmode="browse")
+                                      selectmode="extended")
         for name, width, anchor in self.TOP_COLS:
             self._top_tree.column(name, width=width, minwidth=34,
                                   anchor=anchor)
@@ -2237,6 +2239,7 @@ class KomparasiDeviasiView(tk.Frame):
         tb.grid_rowconfigure(1, weight=1)
         tb.grid_columnconfigure(0, weight=1)
         enable_col_resize(self._top_tree)
+        enable_multi_select(self._top_tree)  # v3.9.32
         self._setup_tags(self._top_tree)
         self._top_df = None
         self._top_sel = {c: None for c in cols}
@@ -2272,7 +2275,7 @@ class KomparasiDeviasiView(tk.Frame):
 
         cols = [c[0] for c in self.FLIP_COLS]
         self._flip_tree = ttk.Treeview(fb, columns=cols, show="headings",
-                                       selectmode="browse")
+                                       selectmode="extended")
         for name, width, anchor in self.FLIP_COLS:
             self._flip_tree.column(name, width=width, minwidth=34,
                                    anchor=anchor)
@@ -2285,6 +2288,7 @@ class KomparasiDeviasiView(tk.Frame):
         fb.grid_rowconfigure(1, weight=1)
         fb.grid_columnconfigure(0, weight=1)
         enable_col_resize(self._flip_tree)
+        enable_multi_select(self._flip_tree)  # v3.9.32
         self._setup_flip_tags(self._flip_tree)
         self._flip_df = None
         self._flip_sel = {c: None for c in cols}

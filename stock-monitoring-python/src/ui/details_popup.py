@@ -8,6 +8,7 @@ LaporanDeviasiView. Fitur v3.1:
 - Copy semua Nomor / Nomor PO (unik) via menu konteks / tombol footer
 - Filter Nama Barang menempel di header kolom (corong, Excel-like)
 - Tombol ⛶ Perbesar: buka tabel popup dalam window besar
+  (v3.9.32: HANYA jalur non-pivot; popup pivot ±90% layar tanpa tombol)
 - Loading overlay saat render
 """
 
@@ -40,6 +41,7 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -68,16 +70,25 @@ class DetailsPopup(tk.Toplevel):
     """Popup window menampilkan source rows untuk kombinasi cell pivot."""
 
     def __init__(self, parent, title: str, df: pd.DataFrame,
-                 filter_info: str = ""):
+                 filter_info: str = "", show_maximize: bool = True):
         super().__init__(parent)
         self._title = title
+        self._show_maximize = show_maximize
         self.title(f"Detail — {title}")
-        # Posisikan di tengah parent (modal nyaman, deterministik)
+        # v3.9.32 — popup diperbesar ADAPTIF ±90% layar (user: "popup di
+        # tab pivot ada deviasinya — terlalu kecil, besarkan lagi");
+        # diposisikan tengah parent + clamp ke layar. Jalur pivot memakai
+        # show_maximize=False (tombol ⛶ dihapus — popup sudah besar).
         try:
-            pw, ph = 1100, 540
+            sw = max(int(self.winfo_screenwidth()), 1024)
+            sh = max(int(self.winfo_screenheight()), 640)
+            pw = max(1100, int(sw * 0.90))
+            ph = max(540, int(sh * 0.86))
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
-            self.geometry(f"{pw}x{ph}+{max(px, 0)}+{max(py, 0)}")
+            px = max(0, min(px, sw - pw))
+            py = max(0, min(py, sh - ph))
+            self.geometry(f"{pw}x{ph}+{px}+{py}")
         except Exception:
             self.geometry("1100x540")
         self.minsize(800, 320)
@@ -129,7 +140,9 @@ class DetailsPopup(tk.Toplevel):
                      bg=C_HEADER, fg="#94a3b8", font=font(9)).pack(
                 anchor="w", pady=(2, 0))
 
-        # Aksi di kanan band: ⛶ Perbesar + ◱ Kolom + ↔ Auto-Fit
+        # Aksi di kanan band: ⛶ Perbesar (v3.9.32: HANYA jalur non-pivot
+        # — popup pivot sudah ±90% layar, tombol dihapus per permintaan
+        # user) + ◱ Kolom + ↔ Auto-Fit
         btn_fit = tk.Button(
             head_in, text="↔ Auto-Fit", command=self._auto_fit,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -145,13 +158,16 @@ class DetailsPopup(tk.Toplevel):
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_cols.pack(side="right", anchor="ne", padx=(0, 6))
-        btn_max = tk.Button(
-            head_in, text="⛶ Perbesar", command=self._maximize,
-            bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
-            activeforeground="#ffffff", bd=0, relief="flat",
-            highlightthickness=0, cursor="hand2", font=font(9, "bold"),
-            padx=12, pady=5)
-        btn_max.pack(side="right", anchor="ne")
+        self._btn_max = None
+        if self._show_maximize:
+            btn_max = tk.Button(
+                head_in, text="⛶ Perbesar", command=self._maximize,
+                bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
+                activeforeground="#ffffff", bd=0, relief="flat",
+                highlightthickness=0, cursor="hand2", font=font(9, "bold"),
+                padx=12, pady=5)
+            btn_max.pack(side="right", anchor="ne")
+            self._btn_max = btn_max
 
         # --- Body: tabel ---
         body = tk.Frame(self, bg=C_BG)
@@ -164,7 +180,7 @@ class DetailsPopup(tk.Toplevel):
         card_in.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.tree = ttk.Treeview(card_in, columns=COL_IDS, show="headings",
-                                 selectmode="browse")
+                                 selectmode="extended")
 
         for col_name, width, anchor in COLUMNS:
             self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
@@ -187,6 +203,7 @@ class DetailsPopup(tk.Toplevel):
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         # loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(card_in, "Menyiapkan detail…")
@@ -464,8 +481,9 @@ class DetailsPopup(tk.Toplevel):
             label="📋 Copy SEMUA Nomor PO (unik)",
             command=lambda: self._copy_all_unique("Nomor PO"))
         menu.add_separator()
-        menu.add_command(label="⛶ Perbesar tabel",
-                         command=self._maximize)
+        if self._show_maximize:   # v3.9.32 — jalur pivot tanpa ⛶
+            menu.add_command(label="⛶ Perbesar tabel",
+                             command=self._maximize)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -604,15 +622,18 @@ class DetailsPopup(tk.Toplevel):
 
 def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
-                        filters: dict = None):
+                        filters: dict = None, show_maximize: bool = True):
     """Filter data + show popup.
 
-    v3.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
+    v3.9.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
     menghasilkan DataFrame baru, dan ``reset_index(drop=True)`` di ujung
     selalu mengembalikan objek baru (hemat ~10ms + memori di 200k baris).
+    v3.9.32: show_maximize=False utk jalur PIVOT (popup sudah ±90% layar
+    — tombol ⛶ dihapus per permintaan user).
     """
     if data is None or data.empty:
-        popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame())
+        popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame(),
+                             show_maximize=show_maximize)
         return popup
 
     df = data
@@ -644,5 +665,6 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     title = " / ".join(title_parts) if title_parts else "All Data"
     filter_info = ", ".join(filter_info_parts) if filter_info_parts else ""
 
-    popup = DetailsPopup(parent, title, df.reset_index(drop=True), filter_info)
+    popup = DetailsPopup(parent, title, df.reset_index(drop=True),
+                         filter_info, show_maximize=show_maximize)
     return popup

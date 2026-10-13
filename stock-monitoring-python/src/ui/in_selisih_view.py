@@ -181,6 +181,7 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -531,7 +532,7 @@ class InDetailPopup(tk.Toplevel):
         cin.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.tree = ttk.Treeview(cin, columns=_POPUP_IDS, show="headings",
-                                 selectmode="browse")
+                                 selectmode="extended")
         for col_name, width, anchor in _POPUP_COLUMNS:
             self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
             self.tree.heading(col_name, text=col_name)
@@ -548,6 +549,7 @@ class InDetailPopup(tk.Toplevel):
         # v3.4: drag tepi heading = resize; double-click tepi = auto-fit
         # (dipasang SEBELUM interaksi lain supaya "break" efektif)
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         self.overlay = LoadingOverlay(cin, "Menyiapkan rincian…")
 
@@ -944,7 +946,7 @@ class InSelisihView(tk.Frame):
         btn_fit.pack(side="right", padx=(0, 6))
 
         self.tree = ttk.Treeview(tbody, columns=[c[0] for c in COLUMNS],
-                                 show="headings", selectmode="browse")
+                                 show="headings", selectmode="extended")
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
@@ -958,6 +960,7 @@ class InSelisihView(tk.Frame):
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))

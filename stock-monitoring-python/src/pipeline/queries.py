@@ -30,8 +30,13 @@ def query_dbs_kategori(config) -> pd.DataFrame:
 
 
 def query_4217(config) -> pd.DataFrame:
-    """Mirror M: shared #"4217" = fn4217(Config[RootPath] & Config[Folders][SaldoAwal4217])"""
-    return fn_4217(config.folder("SaldoAwal4217"))
+    """Mirror M: shared #"4217" = fn4217(Config[RootPath] & Config[Folders][SaldoAwal4217])
+
+    v3.9.32: whitelist kategori dari config ("KategoriBarang4217") ikut
+    diteruskan — filter diterapkan SEBELUM melt di fn_4217 (lebih awal)."""
+    return fn_4217(config.folder("SaldoAwal4217"),
+                   kategori_whitelist=getattr(config, "KategoriBarang4217",
+                                              None))
 
 
 # =============================================================================

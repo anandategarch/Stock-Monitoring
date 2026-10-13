@@ -44,6 +44,22 @@ class Config:
             self.Sheets.get("Pemindahan4205",
                             "#42.05. Rincian Pemindahan Bara"))
 
+        # v3.9.32 — HARGA 41.09 (folder '09.Harga', alamat bisa diubah di
+        # config.json; sheet default = '#41.09. Nilai Persediaan [ALL]').
+        # Config lama tanpa key tetap jalan (default in-memory).
+        self.Folders.setdefault("Harga", "09.Harga")
+        self.Sheets.setdefault("Harga", "#41.09. Nilai Persediaan [ALL]")
+
+        # v3.9.32 — WHITELIST KATEGORI BARANG 42.17 (filter lebih awal,
+        # user: "filter data 42.17 pakai kolom kategori barang [whitelist
+        # 5 kategori]"). List BISA DIUBAH user di config.json key
+        # "KategoriBarang4217" (prefix-match + case/whitespace-insensitive;
+        # [] atau key hilang → tanpa filter; file tanpa kolom kategori →
+        # tanpa filter + warning log).
+        from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST
+        self.KategoriBarang4217 = data.get("KategoriBarang4217",
+                                           DEFAULT_KATEGORI_WHITELIST)
+
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:
         """Return full path untuk folder key (e.g., 'RekapBerjalan')."""

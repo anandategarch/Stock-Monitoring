@@ -48,6 +48,7 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
+    enable_multi_select,
     fmt_int_id,
     insert_tree_items,
     open_tree_maximized,
@@ -177,7 +178,7 @@ class RincianPoView(tk.Frame):
 
         cols = PO_COLUMNS
         self.tree = ttk.Treeview(tbody, columns=cols, show="tree headings",
-                                 selectmode="browse")
+                                 selectmode="extended")
 
         self.tree.column("#0", width=130, minwidth=110)
         self.tree.heading("#0", text="Nomor #")
@@ -205,6 +206,7 @@ class RincianPoView(tk.Frame):
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))

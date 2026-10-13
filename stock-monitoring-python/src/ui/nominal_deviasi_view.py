@@ -1,0 +1,682 @@
+"""
+nominal_deviasi_view.py — v3.9.32 MODE '💰 Nominal (H)' tab 📋 Laporan
+Deviasi (user: "tab baru 'Nominal' di Laporan Deviasi = Harga ×
+kuantitas deviasi, per barang + total").
+
+Baris = pasangan (Nama Barang × Nama Resto × Satuan) dgn qty DEVIASI
+(= 3.DEVIASI = SO − SALDO AKHIR sistem, baris tanggal H — nilai yang
+sama dgn kolom Deviasi tab 📦 Deviasi GR) + HARGA per barang dari file
+41.09 'Nilai Persediaan' (folder 09.Harga; harga GLOBAL — file tanpa
+dimensi resto; Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo Akhir) →
+NOMINAL = Harga × Qty Deviasi. Baris TOTAL di ujung tabel (jumlah
+nominal + jumlah qty).
+
+NORMALISASI SATUAN HARGA (analisis data real: 176/187 barang rekap
+match satuan 41.09; 5 beda — LPG 12KG KG-vs-TABUNG, MUTIARA BOBA
+GR-vs-KG, dll): harga 41.09 per satuan-file → dinormalkan ke SATUAN
+REKAP via peta rasio v3.9.31 (dari 42.05+32.24):
+    harga_rekap = harga41 × rasio(satuanRekap) / rasio(satuan41.09)
+(mis. harga 18,25/GR utk pasangan rekap KG → 18.250/KG). Tanpa
+harga/rasio (pasangan tak ada di 41.09 / peta rasio tak men-cover) →
+kolom harga tampil berlabel satuan asli + penanda '*', nominal '-' dan
+TIDAK ikut baris TOTAL (transparan, bukan angka keliru).
+
+TANGGAL H = state bersama (SharedTanggalH — chip read-only + auto-refresh
+dari tab 📦 Deviasi GR, pola Anomali COM). Urutan default |Nominal|
+MENURUN (dampak terbesar dulu). Minus merah per-cell; format angka
+Indonesia; filter header ⧩ + sort + ⛶ Layar Penuh + ⤢ Perbesar Tabel +
+◱ Kolom + ↔ Auto-Fit.
+"""
+import contextlib
+import tkinter as tk
+from collections.abc import Callable
+from tkinter import ttk
+
+import pandas as pd
+
+# Konversi satuan harga 41.09 → satuan rekap (peta rasio pipeline)
+from src.pipeline.konversi_satuan import lookup_rasio
+
+from .theme import (
+    C_ACCENT,
+    C_BG,
+    C_CARD,
+    C_HEADER,
+    C_TEXT_MUTED,
+    font,
+)
+from .widgets import (
+    CELL_TAGS_SUPPORTED,
+    Card,
+    ColumnManager,
+    EmptyState,
+    GhostButton,
+    HeaderFilterGroup,
+    LoadingOverlay,
+    TableExpander,
+    apply_cell_tag,
+    attach_clone_filters,
+    auto_fit_columns,
+    enable_col_resize,
+    enable_multi_select,
+    fmt_int_id,
+    insert_tree_items,
+    open_tree_maximized,
+    run_async,
+    sort_tree_by_column,
+)
+
+
+def _norm_sat(v) -> str:
+    try:
+        s = str(v).strip().upper()
+        return "" if s in ("NAN", "NONE") else s
+    except Exception:
+        return ""
+
+
+class NominalDeviasiView(tk.Frame):
+    """Tab 📋 Laporan Deviasi — mode 3 '💰 Nominal (H)': Harga × Qty
+    Deviasi per pasangan + baris TOTAL."""
+
+    COLUMNS = [
+        ("Nama Barang", 200, "w"),
+        ("Resto", 90, "w"),
+        ("Satuan", 60, "w"),
+        ("Harga", 100, "e"),          # heading dinamis "Harga (SATUAN)"
+        ("Qty Deviasi", 100, "e"),    # heading dinamis "Qty Deviasi (H=25)"
+        ("Nominal", 120, "e"),
+    ]
+
+    NUMERIC_COLS = ("Harga", "Qty Deviasi", "Nominal")
+
+    def __init__(self, parent, go_to_proses: Callable | None = None,
+                 h_state=None):
+        super().__init__(parent, bg=C_BG)
+        self.data: pd.DataFrame | None = None
+        self.go_to_proses = go_to_proses
+        self._h_state = h_state
+        self.tanggal_h = int(h_state.h) if h_state is not None else 25
+        # peta harga {barang: (harga|None, satuan41)} + peta rasio
+        # v3.9.31 (konversi satuan harga → satuan rekap)
+        self.harga_map: dict = {}
+        self.konversi_map: dict | None = None
+        self._busy = False
+        self._pending = False
+        self._dirty = False                # lazy refresh (v3.2)
+        self._render_gen = 0
+        self._insert_cancel = None
+        self._pending_sort = None
+        self._result_df = None
+        self._col_sel: dict = {c: None for c in
+                               [c[0] for c in self.COLUMNS]}
+        # v3.9.2 minus merah PER CELL (fallback Tk 8 per baris)
+        self._cell_tags = CELL_TAGS_SUPPORTED
+        self._neg_cells: list = []
+        self._total_cells: list = []   # sel baris TOTAL (style khusus)
+
+        self._build_ui()
+        self._setup_tags()
+        self._show_empty()
+
+    # =========================================================================
+    # UI BUILD
+    # =========================================================================
+    def _build_ui(self):
+        self.empty = EmptyState(
+            self, icon="💰", title="Belum ada data Nominal (Harga × Deviasi)",
+            cta_text="🚀 Jalankan Pipeline",
+            on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+        self.content = tk.Frame(self, bg=C_BG)
+
+        # --- Filter card: chip H bersama (read-only — pola Anomali COM) ---
+        fcard = Card(self.content, title="Filter")
+        fcard.pack(fill="x", padx=12, pady=(12, 0))
+        self._fcard = fcard
+        fbody = fcard.body()
+
+        r1 = tk.Frame(fbody, bg=C_CARD)
+        r1.pack(fill="x")
+        tk.Label(r1, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._h_chip_var = tk.StringVar(value=str(self.tanggal_h))
+        chip = tk.Frame(r1, bg="#f1f5f9", highlightbackground="#e2e8f0",
+                        highlightthickness=1)
+        chip.pack(side="left", padx=(6, 18))
+        tk.Label(chip, textvariable=self._h_chip_var, bg="#f1f5f9",
+                 fg=C_ACCENT, font=font(11, "bold")).pack(
+            padx=10, pady=(2, 3))
+        self._total_var = tk.StringVar(value="")
+        tk.Label(r1, textvariable=self._total_var, bg=C_CARD,
+                 fg=C_HEADER, font=font(9, "bold")).pack(
+            side="left", padx=(8, 0))
+        GhostButton(r1, text="✕ Reset Filter",
+                    command=self._reset_filter).pack(side="left", padx=(18, 0))
+
+        # --- Tabel card ---
+        tcard = Card(self.content)
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+        tbody = tcard.body()
+
+        head = tk.Frame(tbody, bg=C_CARD)
+        head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self._title_label = tk.Label(
+            head, text="Nominal Deviasi — Harga 41.09 × Qty Deviasi (kolom H)",
+            bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
+        self._title_label.pack(side="left")
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+                              command=self._maximize)
+        btn_max.pack(side="right")
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand.pack(side="right", padx=(0, 6))
+        btn_cols = GhostButton(head, text="◱ Kolom",
+                               command=lambda: self._colmgr.open_panel())
+        btn_cols.pack(side="right", padx=(0, 6))
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit.pack(side="right", padx=(0, 6))
+
+        col_ids = [c[0] for c in self.COLUMNS]
+        self.tree = ttk.Treeview(tbody, columns=col_ids, show="headings",
+                                 selectmode="extended")
+
+        for col_name, width, anchor in self.COLUMNS:
+            self.tree.column(col_name, width=width, minwidth=34,
+                             anchor=anchor)
+            self.tree.heading(col_name, text=col_name)
+
+        vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        tbody.grid_rowconfigure(1, weight=1)
+        tbody.grid_columnconfigure(0, weight=1)
+
+        enable_col_resize(self.tree)
+        enable_multi_select(self.tree)  # v3.9.32
+
+        foot = tk.Frame(tbody, bg=C_CARD)
+        foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.status_var_label = tk.StringVar(value="Belum ada data.")
+        tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
+                 fg=C_HEADER, font=font(8, "bold")).pack(side="right")
+
+        self.overlay = LoadingOverlay(tbody, "Menghitung nominal deviasi…")
+
+        self.header_filters = HeaderFilterGroup(
+            self.tree, col_ids,
+            get_values=self._col_values,
+            on_apply=self._on_col_filter,
+            on_sort=lambda c, d: self._sort_by(c, reverse=d))
+
+        self._colmgr = ColumnManager(
+            self.tree,
+            open_filter=lambda c: self.header_filters.open_popup(c))
+
+        self._expander = TableExpander(btn_expand, [fcard, self._title_label])
+
+        # chip H bersama + auto-refresh saat H diubah di tab Deviasi GR
+        if self._h_state is not None:
+            self._h_state.subscribe(self._on_shared_h_changed)
+            self.bind("<Destroy>", self._on_view_destroy, add="+")
+
+    def _on_view_destroy(self, event):
+        if event.widget is self and self._h_state is not None:
+            with contextlib.suppress(Exception):
+                self._h_state.unsubscribe(self._on_shared_h_changed)
+
+    def _on_shared_h_changed(self, h):
+        self.tanggal_h = int(h)
+        if hasattr(self, "_h_chip_var"):
+            self._h_chip_var.set(str(self.tanggal_h))
+        self._refresh()
+
+    # =========================================================================
+    # FILTER / SORT
+    # =========================================================================
+    def _reset_filter(self):
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
+        self._refresh()
+
+    def _col_values(self, col: str) -> list:
+        result = self._result_df
+        if result is None or result.empty:
+            return []
+        # nilai unik TERFORMAT dari baris tampil (filter kolom lain aktif)
+        f = result
+        for c, sel in self._col_sel.items():
+            if sel is None or c == col:
+                continue
+            if c in f.columns:
+                fmt = self._format_col_series(c, f[c])
+                f = f[fmt.isin(sel)]
+        if f.empty or col not in f.columns:
+            return []
+        return self._format_col_series(col, f[col]).unique().tolist()
+
+    def _format_col_series(self, col: str, series):
+        if col in self.NUMERIC_COLS:
+            return series.map(self._fmt_cell_num)
+        return series.astype(str)
+
+    def _on_col_filter(self, col: str, selected):
+        self._col_sel[col] = selected
+        self._refresh()
+
+    def _result_cols(self) -> list:
+        return [c[0] for c in self.COLUMNS]
+
+    def _sort_by(self, col: str, reverse: bool = False):
+        if col not in self._result_cols():
+            return
+        if self._busy:
+            self._pending_sort = (col, reverse)
+            return
+        parse = self._parse_num_id if col in self.NUMERIC_COLS else None
+        sort_tree_by_column(self.tree, col, reverse=reverse, parse=parse)
+        self._reapply_cell_tags(self.tree)
+        self._pending_sort = None
+
+    @staticmethod
+    def _parse_num_id(s):
+        """Parser sort format Indonesia: '1.234' = 1234, '(1.234)' =
+        -1234, '-' = 0, '12,5' = 12.5 (identik deviasi_view v3.9.6 —
+        harga tampil '18.250 KG' → 18250; parser default salah utk
+        format Indonesia)."""
+        s = str(s).replace("—", "").strip()
+        parts = s.split()          # buang label satuan di ekor
+        if parts:
+            s = parts[0]
+        if s in ("-", ""):
+            return 0.0
+        neg = s.startswith("(") and s.endswith(")")
+        if neg:
+            s = s[1:-1]
+        s = s.replace(".", "").replace(",", ".")
+        try:
+            v = float(s)
+        except ValueError:
+            return 0.0
+        return -v if neg else v
+
+    def _show_empty(self):
+        self.content.pack_forget()
+        self.empty.pack(fill="both", expand=True, padx=12, pady=12)
+
+    def _show_content(self):
+        self.empty.pack_forget()
+        self.content.pack(fill="both", expand=True)
+
+    def _setup_tags(self, tree=None):
+        tree = tree if tree is not None else self.tree
+        tree.tag_configure("evenrow", background="#ffffff")
+        tree.tag_configure("oddrow", background="#f8fafc")
+        tree.tag_configure("negative", foreground="#dc2626")
+        tree.tag_configure("neg_cell", foreground="#dc2626")
+        # baris TOTAL: latar lembut + teks gelap
+        tree.tag_configure("total", background="#e2e8f0",
+                           foreground="#0f172a")
+        tree.tag_configure("total_cell", background="#e2e8f0",
+                           foreground="#0f172a")
+
+    # =========================================================================
+    # DATA LOADING
+    # =========================================================================
+    def load_data(self, data: pd.DataFrame, harga_map: dict | None = None,
+                  konversi_map: dict | None = None):
+        self.data = data
+        self.harga_map = harga_map or {}
+        self.konversi_map = konversi_map
+        self._render_gen += 1
+        if self._insert_cancel is not None:
+            self._insert_cancel()
+            self._insert_cancel = None
+        self._result_df = None
+        if getattr(self, "_expander", None) is not None:
+            self._expander.reset()
+        self._show_content()
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
+        # lazy refresh — compute hanya bila tab terlihat
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
+    def ensure_refreshed(self):
+        """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
+        if self._dirty and self.data is not None and not self.data.empty:
+            self._dirty = False
+            self._refresh()
+
+    # =========================================================================
+    # COMPUTE
+    # =========================================================================
+    def _compute_nominal(self, data: pd.DataFrame | None = None,
+                         h: int | None = None) -> pd.DataFrame:
+        """Frame per pasangan tanggal H: [Nama Barang, Resto, Satuan,
+        Harga(nilai|None), Harga Tampil(str), Qty Deviasi, Nominal|None].
+
+        Qty deviasi = JENIS '3.DEVIASI' baris Tanggal H (= SO − SALDO
+        AKHIR sistem — nilai kolom Deviasi tab 📦 Deviasi GR; pasangan
+        tanpa baris tanggal H → tak dihitung, kontribusi 0).
+        self._result_df (snapshot utk filter header) ikut diisi.
+        """
+        df = self.data if data is None else data
+        if df is None or df.empty:
+            self._result_df = None
+            return pd.DataFrame()
+        if h is None:
+            h = self.tanggal_h
+        h = int(h)
+
+        tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+        dev = df[(df["JENIS"].astype(str) == "3.DEVIASI") & (tnum == h)]
+        if dev.empty:
+            self._result_df = None
+            return pd.DataFrame()
+        dev = dev.copy()
+        dev["NILAI"] = pd.to_numeric(dev["NILAI"], errors="coerce").fillna(0)
+
+        grouped = (dev.groupby(["Nama Barang", "NAMA RESTO", "SATUAN"],
+                                as_index=False, dropna=False)
+                   ["NILAI"].sum())
+        grouped = grouped.rename(columns={
+            "NAMA RESTO": "Resto", "SATUAN": "Satuan",
+            "NILAI": "Qty Deviasi"})
+        grouped["Nama Barang"] = grouped["Nama Barang"].astype(str)
+        grouped["Resto"] = grouped["Resto"].astype(str)
+        grouped["Satuan"] = grouped["Satuan"].map(
+            lambda v: _norm_sat(v) if _norm_sat(v) else "-")
+
+        # --- harga per barang (+ normalisasi satuan via peta rasio) ---
+        harga_vals = []
+        harga_disp = []
+        nominal_vals = []
+        kmap = self.konversi_map
+        for _, r in grouped.iterrows():
+            b = str(r["Nama Barang"]).strip()
+            sat_rekap = _norm_sat(r["Satuan"])
+            entry = self.harga_map.get(b)
+            harga = None
+            label = ""
+            nom = None
+            if entry is not None:
+                h41, sat41 = entry
+                if h41 is not None:
+                    if not sat41 or not sat_rekap or sat41 == sat_rekap \
+                            or sat_rekap == "-":
+                        # satuan sama (atau tak diketahui) → harga langsung
+                        harga = float(h41)
+                        label = sat41 or sat_rekap
+                    else:
+                        # normalisasi: harga41 × rasio(rekap) / rasio(41.09)
+                        r_rekap, _t1 = lookup_rasio(kmap, b, sat_rekap)
+                        r_41, _t2 = lookup_rasio(kmap, b, sat41)
+                        if r_rekap and r_41:
+                            harga = float(h41) * r_rekap / r_41
+                            label = sat_rekap
+                        else:
+                            # tak bisa dikonversi → harga as-is berpenanda
+                            label = f"{self._fmt_harga(float(h41))} {sat41}*"
+            if harga is not None:
+                nom = harga * float(r["Qty Deviasi"])
+                harga_disp.append(f"{self._fmt_harga(harga)} {label}")
+            else:
+                harga_disp.append(label or "-")
+            harga_vals.append(harga)
+            nominal_vals.append(nom)
+
+        # dtype float EKSPLISIT: semua-harga-gagal → list semua None →
+        # pandas membuat kolom object → .abs() di sort bawah RAISES
+        # (TypeError NoneType) di thread worker (ditelan on_error —
+        # tabel tak pernah render). None → NaN float aman.
+        grouped["Harga"] = pd.Series(harga_vals, dtype="float64")
+        grouped["Harga Tampil"] = harga_disp
+        grouped["Nominal"] = pd.Series(nominal_vals, dtype="float64")
+
+        # urutan default: |Nominal| MENURUN (dampak terbesar dulu);
+        # pasangan tanpa nominal paling bawah (urut |qty deviasi|)
+        grouped["_absnom"] = grouped["Nominal"].abs().fillna(0)
+        grouped["_absqty"] = grouped["Qty Deviasi"].abs()
+        grouped = (grouped.sort_values(
+            ["_absnom", "_absqty"], ascending=[False, False],
+            kind="mergesort")
+            .drop(columns=["_absnom", "_absqty"]))
+        grouped = grouped.reset_index(drop=True)
+
+        # snapshot utk filter header (SEBELUM filter diterapkan)
+        self._result_df = grouped[
+            ["Nama Barang", "Resto", "Satuan", "Harga Tampil",
+             "Qty Deviasi", "Nominal"]].copy()
+        return grouped
+
+    # =========================================================================
+    # REFRESH + RENDER
+    # =========================================================================
+    def _refresh(self, sync: bool = False):
+        if self.data is None or self.data.empty:
+            self.status_var_label.set("Belum ada data.")
+            return
+        if self._busy:
+            self._pending = True
+            return
+        self._busy = True
+        data = self.data
+        h = self.tanggal_h
+        gen = self._render_gen
+
+        def work():
+            # capture identitas pra-capture (pola FIX D-01)
+            return self._compute_nominal(data, h)
+
+        def done(payload):
+            self._busy = False
+            if gen != self._render_gen:
+                if self._pending:
+                    self._pending = False
+                    self._refresh()
+                return
+            self._render_rows(payload)
+            if self._pending:
+                self._pending = False
+                self._refresh()
+            elif self._pending_sort:
+                col, rev = self._pending_sort
+                self._pending_sort = None
+                self._sort_by(col, reverse=rev)
+
+        def on_error(err):
+            self._busy = False
+            self._pending = False
+            self.status_var_label.set(f"⚠ Gagal menghitung nominal: {err}")
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Menghitung nominal deviasi…",
+                  on_error=on_error, sync=sync)
+
+    @staticmethod
+    def _fmt_harga(v) -> str:
+        """Harga: pecahan → 2 desimal (18,25); bulat → fmt_int_id."""
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return str(v)
+        av = abs(v)
+        if av == int(av):
+            return fmt_int_id(av)
+        return f"{av:,.2f}".replace(",", "X").replace(".", ",") \
+            .replace("X", ".")
+
+    def _fmt_cell_num(self, val) -> str:
+        """Format kolom numerik (qty/nominal): bilangan bulat →
+        fmt_int_id; pecahan → 2 desimal; negatif dalam kurung; None → '-'.
+        """
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "-"
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return str(val)
+        if v == 0:
+            return "-"
+        neg = v < 0
+        av = abs(v)
+        if av == int(av):
+            s = fmt_int_id(av)
+        else:
+            s = f"{av:,.2f}".replace(",", "X").replace(".", ",") \
+                .replace("X", ".")
+        return f"({s})" if neg else s
+
+    def _render_rows(self, result: pd.DataFrame):
+        if self._insert_cancel is not None:
+            self._insert_cancel()
+            self._insert_cancel = None
+        self.tree.delete(*self.tree.get_children(""))
+        self._neg_cells = []
+        self._total_cells = []
+        self._result_df = None if result is None else result
+
+        # heading dinamis mengikuti TANGGAL H
+        self.tree.heading("Qty Deviasi",
+                          text=f"Qty Deviasi (H={self.tanggal_h})")
+        if getattr(self, "header_filters", None) is not None:
+            self.header_filters.refresh_icons()
+
+        if result is None or result.empty:
+            self.status_var_label.set(
+                f"Tidak ada baris DEVIASI tanggal {self.tanggal_h}.")
+            self._total_var.set("")
+            self._busy = False
+            self._pending = False
+            return
+
+        # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
+        filtered = result
+        for col, sel in self._col_sel.items():
+            if sel is not None and col in filtered.columns:
+                key = "Harga Tampil" if col == "Harga" else col
+                fmt = self._format_col_series(col, filtered[key])
+                filtered = filtered[fmt.isin(sel)]
+        if filtered.empty:
+            self.status_var_label.set("Tidak ada baris setelah filter.")
+            self._total_var.set("")
+            self._busy = False
+            self._pending = False
+            return
+
+        col_ids = self._result_cols()
+        n = len(filtered)
+        total_nom = float(filtered["Nominal"].dropna().sum()) \
+            if "Nominal" in filtered.columns else 0.0
+        total_qty = float(filtered["Qty Deviasi"].sum()) \
+            if "Qty Deviasi" in filtered.columns else 0.0
+        n_no_harga = int(filtered["Nominal"].isna().sum()) \
+            if "Nominal" in filtered.columns else 0
+
+        items = []
+        for i in range(n):
+            row = filtered.iloc[i]
+            harga_disp = str(row.get("Harga Tampil", "-") or "-")
+            qty = row.get("Qty Deviasi", 0)
+            nom = row.get("Nominal")
+            values = (
+                str(row["Nama Barang"]), str(row["Resto"]),
+                str(row["Satuan"]), harga_disp,
+                self._fmt_cell_num(qty),
+                self._fmt_cell_num(nom) if nom is not None
+                and not pd.isna(nom) else "-",
+            )
+            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            # minus per-cell: Qty Deviasi & Nominal (Tk 8 fallback baris)
+            try:
+                qv = float(qty)
+            except (TypeError, ValueError):
+                qv = 0.0
+            nom_v = None
+            try:
+                if nom is not None and not pd.isna(nom):
+                    nom_v = float(nom)
+            except (TypeError, ValueError):
+                nom_v = None
+            if self._cell_tags:
+                if qv < 0:
+                    self._neg_cells.append((f"row_{i}", "Qty Deviasi"))
+                if nom_v is not None and nom_v < 0:
+                    self._neg_cells.append((f"row_{i}", "Nominal"))
+            elif qv < 0 or (nom_v is not None and nom_v < 0):
+                tags.append("negative")
+            items.append(("", f"row_{i}",
+                          {"values": values, "tags": tuple(tags)}))
+
+        # baris TOTAL di ujung (jumlah qty + nominal) — minus dalam
+        # kurung konsisten dgn baris data (fmt _fmt_cell_num)
+        values_total = (
+            "TOTAL", "", "", "", self._fmt_cell_num(total_qty),
+            self._fmt_cell_num(total_nom),
+        )
+        items.append(("", "row_total",
+                      {"values": values_total, "tags": ("total",)}))
+        for col in col_ids:
+            self._total_cells.append(("row_total", col))
+
+        def render_done():
+            self._reapply_cell_tags(self.tree)
+            self._busy = False
+            if self._pending:
+                self._pending = False
+                self._pending_sort = None
+                self._refresh()
+            elif self._pending_sort:
+                col, rev = self._pending_sort
+                self._pending_sort = None
+                self._sort_by(col, reverse=rev)
+
+        self._insert_cancel = insert_tree_items(
+            self.tree, items, batch=500, on_done=render_done)
+
+        status = (f"{fmt_int_id(n)} pasangan · TANGGAL H = "
+                  f"{self.tanggal_h}")
+        if n_no_harga:
+            status += f" · {fmt_int_id(n_no_harga)} tanpa harga"
+        self.status_var_label.set(status)
+        self._total_var.set(
+            f"TOTAL {fmt_int_id(total_nom)} ({fmt_int_id(total_qty)} qty)")
+
+    def _reapply_cell_tags(self, tree):
+        """Pasang ulang tag per-cell (sort/clone = delete+reinsert → tag
+        ter-reset). Baris TOTAL diberi style khusus di SEMUA selnya."""
+        if not self._cell_tags:
+            return
+        if self._neg_cells:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        if self._total_cells:
+            apply_cell_tag(tree, "total_cell", self._total_cells)
+
+    # =========================================================================
+    # TOOLBAR TABEL
+    # =========================================================================
+    def _auto_fit(self):
+        auto_fit_columns(self.tree)
+
+    def _maximize(self):
+        def filter_setup(new_tree):
+            attach_clone_filters(
+                new_tree, self._result_cols(),
+                get_values=lambda c: self._col_values(c),
+                on_after_filter=lambda t=new_tree:
+                    self._reapply_cell_tags(t))
+
+        return open_tree_maximized(
+            self.tree, "Nominal Deviasi — Harga × Qty Deviasi",
+            setup_tags=lambda t: self._setup_tags(t),
+            on_filter_setup=filter_setup,
+            on_render_done=self._reapply_cell_tags)

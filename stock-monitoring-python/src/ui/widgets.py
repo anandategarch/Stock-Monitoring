@@ -482,11 +482,12 @@ def make_tree(parent, columns: list[str], show: str = "headings",
     """Buat Treeview ter-style lengkap dgn scrollbar v+h. Return tree.
 
     Kolom diatur oleh pemanggil (column/heading per view).
+    v3.9.32: selectmode "extended" (multi-select) — lihat enable_multi_select.
     """
     frame = tk.Frame(parent, bg=C_CARD)
     frame.pack(fill="both", expand=True)
 
-    tree = ttk.Treeview(frame, columns=columns, show=show, selectmode="browse")
+    tree = ttk.Treeview(frame, columns=columns, show=show, selectmode="extended")
 
     vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     hsb = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
@@ -500,6 +501,49 @@ def make_tree(parent, columns: list[str], show: str = "headings",
 
     setup_tree_tags(tree, extra_tags)
     tree._sm_frame = frame  # untuk akses layout jika perlu
+    enable_multi_select(tree)  # v3.9.32
+    return tree
+
+
+def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
+    """v3.9.32 — MULTI-SELECT + Ctrl+A semua tabel (user: "kenapa aku
+    tidak bisa select ya untuk semua data?").
+
+    Semua tree app sebelumnya selectmode="browse" (seleksi BARIS TUNGGAL
+    — Ctrl+Klik / Shift+Klik / Ctrl+A tidak berfungsi). Kini:
+    - selectmode "extended" → Ctrl+Klik (tambah/lepas), Shift+Klik
+      (rentang), drag;
+    - <Control-A> → pilih SEMUA baris (termasuk anak subtree utk tabel
+      hierarki tab Pivot);
+    Dipanggil ulang aman (idempoten) & dipasang juga ke clone Layar
+    Penuh / popup (open_tree_maximized).
+
+    Interaksi lama TIDAK berubah: double-click detail, klik ✓ follow-up,
+    klik-kanan menu — semuanya memakai identify_row/event → tetap benar.
+    """
+    try:
+        tree.configure(selectmode="extended")
+    except tk.TclError:
+        pass
+
+    def _select_all(_event=None):
+        try:
+            iids = []
+
+            def _walk(iid):
+                iids.append(iid)
+                for ch in tree.get_children(iid):
+                    _walk(ch)
+
+            for top in tree.get_children(""):
+                _walk(top)
+            if iids:
+                tree.selection_set(iids)
+        except tk.TclError:
+            pass
+
+    tree.bind("<Control-a>", _select_all, add="+")
+    tree.bind("<Control-A>", _select_all, add="+")
     return tree
 
 
@@ -3204,7 +3248,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     except Exception:
         show_opt = "headings"
     new_tree = ttk.Treeview(cin, columns=list(source_tree["columns"]),
-                            show=show_opt, selectmode="browse")
+                            show=show_opt, selectmode="extended")
 
     for cid in ["#0"] + list(source_tree["columns"]):
         try:
@@ -3243,6 +3287,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     # v3.4: resize kolom manual + auto-fit — dipasang PERTAMA supaya
     # "break" saat drag/double-click tepi kolom mematikan handler view
     enable_col_resize(new_tree)
+    enable_multi_select(new_tree)  # v3.9.32
 
     # v3.6: hide/unhide kolom di clone (klik kanan heading / tombol ◱ Kolom)
     # — mirror ke tabel sumber supaya state konsisten setelah window tutup

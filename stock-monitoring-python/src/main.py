@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import Config
 from src.pipeline.append1 import build_append1
+from src.pipeline.fn_4109 import build_harga_map, fn_4109
 from src.pipeline.fn_audit import build_audit_from_app, extract_po_pending
 from src.pipeline.rincian_po import build_rincian_po
 
@@ -64,6 +65,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         → qty PO Menunggu dikonversi ke satuan terkecil (apple-to-apple
         dgn Selisih/Saldo; user: "PO karton vs barang masuk botol tidak
         match waktu cari deviasi murni"; fallback qty as-is + '*').
+    v3.9.32: HARGA 41.09 (folder '09.Harga' — Folders.Harga bisa diubah
+        user) → audit_result['harga_map'] {barang: (harga, satuan)} +
+        audit_result['konversi_map'] (peta rasio v3.9.31) — input mode
+        'Nominal (H)' tab Laporan Deviasi (Harga × Qty Deviasi; harga
+        dinormalkan ke satuan rekap via peta rasio).
     """
     start_time = time.time()
 
@@ -158,6 +164,18 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     audit_result["df_bulan_ini"] = audit_df2
     audit_result["kpi_bulan_ini"] = audit_kpi2
     audit_result["desc_bulan_ini"] = audit_desc2
+
+    # v3.9.32 — HARGA 41.09 (user: "harga dari file 4109 (41.09) folder
+    # 09.Harga [alamat bisa diubah] — kolom harga = Nilai/Kuantitas
+    # Saldo Akhir") + peta konversi v3.9.31 → input mode 'Nominal (H)'
+    # tab Laporan Deviasi. Folder/sheet diatur config (setdefault).
+    harga_df = fn_4109(config.folder("Harga"), config.sheet("Harga"))
+    audit_result["harga_map"] = build_harga_map(harga_df)
+    audit_result["konversi_map"] = konversi_holder.get("map")
+    if verbose and audit_result["harga_map"]:
+        _nh = len(audit_result["harga_map"])
+        print(f"  Harga 41.09 (v3.9.32): {_nh:,} barang — mode Nominal "
+              f"(H) siap (Harga × Qty Deviasi)")
     if verbose:
         n_neg = (pd.to_numeric(audit_df["Tanggal"], errors="coerce") < 0
                  ).sum() if not audit_df.empty else 0

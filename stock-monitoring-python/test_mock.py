@@ -168,26 +168,116 @@ def create_mock_4205(filepath, resto_code, barang_list, mode="berjalan"):
 
 
 def create_mock_4217(filepath, resto_code, barang_list):
-    """Create #42.17 sheet (saldo awal). UnpivotOtherColumns format."""
-    # Row 1-4: metadata
-    # Row 5: headers = Nama Barang + resto column names
-    # Row 6+: data
+    """Create #42.17 sheet (saldo awal). UnpivotOtherColumns format.
+    v3.9.32: kolom KATEGORI BARANG (pola header grup — hanya baris
+    pertama grup berisi, sisanya None → uji ffill fn_4217) + KODE
+    BARANG (pseudo-kolom non-resto — terbuang oleh mask NAMA RESTO,
+    uji defensif) + NAMA SATUAN per barang + 2 barang ekstra:
+    'BUMBU PASTA KUAH' (saldo-only — TIDAK ada di rekap/IN/out; uji
+    fitur tampil di Deviasi GR + SATUAN fallback) & 'SUPPLIES ITEM'
+    (kategori di luar whitelist → terfilter oleh fn_4217)."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "#42.17. Kuantitas Barang per Gu"
 
-    # Metadata
+    # Metadata (row 1-4)
     for i in range(4):
         ws.cell(row=i + 1, column=1, value=f"Metadata {i+1}")
 
-    # Headers (row 5)
+    # Headers (row 5) — urutan ala file asli (kategori/satuan sebagai kolom)
     ws.cell(row=5, column=1, value="Nama Barang")
-    ws.cell(row=5, column=2, value=f"RESTO MALANG ({resto_code})")
+    ws.cell(row=5, column=2, value="Kode Barang")
+    ws.cell(row=5, column=3, value="Kategori Barang")
+    ws.cell(row=5, column=4, value="Nama Satuan")
+    ws.cell(row=5, column=5, value=f"RESTO MALANG ({resto_code})")
 
     # Data (row 6+)
-    for i, (barang, _) in enumerate(barbar_list):
-        ws.cell(row=6 + i, column=1, value=barang)
-        ws.cell(row=6 + i, column=2, value=200 + i * 10)
+    rows = []
+    for i, (barang, satuan) in enumerate(barang_list):
+        # kategori hanya di baris pertama grup (pola header grup real)
+        rows.append([barang, 90000 + i,
+                     "10.FOOD [RM] - COM V.2" if i == 0 else None,
+                     satuan, 200 + i * 10])
+    # v3.9.32 — barang saldo-only (kategori eksplisit; tanpa rekap)
+    rows.append(["BUMBU PASTA KUAH", 90999,
+                 "10.FOOD [RM] - COM V.2", "GR", 84])
+    # v3.9.32 — barang kategori di luar whitelist (terfilter)
+    rows.append(["SUPPLIES ITEM", 90998,
+                 "SUPPLIES [OTHERS]", "PCS", 999])
+
+    for r_idx, row_data in enumerate(rows, 6):
+        for c_idx, val in enumerate(row_data, 1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    wb.save(filepath)
+    wb.close()
+
+
+def create_mock_4109(filepath, barang_list):
+    """v3.9.32 — Create #41.09. Nilai Persediaan [ALL] (folder 09.Harga).
+
+    Mirror struktur file user 4109.xlsx: 4 baris metadata + header 2
+    baris (grup 'Saldo Awal/Masuk/Keluar/Saldo Akhir' + sub
+    'Kuantitas/Nilai'; Keluar Nilai terpisah 1 kolom spacer) + baris
+    subtotal 'Total Nama Barang' per grup + kategori ber-pola header
+    grup (ffill di fn_4109). Harga contoh:
+    - GULA (V.20): 18,25/GR (rekap KG → uji normalisasi ×1000 → 18.250/KG)
+    - CINCAU (V.20): 15/KG (sama dgn rekap → harga langsung)
+    - FRUCTOSE (V.20): Qty 0 → harga NaN (uji guard div-0)
+    - BUMBU PASTA KUAH: 12/GR (saldo-only pair)
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    # openpyxl tidak bisa menulis '[' pada judul sheet (file user asli
+    # dibuat Accurate) — mock pakai nama tanpa kurung; fn_4109 punya
+    # fallback resolusi nama sheet ternormalisasi (buang [ ] ( ) spasi).
+    ws.title = "#41.09. Nilai Persediaan ALL"
+
+    # Metadata (row 1-4)
+    ws.cell(row=1, column=4, value="PPA")
+    ws.cell(row=2, column=4, value="#41.09. Nilai Persediaan [ALL]")
+    ws.cell(row=3, column=4, value="Dari 01 Okt 2026 s/d 07 Okt 2026")
+    ws.cell(row=4, column=4, value="Cabang : [Semua Cabang]")
+
+    # Header row 5-6 (0-idx 4/5): posisi ala file user
+    # 0=Kategori 1=Nama 4=Kode 5=Satuan 6/7=SaldoAwal 8/9=Masuk
+    # 10=Keluar Qty 12=Keluar Nilai 13/14=Saldo Akhir (Qty/Nilai)
+    hdr = {4: ["Kategori Barang", "Nama Barang", None, None,
+               "Kode Barang", "Nama Satuan", "Saldo Awal", None, "Masuk",
+               None, "Keluar", None, None, "Saldo Akhir", None],
+           5: [None, None, None, None, None, None, "Kuantitas", "Nilai",
+               "Kuantitas", "Nilai", "Kuantitas", None, "Nilai",
+               "Kuantitas", "Nilai"]}
+    for r, vals in hdr.items():
+        for c, v in enumerate(vals, 1):
+            if v is not None:
+                ws.cell(row=r, column=c, value=v)
+
+    data = {
+        "GULA (V.20)":        ("GR", 1000, 18250),    # 18,25/GR
+        "FRUCTOSE SYRUP (V.20)": ("GR", 0, 0),        # Qty 0 → NaN
+        "CINCAU (V.20)":      ("KG", 500, 7500),      # 15/KG
+        "BUMBU PASTA KUAH":   ("GR", 700, 8400),      # 12/GR
+    }
+    rows = []
+    kat_first = True
+    for barang, (sat, qty, nil) in data.items():
+        rows.append(["10.FOOD [RM] - COM V.2" if kat_first else None,
+                     barang, None, None, 88001, sat,
+                     qty, nil, 0, 0, 0, None, 0, qty, nil])
+        kat_first = False
+    rows.append(["21.COST.ASSET", "BARANG ASSET LAIN", None, None,
+                 88999, "UNIT", 5, 5000, 0, 0, 0, None, 0, 5, 5000])
+    # subtotal per grup (dibuang fn_4109)
+    rows.append([None, "Total Nama Barang", None, None, None, None,
+                 None, None, None, None, None, None, None,
+                 sum(r[13] or 0 for r in rows), None])
+
+    for r_idx, row_data in enumerate(rows, 7):
+        for c_idx, val in enumerate(row_data, 1):
+            if val is not None:
+                ws.cell(row=r_idx, column=c_idx, value=val)
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     wb.save(filepath)
@@ -278,7 +368,7 @@ def create_mock_dbs_kategori(filepath, barang_list):
     for col_idx, h in enumerate(headers, 1):
         ws.cell(row=1, column=col_idx, value=h)
 
-    for i, (barang, _) in enumerate(barbar_list):
+    for i, (barang, _) in enumerate(barang_list):
         ws.cell(row=2 + i, column=1, value=barang)
         ws.cell(row=2 + i, column=2, value="DEVIASI")
         ws.cell(row=2 + i, column=3, value="BAHAN BAKU")
@@ -843,7 +933,12 @@ def run_test():
     create_mock_4217(os.path.join(root_path, "6.1 42.17 Saldo Awal", "saldo.xlsx"), resto, barbar_list)
     create_mock_pi(os.path.join(root_path, "26.Rincian PI", "pi.xlsx"), resto, barbar_list)
     create_mock_konversi(os.path.join(root_path, "27.Konversi Satuan Dex", "konversi.xlsx"), barbar_list)
-    create_mock_dbs_kategori(os.path.join(root_path, "21. DBS Kategori", "kategori.xlsx"), barbar_list)
+    # v3.9.32: BUMBU PASTA KUAH (saldo-only) ikut master DBS supaya
+    # lolos filter KATEGORI default 'Deviasi' di tab Deviasi GR
+    create_mock_dbs_kategori(os.path.join(root_path, "21. DBS Kategori", "kategori.xlsx"),
+                              barbar_list + [("BUMBU PASTA KUAH", "GR")])
+    # v3.9.32 — harga 41.09 (folder 09.Harga; key config disetdefault)
+    create_mock_4109(os.path.join(root_path, "09.Harga", "4109.xlsx"), barbar_list)
     create_mock_rincian_po(os.path.join(root_path, "25. Rincian PO", "po.xlsx"), resto, barbar_list)
     create_mock_9901(os.path.join(root_path, "30. 9901", "mutasi.xlsx"), resto, barbar_list)
 
@@ -869,7 +964,8 @@ def run_test():
             "Pemindahan4205": "4. 42.05",
             "Pemindahan4205Lalu": "4.1 4205 Bulan Lalu",
             "RincianPO":      "25. Rincian PO",
-            "Data9901":       "30. 9901"
+            "Data9901":       "30. 9901",
+            "Harga":          "09.Harga"   # v3.9.32 (setdefault juga jalan)
         },
         "Sheets": {
             "RekapMentah":     "REKAP MENTAH",
@@ -1075,7 +1171,7 @@ def run_test():
                             "Nomor", "SOURCE IN"]
     for col in expected_detail_cols:
         assert col in in_detail_result.columns, f"Missing in_detail column: {col}"
-    print(f"    ✓ run_pipeline returns 4 DataFrames correctly (incl. IN detail v3.4 + audit v3.5)")
+    print("    ✓ run_pipeline returns 4 DataFrames correctly (incl. IN detail v3.4 + audit v3.5)")
     print(f"    Append1: {len(append1_result)} rows, cols: {list(append1_result.columns)}")
     print(f"    Rincian PO: {len(rincian_result)} rows")
     print(f"    IN detail: {len(in_detail_result)} rows")
@@ -1140,6 +1236,56 @@ def run_test():
     print("    ✓ v3.9.31 konversi satuan PO: max 12.000 GR (12 KG × "
           "1000) · catatan '(qty 12.000 GR)' · desc 'qty sat. terkecil'")
 
+    # v3.9.32 — (4) FILTER KATEGORI 42.17 + SATUAN 42.17 + (3) SALDO-ONLY
+    # + (5) HARGA 41.09 (E2E pipeline): mock 4217 ber-kolom Kategori
+    # Barang (pola grup) + Nama Satuan + 2 barang ekstra (BUMBU PASTA
+    # KUAH saldo-only & SUPPLIES ITEM di luar whitelist) + mock 41.09.
+    from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST as _WL
+    from src.pipeline.fn_4217 import fn_4217 as _fn4217
+    _q17 = _fn4217(config.folder("SaldoAwal4217"),
+                    kategori_whitelist=_WL)
+    _q17_names = set(_q17["Nama Barang"].astype(str))
+    assert "SUPPLIES ITEM" not in _q17_names, (
+        "v3.9.32: whitelist kategori harus menyaring 'SUPPLIES ITEM'")
+    assert "BUMBU PASTA KUAH" in _q17_names, (
+        "v3.9.32: barang kategori RM V.2 harus lolos whitelist")
+    assert "SATUAN" in _q17.columns and (
+        _q17[_q17["Nama Barang"] == "BUMBU PASTA KUAH"]["SATUAN"]
+        .astype(str).str.strip() == "GR").all(), (
+        "v3.9.32: kolom Nama Satuan 42.17 harus keluar sebagai SATUAN")
+    _q17_nofilter = _fn4217(config.folder("SaldoAwal4217"))
+    assert "SUPPLIES ITEM" in set(
+        _q17_nofilter["Nama Barang"].astype(str)), (
+        "v3.9.32: tanpa whitelist → tanpa filter (kompatibel)")
+    # append1: pasangan saldo-only dapat SATUAN fallback 42.17 (rekap
+    # tetap menang utk pasangan ber-rekap)
+    _bp = append1_result[append1_result["Nama Barang"]
+                         == "BUMBU PASTA KUAH"]
+    assert not _bp.empty and (_bp["SATUAN"].astype(str).str.strip()
+                              == "GR").all(), (
+        "v3.9.32: pasangan 42.17-only harus dapat SATUAN dari file 42.17")
+    assert "SUPPLIES ITEM" not in set(
+        append1_result["Nama Barang"].astype(str)), (
+        "v3.9.32: saldo barang di luar whitelist tidak boleh masuk "
+        "pipeline (filter lebih awal)")
+    # (5) harga 41.09 E2E
+    assert "harga_map" in audit_result and "konversi_map" in \
+        audit_result, "v3.9.32: audit_result harus bawa harga_map + konversi_map"
+    _hm = audit_result["harga_map"]
+    assert _hm.get("GULA (V.20)") == (18.25, "GR"), (
+        f"v3.9.32: harga GULA harus 18,25/GR — got {_hm.get('GULA (V.20)')}")
+    assert _hm.get("CINCAU (V.20)") == (15.0, "KG"), (
+        f"v3.9.32: harga CINCAU harus 15/KG — got {_hm.get('CINCAU (V.20)')}")
+    assert _hm.get("FRUCTOSE SYRUP (V.20)")[0] is None, (
+        "v3.9.32: Qty Saldo Akhir 0 → harga None (guard div-0)")
+    assert "BARANG ASSET LAIN" in _hm, "v3.9.32: barang non-DEVIASI tetap dibaca 41.09"
+    _hmm_rows = [r for r in ["GULA (V.20)", "CINCAU (V.20)",
+                             "FRUCTOSE SYRUP (V.20)", "BUMBU PASTA KUAH",
+                             "BARANG ASSET LAIN"]]
+    assert all(r in _hm for r in _hmm_rows), "v3.9.32: semua barang mock 41.09 masuk peta"
+    print(f"    ✓ v3.9.32: 4217 kategori whitelist ({len(_q17)}/{len(_q17_nofilter)}"
+          f" baris) + SATUAN fallback + harga 41.09 ({len(_hm)} barang)")
+
     # v3.9.20 — deep-audit pipeline fixes (agent 35-d): LANGKAH 9 tie/NA/
     # strip, fn_4205 lalu anchor resto, resolusi sheet folder lalu, e2e
     run_test_v3920_fixes()
@@ -1148,7 +1294,6 @@ def run_test():
     print("\n  [7] Testing view widgets...")
     import time
     import tkinter as tk
-    from tkinter import ttk
 
     def wait_view(root, view, timeout=15.0):
         """Pump event loop sampai render async view selesai (v3.1)."""
@@ -1186,6 +1331,69 @@ def run_test():
     wait_view(root, dv)
     children = dv.tree.get_children()
     print(f"    ✓ DeviasiView (GR) loaded: {len(children)} rows (KG≠GR)")
+
+    # v3.9.32 — (3) BARANG 42.17-ONLY TAMPIL (BUMBU PASTA KUAH saldo 84
+    # tanpa rekap): H=25 (window 23..27 — dulu pasangan lenyap karena
+    # fn_4217 hardcode Tanggal=1) → Sistem = saldo 42.17 = 84, Deviasi
+    # = 0 − 84 = (84)
+    dv.tanggal_h = 25
+    dv._dirty = True
+    dv.ensure_refreshed()
+    wait_view(root, dv)
+    _bp_iid = None
+    for _iid in dv.tree.get_children(""):
+        if "BUMBU PASTA KUAH" in str(dv.tree.item(_iid, "values")):
+            _bp_iid = _iid
+            break
+    assert _bp_iid is not None, (
+        "v3.9.32: barang 42.17-only (BUMBU PASTA KUAH) harus tampil di "
+        "Deviasi GR saat H=25")
+    assert dv.tree.set(_bp_iid, "Sistem") == "84", (
+        f"v3.9.32: Sistem saldo-only = saldo 42.17 (84) — got "
+        f"{dv.tree.set(_bp_iid, 'Sistem')!r}")
+    assert dv.tree.set(_bp_iid, "Deviasi") == "(84)", (
+        f"v3.9.32: Deviasi saldo-only = 0−84 format (84) — got "
+        f"{dv.tree.set(_bp_iid, 'Deviasi')!r}")
+    assert dv.tree.set(_bp_iid, "Satuan") == "GR", (
+        "v3.9.32: Satuan pair saldo-only harus dari 42.17 'Nama Satuan'")
+    print("    ✓ v3.9.32: BUMBU PASTA KUAH (42.17-only) tampil di GR — "
+          "Sistem 84 · Deviasi (84) · Satuan GR")
+
+    # v3.9.32 — (6) MODE NOMINAL E2E: Harga 41.09 × Qty Deviasi +
+    # normalisasi satuan (GULA 18,25/GR → 18.250/KG utk rekap KG via
+    # peta rasio; CINCAU 15/KG langsung) + baris TOTAL + FRUCTOSE tanpa
+    # harga (Qty 0 → None → tak dihitung)
+    from src.ui.nominal_deviasi_view import NominalDeviasiView
+    nv = NominalDeviasiView(root)
+    nv.load_data(append1_result,
+                 harga_map=audit_result["harga_map"],
+                 konversi_map=audit_result["konversi_map"])
+    # H=1: mock SO(1)=100; saldo(1) = SA + IN-9901(1) → GULA 205 → DEV
+    # −105; FRUCTOSE 220 → DEV −120 (tanpa harga); CINCAU 220 → DEV −120
+    nv.tanggal_h = 1
+    nv._dirty = True
+    nv.ensure_refreshed()
+    wait_view(root, nv)
+    _nv_rows = {dv0: nv.tree.item(iid, "values")
+                for iid, dv0 in [(i, str(nv.tree.set(i, "Nama Barang")))
+                                 for i in nv.tree.get_children("")]}
+    _g = _nv_rows.get("GULA (V.20)")
+    assert _g is not None and _g[3] == "18.250 KG" and _g[5] == "(1.916.250)", (
+        f"v3.9.32: GULA nominal = 18.250/KG × DEV −105 = (1.916.250) — "
+        f"got {_g}")
+    _c = _nv_rows.get("CINCAU (V.20)")
+    assert _c is not None and _c[3] == "15 KG" and _c[5] == "(1.800)", (
+        f"v3.9.32: CINCAU nominal = 15/KG × DEV −120 = (1.800) — got {_c}")
+    _f = _nv_rows.get("FRUCTOSE SYRUP (V.20)")
+    assert _f is not None and _f[5] == "-", (
+        f"v3.9.32: FRUCTOSE tanpa harga → nominal '-' — got {_f}")
+    _t = _nv_rows.get("TOTAL")
+    assert _t is not None and _t[5] == "(1.919.058)" and _t[4] == "(429)", (
+        f"v3.9.32: baris TOTAL = −1.919.050? qty −429 (GULA−105 + FRUCTOSE"
+        f"−120 + CINCAU−120 + BUMBU−84; nominal tanpa FRUCTOSE) — got {_t}")
+    print("    ✓ v3.9.32: Nominal E2E — GULA (1.916.250) + CINCAU "
+          "(1.800) + BUMBU (1.008) + TOTAL (1.919.058) · FRUCTOSE '-' "
+          "tanpa harga")
 
     dv2 = DeviasiView(root, satuan_mode="PCS")
     dv2.load_data(append1_df)

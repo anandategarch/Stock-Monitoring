@@ -122,6 +122,7 @@ from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
 from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
+from src.ui.nominal_deviasi_view import NominalDeviasiView
 from src.ui.pivot_view import PivotTableView
 from src.ui.rincian_po_view import RincianPoView, _resto_name
 from src.ui.theme import (
@@ -157,7 +158,62 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.31"  # v3.9.31 — KONVERSI SATUAN PO MENUNGGU (KARTON → SATUAN TERKECIL)
+APP_VERSION = "3.9.32"  # v3.9.32 — MULTI-SELECT + POPUP PIVOT BESAR + BARANG 42.17-ONLY + FILTER KATEGORI 42.17 + HARGA 41.09 + MODE NOMINAL
+# v3.9.32 (user: 6 permintaan — "YA KERJAKAN SEMUA DAN PUSH TO GIT HUB"):
+# (1) MULTI-SELECT SEMUA TABEL (user: "kenapa aku tidak bisa select ya
+#     untuk semua data?"): semua tree selectmode browse → EXTENDED +
+#     binding Ctrl+A pilih semua baris (rekursif utk tabel hierarki
+#     pivot; Ctrl+Klik tambah/lepas, Shift+Klik rentang) — dulu semua
+#     tabel hanya bisa seleksi BARIS TUNGGAL. Interaksi lama (double-click
+#     detail, klik ✓, klik-kanan) tak berubah; clone Layar Penuh & popup
+#     ikut (widgets.enable_multi_select).
+# (2) POPUP DETAIL TAB PIVOT DIPERBESAR (user: "popup di tab pivot ada
+#     deviasinya — terlalu kecil, besarkan lagi dan HAPUS tombol
+#     perbesar popup pivot"): DetailsPopup kini ±90% layar adaptif
+#     (sebelumnya 1100×540; clamp posisi ke layar; minsize tetap 800×320)
+#     + tombol ⛶ Perbesar & item menu-nya DIHAPUS KHUSUS jalur pivot
+#     (param show_maximize=False; jalur laporan/komparasi/follow-up tetap
+#     punya tombol — popup mereka ikut membesar).
+# (3) BARANG 42.17-ONLY TAMPIL DI DEVIASI GR/PCS (user: "BUMBU PASTA KUAH
+#     hanya ada di 42.17, tidak muncul — apakah lookup cuma dari Deviasi
+#     Weekly, tidak dua arah dari 42.17?"): akar = fn_4217 HARDCODE
+#     Tanggal=1 → pasangan saldo-only (tanpa rekap SO/IN/out) tak pernah
+#     masuk window analisa H±2 (H>3) + pivot_table membuang SATUAN NaN.
+#     FIX: (a) baris ('2.SALDO AKHIR', t=1) pasangan TANPA baris window
+#     selalu ikut mask + Sistem pasangan itu = saldo 42.17 (Deviasi =
+#     0 − saldo — selisih nyata); (b) SATUAN pasangan tanpa rekap diisi
+#     dari kolom 'Nama Satuan' file 42.17 (fallback; rekap tetap menang).
+#     Pasangan ber-window TIDAK tersentuh (nilai tabel tak berubah).
+# (4) FILTER KATEGORI 42.17 LEBIH AWAL (user: "filter data 42.17 pakai
+#     kolom kategori barang [whitelist 5 kategori]"): fn_4217 membaca
+#     kolom Kategori Barang sebagai kolom id SEBELUM melt (dulu kolom
+#     kategori/satuan ter-melt jadi pseudo-baris resto → terbuang senyap)
+#     + ffill header grup + whitelist config "KategoriBarang4217"
+#     (default: 00.COST, 01.COST-PACKAGING V.2, 01. COST-PACKAGING-TIDAK
+#     BOLEH, 10.FOOD [BUMBU|RM|WIP]-COM V.2 — 5 kategori produksi +
+#     varian lama; prefix-match case/whitespace-insensitive; file tanpa
+#     kolom → tanpa filter; hasil 0 baris → auto-bypass + peringatan).
+#     Log '4217 kategori filter: N/M baris lolos'.
+# (5) HARGA 41.09 (user: "harga dari file 4109 (41.09) folder 09.Harga
+#     [alamat bisa diubah] — kolom harga = Nilai/Kuantitas Saldo Akhir"):
+#     modul BARU fn_4109 (header 2 baris dideteksi per NAMA — bukan
+#     posisi tetap; subtotal 'Total Nama Barang'/'Total Kategori Barang'
+#     dibuang; kategori ffilled; Qty=0 → harga NaN guard; file contoh
+#     user 4109.xlsx: AIR MINERAL 1.246,35/BOTOL, GULA 18,25/GR) →
+#     audit_result['harga_map'] {barang: (harga, satuan)} GLOBAL +
+#     audit_result['konversi_map'] (peta rasio v3.9.31).
+# (6) MODE BARU '💰 Nominal (H)' tab 📋 Laporan Deviasi (user: "tab baru
+#     Nominal = Harga × kuantitas deviasi, per barang + total"): baris
+#     per pasangan (Nama Barang · Resto · Satuan · Harga · Qty Deviasi ·
+#     Nominal; qty deviasi = 3.DEVIASI tanggal H — nilai kolom Deviasi
+#     tab GR) + baris TOTAL (jumlah qty + nominal; style khusus) + chip
+#     total di kartu Filter. HARGA DINORMALISASI ke satuan rekap via peta
+#     rasio (harga41 × rasio(rekap)/rasio(41.09) — analisis data real:
+#     176/187 match, 5 beda seperti MUTIARA BOBA KG-vs-GR; tanpa
+#     harga/rasio → tampil berpenanda '*' & nominal '-', tak dihitung ke
+#     total). H bersama (chip read-only + auto-refresh); urutan default
+#     |Nominal| menurun; minus merah per-cell; sort parser Indonesia;
+#     filter ⧩ + ⛶ + ⤢ + ◱ + ↔.
 # v3.9.31 (user: "Kolom Kuantitas di Rincian PO atau file 3243 itu masih
 # satuan besar bukan satuan kecil seperti di sheet barang masuk ... air
 # mineral di rincian po pakai satuan karton dan sheet barang masuk botol
@@ -1006,10 +1062,13 @@ class StockMonitorApp:
         view = views.get(sel)
         if view is self._laporan_tab_entry:
             # v3.9.4: refresh pane SESUAI MODE aktif di tab Laporan
-            view = (self.komparasi_view
-                    if getattr(self, "laporan_segment", None) is not None
-                    and self.laporan_segment.active == 0
-                    else self.laporan_view)
+            # v3.9.32: mode 2 = 💰 Nominal (H)
+            _active = (getattr(self, "laporan_segment", None).active
+                       if getattr(self, "laporan_segment", None) is not None
+                       else 0)
+            view = (self.komparasi_view if _active == 0
+                    else (self.nominal_view if _active == 2
+                          else self.laporan_view))
         if view is not None and hasattr(view, "ensure_refreshed"):
             view.ensure_refreshed()
 
@@ -1519,6 +1578,13 @@ class StockMonitorApp:
                     f"  Deviasi Murni ber-PO Menunggu: "
                     f"{fmt_int_id(_n_po)} baris — explainable, sisanya "
                     f"perlu audit fisik\n")
+        # v3.9.32 — harga 41.09 (mode Nominal siap?)
+        _n_harga = len(audit_result.get("harga_map") or {}) \
+            if audit_result else 0
+        if _n_harga:
+            self._append_log_batched(
+                f"  Harga 41.09: {fmt_int_id(_n_harga)} barang — mode "
+                f"💰 Nominal (H) tab 📋 Laporan Deviasi siap\n")
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
@@ -1532,6 +1598,14 @@ class StockMonitorApp:
                                       audit_result=audit_result)
         self.laporan_view.load_data(append1_df)
         self.komparasi_view.load_data(append1_df)  # v3.9.4 — mode komparasi
+        # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
+        # rasio konversi (dari audit_result — pipeline v3.9.32)
+        self.nominal_view.load_data(
+            append1_df,
+            harga_map=(audit_result.get("harga_map")
+                       if audit_result else None),
+            konversi_map=(audit_result.get("konversi_map")
+                          if audit_result else None))
         self.rincian_view.load_data(rincian_po_df)
         self.btn_export.set_enabled(True)
         self.btn_export_tb.set_enabled(True)
@@ -1697,6 +1771,9 @@ class StockMonitorApp:
         # v3.9.4: tab 📋 Laporan Deviasi = 2 MODE via SegmentBar:
         # ⚖ Komparasi File Deviasi (default — v3.9.4) & 🚨 Anomali COM
         # (v3.9.3, H bersama chip read-only + auto-refresh dari tab GR).
+        # v3.9.32: mode ke-3 💰 Nominal (H) — Harga 41.09 × Qty Deviasi
+        # per pasangan + baris TOTAL (user: "tab baru Nominal = Harga ×
+        # kuantitas deviasi, per barang + total").
         self._laporan_container = tk.Frame(self.tab_laporan, bg=C_BG)
         self._laporan_container.pack(fill="both", expand=True)
 
@@ -1705,7 +1782,8 @@ class StockMonitorApp:
         tk.Label(bar, text="MODE", bg=C_BG, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left", padx=(0, 6))
         self.laporan_segment = SegmentBar(
-            bar, ["⚖ Komparasi File Deviasi", "🚨 Anomali COM (H)"],
+            bar, ["⚖ Komparasi File Deviasi", "🚨 Anomali COM (H)",
+                  "💰 Nominal (H)"],
             command=lambda idx: self.show_laporan_mode(idx))
         self.laporan_segment.pack(side="left")
 
@@ -1722,26 +1800,38 @@ class StockMonitorApp:
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
             followup_store=self.followup_store,
             h_state=self._shared_h)
-        # default: mode 0 (Komparasi) — Anomali COM tersembunyi
+        # v3.9.32 — mode Nominal: Harga × Qty Deviasi (+ baris TOTAL)
+        self.nominal_view = NominalDeviasiView(
+            self._laporan_container,
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            h_state=self._shared_h)
+        # default: mode 0 (Komparasi) — COM & Nominal tersembunyi
         self.komparasi_view.pack(fill="both", expand=True)
         self.laporan_view.pack_forget()
+        self.nominal_view.pack_forget()
 
     def show_laporan_mode(self, idx: int):
         """v3.9.4 — ganti mode tab 📋 Laporan Deviasi (dipakai SegmentBar
-        & test): 0 = ⚖ Komparasi File, 1 = 🚨 Anomali COM.
+        & test): 0 = ⚖ Komparasi File, 1 = 🚨 Anomali COM,
+        2 = 💰 Nominal (v3.9.32).
         v3.9.5 FIX (audit 19-c #7): sinkronkan SegmentBar (set_active_silent)
         — dulu pemanggilan programatik membuat segment.active basi →
         _on_tab_changed me-refresh pane yang SALAH & tombol mode tetap
         menyala di posisi lama."""
-        if idx not in (0, 1):
+        if idx not in (0, 1, 2):
             idx = 0
         self.laporan_segment.set_active_silent(idx)
+        # lepas semua pane lalu pack pane aktif (urutan pack konsisten)
+        self.laporan_view.pack_forget()
+        self.nominal_view.pack_forget()
+        self.komparasi_view.pack_forget()
         if idx == 0:
-            self.laporan_view.pack_forget()
             self.komparasi_view.pack(fill="both", expand=True)
             self.komparasi_view.ensure_refreshed()
+        elif idx == 2:
+            self.nominal_view.pack(fill="both", expand=True)
+            self.nominal_view.ensure_refreshed()
         else:
-            self.komparasi_view.pack_forget()
             self.laporan_view.pack(fill="both", expand=True)
             self.laporan_view.ensure_refreshed()
 
