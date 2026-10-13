@@ -1,6 +1,30 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
+hanya hitung bulan ini. Tapi default hitung bulan ini aja") — MODE
+HITUNG (SegmentBar "MODE HITUNG", baris pertama kartu Filter):
+- "📅 Bulan Ini" (DEFAULT): audit = varian BULAN BERJALAN SAJA — baris
+  Tanggal negatif (rekap lalu 25..-31 + IN 42.05/32.24 bulan lalu)
+  DIBUANG sebelum engine VBA (fn_audit.build_audit_from_app
+  bulan_lalu=False) → perilaku identik sheet LAPORAN_DEVIASI workbook
+  user (tgl 1..31, tanpa tanggal negatif). Rentang tampil 1..31.
+- "📆 Lalu + Ini": audit = varian PENUH (incl. bulan lalu — saldo
+  kumulatif menyambung dari 25..31 bulan lalu; perilaku v3.6-v3.9.26).
+  Rentang tampil -31..31.
+Kedua varian dihitung SEKALI oleh pipeline (kunci audit_result
+"df"/"kpi"/"desc" + "df_bulan_ini"/"kpi_bulan_ini"/"desc_bulan_ini");
+mode hanya MEMILIH varian (tanpa recompute). KPI chips + Saldo + Hasil
+Audit ikut varian aktif. Ketik rentang tanggal negatif di mode Bulan
+Ini → otomatis pindah ke Lalu + Ini (baris bulan lalu memang tidak ada
+di varian bulan-ini — tanpa auto-switch tabel akan kosong senyap).
+✕ Reset Filter & data baru → kembali ke default "Bulan Ini".
+Keputusan: varian bulan-ini kehilangan pembanding "SO tanggal 1 = SO
+bulan lalu terakhir" (v3.9.6 — engine melihat baris pertama bulan
+berjalan sebagai awal grup) — inheren: pilih mode "📆 Lalu + Ini" bila
+perlu pembanding bulan lalu. Export "Laporan Deviasi (Audit)" level
+app TETAP varian penuh (kunci "df" tidak berubah).
+
 v3.9.24 (klarifikasi user: periode bisnis 26→25) — RI BALANCING kini
 TANGGAL-AWARE: satu periode = tgl 26 bulan lalu s/d tgl 25 bulan ini
 (dua bulan kalender); PO bulan SEBELUM bulan RI tetap satu periode →
@@ -71,7 +95,9 @@ Drill-down (double-click baris) → popup RINCIAN IN per dokumen:
 
 Tanggal -25..-31 = data bulan lalu (selalu terbaca — LightMode dihapus v3.5).
 v3.8: Default rentang 1 s/d 31 = periode BULAN BERJALAN saja (tanpa
-bulan lalu — permintaan user "rekap selisih in hanya periode 1-31").
+bulan lalu — permintaan user "rekap selisih in hanya periode 1-31";
+v3.9.27: kini bagian dari MODE HITUNG "📅 Bulan Ini" — audit varian
+ikut, bukan sekadar filter tampilan).
 v3.6 (lama): default -26 s/d 31.
 """
 import contextlib
@@ -109,6 +135,7 @@ from .widgets import (
     GhostButton,
     HeaderFilterGroup,
     LoadingOverlay,
+    SegmentBar,
     TableExpander,
     _filter_value_sort_key,
     apply_cell_tag,
@@ -731,6 +758,19 @@ class InSelisihView(tk.Frame):
         self.audit_df: Optional[pd.DataFrame] = None
         self.audit_kpi: dict = {}
         self.audit_desc: str = ""
+        # v3.9.27 — MODE HITUNG (user: "pada rekap selisih in bisa mode
+        # hitung bulan lalu dan hanya hitung bulan ini. Tapi default hitung
+        # bulan ini aja"):
+        # - False (DEFAULT, "📅 Bulan Ini")   : audit varian BULAN BERJALAN
+        #   SAJA (baris Tanggal negatif dibuang engine — mirror sheet
+        #   LAPORAN_DEVIASI tgl 1..31) + rentang 1..31.
+        # - True  ("📆 Lalu + Ini")           : audit varian PENUH
+        #   (incl. bulan lalu — saldo menyambung) + rentang -31..31.
+        # Kedua varian dihitung pipeline SEKALI (kunci audit_result
+        # "df"/"df_bulan_ini") — mode hanya MEMILIH, tanpa recompute.
+        self._mode_bulan_lalu = False
+        self._audit_full: tuple | None = None      # (df, kpi, desc)
+        self._audit_bulan_ini: tuple | None = None  # idem, tanpa bulan lalu
         self.go_to_proses = go_to_proses
         self._col_sel: dict = {c: None for c in _ALL_COLS}   # header filter ⧩
         self._busy = False
@@ -776,6 +816,21 @@ class InSelisihView(tk.Frame):
         fcard = Card(self.content, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
+
+        # v3.9.27 — MODE HITUNG: 📅 Bulan Ini (default) | 📆 Lalu + Ini.
+        # SegmentBar (bukan tk opsi lain) — pola mode PIVOT PER 🏪/📅;
+        # nama atribut sengaja `mode_bar` (BUKAN `mode_seg` — nama lama
+        # dihapus v3.6 dan ditegaskan tidak boleh ada lagi oleh test §13).
+        r_mode = tk.Frame(fbody, bg=C_CARD)
+        r_mode.pack(fill="x", pady=(0, 6))
+        tk.Label(r_mode, text="MODE HITUNG", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self.mode_bar = SegmentBar(
+            r_mode, ["📅 Bulan Ini", "📆 Lalu + Ini"], bg=C_CARD,
+            command=self._on_mode_change)
+        self.mode_bar.pack(side="left", padx=(6, 12))
+        tk.Label(r_mode, text="(default: bulan ini saja)", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         r0 = tk.Frame(fbody, bg=C_CARD)
         r0.pack(fill="x")
@@ -934,14 +989,35 @@ class InSelisihView(tk.Frame):
                   audit_result: dict | None = None):
         self.data = data
         self.in_detail = in_detail
+        # v3.9.27 — MODE HITUNG: simpan KEDUA varian audit dari pipeline
+        # ("df" = penuh incl. bulan lalu; "df_bulan_ini" = bulan berjalan
+        # saja). Pemanggil lama/test tanpa kunci baru → varian bulan-ini
+        # = None (mode "Bulan Ini" jatuh ke varian penuh — kompatibel,
+        # angkanya identik saat memang tak ada data bulan lalu).
         if audit_result:
-            self.audit_df = audit_result.get("df")
-            self.audit_kpi = audit_result.get("kpi") or {}
-            self.audit_desc = audit_result.get("desc") or ""
+            self._audit_full = (audit_result.get("df"),
+                                audit_result.get("kpi") or {},
+                                audit_result.get("desc") or "")
+            if audit_result.get("df_bulan_ini") is not None:
+                self._audit_bulan_ini = (audit_result.get("df_bulan_ini"),
+                                         audit_result.get("kpi_bulan_ini")
+                                         or {},
+                                         audit_result.get("desc_bulan_ini")
+                                         or "")
+            else:
+                self._audit_bulan_ini = None
         else:
-            self.audit_df = None
-            self.audit_kpi = {}
-            self.audit_desc = ""
+            self._audit_full = None
+            self._audit_bulan_ini = None
+        # data baru → mode di-RESET ke default user: "hitung bulan ini
+        # aja" (segment + rentang 1..31; tgl entry di-set supaya konsisten
+        # dgn mode walau sebelumnya user memakai rentang kustom).
+        self._mode_bulan_lalu = False
+        if getattr(self, "mode_bar", None) is not None:
+            self.mode_bar.set_active_silent(0)
+        self.tgl_start_var.set("1")
+        self.tgl_end_var.set("31")
+        self._apply_audit_mode()
         self._cached_base = None
         self._satuan_map = {}
         self._kategori_map = {}
@@ -964,6 +1040,41 @@ class InSelisihView(tk.Frame):
             self._refresh()
         else:
             self._dirty = True
+
+    # ------------------------------------------------ MODE HITUNG (v3.9.27) --
+    def _apply_audit_mode(self):
+        """Pasang audit_df/kpi/desc sesuai MODE aktif + invalidasi cache.
+
+        KRITIS (audit coupling 42-a): _refresh.work() mengunci identitas
+        cache _cached_base pada (data, in_detail) — TIDAK pada audit_df —
+        maka pergantian varian WAJIB me-reset _cached_base manual, kalau
+        tidak tabel diam-diam memakai varian lama (angka basi senyap)."""
+        if self._mode_bulan_lalu or self._audit_bulan_ini is None:
+            src = self._audit_full
+        else:
+            src = self._audit_bulan_ini
+        if src is None:
+            self.audit_df = None
+            self.audit_kpi = {}
+            self.audit_desc = ""
+        else:
+            self.audit_df, self.audit_kpi, self.audit_desc = src
+        self._cached_base = None
+
+    def _on_mode_change(self, idx: int):
+        """v3.9.27 — toggle MODE HITUNG (SegmentBar). idx 0 = 📅 Bulan Ini
+        (default), 1 = 📆 Lalu + Ini. Ganti varian audit + rentang tanggal
+        + refresh (KPI chips ikut varian lewat _render_kpi_chips)."""
+        self._mode_bulan_lalu = (idx == 1)
+        self._apply_audit_mode()
+        self._render_kpi_chips()
+        if self._mode_bulan_lalu:
+            self.tgl_start_var.set("-31")   # semua data bulan lalu (-25..-31)
+            self.tgl_end_var.set("31")
+        else:
+            self.tgl_start_var.set("1")     # v3.8 default berjalan saja
+            self.tgl_end_var.set("31")
+        self._refresh()
 
     def _default_kategori_value(self) -> "str | None":
         """v3.9.22 — nilai KATEGORI 'Deviasi' persis seperti tertulis di
@@ -1002,8 +1113,10 @@ class InSelisihView(tk.Frame):
 
     # ------------------------------------------------------- KPI CHIPS ----
     def _render_kpi_chips(self):
-        """KPI 'EXECUTIVE RECONCILIATION SUMMARY' — dihitung dari data
-        penuh (tidak terpengaruh filter tampilan)."""
+        """KPI 'EXECUTIVE RECONCILIATION SUMMARY' — dihitung dari varian
+        audit AKTIF (v3.9.27: ikut MODE HITUNG — Bulan Ini = bulan
+        berjalan saja; Lalu + Ini = data penuh; tidak terpengaruh filter
+        tampilan)."""
         for w in self.kpi_inner.winfo_children():
             w.destroy()
         if not self.audit_kpi:
@@ -1013,6 +1126,11 @@ class InSelisihView(tk.Frame):
         # FIX C-03: KPI chips ikut format Indonesia (1.234.567, bukan
         # 1,234,567) — konsisten dgn formatter tabel.
         chips = [
+            # v3.9.27 — chip mode di depan: varian audit yang menopang
+            # angka-angka di bawahnya (Bulan Ini = baris negatif dibuang).
+            ("MODE HITUNG",
+             "📅 BULAN INI" if not self._mode_bulan_lalu else "📆 LAU + INI",
+             "#0e7490"),
             ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
             ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
             ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
@@ -1613,9 +1731,32 @@ class InSelisihView(tk.Frame):
             s, e = e, s
             self.tgl_start_var.set(str(s))
             self.tgl_end_var.set(str(e))
+        # v3.9.27 — AUTO-UPGRADE mode: rentang minta tanggal NEGATIF (bulan
+        # lalu) sedangkan mode masih "Bulan Ini" (varian audit tanpa baris
+        # bulan lalu) → pindahkan otomatis ke "📆 Lalu + Ini" supaya baris
+        # bulan lalu benar-benar ADA di varian audit aktif (tanpa ini:
+        # tabel kosong senyap — baris negatif tak pernah ada di varian
+        # bulan-ini). Arah sebaliknya TIDAK otomatis (varian penuh tetap
+        # sah utk rentang 1..31 — perilaku pra-v3.9.27).
+        if s < 0 and not self._mode_bulan_lalu \
+                and self._audit_bulan_ini is not None:
+            self._mode_bulan_lalu = True
+            if getattr(self, "mode_bar", None) is not None:
+                self.mode_bar.set_active_silent(1)
+            self._apply_audit_mode()
+            self._render_kpi_chips()
         self._refresh()
 
     def _reset_filter(self):
+        # v3.9.27 — reset ikut MODE default user: "hitung bulan ini aja"
+        # (varian audit bulan berjalan + rentang 1..31; dulu rentang saja
+        # yang di-reset — kini varian + segmen ikut, konsisten dgn
+        # load_data).
+        self._mode_bulan_lalu = False
+        if getattr(self, "mode_bar", None) is not None:
+            self.mode_bar.set_active_silent(0)
+        self._apply_audit_mode()
+        self._render_kpi_chips()
         self.tgl_start_var.set("1")    # v3.8: 1–31 bulan berjalan saja
         self.tgl_end_var.set("31")
         self.only_selisih_var.set(True)

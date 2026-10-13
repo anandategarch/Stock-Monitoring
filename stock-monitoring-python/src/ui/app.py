@@ -157,7 +157,37 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.26"  # v3.9.26 — POTENSI FLIP FLOP = SELISIH MAGNITUDO KECIL (dibalance dari v3.9.19)
+APP_VERSION = "3.9.27"  # v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET 'Data Base Cek Deviasi'
+# v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
+# hanya hitung bulan ini. Tapi default hitung bulan ini aja" + "kondisi
+# beda tanggal kok menghasilkan data kosong semua? cek file 01.1 CEK
+# STOCK V2.xlsb bagian sheet Data Base Cek Deviasi KOLOM Y ... cek semua
+# logika nya dan bandingkan dengan yang ada di program"):
+# (1) MODE HITUNG tab 📤 Rekap Selisih IN — SegmentBar "MODE HITUNG":
+#     "📅 Bulan Ini" (DEFAULT; audit varian bulan berjalan saja — baris
+#     Tanggal negatif dibuang sebelum engine, mirror sheet
+#     LAPORAN_DEVIASI tgl 1..31; rentang 1..31) | "📆 Lalu + Ini"
+#     (audit varian penuh incl. bulan lalu; rentang -31..31). Kedua
+#     varian dihitung pipeline SEKALI (audit_result + kunci
+#     df_bulan_ini/kpi_bulan_ini/desc_bulan_ini); KPI chips + Saldo +
+#     Hasil Audit ikut varian; ketik tanggal negatif → auto pindah
+#     Lalu+Ini; Reset & data baru → default Bulan Ini.
+# (2) CEK tab Deviasi GR/PCS DI-PORT ULANG PERSIS formula LET sheet
+#     terhide 'Data Base Cek Deviasi' kolom Y (LET KondisiKosong/
+#     Naikturun/HitungManual/TurunDrastis/KondisiACR; simulasi 2.120
+#     baris = label sheet 128/129 eksak): kondisi 2 "Beda Tanggal"
+#     J = KIRIMAN KELUAR (8.BARANG KELUAR; dari 9.ACR — bug port
+#     pertama; bukti MLGPAR/ADONAN GORENG MEKAR sheet='Beda Tanggal',
+#     app lama=''), aturan SO-stale v3.9.22 DIHAPUS (men-flag pasangan
+#     ber-SO_H=0 — 'data kosong' — hingga mendominasi), kondisi 3
+#     "Hitung Manual" stok = W sheet = SO(H-1)+IN−KIRIMAN−PENJUALAN
+#     (dulu sistem+IN−ACR−BK → 266 flag palsu), Stok Seharusnya = W
+#     sheet (dulu SO(H-1)−ACR; 794/1.405 baris beda). Gate sheet
+#     IF(V="","",…) (Total ACR=0 → CEK kosong 47% baris + kaskade
+#     #N/A tanggal di luar cakupan pivot → 'data kosong semua') TIDAK
+#     direplikasi — app mengevaluasi kondisi apa adanya (gejala yang
+#     user pertanyakan = mekanisme tsb; terdokumentasi docstring
+#     deviasi_view).
 # v3.9.26 (user: "potensi flip flop itu harusnya yang selisih nya
 # dikit aja"): ARAH LABEL ANALISA 'Potensi Flip Flop' DIBALIK —
 # audit 41-a (logika hanya di 2 titik komparasi_deviasi_view) +

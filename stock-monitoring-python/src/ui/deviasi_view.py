@@ -5,6 +5,35 @@ deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
 VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
 
+v3.9.27 (user: "Kondisi beda tanggal kok menghasilkan data kosong semua?
+cek file 01.1 CEK STOCK V2.xlsb bagian sheet Data Base Cek Deviasi
+KOLOM Y. Sheet tersebut terhide. Cek semua logika nya dan bandingkan
+dengan yang ada di program.") — CEK DI-PORT ULANG PERSIS formula LET
+sheet terhide tsb. (nama variabel LET terlihat dari defined names
+_xlpm.KondisiKosong/Naikturun/HitungManual/TurunDrastis/KondisiACR;
+simulasi Python 2.120 baris atas nilai sel workbook = label kolom Y
+cached 128/129 eksak — 1 beda = 1 baris gate, lihat bawah):
+- Kondisi 2 "Beda Tanggal": J = "Out H" = KIRIMAN KELUAR (8.BARANG
+  KELUAR app) — DARI 9.ACR/PENJUALAN (bug sejak port pertama; bukti
+  MLGPAR/ADONAN GORENG MEKAR: sheet 'Beda Tanggal', app lama kosong).
+- ATURAN SO-STALE v3.9.22 (tanggal SO nonzero terakhir < H) DIHAPUS —
+  tidak ada di sheet; di data real men-flag pasangan ber-SO_H=0
+  (baris 'data kosong') hingga mendominasi (H≥26: ~semua pasangan).
+- Kondisi 3 "Hitung Manual": stok = W sheet = SO(H-1)+IN_H−KIRIMAN
+  KELUAR_H−PENJUALAN_H (dulu sistem+IN−ACR−BK → 266 flag palsu).
+- Stok Seharusnya (tampil) = W sheet (dulu SO(H-1)−ACR-rata2 → 794/
+  1.405 baris beda dgn sheet; klaim verifikasi v3.9.6 keliru).
+- GATE sheet IF(V="","",…) TIDAK direplikasi (V = Dev to BOM%:
+  Total ACR=0 → V="" → sheet mengosongkan SELURUH CEK — 47% baris
+  workbook; + kaskade #N/A saat tanggal di luar cakupan pivot sumber
+  → 'data kosong semua' — persis gejala yang ditanyakan). App
+  mengevaluasi kondisi apa adanya (lebih informatif; deviasi
+  terdokumentasi di sini).
+- Prioritas & label tak berubah: Promix 04 → RI Balancing →
+  Kosong/Non Aktif → Beda Tanggal → Hitung Manual → Turun Drastis →
+  ACR to BOM (kondisi app-only tetap: dua struktur dokumen di atas
+  heuristik pola angka sheet).
+
 v3.9.24 (klarifikasi user: "jika saat ini bulan oktober maka 1 periode
 nya mulai dari 26 september - 25 oktober nah untuk cek RI balancing
 berarti dengan NO. PO yang bukan bulan september dan oktober") —
@@ -71,7 +100,8 @@ hapus 3 kolom + highlight 2 kolom):
 - KOLOM DIHAPUS dari tampilan GR & PCS (permintaan user): Max Deviasi,
   ACR, Total ACR. HITUNGAN INTERNAL TETAP dihitung persis v3.9.6 —
   Total ACR & ACR tetap dipakai CEK kondisi ke-5 "ACR to BOM", Dev to
-  BOM% (= Deviasi/Total ACR) dan Stok Seharusnya (= SO(H-1) − ACR)
+  BOM% (= Deviasi/Total ACR) dan Stok Seharusnya (v3.9.27 = W sheet:
+  SO(H-1) + IN_H − KIRIMAN KELUAR_H − PENJUALAN_H)
   tetap tampil + tetap masuk snapshot Follow Up (loss_bom).
 - HIGHLIGHT KOLOM Deviasi & SO_H (permintaan user: "highlight kolom
   deviasi dan kolom SO H"): latar lembut #fef3c7 (amber-100) di SEMUA
@@ -103,7 +133,8 @@ dan GR" — mirror sheet DEVIASI GR/PCS workbook asli user):
   · Total ACR (BOM per barang×resto = Σ penjualan 1..H) · Dev to BOM%
   (= Deviasi / Total ACR — "Loss Surplus to BOM" sheet Follow UP;
   formula terverifikasi nilai-per-nilai dari sheet DEVIASI GR asli) ·
-  Stok Seharusnya (= SO(H-1) − ACR — perkiraan stok hari H).
+  Stok Seharusnya (v3.9.27 = W sheet: SO(H-1)+IN_H−KIRIMAN KELUAR_H−
+  PENJUALAN_H — perkiraan stok hari H; dulu SO(H-1)−ACR).
   (v3.9.18: 3 kolom pertama DIHAPUS dari tampilan — lihat atas.)
 - CEK kondisi ke-5 "ACR to BOM": |Deviasi| > Total ACR > 0 → selisih
   stok melebihi pemakaian teoretis sebulan → pasti salah (melengkapi
@@ -375,7 +406,7 @@ class DeviasiView(tk.Frame):
         # tampilan (permintaan user); nilainya TETAP dihitung internal
         # (CEK "ACR to BOM" · Dev to BOM% · Stok Seharusnya ikut pakai).
         ("Dev to BOM%", 85, "e"),      # Deviasi / Total ACR (Loss Surplus to BOM)
-        ("Stok Seharusnya", 90, "e"),  # SO(H-1) − ACR (perkiraan stok hari ini)
+        ("Stok Seharusnya", 90, "e"),  # v3.9.27: W sheet = SO(H-1)+IN−BK−OUT
         ("CEK", 120, "w"),
     ]
 
@@ -1157,7 +1188,6 @@ class DeviasiView(tk.Frame):
         sistem = arr("2.SALDO AKHIR", h)
 
         deviasi = so_h - sistem
-        stok = sistem + in_h - out_h - bk_h
 
         # --- v3.9.6: KATEGORI DEVIASI (mirror sheet DEVIASI GR/PCS asli) ---
         # Total ACR = BOM per (barang, resto, satuan) = Σ penjualan 9.ACR
@@ -1190,7 +1220,15 @@ class DeviasiView(tk.Frame):
         acr = total_acr / h_safe                    # rata-rata penjualan harian
         with np.errstate(divide="ignore", invalid="ignore"):
             dev_to_bom = np.where(total_acr > 0, deviasi / total_acr, 0.0)
-        stok_seharusnya = so_m1 - acr               # SO(H-1) − ACR
+        # v3.9.27 — STOK SEHARUSNYA = W sheet 'Data Base Cek Deviasi':
+        # W = F + I − J − S = SO(H-1) + IN_H − KIRIMAN KELUAR_H −
+        # PENJUALAN_H (dulu SO(H-1) − ACR-rata2 — klaim "terverifikasi"
+        # v3.9.6 keliru: hanya kebetulan sama saat IN=0, KIRIMAN=0 &
+        # penjualan-H = rata2; data real 794/1.405 baris beda, mis.
+        # MLGPAR/ADONAN GORENG: sheet 72.589,5 vs app 83.098,5).
+        # `stok` ( kondisi 3 Hitung Manual) = nilai YANG SAMA — dihitung
+        # di blok CEK di bawah (so_m1 + in_h − bk_h − out_h).
+        stok_seharusnya = so_m1 + in_h - bk_h - out_h
 
         # --- CEK vektorisasi (np.select — urutan kondisi PERSIS versi lama) ---
         barang_s = pivot["Nama Barang"].astype(str)
@@ -1205,37 +1243,48 @@ class DeviasiView(tk.Frame):
         cond_kosong = ((a == "AKTIF") & (so_h < 0)) | \
                       ((a == "NON AKTIF") & (so_h > 0))
 
-        # v3.9.22 — "Beda Tanggal" diperluas: SO STALE (permintaan user:
-        # "Dikolom CEK analisa Beda tanggal kok tidak ada ya" — kondisi
-        # pola lama hampir tak pernah terpicu di data mingguan). Pasangan
-        # dgn tanggal SO NONZERO terakhir < H = SO belum diinput tanggal H
-        # (analisa vs data beda tanggal) → CEK Beda Tanggal. Pasangan tanpa
-        # baris SO positif sama sekali (barang hanya-app) juga terflag.
-        # Terhitung setelah resolusi Promix 04 per-tanggal (v3.9.21) —
-        # prioritas np.select tetap: Promix > Kosong > Beda Tanggal > …
-        so_pos = df[(df["JENIS"] == "1.SO")].assign(_t=tnum)
-        _v = pd.to_numeric(so_pos["NILAI"], errors="coerce").fillna(0)
-        so_pos = so_pos[(so_pos["_t"] >= 1) & (_v != 0)]
-        if so_pos.empty:
-            _last_so_arr = np.full(n, -1, dtype="float64")
-        else:
-            _last_map: dict = {}
-            for _b, _r, _t in zip(so_pos["Nama Barang"].astype(str),
-                                   so_pos["NAMA RESTO"].astype(str),
-                                   so_pos["_t"]):
-                _t = int(_t)
-                _k = (_b, _r)
-                if _last_map.get(_k, -1) < _t:
-                    _last_map[_k] = _t
-            _last_so_arr = np.array(
-                [_last_map.get((b, r), -1)
-                 for b, r in zip(barang_s, pivot["NAMA RESTO"].astype(str))],
-                dtype="float64")
-        cond_tanggal = (((in_h > 0) & (so_h < so_m1) & (out_h == 0)) |
+        # v3.9.27 (user: "Kondisi beda tanggal kok menghasilkan data kosong
+        # semua? cek file 01.1 CEK STOCK V2.xlsb bagian sheet Data Base
+        # Cek Deviasi KOLOM Y ... cek semua logika nya dan bandingkan
+        # dengan yang ada di program") — KONDISI 2 "Beda Tanggal" kini
+        # PORT PERSIS formula LET sheet (audit 42: simulasi 2.120 baris
+        # workbook = label cached Y 128/129 eksak):
+        #   v2 = (I>0 & H<F & J=0) | (H > F+50%F & I=0 & J=0)
+        #   I = "In H" (IN di H) · F = SO(H-1) · H = SO_H ·
+        #   J = "Out H" = KIRIMAN KELUAR di H.
+        # DUA perbaikan vs v3.9.6-v3.9.26:
+        # (1) J dulu dibaca dari 9.ACR (PENJUALAN) — SALAH sumber: sheet
+        #     memakai KIRIMAN KELUAR (= 8.BARANG KELUAR app). Bukti data
+        #     real: MLGPAR/ADONAN GORENG MEKAR — SO 202.000 > 110.289 +
+        #     50%·110.289 dgn IN=0 & KIRIMAN KELUAR=0 → sheet "Beda
+        #     Tanggal", app lama '' (out_h PENJUALAN 37.699,5 ≠ 0 mematikan
+        #     kondisi). Perbaikan ini juga = akar masalah permintaan
+        #     v3.9.22 ("Beda tanggal kok tidak ada ya"): pola asli nyaris
+        #     tak pernah terpicu BUKAN karena datanya tak ada, melainkan
+        #     salah kolom pembanding.
+        # (2) ATURAN SO-STALE v3.9.22 (pasangan dgn tanggal SO nonzero
+        #     terakhir < H) DIHAPUS — TIDAK ada di formula sheet; di data
+        #     real ia menlabel mayoritas pasangan (H=25: 598/1.346 GR;
+        #     H≥26: ~SEMUA) yang justru ber-DATA KOSONG (SO_H=0 → tampil
+        #     '-' — itulah "menghasilkan data kosong semua" yang user
+        #     pertanyakan), menenggelamkan label sheet yang bermakna.
+        # Guard (so_m1 > 0) pada cabang-2 DIPERTAHANKAN (sheet tanpa
+        # guard; data real 2.120 baris: 0 beda — pasangan F=0 & H>0 & I=0
+        # & J=0 tak ada; guard hanya melindungi data sparse app).
+        cond_tanggal = (((in_h > 0) & (so_h < so_m1) & (bk_h == 0)) |
                         ((so_m1 > 0) & (so_h > so_m1 + 0.5 * so_m1) &
-                         (in_h == 0) & (out_h == 0)) |
-                        (_last_so_arr < h))
+                         (in_h == 0) & (bk_h == 0)))
 
+        # v3.9.27 — kondisi 3 "Hitung Manual": STOK kini = W sheet
+        # (= Stok Seharusnya): W = F + I − J − S = SO(H-1) + IN_H −
+        # KIRIMAN KELUAR_H − PENJUALAN_H. Dulu stok = sistem + in_h −
+        # out_h − bk_h (base SALDO AKHIR sistem) → 266 "Hitung Manual"
+        # palsu di data real (base sistem + komponen ganda), mis.
+        # PWKTAM/ADONAN PANGSIT: stok lama = 27.870+0−102.330−0 =
+        # −74.460 → rasio 6,8 > 1,3 padahal W sheet = 553.695−102.330 =
+        # 451.365 → rasio 0,039 — tidak terpicu. Ambang 1,3 tetap
+        # (sel Y1 sheet), termasuk kasus W=0 & H≠0.
+        stok = so_m1 + in_h - bk_h - out_h
         stok_safe = np.where(stok == 0, 1.0, stok)
         ratio = np.abs(so_h - stok) / np.abs(stok_safe)
         cond_manual = np.where(stok == 0, so_h != 0, ratio > 1.3)
@@ -1277,10 +1326,9 @@ class DeviasiView(tk.Frame):
         # design v3.9.19), di ATAS kondisi pola numerik (Kosong/Tanggal/
         # Manual/Drastis/ACR): anomali STRUKTUR DOKUMEN (faktual — RI
         # benar-benar dibuat beda bulan dari PO) lebih pasti & lebih
-        # actionable daripada heuristik pola angka; dan visibilitas:
-        # "Beda Tanggal" SO-stale mendominasi data real (97,8% pasangan
-        # GR) — di urutan terakhir RI Balancing nyaris tak pernah tampil.
-        # Pasangan stale TANPA dokumen balancing tetap "Beda Tanggal".
+        # actionable daripada heuristik pola angka. (v3.9.22-26 aturan
+        # SO-stale pernah mendominasi 97,8% pasangan GR — dihapus
+        # v3.9.27, lihat blok kondisi 2 di atas.)
         _ri_bal_pairs = getattr(self, "_ri_bal_pairs", frozenset())
         cond_ri_bal = np.array(
             [(b, r) in _ri_bal_pairs

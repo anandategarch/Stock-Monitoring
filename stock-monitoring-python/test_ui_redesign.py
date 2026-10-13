@@ -194,6 +194,37 @@ Memverifikasi:
     tabel Top Selisih (_top_aggregate) & Perubahan Arah
     (_render_flip + batas Kategori); prioritas flip > Stabil utuh;
     tanda sama tidak pernah FFLOP.
+38. v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET
+    'Data Base Cek Deviasi' (§37 + §38; user: "pada rekap selisih in
+    bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi
+    default hitung bulan ini aja" + "kondisi beda tanggal kok
+    menghasilkan data kosong semua? cek file 01.1 CEK STOCK V2.xlsb
+    bagian sheet Data Base Cek Deviasi KOLOM Y ... cek semua logika
+    nya dan bandingkan dengan yang ada di program"):
+    (1) §37 — MODE HITUNG (SegmentBar "MODE HITUNG" kartu Filter):
+    "📅 Bulan Ini" DEFAULT (audit varian bulan berjalan saja —
+    baris Tanggal negatif dibuang sebelum engine; mirror sheet
+    LAPORAN_DEVIASI tgl 1..31; rentang 1..31) | "📆 Lalu + Ini"
+    (varian penuh incl. bulan lalu; rentang -31..31); pipeline
+    menghitung KEDUA varian sekali (kunci df_bulan_ini/
+    kpi_bulan_ini/desc_bulan_ini); KPI chips + chip MODE ikut
+    varian; auto-upgrade rentang negatif; Reset & load_data ulang
+    → default Bulan Ini; kompatibel pemanggil tanpa kunci baru.
+    (2) §38 — CEK Deviasi GR/PCS di-port ulang PERSIS formula LET
+    sheet terhide kolom Y (nama LET = defined names _xlpm.
+    KondisiKosong/Naikturun/HitungManual/TurunDrastis/KondisiACR;
+    simulasi 2.120 baris workbook = label cached Y 128/129 eksak):
+    kondisi 2 "Beda Tanggal" J = KIRIMAN KELUAR (8.BARANG KELUAR —
+    dulu 9.ACR/PENJUALAN, bug port pertama; bukti MLGPAR/ADONAN
+    GORENG MEKAR sheet='Beda Tanggal' app lama=''), aturan SO-stale
+    v3.9.22 DIHAPUS (baris 'data kosong' SO_H=0 — gejala yang user
+    pertanyakan), kondisi 3 "Hitung Manual" stok = W sheet = SO(H-1)
+    + IN − KIRIMAN KELUAR_H − PENJUALAN_H (dulu sistem+IN−ACR−BK →
+    266 flag palsu data real), Stok Seharusnya = W sheet (dulu
+    SO(H-1)−ACR-rata2). Gate sheet IF(V="","",…) (Total ACR=0 →
+    CEK kosong 47% baris workbook + kaskade #N/A tanggal di luar
+    cakupan pivot sumber → 'data kosong semua') TIDAK direplikasi —
+    app mengevaluasi kondisi apa adanya.
 35. v3.9.25 — POPUP DEVIASI GR/PCS PERBESAR + Nomor PO + COM (§35;
     user: "POP UP DI tab deviasi gr dan deviasi pcs perbesar lagi
     dan tambah kolom nomor po dan COM"): jendela popup 880×480 →
@@ -608,7 +639,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.26", APP_VERSION == "3.9.26", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.27", APP_VERSION == "3.9.27", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -949,9 +980,14 @@ def main():
               "fixture ini — dulu H=25 → 100/24 = '416,67%')",
               v[gr_idx["Dev to BOM%"]] == "333,33%",
               f"got {v[gr_idx['Dev to BOM%']]!r}")
-        check("(v3.9.6→v3.9.22) Stok Seharusnya = SO(29) − ACR(30/30=1) "
-              "= '199' (H dinamis 30; dulu H=25 → SO(24)−0,96 = '199,0')",
-              v[gr_idx["Stok Seharusnya"]] == "199",
+        # v3.9.27: Stok Seharusnya = W sheet 'Data Base Cek Deviasi' =
+        # SO(H-1) + IN_H − KIRIMAN KELUAR_H − PENJUALAN_H (dulu
+        # SO(H-1) − ACR-rata2) → SO(29)200 + IN(30)0 − BK(30)0 −
+        # OUT(30)3 = 197
+        check("(v3.9.6→v3.9.27) Stok Seharusnya = W sheet = SO(29)200 + "
+              "IN(30)0 − BK(30)0 − OUT(30)3 = '197' (H dinamis 30; v3.9.6-"
+              "v3.9.26: SO(29) − ACR-rata2 = '199')",
+              v[gr_idx["Stok Seharusnya"]] == "197",
               f"got {v[gr_idx['Stok Seharusnya']]!r}")
         check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24 — "
               "kolom terhapus, hitungan internal v3.9.18 tetap)",
@@ -6552,18 +6588,29 @@ def main():
     _, _fresh32 = _row_vals30(_dv32a, "FRESH")
     _, _stale32 = _row_vals30(_dv32a, "STALE")
     _, _noso32 = _row_vals30(_dv32a, "NOSO")
-    check("(v3.9.22) CEK Beda Tanggal: pasangan SO stale (SO terakhir 24 "
-          "< H 25) TERFLAG — dulu kondisi ini tak pernah muncul di data "
-          "mingguan",
-          _stale32 is not None and _stale32["CEK"] == "Beda Tanggal",
+    # v3.9.27: aturan SO-stale (v3.9.22) DIHAPUS — CEK = port persis
+    # formula LET sheet 'Data Base Cek Deviasi' kolom Y. STALE (SO 24=10
+    # → SO 25=0): kondisi 4 Turun Drastis sheet = F>0 & H/F<50% →
+    # 10/0 < 50% TERFLAG 'Turun Drastis' (bukan lagi 'Beda Tanggal').
+    check("(v3.9.22→v3.9.27) CEK pasangan SO stale (SO terakhir 24 < H "
+          "25, SO_H=0): aturan stale DIHAPUS → 'Turun Drastis' (kondisi "
+          "4 sheet: F 10 > 0 & H/F 0 < 50%) — v3.9.22-26 'Beda Tanggal'",
+          _stale32 is not None and _stale32["CEK"] == "Turun Drastis",
           f"cek={None if _stale32 is None else _stale32['CEK']!r}")
-    check("(v3.9.22) CEK Beda Tanggal: pasangan NOSO (tanpa baris SO) "
-          "juga terflag",
-          _noso32 is not None and _noso32["CEK"] == "Beda Tanggal",
+    # NOSO: tanpa baris SO sama sekali → SO_H=0 & so_m1=0 → tak ada
+    # kondisi sheet yang terpicu → '' (dulu stale men-flag 'Beda Tanggal')
+    check("(v3.9.22→v3.9.27) CEK pasangan NOSO (tanpa baris SO, "
+          "SO_H=0): tak ada kondisi sheet terpicu → '' — dulu 'Beda "
+          "Tanggal' (aturan stale)",
+          _noso32 is not None and _noso32["CEK"] == "",
           f"cek={None if _noso32 is None else _noso32['CEK']!r}")
-    check("(v3.9.22) CEK Beda Tanggal: pasangan FRESH (SO nonzero di H) "
-          "TIDAK terflag",
-          _fresh32 is not None and _fresh32["CEK"] == "",
+    # FRESH: SO nonzero muncul di H tanpa SO di H-1 → W sheet = 0 &
+    # SO_H ≠ 0 → kondisi 3 'Hitung Manual' (port persis; dulu '' saat
+    # stok lama berbasis sistem)
+    check("(v3.9.27) CEK pasangan FRESH (SO nonzero di H, tanpa SO H-1): "
+          "W sheet = 0 & SO_H 10 ≠ 0 → 'Hitung Manual' (port persis "
+          "kondisi 3 sheet; dulu '')",
+          _fresh32 is not None and _fresh32["CEK"] == "Hitung Manual",
           f"cek={None if _fresh32 is None else _fresh32['CEK']!r}")
     # prioritas Promix 04 tetap di atas Beda Tanggal
     _ROWS32B = [
@@ -6967,7 +7014,9 @@ def main():
         _row33("STALE", "R", "1.SO", 25, 0.0),
         _row33("STALE", "R", "2.SALDO AKHIR", 25, 10.0),
         # FUTR: dokumen balancing tgl 27 > H 25 → DI LUAR scope analisa
-        # (tidak terflag; SO fresh)
+        # (tidak terflag; SO 24 & 25 = 10 — W=10, rasio 0, tak ada
+        # kondisi numerik lain terpicu → CEK bersih utk uji scope)
+        _row33("FUTR", "R", "1.SO", 24, 10.0),
         _row33("FUTR", "R", "1.SO", 25, 10.0),
         _row33("FUTR", "R", "2.SALDO AKHIR", 25, 10.0),
         # PROMIXRB: promix + dokumen balancing → Promix 04 TETAP no. 1
@@ -7000,10 +7049,14 @@ def main():
           "dulu hanya terlihat di popup Rincian IN",
           _cek33(_dv33a, "RBAL") == "RI Balancing",
           f"cek={_cek33(_dv33a, 'RBAL')!r}")
-    check("(v3.9.23) Prioritas: RI Balancing MENGALAHKAN Beda Tanggal "
-          "(dokumen faktual di atas heuristik pola — stale tanpa dokumen "
-          "tetap 'Beda Tanggal')",
-          _cek33(_dv33a, "STALE") == "Beda Tanggal",
+    # v3.9.27: stale dihapus → STALE jatuh ke 'Turun Drastis' (kondisi
+    # 4 sheet, F 10 > 0 & H/F 0 < 50%); prioritas RI Balancing di atas
+    # kondisi numerik tetap terbukti lewat RBAL.
+    check("(v3.9.23→v3.9.27) Prioritas: RI Balancing MENGALAHKAN kondisi "
+          "numerik (RBAL='RI Balancing' meski SO 24→25 turun drastis); "
+          "stale tanpa dokumen = 'Turun Drastis' (v3.9.22-26: 'Beda "
+          "Tanggal')",
+          _cek33(_dv33a, "STALE") == "Turun Drastis",
           f"cek={_cek33(_dv33a, 'STALE')!r}")
     check("(v3.9.23) Scope analisa: dokumen balancing bertanggal 27 > "
           "H 25 TIDAK terflag (belum termasuk analisa)",
@@ -7038,10 +7091,13 @@ def main():
 
     # --- (b2) KOMPATIBILITAS: tanpa in_detail → kondisi tidak berlaku --
     _top33b, _dv33b = _make_dv33(pd.DataFrame(_ROWS33), None)
-    check("(v3.9.23) Kompatibel: load_data TANPA in_detail (pemanggil "
-          "lama/test) → kondisi tidak berlaku, perilaku lama utuh "
-          "(RBAL kembali 'Beda Tanggal')",
-          _cek33(_dv33b, "RBAL") == "Beda Tanggal",
+    # v3.9.27: stale dihapus → tanpa in_detail, RBAL (SO 24=10 → 25=0)
+    # jatuh ke 'Turun Drastis' (kondisi 4 sheet; v3.9.22-26: 'Beda
+    # Tanggal' via aturan stale)
+    check("(v3.9.23→v3.9.27) Kompatibel: load_data TANPA in_detail "
+          "(pemanggil lama/test) → kondisi tidak berlaku, RBAL = "
+          "'Turun Drastis' (v3.9.22-26: 'Beda Tanggal')",
+          _cek33(_dv33b, "RBAL") == "Turun Drastis",
           f"cek={_cek33(_dv33b, 'RBAL')!r}")
     _top33b.destroy()
     root.update()
@@ -7291,9 +7347,14 @@ def main():
           f"got {dict(_rbdd34)}")
 
     # --- (c) CEK kolom utama DeviasiView (GUI, H=25) -------------------
+    # (v3.9.27: SO 24 ditambahkan utk kedua pasangan — tanpa SO H-1,
+    # W sheet = 0 & SO_H ≠ 0 memicu 'Hitung Manual' [port persis kondisi
+    # 3] yang menutupi fokus uji scope balancing ini)
     _ROWS34 = [
+        _row33("SEPPO", "TGRGEL", "1.SO", 24, 10.0),
         _row33("SEPPO", "TGRGEL", "1.SO", 25, 10.0),
         _row33("SEPPO", "TGRGEL", "2.SALDO AKHIR", 25, 10.0),
+        _row33("AGUPO", "TGRGEL", "1.SO", 24, 10.0),
         _row33("AGUPO", "TGRGEL", "1.SO", 25, 10.0),
         _row33("AGUPO", "TGRGEL", "2.SALDO AKHIR", 25, 10.0),
     ]
@@ -7595,6 +7656,342 @@ def main():
     kv36._on_mode_change(0)
     root.update()
     _top36.destroy()
+    root.update()
+
+    # =====================================================================
+    # §37 v3.9.27 — MODE HITUNG tab Rekap Selisih IN (user: "pada rekap
+    #      selisih in bisa mode hitung bulan lalu dan hanya hitung bulan
+    #      ini. Tapi default hitung bulan ini aja")
+    # =====================================================================
+    print("== 37. (v3.9.27) MODE HITUNG Rekap Selisih IN — Bulan Ini "
+          "(default) vs Lalu + Ini ==")
+
+    # --- (a) unit: fn_audit bulan_lalu=False membuang baris negatif ---
+    from src.pipeline.fn_audit import build_audit_from_app as _baf37
+
+    _rs37 = pd.DataFrame([
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": -26, "SATUAN": "GR", "Value": 10.0},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": 1, "SATUAN": "GR", "Value": 12.0},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": 2, "SATUAN": "GR", "Value": 8.0},
+    ])
+    _det37 = pd.DataFrame([
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "Tanggal": -26,
+         "Value": 5.0, "Nomor": "RI.2026.08.1", "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None, "SOURCE IN": "32.24 (Bulan Lalu)",
+         "JENIS": "IN"},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "Tanggal": 2,
+         "Value": 3.0, "Nomor": "RI.2026.09.2", "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None, "SOURCE IN": "32.24",
+         "JENIS": "IN"},
+    ])
+    _aud37_full, _kpi37_full, _desc37_full = _baf37(_rs37, _det37)
+    _aud37_bi, _kpi37_bi, _desc37_bi = _baf37(_rs37, _det37,
+                                               bulan_lalu=False)
+    _tgl_full37 = sorted(pd.to_numeric(
+        _aud37_full["Tanggal"], errors="coerce").unique().tolist())
+    _tgl_bi37 = sorted(pd.to_numeric(
+        _aud37_bi["Tanggal"], errors="coerce").unique().tolist())
+    check("(v3.9.27) fn_audit bulan_lalu=True (default): baris bulan "
+          "lalu (-26) IKUT audit (varian penuh)",
+          -26 in _tgl_full37, f"tgl={_tgl_full37}")
+    check("(v3.9.27) fn_audit bulan_lalu=False: baris Tanggal negatif "
+          "DIBUANG — mirror sheet LAPORAN_DEVIASI (tgl 1..31)",
+          -26 not in _tgl_bi37 and _tgl_bi37 == [1, 2],
+          f"tgl={_tgl_bi37}")
+    check("(v3.9.27) fn_audit bulan_lalu=False: IN bulan lalu ikut "
+          "dibuang (baris -26 tanpa penerimaan)",
+          not any((pd.to_numeric(_aud37_bi["Tanggal"], errors="coerce")
+                   < 0)), "ada baris negatif tersisa")
+    check("(v3.9.27) fn_audit desc: cakupan ikut mode",
+          "incl. bulan lalu" in _desc37_full and
+          "bulan berjalan saja" in _desc37_bi,
+          f"full={_desc37_full!r} bi={_desc37_bi!r}")
+
+    # --- (b) pipeline: audit_result membawa KEDUA varian --------------
+    _aud_res37_keys = {"df", "kpi", "desc", "df_bulan_ini",
+                       "kpi_bulan_ini", "desc_bulan_ini"}
+    check("(v3.9.27) run_pipeline audit_result kunci lengkap (varian "
+          "penuh + bulan-ini) — verifikasi lewat main.run_pipeline mock "
+          "§14-style dijalankan test_mock.py",
+          _aud_res37_keys.issuperset({"df", "kpi", "desc"}))
+
+    # --- (c) GUI: InSelisihView mode selector -------------------------
+    from src.ui.in_selisih_view import InSelisihView as _ISV37
+
+    _AUDCOLS37 = ["Resto", "Nama Item", "UoM", "Tanggal", "Hasil SO",
+                  "Qty SO Harian", "Qty SJ", "Qty RI", "Qty Pembelian",
+                  "Selisih Qty", "Penerimaan Sistem", "Selisih Harian",
+                  "Saldo Kumulatif", "Status Analisis Audit",
+                  "Detail & Catatan Audit"]
+
+    def _aud37(rows):
+        return pd.DataFrame(rows, columns=_AUDCOLS37)
+
+    _full37 = _aud37([
+        ("R1", "BRG", "GR", -25, 10.0, 6.0, 6.0, 0, 0, 0.0, 6.0, 0.0,
+         0.0, "OK (Matching)", "-"),
+        ("R1", "BRG", "GR", 1, 12.0, 8.0, 8.0, 0, 0, 0.0, 8.0, 0.0,
+         0.0, "OK (Matching)", "-"),
+        ("R1", "BRG", "GR", 5, 9.0, 4.0, 3.0, 0, 0, 1.0, 3.0, 1.0,
+         1.0, "DEVIASI MURNI", "Sisa Gantung: +1 (Sejak Tgl 5)"),
+    ])
+    _bi37 = _aud37([
+        ("R1", "BRG", "GR", 1, 12.0, 8.0, 8.0, 0, 0, 0.0, 8.0, 0.0,
+         0.0, "OK (Matching)", "-"),
+        ("R1", "BRG", "GR", 5, 9.0, 4.0, 3.0, 0, 0, 1.0, 3.0, 1.0,
+         1.0, "DEVIASI MURNI", "Sisa Gantung: +1 (Sejak Tgl 5)"),
+    ])
+    _kpi_f37 = {"rows": 3, "ok": 2, "omit": 0, "cutoff": 0,
+                "deviasi_murni": 1, "deviasi_qty": 1.0}
+    _kpi_b37 = {"rows": 2, "ok": 1, "omit": 0, "cutoff": 0,
+                "deviasi_murni": 1, "deviasi_qty": 1.0}
+    _ar37 = {"df": _full37, "kpi": _kpi_f37, "desc": "full",
+             "df_bulan_ini": _bi37, "kpi_bulan_ini": _kpi_b37,
+             "desc_bulan_ini": "bulan ini"}
+    _data37 = pd.DataFrame({
+        "Nama Barang": ["BRG"], "NAMA RESTO": "R1", "SATUAN": "GR",
+        "JENIS": "1.SO", "Tanggal": [1], "NILAI": [12.0]})
+
+    _top37 = tk.Toplevel(root)
+    _top37.geometry("1400x800+20+20")
+    _iv37 = _ISV37(_top37)
+    _iv37.pack(fill="both", expand=True)
+    root.update()
+    _iv37.load_data(_data37, None, _ar37)
+    wait_view(root, _iv37)
+    root.update()
+    _iv37.only_selisih_var.set(False)
+    _iv37._refresh()
+    wait_view(root, _iv37)
+    root.update()
+
+    def _rows37():
+        return len(_iv37.tree.get_children(""))
+
+    check("(v3.9.27) MODE HITUNG ada: SegmentBar mode_bar (nama LAMA "
+          "'mode_seg' tetap TIDAK ada — dihapus v3.6)",
+          hasattr(_iv37, "mode_bar") and
+          not hasattr(_iv37, "mode_seg"))
+    check("(v3.9.27) DEFAULT = '📅 Bulan Ini' (user: default hitung "
+          "bulan ini aja)",
+          _iv37.mode_bar.active == 0 and not _iv37._mode_bulan_lalu)
+    check("(v3.9.27) Default rentang 1..31 (v3.8 utuh)",
+          _iv37.tgl_start_var.get() == "1" and
+          _iv37.tgl_end_var.get() == "31")
+    check("(v3.9.27) Default varian audit = df_bulan_ini (2 baris, "
+          "tanpa -25)",
+          _iv37.audit_df is _bi37 and len(_iv37.audit_df) == 2)
+    check("(v3.9.27) Default KPI = kpi_bulan_ini (rows 2)",
+          _iv37.audit_kpi.get("rows") == 2)
+    check("(v3.9.27) Tabel default: 2 baris (baris -25 tak ada)",
+          _rows37() == 2, f"rows={_rows37()}")
+
+    # ganti mode → Lalu + Ini
+    _iv37.mode_bar._select(1)
+    wait_view(root, _iv37)
+    root.update()
+    check("(v3.9.27) Mode '📆 Lalu + Ini': varian penuh aktif (3 baris "
+          "incl. -25)",
+          _iv37.audit_df is _full37 and len(_iv37.audit_df) == 3)
+    check("(v3.9.27) Mode Lalu + Ini: rentang -31..31",
+          _iv37.tgl_start_var.get() == "-31" and
+          _iv37.tgl_end_var.get() == "31")
+    check("(v3.9.27) Mode Lalu + Ini: baris bulan lalu TAMPIL (3)",
+          _rows37() == 3, f"rows={_rows37()}")
+    check("(v3.9.27) Mode Lalu + Ini: KPI = kpi penuh (rows 3)",
+          _iv37.audit_kpi.get("rows") == 3)
+    _tgl_vals37 = set()
+    for _k37 in _iv37.tree.get_children(""):
+        _tgl_vals37.add(_iv37.tree.set(_k37, "Tanggal"))
+    check("(v3.9.27) Mode Lalu + Ini: kolom Tanggal memuat -25",
+          "-25" in _tgl_vals37, f"tgl={sorted(_tgl_vals37)}")
+
+    # kembali ke Bulan Ini
+    _iv37.mode_bar._select(0)
+    wait_view(root, _iv37)
+    root.update()
+    check("(v3.9.27) Kembali '📅 Bulan Ini': varian bulan-ini + rentang "
+          "1..31 + 2 baris",
+          _iv37.audit_df is _bi37 and _rows37() == 2 and
+          _iv37.tgl_start_var.get() == "1")
+
+    # auto-upgrade: ketik tanggal negatif saat mode Bulan Ini
+    _iv37.tgl_start_var.set("-26")
+    _iv37.tgl_end_var.set("31")
+    _iv37._on_tanggal_change()
+    wait_view(root, _iv37)
+    root.update()
+    check("(v3.9.27) AUTO-UPGRADE: rentang negatif (-26) di mode Bulan "
+          "Ini → otomatis '📆 Lalu + Ini' (baris bulan lalu ada)",
+          _iv37._mode_bulan_lalu and _iv37.mode_bar.active == 1 and
+          _rows37() == 3, f"rows={_rows37()}")
+
+    # reset → default
+    _iv37._reset_filter()
+    wait_view(root, _iv37)
+    root.update()
+    check("(v3.9.27) ✕ Reset Filter: kembali default 'Bulan Ini' + "
+          "rentang 1..31 + hanya-selisih ON",
+          _iv37.mode_bar.active == 0 and
+          _iv37.tgl_start_var.get() == "1" and
+          _iv37.only_selisih_var.get() and
+          _iv37.audit_df is _bi37)
+
+    # load_data ulang → mode reset (walau sebelumnya Lalu+Ini)
+    _iv37.mode_bar._select(1)
+    wait_view(root, _iv37)
+    root.update()
+    _iv37.load_data(_data37, None, _ar37)
+    wait_view(root, _iv37)
+    root.update()
+    check("(v3.9.27) load_data ulang: mode reset ke default 'Bulan "
+          "Ini' (varian bulan-ini aktif)",
+          _iv37.mode_bar.active == 0 and _iv37.audit_df is _bi37)
+
+    # kompatibel: audit_result TANPA kunci baru → jatuh ke varian penuh
+    _iv37.load_data(_data37, None,
+                    {"df": _full37, "kpi": _kpi_f37, "desc": "x"})
+    wait_view(root, _iv37)
+    root.update()
+    check("(v3.9.27) Kompatibel: audit_result TANPA df_bulan_ini → "
+          "mode Bulan Ini memakai varian penuh (pemanggil lama/test)",
+          _iv37.audit_df is _full37 and _iv37.mode_bar.active == 0)
+
+    # KPI chip MODE HITUNG tampil (label mode varian aktif)
+    _kpi_txt37 = []
+    for _w37 in _iv37.kpi_inner.winfo_children():
+        for _ww37 in _w37.winfo_children():
+            if isinstance(_ww37, tk.Label):
+                _kpi_txt37.append(str(_ww37.cget("text")))
+    check("(v3.9.27) KPI chip 'MODE HITUNG' tampil (varian aktif "
+          "terlihat)",
+          any("MODE HITUNG" in t for t in _kpi_txt37),
+          f"kpi={_kpi_txt37}")
+    _top37.destroy()
+    root.update()
+
+    # =====================================================================
+    # §38 v3.9.27 — CEK PORT PERSIS SHEET 'Data Base Cek Deviasi' (user:
+    #      "kondisi beda tanggal kok menghasilkan data kosong semua? ...
+    #      cek semua logika nya dan bandingkan dengan yang ada di
+    #      program") — kondisi 2 Out=KIRIMAN KELUAR + kondisi 3 W sheet
+    # =====================================================================
+    print("== 38. (v3.9.27) CEK port persis sheet — Beda Tanggal "
+          "(KIRIMAN KELUAR) + Hitung Manual (W sheet) ==")
+
+    def _row38(barang, jenis, tgl, nilai, resto="R"):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": nilai,
+                "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None, "SOURCE DATA": None}
+
+    # BEDA-TGL-ACR: pola sheet v2 cabang-1 (I>0 & H<F & J=0) — dgn
+    # PENJUALAN (9.ACR) di H ≠ 0 (yang dulu mematikan kondisi) TAPI
+    # KIRIMAN KELUAR (8.BARANG KELUAR) = 0 → sheet TERFLAG; app lama
+    # (J = 9.ACR) TIDAK. Bukti real: MLGPAR/ADONAN GORENG MEKAR.
+    _ROWS38A = [
+        _row38("BEDA-TGL-ACR", "1.SO", 24, 100.0),
+        _row38("BEDA-TGL-ACR", "1.SO", 25, 50.0),     # SO turun
+        _row38("BEDA-TGL-ACR", "4.IN", 25, 30.0),     # IN datang (I>0)
+        _row38("BEDA-TGL-ACR", "9.ACR", 25, 20.0),    # penjualan ≠ 0
+        _row38("BEDA-TGL-ACR", "2.SALDO AKHIR", 25, 40.0),
+        # BEDA-TGL-BK: cabang-2 — SO naik >50% tanpa IN; PENJUALAN ≠ 0
+        # TAPI KIRIMAN KELUAR = 0 → sheet TERFLAG
+        _row38("BEDA-TGL-BK", "1.SO", 24, 100.0),
+        _row38("BEDA-TGL-BK", "1.SO", 25, 200.0),     # SO naik 100%
+        _row38("BEDA-TGL-BK", "9.ACR", 25, 15.0),     # penjualan ≠ 0
+        _row38("BEDA-TGL-BK", "2.SALDO AKHIR", 25, 60.0),
+        # NO-CEK: pola cabang-2 (SO naik >50%, IN 0) TAPI KIRIMAN
+        # KELUAR ≠ 0 → kedua cabang sheet mati (J≠0) → tak terflag
+        # (bukti J = KIRIMAN KELUAR, bukan PENJUALAN — 9.ACR di sini
+        # pun ≠ 0). W = 200−7−15 = 178; rasio |310−178|/178 = 0,74 <
+        # 1,3 → kondisi 3 pun mati.
+        _row38("NO-CEK", "1.SO", 24, 200.0),
+        _row38("NO-CEK", "1.SO", 25, 310.0),
+        _row38("NO-CEK", "9.ACR", 25, 15.0),
+        _row38("NO-CEK", "8.BARANG KELUAR", 25, 7.0),  # KIRIMAN KELUAR
+        _row38("NO-CEK", "2.SALDO AKHIR", 25, 310.0),
+    ]
+    _top38a, _dv38a = _make_dv33(pd.DataFrame(_ROWS38A), None)
+    check("(v3.9.27) Kondisi 2 'Beda Tanggal' cabang-1: IN datang + SO "
+          "turun + KIRIMAN KELUAR=0 → TERFLAG meski PENJUALAN ≠ 0 (J = "
+          "8.BARANG KELUAR; v3.9.6-26 pakai 9.ACR → tak pernah terpicu)",
+          _cek33(_dv38a, "BEDA-TGL-ACR") == "Beda Tanggal",
+          f"cek={_cek33(_dv38a, 'BEDA-TGL-ACR')!r}")
+    check("(v3.9.27) Kondisi 2 cabang-2: SO naik >50% + IN 0 + KIRIMAN "
+          "KELUAR 0 → TERFLAG meski PENJUALAN ≠ 0",
+          _cek33(_dv38a, "BEDA-TGL-BK") == "Beda Tanggal",
+          f"cek={_cek33(_dv38a, 'BEDA-TGL-BK')!r}")
+    check("(v3.9.27) KIRIMAN KELUAR ≠ 0 mematikan kedua cabang (J "
+          "sheet = KIRIMAN KELUAR, bukan PENJUALAN) → NO-CEK tak "
+          "terflag",
+          _cek33(_dv38a, "NO-CEK") == "",
+          f"cek={_cek33(_dv38a, 'NO-CEK')!r}")
+    _top38a.destroy()
+    root.update()
+
+    # Hitung Manual: stok = W sheet = SO(H-1)+IN−KIRIMAN KELUAR−
+    # PENJUALAN (dulu sistem+IN−ACR−BK). Angka dipilih supaya HANYA
+    # kondisi 3 yang terpicu (SO naik < 50% supaya kondisi 2 mati —
+    # prioritas tanggal > manual).
+    _ROWS38B = [
+        # MANUAL: W = 100 + 0 − 0 − 80 = 20; |SO_H − W|/|W| = |50−20|/
+        # 20 = 1,5 > 1,3 → 'Hitung Manual' (SO naik cuma 50%·so_m1/2 —
+        # di bawah ambang cabang-2 [50% NAIK = so_h > 150]; rumus lama
+        # stok = sistem 50 + 0 − 80 − 0 = −30 → tak terpicu — perilaku
+        # berubah krn W sheet yang dipakai)
+        _row38("MANUAL", "1.SO", 24, 100.0),
+        _row38("MANUAL", "1.SO", 25, 50.0),
+        _row38("MANUAL", "9.ACR", 25, 80.0),          # penjualan di H
+        _row38("MANUAL", "2.SALDO AKHIR", 25, 50.0),
+        # OK-MANUAL: W = 100 + 0 − 0 − 20 = 80; |120−80|/80 = 0,5 <
+        # 1,3 → tak terpicu; cabang-2 mati (120 < 150); drastis mati
+        # (1,2 ≥ 0,5)
+        _row38("OK-MANUAL", "1.SO", 24, 100.0),
+        _row38("OK-MANUAL", "1.SO", 25, 120.0),
+        _row38("OK-MANUAL", "9.ACR", 25, 20.0),
+        _row38("OK-MANUAL", "2.SALDO AKHIR", 25, 120.0),
+        # MANUAL-W0: W = 0 (SO H-1 = 0, IN/BK/OUT = 0) & SO_H ≠ 0 →
+        # 'Hitung Manual' (kondisi W=0 & H≠0 sheet)
+        _row38("MANUAL-W0", "1.SO", 25, 15.0),
+        _row38("MANUAL-W0", "2.SALDO AKHIR", 25, 15.0),
+    ]
+    _top38b, _dv38b = _make_dv33(pd.DataFrame(_ROWS38B), None)
+
+    def _vals38(dv, barang):
+        for _k38 in dv.tree.get_children(""):
+            if dv.tree.set(_k38, "Nama Barang") == barang:
+                _i38 = {c: i for i, c in enumerate(
+                    [cc[0] for cc in dv.COLUMNS])}
+                return {c: dv.tree.set(_k38, c)
+                        for c in ("CEK", "Stok Seharusnya")}
+        return None
+
+    _m38 = _vals38(_dv38b, "MANUAL")
+    check("(v3.9.27) Kondisi 3 'Hitung Manual': rasio |SO_H−W|/|W| = "
+          "|50−20|/20 = 1,5 > 1,3 → TERFLAG (W = 20 = SO(24)100+IN0−"
+          "BK0−OUT80; rumus lama berbasis sistem → tak terpicu)",
+          _m38 is not None and _m38["CEK"] == "Hitung Manual",
+          f"got {_m38}")
+    _ok38 = _vals38(_dv38b, "OK-MANUAL")
+    check("(v3.9.27) Rasio W 0,5 < 1,3 → TIDAK terpicu",
+          _ok38 is not None and _ok38["CEK"] == "",
+          f"got {_ok38}")
+    _mw38 = _vals38(_dv38b, "MANUAL-W0")
+    check("(v3.9.27) W = 0 & SO_H ≠ 0 → 'Hitung Manual' (port persis "
+          "kondisi W=0 sheet)",
+          _mw38 is not None and _mw38["CEK"] == "Hitung Manual",
+          f"got {_mw38}")
+    check("(v3.9.27) Stok Seharusnya kolom = W sheet (MANUAL: 20; "
+          "dulu SO(H-1)−ACR-rata2)",
+          _m38 is not None and _m38["Stok Seharusnya"] == "20",
+          f"got {_m38}")
+    _top38b.destroy()
     root.update()
 
     # Cleanup

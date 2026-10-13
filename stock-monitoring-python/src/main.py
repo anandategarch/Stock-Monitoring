@@ -48,6 +48,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         APP (rekap SO + BARANG MASUK + IN per tanggal; sheet '29 Rekap
         Barang Masuk' TIDAK dibaca lagi) + kolom SO & hasil audit di tab
         Rekap Selisih IN.
+        v3.9.27: + kunci "df_bulan_ini"/"kpi_bulan_ini"/"desc_bulan_ini" —
+        varian audit BULAN BERJALAN SAJA (baris Tanggal negatif dibuang
+        sebelum engine; mirror sheet LAPORAN_DEVIASI tgl 1..31) utk mode
+        "Hanya Hitung Bulan Ini" tab Rekap Selisih IN (DEFAULT); kunci
+        lama tetap varian PENUH (incl. bulan lalu) utk mode "Hitung
+        Bulan Lalu + Bulan Ini".
     """
     start_time = time.time()
 
@@ -114,6 +120,27 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     audit_df, audit_kpi, audit_desc = build_audit_from_app(
         rekap_so_holder.get("df"), in_detail_df)
     audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
+
+    # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
+    # Selisih IN (user: "pada rekap selisih in bisa mode hitung bulan lalu
+    # dan hanya hitung bulan ini. Tapi default hitung bulan ini aja"):
+    # baris Tanggal negatif (bulan lalu) dibuang sebelum engine → audit
+    # murni bulan berjalan, mirror sheet LAPORAN_DEVIASI (tgl 1..31).
+    # Dihitung SEKALI di pipeline; view memilih varian saat mode diubah
+    # (tanpa recompute). Kunci "df"/"kpi"/"desc" TETAP varian penuh —
+    # pemanggil lama (app.py log + export "Laporan Deviasi (Audit)")
+    # tidak berubah.
+    audit_df2, audit_kpi2, audit_desc2 = build_audit_from_app(
+        rekap_so_holder.get("df"), in_detail_df, bulan_lalu=False)
+    audit_result["df_bulan_ini"] = audit_df2
+    audit_result["kpi_bulan_ini"] = audit_kpi2
+    audit_result["desc_bulan_ini"] = audit_desc2
+    if verbose:
+        n_neg = (pd.to_numeric(audit_df["Tanggal"], errors="coerce") < 0
+                 ).sum() if not audit_df.empty else 0
+        print(f"  Audit (mode Bulan Ini): {len(audit_df2)} rows "
+              f"(varian penuh {len(audit_df)} rows, "
+              f"{int(n_neg)} baris bulan lalu)")
 
     if stop_event is not None and stop_event.is_set():
         raise PipelineStopped("Pipeline dihentikan oleh user setelah Audit")

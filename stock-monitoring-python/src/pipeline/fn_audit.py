@@ -331,15 +331,45 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return out, kpi
 
 
+def _filter_bulan_ini(df: "pd.DataFrame | None") -> "pd.DataFrame | None":
+    """v3.9.27 — buang baris Tanggal NEGATIF (data bulan lalu: rekap lalu
+    25..31 dinegasikan + IN 42.05/32.24 bulan lalu) supaya engine audit
+    berjalan di atas BULAN BERJALAN saja — perilaku identik sheet
+    LAPORAN_DEVIASI workbook user (tgl 1..31, tanpa baris negatif).
+    Baris tanpa Tanggal valid dibiarkan (dibuang lagi oleh
+    build_audit_input dropna)."""
+    if df is None or getattr(df, "empty", True) \
+            or "Tanggal" not in getattr(df, "columns", []):
+        return df
+    t = pd.to_numeric(df["Tanggal"], errors="coerce")
+    return df[(t >= 1) | t.isna()]
+
+
 def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
-                         in_detail_df: Optional[pd.DataFrame]
+                         in_detail_df: Optional[pd.DataFrame],
+                         bulan_lalu: bool = True
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
+
+    v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
+    hanya hitung bulan ini. Tapi default hitung bulan ini aja") — param
+    ``bulan_lalu``:
+    - True  : SEMUA data (default pipeline; baris bulan lalu ber-Tanggal
+              negatif ikut — saldo kumulatif menyambung dari bulan lalu).
+    - False : baris Tanggal negatif DIBUANG sebelum engine → audit murni
+              bulan berjalan (1..31) — mirror sheet LAPORAN_DEVIASI
+              (output macro VBA user = 2.798 pasangan × 31 hari, tanpa
+              tanggal negatif). Pembanding delta SO tanggal 1 jadi SO
+              pertama YANG TERSISA di bulan berjalan (baris bulan lalu
+              tidak ada).
 
     Return (audit_df, kpi, source_desc). audit_df kosong + kpi["rows"]=0
     bila tidak ada data rekap SO / IN sama sekali; source_desc menjelaskan
     asal data (untuk status UI).
     """
+    if not bulan_lalu:
+        rekap_so_df = _filter_bulan_ini(rekap_so_df)
+        in_detail_df = _filter_bulan_ini(in_detail_df)
     raw = build_audit_input(rekap_so_df, in_detail_df)
     if raw.empty:
         return raw, {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
@@ -350,8 +380,9 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
                .notna().sum())
     n_in = int((pd.to_numeric(audit["Penerimaan Sistem"], errors="coerce")
                 .fillna(0) != 0).sum())
+    cakupan = "incl. bulan lalu" if bulan_lalu else "bulan berjalan saja"
     desc = (f"Data app (rekap SO + BM + IN 42.05/32.24/99.01 "
-            f"incl. bulan lalu) · "
+            f"{cakupan}) · "
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
             f"SO {n_so:,} · IN {n_in:,}")
     return audit, kpi, desc

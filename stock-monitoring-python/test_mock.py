@@ -1069,6 +1069,27 @@ def run_test():
     print(f"    Rincian PO: {len(rincian_result)} rows")
     print(f"    IN detail: {len(in_detail_result)} rows")
 
+    # v3.9.27 — audit_result membawa KEDUA varian (mode Hitung Bulan Ini
+    # / Lalu + Ini tab Rekap Selisih IN): kunci lama tetap varian PENUH,
+    # kunci baru = varian bulan berjalan saja (baris Tanggal negatif
+    # dibuang sebelum engine — mirror sheet LAPORAN_DEVIASI).
+    for k in ("df", "kpi", "desc", "df_bulan_ini", "kpi_bulan_ini",
+              "desc_bulan_ini"):
+        assert k in audit_result, f"Missing audit_result key: {k}"
+    _aud_full = audit_result["df"]
+    _aud_bi = audit_result["df_bulan_ini"]
+    assert _aud_full is not None and _aud_bi is not None
+    _t_full = pd.to_numeric(_aud_full["Tanggal"], errors="coerce")
+    _t_bi = pd.to_numeric(_aud_bi["Tanggal"], errors="coerce")
+    assert (_t_bi >= 1).all(), (
+        "varian bulan-ini masih memuat baris Tanggal negatif/bulan lalu")
+    assert not (_t_full < 0).any() or len(_aud_bi) <= len(_aud_full), (
+        "varian bulan-ini tidak boleh lebih besar dari varian penuh")
+    assert audit_result["kpi_bulan_ini"].get("rows") == len(_aud_bi)
+    print(f"    ✓ v3.9.27 audit_result 2 varian: penuh {len(_aud_full)} "
+          f"baris · bulan-ini {len(_aud_bi)} baris (tanpa Tanggal "
+          f"negatif)")
+
     # v3.9.20 — deep-audit pipeline fixes (agent 35-d): LANGKAH 9 tie/NA/
     # strip, fn_4205 lalu anchor resto, resolusi sheet folder lalu, e2e
     run_test_v3920_fixes()
