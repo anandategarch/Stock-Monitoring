@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import Config
 from src.pipeline.append1 import build_append1
-from src.pipeline.fn_audit import build_audit_from_app
+from src.pipeline.fn_audit import build_audit_from_app, extract_po_pending
 from src.pipeline.rincian_po import build_rincian_po
 
 
@@ -54,6 +54,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         "Hanya Hitung Bulan Ini" tab Rekap Selisih IN (DEFAULT); kunci
         lama tetap varian PENUH (incl. bulan lalu) utk mode "Hitung
         Bulan Lalu + Bulan Ini".
+        v3.9.30: Rincian PO 32.43 dibaca SEKALIGUS tanpa filter
+        KATEGORI (semua_out) → pasangan ber-status 'Menunggu diproses'
+        (extract_po_pending) diteruskan ke KEDUA varian audit sebagai
+        penjelas deviasi murni (kolom 'Qty PO Menunggu' + catatan +
+        KPI 'dev_murni_po' — lihat fn_audit._apply_po_menunggu).
     """
     start_time = time.time()
 
@@ -96,7 +101,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         print("  [2/3] Building Rincian PO...")
         print("-" * 60)
 
-    rincian_po_df = build_rincian_po(config)
+    # v3.9.30 — salinan TANPA filter KATEGORI utk audit PO Menunggu
+    # (barang non-DEVIASI-master pun PO-nya ikut terbaca; query utama
+    # tab 🛒 Rincian PO tetap terfilter DEVIASI persis mirror M)
+    po_semua: dict = {}
+    rincian_po_df = build_rincian_po(config, semua_out=po_semua)
+    po_pending_df = extract_po_pending(po_semua.get("df"))
 
     # FIX: check stop_event after Rincian PO build
     if stop_event is not None and stop_event.is_set():
@@ -104,6 +114,9 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
 
     if verbose:
         print(f"\n  Rincian PO result: {len(rincian_po_df)} rows")
+        if po_pending_df is not None and not po_pending_df.empty:
+            print(f"  PO Menunggu diproses (v3.9.30): {len(po_pending_df)} "
+                  f"rows — penjelas deviasi murni di audit")
 
     in_detail_df = in_detail_holder.get("df")
     if in_detail_df is None:
@@ -118,7 +131,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         print("  [3/3] Audit Rekonsiliasi (logika VBA × data app)...")
         print("-" * 60)
     audit_df, audit_kpi, audit_desc = build_audit_from_app(
-        rekap_so_holder.get("df"), in_detail_df)
+        rekap_so_holder.get("df"), in_detail_df,
+        po_pending_df=po_pending_df)
     audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
@@ -131,7 +145,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # pemanggil lama (app.py log + export "Laporan Deviasi (Audit)")
     # tidak berubah.
     audit_df2, audit_kpi2, audit_desc2 = build_audit_from_app(
-        rekap_so_holder.get("df"), in_detail_df, bulan_lalu=False)
+        rekap_so_holder.get("df"), in_detail_df, po_pending_df=po_pending_df,
+        bulan_lalu=False)
     audit_result["df_bulan_ini"] = audit_df2
     audit_result["kpi_bulan_ini"] = audit_kpi2
     audit_result["desc_bulan_ini"] = audit_desc2
@@ -151,6 +166,10 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
               f"Cut-off {k['cutoff']:,} | Valid {k['omit']:,} | "
               f"Deviasi Murni {k['deviasi_murni']:,} | "
               f"Sisa Gantung {k['deviasi_qty']:,.0f}")
+        if k.get("dev_murni_po", 0):
+            print(f"  Deviasi Murni ber-PO Menunggu (v3.9.30): "
+                  f"{k['dev_murni_po']:,} baris — explainable, "
+                  f"sisanya perlu audit fisik")
 
     elapsed = time.time() - start_time
     if verbose:

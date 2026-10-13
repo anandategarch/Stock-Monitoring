@@ -1,6 +1,13 @@
 """
 rincian_po.py — Mirror persis query #"Rincian PO" di M code.
 Rincian Pesanan Pembelian (modul 32.43) → filter KATEGORI = "DEVIASI".
+
+v3.9.30 — param ``semua_out`` (dict opsional): keluaran MERGED TANPA
+filter KATEGORI (semua item, semua status) disimpan ke
+``semua_out["df"]`` — dipakai pipeline utk audit "PO Menunggu"
+(fn_audit.extract_po_pending: status 'Menunggu diproses' per
+resto+barang — penjelas deviasi murni; query utama TETAP difilter
+DEVIASI persis mirror M supaya tab 🛒 Rincian PO tidak berubah).
 """
 import pandas as pd
 
@@ -8,7 +15,7 @@ from .helpers import fn_combine_folder, safe_to_numeric, safe_to_str, to_datetim
 from .queries import query_dbs_kategori
 
 
-def build_rincian_po(config) -> pd.DataFrame:
+def build_rincian_po(config, semua_out: dict | None = None) -> pd.DataFrame:
     """
     Mirror M: shared #"Rincian PO".
 
@@ -16,12 +23,22 @@ def build_rincian_po(config) -> pd.DataFrame:
     Kuantitas, @Harga, Total Harga, Keterangan PO, Status Pesanan Pembelian,
     Tgl/Jam Pembuatan, DBS_Kategori.KATEGORI
     (filtered: DBS_Kategori.KATEGORI = "DEVIASI")
+
+    v3.9.30 ``semua_out``: bila dict diberikan, frame merged SEBELUM
+    filter DEVIASI (semua barang — termasuk non-DEVIASI-master) ikut
+    disimpan ke ``semua_out["df"]``. PO barang non-DEVIASI tidak
+    terbaca query utama; audit PO Menunggu perlu SEMUA pasangan.
+    Return value TIDAK berubah (tetap terfilter DEVIASI).
     """
     # Source = fnCombineFolder(RincianPO, PesananPO, false) + Skip(3) + Skip(1) + Promote
     # = pandas header=4
     sheet_name = config.sheet("PesananPO")
     prom = fn_combine_folder(config.folder("RincianPO"), sheet_name, header_row=4)
     if prom.empty:
+        # v3.9.30 — semua_out tetap terisi (frame kosong) supaya audit
+        # PO Menunggu punya skema konsisten walau folder kosong
+        if semua_out is not None:
+            semua_out["df"] = pd.DataFrame()
         return pd.DataFrame(columns=[
             "Nomor #", "Tanggal", "Cabang PO", "Pemasok", "Nama Barang",
             "Satuan", "Kuantitas", "@Harga", "Total Harga", "Keterangan PO",
@@ -69,6 +86,12 @@ def build_rincian_po(config) -> pd.DataFrame:
     else:
         merged = sel.copy()
         merged["DBS_Kategori.KATEGORI"] = None
+
+    # v3.9.30 — salinan TANPA filter utk audit PO Menunggu (semua
+    # barang; filter DEVIASI query utama memotong barang non-DEVIASI
+    # yang PO-nya justru bisa menunggu diproses)
+    if semua_out is not None:
+        semua_out["df"] = merged
 
     # Filtered = Table.SelectRows(Expanded, each [DBS_Kategori.KATEGORI] = "DEVIASI")
     if "DBS_Kategori.KATEGORI" in merged.columns:

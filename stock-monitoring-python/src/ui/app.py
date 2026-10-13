@@ -157,7 +157,26 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.29"  # v3.9.29 — SOURCE KIRIMAN PER PASANGAN (42.05 Internal/32.24+9901 Eksternal/Campuran) + SCROLL HALUS + KOLOM KATEGORI DEVIASI DIHAPUS
+APP_VERSION = "3.9.30"  # v3.9.30 — PO MENUNGGU DIPROSES (32.43) SEBAGAI PENJELAS DEVIASI MURNI
+# v3.9.30 (user: "ya kerjakan semua dulu dan push to git hub" — konfirmasi
+# atas analisis PO 'Menunggu diproses' 32.43: "PO sudah ada tapi penerimaan
+# belum di-update di sistem → bisa jadi penyebab deviasi murni"): Rincian
+# PO 32.43 kini dibaca SEKALIGUS TANPA filter KATEGORI (build_rincian_po
+# semua_out — barang non-DEVIASI-master pun PO-nya ikut terbaca; query
+# utama tab 🛒 tetap terfilter DEVIASI persis mirror M) → pasangan (resto
+# dari Cabang PO '1370.MLGPAR'→'MLGPAR', barang) ber-Status Pesanan
+# 'Menunggu diproses' (extract_po_pending, case-insensitive) diteruskan ke
+# KEDUA varian audit (fn_audit._apply_po_menunggu — dipasang SETELAH engine
+# VBA, pemanggil lama tanpa PO tak tersentuh): (1) kolom audit 'Qty PO
+# Menunggu' (total qty PO menunggu pasangan — konstanta per pasangan);
+# (2) catatan 'PO Menunggu: PO.xxx (qty 50) (+m)' di-append ke Detail &
+# Catatan Audit HANYA baris DEVIASI MURNI pasangan itu (maks 2 nomor +
+# hitungan sisa) — deviasi murni EXPLAINABLE (akan resolve saat PO
+# diproses jadi RI) vs perlu audit fisik; (3) KPI 'dev_murni_po'. UI tab
+# Rekap Selisih IN: KOLOM BARU 'PO Menunggu' (setelah Saldo; filterable/
+# sortable) + KPI chip 'DEV MURNI · PO MENUNGGU' (amber) + opsi kolom
+# export 'PO Menunggu' (numerik). PO menunggu = keadaan TERKINI (bukan
+# transaksi bertanggal) → tidak difilter varian bulan.
 # v3.9.29 (user: "nama barang + resto yang berasal dari 42.05 harusnya
 # kategori internal. dari 32.24 eksternal dan 9901 juga eksternal ... aku
 # mau ganti" + konfirmasi: campuran→'Campuran'; tanpa IN→kosong; MENGGANTI
@@ -1465,6 +1484,14 @@ class StockMonitorApp:
                 f"Valid {fmt_int_id(audit_kpi['omit'])} · "
                 f"Deviasi Murni {fmt_int_id(audit_kpi['deviasi_murni'])} · "
                 f"Sisa Gantung {fmt_int_id(audit_kpi['deviasi_qty'])}\n")
+            # v3.9.30 — deviasi murni ber-PO 'Menunggu diproses'
+            # (explainable — akan resolve saat PO diproses jadi RI)
+            _n_po = audit_kpi.get("dev_murni_po", 0)
+            if _n_po:
+                self._append_log_batched(
+                    f"  Deviasi Murni ber-PO Menunggu: "
+                    f"{fmt_int_id(_n_po)} baris — explainable, sisanya "
+                    f"perlu audit fisik\n")
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)

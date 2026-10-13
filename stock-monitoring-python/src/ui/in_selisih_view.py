@@ -1,6 +1,28 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.9.30 (user: "cek Rincian PO file 32.43 — ada nama resto+barang
+dgn status pesanan 'Menunggu diproses'; PO sudah ada tapi penerimaan
+belum di-update di sistem → bisa jadi penyebab deviasi murni") — PO
+MENUNGGU SEBAGAI PENJELAS DEVIASI MURNI:
+- KOLOM BARU "PO Menunggu" (setelah Saldo): total qty PO 32.43
+  ber-status 'Menunggu diproses' utk pasangan (resto, barang) baris
+  itu (nilai konstanta per pasangan; '-' bila tak ada). Sumber =
+  kolom 'Qty PO Menunggu' audit_df (fn_audit._apply_po_menunggu —
+  pipeline membaca Rincian PO TANPA filter KATEGORI supaya barang
+  non-DEVIASI-master pun PO-nya ikut; join resto = Cabang PO
+  '1370.MLGPAR' → 'MLGPAR'). Filterable/sortable seperti kolom lain
+  → pasangan ber-PO menunggu bisa diisolasi.
+- Catatan "PO Menunggu: PO.xxx (qty n) (+m)" otomatis di-append ke
+  Catatan Audit baris DEVIASI MURNI pasangan itu (di fn_audit —
+  urutan: catatan VBA | PO Menunggu | catatan app B1-B4) → deviasi
+  murni EXPLAINABLE (menunggu PO diproses → resolve saat RI masuk)
+  vs yang perlu audit fisik terbedakan SEKILAS PANDANG.
+- KPI chip baru "DEV MURNI · PO MENUNGGU" (amber) di antara DEVIASI
+  MURNI & SISA GANTUNG (kpi 'dev_murni_po' = jumlah baris DEVIASI
+  MURNI ber-PO menunggu varian aktif).
+- Kolom ikut ke 💾 Export (opsi "PO Menunggu" di dialog export).
+
 v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
 hanya hitung bulan ini. Tapi default hitung bulan ini aja") — MODE
 HITUNG (SegmentBar "MODE HITUNG", baris pertama kartu Filter):
@@ -152,6 +174,12 @@ from .widgets import (
 )
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
+# v3.9.30 — KOLOM BARU 'PO Menunggu' (setelah Saldo): total qty PO
+# 32.43 ber-status 'Menunggu diproses' utk pasangan (resto, barang)
+# itu — penjelas deviasi murni (PO sudah dibuat, penerimaan/RI belum
+# di-update sistem → selisih gantung akan resolve saat PO diproses).
+# Nilai konstanta per pasangan; baris DEVIASI MURNI pasangan itu juga
+# dapat catatan 'PO Menunggu: PO.xxx (qty n)' (fn_audit, ikut export).
 COLUMNS = [
     ("Resto", 74, "w"),
     ("Tanggal", 64, "e"),
@@ -163,6 +191,7 @@ COLUMNS = [
     ("IN", 96, "e"),               # = Penerimaan Sistem (42.05+32.24+99.01)
     ("Selisih IN", 100, "e"),      # = Barang Masuk − IN
     ("Saldo", 100, "e"),           # saldo kumulatif audit
+    ("PO Menunggu", 96, "e"),      # v3.9.30 — qty PO 32.43 'Menunggu diproses'
     ("Hasil Audit", 150, "w"),     # ← kolom hasil audit (v3.6)
     ("Catatan Audit", 260, "w"),
 ]
@@ -170,7 +199,8 @@ COLUMNS = [
 _ALL_COLS = [c[0] for c in COLUMNS]
 
 # Kolom numerik (utk format & filter nilai)
-_NUM_COLS = {"Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo"}
+_NUM_COLS = {"Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo",
+             "PO Menunggu"}
 
 # Warna status — mirror conditional formatting VBA (soft colors)
 _STATUS_TAG = {
@@ -1136,6 +1166,11 @@ class InSelisihView(tk.Frame):
             ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
             ("CUT-OFF RESOLVED", fmt_int_id(k.get('cutoff', 0)), "#806000"),
             ("DEVIASI MURNI", fmt_int_id(k.get('deviasi_murni', 0)), "#c65911"),
+            # v3.9.30 — deviasi murni yang EXPLAINABLE (pasangannya ada
+            # PO 32.43 'Menunggu diproses' — akan resolve saat PO
+            # diproses jadi RI); sisanya perlu audit fisik.
+            ("DEV MURNI · PO MENUNGGU",
+             fmt_int_id(k.get('dev_murni_po', 0)), "#b45309"),
             ("SISA GANTUNG (NET)",
              fmt_int_id(k.get('deviasi_qty', 0.0)),
              "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
@@ -1253,6 +1288,14 @@ class InSelisihView(tk.Frame):
             "Selisih IN": pd.to_numeric(df["Selisih Harian"],
                                          errors="coerce"),
             "Saldo": pd.to_numeric(df["Saldo Kumulatif"], errors="coerce"),
+            # v3.9.30 — qty PO 'Menunggu diproses' per pasangan (kolom
+            # ditambah fn_audit saat pipeline membawa Rincian PO 32.43;
+            # audit_df lama/test tanpa kolom → NA → tampil '-')
+            "PO Menunggu": (pd.to_numeric(df["Qty PO Menunggu"],
+                                           errors="coerce")
+                             if "Qty PO Menunggu" in df.columns else
+                             pd.Series([pd.NA] * len(df),
+                                       index=df.index, dtype="Float64")),
             "Hasil Audit": df["Status Analisis Audit"].astype(str),
             "Catatan Audit": df["Detail & Catatan Audit"].astype(str),
         })

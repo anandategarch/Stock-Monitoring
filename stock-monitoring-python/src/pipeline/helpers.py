@@ -377,6 +377,32 @@ def to_datetime_robust(series: pd.Series) -> pd.Series:
     return ser_ts.where(serial, rest)
 
 
+def resto_from_cabang_po(val) -> str:
+    """v3.9.30 — Cabang PO Rincian 32.43 → kode resto: bagian setelah
+    titik TERAKHIR ("1370.MLGPAR" → "MLGPAR"; tanpa titik → nilai apa
+    adanya). Satu logika bersama pipeline (fn_audit PO Menunggu) + UI
+    (rincian_po_view._resto_name delegasi ke sini).
+
+    NA-safety (mirror _doc_code_str — dulu `str(val or "")` mengevaluasi
+    bool(pd.NA) → TypeError) + float integral di-stringify TANPA ".0"
+    (1370.0 → "1370"; dulu "1370.0" → rsplit titik terakhir → "0")."""
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, float) and val.is_integer():
+        val = int(val)
+    s = str(val or "").strip()
+    if not s or s.lower() in ("none", "nan"):
+        return ""
+    # float non-integral (mis. 1370.5): perilaku lama dipertahankan —
+    # rsplit titik terakhir ("1370.5" → "5")
+    return s.rsplit(".", 1)[-1].strip() if "." in s else s
+
+
 def date_to_day(series: pd.Series) -> pd.Series:
     """
     Mirror M: Table.TransformColumns(t, {{"Tanggal", Date.Day, Int64.Type}}).

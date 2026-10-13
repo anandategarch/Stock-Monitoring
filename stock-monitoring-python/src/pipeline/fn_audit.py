@@ -48,11 +48,23 @@ Riwayat validasi: engine tervalidasi 100% identik dgn sheet
 LAPORAN_DEVIASI user (output macro asli) pada input yang sama
 (86.738 baris; 25 baris beda terbukti snapshot data lama) — port dipakai
 apa adanya; v3.6 hanya mengganti SUMBER input.
+
+v3.9.30 — PO MENUNGGU DIPROSES (32.43) sebagai PENJELAS DEVIASI MURNI
+(hipotesis user: PO sudah dibuat tapi penerimaan belum di-update di
+sistem → Qty RI = 0 → selisih SO Harian − Penerimaan menumpuk jadi
+saldo gantung). Input opsional po_pending_df (Rincian PO mentah —
+difilter status 'Menunggu diproses' internal) → kolom 'Qty PO
+Menunggu' per pasangan + catatan 'PO Menunggu: PO.xxx (qty n)' di
+baris DEVIASI MURNI + KPI 'dev_murni_po' (deviasi murni explainable
+vs perlu audit fisik). Engine VBA TIDAK diubah — enrichment dipasang
+SETELAH build_audit_rekap; pemanggil lama (tanpa PO) tak tersentuh.
 """
 from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+from .helpers import resto_from_cabang_po
 
 # Kolom kanonik input audit (struktur identik input VBA / sheet 29)
 AUDIT_INPUT_COLUMNS = [
@@ -181,6 +193,12 @@ ST_CUTOFF = "CUT-OFF RESOLVED"
 ST_IN_CUTOFF = "OK (Dalam Cut-off)"
 ST_DEV_MURNI = "DEVIASI MURNI"
 ST_OK = "OK"
+
+# v3.9.30 — status Pesanan Pembelian 32.43 yang berarti PO SUDAH dibuat
+# tapi belum diproses jadi penerimaan (RI) — hipotesis user: penyebab
+# deviasi murni (PO ada, penerimaan belum di-update sistem → Qty RI 0
+# → selisih SO Harian − Penerimaan gantung).
+PO_STATUS_MENUNGGU = "menunggu diproses"
 
 _EPS = 0.0001
 
@@ -345,8 +363,139 @@ def _filter_bulan_ini(df: "pd.DataFrame | None") -> "pd.DataFrame | None":
     return df[(t >= 1) | t.isna()]
 
 
+# =============================================================================
+# v3.9.30 — PO MENUNGGU DIPROSES (32.43) → PENJELAS DEVIASI MURNI
+# (user: "cek Rincian PO file 32.43 — ada nama resto+barang dengan status
+# pesanan 'Menunggu diproses'; PO sudah ada tapi penerimaan belum
+# di-update di sistem → bisa jadi penyebab deviasi murni")
+# =============================================================================
+
+def _po_nomor_str(v) -> str:
+    """Nomor PO → string bersih (None/NaN → ''; float integral tanpa
+    '.0') — mirror _doc_code_str/rincian _resto_name NA-safety."""
+    if v is None:
+        return ""
+    try:
+        if pd.isna(v):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
+def extract_po_pending(po_df: "pd.DataFrame | None") -> pd.DataFrame:
+    """v3.9.30 — subset Rincian PO 32.43 ber-Status Pesanan Pembelian
+    'Menunggu diproses' (case/whitespace-insensitive).
+
+    Input boleh frame MENTAH (hasil merge build_rincian_po tanpa filter
+    KATEGORI) maupun yang sudah terfilter — fungsi idempoten. Kolom
+    status hilang / None / kosong → frame kosong (audit tanpa PO)."""
+    if po_df is None or getattr(po_df, "empty", True):
+        return pd.DataFrame()
+    if "Status Pesanan Pembelian" not in getattr(po_df, "columns", []):
+        return pd.DataFrame()
+    status = po_df["Status Pesanan Pembelian"].fillna("") \
+        .astype(str).str.strip().str.lower()
+    return po_df[status == PO_STATUS_MENUNGGU].copy()
+
+
+def _po_menunggu_pairs(po_pending_df: "pd.DataFrame | None") -> dict:
+    """{(resto, barang): [(nomor, qty), ...]} dari PO menunggu.
+
+    resto = resto_from_cabang_po(Cabang PO '1370.MLGPAR' → 'MLGPAR') —
+    join key identik dgn Resto audit; barang di-strip; nomor & qty
+    defensif (kolom hilang → ''/0.0); urut per nomor; pasangan tanpa
+    resto/barang valid dibuang."""
+    out: dict = {}
+    if po_pending_df is None or getattr(po_pending_df, "empty", True):
+        return out
+    cols = set(getattr(po_pending_df, "columns", []))
+    if not {"Cabang PO", "Nama Barang"} <= cols:
+        return out
+    n = len(po_pending_df)
+    nomors = (po_pending_df["Nomor #"].tolist() if "Nomor #" in cols
+              else [None] * n)
+    qtys = (pd.to_numeric(po_pending_df["Kuantitas"], errors="coerce")
+            .fillna(0.0).tolist() if "Kuantitas" in cols else [0.0] * n)
+    for cab, brg, nomor, qty in zip(po_pending_df["Cabang PO"],
+                                    po_pending_df["Nama Barang"],
+                                    nomors, qtys):
+        resto = resto_from_cabang_po(cab)
+        b = _po_nomor_str(brg)
+        if not resto or not b:
+            continue
+        out.setdefault((resto, b), []).append(
+            (_po_nomor_str(nomor), float(qty)))
+    for lst in out.values():
+        lst.sort()
+    return out
+
+
+def _po_menunggu_note(items) -> str:
+    """Catatan 'PO Menunggu: PO.xxx (qty 50), PO.yyy (qty 30) (+2)' —
+    maks 2 nomor dituliskan, sisanya dihitung (pola B1/B2 catatan
+    audit view v3.9.23)."""
+    shown = [(f"{n} (qty {_fmt_qty(q)})" if n else f"(qty {_fmt_qty(q)})")
+             for n, q in items[:2]]
+    extra = len(items) - len(shown)
+    txt = ", ".join(shown)
+    if extra > 0:
+        txt += f" (+{extra})"
+    return f"PO Menunggu: {txt}"
+
+
+def _join_engine_note(existing: str, note: str) -> str:
+    """Append catatan app ke catatan engine ('-' dianggap kosong) —
+    mirror in_selisih_view._join_notes (VBA tetap PERTAMA, dipisah ' | ')."""
+    s = str(existing).strip() if existing is not None else ""
+    if s in ("", "-", "nan", "None"):
+        return note
+    return f"{s} | {note}"
+
+
+def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
+                       pairs: dict) -> None:
+    """v3.9.30 — perkaya hasil audit dgn info PO Menunggu (mutasi in
+    place — frame fresh milik build_audit_from_app):
+
+    - kolom 'Qty PO Menunggu': TOTAL qty PO menunggu pasangan (nilai
+      konstanta di SEMUA baris pasangan itu — 0 bila tak ada); sumber
+      utk kolom tabel 'PO Menunggu' Rekap Selisih IN + export.
+    - catatan 'PO Menunggu: …' di-append ke 'Detail & Catatan Audit'
+      HANYA baris DEVIASI MURNI yang pasangannya punya PO menunggu —
+      membedakan deviasi murni EXPLAINABLE (menunggu PO diproses →
+      akan resolve saat RI masuk) vs yang perlu audit fisik.
+    - KPI 'dev_murni_po': jumlah baris DEVIASI MURNI ber-PO menunggu.
+    """
+    audit["Qty PO Menunggu"] = 0.0
+    kpi["dev_murni_po"] = 0
+    if not pairs or audit.empty:
+        return
+    resto = audit["Resto"].astype(str).str.strip()
+    item = audit["Nama Item"].astype(str).str.strip()
+    status = audit["Status Analisis Audit"].astype(str)
+    detail = audit["Detail & Catatan Audit"].astype(str).tolist()
+    qty = audit["Qty PO Menunggu"].to_numpy(dtype="float64")
+    n_flagged = 0
+    for i in range(len(audit)):
+        items = pairs.get((resto.iat[i], item.iat[i]))
+        if not items:
+            continue
+        qty[i] = sum(q for _, q in items)
+        if status.iat[i] == ST_DEV_MURNI:
+            detail[i] = _join_engine_note(
+                detail[i], _po_menunggu_note(items))
+            n_flagged += 1
+    audit["Qty PO Menunggu"] = qty
+    audit["Detail & Catatan Audit"] = detail
+    kpi["dev_murni_po"] = n_flagged
+
+
 def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
                          in_detail_df: Optional[pd.DataFrame],
+                         po_pending_df: "pd.DataFrame | None" = None,
                          bulan_lalu: bool = True
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
@@ -363,6 +512,16 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
               pertama YANG TERSISA di bulan berjalan (baris bulan lalu
               tidak ada).
 
+    v3.9.30 — param ``po_pending_df``: Rincian PO 32.43 (frame mentah
+    tanpa filter KATEGORI — difilter status 'Menunggu diproses' internal
+    via extract_po_pending; None = pemanggil lama, output tak tersentuh).
+    Pasangan (resto dari Cabang PO, barang) ber-PO menunggu → kolom
+    'Qty PO Menunggu' + catatan 'PO Menunggu: …' di baris DEVIASI MURNI
+    + KPI 'dev_murni_po' (lihat _apply_po_menunggu). PO menunggu adalah
+    keadaan TERKINI (bukan transaksi bertanggal) → TIDAK difilter
+    varian bulan — kedua varian (Lalu+Ini / Bulan Ini) memakai pasangan
+    PO yang sama.
+
     Return (audit_df, kpi, source_desc). audit_df kosong + kpi["rows"]=0
     bila tidak ada data rekap SO / IN sama sekali; source_desc menjelaskan
     asal data (untuk status UI).
@@ -371,11 +530,20 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
         rekap_so_df = _filter_bulan_ini(rekap_so_df)
         in_detail_df = _filter_bulan_ini(in_detail_df)
     raw = build_audit_input(rekap_so_df, in_detail_df)
+    po_pairs = _po_menunggu_pairs(extract_po_pending(po_pending_df)) \
+        if po_pending_df is not None else None
     if raw.empty:
-        return raw, {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
-                     "deviasi_qty": 0.0, "ok": 0}, \
-            "tidak ada data rekap SO / IN utk audit"
+        kpi0 = {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
+                "deviasi_qty": 0.0, "ok": 0}
+        if po_pairs is not None:
+            # skema konsisten walau tanpa data rekap (kolom + kpi PO ada)
+            raw["Qty PO Menunggu"] = pd.Series(
+                dtype="float64")
+            kpi0["dev_murni_po"] = 0
+        return raw, kpi0, "tidak ada data rekap SO / IN utk audit"
     audit, kpi = build_audit_rekap(raw)
+    if po_pairs is not None:
+        _apply_po_menunggu(audit, kpi, po_pairs)
     n_so = int(pd.to_numeric(raw["Hasil SO"], errors="coerce")
                .notna().sum())
     n_in = int((pd.to_numeric(audit["Penerimaan Sistem"], errors="coerce")
@@ -385,4 +553,8 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
             f"{cakupan}) · "
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
             f"SO {n_so:,} · IN {n_in:,}")
+    if po_pairs:
+        _tot_po = sum(sum(q for _, q in v) for v in po_pairs.values())
+        desc += (f" · PO menunggu {len(po_pairs)} pasangan "
+                 f"({_fmt_qty(_tot_po)} qty)")
     return audit, kpi, desc

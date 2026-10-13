@@ -226,6 +226,21 @@ Memverifikasi:
     (bbox valid saat yscrollcommand), LABEL POOL reuse. (4) Kolom
     KATEGORI dihapus dari tabel Deviasi GR & PCS (COLUMNS 21→20 —
     combobox + filter post-pivot tetap).
+42. v3.9.30 — PO MENUNGGU DIPROSES (32.43) → PENJELAS DEVIASI MURNI
+    (§42 + skema §6/versi diperbarui; user: "cek Rincian PO file 32.43
+    — ada nama resto+barang dengan status pesanan 'Menunggu diproses';
+    PO sudah ada tapi penerimaan belum di-update di sistem → bisa
+    jadi penyebab deviasi murni" + "ya kerjakan semua dulu dan push to
+    git hub"): extract_po_pending (status case-insensitive,
+    idempoten) + build_rincian_po semua_out (frame TANPA filter
+    KATEGORI — barang non-DEVIASI-master ikut; return tetap DEVIASI
+    mirror M) + resto_from_cabang_po (NA-safe, '1370.MLGPAR'→'MLGPAR',
+    1370.0→'1370') + fn_audit._apply_po_menunggu (kolom 'Qty PO
+    Menunggu' pair-level, catatan 'PO Menunggu: PO.xxx (qty n)' HANYA
+    baris DEVIASI MURNI ber-PO menunggu — VBA tetap PERTAMA, KPI
+    'dev_murni_po', desc pasangan) + kompatibel pemanggil tanpa PO +
+    varian Bulan Ini tetap + view kolom 'PO Menunggu' (format ID, 0→
+    '-') + chip 'DEV MURNI · PO MENUNGGU' + export opsi numerik.
 38. v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET
     'Data Base Cek Deviasi' (§37 + §38; user: "pada rekap selisih in
     bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi
@@ -672,7 +687,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.29", APP_VERSION == "3.9.29", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.30", APP_VERSION == "3.9.30", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -1756,10 +1771,12 @@ def main():
     check("Rekap Selisih IN: baris anomali tampil (default Hanya Selisih ≠ 0)",
           len(kids_in) == 4, f"got {len(kids_in)}")
     hdrs = [tree_in.heading(c)["text"] for c in COL_IDS]
-    check("(v3.6) Kolom = 12: + Hasil SO + Saldo + Hasil Audit + Catatan",
+    check("(v3.9.30) Kolom = 13: + Hasil SO + Saldo + PO Menunggu + "
+          "Hasil Audit + Catatan",
           hdrs == ["Resto", "Tanggal", "Nama Barang", "KATEGORI", "Satuan",
                    "Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo",
-                   "Hasil Audit", "Catatan Audit"], f"got {hdrs}")
+                   "PO Menunggu", "Hasil Audit", "Catatan Audit"],
+          f"got {hdrs}")
     check("(v3.6) Tidak ada segment Ringkas|Audit lagi (SATU tabel)",
           not hasattr(iv, "mode_seg"))
     # baris ber-selisih: KOPI tgl3 (BM=100, IN=0, SO=50)
@@ -8275,6 +8292,258 @@ def main():
           _nchild41b <= max(12, _nchild41) and len(_ovl41._pool) > 0,
           f"before={_nchild41} after={_nchild41b} pool={len(_ovl41._pool)}")
     _to41.destroy()
+
+    # ==================================================================
+    # §42 (v3.9.30) — PO MENUNGGU DIPROSES (32.43) → PENJELAS DEVIASI MURNI
+    # ==================================================================
+    print("\n== 42. (v3.9.30) PO MENUNGGU DIPROSES — PENJELAS DEVIASI MURNI ==")
+    from src.pipeline.fn_audit import build_audit_from_app as _baf42
+    from src.pipeline.fn_audit import extract_po_pending as _epp42
+    from src.pipeline.helpers import resto_from_cabang_po as _rfcp42
+
+    # --- (a) resto derivation (NA-safety — satu logika bersama UI) ---
+    check("(v3.9.30) resto_from_cabang_po: '1370.MLGPAR' → 'MLGPAR' "
+          "(join key sama dgn kolom Resto audit)",
+          _rfcp42("1370.MLGPAR") == "MLGPAR")
+    check("(v3.9.30) resto_from_cabang_po: float 1370.0 → '1370' (tanpa "
+          "'.0'); None/pd.NA/blank → ''",
+          _rfcp42(1370.0) == "1370" and _rfcp42(None) == ""
+          and _rfcp42(pd.NA) == "" and _rfcp42("  ") == "")
+
+    # --- (b) extract_po_pending: status match case/whitespace-insensitive
+    _po42 = pd.DataFrame({
+        "Nomor #": ["PO.2026.08.00571", "PO.2026.08.00580",
+                    "PO.2026.08.00599"],
+        "Cabang PO": ["1370.MLGPAR", "1370.SBYKET", "1370.TGRGEL"],
+        "Nama Barang": ["SUSU UHT 1L", "GULA NONDEV", "KOPI BUBUK"],
+        "Kuantitas": [50.0, 300.0, 25.0],
+        "Status Pesanan Pembelian": ["Menunggu diproses",
+                                     "menunggu diproses ", "Selesai"],
+    })
+    _pend42 = _epp42(_po42)
+    check("(v3.9.30) extract_po_pending: 'Menunggu diproses' lolos "
+          "case/whitespace-insensitive; 'Selesai' tidak",
+          len(_pend42) == 2 and
+          set(_pend42["Nomor #"]) == {"PO.2026.08.00571",
+                                      "PO.2026.08.00580"},
+          f"got {len(_pend42)}")
+    check("(v3.9.30) extract_po_pending: idempoten + kolom status hilang/"
+          "None → frame kosong",
+          len(_epp42(_pend42)) == 2 and
+          _epp42(pd.DataFrame({"A": [1]})).empty and _epp42(None).empty)
+
+    # --- (c) build_rincian_po semua_out: TANPA filter KATEGORI ---------
+    import tempfile as _tf42
+
+    import openpyxl as _oxl42
+
+    from src.pipeline.rincian_po import build_rincian_po as _brp42
+
+    _root42 = _tf42.mkdtemp()
+    _po_dir42 = os.path.join(_root42, "po")
+    _kat_dir42 = os.path.join(_root42, "kat")
+    os.makedirs(_po_dir42)
+    os.makedirs(_kat_dir42)
+
+    # mock file 32.43 (4 metadata rows → header row 5, pola test_mock)
+    _wb42 = _oxl42.Workbook()
+    _ws42 = _wb42.active
+    _ws42.title = "#32.43. Rincian Pesanan Pembeli"
+    for _i42 in range(4):
+        _ws42.cell(row=_i42 + 1, column=1, value=f"Meta {_i42}")
+    _hdr42 = ["Nomor #", "Tanggal", "Cabang PO", "Pemasok", "Nama Barang",
+              "Satuan", "Kuantitas", "@Harga", "Total Harga",
+              "Keterangan PO", "Status Pesanan Pembelian",
+              "Tgl/Jam Pembuatan"]
+    for _c42, _h42 in enumerate(_hdr42, 1):
+        _ws42.cell(row=5, column=_c42, value=_h42)
+    _rows42 = [
+        ["PO.2026.08.00571", "2026-09-05", "1370.MLGPAR", "PT KREASI",
+         "SUSU UHT 1L", "PCS", 50.0, 27000, 1350000, "REP",
+         "Menunggu diproses", "2026-09-03 10:00"],
+        ["PO.2026.08.00580", "2026-09-06", "1370.SBYKET", "PT KREASI",
+         "GULA NONDEV", "PCS", 300.0, 12000, 3600000, "REP",
+         "menunggu diproses ", "2026-09-04 10:00"],
+        ["PO.2026.08.00599", "2026-09-07", "1370.MLGPAR", "PT KREASI",
+         "KOPI BUBUK", "PCS", 25.0, 9000, 225000, "REP",
+         "Selesai", "2026-09-05 10:00"],
+    ]
+    for _r42, _row42 in enumerate(_rows42, 6):
+        for _c42, _v42 in enumerate(_row42, 1):
+            _ws42.cell(row=_r42, column=_c42, value=_v42)
+    _wb42.save(os.path.join(_po_dir42, "rincian.xlsx"))
+
+    # mock master DBS Kategori (Sheet1, header row 1) — GULA NONDEV
+    # TIDAK terdaftar (bukti: query terfilter akan memotong barang itu)
+    _wbk42 = _oxl42.Workbook()
+    _wsk42 = _wbk42.active
+    _wsk42.title = "Sheet1"
+    for _c42, _h42 in enumerate(["NAMA BARANG", "KATEGORI", "JENIS",
+                                 "SOURCE KIRIMAN"], 1):
+        _wsk42.cell(row=1, column=_c42, value=_h42)
+    for _r42, (_b42, _k42) in enumerate([("SUSU UHT 1L", "DEVIASI"),
+                                         ("KOPI BUBUK", "DEVIASI")], 2):
+        _wsk42.cell(row=_r42, column=1, value=_b42)
+        _wsk42.cell(row=_r42, column=2, value=_k42)
+    _wbk42.save(os.path.join(_kat_dir42, "kategori.xlsx"))
+
+    class _Cfg42:
+        def folder(self, name):
+            return _po_dir42 if name == "RincianPO" else _kat_dir42
+
+        def sheet(self, name):
+            return "#32.43. Rincian Pesanan Pembeli"
+
+    _semua42 = {}
+    _po_df42 = _brp42(_Cfg42(), semua_out=_semua42)
+    check("(v3.9.30) build_rincian_po: return TETAP terfilter DEVIASI "
+          "(mirror M — tab 🛒 Rincian PO tak berubah)",
+          set(_po_df42["Nama Barang"]) == {"SUSU UHT 1L", "KOPI BUBUK"},
+          f"got {sorted(_po_df42['Nama Barang'].unique())}")
+    check("(v3.9.30) build_rincian_po semua_out: frame TANPA filter — "
+          "barang non-DEVIASI-master (GULA NONDEV) ikut terbaca",
+          len(_semua42["df"]) == 3 and
+          "GULA NONDEV" in set(_semua42["df"]["Nama Barang"]),
+          f"got {len(_semua42['df'])}")
+
+    # PO menunggu dari frame TANPA filter → GULA NONDEV ikut (audit PO
+    # Menunggu tidak kehilangan barang non-DEVIASI-master)
+    _pend_all42 = _epp42(_semua42["df"])
+    check("(v3.9.30) PO menunggu dari semua_out menyertakan barang "
+          "non-DEVIASI-master (bila hanya query terfilter: hilang)",
+          set(_pend_all42["Nama Barang"]) == {"SUSU UHT 1L",
+                                              "GULA NONDEV"},
+          f"got {sorted(_pend_all42['Nama Barang'].unique())}")
+
+    # --- (d) build_audit_from_app: kolom + catatan + KPI + desc -------
+    # skenario: SUSU BM 80 tanpa IN → DEVIASI MURNI +80 (ber-PO menunggu
+    # 50 — explainable); KOPI BM 100 tanpa IN → DEVIASI MURNI +100 (PO
+    # 'Selesai' — BUKAN penjelas, perlu audit fisik)
+    _rk42 = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "JENIS": "SO", "Tanggal": 2, "Value": 100.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "JENIS": "BARANG MASUK", "Tanggal": 2, "Value": 80.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK",
+         "JENIS": "SO", "Tanggal": 3, "Value": 50.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK",
+         "JENIS": "BARANG MASUK", "Tanggal": 3, "Value": 100.0},
+    ])
+    _aud42, _kpi42, _desc42 = _baf42(_rk42, None,
+                                     po_pending_df=_semua42["df"])
+    _susu42 = _aud42[_aud42["Nama Item"] == "SUSU UHT 1L"].iloc[0]
+    _kopi42 = _aud42[_aud42["Nama Item"] == "KOPI BUBUK"].iloc[0]
+    check("(v3.9.30) audit: kolom 'Qty PO Menunggu' (pair-level — 50 utk "
+          "SUSU, 0 utk KOPI tanpa PO menunggu)",
+          "Qty PO Menunggu" in _aud42.columns and
+          float(_susu42["Qty PO Menunggu"]) == 50.0 and
+          float(_kopi42["Qty PO Menunggu"]) == 0.0,
+          f"susu={_susu42.get('Qty PO Menunggu')!r}")
+    check("(v3.9.30) audit: catatan 'PO Menunggu: …' HANYA di baris "
+          "DEVIASI MURNI ber-PO menunggu; catatan VBA tetap PERTAMA "
+          "(dipisah ' | ')",
+          str(_susu42["Detail & Catatan Audit"]).startswith(
+              "Sisa Gantung: +80") and
+          "PO Menunggu: PO.2026.08.00571 (qty 50)" in
+          str(_susu42["Detail & Catatan Audit"]) and
+          "PO Menunggu" not in str(_kopi42["Detail & Catatan Audit"]),
+          f"susu={_susu42['Detail & Catatan Audit']!r}")
+    check("(v3.9.30) audit: KPI 'dev_murni_po' = baris DEVIASI MURNI "
+          "ber-PO menunggu (1 dari 2 — KOPI tanpa penjelas)",
+          _kpi42.get("dev_murni_po") == 1 and
+          _kpi42["deviasi_murni"] == 2,
+          f"got {_kpi42}")
+    check("(v3.9.30) audit: desc menyebut jumlah pasangan PO menunggu",
+          "PO menunggu 2 pasangan" in _desc42, f"got {_desc42!r}")
+
+    # legacy: tanpa po_pending → kolom/kpi TIDAK tersentuh
+    _audl42, _kpil42, _ = _baf42(_rk42, None)
+    check("(v3.9.30) kompatibel: pemanggil TANPA po_pending → tanpa kolom "
+          "'Qty PO Menunggu' & tanpa kunci KPI (output engine murni)",
+          "Qty PO Menunggu" not in _audl42.columns and
+          "dev_murni_po" not in _kpil42)
+
+    # varian Bulan Ini: kolom/kpi PO tetap (PO menunggu = keadaan terkini,
+    # bukan transaksi bertanggal)
+    _audm42, _kpim42, _ = _baf42(_rk42, None,
+                                 po_pending_df=_semua42["df"],
+                                 bulan_lalu=False)
+    check("(v3.9.30) varian Bulan Ini: kolom 'Qty PO Menunggu' & KPI tetap "
+          "terpasang (PO menunggu tak terikat tanggal)",
+          "Qty PO Menunggu" in _audm42.columns and
+          _kpim42.get("dev_murni_po") == 1)
+
+    # --- (e) view: kolom tabel + KPI chip + catatan + format ----------
+    from src.ui.in_selisih_view import InSelisihView as _ISV42
+    _top42 = tk.Toplevel(root)
+    _top42.geometry("1350x700+10+10")
+    _isv42 = _ISV42(_top42)
+    _isv42.pack(fill="both", expand=True)
+    _data42 = pd.DataFrame({
+        "Nama Barang": ["SUSU UHT 1L", "KOPI BUBUK"],
+        "NAMA RESTO": ["MLGPAR", "MLGPAR"],
+        "SATUAN": ["PCS", "PCS"],
+        "KATEGORI": ["DEVIASI", "DEVIASI"],
+        "JENIS": ["1.SO", "1.SO"],
+        "Tanggal": [2, 3],
+        "NILAI": [10.0, 10.0],
+    })
+    _isv42.load_data(_data42, None,
+                     audit_result={"df": _aud42, "kpi": _kpi42,
+                                   "desc": _desc42})
+    _pump30(1.0)
+    _isv42.only_selisih_var.set(False)   # semua baris tampil
+    _isv42._refresh(sync=True)
+    wait_view(root, _isv42)
+    root.update()
+    _vals42 = {}
+    for _k42 in _isv42.tree.get_children(""):
+        _vals42[_isv42.tree.set(_k42, "Nama Barang")] = \
+            _isv42.tree.set(_k42, "PO Menunggu")
+    check("(v3.9.30) view: kolom 'PO Menunggu' tampil — SUSU 50, KOPI '-' "
+          "(0 → '-', format Indonesia)",
+          _vals42.get("SUSU UHT 1L") == "50" and
+          _vals42.get("KOPI BUBUK") == "-",
+          f"got {_vals42}")
+    _cat42 = ""
+    for _k42 in _isv42.tree.get_children(""):
+        if _isv42.tree.set(_k42, "Nama Barang") == "SUSU UHT 1L":
+            _cat42 = _isv42.tree.set(_k42, "Catatan Audit")
+    check("(v3.9.30) view: catatan PO Menunggu (dari engine) tampil di "
+          "kolom Catatan Audit",
+          "PO Menunggu: PO.2026.08.00571 (qty 50)" in _cat42,
+          f"got {_cat42!r}")
+    # KPI chip DEV MURNI · PO MENUNGGU (label + nilai varian aktif)
+    _kpi_txt42 = []
+    for _w42 in _isv42.kpi_inner.winfo_children():
+        for _ww42 in _w42.winfo_children():
+            if isinstance(_ww42, tk.Label):
+                _kpi_txt42.append(str(_ww42.cget("text")))
+    check("(v3.9.30) KPI chip 'DEV MURNI · PO MENUNGGU' tampil dgn nilai "
+          "varian aktif (1)",
+          any("DEV MURNI · PO MENUNGGU" in _t42 for _t42 in _kpi_txt42)
+          and any(_t42 == "1" for _t42 in _kpi_txt42),
+          f"kpi={_kpi_txt42}")
+
+    # --- (f) export: opsi kolom PO Menunggu (numerik) -----------------
+    from src.ui.export_sheets import AUDIT_EXPORT_COLUMNS as _AEC42
+    from src.ui.export_sheets import build_selisih_export_df as _bse42
+    check("(v3.9.30) AUDIT_EXPORT_COLUMNS + 'PO Menunggu' (opsi dialog "
+          "export)",
+          "PO Menunggu" in _AEC42)
+    _base42 = _isv42._cached_base
+    _exp42 = _bse42(_base42, 1, 31, audit_cols=["PO Menunggu"])
+    _exp_s42 = _exp42[_exp42["Nama Barang"] == "SUSU UHT 1L"]
+    _exp_k42 = _exp42[_exp42["Nama Barang"] == "KOPI BUBUK"]
+    check("(v3.9.30) export: kolom PO Menunggu numerik (50; 0 utk tanpa "
+          "PO — NaN tidak bocor)",
+          "PO Menunggu" in _exp42.columns and
+          float(_exp_s42["PO Menunggu"].iloc[0]) == 50.0 and
+          float(_exp_k42["PO Menunggu"].iloc[0]) == 0.0,
+          f"got {_exp42[['Nama Barang', 'PO Menunggu']].to_dict('records')}"
+          if "PO Menunggu" in _exp42.columns else "kolom hilang")
+    _top42.destroy()
+    root.update()
 
     # Cleanup
     root.destroy()

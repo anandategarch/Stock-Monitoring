@@ -1090,6 +1090,25 @@ def run_test():
           f"baris · bulan-ini {len(_aud_bi)} baris (tanpa Tanggal "
           f"negatif)")
 
+    # v3.9.30 — PO MENUNGGU DIPROSES (32.43) ikut audit lewat pipeline:
+    # kolom 'Qty PO Menunggu' + KPI 'dev_murni_po' di KEDUA varian (mock
+    # PO semua ber-status 'Menunggu diproses' dgn Cabang PO
+    # '1370.MLGPAR' → pasangan mock barang MLGPAR ke-match)
+    for _k30 in ("df", "df_bulan_ini"):
+        assert "Qty PO Menunggu" in audit_result[_k30].columns, (
+            f"v3.9.30: Missing 'Qty PO Menunggu' in audit_result[{_k30!r}]")
+    for _k30 in ("kpi", "kpi_bulan_ini"):
+        assert "dev_murni_po" in audit_result[_k30], (
+            f"v3.9.30: Missing KPI 'dev_murni_po' in audit_result[{_k30!r}]")
+    _po_qty_m = pd.to_numeric(_aud_full["Qty PO Menunggu"],
+                              errors="coerce").fillna(0)
+    assert _po_qty_m.sum() > 0, (
+        "v3.9.30: Qty PO Menunggu harus > 0 utk pasangan mock (PO mock "
+        "ber-status 'Menunggu diproses' — join Cabang PO→resto gagal?)")
+    print(f"    ✓ v3.9.30 PO Menunggu di audit: kolom + KPI di kedua "
+          f"varian · dev_murni_po={audit_result['kpi'].get('dev_murni_po')} "
+          f"· qty total {_po_qty_m.sum():.0f}")
+
     # v3.9.20 — deep-audit pipeline fixes (agent 35-d): LANGKAH 9 tie/NA/
     # strip, fn_4205 lalu anchor resto, resolusi sheet folder lalu, e2e
     run_test_v3920_fixes()

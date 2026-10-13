@@ -74,25 +74,11 @@ COL_SRC = {
 def _resto_name(val) -> str:
     """v3.9.19 — Cabang PO → nama resto: bagian setelah titik TERAKHIR
     ("1370.MLGPAR" → "MLGPAR"; tanpa titik → nilai apa adanya).
-    FIX 35-c1 (RISK C1+C2): pd.NA-safe (mirror _doc_code_str — dulu
-    `str(val or "")` mengevaluasi bool(pd.NA) → TypeError) + float
-    integral di-stringify TANPA ".0" (1370.0 → "1370"; dulu "1370.0"
-    → rsplit titik terakhir → "0")."""
-    if val is None:
-        return ""
-    try:
-        if pd.isna(val):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    if isinstance(val, float) and val.is_integer():
-        val = int(val)
-    s = str(val or "").strip()
-    if not s or s.lower() in ("none", "nan"):
-        return ""
-    # float non-integral (mis. 1370.5): perilaku lama dipertahankan —
-    # rsplit titik terakhir ("1370.5" → "5")
-    return s.rsplit(".", 1)[-1].strip() if "." in s else s
+    v3.9.30 — logika diangkat ke pipeline helpers.resto_from_cabang_po
+    (dipakai juga fn_audit PO Menunggu); wrapper ini tetap ada (app.py
+    + test meng-import nama ini)."""
+    from src.pipeline.helpers import resto_from_cabang_po
+    return resto_from_cabang_po(val)
 
 
 class RincianPoView(tk.Frame):

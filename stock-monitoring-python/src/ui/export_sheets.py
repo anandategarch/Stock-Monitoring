@@ -69,7 +69,10 @@ SELISIH_EXPORT_COLUMNS = [
 
 # v3.9: kolom hasil audit OPSIONAL (ditambahkan setelah Selisih bila
 # pengguna mencentangnya di dialog opsi export — sumber kolom = base)
-AUDIT_EXPORT_COLUMNS = ["Hasil Audit", "Saldo", "Catatan Audit"]
+# v3.9.30: + "PO Menunggu" (qty PO 32.43 'Menunggu diproses' per
+# pasangan — penjelas deviasi murni; numerik, NaN/0 → 0.0)
+AUDIT_EXPORT_COLUMNS = ["Hasil Audit", "Saldo", "Catatan Audit",
+                        "PO Menunggu"]
 
 
 # =============================================================================
@@ -139,6 +142,8 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
     for col in audit_cols:
         if col == "Saldo":
             out[col] = _num_col(f, "Saldo").astype("Float64")
+        elif col == "PO Menunggu":   # v3.9.30 — numerik (pair-level)
+            out[col] = _num_col(f, "PO Menunggu").fillna(0.0)
         elif col in f.columns:
             out[col] = f[col].astype(str)
         else:
@@ -174,6 +179,7 @@ def write_selisih_sheet(writer, df: pd.DataFrame,
         "Pembelian by Resto": 18, "Selisih": 14,
         # v3.9: kolom audit opsional
         "Hasil Audit": 22, "Saldo": 12, "Catatan Audit": 40,
+        "PO Menunggu": 14,   # v3.9.30
     }
     for j, col in enumerate(df.columns, start=1):
         ws.column_dimensions[get_column_letter(j)].width = \
