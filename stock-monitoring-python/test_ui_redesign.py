@@ -241,6 +241,29 @@ Memverifikasi:
     'dev_murni_po', desc pasangan) + kompatibel pemanggil tanpa PO +
     varian Bulan Ini tetap + view kolom 'PO Menunggu' (format ID, 0→
     '-') + chip 'DEV MURNI · PO MENUNGGU' + export opsi numerik.
+43. v3.9.31 — KONVERSI SATUAN PO MENUNGGU (KARTON → SATUAN TERKECIL)
+    (§43; user: "Kolom Kuantitas di Rincian PO / file 3243 itu masih
+    satuan besar bukan satuan kecil seperti di sheet barang masuk ...
+    air mineral di rincian po pakai satuan karton dan sheet barang
+    masuk itu botol ini jadi tidak match waktu cari deviasi murni ...
+    solusi ambil konversi per satuan pada 2 file: 32.24 kolom Rasio
+    Satuan dan Satuan; 4205 kolom Rasio Satuan dan #Sat. Kirim" +
+    konfirmasi fallback qty as-is berpenanda + "tampilkan nilai
+    terkonversi"): konversi_satuan (resolve_konversi_kolom kandidat
+    beda versi export → kolom baku SATUAN DOK/RASIO SATUAN/SATUAN
+    TERKECIL; build_konversi_map {(barang, sat-upper): rasio} +
+    terkecil eksplisit 42.05 + inferensi rasio-1; konflik dihitung;
+    rasio<=0/NaN dibuang; lookup exact/implisit-terkecil→1/None) +
+    fn_4205/fn_3224 kolom ekstra (tak ikut pivot append1 — pola
+    SOURCE IN v3.9.29; file lama tanpa kolom → NA, schema konsisten) +
+    append1 konversi_out + main.py wiring KEDUA varian audit +
+    fn_audit._po_menunggu_pairs konversi qty × rasio + label satuan +
+    penanda unconverted ('*' — disetujui user), catatan '(qty 120
+    BOTOL)' / '(qty 5 KARTON*)', kolom 'Qty PO Menunggu' nilai
+    TERKONVERSI (disetujui user), desc 'qty sat. terkecil' + 'N tdk
+    terkonversi', kompatibel pemanggil tanpa peta (perilaku v3.9.30).
+    E2E konversi via test_mock (mock 42.05/32.24 ber-kolom Rasio
+    KG→GR 1000 → PO 12 KG = 12.000 GR + catatan berlabel).
 38. v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET
     'Data Base Cek Deviasi' (§37 + §38; user: "pada rekap selisih in
     bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi
@@ -687,7 +710,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.30", APP_VERSION == "3.9.30", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.31", APP_VERSION == "3.9.31", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -8543,6 +8566,281 @@ def main():
           f"got {_exp42[['Nama Barang', 'PO Menunggu']].to_dict('records')}"
           if "PO Menunggu" in _exp42.columns else "kolom hilang")
     _top42.destroy()
+    root.update()
+
+    # §43 (v3.9.31) — KONVERSI SATUAN PO MENUNGGU (KARTON → TERKECIL)
+    print("\n== 43. (v3.9.31) KONVERSI SATUAN PO MENUNGGU ==")
+    import tempfile as _tf43
+    from datetime import datetime as _dtc43
+
+    import openpyxl as _oxl43
+
+    from src.pipeline.fn_3224 import fn_3224 as _f3224_43
+    from src.pipeline.fn_4205 import fn_4205 as _f4205_43
+    from src.pipeline.fn_audit import _po_menunggu_note as _pmn43
+    from src.pipeline.fn_audit import _po_menunggu_pairs as _pmp43
+    from src.pipeline.fn_audit import build_audit_from_app as _baf43
+    from src.pipeline.konversi_satuan import KOL_RASIO as _KR43
+    from src.pipeline.konversi_satuan import KOL_SATUAN_DOK as _KSD43
+    from src.pipeline.konversi_satuan import KOL_TERKECIL as _KT43
+    from src.pipeline.konversi_satuan import build_konversi_map as _bkm43
+    from src.pipeline.konversi_satuan import lookup_rasio as _lr43
+    from src.pipeline.konversi_satuan import resolve_konversi_kolom as _rkk43
+
+    # --- (a) resolve_konversi_kolom: kandidat beda versi export ------
+    check("(v3.9.31) resolve 4205: '#Sat. Kirim' utama; fallback "
+          "'Satuan' (salinan lama workbook)",
+          _rkk43(["#Sat. Kirim", "Rasio Satuan", "#Sat. Terkecil"], "4205") ==
+          {_KSD43: "#Sat. Kirim", _KR43: "Rasio Satuan",
+           _KT43: "#Sat. Terkecil"} and
+          _rkk43(["Satuan", "Rasio Satuan"], "4205") ==
+          {_KSD43: "Satuan", _KR43: "Rasio Satuan"})
+    check("(v3.9.31) resolve 3224: 'Satuan' + 'Rasio Satuan' (kolom "
+          "terkecil biasanya tak ada di export 32.24)",
+          _rkk43(["Tanggal", "Satuan", "Rasio Satuan"], "3224") ==
+          {_KSD43: "Satuan", _KR43: "Rasio Satuan"})
+    check("(v3.9.31) resolve: kolom konversi tak ada → dict kosong "
+          "(file lama — schema output tetap konsisten via kolom NA)",
+          _rkk43(["Tanggal", "Kts (Unit#1)"], "4205") == {} and
+          _rkk43(None, "3224") == {})
+
+    # --- (b) build_konversi_map + lookup_rasio ------------------------
+    _in43 = pd.DataFrame({
+        "Nama Barang": ["AIR MINERAL BOTOL (V.20)", "AIR MINERAL BOTOL (V.20)",
+                        "GULA (V.20)", "MIE (V.20)"],
+        _KSD43: ["karton ", "BOTOL", "KARUNG", "KANTONG"],
+        _KR43: [24, 1, 50, 12],
+        _KT43: ["BOTOL", "BOTOL", None, None],
+    })
+    _km43 = _bkm43(_in43)
+    check("(v3.9.31) peta: key (barang, satuan-STRIP+UPPER) — 'karton ' "
+          "→ 'KARTON'; terkecil dari kolom 42.05 + inferensi baris "
+          "rasio-1 (MIE KANTONG=12 ≠1 → terkecil kosong)",
+          _km43["rasio"][("AIR MINERAL BOTOL (V.20)", "KARTON")] == 24.0 and
+          _km43["terkecil"]["AIR MINERAL BOTOL (V.20)"] == "BOTOL" and
+          _km43["terkecil"].get("MIE (V.20)") is None,
+          f"got {_km43}")
+    check("(v3.9.31) lookup: exact (case-insensitive) / implisit "
+          "satuan==terkecil → rasio 1 / tak ketemu → (None, terkecil)",
+          _lr43(_km43, "AIR MINERAL BOTOL (V.20)", "Karton")[0] == 24.0 and
+          _lr43(_km43, "AIR MINERAL BOTOL (V.20)", "botol")[0] == 1.0 and
+          _lr43(_km43, "AIR MINERAL BOTOL (V.20)", "DUS")[0] is None and
+          _lr43(None, "X", "Y") == (None, None))
+    _km43b = _bkm43(pd.DataFrame({
+        "Nama Barang": ["TEA NAGA (V.20)", "TEA NAGA (V.20)", "TEA NAGA (V.20)"],
+        _KSD43: ["BALL", "KARTON", "KARTON"],
+        _KR43: [1, 15000, 99999],
+        _KT43: [None, None, None],
+    }))
+    check("(v3.9.31) peta: konflik rasio (barang, satuan sama) dihitung "
+          "— nilai PERTAMA dipakai; baris rasio-1 → terkecil (BALL)",
+          _km43b["n_conflict"] == 1 and
+          _km43b["rasio"][("TEA NAGA (V.20)", "KARTON")] == 15000.0 and
+          _km43b["terkecil"]["TEA NAGA (V.20)"] == "BALL")
+    _bad43 = _bkm43(pd.DataFrame({
+        "Nama Barang": ["X", "X"],
+        _KSD43: ["PCS", "PCS"],
+        _KR43: [0, float("nan")],
+    }))
+    check("(v3.9.31) peta: rasio 0 / NaN dibuang + input kosong/None → "
+          "peta kosong (defensif)",
+          _bad43["n_rasio"] == 0 and _bkm43(None)["n_rasio"] == 0 and
+          _bkm43(pd.DataFrame())["n_rasio"] == 0)
+
+    # --- (c) fn_4205 / fn_3224: kolom baku dari file mock -------------
+    _dir43 = _tf43.mkdtemp(prefix="sk43_")
+    _wb43 = _oxl43.Workbook()
+    _ws43 = _wb43.active
+    _ws43.title = "#42.05. Rincian Pemindahan Bara"
+    _hdr43 = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima",
+              "Nama Barang", "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT",
+              "#Sat. Kirim", "Rasio Satuan", "#Sat. Terkecil"]
+    for _i43 in range(4):
+        _ws43.cell(row=_i43 + 1, column=1, value=f"Metadata {_i43 + 1}")
+    for _c43, _h43 in enumerate(_hdr43, 1):
+        _ws43.cell(row=5, column=_c43, value=_h43)
+    _row43 = ["IT.2026.09.0001", "GUDANG BANDUNG (MLGPAR)",
+              _dtc43(2026, 9, 5), "AIR MINERAL BOTOL (V.20)", 120,
+              _dtc43(2026, 9, 4, 10, 30), "KARTON", 24, "BOTOL"]
+    for _c43, _v43 in enumerate(_row43, 1):
+        _ws43.cell(row=6, column=_c43, value=_v43)
+    _wb43.save(os.path.join(_dir43, "pemindahan.xlsx"))
+    _wb43.close()
+    _df43 = _f4205_43(_dir43)
+    check("(v3.9.31) fn_4205: kolom konversi terbaca → dibakukan SATUAN "
+          "DOK / RASIO SATUAN / SATUAN TERKECIL (typed)",
+          len(_df43) == 1 and
+          str(_df43[_KSD43].iloc[0]).strip() == "KARTON" and
+          float(_df43[_KR43].iloc[0]) == 24.0 and
+          str(_df43[_KT43].iloc[0]).strip() == "BOTOL" and
+          float(_df43["Value"].iloc[0]) == 120.0,
+          f"got {_df43.to_dict('records')}")
+
+    # file TANPA kolom konversi (versi lama) → schema tetap (kolom NA)
+    _dir43b = _tf43.mkdtemp(prefix="sk43b_")
+    _wb43b = _oxl43.Workbook()
+    _ws43b = _wb43b.active
+    _ws43b.title = "#42.05. Rincian Pemindahan Bara"
+    _hdr43b = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima",
+               "Nama Barang", "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"]
+    for _i43 in range(4):
+        _ws43b.cell(row=_i43 + 1, column=1, value=f"Metadata {_i43 + 1}")
+    for _c43, _h43 in enumerate(_hdr43b, 1):
+        _ws43b.cell(row=5, column=_c43, value=_h43)
+    _row43b = ["IT.2026.09.0002", "GUDANG BANDUNG (MLGPAR)",
+               _dtc43(2026, 9, 6), "AIR MINERAL BOTOL (V.20)", 240,
+               _dtc43(2026, 9, 5, 10, 30)]
+    for _c43, _v43 in enumerate(_row43b, 1):
+        _ws43b.cell(row=6, column=_c43, value=_v43)
+    _wb43b.save(os.path.join(_dir43b, "pemindahan.xlsx"))
+    _wb43b.close()
+    _df43b = _f4205_43(_dir43b)
+    check("(v3.9.31) fn_4205 file lama TANPA kolom konversi → kolom baku "
+          "tetap ada (NA) — concat query_in schema konsisten",
+          len(_df43b) == 1 and _KSD43 in _df43b.columns and
+          _KR43 in _df43b.columns and _KT43 in _df43b.columns and
+          _df43b[_KSD43].isna().all(),
+          f"cols={list(_df43b.columns)}")
+
+    # fn_3224: 'Satuan' + 'Rasio Satuan' (terkecil tak ada → NA)
+    _dir43c = _tf43.mkdtemp(prefix="sk43c_")
+    _wb43c = _oxl43.Workbook()
+    _ws43c = _wb43c.active
+    _ws43c.title = "#32.24. Rincian Penerimaan Bara"
+    _hdr43c = ["Tanggal", "Kts (Unit#1)", "Nama Barang", "Nama Gudang",
+               "Nomor # RI", "Nomor # PO", "Tgl/Jam Pembuatan",
+               "Satuan", "Rasio Satuan"]
+    for _i43 in range(4):
+        _ws43c.cell(row=_i43 + 1, column=1, value=f"Metadata {_i43 + 1}")
+    for _c43, _h43 in enumerate(_hdr43c, 1):
+        _ws43c.cell(row=5, column=_c43, value=_h43)
+    _row43c = [_dtc43(2026, 9, 5), 240, "GULA (V.20)",
+               "GUDANG MALANG (MLGPAR)", "RI.2026.09.0001",
+               "PO.2026.09.0001", _dtc43(2026, 9, 3, 16, 52),
+               "KARUNG", 50]
+    for _c43, _v43 in enumerate(_row43c, 1):
+        _ws43c.cell(row=6, column=_c43, value=_v43)
+    _wb43c.save(os.path.join(_dir43c, "ri.xlsx"))
+    _wb43c.close()
+    _df43c = _f3224_43(_dir43c, "berjalan")
+    check("(v3.9.31) fn_3224: 'Satuan'+'Rasio Satuan' terbaca → SATUAN "
+          "DOK / RASIO SATUAN (barang eksternal — konversi hanya dari "
+          "32.24); SATUAN TERKECIL NA",
+          len(_df43c) == 1 and
+          str(_df43c[_KSD43].iloc[0]).strip() == "KARUNG" and
+          float(_df43c[_KR43].iloc[0]) == 50.0 and
+          _df43c[_KT43].isna().all(),
+          f"got {_df43c.to_dict('records')}")
+
+    # --- (d) _po_menunggu_pairs: konversi + label + fallback ----------
+    _po43 = pd.DataFrame({
+        "Nomor #": ["PO.2026.09.5001", "PO.2026.09.5002",
+                    "PO.2026.09.5003"],
+        "Cabang PO": ["1370.MLGPAR", "1370.MLGPAR", "1370.MLGPAR"],
+        "Nama Barang": ["AIR MINERAL BOTOL (V.20)",
+                        "AIR MINERAL BOTOL (V.20)", "GULA (V.20)"],
+        "Satuan": ["KARTON", "DUS", "KARUNG"],
+        "Kuantitas": [5.0, 3.0, 2.0],
+        "Status Pesanan Pembelian": ["Menunggu diproses"] * 3,
+    })
+    _pairs43 = _pmp43(_po43, _km43)
+    _air43 = _pairs43[("MLGPAR", "AIR MINERAL BOTOL (V.20)")]
+    check("(v3.9.31) pairs: qty × rasio → satuan terkecil dgn label "
+          "(5 KARTON × 24 = 120 BOTOL); GULA 2 KARUNG × 50 = 100 "
+          "(terkecil tak diketahui → label kosong)",
+          _air43[0][1] == 120.0 and _air43[0][2] == "BOTOL" and
+          not _air43[0][3] and
+          _pairs43[("MLGPAR", "GULA (V.20)")][0][1] == 100.0 and
+          _pairs43[("MLGPAR", "GULA (V.20)")][0][2] == "",
+          f"got {_pairs43}")
+    check("(v3.9.31) pairs fallback: satuan PO tak ada di peta (DUS) → "
+          "qty AS-IS + label satuan PO + penanda unconverted "
+          "(disetujui user)",
+          _air43[1][1] == 3.0 and _air43[1][2] == "DUS" and
+          _air43[1][3] is True,
+          f"got {_air43}")
+    _note43 = _pmn43(_air43)
+    check("(v3.9.31) catatan: '(qty 120 BOTOL)' berlabel + fallback "
+          "'(qty 3 DUS*)' berpenanda '*'",
+          _note43 == ("PO Menunggu: PO.2026.09.5001 (qty 120 BOTOL), "
+                      "PO.2026.09.5002 (qty 3 DUS*)"),
+          f"got {_note43!r}")
+    _note43b = _pmn43(_pmp43(_po43)[("MLGPAR", "AIR MINERAL BOTOL (V.20)")])
+    check("(v3.9.31) kompatibel: TANPA peta (konversi=None) → format "
+          "v3.9.30 persis '(qty 5)' (tanpa label/penanda)",
+          _note43b == "PO Menunggu: PO.2026.09.5001 (qty 5), "
+                      "PO.2026.09.5002 (qty 3)",
+          f"got {_note43b!r}")
+
+    # --- (e) build_audit_from_app dgn konversi: kolom + catatan + desc
+    _rk43 = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "AIR MINERAL BOTOL (V.20)",
+         "JENIS": "SO", "Tanggal": 2, "Value": 100.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "AIR MINERAL BOTOL (V.20)",
+         "JENIS": "BARANG MASUK", "Tanggal": 2, "Value": 120.0},
+    ])
+    _aud43, _kpi43, _desc43 = _baf43(_rk43, None, po_pending_df=_po43,
+                                     konversi=_km43)
+    _air43r = _aud43[_aud43["Nama Item"] == "AIR MINERAL BOTOL (V.20)"]
+    check("(v3.9.31) audit: kolom 'Qty PO Menunggu' = nilai TERKONVERSI "
+          "(disetujui user 'tampilkan nilai terkonversi' — 123 BOTOL: "
+          "120 konversi + 3 fallback)",
+          "Qty PO Menunggu" in _aud43.columns and
+          float(_air43r["Qty PO Menunggu"].iloc[0]) == 123.0,
+          f"got {_air43r['Qty PO Menunggu'].tolist()}")
+    check("(v3.9.31) audit: catatan DEVIASI MURNI berlabel satuan "
+          "terkecil + penanda fallback",
+          "PO Menunggu: PO.2026.09.5001 (qty 120 BOTOL), "
+          "PO.2026.09.5002 (qty 3 DUS*)" in
+          str(_air43r["Detail & Catatan Audit"].iloc[0]),
+          f"got {_air43r['Detail & Catatan Audit'].iloc[0]!r}")
+    check("(v3.9.31) audit: desc 'qty sat. terkecil' + hitungan "
+          "'tdk terkonversi' (transparansi fallback)",
+          "qty sat. terkecil" in _desc43 and
+          "1 tdk terkonversi" in _desc43,
+          f"got {_desc43!r}")
+    _aud43l, _kpil43, _descl43 = _baf43(_rk43, None, po_pending_df=_po43)
+    check("(v3.9.31) kompatibel: pemanggil TANPA konversi → qty satuan "
+          "PO mentah (5+3+2=10 utk SEMUA pasangan) + desc format lama "
+          "(perilaku v3.9.30)",
+          float(_aud43l[_aud43l["Nama Item"] ==
+                        "AIR MINERAL BOTOL (V.20)"]
+                ["Qty PO Menunggu"].iloc[0]) == 8.0 and
+          "qty sat. terkecil" not in _descl43 and
+          "(10 qty)" in _descl43,
+          f"got {_descl43!r}")
+
+    # --- (f) view: kolom PO Menunggu menampilkan nilai terkonversi ---
+    from src.ui.in_selisih_view import InSelisihView as _ISV43
+    _top43 = tk.Toplevel(root)
+    _top43.geometry("1350x700+10+10")
+    _isv43 = _ISV43(_top43)
+    _isv43.pack(fill="both", expand=True)
+    _data43 = pd.DataFrame({
+        "Nama Barang": ["AIR MINERAL BOTOL (V.20)"],
+        "NAMA RESTO": ["MLGPAR"],
+        "SATUAN": ["BOTOL"],
+        "KATEGORI": ["DEVIASI"],
+        "JENIS": ["1.SO"],
+        "Tanggal": [2],
+        "NILAI": [10.0],
+    })
+    _isv43.load_data(_data43, None,
+                     audit_result={"df": _aud43, "kpi": _kpi43,
+                                   "desc": _desc43})
+    _pump30(1.0)
+    _isv43.only_selisih_var.set(False)
+    _isv43._refresh(sync=True)
+    wait_view(root, _isv43)
+    root.update()
+    _val43 = ""
+    for _k43 in _isv43.tree.get_children(""):
+        _val43 = _isv43.tree.set(_k43, "PO Menunggu")
+    check("(v3.9.31) view: kolom 'PO Menunggu' = 123 (nilai terkonversi "
+          "BOTOL — format Indonesia) di samping Selisih/Saldo satuan "
+          "terkecil",
+          _val43 == "123", f"got {_val43!r}")
+    _top43.destroy()
     root.update()
 
     # Cleanup

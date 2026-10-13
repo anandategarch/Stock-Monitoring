@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from .fn_running_stock import fn_running_stock_grouped
+from .konversi_satuan import build_konversi_map
 from .queries import (
     query_4217,
     query_barang_keluar,
@@ -231,7 +232,8 @@ def _source_kiriman_per_pair(in_df: "pd.DataFrame | None") -> pd.DataFrame:
 
 
 def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
-                 rekap_so_out: dict | None = None) -> pd.DataFrame:
+                 rekap_so_out: dict | None = None,
+                 konversi_out: dict | None = None) -> pd.DataFrame:
     """
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
@@ -244,6 +246,13 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     v3.6 — rekap_so_out: dict opsional; diisi rekap mentah long
     (JENIS 'SO' / 'BARANG MASUK', Tanggal -25..-31 + 1..31) — input
     Audit Rekonsiliasi dari data app (fn_audit.build_audit_input).
+    v3.9.31 — konversi_out: dict opsional; diisi peta konversi satuan
+    {(barang, satuan): rasio} + {barang: terkecil} dari baris IN
+    (kolom SATUAN DOK / RASIO SATUAN / SATUAN TERKECIL fn_4205+fn_3224;
+    konversi_satuan.build_konversi_map) — dipakai fn_audit utk
+    konversi qty PO 32.43 (satuan PO karton) ke satuan terkecil
+    (user: "air mineral di rincian po pakai karton, sheet barang masuk
+    botol — tidak match waktu cari deviasi murni").
 
     stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
     """
@@ -281,6 +290,21 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     print(f"    IN: {len(in_df)} rows")
     if in_detail_out is not None:
         print(f"    IN detail (per dokumen, v3.4): {len(in_detail_out.get('df'))} rows")
+
+    # v3.9.31 — peta konversi satuan dari baris IN (42.05 + 32.24;
+    # dipakai fn_audit utk konversi qty PO Menunggu → satuan terkecil).
+    # Dibangun SEKALI dari data transaksi aktual — tanpa file master
+    # excel tambahan (selalu segar; berjalan + bulan lalu ikut supaya
+    # coverage (barang, satuan) maksimal).
+    if konversi_out is not None:
+        konversi_out["map"] = build_konversi_map(in_df)
+        _km = konversi_out["map"]
+        _km_log = (f"Konversi satuan (v3.9.31): {_km['n_rasio']:,} rasio / "
+                   f"{_km['n_barang']:,} barang")
+        if _km["n_conflict"]:
+            _km_log += (f" — {_km['n_conflict']:,} konflik rasio "
+                        "(nilai pertama dipakai)")
+        print(f"    {_km_log}")
     # v3.9.29 — peta klasifikasi SOURCE KIRIMAN per pasangan (dipakai
     # LANGKAH 5b; mengganti nilai master DBS Kategori)
     _src_kiriman = _source_kiriman_per_pair(in_df)

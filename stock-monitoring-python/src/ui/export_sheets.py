@@ -71,6 +71,9 @@ SELISIH_EXPORT_COLUMNS = [
 # pengguna mencentangnya di dialog opsi export — sumber kolom = base)
 # v3.9.30: + "PO Menunggu" (qty PO 32.43 'Menunggu diproses' per
 # pasangan — penjelas deviasi murni; numerik, NaN/0 → 0.0)
+# v3.9.31: nilai qty PO Menunggu TERKONVERSI ke satuan terkecil (peta
+# rasio 42.05+32.24 — apple-to-apple dgn Selisih; baris tak
+# terkonversi = qty satuan PO asli, penanda '*' ada di Catatan Audit)
 AUDIT_EXPORT_COLUMNS = ["Hasil Audit", "Saldo", "Catatan Audit",
                         "PO Menunggu"]
 
@@ -143,6 +146,8 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
         if col == "Saldo":
             out[col] = _num_col(f, "Saldo").astype("Float64")
         elif col == "PO Menunggu":   # v3.9.30 — numerik (pair-level)
+            # v3.9.31 — nilai terkonversi satuan terkecil (fallback qty
+            # PO asli utk pasangan tak terkonversi — label '*' di catatan)
             out[col] = _num_col(f, "PO Menunggu").fillna(0.0)
         elif col in f.columns:
             out[col] = f[col].astype(str)

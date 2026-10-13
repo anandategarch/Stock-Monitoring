@@ -65,6 +65,7 @@ import numpy as np
 import pandas as pd
 
 from .helpers import resto_from_cabang_po
+from .konversi_satuan import lookup_rasio
 
 # Kolom kanonik input audit (struktur identik input VBA / sheet 29)
 AUDIT_INPUT_COLUMNS = [
@@ -401,13 +402,27 @@ def extract_po_pending(po_df: "pd.DataFrame | None") -> pd.DataFrame:
     return po_df[status == PO_STATUS_MENUNGGU].copy()
 
 
-def _po_menunggu_pairs(po_pending_df: "pd.DataFrame | None") -> dict:
-    """{(resto, barang): [(nomor, qty), ...]} dari PO menunggu.
+def _po_menunggu_pairs(po_pending_df: "pd.DataFrame | None",
+                      konversi: "dict | None" = None) -> dict:
+    """{(resto, barang): [(nomor, qty, satuan_label, unconverted), ...]}
+    dari PO menunggu.
 
     resto = resto_from_cabang_po(Cabang PO '1370.MLGPAR' → 'MLGPAR') —
     join key identik dgn Resto audit; barang di-strip; nomor & qty
     defensif (kolom hilang → ''/0.0); urut per nomor; pasangan tanpa
-    resto/barang valid dibuang."""
+    resto/barang valid dibuang.
+
+    v3.9.31 — KONVERSI SATUAN: bila ``konversi`` (peta dari
+    konversi_satuan.build_konversi_map — 42.05 '#Sat. Kirim'+'Rasio
+    Satuan' + 32.24 'Satuan'+'Rasio Satuan') diberikan:
+    qty × rasio[(barang, Satuan PO)] → SATUAN TERKECIL (apple-to-apple
+    dgn Selisih/Saldo audit — user: "air mineral PO karton, barang
+    masuk botol — tidak match waktu cari deviasi murni"); label =
+    satuan terkecil barang. Lookup gagal (pasangan (barang, satuan-PO)
+    tak terdaftar di 42.05/32.24) → qty AS-IS + label satuan PO +
+    penanda unconverted=True (catatan diberi '*'). ``konversi`` None →
+    perilaku v3.9.30 persis (qty mentah, tanpa label/penanda).
+    """
     out: dict = {}
     if po_pending_df is None or getattr(po_pending_df, "empty", True):
         return out
@@ -419,26 +434,53 @@ def _po_menunggu_pairs(po_pending_df: "pd.DataFrame | None") -> dict:
               else [None] * n)
     qtys = (pd.to_numeric(po_pending_df["Kuantitas"], errors="coerce")
             .fillna(0.0).tolist() if "Kuantitas" in cols else [0.0] * n)
-    for cab, brg, nomor, qty in zip(po_pending_df["Cabang PO"],
-                                    po_pending_df["Nama Barang"],
-                                    nomors, qtys):
+    satuans = (po_pending_df["Satuan"].tolist() if "Satuan" in cols
+               else [None] * n)
+    for cab, brg, nomor, qty, sat in zip(po_pending_df["Cabang PO"],
+                                         po_pending_df["Nama Barang"],
+                                         nomors, qtys, satuans):
         resto = resto_from_cabang_po(cab)
         b = _po_nomor_str(brg)
         if not resto or not b:
             continue
-        out.setdefault((resto, b), []).append(
-            (_po_nomor_str(nomor), float(qty)))
+        qty = float(qty)
+        if konversi is None:
+            # legacy v3.9.30 — qty mentah, tanpa label/penanda
+            out.setdefault((resto, b), []).append(
+                (_po_nomor_str(nomor), qty, "", False))
+            continue
+        rasio, terk = lookup_rasio(konversi, b, sat)
+        if rasio is not None and rasio > 0:
+            out.setdefault((resto, b), []).append(
+                (_po_nomor_str(nomor), qty * float(rasio),
+                 str(terk) if terk else "", False))
+        else:
+            # fallback (disetujui user): qty PO as-is + penanda '*'
+            _sat = _po_nomor_str(sat).upper()
+            out.setdefault((resto, b), []).append(
+                (_po_nomor_str(nomor), qty, _sat, True))
     for lst in out.values():
         lst.sort()
     return out
 
 
 def _po_menunggu_note(items) -> str:
-    """Catatan 'PO Menunggu: PO.xxx (qty 50), PO.yyy (qty 30) (+2)' —
-    maks 2 nomor dituliskan, sisanya dihitung (pola B1/B2 catatan
-    audit view v3.9.23)."""
-    shown = [(f"{n} (qty {_fmt_qty(q)})" if n else f"(qty {_fmt_qty(q)})")
-             for n, q in items[:2]]
+    """Catatan 'PO Menunggu: PO.xxx (qty 120 BOTOL), PO.yyy (qty 5
+    KARTON*) (+2)' — maks 2 nomor dituliskan, sisanya dihitung (pola
+    B1/B2 catatan audit view v3.9.23).
+
+    v3.9.31 — qty menyertai LABEL SATUAN hasil konversi (satuan
+    terkecil — apple-to-apple dgn Selisih/Saldo audit); '*' = tidak
+    terkonversi (pasangan (barang, satuan-PO) tak ada di peta 42.05/
+    32.24 — qty tampil dalam satuan PO asli, disetujui user)."""
+    shown = []
+    for n, q, sat, unconv in items[:2]:
+        qtxt = _fmt_qty(q)
+        if sat:
+            qtxt = f"{qtxt} {sat}"
+        if unconv:
+            qtxt += "*"
+        shown.append(f"{n} (qty {qtxt})" if n else f"(qty {qtxt})")
     extra = len(items) - len(shown)
     txt = ", ".join(shown)
     if extra > 0:
@@ -463,6 +505,10 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
     - kolom 'Qty PO Menunggu': TOTAL qty PO menunggu pasangan (nilai
       konstanta di SEMUA baris pasangan itu — 0 bila tak ada); sumber
       utk kolom tabel 'PO Menunggu' Rekap Selisih IN + export.
+      v3.9.31: nilai TERKONVERSI ke satuan terkecil bila peta konversi
+      aktif (disetujui user "tampilkan nilai terkonversi") — baris
+      tak terkonversi tampil qty satuan PO asli (penanda '*' di
+      catatan).
     - catatan 'PO Menunggu: …' di-append ke 'Detail & Catatan Audit'
       HANYA baris DEVIASI MURNI yang pasangannya punya PO menunggu —
       membedakan deviasi murni EXPLAINABLE (menunggu PO diproses →
@@ -483,7 +529,7 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
         items = pairs.get((resto.iat[i], item.iat[i]))
         if not items:
             continue
-        qty[i] = sum(q for _, q in items)
+        qty[i] = sum(q for _, q, _, _ in items)
         if status.iat[i] == ST_DEV_MURNI:
             detail[i] = _join_engine_note(
                 detail[i], _po_menunggu_note(items))
@@ -496,7 +542,8 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
 def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
                          in_detail_df: Optional[pd.DataFrame],
                          po_pending_df: "pd.DataFrame | None" = None,
-                         bulan_lalu: bool = True
+                         bulan_lalu: bool = True,
+                         konversi: "dict | None" = None
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
 
@@ -522,6 +569,13 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
     varian bulan — kedua varian (Lalu+Ini / Bulan Ini) memakai pasangan
     PO yang sama.
 
+    v3.9.31 — param ``konversi``: peta konversi satuan (append1
+    konversi_out['map'] — konversi_satuan.build_konversi_map dari
+    42.05+32.24). Qty PO dikonversi ke SATUAN TERKECIL (apple-to-apple
+    dgn Selisih/Saldo); catatan berlabel satuan '(qty 120 BOTOL)'; tak
+    terkonversi → qty as-is + '*' (disetujui user). None = perilaku
+    v3.9.30 persis (qty satuan PO tanpa label).
+
     Return (audit_df, kpi, source_desc). audit_df kosong + kpi["rows"]=0
     bila tidak ada data rekap SO / IN sama sekali; source_desc menjelaskan
     asal data (untuk status UI).
@@ -530,7 +584,8 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
         rekap_so_df = _filter_bulan_ini(rekap_so_df)
         in_detail_df = _filter_bulan_ini(in_detail_df)
     raw = build_audit_input(rekap_so_df, in_detail_df)
-    po_pairs = _po_menunggu_pairs(extract_po_pending(po_pending_df)) \
+    po_pairs = _po_menunggu_pairs(
+        extract_po_pending(po_pending_df), konversi) \
         if po_pending_df is not None else None
     if raw.empty:
         kpi0 = {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
@@ -554,7 +609,18 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
             f"SO {n_so:,} · IN {n_in:,}")
     if po_pairs:
-        _tot_po = sum(sum(q for _, q in v) for v in po_pairs.values())
+        _tot_po = sum(q for v in po_pairs.values()
+                      for _n, q, _s, _u in v)
+        if konversi is not None:
+            # v3.9.31 — qty terkonversi satuan terkecil + hitungan
+            # baris PO yg tak terkonversi (transparansi fallback)
+            _n_unc = sum(1 for v in po_pairs.values()
+                         for _n, _q, _s, u in v if u)
+            _qty_txt = f"{_fmt_qty(_tot_po)} qty sat. terkecil"
+            if _n_unc:
+                _qty_txt += f", {_n_unc} tdk terkonversi"
+        else:
+            _qty_txt = f"{_fmt_qty(_tot_po)} qty"
         desc += (f" · PO menunggu {len(po_pairs)} pasangan "
-                 f"({_fmt_qty(_tot_po)} qty)")
+                 f"({_qty_txt})")
     return audit, kpi, desc

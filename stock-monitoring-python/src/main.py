@@ -59,6 +59,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         (extract_po_pending) diteruskan ke KEDUA varian audit sebagai
         penjelas deviasi murni (kolom 'Qty PO Menunggu' + catatan +
         KPI 'dev_murni_po' — lihat fn_audit._apply_po_menunggu).
+    v3.9.31: peta KONVERSI SATUAN dari baris IN 42.05+32.24
+        (append1 konversi_out — 'Rasio Satuan' + '#Sat. Kirim'/'Satuan')
+        → qty PO Menunggu dikonversi ke satuan terkecil (apple-to-apple
+        dgn Selisih/Saldo; user: "PO karton vs barang masuk botol tidak
+        match waktu cari deviasi murni"; fallback qty as-is + '*').
     """
     start_time = time.time()
 
@@ -82,9 +87,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
 
     in_detail_holder: dict = {}
     rekap_so_holder: dict = {}
+    konversi_holder: dict = {}
     append1_df = build_append1(config, stop_event=stop_event,
                                in_detail_out=in_detail_holder,
-                               rekap_so_out=rekap_so_holder)
+                               rekap_so_out=rekap_so_holder,
+                               konversi_out=konversi_holder)
 
     # FIX: check stop_event after Append1 build
     if stop_event is not None and stop_event.is_set():
@@ -132,7 +139,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         print("-" * 60)
     audit_df, audit_kpi, audit_desc = build_audit_from_app(
         rekap_so_holder.get("df"), in_detail_df,
-        po_pending_df=po_pending_df)
+        po_pending_df=po_pending_df,
+        konversi=konversi_holder.get("map"))
     audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
@@ -146,7 +154,7 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # tidak berubah.
     audit_df2, audit_kpi2, audit_desc2 = build_audit_from_app(
         rekap_so_holder.get("df"), in_detail_df, po_pending_df=po_pending_df,
-        bulan_lalu=False)
+        bulan_lalu=False, konversi=konversi_holder.get("map"))
     audit_result["df_bulan_ini"] = audit_df2
     audit_result["kpi_bulan_ini"] = audit_kpi2
     audit_result["desc_bulan_ini"] = audit_desc2
@@ -170,6 +178,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
             print(f"  Deviasi Murni ber-PO Menunggu (v3.9.30): "
                   f"{k['dev_murni_po']:,} baris — explainable, "
                   f"sisanya perlu audit fisik")
+        _km31 = konversi_holder.get("map") or {}
+        if _km31.get("n_rasio"):
+            print(f"  Konversi satuan PO (v3.9.31): peta "
+                  f"{_km31['n_rasio']:,} rasio / "
+                  f"{_km31['n_barang']:,} barang — qty PO Menunggu "
+                  f"tampil satuan terkecil")
 
     elapsed = time.time() - start_time
     if verbose:

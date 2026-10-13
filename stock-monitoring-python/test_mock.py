@@ -105,11 +105,14 @@ def create_mock_2205(filepath, resto_code, barang_list):
 
 
 def create_mock_3224(filepath, resto_code, barang_list, mode="berjalan"):
-    """Create #32.24 sheet."""
+    """Create #32.24 sheet.
+    v3.9.31: + kolom konversi 'Satuan' + 'Rasio Satuan' (mock KG→GR
+    rasio 1000 — E2E konversi qty PO Menunggu ke satuan terkecil)."""
     headers = ["Tanggal", "Kts (Unit#1)", "Nama Barang", "Nama Gudang",
-               "Nomor # RI", "Nomor # PO", "Tgl/Jam Pembuatan"]
+               "Nomor # RI", "Nomor # PO", "Tgl/Jam Pembuatan",
+               "Satuan", "Rasio Satuan"]
     data_rows = []
-    for i, (barang, _) in enumerate(barang_list):
+    for i, (barang, satuan) in enumerate(barang_list):
         tgl = 5 if mode == "berjalan" else 28
         data_rows.append([
             datetime(2026, 9, tgl),
@@ -118,7 +121,9 @@ def create_mock_3224(filepath, resto_code, barang_list, mode="berjalan"):
             f"GUDANG MALANG ({resto_code})",
             f"IT.2026.09.{2000+i}",
             f"PO.2026.09.{3000+i}",
-            datetime(2026, 9, 3, 16, 52, 12)
+            datetime(2026, 9, 3, 16, 52, 12),
+            satuan,          # v3.9.31 — satuan dokumen (KG)
+            1000,            # v3.9.31 — rasio → satuan terkecil (GR)
         ])
     create_mock_file(filepath, "#32.24. Rincian Penerimaan Bara", headers, data_rows, metadata_rows=4)
 
@@ -138,20 +143,26 @@ def create_mock_4215(filepath, resto_code, barang_list):
 
 
 def create_mock_4205(filepath, resto_code, barang_list, mode="berjalan"):
-    """Create #42.05 sheet (mode 'lalu': tanggal ujung bulan = 28)."""
+    """Create #42.05 sheet (mode 'lalu': tanggal ujung bulan = 28).
+    v3.9.31: + kolom konversi '#Sat. Kirim'/'Rasio Satuan'/
+    '#Sat. Terkecil' (mock KG→GR rasio 1000 — E2E konversi PO)."""
     headers = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima", "Nama Barang",
-               "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"]
+               "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT",
+               "#Sat. Kirim", "Rasio Satuan", "#Sat. Terkecil"]
     data_rows = []
     tgl = 5 if mode == "berjalan" else 28
     nomor_base = 4000 if mode == "berjalan" else 5000
-    for i, (barang, _) in enumerate(barang_list):
+    for i, (barang, satuan) in enumerate(barang_list):
         data_rows.append([
             f"IT.2026.09.{nomor_base+i}",
             f"GUDANG BANDUNG ({resto_code})",
             datetime(2026, 9, tgl),
             barang,
             15 + i,
-            datetime(2026, 9, tgl - 1, 10, 30, 0)
+            datetime(2026, 9, tgl - 1, 10, 30, 0),
+            satuan,          # v3.9.31 — #Sat. Kirim (satuan dokumen KG)
+            1000,            # v3.9.31 — Rasio Satuan
+            "GR",            # v3.9.31 — #Sat. Terkecil
         ])
     create_mock_file(filepath, "#42.05. Rincian Pemindahan Bara", headers, data_rows, metadata_rows=4)
 
@@ -1108,6 +1119,26 @@ def run_test():
     print(f"    ✓ v3.9.30 PO Menunggu di audit: kolom + KPI di kedua "
           f"varian · dev_murni_po={audit_result['kpi'].get('dev_murni_po')} "
           f"· qty total {_po_qty_m.sum():.0f}")
+
+    # v3.9.31 — KONVERSI SATUAN PO MENUNGGU (mock 42.05/32.24 ber-kolom
+    # 'Rasio Satuan' KG→GR 1000; PO mock Satuan=KG): qty PO dikalikan
+    # rasio → satuan terkecil (GULA 10, FRUCTOSE 11, CINCAU 12 KG →
+    # 10.000 / 11.000 / 12.000 GR) — apple-to-apple dgn Selisih/Saldo
+    # (dulu qty satuan PO mentah 10/11/12)
+    assert _po_qty_m.max() == 12000.0, (
+        f"v3.9.31: konversi KG×1000 gagal — max Qty PO Menunggu = "
+        f"{_po_qty_m.max()} (harusnya 12.000 utk CINCAU 12 KG)")
+    _note31 = " | ".join(
+        _aud_full.loc[_po_qty_m > 0, "Detail & Catatan Audit"]
+        .astype(str).tolist())
+    assert "(qty 12.000 GR)" in _note31, (
+        "v3.9.31: catatan PO Menunggu harus berlabel satuan terkecil "
+        f"'(qty 12.000 GR)' — got {_note31!r}")
+    assert "qty sat. terkecil" in audit_result["desc"], (
+        "v3.9.31: desc audit harus menyebut 'qty sat. terkecil' — got "
+        f"{audit_result['desc']!r}")
+    print("    ✓ v3.9.31 konversi satuan PO: max 12.000 GR (12 KG × "
+          "1000) · catatan '(qty 12.000 GR)' · desc 'qty sat. terkecil'")
 
     # v3.9.20 — deep-audit pipeline fixes (agent 35-d): LANGKAH 9 tie/NA/
     # strip, fn_4205 lalu anchor resto, resolusi sheet folder lalu, e2e

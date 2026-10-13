@@ -157,7 +157,34 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.30"  # v3.9.30 — PO MENUNGGU DIPROSES (32.43) SEBAGAI PENJELAS DEVIASI MURNI
+APP_VERSION = "3.9.31"  # v3.9.31 — KONVERSI SATUAN PO MENUNGGU (KARTON → SATUAN TERKECIL)
+# v3.9.31 (user: "Kolom Kuantitas di Rincian PO atau file 3243 itu masih
+# satuan besar bukan satuan kecil seperti di sheet barang masuk ... air
+# mineral di rincian po pakai satuan karton dan sheet barang masuk botol
+# ini jadi tidak match waktu cari deviasi murni karna PO belum update
+# penerimaan sistem. Solusi: ambil konversi per satuan pada 2 file yaitu
+# 32.24 di kolom Rasio Satuan dan Satuan ... dan file 4205 juga pakai
+# kolom Rasio Satuan dan #Sat. Kirim" + konfirmasi "tampilkan nilai
+# terkonversi" & fallback qty as-is berpenanda): PETA KONVERSI SATUAN
+# {(barang, satuan): rasio} + {barang: satuan terkecil} dibangun DI
+# MEMORI dari baris IN transaksi aktual (TANPA file master excel
+# tambahan — selalu segar): fn_4205 + fn_3224 kini ikut membaca kolom
+# 'Rasio Satuan' + '#Sat. Kirim'/'Satuan' + '#Sat. Terkecil' (resolusi
+# defensive beda versi export) → dibakukan SATUAN DOK / RASIO SATUAN /
+# SATUAN TERKECIL (kolom ekstra tak ikut pivot append1 — pola SOURCE IN
+# v3.9.29) → append1 konversi_out (build_konversi_map; konflik rasio
+# dihitung utk log) → KEDUA varian audit: qty PO Menunggu = Kuantitas ×
+# rasio[(barang, Satuan PO)] → SATUAN TERKECIL — apple-to-apple dgn
+# Selisih/Saldo (sisa -120 BOTOL vs PO 5 KARTON = match 120 BOTOL kini
+# KELIHATAN; verifikasi data real 42.05: identitas Kuantiti Terima =
+# #Qty Kirim × Rasio 4.591/4.591, 0 konflik rasio, rasio konsisten
+# lintas resto → join key Nama Barang saja). Lookup gagal → qty PO
+# as-is + penanda '*' di catatan (disetujui user); catatan berlabel
+# satuan '(qty 120 BOTOL)'; aturan implisit (barang, satuan-PO ==
+# satuan terkecil) → rasio 1 (70/152 barang real tanpa baris
+# satuan==terkecil di 42.05); desc audit + hitungan 'tdk terkonversi'.
+# Tab 🛒 Rincian PO TETAP tampilkan Kuantitas satuan PO asli (satuan
+# dokumennya). Kompatibel: pemanggil tanpa peta → perilaku v3.9.30.
 # v3.9.30 (user: "ya kerjakan semua dulu dan push to git hub" — konfirmasi
 # atas analisis PO 'Menunggu diproses' 32.43: "PO sudah ada tapi penerimaan
 # belum di-update di sistem → bisa jadi penyebab deviasi murni"): Rincian

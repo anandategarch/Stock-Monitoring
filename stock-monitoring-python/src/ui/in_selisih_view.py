@@ -1,6 +1,23 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.9.31 (user: "kolom Kuantitas di Rincian PO masih satuan besar (karton)
+bukan satuan kecil (botol) seperti sheet barang masuk — tidak match waktu
+cari deviasi murni") — KONVERSI SATUAN PO MENUNGGU:
+- Kolom "PO Menunggu" kini menampilkan NILAI TERKONVERSI ke satuan
+  terkecil (disetujui user) — apple-to-apple dengan kolom Selisih/Saldo
+  (contoh: sisa -120 BOTOL vs PO menunggu 120 BOTOL = match kelihatan;
+  dulu 5 KARTON vs -120 BOTOL tersembunyi). Konversi = peta rasio dari
+  data transaksi aktual 42.05 ('Rasio Satuan' + '#Sat. Kirim' +
+  '#Sat. Terkecil') + 32.24 ('Rasio Satuan' + 'Satuan') — dibangun
+  pipeline di memori (konversi_satuan.build_konversi_map via append1
+  konversi_out), TANPA file master excel tambahan.
+- Catatan "PO Menunggu: PO.xxx (qty 120 BOTOL)" berlabel satuan
+  terkecil; pasangan (barang, satuan-PO) tak ada di peta → qty PO
+  as-is + penanda '*' (mis. "(qty 5 KARTON*)" — disetujui user).
+- Tab 🛒 Rincian PO TETAP menampilkan Kuantitas satuan PO asli (itu
+  memang satuan dokumen PO).
+
 v3.9.30 (user: "cek Rincian PO file 32.43 — ada nama resto+barang
 dgn status pesanan 'Menunggu diproses'; PO sudah ada tapi penerimaan
 belum di-update di sistem → bisa jadi penyebab deviasi murni") — PO

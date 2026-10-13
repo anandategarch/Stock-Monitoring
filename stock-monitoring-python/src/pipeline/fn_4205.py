@@ -8,6 +8,11 @@ IN periode ujung bulan lalu, "sama seperti 32.24 bulan lalu").
 v3.9.20 (deep audit 34-d/fix 35-d): mode "lalu" filter baris resto-valid
 SEBELUM max_t (mirror PERSIS fn_3224 — baris NA-resto tak lagi menggeser
 jendela 5 hari).
+v3.9.31: kolom konversi satuan '#Sat. Kirim'/'Rasio Satuan'/
+'#Sat. Terkecil' ikut terbaca → dibakukan SATUAN DOK / RASIO SATUAN /
+SATUAN TERKECIL (peta konversi PO Menunggu → satuan terkecil —
+konversi_satuan.build_konversi_map; kolom ekstra TIDAK ikut pivot
+append1, pola 'SOURCE IN' v3.9.29).
 """
 import pandas as pd
 
@@ -18,6 +23,12 @@ from .helpers import (
     safe_to_str,
     to_datetime_robust,
     vec_text_between_delimiters,
+)
+from .konversi_satuan import (
+    KOL_RASIO,
+    KOL_SATUAN_DOK,
+    KOL_TERKECIL,
+    resolve_konversi_kolom,
 )
 
 
@@ -33,11 +44,16 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
     prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
     if prom.empty:
         return pd.DataFrame(columns=["Nomor", "NAMA RESTO", "Tanggal", "Nama Barang",
-                                      "Value", "#Tgl/Jam Pembuatan IT"])
+                                      "Value", "#Tgl/Jam Pembuatan IT",
+                                      KOL_SATUAN_DOK, KOL_RASIO, KOL_TERKECIL])
+
+    # v3.9.31 — resolusi kolom konversi (beda versi export: '#Sat. Kirim'
+    # vs 'Satuan' — first-match SATU kolom supaya rename tak tabrakan)
+    konv = resolve_konversi_kolom(prom.columns, "4205")
 
     # Selected
     needed = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima", "Nama Barang",
-              "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"]
+              "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"] + list(konv.values())
     available = [c for c in needed if c in prom.columns]
     sel = prom[available].copy()
 
@@ -67,10 +83,20 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
         "Tanggal #Terima": "Tanggal",
         "#Qty. Terkecil": "Value",
     }
+    # v3.9.31 — kolom konversi dibakukan ke nama standar (join key map)
+    rename_map.update({orig: std for std, orig in konv.items()})
     sel = sel.rename(columns={k: v for k, v in rename_map.items() if k in sel.columns})
 
+    # v3.9.31 — typed kolom konversi (setelah rename ke nama baku)
+    for _std in (KOL_SATUAN_DOK, KOL_TERKECIL):
+        if _std in sel.columns:
+            sel[_std] = safe_to_str(sel[_std])
+    if KOL_RASIO in sel.columns:
+        sel[KOL_RASIO] = safe_to_numeric(sel[KOL_RASIO])
+
     # Final
-    final_cols = ["Nomor", "NAMA RESTO", "Tanggal", "Nama Barang", "Value", "#Tgl/Jam Pembuatan IT"]
+    final_cols = ["Nomor", "NAMA RESTO", "Tanggal", "Nama Barang", "Value",
+                  "#Tgl/Jam Pembuatan IT", KOL_SATUAN_DOK, KOL_RASIO, KOL_TERKECIL]
     for c in final_cols:
         if c not in sel.columns:
             sel[c] = pd.NA
