@@ -157,7 +157,28 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.27"  # v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET 'Data Base Cek Deviasi'
+APP_VERSION = "3.9.28"  # v3.9.28 — TANGGAL SERIAL EXCEL (.xlsb/pyxlsb) ROBUST → Stok Seharusnya & Hitung Manual benar
+# v3.9.28 (user: "push to git hub dan perbaiki stock seharusnya dan hitung
+# manual"): AKAR BUG BARU DITEMUKAN & DIFIKS — file .xlsb dibaca engine
+# pyxlsb menghasilkan sel TANGGAL sebagai SERIAL MENTAH (46290 = 2026-09-25);
+# pd.to_datetime lama membacanya sbg NANODETIK-EPOCH → SEMUA transaksi jatuh
+# ke Tanggal=1 → In_H = 0 utk H>1 → "Stok Seharusnya" (W = SO(H-1)+IN_H−
+# KIRIMAN_H−PENJUALAN_H) kelebihan potong IN & rasio |H−W|/|W| meledak →
+# flag "Hitung Manual" PALSU (reproduksi: sheet '4  42 05' workbook user —
+# 4.591 baris serial → 100% hari 1 pra-fix). FIX: helpers.to_datetime_robust
+# (BARU) — nilai numeric dlm rentang serial Excel wajar (20000..80000) di-
+# konversi via epoch 1899-12-30 (pecahan waktu ikut); date_to_day dibangun
+# di atasnya (dipakai 42.05/32.24/22.05/42.15/9901); '#Tgl/Jam Pembuatan IT'
+# (fn_4205 + queries 3224/3224-lalu) & kolom tanggal Rincian PO ikut robust.
+# VERIFIKASI: pipeline mock 464.205 baris IDENTIK pra-fix (0 baris beda —
+# file .xlsx dgn tanggal datetime tak tersentuh); .xlsb user via fn_buka_sheet
+# → hari 1..26 tersebar benar (dulu 100% hari 1); fn_4205 dgn mock SERIAL →
+# hari 25/30/27 + Tgl/Jam 24 Sep 18:00 benar; parity sheet DEVIASI GR H=25
+# (mock + 32.24 eksternal): Hitung Manual program 3 = sheet 3 (overlap 3/3),
+# Stok Seharusnya 794→12/1.405 (11 = dokumen ADA di raw 42.05 tapi TIDAK di
+# pivot 'Barang Masuk' sheet — inkonsistensi internal workbook; 1 = rekap SO
+# vs pivot 'SO BULAN INI' beda) — rumus program = rumus sheet (rekomputasi
+# rantai LET dari nilai sheet sendiri: 0 mismatch).
 # v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
 # hanya hitung bulan ini. Tapi default hitung bulan ini aja" + "kondisi
 # beda tanggal kok menghasilkan data kosong semua? cek file 01.1 CEK

@@ -23,6 +23,23 @@ Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
 
+### v3.9.28 — TANGGAL SERIAL EXCEL (.xlsb/pyxlsb) ROBUST → STOK SEHARUSNYA & HITUNG MANUAL BENAR
+> User: *"push to git hub dan perbaiki stock seharusnya dan hitung manual"*. (v3.9.27 ter-push di sesi yang sama.)
+
+- **AKAR BUG PRODUKSI DITEMUKAN & DIFIKS** — file **.xlsb** dibaca engine **pyxlsb** menghasilkan sel TANGGAL sebagai **SERIAL MENTAH** (`46290` = 2026-09-25) — pyxlsb tidak mengonversi sel tanggal ke datetime. `pd.to_datetime` lama membacanya sebagai **nanodetik-epoch** (1970-01-01 + 46µs) → **SEMUA transaksi jatuh ke Tanggal = 1** → `In_H = 0` untuk H > 1 →:
+  - **"Stok Seharusnya"** `W = SO(H-1) + IN_H − KIRIMAN_KELUAR_H − PENJUALAN_H` kehilangan seluruh IN hari H (H>1) → **nilai salah**;
+  - rasio `|H − W| / |W|` meledak → **flag "Hitung Manual" PALSU** di mana-mana.
+  - Reproduksi: sheet `'4  42 05'` workbook user dibaca lewat jalur app sendiri (`fn_buka_sheet`) — 4.591 baris serial → **100% hari 1** pra-fix.
+- **FIX — `helpers.to_datetime_robust` (BARU)**: nilai numeric dalam rentang serial Excel wajar (**20000..80000** ≈ th 1954..2119 — tak mungkin tumpang tindih dgn nomor hari 1..31) dikonversi via **epoch Excel 1899-12-30** (pecahan waktu ikut terbawa); nilai lain (datetime64/Timestamp/string tanggal) diparse `pd.to_datetime` seperti biasa; kolom datetime64 apa adanya. **`date_to_day` dibangun di atasnya** — otomatis membenahi pembacaan tanggal **42.05 / 32.24 / 22.05 / 42.15 / 9901**. `'#Tgl/Jam Pembuatan IT'` (fn_4205 + queries 3224 & 3224-bulan-lalu) dan kolom tanggal **Rincian PO** ikut robust (dulu: serial → 1970-01-01).
+- **VERIFIKASI**:
+  - Pipeline mock 464.205 baris **IDENTIK** pra-fix (0 baris beda — file .xlsx dengan tanggal datetime tidak tersentuh / tidak ada regresi);
+  - .xlsb user via `fn_buka_sheet` → hari **1..26 tersebar benar** (dulu 100% hari 1);
+  - `fn_4205` E2E dengan mock tanggal SERIAL → hari 25/30/27 + `Tgl/Jam` 24 Sep 18:00 benar;
+  - **Parity sheet DEVIASI GR H=25** (mock lengkap + 32.24 eksternal disintesis dari pivot 'Barang Masuk'): **Hitung Manual program 3 = sheet 3 (overlap 3/3, 0 flag palsu)**; **Stok Seharusnya 794 → 12/1.405** — 11 sisanya = dokumen **ADA** di raw '4 42 05' tapi **TIDAK** di pivot 'Barang Masuk' sheet (inkonsistensi internal workbook — pivot lebih tua/dr versi data berbeda; program yang benar karena membaca data mentah) + 1 = rekap SO vs pivot 'SO BULAN INI' beda (TGRBIN/SUSU KENTAL: rekap 3 baris SO [harian+promix×2] vs pivot nilai lain);
+  - **Rekomputasi rantai LET kondisi Y dari nilai sheet sendiri: 0 mismatch** — rumus program = rumus sheet; gate sheet (Total ACR=0 → CEK kosong) terverifikasi nyaris tidak berdampak (ungated vs gated: beda 1 baris Turun Drastis) — keputusan tidak mereplikasi gate dipertahankan.
+- **Mock env probe diperbaiki** (artefak audit, bukan app): tanggal 42.05 pra-fix tertulis sbg serial number → seluruh parity v3.9.27 korup (IN semua di hari 1); + sintesis **32.24 RI eksternal** dari pivot 'Barang Masuk' (3.367 baris) supaya IN app ≈ sumber sheet.
+- 5 file: `helpers.py` (to_datetime_robust + date_to_day), `fn_4205.py`, `queries.py`, `rincian_po.py`, `app.py` (v3.9.28), `test_ui_redesign.py` (§39 12 check).
+
 ### v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET 'Data Base Cek Deviasi'
 > 2 permintaan user: *"pada rekap selisih in bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi default hitung bulan ini aja"* + *"kondisi beda tanggal kok menghasilkan data kosong semua? cek file 01.1 CEK STOCK V2.xlsb bagian sheet Data Base Cek Deviasi KOLOM Y. Sheet tersebut terhide. Cek semua logika nya dan bandingkan dengan yang ada di program."* + analisa poin 3 (tanpa kode — lihat catatan).
 

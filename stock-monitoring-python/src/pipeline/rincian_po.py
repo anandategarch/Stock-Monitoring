@@ -4,7 +4,7 @@ Rincian Pesanan Pembelian (modul 32.43) → filter KATEGORI = "DEVIASI".
 """
 import pandas as pd
 
-from .helpers import fn_combine_folder, safe_to_numeric, safe_to_str
+from .helpers import fn_combine_folder, safe_to_numeric, safe_to_str, to_datetime_robust
 from .queries import query_dbs_kategori
 
 
@@ -52,10 +52,11 @@ def build_rincian_po(config) -> pd.DataFrame:
             sel[col] = safe_to_numeric(sel[col])
     for col in date_cols:
         if col in sel.columns:
-            sel[col] = pd.to_datetime(sel[col], errors="coerce")
+            # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah
+            sel[col] = to_datetime_robust(sel[col])
     for col in datetime_cols:
         if col in sel.columns:
-            sel[col] = pd.to_datetime(sel[col], errors="coerce")
+            sel[col] = to_datetime_robust(sel[col])
 
     # BufferedKategori + Merged (LeftOuter on Nama Barang = NAMA BARANG)
     dbs_kategori = query_dbs_kategori(config)

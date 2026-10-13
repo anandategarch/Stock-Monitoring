@@ -18,7 +18,7 @@ from .fn_4217 import fn_4217
 from .fn_9901 import fn_9901
 from .fn_dbs_kategori import fn_dbs_kategori
 from .fn_rekap_mentah import fn_rekap_mentah
-from .helpers import _list_excel_files, _list_sheet_names
+from .helpers import _list_excel_files, _list_sheet_names, to_datetime_robust
 
 # =============================================================================
 # MASTER QUERIES (dari Config)
@@ -62,7 +62,8 @@ def query_3224(config) -> pd.DataFrame:
     """
     result = fn_3224(config.folder("RI3224"), "berjalan")
     if "#Tgl/Jam Pembuatan IT" in result.columns:
-        result["#Tgl/Jam Pembuatan IT"] = pd.to_datetime(result["#Tgl/Jam Pembuatan IT"], errors="coerce")
+        # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah
+        result["#Tgl/Jam Pembuatan IT"] = to_datetime_robust(result["#Tgl/Jam Pembuatan IT"])
     return result
 
 
@@ -79,7 +80,8 @@ def query_3224_bulan_lalu(config) -> pd.DataFrame:
     sheet_name = _resolve_lalu_sheet(folder, SHEET_3224, "#32.24")
     result = fn_3224(folder, "lalu", sheet_name=sheet_name)
     if "#Tgl/Jam Pembuatan IT" in result.columns:
-        result["#Tgl/Jam Pembuatan IT"] = pd.to_datetime(result["#Tgl/Jam Pembuatan IT"], errors="coerce")
+        # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah
+        result["#Tgl/Jam Pembuatan IT"] = to_datetime_robust(result["#Tgl/Jam Pembuatan IT"])
     return result
 
 

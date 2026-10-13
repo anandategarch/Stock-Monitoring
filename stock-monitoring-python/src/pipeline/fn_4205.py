@@ -16,6 +16,7 @@ from .helpers import (
     fn_combine_folder,
     safe_to_numeric,
     safe_to_str,
+    to_datetime_robust,
     vec_text_between_delimiters,
 )
 
@@ -48,8 +49,10 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
     if "#Qty. Terkecil" in sel.columns:
         sel["#Qty. Terkecil"] = safe_to_numeric(sel["#Qty. Terkecil"])
     # Datetime (only for #Tgl/Jam — NOT Tanggal #Terima, which goes through date_to_day)
+    # v3.9.28: to_datetime_robust — file .xlsb (pyxlsb) memberi serial mentah;
+    # pd.to_datetime biasa membacanya sbg nanodetik-epoch → 1970-01-01.
     if "#Tgl/Jam Pembuatan IT" in sel.columns:
-        sel["#Tgl/Jam Pembuatan IT"] = pd.to_datetime(sel["#Tgl/Jam Pembuatan IT"], errors="coerce")
+        sel["#Tgl/Jam Pembuatan IT"] = to_datetime_robust(sel["#Tgl/Jam Pembuatan IT"])
 
     # Transformed: Tanggal#Terima → Date.Day, Gudang#Terima → BetweenDelimiters
     # date_to_day internally calls pd.to_datetime, so no need for separate conversion

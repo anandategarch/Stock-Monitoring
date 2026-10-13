@@ -194,6 +194,21 @@ Memverifikasi:
     tabel Top Selisih (_top_aggregate) & Perubahan Arah
     (_render_flip + batas Kategori); prioritas flip > Stabil utuh;
     tanda sama tidak pernah FFLOP.
+39. v3.9.28 — TANGGAL SERIAL EXCEL (.xlsb/pyxlsb) ROBUST (§39; user:
+    "push to git hub dan perbaiki stock seharusnya dan hitung manual"):
+    file .xlsb via engine pyxlsb memberi sel TANGGAL sbg SERIAL MENTAH
+    (46290 = 2026-09-25); pd.to_datetime lama membaca sbg nanodetik-epoch
+    → SEMUA transaksi jatuh ke Tanggal=1 → In_H=0 utk H>1 → 'Stok
+    Seharusnya' (W = SO(H-1)+IN−KIRIMAN−PENJUALAN) salah & flag 'Hitung
+    Manual' palsu (reproduksi: sheet '4  42 05' workbook user — 4.591
+    baris serial → 100% hari 1 pra-fix). FIX helpers.to_datetime_robust
+    (BARU): numeric 20000..80000 (th 1954..2119 — tak tumpang tindih
+    dgn hari 1..31) dikonversi epoch Excel 1899-12-30 (pecahan waktu
+    ikut); date_to_day dibangun di atasnya (42.05/32.24/22.05/42.15/
+    9901); '#Tgl/Jam Pembuatan IT' fn_4205 + queries 3224/lalu + kolom
+    tanggal Rincian PO ikut robust. Pipeline mock 464.205 baris IDENTIK
+    (0 beda); parity sheet H=25: Hitung Manual 3=3 overlap penuh,
+    Stok Seharusnya 12/1.405 sisa = inkonsistensi internal workbook.
 38. v3.9.27 — MODE HITUNG REKAP SELISIH IN + CEK PORT PERSIS SHEET
     'Data Base Cek Deviasi' (§37 + §38; user: "pada rekap selisih in
     bisa mode hitung bulan lalu dan hanya hitung bulan ini. Tapi
@@ -305,6 +320,7 @@ Memverifikasi:
     'TIDAK ADA DI DATA SAAT INI').
 """
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -639,7 +655,7 @@ def main():
     check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
           len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check(f"Versi = 3.9.27", APP_VERSION == "3.9.27", f"got {APP_VERSION}")
+    check(f"Versi = 3.9.28", APP_VERSION == "3.9.28", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -7993,6 +8009,82 @@ def main():
           f"got {_m38}")
     _top38b.destroy()
     root.update()
+
+    # =====================================================================
+    # 39. v3.9.28 — TANGGAL SERIAL EXCEL (.xlsb/pyxlsb) ROBUST
+    #    (user: "perbaiki stock seharusnya dan hitung manual")
+    # =====================================================================
+    print("== 39. v3.9.28 — to_datetime_robust / date_to_day serial ==")
+    from src.pipeline.helpers import date_to_day, to_datetime_robust
+
+    _d39 = date_to_day(pd.Series([46290, 46266, None]))   # serial int
+    check("(v3.9.28) date_to_day SERIAL int: 46290→25, 46266→1 "
+          "(dulu 100% hari 1 — akar 'Stok Seharusnya' & 'Hitung Manual' salah)",
+          list(_d39[:2]) == [25, 1] and pd.isna(_d39[2]),
+          f"got {_d39.tolist()}")
+    _f39 = date_to_day(pd.Series([46290.5, 46291.25]))     # serial + waktu
+    check("(v3.9.28) date_to_day SERIAL float+pecahan waktu: 25 & 26",
+          list(_f39) == [25, 26], f"got {_f39.tolist()}")
+    _dt39 = date_to_day(pd.Series(pd.to_datetime(["2026-09-25", "2026-10-01"])))
+    check("(v3.9.28) date_to_day datetime64 TIDAK berubah (regresi .xlsx)",
+          list(_dt39) == [25, 1], f"got {_dt39.tolist()}")
+    _s39 = date_to_day(pd.Series(["2026-09-25", "2026-10-01"]))
+    check("(v3.9.28) date_to_day string ISO TIDAK berubah",
+          list(_s39) == [25, 1], f"got {_s39.tolist()}")
+    _m39 = date_to_day(pd.Series([46290, pd.Timestamp("2026-10-01")]))
+    check("(v3.9.28) date_to_day CAMPURAN serial + Timestamp: masing-masing "
+          "jalurnya (25 & 1)",
+          list(_m39) == [25, 1], f"got {_m39.tolist()}")
+    _n39 = date_to_day(pd.Series([None, None]))
+    check("(v3.9.28) date_to_day kosong → <NA>",
+          all(pd.isna(v) for v in _n39), f"got {_n39.tolist()}")
+    _k39 = date_to_day(pd.Series([1, 25, 31]))
+    check("(v3.9.28) angka kecil 1..31 BUKAN serial → perilaku lama utuh",
+          list(_k39) == [1, 1, 1], f"got {_k39.tolist()}")
+    _r39 = to_datetime_robust(pd.Series([46289.75, "2026-09-27", None]))
+    check("(v3.9.28) to_datetime_robust: 46289.75 → 2026-09-24 18:00 "
+          "(pecahan waktu), string ISO, NaT",
+          str(_r39[0]) == "2026-09-24 18:00:00"
+          and str(_r39[1])[:10] == "2026-09-27" and pd.isna(_r39[2]),
+          f"got {_r39.tolist()}")
+    _r39b = to_datetime_robust(
+        pd.Series(pd.to_datetime(["2026-09-25", "2026-10-01"])))
+    check("(v3.9.28) to_datetime_robust kolom datetime64 apa adanya",
+          str(_r39b[0])[:10] == "2026-09-25", f"got {_r39b.tolist()}")
+
+    # E2E: fn_4205 membaca file dgn kolom Tanggal = SERIAL NUMBER
+    import tempfile
+    _tmp39 = os.path.join(tempfile.gettempdir(), "mock4205_serial_39")
+    os.makedirs(_tmp39, exist_ok=True)
+    _rows39 = [
+        {"Nomor #Terima": "IT.2026.09.20742", "Gudang #Terima": "MLGPAR (MLGPAR)",
+         "Tanggal #Terima": 46290.0, "Nama Barang": "ADONAN GORENG MEKAR",
+         "#Qty. Terkecil": 90000.0, "#Tgl/Jam Pembuatan IT": 46289.75},
+        {"Nomor #Terima": "IT.2026.09.20743", "Gudang #Terima": "TGRGEL (TGRGEL)",
+         "Tanggal #Terima": 46295.0, "Nama Barang": "BUAH APEL (V.20)",
+         "#Qty. Terkecil": 4000.0, "#Tgl/Jam Pembuatan IT": None},
+        {"Nomor #Terima": "RI.2026.09.50001", "Gudang #Terima": "KWGGAL (KWGGAL)",
+         "Tanggal #Terima": "2026-09-27", "Nama Barang": "BUAH PEER (V.20)",
+         "#Qty. Terkecil": 2000.0, "#Tgl/Jam Pembuatan IT": None},
+    ]
+    pd.DataFrame(_rows39).to_excel(
+        os.path.join(_tmp39, "in4205.xlsx"),
+        sheet_name="#42.05. Rincian Pemindahan Bara",
+        index=False, startrow=4)
+    from src.pipeline.fn_4205 import fn_4205
+    _out39 = fn_4205(_tmp39)
+    check("(v3.9.28) fn_4205 E2E dgn tanggal SERIAL: hari 25/30/27 benar "
+          "(In_H≠0 → Stok Seharusnya & Hitung Manual benar)",
+          list(_out39["Tanggal"]) == [25, 30, 27],
+          f"got {_out39['Tanggal'].tolist()}")
+    check("(v3.9.28) fn_4205 E2E: #Tgl/Jam Pembuatan IT serial 46289.75 → "
+          "2026-09-24 18:00 (dulu 1970-01-01 nanodetik)",
+          str(_out39["#Tgl/Jam Pembuatan IT"][0]) == "2026-09-24 18:00:00",
+          f"got {_out39['#Tgl/Jam Pembuatan IT'].tolist()}")
+    check("(v3.9.28) fn_4205 E2E: NAMA RESTO tetap terekstrak (MLGPAR)",
+          next(iter(_out39["NAMA RESTO"])) == "MLGPAR",
+          f"got {_out39['NAMA RESTO'].tolist()}")
+    shutil.rmtree(_tmp39, ignore_errors=True)
 
     # Cleanup
     root.destroy()

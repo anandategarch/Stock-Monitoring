@@ -344,11 +344,47 @@ def safe_to_str(series: pd.Series) -> pd.Series:
     return result
 
 
+def to_datetime_robust(series: pd.Series) -> pd.Series:
+    """
+    v3.9.28 — pd.to_datetime yang TAHAN SERIAL EXCEL numerik.
+
+    Sumber masalah: file .xlsb dibaca lewat engine pyxlsb menghasilkan sel
+    tanggal sebagai SERIAL MENTAH (mis. 46290 = 2026-09-25) — pyxlsb tidak
+    mengonversi sel tanggal ke datetime. pd.to_datetime(46290) membacanya
+    sebagai NANODETIK-EPOCH (1970-01-01 + 46µs) → SEMUA nilai jatuh ke
+    hari 1 → In_H = 0 untuk H > 1 → 'Stok Seharusnya' salah & flag
+    'Hitung Manual' palsu (reproduksi: sheet '4  42 05' workbook user —
+    4.591 baris serial → 100% hari 1 pra-fix).
+
+    Aturan: nilai NUMERIC dalam rentang serial Excel wajar (20000..80000
+    ≈ th 1954..2119 — tak mungkin tumpang tindih dgn nomor hari 1..31)
+    dikonversi via epoch Excel 1899-12-30 (pecahan waktu ikut terbawa);
+    nilai lain (datetime/Timestamp/string tanggal) diparse
+    pd.to_datetime seperti biasa. Kolom datetime64 apa adanya.
+    """
+    s = series if isinstance(series, pd.Series) else pd.Series(series)
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return s
+    num = pd.to_numeric(s, errors="coerce")
+    serial = num.notna() & num.between(20000.0, 80000.0)
+    if not bool(serial.any()):
+        return pd.to_datetime(s, errors="coerce")
+    # serial Excel (float/int; hasil pyxlsb .xlsb / export numerik) → Timestamp
+    ser_ts = pd.Timestamp("1899-12-30") + pd.to_timedelta(
+        num.where(serial), unit="D")
+    # nilai non-serial → jalur parse biasa (string/datetime objek)
+    rest = pd.to_datetime(s.where(~serial), errors="coerce")
+    return ser_ts.where(serial, rest)
+
+
 def date_to_day(series: pd.Series) -> pd.Series:
     """
     Mirror M: Table.TransformColumns(t, {{"Tanggal", Date.Day, Int64.Type}}).
     Ambil day-of-month dari datetime/date column. Return Int64.
     OPTIMIZED: vectorized via .dt accessor.
+    v3.9.28: dibangun di atas to_datetime_robust — kolom tanggal numerik
+    (serial Excel, mis. dari file .xlsb via pyxlsb) dikonversi benar,
+    bukan dibaca sbg nanodetik-epoch → hari 1 (lihat docstring helper).
     """
-    dt = pd.to_datetime(series, errors="coerce")
+    dt = to_datetime_robust(series)
     return dt.dt.day.astype("Int64")
