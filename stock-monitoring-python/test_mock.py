@@ -1395,6 +1395,61 @@ def run_test():
           "(1.800) + BUMBU (1.008) + TOTAL (1.919.058) · FRUCTOSE '-' "
           "tanpa harga")
 
+    # v3.9.34 — (6b) TAB 🧮 NOMINAL DEVIASI E2E (user: "isinya total
+    # sum dari nama barang ... cuman ini disum per resto"): Σ nominal
+    # per resto + N barang + tanpa harga + baris TOTAL + kolom Nominal
+    # tab Deviasi GR (Harga 41.09 dinormalkan × Deviasi).
+    from src.ui.nominal_resto_view import NominalRestoView
+    rv = NominalRestoView(root)
+    rv.load_data(append1_result,
+                 harga_map=audit_result["harga_map"],
+                 konversi_map=audit_result["konversi_map"])
+    rv.tanggal_h = 1
+    rv._dirty = True
+    rv.ensure_refreshed()
+    wait_view(root, rv)
+    _rrows = {str(rv.tree.set(i, "Resto")): rv.tree.item(i, "values")
+              for i in rv.tree.get_children("")}
+    _m = _rrows.get("MLGPAR")
+    assert _m is not None and str(_m[1]) == "4" and str(_m[2]) == "1" \
+        and _m[3] == "(1.919.058)", (
+        f"v3.9.34: MLGPAR = 4 barang · 1 tanpa harga · Σ (1.919.058) "
+        f"(GULA 1.916.250 + CINCAU 1.800 + BUMBU 1.008; FRUCTOSE tak "
+        f"ikut) — got {_m}")
+    _rt = _rrows.get("TOTAL")
+    assert _rt is not None and str(_rt[1]) == "4" and str(_rt[2]) == "1" \
+        and _rt[3] == "(1.919.058)", (
+        f"v3.9.34: baris TOTAL Σ (1.919.058) — got {_rt}")
+    assert "H=1" in str(rv.tree.heading("Nominal Deviasi")["text"]), (
+        "v3.9.34: heading dinamis 'Nominal Deviasi (H=1)'")
+    print("    ✓ v3.9.34: 🧮 Nominal Deviasi E2E — MLGPAR 4 barang · 1 "
+          "tanpa harga · Σ (1.919.058) + TOTAL + heading H dinamis")
+
+    # v3.9.34 — (6c) KOLOM Nominal tab Deviasi GR (harga × Deviasi)
+    dv34 = DeviasiView(root, satuan_mode="GR")
+    dv34.load_data(append1_df,
+                   harga_map=audit_result["harga_map"],
+                   konversi_map=audit_result["konversi_map"])
+    dv34.tanggal_h = 1     # H=1: GULA DEV −105 (sama dgn E2E Nominal)
+    dv34._dirty = True
+    dv34.ensure_refreshed()
+    wait_view(root, dv34)
+    # BUMBU PASTA KUAH = satuan GR (tampil di tab GR — GULA satuan KG
+    # hanya tampil di tab PCS); DEV (84) × harga 12/GR = (1.008)
+    _nom34 = None
+    for _i34 in dv34.tree.get_children(""):
+        if "BUMBU PASTA KUAH" in str(dv34.tree.item(_i34, "values")):
+            _nom34 = str(dv34.tree.set(_i34, "Nominal"))
+            break
+    assert _nom34 == "(1.008)", (
+        f"v3.9.34: Deviasi GR kolom Nominal BUMBU = 12/GR × DEV (84) "
+        f"= (1.008) — got {_nom34}")
+    assert "Out_H" not in [c for c in dv34.tree["columns"]] and \
+        "BK_H" not in [c for c in dv34.tree["columns"]], (
+        "v3.9.34: kolom Out_H/BK_H dihapus dari tampilan Deviasi GR")
+    print("    ✓ v3.9.34: Deviasi GR kolom Nominal BUMBU (1.008) + "
+          "Out_H/BK_H dihapus dari tampilan")
+
     dv2 = DeviasiView(root, satuan_mode="PCS")
     dv2.load_data(append1_df)
     dv2.ensure_refreshed()

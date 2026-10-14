@@ -6,6 +6,8 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
+> **Versi terkini: v3.9.34** — kolom Nominal (Harga 41.09 × Qty Deviasi) di tab Deviasi GR/PCS & mode Komparasi · TAB BARU 🧮 Nominal Deviasi (Σ per resto). Changelog di bawah.
+
 ## Quick Start (Python Edition)
 
 ```bash
@@ -22,6 +24,15 @@ python -m src.main
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
+
+### v3.9.34 — KOLOM NOMINAL DI DEVIASI GR/PCS & KOMPARASI · TAB 🧮 NOMINAL DEVIASI PER RESTO
+> User: *"ada tab nominal Deviasi itu isinya Total sum dari nama barang kayak di laporan sampel kolom nominal deviasi yang dapat dari harga × kuantitas deviasi cuman ini disum per resto"* + kolom Nominal di tab 📦 Deviasi GR/🧩 Deviasi PCS dan mode ⚖ Komparasi (tab 📋 Laporan Deviasi).
+
+- **(1) KOLOM NOMINAL di tab 📦 Deviasi GR & 🧩 Deviasi PCS** — `Nominal = Harga 41.09 × Qty Deviasi` (baris `3.DEVIASI` tanggal H) per pasangan barang×resto; **kolom Out_H/BK_H dihapus dari tampilan**; harga dinormalkan ke satuan rekap via peta rasio v3.9.31 (tanpa harga → `-`); app meneruskan `harga_map`/`konversi_map` dari `audit_result` pipeline.
+- **(2) KOLOM NOMINAL mode ⚖ Komparasi File Deviasi** — `Nominal = Harga 41.09 × GR Saat Ini` (pembanding utama mode komparasi); aturan harga identik (normalisasi satuan + fallback `*` transparan).
+- **(3) TAB BARU 🧮 Nominal Deviasi** — baris = SATU RESTO: **Σ Nominal seluruh barang pasangannya** + kolom transparan `Tanpa Harga` + **baris TOTAL**; **double-click resto → popup rincian per barang** (Nama Barang · Satuan · Harga · Qty Deviasi · Nominal); urutan |Σ| menurun; TANGGAL H bersama (chip read-only + auto-refresh); filter ⧩/sort (TOTAL dipin di ujung)/⛶/⤢/◱/↔/multi-select Ctrl+C lengkap.
+- **HELPER BERSAMA `src/ui/nominal_common.py`** — SATU sumber kebenaran perhitungan Nominal, dipakai 4 tempat (mode 💰 Nominal (H) + kolom GR/PCS + Komparasi + tab 🧮); `nominal_deviasi_view` di-refactor jadi wrapper (zero behavior change).
+- **VERIFIKASI**: py_compile + AST + import smoke + **smoke Xvfb app nyata 20/20** (tab ke-10 `🧮 Nominal Deviasi` tepat setelah 📋 Laporan Deviasi; wiring `_tab_views` + `_shared_h` + fanout `_on_pipeline_done` harga_map/konversi_map ke GR/PCS/Komparasi/Nominal/🧮 + log SELESAI) + ruff 15 == baseline (0 temuan baru).
 
 ### v3.9.32 — MULTI-SELECT · POPUP PIVOT BESAR · BARANG 42.17-ONLY · FILTER KATEGORI 42.17 · HARGA 41.09 · MODE NOMINAL
 > User: *"kenapa aku tidak bisa select ya untuk semua data?"* · *"popup di tab pivot ada deviasinya — terlalu kecil, besarkan lagi dan HAPUS tombol perbesar popup pivot"* · *"BUMBU PASTA KUAH hanya ada di 42.17, tidak muncul di Deviasi GR — apakah lookup dari Deviasi Weekly saja tidak dua arah dari 42.17?"* · *"filter lebih awal data 42.17 pakai kolom kategori barang (whitelist 5 kategori)"* · *"harga dari file 4109 (41.09) folder 09.Harga [alamat bisa diubah] — kolom harga = Nilai/Kuantitas Saldo Akhir"* · *"tab baru Nominal di Laporan Deviasi = Harga × kuantitas deviasi, per barang + total"* + konfirmasi **"YA KERJAKAN SEMUA DAN PUSH TO GIT HUB"**.

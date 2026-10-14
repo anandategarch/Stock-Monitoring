@@ -5,14 +5,14 @@ Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
     │ ⬛ Toolbar gelap: 📊 judul + v3.9.22 + [💾 Export] │
     ├────────────────────────────────────────────────────┤
-    │ Tab modern ber-ikon (9 tab, fungsi tidak berubah) │
+    │ Tab modern ber-ikon (10 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
     │ Konten card-based per view (tabel lebar & besar)   │
     ├────────────────────────────────────────────────────┤
     │ StatusBar: ● status data + ringkasan baris          │
     └────────────────────────────────────────────────────┘
 
-9 tab:
+10 tab:
   1. ⚙️ Config          : RootPath + info config
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
   3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default,
@@ -20,17 +20,35 @@ Struktur jendela (ala aplikasi Waste):
                           BULAN BERJALAN — v3.6)
   4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
                           (input TANGGAL H + Apply H — satu-satunya;
-                          spinbox AMBANG ACR to BOM — v3.9.21)
+                          spinbox AMBANG ACR to BOM — v3.9.21) + kolom
+                          Nominal (v3.9.34)
   5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
                           (chip H read-only, ikut tab GR — v3.9;
-                          spinbox ambang ACR sinkron — v3.9.21)
+                          spinbox ambang ACR sinkron — v3.9.21) + kolom
+                          Nominal (v3.9.34)
   6. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
                           kolom SO + kolom Hasil Audit (logika macro VBA ×
                           data app — v3.6, tanpa sheet 29) + drill-down
-  7. 📋 Laporan Deviasi : 2 MODE — ⚖ Komparasi File Deviasi (default,
-                          v3.9.4) & 🚨 Anomali COM (v3.9.3) + ✓
-  8. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
-  9. 🛒 Rincian PO      : rekap PO + item (baris teal/putih, v3.9)
+  7. 📋 Laporan Deviasi : 3 MODE — ⚖ Komparasi File Deviasi (default,
+                          v3.9.4; + kolom Nominal harga × GR Saat Ini —
+                          v3.9.34) & 🚨 Anomali COM (v3.9.3) & 💰 Nominal
+                          (H) (v3.9.32) + ✓
+  8. 🧮 NOMINAL DEVIASI : Σ (Harga 41.09 × Qty Deviasi) per resto +
+                          baris TOTAL + double-click resto → popup
+                          rincian per barang (v3.9.34)
+  9. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
+ 10. 🛒 Rincian PO      : rekap PO + item (baris teal/putih, v3.9)
+
+v3.9.34 ringkas (kolom Nominal di mana-mana + tab Σ per resto):
+- Kolom Nominal (Harga 41.09 × Qty Deviasi) di tab 📦 Deviasi GR &
+  🧩 Deviasi PCS (kolom Out_H/BK_H dihapus dari tampilan) dan di mode
+  ⚖ Komparasi (harga × GR Saat Ini) — perhitungan = helper bersama
+  src/ui/nominal_common.py (satu sumber kebenaran dgn mode 💰 Nominal
+  (H)); app meneruskan harga_map/konversi_map audit_result ke view.
+- TAB BARU 🧮 Nominal Deviasi: Σ nominal per resto + baris TOTAL +
+  double-click resto → popup rincian per barang (user: "isinya total
+  sum ... yang dapat dari harga × kuantitas deviasi, cuman ini disum
+  per resto").
 
 v3.7 "ENGINE TURBO" + DEEP AUDIT FIXES ringkasan:
 - ENGINE 3,5-4× LEBIH CEPAT (output terverifikasi IDENTIK vs v3.6):
@@ -123,6 +141,7 @@ from src.ui.in_selisih_view import InSelisihView
 from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.nominal_deviasi_view import NominalDeviasiView
+from src.ui.nominal_resto_view import NominalRestoView
 from src.ui.pivot_view import PivotTableView
 from src.ui.rincian_po_view import RincianPoView, _resto_name
 from src.ui.theme import (
@@ -158,7 +177,23 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.33"  # v3.9.33 — AUDIT FIX WAVE (Task 48 deep audit)
+APP_VERSION = "3.9.34"  # v3.9.34 — kolom Nominal + tab 🧮 Nominal Deviasi
+# v3.9.34 (user: kolom Nominal di Deviasi GR/PCS + Komparasi + tab Σ per
+# resto):
+# (1) kolom Nominal (Harga 41.09 × Qty Deviasi) di tab 📦 Deviasi GR &
+#     🧩 Deviasi PCS — kolom Out_H/BK_H dihapus dari tampilan;
+# (2) kolom Nominal di mode ⚖ Komparasi File Deviasi (harga × GR Saat
+#     Ini);
+# (3) TAB BARU 🧮 Nominal Deviasi — Σ (harga × qty deviasi) PER RESTO +
+#     baris TOTAL + double-click resto → popup rincian per barang
+#     (user: "ada tab nominal Deviasi, isinya total sum dari nama barang
+#     kayak di laporan sampel kolom nominal deviasi, yang dapat dari
+#     harga × kuantitas deviasi, cuman ini disum per resto");
+# (4) helper bersama src/ui/nominal_common.py — SATU sumber kebenaran
+#     perhitungan nominal (mode 💰 Nominal (H) + kolom GR/PCS +
+#     Komparasi + tab 🧮);
+# (5) app meneruskan harga_map/konversi_map (audit_result pipeline) ke
+#     deviasi GR/PCS + komparasi + nominal + tab 🧮 Nominal Deviasi.
 # v3.9.33 — AUDIT FIX WAVE (Task 48: deep audit 6 agent → 8 HIGH / 31 MED / ~54 LOW):
 # (1) clone ⛶ basi ditutup saat re-render + gen-guard (toggle ✓ baris salah);
 # (2) fn_9901 dedup baris duplikat lintas sheet/file + log per-sheet;
@@ -1027,6 +1062,8 @@ class StockMonitorApp:
         self.tab_deviasi_pcs = tk.Frame(self.notebook, bg=C_BG)
         self.tab_in_selisih = tk.Frame(self.notebook, bg=C_BG)
         self.tab_laporan = tk.Frame(self.notebook, bg=C_BG)
+        # v3.9.34 — tab 🧮 Nominal Deviasi (Σ nominal per resto)
+        self.tab_nominal_resto = tk.Frame(self.notebook, bg=C_BG)
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
 
@@ -1037,6 +1074,9 @@ class StockMonitorApp:
         self.notebook.add(self.tab_deviasi_pcs, text="🧩 Deviasi PCS")
         self.notebook.add(self.tab_in_selisih, text="📤 Rekap Selisih IN")
         self.notebook.add(self.tab_laporan, text="📋 Laporan Deviasi")
+        # v3.9.34 — tab 🧮 Nominal Deviasi: Σ harga×qty deviasi per resto
+        self.notebook.add(self.tab_nominal_resto,
+                          text="🧮 Nominal Deviasi")
         self.notebook.add(self.tab_followup, text="☑ Follow Up")
         self.notebook.add(self.tab_rincian, text="🛒 Rincian PO")
         # v3.2: lazy refresh — tab data hanya compute saat TERLIHAT
@@ -1057,6 +1097,7 @@ class StockMonitorApp:
         self._build_deviasi_pcs_tab()
         self._build_in_selisih_tab()
         self._build_laporan_tab()
+        self._build_nominal_resto_tab()   # v3.9.34 — tab 🧮
         self._build_followup_tab()
         self._build_rincian_tab()
         self._build_tab_views()  # FIX A-11: routing tab berbasis widget
@@ -1100,6 +1141,8 @@ class StockMonitorApp:
             str(self.tab_deviasi_pcs): self.deviasi_pcs_view,
             str(self.tab_in_selisih): self.in_selisih_view,
             str(self.tab_laporan): self._laporan_tab_entry,
+            # v3.9.34 — dispatch _on_tab_changed → ensure_refreshed
+            str(self.tab_nominal_resto): self.nominal_resto_view,
             str(self.tab_rincian): self.rincian_view,
         }
 
@@ -1700,6 +1743,12 @@ class StockMonitorApp:
             self._append_log_batched(
                 f"  Harga 41.09: {fmt_int_id(_n_harga)} barang — mode "
                 f"💰 Nominal (H) tab 📋 Laporan Deviasi siap\n")
+        # v3.9.34 — peta harga 41.09 + peta rasio konversi (dari
+        # audit_result pipeline) diteruskan ke SEMUA view nominal:
+        # kolom Nominal Deviasi GR/PCS, kolom Nominal mode Komparasi,
+        # mode 💰 Nominal (H), tab 🧮 Nominal Deviasi (Σ per resto).
+        _hm = (audit_result.get("harga_map") if audit_result else None)
+        _kv = (audit_result.get("konversi_map") if audit_result else None)
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
@@ -1723,27 +1772,31 @@ class StockMonitorApp:
         # Deviasi GR & PCS — sumber CEK "RI Balancing" kolom utama
         # (bulan Nomor RI ≠ bulan Nomor PO, tanggal dok ≤ H).
         _load_view("📦 Deviasi GR",
-                   lambda: self.deviasi_gr_view.load_data(append1_df,
-                                                          in_detail_df))
+                   lambda: self.deviasi_gr_view.load_data(
+                       append1_df, in_detail_df,
+                       harga_map=_hm, konversi_map=_kv))
         _load_view("🧩 Deviasi PCS",
-                   lambda: self.deviasi_pcs_view.load_data(append1_df,
-                                                           in_detail_df))
+                   lambda: self.deviasi_pcs_view.load_data(
+                       append1_df, in_detail_df,
+                       harga_map=_hm, konversi_map=_kv))
         _load_view("📤 Rekap Selisih IN",
                    lambda: self.in_selisih_view.load_data(
                        append1_df, in_detail_df, audit_result=audit_result))
         _load_view("🚨 Anomali COM",
                    lambda: self.laporan_view.load_data(append1_df))
         _load_view("⚖ Komparasi File Deviasi",
-                   lambda: self.komparasi_view.load_data(append1_df))
+                   lambda: self.komparasi_view.load_data(
+                       append1_df, harga_map=_hm, konversi_map=_kv))
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
-        # rasio konversi (dari audit_result — pipeline v3.9.32)
+        # rasio konversi (dari audit_result — pipeline v3.9.32;
+        # v3.9.34: sumber lokal _hm/_kv bersama semua view nominal)
         _load_view("💰 Nominal (H)",
                    lambda: self.nominal_view.load_data(
-                       append1_df,
-                       harga_map=(audit_result.get("harga_map")
-                                  if audit_result else None),
-                       konversi_map=(audit_result.get("konversi_map")
-                                     if audit_result else None)))
+                       append1_df, harga_map=_hm, konversi_map=_kv))
+        # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
+        _load_view("🧮 Nominal Deviasi",
+                   lambda: self.nominal_resto_view.load_data(
+                       append1_df, harga_map=_hm, konversi_map=_kv))
         _load_view("🛒 Rincian PO",
                    lambda: self.rincian_view.load_data(rincian_po_df))
         self.btn_export.set_enabled(True)
@@ -1769,7 +1822,8 @@ class StockMonitorApp:
         self._append_log_batched(
             "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
             "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
-            "📤 Rekap Selisih IN / 📋 Laporan / ☑ Follow Up / 🛒 Rincian PO.\n")
+            "📤 Rekap Selisih IN / 📋 Laporan / 🧮 Nominal Deviasi /\n"
+            "☑ Follow Up / 🛒 Rincian PO.\n")
 
     def _on_close_window(self):
         """v3.9.33 — AUDIT FIX (48-c LOW): handler tombol X.
@@ -1991,6 +2045,19 @@ class StockMonitorApp:
         else:
             self.laporan_view.pack(fill="both", expand=True)
             self.laporan_view.ensure_refreshed()
+
+    def _build_nominal_resto_tab(self):
+        """v3.9.34 — tab 🧮 Nominal Deviasi: Σ (Harga 41.09 × Qty
+        Deviasi) per resto + TOTAL + double-click resto → rincian per
+        barang (user: "ada tab nominal Deviasi, isinya total sum dari
+        nama barang kayak di laporan sampel kolom nominal deviasi, yang
+        dapat dari harga × kuantitas deviasi, cuman ini disum per
+        resto")."""
+        self.nominal_resto_view = NominalRestoView(
+            self.tab_nominal_resto,
+            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            h_state=self._shared_h)
+        self.nominal_resto_view.pack(fill="both", expand=True)
 
     def _build_followup_tab(self):
         self.followup_view = FollowUpView(

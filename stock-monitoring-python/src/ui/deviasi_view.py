@@ -1,6 +1,16 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.9.34 (user: "Nominal harusnya ada di Deviasi GR dan Deviasi PCS
+juga itu tambah kolom baru dan hapus kolom BK_7 dan OUT_7 misal H = 7"):
+- TAMBAH kolom "Nominal" tepat setelah Deviasi = Harga 41.09
+  (dinormalkan ke satuan pasangan — helper bersama
+  nominal_common.lookup_harga_pair) × Deviasi; barang tanpa harga /
+  satuan tak ter-cover rasio → NaN → tampil '-' (transparan).
+- HAPUS kolom display "Out_H" & "BK_H" (heading dinamis OUT_7/BK_7
+  saat H=7); nilai internal TETAP dihitung (dipakai rumus internal
+  Stok Seharusnya W = SO(H-1)+IN−BK−OUT & CEK — tidak tersentuh).
+
 v3.9.33 — AUDIT FIX (48-b/48-d/48-e/48-f, fix 49-a):
 - (P0) clone ⛶ basi: re-render/load_data MENUTUP semua clone hidup +
   generasi render dicatat di tree clone (klik ✓/double-click clone
@@ -198,6 +208,7 @@ import pandas as pd
 
 from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
+from .nominal_common import lookup_harga_pair  # v3.9.34 — kolom Nominal
 from .theme import (
     C_ACCENT,
     C_BG,
@@ -415,13 +426,15 @@ class DeviasiView(tk.Frame):
         ("In_H-1", 70, "e"),
         ("SO_H", 70, "e"),
         ("In_H", 70, "e"),
-        ("Out_H", 70, "e"),
-        ("BK_H", 70, "e"),
         ("SO_H+1", 70, "e"),
         ("In_H+1", 70, "e"),
         ("SO_H+2", 70, "e"),
         ("Sistem", 80, "e"),
         ("Deviasi", 80, "e"),
+        # v3.9.34 — kolom Nominal (Harga 41.09 × Deviasi) + Out_H/BK_H
+        # dihapus dari tampilan (permintaan user; nilai internal TETAP
+        # dihitung utk Stok Seharusnya W=SO(H-1)+IN−BK−OUT & CEK).
+        ("Nominal", 100, "e"),
         ("Rank", 50, "e"),
         # v3.9.18 — kolom Max Deviasi / ACR / Total ACR DIHAPUS dari
         # tampilan (permintaan user); nilainya TETAP dihitung internal
@@ -463,6 +476,14 @@ class DeviasiView(tk.Frame):
         self._cached_pivot = None
         self._cached_h = None
         self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
+        # v3.9.34 — kolom Nominal: harga 41.09 + peta rasio dari pipeline
+        # (audit_result['harga_map'] / ['konversi_map'] — diteruskan app
+        # lewat load_data). Cache (barang, satuan) → harga_norm dibangun
+        # sekali per data di _compute_pivot (reset di load_data — pola
+        # _aktif_lookup).
+        self.harga_map: dict = {}
+        self.konversi_map: dict | None = None
+        self._harga_pair_cache: dict | None = None
         self._aktif_lookup = {}
         # v3.9.13: lookup KATEGORI per barang (pola _aktif_lookup) + seleksi
         # combobox KATEGORI (None = "Semua" = tanpa filter).
@@ -908,6 +929,11 @@ class DeviasiView(tk.Frame):
         """Format kolom → string tampilan (identik render tabel)."""
         if col == "Dev to BOM%":
             return series.map(self._fmt_pct)
+        if col == "Nominal":
+            # v3.9.34 — NaN (tanpa harga) → 0 → '-' identik sel tabel
+            # (NaN mentah akan tampil string kosong di popup ⧩ —
+            # inkonsisten dgn tabel).
+            return series.fillna(0).map(self._fmt_num)
         return series.map(self._fmt_num)
 
     def _on_col_filter(self, col: str, selected):
@@ -1028,7 +1054,9 @@ class DeviasiView(tk.Frame):
         return max(1, min(h, 31))
 
     def load_data(self, data: pd.DataFrame,
-                  in_detail: pd.DataFrame | None = None):
+                  in_detail: pd.DataFrame | None = None,
+                  harga_map: dict | None = None,
+                  konversi_map: dict | None = None):
         self.data = data
         # v3.9.23 (poin 6) — detail dokumen IN per-dokumen (query_in):
         # sumber CEK "RI Balancing" kolom utama (bulan Nomor RI ≠ bulan
@@ -1036,6 +1064,12 @@ class DeviasiView(tk.Frame):
         # tidak ter-campur seperti kolom gabungan di frame final).
         # None (pemanggil lama/test) → kondisi tidak berlaku.
         self.in_detail = in_detail
+        # v3.9.34 — kolom Nominal: harga 41.09 + peta rasio satuan
+        # (audit_result['harga_map']/['konversi_map']); None/pemanggil
+        # lama → tanpa harga → SEMUA sel Nominal tampil '-' (kompatibel).
+        self.harga_map = harga_map or {}
+        self.konversi_map = konversi_map
+        self._harga_pair_cache = None   # dibangun ulang di _compute_pivot
         self._ri_bal_cache = None   # v3.9.23 — cache pasangan per (df, h)
         self._cached_pivot = None
         self._cached_h = None
@@ -1549,6 +1583,36 @@ class DeviasiView(tk.Frame):
             "Stok Seharusnya": stok_seharusnya,
         })
 
+        # v3.9.34 — kolom Nominal = Harga 41.09 (dinormalkan ke satuan
+        # pasangan) × Deviasi (helper bersama nominal_common; None → NaN
+        # bila barang tak ada di 41.09 / harga None / satuan tak
+        # ter-cover rasio → tampil '-'). Cache (barang, satuan) → harga
+        # = TUPLE (peta, dict) — PEMBACA memvalidasi identitas `is`
+        # (v3.9.34a RACE FIX, mirror komparasi: worker in-flight dgn peta
+        # lama boleh menulis — tuple ber-peta-lama otomatis dibuang saat
+        # dibaca → rebuild dari peta aktif; load_data reset tetap jalan).
+        # Out_H/BK_H TETAP dihitung di result (rumus internal Stok
+        # Seharusnya & CEK) — hanya kolom TAMPILAN yang dihapus.
+        _c34 = self._harga_pair_cache
+        if _c34 is not None and _c34[0] is self.harga_map:
+            _cache: dict = _c34[1]
+        else:
+            _cache = {}
+            for _b, _s in zip(result["Nama Barang"].astype(str),
+                              result["Satuan"].astype(str)):
+                if (_b, _s) not in _cache:
+                    _cache[(_b, _s)] = lookup_harga_pair(
+                        self.harga_map, self.konversi_map, _b, _s)[0]
+            self._harga_pair_cache = (self.harga_map, _cache)
+        _hpn = [_cache.get((str(_b), str(_s)))
+                for _b, _s in zip(result["Nama Barang"],
+                                  result["Satuan"])]
+        result["Nominal"] = pd.Series(
+            [np.nan if _h is None else float(_h) * float(_d)
+             for _h, _d in zip(_hpn, pd.to_numeric(
+                 result["Deviasi"], errors="coerce"))],
+            dtype="float64")
+
         if result.empty:
             return result
 
@@ -1688,12 +1752,16 @@ class DeviasiView(tk.Frame):
         # kolom matrix selain SO_H/Sistem/Deviasi ke cols_np → semua kolom
         # SO_H-2 … SO_H+2, In, Out, BK jatuh ke `else 0` → selalu tampil "-".
         # Kini SEMUA kolom numerik diekstrak (identik perilaku v3.1 row.get).
+        # v3.9.34 — Out_H/BK_H keluar tampilan (tetap dipakai rumus
+        # internal); Nominal masuk jalur numerik (NaN tanpa harga → 0
+        # → tampil '-').
         cols_np = {c: filtered[c].to_numpy() for c in
                    ("Resto", "Nama Barang", "Satuan",
                     "AKTIF/NON", "CEK")}   # v3.9.29 — KATEGORI keluar tampilan
         for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
-                  "Out_H", "BK_H", "SO_H+1", "In_H+1", "SO_H+2",
-                  "Sistem", "Deviasi", "Dev to BOM%", "Stok Seharusnya"):
+                  "SO_H+1", "In_H+1", "SO_H+2",
+                  "Sistem", "Deviasi", "Nominal",
+                  "Dev to BOM%", "Stok Seharusnya"):
             cols_np[c] = pd.to_numeric(
                 filtered[c], errors="coerce").fillna(0).to_numpy(
                 dtype="float64")
@@ -1756,6 +1824,16 @@ class DeviasiView(tk.Frame):
                         zero_cells.append((f"row_{i}", "Deviasi"))
                     else:
                         tags.append("zero_dev")
+            # v3.9.34 — mirror pola Deviasi utk kolom Nominal: minus
+            # merah PER CELL (NaN tanpa harga di-skip; fallback Tk 8 =
+            # tag baris 'negative' — persis jalur Deviasi).
+            nominal = cols_np["Nominal"][i] if "Nominal" in cols_np \
+                else None
+            if pd.notna(nominal) and nominal < 0:
+                if self._cell_tags:
+                    neg_cells.append((f"row_{i}", "Nominal"))
+                else:
+                    tags.append("negative")
             # v3.9.6: kolom kategori Deviasi — minus merah PER CELL juga di
             # "Dev to BOM%" & "Stok Seharusnya" (ACR/Total ACR/Max Deviasi
             # non-negatif by construction).
@@ -2035,10 +2113,12 @@ class DeviasiView(tk.Frame):
             self._pending_sort = (col, reverse)
             return   # render batch masih berjalan — sort ditunda (v3.3)
         tree = tree if tree is not None else self.tree
+        # v3.9.34 — Out_H/BK_H keluar tampilan; Nominal masuk parser
+        # format Indonesia (mis. '(1.825)' → -1825, '-' → 0).
         numeric_like = col in (
-            "SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H", "Out_H", "BK_H",
+            "SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
             "SO_H+1", "In_H+1", "SO_H+2", "Sistem", "Deviasi", "Rank",
-            "Dev to BOM%", "Stok Seharusnya")
+            "Nominal", "Dev to BOM%", "Stok Seharusnya")
         parse = self._parse_num_id if numeric_like else None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
         self._reapply_cell_tags(tree)

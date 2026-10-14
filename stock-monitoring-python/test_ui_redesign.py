@@ -392,6 +392,28 @@ Memverifikasi:
     Ini (BOM Lalu / DEV Lalu / %TO BOM Lalu / BOM Saat Ini / COM Saat
     Ini / DEV Saat Ini / GR Saat Ini; status 'TIDAK ADA DI DATA APP' →
     'TIDAK ADA DI DATA SAAT INI').
+
+45. v3.9.33 — AUDIT FIX WAVE (§45; Task 48 deep audit 6 agent → user
+    "kerjakan semua dan push"): 17 check satu-per-fix — first-match
+    konversi, preflight folder, config RuntimeError, fn_9901 dedup,
+    theme lazy font, Ctrl+C TSV, clone ⛶ basi ditutup, filter Harga
+    Nominal string terformat, TOTAL dipin, followup resolved orphan,
+    Salin Log, close-window guard (detail lengkap §45).
+
+46. v3.9.34 — KOLOM NOMINAL + TAB 🧮 NOMINAL DEVIASI (§46; user:
+    "Nominal harusnya ada di Deviasi GR dan Deviasi PCS juga, tambah
+    kolom baru dan hapus kolom BK_7 dan OUT_7 misal H=7; begitu juga
+    di Laporan Deviasi; terus ada tab nominal Deviasi isinya total
+    sum dari nama barang kayak di laporan sampel kolom nominal
+    deviasi yang dapat dari harga × kuantitas deviasi cuman ini
+    disum per resto"): (1) kolom Nominal (Harga 41.09 × Deviasi,
+    normalisasi satuan via peta rasio) di tab 📦 Deviasi GR & 🧩 PCS
+    — Out_H/BK_H DIHAPUS dari tampilan (internal tetap utk W/CEK);
+    (2) kolom Nominal (harga × GR Saat Ini) mode ⚖ Komparasi; (3) TAB
+    BARU 🧮 Nominal Deviasi — Σ nominal per resto + N barang/tanpa
+    harga + baris TOTAL + double-click resto → popup rincian per
+    barang; helper bersama nominal_common.py; fanout app meneruskan
+    harga_map/konversi_map ke 5 view.
 """
 import os
 import shutil
@@ -724,10 +746,12 @@ def main():
     app = StockMonitorApp(root)
     sys.stdout, sys.stderr = real_stdout, real_stderr
     root.update_idletasks()
-    check("App + toolbar + 9 tab terbangun (v3.9.12: tab 🎯 Pareto dihapus)",
-          len(app.notebook.tabs()) == 9, f"tabs={len(app.notebook.tabs())}")
+    check("App + toolbar + 10 tab terbangun (v3.9.34: tab 🧮 Nominal "
+          "Deviasi ditambahkan)",
+          len(app.notebook.tabs()) == 10,
+          f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.33", APP_VERSION == "3.9.33", f"got {APP_VERSION}")
+    check("Versi = 3.9.34", APP_VERSION == "3.9.34", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -1041,15 +1065,19 @@ def main():
     # (v3.9.18: kolom Max Deviasi / ACR / Total ACR DIHAPUS dari tampilan
     # — permintaan user; hitungan internal TETAP — CEK ke-5 & Dev to BOM%
     # & Stok Seharusnya tetap diuji di bawah)
-    # (v3.9.29: kolom KATEGORI juga DIHAPUS dari tabel — user: "sudah ada
-    # filter di atasnya" → skema kini 20 kolom, Dev to BOM% dst. bergeser
-    # dari indeks 19..21 → 18..20.)
+    # (v3.9.29: kolom KATEGORI juga DIHAPUS; v3.9.34: Out_H/BK_H DIHAPUS
+    # + kolom Nominal (Harga 41.09 × Deviasi) SISIP setelah Deviasi →
+    # skema kini 20 kolom, Dev to BOM% dst. bergeser ke indeks 17..19.)
     gr_cols = [c[0] for c in app.deviasi_gr_view.COLUMNS]
-    check("(v3.9.6→v3.9.29) Skema: Dev to BOM% + Stok Seharusnya + CEK "
-          "setelah Rank; Max Deviasi/ACR/Total ACR/KATEGORI DIHAPUS",
-          gr_cols[18:21] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
+    check("(v3.9.6→v3.9.34) Skema: Dev to BOM% + Stok Seharusnya + CEK "
+          "setelah Rank; Max Deviasi/ACR/Total ACR/KATEGORI/Out_H/BK_H "
+          "DIHAPUS; kolom Nominal (v3.9.34) ada",
+          gr_cols[17:20] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
           "Max Deviasi" not in gr_cols and "ACR" not in gr_cols and
-          "Total ACR" not in gr_cols and "KATEGORI" not in gr_cols,
+          "Total ACR" not in gr_cols and "KATEGORI" not in gr_cols and
+          "Out_H" not in gr_cols and "BK_H" not in gr_cols and
+          "Nominal" in gr_cols and
+          gr_cols.index("Nominal") == gr_cols.index("Deviasi") + 1,
           f"got {gr_cols}")
     gr_idx = {c: i for i, c in enumerate(gr_cols)}
     acr_row = None
@@ -2951,13 +2979,13 @@ def main():
     check("(v3.9.4) show_laporan_mode(0) → kembali ke Komparasi",
           kv.winfo_ismapped() and not app.laporan_view.winfo_ismapped())
 
-    check("(v3.9.14) Skema kolom komparasi (14 kolom — Minggu & H DIHAPUS "
-          "v3.9.13; istilah *Lalu/*Saat Ini v3.9.14)",
+    check("(v3.9.14→v3.9.34) Skema kolom komparasi (15 kolom — Minggu & H "
+          "DIHAPUS v3.9.13; Nominal v3.9.34 setelah GR Saat Ini)",
           [c[0] for c in kv.COLUMNS] == [
               "✓", "Resto", "Nama Barang", "Satuan",
               "BOM Lalu", "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
               "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
-              "GR Saat Ini", "Selisih", "Status"],
+              "GR Saat Ini", "Nominal", "Selisih", "Status"],
           f"got {[c[0] for c in kv.COLUMNS]}")
     check("(v3.9.14) Heading DEV Saat Ini = % TO BOM — Saat Ini (persen)",
           kv.tree.heading("DEV Saat Ini")["text"] == "% TO BOM — Saat Ini",
@@ -3588,11 +3616,14 @@ def main():
           bool(root.bind("<Control-Tab>")))
 
     # ---- A-11: routing tab berbasis WIDGET (bukan index) ----
-    check("(v3.9.10) A-11: peta _tab_views 6 entry berbasis nama widget",
-          len(app._tab_views) == 6
+    check("(v3.9.10→v3.9.34) A-11: peta _tab_views 7 entry berbasis nama "
+          "widget (+ tab 🧮 Nominal Deviasi)",
+          len(app._tab_views) == 7
           and app._tab_views.get(str(app.tab_rincian)) is app.rincian_view
           and app._tab_views.get(str(app.tab_deviasi_pcs))
-          is app.deviasi_pcs_view,
+          is app.deviasi_pcs_view
+          and app._tab_views.get(str(app.tab_nominal_resto))
+          is app.nominal_resto_view,
           f"got {len(app._tab_views)} entry")
     check("(v3.9.10) A-11: marker tab Laporan → dispatch mode aktif",
           app._tab_views.get(str(app.tab_laporan))
@@ -9549,6 +9580,286 @@ def main():
     # cleanup §45
     _sh45.rmtree(_tmp45, ignore_errors=True)
 
+    # ==================================================================
+    print("== 46. (v3.9.34) KOLOM NOMINAL (Deviasi GR/PCS + Komparasi) "
+          "+ TAB 🧮 NOMINAL DEVIASI (Σ per resto) ==")
+
+    # --- (a) DeviasiView: kolom Nominal = harga × Deviasi ----------
+    from src.ui.deviasi_view import DeviasiView as _DV46
+    _top46 = tk.Toplevel(root)
+    _top46.geometry("1400x750+10+10")
+    _dv46 = _DV46(_top46, satuan_mode="GR")
+    _dv46.pack(fill="both", expand=True)
+    root.update()          # map dulu supaya lazy-refresh jalan
+    _dv46.load_data(append1, None,
+                    harga_map={"BARANG ACR": (2.0, "GR")},
+                    konversi_map={"rasio": {("BARANG ACR", "GR"): 1.0,
+                                            ("BARANG ACR", "KG"): 1000.0},
+                                  "terkecil": {"BARANG ACR": "GR"}})
+    wait_view(root, _dv46)
+    _dv46.ensure_refreshed()
+    wait_view(root, _dv46)
+    _acr46 = None
+    for _i46 in _dv46.tree.get_children(""):
+        if str(_dv46.tree.set(_i46, "Nama Barang")) == "BARANG ACR":
+            _acr46 = _i46
+            break
+    check("(v3.9.34) Deviasi GR: BARANG ACR Nominal = 2/GR × Deviasi 100 "
+          "= '200'",
+          _acr46 is not None and _dv46.tree.set(_acr46, "Nominal") == "200",
+          f"got {None if _acr46 is None else _dv46.tree.set(_acr46, 'Nominal')!r}")
+    _ay46 = None
+    for _i46 in _dv46.tree.get_children(""):
+        if str(_dv46.tree.set(_i46, "Nama Barang")) == "AYAM FILET":
+            _ay46 = _i46
+            break
+    check("(v3.9.34) Deviasi GR: pasangan TANPA harga → Nominal '-'",
+          _ay46 is not None and _dv46.tree.set(_ay46, "Nominal") == "-",
+          f"got {None if _ay46 is None else _dv46.tree.set(_ay46, 'Nominal')!r}")
+    # normalisasi satuan: harga 41.09 per KG → GR (rasio 1000/1) →
+    # 2×1/1000 = 0,002/GR × dev 100 = 0,2
+    _dv46.load_data(append1, None,
+                    harga_map={"BARANG ACR": (2.0, "KG")},
+                    konversi_map={"rasio": {("BARANG ACR", "GR"): 1.0,
+                                            ("BARANG ACR", "KG"): 1000.0},
+                                  "terkecil": {"BARANG ACR": "GR"}})
+    wait_view(root, _dv46)
+    _acr46b = None
+    for _i46 in _dv46.tree.get_children(""):
+        if str(_dv46.tree.set(_i46, "Nama Barang")) == "BARANG ACR":
+            _acr46b = _i46
+            break
+    check("(v3.9.34) Deviasi GR: normalisasi satuan harga (2/KG → GR: "
+          "0,002 × 100) = '0,2'",
+          _acr46b is not None
+          and _dv46.tree.set(_acr46b, "Nominal") == "0,2",
+          f"got {None if _acr46b is None else _dv46.tree.set(_acr46b, 'Nominal')!r}")
+    check("(v3.9.34) Deviasi GR: heading TANPA 'Out_30'/'BK_30' "
+          "(kolom dihapus v3.9.34)",
+          not any("Out_" in str(_dv46.tree.heading(c)["text"])
+                  for c in _dv46.tree["columns"])
+          and not any("BK_" in str(_dv46.tree.heading(c)["text"])
+                      for c in _dv46.tree["columns"]),
+          "masih ada heading Out_/BK_")
+    # PCS juga ber-kolom Nominal
+    _dv46p = _DV46(_top46, satuan_mode="PCS")
+    _dv46p.pack(fill="both", expand=True)
+    _dv46p.load_data(append1, None,
+                     harga_map={"KOPI BUBUK 100G": (3.0, "PCS")},
+                     konversi_map={"rasio": {}, "terkecil": {}})
+    wait_view(root, _dv46p)
+    check("(v3.9.34) Deviasi PCS: kolom 'Nominal' ada (dipakai kedua "
+          "mode satuan)",
+          "Nominal" in list(_dv46p.tree["columns"]),
+          f"got {list(_dv46p.tree['columns'])}")
+    _dv46p.destroy()
+    _dv46.destroy()
+    _top46.destroy()
+    root.update()
+
+    # --- (b) app wiring: tab baru + fanout harga_map ---------------
+    _tab_labels46 = [str(app.notebook.tab(t, "text"))
+                     for t in app.notebook.tabs()]
+    check("(v3.9.34) app: tab '🧮 Nominal Deviasi' ada TEPAT SETELAH "
+          "📋 Laporan Deviasi",
+          "🧮 Nominal Deviasi" in _tab_labels46
+          and _tab_labels46.index("🧮 Nominal Deviasi") ==
+          _tab_labels46.index("📋 Laporan Deviasi") + 1,
+          f"got {_tab_labels46}")
+    check("(v3.9.34) app: nominal_resto_view terbangun + terhubung "
+          "shared-H + masuk dispatch _tab_views",
+          getattr(app, "nominal_resto_view", None) is not None
+          and app.nominal_resto_view._h_state is app._shared_h
+          and str(app.tab_nominal_resto) in app._tab_views
+          and app._tab_views[str(app.tab_nominal_resto)]
+          is app.nominal_resto_view)
+    import inspect as _insp46
+    _src46 = _insp46.getsource(StockMonitorApp._on_pipeline_done)
+    check("(v3.9.34) app: fanout _on_pipeline_done meneruskan "
+          "harga_map/konversi_map ke Deviasi GR/PCS + Komparasi + "
+          "tab 🧮 Nominal Deviasi",
+          all(_s46 in _src46 for _s46 in (
+              "deviasi_gr_view.load_data", "deviasi_pcs_view.load_data",
+              "komparasi_view.load_data", "nominal_resto_view.load_data",
+              "harga_map=_hm", "konversi_map=_kv")),
+          "ada pemanggilan fanout yang belum meneruskan peta harga")
+
+    # --- (c) NominalRestoView: Σ per resto + TOTAL + popup ----------
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV46
+    _top46n = tk.Toplevel(root)
+    _top46n.geometry("1400x750+10+10")
+    _rv46 = _NRV46(_top46n)
+    _rv46.pack(fill="both", expand=True)
+    _kmap46 = {"rasio": {("AYAM FILET", "GR"): 1.0,
+                         ("GULA PASIR", "KG"): 1000.0},
+               "terkecil": {"AYAM FILET": "GR", "GULA PASIR": "GR"}}
+    _hmap46 = {"AYAM FILET": (10.0, "GR"),
+               "GULA PASIR": (15.0, "GR")}
+    _dn46 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v,
+    } for b, r, s, v in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0),
+        ("GULA PASIR", "MLGPAR", "KG", 12.0),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0),
+        ("AYAM FILET", "BDGSET", "GR", 3.0),
+    ]])
+    _rv46.load_data(_dn46, harga_map=_hmap46, konversi_map=_kmap46)
+    _rv46.ensure_refreshed()
+    wait_view(root, _rv46)
+    _r46 = {str(_rv46.tree.set(_i46, "Resto")):
+            _rv46.tree.item(_i46, "values")
+            for _i46 in _rv46.tree.get_children("")}
+    _mlg46 = _r46.get("MLGPAR")
+    check("(v3.9.34) 🧮 Nominal Deviasi: MLGPAR = 3 barang · 1 tanpa "
+          "harga · Σ 20+180.000 = 180.020 (KOPI tanpa harga tak ikut)",
+          _mlg46 is not None and _mlg46[1] == "3" and _mlg46[2] == "1"
+          and _mlg46[3] == "180.020",
+          f"got {_mlg46}")
+    _bdg46 = _r46.get("BDGSET")
+    check("(v3.9.34) 🧮 Nominal Deviasi: BDGSET = 1 barang · Σ 30",
+          _bdg46 is not None and _bdg46[1] == "1" and _bdg46[2] == "0"
+          and _bdg46[3] == "30",
+          f"got {_bdg46}")
+    _tot46 = _r46.get("TOTAL")
+    check("(v3.9.34) 🧮 Nominal Deviasi: baris TOTAL = 4 barang · 1 "
+          "tanpa · Σ 180.050",
+          _tot46 is not None and _tot46[0] == "TOTAL"
+          and _tot46[1] == "4" and _tot46[2] == "1"
+          and _tot46[3] == "180.050",
+          f"got {_tot46}")
+    check("(v3.9.34) 🧮 Nominal Deviasi: heading dinamis "
+          "'Nominal Deviasi (H=25)' + urutan |Σ| menurun (MLGPAR dulu)",
+          "H=25" in str(_rv46.tree.heading("Nominal Deviasi")["text"])
+          and [_rv46.tree.set(_i46, "Resto")
+               for _i46 in _rv46.tree.get_children("")
+               if _rv46.tree.set(_i46, "Resto") != "TOTAL"]
+          == ["MLGPAR", "BDGSET"],
+          "heading/urutan salah")
+    check("(v3.9.34) 🧮 Nominal Deviasi: chip TOTAL terisi",
+          "TOTAL" in _rv46._total_var.get())
+    # double-click resto → popup rincian per barang
+    _e46 = tk.Event()
+    _e46.widget = _rv46.tree
+    _rv46.tree.selection_set(
+        next(_i46 for _i46 in _rv46.tree.get_children("")
+             if _rv46.tree.set(_i46, "Resto") == "MLGPAR"))
+    _rv46._on_double_click(_e46)
+    root.update()
+    wait_view(root, _rv46)
+    check("(v3.9.34) 🧮 Nominal Deviasi: double-click resto → popup "
+          "rincian terbuka",
+          len(_rv46._detail_wins) == 1
+          and _rv46._detail_wins[0].winfo_exists()
+          and "MLGPAR" in _rv46._detail_wins[0].title())
+    # cari treeview popup (rekursif)
+    def _findtree46(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Treeview):
+                return c
+            t = _findtree46(c)
+            if t is not None:
+                return t
+        return None
+    _pt46 = _findtree46(_rv46._detail_wins[0])
+    root.update()
+    _pk46 = _pt46.get_children("") if _pt46 is not None else []
+    _prow46 = {str(_pt46.set(k, "Nama Barang")): str(_pt46.set(k, "Nominal"))
+               for k in _pk46} if _pt46 is not None else {}
+    check("(v3.9.34) popup rincian MLGPAR: 3 barang + TOTAL; GULA "
+          "180.000; TOTAL Σ 180.020",
+          len(_pk46) == 4
+          and _prow46.get("GULA PASIR") == "180.000"
+          and _prow46.get("AYAM FILET") == "20"
+          and _prow46.get("KOPI BUBUK 100G") == "-"
+          and _prow46.get("TOTAL") == "180.020",
+          f"got {_prow46}")
+    # sort → TOTAL tetap dipin di ujung
+    _rv46._sort_by("Nominal Deviasi", reverse=True)
+    root.update()
+    check("(v3.9.34) 🧮 Nominal Deviasi: sort → baris TOTAL tetap "
+          "dipin di ujung",
+          _rv46.tree.set(_rv46.tree.get_children("")[-1], "Resto")
+          == "TOTAL")
+    # load_data ulang → popup basi ditutup + kompatibel tanpa peta harga
+    _rv46.load_data(_dn46)
+    _rv46.ensure_refreshed()
+    wait_view(root, _rv46)
+    check("(v3.9.34) 🧮 Nominal Deviasi: reload data → popup basi "
+          "DITUTUP + tanpa harga_map semua Nominal '-'",
+          len(_rv46._detail_wins) == 0
+          and all(
+              str(_rv46.tree.set(_i46, "Nominal Deviasi")) == "-"
+              for _i46 in _rv46.tree.get_children("")
+              if _rv46.tree.set(_i46, "Resto") != "TOTAL")
+          and str(_rv46.tree.set(
+              next(k for k in _rv46.tree.get_children("")
+                   if _rv46.tree.set(k, "Resto") == "TOTAL"),
+              "Nominal Deviasi")) == "-")
+    _top46n.destroy()
+    root.update()
+
+    # --- (d) Komparasi: kolom Nominal = harga × GR Saat Ini ---------
+    # v3.9.34: tangkap messagebox (parse error dialog akan mem-block
+    # test headless — error ditampung utk assertion)
+    import tkinter.messagebox as _mb46
+    _err46 = {}
+    _orig_se46 = _mb46.showerror
+
+    def _cap46(title, msg=None, **kw):
+        _err46["title"] = str(title)
+        _err46["msg"] = str(msg)
+        return None
+    _mb46.showerror = _cap46
+    det46 = make_mock_komparasi_df()
+    # v3.9.34: file mock xlsx DIBUAT ULANG — §13/§22 meng-unlink file lama
+    # (os.unlink(xlsx_path) ~baris 3255/4675) sebagai cleanup; tanpa ini
+    # §46d membaca path basi → parse error (dulu: dialog modal meng-block
+    # suite headless).
+    xlsx_path = make_mock_deviasi_file()
+    kv.load_data(det46,
+                 harga_map={"AYAM FILET": (10.0, "GR"),
+                            "GULA PASIR": (2.0, "GR")},
+                 konversi_map={"rasio": {("AYAM FILET", "GR"): 1.0,
+                                         ("GULA PASIR", "GR"): 1.0},
+                               "terkecil": {}})
+    kv._load_paths([xlsx_path])
+    wait_view(root, kv)
+    _nom_ok46 = 0
+    _nom_bad46 = []
+    _g46_rows = 0
+    for _i46 in kv.tree.get_children(""):
+        _gr46 = str(kv.tree.set(_i46, "GR Saat Ini"))
+        _b46 = str(kv.tree.set(_i46, "Nama Barang"))
+        if _gr46 in ("—", "", "-") or _b46 not in ("AYAM FILET",
+                                                   "GULA PASIR"):
+            continue
+        _g46_rows += 1
+        _grv46 = float(_gr46.replace(".", "").replace(",", "."))
+        _harga46 = 10.0 if _b46 == "AYAM FILET" else 2.0
+        _exp46 = kv._fmt_num(_harga46 * _grv46)
+        _got46 = str(kv.tree.set(_i46, "Nominal"))
+        if _got46 == _exp46:
+            _nom_ok46 += 1
+        else:
+            _nom_bad46.append((_b46, _gr46, _exp46, _got46))
+    check("(v3.9.34) Komparasi: Nominal = harga × GR Saat Ini utk "
+          "SEMUA baris ber-GR (GULA MLGPAR WEEK 4: 2×150 = 300)",
+          _g46_rows >= 1 and _nom_ok46 == _g46_rows and not _nom_bad46
+          and any(str(kv.tree.set(_i46, "GR Saat Ini")) == "150"
+                  and str(kv.tree.set(_i46, "Nominal")) == "300"
+                  for _i46 in kv.tree.get_children("")),
+          f"rows={_g46_rows} ok={_nom_ok46} bad={_nom_bad46[:3]}"
+          f" err={_err46}"
+          f" DIAG map={kv.harga_map}"
+          f" rdf={None if kv._result_df is None else kv._result_df[['Nama Barang', 'Nominal']].head(3).to_dict('records')}")
+    _mb46.showerror = _orig_se46
+    # cleanup §46 — file mock + state persist komparasi (pola §22)
+    import contextlib as _cl46
+    with _cl46.suppress(FileNotFoundError):
+        import os as _os46
+        _os46.unlink(xlsx_path)
+        _os46.unlink("komparasi_last.json")
     # Cleanup
     root.destroy()
 

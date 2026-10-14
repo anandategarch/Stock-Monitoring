@@ -1,6 +1,17 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+v3.9.34 (user: "begitu juga di Laporan Deviasi" — mode ⚖ Komparasi):
+KOLOM BARU "Nominal" = Harga 41.09 (dinormalkan ke satuan baris via peta
+rasio v3.9.31, helper bersama nominal_common.lookup_harga_pair) × "GR
+Saat Ini" — TEPAT SETELAH GR Saat Ini, SEBELUM Selisih. Baris tanpa nilai
+app / barang tanpa harga 41.09 / satuan tak terkonversi (penanda '*') →
+NaN → tampil '—' (konsisten GR Saat Ini). load_data menerima
+(harga_map, konversi_map) dari pipeline (default None → kompatibel
+pemanggil lama). Filter ⧩/sort numerik/minus-merah-per-cell ikut otomatis
+via NUMERIC_COLS; heading "Nominal — Harga 41.09 × GR Saat Ini". Tabel
+analisa (Top Selisih / Flip) TIDAK diubah.
+
 v3.9.33 — AUDIT FIX (48-d/48-e/48-f, fix 49-a):
 - (P0) clone ⛶ basi: re-render (tabel utama / Top / Flip) MENUTUP
   clone milik tabel tsb + generasi render dicatat di tree clone —
@@ -210,6 +221,10 @@ import numpy as np
 import pandas as pd
 
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
+
+# v3.9.34 — lookup harga 41.09 per (barang, satuan) utk kolom Nominal
+# (helper bersama nominal_common — juga dipakai mode 💰 Nominal (H)).
+from .nominal_common import lookup_harga_pair
 from .theme import (
     C_ACCENT,
     C_AMBER,
@@ -572,13 +587,18 @@ class KomparasiDeviasiView(tk.Frame):
         # konsisten kolom %TO BOM Lalu; dulu kuantitas COM−BOM).
         ("DEV Saat Ini", 85, "e"),
         ("GR Saat Ini", 100, "e"),
+        # v3.9.34 — Nominal = Harga 41.09 (dinormalkan satuan via peta
+        # rasio v3.9.31) × GR Saat Ini (user: "begitu juga di Laporan
+        # Deviasi"). Baris tanpa nilai app / tanpa harga / satuan tak
+        # terkonversi → sel kosong (NaN, konsisten kolom GR Saat Ini).
+        ("Nominal", 110, "e"),
         ("Selisih", 100, "e"),
         ("Status", 120, "w"),
     ]
 
     NUMERIC_COLS = ("BOM Lalu", "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
                     "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
-                    "GR Saat Ini", "Selisih")
+                    "GR Saat Ini", "Nominal", "Selisih")
 
     # v3.9.13 — mode 📈 Analisa: kolom tabel Top Selisih & Perubahan Arah
     # v3.9.14 (istilah user): DEV File → DEV Lalu, GR App → GR Saat Ini,
@@ -638,6 +658,11 @@ class KomparasiDeviasiView(tk.Frame):
         self._h_state = h_state
         # v3.9.22: fallback 26 (state diatur dinamis saat data dimuat)
         self.tanggal_h = int(h_state.h) if h_state is not None else 26
+        # v3.9.34 — kolom Nominal (Harga 41.09 × GR Saat Ini): peta harga
+        # + peta rasio konversi dari pipeline (via load_data; default
+        # kosong → kolom Nominal tampil kosong '—').
+        self.harga_map: dict = {}
+        self.konversi_map: dict | None = None
         self._fp_map: dict[str, str] = {}
         self._row_snaps: dict[str, dict] = {}
         self._busy = False
@@ -1043,6 +1068,8 @@ class KomparasiDeviasiView(tk.Frame):
             "COM Saat Ini": "COM — Saat Ini (Σ pakai)",
             "DEV Saat Ini": "% TO BOM — Saat Ini",
             "GR Saat Ini": "DEVIASI — Saat Ini (Tab GR)",
+            # v3.9.34 — Nominal = Harga 41.09 × GR Saat Ini
+            "Nominal": "Nominal — Harga 41.09 × GR Saat Ini",
             "Selisih": "Selisih (GR Saat Ini − DEV Lalu)",
         }
         for col, text in heads.items():
@@ -1220,8 +1247,16 @@ class KomparasiDeviasiView(tk.Frame):
     # =========================================================================
     # DATA LOADING
     # =========================================================================
-    def load_data(self, data: pd.DataFrame):
+    def load_data(self, data: pd.DataFrame,
+                  harga_map: dict | None = None,
+                  konversi_map: dict | None = None):
         self.data = data
+        # v3.9.34 — kolom Nominal (Harga 41.09 × GR Saat Ini): peta harga
+        # + peta rasio konversi dari pipeline (audit_result). Default None
+        # → kompatibel pemanggil lama (Nominal tampil kosong '—'). Cache
+        # lookup harga di-reset — harga_map baru.
+        self.harga_map = harga_map or {}
+        self.konversi_map = konversi_map
         # v3.9.5 (audit 19-a #1): data berganti → job lama dibuang
         self._render_gen += 1
         # v3.9.15a (audit P2-6): data app berganti → tabel analisa ikut
@@ -1980,6 +2015,27 @@ class KomparasiDeviasiView(tk.Frame):
                 (bom_app != 0) & ~np.isnan(bom_app),
                 dev_app / np.abs(bom_app), np.nan)
         df["GR Saat Ini"] = gr_app
+        # v3.9.34 — Nominal = harga 41.09 (dinormalkan ke satuan baris
+        # via peta rasio v3.9.31) × GR Saat Ini. Baris tanpa nilai app /
+        # barang tanpa harga / satuan tak terkonversi → NaN (tampil '—',
+        # konsisten GR Saat Ini).
+        # v3.9.34a — lookup per baris TANPA cache persisten: cache lama
+        # ber-key (barang, satuan) dari FILE SEBELUMNYA — file tanpa
+        # kolom Satuan menghasilkan key ('Barang', '') → file berikutnya
+        # ber-key satuan asli ('GR') MISS senyap → Nominal '—' padahal
+        # peta harga benar (ditemukan test §46d); plus race
+        # load_data-vs-worker-in-flight. lookup_harga_pair = O(1) dict
+        # (+2 get rasio) — ±1µs/baris, murah di worker thread.
+        _hn = np.array(
+            [lookup_harga_pair(self.harga_map, self.konversi_map,
+                               str(b), str(s))[0]
+             for b, s in zip(df["Nama Barang"], df["Satuan"])],
+            dtype=object)
+        df["Nominal"] = pd.to_numeric(
+            pd.Series([np.nan if (h is None or np.isnan(g))
+                       else float(h) * float(g)
+                       for h, g in zip(_hn, gr_app)], dtype="float64"),
+            errors="coerce")
         # NaN otomatis menjalar dari gr_app (baris tanpa nilai app)
         df["Selisih"] = selisih
         df["Status"] = status
@@ -2069,7 +2125,7 @@ class KomparasiDeviasiView(tk.Frame):
                     "BULAN",
                     "BOM Lalu", "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
                     "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
-                    "GR Saat Ini", "Selisih", "Status")}
+                    "GR Saat Ini", "Nominal", "Selisih", "Status")}
         items = []
         fp_map = {}
         row_snaps = {}
@@ -2097,15 +2153,20 @@ class KomparasiDeviasiView(tk.Frame):
                 "DEV Saat Ini": self._fmt_pct(
                     cols_np["DEV Saat Ini"][i]),
                 "GR Saat Ini": self._fmt_num(cols_np["GR Saat Ini"][i]),
+                # v3.9.34 — Harga 41.09 × GR Saat Ini (NaN → '—')
+                "Nominal": self._fmt_num(cols_np["Nominal"][i]),
                 "Selisih": self._fmt_num(cols_np["Selisih"][i]),
             }
             # v3.9.13: kolom Minggu & H TIDAK ditampilkan (permintaan
-            # user) — 14 kolom (data internal tetap di snapshot).
+            # user) — 15 kolom (v3.9.34: +Nominal; data internal tetap di
+            # snapshot).
             values = ["", resto, barang, str(cols_np["Satuan"][i]),
                       fmt_vals["BOM Lalu"], fmt_vals["COM Lalu"],
                       fmt_vals["DEV Lalu"], fmt_vals["%TO BOM Lalu"],
                       fmt_vals["BOM Saat Ini"], fmt_vals["COM Saat Ini"],
                       fmt_vals["DEV Saat Ini"], fmt_vals["GR Saat Ini"],
+                      # v3.9.34 — TEPAT SETELAH GR Saat Ini (urutan COLUMNS)
+                      fmt_vals["Nominal"],
                       fmt_vals["Selisih"], status]
 
             snap = {
@@ -2141,7 +2202,10 @@ class KomparasiDeviasiView(tk.Frame):
                 st_diff_cells.append((f"row_{i}", "Status"))
             elif status:
                 st_missing_cells.append((f"row_{i}", "Status"))
-            # nilai minus per-cell di kolom numerik
+            # nilai minus per-cell di kolom numerik (v3.9.34: "Nominal"
+            # ikut otomatis — loop ini membaca NUMERIC_COLS; fallback
+            # Tk 8 per baris juga NUMERIC_COLS — mirror "Selisih"/
+            # "GR Saat Ini")
             if self._cell_tags:
                 for col in self.NUMERIC_COLS:
                     v = cols_np[col][i]

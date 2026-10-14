@@ -3,6 +3,14 @@ nominal_deviasi_view.py — v3.9.32 MODE '💰 Nominal (H)' tab 📋 Laporan
 Deviasi (user: "tab baru 'Nominal' di Laporan Deviasi = Harga ×
 kuantitas deviasi, per barang + total").
 
+v3.9.34 — REFACTOR (zero behavior change): logika inti perhitungan
+Nominal dipindahkan ke helper BERSAMA src/ui/nominal_common.py
+(hitung_nominal_pairs / lookup_harga_pair / fmt_harga_id /
+fmt_nominal_cell — port persis; kini juga dipakai mode ⚖ Komparasi
+dan tab 🧮 Nominal Deviasi). _compute_nominal = wrapper;
+_fmt_harga/_fmt_cell_num = delegasi. Semua perilaku render/filter/TOTAL
+pin/busy lifecycle/listener H TIDAK berubah.
+
 v3.9.33 — AUDIT FIX (48-e/48-f): (1) filter ⧩ kolom Harga kini benar
 (_col_values memetakan "Harga" → "Harga Tampil" + _result_df tetap
 snapshot display, pola laporan v3.9.5 — dulu apply filter Harga =
@@ -43,9 +51,17 @@ from tkinter import ttk
 
 import pandas as pd
 
-# Konversi satuan harga 41.09 → satuan rekap (peta rasio pipeline)
-from src.pipeline.konversi_satuan import lookup_rasio
-
+# v3.9.34 — REFACTOR: logika inti perhitungan Nominal (filter
+# 3.DEVIASI@H → group → harga loop → sort |Nominal|) DIPINDAHKAN ke
+# helper bersama src/ui/nominal_common.py (dipakai juga mode ⚖ Komparasi,
+# tab 📦/🧩 Deviasi & tab 🧮 Nominal Deviasi). View ini kini hanya
+# wrapper + render; lookup_rasio tak lagi diimpor di sini (dipakai di
+# nominal_common).
+from .nominal_common import (
+    fmt_harga_id,
+    fmt_nominal_cell,
+    hitung_nominal_pairs,
+)
 from .theme import (
     C_ACCENT,
     C_BG,
@@ -74,14 +90,6 @@ from .widgets import (
     run_async,
     sort_tree_by_column,
 )
-
-
-def _norm_sat(v) -> str:
-    try:
-        s = str(v).strip().upper()
-        return "" if s in ("NAN", "NONE") else s
-    except Exception:
-        return ""
 
 
 class NominalDeviasiView(tk.Frame):
@@ -425,6 +433,15 @@ class NominalDeviasiView(tk.Frame):
         AKHIR sistem — nilai kolom Deviasi tab 📦 Deviasi GR; pasangan
         tanpa baris tanggal H → tak dihitung, kontribusi 0).
         self._result_df (snapshot utk filter header) ikut diisi.
+
+        v3.9.34 — REFACTOR (zero behavior change): inti compute
+        (filter 3.DEVIASI@H → groupby pasangan → loop harga +
+        normalisasi satuan → sort |Nominal| menurun) kini PANGGILAN
+        helper bersama nominal_common.hitung_nominal_pairs — port
+        PERSIS logika v3.9.32/33 (dtype float64 eksplisit Harga/Nominal,
+        urutan |Nominal|↓ lalu |qty|↓, fallback '*' transparan).
+        Wrapper (df default self.data, empty → _result_df None, snapshot
+        display kolom) dipertahankan apa adanya.
         """
         df = self.data if data is None else data
         if df is None or df.empty:
@@ -434,80 +451,13 @@ class NominalDeviasiView(tk.Frame):
             h = self.tanggal_h
         h = int(h)
 
-        tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
-        dev = df[(df["JENIS"].astype(str) == "3.DEVIASI") & (tnum == h)]
-        if dev.empty:
+        # v3.9.34 — logika inti di nominal_common (port persis v3.9.32/33)
+        grouped = hitung_nominal_pairs(df, h, self.harga_map,
+                                       self.konversi_map)
+        if grouped is None or grouped.empty:
+            # tanpa baris 3.DEVIASI tanggal H (perilaku lama)
             self._result_df = None
             return pd.DataFrame()
-        dev = dev.copy()
-        dev["NILAI"] = pd.to_numeric(dev["NILAI"], errors="coerce").fillna(0)
-
-        grouped = (dev.groupby(["Nama Barang", "NAMA RESTO", "SATUAN"],
-                                as_index=False, dropna=False)
-                   ["NILAI"].sum())
-        grouped = grouped.rename(columns={
-            "NAMA RESTO": "Resto", "SATUAN": "Satuan",
-            "NILAI": "Qty Deviasi"})
-        grouped["Nama Barang"] = grouped["Nama Barang"].astype(str)
-        grouped["Resto"] = grouped["Resto"].astype(str)
-        grouped["Satuan"] = grouped["Satuan"].map(
-            lambda v: _norm_sat(v) if _norm_sat(v) else "-")
-
-        # --- harga per barang (+ normalisasi satuan via peta rasio) ---
-        harga_vals = []
-        harga_disp = []
-        nominal_vals = []
-        kmap = self.konversi_map
-        for _, r in grouped.iterrows():
-            b = str(r["Nama Barang"]).strip()
-            sat_rekap = _norm_sat(r["Satuan"])
-            entry = self.harga_map.get(b)
-            harga = None
-            label = ""
-            nom = None
-            if entry is not None:
-                h41, sat41 = entry
-                if h41 is not None:
-                    if not sat41 or not sat_rekap or sat41 == sat_rekap \
-                            or sat_rekap == "-":
-                        # satuan sama (atau tak diketahui) → harga langsung
-                        harga = float(h41)
-                        label = sat41 or sat_rekap
-                    else:
-                        # normalisasi: harga41 × rasio(rekap) / rasio(41.09)
-                        r_rekap, _t1 = lookup_rasio(kmap, b, sat_rekap)
-                        r_41, _t2 = lookup_rasio(kmap, b, sat41)
-                        if r_rekap and r_41:
-                            harga = float(h41) * r_rekap / r_41
-                            label = sat_rekap
-                        else:
-                            # tak bisa dikonversi → harga as-is berpenanda
-                            label = f"{self._fmt_harga(float(h41))} {sat41}*"
-            if harga is not None:
-                nom = harga * float(r["Qty Deviasi"])
-                harga_disp.append(f"{self._fmt_harga(harga)} {label}")
-            else:
-                harga_disp.append(label or "-")
-            harga_vals.append(harga)
-            nominal_vals.append(nom)
-
-        # dtype float EKSPLISIT: semua-harga-gagal → list semua None →
-        # pandas membuat kolom object → .abs() di sort bawah RAISES
-        # (TypeError NoneType) di thread worker (ditelan on_error —
-        # tabel tak pernah render). None → NaN float aman.
-        grouped["Harga"] = pd.Series(harga_vals, dtype="float64")
-        grouped["Harga Tampil"] = harga_disp
-        grouped["Nominal"] = pd.Series(nominal_vals, dtype="float64")
-
-        # urutan default: |Nominal| MENURUN (dampak terbesar dulu);
-        # pasangan tanpa nominal paling bawah (urut |qty deviasi|)
-        grouped["_absnom"] = grouped["Nominal"].abs().fillna(0)
-        grouped["_absqty"] = grouped["Qty Deviasi"].abs()
-        grouped = (grouped.sort_values(
-            ["_absnom", "_absqty"], ascending=[False, False],
-            kind="mergesort")
-            .drop(columns=["_absnom", "_absqty"]))
-        grouped = grouped.reset_index(drop=True)
 
         # snapshot utk filter header (SEBELUM filter diterapkan)
         self._result_df = grouped[
@@ -566,37 +516,22 @@ class NominalDeviasiView(tk.Frame):
 
     @staticmethod
     def _fmt_harga(v) -> str:
-        """Harga: pecahan → 2 desimal (18,25); bulat → fmt_int_id."""
-        try:
-            v = float(v)
-        except (TypeError, ValueError):
-            return str(v)
-        av = abs(v)
-        if av == int(av):
-            return fmt_int_id(av)
-        return f"{av:,.2f}".replace(",", "X").replace(".", ",") \
-            .replace("X", ".")
+        """Harga: pecahan → 2 desimal (18,25); bulat → fmt_int_id.
+
+        v3.9.34 — REFACTOR: body diganti DELEGASI ke helper bersama
+        nominal_common.fmt_harga_id (port persis; pemanggil internal
+        tetap jalan — zero behavior change)."""
+        return fmt_harga_id(v)
 
     def _fmt_cell_num(self, val) -> str:
         """Format kolom numerik (qty/nominal): bilangan bulat →
         fmt_int_id; pecahan → 2 desimal; negatif dalam kurung; None → '-'.
+
+        v3.9.34 — REFACTOR: body diganti DELEGASI ke helper bersama
+        nominal_common.fmt_nominal_cell (port persis; pemanggil internal
+        tetap jalan — zero behavior change).
         """
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            return "-"
-        try:
-            v = float(val)
-        except (TypeError, ValueError):
-            return str(val)
-        if v == 0:
-            return "-"
-        neg = v < 0
-        av = abs(v)
-        if av == int(av):
-            s = fmt_int_id(av)
-        else:
-            s = f"{av:,.2f}".replace(",", "X").replace(".", ",") \
-                .replace("X", ".")
-        return f"({s})" if neg else s
+        return fmt_nominal_cell(val)
 
     def _render_rows(self, result: pd.DataFrame):
         if self._insert_cancel is not None:
