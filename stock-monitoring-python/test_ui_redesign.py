@@ -451,6 +451,24 @@ Memverifikasi:
     popup daftar barang tanpa harga + ALASAN (tak ada di 41.09 /
     satuan tak terkonversi; baris TOTAL → semua resto); (4) pivot:
     default kategori 'Deviasi' (fallback '(All)'; reset ikut).
+
+52. v3.9.40 — SCROLL ANTI-GLITCH (§52; user: "scroll masih seperti
+    glitch coba deep cek"): probe Xvfb menemukan DUA akar yang
+    luput dari fix v3.9.29 — (a) callback yscrollcommand (wrap)
+    ternyata baru dipanggil Tk di IDLE (bukan saat yview_scroll)
+    DAN place()/place_forget() label juga DEFERRED ke idle geometri
+    → sel warna selalu tertinggal ≥1 frame dari barisnya (probe:
+    lab_y=210 vs bbox_y=191 segera setelah notch) = 'glitch/tearing';
+    (b) redraw per notch mahal (bbox+set+configure+tag_configure per
+    sel, TANPA cache). FIX: (1) _redraw_overlay_now dipanggil dari
+    DALAM handler roda (setelah yview_scroll — bbox sudah valid saat
+    itu) → label pindah + update_idletasks memproses repaint tree &
+    pergeseran label dalam SATU burst sinkron; (2) CellColorOverlay
+    cache render (style/rowheight/font, warna tag baris per iid,
+    anchor kolom) + lompati configure/place yang tak berubah;
+    (3) reset akumulator saat arah roda berbalik; (4) modifier state/
+    delta/num ikut diteruskan event overlay (Shift+klik sel warna
+    kini men-extend seleksi — dulu state hilang).
 """
 import os
 import shutil
@@ -811,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.39", APP_VERSION == "3.9.39", f"got {APP_VERSION}")
+    check("Versi = 3.9.40", APP_VERSION == "3.9.40", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -10921,13 +10939,18 @@ def main():
           "DEFENSIVE + LOG TERBUANG ==")
     import contextlib as _cl51
     import io as _io51
+
     import openpyxl as _oxl51
     import pandas as _pd51
 
     from src.pipeline.append1 import _collect_protected_barangs as _cp51
     from src.pipeline.fn_4217 import (
         _norm_barang as _nb51,
+    )
+    from src.pipeline.fn_4217 import (
         _resolve_sheet_4217 as _rs51,
+    )
+    from src.pipeline.fn_4217 import (
         fn_4217 as _fn51,
     )
 
@@ -11141,6 +11164,129 @@ def main():
           f"rows={int(_mp51.sum())}")
     _dv51.destroy()
     shutil.rmtree(_tmp51, ignore_errors=True)
+
+    # ==================================================================
+    # §52 (v3.9.40) — SCROLL ANTI-GLITCH: FLUSH SINKRON + CACHE RENDER
+    # + STATE TERUSAN OVERLAY
+    # ==================================================================
+    print("\n== 52. (v3.9.40) SCROLL ANTI-GLITCH: FLUSH SINKRON + CACHE "
+          "+ STATE TERUSAN ==")
+    from src.ui.widgets import CellColorOverlay as _Ovl52
+    from src.ui.widgets import _redraw_overlay_now as _ron52
+    from src.ui.widgets import enable_smooth_wheel as _esw52
+
+    # --- (a) akumulator: sisa arah lama DIBUANG saat arah berbalik ---
+    _tw52 = tk.Toplevel(root)
+    _tw52.geometry("240x260+8+8")
+    _wt52 = ttk.Treeview(_tw52, columns=["c0"], show="headings", height=8)
+    _wt52.column("c0", width=120)
+    _wt52.heading("c0", text="X")
+    for _i52 in range(60):
+        _wt52.insert("", "end", iid=f"s{_i52}", values=[f"v{_i52}"])
+    _wt52.pack(fill="both", expand=True)
+    _tw52.update_idletasks()
+    root.update_idletasks()
+    _esw52(_wt52)
+    _rows52 = [f"s{_i52}" for _i52 in range(60)]
+    _by52 = _wt52.bbox("s0")[1] + 2
+    _wt52.yview_moveto(0.0)
+    root.update_idletasks()
+    for _ in range(3):      # turun 3 baris (acc bersih tiap notch)
+        _wt52.event_generate("<MouseWheel>", delta=-120, when="now")
+    _wt52.event_generate("<MouseWheel>", delta=-90, when="now")   # acc 0.75
+    _idx052 = _rows52.index(_wt52.identify_row(_by52))
+    _wt52.event_generate("<MouseWheel>", delta=120, when="now")   # balik arah
+    root.update_idletasks()
+    _idx152 = _rows52.index(_wt52.identify_row(_by52))
+    check("(v3.9.40) akumulator roda: sisa arah lama dibuang saat arah "
+          "berbalik (turun3+0.75 lalu 1 notch naik = TEPAT naik 1 baris; "
+          "tanpa reset sisa 0.75 'memakan' notch → 0 baris)",
+          _idx052 == 3 and _idx152 == 2,
+          f"idx0={_idx052} idx1={_idx152} (expect 3 → 2)")
+
+    # --- (b) flush sinkron: label pindah DALAM event roda (anti-tearing) ---
+    _to52 = tk.Toplevel(root)
+    _to52.geometry("260x320+8+8")
+    _ov52 = ttk.Treeview(_to52, columns=["c0"], show="headings", height=10)
+    _ov52.column("c0", width=140)
+    _ov52.heading("c0", text="Y")
+    for _i52 in range(40):
+        _ov52.insert("", "end", iid=f"p{_i52}", values=[f"w{_i52}"])
+    _ov52.pack(fill="both", expand=True)
+    _to52.update_idletasks()
+    root.update_idletasks()
+    _ovl52 = _Ovl52(_ov52)
+    _ov52.tag_configure("neg52", foreground="#dc2626")
+    _ovl52.set_cells("neg52", [(f"p{_i52}", "c0") for _i52 in range(40)])
+    _esw52(_ov52)      # jalur handler roda aktif (in-handler redraw)
+    root.update_idletasks()
+    _ov52.yview_moveto(0.0)
+    root.update_idletasks()
+    _lab52 = _ovl52._labels.get(("p6", "c0"))
+    # event roda → label HARUS sudah menempel posisi baru SEGERA,
+    # TANPA update idle (probe pra-fix: lab_y 210 vs bbox 191 = tearing)
+    _ov52.event_generate("<MouseWheel>", delta=-120, when="now")
+    _b52 = _ov52.bbox("p6", "c0")
+    check("(v3.9.40) RODA → label warna pindah SINKRON DALAM EVENT "
+          "(flush geometri — tanpa menunggu idle = tanpa frame tearing)",
+          _lab52 is not None and _lab52.winfo_ismapped() and _b52 is not None
+          and _lab52.winfo_y() == _b52[1] and _lab52.winfo_x() == _b52[0],
+          f"lab=({_lab52.winfo_x() if _lab52 else None},"
+          f"{_lab52.winfo_y() if _lab52 else None}) "
+          f"bbox={(_b52[0], _b52[1]) if _b52 else None}")
+
+    # --- (c) modifier STATE diteruskan overlay: Shift+klik = extend ---
+    _ov52.yview_moveto(0.0)
+    root.update_idletasks()
+    _ov52.selection_set(["p2"])
+    _ov52.focus("p2")
+    root.update_idletasks()
+    _lab52b = _ovl52._labels.get(("p8", "c0"))
+    _lab52b.event_generate("<Button-1>", x=5, y=5, state=0x1, when="now")
+    root.update_idletasks()
+    _sel52 = sorted(_ov52.selection())
+    check("(v3.9.40) overlay meneruskan modifier STATE: Shift+klik sel "
+          "warna men-EXTEND seleksi (dulu state hilang → seleksi berganti)",
+          _sel52 == [f"p{_i52}" for _i52 in range(2, 9)],
+          f"sel={_sel52}")
+
+    # --- (d) label dari pool dipasang ulang dgn posisi benar ---
+    _ov52.event_generate("<MouseWheel>", delta=-3000, when="now")  # jauh
+    root.update_idletasks()
+    _ov52.yview_moveto(0.0)
+    root.update_idletasks()
+    _lab52c = _ovl52._labels.get(("p0", "c0"))
+    _b52c = _ov52.bbox("p0", "c0")
+    check("(v3.9.40) label dari POOL dipasang ulang dgn posisi benar "
+          "(penanda xy di-reset — place tidak dilompati saat reuse)",
+          _lab52c is not None and _b52c is not None
+          and (_lab52c.winfo_x(), _lab52c.winfo_y()) == (_b52c[0], _b52c[1]),
+          f"lab=({_lab52c.winfo_x() if _lab52c else None},"
+          f"{_lab52c.winfo_y() if _lab52c else None}) "
+          f"bbox={(_b52c[0], _b52c[1]) if _b52c else None}")
+
+    # --- (e) _redraw_overlay_now aman utk tree TANPA overlay ---
+    _ron52(_wt52)
+    check("(v3.9.40) _redraw_overlay_now no-op utk tree tanpa overlay "
+          "(tidak membuat overlay/exception)",
+          getattr(_wt52, "_cell_color_overlay", None) is None)
+
+    # --- (f) cache render terisi & ter-invalidasi ---
+    _ovl52._redraw()
+    _cached52 = (len(_ovl52._rowbg_cache) > 0
+                 and _ovl52._style_cache is not None)
+    _ovl52.set_cells("neg52", [("p1", "c0")])
+    _inv52 = (len(_ovl52._rowbg_cache) == 0
+              and _ovl52._style_cache is None)
+    _ovl52._redraw()
+    _refill52 = len(_ovl52._rowbg_cache) > 0
+    check("(v3.9.40) cache render overlay: terisi setelah redraw, dibuang "
+          "saat set_cells (konten/tag berubah), terisi ulang",
+          _cached52 and _inv52 and _refill52,
+          f"cached={_cached52} invalidated={_inv52} refilled={_refill52}")
+
+    _tw52.destroy()
+    _to52.destroy()
 
     root.destroy()
 

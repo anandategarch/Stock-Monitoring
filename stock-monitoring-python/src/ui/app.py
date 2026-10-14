@@ -183,7 +183,29 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.39"  # v3.9.39 — 42.17 dua arah penuh: whitelist tak boleh buang barang ber-pasangan (rekap/IN/out) + sheet resolve defensive + log barang terbuang & jejak saldo-only
+APP_VERSION = "3.9.40"  # v3.9.40 — scroll anti-glitch: flush geometri label sinkron DALAM event roda + cache render overlay + reset akumulator arah + modifier state diteruskan overlay
+# v3.9.40 (user: "scroll masih seperti glitch coba deep cek"):
+# probe Xvfb menemukan akar yang luput dari fix v3.9.29:
+# (1) callback yscrollcommand (wrap overlay) baru dipanggil Tk di
+#     IDLE — bukan saat yview_scroll dieksekusi — dan place()/
+#     place_forget() label juga DEFERRED ke idle geometri → sel warna
+#     tertinggal ≥1 frame dari barisnya setiap notch (probe terukur:
+#     lab_y=210 vs bbox_y=191) = 'glitch/tearing' yang dilaporkan.
+#     FIX: _redraw_overlay_now dipanggil dari DALAM handler roda
+#     (setelah yview_scroll — bbox valid saat itu juga) → label
+#     pindah + update_idletasks memproses repaint tree & pergeseran
+#     label dalam SATU burst sinkron (frame layar tidak pernah
+#     menampilkan baris baru dengan label lama).
+# (2) CellColorOverlay CACHE RENDER: style/rowheight/font, warna tag
+#     baris per iid, anchor kolom — tidak dibaca ulang per sel per
+#     notch; lompati configure/place yang tak berubah (164 configure
+#     per notch = beban repaint terbesar); invalidasi saat set_cells/
+#     Configure; label pool reuse aman (penanda xy di-reset).
+# (3) enable_smooth_wheel: sisa akumulator arah lama DIBUANG saat
+#     arah roda berbalik (dulu sisa 0.75 'memakan' notch arah baru).
+# (4) Event overlay (label sel warna) kini meneruskan modifier
+#     state/delta/num — Shift+klik sel warna men-extend seleksi
+#     (dulu state hilang), wheel dari label membawa delta.
 # v3.9.39 (user: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah?
 # padahal di file 42.17 ada. Dulu pernah aku bilang look up nama barang
 # harus dua arah tidak hanya nama barang yang ada di file atau sheet

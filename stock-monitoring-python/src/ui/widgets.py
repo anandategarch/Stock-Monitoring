@@ -2674,17 +2674,151 @@ class CellColorOverlay:
         self._last_frac: dict = {}      # v3.9.29 — frac terakhir per opt
         self._pending = None
         self._alive = True
+        # v3.9.40 — CACHE RENDER + FLUSH GEOMETRI SINKRON (anti-glitch
+        # scroll; lihat _flush_geometry): nilai style, warna tag baris,
+        # anchor kolom, dan warna baris per iid TIDAK berubah selama
+        # scroll — dulu dibaca ulang via Tcl untuk SETIAP sel di SETIAP
+        # notch (~500 panggilan/notch di tabel 20 kolom) + konfigurasi
+        # label dikirim ulang meski isinya identik.
+        self._style_cache = None       # (style, rowheight, font, ...)
+        self._rowtag_cache: dict = {}  # tag baris -> (bg, fg)
+        self._rowbg_cache: dict = {}   # iid -> (bg, fg) tag-baris efektif
+        self._anchor_cache: dict = {}  # kolom -> anchor
+        self._flushing = False
         # deteksi double-click manual (label press + press terforward
         # saat ini berjalan rekursif → sintesis <Double-1> Tk tidak bisa
         # diandalkan; timer 400ms ala Tk default)
         self._dbl_t = 0.0
         self._dbl_lab = None
+        # v3.9.40 — REGISTRASI MANDIRI di tree: apa pun jalur pembuatan
+        # ( konstruktor langsung / _overlay_for_tree), handler roda
+        # (_redraw_overlay_now) menemukan overlay via atribut ini.
+        with contextlib.suppress(AttributeError, tk.TclError):
+            tree._cell_color_overlay = self
         self._wrap_scroll("yscrollcommand")
         self._wrap_scroll("xscrollcommand")
-        tree.bind("<Configure>", self._schedule, add="+")
+        tree.bind("<Configure>", self._on_configure, add="+")
         tree.bind("<<TreeviewSelect>>", self._schedule, add="+")
         tree.bind("<ButtonRelease-1>", self._schedule, add="+")
         tree.bind("<Destroy>", self._on_destroy, add="+")
+
+    # -- cache render (v3.9.40) --------------------------------------------
+    def _on_configure(self, _event=None):
+        # v3.9.40 — ukuran widget berubah: rowheight/style bisa ikut berubah
+        self._invalidate_render_cache()
+        self._schedule()
+
+    def _invalidate_render_cache(self):
+        """Buang cache render — dipanggil saat konten/ukuran berubah
+        (set_cells / <Configure>). Seleksi BARIS tidak perlu invalidate:
+        warna seleksi diterapkan live saat draw (cache hanya menyimpan
+        warna tag-baris mentah)."""
+        self._style_cache = None
+        self._rowtag_cache = {}
+        self._rowbg_cache = {}
+        self._anchor_cache = {}
+
+    def _style_ctx(self):
+        """(style, rowheight, font, field_bg, base_fg, sel_bg, sel_fg)
+        — di-cache sampai invalidate (dulu 4+ lookup style per redraw)."""
+        if self._style_cache is None:
+            style = ttk.Style(self.tree)
+            try:
+                font = style.lookup("Treeview", "font") or "TkDefaultFont"
+            except tk.TclError:
+                font = "TkDefaultFont"
+            self._style_cache = (
+                style,
+                _style_rowheight(style),
+                font,
+                style.lookup("Treeview", "background") or "#ffffff",
+                style.lookup("Treeview", "foreground") or "#000000",
+                _style_map_value(style, "background", "selected"),
+                _style_map_value(style, "foreground", "selected"),
+            )
+        return self._style_cache
+
+    def _rowtag_colors(self, tag):
+        """(bg, fg) tag BARIS — di-cache per nama tag (dulu tag_configure
+        per tag per baris per redraw)."""
+        try:
+            return self._rowtag_cache[tag]
+        except KeyError:
+            pass
+        try:
+            cfg = self.tree.tag_configure(tag)
+        except tk.TclError:
+            cfg = {}
+        val = (str((cfg or {}).get("background") or ""),
+               str((cfg or {}).get("foreground") or ""))
+        self._rowtag_cache[tag] = val
+        return val
+
+    def _col_anchor(self, col):
+        try:
+            return self._anchor_cache[col]
+        except KeyError:
+            pass
+        try:
+            a = self.tree.column(col, "anchor") or "w"
+        except tk.TclError:
+            a = "w"
+        self._anchor_cache[col] = a
+        return a
+
+    def _row_colors(self, iid, sel_set, sel_bg, sel_fg,
+                    field_bg, base_fg):
+        """Warna baris efektif utk sel TANPA opsi sendiri: tag baris
+        (opsi pertama terisi menang — meniru Treeview) → seleksi.
+        Warna tag-baris di-cache per iid; seleksi diterapkan live."""
+        cached = self._rowbg_cache.get(iid)
+        if cached is None:
+            row_bg, row_fg = "", ""
+            try:
+                tags = self.tree.item(iid, "tags") or ()
+            except tk.TclError:
+                tags = ()
+            for t in tags:
+                bg, fg = self._rowtag_colors(str(t))
+                if not row_bg and bg:
+                    row_bg = bg
+                if not row_fg and fg:
+                    row_fg = fg
+                if row_bg and row_fg:
+                    break
+            cached = (row_bg, row_fg)
+            self._rowbg_cache[iid] = cached
+        row_bg, row_fg = cached
+        sel = iid in sel_set
+        bg_row = sel_bg if (sel and sel_bg) else (row_bg or field_bg)
+        fg_row = sel_fg if (sel and sel_fg) else (row_fg or base_fg)
+        return bg_row, fg_row
+
+    def _flush_geometry(self):
+        """v3.9.40 — paksa Tk memproses pergeseran label SEKARANG.
+
+        AKAR GLITCH SCROLL YANG TERSEDIA (probe Xvfb, terukur):
+        ``place()``/``place_forget()`` itu DEFERRED — Tk baru memindahkan
+        jendela label di idle GEOMETRI, sementara repaint isi tree
+        terjadi lebih dulu → sel warna tampak TERTINGGAL 1 frame di
+        posisi lama (probe: lab_y=210 vs bbox_y=191 segera setelah
+        scroll tanpa update) → saat menggulir terus-menerus, sel warna
+        'berenang' di atas baris yang salah (glitch/tearing).
+
+        Flush ``update_idletasks`` di AKHIR redraw membuat pergeseran
+        label + repaint tree terjadi dalam SATU burst sinkron
+        (sub-milidetik) — tidak ada frame layar yang menyela. Guard
+        ``_flushing`` mencegah rekursi (idle lain yang memicu scroll
+        → redraw → flush bersarang)."""
+        if self._flushing or not self._alive:
+            return
+        self._flushing = True
+        try:
+            self.tree.update_idletasks()
+        except tk.TclError:
+            pass
+        finally:
+            self._flushing = False
 
     # -- lifecycle -----------------------------------------------------------
     def _on_destroy(self, _event=None):
@@ -2747,6 +2881,8 @@ class CellColorOverlay:
         if fg:
             opts["foreground"] = fg
         self._tag_opts[tag] = opts
+        # v3.9.40 — konten/tema tag berubah → buang cache render
+        self._invalidate_render_cache()
         self._rebuild()
         self._schedule()
 
@@ -2814,19 +2950,14 @@ class CellColorOverlay:
         except tk.TclError:
             self._alive = False
             return
-        style = ttk.Style(tree)
-        rowheight = _style_rowheight(style)
+        # v3.9.40 — style + warna di-CACHE (dulu 4 lookup style +
+        # tag_configure per tag per baris di-setiap redraw = puluhan
+        # panggilan Tcl ekstra per notch scroll).
+        (_style, rowheight, font, field_bg, base_fg, sel_bg, sel_fg) = \
+            self._style_ctx()
         visible = self._visible_iids(rowheight)
         if not visible:
             return
-        try:
-            font = style.lookup("Treeview", "font") or "TkDefaultFont"
-        except tk.TclError:
-            font = "TkDefaultFont"
-        field_bg = style.lookup("Treeview", "background") or "#ffffff"
-        base_fg = style.lookup("Treeview", "foreground") or "#000000"
-        sel_bg = _style_map_value(style, "background", "selected")
-        sel_fg = _style_map_value(style, "foreground", "selected")
         try:
             sel_set = set(tree.selection())
         except tk.TclError:
@@ -2838,25 +2969,10 @@ class CellColorOverlay:
             entries = self._by_iid.get(iid)
             if not entries:
                 continue
-            # latar/teks baris efektif: tag BARIS (urutan item — opsi
-            # pertama yang terisi menang, meniru Treeview) → seleksi.
-            row_bg, row_fg = "", ""
-            try:
-                tags = tree.item(iid, "tags") or ()
-            except tk.TclError:
-                tags = ()
-            for t in tags:
-                try:
-                    cfg = tree.tag_configure(t)
-                except tk.TclError:
-                    continue
-                if not row_bg and cfg.get("background"):
-                    row_bg = str(cfg["background"])
-                if not row_fg and cfg.get("foreground"):
-                    row_fg = str(cfg["foreground"])
-            sel = iid in sel_set
-            bg_row = sel_bg if (sel and sel_bg) else (row_bg or field_bg)
-            fg_row = sel_fg if (sel and sel_fg) else (row_fg or base_fg)
+            # latar/teks baris efektif (tag baris → seleksi) — warna
+            # tag-baris per iid di-cache (v3.9.40); seleksi live.
+            bg_row, fg_row = self._row_colors(iid, sel_set, sel_bg,
+                                               sel_fg, field_bg, base_fg)
             for col, opts in entries:
                 try:
                     box = tree.bbox(iid, col)
@@ -2888,20 +3004,32 @@ class CellColorOverlay:
                     except tk.TclError:
                         continue
                 lab = self._label_for(key)
-                try:
-                    anchor = tree.column(col, "anchor") or "w"
-                except tk.TclError:
-                    anchor = "w"
-                lab.configure(
-                    text=text, font=font, anchor=anchor,
-                    background=opts.get("background") or bg_row,
-                    foreground=opts.get("foreground") or fg_row)
-                lab.place(x=box[0], y=box[1], width=box[2], height=box[3])
+                anchor = self._col_anchor(col)
+                bg = opts.get("background") or bg_row
+                fg = opts.get("foreground") or fg_row
+                # v3.9.40 — LOMPATI configure bila tak berubah: saat
+                # scroll, teks/warna/anchor/font sel identik (hanya posisi
+                # y yang bergeser) — configure ulang = invalidasi paint
+                # label yang tidak perlu (beban repaint terbesar).
+                cfg_key = (text, bg, fg, anchor, font)
+                if getattr(lab, "_ov_cfg", None) != cfg_key:
+                    lab.configure(
+                        text=text, font=font, anchor=anchor,
+                        background=bg, foreground=fg)
+                    lab._ov_cfg = cfg_key
+                xy_key = (bx, by, bw, bh)
+                if getattr(lab, "_ov_xy", None) != xy_key:
+                    lab.place(x=bx, y=by, width=bw, height=bh)
+                    lab._ov_xy = xy_key
                 placed.add(key)
         # label sel yang tak lagi terlihat / itemnya hilang → bersihkan
         for key in list(self._labels):
             if key not in placed:
                 self._destroy_label(key)
+        # v3.9.40 — FLUSH SINKRON: tanpa ini place()/place_forget()
+        # baru diproses Tk di idle geometri SETELAH repaint tree → sel
+        # warna tertinggal 1 frame (glitch 'berenang' saat scroll).
+        self._flush_geometry()
 
     # -- label pool + penerusan event -----------------------------------------
     def _label_for(self, key):
@@ -2923,6 +3051,10 @@ class CellColorOverlay:
         if lab is not None:
             with contextlib.suppress(tk.TclError):
                 lab.place_forget()
+            # v3.9.40 — reset penanda posisi: label di pool akan
+            # dipakai ulang utk sel lain — bila xy kebetulan sama, place
+            # tidak boleh dilompati (label masih place_forget!).
+            lab._ov_xy = None
             # v3.9.29 — kembalikan ke pool (reuse) bila masih hidup;
             # pool penuh → benar-benar destroy.
             try:
@@ -2957,8 +3089,20 @@ class CellColorOverlay:
             def handler(event, _seq=seq):
                 try:
                     lx, ly = lab.winfo_x(), lab.winfo_y()
-                    tree.event_generate(_seq, x=lx + event.x,
-                                        y=ly + event.y, warp=False)
+                    kw = {"x": lx + event.x, "y": ly + event.y,
+                          "warp": False}
+                    # v3.9.40 — modifier & field roda ikut diteruskan
+                    # (dulu HILANG: Shift+klik di sel warna tidak bisa
+                    # men-extend seleksi — event terforward datang dgn
+                    # state kosong; wheel terforward tanpa delta tidak
+                    # menggulir). state = bitmask modifier Tk (Shift/
+                    # Ctrl/Button), delta = besaran roda, num = tombol
+                    # X11 Button-4/5.
+                    for attr in ("state", "delta", "num"):
+                        v = getattr(event, attr, None)
+                        if v is not None:
+                            kw[attr] = v
+                    tree.event_generate(_seq, **kw)
                 except tk.TclError:
                     pass
             return handler
@@ -2973,8 +3117,11 @@ class CellColorOverlay:
             self._dbl_t, self._dbl_lab = now, lab
             try:
                 lx, ly = lab.winfo_x(), lab.winfo_y()
-                tree.event_generate("<Button-1>", x=lx + event.x,
-                                    y=ly + event.y, warp=False)
+                # v3.9.40 — state (modifier Shift/Ctrl) ikut diteruskan
+                tree.event_generate(
+                    "<Button-1>", x=lx + event.x, y=ly + event.y,
+                    warp=False,
+                    state=int(getattr(event, "state", 0) or 0))
             except tk.TclError:
                 return
             if is_dbl:
@@ -3326,6 +3473,26 @@ def _tree_content_x(tree: ttk.Treeview, event_x: int) -> float:
     return event_x + offset
 
 
+def _redraw_overlay_now(tree: ttk.Treeview) -> None:
+    """v3.9.40 — redraw overlay + flush SEKARANG, dari DALAM handler
+    roda (sebelum Tk sempat me-repaint tree).
+
+    Temuan probe: callback ``yscrollcommand`` (wrap) baru dipanggil Tk
+    di IDLE — bukan saat ``yview_scroll`` dieksekusi — sehingga redraw
+    label dari dalam wrap SELALU ketinggalan repaint tree (glitch 'sel
+    warna berenang'). Dengan memanggil redraw langsung dari handler
+    roda SETELAH ``yview_scroll``: offset tree sudah ter-update (bbox
+    valid saat itu juga) → label dipindah + ``update_idletasks``
+    memproses repaint tree DAN pergeseran label dalam SATU burst
+    sinkron — frame layar tidak pernah menampilkan baris baru dgn label
+    lama. Tree tanpa overlay (Tk 9 native / tanpa sel warna) → no-op.
+    """
+    ov = getattr(tree, "_cell_color_overlay", None)
+    if ov is not None and getattr(ov, "_alive", False):
+        with contextlib.suppress(tk.TclError):
+            ov._redraw()
+
+
 def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
     """v3.9.29 — SCROLL RODA HALUS (user: "perbaiki animasi scroll seperti
     tidak smooth dan patah patah").
@@ -3347,7 +3514,13 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
     supaya tidak menggulir DOBEL (default 3 baris + binding ini).
     Idempoten (flag `_smooth_wheel_bound`) — dipanggil dari
     enable_col_resize yang dipasang sekali per tree (termasuk clone ⛶).
-    """
+
+    v3.9.40 — (a) RESET AKUMULATOR saat ARAH RODA BERBALIK: sisa ≤0.5
+    baris arah lama dulu ikut tercampur → notch pertama arah baru bisa
+    'dimakan' sisa (terasa macet sesaat); (b) sisanya ada di
+    CellColorOverlay._flush_geometry (geometri label diproses SINKRON —
+    probe Xvfb menunjukkan place() deferred ke idle = sel warna
+    tertinggal 1 frame, akar 'glitch' yang dilaporkan user)."""
     if getattr(tree, "_smooth_wheel_bound", False):
         return
     tree._smooth_wheel_bound = True
@@ -3357,6 +3530,13 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
         if d == 0:
             return None
         acc = getattr(tree, "_smooth_wheel_acc", 0.0)
+        # v3.9.40 — ganti arah: buang sisa akumulator ARAH LAMA (tanpa
+        # ini sisa +0.75 baris 'memakan' notch arah baru → respons
+        # balik arah tertunda). Tanda KONTRIBUSI = -d (roda ke bawah
+        # d<0 → kontribusi +): reset saat tanda kontribusi ≠ tanda akumulator
+        # ⇔ (d > 0) == (acc > 0).
+        if acc and ((d > 0) == (acc > 0)):
+            acc = 0.0
         acc += (-d / 120.0) * units_per_notch
         steps = int(acc)              # potong menuju nol; sisa diakumulasi
         tree._smooth_wheel_acc = acc - steps
@@ -3365,6 +3545,10 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
                 tree.yview_scroll(steps, "units")
             except tk.TclError:
                 pass
+            # v3.9.40 — redraw overlay SEKARANG (sebelum repaint tree
+            # di idle — probe: wrap/yscrollcommand baru jalan di idle,
+            # terlambat utk mencegah label tertinggal 1 frame)
+            _redraw_overlay_now(tree)
         return "break"
 
     def _on_btn45(event):
@@ -3374,6 +3558,9 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
                               "units")
         except tk.TclError:
             pass
+        else:
+            # v3.9.40 — idem _on_wheel: redraw sebelum repaint idle
+            _redraw_overlay_now(tree)
         return "break"
 
     tree.bind("<MouseWheel>", _on_wheel, add="+")

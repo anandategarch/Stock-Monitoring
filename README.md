@@ -6,7 +6,7 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
-> **Versi terkini: v3.9.39** — 🔁 **42.17 DUA ARAH PENUH: whitelist kategori TIDAK BOLEH membuang barang yang ber-pasangan (rekap SO/BM · IN · OUT · BK) — saldo awal wajib masuk, akar "Bumbu Pasta Kuah ada di 42.17 tapi tidak muncul di Deviasi GR"** · **sheet 42.17 resolve defensive** (nama export beda ≠ 0 baris senyap) · **log transparan** (barang terbuang whitelist disebut namanya + jejak pasangan saldo-only). Changelog di bawah.
+> **Versi terkini: v3.9.40** — 🖱️ **SCROLL ANTI-GLITCH: flush geometri label sel warna SINKRON di DALAM event roda** (probe menemukan akar yang luput v3.9.29: callback yscrollcommand & `place()` label ternyata DEFERRED ke idle → sel warna tertinggal 1 frame di atas baris salah = "berenang"; kini repaint tree + pergeseran label terjadi dalam SATU burst) · **cache render overlay** (style/warna/anchor tak dibaca ulang per sel per notch; configure/place tak berubah dilompati) · **reset akumulator saat arah roda berbalik** · **Shift+klik sel warna men-extend seleksi** (modifier state kini diteruskan overlay). Changelog di bawah.
 
 ## Quick Start (Python Edition)
 
@@ -24,6 +24,15 @@ python -m src.main
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
+
+### v3.9.40 — SCROLL ANTI-GLITCH: FLUSH GEOMETRI LABEL SINKRON + CACHE RENDER OVERLAY
+(User: "scroll masih seperti glitch coba deep cek")
+1. **AKAR GLITCH DITEMUKAN (probe Xvfb, terukur)** — dua temuan yang luput dari fix v3.9.29: (a) callback `yscrollcommand` (hook redraw overlay) ternyata baru dipanggil Tk di **IDLE** — bukan saat `yview_scroll` dieksekusi — dan `place()`/`place_forget()` label sel warna juga **DEFERRED ke idle geometri** → tiap notch scroll, tree me-repaint baris baru DULU, label sel warna baru pindah belakangan → sel merah/amber tampak "berenang" tertinggal ≥ 1 frame di atas baris yang salah (probe: `lab_y=210` vs `bbox_y=191` segera setelah notch — v3.9.29 mengira redraw sinkron di dalam callback sudah cukup, tapi PINDAHAN FISIK jendela label tetap terjadi di idle); (b) redraw per notch berat: `bbox` + `tree.set` + `configure(text,font,bg,fg)` + `tag_configure` + `style.lookup` untuk SETIAP sel warna TANPA cache (tabel 20 kolom ≈ 500 panggilan Tcl per notch) — putaran roda cepat menumpuk antrean event → lompatan multi-baris (jank).
+2. **FLUSH SINKRON DALAM EVENT RODA** — `enable_smooth_wheel` kini memanggil `_redraw_overlay_now(tree)` SETELAH `yview_scroll`, di DALAM handler roda (bbox saat itu sudah valid): label dipindah + `update_idletasks` memproses repaint tree & pergeseran label dalam **SATU burst sinkron** — frame layar tidak pernah menampilkan baris baru dengan label lama. Probe pasca-fix: **250/250 label nempel bbox SEGERA** setelah notch (tanpa menunggu idle; tema app rowheight 30, 838 sel warna); X11 Button-4/5 ikut; tree tanpa overlay → no-op; guard `_flushing` anti-rekursi.
+3. **CACHE RENDER OVERLAY** — `CellColorOverlay` meng-cache style/rowheight/font/warna-seleksi, warna tag baris per iid, dan anchor kolom (invalidasi saat `set_cells`/`<Configure>`; warna seleksi diterapkan live); **lompati `configure`/`place` yang tidak berubah** (saat scroll hanya y yang bergeser — dulu 164 `configure` per notch = invalidasi paint label terbesar); label pool reuse aman (penanda posisi di-reset saat kembali ke pool — place tidak dilompati saat label dipakai ulang); **registrasi mandiri** `tree._cell_color_overlay` di konstruktor (apa pun jalur pembuatan, handler roda menemukan overlay).
+4. **AKUMULATOR ARAH + MODIFIER TERUSAN** — sisa akumulator arah lama dibuang saat arah roda berbalik (dulu sisa +0.75 baris "memakan" notch arah baru → respons balik arah tertunda); event yang diteruskan label overlay kini membawa **state/delta/num** (modifier Shift/Ctrl + besaran roda X11) — **Shift+klik sel warna kini men-extend seleksi** (dulu state hilang → seleksi berganti baris tunggal).
+
+Verifikasi: test_ui_redesign **1011/1011 PASS** (1005 + §52 6 check baru) + test_mock ALL PASS + ruff src 198 == baseline & test 14 < 15 baseline + py_compile + QA visual Xvfb dgn tema app (rowheight 30 · 838 sel warna · 25-notch burst): 250/250 label sejajar DALAM event + VLM 2 screenshot (tengah burst & akhir) tanpa artefak + 5.97 ms/notch.
 
 ### v3.9.39 — 42.17 DUA ARAH PENUH: WHITELIST PROTECT + SHEET DEFENSIVE + LOG TERBUANG
 (User: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah? padahal di file 42.17 ada. Dulu pernah aku bilang look up nama barang harus dua arah tidak hanya nama barang yang ada di file atau sheet Rekap Mentah tapi juga di file 42.17. cek dulu")
