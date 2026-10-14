@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.42", APP_VERSION == "3.9.42",
+    check("Versi = 3.9.43", APP_VERSION == "3.9.43",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -11542,7 +11542,13 @@ def main():
           f"got {_btn_txt53}")
     # resize jendela → kolom re-scale (binding <Configure>)
     _geom53 = _win53.geometry()
-    _neww53 = max(760, int(_w53 * 0.7))
+    # v3.9.43 — FIX test (deterministik, bukan flake): floor lama 760
+    # BISA lebih kecil dari popup minsize (900 di-clamp layar —
+    # v3.9.42) → WM menaikkan lebar jadi 900 → assert "geometri normal
+    # kembali" GAGAL pasti di layar 1280 (0.7×1203=842 < 900; di layar
+    # 1920: 0.7×1804=1263 ≥ 900 → lolos — makanya verifikasi v3.9.42
+    # hijau). Floor test kini = minsize popup: 900.
+    _neww53 = max(900, int(_w53 * 0.7))
     _win53.geometry(f"{_neww53}x{max(420, int(_h53w * 0.8))}")
     _win53.update()
     root.update()

@@ -1,0 +1,8 @@
+# v3.9.43 — File .bat/.cmd WAJIB line-ending CRLF: parser cmd.exe
+# sensitif pada LF-Unix (goto/label + blok kurung bisa goyah =
+# launcher "tidak bisa launch" senyap). Kunci eol di level git supaya
+# edit dari Linux (editor/agent ber-line-ending LF) otomatis
+# dinormalisasi ke CRLF saat checkout — launcher tidak bisa rusak lagi.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

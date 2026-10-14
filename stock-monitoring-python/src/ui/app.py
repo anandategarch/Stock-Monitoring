@@ -184,7 +184,25 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.42"  # v3.9.42 — deep-audit 4 agen: hotfix regresi forward-event overlay + stale overlay clear + konsistensi Lalu tabel↔popup + dayfirst tanggal + tipe config whitelist + minggu W3/W4 dedup + popup besar-semua + crash dialog + refresh preserve
+APP_VERSION = "3.9.43"  # v3.9.43 — fix launcher: MULAI.bat kembali ke pola start-terbukti (tanpa powershell/goto), entry src.ui.__main__ tangkap kegagalan IMPORT (dialog+crash.log+exit≠0), CRLF+ASCII + .gitattributes eol=crlf
+# v3.9.43 — FIX LAUNCHER (user: "kenapa mulai.bat tidak bisa launch"):
+# v3.9.42 mengganti MULAI.bat dgn wrapper PowerShell Start-Process
+# -PassThru + tunggu 5 dtk + goto label — wrapper itu sendiri AKAR
+# kegagalan launch di mesin user: (a) AV/SmartScreen/PowerShell
+# Constrained-Language memblokir powershell satu-baris ber-Start-
+# Process (pola launcher malware); (b) PS dingin >5 dtk salah dibaca
+# gagal; (c) race ExitCode-null dibaca "sukses" = mati senyap; (d)
+# file ber-line-ending LF-Unix + byte UTF-8 + goto/label → parser
+# cmd.exe goyah. FIX: (1) MULAI.bat pola TERBUKTI v3.9.33 kembali
+# (`start "" pythonw -m src.ui`) — tanpa powershell, tanpa goto, CRLF
+# + ASCII murni; .gitattributes mengunci eol=crlf utk *.bat/*.cmd
+# permanen; (2) entry BARU src.ui.__main__ = bootstrap stdlib-murni
+# yang menangkap JUGA kegagalan import-level (pandas/tkinter hilang)
+# yang main() tidak bisa lihat — dialog + crash.log + exit 1: pythonw
+# tidak bisa mati senyap lagi, deteksi pindah KE DALAM Python (tidak
+# tergantung powershell/AV/kebijakan mesin); (3) fallback python dgn
+# petunjuk pemecah (PATH / SETUP.bat / Unblock ZIP / App Execution
+# Aliases); `python -m src.ui.app` tetap didukung seperti biasa.
 # v3.9.42 — DEEP AUDIT MENYELURUH (user: "Deep audit all sebar agent dan
 # fix"): 4 agen audit paralel (engine / core views / framework / secondary
 # + config + tests) menemukan & memperbaiki:
