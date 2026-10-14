@@ -47,6 +47,21 @@ nominal deviasi ini buat versus bulan lalu"):
     107,6386854/GR — sama dgn hitungan manual — vs harga snapshot file
     ±113,048/GR → nominal beda; kini nominal lalu = angka file).
 
+v3.9.41 (user: "pop up tab nominal deviasi ada bug kurang besar dan
+lebar coba cek juga" + "Nominal deviasi pembanding dari bulan llau
+sesuai kan week nya jika week 1 maka ambil data week 1 juga"):
+  - POPUP BESAR & RESPONSIF: jendela ±94%×88% layar (dulu maks
+    1000×560), lebar kolom DISKALA memenuhi lebar jendela (dulu fixed
+    660px → sisi kanan kosong), re-scale otomatis saat user resize
+    (<Configure>, idempoten dari basis), tombol ⛶ Perbesar + ↺ Muat
+    Lebar; minsize dinaikkan (900×420). Popup tanpa-harga ikut.
+  - MINGGU PEMBANDING TER-COCOK: h diteruskan ke
+    hitung_nominal_lalu_pairs → minggu file yang MEMUAT H analisa
+    (H 1-7 → WEEK 1; 8-14 → WEEK 2; 15-31 → WEEK 3/4) — dulu SELALU
+    minggu terakhir (penutupan bulan) → minggu-1 vs minggu-4 = apple-
+    to-oranges. Minggu terpilih DISEBUT di head + footer popup +
+    footer tabel; kolom internal '_minggu' di frame lalu.
+
 Perhitungan = src/ui/nominal_common.py (satu sumber kebenaran dgn
 mode 💰 Nominal (H) tab 📋 Laporan Deviasi, kolom Nominal tab 📦
 Deviasi GR/🧩 PCS & mode ⚖ Komparasi — v3.9.34).
@@ -103,22 +118,127 @@ from .widgets import (
 # kolom popup rincian per resto (double-click) — v3.9.36 (user: "pop up
 # per item dengan kolom: Nama resto, nama barang, Kuantiti deviasi,
 # Nominal deviasi Sekarang, Nominal deviasi bulan lalu")
+# v3.9.41 — lebar basis DILEBARKAN + kolom DISKALA memenuhi lebar
+# jendela (user: "pop up tab nominal deviasi ada bug kurang besar dan
+# lebar" — dulu total 660px di jendela 1000px → sisi kanan kosong).
 POPUP_COLUMNS = [
-    ("Nama Resto", 90, "w"),
-    ("Nama Barang", 210, "w"),
-    ("Kuantiti Deviasi", 100, "e"),
-    ("Nominal Deviasi Sekarang", 130, "e"),
-    ("Nominal Deviasi Bulan Lalu", 130, "e"),
+    ("Nama Resto", 110, "w"),
+    ("Nama Barang", 260, "w"),
+    ("Kuantiti Deviasi", 120, "e"),
+    ("Nominal Deviasi Sekarang", 160, "e"),
+    ("Nominal Deviasi Bulan Lalu", 160, "e"),
 ]
 
 # kolom popup barang TANPA HARGA (double-click sel kolom 'Tanpa Harga')
 NOHARGA_COLUMNS = [
-    ("Nama Resto", 90, "w"),
-    ("Nama Barang", 210, "w"),
-    ("Satuan", 60, "w"),
-    ("Kuantiti Deviasi", 100, "e"),
-    ("Keterangan", 200, "w"),
+    ("Nama Resto", 110, "w"),
+    ("Nama Barang", 260, "w"),
+    ("Satuan", 70, "w"),
+    ("Kuantiti Deviasi", 120, "e"),
+    ("Keterangan", 240, "w"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# v3.9.41 — POPUP BESAR + KOLOM RESPONSIF (user: "pop up tab nominal
+# deviasi ada bug kurang besar dan lebar coba cek juga"):
+# (1) jendela ±94% × 88% layar (dulu maks 1000×560 — terasa kecil di
+#     monitor besar);
+# (2) lebar kolom DISKALA memenuhi lebar jendela (proporsional bobot
+#     basis; dulu kolom fixed 660px → sisa kanan jendela kosong abu);
+# (3) re-scale OTOMATIS saat user me-resize jendela (binding <Configure>,
+#     idempoten — selalu hitung ulang dari lebar basis, tanpa drift);
+# (4) tombol ⛶ Perbesar (toggle ~layar penuh) + ↔ Muat Lebar (reset).
+# ---------------------------------------------------------------------------
+def _popup_geometry(win, w_max=1800, h_max=900,
+                    w_frac=0.94, h_frac=0.88) -> "tuple[int, int]":
+    """Geometri popup adaptif besar + clamp posisi tengah layar.
+    → (w, h) aktual (utk skala kolom awal).
+    v3.9.41: batas atas DINAIKKAN (1800×900 — layar besar 1920 kini
+    benar-benar 'besar & lebar'; dulu cap 1000×540 + 0.85×0.8 layar →
+    terasa kecil; user: "pop up ... kurang besar dan lebar")."""
+    try:
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+    except tk.TclError:
+        return w_max, h_max
+    w = min(w_max, max(720, int(sw * w_frac)))
+    hgt = min(h_max, max(420, int(sh * h_frac)))
+    x = max(0, min(int(sw / 2 - w / 2), sw - w))
+    y = max(0, min(int(sh / 2 - hgt / 2), sh - hgt))
+    try:
+        win.geometry(f"{w}x{hgt}+{x}+{y}")
+    except tk.TclError:
+        pass
+    return w, hgt
+
+
+def _scale_popup_columns(tree, col_spec, avail_w) -> None:
+    """Skala lebar kolom memenuhi avail_w (proporsional bobot basis).
+
+    Idempoten: selalu hitung ulang DARI LEBAR BASIS (bukan lebar
+    sekarang) → dipanggil berulang (resize) tidak men-drift. avail_w
+    lebih kecil dari total basis → kolom kembali ke basis (scroll-x
+    treeview ambil alih)."""
+    total = sum(w for _n, w, _a in col_spec)
+    if total <= 0:
+        return
+    extra = max(0, int(avail_w) - total)
+    for name, w, _anchor in col_spec:
+        new_w = w + int(extra * w / total)
+        try:
+            tree.column(name, width=new_w)
+        except tk.TclError:
+            pass
+
+
+def _bind_popup_rescale(win, tree, col_spec) -> None:
+    """Re-scale kolom saat jendela popup di-resize user (<Configure>;
+    guard delta >8px supaya tidak churn loop."""
+    def _on_cfg(e, _tree=tree, _spec=col_spec, _win=win):
+        if e.widget is not _win:
+            return
+        last = getattr(_win, "_rescale_w", None)
+        if last is not None and abs(e.width - last) < 8:
+            return
+        _win._rescale_w = e.width
+        _scale_popup_columns(_tree, _spec, e.width - 36)
+    try:
+        win.bind("<Configure>", _on_cfg, add="+")
+    except tk.TclError:
+        pass
+
+
+def _toggle_popup_max(win, tree, col_spec) -> None:
+    """Toggle ⛶ Perbesar: ~layar penuh ↔ geometri normal (kolom ikut
+    re-scale via binding <Configure>)."""
+    is_max = getattr(win, "_is_max", False)
+    try:
+        if not is_max:
+            win._geom_normal = win.geometry()
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            win.geometry(f"{max(720, sw - 16)}x{max(420, sh - 72)}+8+32")
+            win._is_max = True
+        else:
+            geom = getattr(win, "_geom_normal", None)
+            if geom:
+                win.geometry(geom)
+            win._is_max = False
+    except tk.TclError:
+        pass
+
+
+def _popup_head_buttons(head, win, tree, col_spec) -> None:
+    """Tombol ⛶ Perbesar + ↺ Muat Lebar di head popup (pola tombol
+    popup v3.9.32)."""
+    GhostButton(head, text="⛶ Perbesar",
+                command=lambda: _toggle_popup_max(win, tree, col_spec)
+                ).pack(side="right", padx=(6, 0))
+    GhostButton(head, text="↺ Muat Lebar",
+                command=lambda: _scale_popup_columns(
+                    tree, col_spec, win.winfo_width() - 36)
+                ).pack(side="right", padx=(6, 0))
 
 
 class NominalRestoView(tk.Frame):
@@ -154,6 +274,7 @@ class NominalRestoView(tk.Frame):
         self._lalu_provider = lalu_provider
         self._lalu_df: pd.DataFrame | None = None   # snapshot popup lalu
         self._lalu_loaded = False      # provider pernah mengembalikan df
+        self._lalu_week: str | None = None  # v3.9.41 label minggu lalu
         # v3.9.36 — filter KATEGORI (pola deviasi_view v3.9.19):
         # None = 'Semua' = tanpa filter; default 'Deviasi'.
         self._kategori_sel: str | None = None
@@ -555,13 +676,19 @@ class NominalRestoView(tk.Frame):
         # v3.9.36 — snapshot pasangan Bulan Lalu dari FILE DEVIASI
         # (provider = pembaca komparasi_view._file_df; harga_map fresh
         # → dihitung ulang tiap compute).
+        # v3.9.41 — h diteruskan: minggu pembanding TER-COCOK dgn H
+        # analisa (user: "jika week 1 maka ambil data week 1 juga").
         fdf = None
         if self._lalu_provider is not None:
             with contextlib.suppress(Exception):
                 fdf = self._lalu_provider()
         self._lalu_loaded = fdf is not None
         self._lalu_df = hitung_nominal_lalu_pairs(
-            fdf, self.harga_map, self.konversi_map)
+            fdf, self.harga_map, self.konversi_map, h=h)
+        self._lalu_week = (
+            str(self._lalu_df["_minggu"].iloc[0])
+            if self._lalu_df is not None and not self._lalu_df.empty
+            and "_minggu" in self._lalu_df.columns else None)
         g, pairs = agregasi_nominal_per_resto(
             df, h, self.harga_map, self.konversi_map)
         if g.empty:
@@ -640,6 +767,11 @@ class NominalRestoView(tk.Frame):
         self.tree.heading(
             "Nominal Deviasi",
             text=f"Nominal Deviasi (H={self.tanggal_h})")
+        # v3.9.41 — heading lalu menyebut MINGGU pembanding ter-cocok
+        self.tree.heading(
+            "Nominal Deviasi Bulan Lalu",
+            text=("Nominal Deviasi Bulan Lalu"
+                  + (f" ({self._lalu_week})" if self._lalu_week else "")))
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
 
@@ -743,16 +875,22 @@ class NominalRestoView(tk.Frame):
             status += f" · {fmt_int_id(n_neg)} resto minus"
         if total_noharga:
             status += f" · {fmt_int_id(total_noharga)} pasangan tanpa harga"
-        # v3.9.38 — versus bulan lalu di footer (chip TOTAL juga)
+        # v3.9.38 — versus bulan lalu di footer (chip TOTAL juga);
+        # v3.9.41 — minggu pembanding TER-COCOK H disebut (user:
+        # "sesuaikan week nya ... supaya jelas minggu mana")
         if self._lalu_loaded:
-            status += f" · TOTAL LALU {fmt_nominal_cell(total_lalu)}"
+            _wk = (f" ({self._lalu_week})"
+                   if self._lalu_week else "")
+            status += f" · TOTAL LALU {fmt_nominal_cell(total_lalu)}{_wk}"
         else:
             status += " · LALU: file deviasi belum dimuat (⚖ Komparasi)"
         self.status_var_label.set(status)
         if self._lalu_loaded:
+            _wk2 = (f" · MINGGU {self._lalu_week}"
+                    if self._lalu_week else "")
             self._total_var.set(
                 f"TOTAL {fmt_nominal_cell(total_nom)} · "
-                f"LALU {fmt_nominal_cell(total_lalu)}")
+                f"LALU {fmt_nominal_cell(total_lalu)}{_wk2}")
         else:
             self._total_var.set(
                 f"TOTAL {fmt_nominal_cell(total_nom)}")
@@ -887,16 +1025,22 @@ class NominalRestoView(tk.Frame):
                             f"TANGGAL H {self.tanggal_h}",
                  bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
             side="left", padx=10, pady=8)
+        # v3.9.41 — minggu pembanding file lalu DISEBUT (user: "sesuaikan
+        # week nya" — supaya jelas minggu mana yang dibandingkan).
+        _wk_txt = (f" · minggu {self._lalu_week} (ter-cocok H)"
+                   if self._lalu_week else "")
         tk.Label(head,
                  text="Sekarang = Harga 41.09 × Deviasi (H) · Bulan Lalu "
-                      "= nilai RESMI file deviasi (⚖ Komparasi, bulan "
-                      "terbaru)",
+                      f"= nilai RESMI file deviasi{_wk_txt}",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="right", padx=10)
 
         col_ids = [c[0] for c in POPUP_COLUMNS]
         tree = ttk.Treeview(body, columns=col_ids, show="headings",
                             selectmode="extended")
+        # v3.9.41 — tombol ⛶/↺ (user: "pop up ... kurang besar dan
+        # lebar") — setelah tree dibuat (command men-reference tree).
+        _popup_head_buttons(head, win, tree, POPUP_COLUMNS)
         for col_name, width, anchor in POPUP_COLUMNS:
             tree.column(col_name, width=width, minwidth=34,
                         anchor=anchor)
@@ -1001,6 +1145,8 @@ class NominalRestoView(tk.Frame):
         foot_txt = (f"{len(sub)} barang · {fmt_int_id(n_no)} tanpa harga · "
                     f"TOTAL SEKARANG {fmt_nominal_cell(total_nom)} · "
                     f"TOTAL BULAN LALU {fmt_nominal_cell(total_lalu)}")
+        if self._lalu_week:
+            foot_txt += f" · Lalu: minggu {self._lalu_week} (ter-cocok H)"
         if not self._lalu_loaded:
             foot_txt += " · file deviasi belum dimuat (⚖ Komparasi)"
         elif _nolalu:
@@ -1012,18 +1158,14 @@ class NominalRestoView(tk.Frame):
         GhostButton(foot, text="Tutup", command=win.destroy).pack(
             side="right", padx=10, pady=4)
 
-        # ukuran adaptif ±0.85 layar + clamp posisi (pola popup v3.9.32)
-        try:
-            sw = win.winfo_screenwidth()
-            sh = win.winfo_screenheight()
-            w = min(1000, int(sw * 0.85))
-            hgt = min(560, int(sh * 0.8))
-            x = max(0, min(int(sw / 2 - w / 2), sw - w))
-            y = max(0, min(int(sh / 2 - hgt / 2), sh - hgt))
-            win.geometry(f"{w}x{hgt}+{x}+{y}")
-        except tk.TclError:
-            pass
-        win.minsize(640, 320)
+        # v3.9.41 — ukuran BESAR (±94%×88% layar; dulu maks 1000×560)
+        # + kolom diskala memenuhi lebar jendela + re-scale saat resize
+        # (user: "pop up tab nominal deviasi ada bug kurang besar dan
+        # lebar")
+        _w41, _h41 = _popup_geometry(win)
+        _scale_popup_columns(tree, POPUP_COLUMNS, _w41 - 36)
+        _bind_popup_rescale(win, tree, POPUP_COLUMNS)
+        win.minsize(900, 420)
 
     # -------------------------------------------------------------------------
     # POPUP BARANG TANPA HARGA (v3.9.36)
@@ -1068,6 +1210,8 @@ class NominalRestoView(tk.Frame):
         col_ids = [c[0] for c in NOHARGA_COLUMNS]
         tree = ttk.Treeview(body, columns=col_ids, show="headings",
                             selectmode="extended")
+        # v3.9.41 — tombol ⛶/↺ + kolom responsif (popup dulu kecil)
+        _popup_head_buttons(head, win, tree, NOHARGA_COLUMNS)
         for col_name, width, anchor in NOHARGA_COLUMNS:
             tree.column(col_name, width=width, minwidth=34,
                         anchor=anchor)
@@ -1106,18 +1250,13 @@ class NominalRestoView(tk.Frame):
         GhostButton(foot, text="Tutup", command=win.destroy).pack(
             side="right", padx=10, pady=4)
 
-        # ukuran adaptif (pola popup rincian)
-        try:
-            sw = win.winfo_screenwidth()
-            sh = win.winfo_screenheight()
-            w = min(820, int(sw * 0.7))
-            hgt = min(500, int(sh * 0.7))
-            x = max(0, min(int(sw / 2 - w / 2), sw - w))
-            y = max(0, min(int(sh / 2 - hgt / 2), sh - hgt))
-            win.geometry(f"{w}x{hgt}+{x}+{y}")
-        except tk.TclError:
-            pass
-        win.minsize(560, 280)
+        # v3.9.41 — ukuran besar + kolom responsif (pola popup rincian;
+        # user: "pop up ... kurang besar dan lebar")
+        _w41n, _h41n = _popup_geometry(win, w_max=1180, h_max=680,
+                                       w_frac=0.82, h_frac=0.8)
+        _scale_popup_columns(tree, NOHARGA_COLUMNS, _w41n - 36)
+        _bind_popup_rescale(win, tree, NOHARGA_COLUMNS)
+        win.minsize(760, 360)
 
     @staticmethod
     def _noharga_ket(harga_tampil) -> str:

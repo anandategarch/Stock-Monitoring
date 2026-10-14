@@ -183,7 +183,28 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.40"  # v3.9.40 — scroll anti-glitch: flush geometri label sinkron DALAM event roda + cache render overlay + reset akumulator arah + modifier state diteruskan overlay
+APP_VERSION = "3.9.41"  # v3.9.41 — 42.17 whitelist versi-toleran (BUMBU PASTA KUAH 100383 tampil) + popup 🧮 besar/lebar responsif + minggu pembanding ter-cocok
+# v3.9.41 (user: "100383 BUMBU PASTA KUAH masih belum ada di program ini
+# padahal pada gudang MLGPAR di file 42.17 ada saldo nya dan harusnya
+# masuk. Cek deep." + "pop up tab nominal deviasi ada bug kurang besar
+# dan lebar" + "Nominal deviasi pembanding dari bulan lalu sesuaikan
+# week nya jika week 1 maka ambil data week 1 juga"):
+# (1) WHITELIST 42.17 VERSI-TOLERAN: token versi ujung kategori
+#     (V.1/V.2/V.3 BARU…) dibuang dari KEDUA sisi sebelum prefix-match
+#     (_fam_kat/_kat_match) + DEFAULT + 2 varian FOOD legacy '- TIDAK
+#     BOLEH' (temuan probe: kategori Accurate nyata; item lama bersaldo
+#     terbuang senyap → "tidak muncul"; config user lama yang mem-pin
+#     6 entri tetap tertolong oleh family match). Jejak saldo-only
+#     append1 kini hanya menghitung SALDO AWAL ≠ 0.
+# (2) POPUP 🧮 BESAR/LEBAR: jendela ±94%×88% layar (dulu maks
+#     1000×560) + kolom diskala memenuhi lebar jendela + re-scale saat
+#     resize (<Configure> idempoten) + tombol ⛶ Perbesar/↺ Muat Lebar;
+#     popup Tanpa Harga ikut.
+# (3) MINGGU PEMBANDING TER-COCOK: hitung_nominal_lalu_pairs(…, h)
+#     memilih minggu file yang MEMUAT H analisa (H 1-7 → WEEK 1; 8-14
+#     → WEEK 2; 15-31 → WEEK 3/4; fallback terbesar ≤ target lalu
+#     terkecil > target; h=None = minggu terakhir — perilaku lama).
+#     Minggu terpilih DISEBUT di heading kolom/footer popup & tabel.
 # v3.9.40 (user: "scroll masih seperti glitch coba deep cek"):
 # probe Xvfb menemukan akar yang luput dari fix v3.9.29:
 # (1) callback yscrollcommand (wrap overlay) baru dipanggil Tk di

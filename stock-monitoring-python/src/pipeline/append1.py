@@ -709,14 +709,19 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # SO/BARANG MASUK — baris ini tetap masuk Deviasi GR/PCS via mask
     # saldo-only (v3.9.32) dan kini DICECUT di log supaya kelihatan
     # jumlah pasangan 42.17 yang benar-benar terbawa ke tabel.
+    # v3.9.41 — hanya SALDO AWAL ber-NILAI ≠ 0 yang dihitung: unpivot
+    # LANGKAH 6 membuat baris 'SALDO AWAL' nilai-0 utk SEMUA pasangan ×
+    # tanggal teramati (fillna 0) — dulu ikut terhitung → angka jejak
+    # menyesatkan (probe: 3 barang 42.17 → "983 pasangan saldo-only").
     try:
-        _sa_pairs = (final[final["JENIS"] == "SALDO AWAL"]
+        _nil = pd.to_numeric(final["NILAI"], errors="coerce").fillna(0)
+        _sa_pairs = (final[(final["JENIS"] == "SALDO AWAL")
+                           & (_nil != 0)]
                      [["Nama Barang", "NAMA RESTO"]].drop_duplicates())
         # 'ber-rekap' = ada baris 1.SO/5.BARANG MASUK ber-NILAI non-nol
         # (unpivot LANGKAH 6 membuat baris '1.SO' nilai-0 utk SEMUA
         # pasangan × tanggal teramati — termasuk pasangan 42.17-only;
         # tanpa cek NILAI jejak ini selalu 0).
-        _nil = pd.to_numeric(final["NILAI"], errors="coerce").fillna(0)
         _rk = final[(final["JENIS"].isin(("1.SO", "5.BARANG MASUK")))
                     & (_nil != 0)]
         _rk_pairs = _rk[["Nama Barang", "NAMA RESTO"]].drop_duplicates()

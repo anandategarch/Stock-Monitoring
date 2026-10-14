@@ -10123,7 +10123,9 @@ def main():
         "_resto_norm": ["MLGPAR", "MLGPAR", "MLGPAR", "SBYKET"],
         "_bahan_norm": ["AYAM FILET", "AYAM FILET", "KOPI BUBUK 100G",
                         "AYAM FILET"],
-        "_h": [7, 28, 28, 21],
+        # v3.9.41 — _h WEEK 4 = 25 (mirror output parse _week_h — dulu
+        # 28 heuristik manual; minggu TER-COCOK H=25 → exact WEEK 4)
+        "_h": [7, 25, 25, 21],
     })
     _l48 = _hlp48(_fdf48, {"AYAM FILET": (10.0, "GR")},
                   {"rasio": {}, "terkecil": {}})
@@ -10251,10 +10253,13 @@ def main():
     _ptot48 = next((_k48 for _k48 in _pt48.get_children("")
                     if str(_pt48.set(_k48, "Nama Resto")) == "TOTAL"),
                    None)
-    check("(v3.9.36) 🧮 POPUP PER ITEM: 5 kolom persis (Nama Resto · Nama "
-          "Barang · Kuantiti Deviasi · Nominal Deviasi Sekarang · "
-          "Nominal Deviasi Bulan Lalu); AYAM = 20 vs 1.130 (W4 113×10); "
-          "TOTAL kedua nominal",
+    # v3.941 update: AYAM = minggu TER-COCOK H=25 → WEEK 4 (fixture _h=25
+    # setelah diselaraskan dgn output parse) → 113×10 = 1.130 — harapan
+    # nilai TETAP sama dgn v3.9.36, kini via jalur week-matched.
+    check("(v3.9.36/v3.9.41) 🧮 POPUP PER ITEM: 5 kolom persis (Nama Resto "
+          "· Nama Barang · Kuantiti Deviasi · Nominal Deviasi Sekarang · "
+          "Nominal Deviasi Bulan Lalu); AYAM = 20 vs 1.130 (WEEK 4 "
+          "TER-COCOK H=25 — 113×10); TOTAL kedua nominal",
           list(_pt48["columns"]) == [
               "Nama Resto", "Nama Barang", "Kuantiti Deviasi",
               "Nominal Deviasi Sekarang", "Nominal Deviasi Bulan Lalu"]
@@ -10440,17 +10445,38 @@ def main():
     # v3.9.38: AYAM = NOMINAL DEVIASI MILIK FILE (W5 = 180.000 —
     # nilai RESMI, bukan hitung ulang 10×180 = 1.800). GULA (TEPAT)
     # terfilter KATEGORI default Deviasi → TOTAL = 180.000 saja.
-    check("(v3.9.38) app E2E: popup MLGPAR — AYAM Bulan Lalu = 180.000 "
-          "(NOMINAL DEVIASI MILIK FILE §46d W5 — angka resmi, bukan "
-          "recompute harga ×180; GULA TEPAT terfilter kategori → TOTAL "
-          "180.000; KOPI tanpa pasangan '-')",
-          _aprow48.get("AYAM FILET") == "180.000"
+    # v3.9.41: minggu pembanding TER-COCOK H=25 → target 25: file §46d
+    # punya WEEK 4 (GULA 150.000) — AYAM hanya W1/W2/W5 → TIDAK ada
+    # baris minggu-4 → Lalu '-' JUJUR (dulu minggu terakhir W5 180.000
+    # = apple-to-oranges vs H=25). GULA (TEPAT) terfilter KATEGORI
+    # default dari popup → TOTAL LALU '-'; tabel app MLGPAR Lalu =
+    # 150.000 (GULA ada di minggu 4).
+    check("(v3.9.41) app E2E: popup MLGPAR — minggu TER-COCOK H=25 = "
+          "WEEK 4: AYAM tak ada baris W4 (file hanya W1/W2/W5) → Lalu "
+          "'-' jujur; KOPI '-' — TOTAL LALU '-' (dulu minggu terakhir "
+          "W5 180.000)",
+          _aprow48.get("AYAM FILET") == "-"
           and _aprow48.get("KOPI BUBUK 100G") == "-"
           and "GULA PASIR" not in _aprow48
           and _atot48 is not None
           and str(_apt48.set(_atot48, "Nominal Deviasi Bulan Lalu"))
-          == "180.000",
+          == "-",
           f"got {_aprow48} tot={_atot48}")
+    check("(v3.9.41) app E2E: minggu pembanding DISEBUT — _lalu_week + "
+          "heading kolom + footer chip + baris tabel app MLGPAR Lalu = "
+          "150.000 (GULA minggu-4)",
+          str(app.nominal_resto_view._lalu_week) == "WEEK 4"
+          and "WEEK 4" in str(app.nominal_resto_view.tree.heading(
+              "Nominal Deviasi Bulan Lalu"))
+          and "WEEK 4" in app.nominal_resto_view.status_var_label.get()
+          and any(
+              app.nominal_resto_view.tree.set(
+                  _i48, "Nominal Deviasi Bulan Lalu") == "150.000"
+              for _i48 in app.nominal_resto_view.tree.get_children("")
+              if app.nominal_resto_view.tree.set(
+                  _i48, "Resto") == "MLGPAR"),
+          f"week={app.nominal_resto_view._lalu_week!r} "
+          f"status={app.nominal_resto_view.status_var_label.get()!r}")
     _ap48._close_detail_wins()
 
     print("== 49. (v3.9.37) 🔄 REFRESH FILE SUMBER (cache baca + dialog "
@@ -10988,8 +11014,12 @@ def main():
     _ws417_51.cell(row=5, column=5, value="RESTO MALANG (MLGPAR)")
     _rows417_51 = [
         ["AYAM FILLET (V.20)", 101, "10.FOOD [RM] - COM V.2", "GR", 100],
-        ["BUMBU PASTA KUAH (V.20)", 102, "10.FOOD [WIP] - COM V.3 BARU",
-         "GR", 300000],  # di luar whitelist (V.3) — mirip kasus user
+        # v3.9.41 — kategori PRO (family '10.FOOD[WIP]-PRO' ≠ COM) =
+        # benar-benar DI LUAR whitelist (dulu 'COM V.3 BARU' — kini
+        # lolos via family match versi-toleran, jalur protect tak
+        # teruji) — mirip kasus user: kategori luar + ber-pasangan.
+        ["BUMBU PASTA KUAH (V.20)", 102, "10.FOOD [WIP] - PRO V.3 BARU",
+         "GR", 300000],
         ["SUPPLIES MURNI", 103, "SUPPLIES [OTHERS]", "PCS", 999],
     ]
     for _r51, _row51 in enumerate(_rows417_51, 6):
@@ -11287,6 +11317,255 @@ def main():
 
     _tw52.destroy()
     _to52.destroy()
+
+    # =====================================================================
+    print("== 53. (v3.9.41) 42.17 WHITELIST VERSI-TOLERAN (BUMBU PASTA "
+          "KUAH 100383) + POPUP BESAR/LEBAR + MINGGU TER-COCOK ==")
+
+    # --- (a) _fam_kat + _kat_match: matriks versi-toleran ---------------
+    from src.pipeline.fn_4217 import (
+        DEFAULT_KATEGORI_WHITELIST as _WL53,
+    )
+    from src.pipeline.fn_4217 import (
+        _fam_kat as _fam53,
+    )
+    from src.pipeline.fn_4217 import (
+        _kat_match as _km53,
+    )
+    check("(v3.9.41) _fam_kat: token versi ujung dibuang "
+          "('V.3BARU'/'V.2'/'V.20'); non-versi tak tersentuh",
+          _fam53("10.FOOD[WIP]-COMV.3BARU") == "10.FOOD[WIP]-COM"
+          and _fam53("10.FOOD[WIP]-COMV.2") == "10.FOOD[WIP]-COM"
+          and _fam53("10.FOOD[WIP]-COMV.20") == "10.FOOD[WIP]-COM"
+          and _fam53("10.FOOD[WIP]-COM") == "10.FOOD[WIP]-COM"
+          and _fam53("01.COST-PACKAGING-TIDAKBOLEH")
+          == "01.COST-PACKAGING-TIDAKBOLEH"
+          and _fam53("00.COST") == "00.COST")
+    _wl53 = ["".join(str(w).upper().split()) for w in _WL53]
+    _cases53 = {
+        # kategori legacy nyata user (200 item) — kini lolos
+        "10.FOOD[WIP]-COMTIDAKBOLEH": True,
+        "10.FOOD[RM]-COM-TIDAKBOLEH": True,
+        # drift versi — kini lolos (family match)
+        "10.FOOD[WIP]-COMV.3BARU": True,
+        "10.FOOD[WIP]-COMV.1": True,
+        "10.FOOD[WIP]-COM": True,
+        "10.FOOD[BUMBU]-COMV.20": True,
+        "01.COST-PACKAGINGV.9BARU": True,
+        # family lain — tetap terbuang (whitelist = scope, bukan pass)
+        "SUPPLIES[OTHERS]": False,
+        "SUPPLIES[RM]-TIDAKBOLEH": False,
+        "20.ASSET.ASSET-TIDAKBOLEH": False,
+        "21.COST.ASSET": False,
+        "02.COST-BAHANPEMBANTU-TIDAKBOLEH": False,
+        "10.FOOD[WIP]-PROV.3BARU": False,
+    }
+    _bad53 = {k: _km53(k, _wl53) for k, v in _cases53.items()
+              if _km53(k, _wl53) != v}
+    check("(v3.9.41) _kat_match: 13 kasus matrix — TIDAK BOLEH legacy + "
+          "drift versi family sama LOLOS; SUPPLIES/ASSET/PRO tetap "
+          "terbuang",
+          not _bad53, f"mismatch={_bad53}")
+    check("(v3.9.41) DEFAULT whitelist + 2 varian FOOD legacy "
+          "'- TIDAK BOLEH' (8 entri — mirror config.json)",
+          "10.FOOD [RM] - COM- TIDAK BOLEH" in _WL53
+          and "10.FOOD [WIP] - COM TIDAK BOLEH" in _WL53
+          and len(_WL53) == 8, f"got {len(_WL53)} entri")
+
+    # --- (b) fn_4217: kategori legacy TIDAK BOLEH lolos (kasus user) ---
+    _tmp53 = tempfile.mkdtemp(prefix="t53_")
+    _d4217_53 = os.path.join(_tmp53, "saldo")
+    os.makedirs(_d4217_53, exist_ok=True)
+    _f417_53 = os.path.join(_d4217_53, "saldo.xlsx")
+    _wb53 = _oxl51.Workbook()
+    _ws53 = _wb53.active
+    _ws53.title = "#42.17. Kuantitas Barang per Gu"
+    for _i53 in range(4):
+        _ws53.cell(row=_i53 + 1, column=1, value=f"MD {_i53}")
+    for _c53, _h53 in enumerate(
+            ["Nama Barang", "Kode Barang", "Kategori Barang",
+             "Nama Satuan", "RESTO MALANG (MLGPAR)"], 1):
+        _ws53.cell(row=5, column=_c53, value=_h53)
+    # kasus user persis: BUMBU PASTA KUAH (kode 100383) kategori legacy
+    _rows53 = [
+        ["BUMBU PASTA KUAH", 100383, "10.FOOD [WIP] - COM TIDAK BOLEH",
+         "GR", 84000],
+        ["BUMBU PASTA KUAH (V.20)", 100429, "10.FOOD [BUMBU] - COM V.2",
+         "GR", 284085.9],
+        ["ITEM V.3", 200001, "10.FOOD [WIP] - COM V.3 BARU", "GR", 50],
+        ["SUPPLIES MURNI", 300001, "SUPPLIES [OTHERS]", "PCS", 999],
+    ]
+    for _r53, _row53 in enumerate(_rows53, 6):
+        for _c53, _v53 in enumerate(_row53, 1):
+            _ws53.cell(row=_r53, column=_c53, value=_v53)
+    _wb53.save(_f417_53)
+    _wb53.close()
+    _buf53 = _io51.StringIO()
+    with _cl51.redirect_stdout(_buf53):
+        _q53 = _fn51(_d4217_53, kategori_whitelist=_WL53)
+    _names53 = set(_q53["Nama Barang"].astype(str))
+    check("(v3.9.41) fn_4217 KASUS USER: BUMBU PASTA KUAH (100383, "
+          "kategori 'WIP COM TIDAK BOLEH') + drift 'V.3 BARU' LOLOS "
+          "whitelist (dulu terbuang senyap → 'tidak muncul')",
+          {"BUMBU PASTA KUAH", "BUMBU PASTA KUAH (V.20)",
+           "ITEM V.3"} <= _names53
+          and "SUPPLIES MURNI" not in _names53,
+          f"got {_names53}")
+    check("(v3.9.41) fn_4217: TANPA protected_barangs pun item legacy "
+          "lolos (matching versi-toleran jalan sendiri; config user lama "
+          "yang mem-pin 6 entri tetap tertolong)",
+          "BUMBU PASTA KUAH" in set(
+              _fn51(_d4217_53, kategori_whitelist=[
+                  "00.COST", "01.COST - PACKAGING V.2",
+                  "01. COST - PACKAGING - TIDAK BOLEH",
+                  "10.FOOD [BUMBU] - COM V.2", "10.FOOD [RM] - COM V.2",
+                  "10.FOOD [WIP] - COM V.2"])["Nama Barang"]
+              .astype(str)),
+          "item legacy tidak lolos dgn whitelist 6-entri lama")
+
+    # --- (c) _pilih_minggu_lalu: matriks minggu ter-cocok ---------------
+    from src.ui.nominal_common import _pilih_minggu_lalu as _pm53
+    check("(v3.9.41) _pilih_minggu_lalu: exact target / terbesar ≤ / "
+          "terkecil > / h=None perilaku lama",
+          _pm53([7, 14, 25], 5) == 7
+          and _pm53([7, 14, 25], 10) == 14
+          and _pm53([7, 14, 25], 26) == 25
+          and _pm53([7, 25], 10) == 7          # W2 tak ada → 7
+          and _pm53([14, 25], 5) == 14         # W1 tak ada → terkecil
+          and _pm53([7, 14, 25], None) == 25   # minggu terakhir (lama)
+          and _pm53([], 10) is None,
+          f"got w1={_pm53([7, 14, 25], 5)} "
+          f"no-w2={_pm53([7, 25], 10)} "
+          f"no-w1={_pm53([14, 25], 5)}")
+
+    # --- (d) hitung_nominal_lalu_pairs: h minggu ter-cocok --------------
+    _fdf53 = pd.DataFrame({
+        "Resto": ["1001.MLGPAR"] * 3,
+        "Nama Barang": ["AYAM FILET"] * 3,
+        "Satuan": ["GR"] * 3,
+        "Minggu": ["WEEK 1", "WEEK 2", "WEEK 5"],
+        "DEV Lalu": [49.0, 113.0, 180.0],
+        "Nominal Deviasi Lalu": [49000.0, 113000.0, 180000.0],
+        "BULAN": ["201.OKT 26"] * 3,
+        "_bulan_num": [10] * 3,
+        "_resto_norm": ["MLGPAR"] * 3,
+        "_bahan_norm": ["AYAM FILET"] * 3,
+        "_h": [7, 14, 31],
+    })
+    _h5_53 = _hlp48(_fdf53, {"AYAM FILET": (10.0, "GR")},
+                    {"rasio": {}, "terkecil": {}}, h=5)
+    _h26_53 = _hlp48(_fdf53, {"AYAM FILET": (10.0, "GR")},
+                     {"rasio": {}, "terkecil": {}}, h=26)
+    _hNone_53 = _hlp48(_fdf53, {"AYAM FILET": (10.0, "GR")},
+                       {"rasio": {}, "terkecil": {}})
+    check("(v3.9.41) hitung_nominal_lalu_pairs WEEK-MATCHED: H=5 → "
+          "WEEK 1 (49 — dulu minggu terakhir 180); H=26 → terbesar ≤ 25 "
+          "= WEEK 2 (113); h=None → minggu terakhir WEEK 5 (perilaku "
+          "lama)",
+          len(_h5_53) == 1
+          and float(_h5_53["Qty Deviasi Lalu"].iloc[0]) == 49.0
+          and str(_h5_53["_minggu"].iloc[0]) == "WEEK 1"
+          and len(_h26_53) == 1
+          and float(_h26_53["Qty Deviasi Lalu"].iloc[0]) == 113.0
+          and str(_h26_53["_minggu"].iloc[0]) == "WEEK 2"
+          and len(_hNone_53) == 1
+          and float(_hNone_53["Qty Deviasi Lalu"].iloc[0]) == 180.0,
+          f"h5={_h5_53['Qty Deviasi Lalu'].tolist() if len(_h5_53) else []}"
+          f" h26={_h26_53['Qty Deviasi Lalu'].tolist() if len(_h26_53) else []}"
+          f" none={_hNone_53['Qty Deviasi Lalu'].tolist() if len(_hNone_53) else []}")
+    check("(v3.9.41) hitung_nominal_lalu_pairs: minggu label fallback + "
+          "kolom _minggu di output frame",
+          "_minggu" in _h5_53.columns
+          and str(_h5_53["_minggu"].iloc[0]) == "WEEK 1")
+
+    # --- (e) popup besar + lebar + responsif ----------------------------
+    from src.ui.nominal_resto_view import (
+        POPUP_COLUMNS as _PC53,
+    )
+    from src.ui.nominal_resto_view import (
+        _toggle_popup_max as _tg53,
+    )
+    _top53 = tk.Toplevel(root)
+    _top53.geometry("1600x900+5+5")
+    _rv53 = _NRV48(_top53, lalu_provider=lambda: None)
+    _rv53.pack(fill="both", expand=True)
+    _rv53.load_data(_dn48, harga_map=_hmap48,
+                    konversi_map={"rasio": {}, "terkecil": {}})
+    _rv53.ensure_refreshed()
+    wait_view(root, _rv53)
+    _rv53._show_resto_popup("MLGPAR")
+    root.update()
+    _win53 = _rv53._detail_wins[-1]
+    _t53 = _findtree48(_win53)
+    root.update()
+    _sw53 = max(_win53.winfo_screenwidth(), 1024)
+    _sh53 = max(_win53.winfo_screenheight(), 640)
+    _w53 = _win53.winfo_width()
+    _h53w = _win53.winfo_height()
+    check("(v3.9.41) popup rincian: UKURAN BESAR — ≥ 0.9× lebar layar & "
+          "≥ 0.8× tinggi (dulu maks 1000×560)",
+          _w53 >= int(_sw53 * 0.9) and _h53w >= int(_sh53 * 0.8),
+          f"got {_w53}x{_h53w} vs screen {_sw53}x{_sh53}")
+    # kolom memenuhi lebar jendela (total ± lebar - scrollbar)
+    _colsum53 = sum(_t53.column(c)["width"]
+                    for c in [x[0] for x in _PC53])
+    check("(v3.9.41) popup rincian: kolom MEMENUHI lebar jendela "
+          "(± total kolom ≥ 0.9× lebar jendela — dulu fixed 660px)",
+          _colsum53 >= int(_w53 * 0.9),
+          f"colsum={_colsum53} win={_w53}")
+    # tombol ⛶/↺ ada di head
+    _btn_txt53 = []
+    def _collect53(w):
+        for c in w.winfo_children():
+            try:
+                _txt53 = str(c.cget("text"))
+            except (tk.TclError, AttributeError):
+                _txt53 = ""
+            if _txt53 and _txt53 not in ("{}", "0"):
+                _btn_txt53.append(_txt53)
+            _collect53(c)
+    _collect53(_win53)
+    check("(v3.9.41) popup rincian: tombol ⛶ Perbesar + ↺ Muat Lebar "
+          "tersedia (pola popup v3.9.32)",
+          any("Perbesar" in t for t in _btn_txt53)
+          and any("Muat Lebar" in t for t in _btn_txt53),
+          f"got {_btn_txt53}")
+    # resize jendela → kolom re-scale (binding <Configure>)
+    _geom53 = _win53.geometry()
+    _neww53 = max(760, int(_w53 * 0.7))
+    _win53.geometry(f"{_neww53}x{max(420, int(_h53w * 0.8))}")
+    _win53.update()
+    root.update()
+    _colsum53b = sum(_t53.column(c)["width"]
+                     for c in [x[0] for x in _PC53])
+    check("(v3.9.41) popup rincian: RESIZE jendela → kolom re-scale "
+          "otomatis (binding <Configure>, idempoten dari basis)",
+          abs(_colsum53b - _colsum53) > 8,
+          f"sebelum={_colsum53} sesudah={_colsum53b}")
+    # ⛶ toggle: geometri membesar ke ~layar penuh
+    _tg53(_win53, _t53, _PC53)
+    _win53.update()
+    root.update()
+    _w53max = _win53.winfo_width()
+    check("(v3.9.41) popup rincian: ⛶ Perbesar → ~layar penuh; toggle "
+          "kembali normal",
+          _w53max > _neww53
+          and getattr(_win53, "_is_max", False),
+          f"before={_neww53} max={_w53max}")
+    _tg53(_win53, _t53, _PC53)
+    _win53.update()
+    root.update()
+    check("(v3.9.41) popup rincian: ⛶ toggle kedua → geometri normal "
+          "kembali",
+          not getattr(_win53, "_is_max", True)
+          and _win53.winfo_width() <= _neww53 + 8,
+          f"w={_win53.winfo_width()} vs normal={_neww53}")
+    _win53.geometry(_geom53)
+    _rv53._close_detail_wins()
+    _rv53.destroy()
+    _top53.destroy()
+    root.update()
+    shutil.rmtree(_tmp53, ignore_errors=True)
 
     root.destroy()
 

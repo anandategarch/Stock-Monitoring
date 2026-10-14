@@ -35,6 +35,18 @@ laporan resmi (temuan user BUMBU PASTA KUAH (V.20): 41.09 sekarang
 20.AGUSTUS ±113,048/GR → selisih nominal ±2,34jt utk 1 baris MLGPAR
 W4). Kolom file kosong/NaN → fallback hitung ulang (perilaku lama).
 
+v3.9.41 — MINGGU TER-COCOK (user: "Nominal deviasi pembanding dari
+bulan lalu sesuaikan week nya jika week 1 maka ambil data week 1
+juga"): param h (tanggal analisa) → minggu file yang MEMUAT H
+(H 1-7 → WEEK 1 / cut-off 7; 8-14 → WEEK 2 / 14; 15-31 → WEEK 3-4 /
+25 — mirror _h_to_week_target komparasi v3.9.22). Baris minggu
+persis itu yang dipilih; minggu itu tidak ada di file → fallback
+minggu TERBESAR ≤ target (perbandingan periode terdekat), lalu
+TERKECIL > target (file hanya punya minggu setelahnya). h=None →
+perilaku lama (minggu terakhir = penutupan bulan — kompatibilitas
+pemanggil lama). Kolom internal '_minggu' = label minggu terpilih
+(dipakai label popup/footer supaya minggu pembanding JELIHAT).
+
 ATURAN HARGA (identik sejak v3.9.32, kini satu sumber kebenaran):
   - harga_map   : {barang: (harga|None, satuan41-upper)} — global dari
                   file 41.09 (folder 09.Harga); Harga = Nilai Saldo
@@ -284,25 +296,66 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
 # PASANGAN NOMINAL BULAN LALU — FILE DEVIASI (v3.9.36)
 # ---------------------------------------------------------------------------
 _LALU_COLS = ["Resto", "Nama Barang", "Satuan", "Qty Deviasi Lalu",
-              "Harga", "Nominal Lalu", "_resto_norm", "_bahan_norm"]
+              "Harga", "Nominal Lalu", "_resto_norm", "_bahan_norm",
+              "_minggu"]
+
+
+def _h_to_week_target(h: int) -> int:
+    """v3.9.41 — H analisa → CUT-OFF minggu yang MEMUAT H (mirror
+    komparasi_deviasi_view._h_to_week_target v3.9.22; duplikat LOKAL —
+    nominal_common tak boleh import komparasi (circular)):
+    H 1-7 → 7 (WEEK 1) · H 8-14 → 14 (WEEK 2) · H 15-31 → 25
+    (WEEK 3/4 — 26..31 juga 25: minggu yang memuat H 26 = WEEK 4)."""
+    h = int(h)
+    if h <= 7:
+        return 7
+    if h <= 14:
+        return 14
+    return 25
+
+
+def _pilih_minggu_lalu(weeks_avail: list, h: int | None) -> int | None:
+    """v3.9.41 — pilih _h minggu pembanding dari minggu yang tersedia
+    di file (bulan terbaru):
+    - h None → minggu TERBESAR (perilaku lama — penutupan bulan);
+    - h ada → target = _h_to_week_target(h):
+        (1) minggu PERSIS target bila ada;
+        (2) minggu TERBESAR ≤ target (periode terdekat sebelumnya);
+        (3) minggu TERKECIL > target (file hanya punya minggu
+            setelahnya — satu-satunya pilihan).
+    None bila tak ada minggu sama sekali."""
+    if not weeks_avail:
+        return None
+    if h is None:
+        return max(weeks_avail)
+    target = _h_to_week_target(h)
+    if target in weeks_avail:
+        return target
+    below = [w for w in weeks_avail if w < target]
+    if below:
+        return max(below)
+    return min(weeks_avail)
 
 
 def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
                               harga_map: dict | None,
-                              konversi_map: dict | None) -> pd.DataFrame:
+                              konversi_map: dict | None,
+                              h: int | None = None) -> pd.DataFrame:
     """Frame per pasangan dari FILE deviasi (tab ⚖ Komparasi):
     [_resto_norm, _bahan_norm, Resto, Nama Barang, Satuan,
-    Qty Deviasi Lalu, Harga, Nominal Lalu].
+    Qty Deviasi Lalu, Harga, Nominal Lalu, _minggu].
 
     file_df = output parse_deviasi_file (kolom internal _bulan_num /
     _h / _resto_norm / _bahan_norm milik komparasi). Seleksi:
       - BULAN TERBARU di file (nomor bulan terbesar — multi-file
         History: bulan paling akhir = 'bulan lalu');
-      - per pasangan: baris MINGGU TERAKHIR (minggu file kumulatif —
-        W terbesar = penutupan bulan itu; dedup komparasi menjamin
-        1 baris per bulan+minggu+pasangan).
-    Nominal Lalu = Harga 41.09 (dinormalkan ke SATUAN BARIS FILE via
-    peta rasio — sama seperti kolom Nominal komparasi) × DEV Lalu.
+      - v3.9.41 MINGGU TER-COCOK dgn H analisa (param h — user:
+        "jika week 1 maka ambil data week 1 juga"; lihat
+        _pilih_minggu_lalu); h=None → minggu terakhir (perilaku lama).
+    Nominal Lalu = SUMBER UTAMA kolom resmi file (v3.9.38) — harga
+    snapshot saat laporan dibuat; kolom kosong/NaN/format lama →
+    fallback Harga 41.09 (dinormalkan ke SATUAN BARIS FILE via peta
+    rasio) × DEV Lalu.
     Tanpa harga / satuan tak terkonversi → None (tampil '-').
     Urut |Nominal Lalu| MENURUN (pasangan tanpa nominal paling
     bawah, urut |qty|). Frame kosong bila file kosong / kolom internal
@@ -322,6 +375,11 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
         "Nama Barang": file_df["Nama Barang"].astype(str).values,
         "Satuan": (file_df["Satuan"].astype(str).values
                    if "Satuan" in file_df.columns else ""),
+        # v3.9.41 — label minggu asli file (utk display minggu terpilih)
+        "Minggu": (file_df["Minggu"].astype(str).str.strip().str.upper()
+                   .values
+                   if "Minggu" in file_df.columns
+                   else np.full(len(file_df), "")),
         "_bulan_num": (pd.to_numeric(file_df["_bulan_num"],
                                     errors="coerce").fillna(0)
                        .astype(int).values),
@@ -344,12 +402,31 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
     out = out[out["_bulan_num"] == out["_bulan_num"].max()].copy()
     if out.empty:
         return empty
-    # (b) minggu TERAKHIR per pasangan (penutupan bulan)
-    idx = out.groupby(["_resto_norm", "_bahan_norm"])["_h"].idxmax()
-    out = out.loc[sorted(idx)].copy()
+    # (b) v3.9.41 — MINGGU TER-COCOK dgn H analisa (user: "jika week 1
+    # maka ambil data week 1 juga"): minggu yang MEMUAT H dipilih;
+    # minggu itu tak ada di file → minggu terdekat ≤ target, lalu
+    # terkecil > target (lihat _pilih_minggu_lalu). h=None → minggu
+    # terakhir (penutupan bulan — perilaku lama, kompatibilitas).
+    _weeks_avail = sorted(int(w) for w in out["_h"].dropna().unique()
+                          if pd.notna(w))
+    _wk_sel = _pilih_minggu_lalu(_weeks_avail, h)
+    if _wk_sel is None:
+        return empty
+    out = out[pd.to_numeric(out["_h"], errors="coerce") == _wk_sel].copy()
+    # label minggu terpilih utk display (label asli file; fallback
+    # label cut-off bila kolom Minggu tak terbawa)
+    _wk_fallback = {7: "WEEK 1", 14: "WEEK 2", 25: "WEEK 3/4"}.get(
+        _wk_sel, f"WEEK cut-off H{_wk_sel}")
+    _wk_label = _wk_fallback
+    if "Minggu" in out.columns and len(out):
+        _cand = str(out["Minggu"].iloc[0]).strip().upper()
+        if _cand and _cand not in ("NAN", "NONE"):
+            _wk_label = _cand
     out = out.drop_duplicates(subset=["_resto_norm", "_bahan_norm"],
                               keep="first")
     out = out.reset_index(drop=True)
+    out["_minggu"] = _wk_label
+    out = out.drop(columns=["Minggu"], errors="ignore")
 
     # (c) NOMINAL LALU — SUMBER UTAMA kolom resmi file (v3.9.38):
     # nilai file dipakai APA ADANYA (harga snapshot saat laporan dibuat —

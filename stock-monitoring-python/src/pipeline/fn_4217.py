@@ -38,7 +38,30 @@ v3.9.39 (user: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah? padahal
   versi ('#42.17. Kuantitas Barang per Gu' terpotong 31 karakter).
   Bila nama persis tidak ada di file → fallback sheet berprefiks '#42.17'
   + [INFO] log (pola _resolve_lalu_sheet queries) — bukan 0 baris senyap.
+
+v3.9.41 (user: "100383 BUMBU PASTA KUAH masih belum ada di program ini
+  padahal pada gudang MLGPAR di file 42.17 ada saldo nya dan harusnya
+  masuk. Cek deep"):
+- AKAR (probe E2E data rekap nyata + snapshot 41.09 Accurate): pipeline
+  saldo-only SEHAT — pasangan TAMPIL ketika kategorinya lolos whitelist
+  (probe: kategori '10.FOOD [WIP] - COM V.2' → Sistem 84.000 tampil).
+  Yang GAGAL: kategori item lama tak cocok whitelist yang mem-pin versi:
+  (a) kategori legacy nyata '10.FOOD [RM] - COM- TIDAK BOLEH' &
+      '10.FOOD [WIP] - COM TIDAK BOLEH' (±200 item lama bersaldo;
+      v3.9.32 hanya menambahkan varian PACKAGING-TIDAK BOLEH —
+      varian FOOD-nya TERLEWAT → saldo terbuang senyap);
+  (b) drift versi ('10.FOOD [WIP] - COM V.3 BARU' ≠ prefix '…V.2').
+- MATCHING VERSI-TOLERAN (_fam_kat/_kat_match): token versi ujung
+  (V.1/V.2/V.3 BARU/V.20…) dibuang dari KEDUA sisi sebelum prefix-
+  match → drift versi & varian '- TIDAK BOLEH' family sama lolos;
+  family lain (SUPPLIES/ASSET/02.COST) tetap terbuang (whitelist tetap
+  filter scope, bukan free-pass). Config user yang mem-pin daftar lama
+  TETAP tertolong oleh family match.
+- DEFAULT WHITELIST + 2 kategori FOOD legacy (mirror niat v3.9.32
+  "item lama yang masih bersaldo tetap terpantau").
 """
+import re
+
 import pandas as pd
 
 from .helpers import _list_excel_files, _list_sheet_names, fn_combine_folder
@@ -56,13 +79,21 @@ _KANDIDAT_SATUAN = ["Nama Satuan", "Satuan"]
 # menimpa; prefix-match + case/space-insensitive). 5 kategori aktif V.2 +
 # varian PACKAGING lama '- TIDAK BOLEH' (item lama yang masih bersaldo
 # tetap terpantau — mencegah saldo hilang senyap).
+# v3.9.41 — + 2 varian FOOD legacy '- TIDAK BOLEH' (temuan probe
+# BUMBU PASTA KUAH kode 100383: kategori Accurate nyata berisi
+# '10.FOOD [RM] - COM- TIDAK BOLEH' & '10.FOOD [WIP] - COM TIDAK
+# BOLEH' — item lama bersaldo; tanpa ini saldo awalnya terbuang senyap
+# → barang "tidak muncul" di Deviasi GR). Matching kini juga VERSI-
+# TOLERAN (lihat _fam_kat) — drift 'V.3 BARU' dsb. tetap cocok.
 DEFAULT_KATEGORI_WHITELIST = [
     "00.COST",
     "01.COST - PACKAGING V.2",
     "01. COST - PACKAGING - TIDAK BOLEH",
     "10.FOOD [BUMBU] - COM V.2",
     "10.FOOD [RM] - COM V.2",
+    "10.FOOD [RM] - COM- TIDAK BOLEH",
     "10.FOOD [WIP] - COM V.2",
+    "10.FOOD [WIP] - COM TIDAK BOLEH",
 ]
 
 OUTPUT_COLUMNS = ["Nama Barang", "NAMA RESTO", "Value", "Tanggal",
@@ -88,6 +119,43 @@ def _norm_barang(v) -> str:
     upper): 'BUMBU PASTA KUAH (V.20)' == 'Bumbu  Pasta  Kuah (V.20)'.
     Dipakai match barang 42.17 ↔ sumber lain (rekap/IN/out/BK)."""
     return _norm_kat(v)
+
+
+# v3.9.41 — token versi di ujung kategori ternormalisasi: 'V.2',
+# 'V.3BARU', 'V.20', 'V.1BARU'… (family Accurate: 'COM V.2' /
+# 'COM V.3 BARU' / 'COM TIDAK BOLEH' — versi hanya penanda gelombang
+# item, bukan identitas family produksi).
+_VERSI_UJUNG = re.compile(r"V\.?\d+(BARU)?$")
+
+
+def _fam_kat(v_norm: str) -> str:
+    """v3.9.41 — kategori ternormalisasi → FAMILY (token versi ujung
+    dibuang): '10.FOOD[WIP]-COMV.3BARU' → '10.FOOD[WIP]-COM'.
+
+    Dipakai matching whitelist VERSI-TOLERAN: file dengan kategori
+    gelombang baru/lama ('V.1', 'V.3 BARU', tanpa versi) tetap cocok
+    dgn entri whitelist family yang sama — whitelist tidak lagi
+    "kedaluwarsa" hanya karena Accurate menaikkan versi kategori
+    (akar 'BUMBU PASTA KUAH 100383 masih belum ada di program')."""
+    return _VERSI_UJUNG.sub("", v_norm)
+
+
+def _kat_match(kat_norm: str, wl_norm: list) -> bool:
+    """v3.9.41 — kategori file lolos whitelist bila:
+    (a) prefix persis (perilaku lama — '01.COST-PACKAGING-TIDAKBOLEH'
+        .startswith('01.COST-PACKAGING')), ATAU
+    (b) prefix FAMILY versi-toleran: _fam_kat(kat).startswith(
+        _fam_kat(whitelist)) — menutup drift versi ('V.2' vs 'V.3 BARU'
+        vs tanpa-versi) & varian '- TIDAK BOLEH' family sama
+        ('10.FOOD[WIP]-COMTIDAKBOLEH'.startswith('10.FOOD[WIP]-COM')).
+    Family lain (SUPPLIES / ASSET / 02.COST-BAHAN-PEMBANTU) tetap
+    TIDAK cocok — whitelist tetap filter scope, bukan free-pass."""
+    for w in wl_norm:
+        if kat_norm.startswith(w):
+            return True
+        if _fam_kat(kat_norm).startswith(_fam_kat(w)):
+            return True
+    return False
 
 
 def _resolve_sheet_4217(folder_path: str, sheet_name: str) -> str:
@@ -209,8 +277,11 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
             kat_norm = prom[kat_col].map(_norm_kat)
             # prefix-match: entri whitelist '01.COST - PACKAGING V.2'
             # cocok dgn kategori file yang berawal sama (normalisasi).
-            keep = kat_norm.map(
-                lambda v: any(v.startswith(w) for w in wl_norm))
+            # v3.9.41 — + VERSI-TOLERAN family match (_fam_kat): drift
+            # 'V.3 BARU' / varian '- TIDAK BOLEH' family sama tetap
+            # lolos — whitelist tak memutus saldo barang lama hanya
+            # karena versi kategori dinaikkan di Accurate.
+            keep = kat_norm.map(lambda v: _kat_match(v, wl_norm))
             # v3.9.39 — LOOKUP DUA ARAH (user: "look up nama barang harus
             # dua arah ... Rekap Mentah ↔ 42.17"): barang yang
             # ber-pasangan di sumber lain (rekap SO/BM, IN, OUT, BK)
@@ -250,7 +321,9 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
                     print(f"    4217 whitelist terbuang: "
                           f"{len(_dropped_names)} barang — {_show} "
                           "(kategori di luar whitelist; tidak ada "
-                          "pasangan di rekap/IN/out)")
+                          "pasangan di rekap/IN/out; tambahkan kategori "
+                          "di config.json 'KategoriBarang4217' bila "
+                          "saldo ini harus masuk)")
             if prom.empty and n_total:
                 # SAFETY-NET: whitelist salah config (mis. nama kategori di
                 # file user beda total) → JANGAN kosongkan saldo awal;
