@@ -1176,6 +1176,47 @@ def run_test():
     print(f"    Rincian PO: {len(rincian_result)} rows")
     print(f"    IN detail: {len(in_detail_result)} rows")
 
+    # v3.9.37 — 🔄 REFRESH FILE SUMBER (cache bacaan, user: "ada tombol
+    # refresh untuk file sumber, bisa gak? dan gak harus refresh semua
+    # tapi"): (1) run di atas mengisi cache bacaan per file+sheet; (2) SATU
+    # file sumber diubah (penjualan 22.05 + barang baru) + invalidasi
+    # SELEKTIF file itu saja; (3) run ulang → data barang baru MASUK
+    # (bacaan baru dipakai) TANPA membaca ulang file lain (statistik
+    # miss/hit per file).
+    from src.pipeline.helpers import (
+        read_cache_invalidate,
+        read_cache_reset_counters,
+        read_cache_stats,
+    )
+    _ent0, _nf0, _hit0, _miss0 = read_cache_stats()
+    assert _nf0 >= 5, (
+        f"v3.9.37: cache bacaan harus terisi oleh run di atas — got {_nf0} file")
+    _penj37 = os.path.join(root_path, "2. 22.05", "penjualan.xlsx")
+    assert os.path.exists(_penj37)
+    _n_inv37 = read_cache_invalidate([_penj37])
+    assert _n_inv37 >= 1, (
+        f"v3.9.37: invalidasi selektif penjualan.xlsx harus membuang >=1 "
+        f"entry — got {_n_inv37}")
+    # ubah isi file (barang baru) — bacaan baru harus dipakai run berikut
+    create_mock_2205(_penj37, resto, barbar_list + [("SUSU UHT V37", "LTR")])
+    read_cache_reset_counters()
+    _a37, _r37, _in37, _aud37 = run_pipeline(config_path=config_path,
+                                             verbose=False)
+    _susu37 = _a37[_a37["Nama Barang"] == "SUSU UHT V37"]
+    assert len(_susu37) > 0, (
+        "v3.9.37: barang baru di file yang di-refresh harus masuk "
+        f"append1 — got {len(_susu37)} rows")
+    _ent37, _nf37, _hit37, _miss37 = read_cache_stats()
+    assert _miss37 == 1, (
+        "v3.9.37: HANYA file yang di-refresh boleh dibaca ulang dari "
+        f"disk — got miss={_miss37} file")
+    assert _hit37 >= _nf0 - 1, (
+        "v3.9.37: file lain harus disajikan dari cache (gak harus "
+        f"refresh semua) — hit={_hit37} dari {_nf0} file")
+    print(f"    ✓ v3.9.37 🔄 Refresh File Sumber: barang baru masuk via "
+          f"refresh selektif 1 file; file lain dari cache "
+          f"(dibaca ulang: {_miss37} · cache: {_hit37})")
+
     # v3.9.27 — audit_result membawa KEDUA varian (mode Hitung Bulan Ini
     # / Lalu + Ini tab Rekap Selisih IN): kunci lama tetap varian PENUH,
     # kunci baru = varian bulan berjalan saja (baris Tanggal negatif

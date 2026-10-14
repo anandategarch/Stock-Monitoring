@@ -45,6 +45,7 @@ from .helpers import (
     _list_excel_files,
     _list_sheet_names,
     _xlsb_engine,
+    fn_buka_sheet,
     fn_combine_folder,
     promote_headers,
     safe_to_numeric,
@@ -235,8 +236,10 @@ def _read_combined_file(file_path: str, mode: str,
         raw = None
         try:
             if single_parse:
-                raw = pd.read_excel(file_path, sheet_name=sn, header=None,
-                                    dtype=object, **engine_kwargs)
+                # v3.9.37 — rutekan lewat fn_buka_sheet (cache bacaan file
+                # sumber: Refresh Terpilih tak membaca ulang workbook
+                # gabungan yang tak berubah; engine + kwargs identik).
+                raw = fn_buka_sheet(file_path, sn, raw=True)
                 peek = raw.iloc[:8]
             else:
                 peek = pd.read_excel(file_path, sheet_name=sn, header=None,
@@ -252,8 +255,10 @@ def _read_combined_file(file_path: str, mode: str,
                 df = _promote_at(raw, hr)
                 raw = None               # bebaskan memori
             else:
-                df = pd.read_excel(file_path, sheet_name=sn, header=hr,
-                                   dtype=object, **engine_kwargs)
+                # v3.9.37 — jalur openpyxl (tanpa calamine) ikut lewat
+                # fn_buka_sheet = ter-cache (header=hr, dtype=object,
+                # engine sama — pemetaan argumen identik pd.read_excel).
+                df = fn_buka_sheet(file_path, sn, header_row=hr)
         except Exception as e:
             print(f"  [fn_rekap_mentah] Gagal baca sheet '{sn}' "
                   f"{os.path.basename(file_path)}: {e}")

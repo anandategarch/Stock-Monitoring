@@ -811,7 +811,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.36", APP_VERSION == "3.9.36", f"got {APP_VERSION}")
+    check("Versi = 3.9.37", APP_VERSION == "3.9.37", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -853,8 +853,10 @@ def main():
     check("(v3.9.8) Toolbar tanpa tombol Bantuan",
           not any("Bantuan" in t for t in _shell_txt + _tb_btns),
           f"found {[t for t in _shell_txt + _tb_btns if 'Bantuan' in t]}")
-    check("(v3.9.8) Toolbar hanya 💾 Export Excel",
-          _tb_btns == ["💾 Export Excel"], f"got {_tb_btns}")
+    check("(v3.9.8 → v3.9.37) Toolbar: 💾 Export Excel + 🔄 Refresh "
+          "Sumber (v3.9.37 — tanpa Bantuan)",
+          _tb_btns == ["🔄 Refresh Sumber", "💾 Export Excel"],
+          f"got {_tb_btns}")
 
     def _view_static_labels(view):
         """Label statis (non textvariable) di view — tanpa legenda & KPI."""
@@ -1467,18 +1469,22 @@ def main():
     # (v3.9) layout ringkas: parent = info PO lengkap, anak = item saja
     # v3.9.35: kolom "Status Pesanan" DIHAPUS — status tampil sbg ↳ di
     # kolom Pemasok anak pertama (merge vertical); tanggal format panjang.
+    # v3.9.37: kolom "Keterangan PO" + "Tgl/Jam Pembuatan" JUGA DIHAPUS —
+    # keterangan ↳ di Pemasok anak kedua (pola status), tgl/jam ↳ di
+    # kolom Nomor # #0 anak pertama (user: "Keterangan PO merger Vertical
+    # dengan Pemasok sama seperti Status Pesanan Juga ... Tanggal Jam
+    # pembuatan Merger vertical dengan Nomor #").
     rv = app.rincian_view
     first_po = rv.tree.get_children("")[0]
     po_vals = rv.tree.item(first_po, "values")
     kids = rv.tree.get_children(first_po)
     kid_vals = rv.tree.item(kids[0], "values")
     kid2_vals = rv.tree.item(kids[1], "values")
-    check("(v3.9/v3.9.35) Kolom tabel baru (Status Pesanan DIHAPUS — "
-          "merge ke bawah Pemasok)",
+    check("(v3.9/v3.9.37) Kolom tabel baru (Keterangan PO & Tgl/Jam "
+          "Pembuatan DIHAPUS — merge ↳ ke Pemasok / Nomor #)",
           list(rv.tree["columns"]) == [
-              "Tanggal", "Nama Resto", "Pemasok", "Keterangan PO",
-              "Nama Barang", "Satuan", "Kuantitas",
-              "Tgl/Jam Pembuatan"],
+              "Tanggal", "Nama Resto", "Pemasok",
+              "Nama Barang", "Satuan", "Kuantitas"],
           f"got {list(rv.tree['columns'])}")
     check("(v3.9.35) Baris PO: Tanggal FORMAT PANJANG (02 Juni 2024) "
           "+ Pemasok",
@@ -1488,37 +1494,51 @@ def main():
           "titik → nilai apa adanya)",
           po_vals[1] == "MLGPAR", f"got {po_vals[1]!r}")
     check("(v3.9) Baris PO memuat ringkasan jumlah item + total",
-          "item" in po_vals[4] and "Total:" in po_vals[6],
-          f"got {po_vals[4]!r} / {po_vals[6]!r}")
+          "item" in po_vals[3] and "Total:" in po_vals[5],
+          f"got {po_vals[3]!r} / {po_vals[5]!r}")
     check("(v3.9.35) Anak PERTAMA: STATUS ↳ di kolom Pemasok "
           "(merge vertical — di bawah nama pemasok)",
           kid_vals[2] == "↳ Selesai",
           f"got {kid_vals[2]!r}")
-    check("(v3.9.35) Anak KEDUA: kolom Pemasok kosong (nilai status "
-          "sekali per PO)",
-          kid2_vals[2] == "", f"got {kid2_vals[2]!r}")
+    check("(v3.9.37) Anak KEDUA: KETERANGAN PO ↳ di kolom Pemasok "
+          "(merge vertical — pola SAMA dgn Status Pesanan; kolom "
+          "Keterangan PO dihapus)",
+          kid2_vals[2] == "↳ Rutin", f"got {kid2_vals[2]!r}")
+    check("(v3.9.37) Anak KETIGA: anotasi Pemasok habis (status & "
+          "keterangan sekali per PO)",
+          rv.tree.item(kids[2], "values")[2] == "",
+          f"got {rv.tree.item(kids[2], 'values')[2]!r}")
     check("(v3.9.35) Tag per-cell po_status_note terpasang (anak pertama "
           "tiap PO — teks redup; path-agnostic Tk 8.6 overlay / Tk 9 "
           "native)",
           _cell_tag_has47(rv.tree, "po_status_note", "po_1_1",
                           "Pemasok"),
           f"Tk={tk.TkVersion} has={_cell_tag_has47(rv.tree, 'po_status_note', 'po_1_1', 'Pemasok')}")
+    check("(v3.9.37) Tag per-cell po_status_note JUGA di sel anotasi "
+          "keterangan (po_1_2 Pemasok) + tgl/jam (po_1_1 #0)",
+          _cell_tag_has47(rv.tree, "po_status_note", "po_1_2",
+                          "Pemasok")
+          and _cell_tag_has47(rv.tree, "po_status_note", "po_1_1", "#0"),
+          f"ket={_cell_tag_has47(rv.tree, 'po_status_note', 'po_1_2', 'Pemasok')} "
+          f"tgljam={_cell_tag_has47(rv.tree, 'po_status_note', 'po_1_1', '#0')}")
     check("(v3.9) Baris anak = HANYA item (info PO tidak diulang)",
           kid_vals[0] == "" and kid_vals[1] == "" and
-          kid_vals[3] == "" and
-          kid_vals[4] == "AYAM FILET" and
-          kid_vals[5] == "GR" and kid_vals[6] == "10",
+          kid_vals[3] == "AYAM FILET" and
+          kid_vals[4] == "GR" and kid_vals[5] == "10",
           f"got {list(kid_vals)}")
-    check("(v3.9) Tgl/Jam Pembuatan tersembunyi default",
-          "Tgl/Jam Pembuatan" in rv._colmgr.hidden and
-          "Tgl/Jam Pembuatan" not in rv.tree.cget("displaycolumns"),
-          f"hidden={rv._colmgr.hidden}")
-    check("(v3.9.35) Tgl/Jam Pembuatan format panjang + jam",
-          po_vals[7] == "02 Juni 2024 09:00", f"got {po_vals[7]!r}")
+    check("(v3.9.37) Tgl/Jam Pembuatan MERGE ke kolom Nomor #: anak "
+          "pertama #0 = '↳ 02 Juni 2024 09:00' (kolom Tgl/Jam dihapus)",
+          rv.tree.item(kids[0], "text") == "↳ 02 Juni 2024 09:00",
+          f"got {rv.tree.item(kids[0], 'text')!r}")
+    check("(v3.9.37) Anak kedua/ketiga #0 kosong (tgl/jam sekali per PO)",
+          rv.tree.item(kids[1], "text") == "" and
+          rv.tree.item(kids[2], "text") == "",
+          f"got {rv.tree.item(kids[1], 'text')!r} / "
+          f"{rv.tree.item(kids[2], 'text')!r}")
     gt = rv.tree.item(rv.tree.get_children("")[-1], "values")
     check("(v3.9) Grand total: N PO + total qty di kolom Kuantitas",
-          gt[4] == "12 PO" and gt[6] == "720",
-          f"got {gt[4]!r} / {gt[6]!r}")
+          gt[3] == "12 PO" and gt[5] == "720",
+          f"got {gt[3]!r} / {gt[5]!r}")
 
     app.rincian_view.cabang_var.set("MLGPAR")
     app.rincian_view._refresh()
@@ -6039,12 +6059,15 @@ def main():
                    if k != "grand_total"]
     _vals30r = _rv30r1.tree.item(_parents30r[0], "values") \
         if _parents30r else None
-    check("(v3.9.20/35-c1 → v3.9.35) Rincian PO: Tanggal/Tgl-Jam NaT render "
+    check("(v3.9.20/35-c1 → v3.9.37) Rincian PO: Tanggal/Tgl-Jam NaT render "
           "'' tanpa ⚠ (dulu ValueError → 'Gagal menyiapkan pivot PO')",
           "⚠" not in _rv30r1.status_var.get() and
           len(_parents30r) == 1 and _vals30r is not None and
-          _vals30r[0] == "" and _vals30r[7] == "" and
-          _vals30r[1] == "MLGPAR",
+          _vals30r[0] == "" and _vals30r[1] == "MLGPAR" and
+          (not _rv30r1.tree.get_children(_parents30r[0]) or
+           _rv30r1.tree.item(
+               _rv30r1.tree.get_children(_parents30r[0])[0],
+               "text") == ""),
           f"status={_rv30r1.status_var.get()!r} vals={_vals30r}")
     _top30r1.destroy()
     root.update()
@@ -10409,6 +10432,208 @@ def main():
           == "1.800",
           f"got {_aprow48} tot={_atot48}")
     _ap48._close_detail_wins()
+
+    print("== 49. (v3.9.37) 🔄 REFRESH FILE SUMBER (cache baca + dialog "
+          "selektif) + RINCIAN PO: KETERANGAN ↳ PEMASOK + TGL/JAM ↳ NOMOR # "
+          "==")
+
+    # --- (a) Rincian PO v3.9.37: PO 1-item (status+keterangan digabung) ---
+    from src.ui.rincian_po_view import RincianPoView as _RPV49
+    _rows49 = [
+        {"Nomor #": "PO-901", "Tanggal": pd.Timestamp("2026-09-04"),
+         "Nama Barang": "KOPI BUBUK", "Keterangan PO": "Urgent",
+         "Pemasok": "CV Maju",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2026-09-04 08:00"),
+         "Satuan": "GR", "Kuantitas": 5.0, "Cabang PO": "1370.MLGPAR",
+         "Status Pesanan Pembelian": "Menunggu diproses"},
+        {"Nomor #": "PO-902", "Tanggal": pd.Timestamp("2026-09-05"),
+         "Nama Barang": "KOPI BUBUK", "Keterangan PO": "",
+         "Pemasok": "CV Maju",
+         "Tgl/Jam Pembuatan": pd.Timestamp("2026-09-05 07:30"),
+         "Satuan": "GR", "Kuantitas": 3.0, "Cabang PO": "1370.MLGPAR",
+         "Status Pesanan Pembelian": "Selesai"},
+    ]
+    _top49a = tk.Toplevel(root)
+    _rv49a = _RPV49(_top49a)
+    _rv49a.pack(fill="both", expand=True)
+    root.update()
+    _rv49a.load_data(pd.DataFrame(_rows49))
+    wait_view(root, _rv49a)
+    _pos49 = [k for k in _rv49a.tree.get_children("")
+              if k != "grand_total"]
+    _kid901 = _rv49a.tree.get_children(_pos49[0])[0]
+    check("(v3.9.37) PO 1-item ber-status+keterangan: 2 anotasi digabung "
+          "ke sel anak TUNGGAL ('↳ status · ↳ ket') — nilai sekali per PO",
+          _rv49a.tree.set(_kid901, "Pemasok") ==
+          "↳ Menunggu diproses · ↳ Urgent",
+          f"got {_rv49a.tree.set(_kid901, 'Pemasok')!r}")
+    check("(v3.9.37) PO 1-item: Tgl/Jam Pembuatan tetap ↳ di kolom Nomor #",
+          _rv49a.tree.item(_kid901, "text") == "↳ 04 September 2026 08:00",
+          f"got {_rv49a.tree.item(_kid901, 'text')!r}")
+    _kid902 = _rv49a.tree.get_children(_pos49[1])[0]
+    check("(v3.9.37) PO TANPA keterangan: hanya anotasi status (ket kosong "
+          "tidak menghasilkan baris ↳)",
+          _rv49a.tree.set(_kid902, "Pemasok") == "↳ Selesai",
+          f"got {_rv49a.tree.set(_kid902, 'Pemasok')!r}")
+    _top49a.destroy()
+    root.update()
+
+    # --- (b) helpers: cache bacaan file sumber (signature + copy) -------
+    import tempfile
+
+    from src.pipeline import helpers as _H49
+    _H49.read_cache_invalidate(None)
+    _H49.read_cache_reset_counters()   # counter hit/miss per-RUN (pola app)
+    _tmpd49 = tempfile.mkdtemp(prefix="sm3937_")
+    _p49 = os.path.join(_tmpd49, "sumber49.xlsx")
+    pd.DataFrame({"A": [1, 2]}).to_excel(_p49, index=False)
+    _d49 = _H49.fn_buka_sheet(_p49, 0)
+    check("(v3.9.37) fn_buka_sheet: bacaan pertama → MISS (file dibaca "
+          "disk + ter-cache)",
+          _H49.read_cache_stats() == (1, 1, 0, 1),
+          f"got {_H49.read_cache_stats()}")
+    _d49b = _H49.fn_buka_sheet(_p49, 0)
+    check("(v3.9.37) fn_buka_sheet: bacaan kedua → HIT dari cache (file "
+          "tak berubah — mtime+ukuran identik)",
+          _H49.read_cache_stats() == (1, 1, 1, 1)
+          and len(_d49b) == 2,
+          f"got {_H49.read_cache_stats()}")
+    _d49b.loc[0, "A"] = 999
+    check("(v3.9.37) cache MURNI: mutasi frame hasil pemanggil tak "
+          "menodai entry cache (copy defensif)",
+          _H49.fn_buka_sheet(_p49, 0).loc[0, "A"] == 1,
+          "cache terkorupsi oleh mutasi pemanggil")
+    pd.DataFrame({"A": [1, 2, 3], "B": ["x", "y", "z"]}).to_excel(
+        _p49, index=False)
+    _d49c = _H49.fn_buka_sheet(_p49, 0)
+    check("(v3.9.37) file BERUBAH (ukuran/mtime beda) → signature tak "
+          "cocok → dibaca ulang otomatis",
+          len(_d49c) == 3,
+          f"got {len(_d49c)} rows")
+    check("(v3.9.37) read_cache_invalidate SELEKTIF: normpath varian path "
+          "tetap kena (pencocokan normcase)",
+          _H49.read_cache_invalidate([_p49 + "/."]) == 1
+          and _H49.read_cache_stats()[0] == 0,
+          f"entries={_H49.read_cache_stats()[0]}")
+    _H49.fn_buka_sheet(_p49, 0)
+    check("(v3.9.37) read_cache_invalidate(None) = buang SEMUA (Refresh "
+          "Semua)",
+          _H49.read_cache_invalidate(None) == 1,
+          "entry tak terbuang")
+    shutil.rmtree(_tmpd49, ignore_errors=True)
+
+    # --- (c) RefreshSourcesDialog: scan + pre-check + aksi ---------------
+    from src.ui.refresh_sources import RefreshSourcesDialog as _RSD49
+    _tmpd49c = tempfile.mkdtemp(prefix="sm3937dlg_")
+    os.makedirs(os.path.join(_tmpd49c, "1. DEVIASI WEEKLY"),
+                exist_ok=True)
+    _f1 = os.path.join(_tmpd49c, "1. DEVIASI WEEKLY", "rekap.xlsx")
+    _f2 = os.path.join(_tmpd49c, "gabungan.xlsx")
+    pd.DataFrame({"A": [1]}).to_excel(_f1, index=False)
+    pd.DataFrame({"A": [2]}).to_excel(_f2, index=False)
+
+    class _Cfg49:
+        RootPath = _tmpd49c
+        Folders = {"RekapBerjalan": "1. DEVIASI WEEKLY"}
+
+    _got49: list = []
+    _dlg49 = _RSD49(root, _Cfg49, last_run_at=None,
+                    on_refresh=_got49.append)
+    root.update()
+    _n49 = len(_dlg49.tree.get_children(""))
+    check("(v3.9.37) Dialog Refresh File Sumber: memindai SEMUA file "
+          "Excel sumber (folder Folders + RootPath workbook gabungan)",
+          _n49 == 2 and
+          {os.path.basename(_dlg49._entries[i]["path"])
+           for i in range(_n49)} == {"rekap.xlsx", "gabungan.xlsx"}
+          and "file sumber" in _dlg49.info_var.get(),
+          f"rows={_n49} info={_dlg49.info_var.get()!r}")
+    check("(v3.9.37) last_run_at=None (belum pernah run): tak ada file "
+          "tercentang default; tombol Terpilih disabled",
+          not _dlg49._checked and "0" in _dlg49.btn_terpilih.cget("text")
+          and str(_dlg49.btn_terpilih.cget("state")) == "disabled",
+          f"checked={_dlg49._checked}")
+    _dlg49.destroy()
+    root.update()
+    # file berubah sejak run terakhir → tercentang default
+    _dlg49b = _RSD49(root, _Cfg49, last_run_at=time.time() - 3600,
+                     on_refresh=_got49.append)
+    root.update()
+    check("(v3.9.37) File BERUBAH sejak proses terakhir tercentang "
+          "default (kolom Diubah '● berubah')",
+          len(_dlg49b._checked) == 2 and
+          all(_dlg49b.tree.set(i, "diubah") == "● berubah"
+              for i in _dlg49b.tree.get_children("")),
+          f"checked={len(_dlg49b._checked)}")
+    # pilih selektif → callback path list; Refresh Semua → callback None
+    _dlg49b._check_all(False)
+    _first49 = _dlg49b.tree.get_children("")[0]
+    _dlg49b._toggle(str(_first49))
+    _sel49 = _dlg49b.selected_paths()
+    _dlg49b._do_selected()
+    check("(v3.9.37) Refresh Terpilih → callback(path terpilih) + dialog "
+          "tutup sendiri",
+          _got49 == [_sel49] and len(_sel49) == 1
+          and not _dlg49b.winfo_exists(),
+          f"got {_got49}")
+    _dlg49c = _RSD49(root, _Cfg49, last_run_at=None,
+                     on_refresh=_got49.append)
+    root.update()
+    _dlg49c._do_refresh(None)
+    check("(v3.9.37) Refresh Semua → callback(None) (buang seluruh cache)",
+          _got49[-1] is None, f"got {_got49[-1]!r}")
+    shutil.rmtree(_tmpd49c, ignore_errors=True)
+
+    # --- (d) app wiring: tombol + _refresh_sources + tail refresh mode ---
+    check("(v3.9.37) app: tombol 🔄 toolbar (btn_refresh_tb) + 🔄 tab "
+          "Proses (btn_refresh_src) + method _open_refresh_dialog ada",
+          app.btn_refresh_tb is not None and
+          app.btn_refresh_src is not None and
+          callable(app._open_refresh_dialog),
+          "tombol/method tak terpasang")
+    _orig_sp49 = app._start_pipeline
+    _cap49: list = []
+
+    def _fake_sp49(refresh_files=False):
+        _cap49.append(refresh_files)
+
+    app._start_pipeline = _fake_sp49
+    app._refresh_sources([_f1])
+    app._refresh_sources(None)
+    app._start_pipeline = _orig_sp49
+    check("(v3.9.37) app._refresh_sources: invalidasi cache lalu teruskan "
+          "refresh_files ke pipeline (list utk terpilih, None utk semua)",
+          _cap49 == [[_f1], None],
+          f"got {_cap49!r}")
+    # tail _on_pipeline_done refresh mode: TETAP di tab aktif + status
+    select_and_wait(root, app, app.tab_rincian, app.rincian_view)
+    _cur49 = app.notebook.select()
+    app._on_pipeline_done(
+        pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        {"df": None, "kpi": None, "desc": None, "harga_map": {},
+         "konversi_map": None}, None, [_f1])
+    for _ in range(10):
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.37) refresh mode: selesai TANPA lompat tab (tetap di tab "
+          "aktif) + status 'disegarkan' + waktu run terakhir dicatat",
+          app.notebook.select() == _cur49
+          and "disegarkan" in app.statusbar.dot._var.get()
+          and app._last_run_finished_at is not None,
+          f"tab={app.notebook.select()!r} status="
+          f"{app.statusbar.dot._var.get()!r}")
+    # tail normal (refresh_files=False): perilaku lama — lompat ke 📊 Pivot
+    app._on_pipeline_done(
+        pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        {"df": None, "kpi": None, "desc": None, "harga_map": {},
+         "konversi_map": None}, None, False)
+    for _ in range(10):
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.37) run normal (bukan refresh): tetap lompat ke 📊 Pivot "
+          "pascapipeline (perilaku lama terjaga)",
+          app.notebook.select() == str(app.tab_pivot),
+          f"tab={app.notebook.select()!r}")
 
     root.destroy()
 

@@ -127,6 +127,11 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 from src.main import PipelineStopped, run_pipeline
+from src.pipeline.helpers import (
+    read_cache_invalidate,
+    read_cache_reset_counters,
+    read_cache_stats,
+)
 from src.ui.deviasi_view import (
     DeviasiView,
     SharedACRThreshold,
@@ -143,6 +148,7 @@ from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.nominal_deviasi_view import NominalDeviasiView
 from src.ui.nominal_resto_view import NominalRestoView
 from src.ui.pivot_view import PivotTableView
+from src.ui.refresh_sources import RefreshSourcesDialog
 from src.ui.rincian_po_view import RincianPoView, _resto_name
 from src.ui.theme import (
     C_AMBER,
@@ -177,7 +183,26 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.36"  # v3.9.36 — popup per item (Sekarang vs Bulan Lalu) + filter Kategori default Deviasi (🧮 + Pivot) + popup Tanpa Harga
+APP_VERSION = "3.9.37"  # v3.9.37 — 🔄 Refresh File Sumber (selektif) + Rincian PO: Keterangan PO ↳ Pemasok + Tgl/Jam ↳ Nomor #
+# v3.9.37 (user: "ada tombol refresh untuk file sumber, bisa gak? dan gak
+# harus refresh semua tapi" + "Keterangan PO merger Vertical dengan
+# Pemasok sama seperti Status Pesanan Juga dan kolom Keterangan PO hapus
+# karna sudah termerger. Tanggal Jam pembuatan Merger vertical dengan
+# Nomor #"):
+# (1) DIALOG 🔄 REFRESH FILE SUMBER (toolbar + tab Proses): daftar semua
+#     file Excel sumber dgn checkbox; default tercentang = file berubah
+#     sejak proses terakhir; Refresh Terpilih = hanya file itu dibaca
+#     ulang (file lain dari CACHE bacaan — fn_buka_sheet kini cache
+#     per file+sheet divalidasi mtime+ukuran); Refresh Semua = buang
+#     seluruh cache; run pipeline tetap satu jalur (stop/log/KPI sama);
+#     refresh mode TIDAK melompat tab (tetap di tab aktif, data
+#     diperbarui in-place);
+# (2) RINCIAN PO: kolom Keterangan PO DIHAPUS — nilai jadi anotasi "↳"
+#     di kolom Pemasok (pola Status Pesanan v3.9.35, urut status lalu
+#     keterangan); kolom Tgl/Jam Pembuatan DIHAPUS — nilai jadi anotasi
+#     "↳ 02 Juni 2024 09:00" di kolom Nomor # (#0) baris anak pertama;
+#     skema 8 → 6 kolom nilai; tag redup po_status_note utk semua sel
+#     anotasi (#0 + Pemasok).
 # v3.9.34 (user: kolom Nominal di Deviasi GR/PCS + Komparasi + tab Σ per
 # resto):
 # (1) kolom Nominal (Harga 41.09 × Qty Deviasi) di tab 📦 Deviasi GR &
@@ -994,6 +1019,9 @@ class StockMonitorApp:
         # hilang/rusak) — dihitung dari log pipeline, ditampilkan saat
         # pipeline selesai supaya data parsial tidak disembunyikan.
         self._skipped_files = 0
+        # v3.9.37 — waktu pipeline TERAKHIR selesai (time.time()) — acuan
+        # "file sumber berubah" di dialog 🔄 Refresh File Sumber.
+        self._last_run_finished_at: float | None = None
 
         # v3.2: store follow-up bersama (persist followup.json)
         self.followup_store = FollowUpStore()
@@ -1040,6 +1068,10 @@ class StockMonitorApp:
         self.toolbar = Toolbar(self.root, f"📊 {APP_TITLE}", APP_VERSION)
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
 
+        # v3.9.37 — 🔄 Refresh Sumber: dialog pilih file sumber yang mau
+        # dibaca ulang (selektif — file lain dari cache bacaan).
+        self.btn_refresh_tb = self.toolbar.add_action(
+            "🔄 Refresh Sumber", command=self._open_refresh_dialog)
         self.btn_export_tb = self.toolbar.add_action(
             "💾 Export Excel", command=self._export_excel, accent=True)
         # FIX A-02 (audit 2-a): set_enabled → tombol disabled TAMPAK dim
@@ -1357,6 +1389,14 @@ class StockMonitorApp:
                                          command=self._copy_log)
         self.btn_salin_log.pack(side="left", padx=(8, 0))
 
+        # v3.9.37 — 🔄 Refresh File Sumber…: dialog selektif (file yang
+        # berubah sejak proses terakhir tercentang default; file lain tak
+        # dibaca ulang — cache bacaan).
+        self.btn_refresh_src = GhostButton(
+            btns, text="🔄 Refresh File Sumber…",
+            command=self._open_refresh_dialog)
+        self.btn_refresh_src.pack(side="left", padx=(8, 0))
+
         self.btn_export = GhostButton(btns, text="💾 Export ke Excel",
                                       state="disabled",
                                       command=self._export_excel)
@@ -1492,7 +1532,15 @@ class StockMonitorApp:
     # =====================================================================
     # PIPELINE CONTROL
     # =====================================================================
-    def _start_pipeline(self):
+    def _start_pipeline(self, refresh_files=False):
+        """Jalankan pipeline. refresh_files (v3.9.37):
+        - False  → run normal (cache bacaan tetap dipakai utk file yang
+          tak berubah — hasil identik, lebih cepat);
+        - None   → REFRESH SEMUA (cache bacaan dikosongkan dulu oleh
+          _refresh_sources — semua file dibaca ulang);
+        - list   → REFRESH TERPILIH (entry cache file itu sudah
+          diinvalidasi _refresh_sources — hanya file itu dibaca ulang;
+          file lain disajikan cache: "gak harus refresh semua")."""
         if self.is_running:
             messagebox.showinfo(
                 "Sedang Berjalan",
@@ -1521,6 +1569,9 @@ class StockMonitorApp:
 
         # FIX D-04: reset penghitung file yang di-skip reader
         self._skipped_files = 0
+        # v3.9.37 — reset penghitung cache hit/miss per-file (log akhir
+        # run mencerminkan run INI — file dibaca ulang vs disajikan cache)
+        read_cache_reset_counters()
 
         # v3.9.33 — AUDIT FIX (48-f HIGH-#6): PRE-FLIGHT folder data SEBELUM
         # pipeline — dulu folder hilang / RootPath salah → pipeline berjalan
@@ -1560,7 +1611,12 @@ class StockMonitorApp:
                 "Perbaiki RootPath / Folders di tab ⚙ Pengaturan.",
                 parent=self.root)
 
-        self.notebook.select(self.tab_proses)
+        is_refresh = refresh_files is not False
+        if not is_refresh:
+            self.notebook.select(self.tab_proses)
+        # v3.9.37 — refresh mode: TETAP di tab aktif (data diperbarui
+        # in-place; tab lain menyusul via lazy refresh saat dipilih —
+        # "gak harus refresh semua" juga soal gangguan view).
         self.is_running = True
         self.stop_event.clear()
         self.btn_mulai.set_enabled(False)
@@ -1568,23 +1624,47 @@ class StockMonitorApp:
         # FIX A-02: set_enabled (visual dim) — bukan configure(state) polos
         self.btn_export.set_enabled(False)
         self.btn_export_tb.set_enabled(False)
-        self.status_var.set("Status: menjalankan pipeline…")
+        if is_refresh:
+            n_sel = 0 if refresh_files is None else len(refresh_files)
+            label = ("SEMUA file sumber" if refresh_files is None
+                     else f"{fmt_int_id(n_sel)} file sumber terpilih")
+            self.status_var.set(f"Status: menyegarkan {label}…")
+            self.statusbar.set_status(
+                f"🔄 Refresh — {label} (file lain dari cache bacaan)…",
+                C_ORANGE)
+        else:
+            self.status_var.set("Status: menjalankan pipeline…")
+            self.statusbar.set_status(*_ST_RUN)
         self.status_spinner.start()
-        self.statusbar.set_status(*_ST_RUN)
         if pre_missing:
             # v3.9.33 — status AMBER sebelum run: folder data bermasalah jangan
             # tertutup status "berjalan" polos (48-f: kegagalan senyap).
             self.statusbar.set_status(
                 "Pipeline berjalan… ⚠ folder data tidak ditemukan — lihat log",
                 C_AMBER)
-        self.kpi_status.set_value("MENJALANKAN", "pipeline sedang diproses…",
-                                  C_ORANGE)
+        self.kpi_status.set_value(
+            "MENYEGARKAN…" if is_refresh else "MENJALANKAN",
+            "file sumber diproses ulang…" if is_refresh
+            else "pipeline sedang diproses…", C_ORANGE)
         self.progress.start(12)
         self._run_start_time = time.time()
         self._tick_elapsed()
 
-        self._append_log_batched("\n" + "=" * 60 + "\n  Memulai pipeline…\n")
+        self._append_log_batched("\n" + "=" * 60 + "\n")
+        if is_refresh:
+            n_sel = 0 if refresh_files is None else len(refresh_files)
+            self._append_log_batched(
+                "  🔄 REFRESH FILE SUMBER — "
+                f"{'SEMUA' if refresh_files is None else fmt_int_id(n_sel)} "
+                "file dibaca ulang dari disk;\n"
+                "  file lain memakai bacaan cache (tak berubah — "
+                "mtime/ukuran identik).\n")
+        else:
+            self._append_log_batched("  Memulai pipeline…\n")
 
+        # v3.9.37 — flag refresh diteruskan ke _on_pipeline_done (tetap di
+        # tab aktif saat selesai; log penutup beda).
+        self._refresh_flag = refresh_files
         self.worker_thread = threading.Thread(
             target=self._run_pipeline_worker, daemon=True)
         self.worker_thread.start()
@@ -1635,24 +1715,33 @@ class StockMonitorApp:
         thread) setelah thread dipastikan mati.
         """
         gc_shield_acquire()
+        # v3.9.37 — flag refresh (False/None/list) dibaca saat SELESAI:
+        # worker tak membaca state app lain saat berjalan (pola lama).
+        _rf = getattr(self, "_refresh_flag", False)
         try:
             append1_df, rincian_po_df, in_detail_df, audit_result = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                append1_df, rincian_po_df, in_detail_df, audit_result, None))
+                append1_df, rincian_po_df, in_detail_df, audit_result, None,
+                _rf))
         except PipelineStopped as exc:
             err = (exc, None)
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                None, None, None, None, err))
+                None, None, None, None, err, _rf))
         except Exception as exc:
             import traceback
             err = (exc, traceback.format_exc())
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                None, None, None, None, err))
+                None, None, None, None, err, _rf))
 
     def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df,
-                          audit_result, error):
-        """Dijadwalkan ke main thread via after()."""
+                          audit_result, error, refresh_files=False):
+        """Dijadwalkan ke main thread via after().
+
+        v3.9.37 — refresh_files: False = run normal; None = refresh semua;
+        list = refresh terpilih → penutup TIDAK melompat ke tab 📊 Pivot
+        (tetap di tab aktif; view aktif refresh in-place oleh load_data,
+        tab lain menyusul via lazy refresh)."""
         # v3.9: lepas GC shield SEBELUM UI work berat — bila thread pipeline
         # belum benar-benar mati, retry 15ms sampai mati (lihat widgets.py)
         gc_shield_release(self.worker_thread, retry_widget=self.root)
@@ -1812,18 +1901,42 @@ class StockMonitorApp:
             self.kpi_status.set_value("SELESAI ⚠", warn, C_AMBER)
             self._append_log_batched(f"\n[PERINGATAN] {warn}\n")
 
-        # Switch to Pivot Table tab (default view) — refresh pivot lewat
-        # event tab-changed (lazy loading)
-        self.notebook.select(self.tab_pivot)
-        self.pivot_view.ensure_refreshed()
+        # v3.9.37 — catat waktu selesai (acuan "berubah" dialog Refresh
+        # File Sumber) + observabilitas cache baca file sumber (file
+        # dibaca ulang vs disajikan cache — silent-failure culture 48).
+        self._last_run_finished_at = time.time()
+        _ent, _nf, _hit, _miss = read_cache_stats()
+        if _nf:
+            self._append_log_batched(
+                f"  File sumber (cache baca): {fmt_int_id(_miss)} file "
+                f"dibaca ulang · {fmt_int_id(_hit)} file dipakai dari "
+                f"cache ({fmt_int_id(_ent)} bacaan tersimpan)\n")
 
-        # v3.3: selesai = status bar (hijau) + log — TANPA dialog modal
-        # (dulu messagebox "Selesai" mem-blok alur tiap kali pipeline usai)
-        self._append_log_batched(
-            "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
-            "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
-            "📤 Rekap Selisih IN / 📋 Laporan / 🧮 Nominal Deviasi /\n"
-            "☑ Follow Up / 🛒 Rincian PO.\n")
+        if refresh_files is False:
+            # Switch to Pivot Table tab (default view) — refresh pivot lewat
+            # event tab-changed (lazy loading)
+            self.notebook.select(self.tab_pivot)
+            self.pivot_view.ensure_refreshed()
+
+            # v3.3: selesai = status bar (hijau) + log — TANPA dialog modal
+            # (dulu messagebox "Selesai" mem-blok alur tiap kali pipeline usai)
+            self._append_log_batched(
+                "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
+                "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
+                "📤 Rekap Selisih IN / 📋 Laporan / 🧮 Nominal Deviasi /\n"
+                "☑ Follow Up / 🛒 Rincian PO.\n")
+        else:
+            # v3.9.37 — refresh mode: TETAP di tab aktif (view aktif sudah
+            # di-refresh load_data di atas; tab lain dirty → refresh saat
+            # dipilih). Judul status menyebut REFRESH supaya jelas asal
+            # datanya.
+            self.statusbar.set_status(
+                "SELESAI — 🔄 file sumber disegarkan", C_GREEN)
+            n_sel = 0 if refresh_files is None else len(refresh_files)
+            self._append_log_batched(
+                f"\n[SELESAI] 🔄 Refresh file sumber selesai — "
+                f"{'SEMUA' if refresh_files is None else fmt_int_id(n_sel)} "
+                "file dibaca ulang, data diperbarui.\n")
 
     def _on_close_window(self):
         """v3.9.33 — AUDIT FIX (48-c LOW): handler tombol X.
@@ -1856,6 +1969,77 @@ class StockMonitorApp:
         self._append_log_batched(
             "\n[STOP] Permintaan stop dikirim. Pipeline akan berhenti "
             "di checkpoint berikutnya.\n")
+
+    # =====================================================================
+    # v3.9.37 — 🔄 REFRESH FILE SUMBER (selektif)
+    # =====================================================================
+    def _open_refresh_dialog(self):
+        """Dialog pilih file sumber yang mau dibaca ulang (user: "ada
+        tombol refresh untuk file sumber, bisa gak? dan gak harus
+        refresh semua tapi"). File tak terpilih TIDAK dibaca ulang —
+        bacaan cache-nya (fn_buka_sheet) yang dipakai."""
+        if self.is_running:
+            messagebox.showinfo(
+                "Sedang Berjalan",
+                "Pipeline sedang berjalan. Tunggu hingga selesai atau klik "
+                "Stop.", parent=self.root)
+            return
+        worker = getattr(self, "worker_thread", None)
+        if worker is not None and worker.is_alive():
+            messagebox.showinfo(
+                "Masih Menghentikan",
+                "Pipeline sebelumnya masih berhenti di checkpoint.\n"
+                "Tunggu sampai status berubah, lalu refresh lagi.",
+                parent=self.root)
+            return
+        if not CONFIG_PATH.exists():
+            messagebox.showerror(
+                "Config Tidak Ada",
+                f"config.json tidak ditemukan:\n{CONFIG_PATH}",
+                parent=self.root)
+            return
+        try:
+            from src.config import Config
+            cfg = Config(str(CONFIG_PATH))
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            # OSError: file hilang/tak terbaca; ValueError: JSON rusak;
+            # RuntimeError/KeyError: config.json tak lengkap (pesan
+            # Indonesia v3.9.33 — ditampilkan ke user).
+            messagebox.showerror(
+                "Config Error",
+                f"Tidak bisa membaca config.json:\n{exc}",
+                parent=self.root)
+            return
+        try:
+            RefreshSourcesDialog(
+                self.root, cfg,
+                last_run_at=self._last_run_finished_at,
+                on_refresh=self._refresh_sources)
+        except Exception as exc:  # defensive — dialog jangan matikan app
+            messagebox.showerror(
+                "Refresh File Sumber",
+                f"Gagal membuka dialog:\n{exc}", parent=self.root)
+
+    def _refresh_sources(self, paths):
+        """Callback dialog 🔄 Refresh File Sumber: invalidasi cache bacaan
+        (paths=None → SEMUA; list → file terpilih) lalu jalankan pipeline
+        refresh mode (tetap di tab aktif; hanya file yang diinvalidasi
+        dibaca ulang dari disk)."""
+        n = read_cache_invalidate(paths)
+        if paths is None:
+            self._append_log_batched(
+                f"\n[REFRESH] Cache baca dibuang SEMUA ({fmt_int_id(n)} "
+                "entry) — semua file sumber dibaca ulang dari disk.\n")
+        elif n:
+            self._append_log_batched(
+                f"\n[REFRESH] {fmt_int_id(n)} bacaan file terpilih "
+                "dibuang — file itu akan dibaca ulang dari disk.\n")
+        else:
+            self._append_log_batched(
+                "\n[REFRESH] File terpilih belum punya bacaan cache — "
+                "akan dibaca saat pipeline berjalan.\n")
+        # refresh_files: None = refresh SEMUA; list = refresh TERPILIH
+        self._start_pipeline(refresh_files=paths)
 
     def _export_excel(self):
         """Export data (Append1 + Rincian PO + Rincian IN) ke Excel — async + loading."""

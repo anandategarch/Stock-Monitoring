@@ -6,7 +6,7 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
-> **Versi terkini: v3.9.36** — 🧮 Nominal Deviasi: popup per item 5 kolom (Nominal Deviasi Sekarang vs **Bulan Lalu** dari file deviasi tab ⚖ Komparasi) · filter Kategori default "Deviasi" (🧮 + Pivot) · popup daftar barang tanpa harga + alasan. Changelog di bawah.
+> **Versi terkini: v3.9.37** — 🔄 **Refresh File Sumber (selektif)**: tombol + dialog centang file sumber (file berubah sejak proses terakhir tercentang otomatis; file lain TIDAK dibaca ulang — cache bacaan; refresh tanpa pindah tab) · 🛒 Rincian PO: **Keterangan PO merge ↳ ke Pemasok** + **Tgl/Jam Pembuatan merge ↳ ke Nomor #** (kedua kolom dihapus — tabel kini 6 kolom). Changelog di bawah.
 
 ## Quick Start (Python Edition)
 
@@ -24,6 +24,14 @@ python -m src.main
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
+
+### v3.9.37 — 🔄 REFRESH FILE SUMBER (SELEKTIF) + RINCIAN PO: KETERANGAN ↳ PEMASOK · TGL/JAM ↳ NOMOR #
+> User: *"ada tombol refresh untuk file sumber, bisa gak? dan gak harsu refresh semua tapi"* + *"Keterangan PO merger Vertical dengan Pemasok sama seperti Status Pesanan Juga dan kolom Keterangan PO hapus karna sudah termerger. Tanggal Jam pembuatan Merger vertical dengan Nomor #"*.
+
+- **(1) TOMBOL 🔄 REFRESH FILE SUMBER (toolbar + tab 🚀 Proses)** — dialog daftar **SEMUA file Excel sumber** (folder `Folders` + RootPath utk workbook gabungan rekap) dgn **checkbox per file**; kolom **Diubah** = file berubah sejak proses terakhir (**tercentang default**; mtime > waktu pipeline terakhir selesai); **🔄 Refresh Terpilih** = hanya file tercentang dibaca ulang dari disk — **file lain disajikan dari CACHE BACAAN** (`fn_buka_sheet` kini menyimpan bacaan per file+sheet divalidasi **signature mtime+ukuran**; copy defensif — pemanggil bebas memutasi; guard memori 20 juta sel + evict FIFO); **🔄 Refresh Semua** = buang seluruh cache; pipeline tetap satu jalur (Stop/log/KPI/pre-flight sama); **refresh TIDAK melompat tab** (tetap di tab aktif, data diperbarui in-place; run normal tetap lompat ke 📊 Pivot); log akhir run: *"N file dibaca ulang · M file dipakai dari cache"*. `fn_rekap_mentah` kini lewat `fn_buka_sheet` (workbook gabungan ikut ter-cache).
+- **(2) 🛒 RINCIAN PO — KETERANGAN PO MERGE VERTICAL KE PEMASOK**: kolom **Keterangan PO DIHAPUS** — nilai tampil **"↳ Keterangan" di kolom Pemasok** baris anak KEDUA tiap PO (**pola SAMA dgn Status Pesanan ↳** v3.9.35: status di anak pertama, keterangan menyusul — nilai berjalan vertikal sekali per PO; PO ber-anak lebih sedikit dari anotasi → sisa digabung ke sel anak TERAKHIR " · "; teks redup tag per-cell).
+- **(3) 🛒 RINCIAN PO — TGL/JAM PEMBUATAN MERGE VERTICAL KE NOMOR #**: kolom **Tgl/Jam Pembuatan DIHAPUS** — nilai tampil **"↳ 02 Juni 2024 09:00" di kolom Nomor # (#0)** baris anak PERTAMA tiap PO (merge di bawah nomor PO; #0 dilebarkan 130→185); skema tabel **8 → 6 kolom nilai** (Tanggal · Nama Resto · Pemasok · Nama Barang · Satuan · Kuantitas); tag redup `po_status_note` kini mencakup SEMUA sel anotasi (#0 + Pemasok; deteksi berbasis nilai sel — aman terhadap filter/clone ⛶).
+- **VERIFIKASI**: test_ui_redesign **983/983 PASS** (963 + §49 BARU 20 check) + test_mock ALL PASS (+ E2E: refresh selektif 1 file → barang baru masuk, 12 file lain dari cache, miss=1) + ruff src 198 (baseline 197 + 1 BLE001 defensive konsisten gaya v3.9.34) & test 17 == baseline.
 
 ### v3.9.35 — RINCIAN PO: STATUS DI BAWAH PEMASOK (MERGE VERTICAL) + TANGGAL PANJANG + SELEKSI SEL ALA EXCEL
 > User: *"kolom status pesanan bisa gak ditaruh di bawah kolom pemasok? seperti merge vertical gitu. Sama kaya kolom nama barang yang ditampilkan secara vertical. Format tanggal pakai 01 Oktober 2026 aja format panjang"* + *"kenapa ya aku tidak bisa select disemua tabel nya? aku mau copy data nya seperti tabel di excel kan di cell mana aja aku bebas buat select dan copy"*.

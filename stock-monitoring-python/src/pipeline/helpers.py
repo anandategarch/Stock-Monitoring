@@ -3,10 +3,21 @@ helpers.py — Helper functions yang mirror persis fnBukaSheet, fnCombineFolder,
 dan fungsi text delimiter di Power Query M code.
 
 OPTIMIZED untuk speed: vectorized text operations via .str accessor.
+
+v3.9.37 — CACHE BACAAN FILE SUMBER (user: "ada tombol refresh untuk file
+sumber, bisa gak? dan gak harus refresh semua tapi"): fn_buka_sheet kini
+menyimpan bacaan per (file, sheet, header_row, raw) divalidasi SIGNATURE
+(mtime_ns + ukuran). File yang tak berubah dibaca SEKALI per sesi —
+run berikutnya (termasuk Refresh Terpilih) menyajikan frame dari cache
+(copy defensif — pemanggil bebas memutasi). Invalidasi selektif via
+read_cache_invalidate(paths) (dipakai dialog 🔄 Refresh File Sumber);
+hasil identik baca ulang — hanya lebih cepat. Batas memori: estimasi
+sel object (guard _READ_CACHE_MAX_CELLS, evict FIFO).
 """
 import glob
 import os
 import re
+import threading
 from typing import List, Optional
 
 import numpy as np
@@ -138,6 +149,117 @@ def _get_excel_engine() -> str:
 _EXCEL_ENGINE = _get_excel_engine()
 
 
+# =============================================================================
+# v3.9.37 — CACHE BACAAN FILE SUMBER (refresh selektif tanpa baca ulang
+# file yang tak berubah; user: "gak harus refresh semua")
+# =============================================================================
+_READ_CACHE: dict = {}          # key -> {"sig", "df", "cells"}
+_READ_CACHE_LOCK = threading.Lock()
+_READ_CACHE_CELLS = 0           # total sel ter-cache (guard memori)
+_READ_CACHE_MAX_CELLS = 20_000_000   # ~estimasi 20 juta sel object
+_READ_CACHE_HIT_FILES: set = set()   # normpath file yang disajikan cache
+_READ_CACHE_MISS_FILES: set = set()  # normpath file yang dibaca disk
+
+
+def _read_cache_key(file_path: str, sheet_name, header_row: int,
+                    raw: bool):
+    """Kunci cache: path ternormalisasi (Windows case-insensitive) +
+    sheet + header_row + raw — signature file divalidasi TERPISAH."""
+    return (os.path.normcase(os.path.normpath(file_path)),
+            str(sheet_name), int(header_row), bool(raw))
+
+
+def _read_cache_sig(file_path: str):
+    """Signature file: (mtime_ns, ukuran). None = file tak terbaca stat
+    (hilang/terkunci) → cache MISS (baca ulang; kegagalan mengikuti jalur
+    error fn_buka_sheet yang sudah ada)."""
+    try:
+        st = os.stat(file_path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _read_cache_get(key, sig):
+    """Ambil frame dari cache bila signature cocok → COPY defensif
+    (pemanggil boleh memutasi hasilnya — insert kolom Name / ffill di
+    fn_combine_folder — tanpa menodai entry cache)."""
+    with _READ_CACHE_LOCK:
+        entry = _READ_CACHE.get(key)
+        if entry is None or sig is None or entry["sig"] != sig:
+            return None
+        _READ_CACHE_HIT_FILES.add(key[0])
+        return entry["df"].copy()
+
+
+def _read_cache_put(key, sig, df) -> None:
+    """Simpan copy frame ke cache (evict FIFO bila guard sel terlampaui).
+    Frame yang DISIMPAN adalah copy — frame asli dikembalikan ke
+    pemanggil (boleh dimutasi bebas)."""
+    if sig is None or df is None:
+        return
+    try:
+        cells = int(df.shape[0]) * int(df.shape[1])
+    except (TypeError, ValueError):
+        return
+    if cells <= 0:
+        return
+    global _READ_CACHE_CELLS
+    with _READ_CACHE_LOCK:
+        # evict FIFO sampai muat (dict = urutan insert)
+        while (_READ_CACHE_CELLS + cells > _READ_CACHE_MAX_CELLS
+               and _READ_CACHE):
+            _old_k, _old = next(iter(_READ_CACHE.items()))
+            _READ_CACHE.pop(_old_k, None)
+            _READ_CACHE_CELLS -= _old.get("cells", 0)
+        if _READ_CACHE_CELLS + cells > _READ_CACHE_MAX_CELLS:
+            return  # file raksasa melebihi guard sendirian → tak di-cache
+        _READ_CACHE[key] = {"sig": sig, "df": df.copy(), "cells": cells}
+        _READ_CACHE_CELLS += cells
+        _READ_CACHE_MISS_FILES.add(key[0])
+
+
+def read_cache_invalidate(paths=None) -> int:
+    """v3.9.37 — buang entry cache file sumber. Return jumlah entry
+    yang dibuang.
+
+    paths=None → SEMUA entry dibuang ("Refresh Semua" = baca ulang
+    semua file dari disk). Bila list/set path → hanya entry yang
+    file-nya termasuk (pencocokan normcase+normpath — jalur Windows
+    beda kapital / separator tetap kena)."""
+    global _READ_CACHE_CELLS
+    with _READ_CACHE_LOCK:
+        if paths is None:
+            n = len(_READ_CACHE)
+            _READ_CACHE.clear()
+            _READ_CACHE_CELLS = 0
+            return n
+        targets = {os.path.normcase(os.path.normpath(str(p)))
+                   for p in paths}
+        drop = [k for k in _READ_CACHE if k[0] in targets]
+        for k in drop:
+            _READ_CACHE_CELLS -= _READ_CACHE[k].get("cells", 0)
+            _READ_CACHE.pop(k, None)
+        return len(drop)
+
+
+def read_cache_stats() -> tuple:
+    """v3.9.37 — (n_entry, n_file_unik, n_file_hit, n_file_miss) utk
+    log observabilitas (file ter-cache / disajikan cache / dibaca disk)."""
+    with _READ_CACHE_LOCK:
+        files = {k[0] for k in _READ_CACHE}
+        return (len(_READ_CACHE), len(files),
+                len(_READ_CACHE_HIT_FILES), len(_READ_CACHE_MISS_FILES))
+
+
+def read_cache_reset_counters() -> None:
+    """v3.9.37 — reset penghitung hit/miss per-file (dipanggil app di
+    AWAL tiap run pipeline supaya log akhir run mencerminkan run itu)."""
+    with _READ_CACHE_LOCK:
+        _READ_CACHE_HIT_FILES.clear()
+        _READ_CACHE_MISS_FILES.clear()
+
+
 def _xlsb_engine() -> Optional[str]:
     """Engine untuk file .xlsb: calamine (jika ada) > pyxlsb > None.
     None = engine tidak tersedia (.xlsb harus di-skip dengan pesan jelas)."""
@@ -198,6 +320,14 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
     """
     # v3.3.1: pilih engine eksplisit untuk .xlsb (openpyxl tidak bisa .xlsb;
     # pandas default-engine pun butuh pyxlsb terinstall — beri pesan jelas)
+    # v3.9.37: cache bacaan (signature mtime+ukuran) — file tak berubah
+    # tak dibaca ulang dari disk (Refresh Terpilih: hanya file pilihan
+    # user yang dibaca ulang; hasil identik).
+    _rc_key = _read_cache_key(file_path, sheet_name, header_row, raw)
+    _rc_sig = _read_cache_sig(file_path)
+    _rc_hit = _read_cache_get(_rc_key, _rc_sig)
+    if _rc_hit is not None:
+        return _rc_hit
     if file_path.lower().endswith(".xlsb") and _EXCEL_ENGINE != "calamine":
         xlsb_eng = _xlsb_engine()
         if xlsb_eng is None:
@@ -214,14 +344,17 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
         else:
             df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row,
                                 dtype=object, **engine_kwargs)
+        _read_cache_put(_rc_key, _rc_sig, df)
         return df
     except Exception as e:
         # Fallback to openpyxl if calamine fails (e.g., unsupported format)
         if _EXCEL_ENGINE:
             if raw:
-                return pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=object)
+                df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=object)
             else:
-                return pd.read_excel(file_path, sheet_name=sheet_name, header=header_row, dtype=object)
+                df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row, dtype=object)
+            _read_cache_put(_rc_key, _rc_sig, df)
+            return df
         raise e
 
 
