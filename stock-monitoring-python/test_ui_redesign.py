@@ -811,7 +811,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.38", APP_VERSION == "3.9.38", f"got {APP_VERSION}")
+    check("Versi = 3.9.39", APP_VERSION == "3.9.39", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -10915,6 +10915,232 @@ def main():
     import contextlib as _cl50
     with _cl50.suppress(FileNotFoundError):
         os.unlink("komparasi_last.json")
+
+    # ==================================================================
+    print("== 51. (v3.9.39) 42.17 DUA ARAH: WHITELIST PROTECT + SHEET "
+          "DEFENSIVE + LOG TERBUANG ==")
+    import contextlib as _cl51
+    import io as _io51
+    import openpyxl as _oxl51
+    import pandas as _pd51
+
+    from src.pipeline.append1 import _collect_protected_barangs as _cp51
+    from src.pipeline.fn_4217 import (
+        _norm_barang as _nb51,
+        _resolve_sheet_4217 as _rs51,
+        fn_4217 as _fn51,
+    )
+
+    check("(v3.9.39) _norm_barang: kunci dua arah whitespace/case-"
+          "insensitive ('Bumbu  Pasta  Kuah (V.20)' == 'BUMBU PASTA KUAH "
+          "(V.20)'; None → '')",
+          _nb51("Bumbu  Pasta  Kuah (V.20)")
+          == _nb51("BUMBU PASTA KUAH (V.20)")
+          and _nb51(None) == ""
+          and _nb51(float("nan")) == "")
+
+    _dfa51 = _pd51.DataFrame({"Nama Barang": ["GULA (V.20)", "AYAM", None]})
+    _dfb51 = _pd51.DataFrame({"Nama Barang": ["  gula (V.20) ", "KOPI"]})
+    _dfe51 = _pd51.DataFrame({"Kolom Lain": [1]})
+    check("(v3.9.39) _collect_protected_barangs: union beberapa df "
+          "ternormalisasi (duplikat case/whitespace menyatu; df tanpa "
+          "kolom + None di-skip)",
+          _cp51([_dfa51, _dfb51]) == {"GULA(V.20)", "AYAM", "KOPI"}
+          and _cp51([None, _pd51.DataFrame(), _dfe51]) == set())
+
+    # --- mock 42.17: SHEET NAMA BEDA + kategori di luar whitelist ---
+    _tmp51 = tempfile.mkdtemp(prefix="t51_")
+    _d4217_51 = os.path.join(_tmp51, "6.1 42.17 Saldo Awal")
+    os.makedirs(_d4217_51, exist_ok=True)
+    _f417_51 = os.path.join(_d4217_51, "saldo.xlsx")
+    _wb417_51 = _oxl51.Workbook()
+    _ws417_51 = _wb417_51.active
+    _ws417_51.title = "#42.17. Kuantitas Barang per Gudang"  # BEDA dr default
+    for _i51 in range(4):
+        _ws417_51.cell(row=_i51 + 1, column=1, value=f"MD {_i51}")
+    _ws417_51.cell(row=5, column=1, value="Nama Barang")
+    _ws417_51.cell(row=5, column=2, value="Kode Barang")
+    _ws417_51.cell(row=5, column=3, value="Kategori Barang")
+    _ws417_51.cell(row=5, column=4, value="Nama Satuan")
+    _ws417_51.cell(row=5, column=5, value="RESTO MALANG (MLGPAR)")
+    _rows417_51 = [
+        ["AYAM FILLET (V.20)", 101, "10.FOOD [RM] - COM V.2", "GR", 100],
+        ["BUMBU PASTA KUAH (V.20)", 102, "10.FOOD [WIP] - COM V.3 BARU",
+         "GR", 300000],  # di luar whitelist (V.3) — mirip kasus user
+        ["SUPPLIES MURNI", 103, "SUPPLIES [OTHERS]", "PCS", 999],
+    ]
+    for _r51, _row51 in enumerate(_rows417_51, 6):
+        for _c51, _v51 in enumerate(_row51, 1):
+            _ws417_51.cell(row=_r51, column=_c51, value=_v51)
+    _wb417_51.save(_f417_51)
+    _wb417_51.close()
+
+    from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST as _WL51
+
+    check("(v3.9.39) _resolve_sheet_4217: nama persis TIDAK ada di file → "
+          "fallback sheet berprefiks '#42.17' (export Accurate memotong "
+          "nama — bukan 0 baris senyap)",
+          _rs51(_d4217_51, "#42.17. Kuantitas Barang per Gu")
+          == "#42.17. Kuantitas Barang per Gudang")
+    check("(v3.9.39) _resolve_sheet_4217: nama persis ADA → dipertahankan "
+          "(perilaku lama); folder kosong → nama tetap",
+          _rs51(_d4217_51, "#42.17. Kuantitas Barang per Gudang")
+          == "#42.17. Kuantitas Barang per Gudang"
+          and _rs51(os.path.join(_tmp51, "folder-kosong"),
+                    "#42.17. Kuantitas Barang per Gu")
+          == "#42.17. Kuantitas Barang per Gu")
+
+    _buf51 = _io51.StringIO()
+    with _cl51.redirect_stdout(_buf51):
+        _q51 = _fn51(_d4217_51, kategori_whitelist=_WL51,
+                     protected_barangs=["Bumbu  Pasta  Kuah (V.20)"])
+    _names51 = set(_q51["Nama Barang"].astype(str))
+    _log51 = _buf51.getvalue()
+    check("(v3.9.39) fn_4217 DUA ARAH: barang ber-pasangan (protected) "
+          "TIDAK terbuang whitelist walau kategorinya di luar — "
+          "'BUMBU PASTA KUAH (V.20)' tetap masuk (akar keluhan user)",
+          "BUMBU PASTA KUAH (V.20)" in _names51
+          and "AYAM FILLET (V.20)" in _names51,
+          f"got {_names51}")
+    check("(v3.9.39) fn_4217: barang TANPA pasangan tetap terbuang "
+          "whitelist (SUPPLIES MURNI) + NAMANYA tercantum di log "
+          "'whitelist terbuang' (tidak lenyap senyap)",
+          "SUPPLIES MURNI" not in _names51
+          and "SUPPLIES MURNI" in _log51,
+          f"log={_log51!r}")
+    check("(v3.9.39) fn_4217: log 'dua arah … dipertahankan' tercetak "
+          "saat protect aktif + sheet fallback [INFO] tercetak",
+          "dipertahankan" in _log51 and "[INFO] 4217" in _log51)
+
+    # --- E2E MINI append1: rekap ada barang, 42.17 kategorinya di luar
+    # whitelist → SALDO AWAL wajib masuk final (dua arah penuh) ---
+    def _mk51_rekap(path, resto, rows):
+        _hdr = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS",
+                "NAMA BARANG", "SATUAN"] + [str(d) for d in range(1, 32)]
+        _wb = _oxl51.Workbook()
+        _ws = _wb.active
+        _ws.title = "REKAP MENTAH"
+        for _c, _h in enumerate(_hdr, 1):
+            _ws.cell(row=1, column=_c, value=_h)
+        for _r, _row in enumerate(rows, 2):
+            for _c, _v in enumerate(_row, 1):
+                _ws.cell(row=_r, column=_c, value=_v)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _wb.save(path)
+        _wb.close()
+
+    _root51 = os.path.join(_tmp51, "9.NEW QUERY")
+    _so51 = [100] + [0] * 24 + [100] + [0] * 6
+    _mk51_rekap(os.path.join(_root51, "1. DEVIASI WEEKLY", "MLGPAR.xlsx"),
+                "MLGPAR",
+                [["MLGPAR.001", "input so harian", "SO", "OK",
+                  "AYAM FILLET (V.20)", "GR"] + _so51,
+                 ["MLGPAR.001", "input so harian", "SO", "OK",
+                  "BUMBU PASTA KUAH (V.20)", "GR"] + _so51])
+    _mk51_rekap(os.path.join(_root51, "1.12 Rekap Mentah Bulan Lalu",
+                             "MLGPAR.xlsx"),
+                "MLGPAR",
+                [["MLGPAR.001", "input so harian", "SO", "OK",
+                  "AYAM FILLET (V.20)", "GR"] + [500] * 7,
+                 ["MLGPAR.001", "input so harian", "SO", "OK",
+                  "BUMBU PASTA KUAH (V.20)", "GR"] + [40000] * 7])
+    # 42.17: reuse _f417_51? beda root → copy manual
+    import shutil as _sh51
+    _sh51.copytree(_d4217_51, os.path.join(_root51, "6.1 42.17 Saldo Awal"))
+    _mk51_dbs = os.path.join(_root51, "21. DBS Kategori", "kategori.xlsx")
+    _wb51d = _oxl51.Workbook()
+    _ws51d = _wb51d.active
+    _ws51d.title = "Sheet1"
+    for _c, _h in enumerate(["NAMA BARANG", "KATEGORI", "JENIS",
+                             "SOURCE KIRIMAN"], 1):
+        _ws51d.cell(row=1, column=_c, value=_h)
+    for _r, (_b, ) in enumerate([("AYAM FILLET (V.20)", ),
+                                 ("BUMBU PASTA KUAH (V.20)", )], 2):
+        _ws51d.cell(row=_r, column=1, value=_b)
+        _ws51d.cell(row=_r, column=2, value="DEVIASI")
+        _ws51d.cell(row=_r, column=3, value="BAHAN BAKU")
+        _ws51d.cell(row=_r, column=4, value="INTERNAL")
+    os.makedirs(os.path.dirname(_mk51_dbs), exist_ok=True)
+    _wb51d.save(_mk51_dbs)
+    _wb51d.close()
+
+    _cfg51 = {
+        "RootPath": _root51 + os.sep,
+        "Folders": {
+            "RekapBerjalan": "1. DEVIASI WEEKLY",
+            "RekapLalu": "1.12 Rekap Mentah Bulan Lalu",
+            "Penjualan2205": "2. 22.05",
+            "Kirim4215": "3.1 42.15 Kirim",
+            "Terima4215": "3. 42.15",
+            "RI3224": "13. 32.24 RI",
+            "RI3224Lalu": "13.2 3224 RI Bulan Lalu",
+            "Pemindahan4205": "4. 42.05",
+            "Pemindahan4205Lalu": "4.1 4205 Bulan Lalu",
+            "SaldoAwal4217": "6.1 42.17 Saldo Awal",
+            "DBSKategori": "21. DBS Kategori",
+            "RincianPO": "25. Rincian PO",
+            "Data9901": "30. 9901",
+            "Harga": "09.Harga",
+        },
+        "Sheets": {
+            "RekapMentah": "REKAP MENTAH",
+            "SaldoAwal4217": "#42.17. Kuantitas Barang per Gu",
+            "DBSKategori": "Sheet1",
+            "Penjualan2205": "#22.05. Rincian Penjualan per B",
+            "Pemindahan4215": "#42.15. Pemindahan Barang (KIRI",
+            "Penerimaan3224": "#32.24. Rincian Penerimaan Bara",
+            "Pemindahan4205": "#42.05. Rincian Pemindahan Bara",
+            "PesananPO": "#32.43. Rincian Pesanan Pembeli",
+            "FakturPembelian": "#32.42. Rincian Faktur Pembelia",
+            "Harga": "#41.09. Nilai Persediaan [ALL]",
+        },
+    }
+    for _k51 in _cfg51["Folders"]:
+        os.makedirs(os.path.join(_root51, _cfg51["Folders"][_k51]),
+                    exist_ok=True)
+    _cfgpath51 = os.path.join(_tmp51, "config.json")
+    import json as _js51
+    with open(_cfgpath51, "w", encoding="utf-8") as _f51:
+        _js51.dump(_cfg51, _f51, indent=2, ensure_ascii=False)
+
+    from src.config import Config as _Cfg51
+    from src.pipeline.append1 import build_append1 as _ba51
+    _buf51b = _io51.StringIO()
+    with _cl51.redirect_stdout(_buf51b):
+        _final51 = _ba51(_Cfg51(_cfgpath51))
+    _log51b = _buf51b.getvalue()
+    _sa51 = _final51[(_final51["Nama Barang"].astype(str)
+                      == "BUMBU PASTA KUAH (V.20)")
+                     & (_final51["JENIS"] == "SALDO AWAL")]
+    _sa51_val = _pd51.to_numeric(_sa51["NILAI"], errors="coerce").max()
+    check("(v3.9.39) E2E append1: barang ber-rekap + kategori 42.17 di "
+          "LUAR whitelist → SALDO AWAL tetap masuk final (300000 — dua "
+          "arah penuh; dulu terbuang senyap → barang hilang dari Deviasi "
+          "GR)",
+          float(_sa51_val) == 300000.0,
+          f"got {_sa51_val!r}")
+    check("(v3.9.39) E2E append1: log pipeline mencatat protect dua arah "
+          "+ jejak pasangan saldo-only + ringkas barang/resto",
+          "dilindungi dari whitelist" in _log51b
+          and "dipertahankan" in _log51b
+          and "pasangan saldo-only" in _log51b
+          and "barang ·" in _log51b,
+          f"log={_log51b!r}")
+
+    # pivot Deviasi GR: baris BPB tampil + Sistem = saldo (bukan 0)
+    from src.ui.deviasi_view import DeviasiView as _DV51
+    _dv51 = _DV51(root, satuan_mode="GR")
+    _dv51.load_data(_final51)
+    _pv51 = _dv51._compute_pivot(_final51, _dv51.tanggal_h)
+    _mp51 = _pv51["Nama Barang"].astype(str) == "BUMBU PASTA KUAH (V.20)"
+    check("(v3.9.39) E2E Deviasi GR: pasangan MLGPAR × BUMBU PASTA KUAH "
+          "(V.20) TAMPIL di pivot GR (Sistem 300000 — saldo awal "
+          "dilindungi whitelist)",
+          int(_mp51.sum()) == 1
+          and float(_pv51.loc[_mp51, "Sistem"].iloc[0]) == 300000.0,
+          f"rows={int(_mp51.sum())}")
+    _dv51.destroy()
+    shutil.rmtree(_tmp51, ignore_errors=True)
 
     root.destroy()
 

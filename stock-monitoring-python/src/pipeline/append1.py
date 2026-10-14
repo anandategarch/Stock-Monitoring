@@ -231,6 +231,32 @@ def _source_kiriman_per_pair(in_df: "pd.DataFrame | None") -> pd.DataFrame:
     return g[["Nama Barang", "NAMA RESTO", "SOURCE KIRIMAN"]]
 
 
+def _collect_protected_barangs(dfs: list) -> set:
+    """v3.9.39 — nama barang ternormalisasi dari SEMUA sumber transaksi
+    (Full Rekap Mentah SO, OUT 22.05, BARANG KELUAR 42.15, IN).
+
+    Dipakai query_4217 → fn_4217 'protected_barangs': barang yang
+    ber-pasangan di sumber lain SELALU lolos whitelist kategori 42.17
+    (LOOKUP DUA ARAH — saldo awal tidak boleh hilang, else pasangan itu
+    kehilangan Sistem / barang "tidak muncul di Deviasi GR").
+
+    Normalisasi = buang SEMUA whitespace + upper (mirror _norm_barang
+    fn_4217): 'BUMBU PASTA KUAH (V.20)' == 'bumbu  pasta kuah (V.20)'.
+    """
+    prot: set = set()
+    for df in dfs:
+        if df is None or getattr(df, "empty", True):
+            continue
+        if "Nama Barang" not in getattr(df, "columns", []):
+            continue
+        vals = df["Nama Barang"].dropna().astype(str)
+        for v in vals.unique():
+            v_norm = "".join(str(v).strip().upper().split())
+            if v_norm:
+                prot.add(v_norm)
+    return prot
+
+
 def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                  rekap_so_out: dict | None = None,
                  konversi_out: dict | None = None) -> pd.DataFrame:
@@ -267,14 +293,13 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # 1. SOURCE — Table.Combine({4217, Full Rekap Mentah SO, OUT, BARANG KELUAR, IN})
     # =========================================================================
     print("  [Append1] Loading transaction data...")
-    q4217 = query_4217(config)
-    print(f"    4217 (Saldo Awal): {len(q4217)} rows")
-
-    # FIX: Stop checkpoint after 4217 load
-    if stop_event is not None and stop_event.is_set():
-        from src.main import PipelineStopped
-        raise PipelineStopped("Dihentikan setelah load 4217")
-
+    # v3.9.39 — REORDER + LOOKUP DUA ARAH (user: "look up nama barang harus
+    # dua arah ... Rekap Mentah ↔ 42.17"): sumber TRANSAKSI dibaca DULU,
+    # lalu nama barangnya jadi protected set → query_4217 memakainya agar
+    # whitelist kategori TIDAK PERNAH memutus pasangan barang yang
+    # ber-transaksi (dulu: barang di luar whitelist terbuang senyap dari
+    # 42.17 → saldo awal hilang → Sistem salah / barang "tidak muncul";
+    # urutan M code asli {4217, ...} tidak mengubah hasil gabungan).
     full_rekap_so = query_full_rekap_mentah_so(config)
     print(f"    Full Rekap Mentah SO: {len(full_rekap_so)} rows")
     if rekap_so_out is not None:
@@ -290,6 +315,25 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     print(f"    IN: {len(in_df)} rows")
     if in_detail_out is not None:
         print(f"    IN detail (per dokumen, v3.4): {len(in_detail_out.get('df'))} rows")
+
+    _protected_barangs = _collect_protected_barangs(
+        [full_rekap_so, out_df, keluar_df, in_df])
+    print(f"    4217 dua arah: {len(_protected_barangs):,} nama barang "
+          "ber-pasangan (rekap/IN/out/BK) → dilindungi dari whitelist")
+
+    q4217 = query_4217(config, protected_barangs=_protected_barangs)
+    if not q4217.empty:
+        _n_resto = q4217["NAMA RESTO"].nunique()
+        _n_barang = q4217["Nama Barang"].nunique()
+        print(f"    4217 (Saldo Awal): {len(q4217)} rows "
+              f"({_n_barang} barang · {_n_resto} resto)")
+    else:
+        print(f"    4217 (Saldo Awal): {len(q4217)} rows")
+
+    # FIX: Stop checkpoint after 4217 load
+    if stop_event is not None and stop_event.is_set():
+        from src.main import PipelineStopped
+        raise PipelineStopped("Dihentikan setelah load 4217")
 
     # v3.9.31 — peta konversi satuan dari baris IN (42.05 + 32.24;
     # dipakai fn_audit utk konversi qty PO Menunggu → satuan terkecil).
@@ -659,6 +703,34 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                 final = final.merge(_sat4217,
                                     on=["Nama Barang", "NAMA RESTO"],
                                     how="left")
+
+    # v3.9.39 — JEJAK DUA ARAH (transparansi "barang 42.17 tidak muncul"):
+    # pasangan SALDO-ONLY = ada baris 'SALDO AWAL' 42.17 tapi TANPA rekap
+    # SO/BARANG MASUK — baris ini tetap masuk Deviasi GR/PCS via mask
+    # saldo-only (v3.9.32) dan kini DICECUT di log supaya kelihatan
+    # jumlah pasangan 42.17 yang benar-benar terbawa ke tabel.
+    try:
+        _sa_pairs = (final[final["JENIS"] == "SALDO AWAL"]
+                     [["Nama Barang", "NAMA RESTO"]].drop_duplicates())
+        # 'ber-rekap' = ada baris 1.SO/5.BARANG MASUK ber-NILAI non-nol
+        # (unpivot LANGKAH 6 membuat baris '1.SO' nilai-0 utk SEMUA
+        # pasangan × tanggal teramati — termasuk pasangan 42.17-only;
+        # tanpa cek NILAI jejak ini selalu 0).
+        _nil = pd.to_numeric(final["NILAI"], errors="coerce").fillna(0)
+        _rk = final[(final["JENIS"].isin(("1.SO", "5.BARANG MASUK")))
+                    & (_nil != 0)]
+        _rk_pairs = _rk[["Nama Barang", "NAMA RESTO"]].drop_duplicates()
+        if not _sa_pairs.empty:
+            _only = _sa_pairs.merge(
+                _rk_pairs, on=["Nama Barang", "NAMA RESTO"],
+                how="left", indicator=True)
+            _n_only = int((_only["_merge"] == "left_only").sum())
+            print(f"    4217 dua arah: {_n_only} pasangan saldo-only "
+                  "(barang 42.17 tanpa rekap SO) masuk Deviasi "
+                  "GR/PCS")
+    except (KeyError, ValueError, TypeError):
+        pass  # defensif — final tanpa kolom JENIS/Nama Barang (input aneh)
+
 
     # =========================================================================
     # 9. LOOKUP SOURCE DATA (v3.9.19 — CEK "Promix 04" di tab Deviasi;

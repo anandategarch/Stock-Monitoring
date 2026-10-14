@@ -20,10 +20,28 @@ v3.9.32 (user: "filter lebih awal data 42.17 pakai kolom kategori barang
 - Matching kategori: normalisasi buang SEMUA whitespace + upper
   ('01. COST - PACKAGING - TIDAK BOLEH' == '01.COST-PACKAGING-TIDAKBOLEH')
   + PREFIX match supaya varian spasi/nama file user tetap cocok.
+
+v3.9.39 (user: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah? padahal
+  di file 42.17 ada. Dulu pernah aku bilang look up nama barang harus dua
+  arah tidak hanya nama barang yang ada di file atau sheet Rekap Mentah
+  tapi juga di file 42.17"):
+- LOOKUP DUA ARAH PENUH: whitelist kategori TIDAK BOLEH memutus pasangan
+  barang yang ber-transaksi — barang yang namanya terdaftar di sumber
+  lain (Rekap Mentah SO/BARANG MASUK, IN, OUT, BARANG KELUAR) selalu
+  lolos filter walau kategorinya di luar whitelist (saldo awal wajib
+  masuk pipeline — kalau tidak, Sistem/Deviasi pasangan itu salah).
+  Param protected_barangs diisi build_append1 dari gabungan sumber lain.
+- LOG TRANSPARAN: barang yang benar-benar terbuang whitelist (tanpa
+  pasangan) kini DISEBUT NAMANYA di log — tidak lenyap senyap lagi
+  (akar keluhan "barang ada di 42.17 tapi tidak muncul").
+- SHEET RESOLVE DEFENSIVE: nama sheet export Accurate bisa berbeda antar
+  versi ('#42.17. Kuantitas Barang per Gu' terpotong 31 karakter).
+  Bila nama persis tidak ada di file → fallback sheet berprefiks '#42.17'
+  + [INFO] log (pola _resolve_lalu_sheet queries) — bukan 0 baris senyap.
 """
 import pandas as pd
 
-from .helpers import fn_combine_folder
+from .helpers import _list_excel_files, _list_sheet_names, fn_combine_folder
 
 # Nama sheet standar 42.17 (export Accurate) — v3.9.33 default param;
 # queries.py me-resolve key config Sheets['SaldoAwal4217'] (config lama
@@ -65,6 +83,41 @@ def _norm_kat(v) -> str:
     return "".join(s.split()) if s else ""
 
 
+def _norm_barang(v) -> str:
+    """v3.9.39 — nama barang → kunci dua arah (buang SEMUA whitespace +
+    upper): 'BUMBU PASTA KUAH (V.20)' == 'Bumbu  Pasta  Kuah (V.20)'.
+    Dipakai match barang 42.17 ↔ sumber lain (rekap/IN/out/BK)."""
+    return _norm_kat(v)
+
+
+def _resolve_sheet_4217(folder_path: str, sheet_name: str) -> str:
+    """v3.9.39 — resolusi nama sheet 42.17 DEFENSIVE (pola
+    _resolve_lalu_sheet queries):
+    1. sheet persis ada di salah satu file → pakai (perilaku lama);
+    2. tidak ada → sheet pertama berprefiks '#42.17' + [INFO] log
+       (export Accurate memotong nama sheet 31 karakter — '…per Gu'
+       bisa jadi '…per Gudang' dsb.);
+    3. tidak ada juga → pertahankan nama (WARNING per-file dari
+       fn_combine_folder tetap tercetak — bukan senyap total)."""
+    try:
+        files = _list_excel_files(folder_path)
+    except (OSError, ValueError):
+        return sheet_name
+    if not files:
+        return sheet_name
+    for f in files:
+        if sheet_name in _list_sheet_names(f):
+            return sheet_name
+    pref = "#42.17"
+    for f in files:
+        for name in _list_sheet_names(f):
+            if str(name).strip().lower().startswith(pref.lower()):
+                print(f"    [INFO] 4217: sheet '{name}' dipakai "
+                      f"(nama '{sheet_name}' tidak ada di file)")
+                return str(name)
+    return sheet_name
+
+
 def _find_col(prom_columns, kandidat):
     """Kolom pertama yang cocok (case-insensitive) dari kandidat nama."""
     if prom_columns is None:
@@ -78,26 +131,37 @@ def _find_col(prom_columns, kandidat):
 
 
 def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
-            sheet_name: str = SHEET_4217) -> pd.DataFrame:
+            sheet_name: str = SHEET_4217,
+            protected_barangs: list | set | None = None) -> pd.DataFrame:
     """
     Mirror M: fn4217(folderPath).
 
     kategori_whitelist: list kategori yang LOLOS (prefix-match normalisasi;
     None/kosong → tanpa filter). Sumber default: config "KategoriBarang4217".
 
+    protected_barangs: v3.9.39 — nama barang yang ber-pasangan di sumber
+    lain (rekap/IN/out/BK) — barisnya SELALU lolos whitelist (lookup dua
+    arah: saldo awal tidak boleh hilang karena kategorinya di luar
+    whitelist, else Sistem pasangan itu salah). Normalisasi buang-semua-
+    whitespace + upper.
+
     sheet_name: v3.9.33 — AUDIT FIX (48-a): nama sheet bisa diatur dari
     config.json key Sheets['SaldoAwal4217'] (dihantarkan queries.query_4217;
     default = nama sheet export standar — pemanggil lama tak berubah).
+    v3.9.39: bila nama persis tidak ada di file → fallback prefiks '#42.17'.
 
     Output columns: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS, SATUAN
     (SATUAN = 'Nama Satuan' file per barang; file tanpa kolom → '').
     """
+    # v3.9.39 — sheet resolve defensive (nama export beda ≠ 0 baris senyap)
+    sheet_resolved = _resolve_sheet_4217(folder_path, sheet_name)
+
     # expand + Skip(3) + Promote = header=4
     # v3.9.33 — AUDIT FIX (48-a): ffill kategori PER FILE (ffill_cols) —
     # dulu ffill pada frame CONCAT membuat grup pertama file-2 mewarisi
     # kategori TERAKHIR file-1 (bleed lintas file). Mirror pola per-file
     # fn_4109.
-    prom = fn_combine_folder(folder_path, sheet_name, header_row=4,
+    prom = fn_combine_folder(folder_path, sheet_resolved, header_row=4,
                              ffill_cols=_KANDIDAT_KATEGORI)
     if prom.empty:
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
@@ -147,11 +211,46 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
             # cocok dgn kategori file yang berawal sama (normalisasi).
             keep = kat_norm.map(
                 lambda v: any(v.startswith(w) for w in wl_norm))
+            # v3.9.39 — LOOKUP DUA ARAH (user: "look up nama barang harus
+            # dua arah ... Rekap Mentah ↔ 42.17"): barang yang
+            # ber-pasangan di sumber lain (rekap SO/BM, IN, OUT, BK)
+            # SELALU lolos — whitelist tidak boleh memutus pasangan
+            # (saldo awal hilang = Sistem/Deviasi pasangan itu salah;
+            # akar "Bumbu Pasta Kuah ada di 42.17 tapi tidak muncul").
+            _prot = {_norm_barang(b) for b in (protected_barangs or [])
+                     if b is not None}
+            if _prot and "Nama Barang" in prom.columns:
+                _b_norm = prom["Nama Barang"].map(_norm_barang)
+                _n_prot = int((_b_norm.isin(_prot) & ~keep.fillna(False)
+                               ).sum())
+                keep = keep | _b_norm.isin(_prot)
+                if _n_prot:
+                    print(f"    4217 dua arah: {_n_prot} baris barang "
+                          "ber-pasangan (rekap/IN/out) dipertahankan "
+                          "meski kategori di luar whitelist")
             n_total = len(prom)
             prom = prom[keep.fillna(False)]
             n_keep = len(prom)
             print(f"    4217 kategori filter: {n_keep:,}/{n_total:,} baris "
                   f"lolos whitelist ({len(wl_norm)} kategori)")
+            # v3.9.39 — LOG BARANG TERBUANG (transparan, bukan senyap):
+            # sebut nama barang yang benar-benar terbuang (tanpa pasangan
+            # di sumber lain) supaya keluhan "barang ada di file tapi
+            # tidak muncul" langsung terlihat penyebabnya di log.
+            if n_total > n_keep and "Nama Barang" in prom_raw.columns:
+                _dropped = prom_raw.loc[~keep.fillna(False).reindex(
+                    prom_raw.index, fill_value=False)]
+                _dropped_names = (_dropped["Nama Barang"].dropna()
+                                  .astype(str).str.strip())
+                _dropped_names = [x for x in _dropped_names.unique() if x]
+                if _dropped_names:
+                    _show = ", ".join(_dropped_names[:10])
+                    if len(_dropped_names) > 10:
+                        _show += f" … (+{len(_dropped_names) - 10})"
+                    print(f"    4217 whitelist terbuang: "
+                          f"{len(_dropped_names)} barang — {_show} "
+                          "(kategori di luar whitelist; tidak ada "
+                          "pasangan di rekap/IN/out)")
             if prom.empty and n_total:
                 # SAFETY-NET: whitelist salah config (mis. nama kategori di
                 # file user beda total) → JANGAN kosongkan saldo awal;

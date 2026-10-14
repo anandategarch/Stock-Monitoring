@@ -6,7 +6,7 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
-> **Versi terkini: v3.9.38** — 🧮 **Nominal Deviasi: kolom & TOTAL "Nominal Deviasi Bulan Lalu" per resto (versus bulan lalu — NOMINAL RESMI file deviasi, bukan hitung ulang harga sekarang; jawaban BUMBU PASTA KUAH (V.20): engine = 107,6386854/GR SAMA dgn hitungan manual saldo akhir nilai/kuantitas — beda hanya harga snapshot file laporan resmi)** · **Qty Deviasi 0 TAK perlu cari harga** (Nominal 0.0 netral, tak dihitung 'tanpa harga'). Changelog di bawah.
+> **Versi terkini: v3.9.39** — 🔁 **42.17 DUA ARAH PENUH: whitelist kategori TIDAK BOLEH membuang barang yang ber-pasangan (rekap SO/BM · IN · OUT · BK) — saldo awal wajib masuk, akar "Bumbu Pasta Kuah ada di 42.17 tapi tidak muncul di Deviasi GR"** · **sheet 42.17 resolve defensive** (nama export beda ≠ 0 baris senyap) · **log transparan** (barang terbuang whitelist disebut namanya + jejak pasangan saldo-only). Changelog di bawah.
 
 ## Quick Start (Python Edition)
 
@@ -24,6 +24,13 @@ python -m src.main
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
+
+### v3.9.39 — 42.17 DUA ARAH PENUH: WHITELIST PROTECT + SHEET DEFENSIVE + LOG TERBUANG
+(User: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah? padahal di file 42.17 ada. Dulu pernah aku bilang look up nama barang harus dua arah tidak hanya nama barang yang ada di file atau sheet Rekap Mentah tapi juga di file 42.17. cek dulu")
+1. **INVESTIGASI (jawaban "cek dulu")** — jalur dua arah v3.9.32 (mask saldo-only di `_compute_pivot` + SATUAN fallback 42.17) TERVERIFIKASI masih bekerja: probe simulasi mirror data user (rekap `01.1 CEK STOCK V2.xlsb` nyata — BUMBU PASTA KUAH (V.20) MLGPAR SO W1–25 non-nol, W26–31 = 0) → pasangan TAMPIL di tab Deviasi GR, termasuk pasangan resto non-rekap (scope resto v3.9.18 memang longgar: baris '1.SO' nilai-0 hasil unpivot membuat resto 42.17-only ikut scope). Sisa celah sebenarnya di **pembacaan 42.17**: (a) whitelist kategori membuang barang SENYAP (safety-net hanya aktif bila SEMUA baris terbuang — sebagian terbuang tidak ada jejak); (b) nama sheet export Accurate beda (dipotong 31 karakter) → 0 baris senyap.
+2. **WHITELIST PROTECT DUA ARAH** — `fn_4217(protected_barangs=...)`: barang yang namanya terdaftar di sumber lain (Rekap Mentah SO/BARANG MASUK, IN, OUT, BARANG KELUAR — normalisasi buang-semua-whitespace + upper, `_collect_protected_barangs`) SELALU lolos whitelist kategori → saldo awal tidak mungkin hilang karena kategori. `build_append1` kini membaca sumber transksi DULU baru 42.17 (urutan gabungan M tidak berubah hasil). Berapa pun varian kategori ("10.FOOD [WIP] - COM V.3 BARU" dsb.), barang ber-transaksi tetap terpantau.
+3. **SHEET 42.17 RESOLVE DEFENSIVE** — nama persis tidak ada di file → fallback sheet berprefiks '#42.17' + `[INFO]` log (pola `_resolve_lalu_sheet`); folder kosong/nama tetap → perilaku lama.
+4. **LOG TRANSPARAN (tab Proses / log)** — barang benar-benar terbuang whitelist kini DISEBUT NAMANYA ("4217 whitelist terbuang: N barang — …"); "4217 dua arah: N nama barang ber-pasangan … dilindungi dari whitelist"; ringkas "4217 (Saldo Awal): N rows (X barang · Y resto)"; jejak "N pasangan saldo-only (barang 42.17 tanpa rekap SO) masuk Deviasi GR/PCS" (pasangan dihitung ber-rekap via NILAI non-nol — baris '1.SO' nilai-0 unpivot tidak dihitung).
 
 ### v3.9.38 — QTY DEVIASI 0 TANPA CARI HARGA + 🧮 KOLOM & TOTAL BULAN LALU (NOMINAL RESMI FILE) + VERIFIKASI HARGA BUMBU PASTA KUAH
 - **(1) VERIFIKASI HARGA (jawaban user)**: engine Python = **SAMA dgn hitungan manual** — Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo Akhir (41.09) → BUMBU PASTA KUAH (V.20) = **107,6386854/GR** (tampil "107,64" = pembulatan display 2 desimal; nominal tetap presisi penuh). Yang membuat nominal "beda": engine v3.9.36 menghitung ulang **Nominal Bulan Lalu** dgn harga 41.09 SEKARANG, sedangkan file laporan resmi (20.AGUSTUS 2026.xlsx) memakai harga snapshot saat laporan dibuat (≈113,048/GR → MLGPAR W4 resmi 48.980.811,43 vs recompute 46.637.074,58 — selisih 2.343.736,85). **FIX: Nominal Bulan Lalu kini = KOLOM NOMINAL DEVIASI milik file (angka resmi)** — kolom kosong → fallback hitung ulang.

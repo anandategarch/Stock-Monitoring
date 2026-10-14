@@ -57,19 +57,27 @@ def query_dbs_kategori(config) -> pd.DataFrame:
                                                  SHEET_DBS_KATEGORI))
 
 
-def query_4217(config) -> pd.DataFrame:
+def query_4217(config, protected_barangs: list | set | None = None
+               ) -> pd.DataFrame:
     """Mirror M: shared #"4217" = fn4217(Config[RootPath] & Config[Folders][SaldoAwal4217])
 
     v3.9.32: whitelist kategori dari config ("KategoriBarang4217") ikut
     diteruskan — filter diterapkan SEBELUM melt di fn_4217 (lebih awal).
 
     v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['SaldoAwal4217']
-    (default '#42.17. Kuantitas Barang per Gu' — perilaku lama)."""
+    (default '#42.17. Kuantitas Barang per Gu' — perilaku lama).
+
+    v3.9.39 — LOOKUP DUA ARAH: protected_barangs (nama barang ber-pasangan
+    di sumber lain — rekap/IN/out/BK; diisi build_append1) diteruskan ke
+    fn_4217: baris barang itu SELALU lolos whitelist kategori (saldo awal
+    tidak boleh hilang — akar "barang ada di 42.17 tapi tidak muncul di
+    Deviasi GR")."""
     return fn_4217(config.folder("SaldoAwal4217"),
                    kategori_whitelist=getattr(config, "KategoriBarang4217",
                                               None),
                    sheet_name=_sheet_cfg(config, "SaldoAwal4217",
-                                         SHEET_4217))
+                                         SHEET_4217),
+                   protected_barangs=protected_barangs)
 
 
 # =============================================================================

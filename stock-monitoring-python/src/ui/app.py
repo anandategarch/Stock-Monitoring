@@ -183,7 +183,32 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.38"  # v3.9.38 — QTY Deviasi 0 tanpa cari harga + 🧮 kolom/total Bulan Lalu (nilai RESMI file) + perbaikan harga (BUMBU PASTA KUAH: engine 107,6386854/GR = hitungan manual)
+APP_VERSION = "3.9.39"  # v3.9.39 — 42.17 dua arah penuh: whitelist tak boleh buang barang ber-pasangan (rekap/IN/out) + sheet resolve defensive + log barang terbuang & jejak saldo-only
+# v3.9.39 (user: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah?
+# padahal di file 42.17 ada. Dulu pernah aku bilang look up nama barang
+# harus dua arah tidak hanya nama barang yang ada di file atau sheet
+# Rekap Mentah tapi juga di file 42.17"):
+# (1) INVESTIGASI (jawab "cek dulu"): jalur dua arah v3.9.32 (mask
+#     saldo-only + SATUAN fallback) TERVERIFIKASI masih bekerja —
+#     probe dgn data mirror user (rekap 01.1 nyata: BUMBU PASTA KUAH
+#     (V.20) MLGPAR SO W1-25) → pasangan TAMPIL di tab GR, bahkan
+#     pasangan resto non-rekap (scope v3.9.18 memang longgar krn
+#     baris '1.SO' nilai-0 unpivot). Sisa celah = PEMBACAAN 42.17:
+#     whitelist kategori bisa membuang barang SENYAP (safety-net
+#     hanya jalan bila SEMUA terbuang) + nama sheet export beda →
+#     0 baris senyap;
+# (2) WHITELIST PROTECT DUA ARAH: barang yang ber-pasangan di sumber
+#     lain (Rekap SO/BM, IN, OUT, BK — _collect_protected_barangs,
+#     reorder load append1: transaksi dulu → 4217) SELALU lolos
+#     whitelist kategori 42.17 — saldo awal tidak boleh hilang
+#     (kalau hilang: Sistem salah / barang lenyap dari Deviasi GR);
+# (3) SHEET RESOLVE DEFENSIVE: nama '#42.17. Kuantitas Barang per Gu'
+#     tidak ada di file → fallback sheet berprefiks '#42.17' + [INFO]
+#     (export Accurate memotong nama 31 karakter — bukan 0 baris);
+# (4) LOG TRANSPARAN: barang terbuang whitelist DISEBUT NAMANYA;
+#     '4217 dua arah: N barang … dilindungi'; ringkas 'N barang ·
+#     M resto'; jejak 'N pasangan saldo-only masuk Deviasi GR/PCS'
+#     (nilai non-nol — baris '1.SO' nilai-0 unpivot tak dihitung).
 # v3.9.38 (user: "Kuantiti Deviasi 0 takperlu cari harga. Cek juga
 # keseluruhan terkait ini" + "Nominal Deviasi total per resto juga
 # tambahan di tab nominal deviasi ini buat versus bulan lalu" + harga
