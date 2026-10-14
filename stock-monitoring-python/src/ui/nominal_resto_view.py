@@ -110,6 +110,7 @@ from .widgets import (
     enable_multi_select,
     fmt_int_id,
     insert_tree_items,
+    kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
@@ -683,10 +684,16 @@ class NominalRestoView(tk.Frame):
         if h is None:
             h = self.tanggal_h
         # v3.9.36 — filter KATEGORI combobox PRA-COMPUTE (kategori
-        # melekat per-baris hasil merge '21. DBS Kategori'; NaN → 'nan'
-        # ≠ kategori → terbuang — konsisten deviasi_view).
+        # melekat per-baris hasil merge '21. DBS Kategori').
+        # v3.9.44 — baris TANPA kategori master (NaN/blank) TIDAK lagi
+        # terbuang: passthrough kategori_blank_mask (probe BUMBU PASTA
+        # KUAH 100383 saldo-only 42.17 — tidak ada di master '21. DBS
+        # Kategori' user → KATEGORI NaN → dulu lenyap dari tab 🧮 juga;
+        # konsisten dgn deviasi_view v3.9.44).
         if self._kategori_sel and "KATEGORI" in df.columns:
-            df = df[df["KATEGORI"].astype(str) == str(self._kategori_sel)]
+            _blank = kategori_blank_mask(df["KATEGORI"])
+            df = df[(df["KATEGORI"].astype(str) == str(self._kategori_sel))
+                    | _blank]
             if df.empty:
                 self._result_df = None
                 self._pairs_df = None

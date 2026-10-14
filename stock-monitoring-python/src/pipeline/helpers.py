@@ -124,6 +124,41 @@ def vec_text_between_delimiters(series: pd.Series, open_delim: str = "(", close_
     return result
 
 
+def kategori_blank_mask(kat: "pd.Series | None") -> "pd.Series | None":
+    """v3.9.44 — mask baris TANPA kategori master (NaN/blank/'nan'/'none').
+
+    AKAR "BUMBU PASTA KUAH MLGPAR masih belum ada di tab Deviasi GR"
+    (probe E2E data nyata v3.9.44): item 42.17-only kode 100383 lolos
+    whitelist versi-toleran (v3.9.41) dan masuk pipeline sampai pivot,
+    TAPI tidak terdaftar di master '21. DBS Kategori' user (bukti
+    workbook: hanya varian (V.20) ada di 'Data Base Aktif' & 'Data Base
+    Cek Deviasi') → KATEGORI = NaN → filter KATEGORI default 'Deviasi'
+    di view menyembunyikan barisnya ('nan' ≠ 'DEVIASI') — item lenyap
+    DARI VIEW padahal ADA di data (hanya terlihat bila user ganti ke
+    'Semua' — tanpa tahu itu, keluhan "masih belum ada" muncul lagi).
+
+    KEBIJAKAN: baris yang master-nya tidak kenal TIDAK BOLEH disembunyikan
+    oleh filter kategori — kelas bug "hilang senyap karena master kurang
+    entri", bukan pilihan user. Baris tanpa kategori tampil di seleksi
+    kategori APA PUN; nilai kategorinya tetap kosong (jujur — tidak
+    memfabrikasi 'DEVIASI' dari kategori 42.17 yang beda kosakata).
+    Konsumen: widgets (re-export) → deviasi_view · nominal_resto_view ·
+    pivot_view (2 titik) + append1 jejak saldo-only tanpa kategori.
+    """
+    if kat is None:
+        return None
+    s = kat.astype(str).str.strip()
+    # '-' = konvensi DISPLAY kategori kosong (deviasi_view kategori_s
+    # fillna('-') — pola in_selisih_view); 'nan'/'none' = artefak
+    # astype(str)/safe_to_str dari NaN master.
+    blank = s.str.lower().isin(["", "nan", "none", "-", "—"])
+    try:
+        blank = kat.isna() | blank
+    except (TypeError, ValueError):
+        pass  # series non-standar — mask string sudah cukup
+    return blank
+
+
 # =============================================================================
 # COMBINE FOLDER (mirror fnCombineFolder + fnBukaSheet)
 # =============================================================================

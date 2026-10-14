@@ -236,6 +236,7 @@ from .widgets import (
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
+    kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
@@ -899,8 +900,17 @@ class DeviasiView(tk.Frame):
                 filtered["Satuan"].astype(str).str.upper() != "GR"]
         # filter KATEGORI combobox
         if self._kategori_sel and "KATEGORI" in filtered.columns:
+            # v3.9.44 — passthrough barang TANPA kategori master
+            # (KATEGORI NaN/blank — contoh: BUMBU PASTA KUAH 100383
+            # saldo-only 42.17 yang tidak ada di '21. DBS Kategori'):
+            # master tak kenal ≠ disembunyikan — item tampil di seleksi
+            # kategori apa pun (akar "masih belum ada di tab Deviasi GR"
+            # padahal lolos whitelist & ADA di pivot; probe E2E data
+            # nyata: default DEVIASI → 0 baris, 'Semua' → tampil).
+            _blank = kategori_blank_mask(filtered["KATEGORI"])
             filtered = filtered[
-                filtered["KATEGORI"].astype(str) == str(self._kategori_sel)]
+                (filtered["KATEGORI"].astype(str) == str(self._kategori_sel))
+                | _blank]
         # filter header kolom lain (nilai TERFORMAT — identik render)
         for col, sel in self._col_sel.items():
             if sel is None or col == exclude_col:
@@ -1721,9 +1731,17 @@ class DeviasiView(tk.Frame):
         # 1× utk GR+PCS — permintaan user: "tambah filter kategori di tab
         # deviasi pcs dan gr"). KATEGORI per-barang (1:1) → filter ini
         # barang-granular.
+        # v3.9.44 — passthrough barang TANPA kategori master (KATEGORI
+        # NaN/blank — contoh: BUMBU PASTA KUAH 100383 saldo-only 42.17,
+        # tidak ada di '21. DBS Kategori' user → probe E2E data nyata:
+        # default DEVIASI → 0 baris padahal item ADA di pivot; master tak
+        # kenal ≠ disembunyikan — baris tampil di seleksi kategori apa
+        # pun; mirror titik _filtered_pivot di bawah).
         if st.get("kategori") and "KATEGORI" in filtered.columns:
-            filtered = filtered[filtered["KATEGORI"].astype(str)
-                                == str(st["kategori"])]
+            _blank = kategori_blank_mask(filtered["KATEGORI"])
+            filtered = filtered[
+                (filtered["KATEGORI"].astype(str) == str(st["kategori"]))
+                | _blank]
             if filtered.empty:
                 return {"items": [], "kpi": (0, 0.0, 0),
                         "status": "Tidak ada baris untuk kategori ini."}

@@ -87,6 +87,7 @@ from .widgets import (
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
+    kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     open_tree_maximized,
     run_async,
     validated_tgl_entry,
@@ -359,7 +360,12 @@ class PivotTableView(tk.Frame):
             df = df[df["SOURCE KIRIMAN"].astype(str) == source]
         kategori = self.kategori_var.get()
         if kategori and kategori != "(All)" and "KATEGORI" in df.columns:
-            df = df[df["KATEGORI"].astype(str) == kategori]
+            # v3.9.44 — passthrough barang TANPA kategori master (NaN/
+            # blank — contoh BUMBU PASTA KUAH 100383 saldo-only 42.17
+            # yang tak ada di '21. DBS Kategori' user): master tak kenal
+            # ≠ disembunyikan — konsisten deviasi_view/nominal_resto.
+            _blank = kategori_blank_mask(df["KATEGORI"])
+            df = df[(df["KATEGORI"].astype(str) == kategori) | _blank]
         # rentang tanggal berlaku untuk kedua mode (identik _compute_payload;
         # parse longgar tanpa dialog — pola in_selisih _col_values)
         if "Tanggal" in df.columns and not df.empty:
@@ -590,7 +596,11 @@ class PivotTableView(tk.Frame):
             df = df[df["SOURCE KIRIMAN"].astype(str) == st["source"]]
         if st["kategori"] and st["kategori"] != "(All)" and \
                 "KATEGORI" in df.columns:
-            df = df[df["KATEGORI"].astype(str) == st["kategori"]]
+            # v3.9.44 — passthrough barang tanpa kategori master (mirror
+            # titik _col_values di atas — kategori_blank_mask).
+            _blank = kategori_blank_mask(df["KATEGORI"])
+            df = df[(df["KATEGORI"].astype(str) == st["kategori"])
+                    | _blank]
 
         # rentang tanggal berlaku untuk kedua mode
         if "Tanggal" in df.columns and not df.empty:

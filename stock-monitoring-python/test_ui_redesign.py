@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.43", APP_VERSION == "3.9.43",
+    check("Versi = 3.9.44", APP_VERSION == "3.9.44",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -11970,6 +11970,229 @@ def main():
     _top54k.destroy()
     root.update()
     shutil.rmtree(_tmp54, ignore_errors=True)
+
+    # =====================================================================
+    print("\n== 55. (v3.9.44) PASSTHROUGH KATEGORI KOSONG + SALDO-ONLY "
+          "NOMINAL (user: 'BUMBU PASTA KUAH MLGPAR masih belum ada di "
+          "tab deviasi GR yang harusnya ada') ==")
+
+    # (a) unit — kategori_blank_mask (pipeline.helpers; re-export
+    # widgets): NaN/''/spasi/'nan'/'None'/'-'/'—' → True; kategori asli
+    # → False ('-' = konvensi display kategori_s fillna('-')).
+    from src.pipeline.helpers import kategori_blank_mask as _kbm55
+    _ser55 = pd.Series([None, "", " ", "nan", "None", "-", "—",
+                        "DEVIASI", " TEPAT "])
+    check("(v3.9.44) kategori_blank_mask: semua representasi "
+          "kosong → True; kategori asli → False",
+          _kbm55(_ser55).tolist() ==
+          [True, True, True, True, True, True, True, False, False],
+          f"got {_kbm55(_ser55).tolist()}")
+
+    # (b) DeviasiView E2E — plain saldo-only 42.17 TANPA kategori master:
+    # baris hanya t=1 (fn_4217 hardcode) + KATEGORI NaN → dulu lenyap
+    # dari default DEVIASI ('-'/nan ≠ DEVIASI); kini passthrough.
+    _src55 = []
+    for _j, _v in [("SALDO AWAL", 84.0), ("2.SALDO AKHIR", 84.0),
+                   ("3.DEVIASI", -84.0)]:
+        _src55.append({"Nama Barang": "BUMBU PASTA KUAH", "JENIS": _j,
+                       "NAMA RESTO": "MLGPAR", "Tanggal": 1,
+                       "NILAI": _v, "SATUAN": "GR", "KATEGORI": None,
+                       "AKTIF/NON": None, "SOURCE KIRIMAN": None})
+    for _b, _kat in [("AYAM FILET", "DEVIASI"), ("GULA PASIR", "TEPAT")]:
+        for _j, _v in [("1.SO", 10.0), ("2.SALDO AKHIR", 8.0),
+                       ("3.DEVIASI", -2.0), ("SALDO AWAL", 0.0)]:
+            for _t in range(23, 28):
+                _src55.append({"Nama Barang": _b, "JENIS": _j,
+                               "NAMA RESTO": "MLGPAR", "Tanggal": _t,
+                               "NILAI": _v, "SATUAN": "GR",
+                               "KATEGORI": _kat, "AKTIF/NON": "AKTIF",
+                               "SOURCE KIRIMAN": None})
+    _df55 = pd.DataFrame(_src55)
+    from src.ui.deviasi_view import DeviasiView as _DV55
+    _dv55 = _DV55(root, satuan_mode="GR")
+    _dv55.pack(fill="both", expand=True)
+    _dv55.load_data(_df55)
+    _dv55.ensure_refreshed()
+    wait_view(root, _dv55)
+    check("(v3.9.44) Deviasi default kategori = DEVIASI (ada di data)",
+          str(_dv55._kategori_var.get()).upper() == "DEVIASI")
+
+    def _row55(view, nama):
+        for _i in view.tree.get_children(""):
+            if view.tree.set(_i, "Nama Barang") == nama:
+                return _i
+        return None
+    _bp55 = _row55(_dv55, "BUMBU PASTA KUAH")
+    check("(v3.9.44) Deviasi GR default DEVIASI: saldo-only TANPA "
+          "kategori master TAMPIL (dulu '-' ≠ DEVIASI → lenyap)",
+          _bp55 is not None)
+    if _bp55 is not None:
+        check("(v3.9.44) saldo-only: Sistem = saldo 42.17 (84) & "
+              "Deviasi (84) — passthrough tidak mengubah nilai",
+              _dv55.tree.set(_bp55, "Sistem") == "84"
+              and _dv55.tree.set(_bp55, "Deviasi") == "(84)",
+              f"got Sistem={_dv55.tree.set(_bp55, 'Sistem')!r} "
+              f"Deviasi={_dv55.tree.set(_bp55, 'Deviasi')!r}")
+    check("(v3.9.44) Deviasi GR default DEVIASI: baris kategori TEPAT "
+          "tetap tersembunyi (passthrough hanya baris KOSONG)",
+          _row55(_dv55, "GULA PASIR") is None)
+    check("(v3.9.44) Deviasi GR default DEVIASI: baris kategori "
+          "DEVIASI tetap tampil",
+          _row55(_dv55, "AYAM FILET") is not None)
+    # ganti kategori → TEPAT: plain tetap tampil (master tak kenal ≠
+    # disembunyikan), baris DEVIASI tersembunyi
+    _dv55._kategori_var.set("TEPAT")
+    _dv55._on_kategori_changed()
+    wait_view(root, _dv55)
+    check("(v3.9.44) kategori TEPAT: baris TANPA kategori tetap tampil; "
+          "baris DEVIASI tersembunyi",
+          _row55(_dv55, "BUMBU PASTA KUAH") is not None
+          and _row55(_dv55, "GULA PASIR") is not None
+          and _row55(_dv55, "AYAM FILET") is None)
+    _dv55.destroy()
+    root.update()
+
+    # (c) hitung_nominal_pairs — SALDO-ONLY FALLBACK: pasangan 42.17
+    # hanya punya 3.DEVIASI di t=1 → dulu lenyap dari tab 🧮/mode 💰 di
+    # H=25; kini baris t=1 pasangan saldo-only (ada 2.SALDO AKHIR@t1 ·
+    # tanpa rekap non-nol) ikut; pasangan ber-rekap tak tersentuh; h=1
+    # tanpa duplikasi.
+    from src.ui.nominal_common import hitung_nominal_pairs as _hnp55
+    _nd55 = pd.DataFrame([
+        # saldo-only plain (mirror baris append1 nyata: t=1 saja)
+        {"Nama Barang": "BUMBU PASTA KUAH", "JENIS": "SALDO AWAL",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 1, "NILAI": 84.0,
+         "SATUAN": "GR"},
+        {"Nama Barang": "BUMBU PASTA KUAH", "JENIS": "2.SALDO AKHIR",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 1, "NILAI": 84.0,
+         "SATUAN": "GR"},
+        {"Nama Barang": "BUMBU PASTA KUAH", "JENIS": "3.DEVIASI",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 1, "NILAI": -84.0,
+         "SATUAN": "GR"},
+        # rekap pair: 3.DEVIASI@1 (non-zero) + @25 — fallback TIDAK
+        # boleh menambah baris t=1 utk pasangan ber-rekap
+        {"Nama Barang": "AYAM FILET", "JENIS": "1.SO",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 5, "NILAI": 10.0,
+         "SATUAN": "GR"},
+        {"Nama Barang": "AYAM FILET", "JENIS": "3.DEVIASI",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 1, "NILAI": 99.0,
+         "SATUAN": "GR"},
+        {"Nama Barang": "AYAM FILET", "JENIS": "3.DEVIASI",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 25, "NILAI": 10.0,
+         "SATUAN": "GR"},
+    ])
+    _p25 = _hnp55(_nd55, 25, {}, {"rasio": {}, "terkecil": {}})
+    _bp25 = _p25[_p25["Nama Barang"] == "BUMBU PASTA KUAH"]
+    _ay25 = _p25[_p25["Nama Barang"] == "AYAM FILET"]
+    check("(v3.9.44) hitung_nominal_pairs h=25: pasangan saldo-only "
+          "TAMPIL (3.DEVIASI t=1 dihitung; dulu lenyap)",
+          len(_bp25) == 1
+          and float(_bp25["Qty Deviasi"].iloc[0]) == -84.0,
+          f"got {len(_bp25)} baris "
+          f"{_bp25['Qty Deviasi'].tolist() if len(_bp25) else []}")
+    check("(v3.9.44) hitung_nominal_pairs h=25: pasangan ber-rekap tak "
+          "tersentuh (hanya nilai @25, baris t=1 tidak ikut)",
+          len(_ay25) == 1 and float(_ay25["Qty Deviasi"].iloc[0]) == 10.0,
+          f"got {_ay25['Qty Deviasi'].tolist()}")
+    _p1 = _hnp55(_nd55, 1, {}, {"rasio": {}, "terkecil": {}})
+    _bp1 = _p1[_p1["Nama Barang"] == "BUMBU PASTA KUAH"]
+    _ay1 = _p1[_p1["Nama Barang"] == "AYAM FILET"]
+    check("(v3.9.44) hitung_nominal_pairs h=1: tanpa duplikasi "
+          "(fallback dilewati; AYAM rekap ikut @1)",
+          len(_bp1) == 1 and len(_ay1) == 1
+          and float(_ay1["Qty Deviasi"].iloc[0]) == 99.0,
+          f"bp={len(_bp1)} ay={_ay1['Qty Deviasi'].tolist()}")
+
+    # (d) NominalRestoView (tab 🧮) — kategori passthrough pra-compute:
+    # baris KATEGORI NaN tampil di default DEVIASI (dulu terbuang).
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV55
+    _dn55 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+        "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
+    } for b, v, k in [
+        ("AYAM FILET", 10.0, "DEVIASI"),
+        ("GULA PASIR", 5.0, "TEPAT"),
+        ("BUMBU PASTA KUAH", -84.0, None),
+    ]])
+    _top55 = tk.Toplevel(root)
+    _top55.geometry("1600x900+5+5")
+    _nv55 = _NRV55(_top55, lalu_provider=lambda: None)
+    _nv55.pack(fill="both", expand=True)
+    _nv55.load_data(_dn55, harga_map={},
+                    konversi_map={"rasio": {}, "terkecil": {}})
+    _nv55.ensure_refreshed()
+    wait_view(root, _nv55)
+    check("(v3.9.44) 🧮 default kategori = DEVIASI",
+          str(_nv55._kategori_var.get()).upper() == "DEVIASI")
+    _nv55._show_resto_popup("MLGPAR")
+    root.update()
+    _win55 = _nv55._detail_wins[-1] if _nv55._detail_wins else None
+    _plain_in_popup55 = False
+    if _win55 is not None:
+        def _findtr55(w):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Treeview):
+                    return c
+                t = _findtr55(c)
+                if t is not None:
+                    return t
+            return None
+        _tr55 = _findtr55(_win55)
+        if _tr55 is not None:
+            _plain_in_popup55 = any(
+                _tr55.set(_i, "Nama Barang") == "BUMBU PASTA KUAH"
+                for _i in _tr55.get_children(""))
+    check("(v3.9.44) 🧮 popup rincian default DEVIASI: barang tanpa "
+          "kategori master TAMPIL (dulu KATEGORI NaN terbuang "
+          "pra-compute)",
+          _plain_in_popup55)
+    _nv55._close_detail_wins()
+    _nv55.destroy()
+    _top55.destroy()
+    root.update()
+
+    # (e) PivotTableView — passthrough kategori kosong (2 titik filter:
+    # _col_values + _compute_payload): barang KATEGORI None tampil saat
+    # kategori BAHAN dipilih. Fixture mirror data nyata 100383 (SALDO
+    # AKHIR 84.000 + 3.DEVIASI -84) — WAJIB ada baris positif: default
+    # hide_empty menyembunyikan metric total ≤ 0 (dulu fixture hanya
+    # 3.DEVIASI negatif → semua baris hidden → tree kosong, BUKAN bug
+    # passthrough).
+    _pd55 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+        "Tanggal": 1, "JENIS": j, "NILAI": v, "KATEGORI": k,
+    } for b, j, v, k in [
+        ("AYAM FILET", "2.SALDO AKHIR", 100.0, "BAHAN"),
+        ("AYAM FILET", "3.DEVIASI", -10.0, "BAHAN"),
+        ("BUMBU PASTA KUAH", "2.SALDO AKHIR", 84000.0, None),
+        ("BUMBU PASTA KUAH", "3.DEVIASI", -84.0, None),
+    ]])
+    from src.ui.pivot_view import PivotTableView as _PV55
+    _top55p = tk.Toplevel(root)
+    _top55p.geometry("1600x900+5+5")
+    _pv55 = _PV55(_top55p)
+    _pv55.pack(fill="both", expand=True)
+    _pv55.data = _pd55
+    _pv55._populate_filters()
+    _pv55._show_content()
+    _pv55.kategori_var.set("BAHAN")   # seleksi eksplisit kategori ada
+    _pv55._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _pv55._busy and len(_pv55.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    _pv_names55 = []
+    for _p in _pv55.tree.get_children(""):
+        _pv_names55.append(_pv55.tree.item(_p, "text"))
+    check("(v3.9.44) Pivot kategori BAHAN: barang TANPA kategori "
+          "master tetap tampil (dulu dibuang oleh filter state)",
+          "BUMBU PASTA KUAH" in _pv_names55
+          and "AYAM FILET" in _pv_names55,
+          f"got {_pv_names55}")
+    _pv55.destroy()
+    _top55p.destroy()
+    root.update()
 
     root.destroy()
 

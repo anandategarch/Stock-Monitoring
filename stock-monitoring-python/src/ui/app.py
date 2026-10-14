@@ -184,7 +184,33 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.43"  # v3.9.43 — fix launcher: MULAI.bat kembali ke pola start-terbukti (tanpa powershell/goto), entry src.ui.__main__ tangkap kegagalan IMPORT (dialog+crash.log+exit≠0), CRLF+ASCII + .gitattributes eol=crlf
+APP_VERSION = "3.9.44"  # v3.9.44 — fix "BUMBU PASTA KUAH 100383 MLGPAR masih belum ada di tab Deviasi GR": passthrough kategori kosong (kategori_blank_mask) + saldo-only fallback t=1 (hitung_nominal_pairs)
+# v3.9.44 — FIX "BUMBU PASTA KUAH MLGPAR MASIH BELUM ADA DI TAB
+# DEVIASI GR" (user; probe E2E data nyata rekap 01.1 + 42.17 mock):
+# item 42.17-only 100383 lolos whitelist v3.9.41 & masuk pipeline
+# sampai pivot, TAPI DUA filter menyembunyikannya SENYAP dari view:
+# (a) KATEGORI NaN — item tidak terdaftar di master '21. DBS
+#     Kategori' user (master hanya punya varian (V.20)) → filter
+#     kategori default 'DEVIASI' membuang barisnya ('nan' ≠
+#     'DEVIASI'); FIX: pipeline.helpers.kategori_blank_mask — baris
+#     TANPA kategori master TIDAK disembunyikan oleh filter kategori
+#     (master tak kenal ≠ disembunyikan; tampil di seleksi kategori
+#     apa pun; nilai kategori tetap kosong — jujur) di SEMUA 6 titik
+#     filter: deviasi_view ×2 (tab GR + PCS) · nominal_resto_view
+#     (tab 🧮 pra-compute) · pivot_view ×2 + jejak [INFO] append1
+#     (jumlah pasangan saldo-only tanpa kategori master);
+# (b) fn_4217 HARDCODE Tanggal=1 utk pasangan saldo-only → baris
+#     3.DEVIASI pasangan itu hanya ada di t=1 → hitung_nominal_pairs
+#     filter Tanggal==h (h analisa 25/26) membuangnya dari tab 🧮
+#     (padahal tab Deviasi GR menampilkannya); FIX: saldo-only
+#     fallback — baris 3.DEVIASI t=1 pasangan saldo-only (ada
+#     2.SALDO AKHIR@t1 · TANPA rekap 1.SO/5.BARANG MASUK non-nol ·
+#     belum termuat di dev) ikut dihitung; pasangan ber-rekap tak
+#     tersentuh (nilai tak berubah) & h=1 tanpa duplikasi.
+# VERIFIKASI: probe E2E data nyata — plain 100383 TAMPIL di Deviasi
+# GR default DEVIASI (Sistem 84.000) + popup 🧮 MLGPAR '(84.000)';
+# test_ui_redesign 1057/1057 (§55: 13 check baru) + mock ALL + ruff
+# 195 < 196.
 # v3.9.43 — FIX LAUNCHER (user: "kenapa mulai.bat tidak bisa launch"):
 # v3.9.42 mengganti MULAI.bat dgn wrapper PowerShell Start-Process
 # -PassThru + tunggu 5 dtk + goto label — wrapper itu sendiri AKAR

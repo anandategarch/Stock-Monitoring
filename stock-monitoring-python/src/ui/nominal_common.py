@@ -202,7 +202,36 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     h = int(h)
 
     tnum = pd.to_numeric(data["Tanggal"], errors="coerce")
-    dev = data[(data["JENIS"].astype(str) == "3.DEVIASI") & (tnum == h)]
+    _jenis = data["JENIS"].astype(str)
+    dev = data[(_jenis == "3.DEVIASI") & (tnum == h)]
+    # v3.9.44 — SALDO-ONLY FALLBACK (mirror mask saldo-only
+    # deviasi_view v3.9.32; akar "BUMBU PASTA KUAH MLGPAR masih belum
+    # ada"): pasangan 42.17-only (fn_4217 HARDCODE Tanggal=1 — contoh
+    # nyata: plain 100383 saldo 84.000 @MLGPAR tanpa rekap) hanya punya
+    # baris 3.DEVIASI di t=1 → filter Tanggal==h (h analisa 25/26)
+    # membuangnya SENYAP dari tab 🧮 & mode 💰 padahal tab Deviasi GR
+    # menampilkan pasangan itu (Deviasi = 0 − saldo). Baris 3.DEVIASI
+    # t=1 pasangan SALDO-ONLY (ada 2.SALDO AKHIR@t1 · TANPA baris
+    # rekap 1.SO/5.BARANG MASUK non-nol · belum termuat di dev) ikut
+    # dihitung — pasangan ber-rekap tidak tersentuh (nilai tak berubah).
+    if h != 1:
+        _t1_dev = (_jenis == "3.DEVIASI") & (tnum == 1)
+        if bool(_t1_dev.any()):
+            _key = (data["Nama Barang"].astype(str) + "\x1f"
+                    + data["NAMA RESTO"].astype(str))
+            _dev_keys = (set(_key.loc[dev.index]) if not dev.empty
+                         else set())
+            _nil = pd.to_numeric(data["NILAI"], errors="coerce").fillna(0)
+            _rk_keys = set(_key.loc[(_jenis.isin(("1.SO", "5.BARANG MASUK")))
+                            & (_nil != 0)])
+            _saldo_t1_keys = set(
+                _key.loc[(_jenis == "2.SALDO AKHIR") & (tnum == 1)])
+            _extra = data[_t1_dev
+                          & ~_key.isin(_dev_keys)
+                          & ~_key.isin(_rk_keys)
+                          & _key.isin(_saldo_t1_keys)]
+            if not _extra.empty:
+                dev = pd.concat([dev, _extra], ignore_index=True)
     if dev.empty:
         return pd.DataFrame()
     dev = dev.copy()

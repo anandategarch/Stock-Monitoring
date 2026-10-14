@@ -26,6 +26,10 @@ import numpy as np
 import pandas as pd
 
 from .fn_running_stock import fn_running_stock_grouped
+
+# v3.9.44 — mask baris tanpa kategori master (jejak saldo-only; lihat
+# widgets.kategori_blank_mask utk konsumen view).
+from .helpers import kategori_blank_mask
 from .konversi_satuan import build_konversi_map
 from .queries import (
     query_4217,
@@ -733,6 +737,40 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             print(f"    4217 dua arah: {_n_only} pasangan saldo-only "
                   "(barang 42.17 tanpa rekap SO) masuk Deviasi "
                   "GR/PCS")
+            # v3.9.44 — transparansi kategori master: pasangan saldo-only
+            # TANPA entri di '21. DBS Kategori' (KATEGORI NaN — contoh
+            # nyata: BUMBU PASTA KUAH 100383, master user hanya punya
+            # varian (V.20)) dulu lenyap senyap dari tab Deviasi GR
+            # karena filter KATEGORI default 'Deviasi' membuang baris
+            # NaN — kini view me-passthrough baris tanpa kategori (lihat
+            # widgets.kategori_blank_mask); jejak ini menyebut jumlahnya
+            # supaya keluhan "barang tidak muncul" langsung ketemu
+            # penyebabnya di log.
+            try:
+                if "KATEGORI" in final.columns and _n_only:
+                    _only_k = _only[_only["_merge"] == "left_only"][
+                        ["Nama Barang", "NAMA RESTO"]].drop_duplicates()
+                    # KATEGORI konstan per pasangan (merge master by nama)
+                    # — hitung PASANGAN, bukan baris long (31 tanggal ×
+                    # 9 JENIS akan menggelembungkan angka jejak).
+                    _kk = (final[["Nama Barang", "NAMA RESTO", "KATEGORI"]]
+                           .drop_duplicates(
+                               subset=["Nama Barang", "NAMA RESTO"])
+                           .merge(_only_k,
+                                  on=["Nama Barang", "NAMA RESTO"],
+                                  how="inner"))
+                    _kk_blank = int(
+                        kategori_blank_mask(_kk["KATEGORI"]).sum()) \
+                        if len(_kk) else 0
+                    if _kk_blank:
+                        print(f"    [INFO] 4217: {_kk_blank} pasangan "
+                              "saldo-only TANPA kategori master (barang "
+                              "lama 42.17 belum masuk '21. DBS Kategori' "
+                              "— contoh BUMBU PASTA KUAH 100383) — tampil "
+                              "di SEMUA seleksi filter KATEGORI "
+                              "(widgets.kategori_blank_mask)")
+            except (KeyError, ValueError, TypeError):
+                pass  # defensif — kolom tak lengkap pada input aneh
     except (KeyError, ValueError, TypeError):
         pass  # defensif — final tanpa kolom JENIS/Nama Barang (input aneh)
 

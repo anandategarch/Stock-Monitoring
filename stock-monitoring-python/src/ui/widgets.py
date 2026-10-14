@@ -34,6 +34,16 @@ import tkinter as tk
 from tkinter import messagebox as _mb
 from tkinter import ttk
 
+# v3.9.44 — re-export helper filter kategori dari pipeline.helpers (satu
+# sumber kebenaran; arah import UI→pipeline = pola app.py/nominal_common):
+# mask baris TANPA kategori master (NaN/blank/'nan') — dipakai passthrough
+# filter KATEGORI deviasi_view/nominal_resto_view/pivot_view. Akar
+# "BUMBU PASTA KUAH MLGPAR masih belum ada di tab Deviasi GR": item
+# 42.17-only 100383 tidak ada di master '21. DBS Kategori' user (hanya
+# varian (V.20)) → KATEGORI NaN → filter default 'Deviasi' menyembunyikan
+# barisnya. Kebijakan: master tak kenal ≠ disembunyikan — baris tampil di
+# seleksi kategori apa pun (dokumentasi lengkap di pipeline/helpers.py).
+from ..pipeline.helpers import kategori_blank_mask as kategori_blank_mask  # noqa: PLC0414
 from .theme import (
     C_ACCENT,
     C_ACCENT_HOVER,
@@ -971,11 +981,7 @@ def _mix_hex(c1: str, c2: str, t: float) -> str:
 
     r1, g1, b1 = parse(c1)
     r2, g2, b2 = parse(c2)
-    return "#{:02x}{:02x}{:02x}".format(
-        round(r1 + (r2 - r1) * t),
-        round(g1 + (g2 - g1) * t),
-        round(b1 + (b2 - b1) * t),
-    )
+    return f"#{round(r1 + (r2 - r1) * t):02x}{round(g1 + (g2 - g1) * t):02x}{round(b1 + (b2 - b1) * t):02x}"
 
 
 class Spinner(tk.Canvas):
