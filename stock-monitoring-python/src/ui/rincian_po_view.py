@@ -1,6 +1,21 @@
 """
 rincian_po_view.py — Pivot table view untuk Rincian PO (v3.2 → v3.9).
 
+v3.9.35 (user: "kolom status pesanan bisa gak ditaruh di bawah kolom
+pemasok? seperti merge vertical gitu. Sama kaya kolom nama barang
+yang ditampilkan secara vertical. Format tanggal pakai 01 Oktober 2026
+aja format panjang"):
+- KOLOM "Status Pesanan" DIHAPUS dari tabel — nilai status kini tampil
+  di KOLOM PEMASOK pada baris anak PERTAMA tiap PO sebagai "↳ Status"
+  (merge-vertical look: tepat di bawah nama pemasok, nilai sekali per
+  PO, baris anak lain kosong — persis pola kolom Nama Barang yang
+  nilai-nya berjalan vertikal). Teks status dibuat redup via tag
+  per-cell (po_status_note) supaya terbaca sebagai anotasi PO, bukan
+  data pemasok. Filter status tetap tersedia di kartu Filter (combo
+  STATUS PESANAN).
+- TANGGAL format panjang Indonesia: "02 Juni 2024" (kolom Tanggal) dan
+  "02 Juni 2024 09:00" (Tgl/Jam Pembuatan) — nama bulan Indonesia.
+
 v3.9.20 (deep audit 34-c/fix 35-c1): _resto_name pd.NA/float-safe
 (1370.0 → '1370') + _fmt_date/_fmt_datetime NaT-safe (tab tidak mati) +
 load_data reset combo Cabang/Status (filter basi) + literal
@@ -45,6 +60,7 @@ from .widgets import (
     HeaderFilterGroup,
     LoadingOverlay,
     TableExpander,
+    apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
     enable_col_resize,
@@ -55,21 +71,29 @@ from .widgets import (
     run_async,
 )
 
-# Kolom tabel v3.9 (urutan baru — info PO di kiri, item di kanan):
+# Kolom tabel v3.9.35 (urutan baru — info PO di kiri, item di kanan):
 # baris induk mengisi kolom PO (Tanggal…Keterangan PO) + ringkasan;
-# baris anak hanya mengisi Nama Barang / Satuan / Kuantitas.
+# baris anak hanya mengisi Nama Barang / Satuan / Kuantitas + STATUS
+# PESANAN (↳ di kolom Pemasok, anak pertama saja — merge vertical).
 PO_COLUMNS = [
-    "Tanggal", "Nama Resto", "Pemasok", "Status Pesanan", "Keterangan PO",
+    "Tanggal", "Nama Resto", "Pemasok", "Keterangan PO",
     "Nama Barang", "Satuan", "Kuantitas", "Tgl/Jam Pembuatan",
 ]
 
 # Pemetaan nama kolom tampilan → kolom DataFrame sumber
 # v3.9.19: "Nama Resto" bersumber kolom Cabang PO (kode resto = bagian
 # setelah titik terakhir, mis. "1370.MLGPAR" → "MLGPAR").
+# v3.9.35: "Status Pesanan" tidak lagi kolom tampilan (merge ke bawah
+# Pemasok) — sumbernya tetap dibaca utk nilai ↳ + combo filter.
 COL_SRC = {
-    "Status Pesanan": "Status Pesanan Pembelian",
     "Nama Resto": "Cabang PO",
 }
+
+# v3.9.35 — nama bulan Indonesia utk format tanggal panjang
+# ("01 Oktober 2026" — permintaan user).
+_BULAN_ID = ("Januari", "Februari", "Maret", "April", "Mei", "Juni",
+             "Juli", "Agustus", "September", "Oktober", "November",
+             "Desember")
 
 
 def _resto_name(val) -> str:
@@ -183,10 +207,10 @@ class RincianPoView(tk.Frame):
         self.tree.column("#0", width=130, minwidth=110)
         self.tree.heading("#0", text="Nomor #")
         col_widths = {
-            "Tanggal": 92, "Nama Resto": 90, "Pemasok": 200,
-            "Status Pesanan": 110, "Keterangan PO": 110,
+            "Tanggal": 132, "Nama Resto": 90, "Pemasok": 200,
+            "Keterangan PO": 110,
             "Nama Barang": 200, "Satuan": 64, "Kuantitas": 90,
-            "Tgl/Jam Pembuatan": 140,
+            "Tgl/Jam Pembuatan": 175,
         }
         for c in cols:
             self.tree.column(c, width=col_widths.get(c, 100), minwidth=50,
@@ -321,6 +345,11 @@ class RincianPoView(tk.Frame):
         tree.tag_configure("grand_total", font=font(10, "bold"),
                            background="#e2e8f0",
                            foreground="#0f172a")
+        # v3.9.35 — anotasi status PO (↳ di bawah Pemasok, anak pertama
+        # tiap PO): teks REDUP via tag per-CELL (bukan tag baris — tidak
+        # pernah dipasang ke item; mekanisme overlay sama dgn minus
+        # merah view lain). Dipasang _apply_status_notes pasca-render.
+        tree.tag_configure("po_status_note", foreground=C_TEXT_MUTED)
 
     # =========================================================================
     # DATA LOADING
@@ -485,6 +514,12 @@ class RincianPoView(tk.Frame):
                       if "Kuantitas" in group.columns else 0)
             total_qty += po_qty
             parent_iid = f"po_{po_count}"
+            # v3.9.35 — STATUS PESANAN utk anotasi ↳ di kolom Pemasok
+            # (baris anak PERTAMA — merge vertical; kolom tersendiri
+            # DIHAPUS permintaan user).
+            status_po = (_first_str(group["Status Pesanan Pembelian"])
+                         if "Status Pesanan Pembelian" in group.columns
+                         else "")
             # BARIS INDUK = info PO lengkap + ringkasan (v3.9)
             # v3.9.19: NAMA RESTO (dari Cabang PO — level-PO; anak baris
             # tetap hanya item, konsisten layout ringkas v3.9)
@@ -497,9 +532,6 @@ class RincianPoView(tk.Frame):
                                if "Cabang PO" in group.columns else "",
                                _first_str(group["Pemasok"])
                                if "Pemasok" in group.columns else "",
-                               _first_str(group["Status Pesanan Pembelian"])
-                               if "Status Pesanan Pembelian" in group.columns
-                               else "",
                                _first_str(group["Keterangan PO"])
                                if "Keterangan PO" in group.columns else "",
                                f"▸ {n_items} item",
@@ -516,7 +548,10 @@ class RincianPoView(tk.Frame):
                            ],
                            "tags": ("po_header",), "open": True}))
 
-            # BARIS ANAK = hanya item barang (v3.9 — tanpa mengulang info PO)
+            # BARIS ANAK = hanya item barang (v3.9 — tanpa mengulang info
+            # PO). v3.9.35: anak PERTAMA membawa STATUS PO (↳ …) di kolom
+            # PEMASOK — merge-vertical ala kolom Nama Barang; anak
+            # berikutnya kosong (nilai status sekali per grup PO).
             for i, (_idx, row) in enumerate(group.iterrows()):
                 tag = "evenrow" if i % 2 == 0 else "oddrow"
                 item_count += 1
@@ -524,7 +559,9 @@ class RincianPoView(tk.Frame):
                     parent_iid, f"{parent_iid}_{item_count}",
                     {"text": "",
                      "values": [
-                         "", "", "", "", "",
+                         "", "",
+                         f"↳ {status_po}" if (i == 0 and status_po) else "",
+                         "",
                          str(row.get("Nama Barang", "")),
                          str(row.get("Satuan", "")),
                          self._fmt_num(row.get("Kuantitas")),
@@ -532,10 +569,11 @@ class RincianPoView(tk.Frame):
                      ],
                      "tags": (tag,), "open": False}))
 
-        # 9 kolom nilai (grand total sejajar kolom Kuantitas)
+        # 8 kolom nilai (grand total: N PO di kolom Nama Barang, total qty
+        # sejajar kolom Kuantitas)
         items.append(("", "grand_total",
                       {"text": "GRAND TOTAL",
-                       "values": ["", "", "", "", "",
+                       "values": ["", "", "", "",
                                    f"{po_count} PO", "",
                                    _fmt_qty(total_qty), ""],
                        "tags": ("grand_total",), "open": False}))
@@ -553,6 +591,9 @@ class RincianPoView(tk.Frame):
 
         def render_done():
             self._busy = False
+            # v3.9.35 — anotasi status ↳ (tag per-cell, teks redup)
+            # dipasang SETELAH semua baris masuk (insert async batch).
+            self._apply_status_notes()
             if self._pending:
                 self._pending = False
                 self._refresh()
@@ -581,7 +622,29 @@ class RincianPoView(tk.Frame):
         return open_tree_maximized(
             self.tree, "Rincian PO — Pivot Nomor #",
             setup_tags=lambda t: self._setup_tags(t),
-            on_filter_setup=filter_setup)
+            on_filter_setup=filter_setup,
+            # v3.9.35 — anotasi status ↳ ikut dipasang di clone ⛶
+            on_render_done=lambda t: self._apply_status_notes(t))
+
+    def _apply_status_notes(self, tree=None):
+        """v3.9.35 — pasang tag per-cell `po_status_note` (teks redup) ke
+        sel STATUS (↳ …) di kolom Pemasok baris anak pertama tiap PO.
+
+        Dipanggil pasca-render (insert async) di tabel utama + clone ⛶.
+        Tag per-cell ≠ tag baris — tidak pernah memengaruhi styling baris
+        anak lain (mekanisme sama dgn minus merah per-cell view lain)."""
+        tree = tree if tree is not None else self.tree
+        cells = []
+        try:
+            for po in tree.get_children(""):
+                if po == "grand_total":
+                    continue
+                kids = tree.get_children(po)
+                if kids:
+                    cells.append((kids[0], "Pemasok"))
+        except tk.TclError:
+            return
+        apply_cell_tag(tree, "po_status_note", cells)
 
     # =========================================================================
     # HELPERS (identik versi lama)
@@ -610,9 +673,12 @@ class RincianPoView(tk.Frame):
 
     @staticmethod
     def _fmt_date(val) -> str:
-        # FIX 35-c1 (RISK C6): NaT-safe — NaT.strftime RAISES ValueError di
-        # pandas 2.2.3 (to_datetime(errors="coerce") bisa menghasilkan NaT)
-        # → dulu satu baris NaT mematikan seluruh tab (mirror _fmt_jam).
+        # v3.9.35 — FORMAT PANJANG Indonesia "01 Oktober 2026" (user:
+        # "Format tanggal pakai 01 Oktober 2026 aja format panjang") —
+        # nama bulan Indonesia manual (strftime %B = locale C → English).
+        # FIX 35-c1 (RISK C6): NaT-safe tetap — NaT.strftime RAISES
+        # ValueError di pandas 2.2.3 (to_datetime(errors="coerce") bisa
+        # menghasilkan NaT) → satu baris NaT tidak mematikan tab.
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
         try:
@@ -620,16 +686,22 @@ class RincianPoView(tk.Frame):
                 return ""
         except (TypeError, ValueError):
             pass
-        if hasattr(val, "strftime"):
-            return val.strftime("%Y-%m-%d")
+        d = val if hasattr(val, "strftime") else None
+        if d is None:
+            try:
+                d = pd.to_datetime(val)
+            except Exception:
+                return str(val)
         try:
-            return pd.to_datetime(val).strftime("%Y-%m-%d")
-        except Exception:
+            return f"{d.day:02d} {_BULAN_ID[d.month - 1]} {d.year}"
+        except (AttributeError, IndexError, TypeError, ValueError):
             return str(val)
 
     @staticmethod
     def _fmt_datetime(val) -> str:
-        # FIX 35-c1 (RISK C6): NaT-safe (mirror _fmt_jam — lihat _fmt_date)
+        # v3.9.35 — format panjang + jam menit: "01 Oktober 2026 14:23"
+        # (detik dibuang — kolom tersembunyi default, hemat lebar).
+        # FIX 35-c1 (RISK C6): NaT-safe (lihat _fmt_date).
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return ""
         try:
@@ -637,9 +709,14 @@ class RincianPoView(tk.Frame):
                 return ""
         except (TypeError, ValueError):
             pass
-        if hasattr(val, "strftime"):
-            return val.strftime("%Y-%m-%d %H:%M:%S")
+        d = val if hasattr(val, "strftime") else None
+        if d is None:
+            try:
+                d = pd.to_datetime(val)
+            except Exception:
+                return str(val)
         try:
-            return pd.to_datetime(val).strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
+            return (f"{d.day:02d} {_BULAN_ID[d.month - 1]} {d.year} "
+                    f"{d.hour:02d}:{d.minute:02d}")
+        except (AttributeError, IndexError, TypeError, ValueError):
             return str(val)

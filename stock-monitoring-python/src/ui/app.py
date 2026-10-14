@@ -177,7 +177,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.34"  # v3.9.34 — kolom Nominal + tab 🧮 Nominal Deviasi
+APP_VERSION = "3.9.35"  # v3.9.35 — status PO merge di bawah Pemasok + tanggal panjang + seleksi sel ala Excel
 # v3.9.34 (user: kolom Nominal di Deviasi GR/PCS + Komparasi + tab Σ per
 # resto):
 # (1) kolom Nominal (Harga 41.09 × Qty Deviasi) di tab 📦 Deviasi GR &

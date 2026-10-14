@@ -573,6 +573,269 @@ def copy_tree_selection_tsv(tree: ttk.Treeview) -> int:
         return 0
 
 
+# --- SELEKSI SEL ALA EXCEL (v3.9.35) -------------------------------------------
+#
+# User: "kenapa ya aku tidak bisa select di semua tabelnya? aku mau copy
+# datanya seperti tabel di excel — di cell mana aja aku bebas buat select
+# dan copy". Multi-select v3.9.32 = level BARIS penuh; kini tambah REGION
+# SEL: klik sel → jangkar; drag / Shift+klik → persegi (baris terpilih ×
+# rentang kolom jangkar→fokus); Ctrl+C → TSV per-sel TANPA header (persis
+# semantik Excel: hanya sel yang di-highlight yang tersalin). Highlight
+# memakai mekanisme tag per-cell yang SAMA dgn minus merah (overlay Label
+# Tk 8.6 / tag native Tk 9) — teks sel + warna baris tetap terlihat,
+# event klik/wheel diteruskan overlay, ikut re-posisi saat scroll.
+
+_CELLSEL_TAG = "cellsel"
+_CELLSEL_BG = "#99f6e4"      # teal-200 — lebih pekat drp seleksi baris (teal-100)
+_CELLSEL_FG = "#134e4a"      # teal-900
+# Batas aman: region > sel ini TIDAK digambar overlay (Ctrl+C tetap jalan)
+# — mencegah UI beku saat Ctrl+A di tabel 100 ribu baris.
+_CELLSEL_MAX_CELLS = 20000
+
+
+def _cellsel_region_cols(tree: ttk.Treeview) -> list | None:
+    """Rentang kolom region sel (urutan display, inklusif) — None bila
+    tidak aktif / kolom jangkar atau fokus disembunyikan (ColumnManager)."""
+    if not getattr(tree, "_cellsel_active", False):
+        return None
+    anchor = getattr(tree, "_cellsel_anchor", None)
+    focus = getattr(tree, "_cellsel_focus", None)
+    if not anchor or not focus:
+        return None
+    disp = _tree_display_columns(tree)
+    if anchor not in disp or focus not in disp:
+        return None
+    i1, i2 = disp.index(anchor), disp.index(focus)
+    lo, hi = (i1, i2) if i1 <= i2 else (i2, i1)
+    return disp[lo:hi + 1]
+
+
+def _cellsel_apply_cells(tree: ttk.Treeview, cells: list) -> None:
+    """Pasang/bersihkan highlight region (semantik REPLACE).
+
+    Tk 9 native: `tag cell add` bersifat TAMBAH — region yang menyusut
+    akan meninggalkan sel basi jika hanya add → bersihkan dulu
+    (`remove` tanpa cellList melepas SEMUA anggota tag) lalu pasang
+    ulang (probe Tk 9.0: subcommand valid add/has/remove).
+    Tk 8.6 overlay: set_cells([]) sudah semantik replace."""
+    try:
+        if CELL_TAGS_NATIVE:
+            with contextlib.suppress(tk.TclError):
+                tree.tk.call(str(tree), "tag", "cell", "remove",
+                             _CELLSEL_TAG)
+            if cells:
+                apply_cell_tag(tree, _CELLSEL_TAG, cells)
+            return
+        apply_cell_tag(tree, _CELLSEL_TAG, cells)
+    except tk.TclError:
+        pass
+
+
+def _cellsel_reapply(tree: ttk.Treeview) -> None:
+    """Hitung ulang sel region = (baris terpilih) × (rentang kolom).
+
+    Nonaktif bila seleksi baris kosong (re-render) atau kolom region
+    disembunyikan. Region > _CELLSEL_MAX_CELLS → tanpa overlay (copy
+    tetap berfungsi)."""
+    if not getattr(tree, "_cellsel_active", False):
+        return
+    cols = _cellsel_region_cols(tree)
+    try:
+        sel = tree.selection()
+    except tk.TclError:
+        sel = ()
+    if not cols or not sel:
+        tree._cellsel_active = False
+        tree._cellsel_anchor = None
+        tree._cellsel_focus = None
+        _cellsel_apply_cells(tree, [])
+        return
+    if len(sel) * len(cols) > _CELLSEL_MAX_CELLS:
+        _cellsel_apply_cells(tree, [])
+        return
+    _cellsel_apply_cells(tree, [(str(iid), c) for iid in sel for c in cols])
+
+
+def cell_region_tsv(tree: ttk.Treeview) -> str | None:
+    """Susun REGION sel terpilih jadi teks TSV.
+
+    v3.9.35 — TANPA baris header (semantik Excel: copy seleksi sel hanya
+    memuat sel yang di-highlight; copy baris penuh — tree_selection_tsv —
+    tetap memuat header). Baris mengikuti URUTAN TAMPILAN (walk hierarki);
+    kolom = rentang display jangkar→fokus. None bila region tidak aktif /
+    tidak ada baris."""
+    cols = _cellsel_region_cols(tree)
+    if not cols:
+        return None
+    try:
+        sel_set = {str(i) for i in tree.selection()}
+    except tk.TclError:
+        return None
+    if not sel_set:
+        return None
+    try:
+        all_cols = [str(c) for c in (tree["columns"] or [])]
+    except tk.TclError:
+        all_cols = []
+    col_idx = {c: i for i, c in enumerate(all_cols)}
+    lines: list = []
+
+    def _row_cells(iid) -> list:
+        try:
+            it = tree.item(iid)
+        except tk.TclError:
+            return []
+        vals = it.get("values") or []
+        out = []
+        for c in cols:
+            if c == "#0":
+                out.append(_tsv_cell(it.get("text") or ""))
+            else:
+                i = col_idx.get(c, -1)
+                out.append(_tsv_cell(vals[i]) if 0 <= i < len(vals) else "")
+        return out
+
+    def _walk(parent=""):
+        try:
+            kids = tree.get_children(parent)
+        except tk.TclError:
+            return
+        for iid in kids:
+            if str(iid) in sel_set:
+                cells = _row_cells(iid)
+                if cells:
+                    lines.append("\t".join(cells))
+            _walk(iid)
+
+    _walk("")
+    return "\n".join(lines) if lines else None
+
+
+def copy_cell_region_tsv(tree: ttk.Treeview) -> int:
+    """Salin region sel terpilih ke clipboard (TSV). Return jumlah baris
+    data yang tersalin (0 bila tidak aktif / kosong / widget mati)."""
+    try:
+        text = cell_region_tsv(tree)
+        if not text:
+            return 0
+        tree.clipboard_clear()
+        tree.clipboard_append(text)
+        return text.count("\n") + 1
+    except tk.TclError:
+        return 0
+
+
+def enable_cell_select(tree: ttk.Treeview) -> ttk.Treeview:
+    """v3.9.35 — aktifkan SELEKSI SEL ala Excel di sebuah tree.
+
+    - Klik sel → jangkar region (baris ikut terpilih native — extended);
+    - Drag / Shift+klik → perluas kolom fokus (baris diperluas native);
+    - Ctrl+klik → toggle baris (region baris ikut — <<TreeviewSelect>>);
+    - Ctrl+C → region TSV per-sel (tanpa header) via enable_multi_select;
+      tanpa region → fallback copy baris penuh (v3.9.33);
+    - Esc → bersihkan region ("break" saat aktif supaya window clone ⛶
+      tidak ikut tertutup — Esc tanpa region tetap menutup clone);
+    - klik heading/separator → region DIBIARKAN (drag resize kolom /
+      popup filter ⧩ tidak menghilangkan seleksi); klik area kosong →
+      region berakhir (perilaku Excel).
+
+    Interaksi lama tidak berubah: double-click popup, klik ✓ follow-up,
+    klik-kanan menu — binding additive tanpa "break" (resize kolom
+    terpasang lebih dulu di sebagian view dan tetap memenangkan tepi).
+    Idempoten (flag `_cellsel_bound`); dipasang otomatis ke SEMUA tree
+    lewat enable_multi_select (make_tree + semua view + popup + clone ⛶).
+    """
+    if getattr(tree, "_cellsel_bound", False):
+        return tree
+    tree._cellsel_bound = True
+    tree._cellsel_active = False
+    tree._cellsel_anchor = None
+    tree._cellsel_focus = None
+
+    try:
+        # tag per-cell (bukan tag baris — tak pernah dipasang ke item):
+        # overlay membaca opsi ini utk warna highlight region.
+        tree.tag_configure(_CELLSEL_TAG, background=_CELLSEL_BG,
+                           foreground=_CELLSEL_FG)
+    except tk.TclError:
+        pass
+
+    def _hit(event):
+        """(valid, region, iid, kolom) dari koordinat event."""
+        try:
+            iid = tree.identify_row(event.y)
+            reg = tree.identify_region(event.x, event.y)
+            raw = tree.identify_column(event.x)
+        except tk.TclError:
+            return False, "", "", None
+        if not iid or reg not in ("cell", "tree"):
+            return False, reg, iid, None
+        return True, reg, iid, identify_to_column(tree, raw)
+
+    def _reapply_soon():
+        # Binding WIDGET berjalan SEBELUM binding kelas ttk — saat press
+        # handler ini dieksekusi, seleksi baris NATIVE belum terjadi
+        # (selection() masih kosong) → reapply langsung akan melihat
+        # seleksi kosong dan MENONAKTIFKAN region. after_idle menjalankan
+        # reapply SETELAH seluruh rantai binding press (termasuk seleksi
+        # native kelas) selesai.
+        with contextlib.suppress(tk.TclError):
+            tree.after_idle(lambda: _cellsel_reapply(tree))
+
+    def _on_press(event):
+        ok, reg, _iid, col = _hit(event)
+        if ok and col:
+            tree._cellsel_active = True
+            tree._cellsel_anchor = col
+            tree._cellsel_focus = col
+            _reapply_soon()
+            return
+        # heading/separator (resize kolom / funnel ⧩) → region dibiarkan;
+        # area kosong / sel tak valid → akhiri region (perilaku Excel).
+        if reg not in ("heading", "separator"):
+            tree._cellsel_active = False
+            _cellsel_apply_cells(tree, [])
+
+    def _on_shift(event):
+        ok, _reg, _iid, col = _hit(event)
+        if not ok or not col:
+            return
+        if not tree._cellsel_active or not tree._cellsel_anchor:
+            tree._cellsel_active = True
+            tree._cellsel_anchor = col
+        tree._cellsel_focus = col
+        _reapply_soon()
+
+    def _on_motion(event):
+        # drag memperluas KOLOM fokus (baris diperluas native extended);
+        # motion di heading/separator diabaikan supaya resize tak ikut.
+        if not tree._cellsel_active:
+            return
+        ok, _reg, _iid, col = _hit(event)
+        if ok and col and col != tree._cellsel_focus:
+            tree._cellsel_focus = col
+            _reapply_soon()
+
+    def _on_escape(_event=None):
+        if tree._cellsel_active:
+            tree._cellsel_active = False
+            _cellsel_apply_cells(tree, [])
+            return "break"    # clone ⛶ jangan tertutup oleh Esc
+        return None
+
+    def _on_select(_event=None):
+        # seleksi baris berubah (drag/Ctrl+klik/Ctrl+A/re-render) →
+        # sel region dihitung ulang; seleksi kosong → region berakhir.
+        _cellsel_reapply(tree)
+
+    tree.bind("<Button-1>", _on_press, add="+")
+    tree.bind("<Shift-Button-1>", _on_shift, add="+")
+    tree.bind("<B1-Motion>", _on_motion, add="+")
+    tree.bind("<Escape>", _on_escape, add="+")
+    tree.bind("<<TreeviewSelect>>", _on_select, add="+")
+    return tree
+
+
 def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
     """v3.9.32 — MULTI-SELECT + Ctrl+A semua tabel (user: "kenapa aku
     tidak bisa select ya untuk semua data?").
@@ -594,6 +857,12 @@ def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
     `_multi_select_bound` (pola `_smooth_wheel_bound`). Dipasang juga ke
     clone Layar Penuh / popup (open_tree_maximized — tree BARU, jadi
     flag tidak terbawa → binding tetap terpasang di sana).
+
+    v3.9.35 — SELEKSI SEL ALA EXCEL (user: "aku mau copy datanya seperti
+    tabel di excel — di cell mana aja aku bebas buat select dan copy"):
+    enable_cell_select dipanggil di sini → otomatis aktif di SEMUA tree
+    (make_tree + semua view + popup + clone ⛶). Ctrl+C: region sel aktif
+    → TSV per-sel tanpa header; tanpa region → baris penuh + header.
 
     Interaksi lama TIDAK berubah: double-click detail, klik ✓ follow-up,
     klik-kanan menu — semuanya memakai identify_row/event → tetap benar
@@ -626,7 +895,13 @@ def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
 
     def _copy_rows(_event=None):
         # v3.9.33 — Ctrl+C = aksi konsumsi multi-select (TSV ke clipboard)
+        # v3.9.35 — REGION sel aktif (klik/drag sel ala Excel) MENANG:
+        # copy rectangular per-sel TANPA header; tanpa region → baris
+        # penuh dgn header (perilaku v3.9.33 dipertahankan).
         try:
+            if (getattr(tree, "_cellsel_active", False)
+                    and copy_cell_region_tsv(tree)):
+                return
             copy_tree_selection_tsv(tree)
         except tk.TclError:
             pass
@@ -635,6 +910,7 @@ def enable_multi_select(tree: ttk.Treeview) -> ttk.Treeview:
     tree.bind("<Control-A>", _select_all, add="+")
     tree.bind("<Control-c>", _copy_rows, add="+")
     tree.bind("<Control-C>", _copy_rows, add="+")
+    enable_cell_select(tree)  # v3.9.35 — seleksi sel ala Excel
     return tree
 
 

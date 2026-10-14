@@ -414,6 +414,23 @@ Memverifikasi:
     harga + baris TOTAL + double-click resto → popup rincian per
     barang; helper bersama nominal_common.py; fanout app meneruskan
     harga_map/konversi_map ke 5 view.
+
+47. v3.9.35 — STATUS PO MERGE DI BAWAH PEMASOK + TANGGAL PANJANG +
+    SELEKSI SEL ALA EXCEL (§47; user: "kolom status pesanan bisa gak
+    ditaruh di bawah kolom pemasok? seperti merge vertical gitu.
+    Sama kaya kolom nama barang yang ditampilkan secara vertical.
+    Format tanggal pakai 01 Oktober 2026 aja format panjang" + "kenapa
+    ya aku tidak bisa select disemua tabel nya? aku mau copy data nya
+    seperti tabel di excel kan di cell mana aja aku bebas buat select
+    dan copy"): (1) Rincian PO — kolom Status Pesanan DIHAPUS, nilai
+    tampil ↳ di kolom Pemasok anak pertama (merge vertical, teks
+    redup via tag per-cell) + tanggal format panjang Indonesia
+    "02 Juni 2024" / "02 Juni 2024 09:00"; (2) enable_cell_select di
+    SEMUA tree via enable_multi_select — klik sel → jangkar, drag /
+    Shift+klik → persegi, Ctrl+C → TSV per-sel TANPA header (Excel),
+    Esc bersihkan, klik kosong berakhir, fallback copy baris utuh;
+    highlight via tag per-cell 'cellsel' (mekanisme overlay minus
+    merah — teks + warna baris tetap terlihat, event diteruskan).
 """
 import os
 import shutil
@@ -436,7 +453,15 @@ from src.ui.komparasi_deviasi_view import (
     parse_deviasi_file,
 )
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
-from src.ui.widgets import _GC_HOLD, HeaderFilter, LoadingOverlay, run_async
+from src.ui.widgets import (
+    _GC_HOLD,
+    CELL_TAGS_NATIVE,
+    HeaderFilter,
+    LoadingOverlay,
+    cell_region_tsv,
+    copy_cell_region_tsv,
+    run_async,
+)
 
 PASS = []
 FAIL = []
@@ -449,6 +474,21 @@ def check(name, cond, detail=""):
     else:
         FAIL.append(name)
         print(f"  ✗ {name} {detail}")
+
+
+def _cell_tag_has47(tree, tag, iid, col):
+    """(v3.9.35) Query keanggotaan tag per-CELL lintas jalur render:
+    Tk 9 native (`tag cell has`) / Tk 8.6 overlay (_tag_cells)."""
+    try:
+        if CELL_TAGS_NATIVE:
+            return bool(int(tree.tk.call(
+                str(tree), "tag", "cell", "has", tag,
+                (str(iid), str(col)))))
+        ov = getattr(tree, "_cell_color_overlay", None)
+        return (ov is not None
+                and (str(iid), str(col)) in ov._tag_cells.get(tag, set()))
+    except Exception:
+        return False
 
 
 def wait_view(root, view, timeout=15.0):
@@ -751,7 +791,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.34", APP_VERSION == "3.9.34", f"got {APP_VERSION}")
+    check("Versi = 3.9.35", APP_VERSION == "3.9.35", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -1405,42 +1445,60 @@ def main():
           f"got {app.rincian_view.status_var.get()!r}")
 
     # (v3.9) layout ringkas: parent = info PO lengkap, anak = item saja
+    # v3.9.35: kolom "Status Pesanan" DIHAPUS — status tampil sbg ↳ di
+    # kolom Pemasok anak pertama (merge vertical); tanggal format panjang.
     rv = app.rincian_view
     first_po = rv.tree.get_children("")[0]
     po_vals = rv.tree.item(first_po, "values")
     kids = rv.tree.get_children(first_po)
     kid_vals = rv.tree.item(kids[0], "values")
-    check("(v3.9/v3.9.19) Kolom tabel baru (info PO + item + NAMA RESTO)",
+    kid2_vals = rv.tree.item(kids[1], "values")
+    check("(v3.9/v3.9.35) Kolom tabel baru (Status Pesanan DIHAPUS — "
+          "merge ke bawah Pemasok)",
           list(rv.tree["columns"]) == [
-              "Tanggal", "Nama Resto", "Pemasok", "Status Pesanan",
-              "Keterangan PO", "Nama Barang", "Satuan", "Kuantitas",
+              "Tanggal", "Nama Resto", "Pemasok", "Keterangan PO",
+              "Nama Barang", "Satuan", "Kuantitas",
               "Tgl/Jam Pembuatan"],
           f"got {list(rv.tree['columns'])}")
-    check("(v3.9) Baris PO (teal) memuat Tanggal + Pemasok + Status "
-          "(posisi digeser kolom Nama Resto)",
-          po_vals[0] == "2024-06-02" and po_vals[2] == "PT Sumber" and
-          po_vals[3] == "Selesai",
+    check("(v3.9.35) Baris PO: Tanggal FORMAT PANJANG (02 Juni 2024) "
+          "+ Pemasok",
+          po_vals[0] == "02 Juni 2024" and po_vals[2] == "PT Sumber",
           f"got {po_vals[:4]}")
     check("(v3.9.19) Baris PO memuat NAMA RESTO (dari Cabang PO — tanpa "
           "titik → nilai apa adanya)",
           po_vals[1] == "MLGPAR", f"got {po_vals[1]!r}")
     check("(v3.9) Baris PO memuat ringkasan jumlah item + total",
-          "item" in po_vals[5] and "Total:" in po_vals[7],
-          f"got {po_vals[5]!r} / {po_vals[7]!r}")
+          "item" in po_vals[4] and "Total:" in po_vals[6],
+          f"got {po_vals[4]!r} / {po_vals[6]!r}")
+    check("(v3.9.35) Anak PERTAMA: STATUS ↳ di kolom Pemasok "
+          "(merge vertical — di bawah nama pemasok)",
+          kid_vals[2] == "↳ Selesai",
+          f"got {kid_vals[2]!r}")
+    check("(v3.9.35) Anak KEDUA: kolom Pemasok kosong (nilai status "
+          "sekali per PO)",
+          kid2_vals[2] == "", f"got {kid2_vals[2]!r}")
+    check("(v3.9.35) Tag per-cell po_status_note terpasang (anak pertama "
+          "tiap PO — teks redup; path-agnostic Tk 8.6 overlay / Tk 9 "
+          "native)",
+          _cell_tag_has47(rv.tree, "po_status_note", "po_1_1",
+                          "Pemasok"),
+          f"Tk={tk.TkVersion} has={_cell_tag_has47(rv.tree, 'po_status_note', 'po_1_1', 'Pemasok')}")
     check("(v3.9) Baris anak = HANYA item (info PO tidak diulang)",
-          kid_vals[0] == "" and kid_vals[1] == "" and kid_vals[2] == "" and
-          kid_vals[3] == "" and kid_vals[4] == "" and
-          kid_vals[5] == "AYAM FILET" and
-          kid_vals[6] == "GR" and kid_vals[7] == "10",
+          kid_vals[0] == "" and kid_vals[1] == "" and
+          kid_vals[3] == "" and
+          kid_vals[4] == "AYAM FILET" and
+          kid_vals[5] == "GR" and kid_vals[6] == "10",
           f"got {list(kid_vals)}")
     check("(v3.9) Tgl/Jam Pembuatan tersembunyi default",
           "Tgl/Jam Pembuatan" in rv._colmgr.hidden and
           "Tgl/Jam Pembuatan" not in rv.tree.cget("displaycolumns"),
           f"hidden={rv._colmgr.hidden}")
+    check("(v3.9.35) Tgl/Jam Pembuatan format panjang + jam",
+          po_vals[7] == "02 Juni 2024 09:00", f"got {po_vals[7]!r}")
     gt = rv.tree.item(rv.tree.get_children("")[-1], "values")
     check("(v3.9) Grand total: N PO + total qty di kolom Kuantitas",
-          gt[5] == "12 PO" and gt[7] == "720",
-          f"got {gt[5]!r} / {gt[7]!r}")
+          gt[4] == "12 PO" and gt[6] == "720",
+          f"got {gt[4]!r} / {gt[6]!r}")
 
     app.rincian_view.cabang_var.set("MLGPAR")
     app.rincian_view._refresh()
@@ -5857,19 +5915,20 @@ def main():
           all(_rn29(_v30) == _w30 for _v30, _w30 in _mat30),
           f"got {[(repr(_v30), _rn29(_v30)) for _v30, _w30 in _mat30 if _rn29(_v30) != _w30]}")
 
-    check("(v3.9.20/35-c1) _fmt_date/_fmt_datetime NaT/pd.NA-safe (dulu "
-          "ValueError strftime → tab mati) + nilai normal utuh",
+    check("(v3.9.20/35-c1 → v3.9.35) _fmt_date/_fmt_datetime NaT/pd.NA-safe "
+          "(dulu ValueError strftime → tab mati) + nilai normal format "
+          "PANJANG Indonesia (v3.9.35)",
           _RPV30._fmt_date(pd.NaT) == "" and
           _RPV30._fmt_datetime(pd.NaT) == "" and
           _RPV30._fmt_date(pd.NA) == "" and
-          _RPV30._fmt_date(pd.Timestamp("2026-08-14")) == "2026-08-14" and
+          _RPV30._fmt_date(pd.Timestamp("2026-08-14")) == "14 Agustus 2026" and
           _RPV30._fmt_datetime(
-              pd.Timestamp("2026-08-14 07:30:05")) == "2026-08-14 07:30:05" and
-          _RPV30._fmt_date("2026-08-14") == "2026-08-14")
-    check("(v3.9.20/35-c1) _fmt_date series map: NaT → '' (render baris NaT "
-          "tetap jalan)",
+              pd.Timestamp("2026-08-14 07:30:05")) == "14 Agustus 2026 07:30" and
+          _RPV30._fmt_date("2026-08-14") == "14 Agustus 2026")
+    check("(v3.9.20/35-c1 → v3.9.35) _fmt_date series map: NaT → '' (render "
+          "baris NaT tetap jalan) + format panjang",
           pd.Series([pd.Timestamp("2026-08-01"), pd.NaT]).map(
-              _RPV30._fmt_date).tolist() == ["2026-08-01", ""])
+              _RPV30._fmt_date).tolist() == ["01 Agustus 2026", ""])
 
     check("(v3.9.20/35-c1) _ri_balancing: RI Okt vs PO Agt → 'RI Balancing' "
           "(kasus spec user)",
@@ -5960,11 +6019,11 @@ def main():
                    if k != "grand_total"]
     _vals30r = _rv30r1.tree.item(_parents30r[0], "values") \
         if _parents30r else None
-    check("(v3.9.20/35-c1) Rincian PO: Tanggal/Tgl-Jam NaT render '' tanpa "
-          "⚠ (dulu ValueError → 'Gagal menyiapkan pivot PO')",
+    check("(v3.9.20/35-c1 → v3.9.35) Rincian PO: Tanggal/Tgl-Jam NaT render "
+          "'' tanpa ⚠ (dulu ValueError → 'Gagal menyiapkan pivot PO')",
           "⚠" not in _rv30r1.status_var.get() and
           len(_parents30r) == 1 and _vals30r is not None and
-          _vals30r[0] == "" and _vals30r[8] == "" and
+          _vals30r[0] == "" and _vals30r[7] == "" and
           _vals30r[1] == "MLGPAR",
           f"status={_rv30r1.status_var.get()!r} vals={_vals30r}")
     _top30r1.destroy()
@@ -5997,10 +6056,10 @@ def main():
     _pump30(0.1)
     _rv30r2.ensure_refreshed()
     wait_view(root, _rv30r2)
-    check("(v3.9.20/35-c1) Rincian PO: nilai filter Tanggal = ['', "
-          "'2026-09-02'] ('' sah — baris anak kosong; hanya literal "
-          "'None'/'nan'/'NaT' yang dibuang)",
-          _rv30r2._col_values("Tanggal") == ["", "2026-09-02"],
+    check("(v3.9.20/35-c1 → v3.9.35) Rincian PO: nilai filter Tanggal = "
+          "['', '02 September 2026'] ('' sah — baris anak kosong; hanya "
+          "literal 'None'/'nan'/'NaT' yang dibuang; format panjang)",
+          _rv30r2._col_values("Tanggal") == ["", "02 September 2026"],
           f"got {_rv30r2._col_values('Tanggal')}")
     _top30r2.destroy()
     root.update()
@@ -9553,8 +9612,9 @@ def main():
     root.update()
 
     # --- (j) followup: toggle-remove ikut buang resolved orphan ---------
-    from src.ui import followup as _fu45
     from pathlib import Path as _P45
+
+    from src.ui import followup as _fu45
     _fu45.followup_path = lambda: _P45(_tmp45) / "followup.json"
     _fu45.resolved_path = lambda: _P45(_tmp45) / "followup_resolved.json"
     _st45 = _fu45.FollowUpStore()
@@ -9861,6 +9921,113 @@ def main():
         _os46.unlink(xlsx_path)
         _os46.unlink("komparasi_last.json")
     # Cleanup
+    print("== 47. (v3.9.35) SELEKSI SEL ALA EXCEL (region + Ctrl+C per-sel) ==")
+
+    _top47 = tk.Toplevel(root)
+    _top47.geometry("420x220+40+40")
+    _t47 = ttk.Treeview(_top47, columns=("A", "B", "C"), show="headings")
+    for _c47 in ("A", "B", "C"):
+        _t47.heading(_c47, text=_c47)
+        _t47.column(_c47, width=90)
+    enable_multi_select(_t47)
+    _t47.insert("", "end", iid="r1", values=("1", "2", "3"))
+    _t47.insert("", "end", iid="r2", values=("4", "5", "6"))
+    _t47.pack(fill="both", expand=True)
+    root.update_idletasks()
+    root.update()
+    check("(v3.9.35) enable_cell_select terpasang OTOMATIS oleh "
+          "enable_multi_select (semua tabel + popup + clone)",
+          getattr(_t47, "_cellsel_bound", False)
+          and getattr(_t47, "_cellsel_active", False) is False,
+          f"bound={getattr(_t47, '_cellsel_bound', None)} "
+          f"active={getattr(_t47, '_cellsel_active', None)}")
+    _box47 = _t47.bbox("r1", "B")
+    # klik sel r1/B → jangkar region 1 sel (baris r1 ikut terpilih native)
+    _t47.event_generate("<Button-1>", x=_box47[0] + 10, y=_box47[1] + 5)
+    root.update()
+    check("(v3.9.35) Klik sel → region aktif (jangkar kolom B, baris "
+          "terpilih native)",
+          _t47._cellsel_active and _t47._cellsel_anchor == "B"
+          and _t47.selection() == ("r1",),
+          f"active={_t47._cellsel_active} "
+          f"anchor={getattr(_t47, '_cellsel_anchor', None)} "
+          f"sel={_t47.selection()}")
+    check("(v3.9.35) Highlight region via tag per-cell 'cellsel' = 1 sel "
+          "(path-agnostic)",
+          _cell_tag_has47(_t47, "cellsel", "r1", "B"),
+          f"has={_cell_tag_has47(_t47, 'cellsel', 'r1', 'B')}")
+    # drag → kolom fokus C + seleksi 2 baris → region persegi 2×2
+    _t47.selection_set(("r1", "r2"))
+    _box47c = _t47.bbox("r2", "C")
+    _t47.event_generate("<B1-Motion>", x=_box47c[0] + 10,
+                        y=_box47c[1] + 5)
+    root.update()
+    check("(v3.9.35) Drag sel → region persegi (2 baris × kolom B..C) → "
+          "TSV per-sel TANPA header (semantik Excel)",
+          _t47._cellsel_focus == "C"
+          and cell_region_tsv(_t47) == "2\t3\n5\t6",
+          f"focus={getattr(_t47, '_cellsel_focus', None)} "
+          f"tsv={cell_region_tsv(_t47)!r}")
+    _t47.event_generate("<Control-c>")
+    root.update()
+    try:
+        _clip47 = root.clipboard_get()
+    except tk.TclError:
+        _clip47 = ""
+    check("(v3.9.35) Ctrl+C region → clipboard = TSV per-sel",
+          _clip47 == "2\t3\n5\t6", f"got {_clip47!r}")
+    # Esc → region berakhir; fallback copy BARIS + header (v3.9.33) utuh
+    _t47.event_generate("<Escape>")
+    root.update()
+    _t47.event_generate("<Control-c>")
+    root.update()
+    try:
+        _clip47b = root.clipboard_get()
+    except tk.TclError:
+        _clip47b = ""
+    check("(v3.9.35) Esc → region berakhir; Ctrl+C kembali ke copy baris "
+          "penuh + header (v3.9.33 tak regres)",
+          (not _t47._cellsel_active) and _clip47b.startswith("A\tB\tC")
+          and "1\t2\t3" in _clip47b and "4\t5\t6" in _clip47b,
+          f"active={_t47._cellsel_active} clip={_clip47b!r}")
+    # Klik area KOSONG (bawah baris terakhir) → region berakhir
+    _box47 = _t47.bbox("r1", "B")
+    _t47.event_generate("<Button-1>", x=20, y=_box47[1] + 2 * _box47[3] + 60)
+    root.update()
+    check("(v3.9.35) Klik area kosong → region berakhir (perilaku Excel)",
+          not _t47._cellsel_active,
+          f"active={_t47._cellsel_active}")
+    _t47.destroy()
+    _top47.destroy()
+
+    # --- integrasi tabel nyata: tab 🛒 Rincian PO -----------------------
+    select_and_wait(root, app, app.tab_rincian, app.rincian_view)
+    _rt47 = app.rincian_view.tree
+    _rpo47 = _rt47.get_children("")[0]
+    _pb47 = _rt47.bbox(_rpo47, "Pemasok")
+    if _pb47:
+        _rt47.event_generate("<Button-1>", x=_pb47[0] + 10,
+                             y=_pb47[1] + 8)
+        root.update()
+        check("(v3.9.35) Tabel nyata (Rincian PO): klik sel Pemasok → "
+              "region aktif + baris PO terpilih",
+              _rt47._cellsel_active and _rt47._cellsel_anchor == "Pemasok"
+              and _rt47.selection()
+              and _rt47.selection()[0] == _rpo47,
+              f"active={_rt47._cellsel_active} "
+              f"anchor={getattr(_rt47, '_cellsel_anchor', None)}")
+        copy_cell_region_tsv(_rt47)
+        try:
+            _clip47c = root.clipboard_get()
+        except tk.TclError:
+            _clip47c = ""
+        check("(v3.9.35) Copy 1 sel di tabel nyata → nilai pemasok "
+              "(PT Sumber)",
+              _clip47c == "PT Sumber", f"got {_clip47c!r}")
+    else:
+        check("(v3.9.35) Tabel nyata (Rincian PO): bbox Pemasok tersedia",
+              False, "bbox kosong — sel tak terlihat")
+
     root.destroy()
 
     print()

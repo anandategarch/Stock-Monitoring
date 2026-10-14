@@ -6,7 +6,7 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
-> **Versi terkini: v3.9.34** — kolom Nominal (Harga 41.09 × Qty Deviasi) di tab Deviasi GR/PCS & mode Komparasi · TAB BARU 🧮 Nominal Deviasi (Σ per resto). Changelog di bawah.
+> **Versi terkini: v3.9.35** — Rincian PO: status pesanan ↳ merge-vertical di bawah Pemasok + tanggal panjang "01 Oktober 2026" · SELEKSI SEL ALA EXCEL di semua tabel (klik/drag sel → Ctrl+C copy per-sel tanpa header). Changelog di bawah.
 
 ## Quick Start (Python Edition)
 
@@ -24,6 +24,15 @@ python -m src.main
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
+
+### v3.9.35 — RINCIAN PO: STATUS DI BAWAH PEMASOK (MERGE VERTICAL) + TANGGAL PANJANG + SELEKSI SEL ALA EXCEL
+> User: *"kolom status pesanan bisa gak ditaruh di bawah kolom pemasok? seperti merge vertical gitu. Sama kaya kolom nama barang yang ditampilkan secara vertical. Format tanggal pakai 01 Oktober 2026 aja format panjang"* + *"kenapa ya aku tidak bisa select disemua tabel nya? aku mau copy data nya seperti tabel di excel kan di cell mana aja aku bebas buat select dan copy"*.
+
+- **(1) TAB 🛒 RINCIAN PO — STATUS MERGE DI BAWAH PEMASOK**: kolom **Status Pesanan DIHAPUS** dari tabel; nilai status kini tampil **"↳ Status" di kolom Pemasok pada baris anak PERTAMA tiap PO** (merge-vertical — tepat di bawah nama pemasok, sekali per PO, anak lain kosong — pola kolom Nama Barang); teks status **redup** via tag per-cell `po_status_note` (membaca anotasi, bukan data pemasok; dipasang pasca-render + di clone ⛶); filter status tetap via combo **STATUS PESANAN** di kartu Filter.
+- **(2) TANGGAL FORMAT PANJANG INDONESIA** — kolom Tanggal: **"02 Juni 2024"** (dulu 2024-06-02); Tgl/Jam Pembuatan: **"02 Juni 2024 09:00"**; nama bulan Indonesia manual (strftime %B = locale); NaT/pd.NA tetap aman; nilai ⧩ filter ikut format baru.
+- **(3) SELEKSI SEL ALA EXCEL — SEMUA TABEL** (`enable_cell_select`, otomatis via `enable_multi_select` → 15+ tree: semua view + popup + clone ⛶): **klik sel = jangkar; drag / Shift+klik = persegi** (baris terpilih × rentang kolom jangkar→fokus — baris diperluas native extended); **Ctrl+C = TSV per-sel TANPA header** (semantik Excel: hanya sel ter-highlight; tanpa region → copy baris penuh + header v3.9.33 utuh); highlight = tag per-cell `cellsel` teal-200 (mekanisme overlay minus-merah: teks + warna baris tetap terlihat, klik/wheel diteruskan, ikut scroll); Esc = bersihkan region (clone ⛶ tak tertutup); klik heading/separator = region dibiarkan (resize/funnel aman); klik area kosong = region berakhir; region > 20.000 sel tanpa overlay (copy tetap jalan — anti-beku Ctrl+A di 100 ribu baris).
+- **BUGFIX Tk 9**: `tag cell add` native = TAMBAH → region menyusut meninggalkan highlight basi → `_cellsel_apply_cells` kini clear-then-add (`tag cell remove` tanpa cellList); binding press jalan SEBELUM seleksi native kelas → reapply dijadwalkan `after_idle` (dulu region langsung mati karena selection() masih kosong saat press).
+- **VERIFIKASI**: test_ui_redesign **939/939 PASS** (924 + §47 BARU 15 check + 4 assertion lama diupdate format panjang/posisi kolom) + test_mock ALL PASS + ruff src **197 == baseline** & test 16 < 17.
 
 ### v3.9.34 — KOLOM NOMINAL DI DEVIASI GR/PCS & KOMPARASI · TAB 🧮 NOMINAL DEVIASI PER RESTO
 > User: *"ada tab nominal Deviasi itu isinya Total sum dari nama barang kayak di laporan sampel kolom nominal deviasi yang dapat dari harga × kuantitas deviasi cuman ini disum per resto"* + kolom Nominal di tab 📦 Deviasi GR/🧩 Deviasi PCS dan mode ⚖ Komparasi (tab 📋 Laporan Deviasi).
