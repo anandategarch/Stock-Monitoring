@@ -431,6 +431,26 @@ Memverifikasi:
     Esc bersihkan, klik kosong berakhir, fallback copy baris utuh;
     highlight via tag per-cell 'cellsel' (mekanisme overlay minus
     merah — teks + warna baris tetap terlihat, event diteruskan).
+
+48. v3.9.36 — TAB 🧮 NOMINAL DEVIASI: POPUP PER ITEM (SEKARANG vs
+    BULAN LALU) + KATEGORI DEFAULT DEVIASI + POPUP TANPA HARGA + PIVOT
+    KATEGORI DEFAULT (§48; user: "di tab nominal deviasi bisa pop up
+    per item dengan kolom: Nama resto, nama barang, Kuantiti deviasi,
+    Nominal deviasi Sekarang, Nominal deviasi bulan lalu" + "tambah
+    filter Kategori dengan default pilihan Kategori = Deviasi di tab
+    nominal deviasi. Yang tanpa harga juga bisa pop up untuk tampilkan
+    tanpa harga item apa aja" + "Di tab pivot tabel Default kategori
+    Deviasi"): (1) popup rincian 5 kolom — 'Nominal Deviasi Bulan
+    Lalu' dari FILE deviasi tab ⚖ Komparasi (parse_deviasi_file;
+    nominal_common.hitung_nominal_lalu_pairs: bulan TERBARU + minggu
+    TERAKHIR per pasangan; harga 41.09 × DEV Lalu; app wiring
+    lalu_provider + on_file_loaded → on_lalu_file_changed; tanpa file
+    → '-' + footer petunjuk); (2) filter KATEGORI tab 🧮 (pola
+    deviasi_view — default 'Deviasi' case-insensitive, fallback
+    'Semua'; reset ikut); (3) double-click sel kolom 'Tanpa Harga' →
+    popup daftar barang tanpa harga + ALASAN (tak ada di 41.09 /
+    satuan tak terkonversi; baris TOTAL → semua resto); (4) pivot:
+    default kategori 'Deviasi' (fallback '(All)'; reset ikut).
 """
 import os
 import shutil
@@ -791,7 +811,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.35", APP_VERSION == "3.9.35", f"got {APP_VERSION}")
+    check("Versi = 3.9.36", APP_VERSION == "3.9.36", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -9824,16 +9844,32 @@ def main():
     _pt46 = _findtree46(_rv46._detail_wins[0])
     root.update()
     _pk46 = _pt46.get_children("") if _pt46 is not None else []
-    _prow46 = {str(_pt46.set(k, "Nama Barang")): str(_pt46.set(k, "Nominal"))
+    # v3.9.36: kolom popup = 5 (Nama Resto · Nama Barang · Kuantiti
+    # Deviasi · Nominal Deviasi Sekarang · Nominal Deviasi Bulan Lalu)
+    _prow46 = {str(_pt46.set(k, "Nama Barang")):
+               str(_pt46.set(k, "Nominal Deviasi Sekarang"))
                for k in _pk46} if _pt46 is not None else {}
+    _ptot46 = next((k for k in _pk46
+                    if str(_pt46.set(k, "Nama Resto")) == "TOTAL"), None)
+    check("(v3.9.36) popup rincian: 5 KOLOM (Nama Resto + Bulan Lalu "
+          "tambahan — tanpa file deviasi → Lalu '-')",
+          _pt46 is not None
+          and list(_pt46["columns"]) == [
+              "Nama Resto", "Nama Barang", "Kuantiti Deviasi",
+              "Nominal Deviasi Sekarang", "Nominal Deviasi Bulan Lalu"]
+          and all(str(_pt46.set(k, "Nominal Deviasi Bulan Lalu")) == "-"
+                  for k in _pk46),
+          f"cols={None if _pt46 is None else list(_pt46['columns'])}")
     check("(v3.9.34) popup rincian MLGPAR: 3 barang + TOTAL; GULA "
           "180.000; TOTAL Σ 180.020",
           len(_pk46) == 4
           and _prow46.get("GULA PASIR") == "180.000"
           and _prow46.get("AYAM FILET") == "20"
           and _prow46.get("KOPI BUBUK 100G") == "-"
-          and _prow46.get("TOTAL") == "180.020",
-          f"got {_prow46}")
+          and _ptot46 is not None
+          and str(_pt46.set(_ptot46, "Nominal Deviasi Sekarang"))
+          == "180.020",
+          f"got {_prow46} tot={_ptot46}")
     # sort → TOTAL tetap dipin di ujung
     _rv46._sort_by("Nominal Deviasi", reverse=True)
     root.update()
@@ -10027,6 +10063,352 @@ def main():
     else:
         check("(v3.9.35) Tabel nyata (Rincian PO): bbox Pemasok tersedia",
               False, "bbox kosong — sel tak terlihat")
+
+    # =====================================================================
+    print("== 48. (v3.9.36) 🧮 POPUP PER ITEM (SEKARANG × BULAN LALU) + "
+          "KATEGORI DEFAULT + POPUP TANPA HARGA + PIVOT KATEGORI ==")
+
+    # --- (a) nominal_common.hitung_nominal_lalu_pairs (pure) -----------
+    from src.ui.nominal_common import hitung_nominal_lalu_pairs as _hlp48
+    _fdf48 = pd.DataFrame({
+        "Resto": ["1001.MLGPAR", "1001.MLGPAR", "1001.MLGPAR",
+                  "1002.SBYKET"],
+        "Nama Barang": ["AYAM FILET", "AYAM FILET", "KOPI BUBUK 100G",
+                        "AYAM FILET"],
+        "Satuan": ["GR", "GR", "PCS", "GR"],
+        "Minggu": ["WEEK 1", "WEEK 4", "WEEK 4", "WEEK 4"],
+        "DEV Lalu": [49.0, 113.0, -5.0, 74.0],
+        "BULAN": ["201.OKT 26", "204.OKT 26", "204.OKT 26", "203.SEP 26"],
+        "_bulan_num": [10, 10, 10, 9],
+        "_resto_norm": ["MLGPAR", "MLGPAR", "MLGPAR", "SBYKET"],
+        "_bahan_norm": ["AYAM FILET", "AYAM FILET", "KOPI BUBUK 100G",
+                        "AYAM FILET"],
+        "_h": [7, 28, 28, 21],
+    })
+    _l48 = _hlp48(_fdf48, {"AYAM FILET": (10.0, "GR")},
+                  {"rasio": {}, "terkecil": {}})
+    _lm48 = {(str(r["_resto_norm"]), str(r["_bahan_norm"])): r
+             for _, r in _l48.iterrows()}
+    check("(v3.9.36) hitung_nominal_lalu_pairs: bulan TERBARU (OKT bukan "
+          "SEP) + minggu TERAKHIR per pasangan (AYAM W4 113, bukan W1 49)",
+          len(_l48) == 2
+          and float(_lm48[("MLGPAR", "AYAM FILET")]["Qty Deviasi Lalu"])
+          == 113.0
+          and ("SBYKET", "AYAM FILET") not in _lm48,
+          f"got {len(_l48)} rows: "
+          f"{_l48[['Resto', 'Nama Barang', 'Qty Deviasi Lalu']].to_dict('records')}")
+    check("(v3.9.36) hitung_nominal_lalu_pairs: Nominal Lalu = harga 41.09 "
+          "× DEV Lalu (10 × 113 = 1.130; KOPI tanpa harga → None)",
+          float(_lm48[("MLGPAR", "AYAM FILET")]["Nominal Lalu"]) == 1130.0
+          and pd.isna(_lm48[("MLGPAR", "KOPI BUBUK 100G")]["Nominal Lalu"]),
+          f"got AYAM={_lm48[('MLGPAR', 'AYAM FILET')]['Nominal Lalu']} "
+          f"KOPI={_lm48[('MLGPAR', 'KOPI BUBUK 100G')]['Nominal Lalu']}")
+    check("(v3.9.36) hitung_nominal_lalu_pairs: file None / kolom internal "
+          "tak ada → frame kosong (defensif)",
+          _hlp48(None, {}, {}).empty
+          and _hlp48(pd.DataFrame({"Resto": ["X"], "Nama Barang": ["Y"]}),
+                     {}, {}).empty,
+          "frame tak kosong di jalur defensif")
+
+    # --- (b) NominalRestoView: kategori default + popup 5 kolom -------
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV48
+    _top48 = tk.Toplevel(root)
+    _top48.geometry("1400x750+10+10")
+    _holder48 = {"df": None}
+    _rv48 = _NRV48(_top48, lalu_provider=lambda: _holder48["df"])
+    _rv48.pack(fill="both", expand=True)
+    _dn48 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
+    } for b, r, s, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0, "DEVIASI"),
+        ("GULA PASIR", "MLGPAR", "KG", 12.0, "TEPAT"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0, "DEVIASI"),
+        ("AYAM FILET", "BDGSET", "GR", 3.0, "DEVIASI"),
+    ]])
+    # TANPA peta rasio GULA → satuan KG tak terkonversi → 'Harga Tampil'
+    # '15 GR*' + nominal None (jalur keterangan popup tanpa harga).
+    _hmap48 = {"AYAM FILET": (10.0, "GR"), "GULA PASIR": (15.0, "GR")}
+    _kmap48 = {"rasio": {}, "terkecil": {}}
+    _rv48.load_data(_dn48, harga_map=_hmap48, konversi_map=_kmap48)
+    _rv48.ensure_refreshed()
+    wait_view(root, _rv48)
+
+    def _findtree48(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Treeview):
+                return c
+            t = _findtree48(c)
+            if t is not None:
+                return t
+        return None
+
+    check("(v3.9.36) 🧮: combobox KATEGORI terisi + DEFAULT seleksi "
+          "'DEVIASI' (case-insensitive; 'Semua' = tanpa filter)",
+          list(_rv48._kategori_combo["values"]) == ["Semua", "DEVIASI",
+                                                    "TEPAT"]
+          and _rv48._kategori_var.get() == "DEVIASI"
+          and _rv48._kategori_sel == "DEVIASI",
+          f"values={list(_rv48._kategori_combo['values'])} "
+          f"var={_rv48._kategori_var.get()!r} sel={_rv48._kategori_sel!r}")
+    _r48 = {str(_rv48.tree.set(_i48, "Resto")):
+            _rv48.tree.item(_i48, "values")
+            for _i48 in _rv48.tree.get_children("")}
+    check("(v3.9.36) 🧮: filter KATEGORI Deviasi diterapkan — GULA "
+          "(TEPAT) terbuang: MLGPAR 2 barang (1 tanpa) Σ 20; TOTAL 3 "
+          "barang Σ 50",
+          _r48.get("MLGPAR") is not None and _r48["MLGPAR"][1] == "2"
+          and _r48["MLGPAR"][2] == "1" and _r48["MLGPAR"][3] == "20"
+          and _r48.get("TOTAL") is not None and _r48["TOTAL"][1] == "3"
+          and _r48["TOTAL"][3] == "50",
+          f"got {_r48}")
+    check("(v3.9.36) 🧮: footer status menyebut KATEGORI aktif",
+          "KATEGORI DEVIASI" in _rv48.status_var_label.get(),
+          f"got {_rv48.status_var_label.get()!r}")
+
+    # popup 5 kolom TANPA file (provider → None): Lalu '-' + flag
+    _e48 = tk.Event()
+    _e48.widget = _rv48.tree
+    _rv48.tree.selection_set(
+        next(_i48 for _i48 in _rv48.tree.get_children("")
+             if _rv48.tree.set(_i48, "Resto") == "MLGPAR"))
+    _rv48._on_double_click(_e48)
+    root.update()
+    wait_view(root, _rv48)
+    check("(v3.9.36) 🧮: double-click resto (event tanpa x → kompatibel "
+          "pemanggil lama) → popup rincian; TANPA file → semua Bulan "
+          "Lalu '-' + _lalu_loaded False",
+          len(_rv48._detail_wins) == 1
+          and not _rv48._lalu_loaded
+          and _rv48._lalu_df is not None and _rv48._lalu_df.empty
+          and all(str(_findtree48(_rv48._detail_wins[0]).set(
+              _k48, "Nominal Deviasi Bulan Lalu")) == "-"
+              for _k48 in _findtree48(_rv48._detail_wins[0])
+              .get_children("")),
+          f"wins={len(_rv48._detail_wins)} loaded={_rv48._lalu_loaded}")
+
+    # file deviasi masuk (pola komparasi _apply_file_state → callback):
+    # on_lalu_file_changed → recompute → Lalu terisi
+    _holder48["df"] = _fdf48
+    _rv48.on_lalu_file_changed()
+    wait_view(root, _rv48)
+    check("(v3.9.36) 🧮: file deviasi berganti (on_lalu_file_changed) → "
+          "snapshot lalu dihitung ulang (_lalu_loaded True)",
+          _rv48._lalu_loaded and not _rv48._lalu_df.empty,
+          f"loaded={_rv48._lalu_loaded}")
+    _rv48._close_detail_wins()
+    # re-render (on_lalu_file_changed) menghapus seleksi tree → pasang
+    # ulang sebelum double-click (pola §46)
+    _rv48.tree.selection_set(
+        next(_i48 for _i48 in _rv48.tree.get_children("")
+             if _rv48.tree.set(_i48, "Resto") == "MLGPAR"))
+    _rv48._on_double_click(_e48)
+    root.update()
+    wait_view(root, _rv48)
+    _pt48 = _findtree48(_rv48._detail_wins[0])
+    _prow48 = {str(_pt48.set(_k48, "Nama Barang")): _pt48.item(
+        _k48, "values") for _k48 in _pt48.get_children("")}
+    _ptot48 = next((_k48 for _k48 in _pt48.get_children("")
+                    if str(_pt48.set(_k48, "Nama Resto")) == "TOTAL"),
+                   None)
+    check("(v3.9.36) 🧮 POPUP PER ITEM: 5 kolom persis (Nama Resto · Nama "
+          "Barang · Kuantiti Deviasi · Nominal Deviasi Sekarang · "
+          "Nominal Deviasi Bulan Lalu); AYAM = 20 vs 1.130 (W4 113×10); "
+          "TOTAL kedua nominal",
+          list(_pt48["columns"]) == [
+              "Nama Resto", "Nama Barang", "Kuantiti Deviasi",
+              "Nominal Deviasi Sekarang", "Nominal Deviasi Bulan Lalu"]
+          and _prow48.get("AYAM FILET") is not None
+          and _prow48["AYAM FILET"][0] == "MLGPAR"
+          and _prow48["AYAM FILET"][2] == "2"
+          and _prow48["AYAM FILET"][3] == "20"
+          and _prow48["AYAM FILET"][4] == "1.130"
+          and _ptot48 is not None
+          and _pt48.set(_ptot48, "Nominal Deviasi Sekarang") == "20"
+          and _pt48.set(_ptot48, "Nominal Deviasi Bulan Lalu")
+          == "1.130",
+          f"cols={list(_pt48['columns'])} got {_prow48} "
+          f"tot={_ptot48}")
+    check("(v3.9.36) 🧮 popup: KOPI ada di file tapi TANPA harga → "
+          "kedua nominal '-' (transparan)",
+          _prow48.get("KOPI BUBUK 100G") is not None
+          and _prow48["KOPI BUBUK 100G"][3] == "-"
+          and _prow48["KOPI BUBUK 100G"][4] == "-",
+          f"got {_prow48.get('KOPI BUBUK 100G')}")
+
+    # kategori 'Semua' → GULA (TEPAT) kembali + jadi tanpa harga
+    # (satuan KG tak terkonversi → '15 GR*')
+    _rv48._kategori_var.set("Semua")
+    _rv48._on_kategori_changed()
+    wait_view(root, _rv48)
+    _r48b = {str(_rv48.tree.set(_i48, "Resto")):
+             _rv48.tree.item(_i48, "values")
+             for _i48 in _rv48.tree.get_children("")}
+    check("(v3.9.36) 🧮: KATEGORI 'Semua' → GULA kembali (MLGPAR 3 "
+          "barang · 2 tanpa harga — GULA tak terkonversi + KOPI tak ada "
+          "di 41.09)",
+          _r48b.get("MLGPAR") is not None and _r48b["MLGPAR"][1] == "3"
+          and _r48b["MLGPAR"][2] == "2",
+          f"got {_r48b}")
+
+    # double-click sel kolom 'Tanpa Harga' → popup daftar + alasan
+    _mlg48 = next(_i48 for _i48 in _rv48.tree.get_children("")
+                  if _rv48.tree.set(_i48, "Resto") == "MLGPAR")
+    _bb48 = _rv48.tree.bbox(_mlg48, "#3")
+    check("(v3.9.36) 🧮: bbox sel 'Tanpa Harga' tersedia (kolom #3)",
+          bool(_bb48), "bbox kosong")
+    if _bb48:
+        _rv48._close_detail_wins()
+        _e48b = tk.Event()
+        _e48b.widget = _rv48.tree
+        _e48b.x = _bb48[0] + 5
+        _e48b.y = _bb48[1] + 5
+        _rv48.tree.selection_set(_mlg48)
+        _rv48._on_double_click(_e48b)
+        root.update()
+        wait_view(root, _rv48)
+        _nh48 = _findtree48(_rv48._detail_wins[0])
+        _nrow48 = {str(_nh48.set(_k48, "Nama Barang")): _nh48.item(
+            _k48, "values") for _k48 in _nh48.get_children("")}
+        check("(v3.9.36) 🧮 POPUP TANPA HARGA (double-click sel kolom "
+              "Tanpa Harga): kolom Resto/Barang/Satuan/Qty/Keterangan + "
+              "ALASAN — GULA 'satuan tak terkonversi (15 GR*)', KOPI "
+              "'tak ada di 41.09'",
+              list(_nh48["columns"]) == [
+                  "Nama Resto", "Nama Barang", "Satuan",
+                  "Kuantiti Deviasi", "Keterangan"]
+              and _nrow48.get("GULA PASIR") is not None
+              and "tak terkonversi" in _nrow48["GULA PASIR"][4]
+              and "15 GR*" in _nrow48["GULA PASIR"][4]
+              and _nrow48.get("KOPI BUBUK 100G") is not None
+              and "41.09" in _nrow48["KOPI BUBUK 100G"][4]
+              and len(_nrow48) == 2,
+              f"cols={list(_nh48['columns'])} got {_nrow48}")
+        # baris TOTAL + kolom Tanpa Harga → SEMUA resto
+        _rv48._close_detail_wins()
+        _tot48 = next(_i48 for _i48 in _rv48.tree.get_children("")
+                      if _rv48.tree.set(_i48, "Resto") == "TOTAL")
+        _bt48 = _rv48.tree.bbox(_tot48, "#3")
+        if _bt48:
+            _e48c = tk.Event()
+            _e48c.widget = _rv48.tree
+            _e48c.x = _bt48[0] + 5
+            _e48c.y = _bt48[1] + 5
+            _rv48.tree.selection_set(_tot48)
+            _rv48._on_double_click(_e48c)
+            root.update()
+            wait_view(root, _rv48)
+            _nh48b = _findtree48(_rv48._detail_wins[0])
+            check("(v3.9.36) 🧮: double-click sel Tanpa Harga baris TOTAL "
+                  "→ popup SEMUA resto (2 barang MLGPAR)",
+                  _nh48b is not None
+                  and len(_nh48b.get_children("")) == 2,
+                  f"got {len(_nh48b.get_children('')) if _nh48b else 0}")
+        else:
+            check("(v3.9.36) 🧮: bbox TOTAL Tanpa Harga tersedia",
+                  False, "bbox kosong")
+
+    # reset filter → kategori kembali ke DEFAULT 'Deviasi'
+    _rv48._reset_filter()
+    wait_view(root, _rv48)
+    check("(v3.9.36) 🧮: ✕ Reset Filter → KATEGORI kembali default "
+          "'DEVIASI'",
+          _rv48._kategori_var.get() == "DEVIASI"
+          and _rv48._kategori_sel == "DEVIASI",
+          f"var={_rv48._kategori_var.get()!r}")
+    _rv48.destroy()
+    _top48.destroy()
+    root.update()
+
+    # --- (c) pivot: DEFAULT KATEGORI = Deviasi -------------------------
+    from src.ui.pivot_view import PivotTableView as _PV48
+    _top48p = tk.Toplevel(root)
+    _top48p.geometry("1400x750+20+20")
+    _pv48 = _PV48(_top48p)
+    _pv48.pack(fill="both", expand=True)
+    _d48p = make_mock_append1().copy()
+    _d48p.loc[_d48p["Nama Barang"] == "AYAM FILET", "KATEGORI"] = "DEVIASI"
+    _pv48.load_data(_d48p)
+    _pv48.ensure_refreshed()
+    wait_view(root, _pv48)
+    check("(v3.9.36) 📊 Pivot: DEFAULT KATEGORI = 'DEVIASI' (load_data)",
+          _pv48.kategori_var.get() == "DEVIASI",
+          f"got {_pv48.kategori_var.get()!r}")
+    _par48 = [_pv48.tree.item(_i48, "text")
+              for _i48 in _pv48.tree.get_children("")]
+    check("(v3.9.36) 📊 Pivot: filter Deviasi AKTIF → hanya barang "
+          "ber-kategori DEVIASI (AYAM FILET) yang dirender",
+          _par48 == ["AYAM FILET"],
+          f"got {_par48}")
+    _pv48._reset_filter()
+    wait_view(root, _pv48)
+    check("(v3.9.36) 📊 Pivot: ✕ Reset Filter → kategori kembali "
+          "'DEVIASI' (bukan '(All)')",
+          _pv48.kategori_var.get() == "DEVIASI",
+          f"got {_pv48.kategori_var.get()!r}")
+    _pv48.destroy()
+    _top48p.destroy()
+    root.update()
+    check("(v3.9.36) 📊 app.pivot: data tanpa kategori 'Deviasi' (fixture "
+          "BAHAN) → fallback '(All)' — tabel tak dikosongkan senyap",
+          app.pivot_view.kategori_var.get() == "(All)",
+          f"got {app.pivot_view.kategori_var.get()!r}")
+
+    # --- (d) app wiring: lalu_provider + on_file_loaded ----------------
+    check("(v3.9.36) app: komparasi on_file_loaded = app._on_dev_file_"
+          "loaded (file berganti → segarkan tab 🧮)",
+          app.komparasi_view._on_file_loaded == app._on_dev_file_loaded,
+          "callback tak terpasang")
+    check("(v3.9.36) app: nominal_resto_view.lalu_provider membaca "
+          "komparasi_view._file_df (file §46d masih termuat)",
+          app.nominal_resto_view._lalu_provider is not None
+          and app.nominal_resto_view._lalu_provider()
+          is app.komparasi_view._file_df,
+          "provider tak membaca _file_df komparasi")
+    # E2E app: data + file (§46d) → popup Lalu via provider app
+    app.nominal_resto_view.load_data(_dn48, harga_map=_hmap48,
+                                     konversi_map=_kmap48)
+    # H bersama app kini 30 (default dinamis dari fixture append1 §8) —
+    # pasangkan ke Tanggal fixture _dn48 (pola test_mock E2E §46b)
+    app.nominal_resto_view.tanggal_h = 25
+    app.nominal_resto_view._dirty = True
+    select_and_wait(root, app, app.tab_nominal_resto,
+                    app.nominal_resto_view)
+    check("(v3.9.36) app E2E: provider membaca file komparasi → snapshot "
+          "Bulan Lalu TERISI (kolom popup hidup di app nyata)",
+          app.nominal_resto_view._lalu_loaded
+          and not app.nominal_resto_view._lalu_df.empty,
+          f"loaded={app.nominal_resto_view._lalu_loaded} "
+          f"n={len(app.nominal_resto_view._lalu_df)}")
+    _ap48 = app.nominal_resto_view
+    _ap48._close_detail_wins()
+    _e48d = tk.Event()
+    _e48d.widget = _ap48.tree
+    _ap48.tree.selection_set(
+        next(_i48 for _i48 in _ap48.tree.get_children("")
+             if _ap48.tree.set(_i48, "Resto") == "MLGPAR"))
+    _ap48._on_double_click(_e48d)
+    root.update()
+    wait_view(root, _ap48)
+    _apt48 = _findtree48(_ap48._detail_wins[0])
+    _aprow48 = {str(_apt48.set(_k48, "Nama Barang")): str(
+        _apt48.set(_k48, "Nominal Deviasi Bulan Lalu"))
+        for _k48 in _apt48.get_children("")}
+    _atot48 = next((_k48 for _k48 in _apt48.get_children("")
+                    if str(_apt48.set(_k48, "Nama Resto")) == "TOTAL"),
+                   None)
+    # §46d file: MLGPAR AYAM minggu TERAKHIR = W5 205 (H=31, dev 180 —
+    # baris straggler uji komparasi) → 10 × 180 = 1.800
+    check("(v3.9.36) app E2E: popup MLGPAR — AYAM Bulan Lalu = 1.800 "
+          "(W5 180 × harga 10 — minggu TERAKHIR file §46d; join kunci "
+          "ternormalisasi)",
+          _aprow48.get("AYAM FILET") == "1.800"
+          and _aprow48.get("KOPI BUBUK 100G") == "-"
+          and _atot48 is not None
+          and str(_apt48.set(_atot48, "Nominal Deviasi Bulan Lalu"))
+          == "1.800",
+          f"got {_aprow48} tot={_atot48}")
+    _ap48._close_detail_wins()
 
     root.destroy()
 

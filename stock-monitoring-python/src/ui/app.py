@@ -177,7 +177,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.35"  # v3.9.35 — status PO merge di bawah Pemasok + tanggal panjang + seleksi sel ala Excel
+APP_VERSION = "3.9.36"  # v3.9.36 — popup per item (Sekarang vs Bulan Lalu) + filter Kategori default Deviasi (🧮 + Pivot) + popup Tanpa Harga
 # v3.9.34 (user: kolom Nominal di Deviasi GR/PCS + Komparasi + tab Σ per
 # resto):
 # (1) kolom Nominal (Harga 41.09 × Qty Deviasi) di tab 📦 Deviasi GR &
@@ -2005,7 +2005,10 @@ class StockMonitorApp:
             initial_dir=(self.rootpath_var.get().strip()
                          if getattr(self, "rootpath_var", None) is not None
                          else ""),
-            h_state=self._shared_h)   # v3.9.7: filter minggu file
+            h_state=self._shared_h,   # v3.9.7: filter minggu file
+            # v3.9.36 — file deviasi berganti → segarkan kolom Bulan
+            # Lalu popup tab 🧮 Nominal Deviasi (pola listener H).
+            on_file_loaded=self._on_dev_file_loaded)
         self.laporan_view = LaporanDeviasiView(
             self._laporan_container,
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
@@ -2046,17 +2049,35 @@ class StockMonitorApp:
             self.laporan_view.pack(fill="both", expand=True)
             self.laporan_view.ensure_refreshed()
 
+    def _on_dev_file_loaded(self):
+        """v3.9.36 — file deviasi (tab ⚖ Komparasi) berubah: load baru /
+        ditutup. Tab 🧮 Nominal Deviasi memakai file itu sebagai sumber
+        kolom 'Nominal Deviasi Bulan Lalu' popup rincian → snapshot-nya
+        basi → segarkan (pola listener SharedTanggalH; tab tersembunyi
+        cukup ditandai dirty — refreshed saat dibuka)."""
+        nr = getattr(self, "nominal_resto_view", None)
+        if nr is not None:
+            nr.on_lalu_file_changed()
+
     def _build_nominal_resto_tab(self):
         """v3.9.34 — tab 🧮 Nominal Deviasi: Σ (Harga 41.09 × Qty
         Deviasi) per resto + TOTAL + double-click resto → rincian per
         barang (user: "ada tab nominal Deviasi, isinya total sum dari
         nama barang kayak di laporan sampel kolom nominal deviasi, yang
         dapat dari harga × kuantitas deviasi, cuman ini disum per
-        resto")."""
+        resto").
+
+        v3.9.36 — lalu_provider: sumber kolom 'Nominal Deviasi Bulan
+        Lalu' popup = file deviasi tab ⚖ Komparasi (komparasi_view.
+        _file_df — referensi DIGANTI tiap load, jadi lambda ini selalu
+        membaca file aktif; pembaruan dipicu on_file_loaded →
+        _on_dev_file_loaded)."""
         self.nominal_resto_view = NominalRestoView(
             self.tab_nominal_resto,
             go_to_proses=lambda: self.notebook.select(self.tab_proses),
-            h_state=self._shared_h)
+            h_state=self._shared_h,
+            lalu_provider=lambda: getattr(
+                self.komparasi_view, "_file_df", None))
         self.nominal_resto_view.pack(fill="both", expand=True)
 
     def _build_followup_tab(self):

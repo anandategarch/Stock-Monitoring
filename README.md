@@ -6,7 +6,7 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
-> **Versi terkini: v3.9.35** — Rincian PO: status pesanan ↳ merge-vertical di bawah Pemasok + tanggal panjang "01 Oktober 2026" · SELEKSI SEL ALA EXCEL di semua tabel (klik/drag sel → Ctrl+C copy per-sel tanpa header). Changelog di bawah.
+> **Versi terkini: v3.9.36** — 🧮 Nominal Deviasi: popup per item 5 kolom (Nominal Deviasi Sekarang vs **Bulan Lalu** dari file deviasi tab ⚖ Komparasi) · filter Kategori default "Deviasi" (🧮 + Pivot) · popup daftar barang tanpa harga + alasan. Changelog di bawah.
 
 ## Quick Start (Python Edition)
 

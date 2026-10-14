@@ -9,8 +9,28 @@ Baris = SATU RESTO — Σ Nominal Deviasi seluruh barang pasangannya
 TIDAK ikut Σ — kolom 'Tanpa Harga' transparan). Sesuai laporan sampel
 user ('20.AGUSTUS 2026.xlsx' — kolom NOMINAL DEVIASI per bahan per
 resto), diagregasi per resto. Baris TOTAL di ujung. Double-click baris
-resto → popup RINCIAN per barang resto itu (Nama Barang · Satuan ·
-Harga · Qty Deviasi · Nominal). Urutan default |Σ Nominal| MENURUN.
+resto → popup RINCIAN per barang resto itu. Urutan default |Σ Nominal|
+MENURUN.
+
+v3.9.36 (user: "di tab nominal deviasi bisa pop up per item dengan
+kolom: Nama resto, nama barang, Kuantiti deviasi, Nominal deviasi
+Sekarang, Nominal deviasi bulan lalu" + "tambah filter Kategori dengan
+default pilihan Kategori = Deviasi ... Yang tanpa harga juga bisa pop
+up untuk tampilkan tanpa harga item apa aja"):
+  - POPUP RINCIAN 5 KOLOM: Nama Resto · Nama Barang · Kuantiti Deviasi
+    · Nominal Deviasi Sekarang · Nominal Deviasi Bulan Lalu. 'Bulan
+    Lalu' = FILE DEVIASI tab ⚖ Komparasi (parse_deviasi_file — bulan
+    TERBARU di file + minggu TERAKHIR per pasangan; harga 41.09 × DEV
+    Lalu; perhitungan = nominal_common.hitung_nominal_lalu_pairs).
+    File berganti/ber-load → app memanggil on_lalu_file_changed()
+    (pola listener SharedTanggalH); tanpa file → kolom '-' + footer
+    petunjuk.
+  - FILTER KATEGORI (pola deviasi_view v3.9.19): combobox 'Semua' =
+    tanpa filter; DEFAULT 'Deviasi' (case-insensitive, fallback
+    'Semua'); diterapkan pra-compute di _compute_resto.
+  - DOUBLE-CLICK KOLOM 'Tanpa Harga' → popup daftar barang TANPA HARGA
+    resto itu (TOTAL row = semua resto) + alasan (tak ada di 41.09 /
+    satuan tak terkonversi).
 
 Perhitungan = src/ui/nominal_common.py (satu sumber kebenaran dgn
 mode 💰 Nominal (H) tab 📋 Laporan Deviasi, kolom Nominal tab 📦
@@ -30,8 +50,11 @@ from tkinter import ttk
 import pandas as pd
 
 from .nominal_common import (
+    _norm_name_lalu,
+    _norm_resto_lalu,
     agregasi_nominal_per_resto,
     fmt_nominal_cell,
+    hitung_nominal_lalu_pairs,
 )
 from .theme import (
     C_ACCENT,
@@ -62,13 +85,24 @@ from .widgets import (
     sort_tree_by_column,
 )
 
-# kolom popup rincian per resto (double-click) — mirror mode 💰 Nominal
+# kolom popup rincian per resto (double-click) — v3.9.36 (user: "pop up
+# per item dengan kolom: Nama resto, nama barang, Kuantiti deviasi,
+# Nominal deviasi Sekarang, Nominal deviasi bulan lalu")
 POPUP_COLUMNS = [
-    ("Nama Barang", 220, "w"),
+    ("Nama Resto", 90, "w"),
+    ("Nama Barang", 210, "w"),
+    ("Kuantiti Deviasi", 100, "e"),
+    ("Nominal Deviasi Sekarang", 130, "e"),
+    ("Nominal Deviasi Bulan Lalu", 130, "e"),
+]
+
+# kolom popup barang TANPA HARGA (double-click sel kolom 'Tanpa Harga')
+NOHARGA_COLUMNS = [
+    ("Nama Resto", 90, "w"),
+    ("Nama Barang", 210, "w"),
     ("Satuan", 60, "w"),
-    ("Harga", 110, "e"),
-    ("Qty Deviasi", 100, "e"),
-    ("Nominal", 120, "e"),
+    ("Kuantiti Deviasi", 100, "e"),
+    ("Keterangan", 200, "w"),
 ]
 
 
@@ -85,7 +119,7 @@ class NominalRestoView(tk.Frame):
     NUMERIC_COLS = ("N Barang", "Tanpa Harga", "Nominal Deviasi")
 
     def __init__(self, parent, go_to_proses: Callable | None = None,
-                 h_state=None):
+                 h_state=None, lalu_provider: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
@@ -93,6 +127,17 @@ class NominalRestoView(tk.Frame):
         self.tanggal_h = int(h_state.h) if h_state is not None else 25
         self.harga_map: dict = {}
         self.konversi_map: dict | None = None
+        # v3.9.36 — provider FILE DEVIASI (tab ⚖ Komparasi): () → df
+        # parse_deviasi_file atau None. App memasang lambda pembaca
+        # komparasi_view._file_df (referensi diganti — bukan dimutasi —
+        # jadi pembacaan provider selalu segar); file berganti → app
+        # memanggil on_lalu_file_changed().
+        self._lalu_provider = lalu_provider
+        self._lalu_df: pd.DataFrame | None = None   # snapshot popup lalu
+        self._lalu_loaded = False      # provider pernah mengembalikan df
+        # v3.9.36 — filter KATEGORI (pola deviasi_view v3.9.19):
+        # None = 'Semua' = tanpa filter; default 'Deviasi'.
+        self._kategori_sel: str | None = None
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (pola v3.2)
@@ -152,9 +197,30 @@ class NominalRestoView(tk.Frame):
         GhostButton(r1, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left",
                                                      padx=(18, 0))
-        tk.Label(r1, text="double-click resto → rincian per barang",
+        tk.Label(r1, text="double-click resto → rincian per barang · "
+                            "double-click sel Tanpa Harga → daftar tanpa "
+                            "harga",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="right")
+
+        # v3.9.36 — filter KATEGORI (user: "tambah filter Kategori dengan
+        # default pilihan Kategori = Deviasi"; pola r0b deviasi_view):
+        # 'Semua' = tanpa filter; DEFAULT 'Deviasi' (case-insensitive).
+        r1b = tk.Frame(fbody, bg=C_CARD)
+        r1b.pack(fill="x", pady=(6, 0))
+        tk.Label(r1b, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._kategori_var = tk.StringVar(value="Semua")
+        self._kategori_combo = ttk.Combobox(
+            r1b, textvariable=self._kategori_var, state="readonly",
+            width=18, font=font(9))
+        self._kategori_combo.pack(side="left", padx=(6, 0))
+        self._kategori_combo.bind(
+            "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
+        tk.Label(r1b, text="default: Deviasi (pola tab 📦 Deviasi GR) · "
+                            "kolom Bulan Lalu = file deviasi (⚖ Komparasi)",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="left", padx=(12, 0))
 
         # --- Tabel card ---
         tcard = Card(self.content)
@@ -262,7 +328,27 @@ class NominalRestoView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        self._reset_kategori()    # v3.9.36 — reset = default 'Deviasi'
         self._refresh()
+
+    # v3.9.36 — combobox KATEGORI ("Semua" = tanpa filter; pola
+    # deviasi_view v3.9.19; default 'Deviasi' — case-insensitive).
+    def _on_kategori_changed(self):
+        val = self._kategori_var.get()
+        self._kategori_sel = None if (not val or val == "Semua") else val
+        self._refresh()
+
+    def _default_kategori_value(self) -> str:
+        values = list(self._kategori_combo["values"] or [])
+        for v in values:
+            if str(v).strip().lower() == "deviasi":
+                return str(v)
+        return "Semua"
+
+    def _reset_kategori(self):
+        val = self._default_kategori_value()
+        self._kategori_var.set(val)
+        self._kategori_sel = None if val == "Semua" else val
 
     def _col_values(self, col: str) -> list:
         """Nilai unik TERFORMAT utk popup filter header (pola mode
@@ -367,6 +453,8 @@ class NominalRestoView(tk.Frame):
             self._insert_cancel = None
         self._result_df = None
         self._pairs_df = None
+        self._lalu_df = None          # v3.9.36 — snapshot basi dihapus
+        self._lalu_loaded = False
         self._close_detail_wins()
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
@@ -374,6 +462,16 @@ class NominalRestoView(tk.Frame):
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()
+        # v3.9.36 — isi combobox KATEGORI dari kolom data (merge '21.
+        # DBS Kategori' di append1 — pola deviasi_view) + reset seleksi
+        # ke DEFAULT 'Deviasi' (case-insensitive, fallback 'Semua').
+        if data is not None and "KATEGORI" in getattr(data, "columns", []):
+            _kv = data["KATEGORI"].dropna().astype(str).str.strip()
+            kategori_vals = sorted(v for v in _kv.unique() if v)
+        else:
+            kategori_vals = []
+        self._kategori_combo["values"] = ["Semua"] + kategori_vals
+        self._reset_kategori()
         # lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -392,21 +490,59 @@ class NominalRestoView(tk.Frame):
             self._dirty = False
             self._refresh()
 
+    def on_lalu_file_changed(self):
+        """v3.9.36 — file deviasi (tab ⚖ Komparasi) berubah (load baru /
+        ditutup) → snapshot Bulan Lalu basi: refresh bila tab terlihat,
+        tandai dirty bila tersembunyi (pola listener SharedTanggalH)."""
+        if self.data is None or self.data.empty:
+            return
+        if self._busy:
+            self._pending = True
+            return
+        if not self.winfo_ismapped():
+            self._dirty = True
+            return
+        self._refresh()
+
     # =========================================================================
     # COMPUTE
     # =========================================================================
     def _compute_resto(self, data: pd.DataFrame | None = None,
                        h: int | None = None) -> pd.DataFrame:
         """Frame per resto: [Resto, N Barang, Tanpa Harga, Nominal
-        Deviasi] urut |Σ| menurun. self._pairs_df (rincian popup) dan
+        Deviasi] urut |Σ| menurun. self._pairs_df (rincian popup),
+        self._lalu_df (pasangan file deviasi — v3.9.36) dan
         self._result_df (snapshot filter) ikut diisi."""
         df = self.data if data is None else data
         if df is None or df.empty:
             self._result_df = None
             self._pairs_df = None
+            self._lalu_df = None
+            self._lalu_loaded = False
             return pd.DataFrame()
         if h is None:
             h = self.tanggal_h
+        # v3.9.36 — filter KATEGORI combobox PRA-COMPUTE (kategori
+        # melekat per-baris hasil merge '21. DBS Kategori'; NaN → 'nan'
+        # ≠ kategori → terbuang — konsisten deviasi_view).
+        if self._kategori_sel and "KATEGORI" in df.columns:
+            df = df[df["KATEGORI"].astype(str) == str(self._kategori_sel)]
+            if df.empty:
+                self._result_df = None
+                self._pairs_df = None
+                self._lalu_df = None
+                self._lalu_loaded = False
+                return pd.DataFrame()
+        # v3.9.36 — snapshot pasangan Bulan Lalu dari FILE DEVIASI
+        # (provider = pembaca komparasi_view._file_df; harga_map fresh
+        # → dihitung ulang tiap compute).
+        fdf = None
+        if self._lalu_provider is not None:
+            with contextlib.suppress(Exception):
+                fdf = self._lalu_provider()
+        self._lalu_loaded = fdf is not None
+        self._lalu_df = hitung_nominal_lalu_pairs(
+            fdf, self.harga_map, self.konversi_map)
         g, pairs = agregasi_nominal_per_resto(
             df, h, self.harga_map, self.konversi_map)
         if g.empty:
@@ -548,6 +684,8 @@ class NominalRestoView(tk.Frame):
 
         status = (f"{fmt_int_id(n)} resto · TANGGAL H = "
                   f"{self.tanggal_h}")
+        if self._kategori_sel:
+            status += f" · KATEGORI {self._kategori_sel}"
         if n_neg:
             status += f" · {fmt_int_id(n_neg)} resto minus"
         if total_noharga:
@@ -596,8 +734,26 @@ class NominalRestoView(tk.Frame):
             apply_cell_tag(tree, "total_cell", self._total_cells)
 
     # =========================================================================
-    # DOUBLE-CLICK → POPUP RINCIAN RESTO
+    # DOUBLE-CLICK → POPUP (rincian per resto / tanpa harga)
     # =========================================================================
+    def _event_col_name(self, tree, event) -> "str | None":
+        """v3.9.36 — nama kolom data pada posisi klik event (None bila
+        event tanpa x / kolom tak teridentifikasi — pemanggil
+        program lama tetap dapat popup rincian)."""
+        try:
+            cid = tree.identify_column(event.x)
+        except (AttributeError, tk.TclError, TypeError):
+            # event sintetis tanpa x / tree sudah di-destroy
+            return None
+        if not cid or cid == "#0":
+            return None
+        try:
+            idx = int(str(cid).lstrip("#")) - 1
+            cols = list(tree["columns"])
+            return cols[idx] if 0 <= idx < len(cols) else None
+        except (ValueError, IndexError, TypeError, tk.TclError):
+            return None
+
     def _on_double_click(self, event):
         tree = event.widget
         try:
@@ -605,9 +761,17 @@ class NominalRestoView(tk.Frame):
             if not sel:
                 return
             iid = sel[0]
+            # v3.9.36 — kolom 'Tanpa Harga' + baris TOTAL → daftar
+            # barang tanpa harga SEMUA resto (user: "yang tanpa harga
+            # juga bisa pop up untuk tampilkan tanpa harga item apa aja")
             if iid == "row_total":
+                if self._event_col_name(tree, event) == "Tanpa Harga":
+                    self._show_noharga_popup(None)
                 return
             resto = str(tree.set(iid, "Resto"))
+            if self._event_col_name(tree, event) == "Tanpa Harga":
+                self._show_noharga_popup(resto)
+                return
         except tk.TclError:
             return
         self._show_resto_popup(resto)
@@ -618,15 +782,31 @@ class NominalRestoView(tk.Frame):
                 w.destroy()
         self._detail_wins = []
 
+    def _lalu_map(self) -> dict:
+        """v3.9.36 — peta (_resto_norm, _bahan_norm) → baris frame
+        Bulan Lalu (snapshot self._lalu_df)."""
+        lalu = self._lalu_df
+        if lalu is None or lalu.empty:
+            return {}
+        m = {}
+        for i in range(len(lalu)):
+            r = lalu.iloc[i]
+            m[(str(r["_resto_norm"]), str(r["_bahan_norm"]))] = r
+        return m
+
     def _show_resto_popup(self, resto: str):
-        """Popup rincian per barang utk satu resto (double-click baris).
-        Data = self._pairs_df (snapshot compute terakhir — read-only)."""
+        """Popup RINCIAN PER ITEM utk satu resto (double-click baris) —
+        v3.9.36 5 kolom (user: "Nama resto, nama barang, Kuantiti
+        deviasi, Nominal deviasi Sekarang, Nominal deviasi bulan lalu").
+        Data = self._pairs_df (sekarang) + self._lalu_df (bulan lalu —
+        snapshot compute terakhir, read-only)."""
         pairs = self._pairs_df
         if pairs is None or pairs.empty:
             return
         sub = pairs[pairs["Resto"].astype(str) == str(resto)].copy()
         if sub.empty:
             return
+        lalu_map = self._lalu_map()
 
         win = tk.Toplevel(self)
         win.title(f"Nominal Deviasi — {resto} (H={self.tanggal_h})")
@@ -645,8 +825,8 @@ class NominalRestoView(tk.Frame):
                  bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
             side="left", padx=10, pady=8)
         tk.Label(head,
-                 text="double-click sel = popup detail pasangan "
-                      "(mode 💰 Nominal)",
+                 text="Sekarang = Harga 41.09 × Deviasi (H) · Bulan Lalu "
+                      "= file deviasi (⚖ Komparasi, bulan terbaru)",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="right", padx=10)
 
@@ -670,14 +850,23 @@ class NominalRestoView(tk.Frame):
         total_cells = []
         items = []
         sub = sub.reset_index(drop=True)
+        _nolalu = 0
         for i in range(len(sub)):
             row = sub.iloc[i]
-            harga_disp = str(row.get("Harga Tampil", "-") or "-")
             nom = row.get("Nominal")
+            # pasangan Bulan Lalu — kunci ternormalisasi (pola join
+            # komparasi: '1030.BDGSET' ↔ 'BDGSET')
+            lrow = lalu_map.get(
+                (_norm_resto_lalu(resto),
+                 _norm_name_lalu(row["Nama Barang"])))
+            nom_lalu = lrow.get("Nominal Lalu") if lrow is not None else None
+            if lrow is None:
+                _nolalu += 1
             values = (
-                str(row["Nama Barang"]), str(row["Satuan"]),
-                harga_disp, fmt_nominal_cell(row.get("Qty Deviasi", 0)),
+                str(resto), str(row["Nama Barang"]),
+                fmt_nominal_cell(row.get("Qty Deviasi", 0)),
                 fmt_nominal_cell(nom),
+                fmt_nominal_cell(nom_lalu),
             )
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             nom_v = None
@@ -686,17 +875,47 @@ class NominalRestoView(tk.Frame):
                     nom_v = float(nom)
             except (TypeError, ValueError):
                 nom_v = None
-            if self._cell_tags and nom_v is not None and nom_v < 0:
-                neg_cells.append((f"row_{i}", "Nominal"))
-            elif nom_v is not None and nom_v < 0:
-                tags.append("negative")
+            noml_v = None
+            try:
+                if nom_lalu is not None and not pd.isna(nom_lalu):
+                    noml_v = float(nom_lalu)
+            except (TypeError, ValueError):
+                noml_v = None
+            if self._cell_tags:
+                if nom_v is not None and nom_v < 0:
+                    neg_cells.append(
+                        (f"row_{i}", "Nominal Deviasi Sekarang"))
+                if noml_v is not None and noml_v < 0:
+                    neg_cells.append(
+                        (f"row_{i}", "Nominal Deviasi Bulan Lalu"))
+            else:
+                if (nom_v is not None and nom_v < 0) \
+                        or (noml_v is not None and noml_v < 0):
+                    tags.append("negative")
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
 
         total_nom = float(sub["Nominal"].dropna().sum()) \
             if "Nominal" in sub.columns else 0.0
+        # Σ Bulan Lalu hanya pasangan yang TAMPIL di popup ini (join
+        # kiri dari pasangan sekarang — pasangan file-tak-match tak
+        # ditarik; skipna seperti TOTAL sekarang).
+        total_lalu = 0.0
+        for i in range(len(sub)):
+            lrow = lalu_map.get(
+                (_norm_resto_lalu(resto),
+                 _norm_name_lalu(sub.iloc[i]["Nama Barang"])))
+            if lrow is not None:
+                v = lrow.get("Nominal Lalu")
+                try:
+                    if v is not None and not pd.isna(v):
+                        total_lalu += float(v)
+                except (TypeError, ValueError):
+                    pass
         items.append(("", "row_total", {
-            "values": ("TOTAL", "", "", "", fmt_nominal_cell(total_nom)),
+            "values": ("TOTAL", "", "",
+                       fmt_nominal_cell(total_nom),
+                       fmt_nominal_cell(total_lalu)),
             "tags": ("total",)}))
         for c in col_ids:
             total_cells.append(("row_total", c))
@@ -715,9 +934,15 @@ class NominalRestoView(tk.Frame):
         foot.pack(fill="x")
         n_no = int(sub["Nominal"].isna().sum()) \
             if "Nominal" in sub.columns else 0
-        tk.Label(foot, text=f"{len(sub)} barang · "
-                            f"{fmt_int_id(n_no)} tanpa harga · "
-                            f"TOTAL {fmt_nominal_cell(total_nom)}",
+        foot_txt = (f"{len(sub)} barang · {fmt_int_id(n_no)} tanpa harga · "
+                    f"TOTAL SEKARANG {fmt_nominal_cell(total_nom)} · "
+                    f"TOTAL BULAN LALU {fmt_nominal_cell(total_lalu)}")
+        if not self._lalu_loaded:
+            foot_txt += " · file deviasi belum dimuat (⚖ Komparasi)"
+        elif _nolalu:
+            foot_txt += (f" · {fmt_int_id(_nolalu)} barang tanpa "
+                         "pasangan di file")
+        tk.Label(foot, text=foot_txt,
                  bg=C_CARD, fg=C_HEADER, font=font(8, "bold")).pack(
             side="left", padx=10, pady=6)
         GhostButton(foot, text="Tutup", command=win.destroy).pack(
@@ -727,7 +952,7 @@ class NominalRestoView(tk.Frame):
         try:
             sw = win.winfo_screenwidth()
             sh = win.winfo_screenheight()
-            w = min(980, int(sw * 0.85))
+            w = min(1000, int(sw * 0.85))
             hgt = min(560, int(sh * 0.8))
             x = max(0, min(int(sw / 2 - w / 2), sw - w))
             y = max(0, min(int(sh / 2 - hgt / 2), sh - hgt))
@@ -735,6 +960,112 @@ class NominalRestoView(tk.Frame):
         except tk.TclError:
             pass
         win.minsize(640, 320)
+
+    # -------------------------------------------------------------------------
+    # POPUP BARANG TANPA HARGA (v3.9.36)
+    # -------------------------------------------------------------------------
+    def _show_noharga_popup(self, resto: "str | None"):
+        """Popup daftar barang TANPA HARGA (double-click sel kolom 'Tanpa
+        Harga'; user: "yang tanpa harga juga bisa pop up untuk tampilkan
+        tanpa harga item apa aja"). resto=None → SEMUA resto (baris
+        TOTAL). Kolom Keterangan menjelaskan ALASAN (tak ada di 41.09 /
+        satuan tak terkonversi — dari 'Harga Tampil' pairs)."""
+        pairs = self._pairs_df
+        if pairs is None or pairs.empty:
+            return
+        if "Nominal" not in pairs.columns:
+            return
+        sub = pairs[pairs["Nominal"].isna()].copy()
+        if resto is not None:
+            sub = sub[sub["Resto"].astype(str) == str(resto)].copy()
+        title_resto = str(resto) if resto is not None else "SEMUA RESTO"
+
+        win = tk.Toplevel(self)
+        win.title(f"Barang Tanpa Harga — {title_resto} (H={self.tanggal_h})")
+        self._detail_wins.append(win)
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        with contextlib.suppress(tk.TclError):
+            win.transient(self.winfo_toplevel())
+
+        body = tk.Frame(win, bg=C_BG)
+        body.pack(fill="both", expand=True)
+
+        head = tk.Frame(body, bg=C_CARD)
+        head.pack(fill="x")
+        tk.Label(head, text=f"Barang TANPA HARGA — {title_resto} · "
+                            "tidak ikut Σ Nominal Deviasi",
+                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
+            side="left", padx=10, pady=8)
+        tk.Label(head,
+                 text="harga = file 41.09 (folder 09.Harga)",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="right", padx=10)
+
+        col_ids = [c[0] for c in NOHARGA_COLUMNS]
+        tree = ttk.Treeview(body, columns=col_ids, show="headings",
+                            selectmode="extended")
+        for col_name, width, anchor in NOHARGA_COLUMNS:
+            tree.column(col_name, width=width, minwidth=34,
+                        anchor=anchor)
+            tree.heading(col_name, text=col_name)
+        tree.tag_configure("evenrow", background="#ffffff")
+        tree.tag_configure("oddrow", background="#f8fafc")
+
+        items = []
+        sub = sub.reset_index(drop=True)
+        for i in range(len(sub)):
+            row = sub.iloc[i]
+            ket = self._noharga_ket(row.get("Harga Tampil"))
+            values = (
+                str(row["Resto"]), str(row["Nama Barang"]),
+                str(row.get("Satuan", "-")),
+                fmt_nominal_cell(row.get("Qty Deviasi", 0)),
+                ket,
+            )
+            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            items.append(("", f"row_{i}",
+                          {"values": values, "tags": tuple(tags)}))
+
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        enable_multi_select(tree)   # Ctrl+A + Ctrl+C TSV
+        insert_tree_items(tree, items, batch=500)
+
+        foot = tk.Frame(body, bg=C_CARD)
+        foot.pack(fill="x")
+        tk.Label(foot, text=f"{fmt_int_id(len(sub))} barang tanpa harga "
+                            "· nominal '-' (transparan — tidak dihitung)",
+                 bg=C_CARD, fg=C_HEADER, font=font(8, "bold")).pack(
+            side="left", padx=10, pady=6)
+        GhostButton(foot, text="Tutup", command=win.destroy).pack(
+            side="right", padx=10, pady=4)
+
+        # ukuran adaptif (pola popup rincian)
+        try:
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            w = min(820, int(sw * 0.7))
+            hgt = min(500, int(sh * 0.7))
+            x = max(0, min(int(sw / 2 - w / 2), sw - w))
+            y = max(0, min(int(sh / 2 - hgt / 2), sh - hgt))
+            win.geometry(f"{w}x{hgt}+{x}+{y}")
+        except tk.TclError:
+            pass
+        win.minsize(560, 280)
+
+    @staticmethod
+    def _noharga_ket(harga_tampil) -> str:
+        """Alasan pasangan tanpa harga — dari 'Harga Tampil' pairs:
+        '-' = barang tak ada / harga None di 41.09; ber-'*' = satuan
+        rekap tak ter-cover peta rasio (harga as-is ditampilkan)."""
+        s = str(harga_tampil or "").strip()
+        if not s or s == "-":
+            return "barang tak ada di 41.09 (09.Harga)"
+        if "*" in s:
+            return f"satuan tak terkonversi — harga 41.09: {s}"
+        return "harga 41.09 kosong"
 
     # =========================================================================
     # TOOLBAR TABEL

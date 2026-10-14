@@ -9,6 +9,12 @@ nominal_deviasi_view.py (mode 💰 Nominal (H)); kini dipakai 4 tempat:
                                   harga × GR Saat Ini)
   4. tab   🧮 Nominal Deviasi    (BARU — Σ per resto + popup rincian)
 
+v3.9.36 — TAMBAHAN: hitung_nominal_lalu_pairs — pasangan per-barang
+dari FILE deviasi (parse_deviasi_file tab ⚖ Komparasi, diteruskan app
+lewat lalu_provider): bulan TERBARU di file + minggu TERAKHIR per
+pasangan (penutupan bulan) → Nominal Lalu = harga × DEV Lalu. Dipakai
+popup rincian tab 🧮 (kolom 'Nominal Deviasi Bulan Lalu').
+
 ATURAN HARGA (identik sejak v3.9.32, kini satu sumber kebenaran):
   - harga_map   : {barang: (harga|None, satuan41-upper)} — global dari
                   file 41.09 (folder 09.Harga); Harga = Nilai Saldo
@@ -26,6 +32,8 @@ Qty Deviasi untuk pasangan = JENIS '3.DEVIASI' baris Tanggal H
 """
 
 from __future__ import annotations
+
+import re
 
 import pandas as pd
 
@@ -115,6 +123,27 @@ def lookup_harga_pair(harga_map: dict | None,
         return float(h41) * r_rekap / r_41, sat_rekap, False
     # tak bisa dikonversi → harga as-is berpenanda '*'
     return None, f"{fmt_harga_id(float(h41))} {sat41}*", True
+
+
+# ---------------------------------------------------------------------------
+# NORMALISASI KUNCI FILE DEVIASI (mirror komparasi — v3.9.36)
+# ---------------------------------------------------------------------------
+def _norm_resto_lalu(v) -> str:
+    """Mirror komparasi_deviasi_view._norm_resto: '1041.BDGUKU' /
+    'B.1001.MLGPAR' / 'BDGUKU' → 'BDGUKU' (upper + strip + segmen
+    setelah titik TERAKHIR). Duplikat LOKAL — nominal_common tidak
+    boleh import komparasi_deviasi_view (komparasi sudah meng-import
+    nominal_common sejak v3.9.34 → circular)."""
+    s = str(v).strip().upper()
+    if "." in s:
+        s = s.split(".")[-1].strip()
+    return s
+
+
+def _norm_name_lalu(v) -> str:
+    """Mirror komparasi_deviasi_view._norm_name: upper + rapat spasi
+    ganda (duplikat lokal — alasan _norm_resto_lalu)."""
+    return re.sub(r"\s+", " ", str(v).strip().upper())
 
 
 # ---------------------------------------------------------------------------
@@ -215,3 +244,94 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
     g["N Barang"] = g["N Barang"].astype(int)
     g["Tanpa Harga"] = g["Tanpa Harga"].astype(int)
     return g, pairs
+
+
+# ---------------------------------------------------------------------------
+# PASANGAN NOMINAL BULAN LALU — FILE DEVIASI (v3.9.36)
+# ---------------------------------------------------------------------------
+_LALU_COLS = ["Resto", "Nama Barang", "Satuan", "Qty Deviasi Lalu",
+              "Harga", "Nominal Lalu", "_resto_norm", "_bahan_norm"]
+
+
+def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
+                              harga_map: dict | None,
+                              konversi_map: dict | None) -> pd.DataFrame:
+    """Frame per pasangan dari FILE deviasi (tab ⚖ Komparasi):
+    [_resto_norm, _bahan_norm, Resto, Nama Barang, Satuan,
+    Qty Deviasi Lalu, Harga, Nominal Lalu].
+
+    file_df = output parse_deviasi_file (kolom internal _bulan_num /
+    _h / _resto_norm / _bahan_norm milik komparasi). Seleksi:
+      - BULAN TERBARU di file (nomor bulan terbesar — multi-file
+        History: bulan paling akhir = 'bulan lalu');
+      - per pasangan: baris MINGGU TERAKHIR (minggu file kumulatif —
+        W terbesar = penutupan bulan itu; dedup komparasi menjamin
+        1 baris per bulan+minggu+pasangan).
+    Nominal Lalu = Harga 41.09 (dinormalkan ke SATUAN BARIS FILE via
+    peta rasio — sama seperti kolom Nominal komparasi) × DEV Lalu.
+    Tanpa harga / satuan tak terkonversi → None (tampil '-').
+    Urut |Nominal Lalu| MENURUN (pasangan tanpa nominal paling
+    bawah, urut |qty|). Frame kosong bila file kosong / kolom internal
+    tak ada (file format lama).
+    """
+    empty = pd.DataFrame(columns=_LALU_COLS)
+    if file_df is None or getattr(file_df, "empty", True):
+        return empty
+    need = ("_bulan_num", "_h", "_resto_norm", "_bahan_norm",
+            "DEV Lalu", "Resto", "Nama Barang")
+    missing = [c for c in need if c not in file_df.columns]
+    if missing:
+        return empty
+
+    out = pd.DataFrame({
+        "Resto": file_df["Resto"].astype(str).values,
+        "Nama Barang": file_df["Nama Barang"].astype(str).values,
+        "Satuan": (file_df["Satuan"].astype(str).values
+                   if "Satuan" in file_df.columns else ""),
+        "_bulan_num": (pd.to_numeric(file_df["_bulan_num"],
+                                    errors="coerce").fillna(0)
+                       .astype(int).values),
+        "_h": pd.to_numeric(file_df["_h"], errors="coerce")
+            .fillna(0).values,
+        "_resto_norm": file_df["_resto_norm"].astype(str).values,
+        "_bahan_norm": file_df["_bahan_norm"].astype(str).values,
+        "Qty Deviasi Lalu": (pd.to_numeric(file_df["DEV Lalu"],
+                                           errors="coerce")
+                             .fillna(0.0).values),
+    })
+    # (a) bulan TERBARU di file
+    out = out[out["_bulan_num"] == out["_bulan_num"].max()].copy()
+    if out.empty:
+        return empty
+    # (b) minggu TERAKHIR per pasangan (penutupan bulan)
+    idx = out.groupby(["_resto_norm", "_bahan_norm"])["_h"].idxmax()
+    out = out.loc[sorted(idx)].copy()
+    out = out.drop_duplicates(subset=["_resto_norm", "_bahan_norm"],
+                              keep="first")
+    out = out.reset_index(drop=True)
+
+    # (c) harga × DEV Lalu (lookup per baris — pola komparasi v3.9.34a:
+    # TANPA cache persisten lintas-file)
+    harga_vals = []
+    nominal_vals = []
+    for _, r in out.iterrows():
+        b = str(r["Nama Barang"]).strip()
+        sat_file = norm_sat(r["Satuan"])
+        harga, _label, _bintang = lookup_harga_pair(
+            harga_map, konversi_map, b, sat_file)
+        if harga is not None:
+            nominal_vals.append(harga * float(r["Qty Deviasi Lalu"]))
+        else:
+            nominal_vals.append(None)
+        harga_vals.append(harga)
+    out["Harga"] = pd.Series(harga_vals, dtype="float64")
+    out["Nominal Lalu"] = pd.Series(nominal_vals, dtype="float64")
+
+    out["_absnom"] = out["Nominal Lalu"].abs().fillna(0)
+    out["_absqty"] = out["Qty Deviasi Lalu"].abs()
+    out = (out.sort_values(["_absnom", "_absqty"],
+                           ascending=[False, False],
+                           kind="mergesort")
+           .drop(columns=["_absnom", "_absqty"]))
+    out = out.reset_index(drop=True)
+    return out[_LALU_COLS]

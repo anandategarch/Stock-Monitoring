@@ -513,6 +513,23 @@ class PivotTableView(tk.Frame):
             else:
                 combo["values"] = []
                 var.set("(All)")
+        # v3.9.36 — DEFAULT KATEGORI = "Deviasi" (user: "di tab pivot
+        # tabel default kategori Deviasi"; pola deviasi_view v3.9.19 —
+        # case-insensitive, fallback "(All)" bila tak ada di data).
+        # Reset tiap load_data (pola _reset_kategori deviasi_view).
+        self._reset_kategori()
+
+    # v3.9.36 — default kategori 'Deviasi' (pola deviasi_view v3.9.19).
+    def _default_kategori_value(self) -> str:
+        values = list(self.kategori_combo["values"] or [])
+        for v in values:
+            if str(v).strip().lower() == "deviasi":
+                return str(v)
+        return "(All)"
+
+    def _reset_kategori(self):
+        val = self._default_kategori_value()
+        self.kategori_var.set(val)
 
     # =========================================================================
     # FILTER STATE + COMPUTE (pure — berjalan di thread)
@@ -848,7 +865,7 @@ class PivotTableView(tk.Frame):
     def _reset_filter(self):
         self.resto_var.set("(All)")
         self.source_var.set("(All)")
-        self.kategori_var.set("(All)")
+        self._reset_kategori()    # v3.9.36 — reset = default 'Deviasi'
         self.tgl_start_var.set("-31")  # v3.8: 31 bulan lalu → 31 berjalan
         self.tgl_end_var.set("31")
         self.hide_empty_var.set(True)

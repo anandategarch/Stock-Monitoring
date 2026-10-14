@@ -646,12 +646,18 @@ class KomparasiDeviasiView(tk.Frame):
 
     def __init__(self, parent, go_to_proses: Callable | None = None,
                  followup_store: FollowUpStore | None = None,
-                 initial_dir: str = "", h_state=None):
+                 initial_dir: str = "", h_state=None,
+                 on_file_loaded: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
         self.store = followup_store
         self._initial_dir = initial_dir
+        # v3.9.36 — callback file deviasi berganti (load baru / ditutup):
+        # app memakainya utk menyegarkan kolom 'Nominal Deviasi Bulan Lalu'
+        # popup tab 🧮 Nominal Deviasi (pola listener SharedTanggalH;
+        # dipanggil di main thread dari _apply_file_state/_close_file).
+        self._on_file_loaded = on_file_loaded
         # v3.9.7: TANGGAL H = state bersama (dari tab 📦 Deviasi GR) —
         # dipakai FILTER MINGGU file (H=7 → hanya WEEK 1; pola chip
         # read-only tab Anomali COM). Komparasi TIDAK punya input H.
@@ -1435,6 +1441,12 @@ class KomparasiDeviasiView(tk.Frame):
                      f"(bulan+minggu+resto+bahan sama) dibuang")
         self._file_label_var.set(info)
         self._file_label.configure(fg=C_HEADER)
+        # v3.9.36 — file state baru tersimpan → beri tahu konsumen
+        # (tab 🧮 Nominal Deviasi — kolom Bulan Lalu). Defensive: error
+        # konsumen TIDAK boleh menggagalkan render komparasi.
+        if self._on_file_loaded is not None:
+            with contextlib.suppress(Exception):
+                self._on_file_loaded()
 
     def _close_file(self):
         # v3.9.5 FIX (audit 19-a #1 — P1): ✕ Tutup saat job komparasi masih
@@ -1492,6 +1504,11 @@ class KomparasiDeviasiView(tk.Frame):
             if _c is not None:
                 _c()
         self._anasec_cancel = {}
+        # v3.9.36 — file ditutup → konsumen Bulan Lalu (tab 🧮) ikut
+        # menyegarkan (kolom kembali '-'; defensive — pola _apply_file).
+        if self._on_file_loaded is not None:
+            with contextlib.suppress(Exception):
+                self._on_file_loaded()
         if self._analisa_mode:
             self._refresh_analisa()
         else:
