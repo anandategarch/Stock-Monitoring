@@ -15,6 +15,26 @@ lewat lalu_provider): bulan TERBARU di file + minggu TERAKHIR per
 pasangan (penutupan bulan) → Nominal Lalu = harga × DEV Lalu. Dipakai
 popup rincian tab 🧮 (kolom 'Nominal Deviasi Bulan Lalu').
 
+v3.9.38 — ATURAN "QTY DEVIASI 0 TAK PERLU CARI HARGA" (user:
+"Kuantiti Deviasi 0 takperlu cari harga. Cek juga keseluruhan
+terkait ini"): pasangan ber-qty-deviasi PERSIS 0 → lookup harga
+DILEWATI (Harga None, Harga Tampil '-', tanpa label '*') dan
+Nominal = 0.0 (BUKAN None) → pasangan itu TIDAK dihitung sebagai
+'tanpa harga' (kolom Tanpa Harga / popup tanpa harga / footer mode
+💰) dan tetap netral di Σ — dulu baris qty-0 tanpa harga ikut
+terhitung 'tanpa harga' menyesatkan. Berlaku di hitung_nominal_pairs,
+hitung_nominal_lalu_pairs, kolom Nominal tab 📦 Deviasi GR/PCS
+dan mode ⚖ Komparasi.
+
+v3.9.38 — SUMBER UTAMA 'Nominal Lalu' = KOLOM NOMINAL DEVIASI MILIK
+FILE (angka resmi laporan bulan lalu; parse_deviasi_file → 'Nominal
+Deviasi Lalu'). Dulu v3.9.36 menghitung ulang harga 41.09 SEKARANG ×
+DEV Lalu → harga snapshot beda bulan → nominal menyimpang dari
+laporan resmi (temuan user BUMBU PASTA KUAH (V.20): 41.09 sekarang
+107,6386854/GR — SAMA dgn hitungan manual user — vs file
+20.AGUSTUS ±113,048/GR → selisih nominal ±2,34jt utk 1 baris MLGPAR
+W4). Kolom file kosong/NaN → fallback hitung ulang (perilaku lama).
+
 ATURAN HARGA (identik sejak v3.9.32, kini satu sumber kebenaran):
   - harga_map   : {barang: (harga|None, satuan41-upper)} — global dari
                   file 41.09 (folder 09.Harga); Harga = Nilai Saldo
@@ -26,6 +46,8 @@ ATURAN HARGA (identik sejak v3.9.32, kini satu sumber kebenaran):
     '*' dan nominal TIDAK dihitung (None) — transparan, bukan angka
     keliru; tidak ikut TOTAL.
   - barang tak ada di 41.09 / harga None → nominal None (tampil '-').
+  - Qty Deviasi PERSIS 0 → TANPA lookup harga; Nominal 0.0 (bukan
+    None — tak dihitung 'tanpa harga'; v3.9.38).
 
 Qty Deviasi untuk pasangan = JENIS '3.DEVIASI' baris Tanggal H
 (= SO − SALDO AKHIR sistem — nilai kolom Deviasi tab 📦 Deviasi GR).
@@ -35,6 +57,7 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
 import pandas as pd
 
 from src.pipeline.konversi_satuan import lookup_rasio
@@ -189,6 +212,17 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     for _, r in grouped.iterrows():
         b = str(r["Nama Barang"]).strip()
         sat_rekap = norm_sat(r["Satuan"])
+        # v3.9.38 — Kuantiti Deviasi 0 → TAK PERLU CARI HARGA (user:
+        # "Kuantiti Deviasi 0 takperlu cari harga"): nominal pasti 0;
+        # Harga None + Harga Tampil '-' (tanpa label '*') + Nominal
+        # 0.0 — pasangan TIDAK dihitung 'tanpa harga' (isna) sehingga
+        # kolom Tanpa Harga / popup tanpa harga / footer mode 💰 tak
+        # menyesatkan (dulu qty-0 tanpa harga ikut terhitung).
+        if float(r["Qty Deviasi"]) == 0.0:
+            harga_vals.append(None)
+            harga_disp.append("-")
+            nominal_vals.append(0.0)
+            continue
         harga, label, _bintang = lookup_harga_pair(
             harga_map, konversi_map, b, sat_rekap)
         if harga is not None:
@@ -298,6 +332,13 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
         "Qty Deviasi Lalu": (pd.to_numeric(file_df["DEV Lalu"],
                                            errors="coerce")
                              .fillna(0.0).values),
+        # v3.9.38 — nominal RESMI milik file (parse_deviasi_file;
+        # kolom tak ada di file format lama → NaN → fallback recompute)
+        "Nominal Deviasi Lalu": (
+            pd.to_numeric(file_df["Nominal Deviasi Lalu"],
+                          errors="coerce").values
+            if "Nominal Deviasi Lalu" in file_df.columns
+            else np.full(len(file_df), np.nan)),
     })
     # (a) bulan TERBARU di file
     out = out[out["_bulan_num"] == out["_bulan_num"].max()].copy()
@@ -310,13 +351,33 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
                               keep="first")
     out = out.reset_index(drop=True)
 
-    # (c) harga × DEV Lalu (lookup per baris — pola komparasi v3.9.34a:
-    # TANPA cache persisten lintas-file)
+    # (c) NOMINAL LALU — SUMBER UTAMA kolom resmi file (v3.9.38):
+    # nilai file dipakai APA ADANYA (harga snapshot saat laporan dibuat —
+    # angka resmi bulan lalu); kolom kosong/NaN / file format lama →
+    # fallback hitung ulang harga 41.09 sekarang × DEV Lalu (lookup per
+    # baris — pola komparasi v3.9.34a: TANPA cache persisten lintas-file).
     harga_vals = []
     nominal_vals = []
     for _, r in out.iterrows():
         b = str(r["Nama Barang"]).strip()
         sat_file = norm_sat(r["Satuan"])
+        # v3.9.38 — nilai resmi file ADA → pakai langsung (harga lookup
+        # tetap ditarik utk kolom Harga display; None bila tak ada).
+        _fnom = r.get("Nominal Deviasi Lalu")
+        _has_file_nom = _fnom is not None and not pd.isna(_fnom)
+        if _has_file_nom:
+            nominal_vals.append(float(_fnom))
+            _hg, _lbl, _b = lookup_harga_pair(
+                harga_map, konversi_map, b, sat_file)
+            harga_vals.append(_hg)
+            continue
+        # v3.9.38 — DEV Lalu PERSIS 0 → tak perlu cari harga (mirror
+        # hitung_nominal_pairs): Nominal Lalu 0.0 (bukan None → tak
+        # dihitung 'tanpa pasangan/harga' di footer popup).
+        if float(r["Qty Deviasi Lalu"]) == 0.0:
+            harga_vals.append(None)
+            nominal_vals.append(0.0)
+            continue
         harga, _label, _bintang = lookup_harga_pair(
             harga_map, konversi_map, b, sat_file)
         if harga is not None:

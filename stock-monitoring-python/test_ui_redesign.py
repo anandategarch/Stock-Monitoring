@@ -811,7 +811,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.37", APP_VERSION == "3.9.37", f"got {APP_VERSION}")
+    check("Versi = 3.9.38", APP_VERSION == "3.9.38", f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -9928,7 +9928,6 @@ def main():
     def _cap46(title, msg=None, **kw):
         _err46["title"] = str(title)
         _err46["msg"] = str(msg)
-        return None
     _mb46.showerror = _cap46
     det46 = make_mock_komparasi_df()
     # v3.9.34: file mock xlsx DIBUAT ULANG — §13/§22 meng-unlink file lama
@@ -10420,16 +10419,19 @@ def main():
     _atot48 = next((_k48 for _k48 in _apt48.get_children("")
                     if str(_apt48.set(_k48, "Nama Resto")) == "TOTAL"),
                    None)
-    # §46d file: MLGPAR AYAM minggu TERAKHIR = W5 205 (H=31, dev 180 —
-    # baris straggler uji komparasi) → 10 × 180 = 1.800
-    check("(v3.9.36) app E2E: popup MLGPAR — AYAM Bulan Lalu = 1.800 "
-          "(W5 180 × harga 10 — minggu TERAKHIR file §46d; join kunci "
-          "ternormalisasi)",
-          _aprow48.get("AYAM FILET") == "1.800"
+    # v3.9.38: AYAM = NOMINAL DEVIASI MILIK FILE (W5 = 180.000 —
+    # nilai RESMI, bukan hitung ulang 10×180 = 1.800). GULA (TEPAT)
+    # terfilter KATEGORI default Deviasi → TOTAL = 180.000 saja.
+    check("(v3.9.38) app E2E: popup MLGPAR — AYAM Bulan Lalu = 180.000 "
+          "(NOMINAL DEVIASI MILIK FILE §46d W5 — angka resmi, bukan "
+          "recompute harga ×180; GULA TEPAT terfilter kategori → TOTAL "
+          "180.000; KOPI tanpa pasangan '-')",
+          _aprow48.get("AYAM FILET") == "180.000"
           and _aprow48.get("KOPI BUBUK 100G") == "-"
+          and "GULA PASIR" not in _aprow48
           and _atot48 is not None
           and str(_apt48.set(_atot48, "Nominal Deviasi Bulan Lalu"))
-          == "1.800",
+          == "180.000",
           f"got {_aprow48} tot={_atot48}")
     _ap48._close_detail_wins()
 
@@ -10634,6 +10636,285 @@ def main():
           "pascapipeline (perilaku lama terjaga)",
           app.notebook.select() == str(app.tab_pivot),
           f"tab={app.notebook.select()!r}")
+
+    print("== 50. (v3.9.38) QTY DEVIASI 0 TANPA CARI HARGA + 🧮 KOLOM/TOTAL "
+          "BULAN LALU (NOMINAL RESMI FILE) ==")
+
+    import numpy as _np50
+
+    from src.ui.nominal_common import (
+        agregasi_nominal_per_resto as _agr50,
+    )
+    from src.ui.nominal_common import (
+        hitung_nominal_lalu_pairs as _hlp50,
+    )
+
+    # --- (a) pure: hitung_nominal_pairs — qty-0 tanpa lookup harga -----
+    from src.ui.nominal_common import (
+        hitung_nominal_pairs as _hnp50,
+    )
+    _dn50 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v,
+    } for b, r, s, v in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0),
+        ("NOLDEV", "MLGPAR", "GR", 0.0),     # qty 0 + TANPA harga 41.09
+    ]])
+    _hmap50 = {"AYAM FILET": (10.0, "GR")}
+    _kmap50 = {"rasio": {}, "terkecil": {}}
+    _p50 = _hnp50(_dn50, 25, _hmap50, _kmap50)
+    _pm50 = {str(r["Nama Barang"]): r for _, r in _p50.iterrows()}
+    check("(v3.9.38) hitung_nominal_pairs: qty deviasi PERSIS 0 → TANPA "
+          "cari harga (Harga NaN · Harga Tampil '-' tanpa '*') + Nominal "
+          "0.0 BUKAN None (dulu ikut terhitung 'tanpa harga')",
+          float(_pm50["NOLDEV"]["Nominal"]) == 0.0
+          and (pd.isna(_pm50["NOLDEV"]["Harga"])
+               if "Harga" in _p50.columns else True)
+          and _pm50["NOLDEV"]["Harga Tampil"] == "-"
+          and float(_pm50["AYAM FILET"]["Nominal"]) == 20.0,
+          f"got NOLDEV={_pm50['NOLDEV'][['Harga Tampil', 'Nominal']].to_dict()}")
+    _g50, _pp50 = _agr50(_dn50, 25, _hmap50, _kmap50)
+    _gm50 = {str(r["Resto"]): r for _, r in _g50.iterrows()}
+    check("(v3.9.38) agregasi per resto: pasangan qty-0 TAK dihitung "
+          "'Tanpa Harga' (isna ≠ 0.0) — MLGPAR 2 barang · 0 tanpa · Σ 20",
+          int(_gm50["MLGPAR"]["N Barang"]) == 2
+          and int(_gm50["MLGPAR"]["Tanpa Harga"]) == 0
+          and float(_gm50["MLGPAR"]["Nominal Deviasi"]) == 20.0,
+          f"got {_gm50['MLGPAR'].to_dict()}")
+
+    # --- (b) pure: hitung_nominal_lalu_pairs — nominal RESMI file ------
+    _fdf50 = pd.DataFrame({
+        "Resto": ["1001.MLGPAR"] * 3,
+        "Nama Barang": ["AYAM FILET", "NOLDEV", "KOPI BUBUK 100G"],
+        "Satuan": ["GR", "GR", "PCS"],
+        "Minggu": ["WEEK 4", "WEEK 4", "WEEK 4"],
+        "DEV Lalu": [113.0, 5.0, 7.0],
+        # v3.9.38 — kolom NOMINAL DEVIASI milik file (AYAM ada; NOLDEV &
+        # KOPI kosong → fallback jalur lama)
+        "Nominal Deviasi Lalu": [999.0, _np50.nan, _np50.nan],
+        "BULAN": ["204.OKT 26"] * 3,
+        "_bulan_num": [10, 10, 10],
+        "_resto_norm": ["MLGPAR"] * 3,
+        "_bahan_norm": ["AYAM FILET", "NOLDEV", "KOPI BUBUK 100G"],
+        "_h": [28, 28, 28],
+    })
+    _l50 = _hlp50(_fdf50, {"AYAM FILET": (10.0, "GR"),
+                            "NOLDEV": (10.0, "GR")}, _kmap50)
+    _lm50 = {str(r["_bahan_norm"]): r for _, r in _l50.iterrows()}
+    check("(v3.9.38) hitung_nominal_lalu_pairs: NOMINAL RESMI FILE "
+          "dipakai APA ADANYA (AYAM 999 — BUKAN recompute 10×113=1.130; "
+          "harga snapshot file ≠ 41.09 sekarang tak masalah)",
+          float(_lm50["AYAM FILET"]["Nominal Lalu"]) == 999.0,
+          f"got {_lm50['AYAM FILET']['Nominal Lalu']}")
+    check("(v3.9.38) hitung_nominal_lalu_pairs: kolom file KOSONG → "
+          "fallback recompute (NOLDEV 10×5=50) + tanpa harga → None",
+          float(_lm50["NOLDEV"]["Nominal Lalu"]) == 50.0
+          and pd.isna(_lm50["KOPI BUBUK 100G"]["Nominal Lalu"]),
+          f"got NOLDEV={_lm50['NOLDEV']['Nominal Lalu']} "
+          f"KOPI={_lm50['KOPI BUBUK 100G']['Nominal Lalu']}")
+    # qty-0 TANPA file nominal → 0.0 (bukan None)
+    _fdf50b = _fdf50.copy()
+    _fdf50b.loc[1, "DEV Lalu"] = 0.0
+    _fdf50b.loc[1, "Nominal Deviasi Lalu"] = _np50.nan
+    _l50b = _hlp50(_fdf50b, {"AYAM FILET": (10.0, "GR")}, _kmap50)
+    _lm50b = {str(r["_bahan_norm"]): r for _, r in _l50b.iterrows()}
+    check("(v3.9.38) hitung_nominal_lalu_pairs: DEV Lalu PERSIS 0 tanpa "
+          "file nominal → Nominal 0.0 (tak perlu cari harga)",
+          float(_lm50b["NOLDEV"]["Nominal Lalu"]) == 0.0,
+          f"got {_lm50b['NOLDEV']['Nominal Lalu']}")
+
+    # --- (c) parse_deviasi_file: kolom NOMINAL DEVIASI terbaca ---------
+    from openpyxl import Workbook as _WB50
+
+    from src.ui.komparasi_deviasi_view import parse_deviasi_file as _pdf50
+    _tmp50 = _tf.mkdtemp(prefix="sm50_")
+    _f50 = os.path.join(_tmp50, "dev50.xlsx")
+    _wb50 = _WB50(); _ws50 = _wb50.active; _ws50.title = "Sheet1"
+    _ws50.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                  "QTY DEVIASI", "NOMINAL DEVIASI", "STATUS BULAN",
+                  "BULAN"])
+    _ws50.append(["1001.MLGPAR", "AYAM FILET", "GR", -80, -31, 49, 49000,
+                  "WEEK 1", "201.OKT 26"])
+    _wb50.save(_f50)
+    _res50 = _pdf50(_f50)
+    check("(v3.9.38) parse_deviasi_file: kolom NOMINAL DEVIASI file → "
+          "'Nominal Deviasi Lalu' terbaca (49000; exact-match — bukan "
+          "NOMINAL WASTE/SUSUT)",
+          _res50["ok"]
+          and "Nominal Deviasi Lalu" in _res50["df"].columns
+          and float(_res50["df"].iloc[0]["Nominal Deviasi Lalu"])
+          == 49000.0,
+          f"ok={_res50['ok']} cols={list(_res50['df'].columns)}")
+
+    # --- (d) tab 🧮: kolom 'Nominal Deviasi Bulan Lalu' per resto ------
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV50
+    _top50 = tk.Toplevel(root)
+    _top50.geometry("1400x750+10+10")
+    _holder50 = {"df": None}
+    _rv50 = _NRV50(_top50, lalu_provider=lambda: _holder50["df"])
+    _rv50.pack(fill="both", expand=True)
+    _dn50v = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v,
+    } for b, r, s, v in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0),
+        ("NOLDEV", "MLGPAR", "GR", 0.0),
+        ("AYAM FILET", "BDGSET", "GR", 3.0),
+    ]])
+    _rv50.load_data(_dn50v, harga_map=_hmap50, konversi_map=_kmap50)
+    _rv50.ensure_refreshed()
+    wait_view(root, _rv50)
+    check("(v3.9.38) 🧮: TANPA file → kolom 'Nominal Deviasi Bulan Lalu' "
+          "ada + semua '-' + footer petunjuk (⚖ Komparasi)",
+          str(_rv50.tree.heading("Nominal Deviasi Bulan Lalu")["text"])
+          == "Nominal Deviasi Bulan Lalu"
+          and all(
+              str(_rv50.tree.set(_i50, "Nominal Deviasi Bulan Lalu"))
+              == "-" for _i50 in _rv50.tree.get_children(""))
+          and "belum dimuat" in _rv50.status_var_label.get(),
+          f"footer={_rv50.status_var_label.get()!r}")
+    # qty-0 view-level: NOLDEV tak menambah 'Tanpa Harga'
+    _r50v = {str(_rv50.tree.set(_i50, "Resto")):
+             _rv50.tree.item(_i50, "values")
+             for _i50 in _rv50.tree.get_children("")}
+    check("(v3.9.38) 🧮 view: pasangan qty-0 (NOLDEV) tak dihitung 'Tanpa "
+          "Harga' — MLGPAR 2 barang · 0 tanpa",
+          _r50v.get("MLGPAR") is not None
+          and _r50v["MLGPAR"][1] == "2"
+          and _r50v["MLGPAR"][2] == "0",
+          f"got {_r50v.get('MLGPAR')}")
+    # file masuk → kolom lalu = Σ NOMINAL RESMI file per resto
+    _holder50["df"] = _fdf50
+    _rv50.on_lalu_file_changed()
+    wait_view(root, _rv50)
+    _r50w = {str(_rv50.tree.set(_i50, "Resto")):
+             _rv50.tree.item(_i50, "values")
+             for _i50 in _rv50.tree.get_children("")}
+    check("(v3.9.38) 🧮: kolom Bulan Lalu per resto = Σ NOMINAL RESMI "
+          "file (MLGPAR 999 — angka file, bukan recompute) + baris TOTAL "
+          "menjumlah + resto tanpa baris '-'",
+          _r50w.get("MLGPAR") is not None
+          and _r50w["MLGPAR"][4] == "999"
+          and _r50w.get("BDGSET") is not None
+          and _r50w["BDGSET"][4] == "-"
+          and _r50w.get("TOTAL") is not None
+          and _r50w["TOTAL"][4] == "999",
+          f"got {_r50w}")
+    check("(v3.9.38) 🧮: footer 'TOTAL LALU' + chip TOTAL · LALU "
+          "(versus bulan lalu)",
+          "TOTAL LALU 999" in _rv50.status_var_label.get()
+          and "LALU 999" in _rv50._total_var.get(),
+          f"footer={_rv50.status_var_label.get()!r} "
+          f"chip={_rv50._total_var.get()!r}")
+    _top50.destroy()
+    root.update()
+
+    # --- (e) DeviasiView: kolom Nominal qty-0 → 0.0 (tampil '-') ------
+    from src.ui.deviasi_view import DeviasiView as _DV50
+    _jenis50 = ["SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
+                "4.IN", "5.BARANG MASUK", "8.BARANG KELUAR", "9.ACR"]
+    _nol50 = pd.DataFrame([{
+        "Nama Barang": "NOLDEV", "JENIS": j, "NAMA RESTO": "MLGPAR",
+        "Tanggal": t, "NILAI": (10.0 if j in ("1.SO", "2.SALDO AKHIR",
+                                              "SALDO AWAL") and
+                                (j != "SALDO AWAL" or t == 1) else 0.0),
+        "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+        "SOURCE KIRIMAN": "GUDANG", "Nomor": None, "Nomor PO": None,
+        "#Tgl/Jam Pembuatan IT": None,
+    } for j in _jenis50 for t in range(1, 31)])
+    _a50 = pd.concat([append1, _nol50], ignore_index=True)
+    _top50d = tk.Toplevel(root)
+    _top50d.geometry("1400x750+10+10")
+    _dv50 = _DV50(_top50d, satuan_mode="GR")
+    _dv50.pack(fill="both", expand=True)
+    root.update()
+    _dv50.load_data(_a50, None, harga_map={"BARANG ACR": (2.0, "GR")},
+                    konversi_map={"rasio": {("BARANG ACR", "GR"): 1.0},
+                                  "terkecil": {"BARANG ACR": "GR"}})
+    wait_view(root, _dv50)
+    _dv50.ensure_refreshed()
+    wait_view(root, _dv50)
+    _nol_row50 = None
+    for _i50 in _dv50.tree.get_children(""):
+        if str(_dv50.tree.set(_i50, "Nama Barang")) == "NOLDEV":
+            _nol_row50 = _i50
+            break
+    _rdf50 = _dv50._compute_pivot()
+    _rnol50 = _rdf50[_rdf50["Nama Barang"].astype(str) == "NOLDEV"] \
+        if _rdf50 is not None and not _rdf50.empty else pd.DataFrame()
+    check("(v3.9.38) Deviasi GR: pasangan Deviasi 0 TANPA harga → "
+          "Nominal 0.0 di result (tampil '-'; dulu NaN ikut jalur tanpa "
+          "harga) — cache harga tak dibangun utk kunci qty-0",
+          _nol_row50 is not None
+          and str(_dv50.tree.set(_nol_row50, "Nominal")) == "-"
+          and len(_rnol50) > 0
+          and float(_rnol50.iloc[0]["Nominal"]) == 0.0,
+          f"tree={None if _nol_row50 is None else _dv50.tree.set(_nol_row50, 'Nominal')!r} "
+          f"rdf={_rnol50[['Nominal']].to_dict('records') if len(_rnol50) else None}")
+    _top50d.destroy()
+    root.update()
+
+    # --- (f) Komparasi: GR Saat Ini 0 + tanpa harga → Nominal '-' -----
+    from src.ui.komparasi_deviasi_view import KomparasiDeviasiView as _KDV50
+    _rows50k = []
+    for t in range(1, 26):
+        _sis50 = 100.0
+        for j, v in (("1.SO", 100.0), ("2.SALDO AKHIR", _sis50),
+                     ("4.IN", 0.0), ("9.ACR", 0.0),
+                     ("8.BARANG KELUAR", 0.0)):
+            _rows50k.append({
+                "Nama Barang": "NOLDEV", "JENIS": j,
+                "NAMA RESTO": "MLGPAR", "Tanggal": t, "NILAI": v,
+                "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None,
+            })
+        _rows50k.append({
+            "Nama Barang": "NOLDEV", "JENIS": "SALDO AWAL",
+            "NAMA RESTO": "MLGPAR", "Tanggal": t,
+            "NILAI": 100.0 if t == 1 else 0.0,
+            "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+            "SOURCE KIRIMAN": "GUDANG", "Nomor": None, "Nomor PO": None,
+            "#Tgl/Jam Pembuatan IT": None,
+        })
+    _f50k = os.path.join(_tmp50, "dev50k.xlsx")
+    _wb50k = _WB50(); _ws50k = _wb50k.active; _ws50k.title = "Sheet1"
+    _ws50k.append(["RESTO", "NAMA BAHAN", "Satuan", "QTY BOM", "QTY COM",
+                   "QTY DEVIASI", "NOMINAL DEVIASI", "STATUS BULAN",
+                   "BULAN"])
+    _ws50k.append(["1001.MLGPAR", "NOLDEV", "GR", -100, -100, 0, 0,
+                   "WEEK 4", "204.OKT 26"])
+    _wb50k.save(_f50k)
+    import tkinter.messagebox as _mb50
+    _orig_se50 = _mb50.showerror
+    _mb50.showerror = lambda *a, **k: None
+    _top50k = tk.Toplevel(root)
+    _kv50 = _KDV50(_top50k)
+    _kv50.pack(fill="both", expand=True)
+    root.update()
+    _kv50.load_data(pd.DataFrame(_rows50k), harga_map={},
+                    konversi_map={"rasio": {}, "terkecil": {}})
+    _kv50._load_paths([_f50k])
+    wait_view(root, _kv50)
+    _knol50 = None
+    for _i50 in _kv50.tree.get_children(""):
+        if str(_kv50.tree.set(_i50, "Nama Barang")) == "NOLDEV":
+            _knol50 = _i50
+            break
+    check("(v3.9.38) Komparasi: GR Saat Ini 0 (pair NOLDEV) TANPA harga "
+          "→ Nominal 0.0 tampil '-' (BUKAN '—' tanpa-harga; dulu lookup "
+          "dijalankan → NaN)",
+          _knol50 is not None
+          and str(_kv50.tree.set(_knol50, "Nominal")) == "-",
+          f"got {None if _knol50 is None else _kv50.tree.set(_knol50, 'Nominal')!r}")
+    _mb50.showerror = _orig_se50
+    _top50k.destroy()
+    root.update()
+    shutil.rmtree(_tmp50, ignore_errors=True)
+    import contextlib as _cl50
+    with _cl50.suppress(FileNotFoundError):
+        os.unlink("komparasi_last.json")
 
     root.destroy()
 

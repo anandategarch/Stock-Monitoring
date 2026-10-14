@@ -183,7 +183,29 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.37"  # v3.9.37 — 🔄 Refresh File Sumber (selektif) + Rincian PO: Keterangan PO ↳ Pemasok + Tgl/Jam ↳ Nomor #
+APP_VERSION = "3.9.38"  # v3.9.38 — QTY Deviasi 0 tanpa cari harga + 🧮 kolom/total Bulan Lalu (nilai RESMI file) + perbaikan harga (BUMBU PASTA KUAH: engine 107,6386854/GR = hitungan manual)
+# v3.9.38 (user: "Kuantiti Deviasi 0 takperlu cari harga. Cek juga
+# keseluruhan terkait ini" + "Nominal Deviasi total per resto juga
+# tambahan di tab nominal deviasi ini buat versus bulan lalu" + harga
+# BUMBU PASTA KUAH (V.20) "kok berbeda per gr nya" — manual
+# 107,6386854 via saldo akhir nilai/kuantitas):
+# (1) VERIFIKASI HARGA: engine fn_4109 = SAMA persis dgn hitungan
+#     manual user (Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo Akhir —
+#     107,6386854/GR; tampil '107,64' = pembulatan display saja).
+#     Akar beda nominal: engine v3.9.36 RECOMPUTE Nominal Bulan Lalu
+#     dgn harga 41.09 SEKARANG, sedangkan file laporan resmi memakai
+#     harga snapshot saat laporan dibuat (BUMBU PASTA KUAH (V.20)
+#     MLGPAR W4 ≈ 113,048/GR → resmi 48.980.811,43 vs recompute
+#     46.637.074,58). FIX: Nominal Bulan Lalu kini = KOLOM NOMINAL
+#     DEVIASI MILIK FILE (parse_deviasi_file → 'Nominal Deviasi Lalu'
+#     exact-match); kosong/format lama → fallback recompute (lama);
+# (2) QTY DEVIASI 0 TANPA CARI HARGA — menyeluruh (hitung_nominal_
+#     pairs, hitung_nominal_lalu_pairs, kolom Nominal GR/PCS, mode ⚖
+#     Komparasi): lookup DILEWATI, Nominal 0.0 BUKAN None → tak
+#     dihitung 'tanpa harga' (kolom/popup/footer; dulu menyesatkan);
+# (3) KOLOM 'Nominal Deviasi Bulan Lalu' PER RESTO tab 🧮 + baris
+#     TOTAL + footer 'TOTAL LALU' + chip (versus bulan lalu; resto
+#     tanpa baris di file → '-'; minus merah per-cell).
 # v3.9.37 (user: "ada tombol refresh untuk file sumber, bisa gak? dan gak
 # harus refresh semua tapi" + "Keterangan PO merger Vertical dengan
 # Pemasok sama seperti Status Pesanan Juga dan kolom Keterangan PO hapus

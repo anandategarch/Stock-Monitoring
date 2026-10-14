@@ -494,6 +494,14 @@ def parse_deviasi_file(path: str) -> dict:
     col_com = _find_col(cols, "QTYCOM", "COM")
     col_dev = _find_col(cols, "QTYDEVIASI", "DEVIASI")
     col_sat = _find_col(cols, "SATUAN", "UOM", "UNIT")
+    # v3.9.38 — NOMINAL DEVIASI milik FILE sendiri (angka RESMI laporan:
+    # harga snapshot saat laporan dibuat). Dipakai nominal_common.
+    # hitung_nominal_lalu_pairs sebagai SUMBER UTAMA 'Nominal Lalu'
+    # (dulu dihitung ulang harga 41.09 SEKARANG × DEV Lalu → beda harga
+    # snapshot → nominal bulan-lalu menyimpang dari laporan resmi —
+    # temuan user "harga per gr nya berbeda" BUMBU PASTA KUAH (V.20):
+    # 41.09 sekarang 107,6386854/GR vs file 20.AGUSTUS ±113,048/GR).
+    col_nom = _find_col(cols, "NOMINALDEVIASI")
     col_pct = None
     for k, orig in cols.items():
         if k.startswith("%") and "DEVIASI" in k and "BOM" in k:
@@ -514,6 +522,12 @@ def parse_deviasi_file(path: str) -> dict:
         "BOM Lalu": pd.to_numeric(df[col_bom], errors="coerce"),
         "COM Lalu": pd.to_numeric(df[col_com], errors="coerce"),
         "DEV Lalu": pd.to_numeric(df[col_dev], errors="coerce"),
+        # v3.9.38 — kolom nominal resmi file (exact-match key
+        # 'NOMINALDEVIASI' — bukan NOMINAL WASTE/SUSUT/TRIAL/LOSS;
+        # file tanpa kolom → NaN → konsumen fallback hitung ulang).
+        "Nominal Deviasi Lalu": (
+            pd.to_numeric(df[col_nom], errors="coerce")
+            if col_nom is not None else np.nan),
     })
     out["%TO BOM Lalu"] = (pd.to_numeric(df[col_pct], errors="coerce")
                            if col_pct is not None else np.nan)
@@ -2043,14 +2057,19 @@ class KomparasiDeviasiView(tk.Frame):
         # peta harga benar (ditemukan test §46d); plus race
         # load_data-vs-worker-in-flight. lookup_harga_pair = O(1) dict
         # (+2 get rasio) — ±1µs/baris, murah di worker thread.
+        # v3.9.38 — GR Saat Ini PERSIS 0 → lookup DILEWATI (user:
+        # "Kuantiti Deviasi 0 takperlu cari harga"): Nominal 0.0 →
+        # tampil '-' (bukan '—' tanpa-harga).
         _hn = np.array(
-            [lookup_harga_pair(self.harga_map, self.konversi_map,
+            [None if g == 0.0 else
+             lookup_harga_pair(self.harga_map, self.konversi_map,
                                str(b), str(s))[0]
-             for b, s in zip(df["Nama Barang"], df["Satuan"])],
+             for b, s, g in zip(df["Nama Barang"], df["Satuan"], gr_app)],
             dtype=object)
         df["Nominal"] = pd.to_numeric(
-            pd.Series([np.nan if (h is None or np.isnan(g))
-                       else float(h) * float(g)
+            pd.Series([np.nan if np.isnan(g)
+                       else (0.0 if g == 0.0 else
+                             (np.nan if h is None else float(h) * float(g)))
                        for h, g in zip(_hn, gr_app)], dtype="float64"),
             errors="coerce")
         # NaN otomatis menjalar dari gr_app (baris tanpa nilai app)

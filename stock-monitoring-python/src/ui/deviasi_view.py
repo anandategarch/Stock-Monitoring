@@ -1598,17 +1598,30 @@ class DeviasiView(tk.Frame):
             _cache: dict = _c34[1]
         else:
             _cache = {}
-            for _b, _s in zip(result["Nama Barang"].astype(str),
-                              result["Satuan"].astype(str)):
-                if (_b, _s) not in _cache:
-                    _cache[(_b, _s)] = lookup_harga_pair(
-                        self.harga_map, self.konversi_map, _b, _s)[0]
+            # v3.9.38 — pasangan Deviasi PERSIS 0 TAK PERLU CARI HARGA
+            # (user: "Kuantiti Deviasi 0 takperlu cari harga. Cek juga
+            # keseluruhan terkait ini"): lookup dilewati utk baris qty-0
+            # (cache tetap dibangun utk pasangan ≠ 0 — pasangan lain
+            # resto lain boleh memakai kunci sama).
+            _devn34 = pd.to_numeric(result["Deviasi"], errors="coerce")
+            for _b, _s, _d in zip(result["Nama Barang"].astype(str),
+                                  result["Satuan"].astype(str), _devn34):
+                if (_b, _s) in _cache:
+                    continue
+                if pd.notna(_d) and float(_d) == 0.0:
+                    continue          # qty dev 0 → tak perlu harga
+                _cache[(_b, _s)] = lookup_harga_pair(
+                    self.harga_map, self.konversi_map, _b, _s)[0]
             self._harga_pair_cache = (self.harga_map, _cache)
         _hpn = [_cache.get((str(_b), str(_s)))
                 for _b, _s in zip(result["Nama Barang"],
                                   result["Satuan"])]
+        # v3.9.38 — Deviasi 0 → Nominal 0.0 TANPA harga (mirror
+        # nominal_common; tampil '-' identik NaN — perubahan semantik:
+        # bukan 'tanpa harga').
         result["Nominal"] = pd.Series(
-            [np.nan if _h is None else float(_h) * float(_d)
+            [0.0 if (pd.notna(_d) and float(_d) == 0.0)
+             else (np.nan if _h is None else float(_h) * float(_d))
              for _h, _d in zip(_hpn, pd.to_numeric(
                  result["Deviasi"], errors="coerce"))],
             dtype="float64")

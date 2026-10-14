@@ -6,7 +6,7 @@ Repository berisi:
 
 2. **`stock-monitoring-python/`** — Porting Python dari Power Query M code. Pipeline lengkap yang menghasilkan output Excel "sama persis" dengan sample, tanpa dependency Excel/Windows.
 
-> **Versi terkini: v3.9.37** — 🔄 **Refresh File Sumber (selektif)**: tombol + dialog centang file sumber (file berubah sejak proses terakhir tercentang otomatis; file lain TIDAK dibaca ulang — cache bacaan; refresh tanpa pindah tab) · 🛒 Rincian PO: **Keterangan PO merge ↳ ke Pemasok** + **Tgl/Jam Pembuatan merge ↳ ke Nomor #** (kedua kolom dihapus — tabel kini 6 kolom). Changelog di bawah.
+> **Versi terkini: v3.9.38** — 🧮 **Nominal Deviasi: kolom & TOTAL "Nominal Deviasi Bulan Lalu" per resto (versus bulan lalu — NOMINAL RESMI file deviasi, bukan hitung ulang harga sekarang; jawaban BUMBU PASTA KUAH (V.20): engine = 107,6386854/GR SAMA dgn hitungan manual saldo akhir nilai/kuantitas — beda hanya harga snapshot file laporan resmi)** · **Qty Deviasi 0 TAK perlu cari harga** (Nominal 0.0 netral, tak dihitung 'tanpa harga'). Changelog di bawah.
 
 ## Quick Start (Python Edition)
 
@@ -24,6 +24,12 @@ python -m src.main
 Lihat `stock-monitoring-python/README.md` untuk dokumentasi lengkap.
 
 ## Changelog
+
+### v3.9.38 — QTY DEVIASI 0 TANPA CARI HARGA + 🧮 KOLOM & TOTAL BULAN LALU (NOMINAL RESMI FILE) + VERIFIKASI HARGA BUMBU PASTA KUAH
+- **(1) VERIFIKASI HARGA (jawaban user)**: engine Python = **SAMA dgn hitungan manual** — Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo Akhir (41.09) → BUMBU PASTA KUAH (V.20) = **107,6386854/GR** (tampil "107,64" = pembulatan display 2 desimal; nominal tetap presisi penuh). Yang membuat nominal "beda": engine v3.9.36 menghitung ulang **Nominal Bulan Lalu** dgn harga 41.09 SEKARANG, sedangkan file laporan resmi (20.AGUSTUS 2026.xlsx) memakai harga snapshot saat laporan dibuat (≈113,048/GR → MLGPAR W4 resmi 48.980.811,43 vs recompute 46.637.074,58 — selisih 2.343.736,85). **FIX: Nominal Bulan Lalu kini = KOLOM NOMINAL DEVIASI milik file (angka resmi)** — kolom kosong → fallback hitung ulang.
+- **(2) QTY DEVIASI 0 TAK PERLU CARI HARGA** (menyeluruh: hitung_nominal_pairs, hitung_nominal_lalu_pairs, kolom Nominal Deviasi GR/PCS, mode ⚖ Komparasi): lookup harga DILEWATI, Nominal **0.0 BUKAN None** → pasangan qty-0 TIDAK dihitung 'tanpa harga' (kolom Tanpa Harga / popup / footer — dulu menyesatkan).
+- **(3) KOLOM BARU 'Nominal Deviasi Bulan Lalu' per resto** di tab 🧮 (user: "buat versus bulan lalu"): Σ nilai resmi file per resto + baris TOTAL + footer TOTAL LALU + chip; minus merah per-cell; resto tanpa baris → '-'; tanpa file → '-' + petunjuk.
+- Verifikasi: test_ui_redesign **995/995 PASS** (§50 12 check baru) + test_mock ALL PASS + probe data nyata 20.AGUSTUS 2026 (MLGPAR BUMBU PASTA KUAH (V.20) W4 = 48.980.811,43 persis file resmi) + ruff src 198 == baseline.
 
 ### v3.9.37 — 🔄 REFRESH FILE SUMBER (SELEKTIF) + RINCIAN PO: KETERANGAN ↳ PEMASOK · TGL/JAM ↳ NOMOR #
 > User: *"ada tombol refresh untuk file sumber, bisa gak? dan gak harsu refresh semua tapi"* + *"Keterangan PO merger Vertical dengan Pemasok sama seperti Status Pesanan Juga dan kolom Keterangan PO hapus karna sudah termerger. Tanggal Jam pembuatan Merger vertical dengan Nomor #"*.

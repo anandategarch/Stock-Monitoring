@@ -32,6 +32,21 @@ up untuk tampilkan tanpa harga item apa aja"):
     resto itu (TOTAL row = semua resto) + alasan (tak ada di 41.09 /
     satuan tak terkonversi).
 
+v3.9.38 (user: "Nominal Deviasi total per resto juga tambahan di tab
+nominal deviasi ini buat versus bulan lalu"):
+  - KOLOM BARU 'Nominal Deviasi Bulan Lalu' per resto = Σ 'Nominal Lalu'
+    self._lalu_df (file deviasi ⚖ Komparasi) per resto-norm; resto tanpa
+    baris di file → '-' ; baris TOTAL menjumlah; minus merah per-cell;
+    filter header + sort numerik; footer/chip menyebut TOTAL LALU (atau
+    petunjuk bila file belum dimuat).
+  - QTY DEVIASI 0 tak dihitung 'tanpa harga' (aturan v3.9.38
+    nominal_common — Nominal 0.0 ≠ None).
+  - SUMBER 'Nominal Lalu' = KOLOM NOMINAL DEVIASI MILIK FILE (v3.9.38):
+    angka RESMI laporan bulan lalu — bukan hitung ulang harga 41.09
+    sekarang (temuan user: BUMBU PASTA KUAH (V.20) 41.09 sekarang
+    107,6386854/GR — sama dgn hitungan manual — vs harga snapshot file
+    ±113,048/GR → nominal beda; kini nominal lalu = angka file).
+
 Perhitungan = src/ui/nominal_common.py (satu sumber kebenaran dgn
 mode 💰 Nominal (H) tab 📋 Laporan Deviasi, kolom Nominal tab 📦
 Deviasi GR/🧩 PCS & mode ⚖ Komparasi — v3.9.34).
@@ -114,9 +129,13 @@ class NominalRestoView(tk.Frame):
         ("N Barang", 80, "e"),
         ("Tanpa Harga", 80, "e"),
         ("Nominal Deviasi", 130, "e"),   # heading dinamis "(H=n)"
+        # v3.9.38 — user: "Nominal Deviasi total per resto juga tambahan
+        # di tab nominal deviasi ini buat versus bulan lalu"
+        ("Nominal Deviasi Bulan Lalu", 130, "e"),
     ]
 
-    NUMERIC_COLS = ("N Barang", "Tanpa Harga", "Nominal Deviasi")
+    NUMERIC_COLS = ("N Barang", "Tanpa Harga", "Nominal Deviasi",
+                    "Nominal Deviasi Bulan Lalu")
 
     def __init__(self, parent, go_to_proses: Callable | None = None,
                  h_state=None, lalu_provider: Callable | None = None):
@@ -368,7 +387,7 @@ class NominalRestoView(tk.Frame):
         return self._format_col_series(col, f[col]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
-        if col == "Nominal Deviasi":
+        if col in ("Nominal Deviasi", "Nominal Deviasi Bulan Lalu"):
             return series.map(fmt_nominal_cell)
         return series.astype(str)
 
@@ -550,6 +569,22 @@ class NominalRestoView(tk.Frame):
             self._pairs_df = None
             return pd.DataFrame()
         self._pairs_df = pairs
+        # v3.9.38 — KOLOM BARU 'Nominal Deviasi Bulan Lalu' per resto
+        # (user: "Nominal Deviasi total per resto juga tambahan di tab
+        # nominal deviasi ini buat versus bulan lalu"): Σ 'Nominal Lalu'
+        # self._lalu_df per resto-norm (kunci join = _norm_resto_lalu —
+        # pola popup: '1030.BDGSET' ↔ 'BDGSET'); resto tanpa baris di
+        # file → NaN (tampil '-'); Σ skipna = pola kolom Sekarang.
+        lalu = self._lalu_df
+        if lalu is not None and not lalu.empty \
+                and "Nominal Lalu" in lalu.columns:
+            per_lalu = lalu.groupby("_resto_norm")["Nominal Lalu"].sum()
+            g["Nominal Deviasi Bulan Lalu"] = (
+                g["Resto"].astype(str).map(_norm_resto_lalu).map(per_lalu)
+                .astype("float64"))
+        else:
+            g["Nominal Deviasi Bulan Lalu"] = pd.Series(
+                [float("nan")] * len(g), dtype="float64")
         # snapshot utk filter header (SEBELUM filter diterapkan)
         self._result_df = g.copy()
         return g
@@ -638,6 +673,9 @@ class NominalRestoView(tk.Frame):
         n = len(filtered)
         total_nom = float(filtered["Nominal Deviasi"].dropna().sum()) \
             if "Nominal Deviasi" in filtered.columns else 0.0
+        total_lalu = float(
+            filtered["Nominal Deviasi Bulan Lalu"].dropna().sum()) \
+            if "Nominal Deviasi Bulan Lalu" in filtered.columns else 0.0
         total_barang = int(filtered["N Barang"].sum()) \
             if "N Barang" in filtered.columns else 0
         total_noharga = int(filtered["Tanpa Harga"].sum()) \
@@ -648,11 +686,13 @@ class NominalRestoView(tk.Frame):
         for i in range(n):
             row = filtered.iloc[i]
             nom = row.get("Nominal Deviasi", 0)
+            nom_l = row.get("Nominal Deviasi Bulan Lalu")
             values = (
                 str(row["Resto"]),
                 fmt_int_id(int(row.get("N Barang", 0) or 0)),
                 fmt_int_id(int(row.get("Tanpa Harga", 0) or 0)),
                 fmt_nominal_cell(nom),
+                fmt_nominal_cell(nom_l),
             )
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             nom_v = None
@@ -661,11 +701,23 @@ class NominalRestoView(tk.Frame):
                     nom_v = float(nom)
             except (TypeError, ValueError):
                 nom_v = None
+            # v3.9.38 — minus merah per-cell kolom Bulan Lalu (pola
+            # kolom Sekarang + popup)
+            noml_v = None
+            try:
+                if nom_l is not None and not pd.isna(nom_l):
+                    noml_v = float(nom_l)
+            except (TypeError, ValueError):
+                noml_v = None
             if self._cell_tags:
                 if nom_v is not None and nom_v < 0:
                     self._neg_cells.append((f"row_{i}",
                                             "Nominal Deviasi"))
-            elif nom_v is not None and nom_v < 0:
+                if noml_v is not None and noml_v < 0:
+                    self._neg_cells.append((f"row_{i}",
+                                            "Nominal Deviasi Bulan Lalu"))
+            elif (nom_v is not None and nom_v < 0) \
+                    or (noml_v is not None and noml_v < 0):
                 tags.append("negative")
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
@@ -676,6 +728,7 @@ class NominalRestoView(tk.Frame):
             fmt_int_id(total_barang),
             fmt_int_id(total_noharga),
             fmt_nominal_cell(total_nom),
+            fmt_nominal_cell(total_lalu),
         )
         items.append(("", "row_total",
                       {"values": values_total, "tags": ("total",)}))
@@ -690,9 +743,19 @@ class NominalRestoView(tk.Frame):
             status += f" · {fmt_int_id(n_neg)} resto minus"
         if total_noharga:
             status += f" · {fmt_int_id(total_noharga)} pasangan tanpa harga"
+        # v3.9.38 — versus bulan lalu di footer (chip TOTAL juga)
+        if self._lalu_loaded:
+            status += f" · TOTAL LALU {fmt_nominal_cell(total_lalu)}"
+        else:
+            status += " · LALU: file deviasi belum dimuat (⚖ Komparasi)"
         self.status_var_label.set(status)
-        self._total_var.set(
-            f"TOTAL {fmt_nominal_cell(total_nom)}")
+        if self._lalu_loaded:
+            self._total_var.set(
+                f"TOTAL {fmt_nominal_cell(total_nom)} · "
+                f"LALU {fmt_nominal_cell(total_lalu)}")
+        else:
+            self._total_var.set(
+                f"TOTAL {fmt_nominal_cell(total_nom)}")
 
         self._insert_cancel = insert_tree_items(
             self.tree, items, batch=500, on_done=self._render_done)
@@ -826,7 +889,8 @@ class NominalRestoView(tk.Frame):
             side="left", padx=10, pady=8)
         tk.Label(head,
                  text="Sekarang = Harga 41.09 × Deviasi (H) · Bulan Lalu "
-                      "= file deviasi (⚖ Komparasi, bulan terbaru)",
+                      "= nilai RESMI file deviasi (⚖ Komparasi, bulan "
+                      "terbaru)",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="right", padx=10)
 
