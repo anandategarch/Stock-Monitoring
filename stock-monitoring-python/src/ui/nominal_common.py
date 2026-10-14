@@ -208,6 +208,13 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     dev = dev.copy()
     dev["NILAI"] = pd.to_numeric(dev["NILAI"], errors="coerce").fillna(0)
 
+    # v3.9.42 — audit 61-a P3: SATUAN dinormalkan SEBELUM groupby —
+    # 'GR' vs 'GR ' dulu membuat 2 grup → 2 baris pasangan KEMBAR di
+    # popup per-resto (Σ tetap benar tapi baris dobel membingungkan).
+    if "SATUAN" in dev.columns:
+        dev["SATUAN"] = dev["SATUAN"].map(
+            lambda v: norm_sat(v) if norm_sat(v) else "")
+
     grouped = (dev.groupby(["Nama Barang", "NAMA RESTO", "SATUAN"],
                            as_index=False, dropna=False)["NILAI"].sum())
     grouped = grouped.rename(columns={
@@ -413,6 +420,23 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
     if _wk_sel is None:
         return empty
     out = out[pd.to_numeric(out["_h"], errors="coerce") == _wk_sel].copy()
+    # v3.9.42 — audit 61-a/61-b: WEEK 3 dan WEEK 4 sama-sama dipetakan
+    # _h=25 (mirror komparasi v3.9.22). File yang memuat KEDUA label →
+    # dedup keep="first" memilih baris file pertama (minggu tercampur
+    # ARBITRER per pasangan). Fix: pilih SATU label minggu DETERMINISTIK
+    # — label dgn NOMOR minggu TERBESAR (penutupan — semantik 'minggu
+    # terakhir' v3.9.36) — lalu filter baris label itu SEBELUM dedup.
+    if "Minggu" in out.columns and not out.empty:
+        _labs = [str(x).strip().upper()
+                 for x in out["Minggu"].dropna().unique()
+                 if str(x).strip().upper() not in ("", "NAN", "NONE")]
+        if len(_labs) > 1:
+            def _lab_num(lab):
+                m = re.search(r"(\d+)", lab)
+                return int(m.group(1)) if m else 0
+            _lab_sel = max(_labs, key=_lab_num)
+            out = out[out["Minggu"].astype(str).str.strip()
+                      .str.upper() == _lab_sel].copy()
     # label minggu terpilih utk display (label asli file; fallback
     # label cut-off bila kolom Minggu tak terbawa)
     _wk_fallback = {7: "WEEK 1", 14: "WEEK 2", 25: "WEEK 3/4"}.get(

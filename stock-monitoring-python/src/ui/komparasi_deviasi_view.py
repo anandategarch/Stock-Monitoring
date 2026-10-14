@@ -2351,14 +2351,13 @@ class KomparasiDeviasiView(tk.Frame):
         """v3.9.2 — pasang ulang tag per-cell (sort = delete+reinsert)."""
         if not self._cell_tags:
             return
-        if self._neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._neg_cells)
-        if self._st_match_cells:
-            apply_cell_tag(tree, "st_match", self._st_match_cells)
-        if self._st_diff_cells:
-            apply_cell_tag(tree, "st_diff", self._st_diff_cells)
-        if self._st_missing_cells:
-            apply_cell_tag(tree, "st_missing", self._st_missing_cells)
+        # v3.9.42 — audit 61-c P1-2: guard list-non-kosong DIHAPUS
+        # (list kosong = clear — semantik replace; guard lama meninggalkan
+        # label overlay STALE saat render baru tak punya sel warna).
+        apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        apply_cell_tag(tree, "st_match", self._st_match_cells)
+        apply_cell_tag(tree, "st_diff", self._st_diff_cells)
+        apply_cell_tag(tree, "st_missing", self._st_missing_cells)
 
     def _reset_filter(self):
         for c in self._col_sel:
@@ -2592,14 +2591,11 @@ class KomparasiDeviasiView(tk.Frame):
     def _reapply_top_tags(self, tree):
         if not self._cell_tags:
             return
-        if self._top_neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._top_neg_cells)
-        if self._top_st_match:
-            apply_cell_tag(tree, "st_match", self._top_st_match)
-        if self._top_st_diff:
-            apply_cell_tag(tree, "st_diff", self._top_st_diff)
-        if self._top_st_missing:
-            apply_cell_tag(tree, "st_missing", self._top_st_missing)
+        # v3.9.42 — audit 61-c P1-2: guard dihapus (list kosong = clear)
+        apply_cell_tag(tree, "neg_cell", self._top_neg_cells)
+        apply_cell_tag(tree, "st_match", self._top_st_match)
+        apply_cell_tag(tree, "st_diff", self._top_st_diff)
+        apply_cell_tag(tree, "st_missing", self._top_st_missing)
         self._reapply_ana_tags(tree, self._top_ana_cells)   # v3.9.19
 
     def _ana_empty_cells(self) -> dict:
@@ -2623,8 +2619,8 @@ class KomparasiDeviasiView(tk.Frame):
                            (self.ANALISA_ARAH, "ana_arah"),
                            (self.ANALISA_FFLOP, "ana_fflop")):
             cl = cells.get(label) or []
-            if cl:
-                apply_cell_tag(tree, tag, cl)
+            # v3.9.42 — guard dihapus (list kosong = clear)
+            apply_cell_tag(tree, tag, cl)
 
     def _top_aggregate(self, d: pd.DataFrame) -> pd.DataFrame:
         """v3.9.16 — agregat join → SATU baris per pasangan (resto ×
@@ -2887,14 +2883,13 @@ class KomparasiDeviasiView(tk.Frame):
     def _reapply_flip_tags(self, tree):
         if not self._cell_tags:
             return
-        if self._flip_neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._flip_neg_cells)
+        # v3.9.42 — audit 61-c P1-2: guard dihapus (list kosong = clear)
+        apply_cell_tag(tree, "neg_cell", self._flip_neg_cells)
         for kat, tag in (("Sempurna", "flip_sempurna"),
                          ("Dominan", "flip_dominan"),
                          ("Parsial", "flip_parsial")):
             cells = self._flip_kat_cells.get(kat) or []
-            if cells:
-                apply_cell_tag(tree, tag, cells)
+            apply_cell_tag(tree, tag, cells)
         self._reapply_ana_tags(tree, self._flip_ana_cells)   # v3.9.19
 
     def _flip_pair_core(self):

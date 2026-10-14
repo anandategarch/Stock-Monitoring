@@ -176,6 +176,22 @@ class FollowUpStore:
         if cb not in self._listeners:
             self._listeners.append(cb)
 
+    def remove_listener(self, fn) -> None:
+        """v3.9.42 — audit 61-c/61-d (F5 P3): lepas listener (defensif,
+        idempoten — fn yang tak terdaftar diabaikan senyap). Store hanya
+        punya add_listener: view yang di-destroy / direbuild tidak bisa
+        berhenti berlangganan → callback _notify mendarat di widget mati
+        (traceback noise) + listener menumpuk seumur app. API disiapkan
+        utk dipakai view pemanggil add_listener saat teardown (dipanggil
+        di deviasi_view / komparasi_deviasi_view — dikerjakan pusat).
+
+        (v3.9.33 48-e FIX 11 memakai guard winfo_exists di sisi view —
+        remove_listener memberi akar fix, keduanya kompatibel.)"""
+        try:
+            self._listeners.remove(fn)
+        except ValueError:
+            pass  # fn memang tak terdaftar (defensif)
+
     def _notify(self):
         for cb in list(self._listeners):
             try:
@@ -195,7 +211,14 @@ class FollowUpStore:
 
     # -- mutasi -------------------------------------------------------------------
     def toggle(self, fp: str, row: dict) -> bool:
-        """Tambah/hapus baris. Return True bila kini TERDAFTAR."""
+        """Tambah/hapus baris. Return True bila kini TERDAFTAR.
+
+        v3.9.42 — audit 61-c/61-d (F5 P3): hasil save()/save_resolved()
+        dulu DIABAIKAN — persist gagal (file terkunci / disk penuh)
+        senyap: user yakin baris ter-uncheck padahal restart
+        mengembalikannya. Kini gagal → print [WARNING] (stdout app
+        dialihkan ke log internal; JANGAN messagebox — context bisa
+        bukan main thread). Perubahan tetap di memori (degrade soft)."""
         if fp in self.rows:
             del self.rows[fp]
             # v3.9.33 — AUDIT FIX (48-e FIX 9): resolved dihapus dari
@@ -203,16 +226,22 @@ class FollowUpStore:
             # orphan tetap hidup di file dan muncul lagi setelah restart.
             # Simpan sekarang (baris yang ditambah ulang mulai bersih).
             self.resolved.pop(fp, None)
-            self.save_resolved()
-            self.save()
+            ok_resolved = self.save_resolved()
+            ok = self.save()
             self._notify()
+            if not (ok and ok_resolved):
+                print("[WARNING] followup: gagal menyimpan status followup "
+                      "(file terkunci/disk?) — perubahan hanya di memori")
             return False
         snap = {k: _pyval(row.get(k, "")) for k in SNAPSHOT_FIELDS}
         snap["fp"] = fp
         snap["added_at"] = datetime.now().isoformat(timespec="seconds")
         self.rows[fp] = snap
-        self.save()
+        ok = self.save()
         self._notify()
+        if not ok:
+            print("[WARNING] followup: gagal menyimpan status followup "
+                  "(file terkunci/disk?) — perubahan hanya di memori")
         return True
 
     def clear(self) -> None:
@@ -220,9 +249,14 @@ class FollowUpStore:
             return
         self.rows.clear()
         self.resolved.clear()
-        self.save()
-        self.save_resolved()
+        # v3.9.42 — audit 61-c/61-d (F5 P3): pola toggle — hasil save tidak
+        # diabaikan (gagal persist → [WARNING], lihat toggle).
+        ok = self.save()
+        ok_r = self.save_resolved()
         self._notify()
+        if not (ok and ok_r):
+            print("[WARNING] followup: gagal menyimpan status followup "
+                  "(file terkunci/disk?) — perubahan hanya di memori")
 
     # -- persistensi ---------------------------------------------------------------
     def save(self) -> bool:

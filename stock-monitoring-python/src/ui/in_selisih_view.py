@@ -471,6 +471,15 @@ class InDetailPopup(tk.Toplevel):
         self._render()
         self.focus_set()
         self.bind("<Escape>", lambda e: self.destroy())
+        # v3.9.42 — audit 61-c/61-d (F6 P3): timer flash status dibatalkan
+        # saat popup di-destroy — restore 3 dtk tak pernah mendarat di
+        # widget yang sudah mati (traceback noise di log).
+        def _cancel_flash(_e):
+            if self._flash_after:
+                with contextlib.suppress(tk.TclError):
+                    self.after_cancel(self._flash_after)
+                self._flash_after = None
+        self.bind("<Destroy>", _cancel_flash, add="+")
 
     # ---------------------------------------------------------------- UI ----
     def _build_ui(self, barang, resto, tgl_txt, row_summary):
@@ -520,7 +529,7 @@ class InDetailPopup(tk.Toplevel):
         if row_summary:
             self._chip(chips, "Barang Masuk", row_summary.get("bm", 0.0), "#006100")
             self._chip(chips, "Selisih IN", row_summary.get("selisih", 0.0),
-                       "#CC0000")
+                       "#dc2626")
 
         # --- Tabel dokumen ---
         body = tk.Frame(self, bg=C_BG)
@@ -676,10 +685,11 @@ class InDetailPopup(tk.Toplevel):
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶);
-        v3.9.19 — + sel CEK "RI Balancing" (amber)."""
-        if self._cell_tags and self._neg_cells:
+        v3.9.19 — + sel CEK "RI Balancing" (amber).
+        v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list kosong
+        = clear overlay)."""
+        if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
-        if self._cell_tags and self._cek_cells:
             apply_cell_tag(tree, "cek_ri_bal", self._cek_cells)
 
     # --------------------------------------------------------------- COPY ---
@@ -703,6 +713,11 @@ class InDetailPopup(tk.Toplevel):
         self.status_label.configure(fg=C_ACCENT_DARK)
 
         def restore():
+            # v3.9.42 — audit 61-c/61-d (F6 P3): popup bisa sudah di-destroy
+            # saat timer 3 dtk mendarat (user tutup/Esc) — dulu restore
+            # menyentuh widget mati → traceback noise di log konsol.
+            if not self.winfo_exists():
+                return
             self.status_var.set(self._base_status)
             self.status_label.configure(fg=C_TEXT_MUTED)
 
@@ -1674,8 +1689,9 @@ class InSelisihView(tk.Frame):
     def _reapply_cell_tags(self, tree):
         """FIX C-04 (audit 2-c): pasang ulang tag per-cell minus — sort /
         filter = delete+reinsert me-reset tag cell (mirror deviasi v3.9.2;
-        dipakai juga utk clone ⛶ lewat on_after_filter)."""
-        if self._cell_tags and self._neg_cells:
+        dipakai juga utk clone ⛶ lewat on_after_filter).
+        v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus."""
+        if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     # --------------------------------------------------------- EXPORT --

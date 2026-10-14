@@ -34,6 +34,17 @@ Perbaikan:
     '1  DEVIASI WEEKLY' tetap yang terbaca untuk bulan berjalan).
 
 OPTIMIZED: vectorized text operations.
+
+v3.9.42 — AUDIT FIX (61-a):
+- F5: sheet_filter (pemisah sheet 'LALU' vs berjalan) dibangun SEKALI
+  dan diteruskan ke KEDUA langkah scan — dulu hanya langkah-2 (folder
+  induk) yang memakai filter: workbook gabungan yang berada DI DALAM
+  folder RekapBerjalan/RekapLalu dibaca bebas-sheet → mode 'berjalan'
+  bisa menelan sheet 'SO BULAN LALU' (bulan tercampur senyap).
+- F6: filter JENIS jalur per-resto legacy kini case-insensitive
+  (strip+upper KEDUA sisi — mirror jalur combined; dulu exact-case
+  → 'so'/'So ' tertolak senyap); workbook gabungan lain di folder
+  yang sama yang diabaikan first-match-wins kini DISEBUT di [INFO].
 """
 import os
 from typing import List, Optional
@@ -272,37 +283,61 @@ def _read_combined_file(file_path: str, mode: str,
     return None
 
 
+def _log_sisa_workbook(sisa_files: list) -> None:
+    """v3.9.42 — AUDIT FIX (61-a, F6): sebut file Excel LAIN di folder
+    yang sama yang TIDAK pernah dibaca (scan berhenti di workbook
+    gabungan pertama yang cocok — first-match-wins). Dulu diabaikan
+    SENYAP: duplikat workbook / export ganda di folder tidak kelihatan
+    (data tidak dijumlah — hanya workbook pertama yang dipakai — tapi
+    user tidak tahu workbook mana yang menang)."""
+    if sisa_files:
+        nama = ", ".join(os.path.basename(x) for x in sisa_files)
+        print(f"  [INFO] fn_rekap_mentah: {len(sisa_files)} file lain di "
+              f"folder sama diabaikan (first-match-wins): {nama}")
+
+
 def _read_combined_rekap(folder_path: str, mode: str,
                          jenis_filter: Optional[List[str]]) -> Optional[pd.DataFrame]:
     """Fallback: cari workbook gabungan ber-schema rekap mentah.
 
     Urutan scan (v3.4):
     1. folder itu sendiri — file gabungan diletakkan langsung di folder
-       RekapBerjalan/RekapLalu (semua sheet boleh — folder menentukan
-       bulan-nya, cocok utk format legacy).
+       RekapBerjalan/RekapLalu.
     2. folder induk / RootPath — file gabungan user sering disimpan di
-       RootPath, MAKA dipisah lewat nama sheet supaya data bulan
-       berjalan tidak tercampur ke bulan lalu (dan sebaliknya):
-       - mode "berjalan": SKIP sheet ber-nama "LALU"
-       - mode "lalu"    : HANYA sheet ber-nama "LALU"
+       RootPath.
+
+    v3.9.42 — AUDIT FIX (61-a, F5): pemisah bulan via NAMA SHEET kini
+    berlaku utk KEDUA langkah (dulu hanya langkah-2): workbook gabungan
+    yang kebetulan berada DI DALAM folder RekapBerjalan/RekapLalu juga
+    difilter — mode 'berjalan' tidak lagi bisa menelan sheet 'SO BULAN
+    LALU' (data bulan tercampur senyap):
+    - mode "berjalan": SKIP sheet ber-nama "LALU"
+    - mode "lalu"    : HANYA sheet ber-nama "LALU"
     """
-    # 1. folder itu sendiri (tanpa filter nama sheet)
-    for f in _list_excel_files(folder_path):
-        out = _read_combined_file(f, mode, jenis_filter)
+    # v3.9.42 — filter dibangun SEKALI, dipakai langkah-1 DAN langkah-2
+    if mode == "berjalan":
+        sheet_filter = lambda sn: "LALU" not in sn.upper()  # noqa: E731
+    else:
+        sheet_filter = lambda sn: "LALU" in sn.upper()     # noqa: E731
+
+    # 1. folder itu sendiri (v3.9.42 — kini ikut filter nama sheet)
+    files_here = _list_excel_files(folder_path)
+    for i, f in enumerate(files_here):
+        out = _read_combined_file(f, mode, jenis_filter,
+                                  sheet_filter=sheet_filter)
         if out is not None:
+            _log_sisa_workbook(files_here[i + 1:])
             return out
     # 2. folder induk / RootPath (dengan filter nama sheet)
     parent = os.path.dirname(os.path.abspath(folder_path))
     if parent and os.path.isdir(parent) \
             and os.path.abspath(parent) != os.path.abspath(folder_path):
-        if mode == "berjalan":
-            sheet_filter = lambda sn: "LALU" not in sn.upper()  # noqa: E731
-        else:
-            sheet_filter = lambda sn: "LALU" in sn.upper()     # noqa: E731
-        for f in _list_excel_files(parent):
+        files_parent = _list_excel_files(parent)
+        for i, f in enumerate(files_parent):
             out = _read_combined_file(f, mode, jenis_filter,
                                       sheet_filter=sheet_filter)
             if out is not None:
+                _log_sisa_workbook(files_parent[i + 1:])
                 return out
     print(f"  [fn_rekap_mentah] WARNING: tidak ada file per-resto 'REKAP MENTAH' "
           f"dan tidak ada sheet gabungan rekap-mentah di: {folder_path}")
@@ -384,8 +419,14 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
 
     # === STEP 8: fil = filter JENIS (if jenisFilter given) ===
     if jenis_filter is not None:
-        sel_jenis = sel["JENIS"].astype(str)
-        sel = sel[sel_jenis.isin([str(j) for j in jenis_filter])].copy()
+        # v3.9.42 — AUDIT FIX (61-a, F6): normalisasi KEDUA sisi
+        # (fillna→strip→upper — mirror _combined_to_long jalur combined)
+        # — dulu exact-case: JENIS 'so' / 'So ' di file user tertolak
+        # SENYAP, baris hilang tergantung kapitalisasi file.
+        jf = {str(j).strip().upper() for j in jenis_filter}
+        jj = (sel["JENIS"].fillna("").astype(str).str.strip()
+              .str.upper())
+        sel = sel[jj.isin(jf)].copy()
 
     # === STEP 9: Type cast: base → text, days → number ===
     # Vectorized text conversion

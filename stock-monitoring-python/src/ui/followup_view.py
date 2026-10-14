@@ -480,8 +480,10 @@ class FollowUpView(tk.Frame):
 
     def _reapply_cell_tags(self, tree):
         """v3.9.17 — pasang ulang tag per-cell minus (sort delete+reinsert
-        dan clone ⛶ me-reset tag cell; pola deviasi/in-selisih)."""
-        if self._cell_tags and self._neg_cells:
+        dan clone ⛶ me-reset tag cell; pola deviasi/in-selisih).
+        v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list kosong
+        = clear overlay)."""
+        if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     # =========================================================================

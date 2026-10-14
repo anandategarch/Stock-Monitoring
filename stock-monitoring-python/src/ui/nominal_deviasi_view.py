@@ -638,9 +638,13 @@ class NominalDeviasiView(tk.Frame):
                 if n_no_harga:
                     status += f" · {fmt_int_id(n_no_harga)} tanpa harga"
                 self.status_var_label.set(status)
+                # v3.9.42 — audit 61-b P2: chip TOTAL memakai format tabel
+                # (_fmt_cell_num = fmt_nominal_cell: 2 desimal + minus
+                # kurung) — dulu fmt_int_id (dibulatkan) → chip ≠ baris
+                # TOTAL di bawahnya utk nilai yang sama.
                 self._total_var.set(
-                    f"TOTAL {fmt_int_id(total_nom)} "
-                    f"({fmt_int_id(total_qty)} qty)")
+                    f"TOTAL {self._fmt_cell_num(total_nom)} "
+                    f"({self._fmt_cell_num(total_qty)} qty)")
 
         def render_done():
             # v3.9.33 — AUDIT FIX (48-e FIX 3): satu-satunya titik reset
@@ -667,10 +671,11 @@ class NominalDeviasiView(tk.Frame):
         ter-reset). Baris TOTAL diberi style khusus di SEMUA selnya."""
         if not self._cell_tags:
             return
-        if self._neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._neg_cells)
-        if self._total_cells:
-            apply_cell_tag(tree, "total_cell", self._total_cells)
+        # v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list
+        # kosong = clear overlay — render tanpa sel minus tidak
+        # meninggalkan label STALE).
+        apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        apply_cell_tag(tree, "total_cell", self._total_cells)
 
     # =========================================================================
     # TOOLBAR TABEL

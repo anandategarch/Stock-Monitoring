@@ -1,8 +1,13 @@
 """bench_views.py — Benchmark compute + render view (baseline perf analysis).
 
-Ukur hotspot v3.1: deviasi _compute_pivot (iterrows), laporan _compute_audit
-(apply axis=1), pivot _compute_payload (loc per item×metric), tree insert.
+Ukur hotspot v3.1: deviasi _compute_pivot (iterrows), laporan
+_compute_com_matrix, pivot _compute_payload (loc per item×metric),
+tree insert.
 Tanpa display (Xvfb opsional) — compute-only + insert tree dummy.
+
+v3.9.42 — audit 61-a (F9): metode _compute_audit sudah TIDAK ADA
+(rename lama ke _compute_com_matrix — GREP laporan_deviasi_view)
+→ benchmark laporan dulu langsung AttributeError.
 """
 import sys
 import time
@@ -65,7 +70,10 @@ def main():
 
     lv = LaporanDeviasiView(root)
     lv.data = df
-    r, t_lap = bench("Laporan     _compute_audit", lv._compute_audit)
+    # v3.9.42 — audit 61-a (F9): _compute_audit sudah tidak ada →
+    # AttributeError; metode aktual = _compute_com_matrix (default
+    # membaca self.data — sesuai pemakaian bench ini).
+    r, t_lap = bench("Laporan     _compute_com_matrix", lv._compute_com_matrix)
 
     pv = PivotTableView(root)
     pv.data = df

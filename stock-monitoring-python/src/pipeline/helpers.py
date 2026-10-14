@@ -13,6 +13,17 @@ run berikutnya (termasuk Refresh Terpilih) menyajikan frame dari cache
 read_cache_invalidate(paths) (dipakai dialog 🔄 Refresh File Sumber);
 hasil identik baca ulang — hanya lebih cepat. Batas memori: estimasi
 sel object (guard _READ_CACHE_MAX_CELLS, evict FIFO).
+
+v3.9.42 — AUDIT FIX (61-a):
+- F2: to_datetime_robust — string tanggal kini dayfirst=True + format='mixed'
+  (konteks Indonesia dd/mm/yyyy: '01/10/2026' dulu jadi 10 Jan, '13/10/2026'
+  dulu NaT — hari salah/tanggal hilang senyap; jalur serial Excel numerik
+  tetap apa adanya; 'mixed' mencegah inferensi pandas membalik kolom ISO
+  jadi %Y-%d-%m).
+- F4: fn_combine_folder — kontribusi baris per file kini DI-LOG
+  ([INFO] rincian + [WARNING] bila >1 file menyumbang baris — folder
+  berisi export lama+baru/salinan menjumlah SALDO/IN/OUT 2× SENYAP
+  sebelumnya).
 """
 import glob
 import os
@@ -387,6 +398,11 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
         return pd.DataFrame()
 
     dfs = []
+    # v3.9.42 — AUDIT FIX (61-a, F4): kontribusi baris per file dikumpulkan
+    # SEBELUM concat (mirror log fn_9901 v3.9.33) — concat dulu SENYAP:
+    # folder berisi 2 file (export lama + baru / salinan) menjumlahkan
+    # SALDO/IN/OUT 2× tanpa jejak apa pun di log.
+    kontribusi = []      # (basename, n_baris) per file yang berhasil dibaca
     for f in files:
         try:
             if raw:
@@ -405,6 +421,7 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
                         if c in df.columns:
                             df[c] = df[c].ffill()
                 dfs.append(df)
+                kontribusi.append((os.path.basename(f), len(df)))
         except Exception as e:
             print(f"  [WARNING] Skip file {os.path.basename(f)}: {e}")
 
@@ -418,6 +435,20 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
     else:
         # Header mode: concat by column name
         combined = pd.concat(dfs, ignore_index=True, sort=False)
+
+    # v3.9.42 — AUDIT FIX (61-a, F4): log kontribusi per file — [INFO]
+    # ringkas selalu tercetak (observabilitas); >1 file menyumbang baris
+    # → [WARNING] mencolok (pola log duplikat fn_9901 v3.9.33): file
+    # kembar/salinan export di folder data menjumlahkan baris 2×.
+    if kontribusi:
+        rincian = ", ".join(f"{nama}={n}" for nama, n in kontribusi)
+        print(f"  [INFO] combine_folder {folder_path}: {len(combined)} baris "
+              f"dari {len(kontribusi)} file ({rincian})")
+        if len(kontribusi) > 1:
+            print(f"  [WARNING] combine_folder {folder_path}: "
+                  f"{len(kontribusi)} file menyumbang baris — pastikan "
+                  f"bukan duplikat export (baris dijumlah 2× bila file "
+                  f"kembar)")
     return combined
 
 
@@ -549,6 +580,18 @@ def to_datetime_robust(series: pd.Series) -> pd.Series:
     dikonversi via epoch Excel 1899-12-30 (pecahan waktu ikut terbawa);
     nilai lain (datetime/Timestamp/string tanggal) diparse
     pd.to_datetime seperti biasa. Kolom datetime64 apa adanya.
+
+    v3.9.42 — AUDIT FIX (61-a, F2): string tanggal kini dayfirst=True.
+    Konteks Indonesia = dd/mm/yyyy — tanpa dayfirst, '01/10/2026'
+    diparse 10 Jan (padahal maksudnya 1 Okt → H/hari salah) dan
+    '13/10/2026' jadi NaT (bulan '13' tak ada → tanggal HILANG senyap).
+    Hanya jalur STRING yang kena; jalur serial-Excel numerik di bawah
+    tetap apa adanya (numerik bukan parse string).
+    format='mixed' WAJIB: inferensi satu-format pandas dgn dayfirst
+    membalik kolom ISO ('2026-10-01' ditebak %Y-%d-%m → 10 Jan —
+    korupsi senyap); 'mixed' mem-parse per-elemen → dd/mm dan ISO
+    hidup berdampingan benar. Perf aman utk data tanggal (nilai unik
+    sedikit — per bulan ±31 — cache format pandas efektif).
     """
     s = series if isinstance(series, pd.Series) else pd.Series(series)
     if pd.api.types.is_datetime64_any_dtype(s):
@@ -556,12 +599,20 @@ def to_datetime_robust(series: pd.Series) -> pd.Series:
     num = pd.to_numeric(s, errors="coerce")
     serial = num.notna() & num.between(20000.0, 80000.0)
     if not bool(serial.any()):
-        return pd.to_datetime(s, errors="coerce")
+        # v3.9.42 — dayfirst=True + format='mixed' (lihat docstring):
+        # seluruh nilai di sini string/datetime → parse dd/mm/yyyy tanpa
+        # merusak format ISO.
+        return pd.to_datetime(s, errors="coerce", dayfirst=True,
+                              format="mixed")
     # serial Excel (float/int; hasil pyxlsb .xlsb / export numerik) → Timestamp
     ser_ts = pd.Timestamp("1899-12-30") + pd.to_timedelta(
         num.where(serial), unit="D")
     # nilai non-serial → jalur parse biasa (string/datetime objek)
-    rest = pd.to_datetime(s.where(~serial), errors="coerce")
+    # v3.9.42 — dayfirst=True + format='mixed' (mirror cabang no-serial
+    # di atas): string dd/mm/yyyy di baris non-serial juga harus parse
+    # 1 Okt, bukan 10 Jan.
+    rest = pd.to_datetime(s.where(~serial), errors="coerce", dayfirst=True,
+                          format="mixed")
     return ser_ts.where(serial, rest)
 
 

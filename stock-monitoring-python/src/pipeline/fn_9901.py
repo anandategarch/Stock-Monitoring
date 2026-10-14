@@ -9,7 +9,8 @@ Filter:
 Column mapping:
   - #Prime.Qty     → Value
   - Nama barang    → Nama Barang
-  - Nama cabang    → NAMA RESTO (extract after ".", e.g., "1137.CKGPAH" → "CKGPAH")
+  - Nama cabang    → NAMA RESTO (extract after titik TERAKHIR, e.g.,
+                   "1137.CKGPAH" → "CKGPAH", "B.1001.MLGPAR" → "MLGPAR")
                    CONSISTENT with fn_3224/fn_4215/fn_4217/fn_4205 which extract
                    from between parentheses "(" and ")"
   - Tanggal        → Tanggal (day-of-month)
@@ -29,12 +30,23 @@ v3.9.33 — AUDIT FIX (48-a, deep audit):
 - filter yang di-skip karena kolom hilang kini WAJIB teriak WARNING
   lengkap dengan jumlah baris yang dianggap lolos (risiko dobel hitung
   vs 32.24 jadi eksplisit, bukan senyap).
+
+v3.9.42 — AUDIT FIX (61-a, F3): NAMA RESTO kini lewat helper bersama
+resto_from_cabang_po (bagian setelah titik TERAKHIR, NA/float-safe).
+Dulu membelah di titik PERTAMA → cabang ber-format 'B.1001.MLGPAR'
+menjadi '1001.MLGPAR' (resto phantom — tidak cocok dgn sumber lain →
+IN 9901 resto itu lenyap dari pivot).
 """
 import os
 
 import pandas as pd
 
-from .helpers import date_to_day, safe_to_numeric, safe_to_str, vec_text_after_delimiter
+from .helpers import (
+    date_to_day,
+    resto_from_cabang_po,
+    safe_to_numeric,
+    safe_to_str,
+)
 
 
 def _find_column(df_cols, candidates, contains_any=None, exclude=None):
@@ -269,13 +281,14 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
         out["Tanggal"] = pd.NA
 
     # NAMA RESTO from Nama cabang
-    # FIX: extract text AFTER first "." (e.g., "1137.CKGPAH" → "CKGPAH")
-    # supaya konsisten dengan fn_3224/fn_4215/fn_4217/fn_4205 yang pakai
-    # vec_text_between_delimiters(..., "(", ")") untuk extract resto code.
-    # Sebelumnya pakai safe_to_str langsung → "1137.CKGPAH" dianggap resto berbeda
-    # dari "CKGPAH" di source lain → pivot melihat 2 resto yang sebenarnya sama.
+    # v3.9.42 — AUDIT FIX (61-a, F3): resto = bagian setelah titik TERAKHIR
+    # lewat helper bersama resto_from_cabang_po (NA/float-safe; dipakai
+    # juga fn_audit PO Menunggu + rincian_po_view) — dulu membelah di
+    # titik PERTAMA: 'B.1001.MLGPAR' → '1001.MLGPAR' (resto phantom yang
+    # tak cocok dgn sumber lain → IN 9901 resto itu lenyap dari pivot).
+    # Scalar-safe → .map() per baris (fn_9901 ribuan baris — murah).
     if col_nama_cabang is not None:
-        out["NAMA RESTO"] = vec_text_after_delimiter(prom[col_nama_cabang], ".")
+        out["NAMA RESTO"] = prom[col_nama_cabang].map(resto_from_cabang_po)
     else:
         out["NAMA RESTO"] = pd.NA
 

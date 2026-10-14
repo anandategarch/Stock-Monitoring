@@ -12,6 +12,16 @@ tapi KURANG key wajib dulu melempar KeyError mentah (English,
 membingungkan user). Sekarang: RuntimeError pesan Indonesia yang
 menyebut HANYA key yang benar-benar hilang + instruksi perbaikan
 (app.py on_error menampilkan pesan ini ke user).
+
+v3.9.42 — AUDIT FIX (61-a):
+- F8: JSONDecodeError (config.json rusak — koma kelebihan dsb.) dulu
+  melempar pesan Inggris mentah ke user; kini RuntimeError pesan
+  Indonesia + instruksi (app.py on_error menampilkan dialog ramah).
+- F1: 'KategoriBarang4217' di-validasi TIPE-nya — user salah tulis
+  STRING (bukan daftar) dulu lolos ke fn_4217 → iterasi PER-KARAKTER
+  → prefix-match 1 karakter → hampir semua kategori lolos whitelist
+  (kelas bug item 100383, v3.9.41). Sekarang: bukan daftar-string →
+  PERINGATAN + pakai default bawaan.
 """
 import json
 import os
@@ -27,8 +37,19 @@ class Config:
             base = Path(__file__).resolve().parent.parent
             config_path = base / "config.json"
 
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        # v3.9.42 — AUDIT FIX (61-a, F8): JSON rusak (mis. koma kelebihan)
+        # dulu melempar json.JSONDecodeError mentah berbahasa Inggris —
+        # user bingung tak tahu harus apa. RuntimeError pesan Indonesia
+        # (sudah ditangani app.py on_error → dialog ramah; hapus file =
+        # app regenerasi default otomatis).
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                "config.json rusak (JSON tidak valid): " + str(e)
+                + " — perbaiki atau hapus file untuk regenerasi otomatis"
+            ) from e
 
         # v3.9.33 — AUDIT FIX (48-f): key wajib hilang → pesan ramah
         # (bukan KeyError mentah). Sebut HANYA key yang benar-benar
@@ -76,8 +97,18 @@ class Config:
         # [] atau key hilang → tanpa filter; file tanpa kolom kategori →
         # tanpa filter + warning log).
         from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST
-        self.KategoriBarang4217 = data.get("KategoriBarang4217",
-                                           DEFAULT_KATEGORI_WHITELIST)
+        # v3.9.42 — AUDIT FIX (61-a, F1): validasi TIPE whitelist — user
+        # salah tulis STRING (bukan daftar) di config.json dulu diteruskan
+        # apa adanya → fn_4217 mengiterasinya PER-KARAKTER → prefix-match
+        # 1 karakter → hampir semua kategori lolos (kelas bug item 100383).
+        # Bukan daftar-string → PERINGATAN + default bawaan (copy, supaya
+        # mutasi pemanggil tidak menjinak konstanta modul fn_4217).
+        _wl = data.get("KategoriBarang4217", DEFAULT_KATEGORI_WHITELIST)
+        if not isinstance(_wl, list) or not all(isinstance(x, str) for x in _wl):
+            print("[PERINGATAN] config 'KategoriBarang4217' harus daftar string — "
+                  "memakai default bawaan (lihat tab ⚙ / config.json)")
+            _wl = list(DEFAULT_KATEGORI_WHITELIST)
+        self.KategoriBarang4217 = _wl
 
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:

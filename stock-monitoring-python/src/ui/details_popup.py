@@ -83,13 +83,17 @@ class DetailsPopup(tk.Toplevel):
         try:
             sw = max(int(self.winfo_screenwidth()), 1024)
             sh = max(int(self.winfo_screenheight()), 640)
-            pw = max(1100, int(sw * 0.90))
-            ph = max(540, int(sh * 0.86))
+            # v3.9.42 — audit 61-d P3: clamp lebar/tinggi ≤ layar (min
+            # 1100 di layar 1024 melebarkan popup MELAMPAUI layar) +
+            # simpan utk skala kolom (isi lebar jendela — dulu fixed).
+            pw = min(sw, max(1100, int(sw * 0.90)))
+            ph = min(sh, max(540, int(sh * 0.86)))
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
             px = max(0, min(px, sw - pw))
             py = max(0, min(py, sh - ph))
             self.geometry(f"{pw}x{ph}+{px}+{py}")
+            self._geom_w = pw
         except Exception:
             self.geometry("1100x540")
         self.minsize(800, 320)
@@ -113,6 +117,17 @@ class DetailsPopup(tk.Toplevel):
 
         # Build UI
         self._build_ui(title, filter_info)
+
+        # v3.9.42 — audit 61-d P3: kolom DISKALA memenuhi lebar jendela
+        # (pola popup 🧮 v3.9.41; dulu fixed-width → sisi kanan kosong).
+        with contextlib.suppress(tk.TclError):
+            _avail = int(getattr(self, "_geom_w", 0)) - 48
+            _total = sum(w for _n, w, _a in COLUMNS)
+            if _total > 0 and _avail > _total:
+                _extra = _avail - _total
+                for _n, _w, _a in COLUMNS:
+                    self.tree.column(
+                        _n, width=_w + int(_extra * _w / _total))
 
         # Render data
         self._render()
@@ -391,8 +406,11 @@ class DetailsPopup(tk.Toplevel):
                           on_done=render_done)
 
     def _reapply_cell_tags(self, tree):
-        """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶)."""
-        if self._cell_tags and self._neg_cells:
+        """v3.9.2 — pasang ulang tag per-cell minus (juga utk clone ⛶).
+        v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list kosong
+        = clear overlay — render tanpa sel minus tidak meninggalkan
+        label STALE)."""
+        if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
     def _apply_name_filter_df(self) -> pd.DataFrame:

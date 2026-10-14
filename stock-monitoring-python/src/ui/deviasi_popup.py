@@ -123,15 +123,19 @@ class DeviasiPopup(tk.Toplevel):
             # posisi KEDUA SISI (mirror DetailsPopup v3.9.32) — dulu
             # fixed 1180×640 hanya clamp batas 0 → di layar kecil popup
             # melebihi layar / posisi off-screen kanan-bawah.
+            # v3.9.42 — audit 61-d P3: cap 1180/640 → 2200/1000 — cap lama
+            # membuat popup TIDAK proporsional di monitor >1300px (1920 →
+            # 1180 = 61% layar; kelas keluhan user "popup kurang besar").
             sw = max(int(self.winfo_screenwidth()), 1024)
             sh = max(int(self.winfo_screenheight()), 640)
-            pw = min(1180, int(sw * 0.90))
-            ph = min(640, int(sh * 0.86))
+            pw = min(2200, int(sw * 0.90))
+            ph = min(1000, int(sh * 0.86))
             px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
             py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
             px = max(0, min(px, sw - pw))
             py = max(0, min(py, sh - ph))
             self.geometry(f"{pw}x{ph}+{px}+{py}")
+            self._geom_w = pw   # v3.9.42 — utk skala kolom (isi lebar)
         except Exception:
             self.geometry("1180x640")
         self.minsize(820, 340)
@@ -148,6 +152,19 @@ class DeviasiPopup(tk.Toplevel):
         self._neg_cells: list = []
 
         self._build_ui(title)
+
+        # v3.9.42 — audit 61-d P3: kolom DISKALA memenuhi lebar jendela
+        # (pola popup 🧮 v3.9.41 — dulu fixed-width → sisi kanan jendela
+        # kosong abu di monitor besar; kelas keluhan 'kurang lebar').
+        import contextlib as _cl42
+        with _cl42.suppress(tk.TclError):
+            _avail = int(getattr(self, "_geom_w", 0)) - 48
+            _total = sum(w for _n, w, _a in COLUMNS)
+            if _total > 0 and _avail > _total:
+                _extra = _avail - _total
+                for _n, _w, _a in COLUMNS:
+                    self.tree.column(
+                        _n, width=_w + int(_extra * _w / _total))
 
         self._render()
 
@@ -266,7 +283,9 @@ class DeviasiPopup(tk.Toplevel):
             self.tree.insert("", "end", iid=f"row_{i}", values=values,
                              tags=tuple(tags))
 
-        if self._cell_tags and self._neg_cells:
+        # v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list kosong
+        # = clear overlay).
+        if self._cell_tags:
             apply_cell_tag(self.tree, "neg_cell", self._neg_cells)
 
         # footer status: jumlah baris + legenda '•' bila ada bulan lalu

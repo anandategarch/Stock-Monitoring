@@ -125,6 +125,10 @@ class LaporanDeviasiView(tk.Frame):
         self._render_gen = 0
         self._insert_cancel = None
         self._pending_sort = None          # (col, reverse) antre saat busy
+        # v3.9.42 — audit 61-c/61-d (F2 P2): snapshot state tampilan utk
+        # refresh preserve=True (posisi scroll + seleksi baris; dipulihkan
+        # di render_done — lihat _restore_view_state).
+        self._preserve_after_render = None
         # cache COM matrix — H-INDEPENDEN (ganti H tidak recompute pivot;
         # kolom H dipilih saat render) + lookup satuan
         self._cached_com = None
@@ -391,6 +395,10 @@ class LaporanDeviasiView(tk.Frame):
         return series.astype(str)
 
     def _on_col_filter(self, col: str, selected):
+        # v3.9.42 — audit 61-c/61-d (F2 P2): user mengubah filter saat
+        # refresh mengantre → buang snapshot restore (intent user
+        # menang atas restore refresh).
+        self._preserve_after_render = None
         self._col_sel[col] = selected
         self._refresh()
 
@@ -418,7 +426,17 @@ class LaporanDeviasiView(tk.Frame):
     # =========================================================================
     # DATA LOADING
     # =========================================================================
-    def load_data(self, data: pd.DataFrame):
+    def load_data(self, data: pd.DataFrame, preserve: bool = False):
+        """Muat data baru (dari pipeline).
+
+        v3.9.42 — audit 61-c/61-d (F2 P2): preserve=True (jalur REFRESH
+        app v3.9.37) TIDAK me-reset state tampilan — dulu load_data
+        SELALU membawa _col_sel + funnel ⧩ ke None + clear_all() padahal
+        refresh menjanjikan "gangguan minimal": filter header, posisi
+        scroll & seleksi baris lenyap tiap kali refresh. Filter
+        dipertahankan (dipakai ulang _prepare_rows — mekanisme yang
+        sudah ada), scroll+seleksi dipulihkan SETELAH baris ter-insert
+        (render_done). Default False = load awal, perilaku lama."""
         self.data = data
         # v3.9.5 (audit 19-a #12): data berganti → job lama dibuang
         self._render_gen += 1
@@ -435,9 +453,27 @@ class LaporanDeviasiView(tk.Frame):
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
         self._show_content()
-        for c in self._col_sel:
-            self._col_sel[c] = None
-        self.header_filters.clear_all()
+        if preserve:
+            # filter header ⧩: _col_sel DIPERTAHANKAN (dibaca lagi oleh
+            # _refresh → _prepare_rows) + funnel aktif di-reassert via
+            # API HeaderFilterGroup.set_selected (v3.9.22) supaya ikon
+            # state-nya sinkron dgn seleksi yang dipertahankan.
+            for c, sel in self._col_sel.items():
+                if sel is not None:
+                    self.header_filters.set_selected(c, sel)
+            # scroll + seleksi baru bisa dipulihkan SETELAH semua baris
+            # ter-insert (insert async batch → render_done) — simpan dulu.
+            try:
+                frac = self.tree.yview()[0]
+                sel_iids = list(self.tree.selection())
+            except tk.TclError:
+                frac, sel_iids = 0.0, []
+            self._preserve_after_render = {"frac": frac, "iids": sel_iids}
+        else:
+            self._preserve_after_render = None
+            for c in self._col_sel:
+                self._col_sel[c] = None
+            self.header_filters.clear_all()
         # (v3.2) lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -828,6 +864,26 @@ class LaporanDeviasiView(tk.Frame):
                 "neg_cells": neg_cells, "st_minus_cells": st_minus_cells,
                 "st_above_cells": st_above_cells}
 
+    def _restore_view_state(self):
+        """v3.9.42 — audit 61-c/61-d (F2 P2): pulihkan yview fraction +
+        seleksi baris pasca-render (dipanggil render_done; snapshot dibuat
+        load_data(preserve=True)). Sekali pakai — snapshot dikonsumsi."""
+        snap = self._preserve_after_render
+        if not snap:
+            return
+        self._preserve_after_render = None
+        try:
+            if not self.winfo_exists():
+                return
+            if snap.get("frac"):
+                self.tree.yview_moveto(snap["frac"])
+            for iid in snap.get("iids") or ():
+                if self.tree.exists(iid):
+                    self.tree.selection_add(iid)
+        except tk.TclError:
+            # view/tree sudah tiada saat timer mendarat — abaikan.
+            pass
+
     def _render_rows(self, payload: dict):
         try:
             self._render_rows_inner(payload)
@@ -857,6 +913,11 @@ class LaporanDeviasiView(tk.Frame):
             # v3.9.2: tag PER-CELL setelah semua item ter-insert
             self._reapply_cell_tags(self.tree)
             self._busy = False
+            # v3.9.42 — audit 61-c/61-d (F2 P2): pulihkan posisi scroll +
+            # seleksi yang disimpan load_data(preserve=True) — baru aman
+            # di sini karena SEMUA baris sudah ter-insert (insert async
+            # batch); iid yang lenyap di data baru di-skip senyap.
+            self._restore_view_state()
             if self._pending:
                 self._pending = False
                 self._pending_sort = None
@@ -884,16 +945,19 @@ class LaporanDeviasiView(tk.Frame):
         tag cell ter-reset; dipakai juga utk clone ⛶)."""
         if not self._cell_tags:
             return
-        if self._neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._neg_cells)
-        if self._st_minus_cells:
-            apply_cell_tag(tree, "st_minus", self._st_minus_cells)
-        if self._st_above_cells:
-            apply_cell_tag(tree, "st_above", self._st_above_cells)
+        # v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list
+        # kosong = clear overlay — render tanpa sel minus tidak
+        # meninggalkan label STALE).
+        apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        apply_cell_tag(tree, "st_minus", self._st_minus_cells)
+        apply_cell_tag(tree, "st_above", self._st_above_cells)
 
     def _reset_filter(self):
         """Reset filter header (H TIDAK di-reset — milik tab 📦 Deviasi GR,
         state bersama; mengubahnya dari sini akan mengejutkan tab lain)."""
+        # v3.9.42 — audit 61-c/61-d (F2 P2): reset eksplisit user → buang
+        # snapshot restore refresh yang mengantre (jangan hidupkan lagi).
+        self._preserve_after_render = None
         for c in self._col_sel:
             self._col_sel[c] = None
         self.header_filters.clear_all()

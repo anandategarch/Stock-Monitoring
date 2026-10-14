@@ -107,6 +107,7 @@ import contextlib
 import json
 import os
 import queue
+import shutil
 import sys
 import threading
 import time
@@ -183,7 +184,47 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.41"  # v3.9.41 — 42.17 whitelist versi-toleran (BUMBU PASTA KUAH 100383 tampil) + popup 🧮 besar/lebar responsif + minggu pembanding ter-cocok
+APP_VERSION = "3.9.42"  # v3.9.42 — deep-audit 4 agen: hotfix regresi forward-event overlay + stale overlay clear + konsistensi Lalu tabel↔popup + dayfirst tanggal + tipe config whitelist + minggu W3/W4 dedup + popup besar-semua + crash dialog + refresh preserve
+# v3.9.42 — DEEP AUDIT MENYELURUH (user: "Deep audit all sebar agent dan
+# fix"): 4 agen audit paralel (engine / core views / framework / secondary
+# + config + tests) menemukan & memperbaiki:
+# (1) HOTFIX REGRESI v3.9.40: penerusan event dari sel warna MATI TOTAL
+#     (klik-kanan menu copy, drag seleksi, wheel) — event_generate
+#     menolak opsi -num/-delta (field Event selalu ada, berisi '??') →
+#     TclError ditelan; kini kw selektif (state int, delta int khusus
+#     <MouseWheel>) + roda X11 gulir langsung sinkron; modifier state
+#     double-click kini sampai ke handler (_fire_tree_bindings %s).
+# (2) OVERLAY STALE: guard `if cells:` di 11 view melanggar semantik
+#     REPLACE apply_cell_tag → render baru tanpa sel minus
+#     meninggalkan nilai/warna LAMA menimpa data baru (iid deterministik)
+#     — guard dihapus (list kosong = clear); auto_fit_columns kini
+#     memicu redraw overlay (label tak lagi salah posisi setelah
+#     Auto-Fit programatik).
+# (3) KONSISTENSI 🧮: kolom 'Nominal Deviasi Bulan Lalu' tabel kini
+#     JOIN KIRI ke pasangan sekarang hasil filter kategori — SAMA dgn
+#     popup rincian (dulu tabel = seluruh file per resto → angka tabel
+#     ≠ angka popup utk resto sama); minggu WEEK 3+WEEK 4 (keduanya
+#     _h=25) dipilih label TERBESAR deterministik (dulu keep="first"
+#     baris file pertama); SATUAN 'GR' vs 'GR ' menyatu (dulu baris
+#     kembar di popup); chip 💰 = format tabel (2 desimal, minus
+#     kurung).
+# (4) ENGINE: to_datetime_robust dayfirst+format='mixed' (tanggal teks
+#     dd/mm/yyyy salah hari senyap utk hari ≤12; >12 jadi NaT); fn_9901
+#     resto titik TERAKHIR ('B.1001.MLGPAR' → 'MLGPAR', dulu resto
+#     phantom); fn_combine_folder log per-file + WARNING multi-file
+#     (dobel hitung senyap); sheet_filter LALU diteruskan ke KEDUA
+#     langkah scan rekap; fn_4217 guard tabrakan rename + fallback
+#     kolom bersuara; Config validasi TIPE KategoriBarang4217 (string →
+#     iterasi per-karakter = kelas bug 100383) + JSON rusak → pesan
+#     ramah; MULAI.bat fallback pythonw gagal → python; main() crash
+#     dialog + crash.log; backup config = file LAMA; refresh parsial
+#     mempertahankan filter/seleksi/scroll; followup save-gagal
+#     terlihat; _flash_after guard; bench_views diperbaiki.
+# (5) POPUP SEMUA BESAR: 🧮 cap 2600×1440 (proporsional di monitor
+#     besar), Tanpa Harga + hsb (kolom Keterangan tak terpotong) + Esc
+#     + Destroy cleanup + minsize clamp layar kecil; DeviasiPopup cap
+#     2200 + kolom diskala; DetailsPopup clamp layar + kolom diskala;
+#     ⛶ restore ke ukuran manual TERAKHIR.
 # v3.9.41 (user: "100383 BUMBU PASTA KUAH masih belum ada di program ini
 # padahal pada gudang MLGPAR di file 42.17 ada saldo nya dan harusnya
 # masuk. Cek deep." + "pop up tab nominal deviasi ada bug kurang besar
@@ -1412,12 +1453,18 @@ class StockMonitorApp:
         # FIX D-05 (audit 2-d): tulis ATOMIK (tmp + os.replace) — crash
         # di tengah write tidak lagi meninggalkan config.json korup
         # (pola sama followup.py; .bak tetap dibuat sebagai cadangan).
+        # v3.9.42 — audit 61-c/61-d (F3 P3): .bak dulu ditulis dari `data`
+        # (isi BARU — sama dgn config yang baru ditulis) → .bak tidak
+        # berguna utk rollback. Kini: .bak = salinan file LAMA via
+        # shutil.copy2 SEBELUM tmp/config baru ditulis (rollback bener);
+        # gagal copy → [WARNING] (pola log app — app tetap tersimpan).
         backup_path = CONFIG_PATH.with_suffix(".json.bak")
-        try:
-            with open(backup_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        if CONFIG_PATH.exists():
+            try:
+                shutil.copy2(CONFIG_PATH, backup_path)
+            except OSError as e:
+                print(f"[WARNING] Gagal membuat backup config "
+                      f"({backup_path.name}): {e}")
 
         tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
         try:
@@ -1594,30 +1641,44 @@ class StockMonitorApp:
         self.log_text.configure(state="disabled")
 
     def _poll_log_queue(self):
-        """Batch log writes — ambil semua chunks dari queue (dengan cap)."""
-        chunks = []
-        total_chars = 0
-        chunk_count = 0
+        """Batch log writes — ambil semua chunks dari queue (dengan cap).
+
+        v3.9.42 — audit 61-c/61-d (F4 P3): reschedule dipindah ke
+        `finally` — dulu `self.after(...)` adalah statement terakhir,
+        exception di tengah badan (mis. Text widget log mati → TclError
+        di _append_log_batched) mematikan polling log PERMANEN senyap:
+        log berhenti mengalir tanpa jejak. Guard winfo_exists mencegah
+        jadwal baru saat root sudah mati (tidak dobel-reschedule)."""
         try:
-            while chunk_count < MAX_CHUNKS_PER_POLL and total_chars < MAX_CHARS_PER_POLL:
-                chunk = self.log_queue.get_nowait()
-                chunks.append(chunk)
-                total_chars += len(chunk)
-                chunk_count += 1
-        except queue.Empty:
-            pass
+            chunks = []
+            total_chars = 0
+            chunk_count = 0
+            try:
+                while chunk_count < MAX_CHUNKS_PER_POLL \
+                        and total_chars < MAX_CHARS_PER_POLL:
+                    chunk = self.log_queue.get_nowait()
+                    chunks.append(chunk)
+                    total_chars += len(chunk)
+                    chunk_count += 1
+            except queue.Empty:
+                pass
 
-        if chunks:
-            text = "".join(chunks)
-            # FIX D-04: reader me-log "[WARNING] Skip file ..." ke stdout
-            # (helpers.py) — dihitung di sini (jalur log = satu-satunya
-            # tempat lewat) TANPA mengubah kontrak pipeline.
-            n = text.count("[WARNING] Skip file")
-            if n:
-                self._skipped_files += n
-            self._append_log_batched(text)
-
-        self.root.after(LOG_POLL_INTERVAL_MS, self._poll_log_queue)
+            if chunks:
+                text = "".join(chunks)
+                # FIX D-04: reader me-log "[WARNING] Skip file ..." ke stdout
+                # (helpers.py) — dihitung di sini (jalur log = satu-satunya
+                # tempat lewat) TANPA mengubah kontrak pipeline.
+                n = text.count("[WARNING] Skip file")
+                if n:
+                    self._skipped_files += n
+                self._append_log_batched(text)
+        finally:
+            # pola suppress repo — widget mati (TclError) diabaikan; TIDAK
+            # dobel-reschedule (poll tunggal, satu jadwal per invokasi).
+            with contextlib.suppress(Exception):
+                if self.root.winfo_exists():
+                    self.root.after(LOG_POLL_INTERVAL_MS,
+                                    self._poll_log_queue)
 
     # =====================================================================
     # PIPELINE CONTROL
@@ -1928,6 +1989,13 @@ class StockMonitorApp:
         # mode 💰 Nominal (H), tab 🧮 Nominal Deviasi (Σ per resto).
         _hm = (audit_result.get("harga_map") if audit_result else None)
         _kv = (audit_result.get("konversi_map") if audit_result else None)
+        # v3.9.42 — audit 61-c/61-d (F2 P2): jalur REFRESH (refresh_files
+        # None/list — "gangguan minimal" janji v3.9.37) meneruskan
+        # preserve=True ke view yang mendukungnya: filter ⧩/combo, posisi
+        # scroll & seleksi baris DIPERTAHANKAN (validasi combo terhadap
+        # values data baru ada di view masing-masing). Run normal
+        # (refresh_files=False) tetap reset — perilaku lama.
+        _keep_state = refresh_files is not False
 
         # Load data into views (v3.2: lazy — hanya tab aktif yang compute;
         # tab lain menunggu dipilih via <<NotebookTabChanged>>)
@@ -1962,7 +2030,8 @@ class StockMonitorApp:
                    lambda: self.in_selisih_view.load_data(
                        append1_df, in_detail_df, audit_result=audit_result))
         _load_view("🚨 Anomali COM",
-                   lambda: self.laporan_view.load_data(append1_df))
+                   lambda: self.laporan_view.load_data(
+                       append1_df, preserve=_keep_state))
         _load_view("⚖ Komparasi File Deviasi",
                    lambda: self.komparasi_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv))
@@ -1977,7 +2046,8 @@ class StockMonitorApp:
                    lambda: self.nominal_resto_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv))
         _load_view("🛒 Rincian PO",
-                   lambda: self.rincian_view.load_data(rincian_po_df))
+                   lambda: self.rincian_view.load_data(
+                       rincian_po_df, preserve=_keep_state))
         self.btn_export.set_enabled(True)
         self.btn_export_tb.set_enabled(True)
 
@@ -2401,10 +2471,38 @@ def _enable_windows_dpi_awareness(root: tk.Tk) -> None:
 
 
 def main():
-    root = tk.Tk()
-    _enable_windows_dpi_awareness(root)
-    StockMonitorApp(root)
-    root.mainloop()
+    # v3.9.42 — audit 61-c/61-d (F1 P2): startup TANPA try/except +
+    # MULAI.bat memakai pythonw (tanpa konsol) → error sebelum redirect
+    # stderr internal membuat aplikasi "tidak terbuka" TANPA pesan apa
+    # pun (mati senyap). Kini: traceback ditulis ke crash.log (di samping
+    # config.json — file satu-satunya jejak saat tanpa konsol) + dialog
+    # ramah; `raise` tetap dijaga supaya exit code ≠ 0 (MULAI.bat
+    # memakainya utk fallback python dgn traceback di konsol).
+    root = None
+    try:
+        root = tk.Tk()
+        _enable_windows_dpi_awareness(root)
+        StockMonitorApp(root)
+        root.mainloop()
+    except Exception:
+        import traceback
+        tb = traceback.format_exc()
+        # crash.log di sebelah config.json (pythonw: tanpa konsol — file
+        # satu-satunya jejak; pola suppress = repo, jangan masking error
+        # asli dgn exception kedua saat crash handler sendiri bermasalah).
+        with contextlib.suppress(Exception):
+            _log = CONFIG_PATH.parent / "crash.log"
+            _log.write_text(tb, encoding="utf-8")
+        with contextlib.suppress(Exception):
+            if root is None or not root.winfo_exists():
+                root = tk.Tk()
+                root.withdraw()
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Stock Monitoring — Gagal Memulai",
+                "Terjadi error saat memulai aplikasi.\n\n"
+                "Detail tersimpan di crash.log:\n" + tb[-600:])
+        raise
 
 
 if __name__ == "__main__":

@@ -829,7 +829,8 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.40", APP_VERSION == "3.9.40", f"got {APP_VERSION}")
+    check("Versi = 3.9.42", APP_VERSION == "3.9.42",
+          f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -7738,8 +7739,13 @@ def main():
     _pop35 = show_deviasi_popup(root, _df35, "BRG P", "R", satuan="GR",
                                 h=3)
     root.update()
-    check("(v3.9.25) Popup DIPERBESAR: geometry 1180×640 (dulu 880×480)",
-          _pop35.geometry().split("+")[0] == "1180x640",
+    _g25 = _pop35.geometry().split("+")[0]
+    check("(v3.9.42) Popup DIPERBESAR & PROPORSIONAL: ≥0.88×lebar & "
+          "≥0.8×tinggi layar (dulu fixed 1180×640 = 61% di 1920; v3.9.25 "
+          "880×480)",
+          int(_g25.split("x")[0]) >= int(_pop35.winfo_screenwidth() * 0.88)
+          and int(_g25.split("x")[1]) >= int(
+              _pop35.winfo_screenheight() * 0.8),
           f"got {_pop35.geometry()!r}")
     _k35_2 = next(k for k in _pop35.tree.get_children("")
                   if _pop35.tree.set(k, "Tanggal") == "2")
@@ -10462,16 +10468,20 @@ def main():
           and str(_apt48.set(_atot48, "Nominal Deviasi Bulan Lalu"))
           == "-",
           f"got {_aprow48} tot={_atot48}")
-    check("(v3.9.41) app E2E: minggu pembanding DISEBUT — _lalu_week + "
-          "heading kolom + footer chip + baris tabel app MLGPAR Lalu = "
-          "150.000 (GULA minggu-4)",
+    # v3.9.42 — audit 61-b P1: KOLOM LALU TABEL kini JOIN KIRI ke
+    # pasangan sekarang hasil filter kategori (konsisten dgn popup —
+    # dulu tabel = seluruh file per resto → 150.000 ≠ popup '-').
+    check("(v3.9.42) app E2E: minggu pembanding DISEBUT + kolom Lalu "
+          "tabel KONSISTEN popup (JOIN pasangan ter-filter — GULA TEPAT "
+          "di luar scope → MLGPAR Lalu '-' sama dgn TOTAL popup; dulu "
+          "tabel 150.000 ≠ popup '-')",
           str(app.nominal_resto_view._lalu_week) == "WEEK 4"
           and "WEEK 4" in str(app.nominal_resto_view.tree.heading(
               "Nominal Deviasi Bulan Lalu"))
           and "WEEK 4" in app.nominal_resto_view.status_var_label.get()
           and any(
               app.nominal_resto_view.tree.set(
-                  _i48, "Nominal Deviasi Bulan Lalu") == "150.000"
+                  _i48, "Nominal Deviasi Bulan Lalu") == "-"
               for _i48 in app.nominal_resto_view.tree.get_children("")
               if app.nominal_resto_view.tree.set(
                   _i48, "Resto") == "MLGPAR"),
@@ -11566,6 +11576,394 @@ def main():
     _top53.destroy()
     root.update()
     shutil.rmtree(_tmp53, ignore_errors=True)
+
+    # =====================================================================
+    print("\n== 54. (v3.9.42) DEEP AUDIT: FORWARD EVENT + OVERLAY CLEAR + "
+          "DAYFIRST + TIPE CONFIG + MINGGU DEDUP + LALU KONSISTEN ==")
+    # =====================================================================
+    import contextlib as _cl54
+    import json as _json54
+    import tempfile as _tf54
+
+    import openpyxl as _oxl54
+
+    from src.pipeline.helpers import (
+        date_to_day as _d2d54,
+    )
+    from src.pipeline.helpers import (
+        resto_from_cabang_po as _rfcp54,
+    )
+    from src.pipeline.helpers import (
+        to_datetime_robust as _tdr54,
+    )
+    from src.ui.nominal_common import (
+        hitung_nominal_pairs as _hnp54,
+    )
+    from src.ui.widgets import (
+        CellColorOverlay as _CCO54,
+    )
+    from src.ui.widgets import (
+        apply_cell_tag as _act54,
+    )
+    from src.ui.widgets import (
+        make_tree as _mt54,
+    )
+
+    # --- (a-c) _bind_forward: event dari label sel warna DITERUSKAN ------
+    # REGRESI v3.9.40: tkinter.Event SELALU punya field delta/num (string
+    # '??') → event_generate menolak -num/-delta → TclError ditelan →
+    # SEMUA penerusan MATI (klik-kanan menu copy tak muncul di sel merah).
+    _top54 = tk.Toplevel(root)
+    _top54.geometry("320x240+15+15")
+    _tree54 = ttk.Treeview(_top54, columns=("c54",), show="headings")
+    _tree54.heading("c54", text="C54")
+    _tree54.column("c54", width=140)
+    for _i54 in range(60):
+        _tree54.insert("", "end", iid=f"r{_i54}",
+                       values=(f"v{_i54}",))
+    _tree54.pack(fill="both", expand=True)
+    _tree54.tag_configure("t54", foreground="#dc2626")
+    root.update()
+    _ov54 = _CCO54(_tree54)
+    _ov54.set_cells("t54", [("r1", "c54")])
+    root.update()
+    _lab54 = _ov54._labels.get(("r1", "c54"))
+    _flag54 = {"b3": 0, "mw": 0, "delta": None}
+    _tree54.bind("<Button-3>", lambda _e: _flag54.__setitem__(
+        "b3", _flag54["b3"] + 1))
+    _tree54.bind("<MouseWheel>", lambda _e: (
+        _flag54.__setitem__("mw", _flag54["mw"] + 1),
+        _flag54.__setitem__("delta", getattr(_e, "delta", None))))
+    if _lab54 is not None:
+        _lab54.event_generate("<Button-3>", x=4, y=4)
+        _lab54.event_generate("<MouseWheel>", x=4, y=4, delta=-120)
+        root.update()
+    check("(v3.9.42) _bind_forward: klik-kanan <Button-3> dari sel warna "
+          "DITERUSKAN ke tree (REGRESI v3.9.40 — event_generate menolak "
+          "num/delta '??' → semua forward mati: menu copy tak muncul di "
+          "sel merah)",
+          _lab54 is not None and _flag54["b3"] == 1,
+          f"lab={_lab54 is not None} b3={_flag54['b3']}")
+    check("(v3.9.42) _bind_forward: <MouseWheel> delta INT diteruskan "
+          "(handler tree menerima delta -120)",
+          _lab54 is not None and _flag54["mw"] == 1
+          and _flag54["delta"] == -120,
+          f"mw={_flag54['mw']} delta={_flag54['delta']!r}")
+    # X11 Button-5 (roda turun) di label → tree menggulir LANGSUNG
+    _tree54.yview_moveto(0.0)
+    _before54 = _tree54.yview()[0]
+    if _lab54 is not None:
+        _lab54.event_generate("<Button-5>", x=4, y=4)
+        root.update()
+    check("(v3.9.42) _bind_forward: roda X11 <Button-5> di sel warna → "
+          "tree menggulir LANGSUNG + sinkron (event_generate sintetis tak "
+          "bisa set %b → gulir langsung)",
+          _tree54.yview()[0] > _before54,
+          f"before={_before54} after={_tree54.yview()[0]}")
+    _ov54.set_cells("t54", [])
+    _top54.destroy()
+    root.update()
+
+    # --- (d) apply_cell_tag REPLACE: list kosong = CLEAR -----------------
+    # akar stale overlay: guard `if cells:` di view melanggar semantik
+    # replace → render baru 0 sel minus meninggalkan label LAMA.
+    import src.ui.widgets as _W54
+    _saved_native54 = _W54.CELL_TAGS_NATIVE
+    _W54.CELL_TAGS_NATIVE = False
+    try:
+        _top54d = tk.Toplevel(root)
+        _top54d.geometry("320x200+15+15")
+        _tree54d = ttk.Treeview(_top54d, columns=("c54",),
+                                show="headings")
+        _tree54d.heading("c54", text="C54")
+        _tree54d.column("c54", width=140)
+        for _i54 in range(6):
+            _tree54d.insert("", "end", iid=f"r{_i54}",
+                            values=("-1",))
+        _tree54d.pack(fill="both", expand=True)
+        _tree54d.tag_configure("neg54", foreground="#dc2626")
+        root.update()
+        _act54(_tree54d, "neg54", [("r1", "c54")])
+        root.update()
+        _ov54d = _tree54d._cell_color_overlay
+        _has_a = (_ov54d is not None
+                  and ("r1", "c54") in _ov54d._labels)
+        _act54(_tree54d, "neg54", [])      # CLEAR (render tanpa sel minus)
+        root.update()
+        _has_b = ("r1", "c54") in _ov54d._labels
+        check("(v3.9.42) apply_cell_tag REPLACE: sel terpasang lalu list "
+              "KOSONG → label overlay HILANG (akar stale: guard view lama "
+              "tak pernah memanggil clear)",
+              _has_a and not _has_b,
+              f"after-set={_has_a} after-clear={_has_b}")
+        _top54d.destroy()
+        root.update()
+    finally:
+        _W54.CELL_TAGS_NATIVE = _saved_native54
+
+    # --- (e) tanggal dayfirst + resto titik-terakhir ----------------------
+    _dt54 = _tdr54(pd.Series(["01/10/2026", "13/10/2026",
+                              "2026-10-01"]))
+    check("(v3.9.42) to_datetime_robust DAYFIRST: '01/10/2026' → 1 Okt "
+          "(dulu 10 Jan); '13/10/2026' → 13 Okt (dulu NaT — baris lepas "
+          "dari logika tanggal); ISO tak terbalik",
+          str(_dt54.iloc[0].date()) == "2026-10-01"
+          and str(_dt54.iloc[1].date()) == "2026-10-13"
+          and str(_dt54.iloc[2].date()) == "2026-10-01",
+          f"got {[str(x) for x in _dt54]}")
+    _dd54 = _d2d54(pd.Series(["01/10/2026", "13/10/2026"]))
+    check("(v3.9.42) date_to_day: teks dd/mm/yyyy → hari BENAR (1 & 13; "
+          "dulu 10 & NaN → deviasi per minggu salah senyap)",
+          float(_dd54.iloc[0]) == 1.0 and float(_dd54.iloc[1]) == 13.0,
+          f"got {_dd54.tolist()}")
+    check("(v3.9.42) resto_from_cabang_po: 'B.1001.MLGPAR' → 'MLGPAR' "
+          "(titik TERAKHIR — fn_9901 v3.9.42; dulu titik pertama → resto "
+          "phantom '1001.MLGPAR')",
+          _rfcp54("B.1001.MLGPAR") == "MLGPAR"
+          and _rfcp54("1137.CKGPAH") == "CKGPAH",
+          f"got {_rfcp54('B.1001.MLGPAR')!r}")
+
+    # --- (f) Config: tipe whitelist + JSON rusak --------------------------
+    from src.config import Config as _Cfg54
+    _cfg_base54 = _json54.loads(
+        (Path(__file__).resolve().parent / "config.json")
+        .read_text(encoding="utf-8"))
+    _cfg_base54["KategoriBarang4217"] = \
+        "10.FOOD [WIP] - COM V.2"          # SALAH TIPE (string, bukan list)
+    _tmp54 = _tf54.mkdtemp(prefix="t54_")
+    _cfgpath54 = os.path.join(_tmp54, "config.json")
+    with open(_cfgpath54, "w", encoding="utf-8") as _f54:
+        _json54.dump(_cfg_base54, _f54)
+    _buf54 = _io51.StringIO()
+    _cfg54 = None
+    with _cl54.redirect_stdout(_buf54):
+        try:
+            _cfg54 = _Cfg54(_cfgpath54)
+        except Exception:               # noqa: BLE001
+            _cfg54 = None
+    from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST as _DW54
+    check("(v3.9.42) Config: KategoriBarang4217 STRING (salah tipe) → "
+          "PERINGATAN + default 8 entri (dulu diteruskan → fn_4217 "
+          "iterasi PER-KARAKTER → hampir semua kategori lolos — kelas bug "
+          "item 100383)",
+          _cfg54 is not None
+          and isinstance(_cfg54.KategoriBarang4217, list)
+          and _cfg54.KategoriBarang4217 == list(_DW54)
+          and "PERINGATAN" in _buf54.getvalue(),
+          f"cfg={_cfg54 is not None} "
+          f"type={type(_cfg54.KategoriBarang4217).__name__ if _cfg54 else '?'} "
+          f"n={len(_cfg54.KategoriBarang4217) if _cfg54 else 0}")
+    with open(_cfgpath54, "w", encoding="utf-8") as _f54:
+        _f54.write('{"RootPath": "x",,}')   # JSON rusak
+    _jerr54 = None
+    try:
+        _Cfg54(_cfgpath54)
+    except RuntimeError as _e54:
+        _jerr54 = str(_e54)
+    except Exception as _e54:               # noqa: BLE001
+        _jerr54 = f"salah-tipe: {type(_e54).__name__}"
+    check("(v3.9.42) Config: JSON RUSAK → RuntimeError pesan Indonesia "
+          "(dulu JSONDecodeError Inggris mentah membingungkan)",
+          _jerr54 is not None and "rusak" in _jerr54
+          and "regenerasi" in _jerr54,
+          f"got {_jerr54!r}")
+
+    # --- (g) fn_4217: whitelist STRING dibungkus [str] --------------------
+    _d54g = os.path.join(_tmp54, "saldo")
+    os.makedirs(_d54g, exist_ok=True)
+    _fg54 = os.path.join(_d54g, "saldo.xlsx")
+    _wbg54 = _oxl54.Workbook()
+    _wsg54 = _wbg54.active
+    _wsg54.title = "#42.17. Kuantitas Barang per Gu"
+    for _i54 in range(4):
+        _wsg54.cell(row=_i54 + 1, column=1, value=f"MD {_i54}")
+    for _c54, _h54 in enumerate(
+            ["Nama Barang", "Kode Barang", "Kategori Barang",
+             "Nama Satuan", "RESTO MALANG (MLGPAR)"], 1):
+        _wsg54.cell(row=5, column=_c54, value=_h54)
+    for _r54, _row54 in enumerate([
+        ["BRG FOOD", 200001, "10.FOOD [WIP] - COM V.2", "GR", 50],
+        # kategori '0 LAIN' — dgn bug per-karakter: startswith('0') →
+        # LOLOS padahal whitelist tak memuat; fix [str] → terbuang.
+        ["BRG NOL", 200002, "0 LAIN", "GR", 50],
+    ], 6):
+        for _c54, _v54 in enumerate(_row54, 1):
+            _wsg54.cell(row=_r54, column=_c54, value=_v54)
+    _wbg54.save(_fg54)
+    _wbg54.close()
+    from src.pipeline.fn_4217 import fn_4217 as _fn54g
+    _buf54g = _io51.StringIO()
+    with _cl54.redirect_stdout(_buf54g):
+        _q54g = _fn54g(_d54g,
+                       kategori_whitelist="10.FOOD [WIP] - COM V.2")
+    _names54g = set(_q54g["Nama Barang"].astype(str))
+    check("(v3.9.42) fn_4217: kategori_whitelist STRING dibungkus [str] "
+          "+ WARNING (dulu iterasi per-karakter — '0 LAIN' lolos via "
+          "prefix '0')",
+          "BRG FOOD" in _names54g and "BRG NOL" not in _names54g
+          and "STRING" in _buf54g.getvalue(),
+          f"got {_names54g} log={_buf54g.getvalue()[-120:]!r}")
+
+    # --- (h) minggu WEEK 3 + WEEK 4 (keduanya _h=25) → label TERBESAR -----
+    _fdf54h = pd.DataFrame({
+        "Resto": ["1001.MLGPAR"] * 2,
+        "Nama Barang": ["AYAM FILET"] * 2,
+        "Satuan": ["GR"] * 2,
+        "Minggu": ["WEEK 3", "WEEK 4"],
+        "DEV Lalu": [100.0, 200.0],
+        "Nominal Deviasi Lalu": [1000.0, 2000.0],
+        "BULAN": ["201.OKT 26"] * 2,
+        "_bulan_num": [10, 10],
+        "_resto_norm": ["MLGPAR"] * 2,
+        "_bahan_norm": ["AYAM FILET"] * 2,
+        "_h": [25, 25],
+    })
+    _o54h = _hlp48(_fdf54h, {"AYAM FILET": (10.0, "GR")},
+                   {"rasio": {}, "terkecil": {}}, h=26)
+    check("(v3.9.42) hitung_nominal_lalu_pairs: WEEK 3 + WEEK 4 sama-sama "
+          "_h=25 → label TERBESAR (WEEK 4, penutupan) DETERMINISTIK — "
+          "dulu drop_duplicates keep='first' pilih baris file pertama "
+          "(minggu tercampur arbitrer per pasangan)",
+          len(_o54h) == 1
+          and float(_o54h["Nominal Lalu"].iloc[0]) == 2000.0
+          and str(_o54h["_minggu"].iloc[0]) == "WEEK 4",
+          f"got n={len(_o54h)} "
+          f"nom={_o54h['Nominal Lalu'].tolist()} "
+          f"wk={_o54h['_minggu'].tolist()}")
+
+    # --- (i) hitung_nominal_pairs: SATUAN kembar 'GR' vs 'GR ' ------------
+    _dn54i = pd.DataFrame([
+        {"Nama Barang": "BRG A", "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+         "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": 5.0},
+        {"Nama Barang": "BRG A", "NAMA RESTO": "MLGPAR", "SATUAN": "GR ",
+         "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": 7.0},
+    ])
+    _p54i = _hnp54(_dn54i, 25, {"BRG A": (10.0, "GR")},
+                    {"rasio": {}})
+    check("(v3.9.42) hitung_nominal_pairs: SATUAN 'GR' vs 'GR ' → SATU "
+          "pasangan (Σ 12; dinormalkan SEBELUM groupby — dulu 2 baris "
+          "kembar di popup per-resto)",
+          len(_p54i) == 1
+          and float(_p54i["Qty Deviasi"].iloc[0]) == 12.0,
+          f"got n={len(_p54i)} "
+          f"qty={_p54i['Qty Deviasi'].tolist()}")
+
+    # --- (j) 🧮 kolom Lalu tabel == TOTAL LALU popup (konsistensi) ---------
+    _top54j = tk.Toplevel(root)
+    _top54j.geometry("1400x750+10+10")
+    _fdf54j = pd.DataFrame({
+        "Resto": ["1001.MLGPAR", "1001.MLGPAR"],
+        "Nama Barang": ["AYAM FILET", "GULA PASIR"],
+        "Satuan": ["GR", "KG"],
+        "Minggu": ["WEEK 1", "WEEK 4"],
+        "DEV Lalu": [10.0, 12.0],
+        "Nominal Deviasi Lalu": [49000.0, 150000.0],
+        "BULAN": ["201.OKT 26", "201.OKT 26"],
+        "_bulan_num": [10, 10],
+        "_resto_norm": ["MLGPAR", "MLGPAR"],
+        "_bahan_norm": ["AYAM FILET", "GULA PASIR"],
+        "_h": [7, 25],
+    })
+    _rv54j = _NRV48(_top54j, lalu_provider=lambda: _fdf54j)
+    _rv54j.pack(fill="both", expand=True)
+    _dn54j = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
+    } for b, r, s, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0, "DEVIASI"),
+        ("GULA PASIR", "MLGPAR", "GR", 12.0, "TEPAT"),
+    ]])
+    _rv54j.load_data(_dn54j, harga_map={"AYAM FILET": (10.0, "GR")},
+                     konversi_map={"rasio": {}, "terkecil": {}})
+    _rv54j.ensure_refreshed()
+    wait_view(root, _rv54j)
+
+    def _tbl_lalu54(rv):
+        for _i54 in rv.tree.get_children(""):
+            if str(rv.tree.set(_i54, "Resto")) == "MLGPAR":
+                return str(rv.tree.set(_i54,
+                                       "Nominal Deviasi Bulan Lalu"))
+        return None
+
+    # kategori default 'DEVIASI' → GULA (TEPAT) di luar scope → Lalu '-'
+    # BUKAN 150.000 (dulu: tabel seluruh file 150.000 ≠ popup '-')
+    check("(v3.9.42) 🧮 KONSISTENSI: kategori DEVIASI (GULA TEPAT "
+          "terbuang) → kolom Lalu tabel '-' (dulu 150.000 = seluruh "
+          "file ≠ popup '-')",
+          _tbl_lalu54(_rv54j) == "-",
+          f"got {_tbl_lalu54(_rv54j)!r}")
+    _rv54j.tree.selection_set(
+        next(_i54 for _i54 in _rv54j.tree.get_children("")
+             if _rv54j.tree.set(_i54, "Resto") == "MLGPAR"))
+    _e54j = tk.Event()
+    _e54j.widget = _rv54j.tree
+    _rv54j._on_double_click(_e54j)
+    root.update()
+    wait_view(root, _rv54j)
+    _win54j = _rv54j._detail_wins[-1]
+    _pt54j = _findtree48(_win54j)
+    _tot54j = next((_k54 for _k54 in _pt54j.get_children("")
+                    if str(_pt54j.set(_k54, "Nama Resto")) == "TOTAL"),
+                   None)
+    check("(v3.9.42) 🧮 KONSISTENSI: popup TOTAL LALU == kolom tabel "
+          "('-' — join kiri pasangan ter-filter; dulu tabel 150.000 ≠ "
+          "popup '-')",
+          _tot54j is not None
+          and str(_pt54j.set(_tot54j, "Nominal Deviasi Bulan Lalu"))
+          == "-",
+          f"tot={_pt54j.set(_tot54j, 'Nominal Deviasi Bulan Lalu') if _tot54j else None!r}")
+    # Esc + hsb + Destroy cleanup di popup
+    _esc54 = bool(_win54j.bind("<Escape>"))
+
+    def _find_hsb54(_w):
+        for _c54 in _w.winfo_children():
+            if isinstance(_c54, ttk.Scrollbar) \
+                    and str(_c54.cget("orient")).endswith("horizontal"):
+                return True
+            if _find_hsb54(_c54):
+                return True
+        return False
+
+    _hsb_any54 = _find_hsb54(_win54j)
+    _win54j.destroy()
+    root.update()
+    check("(v3.9.42) 🧮 popup: Esc menutup + scrollbar HORIZONTAL ada "
+          "(kolom Keterangan tak terpotong) + <Destroy> cleanup "
+          "_detail_wins (dulu referensi tertahan sampai refresh)",
+          _esc54 and _hsb_any54 and _win54j not in _rv54j._detail_wins,
+          f"esc={_esc54} hsb={_hsb_any54} "
+          f"wins={len(_rv54j._detail_wins)}")
+    # kategori 'Semua' → GULA kembali → tabel & popup TOTAL = 150.000
+    _rv54j._close_detail_wins()
+    _rv54j._kategori_var.set("Semua")
+    _rv54j._on_kategori_changed()
+    wait_view(root, _rv54j)
+    check("(v3.9.42) 🧮 KONSISTENSI: kategori 'Semua' → GULA kembali → "
+          "kolom Lalu tabel = 150.000 (join pasangan — pasangan file-lalu "
+          "MATCH pasangan sekarang tetap dihitung)",
+          _tbl_lalu54(_rv54j) == "150.000",
+          f"got {_tbl_lalu54(_rv54j)!r}")
+    _rv54j.destroy()
+    _top54j.destroy()
+    root.update()
+
+    # --- (k) fmt chip 💰 + make_tree konsistensi interaksi -----------------
+    from src.ui.nominal_common import fmt_nominal_cell as _fnc54
+    check("(v3.9.42) fmt_nominal_cell: 48.980.811,43 (2 desimal koma — "
+          "chip 💰 kini = format tabel; dulu chip dibulatkan fmt_int_id)",
+          _fnc54(48980811.43) == "48.980.811,43",
+          f"got {_fnc54(48980811.43)!r}")
+    _top54k = tk.Toplevel(root)
+    _top54k.geometry("300x200+15+15")
+    _t54k = _mt54(_top54k, ["x54"])
+    root.update()
+    check("(v3.9.42) make_tree: roda halus 1-baris/notch terpasang "
+          "(konsistensi — info_tree ⚙ & dialog 🔄 dulu 3 baris/notch)",
+          getattr(_t54k, "_smooth_wheel_bound", False),
+          f"bound={getattr(_t54k, '_smooth_wheel_bound', None)}")
+    _top54k.destroy()
+    root.update()
+    shutil.rmtree(_tmp54, ignore_errors=True)
 
     root.destroy()
 

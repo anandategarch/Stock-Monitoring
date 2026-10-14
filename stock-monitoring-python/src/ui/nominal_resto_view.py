@@ -150,13 +150,17 @@ NOHARGA_COLUMNS = [
 #     idempoten — selalu hitung ulang dari lebar basis, tanpa drift);
 # (4) tombol ⛶ Perbesar (toggle ~layar penuh) + ↔ Muat Lebar (reset).
 # ---------------------------------------------------------------------------
-def _popup_geometry(win, w_max=1800, h_max=900,
+def _popup_geometry(win, w_max=2600, h_max=1440,
                     w_frac=0.94, h_frac=0.88) -> "tuple[int, int]":
     """Geometri popup adaptif besar + clamp posisi tengah layar.
     → (w, h) aktual (utk skala kolom awal).
     v3.9.41: batas atas DINAIKKAN (1800×900 — layar besar 1920 kini
     benar-benar 'besar & lebar'; dulu cap 1000×540 + 0.85×0.8 layar →
-    terasa kecil; user: "pop up ... kurang besar dan lebar")."""
+    terasa kecil; user: "pop up ... kurang besar dan lebar").
+    v3.9.42 — audit 61-b P2: cap DINAIKAN lagi (2600×1440) — cap 1800
+    membuat popup di monitor >1920 TIDAK proporsional (2560×1440 →
+    1800×900 = 70%×62% layar; 4K → 47%). kini proporsional penuh di
+    layar ≤2600px."""
     try:
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
@@ -202,6 +206,12 @@ def _bind_popup_rescale(win, tree, col_spec) -> None:
         if last is not None and abs(e.width - last) < 8:
             return
         _win._rescale_w = e.width
+        # v3.9.42 — audit 61-b P3: simpan ukuran manual TERAKHIR (bukan
+        # saat maks) → ⛶ toggle balik ke ukuran manual terakhir user
+        # (dulu geometri tersimpan saat toggle PERTAMA — resize manual
+        # setelahnya terlupakan).
+        if not getattr(_win, "_is_max", False):
+            _win._geom_manual_wh = (e.width, e.height)
         _scale_popup_columns(_tree, _spec, e.width - 36)
     try:
         win.bind("<Configure>", _on_cfg, add="+")
@@ -211,7 +221,9 @@ def _bind_popup_rescale(win, tree, col_spec) -> None:
 
 def _toggle_popup_max(win, tree, col_spec) -> None:
     """Toggle ⛶ Perbesar: ~layar penuh ↔ geometri normal (kolom ikut
-    re-scale via binding <Configure>)."""
+    re-scale via binding <Configure>).
+    v3.9.42 — audit 61-b P3: restore memakai ukuran manual TERAKHIR
+    (di-save binding <Configure>) — bukan geometri saat toggle pertama."""
     is_max = getattr(win, "_is_max", False)
     try:
         if not is_max:
@@ -221,8 +233,16 @@ def _toggle_popup_max(win, tree, col_spec) -> None:
             win.geometry(f"{max(720, sw - 16)}x{max(420, sh - 72)}+8+32")
             win._is_max = True
         else:
+            wh = getattr(win, "_geom_manual_wh", None)
             geom = getattr(win, "_geom_normal", None)
-            if geom:
+            if wh:
+                sw = win.winfo_screenwidth()
+                sh = win.winfo_screenheight()
+                w, h = wh
+                x = max(0, min(int(sw / 2 - w / 2), sw - w))
+                y = max(0, min(int(sh / 2 - h / 2), sh - h))
+                win.geometry(f"{w}x{h}+{x}+{y}")
+            elif geom:
                 win.geometry(geom)
             win._is_max = False
     except tk.TclError:
@@ -705,7 +725,22 @@ class NominalRestoView(tk.Frame):
         lalu = self._lalu_df
         if lalu is not None and not lalu.empty \
                 and "Nominal Lalu" in lalu.columns:
-            per_lalu = lalu.groupby("_resto_norm")["Nominal Lalu"].sum()
+            # v3.9.42 — audit 61-b P1: KOLOM LALU dibatasi ke pasangan
+            # yang HADIR di data sekarang hasil filter kategori (join
+            # kiri via (_resto_norm, _bahan_norm) — PERSIS popup
+            # rincian & TOTAL LALU popup). Dulu: seluruh file per resto →
+            # angka tabel ≠ angka popup utk resto SAMA (tampil hampir
+            # bersamaan) + kolom pembanding tak ikut scope filter
+            # kategori (pasangan Supplies lalu ikut terhitung →
+            # perbandingan tidak sebanding).
+            _key_now = set(zip(
+                pairs["Resto"].astype(str).map(_norm_resto_lalu),
+                pairs["Nama Barang"].astype(str).map(_norm_name_lalu)))
+            lalu_f = lalu[[
+                (_rn, _bn) in _key_now for _rn, _bn in zip(
+                    lalu["_resto_norm"].astype(str),
+                    lalu["_bahan_norm"].astype(str))]]
+            per_lalu = lalu_f.groupby("_resto_norm")["Nominal Lalu"].sum()
             g["Nominal Deviasi Bulan Lalu"] = (
                 g["Resto"].astype(str).map(_norm_resto_lalu).map(per_lalu)
                 .astype("float64"))
@@ -926,13 +961,14 @@ class NominalRestoView(tk.Frame):
 
     def _reapply_cell_tags(self, tree):
         """Pasang ulang tag per-cell (sort/clone = delete+reinsert →
-        tag ter-reset; pola mode Nominal)."""
+        tag ter-reset; pola mode Nominal).
+        v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (list kosong
+        = clear overlay — render tanpa sel minus tidak meninggalkan
+        label STALE)."""
         if not self._cell_tags:
             return
-        if self._neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._neg_cells)
-        if self._total_cells:
-            apply_cell_tag(tree, "total_cell", self._total_cells)
+        apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        apply_cell_tag(tree, "total_cell", self._total_cells)
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP (rincian per resto / tanpa harga)
@@ -978,7 +1014,10 @@ class NominalRestoView(tk.Frame):
         self._show_resto_popup(resto)
 
     def _close_detail_wins(self):
-        for w in self._detail_wins:
+        # v3.9.42 — iterasi COPY: binding <Destroy> (cleanup manual)
+        # menghapus elemen dari list SAAT destroy → iterasi list asli
+        # langsung = RuntimeError 'list changed size during iteration'.
+        for w in list(self._detail_wins):
             with contextlib.suppress(tk.TclError):
                 w.destroy()
         self._detail_wins = []
@@ -1013,6 +1052,13 @@ class NominalRestoView(tk.Frame):
         win.title(f"Nominal Deviasi — {resto} (H={self.tanggal_h})")
         self._detail_wins.append(win)
         win.protocol("WM_DELETE_WINDOW", win.destroy)
+        # v3.9.42 — audit 61-b P3: popup ditutup manual → buang dari
+        # _detail_wins (dulu referensi + closure df tertahan sampai
+        # refresh berikutnya) + Esc menutup (pola popup lain).
+        win.bind("<Destroy>", lambda _e, _w=win: (
+            _w in self._detail_wins and self._detail_wins.remove(_w)),
+            add="+")
+        win.bind("<Escape>", lambda _e, _w=win: _w.destroy())
         with contextlib.suppress(tk.TclError):
             win.transient(self.winfo_toplevel())
 
@@ -1129,8 +1175,16 @@ class NominalRestoView(tk.Frame):
             total_cells.append(("row_total", c))
 
         vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side="left", fill="both", expand=True)
+        # v3.9.42 — audit 61-b P2: + SCROLLBAR HORIZONTAL — total lebar
+        # kolom bisa melebihi jendela saat dikecilkan (dulu kolom
+        # Keterangan/kanan TERPOTONG tanpa cara melihatnya).
+        wrap = tk.Frame(body, bg=C_BG)
+        hsb = ttk.Scrollbar(wrap, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=vsb.set,
+                       xscrollcommand=hsb.set)
+        hsb.pack(side="bottom", fill="x")
+        tree.pack(side="top", fill="both", expand=True)
+        wrap.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         enable_multi_select(tree)   # Ctrl+A + Ctrl+C TSV
 
@@ -1162,10 +1216,13 @@ class NominalRestoView(tk.Frame):
         # + kolom diskala memenuhi lebar jendela + re-scale saat resize
         # (user: "pop up tab nominal deviasi ada bug kurang besar dan
         # lebar")
+        # v3.9.42 — minsize DI-CLAMP ke geometri layar (audit 61-b P3:
+        # minsize 900 di layar <960 melebarkan jendela MELAMPAUI layar).
         _w41, _h41 = _popup_geometry(win)
         _scale_popup_columns(tree, POPUP_COLUMNS, _w41 - 36)
         _bind_popup_rescale(win, tree, POPUP_COLUMNS)
-        win.minsize(900, 420)
+        win.minsize(min(900, _w41), min(420, _h41))
+        win.focus_set()
 
     # -------------------------------------------------------------------------
     # POPUP BARANG TANPA HARGA (v3.9.36)
@@ -1190,6 +1247,12 @@ class NominalRestoView(tk.Frame):
         win.title(f"Barang Tanpa Harga — {title_resto} (H={self.tanggal_h})")
         self._detail_wins.append(win)
         win.protocol("WM_DELETE_WINDOW", win.destroy)
+        # v3.9.42 — audit 61-b P3: idem popup rincian (Destroy cleanup +
+        # Esc menutup + fokus supaya Esc langsung aktif).
+        win.bind("<Destroy>", lambda _e, _w=win: (
+            _w in self._detail_wins and self._detail_wins.remove(_w)),
+            add="+")
+        win.bind("<Escape>", lambda _e, _w=win: _w.destroy())
         with contextlib.suppress(tk.TclError):
             win.transient(self.winfo_toplevel())
 
@@ -1235,8 +1298,17 @@ class NominalRestoView(tk.Frame):
                           {"values": values, "tags": tuple(tags)}))
 
         vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side="left", fill="both", expand=True)
+        # v3.9.42 — audit 61-b P2: + scrollbar horizontal — total lebar
+        # basis kolom (800px) MELAMPAUI avail di minsize lama
+        # (760−36=724) → kolom Keterangan TERPOTONG & tak terjangkau
+        # (probe: 14% kanan terpotong tanpa hsb).
+        wrap = tk.Frame(body, bg=C_BG)
+        hsb = ttk.Scrollbar(wrap, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=vsb.set,
+                       xscrollcommand=hsb.set)
+        hsb.pack(side="bottom", fill="x")
+        tree.pack(side="top", fill="both", expand=True)
+        wrap.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         enable_multi_select(tree)   # Ctrl+A + Ctrl+C TSV
         insert_tree_items(tree, items, batch=500)
@@ -1252,11 +1324,14 @@ class NominalRestoView(tk.Frame):
 
         # v3.9.41 — ukuran besar + kolom responsif (pola popup rincian;
         # user: "pop up ... kurang besar dan lebar")
-        _w41n, _h41n = _popup_geometry(win, w_max=1180, h_max=680,
+        # v3.9.42 — cap dinaikkan (1600×900; audit 61-b P2) + minsize
+        # di-clamp ke geometri layar (audit 61-b P3).
+        _w41n, _h41n = _popup_geometry(win, w_max=1600, h_max=900,
                                        w_frac=0.82, h_frac=0.8)
         _scale_popup_columns(tree, NOHARGA_COLUMNS, _w41n - 36)
         _bind_popup_rescale(win, tree, NOHARGA_COLUMNS)
-        win.minsize(760, 360)
+        win.minsize(min(760, _w41n), min(360, _h41n))
+        win.focus_set()
 
     @staticmethod
     def _noharga_ket(harga_tampil) -> str:

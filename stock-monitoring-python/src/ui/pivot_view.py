@@ -813,7 +813,10 @@ class PivotTableView(tk.Frame):
             # ter-insert — insert baru = tag cell ter-reset). Chunked &
             # fail-safe: bila re-render terjadi di tengah jalan, sisa chunk
             # dibatalkan (render baru memasang ulang).
-            if self._cell_tags and self._red_cells:
+            # v3.9.42 — audit 61-c P1-2: guard `and self._red_cells`
+            # dihapus — list kosong = clear overlay (render baru tanpa
+            # sel minus tidak meninggalkan label STALE).
+            if self._cell_tags:
                 apply_cell_tag(self.tree, "neg_cell", self._red_cells)
             self._busy = False
             if self._pending:
@@ -969,7 +972,9 @@ class PivotTableView(tk.Frame):
         # v3.9.2: clone = insert ulang → tag cell minus ter-reset →
         # pasang ulang di clone (iid identik dengan tabel sumber)
         def cells_setup(new_tree):
-            if self._cell_tags and self._red_cells:
+            # v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus (lihat
+            # render_done).
+            if self._cell_tags:
                 apply_cell_tag(new_tree, "neg_cell", self._red_cells)
 
         return open_tree_maximized(

@@ -511,6 +511,11 @@ def make_tree(parent, columns: list[str], show: str = "headings",
     setup_tree_tags(tree, extra_tags)
     tree._sm_frame = frame  # untuk akses layout jika perlu
     enable_multi_select(tree)  # v3.9.32
+    # v3.9.42 — konsistensi interaksi (audit 61-c P3): tree buatan
+    # make_tree (info_tree tab ⚙, dialog 🔄 Refresh) kini punya resize
+    # kolom manual + roda halus 1-baris/notch (dulu default 3 baris/
+    # notch — inkonsisten dgn semua view).
+    enable_col_resize(tree)
     return tree
 
 
@@ -3087,21 +3092,46 @@ class CellColorOverlay:
 
         def fwd(seq):
             def handler(event, _seq=seq):
+                # v3.9.42 — HOTFIX REGRESI v3.9.40 (audit 61-c): objek
+                # tkinter.Event SELALU punya field delta/num (berisi
+                # string '??' utk event yang tak relevan) → event_generate
+                # menolak opsi -num ("bad option") dan -delta utk event
+                # Button → TclError ditelan → TIDAK ADA event yang pernah
+                # terforward (klik-kanan/drag/wheel MATI di sel warna;
+                # hanya <Button-1> press & <Double-1> yang masih jalan
+                # karena jalur terpisah). Fix: bangun kw SELEKTIF —
+                # state hanya bila int; delta HANYA utk <MouseWheel> dan
+                # bila int; num TIDAK PERNAH dikirim (event_generate
+                # menurunkan %b dari pola seq itu sendiri).
                 try:
+                    if _seq in ("<Button-4>", "<Button-5>"):
+                        # X11 roda di sel warna: event_generate sintetis
+                        # TIDAK bisa men-set %b/num (probe: arah salah) →
+                        # gulir LANGSUNG + redraw overlay sinkron (pola
+                        # enable_smooth_wheel._on_btn45).
+                        try:
+                            tree.yview_scroll(
+                                -1 if _seq == "<Button-4>" else 1,
+                                "units")
+                        except tk.TclError:
+                            return
+                        _redraw_overlay_now(tree)
+                        return
                     lx, ly = lab.winfo_x(), lab.winfo_y()
                     kw = {"x": lx + event.x, "y": ly + event.y,
                           "warp": False}
                     # v3.9.40 — modifier & field roda ikut diteruskan
                     # (dulu HILANG: Shift+klik di sel warna tidak bisa
                     # men-extend seleksi — event terforward datang dgn
-                    # state kosong; wheel terforward tanpa delta tidak
-                    # menggulir). state = bitmask modifier Tk (Shift/
-                    # Ctrl/Button), delta = besaran roda, num = tombol
-                    # X11 Button-4/5.
-                    for attr in ("state", "delta", "num"):
-                        v = getattr(event, attr, None)
-                        if v is not None:
-                            kw[attr] = v
+                    # state kosong). v3.9.42: HANYA nilai VALID yang
+                    # dikirim (state int; delta int khusus <MouseWheel>).
+                    state = getattr(event, "state", 0)
+                    if isinstance(state, int):
+                        kw["state"] = state
+                    if _seq == "<MouseWheel>":
+                        d = getattr(event, "delta", None)
+                        if isinstance(d, int):
+                            kw["delta"] = d
                     tree.event_generate(_seq, **kw)
                 except tk.TclError:
                     pass
@@ -3126,17 +3156,23 @@ class CellColorOverlay:
                 return
             if is_dbl:
                 try:
-                    _fire_tree_bindings(tree, "<Double-1>",
-                                        lx + event.x, ly + event.y)
+                    _fire_tree_bindings(
+                        tree, "<Double-1>", lx + event.x, ly + event.y,
+                        state=int(getattr(event, "state", 0) or 0))
                 except tk.TclError:
                     pass
 
         lab.bind("<Button-1>", press, add="+")
 
 
-def _fire_tree_bindings(tree: ttk.Treeview, seq: str, x: int, y: int) -> int:
+def _fire_tree_bindings(tree: ttk.Treeview, seq: str, x: int, y: int,
+                        state: int = 0) -> int:
     """Panggil SEMUA binding `seq` milik tree (bindtags: widget, kelas,
     toplevel, all) seolah-olah event terjadi di (x, y) pada tree.
+
+    v3.9.42 — param state (modifier Shift/Ctrl) diteruskan ke %s
+    (dulu hard-code "0" → Ctrl/Shift saat double-click sel warna tak
+    sampai ke handler).
 
     Dipakai overlay per-cell utk meneruskan <Double-1> — `event generate`
     Tcl menolak modifier Double/Triple, jadi skrip binding dipanggil
@@ -3154,7 +3190,8 @@ def _fire_tree_bindings(tree: ttk.Treeview, seq: str, x: int, y: int) -> int:
         "%W": str(tree), "%x": str(int(x)), "%y": str(int(y)),
         "%X": str(rootw.winfo_rootx() + int(x)),
         "%Y": str(rootw.winfo_rooty() + int(y)),
-        "%t": "0", "%T": "6", "%#": "0", "%b": "1", "%s": "0",
+        "%t": "0", "%T": "6", "%#": "0", "%b": "1",
+        "%s": str(int(state)),
         "%w": "0", "%h": "0", "%k": "0", "%f": "0",
         "%A": "", "%E": "", "%K": "", "%N": "", "%D": "",
     }
@@ -3731,6 +3768,11 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
             tree.column(col, width=int(min(max(w, min_width), max_width)))
         except tk.TclError:
             continue
+    # v3.9.42 — redraw overlay SEKARANG (audit 61-c P2): lebar kolom
+    # berubah programatik (tombol ↔ Auto-Fit / menu auto-fit kolom) TIDAK
+    # memicu <Configure> tree maupun yscrollcommand → label sel warna
+    # salah posisi/lebar sampai interaksi berikutnya. No-op tanpa overlay.
+    _redraw_overlay_now(tree)
 
 
 # --- Maximize table (fullscreen clone) ----------------------------------------

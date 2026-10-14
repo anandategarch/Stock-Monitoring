@@ -1939,13 +1939,15 @@ class DeviasiView(tk.Frame):
         → dipanggil lagi dari _sort_by dan on_render_done clone."""
         if not self._cell_tags:
             return
-        if self._neg_cells:
-            apply_cell_tag(tree, "neg_cell", self._neg_cells)
-        if self._zero_cells:
-            apply_cell_tag(tree, "zero_cell", self._zero_cells)
+        # v3.9.42 — audit 61-c P1-2: guard list-non-kosong DIHAPUS —
+        # render baru TANPA sel minus harus MENGHAPUS sel lama (list
+        # kosong = clear di overlay — semantik replace); guard lama
+        # meninggalkan label overlay STALE (nilai/warna lama menimpa
+        # data baru — iid deterministik row_i).
+        apply_cell_tag(tree, "neg_cell", self._neg_cells)
+        apply_cell_tag(tree, "zero_cell", self._zero_cells)
         # v3.9.18 — highlight kolom Deviasi & SO_H (Tk 9; no-op Tk 8)
-        if self._hl_cells:
-            apply_cell_tag(tree, "hl_cell", self._hl_cells)
+        apply_cell_tag(tree, "hl_cell", self._hl_cells)
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)

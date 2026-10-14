@@ -59,6 +59,18 @@ v3.9.41 (user: "100383 BUMBU PASTA KUAH masih belum ada di program ini
   TETAP tertolong oleh family match.
 - DEFAULT WHITELIST + 2 kategori FOOD legacy (mirror niat v3.9.32
   "item lama yang masih bersaldo tetap terpantau").
+
+v3.9.42 — AUDIT FIX (61-a):
+- F7: fallback kolom 'Nama Barang' (kolom PERTAMA) kini WAJIB teriak
+  WARNING (dulu senyap — nyasar ke 'Kode Barang' dsb. tanpa jejak);
+  rename 'KATEGORI BARANG'/'SATUAN AWAL'/'Nama Barang' diberi guard
+  tabrakan (dua kolom yang menormalkan ke nama sama → rename menghasilkan
+  kolom GANDA → prom[col] = DataFrame → crash).
+- F1 (defense-in-depth): kategori_whitelist berupa STRING dibungkus
+  jadi daftar 1-elemen sebelum dipakai — string diiterasi per-karakter
+  oleh prefix-match → 1 karakter cocok hampir semua kategori (kelas
+  bug item 100383; config.py kini memvalidasi — ini jaring kedua utk
+  pemanggil lain).
 """
 import re
 
@@ -244,8 +256,22 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
 
     if nama_barang_col is None:
         nama_barang_col = prom.columns[0]
+        # v3.9.42 — AUDIT FIX (61-a, F7): fallback senyap menyulitkan
+        # diagnosis — kolom pertama bisa kolom APA PUN ('Kode Barang',
+        # 'No', …) → Nama Barang nyasar tanpa jejak. WAJIB teriak supaya
+        # user melihat kenapa 42.17 salah-baca.
+        print(f"[WARNING] 4217 {sheet_resolved}: kolom 'Nama Barang' tak "
+              f"ditemukan — memakai kolom pertama '{nama_barang_col}'")
 
     if nama_barang_col != "Nama Barang":
+        # v3.9.42 — AUDIT FIX (61-a, F7): guard tabrakan rename — sheet
+        # dgn dua kolom yang sama-sama menormalkan ke 'nama barang'
+        # (mis. 'Nama Barang' + 'nama barang') membuat rename menghasilkan
+        # 2 kolom bernama sama → prom['Nama Barang'] = DataFrame → crash.
+        # Buang dulu kolom ejaan persis target (yang dipertahankan =
+        # kolom pilihan pencarian di atas, satu-satunya yang di-rename).
+        if "Nama Barang" in prom.columns:
+            prom = prom.drop(columns=["Nama Barang"])
         prom = prom.rename(columns={nama_barang_col: "Nama Barang"})
 
     # v3.9.32 — kolom KATEGORI BARANG + NAMA SATUAN sebagai id SEBELUM melt
@@ -253,9 +279,21 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     sat_col = _find_col(prom.columns, _KANDIDAT_SATUAN)
 
     if kat_col is not None and kat_col != "KATEGORI BARANG":
+        # v3.9.42 — AUDIT FIX (61-a, F7): guard tabrakan rename — bila
+        # sheet punya 'Kategori'/'Kategori Barang' DAN kolom lain bernama
+        # persis 'KATEGORI BARANG' (ejaan beda, key lookup sama → _find_col
+        # bisa memilih yang bukan ejaan persis), rename menghasilkan 2
+        # kolom 'KATEGORI BARANG' → prom[kat_col] = DataFrame → crash di
+        # map whitelist. Buang kolom ejaan persis target dulu.
+        if "KATEGORI BARANG" in prom.columns:
+            prom = prom.drop(columns=["KATEGORI BARANG"])
         prom = prom.rename(columns={kat_col: "KATEGORI BARANG"})
         kat_col = "KATEGORI BARANG"
     if sat_col is not None and sat_col != "SATUAN AWAL":
+        # v3.9.42 — AUDIT FIX (61-a, F7): guard tabrakan rename (mirror
+        # KATEGORI BARANG di atas) utk kolom satuan.
+        if "SATUAN AWAL" in prom.columns:
+            prom = prom.drop(columns=["SATUAN AWAL"])
         # nama sementara supaya tidak bentrok dgn output "SATUAN"
         prom = prom.rename(columns={sat_col: "SATUAN AWAL"})
         sat_col = "SATUAN AWAL"
@@ -270,6 +308,17 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     prom_raw = prom.copy()          # utk safety-net bypass di bawah
     _kat_was = kat_col is not None
     _sat_was = sat_col
+    # v3.9.42 — AUDIT FIX (61-a, F1 defense-in-depth): whitelist STRING
+    # (config salah tulis / pemanggil lama) dulu diiterasi PER-KARAKTER
+    # oleh prefix-match di bawah → prefix 1 karakter → hampir SEMUA
+    # kategori lolos (kelas bug item 100383). Bungkus jadi daftar
+    # 1-elemen di sini — jaring kedua setelah validasi tipe config.py,
+    # supaya jalur pemanggil manapun aman.
+    if isinstance(kategori_whitelist, str):
+        print("    [WARNING] 4217: kategori_whitelist STRING "
+              f"'{kategori_whitelist}' diperlakukan sebagai 1 kategori "
+              "(harusnya daftar — cek config.json 'KategoriBarang4217')")
+        kategori_whitelist = [kategori_whitelist]
     if kat_col is not None and kategori_whitelist:
         wl_norm = [_norm_kat(k) for k in kategori_whitelist
                    if _norm_kat(k)]

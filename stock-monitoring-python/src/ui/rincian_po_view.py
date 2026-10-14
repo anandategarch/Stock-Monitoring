@@ -139,6 +139,10 @@ class RincianPoView(tk.Frame):
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
+        # v3.9.42 — audit 61-c/61-d (F2 P2): snapshot state tampilan utk
+        # refresh preserve=True (posisi scroll + seleksi baris; dipulihkan
+        # di render_done — lihat _restore_view_state).
+        self._preserve_after_render = None
 
         self._build_ui()
         self._setup_tags()
@@ -178,7 +182,7 @@ class RincianPoView(tk.Frame):
                                          state="readonly", width=22)
         self.cabang_combo.pack(side="left", padx=(6, 18))
         self.cabang_combo.bind("<<ComboboxSelected>>",
-                               lambda e: self._refresh())
+                               lambda e: self._on_combo_filter())
 
         tk.Label(r0, text="STATUS PESANAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
@@ -188,7 +192,7 @@ class RincianPoView(tk.Frame):
                                          state="readonly", width=22)
         self.status_combo.pack(side="left", padx=(6, 18))
         self.status_combo.bind("<<ComboboxSelected>>",
-                               lambda e: self._refresh())
+                               lambda e: self._on_combo_filter())
 
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
@@ -341,7 +345,18 @@ class RincianPoView(tk.Frame):
             return series.map(_resto_name)
         return series.astype(str)
 
+    def _on_combo_filter(self):
+        # v3.9.42 — audit 61-c/61-d (F2 P2): combo diubah user saat refresh
+        # mengantre → buang snapshot restore (intent user menang) lalu
+        # refresh tabel.
+        self._preserve_after_render = None
+        self._refresh()
+
     def _on_col_filter(self, col: str, selected):
+        # v3.9.42 — audit 61-c/61-d (F2 P2): user mengubah filter saat
+        # refresh mengantre → buang snapshot restore (intent user
+        # menang atas restore refresh).
+        self._preserve_after_render = None
         self._col_sel[col] = selected
         self._refresh()
 
@@ -374,7 +389,19 @@ class RincianPoView(tk.Frame):
     # =========================================================================
     # DATA LOADING
     # =========================================================================
-    def load_data(self, data: pd.DataFrame):
+    def load_data(self, data: pd.DataFrame, preserve: bool = False):
+        """Muat data baru (dari pipeline).
+
+        v3.9.42 — audit 61-c/61-d (F2 P2): preserve=True (jalur REFRESH
+        app v3.9.37) TIDAK me-reset state tampilan — dulu load_data
+        SELALU me-reset combo Cabang/Status (FIX 35-c1) + _col_sel ⧩ +
+        clear_all() padahal refresh menjanjikan "gangguan minimal":
+        filter, posisi scroll & seleksi baris lenyap tiap refresh.
+        Nilai combo dipertahankan HANYA bila masih ada di values data
+        BARU (validasi — hilang → "(All)", guard basi 35-c1 tetap
+        jalan); _col_sel dipakai ulang _prepare_rows; scroll+seleksi
+        dipulihkan SETELAH baris ter-insert (render_done). Default
+        False = load awal, perilaku lama."""
         self.data = data
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
@@ -385,11 +412,41 @@ class RincianPoView(tk.Frame):
         # berganti — dulu hanya _col_sel + header ⧩; var basi (mis. data baru
         # tanpa cabang itu) membuat tabel 0 baris SENYAP ("Tidak ada data
         # setelah filter.") & popup filter kolom mati.
-        self.cabang_var.set("(All)")
-        self.status_pesanan_var.set("(All)")
-        for c in self._col_sel:
-            self._col_sel[c] = None
-        self.header_filters.clear_all()
+        # v3.9.42 — audit 61-c/61-d (F2 P2): cabang reset itu benar utk LOAD
+        # AWAL — tapi jalur REFRESH kini preserve=True: nilai combo
+        # divalidasi terhadap values data BARU (bukan dibuang begitu saja).
+        if preserve:
+            for var, combo in ((self.cabang_var, self.cabang_combo),
+                               (self.status_pesanan_var, self.status_combo)):
+                val = var.get()
+                try:
+                    vals = list(combo["values"])
+                except tk.TclError:
+                    vals = []
+                if val not in vals:
+                    var.set("(All)")
+            # filter header ⧩: _col_sel DIPERTAHANKAN (dibaca lagi oleh
+            # _refresh → _prepare_rows) + funnel aktif di-reassert via
+            # API HeaderFilterGroup.set_selected (v3.9.22) supaya ikon
+            # state-nya sinkron dgn seleksi yang dipertahankan.
+            for c, sel in self._col_sel.items():
+                if sel is not None:
+                    self.header_filters.set_selected(c, sel)
+            # scroll + seleksi baru bisa dipulihkan SETELAH semua baris
+            # ter-insert (insert async batch → render_done) — simpan dulu.
+            try:
+                frac = self.tree.yview()[0]
+                sel_iids = list(self.tree.selection())
+            except tk.TclError:
+                frac, sel_iids = 0.0, []
+            self._preserve_after_render = {"frac": frac, "iids": sel_iids}
+        else:
+            self._preserve_after_render = None
+            self.cabang_var.set("(All)")
+            self.status_pesanan_var.set("(All)")
+            for c in self._col_sel:
+                self._col_sel[c] = None
+            self.header_filters.clear_all()
         # (v3.2) lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -643,6 +700,11 @@ class RincianPoView(tk.Frame):
         def render_done():
             self._busy = False
             self._apply_status_notes()
+            # v3.9.42 — audit 61-c/61-d (F2 P2): pulihkan posisi scroll +
+            # seleksi yang disimpan load_data(preserve=True) — baru aman
+            # di sini karena SEMUA baris sudah ter-insert (insert async
+            # batch); iid yang lenyap di data baru di-skip senyap.
+            self._restore_view_state()
             if self._pending:
                 self._pending = False
                 self._refresh()
@@ -650,7 +712,30 @@ class RincianPoView(tk.Frame):
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
 
+    def _restore_view_state(self):
+        """v3.9.42 — audit 61-c/61-d (F2 P2): pulihkan yview fraction +
+        seleksi baris pasca-render (dipanggil render_done; snapshot dibuat
+        load_data(preserve=True)). Sekali pakai — snapshot dikonsumsi."""
+        snap = self._preserve_after_render
+        if not snap:
+            return
+        self._preserve_after_render = None
+        try:
+            if not self.winfo_exists():
+                return
+            if snap.get("frac"):
+                self.tree.yview_moveto(snap["frac"])
+            for iid in snap.get("iids") or ():
+                if self.tree.exists(iid):
+                    self.tree.selection_add(iid)
+        except tk.TclError:
+            # view/tree sudah tiada saat timer mendarat — abaikan.
+            pass
+
     def _reset_filter(self):
+        # v3.9.42 — audit 61-c/61-d (F2 P2): reset eksplisit user → buang
+        # snapshot restore refresh yang mengantre (jangan hidupkan lagi).
+        self._preserve_after_render = None
         self.cabang_var.set("(All)")
         self.status_pesanan_var.set("(All)")
         for c in self._col_sel:
