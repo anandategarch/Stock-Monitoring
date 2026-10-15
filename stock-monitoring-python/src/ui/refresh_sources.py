@@ -66,7 +66,8 @@ class RefreshSourcesDialog(tk.Toplevel):
     """
 
     def __init__(self, parent, config, last_run_at: float | None = None,
-                 on_refresh: Callable[[list | None], None] | None = None):
+                 on_refresh: Callable[[list | None], None] | None = None,
+                 can_refresh: Callable[[], bool] | None = None):
         super().__init__(parent)
         self.title("🔄 Refresh File Sumber")
         self.configure(bg=C_BG)
@@ -76,6 +77,10 @@ class RefreshSourcesDialog(tk.Toplevel):
         except tk.TclError:
             pass
         self._on_refresh = on_refresh
+        # v3.9.46 — audit 66 temuan #4: gate status pipeline — dipanggil
+        # di _do_refresh SEBELUM dialog menutup dirinya (pipeline hidup →
+        # dialog menolak + tetap terbuka, user bisa mencoba lagi)
+        self._can_refresh = can_refresh
         self._last_run_at = last_run_at
         self._checked: set = set()
 
@@ -85,6 +90,16 @@ class RefreshSourcesDialog(tk.Toplevel):
         self._populate()
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.bind("<Escape>", lambda e: self.destroy())
+        # v3.9.46 — audit 66 temuan #4: dialog kini MODAL (grab_set) —
+        # dulu hanya transient: jendela utama tetap bisa diklik & pipeline
+        # bisa DIMULAI selama dialog terbuka → tombol Refresh kemudian
+        # menolak di _start_pipeline SETELAH cache diinvalidasi (cache
+        # terbuang tanpa refresh). Dengan grab, interaksi ke jendela utama
+        # diblok sampai dialog ditutup (grab dilepas otomatis saat destroy).
+        try:
+            self.grab_set()
+        except tk.TclError:
+            pass  # display/parent tak mendukung grab — jalan non-modal
 
     # =================================================================
     # SCAN FILE SUMBER
@@ -322,10 +337,29 @@ class RefreshSourcesDialog(tk.Toplevel):
 
     def _do_refresh(self, paths):
         """Konfirmasi ringan bila 0 terpilih (hanya refresh semua yang
-        bisa jalan); panggil callback + tutup dialog."""
+        bisa jalan); panggil callback + tutup dialog.
+
+        v3.9.46 — audit 66 temuan #4: (a) gate can_refresh dicek SEBELUM
+        dialog menutup dirinya — pipeline hidup → refresh DITOLAK, dialog
+        TETAP TERBUKA + info jelas (dulu dialog selalu menutup diri dulu,
+        lalu callback menolak di _start_pipeline SETELAH cache
+        diinvalidasi — cache terbuang tanpa refresh, senyap); (b) grab
+        dilepas DULU sebelum destroy supaya callback (messagebox dari
+        app bila pipeline ternyata berjalan) tidak terblok oleh grab
+        dialog yang sudah mati."""
         if paths is not None and not paths:
             return
+        if self._can_refresh is not None and not self._can_refresh():
+            self.info_var.set(
+                "⚠ Pipeline sedang berjalan / masih menghentikan — "
+                "refresh DITUNDA (cache tidak dibuang). Tunggu status "
+                "berubah, lalu tekan Refresh lagi.")
+            return
         cb = self._on_refresh
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         try:
             self.destroy()
         except tk.TclError:

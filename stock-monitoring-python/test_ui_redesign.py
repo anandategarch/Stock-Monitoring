@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.45", APP_VERSION == "3.9.45",
+    check("Versi = 3.9.46", APP_VERSION == "3.9.46",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -3688,7 +3688,9 @@ def main():
     print("== 24. (v3.9.10) AUDIT UI/UX ROUND 2 — REGRESSION FIXES ==")
     import threading as _th
 
-    from src.ui.app import _enable_windows_dpi_awareness as _dpi_fix
+    from src.ui.app import _apply_windows_tk_scaling as _dpi_scale
+    from src.ui.app import _set_windows_dpi_awareness as _dpi_set
+    from src.ui.app import _windows_dpi_awareness_chain as _dpi_chain
     from src.ui.details_popup import DetailsPopup as _DPcls
     from src.ui.deviasi_view import DeviasiView as _DV
     from src.ui.rincian_po_view import RincianPoView as _RPV
@@ -3747,13 +3749,20 @@ def main():
           is app._laporan_tab_entry)
 
     # ---- A-03: DPI-awareness no-op di Linux (tanpa crash) ----
+    # v3.9.46 — audit 66 #2: fungsi dipecah — _set_windows_dpi_awareness()
+    # TANPA root (dipanggil SEBELUM tk.Tk() di main()) + rantai pemilihan
+    # API kini murni & teruji (lihat §57: HRESULT/BOOL diperiksa,
+    # per-monitor-v2 → per-monitor → system).
     try:
-        _dpi_fix(root)
+        _dpi_mode46 = _dpi_set()
+        _dpi_scale(root)
         _dpi_ok = True
     except Exception as _e:
         _dpi_ok = False
-    check("(v3.9.10) A-03: _enable_windows_dpi_awareness aman di Linux",
-          _dpi_ok)
+        _dpi_mode46 = "<error>"
+    check("(v3.9.10→3.9.46) A-03: _set_windows_dpi_awareness + "
+          "_apply_windows_tk_scaling aman no-op di Linux (mode='')",
+          _dpi_ok and _dpi_mode46 == "", f"mode={_dpi_mode46!r}")
 
     # ---- B-01: parser sort Indonesia (oracle deterministik) ----
     _st_tr = ttk.Treeview(root, columns=["x"])
@@ -4394,8 +4403,10 @@ def main():
     grv13.load_data(_kat13)
     wait_view(root, grv13)
     _kv13 = list(grv13._kategori_combo["values"])
-    check("(v3.9.13) Combobox terisi dari data (Semua + BAHAN + SAYURAN)",
-          _kv13 == ["Semua", "BAHAN", "SAYURAN"], f"got {_kv13}")
+    check("(v3.9.13→3.9.46) Combobox terisi dari data (Semua + "
+          "'(Tanpa Kategori)' selalu ada + BAHAN + SAYURAN)",
+          _kv13 == ["Semua", "(Tanpa Kategori)", "BAHAN", "SAYURAN"],
+          f"got {_kv13}")
     _gr_all13 = len(grv13.tree.get_children(""))
     grv13._kategori_var.set("SAYURAN")
     grv13._on_kategori_changed()
@@ -10191,10 +10202,11 @@ def main():
                 return t
         return None
 
-    check("(v3.9.36) 🧮: combobox KATEGORI terisi + DEFAULT seleksi "
-          "'DEVIASI' (case-insensitive; 'Semua' = tanpa filter)",
-          list(_rv48._kategori_combo["values"]) == ["Semua", "DEVIASI",
-                                                    "TEPAT"]
+    check("(v3.9.36→3.9.46) 🧮: combobox KATEGORI terisi + DEFAULT seleksi "
+          "'DEVIASI' (case-insensitive; 'Semua' = tanpa filter; entry "
+          "'(Tanpa Kategori)' selalu ada)",
+          list(_rv48._kategori_combo["values"]) ==
+          ["Semua", "(Tanpa Kategori)", "DEVIASI", "TEPAT"]
           and _rv48._kategori_var.get() == "DEVIASI"
           and _rv48._kategori_sel == "DEVIASI",
           f"values={list(_rv48._kategori_combo['values'])} "
@@ -12433,6 +12445,350 @@ def main():
     _nv56._close_detail_wins()
     _nv56.destroy()
     _top56.destroy()
+    root.update()
+
+    print("\n== 57. (v3.9.46) AUDIT EKSTERNAL 4 TEMUAN + '(Tanpa Kategori)' "
+          "SELALU ADA (user) ==")
+    import contextlib as _cl57
+    import tempfile
+
+    # --- (a) TEMUAN #1: status final JUJUR — kegagalan view + folder +
+    # file skip tidak boleh tampil sebagai sukses hijau penuh ------------
+    _aud57 = {"df": None, "kpi": None, "desc": None, "harga_map": {},
+              "konversi_map": None}
+    # bersih: hijau polos (baseline)
+    app._skipped_files = 0
+    app._pre_missing = []
+    app._on_pipeline_done(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                          dict(_aud57), None, False)
+    for _ in range(6):
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.46) run BERSIH: status hijau 'SELESAI' polos (tanpa "
+          "PARSIAL/PERINGATAN)",
+          "SELESAI" in app.statusbar.dot._var.get()
+          and "PARSIAL" not in app.statusbar.dot._var.get()
+          and "PERINGATAN" not in app.statusbar.dot._var.get(),
+          f"got {app.statusbar.dot._var.get()!r}")
+
+    # satu view GAGAL → SELESAI PARSIAL + view ditandai + Export tetap
+    # hidup + view lain tetap dimuat
+    _orig_load57 = app.pivot_view.load_data
+
+    def _boom57(*_a, **_k):
+        raise RuntimeError("boom-57")
+
+    app.pivot_view.load_data = _boom57
+    try:
+        app._on_pipeline_done(pd.DataFrame(), pd.DataFrame(),
+                              pd.DataFrame(), dict(_aud57), None, False)
+        for _ in range(6):
+            root.update()
+            time.sleep(0.01)
+    finally:
+        app.pivot_view.load_data = _orig_load57
+    check("(v3.9.46) 1 view gagal → status 'SELESAI PARSIAL — view gagal "
+          "dimuat' (bukan hijau polos)",
+          "SELESAI PARSIAL" in app.statusbar.dot._var.get()
+          and "view gagal dimuat" in app.statusbar.dot._var.get()
+          and app.status_var.get() ==
+          "Status: SELESAI PARSIAL — sebagian view gagal dimuat.",
+          f"bar={app.statusbar.dot._var.get()!r} "
+          f"var={app.status_var.get()!r}")
+    check("(v3.9.46) view gagal DITANDAI: status_var pivot menyebut "
+          "'BELUM DIPERBARUI' (data lama tak dipercaya diam-diam)",
+          "BELUM DIPERBARUI" in app.pivot_view.status_var.get(),
+          f"got {app.pivot_view.status_var.get()!r}")
+    check("(v3.9.46) view lain tetap dimuat + tombol Export tetap "
+          "enabled (isolasi error per-view)",
+          app.deviasi_gr_view.data is not None
+          and str(app.btn_export.cget("state")) != "disabled",
+          f"export={app.btn_export.cget('state')!r}")
+    check("(v3.9.46) log menyebut [ERROR] Gagal memuat view",
+          "[ERROR] Gagal memuat view 📊 Pivot Table" in
+          app.log_text.get("1.0", "end-1c"))
+
+    # REFRESH mode + view gagal: peringatan TIDAK ditimpa hijau polos
+    # (audit: jalur paling rawan — user tetap di tab aktif, log tak
+    # terlihat)
+    app.pivot_view.load_data = _boom57
+    try:
+        app._on_pipeline_done(pd.DataFrame(), pd.DataFrame(),
+                              pd.DataFrame(), dict(_aud57), None,
+                              ["_f57.xlsx"])
+        for _ in range(6):
+            root.update()
+            time.sleep(0.01)
+    finally:
+        app.pivot_view.load_data = _orig_load57
+    check("(v3.9.46) REFRESH + view gagal: 'SELESAI PARSIAL' + info "
+          "'disegarkan' — severitas TIDAK ditimpa hijau (dulu hijau "
+          "polos menimpa)",
+          "SELESAI PARSIAL" in app.statusbar.dot._var.get()
+          and "disegarkan" in app.statusbar.dot._var.get(),
+          f"got {app.statusbar.dot._var.get()!r}")
+
+    # file ter-skip → SELESAI DENGAN PERINGATAN (amber)
+    app._skipped_files = 2
+    app._on_pipeline_done(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                          dict(_aud57), None, False)
+    for _ in range(6):
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.46) 2 file Excel di-skip → 'SELESAI DENGAN PERINGATAN — "
+          "⚠ 2 file Excel dilewati'",
+          "SELESAI DENGAN PERINGATAN" in app.statusbar.dot._var.get()
+          and "2 file Excel" in app.statusbar.dot._var.get(),
+          f"got {app.statusbar.dot._var.get()!r}")
+
+    # folder sumber hilang (pre-flight diingat sampai run usai)
+    app._skipped_files = 0
+    app._pre_missing = [("RekapBerjalan", "/tidak/ada/folder")]
+    app._on_pipeline_done(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                          dict(_aud57), None, False)
+    for _ in range(6):
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.46) folder sumber hilang → 'SELESAI DENGAN PERINGATAN — "
+          "1 folder sumber tidak ditemukan' (preflight tak tertutup "
+          "status akhir)",
+          "1 folder sumber tidak ditemukan" in
+          app.statusbar.dot._var.get(),
+          f"got {app.statusbar.dot._var.get()!r}")
+    app._pre_missing = []
+
+    # --- (b) TEMUAN #3: copy log tak mengembalikan status BASI -----------
+    # kasus A — pipeline SELESAI di tengah flash: status baru MENANG
+    app.status_var.set("Status: menjalankan pipeline…")
+    app._copy_log()
+    check("(v3.9.46) copy log: feedback flash '📋 Log TERSALIN' tampil",
+          app.status_var.get().startswith("📋 Log TERSALIN"))
+    app.status_var.set("Status: SELESAI.")   # pipeline done di tengah flash
+    app._log_flash_restore()
+    check("(v3.9.46) KASUS A: pipeline selesai di tengah flash → restore "
+          "DILEWATI (status baru menang; dulu kembali ke 'menjalankan…')",
+          app.status_var.get() == "Status: SELESAI.",
+          f"got {app.status_var.get()!r}")
+    # kasus B — copy kedua <2,5 dtk: prev tetap status stabil
+    app.status_var.set("Status: SIAP.")
+    app._copy_log()
+    app._copy_log()      # ke-2 — TIDAK boleh menyimpan teks flash sbg prev
+    app._log_flash_restore()
+    check("(v3.9.46) KASUS B: copy 2× cepat → prev tetap status stabil "
+          "(bukan teks flash pertama)",
+          app.status_var.get() == "Status: SIAP.",
+          f"got {app.status_var.get()!r}")
+    # kasus C — normal: flash utuh → dipulihkan
+    app.status_var.set("Status: SIAP.")
+    app._copy_log()
+    app._log_flash_restore()
+    check("(v3.9.46) KASUS C: flash utuh (tak diganti siapa pun) → "
+          "status dipulihkan normal",
+          app.status_var.get() == "Status: SIAP.",
+          f"got {app.status_var.get()!r}")
+    with _cl57.suppress(Exception):
+        app.root.after_cancel(app._log_flash_after)
+
+    # --- (c) TEMUAN #2: DPI chain — per-monitor BENAR + return code
+    # diperiksa (dulu: awareness(1)=SYSTEM sambil komentar bilang
+    # per-monitor; HRESULT tak dicek)
+    class _U3257:
+        def __init__(self, ctx_rc=None, sys_rc=None):
+            self._ctx_rc, self._sys_rc = ctx_rc, sys_rc
+            self.calls = []
+
+        def SetProcessDpiAwarenessContext(self, ctx):
+            self.calls.append(("ctx", ctx))
+            if self._ctx_rc is None:
+                raise AttributeError("no API")
+            return self._ctx_rc
+
+        def SetProcessDPIAware(self):
+            self.calls.append(("sys", None))
+            if self._sys_rc is None:
+                raise AttributeError("no API")
+            return self._sys_rc
+
+    class _Sh57:
+        def __init__(self, hr=None):
+            self._hr = hr
+            self.calls = []
+
+        def SetProcessDpiAwareness(self, val):
+            self.calls.append(("pm", val))
+            if self._hr is None:
+                raise AttributeError("no API")
+            return self._hr
+
+    class _WD57:
+        def __init__(self, user32, shcore):
+            self.user32, self.shcore = user32, shcore
+
+    _u1 = _U3257(ctx_rc=1)
+    check("(v3.9.46) DPI: context PER_MONITOR_AWARE_V2 (-4) sukses → "
+          "'per-monitor-v2' (argtypes c_void_p di-callback nyata)",
+          _dpi_chain(_WD57(_u1, _Sh57())) == "per-monitor-v2"
+          and _u1.calls == [("ctx", -4)],
+          f"calls={_u1.calls}")
+    _u2, _s2 = _U3257(), _Sh57(hr=0)
+    check("(v3.9.46) DPI fallback Win8.1: awareness dipanggil dgn 2 "
+          "(PER_MONITOR — dulu 1=SYSTEM!) → 'per-monitor'",
+          _dpi_chain(_WD57(_u2, _s2)) == "per-monitor"
+          and _s2.calls == [("pm", 2)],
+          f"calls={_s2.calls}")
+    _u3, _s3 = _U3257(sys_rc=1), _Sh57(hr=0x80070005)  # E_ACCESS_DENIED
+    check("(v3.9.46) DPI HRESULT gagal (0x80070005) → DICEK, jatuh ke "
+          "SetProcessDPIAware → 'system'",
+          _dpi_chain(_WD57(_u3, _s3)) == "system"
+          and _u3.calls[-1] == ("sys", None)
+          and ("pm", 2) in _s3.calls,
+          f"u3={_u3.calls} s3={_s3.calls}")
+    check("(v3.9.46) DPI semua API gagal → '' (jujur, bukan mengklaim "
+          "per-monitor)",
+          _dpi_chain(_WD57(_U3257(), _Sh57())) == "")
+    # urutan pemanggilan main(): set SEBELUM tk.Tk() (audit: terlambat
+    # dulu) — cek source _dpi dipanggil sebelum konstruktor Tk
+    import inspect
+
+    import src.ui.app as _appmod57
+    _main_src57 = inspect.getsource(_appmod57.main)
+    _set_pos = _main_src57.find("_set_windows_dpi_awareness()")
+    _tk_pos = _main_src57.find("root = tk.Tk()")
+    check("(v3.9.46) main(): _set_windows_dpi_awareness() dipanggil "
+          "SEBELUM tk.Tk() (dok Microsoft: DPI sebelum HWND pertama)",
+          0 <= _set_pos < _tk_pos,
+          f"set@{_set_pos} tk@{_tk_pos}")
+
+    # --- (d) TEMUAN #4: refresh dialog MODAL + gate can_refresh SEBELUM
+    # dialog menutup diri + guard _refresh_sources sebelum invalidasi
+    import src.ui.app as _appmod57b
+    _orig_mb57 = _appmod57b.messagebox
+    _orig_inv57 = _appmod57b.read_cache_invalidate
+    _orig_sp57 = app._start_pipeline
+    _mb_calls57: list = []
+    _inv_calls57: list = []
+    _sp_calls57: list = []
+
+    class _MB57:
+        @staticmethod
+        def showinfo(*a, **k):
+            _mb_calls57.append(a)
+
+        @staticmethod
+        def showwarning(*a, **k):
+            _mb_calls57.append(a)
+
+        @staticmethod
+        def showerror(*a, **k):
+            _mb_calls57.append(a)
+
+    def _inv57(paths):
+        _inv_calls57.append(paths)
+        return 0
+
+    def _fake_sp57(refresh_files=False):
+        _sp_calls57.append(refresh_files)
+
+    _appmod57b.messagebox = _MB57
+    _appmod57b.read_cache_invalidate = _inv57
+    app._start_pipeline = _fake_sp57
+    try:
+        # dialog modal: grab aktif selama dialog hidup
+        _tmpd57 = tempfile.mkdtemp(prefix="sm3946dlg_")
+        os.makedirs(os.path.join(_tmpd57, "1. DEVIASI WEEKLY"),
+                    exist_ok=True)
+        _f57 = os.path.join(_tmpd57, "1. DEVIASI WEEKLY", "r57.xlsx")
+        pd.DataFrame({"A": [1]}).to_excel(_f57, index=False)
+
+        class _Cfg57:
+            def __init__(self):
+                self.RootPath = _tmpd57
+                self.Folders = {"RekapBerjalan": "1. DEVIASI WEEKLY"}
+
+        _cfg57 = _Cfg57()
+        _dlg57 = _RSD49(root, _cfg57, last_run_at=None,
+                        on_refresh=app._refresh_sources,
+                        can_refresh=lambda: not app.is_running)
+        root.update()
+        check("(v3.9.46) dialog Refresh MODAL (grab_set aktif selama "
+              "dialog terbuka — jendela utama terkunci)",
+              str(_dlg57.grab_current()) == str(_dlg57),
+              f"grab={_dlg57.grab_current()!r}")
+        # pipeline HIDUP saat refresh ditekan → dialog menolak SEBELUM
+        # menutup diri + cache TIDAK dibuang + pesan jelas di info bar
+        app.is_running = True
+        _dlg57._do_refresh(None)
+        root.update()
+        check("(v3.9.46) pipeline berjalan → refresh DITOLAK SEBELUM "
+              "dialog menutup diri: dialog TETAP TERBUKA + cache tak "
+              "terbuang + info jelas (dulu: dialog tutup dulu → invalidasi "
+              "→ _start_pipeline menolak = cache terbuang senyap)",
+              _dlg57.winfo_exists() and _inv_calls57 == []
+              and _sp_calls57 == []
+              and "DITUNDA" in _dlg57.info_var.get(),
+              f"exists={_dlg57.winfo_exists()} inv={_inv_calls57} "
+              f"info={_dlg57.info_var.get()!r}")
+        app.is_running = False
+        # jalur sehat: dialog menutup diri → callback app._refresh_sources
+        # → invalidasi cache → pipeline refresh (semua ter-rekam oleh
+        # stub _inv57 + fake _start_pipeline)
+        _dlg57._do_refresh(None)
+        root.update()
+        check("(v3.9.46) pipeline idle → dialog menutup diri → invalidasi "
+              "cache jalan → pipeline refresh terpanggil (grab dilepas)",
+              _inv_calls57 == [None] and _sp_calls57 == [None]
+              and not _dlg57.winfo_exists()
+              and str(root.grab_current()) in ("", "None"),
+              f"inv={_inv_calls57} sp={_sp_calls57}")
+        # guard _refresh_sources (lapis kedua — race antara gate dialog
+        # dan eksekusi callback): pipeline hidup → cache TAK dibuang
+        app.is_running = True
+        app._refresh_sources(None)
+        check("(v3.9.46) guard _refresh_sources (lapis kedua): pipeline "
+              "hidup → invalidasi cache DIBATALKAN + pesan (messagebox) "
+              "— bukan invalidasi lalu tolak senyap",
+              _inv_calls57 == [None] and len(_mb_calls57) == 1
+              and _sp_calls57 == [None],
+              f"inv={_inv_calls57} mb={len(_mb_calls57)} sp={_sp_calls57}")
+        app.is_running = False
+        shutil.rmtree(_tmpd57, ignore_errors=True)
+    finally:
+        _appmod57b.messagebox = _orig_mb57
+        _appmod57b.read_cache_invalidate = _orig_inv57
+        app._start_pipeline = _orig_sp57
+
+    # --- (e) '(Tanpa Kategori)' SELALU ADA + pesan kosong yang jujur -----
+    # data TANPA baris blank (master lengkap) → entry tetap tampil (dulu
+    # hilang senyap — user: "kategori tanpa kategori kok kosong")
+    _df57e = pd.DataFrame([
+        {"Nama Barang": "AYAM FILET", "JENIS": "1.SO",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 25, "NILAI": 10.0,
+         "SATUAN": "GR", "KATEGORI": "DEVIASI", "AKTIF/NON": "AKTIF"},
+        {"Nama Barang": "AYAM FILET", "JENIS": "3.DEVIASI",
+         "NAMA RESTO": "MLGPAR", "Tanggal": 25, "NILAI": 2.0,
+         "SATUAN": "GR", "KATEGORI": "DEVIASI", "AKTIF/NON": "AKTIF"},
+    ])
+    _dv57 = _DV(root, satuan_mode="GR")
+    _dv57.pack(fill="both", expand=True)
+    _dv57.load_data(_df57e)
+    _dv57.ensure_refreshed()
+    wait_view(root, _dv57)
+    check("(v3.9.46) entry '(Tanpa Kategori)' SELALU ada walau SEMUA "
+          "barang berkategori (master lengkap — dulu hilang senyap)",
+          list(_dv57._kategori_combo["values"]) ==
+          ["Semua", "(Tanpa Kategori)", "DEVIASI"],
+          f"got {list(_dv57._kategori_combo['values'])}")
+    _dv57._kategori_var.set("(Tanpa Kategori)")
+    _dv57._on_kategori_changed()
+    wait_view(root, _dv57)
+    check("(v3.9.46) '(Tanpa Kategori)' dipilih saat 0 baris kosong → "
+          "status JUJUR menjelaskan penyebab (bukan tabel kosong "
+          "misterius)",
+          len(_dv57.tree.get_children("")) == 0
+          and "0 baris tanpa kategori master" in _dv57.status_var.get()
+          and "sudah punya kategori" in _dv57.status_var.get(),
+          f"status={_dv57.status_var.get()!r}")
+    _dv57.destroy()
     root.update()
 
     root.destroy()

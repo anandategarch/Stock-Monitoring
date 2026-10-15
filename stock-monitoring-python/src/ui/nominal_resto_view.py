@@ -684,17 +684,15 @@ class NominalRestoView(tk.Frame):
         # ke DEFAULT 'Deviasi' (case-insensitive, fallback 'Semua').
         # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa
         # master (akses eksplisit kelas 100383).
+        # v3.9.46 — entry SELALU ADA (mirror deviasi_view: master yang
+        # makin lengkap membuat entry kondisional hilang senyap — user
+        # mencari opsi itu & tak menemukannya).
         if data is not None and "KATEGORI" in getattr(data, "columns", []):
             _kv = data["KATEGORI"].dropna().astype(str).str.strip()
             kategori_vals = sorted(v for v in _kv.unique() if v)
-            _has_blank = bool(
-                kategori_blank_mask(data["KATEGORI"]).any())
         else:
             kategori_vals = []
-            _has_blank = False
-        _kv45 = ["Semua"]
-        if _has_blank:
-            _kv45.append(KATEGORI_BLANK_LABEL)
+        _kv45 = ["Semua", KATEGORI_BLANK_LABEL]
         _kv45 += kategori_vals
         self._kategori_combo["values"] = _kv45
         self._reset_kategori()

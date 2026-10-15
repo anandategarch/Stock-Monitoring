@@ -536,11 +536,13 @@ class PivotTableView(tk.Frame):
         # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa master
         # (akses eksplisit kelas 100383 — pola deviasi_view v3.9.45;
         # disisipkan setelah '(All)').
+        # v3.9.46 — entry SELALU ADA (mirror deviasi_view: master yang
+        # makin lengkap membuat entry kondisional hilang senyap — user:
+        # "kategori tanpa kategori kok kosong" — mencari opsi itu & tak
+        # menemukannya di dropdown).
         if "KATEGORI" in self.data.columns:
             _kv45 = [v for v in (self.kategori_combo["values"] or [])]
-            if KATEGORI_BLANK_LABEL not in _kv45 \
-                    and bool(kategori_blank_mask(
-                        self.data["KATEGORI"]).any()):
+            if KATEGORI_BLANK_LABEL not in _kv45:
                 self.kategori_combo["values"] = (
                     ["(All)", KATEGORI_BLANK_LABEL]
                     + [v for v in _kv45 if v != "(All)"])

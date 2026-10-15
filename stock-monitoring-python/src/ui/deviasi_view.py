@@ -1143,17 +1143,18 @@ class DeviasiView(tk.Frame):
         # Kategori" di append1) + reset seleksi — "Semua" = tanpa filter.
         # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa master
         # (akses eksplisis kelas 100383 tanpa menonaktifkan filter).
+        # v3.9.46 — entry kini SELALU ADA (dulu kondisional _has_blank:
+        # user: "kategori tanpa kategori kok kosong" — master yang makin
+        # lengkap / data tanpa baris kosong membuat entry HILANG SENYAP
+        # dari dropdown, user mencari opsi itu & tak menemukannya; bila
+        # dipilih saat memang tak ada baris kosong, status menjelaskan
+        # itu secara jujur — bukan tabel kosong misterius).
         if data is not None and "KATEGORI" in getattr(data, "columns", []):
             _kv = data["KATEGORI"].dropna().astype(str).str.strip()
             kategori_vals = sorted(v for v in _kv.unique() if v)
-            _has_blank = bool(
-                kategori_blank_mask(data["KATEGORI"]).any())
         else:
             kategori_vals = []
-            _has_blank = False
-        _kv45 = ["Semua"]
-        if _has_blank:
-            _kv45.append(KATEGORI_BLANK_LABEL)
+        _kv45 = ["Semua", KATEGORI_BLANK_LABEL]
         _kv45 += kategori_vals
         self._kategori_combo["values"] = _kv45
         self._reset_kategori()
@@ -1761,6 +1762,17 @@ class DeviasiView(tk.Frame):
             if st["kategori"] == KATEGORI_BLANK_LABEL:
                 filtered = filtered[
                     kategori_blank_mask(filtered["KATEGORI"])]
+                if filtered.empty:
+                    # v3.9.46 — pesan KOSONG yang jujur (bukan generik):
+                    # entry SELALU ada sekarang — bila 0 baris, bilang
+                    # KENAPA (semua baris tampil di tab ini sudah
+                    # berkategori master) supaya tak dicurigai bug.
+                    return {"items": [], "kpi": (0, 0.0, 0),
+                            "status": (
+                                "0 baris tanpa kategori master — semua "
+                                "barang yang tampil di tab "
+                                f"{self.satuan_mode} ini sudah punya "
+                                "kategori '21. DBS Kategori'.")}
             elif kategori_passthrough(st["kategori"]):
                 _blank = kategori_blank_mask(filtered["KATEGORI"])
                 filtered = filtered[

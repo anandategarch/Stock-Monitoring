@@ -184,7 +184,50 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.45"  # v3.9.45 — fix "filter kategori ganti tidak terjadi apa apa" (passthrough HANYA default Deviasi + entry '(Tanpa Kategori)') + tab 🧮 multi-bulan (kolom per bulan file deviasi)
+APP_VERSION = "3.9.46"  # v3.9.46 — audit eksternal 4 temuan (status final jujur/parsial, DPI per-monitor benar+sebelum Tk, copy-log tak kembalikan status basi, refresh dialog modal+guard) + entry '(Tanpa Kategori)' SELALU ada
+# v3.9.46 — AUDIT EKSTERNAL 4 TEMUAN + KATEGORI KOSONG (user):
+# (1) [P1] STATUS FINAL JUJUR — status hijau "SELESAI" dulu dipasang
+#     SEBELUM view dimuat + mode refresh MENIMPA peringatan dengan hijau
+#     polos → user bisa percaya semua view ter-update padahal parsial.
+#     Kini: kegagalan view DIKUMPULKAN (failed_views) → status akhir
+#     "SELESAI PARSIAL — N view gagal dimuat" (oranye) + view gagal
+#     DITANDAI "⚠ Data tampilan BELUM DIPERBARUI…" di status_var-nya
+#     sendiri; folder pre-flight hilang + file skip → "SELESAI DENGAN
+#     PERINGATAN" (amber, prefight kini diingat sampai run usai);
+#     bersih → hijau; mode refresh hanya menambah info "🔄 disegarkan"
+#     TANPA menurunkan severitas.
+# (2) [P2] DPI WINDOWS — komentar lama mengklaim per-monitor sambil
+#     memanggil SetProcessDpiAwareness(1) (= SYSTEM-aware) SETELAH
+#     tk.Tk() (terlambat — dok Microsoft: sebelum HWND pertama), tanpa
+#     cek HRESULT. Kini: _set_windows_dpi_awareness() DIPANGGIL SEBELUM
+#     tk.Tk(); rantai per-monitor-v2 (SetProcessDpiAwarenessContext -4,
+#     argtypes c_void_p) → per-monitor (awareness 2) → system; return
+#     code SETIAP API diperiksa (gagal senyap tak mungkin); tk scaling
+#     dipisah ke _apply_windows_tk_scaling(root) pasca-Tk.
+# (3) [P2] COPY LOG — flash "Log TERSALIN" + timer 2,5 dtk bisa
+#     mengembalikan status pipeline BASI (pipeline selesai di tengah
+#     flash → timer memulihkan "menjalankan…"; copy ke-2 menyimpan teks
+#     flash sebagai prev). Kini: prev hanya di-snapshot dari kondisi
+#     STABIL; saat timer menyala, status yang sudah DIGANTI pihak lain
+#     MENANG — restore dilewati (_log_flash_restore).
+# (4) [P3] REFRESH DIALOG — dialog dulu hanya transient: pipeline bisa
+#     DIMULAI dari jendela utama selama dialog terbuka → _refresh_sources
+#     membuang cache DULU → _start_pipeline menolak → cache terbuang
+#     tanpa refresh, senyap. Kini: dialog MODAL (grab_set; grab_release
+#     sebelum destroy supaya callback tak terblok) + re-check pipeline
+#     TEPAT SEBELUM invalidasi cache (cache tak dibuang bila pipeline
+#     hidup, pesan jelas) + guard _start_pipeline tetap lapis terakhir.
+# (5) '(Tanpa Kategori)' SELALU ADA (user: "kategori tanpa kategori kok
+#     kosong ya di tab deviasi gr dan pcs") — entry v3.9.45 dipasang
+#     KONDISIONAL (hanya saat ada baris blank): master yang makin
+#     lengkap membuat entry HILANG SENYAP dari dropdown; probe E2E
+#     data nyata ×2 tab (GR 1.156 baris / PCS 751) membuktikan LOGIKA
+#     filter benar — masalahnya OPDONYA hilang/kosong saat data tanpa
+#     baris blank. Kini entry SELALU tampil (deviasi GR+PCS, 🧮, Pivot);
+#     bila dipilih saat memang 0 baris kosong → status jujur
+#     "0 baris tanpa kategori master — semua barang yang tampil di tab
+#     ini sudah punya kategori '21. DBS Kategori'" (bukan tabel kosong
+#     misterius).
 # v3.9.45 — DUA PERBAIKAN (user: "filter kategori di tab deviasi gr
 # dan deviasi pcs kok seperti ngebug ya? karna aku ganti tidak
 # terjadi apa apa" + "TAB NOMINAL DEVIASI SUPPORT buat multiple file
@@ -1662,7 +1705,20 @@ class StockMonitorApp:
     def _copy_log(self):
         """v3.9.33 — AUDIT FIX (48-f MEDIUM): salin SELURUH isi konsol log ke
         clipboard (traceback pipeline jadi bisa dibagikan) + feedback singkat
-        di baris status kartu Kontrol Pipeline."""
+        di baris status kartu Kontrol Pipeline.
+
+        v3.9.46 — audit 66 temuan #3: feedback TERSALIN tidak lagi bisa
+        mengembalikan status pipeline BASI. Dulu: `prev` disimpan → flash
+        2,5 dtk → timer memulihkan `prev` APA PUN YANG TERJADI — dua lubang:
+        (a) pipeline SELESAI di tengah flash menimpa status_var dengan
+        "Status: SELESAI." → timer lalu memulihkan "menjalankan pipeline…"
+        (status LIE); (b) copy kedua <2,5 dtk menyimpan TEKS FLASH sebagai
+        prev → timer memulihkan notifikasi, bukan status. Kini:
+        (a) snapshot prev hanya diambil dari kondisi STABIL (flash lain
+            belum aktif);
+        (b) saat timer menyala, bila status_var sudah DIGANTI pihak lain
+            (pipeline done/error/stop), status TERBARU yang menang —
+            restore dilewati (lihat _log_flash_restore)."""
         try:
             content = self.log_text.get("1.0", "end-1c")
         except tk.TclError:
@@ -1674,18 +1730,34 @@ class StockMonitorApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(content)
         n_baris = len(content.splitlines())
-        prev = self.status_var.get()
+        if not getattr(self, "_log_flash_active", False):
+            # snapshot hanya dari kondisi stabil — bukan dari teks flash
+            # (copy ke-2 dlm rentang flash mempertahankan prev PERTAMA)
+            self._log_flash_prev = self.status_var.get()
+        self._log_flash_active = True
         self.status_var.set(
             f"📋 Log TERSALIN ke clipboard ({fmt_int_id(n_baris)} baris).")
         if getattr(self, "_log_flash_after", None):
             with contextlib.suppress(Exception):
                 self.root.after_cancel(self._log_flash_after)
 
-        def _restore():
-            if self.root.winfo_exists():
-                self.status_var.set(prev)
+        self._log_flash_after = self.root.after(
+            2500, self._log_flash_restore)
 
-        self._log_flash_after = self.root.after(2500, _restore)
+    def _log_flash_restore(self):
+        """v3.9.46 — pemulihan status pasca-flash "Log TERSALIN".
+
+        Status pipeline yang LEBIH BARU selalu menang: bila status_var
+        sudah berubah sejak flash (pipeline selesai/error/stop di tengah
+        2,5 dtk), pemulihan prev DILEWATI — hanya teks flash yang masih
+        utuh yang diganti kembali ke prev."""
+        self._log_flash_active = False
+        self._log_flash_after = None
+        if not self.root.winfo_exists():
+            return
+        cur = self.status_var.get()
+        if cur.startswith("📋 Log TERSALIN"):
+            self.status_var.set(getattr(self, "_log_flash_prev", ""))
 
     # =====================================================================
     # LOG QUEUE (freeze fix dipertahankan)
@@ -1835,6 +1907,11 @@ class StockMonitorApp:
                 "\n\nPipeline tetap dijalankan (data bisa parsial/kosong).\n"
                 "Perbaiki RootPath / Folders di tab ⚙ Pengaturan.",
                 parent=self.root)
+        # v3.9.46 — audit 66 temuan #1: preflight DIINGAT sampai run usai —
+        # status akhir "SELESAI DENGAN PERINGATAN" (folder sumber
+        # bermasalah) membutuhkan daftar ini di _on_pipeline_done (dulu
+        # hanya tampil sekali di awal run lalu tertutup status hijau).
+        self._pre_missing = list(pre_missing)
 
         is_refresh = refresh_files is not False
         if not is_refresh:
@@ -2026,6 +2103,12 @@ class StockMonitorApp:
             f"IN detail: {len(in_detail_df):,} rows · "
             f"Audit: {audit_n:,} rows", C_GREEN)
         self.kpi_status.set_value("SELESAI", "data siap dianalisis", C_GREEN)
+        # v3.9.46 — audit 66 temuan #1: status hijau di atas adalah
+        # PROVISORI — status AKHIR jujur ditetapkan SETELAH semua view
+        # dimuat (lihat blok "STATUS AKHIR JUJUR" di bawah): kegagalan
+        # view / folder hilang / file ter-skip tidak boleh berakhir
+        # tampil sebagai sukses penuh. Ditulis dua fase agar chip KPI
+        # & log tidak menunggu render view (lambat di data besar).
         self.kpi_append.set_value(f"{len(append1_df):,}",
                                   "baris pivot siap di tab 📊")
         self.kpi_rincian.set_value(f"{len(rincian_po_df):,}",
@@ -2080,60 +2163,130 @@ class StockMonitorApp:
         # Kini tiap view punya try/except sendiri → error DIBISINGKAN ke
         # log dan sisanya tetap dimuat; jalur error pipeline (on_error)
         # tetap terpisah — tidak tertelan di sini.
-        def _load_view(nama: str, fn) -> None:
+        # v3.9.46 — audit 66 temuan #1: kegagalan view KINI DIKUMPULKAN
+        # (failed_views) → status akhir "SELESAI PARSIAL" + view gagal
+        # DITANDAI eksplisit di status_var-nya sendiri ("Data tampilan
+        # belum diperbarui") supaya data lama tidak dipakai tanpa sadar.
+        failed_views: list = []
+
+        def _load_view(nama: str, fn, view=None) -> None:
             try:
                 fn()
             except Exception as exc:  # view gagal ≠ pipeline gagal — lanjut
+                failed_views.append(nama)
                 self._append_log_batched(
                     f"\n[ERROR] Gagal memuat view {nama}: {exc}\n")
+                if view is not None:
+                    # TANDAI DI VIEW: yang tampil bukan data run ini
+                    with contextlib.suppress(Exception):
+                        view.status_var.set(
+                            "⚠ Data tampilan BELUM DIPERBARUI — gagal "
+                            "memuat run ini (lihat log tab Proses)")
 
         _load_view("📊 Pivot Table",
-                   lambda: self.pivot_view.load_data(append1_df))
+                   lambda: self.pivot_view.load_data(append1_df),
+                   self.pivot_view)
         # v3.9.23 (poin 6): detail dokumen IN ikut diteruskan ke tab
         # Deviasi GR & PCS — sumber CEK "RI Balancing" kolom utama
         # (bulan Nomor RI ≠ bulan Nomor PO, tanggal dok ≤ H).
         _load_view("📦 Deviasi GR",
                    lambda: self.deviasi_gr_view.load_data(
                        append1_df, in_detail_df,
-                       harga_map=_hm, konversi_map=_kv))
+                       harga_map=_hm, konversi_map=_kv),
+                   self.deviasi_gr_view)
         _load_view("🧩 Deviasi PCS",
                    lambda: self.deviasi_pcs_view.load_data(
                        append1_df, in_detail_df,
-                       harga_map=_hm, konversi_map=_kv))
+                       harga_map=_hm, konversi_map=_kv),
+                   self.deviasi_pcs_view)
         _load_view("📤 Rekap Selisih IN",
                    lambda: self.in_selisih_view.load_data(
-                       append1_df, in_detail_df, audit_result=audit_result))
+                       append1_df, in_detail_df, audit_result=audit_result),
+                   self.in_selisih_view)
         _load_view("🚨 Anomali COM",
                    lambda: self.laporan_view.load_data(
-                       append1_df, preserve=_keep_state))
+                       append1_df, preserve=_keep_state),
+                   self.laporan_view)
         _load_view("⚖ Komparasi File Deviasi",
                    lambda: self.komparasi_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv))
+                       append1_df, harga_map=_hm, konversi_map=_kv),
+                   self.komparasi_view)
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
         # rasio konversi (dari audit_result — pipeline v3.9.32;
         # v3.9.34: sumber lokal _hm/_kv bersama semua view nominal)
         _load_view("💰 Nominal (H)",
                    lambda: self.nominal_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv))
+                       append1_df, harga_map=_hm, konversi_map=_kv),
+                   self.nominal_view)
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
         _load_view("🧮 Nominal Deviasi",
                    lambda: self.nominal_resto_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv))
+                       append1_df, harga_map=_hm, konversi_map=_kv),
+                   self.nominal_resto_view)
         _load_view("🛒 Rincian PO",
                    lambda: self.rincian_view.load_data(
-                       rincian_po_df, preserve=_keep_state))
+                       rincian_po_df, preserve=_keep_state),
+                   self.rincian_view)
         self.btn_export.set_enabled(True)
         self.btn_export_tb.set_enabled(True)
 
-        # FIX D-04 (audit 2-d): file Excel di-skip reader (terkunci/
-        # hilang/rusak) tidak lagi disembunyikan di balik status hijau
-        # "SELESAI" — user berhak tahu datanya parsial.
-        if self._skipped_files:
-            warn = (f"{fmt_int_id(self._skipped_files)} file Excel "
-                    "dilewati (terkunci/hilang/rusak) — lihat log")
-            self.statusbar.set_status(f"SELESAI — ⚠ {warn}", C_AMBER)
-            self.kpi_status.set_value("SELESAI ⚠", warn, C_AMBER)
-            self._append_log_batched(f"\n[PERINGATAN] {warn}\n")
+        # =================================================================
+        # v3.9.46 — STATUS AKHIR JUJUR (audit 66 temuan #1 — PRIORITAS #1)
+        # =================================================================
+        # Satu titik penetapan status AKHIR run, berdasar hasil AKTUAL:
+        #   view gagal dimuat           → SELESAI PARSIAL (oranye)
+        #   folder sumber / file skip   → SELESAI DENGAN PERINGATAN (amber)
+        #   bersih                      → SELESAI (hijau)
+        # Dulu: (a) status hijau dipasang SEBELUM view dimuat dan kegagalan
+        # view hanya sempat tampil di log; (b) mode refresh MENIMPA dengan
+        # hijau polos "SELESAI — 🔄 file sumber disegarkan" — peringatan
+        # file-skip (FIX D-04) hilang tepat di jalur yang paling rawan
+        # (user tetap di tab aktif, log Proses tak terlihat). Kini mode
+        # refresh hanya menambah INFO "🔄 disegarkan" tanpa menurunkan
+        # severitas; peringatan TETAP TERLIHAT sampai run berikutnya.
+        _pre_missing = getattr(self, "_pre_missing", None) or []
+        _n_missing = len(_pre_missing)
+        _skipped = int(getattr(self, "_skipped_files", 0) or 0)
+        _refresh_sfx = (" — 🔄 file sumber disegarkan"
+                        if refresh_files is not False else "")
+        if failed_views:
+            _detail = (f"{len(failed_views)} view gagal dimuat ("
+                       + ", ".join(failed_views) + ") — lihat log; view itu "
+                       "masih menampilkan data LAMA")
+            self.status_var.set(
+                "Status: SELESAI PARSIAL — sebagian view gagal dimuat.")
+            self.statusbar.set_status(
+                f"SELESAI PARSIAL{_refresh_sfx} — ⚠ {_detail}", C_ORANGE)
+            self.kpi_status.set_value("SELESAI PARSIAL", _detail, C_ORANGE)
+            self._append_log_batched(
+                f"\n[PERINGATAN] SELESAI PARSIAL — {_detail}.\n")
+        elif _n_missing or _skipped:
+            # FIX D-04 (audit 2-d): file Excel di-skip reader (terkunci/
+            # hilang/rusak) tidak disembunyikan di balik status hijau
+            # "SELESAI" — user berhak tahu datanya parsial.
+            # v3.9.46: digabung + folder pre-flight ikut dihitung (dulu
+            # hanya tampil di awal run lalu tertutup status hijau).
+            _parts = []
+            if _n_missing:
+                _parts.append(f"{fmt_int_id(_n_missing)} folder sumber "
+                              "tidak ditemukan")
+            if _skipped:
+                _parts.append(f"{fmt_int_id(_skipped)} file Excel "
+                              "dilewati (terkunci/hilang/rusak)")
+            _warn = "; ".join(_parts) + " — data parsial, lihat log"
+            self.status_var.set("Status: SELESAI DENGAN PERINGATAN.")
+            self.statusbar.set_status(
+                f"SELESAI DENGAN PERINGATAN{_refresh_sfx} — ⚠ {_warn}",
+                C_AMBER)
+            self.kpi_status.set_value("SELESAI ⚠", _warn, C_AMBER)
+            self._append_log_batched(f"\n[PERINGATAN] {_warn}\n")
+        elif refresh_files is not False:
+            # bersih + mode refresh (v3.9.37): TETAP di tab aktif; judul
+            # menyebut REFRESH supaya jelas asal datanya.
+            self.statusbar.set_status(
+                "SELESAI — 🔄 file sumber disegarkan", C_GREEN)
+        # bersih + run normal: status hijau provisori (baris atas) sudah
+        # tepat — tidak ditimpa.
 
         # v3.9.37 — catat waktu selesai (acuan "berubah" dialog Refresh
         # File Sumber) + observabilitas cache baca file sumber (file
@@ -2160,12 +2313,6 @@ class StockMonitorApp:
                 "📤 Rekap Selisih IN / 📋 Laporan / 🧮 Nominal Deviasi /\n"
                 "☑ Follow Up / 🛒 Rincian PO.\n")
         else:
-            # v3.9.37 — refresh mode: TETAP di tab aktif (view aktif sudah
-            # di-refresh load_data di atas; tab lain dirty → refresh saat
-            # dipilih). Judul status menyebut REFRESH supaya jelas asal
-            # datanya.
-            self.statusbar.set_status(
-                "SELESAI — 🔄 file sumber disegarkan", C_GREEN)
             n_sel = 0 if refresh_files is None else len(refresh_files)
             self._append_log_batched(
                 f"\n[SELESAI] 🔄 Refresh file sumber selesai — "
@@ -2248,17 +2395,58 @@ class StockMonitorApp:
             RefreshSourcesDialog(
                 self.root, cfg,
                 last_run_at=self._last_run_finished_at,
-                on_refresh=self._refresh_sources)
+                on_refresh=self._refresh_sources,
+                can_refresh=self._can_refresh_now)
         except Exception as exc:  # defensive — dialog jangan matikan app
             messagebox.showerror(
                 "Refresh File Sumber",
                 f"Gagal membuka dialog:\n{exc}", parent=self.root)
 
+    def _can_refresh_now(self) -> bool:
+        """v3.9.46 — audit 66 temuan #4: gate utk dialog 🔄 Refresh (dicek
+        SEBELUM dialog menutup diri + SEBELUM cache diinvalidasi): pipeline
+        hidup / masih menghentikan → False. Guard _refresh_sources dan
+        _start_pipeline tetap ada sebagai lapis pertahanan berikutnya
+        (race kecil antara cek ini dan eksekusi callback tetap tertutup)."""
+        if self.is_running:
+            return False
+        worker = getattr(self, "worker_thread", None)
+        return not (worker is not None and worker.is_alive())
+
     def _refresh_sources(self, paths):
         """Callback dialog 🔄 Refresh File Sumber: invalidasi cache bacaan
         (paths=None → SEMUA; list → file terpilih) lalu jalankan pipeline
         refresh mode (tetap di tab aktif; hanya file yang diinvalidasi
-        dibaca ulang dari disk)."""
+        dibaca ulang dari disk).
+
+        v3.9.46 — audit 66 temuan #4: status pipeline di-RE-CHECK TEPAT
+        SEBELUM invalidasi cache (dulu hanya dicek saat dialog DIBUKA +
+        di _start_pipeline — celah: dialog hanya transient (bukan modal),
+        user bisa memulai pipeline dari jendela utama selama dialog terbuka
+        → _refresh_sources membuang cache DULU → _start_pipeline menolak
+        → cache ter-invalidasi tanpa refresh + dialog sudah tertutup,
+        user tak tahu refresh tidak jalan). Kini: pipeline hidup → cache
+        TIDAK dibuang + pesan jelas; dialog juga modal (grab_set) supaya
+        jendela utama tak bisa memulai pipeline saat dialog terbuka;
+        guard _start_pipeline tetap sebagai lapis terakhir."""
+        # v3.9.46 — guard SEBELUM invalidasi cache (audit 66 #4)
+        if self.is_running:
+            messagebox.showinfo(
+                "Sedang Berjalan",
+                "Pipeline sedang berjalan — cache bacaan TIDAK dibuang dan "
+                "refresh DIBATALKAN.\n\nTunggu hingga selesai atau klik "
+                "Stop, lalu buka 🔄 Refresh File Sumber lagi.",
+                parent=self.root)
+            return
+        worker = getattr(self, "worker_thread", None)
+        if worker is not None and worker.is_alive():
+            messagebox.showinfo(
+                "Masih Menghentikan",
+                "Pipeline sebelumnya masih berhenti di checkpoint — cache "
+                "bacaan TIDAK dibuang.\n\nTunggu sampai status berubah, "
+                "lalu buka 🔄 Refresh File Sumber lagi.",
+                parent=self.root)
+            return
         n = read_cache_invalidate(paths)
         if paths is None:
             self._append_log_batched(
@@ -2516,25 +2704,89 @@ class StockMonitorApp:
 
 
 # --- Entry point ------------------------------------------------------------
-def _enable_windows_dpi_awareness(root: tk.Tk) -> None:
-    """FIX A-03 (audit 2-a): Windows DPI-aware (125%/150%) supaya teks &
-    tabel tidak di-bitmap-scale (blur) oleh OS.
+# v3.9.46 — DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (handle -4) utk
+# SetProcessDpiAwarenessContext; DPIAwareness(2) = PER_MONITOR_DPI_AWARE v1.
+_DPI_PMV2_CTX = -4
+_DPI_PER_MONITOR_AWARE = 2
 
-    No-op di Linux/macOS. SetProcessDpiAwareness(PER_MONITOR) → ukuran
-    font Tk mengikuti DPI monitor aktual (tk scaling = dpi/72).
-    Catatan: butuh verifikasi visual di mesin Windows asli.
-    """
+
+def _windows_dpi_awareness_chain(windll) -> str:
+    """v3.9.46 — audit 66 temuan #2: rantai pemilihan DPI-awareness Windows
+    (PURE — menerima objek windll duck-typed supaya bisa diuji di Linux
+    dengan stub; return label mode yang BERHASIL, "" bila semua gagal).
+
+    Urutan (rekomendasi Microsoft — paling modern duluan):
+      1. user32.SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)
+         (Win10 1703+; BOOL — 0 = gagal, termasuk bila context lain
+         sudah terpasang oleh manifest/proses lain)
+      2. shcore.SetProcessDpiAwareness(PER_MONITOR_DPI_AWARE) (Win8.1+;
+         HRESULT — 0 = S_OK)
+      3. user32.SetProcessDPIAware() (system-aware, Win7; BOOL)
+
+    Return code SETIAP API DIPERIKSA — kegagalan API Windows dilaporkan
+    lewat HRESULT/BOOL, BUKAN exception (dulu `except` saja → gagal
+    senyap dan kode mengira per-monitor aktif padahal tidak)."""
+    # 1) per-monitor v2
+    try:
+        _rc = int(windll.user32.SetProcessDpiAwarenessContext(_DPI_PMV2_CTX))
+        if _rc != 0:            # BOOL nonzero = sukses
+            return "per-monitor-v2"
+    except (AttributeError, TypeError, ValueError):
+        pass
+    # 2) per-monitor v1
+    try:
+        _hr = int(windll.shcore.SetProcessDpiAwareness(
+            _DPI_PER_MONITOR_AWARE))
+        if _hr == 0:            # HRESULT S_OK
+            return "per-monitor"
+    except (AttributeError, TypeError, ValueError):
+        pass
+    # 3) system-aware (fallback Win7)
+    try:
+        if int(windll.user32.SetProcessDPIAware()) != 0:
+            return "system"
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return ""
+
+
+def _set_windows_dpi_awareness() -> str:
+    """v3.9.46 — audit 66 temuan #2: pasang DPI-awareness process, TANPA
+    argumen root — HARUS dipanggil SEBELUM tk.Tk() (dokumentasi Microsoft:
+    default DPI proses ditetapkan sebelum HWND pertama dibuat; dulu
+    dipanggil SETELAH root = tk.Tk() → jendela sudah terinisialisasi dgn
+    DPI lama).
+
+    Juga memperbaiki NILAI: komentar lama mengklaim per-monitor sambil
+    memanggil SetProcessDpiAwareness(1) — nilai 1 = SYSTEM-DPI-aware.
+    Kini benar-benar per-monitor (context -4 → awareness(2) → system).
+    No-op (return "") di Linux/macOS. Mode yang terpasang di-return utk
+    dicatat di log."""
     if sys.platform != "win32":
-        return
+        return ""
     try:
         import ctypes
-        try:
-            # 1 = PER_MONITOR_DPI_AWARE (tajam di semua monitor campuran)
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except Exception:
-            # fallback Windows versi lama (< 8.1)
-            ctypes.windll.user32.SetProcessDPIAware()
+    except ImportError:
+        return ""
+    try:
+        with contextlib.suppress(Exception):
+            # argtypes eksplisit: context adalah HANDLE (pointer-sized) —
+            # tanpa ini int -4 dikonversi c_int 32-bit (tidak aman di x64)
+            _fn = ctypes.windll.user32.SetProcessDpiAwarenessContext
+            _fn.argtypes = [ctypes.c_void_p]
+            _fn.restype = ctypes.c_int
+        return _windows_dpi_awareness_chain(ctypes.windll)
     except Exception:
+        # windll tak tersedia (Windows sangat tua / khusus) — aplikasi
+        # tetap jalan (OS melakukan bitmap-scaling)
+        return ""
+
+
+def _apply_windows_tk_scaling(root: tk.Tk) -> None:
+    """v3.9.46 — pasang tk scaling dari DPI aktual (dipisah dari
+    _set_windows_dpi_awareness karena butuh root HIDUP; dipanggil SETELAH
+    tk.Tk() dibuat). No-op di non-Windows."""
+    if sys.platform != "win32":
         return
     try:
         dpi = root.winfo_fpixels("1i")  # piksel per inci fisik
@@ -2554,8 +2806,14 @@ def main():
     # memakainya utk fallback python dgn traceback di konsol).
     root = None
     try:
+        # v3.9.46 — audit 66 temuan #2: DPI-awareness SEBELUM jendela
+        # pertama (dulu setelah tk.Tk() — terlambat per dok Microsoft);
+        # mode benar-benar per-monitor + return code diperiksa.
+        _dpi_mode = _set_windows_dpi_awareness()
+        if _dpi_mode:
+            print(f"[DPI] Windows DPI awareness: {_dpi_mode}")
         root = tk.Tk()
-        _enable_windows_dpi_awareness(root)
+        _apply_windows_tk_scaling(root)
         StockMonitorApp(root)
         root.mainloop()
     except Exception:
