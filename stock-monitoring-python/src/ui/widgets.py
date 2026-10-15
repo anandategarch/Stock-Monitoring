@@ -43,7 +43,13 @@ from tkinter import ttk
 # varian (V.20)) → KATEGORI NaN → filter default 'Deviasi' menyembunyikan
 # barisnya. Kebijakan: master tak kenal ≠ disembunyikan — baris tampil di
 # seleksi kategori apa pun (dokumentasi lengkap di pipeline/helpers.py).
+# v3.9.45 — passthrough kini HANYA seleksi default 'Deviasi'
+# (kategori_passthrough; keluhan "ganti kategori tidak terjadi apa apa" —
+# 90% baris '-' buat passthrough universal = filter no-op) + entry
+# combobox KATEGORI_BLANK_LABEL '(Tanpa Kategori)'.
+from ..pipeline.helpers import KATEGORI_BLANK_LABEL as KATEGORI_BLANK_LABEL  # noqa: PLC0414
 from ..pipeline.helpers import kategori_blank_mask as kategori_blank_mask  # noqa: PLC0414
+from ..pipeline.helpers import kategori_passthrough as kategori_passthrough  # noqa: PLC0414
 from .theme import (
     C_ACCENT,
     C_ACCENT_HOVER,
@@ -1864,16 +1870,33 @@ class HeaderFilterGroup:
 
     def __init__(self, tree: ttk.Treeview, cols: list,
                  *, get_values, on_apply, on_sort=None):
+        self._tree = tree
+        self._get_values = get_values
+        self._on_apply = on_apply
+        self._on_sort = on_sort
         self._filters: dict = {}
         for col in cols:
-            self._filters[col] = HeaderFilter(
-                tree, col,
-                get_values=(lambda c=col: get_values(c)),
-                on_apply=(lambda sel, c=col: on_apply(c, sel)),
-                label=col,
-                on_sort=((lambda desc, c=col: on_sort(c, desc))
-                         if on_sort is not None else None),
-            )
+            self._add_column(col)
+
+    def _add_column(self, col):
+        self._filters[col] = HeaderFilter(
+            self._tree, col,
+            get_values=(lambda c=col: self._get_values(c)),
+            on_apply=(lambda sel, c=col: self._on_apply(c, sel)),
+            label=col,
+            on_sort=((lambda desc, c=col: self._on_sort(c, desc))
+                     if self._on_sort is not None else None),
+        )
+
+    def add_columns(self, cols: list):
+        """v3.9.45 — daftarkan kolom TAMBAHAN setelah tree di-reconfigure
+        (kolom DINAMIS bulan-lalu tab 🧮 Nominal Deviasi: satu kolom per
+        bulan file deviasi yang dimuat user): header filter/sort aktif
+        juga di kolom baru; kolom yang sudah terdaftar di-skip
+        (idempoten — aman dipanggil tiap render)."""
+        for col in cols:
+            if col not in self._filters:
+                self._add_column(col)
 
     def clear_all(self):
         for f in self._filters.values():

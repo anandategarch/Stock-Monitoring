@@ -184,7 +184,37 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.44"  # v3.9.44 — fix "BUMBU PASTA KUAH 100383 MLGPAR masih belum ada di tab Deviasi GR": passthrough kategori kosong (kategori_blank_mask) + saldo-only fallback t=1 (hitung_nominal_pairs)
+APP_VERSION = "3.9.45"  # v3.9.45 — fix "filter kategori ganti tidak terjadi apa apa" (passthrough HANYA default Deviasi + entry '(Tanpa Kategori)') + tab 🧮 multi-bulan (kolom per bulan file deviasi)
+# v3.9.45 — DUA PERBAIKAN (user: "filter kategori di tab deviasi gr
+# dan deviasi pcs kok seperti ngebug ya? karna aku ganti tidak
+# terjadi apa apa" + "TAB NOMINAL DEVIASI SUPPORT buat multiple file
+# deviasi buat compare dengan beberapa bulan lalu kan?"):
+# (1) FILTER KATEGORI STRICT — passthrough v3.9.44 terlalu luas:
+#     baris TANPA kategori master ('-', probe data nyata 90% baris
+#     pivot!) tampil di seleksi APA PUN → mengganti kategori = no-op
+#     (Semua == DEVIASI == 1.347 baris). KEBIJAKAN BARU
+#     (kategori_passthrough): passthrough HANYA seleksi default
+#     'Deviasi' (perlindungan kelas 100383 tetap utuh — barang
+#     ber-deviasi tanpa master tak lenyap senyap) · seleksi eksplisit
+#     lain STRICT (filter bekerja normal) · entry combobox BARU
+#     '(Tanpa Kategori)' (KATEGORI_BLANK_LABEL) utk akses eksplisit
+#     kelas itu · status footer menyebut jumlah blank yang ikut
+#     tampil. Dipasang di SEMUA 6 titik: Deviasi GR + PCS ·
+#     🧮 pra-compute · Pivot ×2 (mirror combobox di 3 view).
+# (2) TAB 🧮 MULTI-BULAN — hitung_nominal_lalu_multi: SATU frame per
+#     bulan file deviasi (multi-file ⚖ Komparasi path ';' — v3.9.13)
+#     urut terbaru-dulu, minggu TER-COCOK H per bulan; kolom dinamis
+#     'Lalu <label bulan>' per bulan ≥2 (heading + TOTAL row + chip +
+#     footer + popup rincian per barang per bulan; tree
+#     _ensure_tree_columns reconfigure + HeaderFilterGroup.add_columns
+#     → filter ⧩/sort aktif juga di kolom baru; bulan utama tetap
+#     kolom 'Nominal Deviasi Bulan Lalu' lama — back-compat penuh:
+#     hitung_nominal_lalu_pairs(bulan_sel=None) = perilaku lama).
+# VERIFIKASI: probe E2E data nyata ×2 (kategori: TEPAT strict 0 vs
+# 1.156 dulu; '(Tanpa Kategori)' 1.156 baris blank-only; 100383 tetap
+# tampil default; multi-bulan: kolom 'Lalu JULI 2026' + heading label
+# + popup 20.AGUSTUS nyata + mock JULI) + test 1076/1076 (§56 19 check
+# baru) + mock ALL + ruff src 191 < 195 & test 14 == 14.
 # v3.9.44 — FIX "BUMBU PASTA KUAH MLGPAR MASIH BELUM ADA DI TAB
 # DEVIASI GR" (user; probe E2E data nyata rekap 01.1 + 42.17 mock):
 # item 42.17-only 100383 lolos whitelist v3.9.41 & masuk pipeline

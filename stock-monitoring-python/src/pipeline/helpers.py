@@ -137,11 +137,16 @@ def kategori_blank_mask(kat: "pd.Series | None") -> "pd.Series | None":
     DARI VIEW padahal ADA di data (hanya terlihat bila user ganti ke
     'Semua' — tanpa tahu itu, keluhan "masih belum ada" muncul lagi).
 
-    KEBIJAKAN: baris yang master-nya tidak kenal TIDAK BOLEH disembunyikan
-    oleh filter kategori — kelas bug "hilang senyap karena master kurang
-    entri", bukan pilihan user. Baris tanpa kategori tampil di seleksi
-    kategori APA PUN; nilai kategorinya tetap kosong (jujur — tidak
-    memfabrikasi 'DEVIASI' dari kategori 42.17 yang beda kosakata).
+    KEBIJAKAN v3.9.45 (revisi dari v3.9.44): baris yang master-nya
+    tidak kenal TIDAK BOLEH disembunyikan oleh seleksi DEFAULT 'Deviasi'
+    — kelas bug "hilang senyap karena master kurang entri". v3.9.44
+    sempat memasang passthrough di seleksi APA PUN, tapi dengan master
+    yang men-cover sebagian barang (90% baris '-' di data nyata) filter
+    kategori jadi no-op (user: "ganti tidak terjadi apa apa") → kini
+    passthrough HANYA seleksi default (lihat kategori_passthrough) +
+    entry combobox KATEGORI_BLANK_LABEL utk akses eksplisit; seleksi
+    lain strict. Nilai kategorinya tetap kosong (jujur — tidak
+    memfabrikasi 'DEVIASI').
     Konsumen: widgets (re-export) → deviasi_view · nominal_resto_view ·
     pivot_view (2 titik) + append1 jejak saldo-only tanpa kategori.
     """
@@ -157,6 +162,42 @@ def kategori_blank_mask(kat: "pd.Series | None") -> "pd.Series | None":
     except (TypeError, ValueError):
         pass  # series non-standar — mask string sudah cukup
     return blank
+
+
+# v3.9.45 — label combobox utk memilih baris TANPA kategori master
+# secara EKSPLISIT (akses kelas item 100383 tanpa menonaktifkan filter
+# kategori barang lain).
+KATEGORI_BLANK_LABEL = "(Tanpa Kategori)"
+
+
+def kategori_passthrough(sel) -> bool:
+    """v3.9.45 — apakah seleksi kategori meng-include baris TANPA
+    kategori master (passthrough kategori_blank_mask)?
+
+    HANYA seleksi DEFAULT 'Deviasi' (case-insensitive). Latar v3.9.45
+    (user: "filter kategori di tab deviasi gr dan pcs kok seperti
+    ngebug? aku ganti tidak terjadi apa apa"): v3.9.44 memasang
+    passthrough di SEMUA seleksi — dengan master '21. DBS Kategori'
+    yang hanya men-cover SEBAGIAN barang (probe E2E data nyata: 90%
+    baris pivot ber-KATEGORI '-'), baris '-' tampil di seleksi APA PUN
+    → mengganti kategori praktis tidak mengubah apa pun (Semua ==
+    DEVIASI == 1.347 baris di probe) — filter jadi no-op.
+
+    KEBIJAKAN v3.9.45 (rekonsiliasi dua keluhan user):
+    (a) default 'Deviasi' TETAP meng-include baris tanpa kategori —
+        perlindungan kelas 100383 (barang ber-deviasi yang belum masuk
+        master tidak boleh lenyap senyap dari tab Deviasi — keluhan
+        v3.9.44);
+    (b) seleksi eksplisit LAIN = STRICT (filter bekerja normal —
+        keluhan v3.9.45);
+    (c) baris tanpa kategori punya entry combobox sendiri
+        (KATEGORI_BLANK_LABEL) utk akses eksplisit.
+    Konsumen: deviasi_view ×2 · nominal_resto_view · pivot_view ×2
+    (via re-export widgets).
+    """
+    if sel is None:
+        return False
+    return str(sel).strip().lower() == "deviasi"
 
 
 # =============================================================================

@@ -376,15 +376,17 @@ def _pilih_minggu_lalu(weeks_avail: list, h: int | None) -> int | None:
 def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
                               harga_map: dict | None,
                               konversi_map: dict | None,
-                              h: int | None = None) -> pd.DataFrame:
+                              h: int | None = None,
+                              bulan_sel: int | None = None) -> pd.DataFrame:
     """Frame per pasangan dari FILE deviasi (tab ⚖ Komparasi):
     [_resto_norm, _bahan_norm, Resto, Nama Barang, Satuan,
     Qty Deviasi Lalu, Harga, Nominal Lalu, _minggu].
 
     file_df = output parse_deviasi_file (kolom internal _bulan_num /
     _h / _resto_norm / _bahan_norm milik komparasi). Seleksi:
-      - BULAN TERBARU di file (nomor bulan terbesar — multi-file
-        History: bulan paling akhir = 'bulan lalu');
+      - BULAN: bulan_sel (v3.9.45 — param baru utk multi-bulan)
+        atau BULAN TERBARU di file bila None (nomor bulan terbesar —
+        multi-file History: bulan paling akhir = 'bulan lalu');
       - v3.9.41 MINGGU TER-COCOK dgn H analisa (param h — user:
         "jika week 1 maka ambil data week 1 juga"; lihat
         _pilih_minggu_lalu); h=None → minggu terakhir (perilaku lama).
@@ -434,8 +436,14 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
             if "Nominal Deviasi Lalu" in file_df.columns
             else np.full(len(file_df), np.nan)),
     })
-    # (a) bulan TERBARU di file
-    out = out[out["_bulan_num"] == out["_bulan_num"].max()].copy()
+    # (a) bulan TERBARU di file — atau bulan PILIHAN (v3.9.45 param
+    # bulan_sel utk hitung_nominal_lalu_multi: satu frame per bulan)
+    _bn = pd.to_numeric(out["_bulan_num"], errors="coerce")
+    if bulan_sel is None:
+        _target_bulan = _bn.max()
+    else:
+        _target_bulan = int(bulan_sel)
+    out = out[_bn == _target_bulan].copy()
     if out.empty:
         return empty
     # (b) v3.9.41 — MINGGU TER-COCOK dgn H analisa (user: "jika week 1
@@ -526,3 +534,75 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
            .drop(columns=["_absnom", "_absqty"]))
     out = out.reset_index(drop=True)
     return out[_LALU_COLS]
+
+
+# ---------------------------------------------------------------------------
+# v3.9.45 — MULTI-BULAN: satu frame per bulan file deviasi (user: "tab
+# nominal deviasi support buat multiple file deviasi buat compare dengan
+# beberapa bulan lalu"). File deviasi dimuat MULTI-FILE di tab ⚖ Komparasi
+# (path dipisah ';' — v3.9.13) → file_df memuat SEMUA bulan; fungsi ini
+# memecahnya jadi [(label, pairs)] urut bulan TERBARU dulu.
+# ---------------------------------------------------------------------------
+_BULAN_NAMA = {1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL",
+               5: "MEI", 6: "JUNI", 7: "JULI", 8: "AGUSTUS",
+               9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER",
+               12: "DESEMBER"}
+
+
+def _bulan_label_multi(file_df: pd.DataFrame, bulan_num: int) -> str:
+    """Label bulan kanonik utk satu nomor bulan: nilai kolom BULAN file
+    paling SERING muncul di bulan itu (file user memakai kode periode
+    '201.OKT 26' — dipakai APA ADANYA supaya user mengenalinya; dua
+    file beda periode sama-sama bulan 10 → yang dominan menang), else
+    nama bulan Indonesia, else 'BULAN n'."""
+    try:
+        sub = file_df[pd.to_numeric(
+            file_df["_bulan_num"], errors="coerce") == int(bulan_num)]
+        if "BULAN" in sub.columns and not sub.empty:
+            vals = (sub["BULAN"].astype(str).str.strip().str.upper()
+                    .replace("", pd.NA).dropna())
+            vals = vals[~vals.str.lower().isin(["nan", "none"])]
+            if not vals.empty:
+                return str(vals.mode().iloc[0])
+    except (KeyError, ValueError, TypeError):
+        pass
+    return _BULAN_NAMA.get(int(bulan_num), f"BULAN {bulan_num}")
+
+
+def hitung_nominal_lalu_multi(
+        file_df: pd.DataFrame | None,
+        harga_map: dict | None,
+        konversi_map: dict | None,
+        h: int | None = None,
+        max_months: int = 6) -> list:
+    """v3.9.45 — list [(label_bulan, pairs_df)] dari SEMUA bulan file
+    deviasi, urut bulan TERBARU dulu (index 0 = 'bulan lalu' utama =
+    perilaku hitung_nominal_lalu_pairs lama; index berikut = bulan
+    lebih lama lagi).
+
+    Setiap frame = hitung_nominal_lalu_pairs(bulan_sel=n) — minggu
+    TER-COCOK H diterapkan PER BULAN (bulan lalu punya minggu sendiri).
+    Bulan dengan 0 baris minggu-ter-cocok di-skip. max_months (default
+    6) menjaga lebar tabel wajar — user mengontrol sendiri jumlah
+    bulan lewat berapa file yang dimuat di ⚖ Komparasi."""
+    if file_df is None or getattr(file_df, "empty", True):
+        return []
+    if "_bulan_num" not in file_df.columns:
+        return []
+    try:
+        nums = sorted(
+            {int(n) for n in pd.to_numeric(
+                file_df["_bulan_num"], errors="coerce").dropna().unique()
+             if pd.notna(n)})
+    except (TypeError, ValueError):
+        return []
+    frames = []
+    for n in reversed(nums):          # terbaru dulu
+        if len(frames) >= max(1, int(max_months)):
+            break
+        dfm = hitung_nominal_lalu_pairs(
+            file_df, harga_map, konversi_map, h=h, bulan_sel=n)
+        if dfm is None or dfm.empty:
+            continue
+        frames.append((_bulan_label_multi(file_df, n), dfm))
+    return frames

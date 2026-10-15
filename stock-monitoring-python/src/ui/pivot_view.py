@@ -55,9 +55,9 @@ compute/render async.
 """
 
 import tkinter as tk
+from collections.abc import Callable
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Optional
 
 import pandas as pd
 
@@ -70,6 +70,7 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    KATEGORI_BLANK_LABEL,  # v3.9.45 — entry khusus baris tanpa kategori master
     Card,
     ColumnManager,
     EmptyState,
@@ -88,6 +89,7 @@ from .widgets import (
     identify_to_column,
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
+    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default Deviasi
     open_tree_maximized,
     run_async,
     validated_tgl_entry,
@@ -125,7 +127,7 @@ class PivotTableView(tk.Frame):
     def __init__(self, parent, data: pd.DataFrame = None,
                  go_to_proses: Callable | None = None):
         super().__init__(parent, bg=C_BG)
-        self.data: Optional[pd.DataFrame] = None
+        self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
         self.pivot_mode = "resto"          # "resto" | "tanggal"
         self._name_selected: set | None = None
@@ -364,8 +366,20 @@ class PivotTableView(tk.Frame):
             # blank — contoh BUMBU PASTA KUAH 100383 saldo-only 42.17
             # yang tak ada di '21. DBS Kategori' user): master tak kenal
             # ≠ disembunyikan — konsisten deviasi_view/nominal_resto.
-            _blank = kategori_blank_mask(df["KATEGORI"])
-            df = df[(df["KATEGORI"].astype(str) == kategori) | _blank]
+            # v3.9.45 — passthrough HANYA seleksi default 'Deviasi'
+            # (kelas 100383 tetap tampil by default); seleksi eksplisit
+            # lain STRICT (fix "ganti kategori tidak terjadi apa apa" —
+            # passthrough universal v3.9.44 + mayoritas baris '-'
+            # membuat filter no-op); KATEGORI_BLANK_LABEL = khusus
+            # baris tanpa kategori master.
+            if kategori == KATEGORI_BLANK_LABEL:
+                df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_passthrough(kategori):
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[(df["KATEGORI"].astype(str) == kategori)
+                        | _blank]
+            else:
+                df = df[df["KATEGORI"].astype(str) == kategori]
         # rentang tanggal berlaku untuk kedua mode (identik _compute_payload;
         # parse longgar tanpa dialog — pola in_selisih _col_values)
         if "Tanggal" in df.columns and not df.empty:
@@ -519,6 +533,17 @@ class PivotTableView(tk.Frame):
             else:
                 combo["values"] = []
                 var.set("(All)")
+        # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa master
+        # (akses eksplisit kelas 100383 — pola deviasi_view v3.9.45;
+        # disisipkan setelah '(All)').
+        if "KATEGORI" in self.data.columns:
+            _kv45 = [v for v in (self.kategori_combo["values"] or [])]
+            if KATEGORI_BLANK_LABEL not in _kv45 \
+                    and bool(kategori_blank_mask(
+                        self.data["KATEGORI"]).any()):
+                self.kategori_combo["values"] = (
+                    ["(All)", KATEGORI_BLANK_LABEL]
+                    + [v for v in _kv45 if v != "(All)"])
         # v3.9.36 — DEFAULT KATEGORI = "Deviasi" (user: "di tab pivot
         # tabel default kategori Deviasi"; pola deviasi_view v3.9.19 —
         # case-insensitive, fallback "(All)" bila tak ada di data).
@@ -598,9 +623,17 @@ class PivotTableView(tk.Frame):
                 "KATEGORI" in df.columns:
             # v3.9.44 — passthrough barang tanpa kategori master (mirror
             # titik _col_values di atas — kategori_blank_mask).
-            _blank = kategori_blank_mask(df["KATEGORI"])
-            df = df[(df["KATEGORI"].astype(str) == st["kategori"])
-                    | _blank]
+            # v3.9.45 — passthrough HANYA seleksi default 'Deviasi';
+            # seleksi eksplisit lain STRICT; KATEGORI_BLANK_LABEL
+            # khusus baris tanpa kategori master (mirror _col_values).
+            if st["kategori"] == KATEGORI_BLANK_LABEL:
+                df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_passthrough(st["kategori"]):
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[(df["KATEGORI"].astype(str) == st["kategori"])
+                        | _blank]
+            else:
+                df = df[df["KATEGORI"].astype(str) == st["kategori"]]
 
         # rentang tanggal berlaku untuk kedua mode
         if "Tanggal" in df.columns and not df.empty:

@@ -199,9 +199,9 @@ import json
 import os
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -219,6 +219,7 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    KATEGORI_BLANK_LABEL,  # v3.9.45 — entry khusus baris tanpa kategori master
     Card,
     ColumnManager,
     EmptyState,
@@ -237,6 +238,7 @@ from .widgets import (
     identify_to_column,
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
+    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default Deviasi
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
@@ -460,7 +462,7 @@ class DeviasiView(tk.Frame):
                  h_editable: bool = True,
                  acr_state: SharedACRThreshold | None = None):
         super().__init__(parent, bg=C_BG)
-        self.data: Optional[pd.DataFrame] = None
+        self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None   # v3.9.23 (poin 6)
         self._ri_bal_cache = None   # v3.9.23 — (df-id, h) → pasangan RI Bal
         self.satuan_mode = satuan_mode
@@ -900,17 +902,27 @@ class DeviasiView(tk.Frame):
                 filtered["Satuan"].astype(str).str.upper() != "GR"]
         # filter KATEGORI combobox
         if self._kategori_sel and "KATEGORI" in filtered.columns:
-            # v3.9.44 — passthrough barang TANPA kategori master
-            # (KATEGORI NaN/blank — contoh: BUMBU PASTA KUAH 100383
-            # saldo-only 42.17 yang tidak ada di '21. DBS Kategori'):
-            # master tak kenal ≠ disembunyikan — item tampil di seleksi
-            # kategori apa pun (akar "masih belum ada di tab Deviasi GR"
-            # padahal lolos whitelist & ADA di pivot; probe E2E data
-            # nyata: default DEVIASI → 0 baris, 'Semua' → tampil).
-            _blank = kategori_blank_mask(filtered["KATEGORI"])
-            filtered = filtered[
-                (filtered["KATEGORI"].astype(str) == str(self._kategori_sel))
-                | _blank]
+            # v3.9.45 — REKONSILIASI dua keluhan user: (v3.9.44) barang
+            # tanpa kategori master (KATEGORI '-' — contoh BUMBU PASTA
+            # KUAH 100383) tidak boleh lenyap senyap → passthrough di
+            # seleksi DEFAULT Deviasi; (v3.9.45) "ganti kategori tidak
+            # terjadi apa apa" — passthrough UNIVERSAL v3.9.44 + master
+            # yang men-cover sebagian barang (90% baris '-') bikin
+            # filter no-op → seleksi eksplisit lain kini STRICT + entry
+            # KATEGORI_BLANK_LABEL utk khusus baris tanpa kategori.
+            if self._kategori_sel == KATEGORI_BLANK_LABEL:
+                filtered = filtered[
+                    kategori_blank_mask(filtered["KATEGORI"])]
+            elif kategori_passthrough(self._kategori_sel):
+                _blank = kategori_blank_mask(filtered["KATEGORI"])
+                filtered = filtered[
+                    (filtered["KATEGORI"].astype(str)
+                     == str(self._kategori_sel))
+                    | _blank]
+            else:
+                filtered = filtered[
+                    filtered["KATEGORI"].astype(str)
+                    == str(self._kategori_sel)]
         # filter header kolom lain (nilai TERFORMAT — identik render)
         for col, sel in self._col_sel.items():
             if sel is None or col == exclude_col:
@@ -1129,12 +1141,21 @@ class DeviasiView(tk.Frame):
         self.header_filters.clear_all()
         # v3.9.13: isi combobox KATEGORI dari kolom data (merge "21. DBS
         # Kategori" di append1) + reset seleksi — "Semua" = tanpa filter.
+        # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa master
+        # (akses eksplisis kelas 100383 tanpa menonaktifkan filter).
         if data is not None and "KATEGORI" in getattr(data, "columns", []):
             _kv = data["KATEGORI"].dropna().astype(str).str.strip()
             kategori_vals = sorted(v for v in _kv.unique() if v)
+            _has_blank = bool(
+                kategori_blank_mask(data["KATEGORI"]).any())
         else:
             kategori_vals = []
-        self._kategori_combo["values"] = ["Semua"] + kategori_vals
+            _has_blank = False
+        _kv45 = ["Semua"]
+        if _has_blank:
+            _kv45.append(KATEGORI_BLANK_LABEL)
+        _kv45 += kategori_vals
+        self._kategori_combo["values"] = _kv45
         self._reset_kategori()
         if _data_empty:
             self._show_empty()
@@ -1731,17 +1752,25 @@ class DeviasiView(tk.Frame):
         # 1× utk GR+PCS — permintaan user: "tambah filter kategori di tab
         # deviasi pcs dan gr"). KATEGORI per-barang (1:1) → filter ini
         # barang-granular.
-        # v3.9.44 — passthrough barang TANPA kategori master (KATEGORI
-        # NaN/blank — contoh: BUMBU PASTA KUAH 100383 saldo-only 42.17,
-        # tidak ada di '21. DBS Kategori' user → probe E2E data nyata:
-        # default DEVIASI → 0 baris padahal item ADA di pivot; master tak
-        # kenal ≠ disembunyikan — baris tampil di seleksi kategori apa
-        # pun; mirror titik _filtered_pivot di bawah).
+        # v3.9.45 — passthrough HANYA seleksi default 'Deviasi' (kelas
+        # 100383 tetap tampil by default); seleksi eksplisit lain STRICT
+        # (fix "ganti kategori tidak terjadi apa apa" — 90% baris '-'
+        # membuat passthrough universal v3.9.44 = filter no-op);
+        # KATEGORI_BLANK_LABEL = khusus baris tanpa kategori master.
         if st.get("kategori") and "KATEGORI" in filtered.columns:
-            _blank = kategori_blank_mask(filtered["KATEGORI"])
-            filtered = filtered[
-                (filtered["KATEGORI"].astype(str) == str(st["kategori"]))
-                | _blank]
+            if st["kategori"] == KATEGORI_BLANK_LABEL:
+                filtered = filtered[
+                    kategori_blank_mask(filtered["KATEGORI"])]
+            elif kategori_passthrough(st["kategori"]):
+                _blank = kategori_blank_mask(filtered["KATEGORI"])
+                filtered = filtered[
+                    (filtered["KATEGORI"].astype(str)
+                     == str(st["kategori"]))
+                    | _blank]
+            else:
+                filtered = filtered[
+                    filtered["KATEGORI"].astype(str)
+                    == str(st["kategori"])]
             if filtered.empty:
                 return {"items": [], "kpi": (0, 0.0, 0),
                         "status": "Tidak ada baris untuk kategori ini."}
@@ -1905,6 +1934,17 @@ class DeviasiView(tk.Frame):
             f"{n} baris {self.satuan_mode} · Total |Deviasi| "
             f"{self._fmt_num(total_dev)} · CEK {cek_count} · "
             f"H={st['tanggal_h']}")
+        # v3.9.45 — transparansi passthrough: seleksi default Deviasi
+        # meng-include baris tanpa kategori master → SEBUT jumlahnya di
+        # status (kelas 100383 terlihat, bukan lega; entry
+        # '(Tanpa Kategori)' utk melihat khusus kelas itu).
+        if st.get("kategori") and kategori_passthrough(st["kategori"]) \
+                and "KATEGORI" in filtered.columns:
+            _nblank = int(
+                kategori_blank_mask(filtered["KATEGORI"]).sum())
+            if _nblank:
+                status += (f" · {_nblank} tanpa kategori master "
+                           f"(pilih '{KATEGORI_BLANK_LABEL}')")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
                 "neg_cells": neg_cells, "zero_cells": zero_cells,

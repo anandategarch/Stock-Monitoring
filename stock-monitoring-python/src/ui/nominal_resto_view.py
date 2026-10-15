@@ -84,7 +84,7 @@ from .nominal_common import (
     _norm_resto_lalu,
     agregasi_nominal_per_resto,
     fmt_nominal_cell,
-    hitung_nominal_lalu_pairs,
+    hitung_nominal_lalu_multi,  # v3.9.45 — multi-bulan file deviasi
 )
 from .theme import (
     C_ACCENT,
@@ -96,6 +96,7 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    KATEGORI_BLANK_LABEL,  # v3.9.45 — entry khusus baris tanpa kategori master
     Card,
     ColumnManager,
     EmptyState,
@@ -111,6 +112,7 @@ from .widgets import (
     fmt_int_id,
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
+    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default Deviasi
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
@@ -278,6 +280,10 @@ class NominalRestoView(tk.Frame):
     NUMERIC_COLS = ("N Barang", "Tanpa Harga", "Nominal Deviasi",
                     "Nominal Deviasi Bulan Lalu")
 
+    # v3.9.45 — id kolom BASIS (statis) — pembanding utk register kolom
+    # dinamis 'Lalu <label>' di _ensure_tree_columns.
+    COLUMNS_IDS = tuple(c[0] for c in COLUMNS)
+
     def __init__(self, parent, go_to_proses: Callable | None = None,
                  h_state=None, lalu_provider: Callable | None = None):
         super().__init__(parent, bg=C_BG)
@@ -296,6 +302,14 @@ class NominalRestoView(tk.Frame):
         self._lalu_df: pd.DataFrame | None = None   # snapshot popup lalu
         self._lalu_loaded = False      # provider pernah mengembalikan df
         self._lalu_week: str | None = None  # v3.9.41 label minggu lalu
+        # v3.9.45 — MULTI-BULAN (user: "tab nominal deviasi support buat
+        # multiple file deviasi buat compare dengan beberapa bulan
+        # lalu"): [(label_bulan, pairs_df)] SEMUA bulan file deviasi
+        # urut terbaru-dulu (index 0 = 'bulan lalu' utama = kolom
+        # 'Nominal Deviasi Bulan Lalu' yang sudah ada); bulan ≥2 =
+        # kolom dinamis 'Lalu <label>' (self._lalu_extra).
+        self._lalu_frames: list = []
+        self._lalu_extra: list = []   # [(col_id, label, week)] bulan ≥2
         # v3.9.36 — filter KATEGORI (pola deviasi_view v3.9.19):
         # None = 'Semua' = tanpa filter; default 'Deviasi'.
         self._kategori_sel: str | None = None
@@ -529,7 +543,8 @@ class NominalRestoView(tk.Frame):
         return self._format_col_series(col, f[col]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
-        if col in ("Nominal Deviasi", "Nominal Deviasi Bulan Lalu"):
+        if col in ("Nominal Deviasi", "Nominal Deviasi Bulan Lalu") \
+                or self._is_lalu_extra(col):
             return series.map(fmt_nominal_cell)
         return series.astype(str)
 
@@ -537,8 +552,44 @@ class NominalRestoView(tk.Frame):
         self._col_sel[col] = selected
         self._refresh()
 
+    def _is_lalu_extra(self, col: str) -> bool:
+        """v3.9.45 — kolom dinamis bulan-lalu ≥2 ('Lalu <label>')?"""
+        return any(_cid == col for _cid, _l, _w in self._lalu_extra)
+
     def _result_cols(self) -> list:
-        return [c[0] for c in self.COLUMNS]
+        # v3.9.45 — + kolom dinamis 'Lalu <label>' per bulan file
+        # deviasi (multi-file ⚖ Komparasi — lihat _lalu_extra).
+        return ([c[0] for c in self.COLUMNS]
+                + [c[0] for c in self._lalu_extra])
+
+    def _ensure_tree_columns(self):
+        """v3.9.45 — sinkronkan kolom tree dgn _result_cols() saat
+        himpunan bulan-lalu berubah (pola _render_payload pivot_view:
+        reset displaycolumns dulu — Tk memvalidasi displaycolumns lama
+        terhadap daftar kolom baru 'Invalid column index'). Filter ⧩
+        kolom yang hilang dibuang (bulan tak lagi dimuat)."""
+        col_ids = self._result_cols()
+        if list(self.tree["columns"]) == col_ids:
+            return
+        try:
+            self.tree.configure(displaycolumns="#all")
+        except tk.TclError:
+            pass
+        self.tree["columns"] = col_ids
+        for col_name, width, anchor in self.COLUMNS:
+            self.tree.column(col_name, width=width, minwidth=34,
+                             anchor=anchor)
+            self.tree.heading(col_name, text=col_name)
+        for _cid, _lab, _wk in self._lalu_extra:
+            self.tree.column(_cid, width=130, minwidth=34, anchor="e")
+            self.tree.heading(_cid, text=_cid)
+        # header filter/sort aktif juga di kolom baru (idempoten)
+        self.header_filters.add_columns(
+            [c for c in col_ids if c not in self.COLUMNS_IDS])
+        # filter kolom bulan lama yang tak ada lagi → buang
+        for c in list(self._col_sel):
+            if c not in col_ids:
+                del self._col_sel[c]
 
     def _sort_by(self, col: str, reverse: bool = False):
         if col not in self._result_cols():
@@ -546,7 +597,9 @@ class NominalRestoView(tk.Frame):
         if self._busy:
             self._pending_sort = (col, reverse)
             return
-        parse = self._parse_num_id if col in self.NUMERIC_COLS else None
+        parse = (self._parse_num_id
+                 if (col in self.NUMERIC_COLS
+                     or self._is_lalu_extra(col)) else None)
         sort_tree_by_column(self.tree, col, reverse=reverse, parse=parse)
         self._pin_total_row(self.tree)
         self._reapply_cell_tags(self.tree)
@@ -616,6 +669,9 @@ class NominalRestoView(tk.Frame):
         self._pairs_df = None
         self._lalu_df = None          # v3.9.36 — snapshot basi dihapus
         self._lalu_loaded = False
+        # v3.9.45 — snapshot multi-bulan ikut direset
+        self._lalu_frames = []
+        self._lalu_extra = []
         self._close_detail_wins()
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
@@ -626,12 +682,21 @@ class NominalRestoView(tk.Frame):
         # v3.9.36 — isi combobox KATEGORI dari kolom data (merge '21.
         # DBS Kategori' di append1 — pola deviasi_view) + reset seleksi
         # ke DEFAULT 'Deviasi' (case-insensitive, fallback 'Semua').
+        # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa
+        # master (akses eksplisit kelas 100383).
         if data is not None and "KATEGORI" in getattr(data, "columns", []):
             _kv = data["KATEGORI"].dropna().astype(str).str.strip()
             kategori_vals = sorted(v for v in _kv.unique() if v)
+            _has_blank = bool(
+                kategori_blank_mask(data["KATEGORI"]).any())
         else:
             kategori_vals = []
-        self._kategori_combo["values"] = ["Semua"] + kategori_vals
+            _has_blank = False
+        _kv45 = ["Semua"]
+        if _has_blank:
+            _kv45.append(KATEGORI_BLANK_LABEL)
+        _kv45 += kategori_vals
+        self._kategori_combo["values"] = _kv45
         self._reset_kategori()
         # lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
@@ -680,42 +745,68 @@ class NominalRestoView(tk.Frame):
             self._pairs_df = None
             self._lalu_df = None
             self._lalu_loaded = False
+            self._lalu_frames = []      # v3.9.45
+            self._lalu_extra = []
             return pd.DataFrame()
         if h is None:
             h = self.tanggal_h
         # v3.9.36 — filter KATEGORI combobox PRA-COMPUTE (kategori
         # melekat per-baris hasil merge '21. DBS Kategori').
-        # v3.9.44 — baris TANPA kategori master (NaN/blank) TIDAK lagi
-        # terbuang: passthrough kategori_blank_mask (probe BUMBU PASTA
-        # KUAH 100383 saldo-only 42.17 — tidak ada di master '21. DBS
-        # Kategori' user → KATEGORI NaN → dulu lenyap dari tab 🧮 juga;
-        # konsisten dgn deviasi_view v3.9.44).
+        # v3.9.45 — passthrough HANYA seleksi default 'Deviasi' (kelas
+        # 100383 tetap tampil by default — v3.9.44); seleksi eksplisit
+        # lain STRICT (fix "ganti kategori tidak terjadi apa apa" —
+        # passthrough universal + mayoritas baris tanpa master bikin
+        # filter no-op); KATEGORI_BLANK_LABEL = khusus baris blank.
         if self._kategori_sel and "KATEGORI" in df.columns:
-            _blank = kategori_blank_mask(df["KATEGORI"])
-            df = df[(df["KATEGORI"].astype(str) == str(self._kategori_sel))
-                    | _blank]
+            if self._kategori_sel == KATEGORI_BLANK_LABEL:
+                df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_passthrough(self._kategori_sel):
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[(df["KATEGORI"].astype(str)
+                         == str(self._kategori_sel)) | _blank]
+            else:
+                df = df[df["KATEGORI"].astype(str)
+                        == str(self._kategori_sel)]
             if df.empty:
                 self._result_df = None
                 self._pairs_df = None
                 self._lalu_df = None
                 self._lalu_loaded = False
+                self._lalu_frames = []  # v3.9.45
+                self._lalu_extra = []
                 return pd.DataFrame()
         # v3.9.36 — snapshot pasangan Bulan Lalu dari FILE DEVIASI
         # (provider = pembaca komparasi_view._file_df; harga_map fresh
         # → dihitung ulang tiap compute).
         # v3.9.41 — h diteruskan: minggu pembanding TER-COCOK dgn H
         # analisa (user: "jika week 1 maka ambil data week 1 juga").
+        # v3.9.45 — MULTI-BULAN: SEMUA bulan file deviasi jadi frame
+        # terpisah (user: "support buat multiple file deviasi buat
+        # compare dengan beberapa bulan lalu"); index 0 (terbaru) =
+        # kolom 'Nominal Deviasi Bulan Lalu' yang sudah ada (perilaku
+        # lama utuh), bulan ≥2 = kolom dinamis 'Lalu <label>'.
         fdf = None
         if self._lalu_provider is not None:
             with contextlib.suppress(Exception):
                 fdf = self._lalu_provider()
         self._lalu_loaded = fdf is not None
-        self._lalu_df = hitung_nominal_lalu_pairs(
+        self._lalu_frames = hitung_nominal_lalu_multi(
             fdf, self.harga_map, self.konversi_map, h=h)
+        # back-compat: frame kosong = DataFrame KOSONG (bukan None —
+        # pola hitung_nominal_lalu_pairs; konsumen memeriksa .empty)
+        self._lalu_df = (self._lalu_frames[0][1]
+                         if self._lalu_frames else pd.DataFrame())
         self._lalu_week = (
             str(self._lalu_df["_minggu"].iloc[0])
             if self._lalu_df is not None and not self._lalu_df.empty
             and "_minggu" in self._lalu_df.columns else None)
+        # metadata kolom dinamis bulan ≥2: (col_id, label, week)
+        self._lalu_extra = []
+        for _lab, _fr in self._lalu_frames[1:]:
+            _wk = (str(_fr["_minggu"].iloc[0])
+                   if _fr is not None and not _fr.empty
+                   and "_minggu" in _fr.columns else None)
+            self._lalu_extra.append((f"Lalu {_lab}", _lab, _wk))
         g, pairs = agregasi_nominal_per_resto(
             df, h, self.harga_map, self.konversi_map)
         if g.empty:
@@ -729,7 +820,24 @@ class NominalRestoView(tk.Frame):
         # self._lalu_df per resto-norm (kunci join = _norm_resto_lalu —
         # pola popup: '1030.BDGSET' ↔ 'BDGSET'); resto tanpa baris di
         # file → NaN (tampil '-'); Σ skipna = pola kolom Sekarang.
-        lalu = self._lalu_df
+        # v3.9.45 — generalisasi: SATU kolom per bulan (helper
+        # _assign_lalu_column — bulan pertama pakai nama kolom lama).
+        self._assign_lalu_column(g, pairs, "Nominal Deviasi Bulan Lalu",
+                                 self._lalu_df)
+        for _cid, _lab, _wk in self._lalu_extra:
+            _fr = next((_f for _l, _f in self._lalu_frames[1:]
+                        if f"Lalu {_l}" == _cid), None)
+            self._assign_lalu_column(g, pairs, _cid, _fr)
+        # snapshot utk filter header (SEBELUM filter diterapkan)
+        self._result_df = g.copy()
+        return g
+
+    def _assign_lalu_column(self, g: pd.DataFrame, pairs: pd.DataFrame,
+                            col_id: str, lalu: "pd.DataFrame | None"):
+        """v3.9.45 — pasang kolom nominal-bulan-lalu per resto (dipakai
+        utk kolom 'Nominal Deviasi Bulan Lalu' utama MAUPUN kolom
+        dinamis 'Lalu <label>' bulan ≥2 — logika identik v3.9.38/3.9.42).
+        """
         if lalu is not None and not lalu.empty \
                 and "Nominal Lalu" in lalu.columns:
             # v3.9.42 — audit 61-b P1: KOLOM LALU dibatasi ke pasangan
@@ -748,15 +856,12 @@ class NominalRestoView(tk.Frame):
                     lalu["_resto_norm"].astype(str),
                     lalu["_bahan_norm"].astype(str))]]
             per_lalu = lalu_f.groupby("_resto_norm")["Nominal Lalu"].sum()
-            g["Nominal Deviasi Bulan Lalu"] = (
+            g[col_id] = (
                 g["Resto"].astype(str).map(_norm_resto_lalu).map(per_lalu)
                 .astype("float64"))
         else:
-            g["Nominal Deviasi Bulan Lalu"] = pd.Series(
+            g[col_id] = pd.Series(
                 [float("nan")] * len(g), dtype="float64")
-        # snapshot utk filter header (SEBELUM filter diterapkan)
-        self._result_df = g.copy()
-        return g
 
     # =========================================================================
     # REFRESH + RENDER
@@ -804,16 +909,29 @@ class NominalRestoView(tk.Frame):
         self._close_detail_wins()    # data baru → popup rincian basi
         self._neg_cells = []
         self._total_cells = []
+        # v3.9.45 — kolom dinamis 'Lalu <label>' per bulan file deviasi
+        # (multi-file ⚖ Komparasi): sinkronkan dulu SEBELUM heading
+        # (heading kolom baru baru bisa dipasang).
+        self._ensure_tree_columns()
 
         # heading dinamis mengikuti TANGGAL H
         self.tree.heading(
             "Nominal Deviasi",
             text=f"Nominal Deviasi (H={self.tanggal_h})")
-        # v3.9.41 — heading lalu menyebut MINGGU pembanding ter-cocok
+        # v3.9.41 — heading lalu menyebut MINGGU pembanding ter-cocok;
+        # v3.9.45 — multi-bulan: bulan utama + label bulan ≥2 di
+        # heading kolom dinamis (label bulan + minggu masing-masing).
+        _lab0 = (self._lalu_frames[0][0]
+                 if self._lalu_frames else None)
         self.tree.heading(
             "Nominal Deviasi Bulan Lalu",
             text=("Nominal Deviasi Bulan Lalu"
+                  + (f" · {_lab0}" if _lab0 else "")
                   + (f" ({self._lalu_week})" if self._lalu_week else "")))
+        for _cid, _lab, _wk in self._lalu_extra:
+            self.tree.heading(
+                _cid,
+                text=_cid + (f" ({_wk})" if _wk else ""))
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
 
@@ -850,6 +968,12 @@ class NominalRestoView(tk.Frame):
         total_lalu = float(
             filtered["Nominal Deviasi Bulan Lalu"].dropna().sum()) \
             if "Nominal Deviasi Bulan Lalu" in filtered.columns else 0.0
+        # v3.9.45 — total per bulan ≥2 (kolom dinamis)
+        totals_extra = {}
+        for _cid, _lab, _wk in self._lalu_extra:
+            totals_extra[_cid] = (
+                float(filtered[_cid].dropna().sum())
+                if _cid in filtered.columns else 0.0)
         total_barang = int(filtered["N Barang"].sum()) \
             if "N Barang" in filtered.columns else 0
         total_noharga = int(filtered["Tanpa Harga"].sum()) \
@@ -861,13 +985,18 @@ class NominalRestoView(tk.Frame):
             row = filtered.iloc[i]
             nom = row.get("Nominal Deviasi", 0)
             nom_l = row.get("Nominal Deviasi Bulan Lalu")
-            values = (
+            # v3.9.45 — nilai kolom dinamis bulan ≥2 + minus merah
+            # per-cell (pola kolom Lalu utama)
+            vals_extra = [row.get(_cid) for _cid, _l, _w
+                          in self._lalu_extra]
+            values = [
                 str(row["Resto"]),
                 fmt_int_id(int(row.get("N Barang", 0) or 0)),
                 fmt_int_id(int(row.get("Tanpa Harga", 0) or 0)),
                 fmt_nominal_cell(nom),
                 fmt_nominal_cell(nom_l),
-            )
+            ] + [fmt_nominal_cell(v) for v in vals_extra]
+            values = tuple(values)
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             nom_v = None
             try:
@@ -883,6 +1012,8 @@ class NominalRestoView(tk.Frame):
                     noml_v = float(nom_l)
             except (TypeError, ValueError):
                 noml_v = None
+            _neg_any = ((nom_v is not None and nom_v < 0)
+                        or (noml_v is not None and noml_v < 0))
             if self._cell_tags:
                 if nom_v is not None and nom_v < 0:
                     self._neg_cells.append((f"row_{i}",
@@ -890,8 +1021,18 @@ class NominalRestoView(tk.Frame):
                 if noml_v is not None and noml_v < 0:
                     self._neg_cells.append((f"row_{i}",
                                             "Nominal Deviasi Bulan Lalu"))
-            elif (nom_v is not None and nom_v < 0) \
-                    or (noml_v is not None and noml_v < 0):
+                for _j, _ev in enumerate(vals_extra):
+                    _evf = None
+                    try:
+                        if _ev is not None and not pd.isna(_ev):
+                            _evf = float(_ev)
+                    except (TypeError, ValueError):
+                        _evf = None
+                    if _evf is not None and _evf < 0:
+                        self._neg_cells.append(
+                            (f"row_{i}", self._lalu_extra[_j][0]))
+                        _neg_any = True
+            elif _neg_any:
                 tags.append("negative")
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
@@ -903,7 +1044,8 @@ class NominalRestoView(tk.Frame):
             fmt_int_id(total_noharga),
             fmt_nominal_cell(total_nom),
             fmt_nominal_cell(total_lalu),
-        )
+        ) + tuple(fmt_nominal_cell(totals_extra[_cid])
+                   for _cid, _l, _w in self._lalu_extra)
         items.append(("", "row_total",
                       {"values": values_total, "tags": ("total",)}))
         for col in col_ids:
@@ -919,20 +1061,33 @@ class NominalRestoView(tk.Frame):
             status += f" · {fmt_int_id(total_noharga)} pasangan tanpa harga"
         # v3.9.38 — versus bulan lalu di footer (chip TOTAL juga);
         # v3.9.41 — minggu pembanding TER-COCOK H disebut (user:
-        # "sesuaikan week nya ... supaya jelas minggu mana")
+        # "sesuaikan week nya ... supaya jelas minggu mana");
+        # v3.9.45 — MULTI-BULAN: total per bulan ≥2 ikut disebut
+        # (label bulan singkat — pembanding beberapa bulan sekaligus).
         if self._lalu_loaded:
             _wk = (f" ({self._lalu_week})"
                    if self._lalu_week else "")
             status += f" · TOTAL LALU {fmt_nominal_cell(total_lalu)}{_wk}"
+            for _cid, _lab, _wk in self._lalu_extra:
+                _wkx = (f" ({_wk})" if _wk else "")
+                status += (f" · LALU {_lab} "
+                           f"{fmt_nominal_cell(totals_extra.get(_cid, 0.0))}"
+                           f"{_wkx}")
         else:
             status += " · LALU: file deviasi belum dimuat (⚖ Komparasi)"
         self.status_var_label.set(status)
         if self._lalu_loaded:
             _wk2 = (f" · MINGGU {self._lalu_week}"
                     if self._lalu_week else "")
-            self._total_var.set(
-                f"TOTAL {fmt_nominal_cell(total_nom)} · "
-                f"LALU {fmt_nominal_cell(total_lalu)}{_wk2}")
+            _chip = (f"TOTAL {fmt_nominal_cell(total_nom)} · "
+                     f"LALU {fmt_nominal_cell(total_lalu)}{_wk2}")
+            # v3.9.45 — chip: pembanding bulan ≥2 (ringkas — label bulan)
+            for _cid, _lab, _wk in self._lalu_extra[:3]:
+                _chip += (f" · {_lab} "
+                          f"{fmt_nominal_cell(totals_extra.get(_cid, 0.0))}")
+            if len(self._lalu_extra) > 3:
+                _chip += f" · +{len(self._lalu_extra) - 3} bulan lagi"
+            self._total_var.set(_chip)
         else:
             self._total_var.set(
                 f"TOTAL {fmt_nominal_cell(total_nom)}")
@@ -1041,12 +1196,32 @@ class NominalRestoView(tk.Frame):
             m[(str(r["_resto_norm"]), str(r["_bahan_norm"]))] = r
         return m
 
+    def _lalu_maps(self) -> list:
+        """v3.9.45 — list peta (_resto_norm, _bahan_norm) → baris frame
+        Bulan Lalu PER BULAN (index 0 = bulan utama self._lalu_df;
+        index berikut = bulan ≥2 self._lalu_frames[1:]) — popup rincian
+        multi-bulan."""
+        maps = []
+        for _lab, _fr in self._lalu_frames:
+            m = {}
+            if _fr is not None and not _fr.empty:
+                for i in range(len(_fr)):
+                    r = _fr.iloc[i]
+                    m[(str(r["_resto_norm"]),
+                       str(r["_bahan_norm"]))] = r
+            maps.append(m)
+        return maps
+
     def _show_resto_popup(self, resto: str):
         """Popup RINCIAN PER ITEM utk satu resto (double-click baris) —
         v3.9.36 5 kolom (user: "Nama resto, nama barang, Kuantiti
         deviasi, Nominal deviasi Sekarang, Nominal deviasi bulan lalu").
         Data = self._pairs_df (sekarang) + self._lalu_df (bulan lalu —
-        snapshot compute terakhir, read-only)."""
+        snapshot compute terakhir, read-only).
+        v3.9.45 — MULTI-BULAN: + SATU KOLOM 'Lalu <label>' per bulan
+        file deviasi ≥2 (user: "support buat multiple file deviasi buat
+        compare dengan beberapa bulan lalu") — popup = pembanding per
+        barang lintas beberapa bulan sekaligus."""
         pairs = self._pairs_df
         if pairs is None or pairs.empty:
             return
@@ -1054,6 +1229,10 @@ class NominalRestoView(tk.Frame):
         if sub.empty:
             return
         lalu_map = self._lalu_map()
+        # v3.9.45 — peta per bulan ≥2 (kolom dinamis popup)
+        _maps_extra = self._lalu_maps()[1:]
+        _extra_cols = [(cid, 150, "e")
+                       for cid, lab, wk in self._lalu_extra]
 
         win = tk.Toplevel(self)
         win.title(f"Nominal Deviasi — {resto} (H={self.tanggal_h})")
@@ -1088,16 +1267,21 @@ class NominalRestoView(tk.Frame):
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="right", padx=10)
 
-        col_ids = [c[0] for c in POPUP_COLUMNS]
+        # v3.9.45 — kolom popup = BASIS + kolom dinamis per bulan ≥2
+        # (heading menyebut label bulan + minggu ter-cocok masing2).
+        _popup_cols = list(POPUP_COLUMNS) + _extra_cols
+        col_ids = [c[0] for c in _popup_cols]
         tree = ttk.Treeview(body, columns=col_ids, show="headings",
                             selectmode="extended")
         # v3.9.41 — tombol ⛶/↺ (user: "pop up ... kurang besar dan
         # lebar") — setelah tree dibuat (command men-reference tree).
-        _popup_head_buttons(head, win, tree, POPUP_COLUMNS)
-        for col_name, width, anchor in POPUP_COLUMNS:
+        _popup_head_buttons(head, win, tree, _popup_cols)
+        for col_name, width, anchor in _popup_cols:
             tree.column(col_name, width=width, minwidth=34,
                         anchor=anchor)
             tree.heading(col_name, text=col_name)
+        for _cid, _lab, _wk in self._lalu_extra:
+            tree.heading(_cid, text=_cid + (f" ({_wk})" if _wk else ""))
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
@@ -1112,23 +1296,38 @@ class NominalRestoView(tk.Frame):
         items = []
         sub = sub.reset_index(drop=True)
         _nolalu = 0
+        # v3.9.45 — Σ per bulan ≥2 (hanya pasangan yang TAMPIL — join
+        # kiri dari pasangan sekarang, pola TOTAL LALU utama)
+        totals_extra = [0.0] * len(_maps_extra)
         for i in range(len(sub)):
             row = sub.iloc[i]
             nom = row.get("Nominal")
             # pasangan Bulan Lalu — kunci ternormalisasi (pola join
             # komparasi: '1030.BDGSET' ↔ 'BDGSET')
-            lrow = lalu_map.get(
-                (_norm_resto_lalu(resto),
-                 _norm_name_lalu(row["Nama Barang"])))
-            nom_lalu = lrow.get("Nominal Lalu") if lrow is not None else None
+            _key_l = (_norm_resto_lalu(resto),
+                      _norm_name_lalu(row["Nama Barang"]))
+            lrow = lalu_map.get(_key_l)
+            nom_lalu = lrow.get("Nominal Lalu") if lrow is not None \
+                else None
             if lrow is None:
                 _nolalu += 1
+            # nilai per bulan ≥2 + akumulasi total popup
+            vals_extra = []
+            for _mi, _m in enumerate(_maps_extra):
+                _r = _m.get(_key_l)
+                _v = _r.get("Nominal Lalu") if _r is not None else None
+                vals_extra.append(_v)
+                try:
+                    if _v is not None and not pd.isna(_v):
+                        totals_extra[_mi] += float(_v)
+                except (TypeError, ValueError):
+                    pass
             values = (
                 str(resto), str(row["Nama Barang"]),
                 fmt_nominal_cell(row.get("Qty Deviasi", 0)),
                 fmt_nominal_cell(nom),
                 fmt_nominal_cell(nom_lalu),
-            )
+            ) + tuple(fmt_nominal_cell(v) for v in vals_extra)
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             nom_v = None
             try:
@@ -1142,6 +1341,8 @@ class NominalRestoView(tk.Frame):
                     noml_v = float(nom_lalu)
             except (TypeError, ValueError):
                 noml_v = None
+            _neg_any = ((nom_v is not None and nom_v < 0)
+                        or (noml_v is not None and noml_v < 0))
             if self._cell_tags:
                 if nom_v is not None and nom_v < 0:
                     neg_cells.append(
@@ -1149,10 +1350,19 @@ class NominalRestoView(tk.Frame):
                 if noml_v is not None and noml_v < 0:
                     neg_cells.append(
                         (f"row_{i}", "Nominal Deviasi Bulan Lalu"))
-            else:
-                if (nom_v is not None and nom_v < 0) \
-                        or (noml_v is not None and noml_v < 0):
-                    tags.append("negative")
+                for _j, _ev in enumerate(vals_extra):
+                    _evf = None
+                    try:
+                        if _ev is not None and not pd.isna(_ev):
+                            _evf = float(_ev)
+                    except (TypeError, ValueError):
+                        _evf = None
+                    if _evf is not None and _evf < 0:
+                        neg_cells.append(
+                            (f"row_{i}", _extra_cols[_j][0]))
+                        _neg_any = True
+            elif _neg_any:
+                tags.append("negative")
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
 
@@ -1176,7 +1386,8 @@ class NominalRestoView(tk.Frame):
         items.append(("", "row_total", {
             "values": ("TOTAL", "", "",
                        fmt_nominal_cell(total_nom),
-                       fmt_nominal_cell(total_lalu)),
+                       fmt_nominal_cell(total_lalu))
+            + tuple(fmt_nominal_cell(v) for v in totals_extra),
             "tags": ("total",)}))
         for c in col_ids:
             total_cells.append(("row_total", c))
@@ -1208,6 +1419,10 @@ class NominalRestoView(tk.Frame):
                     f"TOTAL BULAN LALU {fmt_nominal_cell(total_lalu)}")
         if self._lalu_week:
             foot_txt += f" · Lalu: minggu {self._lalu_week} (ter-cocok H)"
+        # v3.9.45 — total per bulan ≥2 di footer popup
+        for _mi, (_cid, _lab, _wk) in enumerate(self._lalu_extra):
+            foot_txt += (f" · {_lab} "
+                         f"{fmt_nominal_cell(totals_extra[_mi])}")
         if not self._lalu_loaded:
             foot_txt += " · file deviasi belum dimuat (⚖ Komparasi)"
         elif _nolalu:
@@ -1226,8 +1441,8 @@ class NominalRestoView(tk.Frame):
         # v3.9.42 — minsize DI-CLAMP ke geometri layar (audit 61-b P3:
         # minsize 900 di layar <960 melebarkan jendela MELAMPAUI layar).
         _w41, _h41 = _popup_geometry(win)
-        _scale_popup_columns(tree, POPUP_COLUMNS, _w41 - 36)
-        _bind_popup_rescale(win, tree, POPUP_COLUMNS)
+        _scale_popup_columns(tree, _popup_cols, _w41 - 36)
+        _bind_popup_rescale(win, tree, _popup_cols)
         win.minsize(min(900, _w41), min(420, _h41))
         win.focus_set()
 

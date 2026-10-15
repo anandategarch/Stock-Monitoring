@@ -742,10 +742,11 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             # nyata: BUMBU PASTA KUAH 100383, master user hanya punya
             # varian (V.20)) dulu lenyap senyap dari tab Deviasi GR
             # karena filter KATEGORI default 'Deviasi' membuang baris
-            # NaN — kini view me-passthrough baris tanpa kategori (lihat
-            # widgets.kategori_blank_mask); jejak ini menyebut jumlahnya
-            # supaya keluhan "barang tidak muncul" langsung ketemu
-            # penyebabnya di log.
+            # NaN — kini view me-passthrough baris tanpa kategori
+            # (v3.9.45: HANYA di seleksi default Deviasi + entry
+            # '(Tanpa Kategori)' — lihat widgets.kategori_passthrough);
+            # jejak ini menyebut jumlahnya supaya keluhan "barang tidak
+            # muncul" langsung ketemu penyebabnya di log.
             try:
                 if "KATEGORI" in final.columns and _n_only:
                     _only_k = _only[_only["_merge"] == "left_only"][
@@ -767,8 +768,8 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                               "saldo-only TANPA kategori master (barang "
                               "lama 42.17 belum masuk '21. DBS Kategori' "
                               "— contoh BUMBU PASTA KUAH 100383) — tampil "
-                              "di SEMUA seleksi filter KATEGORI "
-                              "(widgets.kategori_blank_mask)")
+                              "di seleksi DEFAULT Deviasi & entry "
+                              "'(Tanpa Kategori)' (v3.9.45)")
             except (KeyError, ValueError, TypeError):
                 pass  # defensif — kolom tak lengkap pada input aneh
     except (KeyError, ValueError, TypeError):

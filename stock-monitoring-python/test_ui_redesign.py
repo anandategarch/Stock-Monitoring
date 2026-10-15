@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.44", APP_VERSION == "3.9.44",
+    check("Versi = 3.9.45", APP_VERSION == "3.9.45",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -10262,18 +10262,25 @@ def main():
     # v3.941 update: AYAM = minggu TER-COCOK H=25 → WEEK 4 (fixture _h=25
     # setelah diselaraskan dgn output parse) → 113×10 = 1.130 — harapan
     # nilai TETAP sama dgn v3.9.36, kini via jalur week-matched.
-    check("(v3.9.36/v3.9.41) 🧮 POPUP PER ITEM: 5 kolom persis (Nama Resto "
-          "· Nama Barang · Kuantiti Deviasi · Nominal Deviasi Sekarang · "
-          "Nominal Deviasi Bulan Lalu); AYAM = 20 vs 1.130 (WEEK 4 "
-          "TER-COCOK H=25 — 113×10); TOTAL kedua nominal",
+    # v3.9.45 update: fixture _fdf48 MULTI-BULAN (OKT + SEP) → popup
+    # kini 6 kolom: basis 5 + KOLOM DINAMIS 'Lalu 203.SEP 26' (fitur
+    # multi-bulan — user: "support buat multiple file deviasi buat
+    # compare dengan beberapa bulan lalu"); AYAM-MLGPAR tak ada di bulan
+    # SEP (hanya SBYKET) → kolom dinamis '-' utk pasangan MLGPAR.
+    check("(v3.9.36/v3.9.41/v3.9.45) 🧮 POPUP PER ITEM: 6 kolom (basis 5 "
+          "+ kolom dinamis 'Lalu 203.SEP 26' — fixture multi-bulan OKT+SEP); "
+          "AYAM = 20 vs 1.130 (WEEK 4 TER-COCOK H=25 — 113×10); TOTAL "
+          "kedua nominal",
           list(_pt48["columns"]) == [
               "Nama Resto", "Nama Barang", "Kuantiti Deviasi",
-              "Nominal Deviasi Sekarang", "Nominal Deviasi Bulan Lalu"]
+              "Nominal Deviasi Sekarang", "Nominal Deviasi Bulan Lalu",
+              "Lalu 203.SEP 26"]
           and _prow48.get("AYAM FILET") is not None
           and _prow48["AYAM FILET"][0] == "MLGPAR"
           and _prow48["AYAM FILET"][2] == "2"
           and _prow48["AYAM FILET"][3] == "20"
           and _prow48["AYAM FILET"][4] == "1.130"
+          and _prow48["AYAM FILET"][5] == "-"
           and _ptot48 is not None
           and _pt48.set(_ptot48, "Nominal Deviasi Sekarang") == "20"
           and _pt48.set(_ptot48, "Nominal Deviasi Bulan Lalu")
@@ -12044,11 +12051,25 @@ def main():
     _dv55._kategori_var.set("TEPAT")
     _dv55._on_kategori_changed()
     wait_view(root, _dv55)
-    check("(v3.9.44) kategori TEPAT: baris TANPA kategori tetap tampil; "
-          "baris DEVIASI tersembunyi",
+    # v3.9.45 — REVISI KEBIJAKAN: passthrough HANYA seleksi default
+    # 'Deviasi' (fix "ganti kategori tidak terjadi apa apa" — 90% baris
+    # '-' di data nyata membuat passthrough universal = filter no-op);
+    # TEPAT kini STRICT: hanya GULA (TEPAT) tampil.
+    check("(v3.9.45) kategori TEPAT STRICT: hanya GULA (TEPAT) tampil; "
+          "baris tanpa kategori & DEVIASI tersembunyi (filter bekerja)",
+          _row55(_dv55, "GULA PASIR") is not None
+          and _row55(_dv55, "AYAM FILET") is None
+          and _row55(_dv55, "BUMBU PASTA KUAH") is None)
+    # entry '(Tanpa Kategori)' = khusus baris blank (akses eksplisit
+    # kelas 100383 — bukan lewat passthrough)
+    _dv55._kategori_var.set("(Tanpa Kategori)")
+    _dv55._on_kategori_changed()
+    wait_view(root, _dv55)
+    check("(v3.9.45) entry '(Tanpa Kategori)': HANYA baris blank "
+          "(BUMBU tampil; AYAM/DEVIASI & GULA/TEPAT tersembunyi)",
           _row55(_dv55, "BUMBU PASTA KUAH") is not None
-          and _row55(_dv55, "GULA PASIR") is not None
-          and _row55(_dv55, "AYAM FILET") is None)
+          and _row55(_dv55, "AYAM FILET") is None
+          and _row55(_dv55, "GULA PASIR") is None)
     _dv55.destroy()
     root.update()
 
@@ -12185,13 +12206,233 @@ def main():
     _pv_names55 = []
     for _p in _pv55.tree.get_children(""):
         _pv_names55.append(_pv55.tree.item(_p, "text"))
-    check("(v3.9.44) Pivot kategori BAHAN: barang TANPA kategori "
-          "master tetap tampil (dulu dibuang oleh filter state)",
-          "BUMBU PASTA KUAH" in _pv_names55
-          and "AYAM FILET" in _pv_names55,
+    # v3.9.45 — BAHAN (bukan default Deviasi) = STRICT: barang tanpa
+    # kategori tersembunyi (revisi kebijakan passthrough — lihat §56).
+    check("(v3.9.45) Pivot kategori BAHAN STRICT: HANYA AYAM (BAHAN) "
+          "tampil; barang tanpa kategori tersembunyi",
+          "AYAM FILET" in _pv_names55
+          and "BUMBU PASTA KUAH" not in _pv_names55,
           f"got {_pv_names55}")
+    # entry '(Tanpa Kategori)': khusus baris blank (mirror deviasi_view)
+    _pv55.kategori_var.set("(Tanpa Kategori)")
+    _pv55._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _pv55._busy and len(_pv55.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    _pv_names55b = [ _pv55.tree.item(_p, "text")
+                     for _p in _pv55.tree.get_children("") ]
+    check("(v3.9.45) Pivot '(Tanpa Kategori)': HANYA barang blank "
+          "(BUMBU) tampil",
+          "BUMBU PASTA KUAH" in _pv_names55b
+          and "AYAM FILET" not in _pv_names55b,
+          f"got {_pv_names55b}")
     _pv55.destroy()
     _top55p.destroy()
+    root.update()
+
+    # =====================================================================
+    print("\n== 56. (v3.9.45) FILTER KATEGORI STRICT (fix 'ganti tidak "
+          "terjadi apa apa') + MULTI-BULAN 🧮 (user: 'tab nominal deviasi "
+          "support buat multiple file deviasi buat compare dengan "
+          "beberapa bulan lalu') ==")
+
+    # (a) unit — kategori_passthrough: HANYA seleksi default 'Deviasi'
+    # (case/strip-insensitive); seleksi lain → strict.
+    from src.pipeline.helpers import kategori_passthrough as _kpt56
+    check("(v3.9.45) kategori_passthrough: HANYA 'Deviasi' (case/strip-"
+          "insensitive); TEPAT/Semua/None/blank-label → False",
+          _kpt56("DEVIASI") and _kpt56(" Deviasi ")
+          and _kpt56("deviasi")
+          and not _kpt56("TEPAT") and not _kpt56(None)
+          and not _kpt56("(Tanpa Kategori)")
+          and not _kpt56("Semua"),
+          f"got DEV={_kpt56('DEVIASI')} TEPAT={_kpt56('TEPAT')}")
+
+    # (b) DeviasiView — entry '(Tanpa Kategori)' di combobox + status
+    # menyebut jumlah blank (transparansi passthrough default) + FILTER
+    # BENAR-BENAR mengubah baris (regresi 'ganti tidak terjadi apa apa':
+    # passthrough universal v3.9.44 + 90% baris '-' = no-op).
+    _src56 = []
+    for _j, _v in [("SALDO AWAL", 84.0), ("2.SALDO AKHIR", 84.0),
+                   ("3.DEVIASI", -84.0)]:
+        _src56.append({"Nama Barang": "BUMBU PASTA KUAH", "JENIS": _j,
+                       "NAMA RESTO": "MLGPAR", "Tanggal": 1,
+                       "NILAI": _v, "SATUAN": "GR", "KATEGORI": None,
+                       "AKTIF/NON": None, "SOURCE KIRIMAN": None})
+    for _b, _kat in [("AYAM FILET", "DEVIASI"), ("GULA PASIR", "TEPAT")]:
+        for _j, _v in [("1.SO", 10.0), ("2.SALDO AKHIR", 8.0),
+                       ("3.DEVIASI", -2.0), ("SALDO AWAL", 0.0)]:
+            for _t in range(23, 28):
+                _src56.append({"Nama Barang": _b, "JENIS": _j,
+                               "NAMA RESTO": "MLGPAR", "Tanggal": _t,
+                               "NILAI": _v, "SATUAN": "GR",
+                               "KATEGORI": _kat, "AKTIF/NON": "AKTIF",
+                               "SOURCE KIRIMAN": None})
+    _df56 = pd.DataFrame(_src56)
+    _dv56 = _DV55(root, satuan_mode="GR")
+    _dv56.pack(fill="both", expand=True)
+    _dv56.load_data(_df56)
+    _dv56.ensure_refreshed()
+    wait_view(root, _dv56)
+    check("(v3.9.45) combobox kategori: entry '(Tanpa Kategori)' saat "
+          "ada barang tanpa master (Semua · blank-label · kategori "
+          "sorted)",
+          list(_dv56._kategori_combo["values"]) ==
+          ["Semua", "(Tanpa Kategori)", "DEVIASI", "TEPAT"],
+          f"got {list(_dv56._kategori_combo['values'])}")
+
+    def _n56(view):
+        return len(view.tree.get_children(""))
+
+    # default DEVIASI: blank ikut (kelas 100383) + status menyebut jumlah
+    check("(v3.9.45) default DEVIASI: blank ikut tampil (BUMBU) + status "
+          "menyebut '1 tanpa kategori master'",
+          _row55(_dv56, "BUMBU PASTA KUAH") is not None
+          and "1 tanpa kategori master" in _dv56.status_var.get(),
+          f"status={_dv56.status_var.get()!r}")
+    _n_dev56 = _n56(_dv56)          # BUMBU(blank) + AYAM = 2
+    # TEPAT strict: hanya GULA (baris BERGANTI — filter bekerja)
+    _dv56._kategori_var.set("TEPAT")
+    _dv56._on_kategori_changed()
+    wait_view(root, _dv56)
+    check("(v3.9.45) REGRESI no-op: ganti kategori mengubah jumlah baris "
+          "(DEVIASI→TEPAT: 2→1 — dulu passthrough universal = tetap)",
+          _n_dev56 == 2 and _n56(_dv56) == 1
+          and _row55(_dv56, "GULA PASIR") is not None,
+          f"dev={_n_dev56} tepat={_n56(_dv56)}")
+    # kembali Semua: semua barang
+    _dv56._kategori_var.set("Semua")
+    _dv56._on_kategori_changed()
+    wait_view(root, _dv56)
+    check("(v3.9.45) kategori 'Semua': semua barang tampil (3)",
+          _n56(_dv56) == 3, f"got {_n56(_dv56)}")
+    _dv56.destroy()
+    root.update()
+
+    # (c) unit — hitung_nominal_lalu_multi: frame per bulan urut
+    # terbaru-dulu + minggu ter-cocok PER BULAN + back-compat index-0.
+    from src.ui.nominal_common import hitung_nominal_lalu_multi as _hnm56
+    _fd56 = pd.DataFrame({
+        "Resto": ["1001.MLGPAR", "1001.MLGPAR", "1002.SBYKET"],
+        "Nama Barang": ["AYAM FILET", "KOPI BUBUK 100G", "AYAM FILET"],
+        "Satuan": ["GR", "PCS", "GR"],
+        "Minggu": ["WEEK 4", "WEEK 4", "WEEK 2"],
+        "DEV Lalu": [113.0, -5.0, 74.0],
+        "BULAN": ["204.OKT 26", "204.OKT 26", "203.SEP 26"],
+        "_bulan_num": [10, 10, 9],
+        "_resto_norm": ["MLGPAR", "MLGPAR", "SBYKET"],
+        "_bahan_norm": ["AYAM FILET", "KOPI BUBUK 100G", "AYAM FILET"],
+        "_h": [25, 25, 14],
+    })
+    _fr56 = _hnm56(_fd56, {"AYAM FILET": (10.0, "GR")},
+                   {"rasio": {}, "terkecil": {}}, h=25)
+    check("(v3.9.45) hitung_nominal_lalu_multi: 2 bulan urut TERBARU-"
+          "dulu + label dari kolom BULAN file",
+          len(_fr56) == 2 and _fr56[0][0] == "204.OKT 26"
+          and _fr56[1][0] == "203.SEP 26",
+          f"got {[(l, len(f)) for l, f in _fr56]}")
+    check("(v3.9.45) frame[0] = perilaku lama (bulan terbaru — "
+          "hitung_nominal_lalu_pairs None)",
+          len(_fr56[0][1]) == 2
+          and float(_fr56[0][1].loc[
+              _fr56[0][1]["_bahan_norm"] == "AYAM FILET",
+              "Nominal Lalu"].iloc[0]) == 1130.0,
+          f"got {len(_fr56[0][1])} baris")
+    check("(v3.9.45) bulan SEP: minggu ter-cocok TERPISAH (W2 _h=14 "
+          "satu-satunya ≤ target 25 → AYAM SBYKET 74)",
+          len(_fr56[1][1]) == 1
+          and float(_fr56[1][1]["Qty Deviasi Lalu"].iloc[0]) == 74.0,
+          f"got {len(_fr56[1][1])} baris")
+    check("(v3.9.45) max_months=1 → hanya bulan terbaru",
+          len(_hnm56(_fd56, {}, {"rasio": {}, "terkecil": {}}, h=25,
+                    max_months=1)) == 1)
+    check("(v3.9.45) file_df None → [] (defensif)",
+          _hnm56(None, {}, {}, h=25) == [])
+
+    # (d) NominalRestoView E2E — KOLOM DINAMIS per bulan + heading label
+    # + TOTAL row + chip + popup per bulan (multi-file ⚖ Komparasi).
+    _top56 = tk.Toplevel(root)
+    _top56.geometry("1600x900+5+5")
+    _nv56 = _NRV55(_top56, lalu_provider=lambda: _fd56)
+    _nv56.pack(fill="both", expand=True)
+    _dn56 = pd.DataFrame([{
+        "Nama Barang": "AYAM FILET", "NAMA RESTO": "MLGPAR",
+        "SATUAN": "GR", "Tanggal": 25, "JENIS": "3.DEVIASI",
+        "NILAI": 2.0, "KATEGORI": "DEVIASI",
+    }])
+    _nv56.load_data(_dn56, harga_map={"AYAM FILET": (10.0, "GR")},
+                    konversi_map={"rasio": {}, "terkecil": {}})
+    _nv56.ensure_refreshed()
+    wait_view(root, _nv56)
+    check("(v3.9.45) 🧮 tree: kolom dinamis 'Lalu 203.SEP 26' (bulan "
+          "≥2) muncul setelah kolom Bulan Lalu utama",
+          list(_nv56.tree["columns"]) == [
+              "Resto", "N Barang", "Tanpa Harga", "Nominal Deviasi",
+              "Nominal Deviasi Bulan Lalu", "Lalu 203.SEP 26"],
+          f"got {list(_nv56.tree['columns'])}")
+    check("(v3.9.45) 🧮 heading bulan utama menyebut LABEL bulan file "
+          "(204.OKT 26) + minggu ter-cocok",
+          "204.OKT 26" in _nv56.tree.heading(
+              "Nominal Deviasi Bulan Lalu")["text"],
+          f"got {_nv56.tree.heading('Nominal Deviasi Bulan Lalu')['text']!r}")
+    _mlg56 = next((_i for _i in _nv56.tree.get_children("")
+                   if _nv56.tree.set(_i, "Resto") == "MLGPAR"), None)
+    check("(v3.9.45) 🧮 baris MLGPAR: Sekarang 20 · Lalu OKT 1.130 · "
+          "SEP '-' (AYAM-MLGPAR tak ada di bulan SEP)",
+          _mlg56 is not None
+          and _nv56.tree.item(_mlg56, "values") ==
+          ("MLGPAR", "1", "0", "20", "1.130", "-"),
+          f"got {_nv56.tree.item(_mlg56, 'values') if _mlg56 else None}")
+    _tot56 = next((_i for _i in _nv56.tree.get_children("")
+                   if _i == "row_total"), None)
+    check("(v3.9.45) 🧮 TOTAL row: kolom SEP ikut (nilai '-')",
+          _tot56 is not None
+          and _nv56.tree.item(_tot56, "values") ==
+          ("TOTAL", "1", "0", "20", "1.130", "-"),
+          f"got {_nv56.tree.item(_tot56, 'values') if _tot56 else None}")
+    check("(v3.9.45) 🧮 chip TOTAL menyebut pembanding bulan ≥2 (SEP)",
+          "203.SEP 26" in _nv56._total_var.get()
+          and "TOTAL 20" in _nv56._total_var.get(),
+          f"got {_nv56._total_var.get()!r}")
+    # popup per bulan: kolom dinamis + TOTAL per bulan
+    _nv56._show_resto_popup("MLGPAR")
+    root.update()
+    _win56 = _nv56._detail_wins[-1] if _nv56._detail_wins else None
+    _pc56 = []
+    _tr56 = None
+    if _win56 is not None:
+        def _findtr56(w):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Treeview):
+                    return c
+                t = _findtr56(c)
+                if t is not None:
+                    return t
+            return None
+        _tr56 = _findtr56(_win56)
+        _pc56 = list(_tr56["columns"]) if _tr56 is not None else []
+    check("(v3.9.45) 🧮 popup rincian: kolom dinamis 'Lalu 203.SEP 26' "
+          "ikut (pembanding per barang lintas bulan)",
+          _pc56 == ["Nama Resto", "Nama Barang", "Kuantiti Deviasi",
+                    "Nominal Deviasi Sekarang",
+                    "Nominal Deviasi Bulan Lalu",
+                    "Lalu 203.SEP 26"],
+          f"got {_pc56}")
+    if _win56 is not None and _tr56 is not None:
+        _ay56 = next((_i for _i in _tr56.get_children("")
+                      if _tr56.set(_i, "Nama Barang") == "AYAM FILET"),
+                     None)
+        check("(v3.9.45) 🧮 popup AYAM: Sekarang 20 · Lalu 1.130 · "
+              "SEP '-'",
+              _ay56 is not None
+              and _tr56.item(_ay56, "values") ==
+              ("MLGPAR", "AYAM FILET", "2", "20", "1.130", "-"),
+              f"got {_tr56.item(_ay56, 'values') if _ay56 else None}")
+    _nv56._close_detail_wins()
+    _nv56.destroy()
+    _top56.destroy()
     root.update()
 
     root.destroy()
