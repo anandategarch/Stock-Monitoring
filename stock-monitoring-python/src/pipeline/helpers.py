@@ -169,6 +169,62 @@ def kategori_blank_mask(kat: "pd.Series | None") -> "pd.Series | None":
 # kategori barang lain).
 KATEGORI_BLANK_LABEL = "(Tanpa Kategori)"
 
+# v3.9.49 — KATEGORI DEFAULT GABUNGAN (user: "sebenernya sudah ada
+# KATEGORI dari file Rekap Mentah folder Deviasi Weekly jadi bisa ambil
+# kategori dari situ jadi secara default di semua tab kategori sudah
+# pilih: COM DEVIASI - RESTO dan Biaya Packaging - RESTO"): kolom
+# KATEGORI file Rekap Mentah (sheet '1  DEVIASI WEEKLY') kini DIBAWA
+# pipeline (fn_rekap_mentah → query_full_rekap_mentah_so → append1
+# override PRIORITAS atas master '21. DBS Kategori' — barang di rekap
+# memakai kategori rekapnya; barang hanya-di-master/in-only tetap
+# memakai master). Dua nilai kategori rekap user dijadikan seleksi
+# DEFAULT gabungan di semua tab ber-filter kategori (Deviasi GR/PCS ·
+# 🧮 Nominal per Resto · Pivot · default header Rekap Selisih IN).
+KATEGORI_REKAP_VALUES = ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO")
+KATEGORI_DEFAULT_LABEL = "COM DEVIASI - RESTO + Biaya Packaging - RESTO"
+
+
+def kategori_multi_values(sel) -> "tuple[str, ...] | None":
+    """v3.9.49 — himpunan kategori yang dicocokkan seleksi GABUNGAN
+    (entry default KATEGORI_DEFAULT_LABEL), atau None bila seleksi bukan
+    entri gabungan.
+
+    Konsumen memakai ini SEBELUM cabang kategori_passthrough — entri
+    gabungan juga ber-passthrough baris kosong (kebijakan v3.9.45 tetap:
+    barang tanpa kategori mana pun tidak boleh lenyap dari seleksi
+    DEFAULT).
+    """
+    if sel is None:
+        return None
+    if str(sel).strip() == KATEGORI_DEFAULT_LABEL:
+        return KATEGORI_REKAP_VALUES
+    return None
+
+
+def kategori_filter_mask(kat, sel):
+    """v3.9.49 — mask baris yang cocok seleksi kategori GABUNGAN
+    (case-insensitive + strip — entri gabungan VIRTUAL, bukan nilai data
+    tunggal). None bila seleksi bukan entri gabungan atau kat None."""
+    vals = kategori_multi_values(sel)
+    if vals is None or kat is None:
+        return None
+    s = kat.astype(str).str.strip().str.upper()
+    return s.isin([v.upper() for v in vals])
+
+
+def kategori_has_default_values(series) -> bool:
+    """v3.9.49 — apakah kolom KATEGORI memuat salah satu nilai rekap
+    default (dipakai view utk memasang entry gabungan + seleksi default
+    hanya bila relevan dgn data — tanpa itu, entry default di data tanpa
+    kategori rekap akan memfilter 0 baris secara membingungkan)."""
+    if series is None:
+        return False
+    try:
+        s = series.dropna().astype(str).str.strip().str.upper()
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return bool(s.isin([v.upper() for v in KATEGORI_REKAP_VALUES]).any())
+
 
 def kategori_passthrough(sel) -> bool:
     """v3.9.45 — apakah seleksi kategori meng-include baris TANPA
@@ -192,12 +248,19 @@ def kategori_passthrough(sel) -> bool:
         keluhan v3.9.45);
     (c) baris tanpa kategori punya entry combobox sendiri
         (KATEGORI_BLANK_LABEL) utk akses eksplisit.
+    v3.9.49 — entri gabungan DEFAULT (KATEGORI_DEFAULT_LABEL — kategori
+    Rekap Mentah) ikut ber-passthrough (kebijakan (a) berlaku utk
+    seleksi default mana pun; cabang multi-nilai diperiksa view
+    SEBELUM cabang ini).
     Konsumen: deviasi_view ×2 · nominal_resto_view · pivot_view ×2
     (via re-export widgets).
     """
     if sel is None:
         return False
-    return str(sel).strip().lower() == "deviasi"
+    s = str(sel).strip().lower()
+    if s == "deviasi":
+        return True
+    return s == KATEGORI_DEFAULT_LABEL.strip().lower()
 
 
 # =============================================================================

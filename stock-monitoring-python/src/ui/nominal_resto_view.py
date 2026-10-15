@@ -97,6 +97,7 @@ from .theme import (
 from .widgets import (
     CELL_TAGS_SUPPORTED,
     KATEGORI_BLANK_LABEL,  # v3.9.45 — entry khusus baris tanpa kategori master
+    KATEGORI_DEFAULT_LABEL,  # v3.9.49 — entry gabungan default (rekap)
     Card,
     ColumnManager,
     EmptyState,
@@ -112,7 +113,9 @@ from .widgets import (
     fmt_int_id,
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
-    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default Deviasi
+    kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
+    kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
+    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
@@ -381,6 +384,10 @@ class NominalRestoView(tk.Frame):
         # v3.9.36 — filter KATEGORI (user: "tambah filter Kategori dengan
         # default pilihan Kategori = Deviasi"; pola r0b deviasi_view):
         # 'Semua' = tanpa filter; DEFAULT 'Deviasi' (case-insensitive).
+        # v3.9.49 — DEFAULT BARU: entry gabungan kategori Rekap Mentah
+        # (user: "secara default di semua tab kategori sudah pilih: COM
+        # DEVIASI - RESTO dan Biaya Packaging - RESTO") bila ada di data;
+        # combo dilebarkan utk label gabungan panjang.
         r1b = tk.Frame(fbody, bg=C_CARD)
         r1b.pack(fill="x", pady=(6, 0))
         tk.Label(r1b, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
@@ -388,12 +395,13 @@ class NominalRestoView(tk.Frame):
         self._kategori_var = tk.StringVar(value="Semua")
         self._kategori_combo = ttk.Combobox(
             r1b, textvariable=self._kategori_var, state="readonly",
-            width=18, font=font(9))
+            width=46, font=font(9))
         self._kategori_combo.pack(side="left", padx=(6, 0))
         self._kategori_combo.bind(
             "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
-        tk.Label(r1b, text="default: Deviasi (pola tab 📦 Deviasi GR) · "
-                            "kolom Bulan Lalu = file deviasi (⚖ Komparasi)",
+        tk.Label(r1b, text="default: kategori Rekap Mentah (pola tab 📦 "
+                            "Deviasi GR) · kolom Bulan Lalu = file "
+                            "deviasi (⚖ Komparasi)",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="left", padx=(12, 0))
 
@@ -508,6 +516,8 @@ class NominalRestoView(tk.Frame):
 
     # v3.9.36 — combobox KATEGORI ("Semua" = tanpa filter; pola
     # deviasi_view v3.9.19; default 'Deviasi' — case-insensitive).
+    # v3.9.49 — default BARU: entry gabungan kategori Rekap Mentah bila
+    # ada di data; fallback legacy 'Deviasi' → 'Semua'.
     def _on_kategori_changed(self):
         val = self._kategori_var.get()
         self._kategori_sel = None if (not val or val == "Semua") else val
@@ -515,6 +525,8 @@ class NominalRestoView(tk.Frame):
 
     def _default_kategori_value(self) -> str:
         values = list(self._kategori_combo["values"] or [])
+        if KATEGORI_DEFAULT_LABEL in values:
+            return KATEGORI_DEFAULT_LABEL
         for v in values:
             if str(v).strip().lower() == "deviasi":
                 return str(v)
@@ -692,7 +704,13 @@ class NominalRestoView(tk.Frame):
             kategori_vals = sorted(v for v in _kv.unique() if v)
         else:
             kategori_vals = []
-        _kv45 = ["Semua", KATEGORI_BLANK_LABEL]
+        # v3.9.49 — entry GABUNGAN default (kategori Rekap Mentah) hanya
+        # saat data memuat salah satu nilai rekap (pola deviasi_view).
+        _kv45 = ["Semua"]
+        if kategori_has_default_values(
+                data.get("KATEGORI") if data is not None else None):
+            _kv45.append(KATEGORI_DEFAULT_LABEL)
+        _kv45.append(KATEGORI_BLANK_LABEL)
         _kv45 += kategori_vals
         self._kategori_combo["values"] = _kv45
         self._reset_kategori()
@@ -758,6 +776,15 @@ class NominalRestoView(tk.Frame):
         if self._kategori_sel and "KATEGORI" in df.columns:
             if self._kategori_sel == KATEGORI_BLANK_LABEL:
                 df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_filter_mask(df["KATEGORI"],
+                                      self._kategori_sel) is not None:
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap
+                # Mentah): cocokkan SEMUA nilai + passthrough blank
+                # (kebijakan v3.9.45 (a)).
+                _mmask = kategori_filter_mask(
+                    df["KATEGORI"], self._kategori_sel)
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[_mmask | _blank]
             elif kategori_passthrough(self._kategori_sel):
                 _blank = kategori_blank_mask(df["KATEGORI"])
                 df = df[(df["KATEGORI"].astype(str)

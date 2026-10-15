@@ -585,6 +585,48 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         expanded_kategori["AKTIF/NON"] = None
 
     # =========================================================================
+    # 5c. KATEGORI REKAP MENTAH — PRIORITAS ATAS MASTER (v3.9.49)
+    # =========================================================================
+    # user: "Saat ini look up nama barang ambil dari dbs kategori ya?
+    # sebenernya sudah ada KATEGORI dari file Rekap Mentah folder Deviasi
+    # Weekly jadi bisa ambil kategori dari situ jadi secara default di
+    # semua tab kategori sudah pilih: COM DEVIASI - RESTO dan Biaya
+    # Packaging - RESTO" (+ "BUMBU PASTA KUAH MLGPAR INI kenapa masih
+    # tidak ada ya?" — item tak terdaftar master → kategori kosong →
+    # kelas bug 100383). Kolom KATEGORI rekap SO (fn_rekap_mentah v3.9.49
+    # → query_full_rekap_mentah_so) kini MENIMPA nilai master utk barang
+    # yang punya baris rekap: lookup per Nama Barang pada key
+    # TER-NORMALISASI (strip + upper — pola _KEY master LANGKAH 5 di
+    # atas; first-match utk duplikat). Barang tanpa baris rekap
+    # (IN-only / saldo-only) TETAP memakai kategori master; AKTIF/NON
+    # tetap murni master.
+    _n_rk_barang = 0
+    _n_rk_rows = 0
+    if ("KATEGORI" in full_rekap_so.columns
+            and "Nama Barang" in full_rekap_so.columns
+            and "Nama Barang" in expanded_kategori.columns):
+        _rk = full_rekap_so[["Nama Barang", "KATEGORI"]].copy()
+        _rk["Nama Barang"] = _rk["Nama Barang"].astype(str).str.strip().str.upper()
+        _rk["KATEGORI"] = _rk["KATEGORI"].astype(str).str.strip()
+        _rk = _rk[_rk["KATEGORI"].ne("")
+                  & _rk["KATEGORI"].str.lower().ne("nan")
+                  & _rk["KATEGORI"].str.lower().ne("none")]
+        _rk = _rk.drop_duplicates(subset=["Nama Barang"], keep="first")
+        _rk_map = dict(zip(_rk["Nama Barang"], _rk["KATEGORI"]))
+        if _rk_map:
+            _kk = expanded_kategori["Nama Barang"].astype(str).str.strip().str.upper()
+            _rk_val = _kk.map(_rk_map)
+            _has_rk = _rk_val.notna()
+            if bool(_has_rk.any()):
+                expanded_kategori["KATEGORI"] = _rk_val.where(
+                    _has_rk, expanded_kategori["KATEGORI"])
+                _n_rk_barang = len(_rk_map)
+                _n_rk_rows = int(_has_rk.sum())
+    if _n_rk_barang:
+        print(f"    KATEGORI Rekap Mentah (prioritas atas master): "
+              f"{_n_rk_barang} barang ({_n_rk_rows:,} baris) ber-kategori rekap")
+
+    # =========================================================================
     # 5b. SOURCE KIRIMAN PER PASANGAN (v3.9.29 — MENGGANTI nilai master)
     # =========================================================================
     # Klasifikasi dari sumber IN AKTUAL per (Nama Barang, NAMA RESTO):

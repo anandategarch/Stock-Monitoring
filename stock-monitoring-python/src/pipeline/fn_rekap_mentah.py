@@ -45,6 +45,19 @@ v3.9.42 — AUDIT FIX (61-a):
   (strip+upper KEDUA sisi — mirror jalur combined; dulu exact-case
   → 'so'/'So ' tertolak senyap); workbook gabungan lain di folder
   yang sama yang diabaikan first-match-wins kini DISEBUT di [INFO].
+
+v3.9.49 — KOLOM KATEGORI REKAP MENTAH DIBAWA (user: "sebenernya sudah
+ada KATEGORI dari file Rekap Mentah folder Deviasi Weekly jadi bisa
+ambil kategori dari situ"): sheet '1  DEVIASI WEEKLY' user punya
+kolom KATEGORI (nilai 'COM DEVIASI - RESTO' / 'Biaya Packaging -
+RESTO') tepat setelah NAMA RESTO — sebelumnya kolom itu DIBUANG di
+_combined_to_long (hanya _BASE_COLS + hari yang diseleksi) sehingga
+lookup kategori app HANYA bergantung master '21. DBS Kategori'
+(item tak terdaftar master → kategori kosong → kelas bug 100383).
+Kini kolom KATEGORI dibawa di KEDUA jalur (combined + per-resto)
+BILA ADA di sheet (schema lama tanpa KATEGORI tetap didukung — kolom
+opsional, tidak mengubah bentuk output lama); konsumen:
+query_full_rekap_mentah_so → append1 override prioritas.
 """
 import os
 from typing import List, Optional
@@ -163,6 +176,16 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
         stripped = col.astype(str).str.strip()
         sel[name] = stripped.where(col.notna(), other=None)
 
+    # v3.9.49 — kolom KATEGORI rekap mentah dibawa BILA ADA di sheet
+    # (nilai dipakai append1 sebagai sumber kategori PRIORITAS atas
+    # master '21. DBS Kategori'; schema lama tanpa kolom ini tetap
+    # didukung — output tak berkolom KATEGORI).
+    _kat_pos = _first("KATEGORI")
+    if _kat_pos is not None:
+        _kcol = df.iloc[:, _kat_pos]
+        sel["KATEGORI"] = (_kcol.astype(str).str.strip()
+                           .where(_kcol.notna(), other=None))
+
     # kolom hari → numeric
     for pos, d in days.items():
         sel[str(d)] = safe_to_numeric(df.iloc[:, pos])
@@ -176,9 +199,14 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
             return None
 
     # unpivot hari → (Attribute, Value)
+    # v3.9.49 — KATEGORI (bila ada) ikut sebagai id_vars supaya tiap
+    # baris long membawa kategori rekap barangnya.
+    _idv = [c for c in _BASE_COLS if c in sel.columns]
+    if "KATEGORI" in sel.columns:
+        _idv.append("KATEGORI")
     day_names = [str(d) for d in sorted(set(days.values()))]
     melted = sel.melt(
-        id_vars=[c for c in _BASE_COLS if c in sel.columns],
+        id_vars=_idv,
         value_vars=day_names,
         var_name="Attribute",
         value_name="Value"
@@ -189,7 +217,9 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
     melted["Value"] = safe_to_numeric(melted["Value"])
     melted = melted.dropna(subset=["Value"]).reset_index(drop=True)
 
-    out_cols = [c for c in _BASE_COLS if c in melted.columns] + ["Attribute", "Value"]
+    out_cols = ([c for c in _BASE_COLS if c in melted.columns]
+                + (["KATEGORI"] if "KATEGORI" in melted.columns else [])
+                + ["Attribute", "Value"])
     return melted[out_cols]
 
 
@@ -407,6 +437,11 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
 
     # === STEP 6: base columns + days ===
     base = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS", "NAMA BARANG", "SATUAN"]
+    # v3.9.49 — kolom KATEGORI rekap mentah dibawa BILA ADA di sheet
+    # per-resto (schema lama tanpa kolom ini tetap didukung; mirror
+    # jalur combined _combined_to_long).
+    if "KATEGORI" in ren.columns:
+        base = base + ["KATEGORI"]
     if mode == "berjalan":
         days = [str(d) for d in range(1, 32)]
     else:  # "lalu"

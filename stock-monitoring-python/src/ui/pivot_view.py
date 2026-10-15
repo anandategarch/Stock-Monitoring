@@ -71,6 +71,7 @@ from .theme import (
 from .widgets import (
     CELL_TAGS_SUPPORTED,
     KATEGORI_BLANK_LABEL,  # v3.9.45 — entry khusus baris tanpa kategori master
+    KATEGORI_DEFAULT_LABEL,  # v3.9.49 — entry gabungan default (rekap)
     Card,
     ColumnManager,
     EmptyState,
@@ -89,7 +90,9 @@ from .widgets import (
     identify_to_column,
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
-    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default Deviasi
+    kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
+    kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
+    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
     run_async,
     validated_tgl_entry,
@@ -374,6 +377,13 @@ class PivotTableView(tk.Frame):
             # baris tanpa kategori master.
             if kategori == KATEGORI_BLANK_LABEL:
                 df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_filter_mask(df["KATEGORI"], kategori) is not None:
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap
+                # Mentah): SEMUA nilai gabungan + passthrough blank
+                # (kebijakan v3.9.45 (a)).
+                _mmask = kategori_filter_mask(df["KATEGORI"], kategori)
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[_mmask | _blank]
             elif kategori_passthrough(kategori):
                 _blank = kategori_blank_mask(df["KATEGORI"])
                 df = df[(df["KATEGORI"].astype(str) == kategori)
@@ -540,21 +550,38 @@ class PivotTableView(tk.Frame):
         # makin lengkap membuat entry kondisional hilang senyap — user:
         # "kategori tanpa kategori kok kosong" — mencari opsi itu & tak
         # menemukannya di dropdown).
+        # v3.9.49 — entry GABUNGAN default (kategori Rekap Mentah) setelah
+        # '(All)' hanya bila data memuat salah satu nilai rekap (pola
+        # deviasi_view; tanpa itu entry akan memfilter 0 baris di data
+        # lama tanpa kategori rekap).
         if "KATEGORI" in self.data.columns:
-            _kv45 = [v for v in (self.kategori_combo["values"] or [])]
-            if KATEGORI_BLANK_LABEL not in _kv45:
-                self.kategori_combo["values"] = (
-                    ["(All)", KATEGORI_BLANK_LABEL]
-                    + [v for v in _kv45 if v != "(All)"])
+            # v3.9.49 — susun ulang: '(All)' → entry gabungan default
+            # (bila data ber-kategori rekap) → '(Tanpa Kategori)' →
+            # nilai data terurut. Deterministik (idempoten — entri
+            # virtual di-strip dulu lalu disisipkan ulang).
+            _kv45 = [v for v in (self.kategori_combo["values"] or [])
+                     if v not in ("(All)", KATEGORI_DEFAULT_LABEL,
+                                  KATEGORI_BLANK_LABEL)]
+            _head = ["(All)"]
+            if kategori_has_default_values(self.data["KATEGORI"]):
+                _head.append(KATEGORI_DEFAULT_LABEL)
+            _head.append(KATEGORI_BLANK_LABEL)
+            self.kategori_combo["values"] = _head + _kv45
         # v3.9.36 — DEFAULT KATEGORI = "Deviasi" (user: "di tab pivot
         # tabel default kategori Deviasi"; pola deviasi_view v3.9.19 —
         # case-insensitive, fallback "(All)" bila tak ada di data).
+        # v3.9.49 — DEFAULT BARU: entry gabungan kategori Rekap Mentah
+        # bila ada di data; fallback legacy 'Deviasi' → '(All)'.
         # Reset tiap load_data (pola _reset_kategori deviasi_view).
         self._reset_kategori()
 
     # v3.9.36 — default kategori 'Deviasi' (pola deviasi_view v3.9.19).
+    # v3.9.49 — default BARU: entry gabungan kategori Rekap Mentah bila
+    # ada di data; fallback legacy 'Deviasi' → '(All)'.
     def _default_kategori_value(self) -> str:
         values = list(self.kategori_combo["values"] or [])
+        if KATEGORI_DEFAULT_LABEL in values:
+            return KATEGORI_DEFAULT_LABEL
         for v in values:
             if str(v).strip().lower() == "deviasi":
                 return str(v)
@@ -630,6 +657,15 @@ class PivotTableView(tk.Frame):
             # khusus baris tanpa kategori master (mirror _col_values).
             if st["kategori"] == KATEGORI_BLANK_LABEL:
                 df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_filter_mask(df["KATEGORI"],
+                                      st["kategori"]) is not None:
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap
+                # Mentah): SEMUA nilai gabungan + passthrough blank
+                # (kebijakan v3.9.45 (a)).
+                _mmask = kategori_filter_mask(
+                    df["KATEGORI"], st["kategori"])
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[_mmask | _blank]
             elif kategori_passthrough(st["kategori"]):
                 _blank = kategori_blank_mask(df["KATEGORI"])
                 df = df[(df["KATEGORI"].astype(str) == st["kategori"])

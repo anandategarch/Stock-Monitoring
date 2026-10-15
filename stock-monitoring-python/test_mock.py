@@ -893,6 +893,186 @@ def run_test_v3920_fixes():
     return True
 
 
+def run_test_v3949_rekap_kategori():
+    """[6c] v3.9.49: KATEGORI Rekap Mentah DIBAWA (per-resto + combined)
+    + PRIORITAS atas master '21. DBS Kategori' di append1 LANGKAH 5c
+    (user: "sebenernya sudah ada KATEGORI dari file Rekap Mentah folder
+    Deviasi Weekly jadi bisa ambil kategori dari situ"; default gabungan
+    'COM DEVIASI - RESTO + Biaya Packaging - RESTO')."""
+    n_ok = [0]
+
+    def check49(name, cond, detail=""):
+        assert cond, f"FAIL: {name} {detail}"
+        n_ok[0] += 1
+        print(f"    OK {name}" + ((" — " + detail) if detail else ""))
+
+    print("\n  [6c] (v3.9.49) KATEGORI Rekap Mentah — bawa kolom + prioritas")
+    tmp = tempfile.mkdtemp(prefix="t3949_kat_")
+    root = os.path.join(tmp, "9.NEW QUERY")
+
+    # --- 1. rekap BERJALAN per-resto DENGAN kolom KATEGORI (pola sheet
+    #         user '1  DEVIASI WEEKLY': KATEGORI tepat setelah NAMA RESTO) —
+    #         GULA → COM DEVIASI - RESTO; CINCAU → Biaya Packaging - RESTO.
+    def _write_rekap_kat(filepath, mode, kategori_on, sheet="REKAP MENTAH"):
+        days = list(range(1, 32)) if mode == "berjalan" else list(range(25, 32))
+        headers = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS",
+                   "NAMA BARANG", "SATUAN"]
+        if kategori_on:
+            headers.insert(1, "KATEGORI")
+        headers += [str(d) for d in days]
+        data = []
+        for barang, satuan, kat in (
+                ("GULA (V.20)", "GR", "COM DEVIASI - RESTO"),
+                ("CINCAU (V.20)", "KG", "Biaya Packaging - RESTO")):
+            for jenis in ("SO", "BARANG MASUK"):
+                row = ["MLGPAR.001"]
+                if kategori_on:
+                    row.append(kat)
+                row += ["input so harian", jenis, "OK", barang, satuan]
+                row += [100 if (d == 1 and jenis == "SO") else 0
+                        for d in days]
+                data.append(row)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = sheet[:31]
+        for c, h in enumerate(headers, 1):
+            ws.cell(row=1, column=c, value=h)
+        for r, vals in enumerate(data, 2):
+            for c, v in enumerate(vals, 1):
+                if v is not None:
+                    ws.cell(row=r, column=c, value=v)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        wb.save(filepath)
+        wb.close()
+    _write_rekap_kat(os.path.join(root, "1. DEVIASI WEEKLY", "MLGPAR.xlsx"),
+                     "berjalan", kategori_on=True)
+    # rekap LALU TANPA KATEGORI (schema lama — back-compat: kolom opsional)
+    _write_rekap_kat(os.path.join(root, "1.12 Rekap Mentah Bulan Lalu",
+                                  "MLGPAR.xlsx"),
+                     "lalu", kategori_on=False)
+    # master: SEMUA barang → DEVIASI (harus DITIMPA kategori rekap utk
+    # barang ber-rekap; BUMBU PASTA KUAH saldo-only TETAP master)
+    create_mock_dbs_kategori(
+        os.path.join(root, "21. DBS Kategori", "kategori.xlsx"),
+        [("GULA (V.20)", "GR"), ("CINCAU (V.20)", "KG"),
+         ("BUMBU PASTA KUAH", "GR")])
+    # 42.17: BUMBU PASTA KUAH saldo-only (whitelist 10.FOOD — pola
+    # create_mock_4217 barang ekstra)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "#42.17. Kuantitas Barang per Gu"
+    for i in range(4):
+        ws.cell(row=i + 1, column=1, value=f"Metadata {i + 1}")
+    ws.cell(row=5, column=1, value="Nama Barang")
+    ws.cell(row=5, column=2, value="Kode Barang")
+    ws.cell(row=5, column=3, value="Kategori Barang")
+    ws.cell(row=5, column=4, value="Nama Satuan")
+    ws.cell(row=5, column=5, value="RESTO MALANG (MLGPAR)")
+    ws.cell(row=6, column=1, value="BUMBU PASTA KUAH")
+    ws.cell(row=6, column=2, value=100383)
+    ws.cell(row=6, column=3, value="10.FOOD [RM] - COM V.2")
+    ws.cell(row=6, column=4, value="GR")
+    ws.cell(row=6, column=5, value=84)
+    os.makedirs(os.path.join(root, "6.1 42.17 Saldo Awal"), exist_ok=True)
+    wb.save(os.path.join(root, "6.1 42.17 Saldo Awal", "saldo.xlsx"))
+    wb.close()
+
+    import json as _json  # noqa: F401 — konsisten pola seksi lain
+    cfg_path = _v20_config(root, sheets={
+        "RekapMentah": "REKAP MENTAH",
+        "SaldoAwal4217": "#42.17. Kuantitas Barang per Gu",
+        "DBSKategori": "Sheet1",
+    })
+    cfg = Config(cfg_path)
+
+    # --- 2. fn_rekap_mentah: kolom KATEGORI dibawa (jalur per-resto) ---
+    from src.pipeline.fn_rekap_mentah import fn_rekap_mentah
+    rk = fn_rekap_mentah(cfg.folder("RekapBerjalan"), "berjalan",
+                         ["BARANG MASUK", "SO"])
+    check49("fn_rekap_mentah (per-resto): KATEGORI DIBAWA bila sheet "
+            "punya kolom itu",
+            "KATEGORI" in rk.columns and len(rk) > 0,
+            f"cols={list(rk.columns)}")
+    _gk = rk[rk["NAMA BARANG"] == "GULA (V.20)"]["KATEGORI"].dropna()
+    check49("fn_rekap_mentah: nilai KATEGORI rekap utuh (GULA → "
+            "COM DEVIASI - RESTO)",
+            set(_gk) == {"COM DEVIASI - RESTO"}, f"got {set(_gk)}")
+    rk_l = fn_rekap_mentah(cfg.folder("RekapLalu"), "lalu",
+                           ["BARANG MASUK", "SO"])
+    check49("fn_rekap_mentah: schema LAMA tanpa KATEGORI tetap didukung "
+            "(kolom opsional — output tak berkolom KATEGORI)",
+            "KATEGORI" not in rk_l.columns and len(rk_l) > 0,
+            f"cols={list(rk_l.columns)}")
+
+    # --- 3. combined workbook (fallback) bawa KATEGORI ------------------
+    tmp2 = tempfile.mkdtemp(prefix="t3949_comb_")
+    comb_dir = os.path.join(tmp2, "1. DEVIASI WEEKLY")
+    # sheet BUKAN 'REKAP MENTAH' → jalur per-resto tak menemukan apa pun
+    # → fallback combined (NAMA RESTO dari KOLOM — pola workbook user
+    # '01.1 CEK STOCK V2.xlsb' sheet '1  DEVIASI WEEKLY').
+    _write_rekap_kat(os.path.join(comb_dir, "CEK STOCK V2.xlsx"),
+                     "berjalan", kategori_on=True,
+                     sheet="1  DEVIASI WEEKLY")
+    rkc = fn_rekap_mentah(comb_dir, "berjalan", ["BARANG MASUK", "SO"])
+    check49("fn_rekap_mentah (combined fallback): KATEGORI DIBAWA",
+            "KATEGORI" in rkc.columns and len(rkc) > 0,
+            f"cols={list(rkc.columns)}")
+
+    # --- 4. append1 LANGKAH 5c: prioritas rekap atas master -------------
+    final = build_append1(cfg)
+    check49("append1: barang ber-rekap → KATEGORI rekap MENIMPA master "
+            "'DEVIASI' (GULA → COM DEVIASI - RESTO)",
+            set(final[final["Nama Barang"] == "GULA (V.20)"]
+                ["KATEGORI"].dropna()) == {"COM DEVIASI - RESTO"})
+    check49("append1: CINCAU → Biaya Packaging - RESTO (rekap)",
+            set(final[final["Nama Barang"] == "CINCAU (V.20)"]
+                ["KATEGORI"].dropna()) == {"Biaya Packaging - RESTO"})
+    check49("append1: BUMBU PASTA KUAH saldo-only (TANPA rekap) TETAP "
+            "kategori master 'DEVIASI'",
+            set(final[final["Nama Barang"] == "BUMBU PASTA KUAH"]
+                ["KATEGORI"].dropna()) == {"DEVIASI"})
+
+    # --- 5. unit helpers (dipakai semua view) ---------------------------
+    import pandas as _pd
+
+    from src.pipeline.helpers import (
+        KATEGORI_DEFAULT_LABEL,
+        kategori_filter_mask,
+        kategori_has_default_values,
+        kategori_multi_values,
+        kategori_passthrough,
+    )
+    check49("kategori_multi_values: label gabungan → 2 nilai rekap",
+            kategori_multi_values(KATEGORI_DEFAULT_LABEL) ==
+            ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO"))
+    check49("kategori_multi_values: seleksi biasa/None → None",
+            kategori_multi_values("DEVIASI") is None
+            and kategori_multi_values(None) is None)
+    check49("kategori_passthrough: label gabungan ikut passthrough "
+            "(default menyertakan blank)",
+            kategori_passthrough(KATEGORI_DEFAULT_LABEL) is True
+            and kategori_passthrough("deviasi") is True
+            and kategori_passthrough("BAHAN") is False)
+    _s = _pd.Series(["COM DEVIASI - RESTO", "BAHAN", None,
+                     "biaya packaging - resto"])
+    check49("kategori_has_default_values: case-insensitive + strip",
+            kategori_has_default_values(_s) is True
+            and kategori_has_default_values(
+                _pd.Series(["BAHAN", "DEVIASI"])) is False
+            and kategori_has_default_values(None) is False)
+    _m = kategori_filter_mask(_s, KATEGORI_DEFAULT_LABEL)
+    check49("kategori_filter_mask: cocok 2 nilai (case-insensitive), "
+            "bukan None bila label gabungan",
+            _m is not None and _m.tolist() == [True, False, False, True])
+    check49("kategori_filter_mask: None bila bukan label gabungan",
+            kategori_filter_mask(_s, "DEVIASI") is None)
+
+    print(f"    ✓ [6c] v3.9.49: {n_ok[0]}/{n_ok[0]} checks OK")
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(tmp2, ignore_errors=True)
+    return True
+
+
 # =============================================================================
 # MAIN TEST
 # =============================================================================
@@ -1330,6 +1510,9 @@ def run_test():
     # v3.9.20 — deep-audit pipeline fixes (agent 35-d): LANGKAH 9 tie/NA/
     # strip, fn_4205 lalu anchor resto, resolusi sheet folder lalu, e2e
     run_test_v3920_fixes()
+
+    # v3.9.49 — KATEGORI Rekap Mentah: bawa kolom + prioritas atas master
+    run_test_v3949_rekap_kategori()
 
     # Test view widgets (smoke test)
     print("\n  [7] Testing view widgets...")

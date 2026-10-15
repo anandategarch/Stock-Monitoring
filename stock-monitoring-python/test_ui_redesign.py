@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.48", APP_VERSION == "3.9.48",
+    check("Versi = 3.9.49", APP_VERSION == "3.9.49",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1149,14 +1149,17 @@ def main():
     # (v3.9.29: kolom KATEGORI juga DIHAPUS; v3.9.34: Out_H/BK_H DIHAPUS
     # + kolom Nominal (Harga 41.09 × Deviasi) SISIP setelah Deviasi →
     # skema kini 20 kolom, Dev to BOM% dst. bergeser ke indeks 17..19.)
+    # (v3.9.49: kolom AKTIF/NON DIHAPUS — pindah ke combobox Filter;
+    # skema kini 19 kolom, Dev to BOM% dst. bergeser ke indeks 16..18.)
     gr_cols = [c[0] for c in app.deviasi_gr_view.COLUMNS]
-    check("(v3.9.6→v3.9.34) Skema: Dev to BOM% + Stok Seharusnya + CEK "
-          "setelah Rank; Max Deviasi/ACR/Total ACR/KATEGORI/Out_H/BK_H "
-          "DIHAPUS; kolom Nominal (v3.9.34) ada",
-          gr_cols[17:20] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
+    check("(v3.9.6→3.9.49) Skema: Dev to BOM% + Stok Seharusnya + CEK "
+          "setelah Rank; Max Deviasi/ACR/Total ACR/KATEGORI/Out_H/BK_H/"
+          "AKTIF-NON DIHAPUS; kolom Nominal (v3.9.34) ada",
+          gr_cols[16:19] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
           "Max Deviasi" not in gr_cols and "ACR" not in gr_cols and
           "Total ACR" not in gr_cols and "KATEGORI" not in gr_cols and
           "Out_H" not in gr_cols and "BK_H" not in gr_cols and
+          "AKTIF/NON" not in gr_cols and
           "Nominal" in gr_cols and
           gr_cols.index("Nominal") == gr_cols.index("Deviasi") + 1,
           f"got {gr_cols}")
@@ -4398,13 +4401,18 @@ def main():
     # v3.9.29 (user: "hapus kolom kategori di tab deviasi gr dan pcs karna
     # sudah ada filter di atas nya") — kolom TABEL dihapus; dulu (v3.9.13)
     # berada tepat setelah Satuan.
-    check("(v3.9.29) Kolom KATEGORI DIHAPUS dari tabel Deviasi GR",
-          "KATEGORI" not in _cols13 and
-          "AKTIF/NON" in _cols13 and
-          _cols13.index("AKTIF/NON") == _cols13.index("Satuan") + 1,
+    # v3.9.49 (user: "kolom Aktif dan non aktif pindah ke bagian filter
+    # dekat kategori aja") — kolom tabel AKTIF/NON ikut DIHAPUS; fungsinya
+    # pindah ke combobox AKTIF/NON di kartu Filter (cek §59).
+    check("(v3.9.29/49) Kolom KATEGORI & AKTIF/NON DIHAPUS dari tabel "
+          "Deviasi GR (keduanya kini filter di kartu Filter)",
+          "KATEGORI" not in _cols13 and "AKTIF/NON" not in _cols13,
           f"got cols={_cols13}")
     check("(v3.9.29) Kolom KATEGORI juga hilang di tree (displaycolumns)",
           "KATEGORI" not in list(grv13.tree["columns"]),
+          f"got {list(grv13.tree['columns'])}")
+    check("(v3.9.49) Kolom AKTIF/NON juga hilang di tree (displaycolumns)",
+          "AKTIF/NON" not in list(grv13.tree["columns"]),
           f"got {list(grv13.tree['columns'])}")
     check("(v3.9.13) Combobox KATEGORI ada (GR) + default 'Semua'",
           hasattr(grv13, "_kategori_var") and
@@ -13072,6 +13080,263 @@ def main():
     check("(v3.9.48) WINDOW_SIZE tetap '1280x760' (pipeline lama utuh di "
           "proses DPI-unaware / non-Windows)",
           _WS58 == "1280x760" and _WW58 == 1280 and _WH58 == 760)
+
+    # == 59. (v3.9.49) FILTER AKTIF/NON (pindahan kolom) + KATEGORI
+    #    GABUNGAN DEFAULT (Rekap Mentah) + SEKAT VISUAL KELOMPOK ==
+    print("\n== 59. (v3.9.49) Filter AKTIF/NON + kategori Rekap Mentah "
+          "(default gabungan) + sekat visual kelompok ==")
+    from src.pipeline.helpers import (
+        KATEGORI_DEFAULT_LABEL as _KDL59,
+    )
+    from src.ui.deviasi_view import DeviasiView as _DV59
+
+    # --- (a) fixture campuran: 3 kelompok barang × resto, kategori rekap
+    # campuran, AKTIF/NON campuran (blank utk '(Kosong)') ---------------
+    def _row59(barang, resto, jenis, t, nilai, kat, aktif):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": t, "NILAI": nilai,
+                "SATUAN": "GR", "KATEGORI": kat, "AKTIF/NON": aktif,
+                "SOURCE KIRIMAN": None}
+
+    _rows59 = []
+    # AKTIF/NON = atribut PER BARANG (1:1 master — sama utk semua resto
+    # pasangannya; pola _aktif_lookup): CABE=AKTIF · PENTOL=NON AKTIF ·
+    # GULA=tanpa status (None → '(Kosong)').
+    for _r in ("MLGPAR", "SBYKET", "BDGUKU"):
+        _rows59 += [
+            _row59("CABE", _r, "1.SO", 25, 10.0,
+                   "COM DEVIASI - RESTO", "AKTIF"),
+            _row59("CABE", _r, "2.SALDO AKHIR", 25, 8.0,
+                   "COM DEVIASI - RESTO", "AKTIF"),
+        ]
+    for _r in ("MLGPAR", "SBYKET"):
+        _rows59 += [
+            _row59("PENTOL", _r, "1.SO", 25, 6.0,
+                   "Biaya Packaging - RESTO", "NON AKTIF"),
+            _row59("PENTOL", _r, "2.SALDO AKHIR", 25, 5.0,
+                   "Biaya Packaging - RESTO", "NON AKTIF"),
+        ]
+    # GULA × 1 resto (kelompok SATU baris; kategori LAIN = strict test;
+    # tanpa status AKTIF → kelas '(Kosong)')
+    _rows59 += [
+        _row59("GULA SATU", "MLGPAR", "1.SO", 25, 3.0, "LAIN", None),
+        _row59("GULA SATU", "MLGPAR", "2.SALDO AKHIR", 25, 2.0,
+               "LAIN", None),
+    ]
+    _df59 = pd.DataFrame(_rows59)
+
+    _top59 = tk.Toplevel(root)
+    _top59.geometry("1700x900+5+5")
+    _dv59 = _DV59(_top59, satuan_mode="GR")
+    _dv59.pack(fill="both", expand=True)
+    _dv59.load_data(_df59)
+    _dv59.ensure_refreshed()
+    wait_view(root, _dv59)
+
+    def _names59(view):
+        return [view.tree.set(k, "Nama Barang")
+                for k in view.tree.get_children("")]
+
+    def _grptag59(view, k):
+        tags = [str(t) for t in (view.tree.item(k, "tags") or ())]
+        return next((t for t in tags if t.startswith("grp")), None)
+
+    # --- (b) KATEGORI GABUNGAN DEFAULT — dicek SAAT STATE LOAD
+    # (kategori = default gabungan, sebelum diubah-ubah) ---------------
+    _kv59 = list(_dv59._kategori_combo["values"])
+    check("(v3.9.49) Combobox KATEGORI: entry GABUNGAN setelah 'Semua' "
+          "bila data ber-kategori rekap (+ '(Tanpa Kategori)' + nilai)",
+          _kv59 == ["Semua", _KDL59, "(Tanpa Kategori)",
+                    "Biaya Packaging - RESTO", "COM DEVIASI - RESTO",
+                    "LAIN"],
+          f"got {_kv59}")
+    check("(v3.9.49) DEFAULT seleksi = entry GABUNGAN (COM DEVIASI - "
+          "RESTO + Biaya Packaging - RESTO)",
+          _dv59._kategori_var.get() == _KDL59 and
+          _dv59._kategori_sel == _KDL59,
+          f"got {_dv59._kategori_var.get()!r}")
+    check("(v3.9.49) default gabungan → baris 2 kategori rekap + "
+          "passthrough blank tampil; 'LAIN' tersembunyi (5 baris)",
+          sorted(set(_names59(_dv59))) == ["CABE", "PENTOL"] and
+          len(_dv59.tree.get_children("")) == 5,
+          f"got {sorted(set(_names59(_dv59)))} "
+          f"n={len(_dv59.tree.get_children(''))}")
+    _dv59._kategori_var.set("LAIN")
+    _dv59._on_kategori_changed()
+    wait_view(root, _dv59)
+    check("(v3.9.49) seleksi eksplisit 'LAIN' tetap STRICT (GULA saja)",
+          _names59(_dv59) == ["GULA SATU"],
+          f"got {_names59(_dv59)}")
+    _dv59._kategori_var.set("Semua")
+    _dv59._on_kategori_changed()
+    wait_view(root, _dv59)
+    check("(v3.9.49) kategori 'Semua' = tanpa penyaringan (semua 6 baris "
+          "tampil — perilaku tabel lama)",
+          len(_dv59.tree.get_children("")) == 6,
+          f"got {len(_dv59.tree.get_children(''))}")
+
+    # --- (c) FILTER AKTIF/NON (pindahan kolom tabel → kartu Filter) -----
+    check("(v3.9.49) Combobox AKTIF/NON ada di kartu Filter (GR) + "
+          "values Semua/AKTIF/NON AKTIF/(Kosong) + default 'Semua'",
+          hasattr(_dv59, "_aktif_combo") and
+          list(_dv59._aktif_combo["values"]) ==
+          ["Semua", "AKTIF", "NON AKTIF", "(Kosong)"] and
+          _dv59._aktif_var.get() == "Semua" and _dv59._aktif_sel is None,
+          f"got {list(_dv59._aktif_combo['values'])!r} "
+          f"sel={_dv59._aktif_sel!r}")
+    _dv59._aktif_var.set("AKTIF")
+    _dv59._on_aktif_changed()
+    wait_view(root, _dv59)
+    check("(v3.9.49) filter AKTIF → hanya barang ber-status AKTIF "
+          "(CABE×3 resto — status per-barang 1:1)",
+          _names59(_dv59) == ["CABE", "CABE", "CABE"],
+          f"got {_names59(_dv59)}")
+    _dv59._aktif_var.set("NON AKTIF")
+    _dv59._on_aktif_changed()
+    wait_view(root, _dv59)
+    check("(v3.9.49) filter NON AKTIF → hanya PENTOL×2",
+          _names59(_dv59) == ["PENTOL", "PENTOL"],
+          f"got {_names59(_dv59)}")
+    _dv59._aktif_var.set("(Kosong)")
+    _dv59._on_aktif_changed()
+    wait_view(root, _dv59)
+    check("(v3.9.49) filter '(Kosong)' → hanya GULA (tanpa status master)",
+          _names59(_dv59) == ["GULA SATU"],
+          f"got {_names59(_dv59)}")
+    _dv59._aktif_var.set("Semua")
+    _dv59._on_aktif_changed()
+    wait_view(root, _dv59)
+    # snapshot follow-up 'aktif' tetap terisi (nilai internal utuh)
+    _snap59 = _dv59._row_snaps.get(
+        _dv59.tree.get_children("")[0], {})
+    check("(v3.9.49) snapshot follow-up 'aktif' TETAP terisi (kolom "
+          "hilang dari tabel, nilai internal utuh)",
+          _snap59.get("aktif") == "AKTIF",
+          f"got {_snap59.get('aktif')!r}")
+    # kombinasi kategori LAIN + aktif NON AKTIF → 0 baris (GULA tanpa
+    # status) → status JUJUR
+    _dv59._kategori_var.set("LAIN")
+    _dv59._on_kategori_changed()
+    wait_view(root, _dv59)
+    _dv59._aktif_var.set("NON AKTIF")
+    _dv59._on_aktif_changed()
+    wait_view(root, _dv59)
+    check("(v3.9.49) status JUJUR saat 0 baris (AKTIF/NON tak match)",
+          len(_dv59.tree.get_children("")) == 0 and
+          "Tidak ada baris" in str(_dv59.status_var.get()),
+          f"n={len(_dv59.tree.get_children(''))} "
+          f"status={str(_dv59.status_var.get())[:70]!r}")
+    _dv59._reset_filter()
+    wait_view(root, _dv59)
+    check("(v3.9.49) ✕ Reset Filter → kembali DEFAULT GABUNGAN + AKTIF "
+          "'Semua'",
+          _dv59._kategori_var.get() == _KDL59
+          and _dv59._aktif_var.get() == "Semua",
+          f"kat={_dv59._kategori_var.get()!r} "
+          f"aktif={_dv59._aktif_var.get()!r}")
+
+    # --- (d) SEKAT VISUAL: banding kelompok + grp_head --------------------
+    _dv59._kategori_var.set("Semua")
+    _dv59._on_kategori_changed()
+    wait_view(root, _dv59)
+    _kids59 = list(_dv59.tree.get_children(""))
+    _seq59 = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
+              for k in _kids59]
+    check("(v3.9.49) banding kelompok: baris PERTAMA kelompok ≥2-baris = "
+          "grp_head, anggota lain = pita kelompok bergantian; kelompok "
+          "1-baris (GULA) = pita saja",
+          _seq59 == [("CABE", "grp_head"), ("CABE", "grp0"),
+                     ("CABE", "grp0"), ("GULA SATU", "grp1"),
+                     ("PENTOL", "grp_head"), ("PENTOL", "grp0")],
+          f"got {_seq59}")
+    # sort kolom lain → band dipasang ulang mengikuti urutan visual
+    _dv59._sort_by("Deviasi", reverse=True)
+    root.update()
+    _kids59b = list(_dv59.tree.get_children(""))
+    _seq59b = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
+               for k in _kids59b]
+    # setelah sort by Deviasi: urutan bisa berubah/tetap (nilai deviasi
+    # fixture seragam per kelompok — stable sort); band harus mengikuti
+    # ADJACENCY persis semantik _reapply_group_bands: baris = grp_head iff
+    # awal run ≥2-baris; selain itu pita grp0/grp1.
+    _ok_sort59 = (
+        len(_seq59b) == 6
+        and all(t in ("grp0", "grp1", "grp_head")
+                for _, t in _seq59b))
+    for _i in range(len(_seq59b)):
+        _b, _t = _seq59b[_i]
+        _prev_same = _i > 0 and _seq59b[_i - 1][0] == _b
+        _next_same = (_i + 1 < len(_seq59b)
+                      and _seq59b[_i + 1][0] == _b)
+        if not _prev_same and _next_same:
+            _ok_sort59 = _ok_sort59 and _t == "grp_head"
+        else:
+            _ok_sort59 = _ok_sort59 and _t in ("grp0", "grp1")
+    check("(v3.9.49) sort kolom lain → band dipasang ulang mengikuti "
+          "urutan visual (adjacency barang; tanpa crash)",
+          _ok_sort59, f"got {_seq59b}")
+    # re-apply idempoten: tag tak berubah pada pemanggilan kedua
+    _dv59._reapply_group_bands(_dv59.tree)
+    _seq59c = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
+               for k in _dv59.tree.get_children("")]
+    check("(v3.9.49) _reapply_group_bands IDEMPOTEN (pemanggilan kedua "
+          "tak mengubah tag)",
+          _seq59c == _seq59b, f"got {_seq59c}")
+    _dv59.destroy()
+    _top59.destroy()
+    root.update()
+
+    # --- (e) tab lain: default gabungan (nominal_resto · pivot ·
+    # in_selisih) -------------------------------------------------------
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV59
+    _top59n = tk.Toplevel(root)
+    _top59n.geometry("1700x900+5+5")
+    _nr59 = _NRV59(_top59n)
+    _nr59.pack(fill="both", expand=True)
+    _nr59.load_data(_df59)
+    _nr59.ensure_refreshed()
+    wait_view(root, _nr59)
+    check("(v3.9.49) tab 🧮 Nominal per Resto: default = entry GABUNGAN "
+          "(bila data ber-kategori rekap)",
+          _nr59._kategori_var.get() == _KDL59,
+          f"got {_nr59._kategori_var.get()!r}")
+    _nr59.destroy()
+    _top59n.destroy()
+    root.update()
+
+    from src.ui.pivot_view import PivotTableView as _PV59
+    _top59p = tk.Toplevel(root)
+    _top59p.geometry("1700x900+5+5")
+    _pv59 = _PV59(_top59p)
+    _pv59.pack(fill="both", expand=True)
+    _pv59.data = _df59
+    _pv59._populate_filters()
+    _pv59._show_content()
+    check("(v3.9.49) tab Pivot: entry GABUNGAN hadir setelah '(All)' + "
+          "default = GABUNGAN",
+          _KDL59 in list(_pv59.kategori_combo["values"]) and
+          _pv59.kategori_var.get() == _KDL59,
+          f"vals={list(_pv59.kategori_combo['values'])!r} "
+          f"sel={_pv59.kategori_var.get()!r}")
+    _pv59.destroy()
+    _top59p.destroy()
+    root.update()
+
+    from src.ui.in_selisih_view import InSelisihView as _ISV59
+    _top59i = tk.Toplevel(root)
+    _top59i.geometry("1700x900+5+5")
+    _is59 = _ISV59(_top59i)
+    _is59.pack(fill="both", expand=True)
+    _is59.data = _df59
+    _is59._apply_default_kategori()
+    check("(v3.9.49) tab Rekap Selisih IN: default KATEGORI = KEDUA "
+          "nilai rekap yang hadir di data (multi-select header ⧩)",
+          _is59._col_sel.get("KATEGORI") ==
+          ["COM DEVIASI - RESTO", "Biaya Packaging - RESTO"],
+          f"got {_is59._col_sel.get('KATEGORI')!r}")
+    _is59.destroy()
+    _top59i.destroy()
+    root.update()
 
     root.destroy()
 

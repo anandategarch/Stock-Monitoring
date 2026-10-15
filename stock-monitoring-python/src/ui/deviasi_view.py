@@ -220,6 +220,7 @@ from .theme import (
 from .widgets import (
     CELL_TAGS_SUPPORTED,
     KATEGORI_BLANK_LABEL,  # v3.9.45 — entry khusus baris tanpa kategori master
+    KATEGORI_DEFAULT_LABEL,  # v3.9.49 — entry gabungan default (rekap)
     Card,
     ColumnManager,
     EmptyState,
@@ -238,7 +239,9 @@ from .widgets import (
     identify_to_column,
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
-    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default Deviasi
+    kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
+    kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
+    kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
@@ -423,7 +426,11 @@ class DeviasiView(tk.Frame):
         # kategori di tab deviasi gr dan pcs karna sudah ada filter di
         # atasnya") — combobox KATEGORI di kartu Filter tetap; nilai tetap
         # hidup di pivot internal (filter post-pivot baris 1471).
-        ("AKTIF/NON", 70, "w"),
+        # v3.9.49 — kolom AKTIF/NON DIHAPUS dari tabel (user: "kolom Aktif
+        # dan non aktif pindah ke bagian filter dekat kategori") — kini
+        # combobox AKTIF/NON di kartu Filter (samping KATEGORI); nilai
+        # tetap dihitung internal (CEK 'Kosong/Non Aktif' + snapshot
+        # follow-up 'aktif' — baris dibangun dari cols_np, bukan COLUMNS).
         ("SO_H-2", 70, "e"),
         ("SO_H-1", 70, "e"),
         ("In_H-1", 70, "e"),
@@ -451,6 +458,22 @@ class DeviasiView(tk.Frame):
     # "highlight kolom deviasi dan kolom SO H") — tag cell Tk 9.
     HIGHLIGHT_COLS = ("Deviasi", "SO_H")
     HIGHLIGHT_BG = "#fef3c7"   # amber-100 — latar lembut, teks tetap terbaca
+
+    # v3.9.49 — SEKAT VISUAL ANTAR KELOMPOK BARANG (user: "dibagian antara
+    # Cabe dan pentol itu ada semacam sekat visual yang membatasi atau
+    # menandakan"): striping per-baris (evenrow/oddrow) DIGANTI banding per
+    # KELOMPOK Nama Barang — grp0/grp1 = pita latar bergantian per kelompok,
+    # grp_head = baris PERTAMA tiap kelompok (latar paling tegas = penanda
+    # 'kelompok baru dimulai'). Tag dipasang ulang tiap sort/clone supaya
+    # band mengikuti urutan visual (_reapply_group_bands).
+    # Tuple-of-tuples (bukan dict) — nilai KONSTAN immutable (mirror COLUMNS
+    # list-of-tuples kelas ini).
+    GRP_TAG_COLORS = (
+        ("grp0", "#ffffff"),      # kelompok genap — putih
+        ("grp1", "#f1f5f9"),      # kelompok ganjil — slate-100
+        ("grp_head", "#e2e8f0"),  # baris pertama tiap kelompok — slate-200
+    )
+    _GRP_TAGS = ("grp0", "grp1", "grp_head")
 
     CEK_THRESHOLD = 1.3
 
@@ -492,6 +515,9 @@ class DeviasiView(tk.Frame):
         # combobox KATEGORI (None = "Semua" = tanpa filter).
         self._kategori_lookup = {}
         self._kategori_sel: str | None = None
+        # v3.9.49 — filter AKTIF/NON (pindahan dari kolom tabel;
+        # None = "Semua" = tanpa filter).
+        self._aktif_sel: str | None = None
         self.go_to_proses = go_to_proses
         self._busy = False
         self._pending = False
@@ -605,6 +631,9 @@ class DeviasiView(tk.Frame):
         # v3.9.13 — filter KATEGORI (user: "tambah filter kategori di tab
         # deviasi pcs dan gr"); diterapkan POST-PIVOT di _prepare_rows
         # supaya SharedPivotCache GR+PCS tetap dihitung 1×.
+        # v3.9.49 — lebar combo dinaikkan (label entry gabungan default
+        # kategori Rekap Mentah panjang: 'COM DEVIASI - RESTO + Biaya
+        # Packaging - RESTO').
         r0b = tk.Frame(fbody, bg=C_CARD)
         r0b.pack(fill="x", pady=(6, 0))
         tk.Label(r0b, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
@@ -612,10 +641,30 @@ class DeviasiView(tk.Frame):
         self._kategori_var = tk.StringVar(value="Semua")
         self._kategori_combo = ttk.Combobox(
             r0b, textvariable=self._kategori_var, state="readonly",
-            width=18, font=font(9))
+            width=46, font=font(9))
         self._kategori_combo.pack(side="left", padx=(6, 0))
         self._kategori_combo.bind(
             "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
+
+        # v3.9.49 — filter AKTIF/NON (user: "kolom Aktif dan non aktif
+        # pindah ke bagian filter dekat kategori aja"): kolom tabel
+        # AKTIF/NON dihapus dari COLUMNS; combobox ini menggantikan fungsi
+        # visibilitasnya. Nilai "Semua" default = perilaku tabel lama
+        # (tak ada penyaringan); AKTIF / NON AKTIF = filter nilai master
+        # (case-insensitive + strip — identik normalisasi CEK
+        # 'Kosong/Non Aktif'); '(Kosong)' = barang tanpa status master
+        # (kelas 100383 — pola entry '(Tanpa Kategori)').
+        tk.Label(r0b, text="AKTIF/NON", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._aktif_var = tk.StringVar(value="Semua")
+        self._aktif_combo = ttk.Combobox(
+            r0b, textvariable=self._aktif_var, state="readonly",
+            width=12, font=font(9))
+        self._aktif_combo["values"] = [
+            "Semua", "AKTIF", "NON AKTIF", "(Kosong)"]
+        self._aktif_combo.pack(side="left", padx=(6, 0))
+        self._aktif_combo.bind(
+            "<<ComboboxSelected>>", lambda e: self._on_aktif_changed())
 
         # v3.9.21 — AMBANG ACR to BOM (user: "di bagian ACR to BOM itu
         # harusnya ada threshold > 80% absolute dan aku bisa atur"):
@@ -913,6 +962,15 @@ class DeviasiView(tk.Frame):
             if self._kategori_sel == KATEGORI_BLANK_LABEL:
                 filtered = filtered[
                     kategori_blank_mask(filtered["KATEGORI"])]
+            elif kategori_filter_mask(filtered["KATEGORI"],
+                                      self._kategori_sel) is not None:
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap Mentah):
+                # cocokkan SEMUA nilai gabungan + passthrough baris kosong
+                # (kebijakan v3.9.45 (a) berlaku utk seleksi default).
+                _mmask = kategori_filter_mask(
+                    filtered["KATEGORI"], self._kategori_sel)
+                _blank = kategori_blank_mask(filtered["KATEGORI"])
+                filtered = filtered[_mmask | _blank]
             elif kategori_passthrough(self._kategori_sel):
                 _blank = kategori_blank_mask(filtered["KATEGORI"])
                 filtered = filtered[
@@ -967,6 +1025,10 @@ class DeviasiView(tk.Frame):
     # "secara default kategori terfilter ke kategori Deviasi") —
     # dicocokkan case-insensitive dgn nilai data (mis. "DEVIASI");
     # fallback "Semua" bila kategori itu tidak ada di data.
+    # v3.9.49 — DEFAULT BARU: entry GABUNGAN kategori Rekap Mentah
+    # (user: "jadi secara default di semua tab kategori sudah pilih: COM
+    # DEVIASI - RESTO dan Biaya Packaging - RESTO") bila data memuat
+    # salah satu nilai rekap; fallback legacy 'Deviasi' → 'Semua'.
     def _on_kategori_changed(self):
         val = self._kategori_var.get()
         self._kategori_sel = None if (not val or val == "Semua") else val
@@ -974,6 +1036,8 @@ class DeviasiView(tk.Frame):
 
     def _default_kategori_value(self) -> str:
         values = list(self._kategori_combo["values"] or [])
+        if KATEGORI_DEFAULT_LABEL in values:
+            return KATEGORI_DEFAULT_LABEL
         for v in values:
             if str(v).strip().lower() == "deviasi":
                 return str(v)
@@ -983,6 +1047,17 @@ class DeviasiView(tk.Frame):
         val = self._default_kategori_value()
         self._kategori_var.set(val)
         self._kategori_sel = None if val == "Semua" else val
+
+    # v3.9.49 — combobox AKTIF/NON ("Semua" = tanpa filter — pindahan
+    # kolom tabel ke bagian filter, dekat KATEGORI).
+    def _on_aktif_changed(self):
+        val = self._aktif_var.get()
+        self._aktif_sel = None if (not val or val == "Semua") else val
+        self._refresh()
+
+    def _reset_aktif(self):
+        self._aktif_var.set("Semua")
+        self._aktif_sel = None
 
     def _show_empty(self):
         self.content.pack_forget()
@@ -996,6 +1071,11 @@ class DeviasiView(tk.Frame):
         tree = tree if tree is not None else self.tree
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
+        # v3.9.49 — sekat visual antar kelompok Nama Barang (menggantikan
+        # striping evenrow/oddrow di view ini; konfigurasi lama tetap —
+        # clone/instansi lama tak terdampak).
+        for _tag, _bg in self.GRP_TAG_COLORS:
+            tree.tag_configure(_tag, background=_bg)
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero_dev", foreground="#64748b")
         # v3.9.2 — minus merah PER CELL (bukan satu baris penuh)
@@ -1154,10 +1234,21 @@ class DeviasiView(tk.Frame):
             kategori_vals = sorted(v for v in _kv.unique() if v)
         else:
             kategori_vals = []
-        _kv45 = ["Semua", KATEGORI_BLANK_LABEL]
+        # v3.9.49 — entry GABUNGAN default (kategori Rekap Mentah) hanya
+        # saat data memuat salah satu nilai rekap (tanpa itu, entry akan
+        # memfilter 0 baris di data lama yang tak ber-kategori rekap).
+        _kv45 = ["Semua"]
+        if kategori_has_default_values(
+                data.get("KATEGORI") if data is not None else None):
+            _kv45.append(KATEGORI_DEFAULT_LABEL)
+        _kv45.append(KATEGORI_BLANK_LABEL)
         _kv45 += kategori_vals
         self._kategori_combo["values"] = _kv45
         self._reset_kategori()
+        # v3.9.49 — filter AKTIF/NON direset ke 'Semua' tiap load data
+        # (pola _reset_kategori; kolom pindahan dari tabel → filter).
+        if hasattr(self, "_aktif_var"):
+            self._reset_aktif()
         if _data_empty:
             self._show_empty()
             self.status_var.set(
@@ -1690,6 +1781,7 @@ class DeviasiView(tk.Frame):
                         if s is not None},
             "tanggal_h": self.tanggal_h,
             "kategori": self._kategori_sel,   # v3.9.13
+            "aktif": self._aktif_sel,         # v3.9.49 — filter AKTIF/NON
         }
 
         def work():
@@ -1773,6 +1865,16 @@ class DeviasiView(tk.Frame):
                                 "barang yang tampil di tab "
                                 f"{self.satuan_mode} ini sudah punya "
                                 "kategori '21. DBS Kategori'.")}
+            elif kategori_filter_mask(filtered["KATEGORI"],
+                                      st["kategori"]) is not None:
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap Mentah):
+                # cocokkan SEMUA nilai gabungan + passthrough baris kosong
+                # (kebijakan v3.9.45 (a) — barang tanpa kategori mana pun
+                # tetap tampil di seleksi default, proteksi kelas 100383).
+                _mmask = kategori_filter_mask(
+                    filtered["KATEGORI"], st["kategori"])
+                _blank = kategori_blank_mask(filtered["KATEGORI"])
+                filtered = filtered[_mmask | _blank]
             elif kategori_passthrough(st["kategori"]):
                 _blank = kategori_blank_mask(filtered["KATEGORI"])
                 filtered = filtered[
@@ -1786,6 +1888,23 @@ class DeviasiView(tk.Frame):
             if filtered.empty:
                 return {"items": [], "kpi": (0, 0.0, 0),
                         "status": "Tidak ada baris untuk kategori ini."}
+
+        # v3.9.49 — filter AKTIF/NON (user: "kolom Aktif dan non aktif
+        # pindah ke bagian filter dekat kategori aja" — pindahan kolom
+        # tabel). Nilai pivot dinormalisasi (strip+upper) saat compute —
+        # kecocokan identik CEK 'Kosong/Non Aktif'; '(Kosong)' = barang
+        # tanpa status master (kelas 100383 — pola blank kategori).
+        if st.get("aktif") and "AKTIF/NON" in filtered.columns:
+            if st["aktif"] == "(Kosong)":
+                filtered = filtered[
+                    kategori_blank_mask(filtered["AKTIF/NON"])]
+            else:
+                _a = filtered["AKTIF/NON"].astype(str).str.strip().str.upper()
+                filtered = filtered[_a == str(st["aktif"]).strip().upper()]
+            if filtered.empty:
+                return {"items": [], "kpi": (0, 0.0, 0),
+                        "status": ("Tidak ada baris untuk status "
+                                    f"AKTIF/NON '{st['aktif']}'.")}
 
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel; menggantikan RESTO/Nama Barang combo)
@@ -1812,6 +1931,22 @@ class DeviasiView(tk.Frame):
         total_dev = float(filtered["Deviasi"].abs().sum())
         cek_series = filtered["CEK"].astype(str).str.strip()
         cek_count = int((cek_series != "").sum())
+        # v3.9.49 — SEKAT VISUAL ANTAR KELOMPOK BARANG: urutan render sudah
+        # di-sort by (Nama Barang, |Dev| desc) → kelompok barang KONTIGU.
+        # Band index = nomor kelompok berjalan (beralih tiap kali Nama
+        # Barang berubah); baris PERTAMA kelompok BER-ANGGOTA ≥2 diberi tag
+        # grp_head (latar paling tegas — kelompok 1-baris tak di-head supaya
+        # sort kolom lain — semua kelompok 1-baris — tidak membuat seluruh
+        # tabel seragam abu). Sort kolom lain → band dipasang ulang oleh
+        # _reapply_group_bands mengikuti urutan visual baru.
+        barang_np = filtered["Nama Barang"].astype(str).to_numpy()
+        grp_start = np.ones(n, dtype=bool)
+        if n > 1:
+            grp_start[1:] = barang_np[1:] != barang_np[:-1]
+        grp_id = np.cumsum(grp_start) - 1
+        grp_sizes = np.bincount(grp_id)
+        grp_band = grp_id % 2
+        grp_head = grp_start & (grp_sizes[grp_id] > 1)
         items = []
         fp_map = {}
         row_snaps = {}
@@ -1937,7 +2072,14 @@ class DeviasiView(tk.Frame):
                 tags.append("cek_drastis")
             elif cek_val == "ACR to BOM":
                 tags.append("cek_acr")
-            tags.append("evenrow" if i % 2 == 0 else "oddrow")
+            # v3.9.49 — banding KELOMPOK (menggantikan evenrow/oddrow):
+            # baris pertama kelompok ≥2-baris = grp_head (sekat), lainnya
+            # = pita kelompok bergantian grp0/grp1 — supaya blok CABE dan
+            # blok PENTOL terpisah jelas secara visual.
+            if bool(grp_head[i]):
+                tags.append("grp_head")
+            else:
+                tags.append("grp0" if int(grp_band[i]) == 0 else "grp1")
 
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
@@ -1987,7 +2129,7 @@ class DeviasiView(tk.Frame):
 
         def render_done():
             # v3.9.2: tag PER-CELL setelah semua item ter-insert
-            self._reapply_cell_tags(self.tree)
+            self._reapply_render_decorations(self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -2002,6 +2144,73 @@ class DeviasiView(tk.Frame):
 
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
+
+    def _reapply_render_decorations(self, tree):
+        """v3.9.49 — pasang ulang SEMUA dekorasi render pasca-insert/sort/
+        filter-clone: tag per-cell (minus/nol/highlight) + BANDING
+        kelompok barang (sekat visual). Satu pintu supaya semua jalur
+        (render_done · _sort_by · on_after_filter clone · on_render_done
+        clone) konsisten."""
+        self._reapply_cell_tags(tree)
+        self._reapply_group_bands(tree)
+
+    def _reapply_group_bands(self, tree):
+        """v3.9.49 — pasang ulang tag banding KELOMPOK Nama Barang
+        mengikuti URUTAN VISUAL tree saat ini (sort kolom lain / filter
+        clone mengubah urutan → band dihitung ulang dari adjacency).
+        Baris pertama kelompok ≥2-baris = grp_head; kelompok 1-baris =
+        warna pita (supaya sort non-barang tidak membuat tabel seragam
+        abu). Tag grp0/grp1/grp_head LAMA di item diganti; tag lain
+        (cek_*, negative, dst) dipertahankan. Overlay Tk 8
+        (CellColorOverlay) me-cache warna tag-baris per iid → cache
+        di-invalidate + redraw. Idempoten & O(n)."""
+        try:
+            children = list(tree.get_children(""))
+            if not children:
+                return
+            col_ids = list(tree["columns"])
+            try:
+                b_idx = col_ids.index("Nama Barang")
+            except ValueError:
+                return
+            rows = []
+            for k in children:
+                try:
+                    vals = tree.item(k, "values") or []
+                except tk.TclError:
+                    continue
+                rows.append((k, str(vals[b_idx]) if b_idx < len(vals)
+                             else ""))
+            prev = None
+            band = 0
+            for idx, (k, barang) in enumerate(rows):
+                same_as_next = (idx + 1 < len(rows)
+                                and rows[idx + 1][1] == barang)
+                if barang != prev:
+                    band = (band + 1) % 2 if prev is not None else 0
+                    new_tag = "grp_head" if same_as_next else (
+                        "grp0" if band == 0 else "grp1")
+                else:
+                    new_tag = "grp0" if band == 0 else "grp1"
+                prev = barang
+                try:
+                    old_tags = list(tree.item(k, "tags") or ())
+                except tk.TclError:
+                    old_tags = []
+                if old_tags and old_tags[-1] in self._GRP_TAGS:
+                    if old_tags[-1] == new_tag:
+                        continue
+                    old_tags = old_tags[:-1]
+                tree.item(k, tags=tuple(old_tags) + (new_tag,))
+        except tk.TclError:
+            return
+        # overlay Tk 8 me-cache warna bg tag-baris per iid (v3.9.40) —
+        # band baru = warna baru → invalidate + jadwalkan redraw.
+        _ov = getattr(tree, "_cell_color_overlay", None)
+        if _ov is not None and getattr(_ov, "_alive", False):
+            with contextlib.suppress(Exception):
+                _ov._invalidate_render_cache()
+                _ov._schedule()
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
@@ -2037,14 +2246,14 @@ class DeviasiView(tk.Frame):
                 on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
                                                                tree=t),
                 on_after_filter=lambda t=new_tree:
-                    self._reapply_cell_tags(t))
+                    self._reapply_render_decorations(t))
 
         win, new_tree = open_tree_maximized(
             self.tree, f"Deviasi {mode_label} — CEK Anomaly",
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
             on_filter_setup=filter_setup,
-            on_render_done=self._reapply_cell_tags)  # v3.9.2 per-cell
+            on_render_done=self._reapply_render_decorations)  # v3.9.2/49 per-cell+band
         # v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat clone hidup +
         # generasi render saat dibuka (guard handler + penutupan saat
         # re-render — lihat _close_stale_clones).
@@ -2139,6 +2348,7 @@ class DeviasiView(tk.Frame):
             self._col_sel[c] = None
         self.header_filters.clear_all()
         self._reset_kategori()   # v3.9.13 — combobox kategori ikut di-reset
+        self._reset_aktif()      # v3.9.49 — combobox AKTIF/NON ikut di-reset
         # FIX B-07: ✕ Reset Filter kini juga me-reset TANGGAL H ke default
         # — sebelumnya nilai H lama tetap aktif, semantik reset tidak total
         # dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya KEDUA
@@ -2206,7 +2416,9 @@ class DeviasiView(tk.Frame):
             "Nominal", "Dev to BOM%", "Stok Seharusnya")
         parse = self._parse_num_id if numeric_like else None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
-        self._reapply_cell_tags(tree)
+        # v3.9.49 — banding kelompok ikut dipasang ulang (urutan visual
+        # berubah → band dihitung ulang dari adjacency barang).
+        self._reapply_render_decorations(tree)
 
     def _auto_fit(self):
         """v3.4 — auto-fit lebar semua kolom ke konten."""

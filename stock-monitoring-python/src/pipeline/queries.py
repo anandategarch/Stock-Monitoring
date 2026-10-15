@@ -378,8 +378,12 @@ def query_full_rekap_mentah_so(config) -> pd.DataFrame:
     # v3.9.19: SOURCE DATA ikut dibawa (REKAP MENTAH JENIS SO — "input so
     # harian" / "input promix 04 dine in" / "input promix 04 take away")
     # utk CEK "Promix 04" di tab Deviasi GR/PCS (append1 merge per pasangan).
+    # v3.9.49: KATEGORI rekap mentah ikut dibawa (user: "ambil kategori
+    # dari file Rekap Mentah") — dipakai append1 LANGKAH 5 sebagai sumber
+    # kategori PRIORITAS atas master '21. DBS Kategori'; kolom opsional
+    # (schema rekap lama tanpa KATEGORI tetap didukung).
     needed = ["NAMA RESTO", "Nama Barang", "JENIS", "Tanggal", "Value",
-              "SATUAN", "SOURCE DATA"]
+              "SATUAN", "SOURCE DATA", "KATEGORI"]
     available = [col for col in needed if col in c.columns]
     e = c[available].copy()
 

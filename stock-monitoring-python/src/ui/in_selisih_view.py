@@ -168,6 +168,7 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    KATEGORI_REKAP_VALUES,  # v3.9.49 — default kategori Rekap Mentah
     Card,
     ColumnManager,
     EmptyState,
@@ -1171,26 +1172,45 @@ class InSelisihView(tk.Frame):
 
     def _default_kategori_value(self) -> "str | None":
         """v3.9.22 — nilai KATEGORI 'Deviasi' persis seperti tertulis di
-        data (case-insensitive; None bila tidak ada)."""
+        data (case-insensitive; None bila tidak ada).
+        v3.9.49 — default BARU: nilai kategori Rekap Mentah (COM DEVIASI
+        - RESTO + Biaya Packaging - RESTO — user: "secara default di
+        semua tab kategori sudah pilih") bila ada di data; fallback
+        legacy 'Deviasi'; None bila dua-duanya tak ada. Return nilai
+        DATA persis (filter header ⧩ mencocokkan nilai terformat
+        eksak — bukan label virtual)."""
         for df in (self.audit_df, self.data):
             if df is None or getattr(df, "empty", True):
                 continue
             if "KATEGORI" not in getattr(df, "columns", []):
                 continue
-            for v in df["KATEGORI"].dropna().astype(str).str.strip():
+            vals = df["KATEGORI"].dropna().astype(str).str.strip()
+            # v3.9.49 — kumpulkan SEMUA nilai rekap default yang hadir
+            # (case-insensitive, urutan tetap KATEGORI_REKAP_VALUES).
+            found = []
+            for rv in KATEGORI_REKAP_VALUES:
+                for v in vals.unique():
+                    if v and v.upper() == rv.upper():
+                        found.append(v)
+                        break
+            if found:
+                return found
+            for v in vals:
                 if v and v.lower() == "deviasi":
-                    return v
+                    return [v]
         return None
 
     def _apply_default_kategori(self):
         """v3.9.22 — terapkan seleksi default KATEGORI=Deviasi (state
-        _col_sel + ikon corong aktif)."""
+        _col_sel + ikon corong aktif).
+        v3.9.49 — default = SEMUA nilai kategori Rekap Mentah yang
+        hadir di data (multi-select list; legacy 'Deviasi' single)."""
         val = self._default_kategori_value()
         if val is None:
             return
-        self._col_sel["KATEGORI"] = [val]
+        self._col_sel["KATEGORI"] = list(val)
         if self.header_filters is not None:
-            self.header_filters.set_selected("KATEGORI", [val])
+            self.header_filters.set_selected("KATEGORI", list(val))
 
     def ensure_refreshed(self):
         """Lazy refresh: compute hanya saat tab ini terlihat."""

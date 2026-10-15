@@ -188,7 +188,47 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.48"  # v3.9.48 — TAMPILAN HD TAJAM + ZOOM CTRL+Scroll (user: "kok program nya seperti tidak HD ya tampilan nya?" + "bisa gak kalau aku CTRL + Scroll mouse jadi zoom in dan zoom out?")
+APP_VERSION = "3.9.49"  # v3.9.49 — KATEGORI REKAP MENTAH + FILTER AKTIF/NON + SEKAT KELOMPOK (user: "kolom aktif dan non aktif pindah ke bagian filter dekat kategori" + "ambil kategori dari file Rekap Mentah ... default: COM DEVIASI - RESTO dan Biaya Packaging - RESTO" + "sekat visual antara cabe dan pentol")
+# v3.9.49 — KATEGORI REKAP MENTAH + FILTER AKTIF/NON + SEKAT VISUAL
+# KELOMPOK (4 permintaan 1 rilis):
+# (1) KOLOM AKTIF/NON → FILTER (user: "kolom Aktif dan non aktif pindah
+#     ke bagian filter dekat kategori aja"): kolom tabel dihapus dari
+#     Deviasi GR/PCS; combobox AKTIF/NON kini DI KARTU FILTER samping
+#     KATEGORI (Semua/AKTIF/NON AKTIF/(Kosong) — kecocokan case-
+#     insensitive persis normalisasi CEK; '(Kosong)' = barang tanpa
+#     status master, pola '(Tanpa Kategori)'). Nilai TETAP dihitung
+#     internal: CEK 'Kosong/Non Aktif' + snapshot follow-up 'aktif'
+#     utuh; default 'Semua' = tabel lama tanpa penyaringan.
+# (2) KATEGORI DARI REKAP MENTAH + DEFAULT GABUNGAN (user: "sebenernya
+#     sudah ada KATEGORI dari file Rekap Mentah folder Deviasi Weekly
+#     jadi bisa ambil kategori dari situ jadi secara default di semua
+#     tab kategori sudah pilih: COM DEVIASI - RESTO dan Biaya Packaging
+#     - RESTO"): fn_rekap_mentah kini MEMBAWA kolom KATEGORI sheet rekap
+#     (bila ada — schema lama tetap didukung) → query_full_rekap_
+#     mentah_so → append1 LANGKAH 5c: kategori rekap MENIMPA master
+#     '21. DBS Kategori' per barang (key ternormalisasi strip+upper;
+#     barang tanpa rekap tetap pakai master). Entry combobox GABUNGAN
+#     'COM DEVIASI - RESTO + Biaya Packaging - RESTO' (KATEGORI_DEFAULT_
+#     LABEL — helpers) jadi DEFAULT di Deviasi GR/PCS · 🧮 Nominal per
+#     Resto · Pivot (entry hanya muncul bila data ber-kategori rekap;
+#     passthrough blank tetap — proteksi kelas 100383); Rekap Selisih IN:
+#     filter header KATEGORI default = kedua nilai rekap yang hadir.
+#     Ini juga menjawab "BUMBU PASTA KUAH MLGPAR kenapa masih tidak ada
+#     ya?": item kini ber-kategori rekap → tampil di seleksi default
+#     (bukan hanya via passthrough/'(Tanpa Kategori)').
+# (3) SEKAT VISUAL ANTAR KELOMPOK BARANG di Deviasi GR/PCS (user:
+#     "dibagian antara Cabe dan pentol itu ada semacam sekat visual yang
+#     membatasi atau menandakan"): striping per-baris (evenrow/oddrow)
+#     DIGANTI banding per KELOMPOK Nama Barang — grp0/grp1 = pita latar
+#     bergantian per kelompok, grp_head = baris pertama kelompok
+#     ber-anggota ≥2 (latar paling tegas = penanda 'kelompok baru');
+#     tag dipasang ulang tiap sort/clone/filter mengikuti urutan visual
+#     (_reapply_group_bands — invalidate cache overlay Tk 8). Kelompok
+#     1-baris hanya pita (sort kolom lain tak bikin tabel seragam abu).
+# (4) probe E2E data nyata: 150 barang (65.627 baris) ber-kategori
+#     rekap; BUMBU PASTA KUAH (V.20) → 'COM DEVIASI - RESTO' tampil di
+#     default; plain saldo-only tetap blank → passthrough default +
+#     entry '(Tanpa Kategori)'.
 # v3.9.48 — TAMPILAN HD TAJAM + ZOOM RUNTIME (2 keluhan user sekaligus):
 # (1) "KOK TIDAK HD?" — akar = KEBIJAKAN opt-out v3.9.47: default
 #     DpiAware=false membuat proses DPI-UNAWARE → Windows MENYALIN-

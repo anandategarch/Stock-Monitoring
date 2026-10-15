@@ -47,8 +47,17 @@ from tkinter import ttk
 # (kategori_passthrough; keluhan "ganti kategori tidak terjadi apa apa" —
 # 90% baris '-' buat passthrough universal = filter no-op) + entry
 # combobox KATEGORI_BLANK_LABEL '(Tanpa Kategori)'.
+# v3.9.49 — kategori gabungan default Rekap Mentah (KATEGORI_DEFAULT_
+# LABEL + helper multi-nilai) — re-export utk semua view ber-filter
+# kategori.
 from ..pipeline.helpers import KATEGORI_BLANK_LABEL as KATEGORI_BLANK_LABEL  # noqa: PLC0414
+from ..pipeline.helpers import KATEGORI_DEFAULT_LABEL as KATEGORI_DEFAULT_LABEL  # noqa: PLC0414
+from ..pipeline.helpers import KATEGORI_REKAP_VALUES as KATEGORI_REKAP_VALUES  # noqa: PLC0414
 from ..pipeline.helpers import kategori_blank_mask as kategori_blank_mask  # noqa: PLC0414
+from ..pipeline.helpers import kategori_filter_mask as kategori_filter_mask  # noqa: PLC0414
+from ..pipeline.helpers import (
+    kategori_has_default_values as kategori_has_default_values,  # noqa: PLC0414
+)
 from ..pipeline.helpers import kategori_passthrough as kategori_passthrough  # noqa: PLC0414
 from .theme import (
     C_ACCENT,
