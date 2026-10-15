@@ -28,7 +28,6 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     font,
-    font_family,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
@@ -487,7 +486,7 @@ class DetailsPopup(tk.Toplevel):
         menu = tk.Menu(self, tearoff=0, bg=C_CARD, fg=C_HEADER,
                        activebackground=C_ACCENT_SOFT,
                        activeforeground=C_ACCENT_DARK,
-                       font=(font_family(), 9), bd=0, relief="flat")
+                       font=font(9), bd=0, relief="flat")
         menu.add_command(
             label=f"📋 Copy Nomor — {_lbl(nomor)}",
             command=lambda: self._copy_to_clipboard(nomor, "Nomor"))

@@ -15,6 +15,14 @@ Palet:
 
 Font: resolusi otomatis — Segoe UI (Windows) → Noto Sans → DejaVu Sans
 (Linux) supaya metrik teks jujur di semua platform.
+
+v3.9.48 — ZOOM UI (CTRL + Scroll, permintaan user "bisa gak kalau aku
+CTRL + Scroll mouse jadi zoom in dan zoom out?") + fix "tampilan tidak
+HD": font()/mono() kini mengembalikan NAMED FONT (tkfont.Font) yang
+di-SHARE semua widget → zoom cukup configure size sekali per font dan
+seluruh UI (style ttk + tk widget + tag Treeview + konsol log) ikut
+HIDUP; apply_theme idempoten dan dipanggil ulang saat zoom berubah
+(rowheight tabel ikut skala). Lihat bagian ZOOM di bawah.
 """
 from __future__ import annotations
 
@@ -120,18 +128,162 @@ def mono_family() -> str:
     return _mono_family
 
 
-def font(size: int = 10, weight: str = "normal") -> tuple:
-    """Tuple font Tkinter standar: (family, size, weight)."""
-    return (font_family(), size, weight)
+# --- v3.9.48: ZOOM UI (CTRL + Scroll) ----------------------------------------
+# Dua mekanisme yang bekerja sama:
+#
+# (1) NAMED FONT BERSAMA: font()/mono() mengembalikan OBJEK tkfont.Font
+#     (satu per (kind, size, weight), di-cache) — Tk menerima objek Font
+#     untuk opsi font= di SEMUA jenis widget (tk widget, ttk style, tag
+#     Treeview, Text). Karena satu objek dipakai bersama, zoom cukup
+#     f.configure(size=...) SEKALI per font → semua pemakai re-render
+#     HIDUP (perilaku standar Tk; tidak bergantung semantik `tk scaling`
+#     yang tidak mereskalakan font yang sudah dirender).
+#
+# (2) DISPATCH RODA-CTRL: widgets.py memasang bind_ctrl_zoom() di semua
+#     titik pembuatan widget scrollable (enable_smooth_wheel /
+#     make_log_console / canvas daftar filter). Pola <Control-MouseWheel>
+#     / <Control-Button-4/5> LEBIH SPESIFIK daripada binding <MouseWheel>
+#     polos di bindtag widget yang sama → menurut aturan Tk (binding
+#     ter-spesifik menang dalam satu bindtag) CTRL+roda TIDAK menggulir
+#     widget, melainkan zoom — dan 'break' mematikan binding kelas di
+#     bindtag berikutnya. Handler zoom hidup di app.py (StockMonitorApp)
+#     dan dihubungkan lewat set_zoom_wheel_handler(); theme dipilih
+#     sebagai lokus registry karena diimpor widgets & app tanpa impor
+#     melingkar.
+_ui_scale = 1.0                 # faktor zoom aktif (1.0 = 100%)
+_font_cache: dict = {}          # {"_root": Tk, (kind, size, weight): Font}
+_ctrl_wheel_handler = None
 
 
-def mono(size: int = 10) -> tuple:
-    return (mono_family(), size)
+def ui_scale() -> float:
+    """Faktor zoom UI aktif (1.0 = default/100%; 1.1 = 110%)."""
+    return _ui_scale
+
+
+def set_ui_scale(scale: float) -> float:
+    """Set faktor zoom aktif — dipakai font()/mono()/apply_theme untuk
+    widget BARU yang dibuat setelah zoom berubah (popup, view).
+    Zoomer (app.py) memanggil ini lalu rescale_named_fonts()."""
+    global _ui_scale
+    _ui_scale = scale
+    return _ui_scale
+
+
+def scale_pt(size: int) -> int:
+    """Ukuran font POINT dikali zoom aktif (lantai 4 — tidak lenyap)."""
+    return max(4, round(size * _ui_scale))
+
+
+def scale_px(px: int) -> int:
+    """Ukuran PIXEL desain (rowheight tabel) dikali zoom aktif."""
+    return max(1, round(px * _ui_scale))
+
+
+def _cache_root():
+    """Root default aktif (None bila belum ada Tk — jalur import time)."""
+    return getattr(tk, "_default_root", None)
+
+
+def _named_font(kind: str, size: int, weight: str):
+    """Ambil/buat named font untuk (kind, size, weight) — SATU objek
+    bersama semua pemakai. Cache di-RESET saat root/interp lain aktif
+    (font milik interp lama tak bisa dipakai lintas Tk; _default_root
+    menetap di root pertama — aman untuk app + test satu-root).
+    Return None bila belum ada root → pemanggil jatuh ke tuple fallback
+    (perilaku defensif v3.9.33 untuk panggilan import-time)."""
+    r = _cache_root()
+    if r is None:
+        return None
+    global _font_cache
+    if _font_cache.get("_root") is not r:
+        _font_cache = {"_root": r}
+    key = (kind, size, weight)
+    f = _font_cache.get(key)
+    if f is None:
+        if kind == "ui":
+            f = tkfont.Font(root=r, family=font_family(),
+                            size=scale_pt(size), weight=weight)
+        else:
+            f = tkfont.Font(root=r, family=mono_family(),
+                            size=scale_pt(size))
+        _font_cache[key] = f
+    return f
+
+
+def rescale_named_fonts() -> list:
+    """v3.9.48 — configure ulang SEMUA named font ke size-dasar × zoom
+    aktif. Semua widget pemakai otomatis re-render (satu named font =
+    satu objek bersama — konfigurasi menyebarkan ke semua pemakainya).
+    Return [(key, size_baru)] untuk verifikasi/test."""
+    out = []
+    for key, f in list(_font_cache.items()):
+        if key == "_root":
+            continue
+        f.configure(size=scale_pt(key[1]))
+        out.append((key, f.cget("size")))
+    return out
+
+
+def set_zoom_wheel_handler(handler) -> None:
+    """Hubungkan handler zoom (app.py) ke dispatch roda-CTRL."""
+    global _ctrl_wheel_handler
+    _ctrl_wheel_handler = handler
+
+
+def ctrl_wheel_dispatch(event):
+    """Panggilan balik bindtag roda-CTRL (dipasang bind_ctrl_zoom di
+    widget scrollable + bind_class Listbox oleh app).
+    Tanpa handler (view mandiri di unit test) → None: event dibiarkan
+    lanjut ke bindtag berikutnya (tidak ada yang mengonsumsi)."""
+    if _ctrl_wheel_handler is not None:
+        return _ctrl_wheel_handler(event)
+    return None
+
+
+def bind_ctrl_zoom(widget) -> None:
+    """v3.9.48 — pasang pola roda-CTRL TINGKAT WIDGET (bindtag path).
+    Dipanggil dari semua titik pembuatan widget scrollable.
+
+    KUNCI anti-bentrok (diprobe di Xvfb): dalam SATU bindtag Tk hanya
+    memanggil binding TERPILIH SPESIFIK — <Control-MouseWheel> mengalah-
+    kan <MouseWheel> polos yang sudah terpasang → CTRL+roda masuk zoom
+    TANPA menggulir tabel/log; roda polos tetap menggulir seperti biasa."""
+    widget.bind("<Control-MouseWheel>", ctrl_wheel_dispatch)
+    widget.bind("<Control-Button-4>", ctrl_wheel_dispatch)
+    widget.bind("<Control-Button-5>", ctrl_wheel_dispatch)
+
+
+def font(size: int = 10, weight: str = "normal") -> tkfont.Font | tuple:
+    """Font UI standar — kini NAMED FONT (tkfont.Font) selama root sudah
+    ada: satu objek per (size, weight) DI-SHARE lintas widget → zoom
+    CTRL+Scroll (set_ui_scale/rescale_named_fonts) menyebarkan ke semua
+    pemakai secara HIDUP. Tk menerima objek Font maupun tuple untuk opsi
+    font= di semua widget/style/tag. Pre-root (import time) → tuple
+    fallback (perilaku defensif v3.9.33 dipertahankan)."""
+    f = _named_font("ui", size, weight)
+    if f is None:
+        return (font_family(), size, weight)
+    return f
+
+
+def mono(size: int = 10) -> tkfont.Font | tuple:
+    """Idem font() untuk family monospace (konsol log)."""
+    f = _named_font("mono", size, "")
+    if f is None:
+        return (mono_family(), size)
+    return f
 
 
 # --- Setup ttk style ---------------------------------------------------------
 def apply_theme(root: tk.Tk) -> ttk.Style:
     """Pasang tema global ke root window. Dipanggil sekali di startup.
+
+    v3.9.48 — dipanggil ULANG oleh zoomer (app._apply_ui_zoom) saat zoom
+    berubah: konfigurasi style bersifat IDEMPOTEN (configure menimpa
+    nilai sama) dan font kini NAMED FONT bersama — re-apply membuat
+    rowheight tabel (scale_px) + seluruh style ikut zoom tanpa membangun
+    ulang widget. Style KUSTOM milik view (dipasang setelah theme) tak
+    tersentuh (nama style berbeda).
 
     Return objek ttk.Style (bisa dipakai untuk kustomisasi lanjutan).
     """
@@ -143,30 +295,30 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
 
     fam = font_family()
 
-    # --- Base widgets ---
+    # --- Base widgets --- (v3.9.48: font via pabrik NAMED — ikut zoom)
     style.configure(".", background=C_BG, foreground=C_HEADER,
-                    font=(fam, 10), borderwidth=0)
+                    font=font(10), borderwidth=0)
     style.configure("TFrame", background=C_BG, padding=0)
     style.configure("Card.TFrame", background=C_CARD, padding=0)
 
-    style.configure("TLabel", background=C_BG, foreground=C_HEADER, font=(fam, 10))
-    style.configure("Card.TLabel", background=C_CARD, foreground=C_HEADER, font=(fam, 10))
+    style.configure("TLabel", background=C_BG, foreground=C_HEADER, font=font(10))
+    style.configure("Card.TLabel", background=C_CARD, foreground=C_HEADER, font=font(10))
     style.configure("CardMuted.TLabel", background=C_CARD, foreground=C_TEXT_MUTED,
-                    font=(fam, 9))
-    style.configure("Muted.TLabel", background=C_BG, foreground=C_TEXT_MUTED, font=(fam, 9))
+                    font=font(9))
+    style.configure("Muted.TLabel", background=C_BG, foreground=C_TEXT_MUTED, font=font(9))
     style.configure("Title.TLabel", background=C_CARD, foreground=C_HEADER,
-                    font=(fam, 13, "bold"))
+                    font=font(13, "bold"))
     style.configure("Subtitle.TLabel", background=C_CARD, foreground=C_TEXT_MUTED,
-                    font=(fam, 10))
+                    font=font(10))
     style.configure("Toolbar.TLabel", background=C_HEADER, foreground="#f1f5f9",
-                    font=(fam, 11))
+                    font=font(11))
     style.configure("ToolbarTitle.TLabel", background=C_HEADER, foreground="#f1f5f9",
-                    font=(fam, 12, "bold"))
+                    font=font(12, "bold"))
 
     # --- Tombol (ghost/default — pakai ttk) ---
     # v3.9 (ala Waste): padding tombol 6px/14px → Tk (14, 7)
     style.configure("TButton", background=C_CARD, foreground=C_HEADER,
-                    font=(fam, 10), padding=(14, 7), borderwidth=1,
+                    font=font(10), padding=(14, 7), borderwidth=1,
                     focuscolor=C_CARD)
     style.map("TButton",
               background=[("active", "#f8fafc"), ("disabled", "#f1f5f9")],
@@ -179,11 +331,11 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     # spasi-ganda = ±1280px utk 10 tab > minsize 1020px → tab kanan
     # terpotong. Kini (12,9): ±912px — muat dgn margin; tinggi tab tetap.
     style.configure("TNotebook.Tab", background="#e2e8f0", foreground=C_TEXT_MUTED,
-                    padding=(12, 9), font=(fam, 10), borderwidth=0)
+                    padding=(12, 9), font=font(10), borderwidth=0)
     style.map("TNotebook.Tab",
               background=[("selected", C_CARD), ("active", "#eef2f7")],
               foreground=[("selected", C_HEADER), ("active", C_HEADER)],
-              font=[("selected", (fam, 10, "bold"))])
+              font=[("selected", font(10, "bold"))])
     style.configure("TNotebook.Pane", background=C_BG, borderwidth=0)
 
     # --- Entry / Combobox ---
@@ -192,21 +344,24 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     style.map("TEntry", bordercolor=[("focus", C_ACCENT)])
     style.configure("TCombobox", fieldbackground=C_CARD, foreground=C_HEADER,
                     bordercolor=C_BORDER, arrowcolor=C_TEXT_MUTED, padding=(8, 4))
+    # (font TEntry/TCombobox mengikuti style "." — named font bersama)
     style.map("TCombobox",
               bordercolor=[("focus", C_ACCENT)],
               fieldbackground=[("readonly", C_CARD), ("disabled", "#f8fafc")],
               foreground=[("disabled", C_TEXT_SOFT)])
 
     # Dropdown list Combobox (via option database)
+    # v3.9.48 — font dropdown ikut zoom: option_add di-reset tiap
+    # re-apply theme dgn size ter-skala (dropdown dibuat-ulang tiap buka)
     root.option_add("*TCombobox*Listbox.background", C_CARD)
     root.option_add("*TCombobox*Listbox.foreground", C_HEADER)
     root.option_add("*TCombobox*Listbox.selectBackground", C_ACCENT_SOFT)
     root.option_add("*TCombobox*Listbox.selectForeground", C_ACCENT_DARK)
-    root.option_add("*TCombobox*Listbox.font", (fam, 10))
+    root.option_add("*TCombobox*Listbox.font", (fam, scale_pt(10)))
 
     # --- Checkbutton ---
     style.configure("TCheckbutton", background=C_CARD, foreground=C_HEADER,
-                    font=(fam, 10), focuscolor=C_CARD)
+                    font=font(10), focuscolor=C_CARD)
     style.map("TCheckbutton",
               background=[("active", C_CARD)],
               indicatorcolor=[("selected", C_ACCENT), ("!selected", "#ffffff")])
@@ -229,11 +384,14 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     # v3.9 "PERBESAR TABEL" (permintaan user — mirror aplikasi Waste:
     # font tabel 13px + item padding 3px/8px + baris lapang):
     # font 9 → 10, rowheight 26 → 30 — tabel terlihat besar & mudah dibaca.
+    # v3.9.48 — rowheight = 30 × zoom (scale_px): font baris membesar via
+    # named font; rowheight statis akan MEMPOTONG teks. widgets.
+    # _style_rowheight membaca nilai ini tiap invalidate cache.
     style.configure("Treeview", background=ROW_EVEN, fieldbackground=ROW_EVEN,
-                    foreground=C_HEADER, rowheight=30, font=(fam, 10),
+                    foreground=C_HEADER, rowheight=scale_px(30), font=font(10),
                     bordercolor=C_BORDER, relief="solid")
     style.configure("Treeview.Heading", background="#f8fafc", foreground=C_HEADER,
-                    font=(fam, 10, "bold"), relief="flat", bordercolor=C_BORDER,
+                    font=font(10, "bold"), relief="flat", bordercolor=C_BORDER,
                     padding=(8, 8))
     style.map("Treeview.Heading", background=[("active", "#e8edf3")])
     style.map("Treeview",

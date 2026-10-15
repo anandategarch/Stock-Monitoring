@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.47", APP_VERSION == "3.9.47",
+    check("Versi = 3.9.48", APP_VERSION == "3.9.48",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -2763,10 +2763,24 @@ def main():
     check("(v3.9) Tabel diperbesar: rowheight 30 (dari 26) ala Waste",
           int(style.configure("Treeview", "rowheight")) == 30,
           f"got {style.configure('Treeview', 'rowheight')}")
-    _hf_font = str(style.configure("Treeview.Heading", "font")).split()
-    check("(v3.9) Tabel diperbesar: heading font size 10 bold",
-          _hf_font[-2:] == ["10", "bold"],
-          f"got {_hf_font}")
+    _hf = style.configure("Treeview.Heading", "font")
+    # v3.9.48 — font style kini NAMED FONT (tkfont.Font, fondasi zoom
+    # CTRL+Scroll): style.configure mengembalikan NAMA font; asersi tetap
+    # semantik sama — ukuran dasar 10 + bold (dibaca dari objek font).
+    try:
+        import tkinter.font as _tkfont_v39
+        _hf_obj = _tkfont_v39.Font(root=root, name=str(_hf), exists=True)
+        _hf_ok = (_hf_obj.cget("size") == 10
+                  and str(_hf_obj.cget("weight")) == "bold")
+        _hf_detail = (f"named {_hf!r}: size={_hf_obj.cget('size')} "
+                      f"weight={_hf_obj.cget('weight')}")
+    except tk.TclError:
+        _hf_font = str(_hf).split()
+        _hf_ok = _hf_font[-2:] == ["10", "bold"]
+        _hf_detail = f"tuple {_hf_font}"
+    check("(v3.9) Tabel diperbesar: heading font size 10 bold (v3.9.48: "
+          "named font — ukuran dasar tetap 10 bold)",
+          _hf_ok, f"got {_hf_detail}")
     from src.ui.widgets import TableExpander, funnel_image
     img_on = funnel_image(active=True)
     img_off = funnel_image(active=False)
@@ -12646,11 +12660,11 @@ def main():
     check("(v3.9.46) DPI semua API gagal → '' (jujur, bukan mengklaim "
           "per-monitor)",
           _dpi_chain(_WD57(_U3257(), _Sh57())) == "")
-    # v3.9.47 — REGRESI UKURAN (user: "kenapa sekarang tampilkan
-    # program nya lebih besar? kembalikan ke size tampilan lama"):
-    # intervensi DPI v3.9.46 kini OPT-IN "DpiAware" (default false =
-    # pipeline ukuran PERSIS pra-v3.9.46: TANPA panggilan API awareness
-    # + TANPA sentuh tk scaling)
+    # v3.9.47 → v3.9.48 — DEFAULT DIBALIK (user: "kok program nya
+    # seperti tidak HD ya tampilan nya?" — proses DPI-unaware selalu
+    # di-bitmap-stretch Windows = kabur): kini default TRUE (tajam +
+    # KOMPENSASI GEOMETRI jendela → ukuran fisik lama); false = opt-OUT
+    # eksplisit (pipeline bitmap-stretch lama persis)
     import inspect
 
     import src.ui.app as _appmod57
@@ -12660,15 +12674,15 @@ def main():
     _tk_pos = _main_src57.find("root = tk.Tk()")
     _scale_gate_pos = _main_src57.find("if _dpi_mode:")
     _scale_pos = _main_src57.find("_apply_windows_tk_scaling(root)")
-    check("(v3.9.47) main(): gate _config_dpi_aware() SEBELUM "
-          "_set_windows_dpi_awareness() (default false = TAK memanggil "
-          "API awareness sama sekali → Windows bitmap-scale = ukuran "
-          "lama; opt-in true tetap SEBELUM tk.Tk() per dok Microsoft)",
+    check("(v3.9.48) main(): gate _config_dpi_aware() SEBELUM "
+          "_set_windows_dpi_awareness() (default TRUE = mode tajam + "
+          "kompensasi geometri; opt-OUT false tetap SEBELUM tk.Tk() per "
+          "dok Microsoft — urutan audit #2 v3.9.46 tak berubah)",
           0 <= _gate_pos < _set_pos < _tk_pos,
           f"gate@{_gate_pos} set@{_set_pos} tk@{_tk_pos}")
     check("(v3.9.47) main(): _apply_windows_tk_scaling dibalut "
-          "'if _dpi_mode:' (tanpa awareness aktif → tk scaling TAK "
-          "disentuh sama sekali)",
+          "'if _dpi_mode:' (tanpa awareness sukses → tk scaling TAK "
+          "disentuh sama sekali — opt-out bitmap-stretch murni)",
           0 <= _scale_gate_pos < _scale_pos,
           f"gate@{_scale_gate_pos} scale@{_scale_pos}")
 
@@ -12683,30 +12697,34 @@ def main():
     try:
         _cfg57 = Path(_tmpdir57) / "config.json"
         _appmod57.CONFIG_PATH = _cfg57
-        check("(v3.9.47) DpiAware: config.json hilang → False "
-              "(default ukuran lama)",
-              _dpi_cfg() is False)
+        check("(v3.9.48) DpiAware: config.json hilang → True (default "
+              "tajam + kompensasi geometri — fix 'tidak HD')",
+              _dpi_cfg() is True)
         _cfg57.write_text('{"RootPath": "x"}', encoding="utf-8")
-        check("(v3.9.47) DpiAware: key hilang → False (config user "
-              "lama TANPA key otomatis kembali ukuran lama — tanpa "
-              "migrasi)",
-              _dpi_cfg() is False)
+        check("(v3.9.48) DpiAware: key hilang → True (config user lama "
+              "TANPA key otomatis tajam — tanpa migrasi; keluhan 'tidak "
+              "HD' terjawab saat update)",
+              _dpi_cfg() is True)
         _cfg57.write_text('{"DpiAware": true}', encoding="utf-8")
-        check("(v3.9.47) DpiAware: true → mode tajam per-monitor "
-              "aktif (opt-in)",
+        check("(v3.9.48) DpiAware: true → mode tajam aktif",
               _dpi_cfg() is True)
         _cfg57.write_text('{"DpiAware": "false"}', encoding="utf-8")
-        check("(v3.9.47) DpiAware: string \"false\" → False (STRICT "
-              "is-True — bool('false')=True jebakan klasik)",
+        check("(v3.9.48) DpiAware: string \"false\" → False (opt-OUT "
+              "eksplisit — STRICT is-True, bool('false')=True jebakan "
+              "klasik)",
+              _dpi_cfg() is False)
+        _cfg57.write_text('{"DpiAware": "true"}', encoding="utf-8")
+        check("(v3.9.48) DpiAware: string \"true\" → False (string ≠ "
+              "boolean JSON — harus eksplisit)",
               _dpi_cfg() is False)
         _cfg57.write_text('{"DpiAware": true,', encoding="utf-8")
-        check("(v3.9.47) DpiAware: JSON rusak → False (startup tak "
-              "tersandung; error config asli tetap dilaporkan app "
-              "seperti biasa)",
-              _dpi_cfg() is False)
+        check("(v3.9.48) DpiAware: JSON rusak → True (default tajam; "
+              "startup tak tersandung — error config asli tetap "
+              "dilaporkan app seperti biasa)",
+              _dpi_cfg() is True)
         _cfg57.write_text('[1, 2]', encoding="utf-8")
-        check("(v3.9.47) DpiAware: JSON bukan dict → False",
-              _dpi_cfg() is False)
+        check("(v3.9.48) DpiAware: JSON bukan dict → True (default)",
+              _dpi_cfg() is True)
     finally:
         _appmod57.CONFIG_PATH = _orig_cfg_path57
         shutil.rmtree(_tmpdir57, ignore_errors=True)
@@ -12842,6 +12860,218 @@ def main():
           f"status={_dv57.status_var.get()!r}")
     _dv57.destroy()
     root.update()
+
+    # == 58. (v3.9.48) TAMPILAN HD (DPI-aware default + kompensasi
+    #    geometri) + ZOOM RUNTIME CTRL+Scroll (user: "kok program nya
+    #    seperti tidak HD ya tampilan nya?" + "bisa gak kalau aku CTRL +
+    #    Scroll mouse jadi zoom in dan zoom out?") ==
+    print("\n== 58. (v3.9.48) TAMPILAN HD (DPI-aware default + kompensasi "
+          "geometri) + ZOOM CTRL+Scroll (user) ==")
+    import json as _json58
+    import tkinter.font as _tfont58
+    from types import SimpleNamespace as _NS58
+
+    import src.ui.app as _appmod58
+    from src.ui.app import (
+        UI_ZOOM_DEFAULT as _ZDEF58,
+    )
+    from src.ui.app import (
+        UI_ZOOM_MAX as _ZMAX58,
+    )
+    from src.ui.app import (
+        UI_ZOOM_MIN as _ZMIN58,
+    )
+    from src.ui.app import (
+        UI_ZOOM_STEP as _ZSTEP58,
+    )
+    from src.ui.app import (
+        WINDOW_H as _WH58,
+    )
+    from src.ui.app import (
+        WINDOW_SIZE as _WS58,
+    )
+    from src.ui.app import (
+        WINDOW_W as _WW58,
+    )
+    from src.ui.theme import (
+        ctrl_wheel_dispatch as _dispatch58,
+    )
+    from src.ui.theme import (
+        font as _font58,
+    )
+    from src.ui.theme import (
+        mono as _mono58,
+    )
+    from src.ui.theme import (
+        rescale_named_fonts as _rescale58,
+    )
+    from src.ui.theme import (
+        set_zoom_wheel_handler as _setzh58,
+    )
+    from src.ui.theme import (
+        ui_scale as _uisc58,
+    )
+
+    # --- (a) konstanta & state awal -----------------------------------------
+    check("(v3.9.48) konstanta zoom: rentang 0.5–2.0, step 0.1, default 1.0",
+          (_ZMIN58, _ZMAX58, _ZSTEP58, _ZDEF58) == (0.5, 2.0, 0.1, 1.0),
+          f"got {(_ZMIN58, _ZMAX58, _ZSTEP58, _ZDEF58)}")
+    check("(v3.9.48) app.ui_zoom awal = 1.0 (100%) + theme.ui_scale() "
+          "sinkron (restart = zoom reset — by design)",
+          app.ui_zoom == 1.0 and _uisc58() == 1.0,
+          f"zoom={app.ui_zoom} scale={_uisc58()}")
+    check("(v3.9.48) non-Windows: _dpi_scale = 1.0 (kompensasi geometri "
+          "hanya Windows — pipeline Linux tak berubah)",
+          app._dpi_scale == 1.0, f"got {app._dpi_scale}")
+
+    # --- (b) named font bersama (fondasi zoom live) --------------------------
+    _f58 = _font58(10)
+    check("(v3.9.48) font(10) = NAMED FONT (tkfont.Font) pasca-root — "
+          "fondasi zoom live: satu objek di-share semua pemakai",
+          isinstance(_f58, _tfont58.Font), f"type={type(_f58)}")
+    check("(v3.9.48) font(10) di-SHARE (pemanggil kedua = objek sama)",
+          _font58(10) is _f58)
+    check("(v3.9.48) mono(10) named & objek BERBEDA dari font(10) (kunci "
+          "cache kind terpisah)",
+          isinstance(_mono58(10), _tfont58.Font)
+          and _mono58(10) is not _f58)
+    check("(v3.9.48) font(9,'bold') kunci cache terpisah dari font(9)",
+          _font58(9, "bold") is not _font58(9))
+
+    # --- (c) wiring binding anti-bentrok -------------------------------------
+    _CTRL_SEQS58 = ("<Control-MouseWheel>", "<Control-Button-4>",
+                    "<Control-Button-5>")
+    check("(v3.9.48) bind_all roda-CTRL terpasang (fallback area "
+          "non-scrollable: frame/label/kartu)",
+          all(bool(root.bind_all(_s)) for _s in _CTRL_SEQS58))
+    check("(v3.9.48) bind_class Listbox roda-CTRL (popdown Combobox — "
+          "kelas scrollable tanpa factory)",
+          all(bool(root.bind_class("Listbox", _s)) for _s in _CTRL_SEQS58))
+    _tr58 = app.pivot_view.tree
+    check("(v3.9.48) tree view: binding roda-CTRL TINGKAT WIDGET "
+          "(enable_smooth_wheel choke-point; pola Control lebih spesifik "
+          "dari <MouseWheel> polos → CTRL+roda TIDAK menggulir tabel)",
+          all(bool(_tr58.bind(_s)) for _s in _CTRL_SEQS58))
+    check("(v3.9.48) konsol log: binding roda-CTRL (make_log_console "
+          "choke-point)",
+          all(bool(app.log_text.bind(_s)) for _s in _CTRL_SEQS58))
+
+    # dispatch registry (widgets → app tanpa impor melingkar)
+    _calls58: list = []
+
+    def _zh58(_e):
+        _calls58.append(_e)
+        return "break"
+
+    _setzh58(_zh58)
+    try:
+        _ret58 = _dispatch58(_NS58(delta=120))
+        check("(v3.9.48) ctrl_wheel_dispatch → handler registry "
+              "terpanggil + teruskan 'break'",
+              len(_calls58) == 1 and _ret58 == "break",
+              f"calls={len(_calls58)} ret={_ret58!r}")
+    finally:
+        _setzh58(app._on_zoom_wheel)
+    _setzh58(None)
+    check("(v3.9.48) dispatch TANPA handler → None (view mandiri di unit "
+          "test — event dibiarkan lanjut)",
+          _dispatch58(_NS58(delta=120)) is None)
+    _setzh58(app._on_zoom_wheel)
+
+    # --- (d) zoom naik: efek berlapis ----------------------------------------
+    _w58_0, _h58_0 = root.winfo_width(), root.winfo_height()
+    _r58 = app._on_zoom_wheel(_NS58(delta=120))
+    root.update()
+    check("(v3.9.48) CTRL+roda naik (delta +120) → zoom 110% + 'break' "
+          "(binding kelas scroll dimatikan)",
+          _r58 == "break" and app.ui_zoom == 1.1,
+          f"ret={_r58!r} zoom={app.ui_zoom}")
+    check("(v3.9.48) theme.ui_scale sinkron + named font ter-configure "
+          "(font(10) → 11pt) — SEMUA pemakai font ikut HIDUP",
+          _uisc58() == 1.1 and _f58.cget("size") == 11,
+          f"scale={_uisc58()} size={_f58.cget('size')}")
+    check("(v3.9.48) rowheight tabel ter-skala (30 → 33 — font baris "
+          "membesar, rowheight statis akan memotong teks)",
+          int(ttk.Style(root).lookup("Treeview", "rowheight")) == 33,
+          f"rh={ttk.Style(root).lookup('Treeview', 'rowheight')}")
+    check("(v3.9.48) jendela × rasio zoom (menghormati ukuran awal)",
+          abs(root.winfo_width() - round(_w58_0 * 1.1)) <= 2
+          and abs(root.winfo_height() - round(_h58_0 * 1.1)) <= 2,
+          f"w={root.winfo_width()} h={root.winfo_height()} "
+          f"dari {_w58_0}x{_h58_0}")
+    check("(v3.9.48) badge status bar: 'Zoom 110% (CTRL+roda)' — fitur "
+          "bisa ditemukan tanpa baca README",
+          "Zoom 110%" in app.statusbar._right_var.get()
+          and "CTRL+roda" in app.statusbar._right_var.get(),
+          f"got {app.statusbar._right_var.get()!r}")
+
+    # --- (e) X11 Button-4/5 + event tak dikenal ------------------------------
+    app._on_zoom_wheel(_NS58(num=4, delta=0))
+    check("(v3.9.48) X11 <Control-Button-4> (num=4) → zoom naik (120%)",
+          app.ui_zoom == 1.2, f"zoom={app.ui_zoom}")
+    app._on_zoom_wheel(_NS58(num=5, delta=0))
+    check("(v3.9.48) X11 <Control-Button-5> (num=5) → zoom turun (110%)",
+          app.ui_zoom == 1.1, f"zoom={app.ui_zoom}")
+    _r58b = app._on_zoom_wheel(_NS58(delta=0, num=0))
+    check("(v3.9.48) event roda tak dikenal → 'break', zoom tak berubah",
+          _r58b == "break" and app.ui_zoom == 1.1)
+
+    # --- (f) clamp batas + idempoten + lantai font ---------------------------
+    app._apply_ui_zoom(99.0)
+    check("(v3.9.48) clamp ATAS: 99.0 → 200%", app.ui_zoom == 2.0,
+          f"zoom={app.ui_zoom}")
+    app._on_zoom_wheel(_NS58(delta=120))
+    check("(v3.9.48) di batas atas: roda naik = no-op (tetap 200%)",
+          app.ui_zoom == 2.0)
+    app._apply_ui_zoom(0.1)
+    check("(v3.9.48) clamp BAWAH: 0.1 → 50%", app.ui_zoom == 0.5,
+          f"zoom={app.ui_zoom}")
+    app._on_zoom_wheel(_NS58(delta=-120))
+    check("(v3.9.48) di batas bawah: roda turun = no-op (tetap 50%)",
+          app.ui_zoom == 0.5)
+    check("(v3.9.48) nilai sama → no-op (return False, tanpa efek samping)",
+          app._apply_ui_zoom(0.5) is False)
+    check("(v3.9.48) lantai font 4pt di zoom 50% (font(8) → 4, teks tak "
+          "lenyap)",
+          _font58(8).cget("size") == 4, f"size={_font58(8).cget('size')}")
+
+    # --- (g) event NYATA di tree (jalur user asli via binding widget) --------
+    app._apply_ui_zoom(1.0)
+    root.update()
+    app.notebook.select(app.tab_pivot)
+    root.update()
+    _tr58.event_generate("<Control-MouseWheel>", delta=120)
+    root.update()
+    check("(v3.9.48) event NYATA <Control-MouseWheel> di tree view → zoom "
+          "naik via binding widget level (jalur user asli)",
+          app.ui_zoom == 1.1, f"zoom={app.ui_zoom}")
+    app._apply_ui_zoom(1.0)
+    root.update()
+
+    # --- (h) kembali 100%: semuanya pulih -------------------------------------
+    check("(v3.9.48) kembali 100% → badge versi polos (identik v3.9.47 — "
+          "test lama utuh)",
+          app.statusbar._right_var.get() ==
+          f"v{APP_VERSION} · Python Edition",
+          f"got {app.statusbar._right_var.get()!r}")
+    check("(v3.9.48) kembali 100% → rowheight 30 + font(10) = 10pt (round-"
+          "trip bersih, tanpa drift pembulatan)",
+          int(ttk.Style(root).lookup("Treeview", "rowheight")) == 30
+          and _f58.cget("size") == 10)
+    check("(v3.9.48) rescale_named_fonts: SEMUA font kembali size dasar "
+          "(round-trip 100%→200%→50%→100% eksak)",
+          all(_v == _k[1] for _k, _v in _rescale58()))
+
+    # --- (i) config.json repo: default tajam aktif utk user -------------------
+    _cfg_real58 = _json58.loads(
+        Path(_appmod58.CONFIG_PATH).read_text(encoding="utf-8"))
+    check("(v3.9.48) config.json repo: 'DpiAware': true — fix 'tidak HD' "
+          "aktif untuk user (opt-out: false)",
+          _cfg_real58.get("DpiAware") is True,
+          f"got {_cfg_real58.get('DpiAware')!r}")
+    check("(v3.9.48) WINDOW_SIZE tetap '1280x760' (pipeline lama utuh di "
+          "proses DPI-unaware / non-Windows)",
+          _WS58 == "1280x760" and _WW58 == 1280 and _WH58 == 760)
 
     root.destroy()
 

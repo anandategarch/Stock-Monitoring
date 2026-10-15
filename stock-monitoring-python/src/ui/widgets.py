@@ -65,8 +65,8 @@ from .theme import (
     C_RED_SOFT,
     C_TEXT_MUTED,
     C_TEXT_SOFT,
+    bind_ctrl_zoom,
     font,
-    font_family,
     mono,
     setup_tree_tags,
 )
@@ -453,7 +453,7 @@ class EmptyState(tk.Frame):
         self._center = center
         self._subtitle_lbl = None
 
-        tk.Label(center, text=icon, bg=C_CARD, font=(font_family(), 40)).pack(
+        tk.Label(center, text=icon, bg=C_CARD, font=font(40)).pack(
             pady=(28, 0))
         tk.Label(center, text=title, bg=C_CARD, fg=C_HEADER,
                  font=font(13, "bold")).pack(pady=(6, 2))
@@ -970,6 +970,10 @@ def make_log_console(parent, **kw) -> tuple[tk.Text, tk.Frame]:
 
     text.bind("<Control-c>", _copy_selection)
     text.bind("<Control-C>", _copy_selection)
+    # v3.9.48 — CTRL+Scroll di konsol log = ZOOM UI (bukan gulir teks;
+    # pola Control lebih spesifik menang di bindtag widget — lihat
+    # theme.bind_ctrl_zoom)
+    bind_ctrl_zoom(text)
     return text, frame
 
 
@@ -1575,6 +1579,8 @@ class HeaderFilter:
         # scroll wheel
         cv.bind("<MouseWheel>",
                 lambda e: cv.yview_scroll(-1 * (e.delta // 120), "units"))
+        # v3.9.48 — CTRL+Scroll = ZOOM UI (bukan gulir daftar filter)
+        bind_ctrl_zoom(cv)
         # FIX B-05: simpan container daftar — checkbox LAZY untuk nilai di
         # luar cap dibuat di sini saat pencarian menemukannya.
         self._list_inner = inner
@@ -2164,6 +2170,8 @@ class ColumnManager:
         sb.pack(side="right", fill="y")
         cv.bind("<MouseWheel>",
                 lambda e: cv.yview_scroll(int(-e.delta / 120) or -1, "units"))
+        # v3.9.48 — CTRL+Scroll = ZOOM UI (bukan gulir daftar)
+        bind_ctrl_zoom(cv)
 
         vars_: dict[str, tk.BooleanVar] = {}
 
@@ -3632,6 +3640,13 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
     tree.bind("<MouseWheel>", _on_wheel, add="+")
     tree.bind("<Button-4>", _on_btn45, add="+")
     tree.bind("<Button-5>", _on_btn45, add="+")
+    # v3.9.48 — CTRL+Scroll = ZOOM UI (user): pola <Control-MouseWheel>/
+    # <Control-Button-4/5> LEBIH SPESIFIK daripada binding <MouseWheel>
+    # polos di atas (bindtag widget yang sama) → menurut aturan Tk,
+    # CTRL+roda masuk dispatch zoom TANPA menggulir tabel; roda polos
+    # tetap scroll halus. Choke-point ini terpasang di SEMUA tree
+    # (enable_col_resize — termasuk clone ⤢ dan popup).
+    bind_ctrl_zoom(tree)
 
 
 def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):
@@ -3736,22 +3751,21 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
                      pad: int = 24, sample_rows: int = 400):
     """v3.4 — Auto-fit lebar kolom ke konten (judul + sampel baris).
 
-    Ukuran dihitung dari font tabel (family, 10 — v3.9: font tabel
-    diperbesar ala Waste) via Font.measure:
+    Ukuran dihitung dari font tabel via Font.measure:
     max(lebar judul, lebar isi terpanjang sampel) + pad, dibatasi
     [min_width, max_width]. Untuk tabel besar hanya sampel `sample_rows`
     baris merata yang diukur (ukur 400×30 sel < 100ms).
+    v3.9.48 — mengukur dgn NAMED FONT ter-zoom (theme.font(10)) supaya
+    auto-fit tetap akurat saat UI di-zoom CTRL+Scroll (dulu Font baru
+    size-10 statis → lebar kolom salah hitung di zoom ≠ 100%).
     """
-    import tkinter.font as tkfont
-
-    from .theme import font_family
-
-    cols = list(columns) if columns is not None else _tree_display_columns(tree)
     try:
-        meas = tkfont.Font(family=font_family(), size=10).measure
+        meas = font(10).measure
     except Exception:
         def meas(s):  # fallback kasar
             return 7 * len(str(s))
+
+    cols = list(columns) if columns is not None else _tree_display_columns(tree)
 
     try:
         children = tree.get_children("")
@@ -3857,7 +3871,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     hi = tk.Frame(head, bg=C_HEADER)
     hi.pack(fill="x", padx=16, pady=10)
     tk.Label(hi, text="⛶", bg=C_HEADER, fg="#5eead4",
-             font=(font_family(), 12, "bold")).pack(side="left")
+             font=font(12, "bold")).pack(side="left")
     tk.Label(hi, text=title, bg=C_HEADER, fg="#f1f5f9",
              font=font(12, "bold")).pack(side="left", padx=(8, 0))
     tk.Button(

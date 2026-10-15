@@ -161,7 +161,11 @@ from src.ui.theme import (
     C_RED,
     C_TEXT_MUTED,
     apply_theme,
+    ctrl_wheel_dispatch,
     font,
+    rescale_named_fonts,
+    set_ui_scale,
+    set_zoom_wheel_handler,
 )
 from src.ui.widgets import (
     AccentButton,
@@ -184,7 +188,45 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.47"  # v3.9.47 — fix regresi ukuran tampilan v3.9.46 (DPI-awareness kini OPT-IN 'DpiAware' config, default FALSE = ukuran tampilan persis pra-v3.9.46)
+APP_VERSION = "3.9.48"  # v3.9.48 — TAMPILAN HD TAJAM + ZOOM CTRL+Scroll (user: "kok program nya seperti tidak HD ya tampilan nya?" + "bisa gak kalau aku CTRL + Scroll mouse jadi zoom in dan zoom out?")
+# v3.9.48 — TAMPILAN HD TAJAM + ZOOM RUNTIME (2 keluhan user sekaligus):
+# (1) "KOK TIDAK HD?" — akar = KEBIJAKAN opt-out v3.9.47: default
+#     DpiAware=false membuat proses DPI-UNAWARE → Windows MENYALIN-
+#     BESARKAN (bitmap-stretch) seluruh jendela di layar scaling
+#     >100% → semua piksel direntangkan = KABUR (itu yang user lihat
+#     sebagai "tidak HD"). FIX DEFAULT BARU: "DpiAware" kini default
+#     TRUE (piksel 1:1 TAJAM) + KOMPENSASI GEOMETRI menjawab REGRESI
+#     ukuran v3.9.46 yang dulu jadi alasan opt-out: ukuran jendela
+#     dikali skala DPI (winfo_fpixels/96, khusus Windows) — 1280×760 di
+#     layar 125% → 1600×950 piksel FISIK = ukuran FISIK jendela lama
+#     yang di-stretch Windows, TAPI tajam; font tetap POINT (bukan
+#     pixel) + tk scaling dari DPI monitor (v3.9.46) → ukuran relatif
+#     font:geometry kembali IDENTIK dgn tampilan lama. Opt-out tetap
+#     tersedia: "DpiAware": false = pipeline bitmap-stretch lama persis
+#     (kabur tapi identik piksel-ke-piksel dgn pra-v3.9.46).
+# (2) ZOOM RUNTIME CTRL+Scroll (50%–200%, langkah 10%):
+#     - theme.py: font()/mono() kini NAMED FONT BERSAMA (tkfont.Font
+#       di-cache per (size, weight)) — zoom cukup configure size SEKALI
+#       per font dan SEMUA pemakai (ttk style, tk widget, tag Treeview,
+#       konsol log, popup terbuka) re-render HIDUP. apply_theme kini
+#       IDEMPOTEN + rowheight = 30×zoom (scale_px) — dipanggil ulang
+#       oleh zoomer. auto_fit_columns mengukur dgn font ter-zoom.
+#     - anti-BENTROK scroll: pola <Control-MouseWheel>/<Control-Button-4/5>
+#       dipasang TINGKAT WIDGET di SEMUA widget scrollable (choke-point
+#       enable_smooth_wheel/make_log_console/canvas filter) — pola Control
+#       LEBIH SPESIFIK mengalahkan binding <MouseWheel> polos di bindtag
+#       yang sama (aturan Tk: binding ter-spesifik menang) → CTRL+roda
+#       TIDAK menggulir tabel/log, hanya zoom; roda polos tetap scroll.
+#     - efek berlapis _apply_ui_zoom: named font (semua teks) + re-apply
+#       theme (rowheight tabel) + ukuran jendela × rasio zoom (menghormati
+#       resize manual user; clamp layar + 400×300) + minsize proporsional
+#       + invalidasi cache render CellColorOverlay (label sel warna tak
+#       tertinggal posisi lama) + badge "Zoom NNN%" di status bar kanan.
+#     - dispatch lewat registry theme.set_zoom_wheel_handler (widgets→app
+#       tanpa impor melingkar); fallback bind_all utk area non-scrollable
+#       + bind_class Listbox (popdown Combobox).
+#     - runtime saja (restart → 100%) — sengaja: zoom = preferensi sesi,
+#     tidak menulis config.json diam-diam.
 # v3.9.47 — FIX REGRESI UKURAN TAMPILAN (user: "kenapa sekarang
 # tampilkan program nya lebih besar? kembalikan ke size tampilan
 # lama cek dulu coba ini karna apa"):
@@ -1228,10 +1270,23 @@ APP_VERSION = "3.9.47"  # v3.9.47 — fix regresi ukuran tampilan v3.9.46 (DPI-a
 # v3.6.0 — fix tombol filter; hide/unhide kolom; audit dari data app.
 # v3.5.0 — LightMode dihapus; header filter semua kolom; KATEGORI.
 # v3.4.0 — lebar kolom adjustable; SO bulan lalu; tab Rekap Selisih IN.
-WINDOW_SIZE = "1280x760"
+WINDOW_W, WINDOW_H = 1280, 760
+# v3.9.48 — dipecah jadi angka utk KOMPENSASI GEOMETRI DPI (nilai string
+# tak berubah — pipeline lama tetap "1280x760" di proses DPI-unaware):
+# Windows + DpiAware → jendela = WINDOW_W/H × (fpixels/96) supaya
+# ukuran FISIK sama dgn jendela lama yang di-bitmap-stretch (tapi TAJAM).
+WINDOW_SIZE = f"{WINDOW_W}x{WINDOW_H}"
 # FIX (audit 2-a QA visual): tinggi minimum 640 → 700 — di bawah ~695
 # h-scrollbar tabel tertabrak tepi bawah (tidak bisa scroll horizontal).
 WINDOW_MIN = (1020, 700)
+
+# v3.9.48 — ZOOM UI runtime (CTRL + Scroll) — rentang & langkah.
+# 0.5–2.0 dipilih supaya teks tetap terbaca di kedua ujung (font 8pt
+# di 50% ≈ 4pt = lantai scale_pt 4). Runtime saja — tidak dipersist.
+UI_ZOOM_MIN = 0.5
+UI_ZOOM_MAX = 2.0
+UI_ZOOM_STEP = 0.1
+UI_ZOOM_DEFAULT = 1.0
 
 # Path config.json di root project
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config.json"
@@ -1270,8 +1325,29 @@ class StockMonitorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"{APP_TITLE} — Python Edition")
-        self.root.geometry(WINDOW_SIZE)
-        self.root.minsize(*WINDOW_MIN)
+        # v3.9.48 — (1) KOMPENSASI GEOMETRI DPI (fix "tidak HD" tanpa
+        # regresi ukuran v3.9.46): default "DpiAware" kini TRUE = piksel
+        # 1:1 TAJAM (Windows tak lagi bitmap-stretch = sumber kabur);
+        # ukuran FISIK lama dipertahankan dgn mengalikan geometry dgn
+        # skala DPI efektif (fpixels/96 — hanya Windows; non-Windows &
+        # proses unaware = 1.0 → pipeline lama persis).
+        # (2) ZOOM RUNTIME — state di bawah, mesin di _setup_ui_zoom.
+        self._dpi_scale = self._read_dpi_scale()
+        self.ui_zoom = UI_ZOOM_DEFAULT
+        if self._dpi_scale != 1.0:
+            _sw, _sh = (self.root.winfo_screenwidth(),
+                        self.root.winfo_screenheight())
+            self.root.geometry(
+                f"{min(round(WINDOW_W * self._dpi_scale), _sw)}"
+                f"x{min(round(WINDOW_H * self._dpi_scale), _sh)}")
+            self.root.minsize(
+                min(round(WINDOW_MIN[0] * self._dpi_scale), _sw),
+                min(round(WINDOW_MIN[1] * self._dpi_scale), _sh))
+            print(f"[DPI] Kompensasi ukuran jendela ×{self._dpi_scale:.2f} "
+                  f"(piksel 1:1 tajam — ukuran fisik = tampilan lama)")
+        else:
+            self.root.geometry(WINDOW_SIZE)
+            self.root.minsize(*WINDOW_MIN)
         self.root.configure(bg=C_BG)
 
         # State
@@ -1316,6 +1392,9 @@ class StockMonitorApp:
         # Build UI
         self._build_toolbar()
         self._build_statusbar()
+        # v3.9.48 — mesin zoom CTRL+Scroll (dipasang SETELAH statusbar —
+        # badge zoom menulis ke statusbar kanan; lihat _setup_ui_zoom)
+        self._setup_ui_zoom()
         self._build_notebook()
 
         # Redirect stdout/stderr ke queue
@@ -1354,6 +1433,148 @@ class StockMonitorApp:
         self.statusbar = StatusBar(self.root)
         self.statusbar.pack(side=tk.BOTTOM, fill=tk.X)
         self.statusbar.set_right(f"v{APP_VERSION} · Python Edition")
+
+    # =====================================================================
+    # v3.9.48 — ZOOM UI RUNTIME (CTRL + Scroll) — user: "bisa gak kalau
+    # aku CTRL + Scroll mouse jadi zoom in dan zoom out?"
+    # =====================================================================
+    def _read_dpi_scale(self) -> float:
+        """Skala DPI efektif utk KOMPENSASI GEOMETRI (Windows + DpiAware
+        sukses): winfo_fpixels('1i')/96 — layar 125% → 1.25, 150% → 1.5.
+        Proses DPI-unaware (\"DpiAware\": false) melihat 96 virtual → 1.0
+        (geometry polos = pipeline lama persis). Non-Windows → 1.0 (X11/
+        macOS tak bitmap-stretch; ukuran lama sudah benar di sana).
+        Dibaca SEKALI di startup SETELAH main() memasang awareness+scaling
+        DPI — jangan dibaca ulang setelah zoom (fpixels ikut tk scaling).
+        """
+        try:
+            if sys.platform != "win32":
+                return 1.0
+            return max(1.0, round(self.root.winfo_fpixels("1i") / 96.0, 2))
+        except tk.TclError:
+            return 1.0
+
+    def _setup_ui_zoom(self):
+        """Pasang seluruh mesin zoom runtime:
+        - handler roda-CTRL → registry theme (semua widget scrollable
+          memanggil ctrl_wheel_dispatch via bind_ctrl_zoom — spesifisitas
+          pattern Tk memangkas scroll ganda);
+        - fallback bind_all utk area NON-scrollable (frame/label/kartu —
+          tak ada binding roda lain yang bisa bentrok);
+        - kelas Listbox (popdown Combobox — satu-satunya kelas scrollable
+          tanpa factory choke-point);
+        - badge persen zoom di status bar kanan (hint cara pakai)."""
+        set_zoom_wheel_handler(self._on_zoom_wheel)
+        for _seq in ("<Control-MouseWheel>", "<Control-Button-4>",
+                     "<Control-Button-5>"):
+            self.root.bind_all(_seq, self._on_zoom_wheel)
+            self.root.bind_class("Listbox", _seq, ctrl_wheel_dispatch)
+        self._update_zoom_badge()
+
+    def _on_zoom_wheel(self, event):
+        """CTRL + roda: arah atas = perbesar, bawah = perkecil.
+        Windows/macOS: event.delta (±120 per notch, trackpad bisa kecil);
+        X11: event.num 4 (naik) / 5 (turun).
+        Selalu return \"break\" — mematikan binding kelas pada bindtag
+        berikutnya supaya tabel/log TIDAK ikut bergulir saat zoom."""
+        _d = getattr(event, "delta", 0) or 0
+        if _d:
+            _dir = 1 if _d > 0 else -1
+        else:
+            _num = getattr(event, "num", 0) or 0
+            if _num == 4:
+                _dir = 1
+            elif _num == 5:
+                _dir = -1
+            else:
+                return "break"
+        self._apply_ui_zoom(self.ui_zoom + _dir * UI_ZOOM_STEP)
+        return "break"
+
+    def _apply_ui_zoom(self, value: float) -> bool:
+        """Terapkan zoom UI (clamp 50%–200%, bulat 2 desimal). Return
+        True bila zoom benar-benar berubah (nilai sama = no-op).
+
+        Efek berlapis (urutan penting — style font membaca zoom aktif):
+        (1) FONT NAMED: set_ui_scale + rescale_named_fonts — semua teks
+            (ttk style, tk widget, tag tree, konsol log, popup TERBUKA)
+            re-render HIDUP;
+        (2) STYLE TABEL: apply_theme dipasang ULANG (idempoten) —
+            rowheight = 30×zoom (font baris membesar; rowheight statis
+            akan memotong teks) + style font ikut ter-refresh;
+        (3) JENDELA: ukuran × rasio zoom (menghormati resize manual user;
+            clamp batas layar + 400×300 minimum) + minsize proporsional;
+        (4) CACHE RENDER: rowheight berubah → cache CellColorOverlay +
+            batching insert virtual di-invalidasi (label sel warna tak
+            tertinggal di posisi lama);
+        (5) BADGE persen di status bar kanan."""
+        _new = round(min(UI_ZOOM_MAX, max(UI_ZOOM_MIN, value)), 2)
+        _old = self.ui_zoom
+        if abs(_new - _old) < 1e-6:
+            return False
+        self.ui_zoom = _new
+        # (1) named font bersama — live ke semua pemakai
+        set_ui_scale(_new)
+        rescale_named_fonts()
+        # (2) re-apply theme: rowheight + font style (idempoten)
+        with contextlib.suppress(Exception):
+            apply_theme(self.root)
+        # (3) jendela + minsize proporsional
+        with contextlib.suppress(Exception):
+            _w, _h = self.root.winfo_width(), self.root.winfo_height()
+            if _w > 1 and _h > 1:
+                _r = _new / _old
+                _sw, _sh = (self.root.winfo_screenwidth(),
+                            self.root.winfo_screenheight())
+                self.root.geometry(
+                    f"{min(max(round(_w * _r), 400), _sw)}"
+                    f"x{min(max(round(_h * _r), 300), _sh)}")
+            _ms = self._dpi_scale * _new
+            self.root.minsize(
+                min(round(WINDOW_MIN[0] * _ms),
+                    self.root.winfo_screenwidth()),
+                min(round(WINDOW_MIN[1] * _ms),
+                    self.root.winfo_screenheight()))
+        # (4) cache render overlay/tree (rowheight berubah)
+        self._invalidate_tree_render_caches()
+        # (5) badge
+        self._update_zoom_badge()
+        return True
+
+    def _invalidate_tree_render_caches(self):
+        """Invalidasi cache render SEMUA tree (termasuk popup/clone ⤢):
+        CellColorOverlay (v3.9.40) menyimpan (style, rowheight, font) di
+        cache sampai <Configure> — zoom di batas layar bisa TIDAK mengubah
+        ukuran widget (clamp) → tanpa invalidasi eksplisit, label sel
+        warna tertinggal di posisi rowheight lama & batching insert
+        virtual salah hitung baris."""
+        def _walk(_w):
+            try:
+                _kids = _w.winfo_children()
+            except tk.TclError:
+                return
+            for _ch in _kids:
+                _walk(_ch)
+            _ov = getattr(_w, "_cell_color_overlay", None)
+            if _ov is not None and getattr(_ov, "_alive", False):
+                with contextlib.suppress(Exception):
+                    _ov._invalidate_render_cache()
+                    _ov._schedule()
+        with contextlib.suppress(Exception):
+            _walk(self.root)
+
+    def _update_zoom_badge(self):
+        """Badge zoom di status bar kanan: hint \"(CTRL+roda)\" tampil
+        saat zoom ≠ 100% supaya fitur bisa ditemukan tanpa baca README;
+        100% = teks versi polos (identik v3.9.47 — test lama utuh)."""
+        with contextlib.suppress(Exception):
+            if abs(self.ui_zoom - 1.0) < 1e-6:
+                self.statusbar.set_right(f"v{APP_VERSION} · Python Edition")
+            else:
+                self.statusbar.set_right(
+                    f"v{APP_VERSION} · Zoom "
+                    f"{round(self.ui_zoom * 100)}% (CTRL+roda) · "
+                    f"Python Edition")
 
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
@@ -2811,17 +3032,29 @@ def _set_windows_dpi_awareness() -> str:
 
 
 def _config_dpi_aware() -> bool:
-    """v3.9.47 — baca key "DpiAware" dari config.json (default False).
+    """v3.9.47 → v3.9.48 — baca key "DpiAware" dari config.json.
+
+    v3.9.48 — DEFAULT KINI TRUE (keluhan user: "kok program nya seperti
+    tidak HD ya tampilan nya?"): proses DPI-unaware (default v3.9.47)
+    selalu di-BITMAP-STRETCH Windows di layar scaling >100% → semua
+    piksel direntangkan = KABUR. Kini default: proses DPI-aware =
+    piksel 1:1 TAJAM, dgn ukuran fisik dipertahankan lewat KOMPENSASI
+    GEOMETRI jendela (× fpixels/96 — StockMonitorApp.__init__) + tk
+    scaling dari DPI monitor (v3.9.46) — kombinasi = tajam TANPA regresi
+    ukuran yang dulu membuat v3.9.47 memilih opt-out. "DpiAware": false
+    = opt-out eksplisit ke pipeline bitmap-stretch pra-v3.9.46 persis
+    (kabur, ukuran identik piksel-ke-piksel — jalur darurat bila kompensasi
+    tak cocok di mesin tertentu).
 
     Dibaca MENTAH (bukan lewat kelas Config — yang memvalidasi key
     wajib & bisa melempar RuntimeError): keputusan DPI harus tersedia
     SEBELUM tk.Tk() dan tak boleh tersandung masalah config lain
-    (config rusak → default False = ukuran lama; error config asli
-    tetap dilaporkan app seperti biasa saat load pipeline).
-    Penuh defensif: file hilang / JSON rusak / bukan dict / nilai
-    bukan boolean true JSON → False. STRICT `is True` (bukan bool()):
-    string "false"/"true"/angka 1 tak sengaja ditulis user TIDAK
-    dianggap aktif (bool("false") == True = jebakan klasik).
+    (error config asli tetap dilaporkan app seperti biasa saat load
+    pipeline). Penuh defensif: file hilang / JSON rusak / bukan dict /
+    nilai bukan boolean true JSON → DEFAULT (True). STRICT `is True`
+    (bukan bool()): string "false"/"true"/angka 1 tak sengaja ditulis
+    user TIDAK dianggap aktif (bool("false") == True = jebakan klasik)
+    — opt-in maupun opt-out harus boolean JSON eksplisit.
     Exception SPESIFIK (OSError + ValueError — cukup utk open+
     json.load: FileNotFoundError/PermissionError/JSONDecodeError/
     UnicodeDecodeError): bug kode lain tetap tersangkut crash
@@ -2831,10 +3064,10 @@ def _config_dpi_aware() -> bool:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return False
-        return data.get("DpiAware", False) is True
+            return True
+        return data.get("DpiAware", True) is True
     except (OSError, ValueError):
-        return False
+        return True
 
 
 def _apply_windows_tk_scaling(root: tk.Tk) -> None:
@@ -2866,21 +3099,24 @@ def main():
     # memakainya utk fallback python dgn traceback di konsol).
     root = None
     try:
-        # v3.9.47 — REGRESI UKURAN v3.9.46: intervensi DPI kini OPT-IN
-        # (config.json "DpiAware", default FALSE). Default = pipeline
-        # ukuran PERSIS pra-v3.9.46: TIDAK memanggil API awareness
-        # (proses DPI-unaware → Windows bitmap-scale jendela = ukuran
-        # yang user kenal) + TIDAK menyentuh tk scaling. "DpiAware":
-        # true → mode tajam per-monitor v3.9.46 (audit #2: SEBELUM
-        # jendela pertama + mode benar-benar per-monitor + return code
-        # diperiksa) + tk scaling dari DPI monitor.
+        # v3.9.47 → v3.9.48 — DPI-AWARE KINI DEFAULT (fix "tampilan tidak
+        # HD" — proses DPI-unaware selalu di-bitmap-stretch Windows di
+        # layar scaling >100% = KABUR): "DpiAware" default TRUE = piksel
+        # 1:1 tajam (SEBELUM jendela pertama, per dok Microsoft — audit
+        # #2 v3.9.46) + tk scaling dari DPI monitor; REGRESI UKURAN
+        # v3.9.46 dijawab KOMPENSASI GEOMETRI di StockMonitorApp.__init__
+        # (jendela × fpixels/96 → ukuran FISIK = tampilan lama).
+        # "DpiAware": false = opt-out eksplisit → TIDAK memanggil API
+        # awareness sama sekali + TIDAK menyentuh tk scaling = pipeline
+        # bitmap-stretch pra-v3.9.46 persis (kabur, ukuran lama).
         _dpi_mode = ""
         if _config_dpi_aware():
             _dpi_mode = _set_windows_dpi_awareness()
             if _dpi_mode:
                 print(f"[DPI] Windows DPI awareness: {_dpi_mode} "
-                      "(mode tajam 'DpiAware' — ukuran tampilan bisa "
-                      "berbeda dari default)")
+                      "(mode tajam 'DpiAware' default — ukuran fisik "
+                      "dipertahankan via kompensasi geometri; CTRL+Scroll "
+                      "= zoom 50–200%)")
         root = tk.Tk()
         if _dpi_mode:
             _apply_windows_tk_scaling(root)
