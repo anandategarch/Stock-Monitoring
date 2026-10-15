@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.46", APP_VERSION == "3.9.46",
+    check("Versi = 3.9.47", APP_VERSION == "3.9.47",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -12646,18 +12646,70 @@ def main():
     check("(v3.9.46) DPI semua API gagal → '' (jujur, bukan mengklaim "
           "per-monitor)",
           _dpi_chain(_WD57(_U3257(), _Sh57())) == "")
-    # urutan pemanggilan main(): set SEBELUM tk.Tk() (audit: terlambat
-    # dulu) — cek source _dpi dipanggil sebelum konstruktor Tk
+    # v3.9.47 — REGRESI UKURAN (user: "kenapa sekarang tampilkan
+    # program nya lebih besar? kembalikan ke size tampilan lama"):
+    # intervensi DPI v3.9.46 kini OPT-IN "DpiAware" (default false =
+    # pipeline ukuran PERSIS pra-v3.9.46: TANPA panggilan API awareness
+    # + TANPA sentuh tk scaling)
     import inspect
 
     import src.ui.app as _appmod57
     _main_src57 = inspect.getsource(_appmod57.main)
+    _gate_pos = _main_src57.find("if _config_dpi_aware():")
     _set_pos = _main_src57.find("_set_windows_dpi_awareness()")
     _tk_pos = _main_src57.find("root = tk.Tk()")
-    check("(v3.9.46) main(): _set_windows_dpi_awareness() dipanggil "
-          "SEBELUM tk.Tk() (dok Microsoft: DPI sebelum HWND pertama)",
-          0 <= _set_pos < _tk_pos,
-          f"set@{_set_pos} tk@{_tk_pos}")
+    _scale_gate_pos = _main_src57.find("if _dpi_mode:")
+    _scale_pos = _main_src57.find("_apply_windows_tk_scaling(root)")
+    check("(v3.9.47) main(): gate _config_dpi_aware() SEBELUM "
+          "_set_windows_dpi_awareness() (default false = TAK memanggil "
+          "API awareness sama sekali → Windows bitmap-scale = ukuran "
+          "lama; opt-in true tetap SEBELUM tk.Tk() per dok Microsoft)",
+          0 <= _gate_pos < _set_pos < _tk_pos,
+          f"gate@{_gate_pos} set@{_set_pos} tk@{_tk_pos}")
+    check("(v3.9.47) main(): _apply_windows_tk_scaling dibalut "
+          "'if _dpi_mode:' (tanpa awareness aktif → tk scaling TAK "
+          "disentuh sama sekali)",
+          0 <= _scale_gate_pos < _scale_pos,
+          f"gate@{_scale_gate_pos} scale@{_scale_pos}")
+
+    # _config_dpi_aware — STRICT is-True + defensif (patch CONFIG_PATH
+    # ke file temp, dikembalikan di finally)
+    import tempfile as _tf57
+
+    from src.ui.app import _config_dpi_aware as _dpi_cfg
+
+    _orig_cfg_path57 = _appmod57.CONFIG_PATH
+    _tmpdir57 = _tf57.mkdtemp(prefix="dpi_57_")
+    try:
+        _cfg57 = Path(_tmpdir57) / "config.json"
+        _appmod57.CONFIG_PATH = _cfg57
+        check("(v3.9.47) DpiAware: config.json hilang → False "
+              "(default ukuran lama)",
+              _dpi_cfg() is False)
+        _cfg57.write_text('{"RootPath": "x"}', encoding="utf-8")
+        check("(v3.9.47) DpiAware: key hilang → False (config user "
+              "lama TANPA key otomatis kembali ukuran lama — tanpa "
+              "migrasi)",
+              _dpi_cfg() is False)
+        _cfg57.write_text('{"DpiAware": true}', encoding="utf-8")
+        check("(v3.9.47) DpiAware: true → mode tajam per-monitor "
+              "aktif (opt-in)",
+              _dpi_cfg() is True)
+        _cfg57.write_text('{"DpiAware": "false"}', encoding="utf-8")
+        check("(v3.9.47) DpiAware: string \"false\" → False (STRICT "
+              "is-True — bool('false')=True jebakan klasik)",
+              _dpi_cfg() is False)
+        _cfg57.write_text('{"DpiAware": true,', encoding="utf-8")
+        check("(v3.9.47) DpiAware: JSON rusak → False (startup tak "
+              "tersandung; error config asli tetap dilaporkan app "
+              "seperti biasa)",
+              _dpi_cfg() is False)
+        _cfg57.write_text('[1, 2]', encoding="utf-8")
+        check("(v3.9.47) DpiAware: JSON bukan dict → False",
+              _dpi_cfg() is False)
+    finally:
+        _appmod57.CONFIG_PATH = _orig_cfg_path57
+        shutil.rmtree(_tmpdir57, ignore_errors=True)
 
     # --- (d) TEMUAN #4: refresh dialog MODAL + gate can_refresh SEBELUM
     # dialog menutup diri + guard _refresh_sources sebelum invalidasi

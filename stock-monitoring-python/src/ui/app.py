@@ -184,7 +184,31 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.46"  # v3.9.46 — audit eksternal 4 temuan (status final jujur/parsial, DPI per-monitor benar+sebelum Tk, copy-log tak kembalikan status basi, refresh dialog modal+guard) + entry '(Tanpa Kategori)' SELALU ada
+APP_VERSION = "3.9.47"  # v3.9.47 — fix regresi ukuran tampilan v3.9.46 (DPI-awareness kini OPT-IN 'DpiAware' config, default FALSE = ukuran tampilan persis pra-v3.9.46)
+# v3.9.47 — FIX REGRESI UKURAN TAMPILAN (user: "kenapa sekarang
+# tampilkan program nya lebih besar? kembalikan ke size tampilan
+# lama cek dulu coba ini karna apa"):
+# AKAR — satu-satunya perubahan v3.9.46 yang menyentuh UKURAN
+# rendering adalah audit fix #2 (DPI-awareness Windows): v3.9.46
+# memasang per-monitor-v2 awareness SEBELUM tk.Tk() (benar per dok
+# Microsoft) → di layar Windows dgn scaling >100% (125%/150%)
+# aplikasi berpindah dari pipeline LAMA (proses DPI-unaware →
+# Windows bitmap-stretch jendela ke ukuran "normal" yang user lihat
+# bertahun-tahun — panggilan awareness v3.9.45 kebetulan GAGAL senyap
+# karena dipanggil SETELAH jendela pertama, E_ACCESSDENIED, return
+# code tak diperiksa) ke pipeline BARU (pixel asli + tk scaling dari
+# DPI monitor) → ukuran bersih NET berubah (di mesin user: LEBIH
+# BESAR). KEBIJAKAN: ukuran tampilan yang user kenal MENANG atas
+# ketajaman pixel — keduanya tak bisa dijamin identik lintas mesin.
+# FIX: intervensi DPI kini OPT-IN via config.json key "DpiAware"
+# (default FALSE): False = TIDAK memanggil API awareness sama sekali
+# + TIDAK menyentuh tk scaling = pipeline PERSIS efektif pra-v3.9.46
+# (Windows bitmap-scale, ukuran lama) · True = mode tajam per-monitor
+# v3.9.46 (kode audit #2 yang benar tetap tersedia, hanya harus
+# diminta). Key DIBACA mentah (json.load + .get) SEBELUM Tk — penuh
+# defensif: config hilang/rusak/bukan dict → False (default aman;
+# error config asli tetap dilaporkan app seperti biasa, tidak
+# diduplikasi di sini).
 # v3.9.46 — AUDIT EKSTERNAL 4 TEMUAN + KATEGORI KOSONG (user):
 # (1) [P1] STATUS FINAL JUJUR — status hijau "SELESAI" dulu dipasang
 #     SEBELUM view dimuat + mode refresh MENIMPA peringatan dengan hijau
@@ -2757,6 +2781,10 @@ def _set_windows_dpi_awareness() -> str:
     dipanggil SETELAH root = tk.Tk() → jendela sudah terinisialisasi dgn
     DPI lama).
 
+    v3.9.47 — OPT-IN: fungsi ini hanya dipanggil bila config.json key
+    "DpiAware" == true (default false — ukuran tampilan pra-v3.9.46
+    dipertahankan; lihat _config_dpi_aware).
+
     Juga memperbaiki NILAI: komentar lama mengklaim per-monitor sambil
     memanggil SetProcessDpiAwareness(1) — nilai 1 = SYSTEM-DPI-aware.
     Kini benar-benar per-monitor (context -4 → awareness(2) → system).
@@ -2782,10 +2810,42 @@ def _set_windows_dpi_awareness() -> str:
         return ""
 
 
+def _config_dpi_aware() -> bool:
+    """v3.9.47 — baca key "DpiAware" dari config.json (default False).
+
+    Dibaca MENTAH (bukan lewat kelas Config — yang memvalidasi key
+    wajib & bisa melempar RuntimeError): keputusan DPI harus tersedia
+    SEBELUM tk.Tk() dan tak boleh tersandung masalah config lain
+    (config rusak → default False = ukuran lama; error config asli
+    tetap dilaporkan app seperti biasa saat load pipeline).
+    Penuh defensif: file hilang / JSON rusak / bukan dict / nilai
+    bukan boolean true JSON → False. STRICT `is True` (bukan bool()):
+    string "false"/"true"/angka 1 tak sengaja ditulis user TIDAK
+    dianggap aktif (bool("false") == True = jebakan klasik).
+    Exception SPESIFIK (OSError + ValueError — cukup utk open+
+    json.load: FileNotFoundError/PermissionError/JSONDecodeError/
+    UnicodeDecodeError): bug kode lain tetap tersangkut crash
+    handler main() (jujur), bukan ditelan senyap.
+    """
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+        return data.get("DpiAware", False) is True
+    except (OSError, ValueError):
+        return False
+
+
 def _apply_windows_tk_scaling(root: tk.Tk) -> None:
     """v3.9.46 — pasang tk scaling dari DPI aktual (dipisah dari
     _set_windows_dpi_awareness karena butuh root HIDUP; dipanggil SETELAH
-    tk.Tk() dibuat). No-op di non-Windows."""
+    tk.Tk() dibuat). No-op di non-Windows.
+
+    v3.9.47 — OPT-IN: hanya dipanggil bila config "DpiAware" == true
+    DAN awareness berhasil terpasang (_dpi_mode != "") — tanpa itu,
+    tk scaling TIDAK disentuh sama sekali (pipeline ukuran lama).
+    """
     if sys.platform != "win32":
         return
     try:
@@ -2806,14 +2866,24 @@ def main():
     # memakainya utk fallback python dgn traceback di konsol).
     root = None
     try:
-        # v3.9.46 — audit 66 temuan #2: DPI-awareness SEBELUM jendela
-        # pertama (dulu setelah tk.Tk() — terlambat per dok Microsoft);
-        # mode benar-benar per-monitor + return code diperiksa.
-        _dpi_mode = _set_windows_dpi_awareness()
-        if _dpi_mode:
-            print(f"[DPI] Windows DPI awareness: {_dpi_mode}")
+        # v3.9.47 — REGRESI UKURAN v3.9.46: intervensi DPI kini OPT-IN
+        # (config.json "DpiAware", default FALSE). Default = pipeline
+        # ukuran PERSIS pra-v3.9.46: TIDAK memanggil API awareness
+        # (proses DPI-unaware → Windows bitmap-scale jendela = ukuran
+        # yang user kenal) + TIDAK menyentuh tk scaling. "DpiAware":
+        # true → mode tajam per-monitor v3.9.46 (audit #2: SEBELUM
+        # jendela pertama + mode benar-benar per-monitor + return code
+        # diperiksa) + tk scaling dari DPI monitor.
+        _dpi_mode = ""
+        if _config_dpi_aware():
+            _dpi_mode = _set_windows_dpi_awareness()
+            if _dpi_mode:
+                print(f"[DPI] Windows DPI awareness: {_dpi_mode} "
+                      "(mode tajam 'DpiAware' — ukuran tampilan bisa "
+                      "berbeda dari default)")
         root = tk.Tk()
-        _apply_windows_tk_scaling(root)
+        if _dpi_mode:
+            _apply_windows_tk_scaling(root)
         StockMonitorApp(root)
         root.mainloop()
     except Exception:
