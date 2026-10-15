@@ -1086,7 +1086,7 @@ class DeviasiView(tk.Frame):
         # CEK — palet modern (sejalan design system)
         tree.tag_configure("cek_kosong", foreground="#b45309")   # amber
         tree.tag_configure("cek_tanggal", foreground="#2563eb")  # blue
-        tree.tag_configure("cek_manual", foreground="#ea580c")   # orange
+        tree.tag_configure("cek_manual", foreground="#c2410c")   # orange-700 (v3.9.50: kontras 2,89→3,9:1 di atas bg grp_head — audit 3-c)
         tree.tag_configure("cek_drastis", foreground="#dc2626")  # red
         tree.tag_configure("cek_acr", foreground="#7c3aed")      # purple
         # v3.9.19 — kondisi ke-0 "Promix 04" (SO bersumber non input so

@@ -178,6 +178,7 @@ from src.ui.widgets import (
     Spinner,
     StatusBar,
     Toolbar,
+    auto_fit_columns,
     fmt_int_id,
     gc_shield_acquire,
     gc_shield_release,
@@ -188,7 +189,67 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.49"  # v3.9.49 — KATEGORI REKAP MENTAH + FILTER AKTIF/NON + SEKAT KELOMPOK (user: "kolom aktif dan non aktif pindah ke bagian filter dekat kategori" + "ambil kategori dari file Rekap Mentah ... default: COM DEVIASI - RESTO dan Biaya Packaging - RESTO" + "sekat visual antara cabe dan pentol")
+APP_VERSION = "3.9.50"  # v3.9.50 — DEEP AUDIT 4-AGENT (3-a..3-d): fix zoom kolom tabel + round-trip jendela + filter '-' 5c + precedence berjalan + kontras cek_manual
+# v3.9.50 — DEEP AUDIT SEMUA FITUR BARU (user: "Deep audit semua
+# fitur baru dan fix sebar agent" — 4 agent paralel: 3-a zoom/DPI,
+# 3-b pipeline kategori, 3-c UI filter/banding, 3-d regresi+E2E;
+# baterai penuh 1159/1159 + mock + ruff 190/15 + E2E real data
+# semua HIJAU — temuan di bawah adalah sisa audit, bukan regresi):
+# (1) [MAJOR 3-a] ZOOM TIDAK MENSKALAKAN LEBAR KOLOM TABEL: _apply_ui_
+#     zoom menyentuh font/rowheight/jendela/overlay tapi BUKAN kolom —
+#     auto_fit_columns clamp max_width=340 STATIS → Nama Barang di
+#     zoom >±110% mulai TERPOTONG (butuh 634px di 200%, capped 340).
+#     FIX: (a) auto_fit_columns menskalakan min_width/max_width/pad ×
+#     theme.ui_scale() (pengukuran font(10) ter-zoom sudah benar —
+#     hanya BOUNDS-nya yang statis); (b) _apply_ui_zoom memanggil
+#     _refit_all_tree_columns() — auto-fit ULANG semua tree (root +
+#     popup + clone ⛶, walk winfo_children recursive) setelah font
+#     ter-rescale, sebelum invalidasi cache render → kolom mengikuti
+#     zoom seperti janji 'zoom seluruh UI' (deterministik dari konten
+#     via auto_fit — tanpa drift pembulatan rasio).
+# (2) [MINOR 3-a] ROUND-TRIP JENDELA LEWAT CLAMP LAYAR: rasio dikali
+#     dari ukuran TER-CLAMP (1100×800 → 200% clamp 1920×1080 → balik
+#     100% = 1020×700 minsize, BUKAN 1100×800 — ukuran asli 'terbakar').
+#     FIX: _zoom_base_wh (ukuran efektif 100%) + _zoom_expected_wh
+#     (ukuran yang kita minta sendiri) + binding <Configure>
+#     _on_root_configure: resize MANUAL user → base diperbarui
+#     (current/zoom), perubahan dari zoom aplikasi sendiri (match
+#     expected, termasuk hasil clamp) → base TIDAK berubah → round-
+#     trip 100%→200%→100% EKSAK pulih meski lewat clamp layar.
+# (3) [MINOR 3-a] MINSIZE×zoom DI-CLAMP LAYAR PENUH (1920×1080 di zoom
+#     200% → user tak bisa mengecilkan jendela sama sekali): clamp
+#     minsize kini fraksi 85% layar (bukan 100%).
+# (4) [MINOR 3-a] 2 popup tree Nominal per Resto TANPA choke-point
+#     (tanpa enable_col_resize → tanpa smooth wheel + binding CTRL
+#     widget-level; klaim 'semua tree' meleset): _show_resto_popup +
+#     _show_noharga_popup kini enable_col_resize(tree) — parity 14
+#     call site lain (zoom tetap jalan via bind_all fallback, tapi
+#     roda halus + prioritas binding widget kini utuh).
+# (5) [MINOR 3-b] LANGKAH 5c filter blank TAK MEMBUANG '-'/'—' (cermin
+#     token kategori_blank_mask): rekap kategori '-' kini TIDAK menimpa
+#     master (dulu: item ber-master nyata 'kehilangan' kategorinya).
+# (6) [MINOR 3-b] PRECEDENCE 5c: duplikat nama barang di rekap LALU vs
+#     BERJALAN → drop_duplicates kini keep="last" (concat b-lalu lalu
+#     a-berjalan → BERJALAN menang — bulan berjalan otoritatif; dulu
+#     nilai BASI bulan lalu yang menang secara diam-diam).
+# (7) [MINOR 3-b] LOG 5c kini juga melaporkan jumlah baris yang NILAINYA
+#     BENAR-BENAR berubah dari master (rekonsiliasi audit — dulu hanya
+#     'ber-rekap' yang tak membedakan sudah sama/berubah).
+# (8) [MINOR 3-b] Asimetri case kategori_multi_values vs kategori_
+#     passthrough (label gabungan exact-case vs lower): kini keduanya
+#     case-insensitive (landmine pemanggil programatik hilang).
+# (9) [MINOR 3-b] Pivot combobox KATEGORI width 16 → 46 (label gabungan
+#     49-char default TERPOTONG di tab Pivot; 2 combobox lain sudah 46).
+# (10) [MINOR 3-b] Deteksi KATEGORI jalur per-resto kini whitespace-
+#     tolerant (strip — parity jalur combined; header 'KATEGORI ' di
+#     sheet per-resto legacy tak lagi dibuang senyap).
+# (11) [MINOR 3-c] KONTRAS fg cek_manual #ea580c di atas bg grp_head
+#     #e2e8f0 = 2,89:1 (< 3:1 WCAG): digelapkan ke #c2410c (≈3,9:1) —
+#     teks CEK 'Hitung Manual' di baris pertama kelompok tetap terbaca.
+# (12) [MINOR 3-c] '(Kosong)' TERBUKTI BENAR (kategori_blank_mask
+#     diterapkan ke kolom AKTIF/NON — helper detektor token blank
+#     generik; penamaan saja yang misleading) — tidak diubah, hanya
+#     didokumentasikan di sini supaya audit berikutnya tak curiga ulang.
 # v3.9.49 — KATEGORI REKAP MENTAH + FILTER AKTIF/NON + SEKAT VISUAL
 # KELOMPOK (4 permintaan 1 rilis):
 # (1) KOLOM AKTIF/NON → FILTER (user: "kolom Aktif dan non aktif pindah
@@ -1374,20 +1435,36 @@ class StockMonitorApp:
         # (2) ZOOM RUNTIME — state di bawah, mesin di _setup_ui_zoom.
         self._dpi_scale = self._read_dpi_scale()
         self.ui_zoom = UI_ZOOM_DEFAULT
+        # v3.9.50 — [MINOR 3-a] ROUND-TRIP JENDELA: simpan ukuran BASE
+        # (= ukuran efektif di zoom 100%) + ukuran EXPECTED (yang kita
+        # minta sendiri via geometry — termasuk hasil clamp layar).
+        # Binding <Configure> _on_root_configure membedakan resize MANUAL
+        # user (→ base diperbarui = current/zoom) dari perubahan zoom
+        # aplikasi sendiri (match expected → base tetap) → kembali ke
+        # 100% dari zoom tinggi yang TER-CLAMP layar memulihkan ukuran
+        # asli EKSAK (dulu: rasio dihitung dari ukuran ter-clamp →
+        # 1100×800 → 200% → 100% = 1020×700 minsize 'collapse').
+        self._zoom_base_wh = None
+        self._zoom_expected_wh = None
         if self._dpi_scale != 1.0:
             _sw, _sh = (self.root.winfo_screenwidth(),
                         self.root.winfo_screenheight())
-            self.root.geometry(
-                f"{min(round(WINDOW_W * self._dpi_scale), _sw)}"
-                f"x{min(round(WINDOW_H * self._dpi_scale), _sh)}")
+            _gw = min(round(WINDOW_W * self._dpi_scale), _sw)
+            _gh = min(round(WINDOW_H * self._dpi_scale), _sh)
+            self.root.geometry(f"{_gw}x{_gh}")
             self.root.minsize(
                 min(round(WINDOW_MIN[0] * self._dpi_scale), _sw),
                 min(round(WINDOW_MIN[1] * self._dpi_scale), _sh))
+            self._zoom_base_wh = (_gw, _gh)
+            self._zoom_expected_wh = (_gw, _gh)
             print(f"[DPI] Kompensasi ukuran jendela ×{self._dpi_scale:.2f} "
                   f"(piksel 1:1 tajam — ukuran fisik = tampilan lama)")
         else:
             self.root.geometry(WINDOW_SIZE)
             self.root.minsize(*WINDOW_MIN)
+            self._zoom_base_wh = (WINDOW_W, WINDOW_H)
+            self._zoom_expected_wh = (WINDOW_W, WINDOW_H)
+        self.root.bind("<Configure>", self._on_root_configure)
         self.root.configure(bg=C_BG)
 
         # State
@@ -1559,27 +1636,87 @@ class StockMonitorApp:
         # (2) re-apply theme: rowheight + font style (idempoten)
         with contextlib.suppress(Exception):
             apply_theme(self.root)
-        # (3) jendela + minsize proporsional
+        # (2b) v3.9.50 — [MAJOR 3-a] RE-FIT KOLOM SEMUA TABEL: font ter-
+        # zoom + bounds auto_fit ter-skala → kolom mengikuti zoom (dulu
+        # hanya font/rowheight/jendela — konten tabel terpotong di zoom
+        # >±110% karena clamp max_width statis 340px).
+        self._refit_all_tree_columns()
+        # (3) jendela + minsize proporsional — v3.9.50: target = BASE×zoom
+        # (bukan current×rasio) supaya round-trip lewat clamp layar pulih
+        # eksak; resize manual terus ditrack ke base via _on_root_configure.
         with contextlib.suppress(Exception):
-            _w, _h = self.root.winfo_width(), self.root.winfo_height()
-            if _w > 1 and _h > 1:
-                _r = _new / _old
+            if self._zoom_base_wh is not None:
+                _bw, _bh = self._zoom_base_wh
                 _sw, _sh = (self.root.winfo_screenwidth(),
                             self.root.winfo_screenheight())
-                self.root.geometry(
-                    f"{min(max(round(_w * _r), 400), _sw)}"
-                    f"x{min(max(round(_h * _r), 300), _sh)}")
+                _tw = int(min(max(round(_bw * _new), 400), _sw))
+                _th = int(min(max(round(_bh * _new), 300), _sh))
+                self.root.geometry(f"{_tw}x{_th}")
+                self._zoom_expected_wh = (_tw, _th)
             _ms = self._dpi_scale * _new
+            # v3.9.50 — [MINOR 3-a] clamp minsize ke FRAKSI layar (85%):
+            # dulu clamp 100% layar → di zoom 200% minsize = layar penuh
+            # → user tak bisa mengecilkan jendela sama sekali.
             self.root.minsize(
                 min(round(WINDOW_MIN[0] * _ms),
-                    self.root.winfo_screenwidth()),
+                    int(self.root.winfo_screenwidth() * 0.85)),
                 min(round(WINDOW_MIN[1] * _ms),
-                    self.root.winfo_screenheight()))
+                    int(self.root.winfo_screenheight() * 0.85)))
         # (4) cache render overlay/tree (rowheight berubah)
         self._invalidate_tree_render_caches()
         # (5) badge
         self._update_zoom_badge()
         return True
+
+    def _on_root_configure(self, event):
+        """v3.9.50 — [MINOR 3-a] lacak ukuran jendela utk base zoom.
+
+        <Configure> TERIKAT di root menerima event CHILD widget JUGA
+        (diprobe: event noteboo/toolbar ber-ukuran inset sampai ke
+        binding root — ukuran child akan MENGKORUPSI base). Filter:
+        hanya event milik ROOT sendiri (event.widget == root — diprobe
+        terpisah: atribut .widget child ≠ root) yang diproses; event
+        root yang match _zoom_expected_wh (ukuran yang KITA minta via
+        geometry — termasuk hasil clamp layar oleh zoom aplikasi) →
+        BUKAN resize user: base tak disentuh (round-trip eksak); beda →
+        resize MANUAL user (WM) → base diperbarui = (current/zoom).
+        Abaikan ukuran pra-map (< 400×300 — artefak inisialisasi Tk)."""
+        with contextlib.suppress(Exception):
+            if str(getattr(event, "widget", "")) != str(self.root):
+                return
+            _w, _h = int(getattr(event, "width", 0) or 0), \
+                int(getattr(event, "height", 0) or 0)
+            if _w < 400 or _h < 300:
+                return
+            if (_w, _h) == self._zoom_expected_wh:
+                return
+            _z = self.ui_zoom or UI_ZOOM_DEFAULT
+            self._zoom_base_wh = (max(400, round(_w / _z)),
+                                  max(300, round(_h / _z)))
+            self._zoom_expected_wh = (_w, _h)
+
+    def _refit_all_tree_columns(self):
+        """v3.9.50 — [MAJOR 3-a] auto-fit ULANG semua tree setelah zoom.
+
+        Walk recursive SEMUA widget (root + notebook semua tab + popup
+        Toplevel + clone ⛶): tiap ttk.Treeview di-auto_fit_columns dgn
+        bounds ter-skala ui_scale + pengukuran font(10) ter-zoom —
+        deterministik dari konten (tanpa drift pembulatan rasio ×multi-
+        langkah), idempoten, dan konsisten dgn apa yang auto-fit render
+        data berikutnya akan hasilkan. Tree kosong hanya mengukur heading
+        (murah). Popup yang sedang TERBUKA ikut (janji 'zoom seluruh UI')."""
+        def _walk(_w):
+            try:
+                _kids = _w.winfo_children()
+            except tk.TclError:
+                return
+            for _ch in _kids:
+                _walk(_ch)
+            if isinstance(_w, ttk.Treeview):
+                with contextlib.suppress(Exception):
+                    auto_fit_columns(_w)
+        with contextlib.suppress(Exception):
+            _walk(self.root)
 
     def _invalidate_tree_render_caches(self):
         """Invalidasi cache render SEMUA tree (termasuk popup/clone ⤢):

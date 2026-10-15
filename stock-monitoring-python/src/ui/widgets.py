@@ -78,6 +78,7 @@ from .theme import (
     font,
     mono,
     setup_tree_tags,
+    ui_scale,
 )
 
 # Tombol aksen/berbahaya pakai tk.Button murni: kontrol penuh atas warna
@@ -3767,7 +3768,18 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
     v3.9.48 — mengukur dgn NAMED FONT ter-zoom (theme.font(10)) supaya
     auto-fit tetap akurat saat UI di-zoom CTRL+Scroll (dulu Font baru
     size-10 statis → lebar kolom salah hitung di zoom ≠ 100%).
+    v3.9.50 — [MAJOR audit 3-a] BOUNDS ikut ter-skala ×theme.ui_scale():
+    pengukuran font sudah ter-zoom tapi clamp max_width=340 STATIS →
+    kolom panjang (Nama Barang) TERPOTONG mulai zoom ±110% (butuh
+    634px di 200%, capped 340). Kini min/max/pad diskalakan → janji
+    'zoom seluruh UI' berlaku juga utk lebar kolom tabel.
     """
+    # v3.9.50 — bounds pixel ter-skala zoom (default DAN override caller
+    # sama-sama diskalakan — satuan pixel konten berubah dgn zoom).
+    _zs = ui_scale()
+    max_width = round(max_width * _zs)
+    min_width = round(min_width * _zs)
+    pad = round(pad * _zs)
     try:
         meas = font(10).measure
     except Exception:

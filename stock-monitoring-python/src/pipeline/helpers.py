@@ -193,10 +193,14 @@ def kategori_multi_values(sel) -> "tuple[str, ...] | None":
     gabungan juga ber-passthrough baris kosong (kebijakan v3.9.45 tetap:
     barang tanpa kategori mana pun tidak boleh lenyap dari seleksi
     DEFAULT).
+    v3.9.50 — [audit 3-b] case-INSENSITIVE (strip+lower — parity
+    kategori_passthrough; dulu exact-case: pemanggil programatik dgn
+    kapitalisasi beda jatuh ke cabang strict → 0 baris + blank-pass
+    tanpa disengaja).
     """
     if sel is None:
         return None
-    if str(sel).strip() == KATEGORI_DEFAULT_LABEL:
+    if str(sel).strip().lower() == KATEGORI_DEFAULT_LABEL.lower():
         return KATEGORI_REKAP_VALUES
     return None
 

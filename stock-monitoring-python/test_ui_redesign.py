@@ -829,7 +829,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.49", APP_VERSION == "3.9.49",
+    check("Versi = 3.9.50", APP_VERSION == "3.9.50",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -13336,6 +13336,159 @@ def main():
           f"got {_is59._col_sel.get('KATEGORI')!r}")
     _is59.destroy()
     _top59i.destroy()
+    root.update()
+
+    # == 60. (v3.9.50) DEEP AUDIT 4-AGENT: fix zoom kolom + round-trip
+    #    jendela + minsize fraksi layar + case-insensitive kategori +
+    #    kontras cek_manual + lebar combobox Pivot ==
+    print("\n== 60. (v3.9.50) Deep audit fix: zoom kolom tabel + round-trip "
+          "jendela + kategori case-insensitive + kontras/w ==")
+    from src.pipeline.helpers import (
+        KATEGORI_DEFAULT_LABEL as _KDL60,
+    )
+    from src.pipeline.helpers import (
+        kategori_multi_values as _kmv60,
+    )
+    from src.ui.theme import rescale_named_fonts as _rsf60
+    from src.ui.theme import set_ui_scale as _sus60
+    from src.ui.widgets import auto_fit_columns as _af60
+
+    # --- (a) kategori_multi_values CASE-INSENSITIVE (audit 3-b: dulu
+    # exact-case — asimetri vs kategori_passthrough yang lower) ---------
+    check("(v3.9.50) kategori_multi_values: label gabungan LOWERCASE "
+          "→ 2 nilai (case-insensitive — parity passthrough)",
+          _kmv60(_KDL60.lower()) == ("COM DEVIASI - RESTO",
+                                     "Biaya Packaging - RESTO"),
+          f"got {_kmv60(_KDL60.lower())!r}")
+    check("(v3.9.50) kategori_multi_values: label gabungan + spasi tepi "
+          "→ 2 nilai",
+          _kmv60("  " + _KDL60 + "  ") is not None)
+    check("(v3.9.50) kategori_multi_values: kapitalisasi acak tetap "
+          "dikenali (bukan strict)",
+          _kmv60("Com Deviasi - Resto + Biaya Packaging - Resto")
+          == ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO"))
+
+    # --- (b) kontras cek_manual (audit 3-c: 2,89:1 → 3,9:1 di grp_head) -
+    _top60 = tk.Toplevel(root)
+    _top60.geometry("800x600+5+5")
+    from src.ui.deviasi_view import DeviasiView as _DV60
+    _dv60 = _DV60(_top60, satuan_mode="GR")
+    _dv60.pack(fill="both", expand=True)
+    check("(v3.9.50) cek_manual fg = #c2410c (kontras ≥3:1 di atas bg "
+          "band grp_head #e2e8f0 — audit 3-c)",
+          _dv60.tree.tag_configure("cek_manual").get("foreground")
+          == "#c2410c",
+          f"got {_dv60.tree.tag_configure('cek_manual')!r}")
+    _dv60.destroy()
+    _top60.destroy()
+    root.update()
+
+    # --- (c) combobox kategori Pivot width 46 (audit 3-b: label gabungan
+    # 49-char default terpotong di width=16) ---------------------------
+    check("(v3.9.50) Pivot kategori_combo width 46 (label gabungan tak "
+          "terpotong — parity deviasi/nominal)",
+          int(app.pivot_view.kategori_combo.cget("width")) == 46,
+          f"got {app.pivot_view.kategori_combo.cget('width')}")
+
+    # --- (d) ZOOM: BOUNDS auto_fit ter-skala (audit 3-a MAJOR) ----------
+    # tree pack PLAIN (tanpa fill) → lebar natural = jumlah kolom (bebas
+    # dari stretch Tk — pembacaan = nilai yang di-SET, deterministik).
+    _t60 = ttk.Treeview(root, columns=["A"], show="headings")
+    _t60.heading("A", text="Nama")
+    _t60.pack()
+    _t60.insert("", "end", values=("X" * 90,))
+    root.update()
+    _af60(_t60, max_width=100)
+    _w100_60 = _t60.column("A", "width")
+    check("(v3.9.50) auto_fit max_width clamp bekerja di 100% (konten "
+          "90-char > 100 → capped)",
+          _w100_60 == 100, f"got {_w100_60}")
+    _sus60(2.0)
+    _rsf60()
+    _af60(_t60, max_width=100)
+    _w200_60 = _t60.column("A", "width")
+    check("(v3.9.50) auto_fit bounds ×ui_scale: max_width=100 @200% → "
+          "clamp 200 (konten tak terpotong oleh clamp statis)",
+          _w200_60 == 200, f"got {_w200_60}")
+    _sus60(1.0)
+    _rsf60()
+    _af60(_t60, max_width=100)
+    check("(v3.9.50) auto_fit bounds round-trip 100% eksak (idempoten "
+          "zoom)",
+          _t60.column("A", "width") == 100,
+          f"got {_t60.column('A', 'width')}")
+
+    # --- (e) ZOOM: WALK re-fit kolom via _apply_ui_zoom -----------------
+    check("(v3.9.50) _refit_all_tree_columns terpasang (walk semua tree "
+          "pasca-zoom — termasuk tree uji ini)",
+          callable(getattr(app, "_refit_all_tree_columns", None)))
+    app._apply_ui_zoom(1.0)
+    root.update()
+    _af60(_t60)  # default bounds
+    _wd60 = _t60.column("A", "width")
+    app._apply_ui_zoom(2.0)
+    root.update()
+    _wd60b = _t60.column("A", "width")
+    app._apply_ui_zoom(1.0)
+    root.update()
+    _wd60c = _t60.column("A", "width")
+    check("(v3.9.50) _apply_ui_zoom → kolom tree ikut melebar @200% "
+          "(konten tabel mengikuti zoom — bukan cuma font)",
+          _wd60b > _wd60, f"100%={_wd60} 200%={_wd60b}")
+    check("(v3.9.50) kolom round-trip eksak kembali ke lebar 100%",
+          _wd60c == _wd60, f"got {_wd60c} (dari {_wd60})")
+    _t60.destroy()
+    root.update()
+
+    # --- (f) ROUND-TRIP JENDELA via clamp layar (audit 3-a) -------------
+    app._apply_ui_zoom(1.0)
+    root.update()
+    root.geometry("1100x800+5+5")
+    root.update()
+    _w0_60, _h0_60 = root.winfo_width(), root.winfo_height()
+    app._apply_ui_zoom(2.0)
+    root.update()
+    _wz_60, _hz_60 = root.winfo_width(), root.winfo_height()
+    app._apply_ui_zoom(1.0)
+    root.update()
+    check("(v3.9.50) round-trip jendela LEWAT CLAMP LAYAR pulih EKSAK "
+          "(base×zoom, bukan rasio ukuran ter-clamp — dulu 1100x800 → "
+          "200% → 100% = 1020x700 minsize collapse)",
+          (root.winfo_width(), root.winfo_height()) == (_w0_60, _h0_60)
+          and (_wz_60, _hz_60) != (_w0_60, _h0_60),
+          f"manual={_w0_60}x{_h0_60} @200%={_wz_60}x{_hz_60} "
+          f"back={root.winfo_width()}x{root.winfo_height()}")
+
+    # --- (g) resize MANUAL saat zoom dihormati + round-trip -------------
+    app._apply_ui_zoom(1.5)
+    root.update()
+    root.geometry("1600x1000+5+5")
+    root.update()
+    app._apply_ui_zoom(1.8)
+    root.update()
+    _w18_60, _h18_60 = root.winfo_width(), root.winfo_height()
+    app._apply_ui_zoom(1.5)
+    root.update()
+    check("(v3.9.50) resize manual saat zoom 150% dihormati oleh zoom "
+          "berikutnya (base = current/zoom) + kembali eksak",
+          abs(_w18_60 - 1920) <= 2 and abs(_h18_60 - 1080) <= 2
+          and (root.winfo_width(), root.winfo_height()) == (1600, 1000),
+          f"@180%={_w18_60}x{_h18_60} "
+          f"back150%={root.winfo_width()}x{root.winfo_height()}")
+
+    # --- (h) minsize fraksi layar (audit 3-a: dulu = layar penuh) -------
+    app._apply_ui_zoom(2.0)
+    root.update()
+    _ms60 = root.minsize()
+    _sw60, _sh60 = root.winfo_screenwidth(), root.winfo_screenheight()
+    check("(v3.9.50) minsize @200% di-clamp 85% layar (user tetap bisa "
+          "mengecilkan jendela — dulu minsize = layar penuh)",
+          _ms60[0] <= int(_sw60 * 0.85) + 2
+          and _ms60[1] <= int(_sh60 * 0.85) + 2,
+          f"minsize={_ms60} layar={_sw60}x{_sh60}")
+    app._apply_ui_zoom(1.0)
+    root.update()
+    root.geometry("1280x760+5+5")
     root.update()
 
     root.destroy()

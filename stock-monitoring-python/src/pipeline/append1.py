@@ -597,11 +597,19 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # → query_full_rekap_mentah_so) kini MENIMPA nilai master utk barang
     # yang punya baris rekap: lookup per Nama Barang pada key
     # TER-NORMALISASI (strip + upper — pola _KEY master LANGKAH 5 di
-    # atas; first-match utk duplikat). Barang tanpa baris rekap
-    # (IN-only / saldo-only) TETAP memakai kategori master; AKTIF/NON
-    # tetap murni master.
+    # atas). Barang tanpa baris rekap (IN-only / saldo-only) TETAP
+    # memakai kategori master; AKTIF/NON tetap murni master.
+    # v3.9.50 — [audit 3-b] 3 penguatan: (a) token blank '-'/'—' ikut
+    # dibuang (cermin kategori_blank_mask — dulu rekap '-' MENIMPA
+    # master nyata → item 'kehilangan' kategorinya); (b) duplikat nama
+    # barang antar rekap LALU vs BERJALAN: keep="last" (concat queries
+    # b-lalu lalu a-berjalan → BERJALAN menang — bulan berjalan
+    # otoritatif; dulu nilai basi bulan lalu menang diam-diam); (c) log
+    # juga melaporkan baris yang NILAINYA benar-benar BERUBAH dari master
+    # (rekonsiliasi audit — 'ber-rekap' tak membedakan sama/berubah).
     _n_rk_barang = 0
     _n_rk_rows = 0
+    _n_rk_changed = 0
     if ("KATEGORI" in full_rekap_so.columns
             and "Nama Barang" in full_rekap_so.columns
             and "Nama Barang" in expanded_kategori.columns):
@@ -610,21 +618,31 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         _rk["KATEGORI"] = _rk["KATEGORI"].astype(str).str.strip()
         _rk = _rk[_rk["KATEGORI"].ne("")
                   & _rk["KATEGORI"].str.lower().ne("nan")
-                  & _rk["KATEGORI"].str.lower().ne("none")]
-        _rk = _rk.drop_duplicates(subset=["Nama Barang"], keep="first")
+                  & _rk["KATEGORI"].str.lower().ne("none")
+                  & ~_rk["KATEGORI"].isin(["-", "—"])]
+        _rk = _rk.drop_duplicates(subset=["Nama Barang"], keep="last")
         _rk_map = dict(zip(_rk["Nama Barang"], _rk["KATEGORI"]))
         if _rk_map:
             _kk = expanded_kategori["Nama Barang"].astype(str).str.strip().str.upper()
             _rk_val = _kk.map(_rk_map)
             _has_rk = _rk_val.notna()
             if bool(_has_rk.any()):
+                # v3.9.50 — hitung baris yang nilai kategorinya BENAR
+                # berubah dari master (rekonsiliasi; master disalin dulu
+                # sbg string utk perbandingan stabil None/NaN→'None').
+                _before_rk = expanded_kategori["KATEGORI"].astype(str)
                 expanded_kategori["KATEGORI"] = _rk_val.where(
                     _has_rk, expanded_kategori["KATEGORI"])
+                _n_rk_changed = int(
+                    (_has_rk
+                     & (expanded_kategori["KATEGORI"].astype(str)
+                        != _before_rk)).sum())
                 _n_rk_barang = len(_rk_map)
                 _n_rk_rows = int(_has_rk.sum())
     if _n_rk_barang:
         print(f"    KATEGORI Rekap Mentah (prioritas atas master): "
-              f"{_n_rk_barang} barang ({_n_rk_rows:,} baris) ber-kategori rekap")
+              f"{_n_rk_barang} barang ({_n_rk_rows:,} baris) ber-kategori "
+              f"rekap ({_n_rk_changed:,} baris berubah dari master)")
 
     # =========================================================================
     # 5b. SOURCE KIRIMAN PER PASANGAN (v3.9.29 — MENGGANTI nilai master)

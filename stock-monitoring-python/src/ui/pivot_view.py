@@ -204,7 +204,11 @@ class PivotTableView(tk.Frame):
         self.kategori_var = tk.StringVar(value="(All)")
         self.kategori_combo = ttk.Combobox(self.f_kategori,
                                            textvariable=self.kategori_var,
-                                           state="readonly", width=16)
+                                           # v3.9.50 — width 16→46: label
+                                           # gabungan default 49-char
+                                           # TERPOTONG (parity deviasi/
+                                           # nominal 46 — audit 3-b)
+                                           state="readonly", width=46)
         self.kategori_combo.pack(side="left", padx=(6, 0))
         self.kategori_combo.bind("<<ComboboxSelected>>",
                                  lambda e: self._refresh_pivot())

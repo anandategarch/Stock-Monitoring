@@ -1298,6 +1298,10 @@ class NominalRestoView(tk.Frame):
         col_ids = [c[0] for c in _popup_cols]
         tree = ttk.Treeview(body, columns=col_ids, show="headings",
                             selectmode="extended")
+        # v3.9.50 — [MINOR audit 3-a] choke-point: popup ini dulu TANPA
+        # enable_col_resize → tanpa smooth wheel + binding CTRL-zoom
+        # tingkat widget (parity 14 call site tree lain).
+        enable_col_resize(tree)
         # v3.9.41 — tombol ⛶/↺ (user: "pop up ... kurang besar dan
         # lebar") — setelah tree dibuat (command men-reference tree).
         _popup_head_buttons(head, win, tree, _popup_cols)
@@ -1520,6 +1524,9 @@ class NominalRestoView(tk.Frame):
         col_ids = [c[0] for c in NOHARGA_COLUMNS]
         tree = ttk.Treeview(body, columns=col_ids, show="headings",
                             selectmode="extended")
+        # v3.9.50 — [MINOR audit 3-a] choke-point (parity popup resto di
+        # atas + 14 call site tree lain — smooth wheel + CTRL-zoom).
+        enable_col_resize(tree)
         # v3.9.41 — tombol ⛶/↺ + kolom responsif (popup dulu kecil)
         _popup_head_buttons(head, win, tree, NOHARGA_COLUMNS)
         for col_name, width, anchor in NOHARGA_COLUMNS:

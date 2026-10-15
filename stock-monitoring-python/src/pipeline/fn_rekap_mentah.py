@@ -440,7 +440,15 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
     # v3.9.49 — kolom KATEGORI rekap mentah dibawa BILA ADA di sheet
     # per-resto (schema lama tanpa kolom ini tetap didukung; mirror
     # jalur combined _combined_to_long).
-    if "KATEGORI" in ren.columns:
+    # v3.9.50 — [audit 3-b] deteksi kini WHITESPACE-TOLERANT (strip —
+    # parity jalur combined yang menormalisasi header; sheet per-resto
+    # legacy 'KATEGORI ' trailing-space tak lagi dibuang senyap →
+    # barangnya tetap dapat kategori rekap).
+    _kat_src = next((c for c in ren.columns
+                     if str(c).strip().upper() == "KATEGORI"), None)
+    if _kat_src is not None:
+        if _kat_src != "KATEGORI":
+            ren = ren.rename(columns={_kat_src: "KATEGORI"})
         base = base + ["KATEGORI"]
     if mode == "berjalan":
         days = [str(d) for d in range(1, 32)]
