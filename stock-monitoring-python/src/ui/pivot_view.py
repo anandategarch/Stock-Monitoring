@@ -84,6 +84,7 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -94,6 +95,7 @@ from .widgets import (
     kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
     kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
+    reset_autofit_once,  # v3.9.55 — F8
     run_async,
     validated_tgl_entry,
 )
@@ -208,7 +210,9 @@ class PivotTableView(tk.Frame):
                                            # gabungan default 49-char
                                            # TERPOTONG (parity deviasi/
                                            # nominal 46 — audit 3-b)
-                                           state="readonly", width=46)
+                                           # v3.9.55 — label gabungan
+                                           # kini RINGKA → 34.
+                                           state="readonly", width=34)
         self.kategori_combo.pack(side="left", padx=(6, 0))
         self.kategori_combo.bind("<<ComboboxSelected>>",
                                  lambda e: self._refresh_pivot())
@@ -490,6 +494,8 @@ class PivotTableView(tk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame):
         self.data = data
+        # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
+        reset_autofit_once(self)
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
@@ -904,6 +910,8 @@ class PivotTableView(tk.Frame):
             # sel minus tidak meninggalkan label STALE).
             if self._cell_tags:
                 apply_cell_tag(self.tree, "neg_cell", self._red_cells)
+            # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+            autofit_tree_once(self, self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False

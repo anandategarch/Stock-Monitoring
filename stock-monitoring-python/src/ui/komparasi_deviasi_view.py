@@ -249,12 +249,14 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
     open_tree_maximized,
+    reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
 )
@@ -1294,6 +1296,8 @@ class KomparasiDeviasiView(tk.Frame):
                   harga_map: dict | None = None,
                   konversi_map: dict | None = None):
         self.data = data
+        # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
+        reset_autofit_once(self)
         # v3.9.34 — kolom Nominal (Harga 41.09 × GR Saat Ini): peta harga
         # + peta rasio konversi dari pipeline (audit_result). Default None
         # → kompatibel pemanggil lama (Nominal tampil kosong '—'). Cache
@@ -2356,6 +2360,8 @@ class KomparasiDeviasiView(tk.Frame):
 
         def render_done():
             self._reapply_cell_tags(self.tree)
+            # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+            autofit_tree_once(self, self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False

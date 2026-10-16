@@ -181,12 +181,14 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
     open_tree_maximized,
+    reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
     validated_tgl_entry,
@@ -937,6 +939,21 @@ class InSelisihView(tk.Frame):
         self.kpi_inner = tk.Frame(self.kpi_card, bg=C_CARD)
         self.kpi_inner.pack(fill="x", padx=12, pady=8)
 
+        # v3.9.55 — F3: kartu SKOR RESTO (user: "Di tab rekap selisih IN.
+        # Beri Skor per resto dengan selisih terbanyak supaya aku bisa
+        # langsung kasih perhatian resto itu. Selisih terbanyak di tiap
+        # tanggal dan di keseluruhan tanggal") — leaderboard resto
+        # berdasarkan baris selisih: SKOR = item selisih + tanggal
+        # terdampak (resto kronis [selisih TIAP tanggal] mengungguli
+        # resto insidental [1 tanggal banyak item] — persis contoh user:
+        # periode 1-14 resto A selisih tiap tanggal vs resto B 1 tanggal
+        # 5 item). Klik baris → filter tabel ke resto itu. Konten dibangun
+        # ulang tiap render (_render_resto_scores dari payload worker).
+        self._skor_zone = tk.Frame(self.content, bg=C_CARD,
+                                   highlightbackground="#e2e8f0",
+                                   highlightthickness=1)
+        self._skor_zone_active_resto = None
+
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
@@ -993,9 +1010,11 @@ class InSelisihView(tk.Frame):
         self.overlay = LoadingOverlay(tbody, "Menghitung rekap Selisih IN…")
 
         # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + KPI
-        # chips + judul; tombol toolbar tetap tampil utk mengembalikan.
+        # chips + kartu SKOR RESTO + judul; tombol toolbar tetap tampil
+        # utk mengembalikan.
         self._expander = TableExpander(
-            btn_expand, [fcard, self.kpi_card, self.title_label])
+            btn_expand, [fcard, self.kpi_card, self._skor_zone,
+                         self.title_label])
 
         self._apply_columns()
 
@@ -1061,6 +1080,8 @@ class InSelisihView(tk.Frame):
                   audit_result: dict | None = None):
         self.data = data
         self.in_detail = in_detail
+        # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
+        reset_autofit_once(self)
         # v3.9.27 — MODE HITUNG: simpan KEDUA varian audit dari pipeline
         # ("df" = penuh incl. bulan lalu; "df_bulan_ini" = bulan berjalan
         # saja). Pemanggil lama/test tanpa kunci baru → varian bulan-ini
@@ -1269,7 +1290,9 @@ class InSelisihView(tk.Frame):
                      font=font(11, "bold")).pack(anchor="w", padx=10,
                                                  pady=(0, 6))
         self.kpi_card.pack(fill="x", padx=12, pady=(10, 0),
-                           before=self._tcard)
+                           before=(self._skor_zone
+                                   if self._skor_zone.winfo_ismapped()
+                                   else self._tcard))
 
     # --------------------------------------------------- VALUES & FILTER ---
     def _col_values(self, col: str) -> list:
@@ -1619,12 +1642,61 @@ class InSelisihView(tk.Frame):
                 fmt = _format_col_values(col, f[col])
                 f = f[fmt.isin(sel)]
 
+        # v3.9.55 — F3: snapshot frame pra-only_selisih (dasar SKOR RESTO
+        # — baris selisih sama baik checkbox aktif / tidak).
+        f_pre = f
+
         if st["only_selisih"] and "Selisih IN" in f.columns:
             sv = pd.to_numeric(f["Selisih IN"], errors="coerce").fillna(0)
             f = f[sv != 0]
 
+        # v3.9.55 — F3: SKOR RESTO (user: "Beri Skor per resto dengan
+        # selisih terbanyak ... Selisih terbanyak di tiap tanggal dan di
+        # keseluruhan tanggal") — dihitung dari frame TERFILTER (rentang
+        # tanggal + header ⧩ aktif — konteks apa yang sedang dilihat);
+        # baris selisih = Selisih IN ≠ 0 (tak terpengaruh checkbox
+        # 'Hanya Selisih ≠ 0' — skor selalu tentang baris bermasalah).
+        # SKOR = jumlah ITEM selisih + jumlah TANGGAL terdampak
+        # (bonus kronis: resto yang selisih TIAP tanggal periode 1-14
+        # [14 item + 14 tgl = 28] mengungguli resto 1-tanggal-5-item [5+1
+        # = 6] — persis contoh user). Diurut skor ↓, item ↓, nama resto ↑.
+        resto_scores = []
+        try:
+            if "Selisih IN" in f_pre.columns:
+                _sv3 = pd.to_numeric(f_pre["Selisih IN"],
+                                     errors="coerce").fillna(0)
+                _sel = f_pre[_sv3 != 0]
+                if not _sel.empty:
+                    _t_all = pd.to_numeric(f_pre["Tanggal"],
+                                           errors="coerce")
+                    _n_tgl_range = int(_t_all.dropna().nunique())
+                    _resto_s = _sel["Resto"].astype(str)
+                    _tgl_s = pd.to_numeric(_sel["Tanggal"],
+                                           errors="coerce")
+                    _grp = _sel.assign(_r=_resto_s, _t=_tgl_s).groupby("_r")
+                    for resto, gdf in _grp:
+                        n_items = len(gdf)
+                        n_dates = int(gdf["_t"].dropna().nunique())
+                        sum_abs = float(
+                            pd.to_numeric(gdf["Selisih IN"],
+                                          errors="coerce").abs().sum())
+                        resto_scores.append({
+                            "resto": resto, "n_items": n_items,
+                            "n_dates": n_dates, "sum_abs": sum_abs,
+                            "skor": n_items + n_dates,
+                        })
+                    resto_scores.sort(
+                        key=lambda r: (-r["skor"], -r["n_items"],
+                                       str(r["resto"])))
+                    resto_scores = [
+                        {**r, "n_tgl_range": _n_tgl_range}
+                        for r in resto_scores]
+        except (KeyError, TypeError, ValueError):
+            resto_scores = []
+
         if f.empty:
-            return {"items": [], "status": "Tidak ada data setelah filter."}
+            return {"items": [], "status": "Tidak ada data setelah filter.",
+                    "resto_scores": resto_scores}
 
         col_ids = [c[0] for c in COLUMNS]
 
@@ -1680,7 +1752,8 @@ class InSelisihView(tk.Frame):
             f"{k}: {fmt_int_id(v)}" for k, v in
             pd.Series(status_s).value_counts().head(3).items())
         return {"items": items, "status": status_txt, "keys": keys,
-                "neg_cells": neg_cells}
+                "neg_cells": neg_cells,
+                "resto_scores": resto_scores}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -1689,10 +1762,15 @@ class InSelisihView(tk.Frame):
         self.status_var.set(payload["status"])
         self._keys = payload.get("keys", [])
         self._neg_cells = payload.get("neg_cells", [])  # FIX C-04
+        # v3.9.55 — F3: kartu SKOR RESTO ikut render tiap refresh (konteks
+        # filter tanggal/⧩ aktif).
+        self._render_resto_scores(payload.get("resto_scores") or [])
 
         def render_done():
             # FIX C-04: tag per-cell dipasang SETELAH insert batch selesai
             self._reapply_cell_tags(self.tree)
+            # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+            autofit_tree_once(self, self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -1713,6 +1791,118 @@ class InSelisihView(tk.Frame):
         v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus."""
         if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
+
+    # --------------------------------------------------- SKOR RESTO (F3) --
+    _SKOR_RANK_BG = ("#fef3c7", "#e2e8f0", "#fffbeb")   # emas/perak/perunggu lembut
+
+    def _render_resto_scores(self, scores: list):
+        """v3.9.55 — F3: bangun ulang kartu leaderboard SKOR RESTO.
+
+        Baris = resto urut SKOR ↓ (skor = item selisih + tanggal terdampak
+        — lihat _prepare_rows). Kolom: peringkat · resto · tgl terdampak
+        (n dari N tgl periode) · item selisih · Σ|Selisih| · skor + bar
+        proporsional. Top-3 diberi latar medali lembut. KLIK baris = filter
+        tabel Resto (klik lagi = lepas) — 'langsung kasih perhatian resto
+        itu'."""
+        zone = self._skor_zone
+        for w in zone.winfo_children():
+            w.destroy()
+        if not scores:
+            zone.pack_forget()
+            self._skor_zone_active_resto = None
+            return
+        active = (self._col_sel.get("Resto") or [None])[0] \
+            if isinstance(self._col_sel.get("Resto"), list) else None
+        self._skor_zone_active_resto = active
+
+        head = tk.Frame(zone, bg=C_CARD)
+        head.pack(fill="x", padx=12, pady=(8, 2))
+        tk.Label(head, text="🏆 SKOR RESTO — Prioritas Perhatian",
+                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
+            side="left")
+        tk.Label(head, text=(
+            "skor = item selisih + tgl terdampak · klik baris utk filter "
+            "tabel ke resto itu"), bg=C_CARD, fg=C_TEXT_MUTED,
+            font=font(8)).pack(side="right")
+
+        cols = (("RESTO", 34), ("TGL TERDAMPAK", 15), ("ITEM", 9),
+                ("Σ|SELISIH|", 13), ("SKOR", 24))
+        hdr = tk.Frame(zone, bg="#f8fafc")
+        hdr.pack(fill="x", padx=12)
+        for text, wpx in cols:
+            tk.Label(hdr, text=text, bg="#f8fafc", fg=C_TEXT_MUTED,
+                     font=font(8, "bold"), width=wpx, anchor="w",
+                     padx=6).pack(side="left")
+
+        max_skor = max(r["skor"] for r in scores) or 1
+        for i, r in enumerate(scores[:12]):
+            bg = self._SKOR_RANK_BG[i] if i < 3 else C_CARD
+            is_active = (str(r["resto"]) == str(active))
+            bg = "#fef3c7" if is_active else bg
+            row = tk.Frame(zone, bg=bg, cursor="hand2",
+                           highlightbackground="#e2e8f0",
+                           highlightthickness=1 if is_active else 0)
+            row.pack(fill="x", padx=12, pady=(0, 1))
+            _resto = str(r["resto"])
+            vals = (
+                f"#{i + 1}  {_resto}",
+                f"{r['n_dates']} / {r.get('n_tgl_range', '—')} tgl",
+                fmt_int_id(r["n_items"]),
+                self._fmt_num_skor(r["sum_abs"]),
+                fmt_int_id(r["skor"]),
+            )
+            for (text, wpx), val in zip(cols, vals):
+                fg = ("#b91c1c" if (i == 0 and not is_active) else
+                      ("#0e7490" if is_active else C_HEADER))
+                tk.Label(row, text=val, bg=bg, fg=fg, width=wpx,
+                         anchor="w", padx=6, font=font(
+                             9, "bold" if i < 3 or is_active else "normal")
+                ).pack(side="left")
+            # bar proporsional skor (visual leaderboard)
+            bar_w = max(6, int(150 * r["skor"] / max_skor))
+            tk.Frame(row, bg=("#b91c1c" if i == 0 else "#64748b"),
+                     height=6, width=bar_w, bd=0,
+                     highlightthickness=0).pack(side="left", padx=(10, 0),
+                                                pady=(6, 0))
+            row.bind("<Button-1>", lambda e, rs=_resto:
+                     self._on_skor_row_click(rs))
+            for ch in row.winfo_children():
+                ch.bind("<Button-1>", lambda e, rs=_resto:
+                         self._on_skor_row_click(rs))
+        if not getattr(self._expander, "expanded", False):
+            # v3.9.55 — saat ⤢ diperbesar (kartu disembunyikan), JANGAN
+            # re-pack zona (restore milik TableExpander yang mengelola).
+            zone.pack(fill="x", padx=12, pady=(10, 0), before=self._tcard)
+
+    def _on_skor_row_click(self, resto: str):
+        """v3.9.55 — F3: klik baris skor → TOGGLE filter kolom Resto
+        (klik = fokus tabel ke resto itu; klik lagi = lepas). Filter "/7
+        header ⧩ disinkronkan (ikon corong aktif)."""
+        cur = self._col_sel.get("Resto")
+        if isinstance(cur, list) and len(cur) == 1 and str(cur[0]) == str(resto):
+            self._col_sel["Resto"] = None
+            if self.header_filters is not None:
+                self.header_filters.set_selected("Resto", None)
+        else:
+            self._col_sel["Resto"] = [resto]
+            if self.header_filters is not None:
+                self.header_filters.set_selected("Resto", [resto])
+        self._refresh()
+
+    @staticmethod
+    def _fmt_num_skor(v) -> str:
+        """Format Σ|selisih| gaya Indonesia (pola _fmt_num view lain;
+        0 → '-' — resto tanpa selisih tak masuk leaderboard)."""
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return str(v)
+        if v == 0:
+            return "-"
+        if v == int(v):
+            return fmt_int_id(v)
+        return f"{v:,.1f}".replace(",", "\u00a0").replace(".", ",").replace(
+            "\u00a0", ".")
 
     # --------------------------------------------------------- EXPORT --
     def _export_options_dialog(self):

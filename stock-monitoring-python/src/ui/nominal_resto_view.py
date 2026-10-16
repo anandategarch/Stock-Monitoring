@@ -109,6 +109,7 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -119,6 +120,7 @@ from .widgets import (
     kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
     kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
+    reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
 )
@@ -390,6 +392,8 @@ class NominalRestoView(tk.Frame):
         # (user: "secara default di semua tab kategori sudah pilih: COM
         # DEVIASI - RESTO dan Biaya Packaging - RESTO") bila ada di data;
         # combo dilebarkan utk label gabungan panjang.
+        # v3.9.55 — label gabungan kini RINGKA 'Deviasi (COM + Packaging)'
+        # → lebar 34 (parity deviasi/pivot).
         r1b = tk.Frame(fbody, bg=C_CARD)
         r1b.pack(fill="x", pady=(6, 0))
         tk.Label(r1b, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
@@ -397,7 +401,7 @@ class NominalRestoView(tk.Frame):
         self._kategori_var = tk.StringVar(value="Semua")
         self._kategori_combo = ttk.Combobox(
             r1b, textvariable=self._kategori_var, state="readonly",
-            width=46, font=font(9))
+            width=34, font=font(9))
         self._kategori_combo.pack(side="left", padx=(6, 0))
         self._kategori_combo.bind(
             "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
@@ -679,6 +683,8 @@ class NominalRestoView(tk.Frame):
         self.harga_map = harga_map or {}
         self.konversi_map = konversi_map
         self._render_gen += 1
+        # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
+        reset_autofit_once(self)
         if self._insert_cancel is not None:
             self._insert_cancel()
             self._insert_cancel = None
@@ -1130,6 +1136,8 @@ class NominalRestoView(tk.Frame):
         """Jalur hasil-kosong tetap berakhir di render_done (reset
         _busy + proses pending — pola 48-e FIX 2/3 mode Nominal)."""
         self._reapply_cell_tags(self.tree)
+        # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+        autofit_tree_once(self, self.tree)
         self._busy = False
         if self._pending:
             self._pending = False
@@ -1142,6 +1150,8 @@ class NominalRestoView(tk.Frame):
 
     def _render_done(self):
         self._reapply_cell_tags(self.tree)
+        # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+        autofit_tree_once(self, self.tree)
         self._busy = False
         if self._pending:
             self._pending = False

@@ -27,6 +27,8 @@ Output: DataFrame [Kategori, Nama Barang, Satuan, Harga] — 1 baris per
 barang (harga GLOBAL lintas resto; duplikat nama barang → baris
 terakhir menang, konsisten grup).
 """
+import re
+
 import pandas as pd
 
 from .helpers import _list_excel_files, _list_sheet_names, fn_buka_sheet
@@ -204,20 +206,35 @@ def fn_4109(folder_path: str, sheet_name: str = SHEET_4109_DEFAULT) -> pd.DataFr
     return combined.reset_index(drop=True)
 
 
+def _norm_barang_key(v) -> str:
+    """v3.9.55 — kunci normalisasi nama barang utk peta harga 41.09:
+    strip + rapat spasi ganda + UPPER. Latar (user: "ada deviasi yang
+    tidak ada nominal nya coba cek"): kunci lama exact-string — nama
+    yang sama tapi beda kapitalisasi/spasi ganda ('Gula Pasir' vs
+    'GULA  PASIR') MELESET senyap → kolom Nominal '-' padahal harga
+    ADA di 41.09. Normalisasi diterapkan KEDUA sisi (build + lookup)
+    supaya tetap konsisten."""
+    s = re.sub(r"\s+", " ", str(v).strip()).upper()
+    return "" if s in ("", "NAN", "NONE") else s
+
+
 def build_harga_map(harga_df: pd.DataFrame | None) -> dict:
     """{nama barang: (harga | None, satuan)} — harga GLOBAL per barang.
 
     Barang tanpa harga valid (Qty=0 → NaN) tetap masuk peta dgn harga
     None supaya view bisa menampilkan 'tanpa harga' secara eksplisit
-    (bukan keliru dianggap tak ada di file)."""
+    (bukan keliru dianggap tak ada di file).
+    v3.9.55 — KUNCI DINORMALISASI (strip + rapat spasi + upper — lihat
+    _norm_barang_key): lookup lookup_harga_pair memakai normalisasi
+    SAMA → selisih kapitalisasi/spasi tak lagi membuat nominal hilang."""
     out: dict = {}
     if harga_df is None or getattr(harga_df, "empty", True):
         return out
     if "Nama Barang" not in getattr(harga_df, "columns", []):
         return out
     for _, r in harga_df.iterrows():
-        b = str(r["Nama Barang"]).strip()
-        if not b or b.lower() in ("nan", "none"):
+        b = _norm_barang_key(r["Nama Barang"])
+        if not b:
             continue
         try:
             h = float(r["Harga"]) if pd.notna(r["Harga"]) else None

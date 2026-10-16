@@ -155,6 +155,16 @@ def fmt_rp_cell(val) -> str:
 # ---------------------------------------------------------------------------
 # LOOKUP HARGA PER PASANGAN (barang, satuan-rekap)
 # ---------------------------------------------------------------------------
+def norm_barang_harga_key(v) -> str:
+    """v3.9.55 — normalisasi kunci nama barang utk lookup harga 41.09
+    (strip + rapat spasi + UPPER). HARUS identik dgn
+    fn_4109._norm_barang_key (duplikat lokal — nominal_common tak boleh
+    import modul pipeline fn_4109 yg berat/ber-IO; kunci dinyatakan
+    eksplisit di kedua sisi + dikuji test)."""
+    s = re.sub(r"\s+", " ", str(v).strip()).upper()
+    return "" if s in ("", "NAN", "NONE") else s
+
+
 def lookup_harga_pair(harga_map: dict | None,
                       konversi_map: dict | None,
                       barang, satuan_rekap) -> tuple:
@@ -164,9 +174,18 @@ def lookup_harga_pair(harga_map: dict | None,
       None  → nominal tak bisa dihitung (tanpa harga / tak terkonversi)
       label → satuan hasil normalisasi (utk display harga)
       bintang → True bila satuan tak ter-cover rasio (fallback '*')
+    v3.9.55 — kunci barang DINORMALISASI (parity build_harga_map):
+    selisih kapitalisasi/spasi nama barang vs 41.09 tak lagi membuat
+    nominal '-' senyap (akar keluhan "ada deviasi yang tidak ada nominal
+    nya") — pasangan tetap fallback label '-'/'*' bila benar2 tak ada
+    harga di 41.09 / satuan tak terkonversi.
     """
-    b = str(barang).strip()
+    b = norm_barang_harga_key(barang)
     entry = (harga_map or {}).get(b)
+    if entry is None:
+        # v3.9.55 — fallback exact-string lama (peta dibangun versi lama
+        # / peta buatan test dgn kunci asli) supaya tak ada regresi.
+        entry = (harga_map or {}).get(str(barang).strip())
     if entry is None:
         return None, "-", False
     h41, sat41 = entry
@@ -177,8 +196,18 @@ def lookup_harga_pair(harga_map: dict | None,
             or sat_rekap == "-":
         # satuan sama (atau tak diketahui) → harga langsung
         return float(h41), (sat41 or sat_rekap or ""), False
-    r_rekap, _t1 = lookup_rasio(konversi_map, b, sat_rekap)
-    r_41, _t2 = lookup_rasio(konversi_map, b, sat41)
+    # v3.9.55 — konversi_map BER-KUNCI nama asli (build_konversi_map tak
+    # men-normalisasi kapitalisasi) → lookup_rasio memakai string ASLI
+    # pasangan (bukan kunci normalisasi 41.09); fallback kunci-normalisasi
+    # utk peta yg kebetulan ber-kunci kapital.
+    _b_orig = str(barang).strip()
+    r_rekap, _t1 = lookup_rasio(konversi_map, _b_orig, sat_rekap)
+    r_41, _t2 = lookup_rasio(konversi_map, _b_orig, sat41)
+    if not (r_rekap and r_41) and b != _b_orig:
+        r_rekap2, _t3 = lookup_rasio(konversi_map, b, sat_rekap)
+        r_41_2, _t4 = lookup_rasio(konversi_map, b, sat41)
+        r_rekap = r_rekap or r_rekap2
+        r_41 = r_41 or r_41_2
     if r_rekap and r_41:
         return float(h41) * r_rekap / r_41, sat_rekap, False
     # tak bisa dikonversi → harga as-is berpenanda '*'

@@ -66,12 +66,14 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
     open_tree_maximized,
+    reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
 )
@@ -438,6 +440,9 @@ class LaporanDeviasiView(tk.Frame):
         sudah ada), scroll+seleksi dipulihkan SETELAH baris ter-insert
         (render_done). Default False = load awal, perilaku lama."""
         self.data = data
+
+        # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
+        reset_autofit_once(self)
         # v3.9.5 (audit 19-a #12): data berganti → job lama dibuang
         self._render_gen += 1
         if self._insert_cancel is not None:
@@ -912,6 +917,8 @@ class LaporanDeviasiView(tk.Frame):
         def render_done():
             # v3.9.2: tag PER-CELL setelah semua item ter-insert
             self._reapply_cell_tags(self.tree)
+            # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+            autofit_tree_once(self, self.tree)
             self._busy = False
             # v3.9.42 — audit 61-c/61-d (F2 P2): pulihkan posisi scroll +
             # seleksi yang disimpan load_data(preserve=True) — baru aman

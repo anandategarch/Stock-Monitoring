@@ -180,8 +180,20 @@ KATEGORI_BLANK_LABEL = "(Tanpa Kategori)"
 # memakai master). Dua nilai kategori rekap user dijadikan seleksi
 # DEFAULT gabungan di semua tab ber-filter kategori (Deviasi GR/PCS ·
 # 🧮 Nominal per Resto · Pivot · default header Rekap Selisih IN).
+# v3.9.55 — LABEL DIPENDEKAN (user: "Kategori kembali ke DBS kategori
+# barang aja lebih valid atau tambah kategorinya jadi 2 aja dan default
+# Deviasi"): entry gabungan tetap memilih TEPAT 2 kategori rekap (COM
+# DEVIASI - RESTO + Biaya Packaging - RESTO — semantics v3.9.49/53 utuh)
+# TAPI labelnya kini RINGKA "Deviasi (COM + Packaging)" — dropdown
+# kembali tampil sebagai daftar kategori DBS (label virtual 49-char
+# panjang dianggap kurang valid oleh user). Semantik STRICT v3.9.53
+# (tanpa passthrough blank) TIDAK berubah; label lama 49-char tetap
+# dikenali kategori_multi_values (kompatibilitas seleksi tersimpan).
 KATEGORI_REKAP_VALUES = ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO")
-KATEGORI_DEFAULT_LABEL = "COM DEVIASI - RESTO + Biaya Packaging - RESTO"
+KATEGORI_DEFAULT_LABEL = "Deviasi (COM + Packaging)"
+# v3.9.55 — label panjang v3.9.49-54 tetap cocok (seleksi tersimpan /
+# pemanggil programatik lama tak berubah perilakunya).
+_KATEGORI_DEFAULT_LABEL_LEGACY = "COM DEVIASI - RESTO + Biaya Packaging - RESTO"
 
 
 def kategori_multi_values(sel) -> "tuple[str, ...] | None":
@@ -200,7 +212,11 @@ def kategori_multi_values(sel) -> "tuple[str, ...] | None":
     """
     if sel is None:
         return None
-    if str(sel).strip().lower() == KATEGORI_DEFAULT_LABEL.lower():
+    _s = str(sel).strip().lower()
+    # v3.9.55 — label baru RINGKA + label lama 49-char (legacy) dua-duanya
+    # dikenali → entri gabungan yang sama.
+    if _s == KATEGORI_DEFAULT_LABEL.lower() \
+            or _s == _KATEGORI_DEFAULT_LABEL_LEGACY.lower():
         return KATEGORI_REKAP_VALUES
     return None
 

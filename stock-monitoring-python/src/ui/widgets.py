@@ -2336,8 +2336,9 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
         ls = getattr(tree, "_last_sort", None)
         if ls is not None:
             with contextlib.suppress(Exception):
-                sort_tree_by_column(tree, ls[0], reverse=ls[1],
-                                    parse=ls[2])
+                sort_tree_by_column(
+                    tree, ls[0], reverse=ls[1], parse=ls[2],
+                    value_get=(ls[3] if len(ls) > 3 else None))
         if on_done:
             on_done()
     tree._row_filter_cancel = insert_tree_items(tree, items, batch=600,
@@ -3473,399 +3474,11 @@ class HeadingTintOverlay:
         lab.bind("<Button-1>", press, add="+")
 
 
-class RankMergeOverlay:
-    """v3.9.52 — MERGE-VERTIKAL VISUAL kolom Rank (user: "kolom Rank ...
-    dimerger vertical di kolom nama barang. Merger vertcial sama kaya
-    di tab rincian PO").
-
-    v3.9.51 sudah menampilkan nilai rank SEKALI di baris pertama
-    kelompok (baris lanjutan kosong) — tapi secara VISUAL TIDAK tampak
-    seperti satu sel tinggi: baris kepala kelompok ber-tag grp_head
-    (#e2e8f0) sedangkan baris lanjutan ber-pita band (#ffffff/#f1f5f9)
-    → ada batas warna horizontal TEPAT di bawah angka rank (angka
-    terlihat milik baris kepala saja, sel di bawahnya terlihat sel
-    kosong TERPISAH — kebalikan "merged"). Overlay ini menggambar SATU
-    Label tinggi per kelompok ≥2 baris di kolom Rank:
-      - latar KONTINU warna band kelompok (sekat grp_head digantikan di
-        kolom ini saja — kolom lain tetap pakai sekat v3.9.49),
-      - nilai rank VERTIKAL CENTERED di tengah blok (ala merged-cell
-        Excel; bila blok lebih tinggi dari viewport → center di bagian
-        yang terlihat),
-      - seleksi baris mana pun dalam kelompok → label ikut warna
-        seleksi (parity perilaku CellColorOverlay).
-
-    Struktur kelompok (runs) DIDORONG view via set_runs() dari
-    _reapply_rank_merge (yang memang berjalan di URUTAN VISUAL tiap
-    render/sort/clone — satu pintu _reapply_render_decorations) —
-    overlay TIDAK berjalan sendiri; refresh() hanya menghitung ulang
-    GEOMETRI (murah — dipicu scroll/resize/zoom/seleksi).
-
-    Reposisi otomatis: wrap yscrollcommand+xscrollcommand, <Configure>,
-    <ButtonRelease-1> (resize kolom), <<TreeviewSelect>>, refresh()
-    eksplisit dari view & app (zoom — _refit_all_tree_columns).
-    Event area label DITERUSKAN ke tree (pola forwarding CellColorOverlay
-    v3.9.42 + deteksi double-click manual) supaya seleksi, klik-kanan,
-    roda, dan double-click rincian tetap bekerja. Kolom tersembunyi
-    (◱ Kolom) → label ikut hilang. Registrasi mandiri
-    tree._rank_merge (pola _heading_tint) — clone ⛶ membuat overlay
-    sendiri; label anak tree → mati otomatis saat window ditutup.
-    """
-
-    # <Button-1> ditangani handler `press` khusus (deteksi double manual —
-    # pola CellColorOverlay)
-    _FORWARD_SEQS = (
-        "<Button-3>", "<ButtonRelease-1>",
-        "<B1-Motion>", "<MouseWheel>", "<Button-4>", "<Button-5>",
-    )
-    _POOL_MAX = 48
-
-    def __init__(self, tree: ttk.Treeview, col: str = "Rank",
-                 band_colors: tuple = ("#ffffff", "#f1f5f9")):
-        self.tree = tree
-        self.col = str(col)
-        self.band_colors = (str(band_colors[0]), str(band_colors[1]))
-        # runs dari view: (head_iid, n_baris, teks_rank, band_parity)
-        self._runs: list = []
-        self._labels: dict = {}      # head_iid -> tk.Label (AKTIF)
-        self._pool: list = []        # label nganggur (reuse — pola v3.9.29)
-        self._pending = None
-        self._alive = True
-        self._flushing = False
-        self._style_cache = None     # (font, sel_bg, sel_fg) — per refresh murah
-        # deteksi double-click manual (pola CellColorOverlay — event_generate
-        # tidak bisa mensintesis <Double-1>)
-        self._dbl_t = 0.0
-        self._dbl_lab = None
-        with contextlib.suppress(AttributeError, tk.TclError):
-            tree._rank_merge = self
-        tree.bind("<Configure>", self._schedule, add="+")
-        tree.bind("<<TreeviewSelect>>", self._schedule, add="+")
-        tree.bind("<ButtonRelease-1>", self._schedule, add="+")
-        tree.bind("<Destroy>", self._on_destroy, add="+")
-        self._wrap_scroll("yscrollcommand")
-        self._wrap_scroll("xscrollcommand")
-
-    def _on_destroy(self, _event=None):
-        self._alive = False
-        self._labels = {}
-        self._pool = []
-        self._runs = []
-
-    # -- dorongan struktur dari view ----------------------------------------
-    def set_runs(self, runs) -> None:
-        """GANTI daftar kelompok visual (semantik replace): tiap entri
-        (head_iid, n_baris, teks_rank, band_parity). Dipanggil
-        _reapply_rank_merge setelah nilai in-tree dipasang — urutan
-        mengikuti URUTAN VISUAL tree saat ini."""
-        if not self._alive:
-            return
-        self._runs = [tuple(r) for r in (runs or [])]
-        self._schedule()
-
-    # -- scheduling ----------------------------------------------------------
-    def _schedule(self, *_args):
-        if not self._alive or self._pending is not None:
-            return
-        try:
-            self._pending = self.tree.after_idle(self._redraw)
-        except tk.TclError:
-            self._pending = None
-
-    def _redraw(self):
-        """Jalur after_idle: refresh + FLUSH GEOMETRI SINKRON (anti glitch
-        'berenang' saat scroll — pola CellColorOverlay v3.9.40).
-        v3.9.52 fix race zoom: flush (update_idletasks) HANYA di jalur idle —
-        refresh() yang dipanggil LANGSUNG/sinkron (walk zoom
-        _refit_all_tree_columns / test) TIDAK memproses geometri di tengah
-        mutasi lebar kolom (probe: flush di tengah walk memicu Tk
-        column-stretch memaksa lebar lama 200% kembali — round-trip kolom
-        patah)."""
-        self.refresh()
-        self._flush_geometry()
-
-    def _wrap_scroll(self, opt: str):
-        """Bungkus scroll command — label ikut bergeser vertikal &
-        horizontal (pola CellColorOverlay._wrap_scroll)."""
-        try:
-            orig = str(self.tree.cget(opt))
-        except tk.TclError:
-            return
-
-        def wrap(first, last, _orig=orig):
-            if _orig:
-                with contextlib.suppress(tk.TclError):
-                    self.tree.tk.call(_orig, first, last)
-            self._schedule()
-
-        with contextlib.suppress(tk.TclError):
-            self.tree.configure(**{opt: wrap})
-
-    # -- style ---------------------------------------------------------------
-    def _style_ctx(self):
-        """(font, sel_bg, sel_fg) — di-cache per refresh-muatan; dibaca
-        ulang tiap refresh (murah — 3 lookup) supaya perubahan tema/zoom
-        named-font langsung terlihat tanpa invalidasi eksplisit."""
-        try:
-            style = ttk.Style(self.tree)
-            font = style.lookup("Treeview", "font") or "TkDefaultFont"
-            sel_bg = _style_map_value(style, "background", "selected")
-            sel_fg = _style_map_value(style, "foreground", "selected")
-        except tk.TclError:
-            font, sel_bg, sel_fg = "TkDefaultFont", "", ""
-        self._style_cache = (font, sel_bg, sel_fg)
-        return self._style_cache
-
-    # -- refresh utama --------------------------------------------------------
-    def refresh(self):
-        """Hitung ulang posisi/ukuran label merge dari viewport saat ini.
-        Idempoten; konfigurasi/place yang tak berubah dilompati (pola
-        _ov_cfg/_ov_xy CellColorOverlay v3.9.40 — beban scroll minim).
-        TANPA flush geometri (lihat _redraw) — aman dipanggil sinkron dari
-        walk zoom / test."""
-        self._pending = None
-        if not self._alive:
-            return
-        tree = self.tree
-        try:
-            if not tree.winfo_exists():
-                self._alive = False
-                return
-        except tk.TclError:
-            self._alive = False
-            return
-        try:
-            children = list(tree.get_children(""))
-        except tk.TclError:
-            children = []
-        # label tak lagi punya run → bersihkan SEMUA (tree kosong/re-render)
-        if not children or not self._runs:
-            for key in list(self._labels):
-                self._destroy_label(key)
-            return
-        # kolom tersembunyi (displaycolumns) → label ikut hilang
-        try:
-            dcols = _tree_display_columns(tree)
-        except tk.TclError:
-            dcols = []
-        if self.col not in dcols:
-            for key in list(self._labels):
-                self._destroy_label(key)
-            return
-        try:
-            visible_w = tree.winfo_width()
-        except tk.TclError:
-            visible_w = 0
-        if visible_w < 2:
-            return   # tree belum dipetakan — <Configure> akan memicu ulang
-
-        # kalibrasi baris: scroll Treeview TERKUNCI ke baris penuh (probe
-        # Xvfb: yview fraksi × n = indeks baris pertama terlihat, eksak),
-        # semua baris seragam tinggi → posisi y baris i = y0+(i-i0)·h.
-        # x kolom diambil dari bbox SEL (viewport-relative — ikut xscroll;
-        # probe: bbox(iid, col) ter-translasi scroll tapi tak ter-klip).
-        idx_of = {str(k): i for i, k in enumerate(children)}
-        n = len(children)
-        try:
-            i0 = round(tree.yview()[0] * n)
-        except (tk.TclError, ValueError):
-            i0 = 0
-        i0 = max(0, min(i0, n - 1))
-        rowheight = 0
-        y0 = None
-        col_x = col_w = None
-        for probe in (i0, i0 + 1, i0 - 1, 0):
-            if not (0 <= probe < n):
-                continue
-            box = tree.bbox(children[probe])
-            cell = tree.bbox(children[probe], self.col)
-            if box and cell:
-                rowheight = int(box[3])
-                y0 = int(box[1])
-                i0 = probe
-                col_x, col_w = int(cell[0]), int(cell[2])
-                break
-        if y0 is None or rowheight < 4 or col_x is None:
-            return   # tak ada baris tergambar (viewport kosong)
-        try:
-            widget_h = tree.winfo_height()
-        except tk.TclError:
-            widget_h = 0
-        try:
-            sel_set = set(tree.selection())
-        except tk.TclError:
-            sel_set = set()
-        _font, sel_bg, sel_fg = self._style_ctx()
-        try:
-            anchor = str(tree.column(self.col, "anchor") or "w")
-        except tk.TclError:
-            anchor = "w"
-
-        placed = set()
-        for head_iid, count, text, band in self._runs:
-            if int(count) < 2:
-                continue    # kelompok 1-baris: nilai in-tree + band biasa
-            head_idx = idx_of.get(str(head_iid))
-            if head_idx is None:
-                continue    # run basi (re-render sedang berjalan)
-            y_top = y0 + (head_idx - i0) * rowheight
-            y_bot = y_top + int(count) * rowheight
-            clip_top = max(y_top, y0)
-            clip_bot = min(y_bot, widget_h)
-            if clip_bot <= clip_top:
-                continue    # seluruh blok di luar viewport
-            lab = self._label_for(head_iid)
-            if lab is None:
-                continue
-            # seleksi baris mana pun dalam kelompok → ikut warna seleksi
-            # v3.9.54 FIX (audit 8-b): run LAMA bisa menembus batas tree
-            # hasil re-render PARSIAL (idle-redraw terjadwal di antara
-            # chunk insert_tree_items; set_runs baru belum terdorong) —
-            # guard head_idx tak melindungi BATAS ATAS head_idx+count →
-            # IndexError di callback Tk. Klip ke jumlah baris aktual
-            # (cap 64 baris tetap — keperluan perf saja).
-            _hi = min(head_idx + min(int(count), 64), len(children))
-            sel = any(str(children[j]) in sel_set
-                      for j in range(head_idx, _hi))
-            bg = (sel_bg if (sel and sel_bg)
-                  else self.band_colors[int(band) % 2])
-            fg = (sel_fg if (sel and sel_fg) else "#0f172a")
-            cfg_key = (str(text), bg, fg, anchor, _font)
-            if getattr(lab, "_ov_cfg", None) != cfg_key:
-                try:
-                    lab.configure(text=str(text), font=_font,
-                                  anchor=anchor, background=bg,
-                                  foreground=fg)
-                except tk.TclError:
-                    continue
-                lab._ov_cfg = cfg_key
-            lx = col_x
-            lw = max(1, col_w)
-            # klip tepi kanan (pola CellColorOverlay — bbox tak ter-klip,
-            # kolom boleh terpotong di tepi viewport)
-            if lx + lw > visible_w:
-                lw = visible_w - lx
-            if lx + lw <= 0 or lx >= visible_w:
-                continue    # kolom di luar viewport horizontal
-            xy_key = (lx, clip_top, lw, clip_bot - clip_top)
-            if getattr(lab, "_ov_xy", None) != xy_key:
-                try:
-                    lab.place(x=lx, y=clip_top, width=lw,
-                              height=clip_bot - clip_top)
-                except tk.TclError:
-                    continue
-                lab._ov_xy = xy_key
-            placed.add(str(head_iid))
-        # label tanpa run terlihat → kembalikan ke pool
-        for key in list(self._labels):
-            if key not in placed:
-                self._destroy_label(key)
-
-    def _flush_geometry(self):
-        """Paksa Tk memproses pergeseran label SEKARANG (anti glitch
-        'berenang' saat scroll — pola CellColorOverlay v3.9.40)."""
-        if self._flushing or not self._alive:
-            return
-        self._flushing = True
-        try:
-            self.tree.update_idletasks()
-        except tk.TclError:
-            pass
-        finally:
-            self._flushing = False
-
-    # -- label pool + penerusan event ----------------------------------------
-    def _label_for(self, key):
-        lab = self._labels.get(key)
-        if lab is None or not self._label_ok(lab):
-            if self._pool:
-                lab = self._pool.pop()
-            else:
-                lab = tk.Label(self.tree, bd=0, highlightthickness=0,
-                               takefocus=0, padx=6, pady=0, cursor="arrow")
-                self._bind_forward(lab)
-            self._labels[key] = lab
-        return lab
-
-    @staticmethod
-    def _label_ok(lab) -> bool:
-        try:
-            return bool(lab.winfo_exists())
-        except tk.TclError:
-            return False
-
-    def _destroy_label(self, key):
-        lab = self._labels.pop(key, None)
-        if lab is not None:
-            with contextlib.suppress(tk.TclError):
-                lab.place_forget()
-            lab._ov_xy = None
-            try:
-                if lab.winfo_exists() and len(self._pool) < self._POOL_MAX:
-                    self._pool.append(lab)
-                    return
-            except tk.TclError:
-                pass
-            with contextlib.suppress(tk.TclError):
-                lab.destroy()
-
-    def _bind_forward(self, lab):
-        """Teruskan klik/roda dari Label ke tree (pola CellColorOverlay
-        v3.9.42 + deteksi double-click manual v3.9.42)."""
-        tree = self.tree
-
-        def fwd(seq):
-            def handler(event, _seq=seq):
-                try:
-                    if _seq in ("<Button-4>", "<Button-5>"):
-                        # X11 roda di label merge: gulir LANGSUNG
-                        # (event_generate sintetis tak bisa men-set %b) +
-                        # redraw overlay sinkron (refresh+flush).
-                        try:
-                            tree.yview_scroll(
-                                -1 if _seq == "<Button-4>" else 1, "units")
-                        except tk.TclError:
-                            return
-                        _redraw_overlay_now(tree)
-                        self._redraw()
-                        return
-                    lx, ly = lab.winfo_x(), lab.winfo_y()
-                    kw = {"x": lx + event.x, "y": ly + event.y,
-                          "warp": False}
-                    state = getattr(event, "state", 0)
-                    if isinstance(state, int):
-                        kw["state"] = state
-                    if _seq == "<MouseWheel>":
-                        d = getattr(event, "delta", None)
-                        if isinstance(d, int):
-                            kw["delta"] = d
-                    tree.event_generate(_seq, **kw)
-                except tk.TclError:
-                    pass
-            return handler
-
-        for seq in self._FORWARD_SEQS:
-            lab.bind(seq, fwd(seq), add="+")
-
-        def press(event):
-            now = _time.time()
-            is_dbl = (self._dbl_lab is lab
-                      and now - self._dbl_t <= 0.4)
-            self._dbl_t, self._dbl_lab = now, lab
-            try:
-                lx, ly = lab.winfo_x(), lab.winfo_y()
-                tree.event_generate(
-                    "<Button-1>", x=lx + event.x, y=ly + event.y,
-                    warp=False,
-                    state=int(getattr(event, "state", 0) or 0))
-            except tk.TclError:
-                return
-            if is_dbl:
-                with contextlib.suppress(tk.TclError):
-                    _fire_tree_bindings(
-                        tree, "<Double-1>", lx + event.x, ly + event.y,
-                        state=int(getattr(event, "state", 0) or 0))
-
-        lab.bind("<Button-1>", press, add="+")
+# v3.9.55 — RankMergeOverlay DIHAPUS (merge-vertikal kini NATIVE
+# di deviasi_view._reapply_group_merge: nilai head-only + band kelompok
+# seragam — tanpa widget LABEL di atas tree, bebas glitch scroll &
+# mencakup kolom Nama Barang + Rank; lihat riwayat v3.9.52 utk desain
+# overlay lama).
 
 
 def _collect_iids(tree, parent="") -> set:
@@ -3936,7 +3549,7 @@ def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
 # --- Sort engine linear (v3.3) ------------------------------------------------
 
 def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
-                        parse=None) -> None:
+                        parse=None, value_get=None) -> None:
     """Sort baris top-level tree berdasarkan kolom — WAKTU LINEAR (v3.3).
 
     Versi lama (v3.0-v3.2): ``tree.move(k, "", i)`` per baris → O(n²)
@@ -3949,13 +3562,17 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
 
     iid dipertahankan → pemetaan iid→fingerprint (_fp_map) dan toggle
     kolom ✓ tetap mengenai baris yang benar setelah sort.
+
+    v3.9.55 — ``value_get(iid)``: override sumber nilai sort per baris
+    (deviasi_view memakainya utk kolom MERGE-VERTIKAL Nama Barang/Rank —
+    nilai tree baris lanjutan blank; kunci sort = nilai RAW snapshot).
     """
     # FIX B-14 (audit 2-b): catat sort TERAKHIR di tree — apply_tree_row_
     # filters (rebuild clone pasca toggle filter) menjalankan ulang sort
     # ini SEBELUM reapply tag per-cell, supaya toggle filter tidak
     # mengembalikan urutan ke urutan asli cache secara diam-diam.
     try:
-        tree._last_sort = (col, bool(reverse), parse)
+        tree._last_sort = (col, bool(reverse), parse, value_get)
     except Exception:
         pass
     children = list(tree.get_children(""))
@@ -3971,8 +3588,12 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
     for k in children:
         it = tree.item(k)
         info[k] = it
-        vals = it.get("values") or []
-        raw = vals[col_idx] if 0 <= col_idx < len(vals) else ""
+        if value_get is not None:
+            # v3.9.55 — nilai sort dari sumber RAW (merge-vertikal).
+            raw = value_get(k)
+        else:
+            vals = it.get("values") or []
+            raw = vals[col_idx] if 0 <= col_idx < len(vals) else ""
         keys.append((raw, k))
 
     if parse is None:
@@ -4162,11 +3783,122 @@ def _redraw_overlay_now(tree: ttk.Treeview) -> None:
     memproses repaint tree DAN pergeseran label dalam SATU burst
     sinkron — frame layar tidak pernah menampilkan baris baru dgn label
     lama. Tree tanpa overlay (Tk 9 native / tanpa sel warna) → no-op.
+    v3.9.55 — strip header kolom In (HeadingTintOverlay) ikut
+    di-refresh (scroll horizontal — scrollbar h / Shift+roda).
     """
     ov = getattr(tree, "_cell_color_overlay", None)
     if ov is not None and getattr(ov, "_alive", False):
         with contextlib.suppress(tk.TclError):
             ov._redraw()
+    tint = getattr(tree, "_heading_tint", None)
+    if tint is not None and getattr(tint, "_alive", False):
+        with contextlib.suppress(tk.TclError):
+            tint.refresh()
+
+
+# v3.9.55 — bindtag BERSAMA utk sinkron overlay pasca keyboard-scroll
+# (binding didaftarkan SEKALI per interpreter; handler membaca
+# event.widget → tree mana pun yang menggulir via keyboard ikut sinkron;
+# tidak ada kebocoran binding per-popup — tag dipakai bersama).
+_OVSCROLL_SYNC_TAG = "OvScrollSync"
+_OVSCROLL_SYNC_BOUND = False
+_OVSCROLL_KEY_SEQS = ("<Up>", "<Down>", "<Prior>", "<Next>",
+                      "<Home>", "<End>")
+
+
+def _bind_ovscroll_sync_tag(tree: ttk.Treeview) -> None:
+    """Daftarkan binding keyboard di bindtag bersama _OVSCROLL_SYNC_TAG
+    (registrasi bind_class GLOBAL — cukup sekali; handler membaca
+    event.widget). Binding dijalankan SETELAH binding kelas Treeview
+    (urutan bindtags) → binding kelas telah menggulir tree saat handler
+    kita jalan → redraw overlay sinkron (pola handler roda v3.9.40)."""
+    global _OVSCROLL_SYNC_BOUND
+    if _OVSCROLL_SYNC_BOUND:
+        return
+    _OVSCROLL_SYNC_BOUND = True
+
+    def _after_key(event):
+        with contextlib.suppress(tk.TclError):
+            _redraw_overlay_now(event.widget)
+
+    for seq in _OVSCROLL_KEY_SEQS:
+        with contextlib.suppress(tk.TclError):
+            tree.bind_class(_OVSCROLL_SYNC_TAG, seq, _after_key, add="+")
+
+
+def sync_tree_scroll_overlays(tree: ttk.Treeview) -> None:
+    """v3.9.55 — ANTI-GLITCH SCROLL SINKRON (user: "Waktu scroll kok banyak
+    glitch ya di program nya?").
+
+    Dua celah lag yang TERSISA setelah fix roda v3.9.29/40 (probe
+    v3.9.55: ``tree.yview_moveto`` TIDAK memanggil command scrollbar /
+    yscrollcommand secara sinkron — callback baru jalan di idle):
+    1. DRAG SCROLLBAR: thumb digeser → command scrollbar → tree.yview
+       moveto → tree menggulir & MENGGAMBAR, tapi redraw label overlay
+       menunggu idle → label 'berenang' 1 frame di posisi lama.
+       FIX: command scrollbar (vsb & hsb saudara tree — frame induk
+       sama) DIWRAP: panggil command asli LALU redraw overlay SEKARANG
+       (pola _redraw_overlay_now handler roda).
+    2. KEYBOARD (Up/Down/PageUp/PageDown/Home/End): binding kelas
+       Treeview menggulir TANPA melewati handler roda → lag yang sama.
+       FIX: bindtag bersama _OVSCROLL_SYNC_TAG disisipkan SETELAH tag
+       kelas di bindtags tree → binding kita jalan SETELAH scroll kelas
+       selesai → redraw sinkron.
+
+    Idempoten (flag per scrollbar / bindtag). Dipasang dari
+    enable_col_resize (choke-point SEMUA tree termasuk popup & clone ⛶)
+    + re-scan after_idle (scrollbar kadang dibuat SETELAH enable_col_
+    resize — pola view lama)."""
+    # (1) wrap scrollbar command
+    try:
+        sbs = [w for w in tree.master.winfo_children()
+               if isinstance(w, ttk.Scrollbar)]
+    except (tk.TclError, AttributeError):
+        sbs = []
+    for sb in sbs:
+        if getattr(sb, "_ov_sync_bound", False):
+            continue
+        try:
+            orig = str(sb.cget("command"))
+        except tk.TclError:
+            continue
+        if not orig or orig == "":
+            continue
+        sb._ov_sync_bound = True
+
+        def _cmd(*args, _orig=orig, _tree=tree):
+            with contextlib.suppress(tk.TclError):
+                _tree.tk.call(_orig, *args)
+            # redraw SEKARANG — sebelum repaint idle (anti-glitch)
+            _redraw_overlay_now(_tree)
+
+        with contextlib.suppress(tk.TclError):
+            sb.configure(command=_cmd)
+    # (2) bindtag keyboard sync
+    try:
+        bts = list(tree.bindtags())
+    except tk.TclError:
+        bts = []
+    if bts and _OVSCROLL_SYNC_TAG not in bts:
+        try:
+            cls_idx = bts.index("Treeview")
+        except ValueError:
+            cls_idx = 0
+        bts.insert(cls_idx + 1, _OVSCROLL_SYNC_TAG)
+        with contextlib.suppress(tk.TclError):
+            tree.bindtags(bts)
+    _bind_ovscroll_sync_tag(tree)
+    # re-scan SEKALI di idle (scrollbar kadang dibuat SETELAH
+    # enable_col_resize — flag cegah loop after_idle berulang).
+    if not getattr(tree, "_ovsync_rescan", False):
+        tree._ovsync_rescan = True
+
+        def _rescan():
+            with contextlib.suppress(Exception):
+                if tree.winfo_exists():
+                    sync_tree_scroll_overlays(tree)
+        with contextlib.suppress(Exception):
+            tree.after_idle(_rescan)
 
 
 def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
@@ -4271,8 +4003,12 @@ def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):
     choke-point tunggal — fungsi ini dipanggil sekali per tree di SEMUA
     view + clone ⛶ + popup (14 call site), jadi smooth wheel otomatis
     aktif di semua tabel tanpa harus menyentuh tiap view.
+    v3.9.55 — juga memasang SYNC OVERLAY SCROLL (sync_tree_scroll_overlays:
+    drag scrollbar + keyboard — dua jalur scroll yang dulu meninggalkan
+    label sel warna 1 frame di posisi lama).
     """
     enable_smooth_wheel(tree)   # v3.9.29 — idempoten (flag)
+    sync_tree_scroll_overlays(tree)   # v3.9.55 — idempoten (flag/bindtag)
     state = {"col": None, "start_x": 0, "start_w": 0}
 
     def _edges():
@@ -4391,14 +4127,6 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
     else:
         idxs = list(range(n))
 
-    # cache values per baris sampel (1 panggilan Tcl per baris)
-    sampled_vals = []
-    sampled_texts = []
-    for i in idxs:
-        it = tree.item(children[i])
-        sampled_vals.append(it.get("values") or [])
-        sampled_texts.append(str(it.get("text") or ""))
-
     # v3.7 FIX (deep audit): index values = urutan kolom LOGIS — values[]
     # item Treeview diindeks sesuai tree["columns"], bukan urutan display;
     # setelah kolom disembunyikan, auto-fit dulu mengukur nilai kolom yang
@@ -4407,6 +4135,30 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
         logical_cols = [str(c) for c in tree["columns"]]
     except Exception:
         logical_cols = []
+
+    # cache values per baris sampel (1 panggilan Tcl per baris)
+    # v3.9.55 — MERGE-AWARE: tree dgn atribut _autofit_value_get(iid, col,
+    # cur) (deviasi_view: kolom Nama Barang/Rank head-only — baris lanjutan
+    # blank) mengukur nilai RAW per iid supaya lebar kolom tidak menyusut
+    # hanya karena sampel tak mengenai baris head kelompok.
+    _vg = getattr(tree, "_autofit_value_get", None)
+    sampled_vals = []
+    sampled_texts = []
+    for i in idxs:
+        it = tree.item(children[i])
+        vals = list(it.get("values") or [])
+        if _vg is not None:
+            # v3.9.55 — override nilai pengukuran merge-aware; gagal →
+            # pakai nilai asli (suppress sempit, bukan blind except).
+            with contextlib.suppress((AttributeError, IndexError,
+                                       TypeError, ValueError, tk.TclError)):
+                vals = [
+                    _vg(str(children[i]), logical_cols[k],
+                        vals[k] if k < len(vals) else "")
+                    for k in range(len(logical_cols))]
+        sampled_vals.append(vals)
+        sampled_texts.append(str(it.get("text") or ""))
+
     for col in cols:
         try:
             w = meas(str(tree.heading(col, "text") or "")) + pad + 10
@@ -4429,6 +4181,24 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
     # memicu <Configure> tree maupun yscrollcommand → label sel warna
     # salah posisi/lebar sampai interaksi berikutnya. No-op tanpa overlay.
     _redraw_overlay_now(tree)
+
+
+def autofit_tree_once(view, tree: ttk.Treeview) -> None:
+    """v3.9.55 — F8 (user: "Waktu pertama kali buka program bisa gak sudah
+    diset ke auto fit biar gak adjust manual lagi?"): auto-fit lebar kolom
+    SEKALI per muat data — dipanggil view dari render_done (batch insert
+    selesai → konten terukur). view me-reset flag via reset_autofit_once
+    di load_data; view tanpa reset (test standalone) tetap sekali saja."""
+    if getattr(view, "_autofit_once", False):
+        return
+    view._autofit_once = True
+    with contextlib.suppress(Exception):
+        auto_fit_columns(tree)
+
+
+def reset_autofit_once(view) -> None:
+    """v3.9.55 — F8: reset flag sekali-per-muat (dipanggil view.load_data)."""
+    view._autofit_once = False
 
 
 # --- Maximize table (fullscreen clone) ----------------------------------------

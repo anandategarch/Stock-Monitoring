@@ -189,7 +189,47 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.54"  # v3.9.54 — FIX popup pivot KOSONG (kategori virtual) + audit sebar-agent 8-a/8-b
+APP_VERSION = "3.9.55"  # v3.9.55 — merge-vertikal NATIVE + skor resto + anti-glitch scroll + auto-fit startup
+# v3.9.55 — 8 PERMINTAAN USER ("kerjakan no bug no mistakes dan cek ulang
+# jagan asumsi dan no lemet. Deep audit juga program kita biar cepat dan
+# smooth"):
+# (1) KATEGORI LABEL RINGKA: entry gabungan default kini "Deviasi (COM +
+#     Packaging)" (dulu label virtual 49-char — dropdown kembali tampil
+#     daftar kategori DBS; label lama tetap dikenali; semantik strict
+#     v3.9.53 utuh); lebar combo 46 → 34 (deviasi/pivot/nominal).
+# (2) NOMINAL KOSONG (user: "ada deviasi yang tidak ada nominal nya coba
+#     cek"): (a) lookup harga 41.09 kini NORMALISASI kunci (strip + rapat
+#     spasi + upper — kedua sisi build_harga_map/lookup_harga_pair):
+#     selisih kapitalisasi/nama tak lagi membuat Nominal '-' senyap;
+#     (b) DIAGNOSTIK transparan di status footer: n baris tanpa nominal
+#     diklasifikasi (a tanpa harga 41.09 · b satuan tak terkonversi).
+# (3) SKOR RESTO (Rekap Selisih IN; user: "Beri Skor per resto dengan
+#     selisih terbanyak ... di tiap tanggal dan di keseluruhan tanggal"):
+#     leaderboard kartu 🏆 — skor = item selisih + tanggal terdampak
+#     (kronis > insidental, persis contoh user), top-3 medali + bar
+#     proporsional; KLIK baris = filter tabel ke resto itu (toggle).
+# (4) MERGE-VERTIKAL NATIVE Nama Barang + Rank (user: "Merger Vertical
+#     Nama barang dan Rank ... sama kaya di tab rincian PO"): nilai sekali
+#     di head run + band kelompok SERAGAM (grp_head & RankMergeOverlay
+#     DIHAPUS — label overlay di atas tree = sumber glitch scroll);
+#     adjacency dari _row_snaps; sort value_get (kelompok bergerak utuh);
+#     double-click baca snapshot (baris lanjutan blank).
+# (5) URUTAN KOLOM POPUP Deviasi GR/PCS: Tanggal, SO, Saldo Akhir,
+#     Deviasi, COM, IN, Nomor, Nomor PO.
+# (6) ANTI-GLITCH SCROLL (user: "Waktu scroll kok banyak glitch?"):
+#     sync_tree_scroll_overlays — command scrollbar (vsb+hsb) DIWRAP
+#     (drag thumb → redraw overlay sinkron — probe: yscrollcommand baru
+#     jalan di IDLE) + bindtag OvScrollSync SETELAH kelas (keyboard) +
+#     _redraw_overlay_now ikut refresh HeadingTint; dipasang otomatis di
+#     SEMUA tree via enable_col_resize.
+# (7) TOMBOL SORT ANALISA CEK (▲ Kenaikan / ▼ Penurunan Tertinggi):
+#     sortir oleh segmen analisa lalu→kini di teks CEK (tuple tier+pct;
+#     tanpa persen → ±∞; Berubah Arah tier tengah).
+# (8) AUTO-FIT PERTAMA BUKA (user: "bisa gak sudah diset ke auto fit
+#     biar gak adjust manual lagi?"): jendela MAXIMIZED saat pertama kali
+#     + ukuran/maximize TERAKHIR diingat (settings.json, disimpan saat
+#     ditutup); kolom auto-fit SEKALI per muat data di SEMUA view utama
+#     (autofit_tree_once/reset — merge-aware via _autofit_value_get).
 # v3.9.54 — FIX "ADA BUG di pop up pivot tabel yang kosong ketika aku double
 # klik. Cari bug secara keseluruhan sebar agent dan fix" (user):
 # (1) POPUP PIVOT KOSONG (P0, sejak v3.9.49): _on_double_click pivot
@@ -1512,6 +1552,52 @@ WINDOW_SIZE = f"{WINDOW_W}x{WINDOW_H}"
 # h-scrollbar tabel tertabrak tepi bawah (tidak bisa scroll horizontal).
 WINDOW_MIN = (1020, 700)
 
+
+# v3.9.55 — F8: persistensi STATE JENDELA (settings.json — pola
+# acr_threshold deviasi_view: read-modify-write atomik; kegagalan I/O
+# senyap). Disimpan saat jendela ditutup (jalur WM_DELETE_WINDOW asli —
+# bukan root.destroy() langsung milik test); dipulihkan saat startup:
+# pertama kali (tanpa state) → MAXIMIZED (auto-fit layar).
+_SETTINGS_PATH = Path(__file__).resolve().parent.parent.parent / "settings.json"
+
+
+def _load_window_state():
+    """{w, h, maximized} tersimpan; None bila tak ada/korup (first open)."""
+    try:
+        with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        st = data.get("window_state")
+        if (isinstance(st, dict) and isinstance(st.get("w"), int)
+                and isinstance(st.get("h"), int)
+                and st["w"] >= WINDOW_MIN[0] and st["h"] >= WINDOW_MIN[1]):
+            return {"w": st["w"], "h": st["h"],
+                    "maximized": bool(st.get("maximized"))}
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def _save_window_state(w: int, h: int, maximized: bool) -> None:
+    """Simpan state jendela (read-modify-write atomik; senyap gagal)."""
+    old = {}
+    try:
+        with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["window_state"] = {"w": int(w), "h": int(h),
+                               "maximized": bool(maximized)}
+        tmp = _SETTINGS_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, _SETTINGS_PATH)
+    except (OSError, ValueError, TypeError):
+        return
+
+
 # v3.9.48 — ZOOM UI runtime (CTRL + Scroll) — rentang & langkah.
 # 0.5–2.0 dipilih supaya teks tetap terbaca di kedua ujung (font 8pt
 # di 50% ≈ 4pt = lantai scale_pt 4). Runtime saja — tidak dipersist.
@@ -1597,6 +1683,30 @@ class StockMonitorApp:
             self._zoom_expected_wh = (WINDOW_W, WINDOW_H)
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.configure(bg=C_BG)
+        # v3.9.55 — F8 (user: "Waktu pertama kali buka program bisa gak
+        # sudah diset ke auto fit biar gak adjust manual lagi?"):
+        # (a) PERTAMA kali dibuka (tanpa state tersimpan) → jendela
+        #     langsung MAXIMIZED (auto-fit layar — tak perlu adjust manual);
+        # (b) sesi BERIKUTNYA → ukuran + status maximize TERAKHIR diingat
+        #     (settings.json, pola acr_threshold): user resize sekali →
+        #     terbuka persis seperti itu lagi. Simpan saat jendela ditutup
+        #     (_on_close_window — jalur WM asli, bukan destroy() test).
+        _saved_win = _load_window_state()
+        if _saved_win is not None:
+            _sw = int(self.root.winfo_screenwidth())
+            _sh = int(self.root.winfo_screenheight())
+            _w = int(min(max(_saved_win.get("w", WINDOW_W),
+                             WINDOW_MIN[0]), _sw))
+            _h = int(min(max(_saved_win.get("h", WINDOW_H),
+                             WINDOW_MIN[1]), _sh))
+            with contextlib.suppress(tk.TclError):
+                self.root.geometry(f"{_w}x{_h}")
+            self._zoom_base_wh = (_w, _h)
+            self._zoom_expected_wh = (_w, _h)
+            if _saved_win.get("maximized"):
+                self._maximize_root_window()
+        else:
+            self._maximize_root_window()
 
         # State
         self.log_queue: queue.Queue = queue.Queue()
@@ -1838,8 +1948,8 @@ class StockMonitorApp:
         (murah). Popup yang sedang TERBUKA ikut (janji 'zoom seluruh UI').
         v3.9.51 — strip warna header kolom In (HeadingTintOverlay) ikut
         di-reposisi (lebar kolom berubah pasca auto-fit).
-        v3.9.52 — merge-vertikal kolom Rank (RankMergeOverlay) ikut
-        di-reposisi (rowheight/lebar kolom berubah)."""
+        v3.9.55 — merge-vertikal Rank kini NATIVE (tanpa overlay) → tidak
+        ada reposisi overlay rank lagi (RankMergeOverlay dihapus)."""
         def _walk(_w):
             try:
                 _kids = _w.winfo_children()
@@ -1855,11 +1965,9 @@ class StockMonitorApp:
                 if _tint is not None and getattr(_tint, "_alive", False):
                     with contextlib.suppress(Exception):
                         _tint.refresh()
-                # v3.9.52 — reposisi label merge-vertikal Rank (bila ada)
-                _rank = getattr(_w, "_rank_merge", None)
-                if _rank is not None and getattr(_rank, "_alive", False):
-                    with contextlib.suppress(Exception):
-                        _rank.refresh()
+                # v3.9.55 — merge-vertikal Rank kini NATIVE (nilai head +
+                # band — RankMergeOverlay dihapus) → tak ada overlay yang
+                # perlu di-reposisi pasca auto-fit.
         with contextlib.suppress(Exception):
             _walk(self.root)
 
@@ -2892,13 +3000,63 @@ class StockMonitorApp:
                 f"{'SEMUA' if refresh_files is None else fmt_int_id(n_sel)} "
                 "file dibaca ulang, data diperbarui.\n")
 
+    def _maximize_root_window(self):
+        """v3.9.55 — F8: maximize jendela lintas platform.
+
+        Urutan: (1) state('zoomed') — Windows (juga beberapa WM Linux);
+        (2) attributes('-zoomed') — X11 EWMH; (3) fallback geometry 94%
+        layar — HANYA bila ada window manager (tanpa WM — Xvfb headless
+        test — biarkan geometry default supaya test deterministik).
+        _zoom_base_wh/expected diperbarui oleh <Configure> listener saat
+        ukuran akhir diketahui (maximize = bukan resize manual user)."""
+        try:
+            self.root.state("zoomed")
+            return
+        except tk.TclError:
+            pass
+        try:
+            self.root.attributes("-zoomed", True)
+            return
+        except tk.TclError:
+            pass
+        try:
+            if not str(self.root.winfo_manager()):
+                return   # tanpa WM (headless) — jangan ubah geometry test
+        except tk.TclError:
+            pass
+        with contextlib.suppress(tk.TclError):
+            _sw = int(self.root.winfo_screenwidth())
+            _sh = int(self.root.winfo_screenheight())
+            _w, _h = int(_sw * 0.94), int(_sh * 0.94)
+            self.root.geometry(f"{_w}x{_h}")
+            self._zoom_base_wh = (_w, _h)
+            self._zoom_expected_wh = (_w, _h)
+
+    def _is_root_maximized(self) -> bool:
+        """v3.9.55 — F8: status maximize utk disimpan (Windows 'zoomed'
+        state; X11 attributes -zoomed)."""
+        try:
+            if str(self.root.state()) == "zoomed":
+                return True
+        except tk.TclError:
+            pass
+        try:
+            if int(self.root.attributes("-zoomed")):
+                return True
+        except (tk.TclError, ValueError, TypeError):
+            pass
+        return False
+
     def _on_close_window(self):
         """v3.9.33 — AUDIT FIX (48-c LOW): handler tombol X.
 
         Pipeline masih berjalan → konfirmasi dulu (worker daemon mati
         bersama proses bila user tetap keluar; tidak ada cleanup khusus
         lain di close path — state persist antara-sesi disimpan oleh
-        mekanisme masing-masing saat berubah). Idle → langsung tutup."""
+        mekanisme masing-masing saat berubah). Idle → langsung tutup.
+        v3.9.55 — F8: sebelum destroy, STATE JENDELA (ukuran/maximize)
+        disimpan ke settings.json → sesi berikutnya terbuka persis
+        seperti kebiasaan user (tanpa adjust manual)."""
         worker = getattr(self, "worker_thread", None)
         pipeline_hIDup = (self.is_running
                           or (worker is not None and worker.is_alive()))
@@ -2908,6 +3066,13 @@ class StockMonitorApp:
                 "dihentikan paksa)",
                 parent=self.root):
             return
+        # v3.9.55 — simpan state jendela (F8)
+        with contextlib.suppress(Exception):
+            _max = self._is_root_maximized()
+            _w = int(self.root.winfo_width())
+            _h = int(self.root.winfo_height())
+            if _w >= WINDOW_MIN[0] and _h >= WINDOW_MIN[1]:
+                _save_window_state(_w, _h, _max)
         self.root.destroy()
 
     def _stop_pipeline(self):

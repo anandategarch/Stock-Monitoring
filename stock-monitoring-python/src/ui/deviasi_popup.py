@@ -82,15 +82,26 @@ from .widgets import (
 # v3.9.25 — kolom Nomor PO (permintaan user: "tambah kolom nomor po dan
 # COM"): nomor pesanan pembelian baris 4.IN per tanggal (pola Nomor) +
 # kolom COM (pemakaian harian — formula identik Anomali COM).
+# v3.9.22 — kolom Nomor (permintaan user: "Pop up di tab Deviasi GR dan
+# PCS ada Nomor nya juga Misal IT...... atau RI......"): nomor dokumen IN
+# per tanggal (IT. = pemindahan 42.05, RI. = penerimaan 32.24; >1 dokumen
+# digabung koma, didedup + diurut).
+# v3.9.25 — kolom Nomor PO (permintaan user: "tambah kolom nomor po dan
+# COM"): nomor pesanan pembelian baris 4.IN per tanggal (pola Nomor) +
+# kolom COM (pemakaian harian — formula identik Anomali COM).
+# v3.9.55 — URUTAN KOLOM (user: "Urutan kolom di pop up deviasi GR dan
+# PCS: Tanggal, SO, Saldo Akhir, Deviasi, COM, IN, Nomor, Nomor PO"):
+# Tanggal → SO → Saldo Akhir → Deviasi → COM → IN → Nomor → Nomor PO
+# (dulu Tanggal, Saldo Akhir, SO, IN, Nomor, Nomor PO, COM, Deviasi).
 COLUMNS = [
     ("Tanggal", 76, "e"),
-    ("Saldo Akhir", 110, "e"),
     ("SO", 110, "e"),
+    ("Saldo Akhir", 110, "e"),
+    ("Deviasi", 110, "e"),
+    ("COM", 100, "e"),
     ("IN", 110, "e"),
     ("Nomor", 200, "w"),
     ("Nomor PO", 190, "w"),
-    ("COM", 100, "e"),
-    ("Deviasi", 110, "e"),
 ]
 
 COL_IDS = [c[0] for c in COLUMNS]

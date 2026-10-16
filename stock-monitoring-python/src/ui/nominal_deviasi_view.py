@@ -83,11 +83,13 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
     insert_tree_items,
     open_tree_maximized,
+    reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
 )
@@ -400,6 +402,8 @@ class NominalDeviasiView(tk.Frame):
         self.harga_map = harga_map or {}
         self.konversi_map = konversi_map
         self._render_gen += 1
+        # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
+        reset_autofit_once(self)
         if self._insert_cancel is not None:
             self._insert_cancel()
             self._insert_cancel = None
@@ -663,6 +667,8 @@ class NominalDeviasiView(tk.Frame):
             # _busy (setelah batch insert selesai) + proses refresh/sort
             # yang mengantre (pola render_done laporan/in_selisih).
             self._reapply_cell_tags(self.tree)
+            # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
+            autofit_tree_once(self, self.tree)
             self._busy = False
             if self._pending:
                 self._pending = False
