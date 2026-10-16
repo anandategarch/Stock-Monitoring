@@ -232,6 +232,7 @@ from .widgets import (
     HeadingTintOverlay,  # v3.9.51 — strip warna header kolom In (kiriman)
     LegendRow,
     LoadingOverlay,
+    RankMergeOverlay,  # v3.9.52 — merge-vertikal visual kolom Rank
     TableExpander,
     _set_sort_arrow,  # v3.9.33 — AUDIT FIX (48-d): pasang ulang panah sort
     apply_cell_tag,
@@ -797,9 +798,17 @@ class DeviasiView(tk.Frame):
             on_sort=lambda c, d: self._sort_by(c, reverse=d))
 
         # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
+        # v3.9.52 — SATUAN disembunyikan SEJAK AWAL di tab Deviasi GR & PCS
+        # (user: "Secara default hide kolom Satuan di tab Deviasi Gr dan
+        # PCS"): di tab GR nilainya seragam 'GR' (redundan), di PCS pun
+        # mode-nya sudah ditentukan tab — kolom tetap bisa di-unhide via
+        # ◱ Kolom / klik kanan; NILAI tetap hidup (snapshot follow-up,
+        # popup rincian, filter mode Satuan — displaycolumns hanya soal
+        # tampilan; clone ⛶ menyalin displaycolumns sumber).
         self._colmgr = ColumnManager(
             self.tree,
-            open_filter=lambda c: self.header_filters.open_popup(c))
+            open_filter=lambda c: self.header_filters.open_popup(c),
+            default_hidden=["Satuan"])
 
         # v3.9.51 — strip warna header kolom In (kiriman — BUKAN Stock):
         # In_H-1 / In_H / In_H+1 (heading dinamis In_13/In_14/In_15 saat
@@ -807,6 +816,19 @@ class DeviasiView(tk.Frame):
         # tipis 6px di atas heading (teks & corong ⧩ tak tertutup).
         self._in_tint = HeadingTintOverlay(
             self.tree, list(self.IN_COLS), self.IN_HEADER_COLOR)
+
+        # v3.9.52 — MERGE-VERTIKAL VISUAL kolom Rank (user: "kolom Rank
+        # kok tidak termerger vertical ... sama kaya di tab rincian PO"):
+        # v3.9.51 menampilkan nilai sekali di baris kepala, TAPI batas
+        # warna grp_head-vs-band membuatnya tampak sel TERPISAH (bukan
+        # satu sel tinggi) → overlay menggambar SATU blok Label kontinu
+        # per kelompok (nilai VERTIKAL CENTERED; sekat grp_head ganti
+        # warna band di kolom ini saja). Runs didorong
+        # _reapply_rank_merge (satu pintu dekorasi render/sort/clone).
+        self._rank_overlay = RankMergeOverlay(
+            self.tree, col="Rank",
+            band_colors=(self.GRP_TAG_COLORS[0][1],
+                         self.GRP_TAG_COLORS[1][1]))
 
         # Legend CEK
         legend = LegendRow(self.content, [
@@ -2409,18 +2431,30 @@ class DeviasiView(tk.Frame):
         PERTAMA tiap kelompok Nama Barang mengikuti URUTAN VISUAL tree
         (sort kolom lain / filter clone mengubah urutan → head dihitung
         ulang dari adjacency; nilai per iid TAK HILANG — head baru tinggal
-        mengambil dari _rank_map). Idempoten & O(n)."""
+        mengambil dari _rank_map). Idempoten & O(n).
+        v3.9.52 — sekaligus DORONG struktur kelompok (runs) ke
+        RankMergeOverlay tree ini (registrasi mandiri tree._rank_merge —
+        main & clone ⛶ masing-masing): overlay menggambar SATU blok Label
+        kontinu per kelompok ≥2 baris supaya kolom Rank benar-benar tampak
+        TERMERGER VERTIKAL (nilai centered, tanpa sekat grp_head di kolom
+        ini). Paritas band mengikuti urutan run visual — SAMA dgn
+        _reapply_group_bands (ordinal kelompok % 2)."""
+        runs = []    # (head_iid, n_baris, teks_rank, band_parity)
         try:
             children = list(tree.get_children(""))
             if not children:
+                self._push_rank_runs(tree, runs)
                 return
             col_ids = list(tree["columns"])
             try:
                 r_idx = col_ids.index("Rank")
                 b_idx = col_ids.index("Nama Barang")
             except ValueError:
+                self._push_rank_runs(tree, runs)
                 return
             prev = None
+            run_head = None
+            run_len = 0
             for k in children:
                 try:
                     vals = list(tree.item(k, "values") or [])
@@ -2430,6 +2464,14 @@ class DeviasiView(tk.Frame):
                     continue
                 barang = str(vals[b_idx])
                 is_head = barang != prev
+                if is_head:
+                    if run_head is not None:
+                        runs.append((run_head, run_len,
+                                     self._rank_map.get(run_head, ""),
+                                     len(runs) % 2))
+                    run_head, run_len = str(k), 1
+                else:
+                    run_len += 1
                 prev = barang
                 want = self._rank_map.get(str(k), "") if is_head else ""
                 if str(vals[r_idx]) != want:
@@ -2438,8 +2480,22 @@ class DeviasiView(tk.Frame):
                         tree.item(k, values=vals)
                     except tk.TclError:
                         continue
+            if run_head is not None:
+                runs.append((run_head, run_len,
+                             self._rank_map.get(run_head, ""),
+                             len(runs) % 2))
         except tk.TclError:
             return
+        self._push_rank_runs(tree, runs)
+
+    def _push_rank_runs(self, tree, runs):
+        """v3.9.52 — dorong runs kelompok Rank ke overlay tree ini
+        (registrasi mandiri tree._rank_merge — pola _heading_tint; clone ⛶
+        punya overlay sendiri). Overlay mati/absen → no-op."""
+        _ov = getattr(tree, "_rank_merge", None)
+        if _ov is not None and getattr(_ov, "_alive", False):
+            with contextlib.suppress(Exception):
+                _ov.set_runs(runs)
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
@@ -2493,6 +2549,19 @@ class DeviasiView(tk.Frame):
         with contextlib.suppress(tk.TclError):
             HeadingTintOverlay(new_tree, list(self.IN_COLS),
                                self.IN_HEADER_COLOR)
+        # v3.9.52 — merge-vertikal kolom Rank juga di clone ⛶ (overlay
+        # milik tree clone; runs didorong _reapply_rank_merge saat
+        # on_render_done clone / sort di dalam clone).
+        with contextlib.suppress(tk.TclError):
+            RankMergeOverlay(
+                new_tree, col="Rank",
+                band_colors=(self.GRP_TAG_COLORS[0][1],
+                             self.GRP_TAG_COLORS[1][1]))
+        # insert_tree_items menjalankan chunk PERTAMA sinkron — tabel
+        # kecil (< batch) memanggil on_render_done (dorong runs) SEBELUM
+        # baris ini terpasang → dorong ulang setelah overlay ada
+        # (idempoten: nilai in-tree tak berubah, hanya runs ke overlay).
+        self._reapply_rank_merge(new_tree)
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree

@@ -189,7 +189,31 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.51"  # v3.9.51 — ANALISA DEVIASI LALU→KINI di CEK + Dev. Bulan Lalu (ganti Stok Seharusnya) + Rank merge-vertikal + strip header kolom In + Currency Rp semua nominal + hapus kolom Selisih (Komparasi)
+APP_VERSION = "3.9.52"  # v3.9.52 — MERGE-VERTIKAL VISUAL Rank (overlay blok kontinu, nilai centered) + SATUAN hidden by default Deviasi GR/PCS
+# v3.9.52 — 2 PERMINTAAN USER (tab 📦 Deviasi GR / 🧩 PCS):
+# (1) MERGE-VERTIKAL VISUAL kolom Rank (user: "kolom Rank kok tidak
+#     termerger vertcial seperti kemauanku di atas? ... Merger vertcial
+#     sama kaya di tab rincian PO"): v3.9.51 menampilkan nilai sekali di
+#     baris kepala, TAPI batas warna grp_head-vs-band membuatnya tampak
+#     sel TERPISAH (bukan satu sel tinggi) → RankMergeOverlay BARU
+#     (widgets) menggambar SATU Label blok kontinu per kelompok ≥2
+#     baris: latar warna band kelompok (sekat grp_head digantikan di
+#     kolom Rank saja), nilai VERTIKAL CENTERED, seleksi ikut warna
+#     seleksi; runs didorong _reapply_rank_merge (satu pintu dekorasi
+#     render/sort/clone — urutan visual); reposisi otomatis scroll y/x
+#     + resize kolom + zoom (_refit_all_tree_columns walk tree._rank_merge);
+#     event area label diteruskan ke tree (pola CellColorOverlay +
+#     double-click manual) supaya seleksi/klik-kanan/roda/double-click
+#     rincian tetap bekerja; clone ⛶ overlay sendiri (+ dorong ulang
+#     runs — insert_tree_items chunk pertama SINKRON: on_render_done
+#     clone kecil bisa terjadi sebelum overlay terpasang).
+# (2) SATUAN HIDDEN BY DEFAULT (user: "Secara default hide kolom Satuan
+#     di tab Deviasi Gr dan PCS"): ColumnManager param BARU
+#     default_hidden — DeviasiView pass ["Satuan"] (di tab GR seragam
+#     'GR' — redundan; PCS mode sudah ditentukan tab); kolom tetap
+#     bisa di-unhide (◱ Kolom / klik kanan); NILAI tetap hidup
+#     (snapshot follow-up, popup rincian, filter mode) — displaycolumns
+#     hanya soal tampilan; clone ⛶ menyalin displaycolumns sumber.
 # v3.9.51 — 5 PERMINTAAN USER (tab 📦 Deviasi GR / 🧩 PCS + Laporan):
 # (1) ANALISA di kolom CEK (user: "kolom Cek tambahkan analisa Penurunan
 #     tertinggi, peningkatan tertinggi atau berubah arah seperti pada
@@ -1737,7 +1761,9 @@ class StockMonitorApp:
         data berikutnya akan hasilkan. Tree kosong hanya mengukur heading
         (murah). Popup yang sedang TERBUKA ikut (janji 'zoom seluruh UI').
         v3.9.51 — strip warna header kolom In (HeadingTintOverlay) ikut
-        di-reposisi (lebar kolom berubah pasca auto-fit)."""
+        di-reposisi (lebar kolom berubah pasca auto-fit).
+        v3.9.52 — merge-vertikal kolom Rank (RankMergeOverlay) ikut
+        di-reposisi (rowheight/lebar kolom berubah)."""
         def _walk(_w):
             try:
                 _kids = _w.winfo_children()
@@ -1753,6 +1779,11 @@ class StockMonitorApp:
                 if _tint is not None and getattr(_tint, "_alive", False):
                     with contextlib.suppress(Exception):
                         _tint.refresh()
+                # v3.9.52 — reposisi label merge-vertikal Rank (bila ada)
+                _rank = getattr(_w, "_rank_merge", None)
+                if _rank is not None and getattr(_rank, "_alive", False):
+                    with contextlib.suppress(Exception):
+                        _rank.refresh()
         with contextlib.suppress(Exception):
             _walk(self.root)
 

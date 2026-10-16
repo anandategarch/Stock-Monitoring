@@ -1959,15 +1959,21 @@ class ColumnManager:
     - State in-memory per tabel (reset saat aplikasi ditutup).
     - mirror: tree lain (mis. clone ⛶ / tabel utama) yang diterapkan
       konfigurasi kolom yang sama.
+    - default_hidden (v3.9.52): daftar kolom yang disembunyikan SEJAK
+      AWAL (user: "Secara default hide kolom Satuan di tab Deviasi Gr
+      dan PCS") — kolom tetap bisa di-unhide lewat ◱ Kolom / klik kanan
+      (nilainya tetap terbaca via tree.set — displaycolumns hanya soal
+      tampilan).
     """
 
     def __init__(self, tree: ttk.Treeview, *, open_filter=None, mirror=None,
-                 on_change=None):
+                 on_change=None, default_hidden=None):
         self.tree = tree
         self.open_filter = open_filter       # callable(col) → buka popup filter
         self.mirror = mirror                 # tree lain yang ikut hide/unhide
         self.on_change = on_change
-        self.hidden: list[str] = []
+        self.hidden: list[str] = [
+            str(c) for c in (default_hidden or []) if c in self.columns()]
         self._panel: tk.Toplevel | None = None
         tree.bind("<Button-3>", self._on_right_click, add="+")
         # v3.7: daftarkan diri di tree supaya ColumnManager lain (mis. clone
@@ -1990,6 +1996,12 @@ class ColumnManager:
                 refs = list(getattr(mirror, "_mirror_backrefs", None) or [])
                 refs.append(self)
                 mirror._mirror_backrefs = refs
+        # v3.9.52 — default_hidden: terapkan SEKARANG (tree masih kosong —
+        # displaycolumns aman dikonfigurasi kapan pun) supaya sejak render
+        # pertama kolom sudah tersembunyi; clone ⛶ menyalin displaycolumns
+        # sumber saat dibuka (v3.6) → state awal konsisten.
+        if self.hidden:
+            self.apply()
 
     # -- state ---------------------------------------------------------------
     def columns(self) -> list[str]:
@@ -3454,6 +3466,394 @@ class HeadingTintOverlay:
                     state=int(getattr(event, "state", 0) or 0))
             except tk.TclError:
                 return
+
+        lab.bind("<Button-1>", press, add="+")
+
+
+class RankMergeOverlay:
+    """v3.9.52 — MERGE-VERTIKAL VISUAL kolom Rank (user: "kolom Rank ...
+    dimerger vertical di kolom nama barang. Merger vertcial sama kaya
+    di tab rincian PO").
+
+    v3.9.51 sudah menampilkan nilai rank SEKALI di baris pertama
+    kelompok (baris lanjutan kosong) — tapi secara VISUAL TIDAK tampak
+    seperti satu sel tinggi: baris kepala kelompok ber-tag grp_head
+    (#e2e8f0) sedangkan baris lanjutan ber-pita band (#ffffff/#f1f5f9)
+    → ada batas warna horizontal TEPAT di bawah angka rank (angka
+    terlihat milik baris kepala saja, sel di bawahnya terlihat sel
+    kosong TERPISAH — kebalikan "merged"). Overlay ini menggambar SATU
+    Label tinggi per kelompok ≥2 baris di kolom Rank:
+      - latar KONTINU warna band kelompok (sekat grp_head digantikan di
+        kolom ini saja — kolom lain tetap pakai sekat v3.9.49),
+      - nilai rank VERTIKAL CENTERED di tengah blok (ala merged-cell
+        Excel; bila blok lebih tinggi dari viewport → center di bagian
+        yang terlihat),
+      - seleksi baris mana pun dalam kelompok → label ikut warna
+        seleksi (parity perilaku CellColorOverlay).
+
+    Struktur kelompok (runs) DIDORONG view via set_runs() dari
+    _reapply_rank_merge (yang memang berjalan di URUTAN VISUAL tiap
+    render/sort/clone — satu pintu _reapply_render_decorations) —
+    overlay TIDAK berjalan sendiri; refresh() hanya menghitung ulang
+    GEOMETRI (murah — dipicu scroll/resize/zoom/seleksi).
+
+    Reposisi otomatis: wrap yscrollcommand+xscrollcommand, <Configure>,
+    <ButtonRelease-1> (resize kolom), <<TreeviewSelect>>, refresh()
+    eksplisit dari view & app (zoom — _refit_all_tree_columns).
+    Event area label DITERUSKAN ke tree (pola forwarding CellColorOverlay
+    v3.9.42 + deteksi double-click manual) supaya seleksi, klik-kanan,
+    roda, dan double-click rincian tetap bekerja. Kolom tersembunyi
+    (◱ Kolom) → label ikut hilang. Registrasi mandiri
+    tree._rank_merge (pola _heading_tint) — clone ⛶ membuat overlay
+    sendiri; label anak tree → mati otomatis saat window ditutup.
+    """
+
+    # <Button-1> ditangani handler `press` khusus (deteksi double manual —
+    # pola CellColorOverlay)
+    _FORWARD_SEQS = (
+        "<Button-3>", "<ButtonRelease-1>",
+        "<B1-Motion>", "<MouseWheel>", "<Button-4>", "<Button-5>",
+    )
+    _POOL_MAX = 48
+
+    def __init__(self, tree: ttk.Treeview, col: str = "Rank",
+                 band_colors: tuple = ("#ffffff", "#f1f5f9")):
+        self.tree = tree
+        self.col = str(col)
+        self.band_colors = (str(band_colors[0]), str(band_colors[1]))
+        # runs dari view: (head_iid, n_baris, teks_rank, band_parity)
+        self._runs: list = []
+        self._labels: dict = {}      # head_iid -> tk.Label (AKTIF)
+        self._pool: list = []        # label nganggur (reuse — pola v3.9.29)
+        self._pending = None
+        self._alive = True
+        self._flushing = False
+        self._style_cache = None     # (font, sel_bg, sel_fg) — per refresh murah
+        # deteksi double-click manual (pola CellColorOverlay — event_generate
+        # tidak bisa mensintesis <Double-1>)
+        self._dbl_t = 0.0
+        self._dbl_lab = None
+        with contextlib.suppress(AttributeError, tk.TclError):
+            tree._rank_merge = self
+        tree.bind("<Configure>", self._schedule, add="+")
+        tree.bind("<<TreeviewSelect>>", self._schedule, add="+")
+        tree.bind("<ButtonRelease-1>", self._schedule, add="+")
+        tree.bind("<Destroy>", self._on_destroy, add="+")
+        self._wrap_scroll("yscrollcommand")
+        self._wrap_scroll("xscrollcommand")
+
+    def _on_destroy(self, _event=None):
+        self._alive = False
+        self._labels = {}
+        self._pool = []
+        self._runs = []
+
+    # -- dorongan struktur dari view ----------------------------------------
+    def set_runs(self, runs) -> None:
+        """GANTI daftar kelompok visual (semantik replace): tiap entri
+        (head_iid, n_baris, teks_rank, band_parity). Dipanggil
+        _reapply_rank_merge setelah nilai in-tree dipasang — urutan
+        mengikuti URUTAN VISUAL tree saat ini."""
+        if not self._alive:
+            return
+        self._runs = [tuple(r) for r in (runs or [])]
+        self._schedule()
+
+    # -- scheduling ----------------------------------------------------------
+    def _schedule(self, *_args):
+        if not self._alive or self._pending is not None:
+            return
+        try:
+            self._pending = self.tree.after_idle(self._redraw)
+        except tk.TclError:
+            self._pending = None
+
+    def _redraw(self):
+        """Jalur after_idle: refresh + FLUSH GEOMETRI SINKRON (anti glitch
+        'berenang' saat scroll — pola CellColorOverlay v3.9.40).
+        v3.9.52 fix race zoom: flush (update_idletasks) HANYA di jalur idle —
+        refresh() yang dipanggil LANGSUNG/sinkron (walk zoom
+        _refit_all_tree_columns / test) TIDAK memproses geometri di tengah
+        mutasi lebar kolom (probe: flush di tengah walk memicu Tk
+        column-stretch memaksa lebar lama 200% kembali — round-trip kolom
+        patah)."""
+        self.refresh()
+        self._flush_geometry()
+
+    def _wrap_scroll(self, opt: str):
+        """Bungkus scroll command — label ikut bergeser vertikal &
+        horizontal (pola CellColorOverlay._wrap_scroll)."""
+        try:
+            orig = str(self.tree.cget(opt))
+        except tk.TclError:
+            return
+
+        def wrap(first, last, _orig=orig):
+            if _orig:
+                with contextlib.suppress(tk.TclError):
+                    self.tree.tk.call(_orig, first, last)
+            self._schedule()
+
+        with contextlib.suppress(tk.TclError):
+            self.tree.configure(**{opt: wrap})
+
+    # -- style ---------------------------------------------------------------
+    def _style_ctx(self):
+        """(font, sel_bg, sel_fg) — di-cache per refresh-muatan; dibaca
+        ulang tiap refresh (murah — 3 lookup) supaya perubahan tema/zoom
+        named-font langsung terlihat tanpa invalidasi eksplisit."""
+        try:
+            style = ttk.Style(self.tree)
+            font = style.lookup("Treeview", "font") or "TkDefaultFont"
+            sel_bg = _style_map_value(style, "background", "selected")
+            sel_fg = _style_map_value(style, "foreground", "selected")
+        except tk.TclError:
+            font, sel_bg, sel_fg = "TkDefaultFont", "", ""
+        self._style_cache = (font, sel_bg, sel_fg)
+        return self._style_cache
+
+    # -- refresh utama --------------------------------------------------------
+    def refresh(self):
+        """Hitung ulang posisi/ukuran label merge dari viewport saat ini.
+        Idempoten; konfigurasi/place yang tak berubah dilompati (pola
+        _ov_cfg/_ov_xy CellColorOverlay v3.9.40 — beban scroll minim).
+        TANPA flush geometri (lihat _redraw) — aman dipanggil sinkron dari
+        walk zoom / test."""
+        self._pending = None
+        if not self._alive:
+            return
+        tree = self.tree
+        try:
+            if not tree.winfo_exists():
+                self._alive = False
+                return
+        except tk.TclError:
+            self._alive = False
+            return
+        try:
+            children = list(tree.get_children(""))
+        except tk.TclError:
+            children = []
+        # label tak lagi punya run → bersihkan SEMUA (tree kosong/re-render)
+        if not children or not self._runs:
+            for key in list(self._labels):
+                self._destroy_label(key)
+            return
+        # kolom tersembunyi (displaycolumns) → label ikut hilang
+        try:
+            dcols = _tree_display_columns(tree)
+        except tk.TclError:
+            dcols = []
+        if self.col not in dcols:
+            for key in list(self._labels):
+                self._destroy_label(key)
+            return
+        try:
+            visible_w = tree.winfo_width()
+        except tk.TclError:
+            visible_w = 0
+        if visible_w < 2:
+            return   # tree belum dipetakan — <Configure> akan memicu ulang
+
+        # kalibrasi baris: scroll Treeview TERKUNCI ke baris penuh (probe
+        # Xvfb: yview fraksi × n = indeks baris pertama terlihat, eksak),
+        # semua baris seragam tinggi → posisi y baris i = y0+(i-i0)·h.
+        # x kolom diambil dari bbox SEL (viewport-relative — ikut xscroll;
+        # probe: bbox(iid, col) ter-translasi scroll tapi tak ter-klip).
+        idx_of = {str(k): i for i, k in enumerate(children)}
+        n = len(children)
+        try:
+            i0 = round(tree.yview()[0] * n)
+        except (tk.TclError, ValueError):
+            i0 = 0
+        i0 = max(0, min(i0, n - 1))
+        rowheight = 0
+        y0 = None
+        col_x = col_w = None
+        for probe in (i0, i0 + 1, i0 - 1, 0):
+            if not (0 <= probe < n):
+                continue
+            box = tree.bbox(children[probe])
+            cell = tree.bbox(children[probe], self.col)
+            if box and cell:
+                rowheight = int(box[3])
+                y0 = int(box[1])
+                i0 = probe
+                col_x, col_w = int(cell[0]), int(cell[2])
+                break
+        if y0 is None or rowheight < 4 or col_x is None:
+            return   # tak ada baris tergambar (viewport kosong)
+        try:
+            widget_h = tree.winfo_height()
+        except tk.TclError:
+            widget_h = 0
+        try:
+            sel_set = set(tree.selection())
+        except tk.TclError:
+            sel_set = set()
+        _font, sel_bg, sel_fg = self._style_ctx()
+        try:
+            anchor = str(tree.column(self.col, "anchor") or "w")
+        except tk.TclError:
+            anchor = "w"
+
+        placed = set()
+        for head_iid, count, text, band in self._runs:
+            if int(count) < 2:
+                continue    # kelompok 1-baris: nilai in-tree + band biasa
+            head_idx = idx_of.get(str(head_iid))
+            if head_idx is None:
+                continue    # run basi (re-render sedang berjalan)
+            y_top = y0 + (head_idx - i0) * rowheight
+            y_bot = y_top + int(count) * rowheight
+            clip_top = max(y_top, y0)
+            clip_bot = min(y_bot, widget_h)
+            if clip_bot <= clip_top:
+                continue    # seluruh blok di luar viewport
+            lab = self._label_for(head_iid)
+            if lab is None:
+                continue
+            # seleksi baris mana pun dalam kelompok → ikut warna seleksi
+            sel = any(str(children[head_idx + j]) in sel_set
+                      for j in range(min(int(count), 64)))
+            bg = (sel_bg if (sel and sel_bg)
+                  else self.band_colors[int(band) % 2])
+            fg = (sel_fg if (sel and sel_fg) else "#0f172a")
+            cfg_key = (str(text), bg, fg, anchor, _font)
+            if getattr(lab, "_ov_cfg", None) != cfg_key:
+                try:
+                    lab.configure(text=str(text), font=_font,
+                                  anchor=anchor, background=bg,
+                                  foreground=fg)
+                except tk.TclError:
+                    continue
+                lab._ov_cfg = cfg_key
+            lx = col_x
+            lw = max(1, col_w)
+            # klip tepi kanan (pola CellColorOverlay — bbox tak ter-klip,
+            # kolom boleh terpotong di tepi viewport)
+            if lx + lw > visible_w:
+                lw = visible_w - lx
+            if lx + lw <= 0 or lx >= visible_w:
+                continue    # kolom di luar viewport horizontal
+            xy_key = (lx, clip_top, lw, clip_bot - clip_top)
+            if getattr(lab, "_ov_xy", None) != xy_key:
+                try:
+                    lab.place(x=lx, y=clip_top, width=lw,
+                              height=clip_bot - clip_top)
+                except tk.TclError:
+                    continue
+                lab._ov_xy = xy_key
+            placed.add(str(head_iid))
+        # label tanpa run terlihat → kembalikan ke pool
+        for key in list(self._labels):
+            if key not in placed:
+                self._destroy_label(key)
+
+    def _flush_geometry(self):
+        """Paksa Tk memproses pergeseran label SEKARANG (anti glitch
+        'berenang' saat scroll — pola CellColorOverlay v3.9.40)."""
+        if self._flushing or not self._alive:
+            return
+        self._flushing = True
+        try:
+            self.tree.update_idletasks()
+        except tk.TclError:
+            pass
+        finally:
+            self._flushing = False
+
+    # -- label pool + penerusan event ----------------------------------------
+    def _label_for(self, key):
+        lab = self._labels.get(key)
+        if lab is None or not self._label_ok(lab):
+            if self._pool:
+                lab = self._pool.pop()
+            else:
+                lab = tk.Label(self.tree, bd=0, highlightthickness=0,
+                               takefocus=0, padx=6, pady=0, cursor="arrow")
+                self._bind_forward(lab)
+            self._labels[key] = lab
+        return lab
+
+    @staticmethod
+    def _label_ok(lab) -> bool:
+        try:
+            return bool(lab.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def _destroy_label(self, key):
+        lab = self._labels.pop(key, None)
+        if lab is not None:
+            with contextlib.suppress(tk.TclError):
+                lab.place_forget()
+            lab._ov_xy = None
+            try:
+                if lab.winfo_exists() and len(self._pool) < self._POOL_MAX:
+                    self._pool.append(lab)
+                    return
+            except tk.TclError:
+                pass
+            with contextlib.suppress(tk.TclError):
+                lab.destroy()
+
+    def _bind_forward(self, lab):
+        """Teruskan klik/roda dari Label ke tree (pola CellColorOverlay
+        v3.9.42 + deteksi double-click manual v3.9.42)."""
+        tree = self.tree
+
+        def fwd(seq):
+            def handler(event, _seq=seq):
+                try:
+                    if _seq in ("<Button-4>", "<Button-5>"):
+                        # X11 roda di label merge: gulir LANGSUNG
+                        # (event_generate sintetis tak bisa men-set %b) +
+                        # redraw overlay sinkron (refresh+flush).
+                        try:
+                            tree.yview_scroll(
+                                -1 if _seq == "<Button-4>" else 1, "units")
+                        except tk.TclError:
+                            return
+                        _redraw_overlay_now(tree)
+                        self._redraw()
+                        return
+                    lx, ly = lab.winfo_x(), lab.winfo_y()
+                    kw = {"x": lx + event.x, "y": ly + event.y,
+                          "warp": False}
+                    state = getattr(event, "state", 0)
+                    if isinstance(state, int):
+                        kw["state"] = state
+                    if _seq == "<MouseWheel>":
+                        d = getattr(event, "delta", None)
+                        if isinstance(d, int):
+                            kw["delta"] = d
+                    tree.event_generate(_seq, **kw)
+                except tk.TclError:
+                    pass
+            return handler
+
+        for seq in self._FORWARD_SEQS:
+            lab.bind(seq, fwd(seq), add="+")
+
+        def press(event):
+            now = _time.time()
+            is_dbl = (self._dbl_lab is lab
+                      and now - self._dbl_t <= 0.4)
+            self._dbl_t, self._dbl_lab = now, lab
+            try:
+                lx, ly = lab.winfo_x(), lab.winfo_y()
+                tree.event_generate(
+                    "<Button-1>", x=lx + event.x, y=ly + event.y,
+                    warp=False,
+                    state=int(getattr(event, "state", 0) or 0))
+            except tk.TclError:
+                return
+            if is_dbl:
+                with contextlib.suppress(tk.TclError):
+                    _fire_tree_bindings(
+                        tree, "<Double-1>", lx + event.x, ly + event.y,
+                        state=int(getattr(event, "state", 0) or 0))
 
         lab.bind("<Button-1>", press, add="+")
 

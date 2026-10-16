@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.51", APP_VERSION == "3.9.51",
+    check("Versi = 3.9.52", APP_VERSION == "3.9.52",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -13770,6 +13770,303 @@ def main():
           f"got {list(_fmt61)}")
     _dv61.destroy()
     _top61.destroy()
+    root.update()
+
+    # =====================================================================
+    # §62 (v3.9.52) — MERGE-VERTIKAL VISUAL kolom Rank (RankMergeOverlay)
+    #     + SATUAN hidden by default di tab Deviasi GR & PCS
+    #     (user: "kolom Rank kok tidak termerger vertcial seperti kemauanku
+    #     di atas? ... Merger vertcial sama kaya di tab rincian PO" +
+    #     "Secara default hide kolom Satuan di tab Deviasi Gr dan PCS")
+    # =====================================================================
+    print("\n== 62. (v3.9.52) Rank merge-vertikal VISUAL (overlay) · "
+          "Satuan hidden default ==")
+    import time as _time62
+
+    from src.ui.widgets import ColumnManager as _CM62
+    from src.ui.widgets import RankMergeOverlay as _RMO62
+
+    def _pump62(root_, seconds=0.4):
+        _t62 = _time62.time()
+        while _time62.time() - _t62 < seconds:
+            root_.update()
+            _time62.sleep(0.01)
+
+    def _val62_ok_satuan(tree):
+        """Nilai Satuan tetap terbaca via tree.set walau kolom "
+        "tersembunyi (displaycolumns hanya soal tampilan)."""
+        return all(tree.set(k, "Satuan") == "GR"
+                   for k in tree.get_children(""))
+
+    # --- (a) ColumnManager default_hidden — unit ------------------------
+    _t62u = ttk.Treeview(root, columns=["A", "B", "C"], show="headings")
+    _cm62u = _CM62(_t62u, default_hidden=["B"])
+    root.update()
+    check("(v3.9.52) ColumnManager default_hidden: kolom B tersembunyi "
+          "SEJAK KONSTRUKSI (displaycolumns tanpa B)",
+          "B" not in [str(c) for c in _t62u.cget("displaycolumns")]
+          and _cm62u.hidden == ["B"],
+          f"dc={_t62u.cget('displaycolumns')} hidden={_cm62u.hidden}")
+    check("(v3.9.52) default_hidden kolom tak dikenal diabaikan (guard); "
+          "default lama tetap SEMUA tampil",
+          _CM62(_t62u, default_hidden=["ZZZ"]).hidden == []
+          and _CM62(_t62u).hidden == [],
+          "guard default_hidden salah")
+    _cm62u.hidden = []
+    _cm62u.apply()
+    root.update()
+    check("(v3.9.52) Unhide via colmgr tetap bekerja (state konsisten)",
+          "B" in [str(c) for c in _t62u.cget("displaycolumns")],
+          f"dc={_t62u.cget('displaycolumns')}")
+    _t62u.destroy()
+
+    # --- (b) SATUAN hidden by default di Deviasi GR & PCS ---------------
+    _top62 = tk.Toplevel(root)
+    _top62.geometry("1400x900+5+5")
+    from src.ui.deviasi_view import DeviasiView as _DV62
+    _dv62 = _DV62(_top62, satuan_mode="GR")
+    _dv62.pack(fill="both", expand=True)
+    root.update()   # map dulu — load_data lazy-refresh saat mapped
+    _dv62.load_data(pd.DataFrame(_rows61))   # fixture §61: 3 barang
+    wait_view(root, _dv62)
+    root.update()
+
+    def _dc62(t):
+        dc = t.cget("displaycolumns")
+        return [str(x) for x in dc] if isinstance(dc, (tuple, list)) \
+            else str(dc).split()
+
+    check("(v3.9.52) SATUAN hidden by default (GR): displaycolumns tanpa "
+          "'Satuan' — kolom definisi & NILAI tetap ada (displaycolumns "
+          "hanya soal tampilan)",
+          "Satuan" not in _dc62(_dv62.tree)
+          and "Satuan" in [str(c) for c in _dv62.tree["columns"]]
+          and _val62_ok_satuan(_dv62.tree),
+          f"dc={_dc62(_dv62.tree)}")
+    check("(v3.9.52) colmgr GR: hidden == ['Satuan'] (panel ◱ menampilkan "
+          "checkbox benar; unhide tetap bisa)",
+          _dv62._colmgr.hidden == ["Satuan"],
+          f"hidden={_dv62._colmgr.hidden}")
+    _dv62._colmgr.hidden = []
+    _dv62._colmgr.apply()
+    root.update()
+    check("(v3.9.52) Unhide Satuan (◱ Kolom) bekerja → muncul kembali di "
+          "tabel",
+          "Satuan" in _dc62(_dv62.tree),
+          f"dc={_dc62(_dv62.tree)}")
+    _dv62._colmgr.hidden = ["Satuan"]
+    _dv62._colmgr.apply()
+    root.update()
+
+    _dv62p = _DV62(_top62, satuan_mode="PCS")
+    _dv62p.pack(fill="both", expand=True)
+    root.update()
+    check("(v3.9.52) SATUAN hidden by default juga di instansi PCS "
+          "(kelas dipakai bersama)",
+          "Satuan" not in _dc62(_dv62p.tree)
+          and _dv62p._colmgr.hidden == ["Satuan"],
+          f"dc={_dc62(_dv62p.tree)}")
+    _dv62p.destroy()
+
+    # --- (c) RankMergeOverlay: blok kontinu per kelompok ≥2 baris ------
+    _ov62 = getattr(_dv62.tree, "_rank_merge", None)
+    check("(v3.9.52) RankMergeOverlay terpasang & terdaftar di tree "
+          "utama (tree._rank_merge — pola _heading_tint) + kelas "
+          "diekspor widgets",
+          _ov62 is not None and _ov62._alive
+          and isinstance(_ov62, _RMO62),
+          f"ov={_ov62}")
+    root.update()
+    _ov62.refresh()
+    root.update()
+    _kids62 = list(_dv62.tree.get_children(""))
+    # urutan visual §61: BUMBU(1 baris) · CABE(2) · PENTOL(2)
+    _runs62 = _ov62._runs
+    check("(v3.9.52) Runs didorong _reapply_rank_merge: (head_iid, "
+          "n_baris, rank, band) — BUMBU 1 · CABE 2 · PENTOL 2 (urutan "
+          "visual Nama Barang)",
+          len(_runs62) == 3
+          and _runs62[0][1] == 1 and _runs62[1][1] == 2
+          and _runs62[2][1] == 2
+          and _runs62[1][2] == "2" and _runs62[2][2] == "1",
+          f"got {_runs62}")
+    check("(v3.9.52) Label hanya utk kelompok ≥2 baris (BUMBU 1-baris "
+          "tanpa label — nilai in-tree + band biasa)",
+          set(_ov62._labels) == {_runs62[1][0], _runs62[2][0]}
+          and _dv62.tree.set(_runs62[0][0], "Rank") == "3",
+          f"labels={list(_ov62._labels)}")
+    _lab_c62 = _ov62._labels.get(_runs62[1][0])
+    _bb62 = _dv62.tree.bbox(_runs62[1][0], "Rank")
+    _bb2_62 = _dv62.tree.bbox(
+        _dv62.tree.get_children("")[
+            list(_dv62.tree.get_children("")).index(_runs62[1][0]) + 1],
+        "Rank")
+    check("(v3.9.52) GEOMETRI merge eksak: label menempel baris kepala "
+          "sampai baris terakhir kelompok (x/y/lebar = bbox sel; tinggi "
+          "= n_baris × rowheight)",
+          _lab_c62 is not None and _bb62 and _bb2_62
+          and _lab_c62.winfo_x() == _bb62[0]
+          and _lab_c62.winfo_y() == _bb62[1]
+          and _lab_c62.winfo_width() == _bb62[2]
+          and _lab_c62.winfo_height() == _bb2_62[1] + _bb2_62[3] - _bb62[1],
+          f"lab=({_lab_c62.winfo_x()},{_lab_c62.winfo_y()},"
+          f"{_lab_c62.winfo_width()},{_lab_c62.winfo_height()}) "
+          f"cell1={_bb62} cell2={_bb2_62}")
+    check("(v3.9.52) Label blok merge: teks = rank kelompok + latar = "
+          "warna band paritas (CABE ordinal 1 → grp1 #f1f5f9 — sekat "
+          "grp_head TIDAK memotong kolom Rank)",
+          _lab_c62 is not None
+          and _lab_c62.cget("text") == "2"
+          and str(_lab_c62.cget("background")) == "#f1f5f9",
+          f"text={_lab_c62.cget('text')!r} "
+          f"bg={_lab_c62.cget('background')!r}")
+    check("(v3.9.52) Label PENTOL band 0 → #ffffff (pita bergantian ikut "
+          "— banding v3.9.49 konsisten di kolom Rank)",
+          str(_ov62._labels[_runs62[2][0]].cget("background"))
+          == "#ffffff",
+          f"bg={_ov62._labels[_runs62[2][0]].cget('background')!r}")
+    check("(v3.9.52) (kompabilitas §61) nilai in-tree tetap head-only "
+          "— baris lanjutan kosong (fallback & sort engine tak berubah)",
+          _dv62.tree.set(
+              list(_dv62.tree.get_children(""))[
+                  list(_dv62.tree.get_children("")).index(
+                      _runs62[1][0]) + 1], "Rank") == "",
+          "baris lanjutan ber-angka (merge in-tree bocor)")
+
+    # --- (d) reposisi: scroll vertikal + horizontal --------------------
+    _dv62.tree.yview_scroll(1, "units")
+    root.update()
+    _ov62.refresh()
+    root.update()
+    _bb62b = _dv62.tree.bbox(_runs62[1][0], "Rank")
+    check("(v3.9.52) Scroll vertikal: label ikut menempel baris "
+          "(kalibrasi y0 + aritmetika rowheight seragam)",
+          _lab_c62.winfo_y() == (_bb62b[1] if _bb62b else -999)
+          or _bb62b is None or not _lab_c62.winfo_ismapped(),
+          f"lab y={_lab_c62.winfo_y()} cell y={_bb62b}")
+    _dv62.tree.yview_moveto(0)
+    _dv62.tree.xview_scroll(150, "units")
+    root.update()
+    _ov62.refresh()
+    root.update()
+    _bb62c = _dv62.tree.bbox(_runs62[1][0], "Rank")
+    check("(v3.9.52) Scroll horizontal: label ikut kolom (x = bbox sel — "
+          "viewport-relative, ter-translasi xscroll)",
+          _bb62c is not None and _lab_c62.winfo_x() == _bb62c[0],
+          f"lab x={_lab_c62.winfo_x()} cell x={_bb62c}")
+    _dv62.tree.xview_moveto(0)
+    root.update()
+    _ov62.refresh()
+
+    # --- (e) sort interleave ↔ kelompok (runs ikut urutan visual) ------
+    _dv62._sort_by("Resto", reverse=False, tree=_dv62.tree)
+    root.update()
+    _ov62.refresh()
+    root.update()
+    check("(v3.9.52) Sort kolom lain (Resto) → kelompok ter-interleave: "
+          "SEMUA run 1-baris → label dibersihkan, nilai rank tampil "
+          "in-tree di tiap baris (semantik v3.9.51 utuh)",
+          all(r[1] == 1 for r in _ov62._runs)
+          and len(_ov62._labels) == 0
+          and all(_dv62.tree.set(k, "Rank")
+                  for k in _dv62.tree.get_children("")),
+          f"runs={[r[1] for r in _ov62._runs]} "
+          f"labels={len(_ov62._labels)}")
+    _dv62._sort_by("Nama Barang", reverse=False, tree=_dv62.tree)
+    root.update()
+    _ov62.refresh()
+    root.update()
+    check("(v3.9.52) Sort balik ke Nama Barang → kelompok kontigu: label "
+          "merge dipasang ulang otomatis",
+          len(_ov62._runs) == 3 and len(_ov62._labels) == 2,
+          f"runs={len(_ov62._runs)} labels={len(_ov62._labels)}")
+
+    # --- (f) seleksi & forwarding --------------------------------------
+    # re-fetch label: sort-interleave memusnahkan label lama (pool) —
+    # objek label bisa di-reuse utk run lain pasca sort-balik.
+    _lab_c62 = _ov62._labels.get(_runs62[1][0])
+    _dv62.tree.selection_set(_runs62[1][0])
+    root.update()
+    _ov62.refresh()
+    root.update()
+    _bg_sel62 = str(_lab_c62.cget("background"))
+    _dv62.tree.selection_remove(*_dv62.tree.selection())
+    root.update()
+    _ov62.refresh()
+    root.update()
+    check("(v3.9.52) Seleksi baris kelompok → label ikut warna seleksi; "
+          "deselect → kembali warna band (parity CellColorOverlay)",
+          _bg_sel62 not in ("#f1f5f9", "#ffffff")
+          and str(_lab_c62.cget("background")) == "#f1f5f9",
+          f"sel={_bg_sel62} now={_lab_c62.cget('background')}")
+    _hits62 = {"n": 0}
+
+    def _cnt62(_e):
+        _hits62["n"] += 1
+
+    _dv62.tree.bind("<Button-1>", _cnt62, add="+")
+    _lab_c62.event_generate("<Button-1>", x=10, y=10)
+    root.update()
+    check("(v3.9.52) Klik DI AREA label merge DITERUSKAN ke tree (pola "
+          "forwarding CellColorOverlay — seleksi/✓/klik-kanan tetap "
+          "bekerja)",
+          _hits62["n"] >= 1,
+          f"hits={_hits62['n']}")
+
+    # --- (g) kolom tersembunyi (◱) → label hilang ----------------------
+    _dv62._colmgr.hidden = ["Rank"]
+    _dv62._colmgr.apply()
+    root.update()
+    _ov62.refresh()
+    root.update()
+    check("(v3.9.52) Kolom Rank disembunyikan (◱ Kolom) → label merge "
+          "ikut hilang (pola HeadingTintOverlay)",
+          len(_ov62._labels) == 0,
+          f"labels={len(_ov62._labels)}")
+    _dv62._colmgr.hidden = ["Satuan"]
+    _dv62._colmgr.apply()
+    root.update()
+    _ov62.refresh()
+    root.update()
+    check("(v3.9.52) Unhide Rank → label merge kembali",
+          len(_ov62._labels) == 2,
+          f"labels={len(_ov62._labels)}")
+
+    # --- (h) clone ⛶: overlay sendiri + runs terdorong ------------------
+    _win62, _ct62 = _dv62._maximize()
+    _pump62(root, 0.5)
+    _cov62 = getattr(_ct62, "_rank_merge", None)
+    check("(v3.9.52) Clone ⛶ punya overlay RankMergeOverlay sendiri + "
+          "runs TERDORONG (insert_tree_items chunk pertama SINKRON — "
+          "on_render_done clone kecil terjadi sebelum overlay terpasang "
+          "→ _reapply_rank_merge dipanggil ulang pasca-attach)",
+          _cov62 is not None and _cov62._alive
+          and len(_cov62._runs) == 3 and len(_cov62._labels) >= 1,
+          f"runs={len(_cov62._runs) if _cov62 else None} "
+          f"labels={len(_cov62._labels) if _cov62 else None}")
+    _win62.destroy()
+    root.update()
+
+    # --- (i) zoom walk: _refit_all_tree_columns me-refresh _rank_merge --
+    # re-fetch label (hide/unhide ◱ di (g) juga memusnahkan label — pool).
+    _lab_c62 = _ov62._labels.get(_runs62[1][0])
+    _dv62.tree.update_idletasks()
+    app._refit_all_tree_columns()
+    root.update()
+    _ov62.refresh()
+    root.update()
+    _bb62d = _dv62.tree.bbox(_runs62[1][0], "Rank")
+    check("(v3.9.52) app._refit_all_tree_columns (jalur zoom) me-refresh "
+          "overlay merge (walk tree._rank_merge — rowheight/kolom "
+          "ter-zoom tetap menempel)",
+          _bb62d is not None
+          and _lab_c62.winfo_x() == _bb62d[0]
+          and _lab_c62.winfo_y() == _bb62d[1],
+          f"lab=({_lab_c62.winfo_x()},{_lab_c62.winfo_y()}) "
+          f"cell={_bb62d}")
+
+    _dv62.destroy()
+    _top62.destroy()
     root.update()
 
     root.destroy()
