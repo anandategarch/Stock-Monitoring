@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.56", APP_VERSION == "3.9.56",
+    check("Versi = 3.9.57", APP_VERSION == "3.9.57",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -15180,6 +15180,234 @@ def main():
     _dv66.destroy()
     _top66.destroy()
     root.update()
+
+    # §67 — v3.9.57 RODA HALUS DAFTAR NILAI FILTER (audit: "scroll daftar
+    # nilai filter belum menangani roda mouse beresolusi tinggi")
+    # akar: e.delta // 120 → delta < 120 dibulatkan 0 SETIAP event
+    # (trackpad/roda resolusi tinggi = daftar macet permanen) + binding
+    # lama hanya di canvas (Windows Tk 8.6 kirim wheel ke widget FOKUS =
+    # entry pencarian → tak pernah terpanggil) + X11 <Button-4/5> tak
+    # ter-bind sama sekali.
+    from src.ui.theme import set_zoom_wheel_handler as _szh67
+    from src.ui.widgets import ColumnManager as _CM67
+    from src.ui.widgets import enable_smooth_wheel_list as _eswl67
+
+    _top67 = tk.Toplevel(root)
+    _top67.geometry("480x420+50+50")
+    _cols67 = [f"c{_i}" for _i in range(30)] + ["x"]
+    _t67 = ttk.Treeview(_top67, columns=_cols67)
+    for _c67 in _cols67:
+        _t67.heading(_c67, text=_c67)
+    _t67.pack(fill="both", expand=True)
+    for _i67 in range(5):
+        _t67.insert("", "end", values=[f"v{_i67}"] * len(_cols67))
+    for _ in range(20):
+        root.update()
+
+    def _find_cv67(_w):
+        for _ch67 in _w.winfo_children():
+            if isinstance(_ch67, tk.Canvas):
+                return _ch67
+            _r67 = _find_cv67(_ch67)
+            if _r67 is not None:
+                return _r67
+        return None
+
+    def _find_w67(_w, _cls):
+        for _ch67 in _w.winfo_children():
+            if isinstance(_ch67, _cls):
+                return _ch67
+            _r67 = _find_w67(_ch67, _cls)
+            if _r67 is not None:
+                return _r67
+        return None
+
+    _vals67 = [f"nilai-{_i67:03d}" for _i67 in range(60)]
+    _hf67 = HeaderFilter(_t67, "x", get_values=lambda: _vals67,
+                         on_apply=lambda sel: None, label="X")
+    _hf67.open_popup()
+    for _ in range(40):
+        root.update()
+    _win67 = _hf67._popup
+    _cv67 = _find_cv67(_win67) if _win67 is not None else None
+    check("(v3.9.57) §67 fixture: popup filter 60 nilai + canvas daftar "
+          "ter-map (tinggi ≥ 200)",
+          _win67 is not None and _win67.winfo_exists()
+          and _cv67 is not None and _cv67.winfo_height() >= 200,
+          f"cv={_cv67} h={_cv67.winfo_height() if _cv67 else None}")
+
+    def _reset67():
+        _cv67.yview_moveto(0)
+        _cv67._smooth_list_wheel_acc = 0.0
+        for _ in range(2):
+            root.update()
+
+    # (a) notch penuh — perilaku lama dipertahankan
+    _y067 = _cv67.yview()[0]
+    _cv67.event_generate("<MouseWheel>", delta=-120)
+    root.update()
+    check("(v3.9.57) notch penuh (-120): daftar bergulir TURUN 1 unit "
+          "(perilaku notch lama tetap)",
+          _cv67.yview()[0] > _y067,
+          f"{_y067:.4f} → {_cv67.yview()[0]:.4f}")
+
+    # (b) akumulator — bug yang dilaporkan audit: delta < 120
+    _reset67()
+    _cv67.event_generate("<MouseWheel>", delta=-40)
+    _cv67.event_generate("<MouseWheel>", delta=-40)
+    root.update()
+    check("(v3.9.57) 2× delta -40 (<120): BELUM bergulir — 0,67 unit "
+          "terakumulasi (kode lama //120: NOL selamanya = macet)",
+          _cv67.yview()[0] == 0.0
+          and 0 < _cv67._smooth_list_wheel_acc < 1,
+          f"y={_cv67.yview()[0]} "
+          f"acc={_cv67._smooth_list_wheel_acc:.3f}")
+    _cv67.event_generate("<MouseWheel>", delta=-40)
+    root.update()
+    _yacc67 = _cv67.yview()[0]
+    check("(v3.9.57) delta -40 KE-3 (total 120): daftar bergulir — "
+          "akumulator melunasi",
+          _yacc67 > 0, f"y={_yacc67:.4f}")
+
+    # (c) eksak: 3×-40 == 1×-120
+    _reset67()
+    _cv67.event_generate("<MouseWheel>", delta=-120)
+    root.update()
+    _yone67 = _cv67.yview()[0]
+    check("(v3.9.57) akumulasi EKSAK: 3×(-40) == 1×(-120)",
+          abs(_yacc67 - _yone67) < 1e-9,
+          f"acc={_yacc67:.6f} one={_yone67:.6f}")
+
+    # (d) balik arah: sisa akumulator arah lama dibuang
+    _reset67()
+    _cv67.event_generate("<MouseWheel>", delta=-100)
+    _cv67.event_generate("<MouseWheel>", delta=-100)
+    root.update()
+    _ydown67 = _cv67.yview()[0]
+    _cv67.event_generate("<MouseWheel>", delta=120)
+    root.update()
+    check("(v3.9.57) balik arah: sisa akumulator dibuang → notch balik "
+          "= 1 unit PENUH ke atas (bukan 0,33)",
+          _ydown67 > 0 and abs(_cv67.yview()[0]) < 1e-9,
+          f"down={_ydown67:.4f} up={_cv67.yview()[0]:.4f}")
+
+    # (e) X11 Button-4/5 — arah via POLA binding (bukan event.num:
+    #     event_generate sintetis tak bisa men-set %b/num; Tk 9 memetakan
+    #     <Button-4/5> ke tombol fisik 8/9)
+    _reset67()
+    _cv67.event_generate("<Button-5>")
+    root.update()
+    _yb567 = _cv67.yview()[0]
+    _cv67.event_generate("<Button-4>")
+    root.update()
+    check("(v3.9.57) X11 <Button-5> turun / <Button-4> naik — arah dari "
+          "POLA binding (2 handler terpisah)",
+          _yb567 > 0 and abs(_cv67.yview()[0]) < 1e-9,
+          f"b5={_yb567:.4f} b4={_cv67.yview()[0]:.4f}")
+
+    # (f) CTRL+roda = ZOOM (bukan gulir) — canvas (pola Control-* lebih
+    #     spesifik → registry theme) & ENTRY (bypass state di binding
+    #     Toplevel polos → lanjut ke bindtag 'all' = app._on_zoom_wheel
+    #     LANGSUNG — bukan via registry!) → 'all' di-override recorder
+    #     utk mengukur, lalu dipulihkan script aslinya.
+    _zcalls67: list = []
+    _zall67: list = []
+
+    def _zh67(_e):
+        _zcalls67.append(1)
+        return "break"
+
+    def _zh_all67(_e):
+        _zall67.append(1)
+        return "break"
+
+    _orig_all67 = root.bind_all("<Control-MouseWheel>")
+    _szh67(_zh67)
+    root.bind_all("<Control-MouseWheel>", _zh_all67)
+    try:
+        _reset67()
+        _cv67.event_generate("<MouseWheel>", delta=-120, state=0x4)
+        root.update()
+        _cv67.event_generate("<Button-5>", state=0x4)
+        root.update()
+        _ent67 = _find_w67(_win67, ttk.Entry)
+        _ent67.event_generate("<MouseWheel>", delta=-120, state=0x4)
+        root.update()
+    finally:
+        _szh67(app._on_zoom_wheel)
+        root.bind_all("<Control-MouseWheel>", _orig_all67)
+    check("(v3.9.57) CTRL+roda TIDAK menggulir daftar — dispatch ZOOM: "
+          "canvas ×2 (pola Control-* lebih spesifik → registry theme) + "
+          "ENTRY ×1 (bypass state → bindtag 'all')",
+          _cv67.yview()[0] == 0.0 and len(_zcalls67) == 2
+          and len(_zall67) == 1,
+          f"y={_cv67.yview()[0]} registry={len(_zcalls67)} "
+          f"all={len(_zall67)}")
+
+    # (g) binding TINGKAT POPUP: wheel di anak (jalur fokus Windows /
+    #     pointer X11) → daftar ikut bergulir
+    _reset67()
+    _ent67.event_generate("<MouseWheel>", delta=-120)
+    root.update()
+    _yent67 = _cv67.yview()[0]
+    _reset67()
+    _cb67 = _find_w67(_win67, ttk.Checkbutton)
+    _cb67.event_generate("<Button-5>")
+    root.update()
+    check("(v3.9.57) wheel di ENTRY pencarian & CHECKBOX (jalur anak "
+          "popup) → DAFTAR ikut bergulir (binding Toplevel — dulu wheel "
+          "dari entry TIDAK menggulir sama sekali)",
+          _yent67 > 0 and _cv67.yview()[0] > 0,
+          f"ent={_yent67:.4f} cb={_cv67.yview()[0]:.4f}")
+
+    # (h) idempoten
+    _b67 = _cv67.bind("<MouseWheel>")
+    _eswl67(_cv67, container=_win67)
+    check("(v3.9.57) enable_smooth_wheel_list IDEMPOTEN (binding tak "
+          "berubah saat dipasang 2×)",
+          _b67 != "" and _cv67.bind("<MouseWheel>") == _b67)
+
+    _hf67._close()
+    for _ in range(20):
+        root.update()
+
+    # (i) panel kolom ColumnManager — akumulator juga aktif (call-site
+    #     kedua; dulu trik `or -1` memaksa 1 unit per event kecil)
+    _cm67 = _CM67(_t67)
+    _cm67.open_panel()
+    for _ in range(40):
+        root.update()
+    _cvp67 = _find_cv67(_cm67._panel)
+    _ok_i67 = _cvp67 is not None and _cvp67.winfo_height() >= 200
+    if _ok_i67:
+        _cvp67.yview_moveto(0)
+        _cvp67._smooth_list_wheel_acc = 0.0
+        root.update()
+        _cvp67.event_generate("<MouseWheel>", delta=-40)
+        _cvp67.event_generate("<MouseWheel>", delta=-40)
+        root.update()
+        _yi2_67 = _cvp67.yview()[0]
+        _cvp67.event_generate("<MouseWheel>", delta=-40)
+        root.update()
+        _yi3_67 = _cvp67.yview()[0]
+        _cvp67.event_generate("<Button-5>")
+        root.update()
+        _yi4_67 = _cvp67.yview()[0]
+    else:
+        _yi2_67 = _yi3_67 = _yi4_67 = -1.0
+    check("(v3.9.57) panel kolom: 2×-40 BELUM bergulir → ke-3 bergulir "
+          "+ Button-5 bergulir (dulu `or -1`: tiap event kecil memaksa "
+          "1 unit penuh = terlalu cepat)",
+          _ok_i67 and _yi2_67 == 0.0 and _yi3_67 > 0
+          and _yi4_67 > _yi3_67,
+          f"h={_cvp67.winfo_height() if _cvp67 else None} "
+          f"2x={_yi2_67} 3x={_yi3_67} b5={_yi4_67}")
+
+    if _cm67._panel is not None and _cm67._panel.winfo_exists():
+        _cm67._panel.destroy()
+    _top67.destroy()
+    for _ in range(20):
+        root.update()
 
     # bersihkan state file followup uji
     for _p in (followup_path(), resolved_path()):

@@ -1593,11 +1593,13 @@ class HeaderFilter:
         cv.configure(yscrollcommand=sb.set)
         cv.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        # scroll wheel
-        cv.bind("<MouseWheel>",
-                lambda e: cv.yview_scroll(-1 * (e.delta // 120), "units"))
-        # v3.9.48 — CTRL+Scroll = ZOOM UI (bukan gulir daftar filter)
-        bind_ctrl_zoom(cv)
+        # scroll wheel — v3.9.57: roda HALUS ber-AKUMULATOR (audit: delta
+        # < 120 dibulatkan-0 oleh kode lama = daftar macet di trackpad/
+        # roda resolusi tinggi) + binding TINGKAT POPUP (wheel di anak apa
+        # pun — entry pencarian fokus (Windows Tk 8.6 kirim wheel ke widget
+        # FOKUS)/checkbox/scrollbar — tetap menggulir daftar) + X11
+        # <Button-4/5>; CTRL+Scroll tetap ZOOM UI (v3.9.48).
+        enable_smooth_wheel_list(cv, container=win)
         # FIX B-05: simpan container daftar — checkbox LAZY untuk nilai di
         # luar cap dibuat di sini saat pencarian menemukannya.
         self._list_inner = inner
@@ -2197,10 +2199,11 @@ class ColumnManager:
         cv.configure(yscrollcommand=sb.set)
         cv.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        cv.bind("<MouseWheel>",
-                lambda e: cv.yview_scroll(int(-e.delta / 120) or -1, "units"))
-        # v3.9.48 — CTRL+Scroll = ZOOM UI (bukan gulir daftar)
-        bind_ctrl_zoom(cv)
+        # v3.9.57 — roda HALUS ber-AKUMULATOR (dulu trik `or -1`: tiap
+        # event kecil memaksa 1 unit penuh = terlalu cepat di trackpad/
+        # roda resolusi tinggi) + binding TINGKAT POPUP + X11 <Button-4/5>;
+        # CTRL+Scroll tetap ZOOM UI (v3.9.48).
+        enable_smooth_wheel_list(cv, container=win)
 
         vars_: dict[str, tk.BooleanVar] = {}
 
@@ -3992,21 +3995,29 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
             _redraw_overlay_now(tree)
         return "break"
 
-    def _on_btn45(event):
-        # X11: <Button-4> = roda naik, <Button-5> = turun (1 notch/event)
+    def _on_btn_up(event):
         try:
-            tree.yview_scroll(-1 if getattr(event, "num", 4) == 4 else 1,
-                              "units")
+            tree.yview_scroll(-1, "units")
         except tk.TclError:
-            pass
-        else:
-            # v3.9.40 — idem _on_wheel: redraw sebelum repaint idle
-            _redraw_overlay_now(tree)
+            return
+        _redraw_overlay_now(tree)
+        return "break"
+
+    def _on_btn_down(event):
+        try:
+            tree.yview_scroll(1, "units")
+        except tk.TclError:
+            return
+        _redraw_overlay_now(tree)
         return "break"
 
     tree.bind("<MouseWheel>", _on_wheel, add="+")
-    tree.bind("<Button-4>", _on_btn45, add="+")
-    tree.bind("<Button-5>", _on_btn45, add="+")
+    # v3.9.57 — X11 roda: arah dibawa POLA BINDING (2 handler terpisah),
+    # BUKAN event.num: event_generate sintetis tak bisa men-set %b/num
+    # (Tk 9 memetakan <Button-4/5> ke tombol fisik 8/9 — probe v3.9.40
+    # overlay sudah membuktikan arah-num sintetis salah).
+    tree.bind("<Button-4>", _on_btn_up, add="+")
+    tree.bind("<Button-5>", _on_btn_down, add="+")
     # v3.9.48 — CTRL+Scroll = ZOOM UI (user): pola <Control-MouseWheel>/
     # <Control-Button-4/5> LEBIH SPESIFIK daripada binding <MouseWheel>
     # polos di atas (bindtag widget yang sama) → menurut aturan Tk,
@@ -4014,6 +4025,108 @@ def enable_smooth_wheel(tree: ttk.Treeview, *, units_per_notch: float = 1.0):
     # tetap scroll halus. Choke-point ini terpasang di SEMUA tree
     # (enable_col_resize — termasuk clone ⤢ dan popup).
     bind_ctrl_zoom(tree)
+
+
+def enable_smooth_wheel_list(cv: tk.Canvas, *,
+                             container: tk.Misc | None = None,
+                             units_per_notch: float = 1.0) -> None:
+    """v3.9.57 — roda HALUS untuk DAFTAR NILAI ber-canvas (popup filter
+    HeaderFilter & panel kolom ColumnManager) — padanan
+    enable_smooth_wheel untuk Canvas, BUKAN ttk.Treeview.
+
+    Audit (item "scroll daftar nilai filter belum menangani roda
+    beresolusi tinggi") menemukan TIGA akar sekaligus:
+    1. Binding lama membagi delta LANGSUNG: ``e.delta // 120`` —
+       roda/trackpad resolusi tinggi (delta < 120 per event, mis.
+       touchpad Precision Windows / trackpad macOS) dibulatkan ke
+       NOL pada SETIAP event → daftar TIDAK PERNAH bergulir; varian
+       panel kolom memakai trik ``int(-e.delta / 120) or -1`` yang
+       justru memaksa 1 unit penuh per event kecil (terlalu cepat).
+       FIX: AKUMULATOR delta pecahan (pola enable_smooth_wheel
+       v3.9.29): kontribusi ``-delta/120`` dijumlahkan, ``int(acc)``
+       digulir, sisa diakumulasi.
+    2. Binding lama HANYA di canvas — (a) Windows/Tk 8.6 mengirim
+       wheel ke widget FOKUS (popup memfokuskan ENTRY pencarian →
+       binding canvas tak pernah terpanggil dari sana); (b) X11
+       memakai <Button-4/5> yang tak di-bind sama sekali (roda polos
+       di Linux hanya jalan via drag scrollbar). FIX: binding juga
+       di Toplevel popup (``container``) — bindtag Toplevel ada di
+       rantai SEMUA anak (entry/checkbox/label/scrollbar) → wheel di
+       anak mana pun tetap menggulir daftar; event yang jatuh ke
+       canvas sendiri berhenti di 'break' binding canvas (tidak
+       dobel-gulir).
+    3. CTRL+Scroll = ZOOM UI (v3.9.48) tetap tak terganggu: handler
+       polos MELEWATKAN event bergaya Control (bit 0x4) tanpa
+       'break' → berlanjut ke bindtag 'all' (bind_all app); di atas
+       canvas, pola <Control-MouseWheel>/<Control-Button-4/5>
+       (bind_ctrl_zoom) lebih spesifik dan menang duluan.
+
+    Idempoten (flag ``_smooth_list_wheel_bound``)."""
+    if getattr(cv, "_smooth_list_wheel_bound", False):
+        return
+    cv._smooth_list_wheel_bound = True
+
+    _ctrl = 0x0004   # bit modifier Control (<MouseWheel> & X11 Button-4/5)
+
+    def _on_wheel(event):
+        state = getattr(event, "state", 0) or 0
+        if isinstance(state, int) and state & _ctrl:
+            return None          # → bindtag 'all' (fallback zoom app)
+        d = getattr(event, "delta", 0) or 0
+        if d == 0:
+            return None
+        acc = getattr(cv, "_smooth_list_wheel_acc", 0.0)
+        # ganti arah: buang sisa akumulator ARAH LAMA (v3.9.40 — tanpa
+        # ini sisa arah lama 'memakan' notch pertama arah baru → respons
+        # balik arah tertunda/terasa macet)
+        if acc and ((d > 0) == (acc > 0)):
+            acc = 0.0
+        acc += (-d / 120.0) * units_per_notch
+        steps = int(acc)         # potong menuju nol; sisa diakumulasi
+        cv._smooth_list_wheel_acc = acc - steps
+        if steps:
+            try:
+                cv.yview_scroll(steps, "units")
+            except tk.TclError:
+                pass
+        return "break"
+
+    # X11: arah DIBAWA POLA BINDING (bukan event.num — event_generate
+    # sintetis tidak bisa men-set %b/num: Tk 9 memetakan <Button-4/5>
+    # ke tombol fisik 8/9; probe v3.9.40 di overlay sudah membuktikan
+    # arah-num sintetis salah) → 2 handler terpisah per sekuens.
+    def _on_btn_up(_event):
+        state = getattr(_event, "state", 0) or 0
+        if isinstance(state, int) and state & _ctrl:
+            return None
+        try:
+            cv.yview_scroll(-1, "units")
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _on_btn_down(_event):
+        state = getattr(_event, "state", 0) or 0
+        if isinstance(state, int) and state & _ctrl:
+            return None
+        try:
+            cv.yview_scroll(1, "units")
+        except tk.TclError:
+            pass
+        return "break"
+
+    cv.bind("<MouseWheel>", _on_wheel)
+    cv.bind("<Button-4>", _on_btn_up)
+    cv.bind("<Button-5>", _on_btn_down)
+    if container is not None:
+        container.bind("<MouseWheel>", _on_wheel)
+        container.bind("<Button-4>", _on_btn_up)
+        container.bind("<Button-5>", _on_btn_down)
+    # v3.9.48 — CTRL+Scroll = ZOOM UI: pola Control-* lebih spesifik di
+    # bindtag canvas (menang duluan atas <MouseWheel>/<Button-4/5> polos)
+    # + handler polos di atas melewatkan event bergaya Control ke
+    # fallback 'all' (jalur zoom utk wheel yang jatuh di anak popup).
+    bind_ctrl_zoom(cv)
 
 
 def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):

@@ -189,7 +189,32 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.56"  # v3.9.56 — sticky merge-vertikal (nama barang selalu terlihat saat scroll) + filter clone merge-aware
+APP_VERSION = "3.9.57"  # v3.9.57 — roda halus daftar nilai filter (akumulator delta + binding popup-wide) + arah X11 by-pattern
+# v3.9.57 — FIX AUDIT ("scroll daftar nilai filter belum menangani roda
+# mouse beresolusi tinggi — cek ini"):
+# (1) AKUMULATOR RODA HALUS untuk DAFTAR NILAI ber-canvas: fungsi BARU
+#     enable_smooth_wheel_list (padanan enable_smooth_wheel utk Canvas)
+#     dipasang di popup filter HeaderFilter (dulu cv.yview_scroll(
+#     -1*(e.delta//120)) — roda/trackpad resolusi tinggi mengirim delta
+#     < 120 per event → dibulatkan NOL SETIAP event = daftar TIDAK
+#     PERNAH bergulir) & panel kolom ColumnManager (dulu trik
+#     int(-e.delta/120) or -1 — justru memaksa 1 unit penuh per event
+#     kecil = terlalu cepat): kontribusi -delta/120 diakumulasi,
+#     int(acc) digulir, sisa dibawa; reset arah saat roda berbalik.
+# (2) BINDING TINGKAT POPUP (Toplevel): Windows/Tk 8.6 mengirim wheel
+#     ke widget FOKUS (popup memfokuskan ENTRY pencarian → binding
+#     canvas lama tak pernah terpanggil dari entry!) — kini wheel di
+#     anak APA PUN (entry/checkbox/scrollbar/label) menggulir daftar;
+#     event yang jatuh ke canvas berhenti di 'break' (tanpa dobel).
+# (3) X11 <Button-4/5> kini TER-BIND (dulu roda Linux hanya via drag
+#     scrollbar); ARAH dibawa POLA BINDING (2 handler terpisah), bukan
+#     event.num — event_generate sintetis tak bisa men-set %b/num
+#     (Tk 9 memetakan <Button-4/5> → tombol fisik 8/9); refactor sama
+#     diterapkan ke enable_smooth_wheel (tree — 2 closure terpisah).
+# (4) CTRL+Scroll = ZOOM UI tetap murni: handler polos melewatkan
+#     event bergaya Control (bit 0x4, tanpa 'break') ke bindtag 'all'
+#     (bind_all fallback app); di canvas pola Control-* (bind_ctrl_zoom)
+#     lebih spesifik & menang duluan.
 # v3.9.56 — FIX BUG USER ("bug nama barang tidak muncul di tab deviasi
 # gr dan pcs dan fix yang lain"):
 # (1) STICKY MERGE-VERTIKAL: v3.9.55 merge native menulis nilai nama/rank
