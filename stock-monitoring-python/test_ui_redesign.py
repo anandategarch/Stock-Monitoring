@@ -491,6 +491,7 @@ from src.ui.komparasi_deviasi_view import (
     parse_deviasi_file,
 )
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
+from src.ui.nominal_common import fmt_rp_cell  # v3.9.51 — cek Currency Rp
 from src.ui.widgets import (
     _GC_HOLD,
     CELL_TAGS_NATIVE,
@@ -829,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.50", APP_VERSION == "3.9.50",
+    check("Versi = 3.9.51", APP_VERSION == "3.9.51",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1151,15 +1152,20 @@ def main():
     # skema kini 20 kolom, Dev to BOM% dst. bergeser ke indeks 17..19.)
     # (v3.9.49: kolom AKTIF/NON DIHAPUS — pindah ke combobox Filter;
     # skema kini 19 kolom, Dev to BOM% dst. bergeser ke indeks 16..18.)
+    # (v3.9.51: Stok Seharusnya DIHAPUS → diganti Dev. Bulan Lalu (Σ
+    # 3.DEVIASI tanggal NEGATIF — kuantiti; rumus W tetap internal utk
+    # CEK Hitung Manual); Rank kini per-BARANG merge-vertikal; CEK 210
+    # dgn segmen analisa lalu-kini setelah ' · '.)
     gr_cols = [c[0] for c in app.deviasi_gr_view.COLUMNS]
-    check("(v3.9.6→3.9.49) Skema: Dev to BOM% + Stok Seharusnya + CEK "
+    check("(v3.9.6→3.9.51) Skema: Dev to BOM% + Dev. Bulan Lalu + CEK "
           "setelah Rank; Max Deviasi/ACR/Total ACR/KATEGORI/Out_H/BK_H/"
-          "AKTIF-NON DIHAPUS; kolom Nominal (v3.9.34) ada",
-          gr_cols[16:19] == ["Dev to BOM%", "Stok Seharusnya", "CEK"] and
+          "AKTIF-NON/Stok Seharusnya DIHAPUS; kolom Nominal (v3.9.34) ada",
+          gr_cols[16:19] == ["Dev to BOM%", "Dev. Bulan Lalu", "CEK"] and
           "Max Deviasi" not in gr_cols and "ACR" not in gr_cols and
           "Total ACR" not in gr_cols and "KATEGORI" not in gr_cols and
           "Out_H" not in gr_cols and "BK_H" not in gr_cols and
           "AKTIF/NON" not in gr_cols and
+          "Stok Seharusnya" not in gr_cols and
           "Nominal" in gr_cols and
           gr_cols.index("Nominal") == gr_cols.index("Deviasi") + 1,
           f"got {gr_cols}")
@@ -1184,15 +1190,17 @@ def main():
               "fixture ini — dulu H=25 → 100/24 = '416,67%')",
               v[gr_idx["Dev to BOM%"]] == "333,33%",
               f"got {v[gr_idx['Dev to BOM%']]!r}")
-        # v3.9.27: Stok Seharusnya = W sheet 'Data Base Cek Deviasi' =
-        # SO(H-1) + IN_H − KIRIMAN KELUAR_H − PENJUALAN_H (dulu
-        # SO(H-1) − ACR-rata2) → SO(29)200 + IN(30)0 − BK(30)0 −
-        # OUT(30)3 = 197
-        check("(v3.9.6→v3.9.27) Stok Seharusnya = W sheet = SO(29)200 + "
-              "IN(30)0 − BK(30)0 − OUT(30)3 = '197' (H dinamis 30; v3.9.6-"
-              "v3.9.26: SO(29) − ACR-rata2 = '199')",
-              v[gr_idx["Stok Seharusnya"]] == "197",
-              f"got {v[gr_idx['Stok Seharusnya']]!r}")
+        # v3.9.27: W sheet 'Data Base Cek Deviasi' = SO(H-1) + IN_H −
+        # KIRIMAN KELUAR_H − PENJUALAN_H (dulu SO(H-1) − ACR-rata2) →
+        # SO(29)200 + IN(30)0 − BK(30)0 − OUT(30)3 = 197 — v3.9.51 kolom
+        # TAMPILAN diganti 'Dev. Bulan Lalu' (W tetap INTERNAL: CEK-3
+        # Hitung Manual & rasio — diuji eksplisit di §38). Fixture ini
+        # TANPA tanggal negatif → Dev. Bulan Lalu = '-'.
+        check("(v3.9.51) Dev. Bulan Lalu = '-' (fixture tanpa rekap "
+              "bulan lalu; menggantikan kolom Stok Seharusnya — W=197 "
+              "tetap internal via CEK)",
+              v[gr_idx["Dev. Bulan Lalu"]] == "-",
+              f"got {v[gr_idx['Dev. Bulan Lalu']]!r}")
         check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24 — "
               "kolom terhapus, hitungan internal v3.9.18 tetap)",
               v[gr_idx["CEK"]] == "ACR to BOM",
@@ -3113,13 +3121,14 @@ def main():
     check("(v3.9.4) show_laporan_mode(0) → kembali ke Komparasi",
           kv.winfo_ismapped() and not app.laporan_view.winfo_ismapped())
 
-    check("(v3.9.14→v3.9.34) Skema kolom komparasi (15 kolom — Minggu & H "
-          "DIHAPUS v3.9.13; Nominal v3.9.34 setelah GR Saat Ini)",
+    check("(v3.9.14→v3.9.51) Skema kolom komparasi (14 kolom — Minggu & H "
+          "DIHAPUS v3.9.13; Nominal v3.9.34 setelah GR Saat Ini; Selisih "
+          "DIHAPUS v3.9.51 — nilai internal tetap: Status/snapshot)",
           [c[0] for c in kv.COLUMNS] == [
               "✓", "Resto", "Nama Barang", "Satuan",
               "BOM Lalu", "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
               "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
-              "GR Saat Ini", "Nominal", "Selisih", "Status"],
+              "GR Saat Ini", "Nominal", "Status"],
           f"got {[c[0] for c in kv.COLUMNS]}")
     check("(v3.9.14) Heading DEV Saat Ini = % TO BOM — Saat Ini (persen)",
           kv.tree.heading("DEV Saat Ini")["text"] == "% TO BOM — Saat Ini",
@@ -3276,11 +3285,14 @@ def main():
               "(49/80 — persen konsisten %TO BOM Lalu; dulu kuantitas '49')",
               kv.tree.set(k_match, "DEV Saat Ini") == "61,25%",
               f"got {kv.tree.set(k_match, 'DEV Saat Ini')!r}")
-        check("(v3.9.4) Selisih 0 → status MATCH",
+        # v3.9.51: kolom Selisih DIHAPUS dari tabel — nilai INTERNAL
+        # dibaca dari snapshot follow-up (field 'deviasi' = Selisih).
+        _sel_match = kv._row_snaps.get(k_match, {}).get("deviasi")
+        check("(v3.9.4→v3.9.51) Selisih 0 → status MATCH (Selisih "
+              "internal via snapshot = 0.0)",
               kv.tree.set(k_match, "Status") == "MATCH" and
-              kv.tree.set(k_match, "Selisih") == "-",
-              f"got {kv.tree.set(k_match, 'Status')!r} / "
-              f"{kv.tree.set(k_match, 'Selisih')!r}")
+              _sel_match == 0.0,
+              f"got {kv.tree.set(k_match, 'Status')!r} / {_sel_match!r}")
         check("(v3.9.4) % TO BOM Lalu = '61,25%'",
               kv.tree.set(k_match, "%TO BOM Lalu") == "61,25%",
               f"got {kv.tree.set(k_match, '%TO BOM Lalu')!r}")
@@ -3302,11 +3314,14 @@ def main():
           kv.tree.set(k_gula, "Status") == "MATCH")
 
     k_sel = kv_row("1002.SBYKET", "AYAM FILET", "WEEK 1")
-    check("(v3.9.4) DEV Lalu 74 vs GR 49 → SELISIH + selisih '(25)'",
+    # v3.9.51: Selisih internal = |49|−|74| = -25 (snapshot 'deviasi')
+    _sel_val = kv._row_snaps.get(k_sel, {}).get("deviasi") if k_sel else None
+    check("(v3.9.4→v3.9.51) DEV Lalu 74 vs GR 49 → SELISIH (Selisih "
+          "internal = -25 — tampilan '(25)' dihapus v3.9.51)",
           k_sel is not None and kv.tree.set(k_sel, "Status") == "SELISIH" and
-          kv.tree.set(k_sel, "Selisih") == "(25)",
+          _sel_val == -25.0,
           f"got {kv.tree.set(k_sel, 'Status') if k_sel else None} / "
-          f"{kv.tree.set(k_sel, 'Selisih') if k_sel else None}")
+          f"{_sel_val!r}")
 
     k_noapp = kv_row("1001.MLGPAR", "BARANG TAK ADA", "WEEK 1")
     check("(v3.9.14) Barang tak ada di data → TIDAK ADA DI DATA SAAT INI "
@@ -3346,11 +3361,15 @@ def main():
               _khcd(k_match, "Satuan") == 0)
         check("(v3.9.4) Sel Status MATCH hijau per-cell",
               _khst(k_match) == 1 and _khst(k_sel) == 0)
-        kv._sort_by("Selisih", reverse=False)
-        check("(v3.9.4) Sort Selisih naik → baris SELISIH (-25) di atas + "
-              "tag cell dipasang ulang",
-              kv.tree.set(kv.tree.get_children("")[0], "Status") ==
-              "SELISIH" and _khcd(k_match, "BOM Lalu") == 1)
+        # v3.9.51: kolom Selisih DIHAPUS dari tabel → sort diuji via
+        # 'GR Saat Ini' menurun (GULA W4 GR=150 teratas) + tag cell
+        # dipasang ulang pasca-sort (sort = delete+reinsert).
+        kv._sort_by("GR Saat Ini", reverse=True)
+        check("(v3.9.4→v3.9.51) Sort GR Saat Ini menurun → baris GR 150 "
+              "(GULA W4) di atas + tag cell dipasang ulang (kolom Selisih "
+              "dihapus v3.9.51 — sort diuji kolom lain)",
+              kv.tree.set(kv.tree.get_children("")[0], "Nama Barang") ==
+              "GULA PASIR" and _khcd(k_match, "BOM Lalu") == 1)
 
     # filter header Status = MATCH → 3 baris
     kv._on_col_filter("Status", ["MATCH"])
@@ -3569,13 +3588,14 @@ def main():
     kv._load_paths([xlsx_path])
     check("(v3.9.5) Sort diklik saat compute berjalan → diantrekan",
           kv._busy and kv._pending_sort is None)
-    kv._sort_by("Selisih", reverse=False)
+    kv._sort_by("GR Saat Ini", reverse=True)
     check("(v3.9.5) _pending_sort terisi saat busy",
-          kv._pending_sort == ("Selisih", False))
+          kv._pending_sort == ("GR Saat Ini", True))
     wait_view(root, kv)
     check("(v3.9.5) Sort antrean diterapkan setelah render selesai",
           kv._pending_sort is None and
-          kv.tree.set(kv.tree.get_children("")[0], "Status") == "SELISIH")
+          kv.tree.set(kv.tree.get_children("")[0], "Nama Barang") ==
+          "GULA PASIR")
 
     # --- (A3/C4) tag per-cell bertahan setelah filter di clone ⛶ ---
     k_match2 = kv_row("1001.MLGPAR", "AYAM FILET", "WEEK 1")
@@ -5662,11 +5682,13 @@ def main():
               ["50,00%", "25,00%", "75,00%"] and
               kv30._col_values("Resto") == ["RA"])
     kv30._col_sel["DEV Saat Ini"] = None
+    # v3.9.51: kolom Selisih keluar tampilan → jalur numerik diuji via
+    # 'DEV Lalu' (NUMERIC_COLS aktif; fmt sama dgn sel tabel).
     kv30._result_df = pd.DataFrame({
-        "Resto": ["RA", "RB"], "Selisih": [0.0, 5.0]})
-    kv30._col_sel["Selisih"] = {"5"}
+        "Resto": ["RA", "RB"], "DEV Lalu": [0.0, 5.0]})
+    kv30._col_sel["DEV Lalu"] = {"5"}
     _num30 = kv30._col_values("Resto") == ["RB"]
-    kv30._col_sel["Selisih"] = None
+    kv30._col_sel["DEV Lalu"] = None
     check("(v3.9.20/35-a) Popup tabel utama: format persen/angka konsisten "
           "jalur APPLY _prepare_rows (dulu fmt salah → daftar nilai kolom "
           "lain kosong senyap)",
@@ -8257,8 +8279,10 @@ def main():
             if dv.tree.set(_k38, "Nama Barang") == barang:
                 _i38 = {c: i for i, c in enumerate(
                     [cc[0] for cc in dv.COLUMNS])}
+                # v3.9.51 — Stok Seharusnya keluar tampilan → Dev. Bulan
+                # Lalu (fixture ini tanpa tanggal negatif → '-')
                 return {c: dv.tree.set(_k38, c)
-                        for c in ("CEK", "Stok Seharusnya")}
+                        for c in ("CEK", "Dev. Bulan Lalu")}
         return None
 
     _m38 = _vals38(_dv38b, "MANUAL")
@@ -8276,9 +8300,15 @@ def main():
           "kondisi W=0 sheet)",
           _mw38 is not None and _mw38["CEK"] == "Hitung Manual",
           f"got {_mw38}")
-    check("(v3.9.27) Stok Seharusnya kolom = W sheet (MANUAL: 20; "
-          "dulu SO(H-1)−ACR-rata2)",
-          _m38 is not None and _m38["Stok Seharusnya"] == "20",
+    # v3.9.27: W sheet = 20 (SO(24)100+IN0−BK0−OUT80) — v3.9.51 kolom
+    # TAMPILAN Stok Seharusnya diganti Dev. Bulan Lalu; nilai W tetap
+    # INTERNAL & terbukti lewat CEK-3 di atas (rasio |50−20|/20 = 1,5
+    # hanya tercapai bila W = 20 — rumus lama tak terpicu). Fixture §38
+    # tanpa tanggal negatif → Dev. Bulan Lalu '-'.
+    check("(v3.9.27→v3.9.51) W sheet tetap INTERNAL (CEK-3 di atas = "
+          "bukti W=20); kolom pengganti Dev. Bulan Lalu = '-' tanpa "
+          "rekap lalu",
+          _m38 is not None and _m38["Dev. Bulan Lalu"] == "-",
           f"got {_m38}")
     _top38b.destroy()
     root.update()
@@ -9372,16 +9402,16 @@ def main():
                   _nv44.tree.item(_i44, "values")
                   for _i44 in _nv44.tree.get_children("")}
     _ayn44 = _nv_rows44.get("AYAM FILET")
-    check("(v3.9.32) Nominal: satuan SAMA → harga langsung (AYAM 10 GR) "
-          "& nominal = 10 × DEV 2 = 20",
+    check("(v3.9.32→v3.9.51) Nominal: satuan SAMA → harga langsung (AYAM "
+          "10 GR) & nominal = 10 × DEV 2 = 'Rp 20' (Currency Rp v3.9.51)",
           _ayn44 is not None and _ayn44[3] == "10 GR"
-          and _ayn44[4] == "2" and _ayn44[5] == "20",
+          and _ayn44[4] == "2" and _ayn44[5] == "Rp 20",
           f"got {_ayn44}")
     _gl44 = _nv_rows44.get("GULA PASIR")
-    check("(v3.9.32) Nominal: normalisasi satuan (GULA 15/GR → rekap KG "
-          "→ 15.000/KG; DEV 12 → 180.000)",
+    check("(v3.9.32→v3.9.51) Nominal: normalisasi satuan (GULA 15/GR → "
+          "rekap KG → 15.000/KG; DEV 12 → 'Rp 180.000')",
           _gl44 is not None and _gl44[3] == "15.000 KG"
-          and _gl44[4] == "12" and _gl44[5] == "180.000",
+          and _gl44[4] == "12" and _gl44[5] == "Rp 180.000",
           f"got {_gl44}")
     _kf44 = _nv_rows44.get("KOPI BUBUK 100G")
     check("(v3.9.32) Nominal: tanpa harga → nominal '-' (tak dihitung "
@@ -9390,10 +9420,10 @@ def main():
           and "tanpa harga" in _nv44.status_var_label.get(),
           f"got {_kf44} · {_nv44.status_var_label.get()!r}")
     _tot44 = _nv_rows44.get("TOTAL")
-    check("(v3.9.32) Nominal: baris TOTAL = qty 2+12−5=9 & nominal "
-          "20+180.000=180.020 (KOPI tak ikut nominal)",
+    check("(v3.9.32→v3.9.51) Nominal: baris TOTAL = qty 2+12−5=9 & "
+          "nominal 20+180.000='Rp 180.020' (KOPI tak ikut nominal)",
           _tot44 is not None and _tot44[0] == "TOTAL"
-          and _tot44[4] == "9" and _tot44[5] == "180.020",
+          and _tot44[4] == "9" and _tot44[5] == "Rp 180.020",
           f"got {_tot44}")
     # urutan default: |Nominal| menurun (180.000 → 20 → tanpa harga)
     _order44 = [str(_nv44.tree.set(_i44, "Nama Barang"))
@@ -9764,9 +9794,9 @@ def main():
         if str(_dv46.tree.set(_i46, "Nama Barang")) == "BARANG ACR":
             _acr46 = _i46
             break
-    check("(v3.9.34) Deviasi GR: BARANG ACR Nominal = 2/GR × Deviasi 100 "
-          "= '200'",
-          _acr46 is not None and _dv46.tree.set(_acr46, "Nominal") == "200",
+    check("(v3.9.34→v3.9.51) Deviasi GR: BARANG ACR Nominal = 2/GR × "
+          "Deviasi 100 = 'Rp 200' (Currency Rp v3.9.51)",
+          _acr46 is not None and _dv46.tree.set(_acr46, "Nominal") == "Rp 200",
           f"got {None if _acr46 is None else _dv46.tree.set(_acr46, 'Nominal')!r}")
     _ay46 = None
     for _i46 in _dv46.tree.get_children(""):
@@ -9789,10 +9819,10 @@ def main():
         if str(_dv46.tree.set(_i46, "Nama Barang")) == "BARANG ACR":
             _acr46b = _i46
             break
-    check("(v3.9.34) Deviasi GR: normalisasi satuan harga (2/KG → GR: "
-          "0,002 × 100) = '0,2'",
+    check("(v3.9.34→v3.9.51) Deviasi GR: normalisasi satuan harga (2/KG "
+          "→ GR: 0,002 × 100) = 'Rp 0,20' (Rp: 2 desimal)",
           _acr46b is not None
-          and _dv46.tree.set(_acr46b, "Nominal") == "0,2",
+          and _dv46.tree.set(_acr46b, "Nominal") == "Rp 0,20",
           f"got {None if _acr46b is None else _dv46.tree.set(_acr46b, 'Nominal')!r}")
     check("(v3.9.34) Deviasi GR: heading TANPA 'Out_30'/'BK_30' "
           "(kolom dihapus v3.9.34)",
@@ -9871,22 +9901,24 @@ def main():
             _rv46.tree.item(_i46, "values")
             for _i46 in _rv46.tree.get_children("")}
     _mlg46 = _r46.get("MLGPAR")
-    check("(v3.9.34) 🧮 Nominal Deviasi: MLGPAR = 3 barang · 1 tanpa "
-          "harga · Σ 20+180.000 = 180.020 (KOPI tanpa harga tak ikut)",
+    check("(v3.9.34→v3.9.51) 🧮 Nominal Deviasi: MLGPAR = 3 barang · 1 "
+          "tanpa harga · Σ 20+180.000 = 'Rp 180.020' (KOPI tanpa harga "
+          "tak ikut; Currency Rp v3.9.51)",
           _mlg46 is not None and _mlg46[1] == "3" and _mlg46[2] == "1"
-          and _mlg46[3] == "180.020",
+          and _mlg46[3] == "Rp 180.020",
           f"got {_mlg46}")
     _bdg46 = _r46.get("BDGSET")
-    check("(v3.9.34) 🧮 Nominal Deviasi: BDGSET = 1 barang · Σ 30",
+    check("(v3.9.34→v3.9.51) 🧮 Nominal Deviasi: BDGSET = 1 barang · "
+          "'Rp 30'",
           _bdg46 is not None and _bdg46[1] == "1" and _bdg46[2] == "0"
-          and _bdg46[3] == "30",
+          and _bdg46[3] == "Rp 30",
           f"got {_bdg46}")
     _tot46 = _r46.get("TOTAL")
-    check("(v3.9.34) 🧮 Nominal Deviasi: baris TOTAL = 4 barang · 1 "
-          "tanpa · Σ 180.050",
+    check("(v3.9.34→v3.9.51) 🧮 Nominal Deviasi: baris TOTAL = 4 barang "
+          "· 1 tanpa · Σ 'Rp 180.050'",
           _tot46 is not None and _tot46[0] == "TOTAL"
           and _tot46[1] == "4" and _tot46[2] == "1"
-          and _tot46[3] == "180.050",
+          and _tot46[3] == "Rp 180.050",
           f"got {_tot46}")
     check("(v3.9.34) 🧮 Nominal Deviasi: heading dinamis "
           "'Nominal Deviasi (H=25)' + urutan |Σ| menurun (MLGPAR dulu)",
@@ -9940,15 +9972,15 @@ def main():
           and all(str(_pt46.set(k, "Nominal Deviasi Bulan Lalu")) == "-"
                   for k in _pk46),
           f"cols={None if _pt46 is None else list(_pt46['columns'])}")
-    check("(v3.9.34) popup rincian MLGPAR: 3 barang + TOTAL; GULA "
-          "180.000; TOTAL Σ 180.020",
+    check("(v3.9.34→v3.9.51) popup rincian MLGPAR: 3 barang + TOTAL; "
+          "GULA 'Rp 180.000'; TOTAL Σ 'Rp 180.020'",
           len(_pk46) == 4
-          and _prow46.get("GULA PASIR") == "180.000"
-          and _prow46.get("AYAM FILET") == "20"
+          and _prow46.get("GULA PASIR") == "Rp 180.000"
+          and _prow46.get("AYAM FILET") == "Rp 20"
           and _prow46.get("KOPI BUBUK 100G") == "-"
           and _ptot46 is not None
           and str(_pt46.set(_ptot46, "Nominal Deviasi Sekarang"))
-          == "180.020",
+          == "Rp 180.020",
           f"got {_prow46} tot={_ptot46}")
     # sort → TOTAL tetap dipin di ujung
     _rv46._sort_by("Nominal Deviasi", reverse=True)
@@ -10012,17 +10044,17 @@ def main():
         _g46_rows += 1
         _grv46 = float(_gr46.replace(".", "").replace(",", "."))
         _harga46 = 10.0 if _b46 == "AYAM FILET" else 2.0
-        _exp46 = kv._fmt_num(_harga46 * _grv46)
+        _exp46 = fmt_rp_cell(_harga46 * _grv46)   # v3.9.51 — Currency Rp
         _got46 = str(kv.tree.set(_i46, "Nominal"))
         if _got46 == _exp46:
             _nom_ok46 += 1
         else:
             _nom_bad46.append((_b46, _gr46, _exp46, _got46))
-    check("(v3.9.34) Komparasi: Nominal = harga × GR Saat Ini utk "
-          "SEMUA baris ber-GR (GULA MLGPAR WEEK 4: 2×150 = 300)",
+    check("(v3.9.34→v3.9.51) Komparasi: Nominal = harga × GR Saat Ini "
+          "utk SEMUA baris ber-GR (GULA MLGPAR WEEK 4: 2×150 = 'Rp 300')",
           _g46_rows >= 1 and _nom_ok46 == _g46_rows and not _nom_bad46
           and any(str(kv.tree.set(_i46, "GR Saat Ini")) == "150"
-                  and str(kv.tree.set(_i46, "Nominal")) == "300"
+                  and str(kv.tree.set(_i46, "Nominal")) == "Rp 300"
                   for _i46 in kv.tree.get_children("")),
           f"rows={_g46_rows} ok={_nom_ok46} bad={_nom_bad46[:3]}"
           f" err={_err46}"
@@ -10236,13 +10268,13 @@ def main():
     _r48 = {str(_rv48.tree.set(_i48, "Resto")):
             _rv48.tree.item(_i48, "values")
             for _i48 in _rv48.tree.get_children("")}
-    check("(v3.9.36) 🧮: filter KATEGORI Deviasi diterapkan — GULA "
-          "(TEPAT) terbuang: MLGPAR 2 barang (1 tanpa) Σ 20; TOTAL 3 "
-          "barang Σ 50",
+    check("(v3.9.36→v3.9.51) 🧮: filter KATEGORI Deviasi diterapkan — "
+          "GULA (TEPAT) terbuang: MLGPAR 2 barang (1 tanpa) 'Rp 20'; "
+          "TOTAL 3 barang 'Rp 50'",
           _r48.get("MLGPAR") is not None and _r48["MLGPAR"][1] == "2"
-          and _r48["MLGPAR"][2] == "1" and _r48["MLGPAR"][3] == "20"
+          and _r48["MLGPAR"][2] == "1" and _r48["MLGPAR"][3] == "Rp 20"
           and _r48.get("TOTAL") is not None and _r48["TOTAL"][1] == "3"
-          and _r48["TOTAL"][3] == "50",
+          and _r48["TOTAL"][3] == "Rp 50",
           f"got {_r48}")
     check("(v3.9.36) 🧮: footer status menyebut KATEGORI aktif",
           "KATEGORI DEVIASI" in _rv48.status_var_label.get(),
@@ -10301,10 +10333,10 @@ def main():
     # multi-bulan — user: "support buat multiple file deviasi buat
     # compare dengan beberapa bulan lalu"); AYAM-MLGPAR tak ada di bulan
     # SEP (hanya SBYKET) → kolom dinamis '-' utk pasangan MLGPAR.
-    check("(v3.9.36/v3.9.41/v3.9.45) 🧮 POPUP PER ITEM: 6 kolom (basis 5 "
-          "+ kolom dinamis 'Lalu 203.SEP 26' — fixture multi-bulan OKT+SEP); "
-          "AYAM = 20 vs 1.130 (WEEK 4 TER-COCOK H=25 — 113×10); TOTAL "
-          "kedua nominal",
+    check("(v3.9.36/v3.9.41/v3.9.45→v3.9.51) 🧮 POPUP PER ITEM: 6 kolom "
+          "(basis 5 + kolom dinamis 'Lalu 203.SEP 26' — fixture multi-bulan "
+          "OKT+SEP); AYAM = 'Rp 20' vs 'Rp 1.130' (WEEK 4 TER-COCOK H=25 "
+          "— 113×10); TOTAL kedua nominal (Currency Rp v3.9.51)",
           list(_pt48["columns"]) == [
               "Nama Resto", "Nama Barang", "Kuantiti Deviasi",
               "Nominal Deviasi Sekarang", "Nominal Deviasi Bulan Lalu",
@@ -10312,13 +10344,13 @@ def main():
           and _prow48.get("AYAM FILET") is not None
           and _prow48["AYAM FILET"][0] == "MLGPAR"
           and _prow48["AYAM FILET"][2] == "2"
-          and _prow48["AYAM FILET"][3] == "20"
-          and _prow48["AYAM FILET"][4] == "1.130"
+          and _prow48["AYAM FILET"][3] == "Rp 20"
+          and _prow48["AYAM FILET"][4] == "Rp 1.130"
           and _prow48["AYAM FILET"][5] == "-"
           and _ptot48 is not None
-          and _pt48.set(_ptot48, "Nominal Deviasi Sekarang") == "20"
+          and _pt48.set(_ptot48, "Nominal Deviasi Sekarang") == "Rp 20"
           and _pt48.set(_ptot48, "Nominal Deviasi Bulan Lalu")
-          == "1.130",
+          == "Rp 1.130",
           f"cols={list(_pt48['columns'])} got {_prow48} "
           f"tot={_ptot48}")
     check("(v3.9.36) 🧮 popup: KOPI ada di file tapi TANPA harga → "
@@ -10885,20 +10917,20 @@ def main():
     _r50w = {str(_rv50.tree.set(_i50, "Resto")):
              _rv50.tree.item(_i50, "values")
              for _i50 in _rv50.tree.get_children("")}
-    check("(v3.9.38) 🧮: kolom Bulan Lalu per resto = Σ NOMINAL RESMI "
-          "file (MLGPAR 999 — angka file, bukan recompute) + baris TOTAL "
-          "menjumlah + resto tanpa baris '-'",
+    check("(v3.9.38→v3.9.51) 🧮: kolom Bulan Lalu per resto = Σ NOMINAL "
+          "RESMI file (MLGPAR 'Rp 999' — angka file, bukan recompute) + "
+          "baris TOTAL menjumlah + resto tanpa baris '-'",
           _r50w.get("MLGPAR") is not None
-          and _r50w["MLGPAR"][4] == "999"
+          and _r50w["MLGPAR"][4] == "Rp 999"
           and _r50w.get("BDGSET") is not None
           and _r50w["BDGSET"][4] == "-"
           and _r50w.get("TOTAL") is not None
-          and _r50w["TOTAL"][4] == "999",
+          and _r50w["TOTAL"][4] == "Rp 999",
           f"got {_r50w}")
-    check("(v3.9.38) 🧮: footer 'TOTAL LALU' + chip TOTAL · LALU "
-          "(versus bulan lalu)",
-          "TOTAL LALU 999" in _rv50.status_var_label.get()
-          and "LALU 999" in _rv50._total_var.get(),
+    check("(v3.9.38→v3.9.51) 🧮: footer 'TOTAL LALU' + chip TOTAL · "
+          "LALU (versus bulan lalu — Currency Rp)",
+          "TOTAL LALU Rp 999" in _rv50.status_var_label.get()
+          and "LALU Rp 999" in _rv50._total_var.get(),
           f"footer={_rv50.status_var_label.get()!r} "
           f"chip={_rv50._total_var.get()!r}")
     _top50.destroy()
@@ -11985,10 +12017,11 @@ def main():
     _rv54j._kategori_var.set("Semua")
     _rv54j._on_kategori_changed()
     wait_view(root, _rv54j)
-    check("(v3.9.42) 🧮 KONSISTENSI: kategori 'Semua' → GULA kembali → "
-          "kolom Lalu tabel = 150.000 (join pasangan — pasangan file-lalu "
-          "MATCH pasangan sekarang tetap dihitung)",
-          _tbl_lalu54(_rv54j) == "150.000",
+    check("(v3.9.42→v3.9.51) 🧮 KONSISTENSI: kategori 'Semua' → GULA "
+          "kembali → kolom Lalu tabel = 'Rp 150.000' (join pasangan — "
+          "pasangan file-lalu MATCH pasangan sekarang tetap dihitung; "
+          "Currency Rp v3.9.51)",
+          _tbl_lalu54(_rv54j) == "Rp 150.000",
           f"got {_tbl_lalu54(_rv54j)!r}")
     _rv54j.destroy()
     _top54j.destroy()
@@ -12413,22 +12446,23 @@ def main():
           f"got {_nv56.tree.heading('Nominal Deviasi Bulan Lalu')['text']!r}")
     _mlg56 = next((_i for _i in _nv56.tree.get_children("")
                    if _nv56.tree.set(_i, "Resto") == "MLGPAR"), None)
-    check("(v3.9.45) 🧮 baris MLGPAR: Sekarang 20 · Lalu OKT 1.130 · "
-          "SEP '-' (AYAM-MLGPAR tak ada di bulan SEP)",
+    check("(v3.9.45→v3.9.51) 🧮 baris MLGPAR: Sekarang 'Rp 20' · Lalu "
+          "OKT 'Rp 1.130' · SEP '-' (AYAM-MLGPAR tak ada di bulan SEP)",
           _mlg56 is not None
           and _nv56.tree.item(_mlg56, "values") ==
-          ("MLGPAR", "1", "0", "20", "1.130", "-"),
+          ("MLGPAR", "1", "0", "Rp 20", "Rp 1.130", "-"),
           f"got {_nv56.tree.item(_mlg56, 'values') if _mlg56 else None}")
     _tot56 = next((_i for _i in _nv56.tree.get_children("")
                    if _i == "row_total"), None)
-    check("(v3.9.45) 🧮 TOTAL row: kolom SEP ikut (nilai '-')",
+    check("(v3.9.45→v3.9.51) 🧮 TOTAL row: kolom SEP ikut (nilai '-')",
           _tot56 is not None
           and _nv56.tree.item(_tot56, "values") ==
-          ("TOTAL", "1", "0", "20", "1.130", "-"),
+          ("TOTAL", "1", "0", "Rp 20", "Rp 1.130", "-"),
           f"got {_nv56.tree.item(_tot56, 'values') if _tot56 else None}")
-    check("(v3.9.45) 🧮 chip TOTAL menyebut pembanding bulan ≥2 (SEP)",
+    check("(v3.9.45→v3.9.51) 🧮 chip TOTAL menyebut pembanding bulan "
+          "≥2 (SEP) — nilai Rp",
           "203.SEP 26" in _nv56._total_var.get()
-          and "TOTAL 20" in _nv56._total_var.get(),
+          and "TOTAL Rp 20" in _nv56._total_var.get(),
           f"got {_nv56._total_var.get()!r}")
     # popup per bulan: kolom dinamis + TOTAL per bulan
     _nv56._show_resto_popup("MLGPAR")
@@ -12458,11 +12492,11 @@ def main():
         _ay56 = next((_i for _i in _tr56.get_children("")
                       if _tr56.set(_i, "Nama Barang") == "AYAM FILET"),
                      None)
-        check("(v3.9.45) 🧮 popup AYAM: Sekarang 20 · Lalu 1.130 · "
-              "SEP '-'",
+        check("(v3.9.45→v3.9.51) 🧮 popup AYAM: Sekarang 'Rp 20' · "
+              "Lalu 'Rp 1.130' · SEP '-'",
               _ay56 is not None
               and _tr56.item(_ay56, "values") ==
-              ("MLGPAR", "AYAM FILET", "2", "20", "1.130", "-"),
+              ("MLGPAR", "AYAM FILET", "2", "Rp 20", "Rp 1.130", "-"),
               f"got {_tr56.item(_ay56, 'values') if _ay56 else None}")
     _nv56._close_detail_wins()
     _nv56.destroy()
@@ -13489,6 +13523,253 @@ def main():
     app._apply_ui_zoom(1.0)
     root.update()
     root.geometry("1280x760+5+5")
+    root.update()
+
+    # =====================================================================
+    # 61. (v3.9.51) ANALISA DEVIASI LALU-KINI di CEK + Dev. Bulan Lalu +
+    #     Rank MERGE-VERTIKAL + strip header kolom In + Currency Rp
+    #     (user: "kolom Cek tambahkan analisa ... berapa persen ... di
+    #     absolute dulu" / "kolom Rank ... dimerger vertical ... sama
+    #     kaya di tab rincian PO" / "Stock seharusnya hide ... ganti
+    #     dengan Deviasi bulan lalu" / "Header In_13 atau In 15 ...
+    #     diberi warna beda" / "Semua data nominal diberi format
+    #     Currency Rp" / "hapus juga kolom selish")
+    # =====================================================================
+    print("\n== 61. (v3.9.51) Analisa lalu-kini CEK · Dev. Bulan Lalu · "
+          "Rank merge · strip In · Currency Rp ==")
+
+    # --- (a) fmt_rp_cell — unit (Currency Rp semua data nominal) -------
+    from src.ui.nominal_common import fmt_rp_cell as _frc61
+    check("(v3.9.51) fmt_rp_cell: 'Rp 1.825' · 'Rp 1.825,50' (2 desimal) "
+          "· '(Rp 1.825)' minus kurung · 0/None → '-'",
+          _frc61(1825) == "Rp 1.825" and _frc61(1825.5) == "Rp 1.825,50"
+          and _frc61(-1825) == "(Rp 1.825)" and _frc61(0) == "-"
+          and _frc61(None) == "-",
+          f"got {_frc61(1825)!r} / {_frc61(1825.5)!r} / "
+          f"{_frc61(-1825)!r} / {_frc61(0)!r}")
+
+    # --- (b) parser sort & popup ⧩ Rp-aware -----------------------------
+    from src.ui.komparasi_deviasi_view import KomparasiDeviasiView as _KDV61
+    from src.ui.widgets import _filter_value_sort_key as _fvsk61
+    check("(v3.9.51) _filter_value_sort_key Rp-aware: 'Rp 1.825' & "
+          "'(Rp 1.825)' → grup NUMERIK (dulu grup teks)",
+          _fvsk61("Rp 1.825")[0] == 0 and _fvsk61("(Rp 1.825)")[0] == 0
+          and _fvsk61("(Rp 1.825)")[1] == -1825.0,
+          f"got {_fvsk61('Rp 1.825')} / {_fvsk61('(Rp 1.825)')}")
+    check("(v3.9.51) parser sort Indonesia + Rp: 'Rp 1.825' = 1825 · "
+          "'(Rp 1.825)' = -1825 (komparasi & deviasi & nominal view)",
+          _KDV61._parse_num_id("Rp 1.825") == 1825.0
+          and _KDV61._parse_num_id("(Rp 1.825)") == -1825.0
+          and app.deviasi_gr_view._parse_num_id("Rp 1.825") == 1825.0
+          and app.deviasi_gr_view._parse_num_id("(Rp 1.825)") == -1825.0,
+          "parser tidak membuang prefiks Rp")
+
+    # --- (c) ANALISA lalu-kini + Dev. Bulan Lalu + Rank merge + tint ---
+    # fixture: bulan lalu = 3.DEVIASI tanggal NEGATIF; H dinamis = 14.
+    _top61 = tk.Toplevel(root)
+    _top61.geometry("1400x900+5+5")
+    from src.ui.deviasi_view import DeviasiView as _DV61
+    _dv61 = _DV61(_top61, satuan_mode="GR")
+    _dv61.pack(fill="both", expand=True)
+    root.update()   # map Toplevel dulu — load_data lazy-refresh saat mapped
+
+    def _row61(j, tgl, nil, barang, resto):
+        return {"JENIS": j, "Tanggal": tgl, "NILAI": nil,
+                "Nama Barang": barang, "NAMA RESTO": resto,
+                "SATUAN": "GR"}
+
+    _rows61 = [
+        # bulan lalu (rekap lalu — tanggal negatif)
+        _row61("3.DEVIASI", -25, 100.0, "CABE", "MLGPAR"),
+        _row61("3.DEVIASI", -26, 50.0, "CABE", "PWKTAM"),
+        _row61("3.DEVIASI", -25, -80.0, "PENTOL", "MLGPAR"),
+        _row61("3.DEVIASI", -25, 30.0, "PENTOL", "PWKTAM"),
+    ]
+    for _b61, _r61, _so61, _sis61 in (
+            ("CABE", "MLGPAR", 60.0, 100.0),    # dev -40 vs +100 → ARAH
+            ("CABE", "PWKTAM", 30.0, 5.0),      # dev +25 vs +50 → -50,0%
+            ("PENTOL", "MLGPAR", 20.0, -5.0),   # dev +25 vs -80 → ARAH
+            ("PENTOL", "PWKTAM", 80.0, 10.0),   # dev +70 vs +30 → +133,3%
+            ("BUMBU", "MLGPAR", 50.0, 30.0)):   # dev +20, tanpa lalu
+        for _t61 in (12, 13, 14, 15, 16):
+            _rows61.append(_row61("1.SO", _t61,
+                                  _so61 if _t61 == 14 else 0.0,
+                                  _b61, _r61))
+        _rows61.append(_row61("2.SALDO AKHIR", 14, _sis61, _b61, _r61))
+        for _t61 in (13, 14, 15):
+            _rows61.append(_row61("4.IN", _t61, 30.0, _b61, _r61))
+    _dv61.load_data(pd.DataFrame(_rows61))
+    wait_view(root, _dv61)
+
+    _wid61 = {c[0]: c[1] for c in _dv61.COLUMNS}
+    check("(v3.9.51) CEK width 210 (segmen analisa menempel ' · ')",
+          _wid61.get("CEK") == 210,
+          f"got {_wid61.get('CEK')!r}")
+
+    def _val61(iid, col):
+        return str(_dv61.tree.set(iid, col))
+
+    def _find61(barang, resto):
+        for _k61 in _dv61.tree.get_children(""):
+            if _val61(_k61, "Nama Barang") == barang \
+                    and _val61(_k61, "Resto") == resto:
+                return _k61
+        return None
+
+    _kcm61 = _find61("CABE", "MLGPAR")
+    check("(v3.9.51) Analisa tanda BERLAWANAN → 'Berubah Arah' "
+          "(CABE/MLGPAR dev -40 vs lalu +100 — absolut dulu, flip "
+          "menang)",
+          _kcm61 is not None and _val61(_kcm61, "CEK") == "Berubah Arah",
+          f"got {None if _kcm61 is None else _val61(_kcm61, 'CEK')!r}")
+    _kcp61 = _find61("CABE", "PWKTAM")
+    check("(v3.9.51) Analisa PENURUNAN + persen: |25| vs |50| → "
+          "'Penurunan Tertinggi -50,0%' (basis |lalu|, 1 desimal koma)",
+          _kcp61 is not None
+          and _val61(_kcp61, "CEK") == "Penurunan Tertinggi -50,0%",
+          f"got {None if _kcp61 is None else _val61(_kcp61, 'CEK')!r}")
+    _kpp61 = _find61("PENTOL", "PWKTAM")
+    check("(v3.9.51) Analisa PENINGKATAN + persen MENEMPEL pada label "
+          "check lama ('Hitung Manual · Peningkatan Tertinggi +133,3%' "
+          "— |70| vs |30|)",
+          _kpp61 is not None and _val61(_kpp61, "CEK") ==
+          "Hitung Manual · Peningkatan Tertinggi +133,3%",
+          f"got {None if _kpp61 is None else _val61(_kpp61, 'CEK')!r}")
+    _kbm61 = _find61("BUMBU", "MLGPAR")
+    check("(v3.9.51) Pasangan TANPA rekap bulan lalu → tanpa analisa "
+          "(CEK kosong) + Dev. Bulan Lalu '-'",
+          _kbm61 is not None and _val61(_kbm61, "CEK") == ""
+          and _val61(_kbm61, "Dev. Bulan Lalu") == "-",
+          f"got CEK={_val61(_kbm61, 'CEK')!r} "
+          f"lalu={_val61(_kbm61, 'Dev. Bulan Lalu')!r}")
+    check("(v3.9.51) Dev. Bulan Lalu = Σ 3.DEVIASI tanggal NEGATIF "
+          "(100 / 50 / 30 / (80) minus kurung)",
+          _val61(_kcm61, "Dev. Bulan Lalu") == "100"
+          and _val61(_kcp61, "Dev. Bulan Lalu") == "50"
+          and _val61(_kpp61, "Dev. Bulan Lalu") == "30"
+          and _val61(_find61("PENTOL", "MLGPAR"), "Dev. Bulan Lalu")
+          == "(80)",
+          "nilai kolom Dev. Bulan Lalu salah")
+    check("(v3.9.51) Stabil → tanpa label (toleransi mirror komparasi) "
+          "& status footer CEK hanya menghitung label ANOMALI CHECK "
+          "(CEK 1 — 3 baris analisa-only tidak terhitung)",
+          "CEK 1" in _dv61.status_var.get(),
+          f"got {_dv61.status_var.get()!r}")
+    check("(v3.9.51) Snapshot follow-up CEK = LABEL UTAMA (fingerprint "
+          "baris ✓ lama tetap cocok — analisa hanya display)",
+          _dv61._row_snaps[_kpp61]["cek"] == "Hitung Manual",
+          f"got {_dv61._row_snaps[_kpp61]['cek']!r}")
+    _cvals61 = [str(x) for x in _dv61._col_values("CEK")]
+    check("(v3.9.51) Popup ⧩ CEK = nilai LABEL UTAMA (tanpa segmen "
+          "analisa — filter tetap mengelompokkan anomali check)",
+          all(" · " not in x for x in _cvals61)
+          and "Hitung Manual" in _cvals61,
+          f"got {_cvals61}")
+
+    # --- (d) Rank MERGE-VERTIKAL per kelompok Nama Barang ---------------
+    _rk61 = [(_val61(_k61, "Nama Barang"), _val61(_k61, "Rank"))
+             for _k61 in _dv61.tree.get_children("")]
+    _byb61 = {}
+    for _b61, _r61v in _rk61:
+        _byb61.setdefault(_b61, []).append(_r61v)
+    check("(v3.9.51) Rank = PER BARANG (Σ|Deviasi| kelompok terfilter): "
+          "PENTOL 95=1 · CABE 65=2 · BUMBU 20=3",
+          _byb61.get("PENTOL", [None])[0] == "1"
+          and _byb61.get("CABE", [None])[0] == "2"
+          and _byb61.get("BUMBU", [None])[0] == "3",
+          f"got {_byb61}")
+    check("(v3.9.51) Rank merge-vertikal ala Rincian PO: nilai HANYA di "
+          "baris pertama kelompok (baris lanjutan kosong)",
+          all(len([r for r in rs if r]) <= 1
+              for rs in _byb61.values())
+          and _rk61[1][1] == "2" and _rk61[2][1] == "",
+          f"got {_rk61}")
+    _dv61._sort_by("Deviasi", reverse=True, tree=_dv61.tree)
+    root.update()
+    _rk61b = [(_val61(_k61, "Nama Barang"), _val61(_k61, "Rank"))
+              for _k61 in _dv61.tree.get_children("")]
+    _run_ok61 = True
+    _prev61 = None
+    _seen61 = False
+    for _b61, _r61v in _rk61b:
+        if _b61 != _prev61:
+            _prev61, _seen61 = _b61, False
+        if _r61v:
+            if _seen61:
+                _run_ok61 = False
+            _seen61 = True
+    check("(v3.9.51) Sort kolom lain → merge dipasang ulang per URUTAN "
+          "VISUAL (run kontigu = unit merge — filosofi banding v3.9.49)",
+          _run_ok61
+          and all(r in ("", {"PENTOL": "1", "CABE": "2",
+                             "BUMBU": "3"}[b])
+                  for b, r in _rk61b),
+          f"got {_rk61b}")
+
+    # --- (e) strip header kolom In (kiriman — bukan Stock) --------------
+    check("(v3.9.51) Heading dinamis In: H=14 → In_13 / In_14 / In_15",
+          [_dv61.tree.heading(c, "text") for c in _dv61.IN_COLS]
+          == ["In_13", "In_14", "In_15"],
+          f"got {[_dv61.tree.heading(c, 'text') for c in _dv61.IN_COLS]}")
+    _tint61 = getattr(_dv61.tree, "_heading_tint", None)
+    root.update()
+    check("(v3.9.51) HeadingTintOverlay terpasang di tree utama: strip "
+          "teal #0e7490 y=0 untuk 3 kolom In (ttk tanpa bg per-heading)",
+          _tint61 is not None and _tint61.color == "#0e7490"
+          and all(_tint61._labels.get(c) is not None
+                  and _tint61._labels[c].place_info() is not None
+                  for c in _dv61.IN_COLS),
+          f"tint={_tint61}")
+    _lab61 = _tint61._labels["In_H"]
+    _xmid61 = int(_lab61.winfo_x()) + max(1, int(_lab61.winfo_width()) // 2)
+    check("(v3.9.51) Strip In tidak menutup teks heading (region tengah "
+          "strip = heading; strip 6px di y=0, padding heading 8px)",
+          _dv61.tree.identify_region(_xmid61, 3) == "heading",
+          f"got {_dv61.tree.identify_region(_xmid61, 3)!r}")
+    _hits61 = {"n": 0}
+
+    def _cnt61(_e):
+        _hits61["n"] += 1
+
+    _dv61.tree.bind("<Button-1>", _cnt61, add="+")
+    _lab61.event_generate("<Button-1>",
+                          x=_xmid61 - int(_lab61.winfo_x()), y=2)
+    root.update()
+    check("(v3.9.51) Klik DI AREA strip DITERUSKAN ke tree (pola "
+          "forwarding CellColorOverlay — popup ⧩/resize tetap bekerja)",
+          _hits61["n"] >= 1,
+          f"hits={_hits61['n']}")
+    def _legend_txt61(w):
+        out61 = []
+        for c61 in w.winfo_children():
+            if isinstance(c61, tk.Label):
+                out61.append(str(c61.cget("text")))
+            else:
+                out61.extend(_legend_txt61(c61))
+        return out61
+
+    check("(v3.9.51) Legend: strip In (kiriman) + analisa dev lalu-kini "
+          "tercantum (penanda non-Stock & segmen CEK dapat ditemukan "
+          "user)",
+          any("In (kiriman" in t for t in _legend_txt61(_dv61._legend))
+          and any("analisa dev lalu-kini" in t
+                  for t in _legend_txt61(_dv61._legend)),
+          f"got {_legend_txt61(_dv61._legend)}")
+
+    # --- (f) Nominal Currency Rp di Deviasi GR/PCS -----------------------
+    check("(v3.9.51) Kolom Nominal Deviasi = format 'Rp' (NaN/0 tanpa "
+          "harga → '-')",
+          all(_val61(_k61, "Nominal") == "-"
+              for _k61 in _dv61.tree.get_children("")),
+          "format Nominal bukan Rp/'-'")
+    _fmt61 = _dv61._format_col_series(
+        "Nominal", pd.Series([1825.0, -1825.0, 0.0]))
+    check("(v3.9.51) _format_col_series Nominal = fmt_rp_cell (popup ⧩ "
+          "& APPLY konsisten sel tabel)",
+          list(_fmt61) == ["Rp 1.825", "(Rp 1.825)", "-"],
+          f"got {list(_fmt61)}")
+    _dv61.destroy()
+    _top61.destroy()
     root.update()
 
     root.destroy()

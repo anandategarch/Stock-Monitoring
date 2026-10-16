@@ -84,6 +84,7 @@ from .nominal_common import (
     _norm_resto_lalu,
     agregasi_nominal_per_resto,
     fmt_nominal_cell,
+    fmt_rp_cell,
     hitung_nominal_lalu_multi,  # v3.9.45 — multi-bulan file deviasi
 )
 from .theme import (
@@ -629,8 +630,11 @@ class NominalRestoView(tk.Frame):
     @staticmethod
     def _parse_num_id(s):
         """Parser sort format Indonesia (pola mode Nominal): '1.234' =
-        1234, '(1.234)' = -1234, '-' = 0, '12,5' = 12.5."""
-        s = str(s).replace("—", "").strip()
+        1234, '(1.234)' = -1234, '-' = 0, '12,5' = 12.5.
+        v3.9.51: prefiks 'Rp ' dibuang DULU (fmt_rp_cell — kolom nominal:
+        'Rp 1.825' → 1825, '(Rp 1.825)' → -1825) SEBELUM split parts[0]."""
+        s = str(s).replace("—", "").replace("Rp ", "") \
+            .replace("Rp", "").strip()
         parts = s.split()
         if parts:
             s = parts[0]
@@ -1018,9 +1022,11 @@ class NominalRestoView(tk.Frame):
                 str(row["Resto"]),
                 fmt_int_id(int(row.get("N Barang", 0) or 0)),
                 fmt_int_id(int(row.get("Tanpa Harga", 0) or 0)),
-                fmt_nominal_cell(nom),
-                fmt_nominal_cell(nom_l),
-            ] + [fmt_nominal_cell(v) for v in vals_extra]
+                # v3.9.51 — Currency Rp (user: "Semua data nominal diberi
+                # format Currency Rp").
+                fmt_rp_cell(nom),
+                fmt_rp_cell(nom_l),
+            ] + [fmt_rp_cell(v) for v in vals_extra]
             values = tuple(values)
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             nom_v = None
@@ -1062,14 +1068,14 @@ class NominalRestoView(tk.Frame):
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
 
-        # baris TOTAL di ujung (jumlah semua resto tampil)
+        # baris TOTAL di ujung (jumlah semua resto tampil); v3.9.51 → Rp
         values_total = (
             "TOTAL",
             fmt_int_id(total_barang),
             fmt_int_id(total_noharga),
-            fmt_nominal_cell(total_nom),
-            fmt_nominal_cell(total_lalu),
-        ) + tuple(fmt_nominal_cell(totals_extra[_cid])
+            fmt_rp_cell(total_nom),
+            fmt_rp_cell(total_lalu),
+        ) + tuple(fmt_rp_cell(totals_extra[_cid])
                    for _cid, _l, _w in self._lalu_extra)
         items.append(("", "row_total",
                       {"values": values_total, "tags": ("total",)}))
@@ -1092,11 +1098,11 @@ class NominalRestoView(tk.Frame):
         if self._lalu_loaded:
             _wk = (f" ({self._lalu_week})"
                    if self._lalu_week else "")
-            status += f" · TOTAL LALU {fmt_nominal_cell(total_lalu)}{_wk}"
+            status += f" · TOTAL LALU {fmt_rp_cell(total_lalu)}{_wk}"
             for _cid, _lab, _wk in self._lalu_extra:
                 _wkx = (f" ({_wk})" if _wk else "")
                 status += (f" · LALU {_lab} "
-                           f"{fmt_nominal_cell(totals_extra.get(_cid, 0.0))}"
+                           f"{fmt_rp_cell(totals_extra.get(_cid, 0.0))}"
                            f"{_wkx}")
         else:
             status += " · LALU: file deviasi belum dimuat (⚖ Komparasi)"
@@ -1104,18 +1110,18 @@ class NominalRestoView(tk.Frame):
         if self._lalu_loaded:
             _wk2 = (f" · MINGGU {self._lalu_week}"
                     if self._lalu_week else "")
-            _chip = (f"TOTAL {fmt_nominal_cell(total_nom)} · "
-                     f"LALU {fmt_nominal_cell(total_lalu)}{_wk2}")
+            _chip = (f"TOTAL {fmt_rp_cell(total_nom)} · "
+                     f"LALU {fmt_rp_cell(total_lalu)}{_wk2}")
             # v3.9.45 — chip: pembanding bulan ≥2 (ringkas — label bulan)
             for _cid, _lab, _wk in self._lalu_extra[:3]:
                 _chip += (f" · {_lab} "
-                          f"{fmt_nominal_cell(totals_extra.get(_cid, 0.0))}")
+                          f"{fmt_rp_cell(totals_extra.get(_cid, 0.0))}")
             if len(self._lalu_extra) > 3:
                 _chip += f" · +{len(self._lalu_extra) - 3} bulan lagi"
             self._total_var.set(_chip)
         else:
             self._total_var.set(
-                f"TOTAL {fmt_nominal_cell(total_nom)}")
+                f"TOTAL {fmt_rp_cell(total_nom)}")
 
         self._insert_cancel = insert_tree_items(
             self.tree, items, batch=500, on_done=self._render_done)
@@ -1354,9 +1360,11 @@ class NominalRestoView(tk.Frame):
             values = (
                 str(resto), str(row["Nama Barang"]),
                 fmt_nominal_cell(row.get("Qty Deviasi", 0)),
-                fmt_nominal_cell(nom),
-                fmt_nominal_cell(nom_lalu),
-            ) + tuple(fmt_nominal_cell(v) for v in vals_extra)
+                # v3.9.51 — kolom nominal popup → Currency Rp (Qty tetap
+                # format kuantitas).
+                fmt_rp_cell(nom),
+                fmt_rp_cell(nom_lalu),
+            ) + tuple(fmt_rp_cell(v) for v in vals_extra)
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             nom_v = None
             try:
@@ -1414,9 +1422,9 @@ class NominalRestoView(tk.Frame):
                     pass
         items.append(("", "row_total", {
             "values": ("TOTAL", "", "",
-                       fmt_nominal_cell(total_nom),
-                       fmt_nominal_cell(total_lalu))
-            + tuple(fmt_nominal_cell(v) for v in totals_extra),
+                       fmt_rp_cell(total_nom),
+                       fmt_rp_cell(total_lalu))
+            + tuple(fmt_rp_cell(v) for v in totals_extra),
             "tags": ("total",)}))
         for c in col_ids:
             total_cells.append(("row_total", c))
@@ -1444,14 +1452,14 @@ class NominalRestoView(tk.Frame):
         n_no = int(sub["Nominal"].isna().sum()) \
             if "Nominal" in sub.columns else 0
         foot_txt = (f"{len(sub)} barang · {fmt_int_id(n_no)} tanpa harga · "
-                    f"TOTAL SEKARANG {fmt_nominal_cell(total_nom)} · "
-                    f"TOTAL BULAN LALU {fmt_nominal_cell(total_lalu)}")
+                    f"TOTAL SEKARANG {fmt_rp_cell(total_nom)} · "
+                    f"TOTAL BULAN LALU {fmt_rp_cell(total_lalu)}")
         if self._lalu_week:
             foot_txt += f" · Lalu: minggu {self._lalu_week} (ter-cocok H)"
         # v3.9.45 — total per bulan ≥2 di footer popup
         for _mi, (_cid, _lab, _wk) in enumerate(self._lalu_extra):
             foot_txt += (f" · {_lab} "
-                         f"{fmt_nominal_cell(totals_extra[_mi])}")
+                         f"{fmt_rp_cell(totals_extra[_mi])}")
         if not self._lalu_loaded:
             foot_txt += " · file deviasi belum dimuat (⚖ Komparasi)"
         elif _nolalu:

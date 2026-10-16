@@ -1746,22 +1746,23 @@ def run_test():
                 for iid, dv0 in [(i, str(nv.tree.set(i, "Nama Barang")))
                                  for i in nv.tree.get_children("")]}
     _g = _nv_rows.get("GULA (V.20)")
-    assert _g is not None and _g[3] == "18.250 KG" and _g[5] == "(1.916.250)", (
-        f"v3.9.32: GULA nominal = 18.250/KG × DEV −105 = (1.916.250) — "
-        f"got {_g}")
+    assert _g is not None and _g[3] == "18.250 KG" and _g[5] == "(Rp 1.916.250)", (
+        f"v3.9.51: GULA nominal = 18.250/KG × DEV −105 = (Rp 1.916.250) "
+        f"— Currency Rp — got {_g}")
     _c = _nv_rows.get("CINCAU (V.20)")
-    assert _c is not None and _c[3] == "15 KG" and _c[5] == "(1.800)", (
-        f"v3.9.32: CINCAU nominal = 15/KG × DEV −120 = (1.800) — got {_c}")
+    assert _c is not None and _c[3] == "15 KG" and _c[5] == "(Rp 1.800)", (
+        f"v3.9.51: CINCAU nominal = 15/KG × DEV −120 = (Rp 1.800) — got {_c}")
     _f = _nv_rows.get("FRUCTOSE SYRUP (V.20)")
     assert _f is not None and _f[5] == "-", (
         f"v3.9.32: FRUCTOSE tanpa harga → nominal '-' — got {_f}")
     _t = _nv_rows.get("TOTAL")
-    assert _t is not None and _t[5] == "(1.919.058)" and _t[4] == "(429)", (
-        f"v3.9.32: baris TOTAL = −1.919.050? qty −429 (GULA−105 + FRUCTOSE"
-        f"−120 + CINCAU−120 + BUMBU−84; nominal tanpa FRUCTOSE) — got {_t}")
-    print("    ✓ v3.9.32: Nominal E2E — GULA (1.916.250) + CINCAU "
-          "(1.800) + BUMBU (1.008) + TOTAL (1.919.058) · FRUCTOSE '-' "
-          "tanpa harga")
+    assert _t is not None and _t[5] == "(Rp 1.919.058)" and _t[4] == "(429)", (
+        f"v3.9.51: baris TOTAL = −1.919.050? qty −429 (GULA−105 + "
+        f"FRUCTOSE−120 + CINCAU−120 + BUMBU−84; nominal Rp tanpa "
+        f"FRUCTOSE) — got {_t}")
+    print("    ✓ v3.9.51: Nominal E2E Currency Rp — GULA "
+          "(Rp 1.916.250) + CINCAU (Rp 1.800) + BUMBU (Rp 1.008) + "
+          "TOTAL (Rp 1.919.058) · FRUCTOSE '-' tanpa harga")
 
     # v3.9.34 — (6b) TAB 🧮 NOMINAL DEVIASI E2E (user: "isinya total
     # sum dari nama barang ... cuman ini disum per resto"): Σ nominal
@@ -1780,18 +1781,19 @@ def run_test():
               for i in rv.tree.get_children("")}
     _m = _rrows.get("MLGPAR")
     assert _m is not None and str(_m[1]) == "4" and str(_m[2]) == "1" \
-        and _m[3] == "(1.919.058)", (
-        f"v3.9.34: MLGPAR = 4 barang · 1 tanpa harga · Σ (1.919.058) "
+        and _m[3] == "(Rp 1.919.058)", (
+        f"v3.9.51: MLGPAR = 4 barang · 1 tanpa harga · Σ (Rp 1.919.058) "
         f"(GULA 1.916.250 + CINCAU 1.800 + BUMBU 1.008; FRUCTOSE tak "
-        f"ikut) — got {_m}")
+        f"ikut; Currency Rp) — got {_m}")
     _rt = _rrows.get("TOTAL")
     assert _rt is not None and str(_rt[1]) == "4" and str(_rt[2]) == "1" \
-        and _rt[3] == "(1.919.058)", (
-        f"v3.9.34: baris TOTAL Σ (1.919.058) — got {_rt}")
+        and _rt[3] == "(Rp 1.919.058)", (
+        f"v3.9.51: baris TOTAL Σ (Rp 1.919.058) — got {_rt}")
     assert "H=1" in str(rv.tree.heading("Nominal Deviasi")["text"]), (
         "v3.9.34: heading dinamis 'Nominal Deviasi (H=1)'")
-    print("    ✓ v3.9.34: 🧮 Nominal Deviasi E2E — MLGPAR 4 barang · 1 "
-          "tanpa harga · Σ (1.919.058) + TOTAL + heading H dinamis")
+    print("    ✓ v3.9.51: 🧮 Nominal Deviasi E2E Currency Rp — MLGPAR 4 "
+          "barang · 1 tanpa harga · Σ (Rp 1.919.058) + TOTAL + heading H "
+          "dinamis")
 
     # v3.9.34 — (6c) KOLOM Nominal tab Deviasi GR (harga × Deviasi)
     dv34 = DeviasiView(root, satuan_mode="GR")
@@ -1809,13 +1811,13 @@ def run_test():
         if "BUMBU PASTA KUAH" in str(dv34.tree.item(_i34, "values")):
             _nom34 = str(dv34.tree.set(_i34, "Nominal"))
             break
-    assert _nom34 == "(1.008)", (
-        f"v3.9.34: Deviasi GR kolom Nominal BUMBU = 12/GR × DEV (84) "
-        f"= (1.008) — got {_nom34}")
+    assert _nom34 == "(Rp 1.008)", (
+        f"v3.9.51: Deviasi GR kolom Nominal BUMBU = 12/GR × DEV (84) "
+        f"= (Rp 1.008) — Currency Rp — got {_nom34}")
     assert "Out_H" not in [c for c in dv34.tree["columns"]] and \
         "BK_H" not in [c for c in dv34.tree["columns"]], (
         "v3.9.34: kolom Out_H/BK_H dihapus dari tampilan Deviasi GR")
-    print("    ✓ v3.9.34: Deviasi GR kolom Nominal BUMBU (1.008) + "
+    print("    ✓ v3.9.51: Deviasi GR kolom Nominal BUMBU (Rp 1.008) + "
           "Out_H/BK_H dihapus dari tampilan")
 
     dv2 = DeviasiView(root, satuan_mode="PCS")

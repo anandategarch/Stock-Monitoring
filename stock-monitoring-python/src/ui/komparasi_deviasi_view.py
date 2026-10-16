@@ -224,7 +224,7 @@ from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 
 # v3.9.34 — lookup harga 41.09 per (barang, satuan) utk kolom Nominal
 # (helper bersama nominal_common — juga dipakai mode 💰 Nominal (H)).
-from .nominal_common import lookup_harga_pair
+from .nominal_common import fmt_rp_cell, lookup_harga_pair
 from .theme import (
     C_ACCENT,
     C_AMBER,
@@ -605,14 +605,19 @@ class KomparasiDeviasiView(tk.Frame):
         # rasio v3.9.31) × GR Saat Ini (user: "begitu juga di Laporan
         # Deviasi"). Baris tanpa nilai app / tanpa harga / satuan tak
         # terkonversi → sel kosong (NaN, konsisten kolom GR Saat Ini).
+        # v3.9.51 — format Currency Rp (fmt_rp_cell).
         ("Nominal", 110, "e"),
-        ("Selisih", 100, "e"),
+        # v3.9.51 — kolom "Selisih" DIHAPUS dari TABEL (user: "hapus juga
+        # kolom selish pada tab laporan deviasi") — nilai internal
+        # _result_df['Selisih'] TETAP dihitung (Status MATCH/SELISIH,
+        # analisa Top/Flip, snapshot follow-up & fingerprint tak berubah);
+        # urutan sel di bawah (values list) ikut disesuaikan.
         ("Status", 120, "w"),
     ]
 
     NUMERIC_COLS = ("BOM Lalu", "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
                     "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
-                    "GR Saat Ini", "Nominal", "Selisih")
+                    "GR Saat Ini", "Nominal")
 
     # v3.9.13 — mode 📈 Analisa: kolom tabel Top Selisih & Perubahan Arah
     # v3.9.14 (istilah user): DEV File → DEV Lalu, GR App → GR Saat Ini,
@@ -1090,7 +1095,7 @@ class KomparasiDeviasiView(tk.Frame):
             "GR Saat Ini": "DEVIASI — Saat Ini (Tab GR)",
             # v3.9.34 — Nominal = Harga 41.09 × GR Saat Ini
             "Nominal": "Nominal — Harga 41.09 × GR Saat Ini",
-            "Selisih": "Selisih (GR Saat Ini − DEV Lalu)",
+            # v3.9.51 — kolom Selisih keluar tampilan (heading ikut).
         }
         for col, text in heads.items():
             self.tree.heading(col, text=text)
@@ -1203,6 +1208,10 @@ class KomparasiDeviasiView(tk.Frame):
             # %TO BOM Lalu). v3.9.14: nama kolom baru.
             if col in ("%TO BOM Lalu", "DEV Saat Ini"):
                 return series.map(self._fmt_pct)
+            # v3.9.51 — Nominal: Currency Rp (konsisten sel tabel — popup
+            # ⧩ & APPLY memakai format yang sama).
+            if col == "Nominal":
+                return series.fillna(0).map(fmt_rp_cell)
             return series.map(self._fmt_num)
         return series.astype(str)
 
@@ -2189,13 +2198,16 @@ class KomparasiDeviasiView(tk.Frame):
                 "DEV Saat Ini": self._fmt_pct(
                     cols_np["DEV Saat Ini"][i]),
                 "GR Saat Ini": self._fmt_num(cols_np["GR Saat Ini"][i]),
-                # v3.9.34 — Harga 41.09 × GR Saat Ini (NaN → '—')
-                "Nominal": self._fmt_num(cols_np["Nominal"][i]),
+                # v3.9.34 — Harga 41.09 × GR Saat Ini (NaN → '—');
+                # v3.9.51 — Currency Rp.
+                "Nominal": fmt_rp_cell(cols_np["Nominal"][i]),
+                # v3.9.51 — 'Selisih' TETAP dihitung utk snapshot (fingerprint
+                # follow-up & analisa) — kolom TABEL dihapus (COLUMNS).
                 "Selisih": self._fmt_num(cols_np["Selisih"][i]),
             }
             # v3.9.13: kolom Minggu & H TIDAK ditampilkan (permintaan
-            # user) — 15 kolom (v3.9.34: +Nominal; data internal tetap di
-            # snapshot).
+            # user) — v3.9.51: kolom Selisih ikut keluar tampilan (13
+            # kolom; data internal tetap di snapshot).
             values = ["", resto, barang, str(cols_np["Satuan"][i]),
                       fmt_vals["BOM Lalu"], fmt_vals["COM Lalu"],
                       fmt_vals["DEV Lalu"], fmt_vals["%TO BOM Lalu"],
@@ -2203,7 +2215,7 @@ class KomparasiDeviasiView(tk.Frame):
                       fmt_vals["DEV Saat Ini"], fmt_vals["GR Saat Ini"],
                       # v3.9.34 — TEPAT SETELAH GR Saat Ini (urutan COLUMNS)
                       fmt_vals["Nominal"],
-                      fmt_vals["Selisih"], status]
+                      status]
 
             snap = {
                 "asal": "KOMPARASI",
@@ -3386,8 +3398,11 @@ class KomparasiDeviasiView(tk.Frame):
     @staticmethod
     def _parse_num_id(s):
         """Parser sort utk format Indonesia: '1.234' = 1234,
-        '(1.234)' = -1234, '-' = 0, '12,5' = 12.5, '26,97%' = 26.97."""
-        s = str(s).replace("%", "").replace("—", "").strip()
+        '(1.234)' = -1234, '-' = 0, '12,5' = 12.5, '26,97%' = 26.97.
+        v3.9.51: prefiks 'Rp ' (fmt_rp_cell — kolom Nominal) dibuang dulu
+        ('Rp 1.825' → 1825, '(Rp 1.825)' → -1825)."""
+        s = str(s).replace("%", "").replace("—", "").replace("Rp", "") \
+            .strip()
         if s in ("-", ""):
             return 0.0
         neg = s.startswith("(") and s.endswith(")")

@@ -60,6 +60,7 @@ import pandas as pd
 from .nominal_common import (
     fmt_harga_id,
     fmt_nominal_cell,
+    fmt_rp_cell,
     hitung_nominal_pairs,
 )
 from .theme import (
@@ -306,6 +307,10 @@ class NominalDeviasiView(tk.Frame):
 
     def _format_col_series(self, col: str, series):
         if col in self.NUMERIC_COLS:
+            # v3.9.51 — Nominal: Currency Rp (konsisten sel tabel); Harga &
+            # Qty Deviasi tetap fmt lama.
+            if col == "Nominal":
+                return series.map(fmt_rp_cell)
             return series.map(self._fmt_cell_num)
         return series.astype(str)
 
@@ -345,8 +350,12 @@ class NominalDeviasiView(tk.Frame):
         """Parser sort format Indonesia: '1.234' = 1234, '(1.234)' =
         -1234, '-' = 0, '12,5' = 12.5 (identik deviasi_view v3.9.6 —
         harga tampil '18.250 KG' → 18250; parser default salah utk
-        format Indonesia)."""
-        s = str(s).replace("—", "").strip()
+        format Indonesia).
+        v3.9.51: prefiks 'Rp ' dibuang DULU (fmt_rp_cell — kolom Nominal:
+        'Rp 1.825' → 1825, '(Rp 1.825)' → -1825) SEBELUM split label
+        satuan (parts[0])."""
+        s = str(s).replace("—", "").replace("Rp ", "") \
+            .replace("Rp", "").strip()
         parts = s.split()          # buang label satuan di ekor
         if parts:
             s = parts[0]
@@ -596,7 +605,10 @@ class NominalDeviasiView(tk.Frame):
                         str(row["Nama Barang"]), str(row["Resto"]),
                         str(row["Satuan"]), harga_disp,
                         self._fmt_cell_num(qty),
-                        self._fmt_cell_num(nom) if nom is not None
+                        # v3.9.51 — Nominal: Currency Rp (user: "Semua data
+                        # nominal diberi format Currency Rp") — NaN tetap
+                        # '-' (tanpa harga).
+                        fmt_rp_cell(nom) if nom is not None
                         and not pd.isna(nom) else "-",
                     )
                     tags = ["evenrow" if i % 2 == 0 else "oddrow"]
@@ -622,10 +634,10 @@ class NominalDeviasiView(tk.Frame):
                                   {"values": values, "tags": tuple(tags)}))
 
                 # baris TOTAL di ujung (jumlah qty + nominal) — minus dalam
-                # kurung konsisten dgn baris data (fmt _fmt_cell_num)
+                # kurung konsisten dgn baris data; v3.9.51 nominal → Rp.
                 values_total = (
                     "TOTAL", "", "", "", self._fmt_cell_num(total_qty),
-                    self._fmt_cell_num(total_nom),
+                    fmt_rp_cell(total_nom),
                 )
                 items.append(("", "row_total",
                               {"values": values_total,
@@ -639,11 +651,11 @@ class NominalDeviasiView(tk.Frame):
                     status += f" · {fmt_int_id(n_no_harga)} tanpa harga"
                 self.status_var_label.set(status)
                 # v3.9.42 — audit 61-b P2: chip TOTAL memakai format tabel
-                # (_fmt_cell_num = fmt_nominal_cell: 2 desimal + minus
-                # kurung) — dulu fmt_int_id (dibulatkan) → chip ≠ baris
-                # TOTAL di bawahnya utk nilai yang sama.
+                # (v3.9.51: nominal → Currency Rp; qty tetap fmt lama —
+                # dulu fmt_int_id (dibulatkan) → chip ≠ baris TOTAL di
+                # bawahnya utk nilai yang sama).
                 self._total_var.set(
-                    f"TOTAL {self._fmt_cell_num(total_nom)} "
+                    f"TOTAL {fmt_rp_cell(total_nom)} "
                     f"({self._fmt_cell_num(total_qty)} qty)")
 
         def render_done():

@@ -112,7 +112,9 @@ _VALUE_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$|^\d+(?:,\d+)?$")
 
 def _filter_value_sort_key(v: str):
     """Key tuple (numerik_dulu, angka, teks_asli) — teks non-numerik
-    masuk grup kedua (urut abjad), angka grup pertama (naik)."""
+    masuk grup kedua (urut abjad), angka grup pertama (naik).
+    v3.9.51: prefiks 'Rp ' (currency — fmt_rp_cell) dibuang dulu supaya
+    nilai nominal tetap terurut numerik di popup filter ⧩."""
     s = str(v).strip()
     if s.endswith("%"):
         s = s[:-1].strip()
@@ -121,6 +123,8 @@ def _filter_value_sort_key(v: str):
         neg, s = True, s[1:-1].strip()
     elif s.startswith("-"):
         neg, s = True, s[1:]
+    if s[:2].upper() == "RP":
+        s = s[2:].lstrip()
     if not s or not _VALUE_NUM_RE.match(s):
         return (1, 0.0, str(v))
     try:
@@ -3289,6 +3293,171 @@ def _overlay_for_tree(tree: ttk.Treeview) -> CellColorOverlay:
     return ov
 
 
+class HeadingTintOverlay:
+    """v3.9.51 — strip warna TIPIS di ATAS heading kolom tertentu
+    (user: "Header In_13 atau In_15 diberi warna beda biar aku tau itu
+    bukan kolom Stock").
+
+    ttk TIDAK mendukung background per-heading (style global saja) —
+    penanda digambar sebagai Label 6px anak tree di y=0 lebar penuh
+    kolom (padding heading 8px → teks heading & ikon corong ⧩ TIDAK
+    tertutup). SEMUA event di area strip DITERUSKAN ke tree (pola
+    forwarding CellColorOverlay v3.9.42 — kw selektif + koordinat
+    diterjemahkan) supaya klik-heading (popup filter ⧩), drag tepi
+    (resize kolom), klik-kanan (◱ kolom) & roda tetap bekerja.
+
+    Reposisi otomatis: <Configure>, wrap xscrollcommand (heading ikut
+    scroll horizontal), <ButtonRelease-1> (selesai resize kolom) +
+    refresh() eksplisit dari view (render/sort/clone) & app (zoom —
+    _refit_all_tree_columns). Kolom tersembunyi (◱ Kolom) → strip ikut
+    hilang (place_forget).
+    """
+
+    STRIP_H = 6
+
+    def __init__(self, tree: ttk.Treeview, cols: list, color: str = "#0e7490"):
+        self.tree = tree
+        self.cols = [str(c) for c in cols]
+        self.color = color
+        self._labels: dict = {}
+        self._alive = True
+        # registrasi mandiri (pola CellColorOverlay): handler zoom/refresh
+        # menemukan overlay via atribut ini tanpa perlu view menyimpan.
+        with contextlib.suppress(AttributeError, tk.TclError):
+            tree._heading_tint = self
+        tree.bind("<Configure>", lambda e: self.refresh(), add="+")
+        tree.bind("<ButtonRelease-1>", lambda e: self.refresh(), add="+")
+        tree.bind("<Destroy>", self._on_destroy, add="+")
+        self._wrap_scroll("xscrollcommand")
+        self.refresh()
+
+    def _on_destroy(self, _event=None):
+        self._alive = False
+        self._labels = {}
+
+    # -- reposisi ------------------------------------------------------------
+    def _wrap_scroll(self, opt: str):
+        """Bungkus xscrollcommand tree — heading ikut scroll horizontal
+        → strip harus ikut bergeser (pola CellColorOverlay._wrap_scroll)."""
+        try:
+            orig = str(self.tree.cget(opt))
+        except tk.TclError:
+            return
+
+        def wrap(first, last, _orig=orig):
+            if _orig:
+                with contextlib.suppress(tk.TclError):
+                    self.tree.tk.call(_orig, first, last)
+            self.refresh()
+
+        with contextlib.suppress(tk.TclError):
+            self.tree.configure(**{opt: wrap})
+
+    def _label_for(self, col: str) -> tk.Label:
+        lab = self._labels.get(col)
+        if lab is None or not self._label_ok(lab):
+            lab = tk.Label(self.tree, bg=self.color, bd=0,
+                           highlightthickness=0, takefocus=0,
+                           cursor="arrow")
+            self._bind_forward(lab)
+            self._labels[col] = lab
+        return lab
+
+    @staticmethod
+    def _label_ok(lab) -> bool:
+        try:
+            return bool(lab.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def refresh(self):
+        """Hitung ulang posisi strip dari lebar kolom + offset xview."""
+        if not self._alive:
+            return
+        tree = self.tree
+        try:
+            if not tree.winfo_exists():
+                return
+            dcols = _tree_display_columns(tree)
+        except tk.TclError:
+            return
+        x = 0
+        pos = {}
+        try:
+            for c in dcols:
+                if c == "#0":
+                    x += int(tree.column("#0", "width") or 0)
+                else:
+                    pos[str(c)] = (x, int(tree.column(c, "width") or 0))
+                    x += pos[str(c)][1]
+            content_w = x
+            frac = tree.xview()[0]
+            visible_w = tree.winfo_width()
+            offset = frac * max(0, content_w - visible_w)
+        except tk.TclError:
+            return
+        for col in self.cols:
+            lab = self._labels.get(col)
+            if col not in pos:
+                # kolom tersembunyi (displaycolumns) / tak ada → hilangkan
+                if lab is not None and self._label_ok(lab):
+                    with contextlib.suppress(tk.TclError):
+                        lab.place_forget()
+                continue
+            lab = self._label_for(col)
+            cx, cw = pos[col]
+            with contextlib.suppress(tk.TclError):
+                lab.place(x=int(cx - offset), y=0, width=max(1, cw),
+                          height=self.STRIP_H)
+
+    # -- forwarding event (pola CellColorOverlay) ---------------------------
+    def _bind_forward(self, lab: tk.Label):
+        tree = self.tree
+
+        def fwd(seq):
+            def handler(event, _seq=seq):
+                try:
+                    if _seq in ("<Button-4>", "<Button-5>"):
+                        # X11 roda: event_generate sintetis tak bisa men-set
+                        # %b → gulir LANGSUNG (pola enable_smooth_wheel).
+                        try:
+                            tree.yview_scroll(
+                                -1 if _seq == "<Button-4>" else 1, "units")
+                        except tk.TclError:
+                            return
+                        return
+                    lx, ly = lab.winfo_x(), lab.winfo_y()
+                    kw = {"x": lx + event.x, "y": ly + event.y,
+                          "warp": False}
+                    state = getattr(event, "state", 0)
+                    if isinstance(state, int):
+                        kw["state"] = state
+                    if _seq == "<MouseWheel>":
+                        d = getattr(event, "delta", None)
+                        if isinstance(d, int):
+                            kw["delta"] = d
+                    tree.event_generate(_seq, **kw)
+                except tk.TclError:
+                    pass
+            return handler
+
+        for seq in ("<Button-3>", "<ButtonRelease-1>", "<B1-Motion>",
+                    "<MouseWheel>", "<Button-4>", "<Button-5>"):
+            lab.bind(seq, fwd(seq), add="+")
+
+        def press(event):
+            try:
+                lx, ly = lab.winfo_x(), lab.winfo_y()
+                tree.event_generate(
+                    "<Button-1>", x=lx + event.x, y=ly + event.y,
+                    warp=False,
+                    state=int(getattr(event, "state", 0) or 0))
+            except tk.TclError:
+                return
+
+        lab.bind("<Button-1>", press, add="+")
+
+
 def _collect_iids(tree, parent="") -> set:
     """Kumpulkan SEMUA iid tree (parent + anak — mendukung hierarki 2
     level ala pivot). Dipakai fallback apply_cell_tag."""
@@ -3398,7 +3567,10 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
 
     if parse is None:
         def parse(s):
-            s = str(s).replace(",", "").replace("%", "").strip()
+            # v3.9.51: 'Rp ' (currency — fmt_rp_cell) ikut dibuang supaya
+            # kolom Nominal terurut numerik tanpa parser khusus per view.
+            s = str(s).replace(",", "").replace("%", "") \
+                .replace("Rp", "").replace("Rp", "").strip()
             if s in ("-", ""):
                 return 0
             if s.startswith("(") and s.endswith(")"):

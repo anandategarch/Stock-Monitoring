@@ -208,7 +208,10 @@ import pandas as pd
 
 from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
-from .nominal_common import lookup_harga_pair  # v3.9.34 — kolom Nominal
+from .nominal_common import (  # v3.9.34 — kolom Nominal; v3.9.51 — fmt_rp_cell
+    fmt_rp_cell,
+    lookup_harga_pair,
+)
 from .theme import (
     C_ACCENT,
     C_BG,
@@ -226,6 +229,7 @@ from .widgets import (
     EmptyState,
     GhostButton,
     HeaderFilterGroup,
+    HeadingTintOverlay,  # v3.9.51 — strip warna header kolom In (kiriman)
     LegendRow,
     LoadingOverlay,
     TableExpander,
@@ -450,8 +454,16 @@ class DeviasiView(tk.Frame):
         # tampilan (permintaan user); nilainya TETAP dihitung internal
         # (CEK "ACR to BOM" · Dev to BOM% · Stok Seharusnya ikut pakai).
         ("Dev to BOM%", 85, "e"),      # Deviasi / Total ACR (Loss Surplus to BOM)
-        ("Stok Seharusnya", 90, "e"),  # v3.9.27: W sheet = SO(H-1)+IN−BK−OUT
-        ("CEK", 120, "w"),
+        # v3.9.51 — "Stok Seharusnya" (W sheet, v3.9.27) DIHAPUS dari
+        # TAMPILAN (user: "Stock seharusnya hide pada deviasi gr dan
+        # deviasi pcs ganti dengan Deviasi bulan lalu sama seperti di
+        # tab laporan deviasi secara kuantiti") — rumus W tetap dihitung
+        # INTERNAL utk kondisi CEK-3 'Hitung Manual' (stok =
+        # so_m1+in_h−bk_h−out_h, blok CEK di bawah).
+        ("Dev. Bulan Lalu", 95, "e"),  # Σ 3.DEVIASI Tanggal negatif (rekap lalu)
+        # v3.9.51 — CEK 120 → 210: label anomali + segmen analisa deviasi
+        # lalu→kini (dipisah ' · ').
+        ("CEK", 210, "w"),
     ]
 
     # v3.9.18 — kolom yang di-HIGHLIGHT latar lembut (permintaan user:
@@ -476,6 +488,30 @@ class DeviasiView(tk.Frame):
     _GRP_TAGS = ("grp0", "grp1", "grp_head")
 
     CEK_THRESHOLD = 1.3
+
+    # v3.9.51 — kolom In (kiriman — BUKAN kolom Stock/SO): header diberi
+    # strip warna (user: "Header In_13 atau In 15 (Jika H = 14 contoh
+    # nya) diberi warna beda biar aku tau itu bukan kolom Stock") —
+    # HeadingTintOverlay (widgets) karena ttk tak punya bg per-heading.
+    IN_COLS = ("In_H-1", "In_H", "In_H+1")
+    IN_HEADER_COLOR = "#0e7490"   # teal-700 — beda dari latar heading & amber Deviasi/SO_H
+
+    # v3.9.51 — ANALISA DEVIASI LALU→KINI di CEK (label = kata user;
+    # klasifikasi mirror mode 📈 Analisa tab 📋 Laporan Deviasi).
+    ANALISA_NAIK_TXT = "Peningkatan Tertinggi"
+    ANALISA_TURUN_TXT = "Penurunan Tertinggi"
+    ANALISA_ARAH_TXT = "Berubah Arah"
+
+    # Toleransi 'Stabil' analisa lalu→kini (mirror TOL_ABS/TOL_REL
+    # komparasi — selisih ≤ ini tak diberi label analisa).
+    _LALU_TOL_ABS = 1.0
+    _LALU_TOL_REL = 0.0001
+
+    # v3.9.51 — 7 label anomali check kanonik (urutan np.select CEK):
+    # pembanding hitungan 'CEK n' footer & pembeda dari segmen analisa.
+    _CEK_CHECK_LABELS = (
+        "Promix 04", "RI Balancing", "Kosong/Non Aktif", "Beda Tanggal",
+        "Hitung Manual", "Turun Drastis", "ACR to BOM")
 
     def __init__(self, parent, satuan_mode: str = "GR",
                  go_to_proses: Callable | None = None,
@@ -525,6 +561,9 @@ class DeviasiView(tk.Frame):
         self.store = followup_store       # shared FollowUpStore (v3.2)
         self._fp_map: dict[str, str] = {}     # iid → fingerprint
         self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw (v3.2)
+        # v3.9.51 — iid → rank barang TERFORMAT (merge-vertikal kolom Rank;
+        # dipasang ulang pasca-sort/clone mengikuti urutan visual).
+        self._rank_map: dict[str, str] = {}
         # v3.9.2: minus merah PER CELL (Tk 9 `tag cell`) — fallback Tk 8:
         # tag per baris (perilaku lama)
         self._cell_tags = CELL_TAGS_SUPPORTED
@@ -762,6 +801,13 @@ class DeviasiView(tk.Frame):
             self.tree,
             open_filter=lambda c: self.header_filters.open_popup(c))
 
+        # v3.9.51 — strip warna header kolom In (kiriman — BUKAN Stock):
+        # In_H-1 / In_H / In_H+1 (heading dinamis In_13/In_14/In_15 saat
+        # H=14) — ttk tak punya background per-heading → overlay strip
+        # tipis 6px di atas heading (teks & corong ⧩ tak tertutup).
+        self._in_tint = HeadingTintOverlay(
+            self.tree, list(self.IN_COLS), self.IN_HEADER_COLOR)
+
         # Legend CEK
         legend = LegendRow(self.content, [
             ("Promix 04", "#0e7490"),     # v3.9.19 — kondisi ke-0
@@ -774,6 +820,11 @@ class DeviasiView(tk.Frame):
             ("negatif (merah)", "#dc2626"),
             # v3.9.18 — highlight kolom Deviasi & SO_H
             ("kolom Deviasi/SO_H", self.HIGHLIGHT_BG),
+            # v3.9.51 — strip header kolom In (kiriman — bukan Stock)
+            ("header kolom In (kiriman)", self.IN_HEADER_COLOR),
+            # v3.9.51 — segmen analisa deviasi lalu-kini di teks CEK
+            # (label legend TANPA panah '→' — cek v3.9.8 static-label)
+            ("analisa dev lalu-kini (teks CEK)", "#475569"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
@@ -1006,14 +1057,24 @@ class DeviasiView(tk.Frame):
         return self._format_col_series(col, pivot_df[col]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
-        """Format kolom → string tampilan (identik render tabel)."""
+        """Format kolom → string tampilan (identik render tabel).
+        v3.9.51: Nominal → Currency Rp; Dev. Bulan Lalu → format khusus
+        (NaN vs 0 dibedakan); CEK → LABEL UTAMA (sebelum ' · ') supaya
+        popup ⧩ & APPLY tetap mengelompokkan label anomali check."""
         if col == "Dev to BOM%":
             return series.map(self._fmt_pct)
         if col == "Nominal":
             # v3.9.34 — NaN (tanpa harga) → 0 → '-' identik sel tabel
             # (NaN mentah akan tampil string kosong di popup ⧩ —
-            # inkonsisten dgn tabel).
-            return series.fillna(0).map(self._fmt_num)
+            # inkonsisten dgn tabel). v3.9.51 — format Currency Rp.
+            return series.fillna(0).map(fmt_rp_cell)
+        if col == "Dev. Bulan Lalu":
+            return series.map(self._fmt_dev_lalu)
+        if col == "CEK":
+            # v3.9.51 — nilai popup = label utama; analisa lalu→kini
+            # hanyalah segmen teks (mis. 'Turun Drastis · Penurunan
+            # Tertinggi -25,3%' → entri 'Turun Drastis').
+            return series.astype(str).map(lambda s: s.split(" \u00b7 ")[0])
         return series.map(self._fmt_num)
 
     def _on_col_filter(self, col: str, selected):
@@ -1516,6 +1577,26 @@ class DeviasiView(tk.Frame):
         if _saldo_only_rows.any():
             sistem = np.where(_saldo_only_rows, _sistem_t1, sistem)
 
+        # v3.9.51 — DEVIASI BULAN LALU (kuantiti) per pasangan = Σ baris
+        # 3.DEVIASI ber-Tanggal NEGATIF (rekap bulan lalu — tanggal
+        # dinegasikan 25..-31; user: "ganti dengan Deviasi bulan lalu sama
+        # seperti di tab laporan deviasi secara kuantiti"). NaN = pasangan
+        # tanpa baris rekap bulan lalu (tampil '-'); dipakai juga ANALISA
+        # CEK lalu→kini. tnum sudah ter-cache (identitas df dijaga D-01);
+        # key pasangan pola _pk_pivot (barang\x1fresto — satuan pasangan
+        # konstan, GR/PCS dipisah di _prepare_rows per tab).
+        _lmask = (df["JENIS"].astype(str) == "3.DEVIASI") & (tnum < 0)
+        if bool(_lmask.any()):
+            _ldf = df[_lmask]
+            _lkey = (_ldf["Nama Barang"].astype(str) + "\x1f"
+                     + _ldf["NAMA RESTO"].astype(str))
+            _lval = pd.to_numeric(_ldf["NILAI"], errors="coerce").fillna(0)
+            _lmap = _lval.groupby(_lkey).sum()
+            dev_lalu = (_pk_pivot.map(_lmap)
+                        .to_numpy(dtype="float64"))
+        else:
+            dev_lalu = np.full(n, np.nan, dtype="float64")
+
         deviasi = so_h - sistem
 
         # --- v3.9.6: KATEGORI DEVIASI (mirror sheet DEVIASI GR/PCS asli) ---
@@ -1552,15 +1633,13 @@ class DeviasiView(tk.Frame):
         acr = total_acr / h_safe                    # rata-rata penjualan harian
         with np.errstate(divide="ignore", invalid="ignore"):
             dev_to_bom = np.where(total_acr > 0, deviasi / total_acr, 0.0)
-        # v3.9.27 — STOK SEHARUSNYA = W sheet 'Data Base Cek Deviasi':
-        # W = F + I − J − S = SO(H-1) + IN_H − KIRIMAN KELUAR_H −
-        # PENJUALAN_H (dulu SO(H-1) − ACR-rata2 — klaim "terverifikasi"
-        # v3.9.6 keliru: hanya kebetulan sama saat IN=0, KIRIMAN=0 &
-        # penjualan-H = rata2; data real 794/1.405 baris beda, mis.
-        # MLGPAR/ADONAN GORENG: sheet 72.589,5 vs app 83.098,5).
-        # `stok` ( kondisi 3 Hitung Manual) = nilai YANG SAMA — dihitung
-        # di blok CEK di bawah (so_m1 + in_h − bk_h − out_h).
-        stok_seharusnya = so_m1 + in_h - bk_h - out_h
+        # v3.9.27 — STOK SEHARUSNYA = W sheet 'Data Base Cek Deviasi'
+        # (SO(H-1) + IN_H − KIRIMAN KELUAR_H − PENJUALAN_H — bukti data
+        # real: MLGPAR/ADONAN GORENG sheet 72.589,5 vs rumus lama
+        # 83.098,5). v3.9.51: kolom TAMPILAN 'Stok Seharusnya' diganti
+        # 'Dev. Bulan Lalu' (lihat COLUMNS); nilai W tetap hidup sebagai
+        # variabel `stok` di blok CEK kondisi-3 'Hitung Manual' di bawah
+        # — rumus persis sama (so_m1 + in_h − bk_h − out_h).
 
         # --- CEK vektorisasi (np.select — urutan kondisi PERSIS versi lama) ---
         barang_s = pivot["Nama Barang"].astype(str)
@@ -1678,6 +1757,52 @@ class DeviasiView(tk.Frame):
             default="",
         )
 
+        # v3.9.51 — ANALISA DEVIASI LALU→KINI di teks CEK (user: "kolom
+        # Cek tambahkan analisa Penurunan tertinggi, peningkatan tertinggi
+        # atau berubah arah seperti pada tab laporan deviasi tab analisa.
+        # Cuman tidak hanya penurunan tinggi atau peningkatan tinggi tapi
+        # berapa persen penurunann atau peningkatan tersebut. Tapi hitung
+        # penurunan dan peningkatan kuantiti deviasi di absolute dulu
+        # ya."). Pembanding = |Deviasi(H)| vs |Σ Dev bulan lalu| —
+        # ABSOLUT DULU (mirror v3.9.16 komparasi); klasifikasi mirror
+        # ANALISA komparasi: tanda berlawanan → Berubah Arah; |selisih| ≤
+        # toleransi → Stabil (TANPA label — CEK tetap fokus anomali);
+        # selisih > 0 → Peningkatan Tertinggi +p%, < 0 → Penurunan
+        # Tertinggi -p% (basis |lalu|; |lalu|=0 → label tanpa persen —
+        # pembagian tak terdefinisi). Pasangan tanpa baris rekap lalu →
+        # tanpa analisa. Segmen ditambahkan ke teks CEK dengan pemisah
+        # ' · ' (label anomali check tetap di depan).
+        _has_lalu = ~np.isnan(dev_lalu)
+        _a_now = np.abs(deviasi)
+        _a_lalu = np.abs(dev_lalu)
+        _sel_l = _a_now - _a_lalu
+        _tol_l = self._LALU_TOL_ABS + self._LALU_TOL_REL * _a_lalu
+        _flip_l = _has_lalu & ((deviasi * dev_lalu) < 0.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            _pct_l = np.where(_a_lalu > 0, _sel_l / _a_lalu, np.nan)
+        ana = []
+        for i in range(n):
+            if not _has_lalu[i]:
+                ana.append("")
+            elif _flip_l[i]:
+                ana.append(self.ANALISA_ARAH_TXT)
+            elif abs(_sel_l[i]) <= _tol_l[i]:
+                ana.append("")                    # Stabil — tanpa label
+            else:
+                _lab = (self.ANALISA_NAIK_TXT if _sel_l[i] > 0
+                        else self.ANALISA_TURUN_TXT)
+                _p = _pct_l[i]
+                if not np.isnan(_p):
+                    _sp = (f"{abs(_p) * 100:,.1f}"
+                           .replace(",", "\u00a0").replace(".", ",")
+                           .replace("\u00a0", "."))
+                    _lab = f"{_lab} {'+' if _p > 0 else '-'}{_sp}%"
+                ana.append(_lab)
+        if any(ana):
+            cek = np.array(
+                [f"{c} \u00b7 {a}" if (c and a) else (c or a)
+                 for c, a in zip(cek, ana)], dtype=object)
+
         result = pd.DataFrame({
             "Resto": pivot["NAMA RESTO"].astype(str).to_numpy(),
             "Nama Barang": barang_s.to_numpy(),
@@ -1703,7 +1828,7 @@ class DeviasiView(tk.Frame):
             "ACR": acr,
             "Total ACR": total_acr,
             "Dev to BOM%": dev_to_bom,
-            "Stok Seharusnya": stok_seharusnya,
+            "Dev. Bulan Lalu": dev_lalu,   # v3.9.51 — NaN = tanpa rekap lalu
         })
 
         # v3.9.34 — kolom Nominal = Harga 41.09 (dinormalkan ke satuan
@@ -1752,8 +1877,11 @@ class DeviasiView(tk.Frame):
         if result.empty:
             return result
 
-        result["Rank"] = result.groupby("Nama Barang")["_ABS"].rank(
-            method="min", ascending=False).astype("Int64")
+        # v3.9.51 — Rank lama (per-BARIS dalam kelompok barang — 1..k per
+        # resto) DIHAPUS dari pivot: kini RANK PER BARANG (Σ|Deviasi|
+        # kelompok) dihitung di _prepare_rows atas frame TERFILTER (benar
+        # per tab GR/PCS + renumber mengikuti filter aktif) dan tampil
+        # MERGE-VERTIKAL per kelompok (pola tab 🛒 Rincian PO).
         # Max Deviasi = max |Deviasi| per barang (semua resto — terverifikasi
         # dari sheet DEVIASI GR file asli: kolom == groupby-max ABS Deviasi)
         result["Max Deviasi"] = result.groupby("Nama Barang")["_ABS"] \
@@ -1926,11 +2054,35 @@ class DeviasiView(tk.Frame):
             .drop(columns=["_abs_dev"])
         )
 
+        # v3.9.51 — RANK PER BARANG utk MERGE-VERTIKAL (user: "kolom Rank
+        # di tab deviasi pcs dan deviasi gr bisa gak dimerger vertical di
+        # kolom nama barang. Merger vertikal sama kaya di tab rincian
+        # PO"): nilai = rank barang berdasar Σ|Deviasi| seluruh pasangan
+        # resto yang TAMPIL (frame TERFILTER — renumber per tab/filter,
+        # benar per GR/PCS), SATU nilai konstanta per kelompok; baris
+        # lanjutan digelapkan & dipasang ulang mengikuti urutan visual
+        # (_reapply_rank_merge). Dulu: rank per-BARIS dalam kelompok
+        # (1..k per resto — pasca-merge nilainya tak terpakai).
+        _tot_barang = (filtered["Deviasi"].abs()
+                       .groupby(filtered["Nama Barang"].astype(str)).sum())
+        _rank_barang = _tot_barang.rank(method="min", ascending=False)
+        filtered = filtered.assign(
+            Rank=filtered["Nama Barang"].astype(str).map(_rank_barang))
+        # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
+        # load_data): guard supaya _prepare_rows tetap jalan.
+        if "Dev. Bulan Lalu" not in filtered.columns:
+            filtered = filtered.assign(**{"Dev. Bulan Lalu": np.nan})
+
         col_ids = [c[0] for c in self.COLUMNS]
         n = len(filtered)
         total_dev = float(filtered["Deviasi"].abs().sum())
         cek_series = filtered["CEK"].astype(str).str.strip()
-        cek_count = int((cek_series != "").sum())
+        # v3.9.51 — hitung baris ber-LABEL ANOMALI CHECK saja (7 label
+        # tetap): baris yang teks CEK-nya HANYA segmen analisa lalu-kini
+        # ('Berubah Arah' / 'Penurunan Tertinggi -25,0%' / dst) bukan
+        # anomali check — jangan menggelembungkan angka 'CEK n' footer.
+        _cek_primary61 = cek_series.str.split(" \u00b7 ").str[0]
+        cek_count = int(_cek_primary61.isin(self._CEK_CHECK_LABELS).sum())
         # v3.9.49 — SEKAT VISUAL ANTAR KELOMPOK BARANG: urutan render sudah
         # di-sort by (Nama Barang, |Dev| desc) → kelompok barang KONTIGU.
         # Band index = nomor kelompok berjalan (beralih tiap kali Nama
@@ -1950,6 +2102,7 @@ class DeviasiView(tk.Frame):
         items = []
         fp_map = {}
         row_snaps = {}
+        rank_map = {}    # v3.9.51 — iid → rank barang terformat (merge-vertikal)
         neg_cells = []    # v3.9.2 — per-cell minus (kolom Deviasi)
         zero_cells = []   # v3.9.2 — per-cell deviasi == 0
         hl_cells = []     # v3.9.18 — highlight kolom Deviasi & SO_H
@@ -1968,10 +2121,16 @@ class DeviasiView(tk.Frame):
         for c in ("SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
                   "SO_H+1", "In_H+1", "SO_H+2",
                   "Sistem", "Deviasi", "Nominal",
-                  "Dev to BOM%", "Stok Seharusnya"):
+                  "Dev to BOM%"):
             cols_np[c] = pd.to_numeric(
                 filtered[c], errors="coerce").fillna(0).to_numpy(
                 dtype="float64")
+        # v3.9.51 — Dev. Bulan Lalu: NaN DIPERTAHANKAN (format khusus
+        # _fmt_dev_lalu — '-' = tanpa rekap lalu vs '0' = ada, bernilai 0;
+        # fillna(0) akan menyamarkan keduanya).
+        cols_np["Dev. Bulan Lalu"] = pd.to_numeric(
+            filtered["Dev. Bulan Lalu"], errors="coerce").to_numpy(
+            dtype="float64")
         cols_np["Rank"] = filtered["Rank"].to_numpy()
         for i in range(n):
             barang = str(cols_np["Nama Barang"][i])
@@ -1982,9 +2141,20 @@ class DeviasiView(tk.Frame):
                     continue
                 val = cols_np[col_id][i] if col_id in cols_np else 0
                 if col_id == "Rank":
-                    values[j] = self._fmt_int(val)
+                    # v3.9.51 — MERGE-VERTIKAL (pola Rincian PO): nilai
+                    # rank HANYA di baris pertama kelompok Nama Barang;
+                    # baris lanjutan kosong (dipasang ulang per urutan
+                    # visual oleh _reapply_rank_merge pasca-sort/clone).
+                    values[j] = (self._fmt_int(val)
+                                 if bool(grp_start[i]) else "")
+                elif col_id == "Dev. Bulan Lalu":
+                    values[j] = self._fmt_dev_lalu(val)
                 elif col_id == "Dev to BOM%":
                     values[j] = self._fmt_pct(val)
+                elif col_id == "Nominal":
+                    # v3.9.51 — Currency Rp (user: "Semua data nominal
+                    # diberi format Currency Rp") — NaN/0 tetap '-'.
+                    values[j] = fmt_rp_cell(val)
                 else:
                     values[j] = self._fmt_num(val)
 
@@ -2002,7 +2172,7 @@ class DeviasiView(tk.Frame):
                 "so": float(cols_np["SO_H"][i]),
                 "sistem": float(cols_np["Sistem"][i]),
                 "deviasi": float(cols_np["Deviasi"][i]),
-                "cek": str(cols_np["CEK"][i]),
+                "cek": (str(cols_np["CEK"][i]).split(" \u00b7 ")[0]),
                 "so_m2": float(cols_np["SO_H-2"][i]),
                 "so_m1": float(cols_np["SO_H-1"][i]),
                 "so_p1": float(cols_np["SO_H+1"][i]),
@@ -2014,6 +2184,9 @@ class DeviasiView(tk.Frame):
             values[0] = CHECK_ON if checked else CHECK_OFF
             fp_map[f"row_{i}"] = fp
             row_snaps[f"row_{i}"] = snap
+            # v3.9.51 — rank mentah per iid: reapply merge pasca-sort butuh
+            # nilai per-baris (head bergeser mengikuti urutan visual baru).
+            rank_map[f"row_{i}"] = self._fmt_int(cols_np["Rank"][i])
 
             tags = []
             deviasi = cols_np["Deviasi"][i]
@@ -2047,8 +2220,12 @@ class DeviasiView(tk.Frame):
             if self._cell_tags:
                 if cols_np["Dev to BOM%"][i] < 0:
                     neg_cells.append((f"row_{i}", "Dev to BOM%"))
-                if cols_np["Stok Seharusnya"][i] < 0:
-                    neg_cells.append((f"row_{i}", "Stok Seharusnya"))
+                # v3.9.51 — Stok Seharusnya keluar tampilan; minus merah
+                # kini ke kolom penggantinya (Dev. Bulan Lalu bisa negatif).
+                _dl = cols_np["Dev. Bulan Lalu"][i]
+                if not (isinstance(_dl, float) and np.isnan(_dl)) \
+                        and _dl < 0:
+                    neg_cells.append((f"row_{i}", "Dev. Bulan Lalu"))
             # v3.9.18 — highlight latar lembut kolom Deviasi & SO_H
             # (permintaan user: "highlight kolom deviasi dan kolom SO H")
             # utk SEMUA baris; dikumpulkan utk tag cell (Tk 9 — terukur
@@ -2057,7 +2234,10 @@ class DeviasiView(tk.Frame):
             if self._cell_tags:
                 for hl_col in self.HIGHLIGHT_COLS:
                     hl_cells.append((f"row_{i}", hl_col))
-            cek_val = cek_series.iloc[i]
+            # v3.9.51 — kecocokan tag warna pada LABEL UTAMA teks CEK
+            # (segmen analisa lalu→kini setelah ' · ' tak memengaruhi
+            # warna — label anomali check tetap pewarna).
+            cek_val = cek_series.iloc[i].split(" \u00b7 ")[0]
             if cek_val == "Promix 04":           # v3.9.19 — kondisi ke-0
                 tags.append("cek_promix")
             elif cek_val == "RI Balancing":      # v3.9.23 (poin 6) — ke-1
@@ -2101,6 +2281,7 @@ class DeviasiView(tk.Frame):
                            f"(pilih '{KATEGORI_BLANK_LABEL}')")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
+                "rank_map": rank_map,
                 "neg_cells": neg_cells, "zero_cells": zero_cells,
                 "hl_cells": hl_cells}
 
@@ -2117,6 +2298,8 @@ class DeviasiView(tk.Frame):
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
+        # v3.9.51 — rank per iid utk reapply merge-vertikal pasca-sort
+        self._rank_map = payload.get("rank_map", {})
         # v3.9.2 — cell minus per-cell (dipasang ulang juga setelah sort/clone)
         self._neg_cells = payload.get("neg_cells", [])
         self._zero_cells = payload.get("zero_cells", [])
@@ -2150,9 +2333,16 @@ class DeviasiView(tk.Frame):
         filter-clone: tag per-cell (minus/nol/highlight) + BANDING
         kelompok barang (sekat visual). Satu pintu supaya semua jalur
         (render_done · _sort_by · on_after_filter clone · on_render_done
-        clone) konsisten."""
+        clone) konsisten.
+        v3.9.51 — + merge-vertikal kolom Rank + reposisi strip header
+        kolom In (HeadingTintOverlay)."""
         self._reapply_cell_tags(tree)
         self._reapply_group_bands(tree)
+        self._reapply_rank_merge(tree)
+        _tint = getattr(tree, "_heading_tint", None)
+        if _tint is not None and getattr(_tint, "_alive", False):
+            with contextlib.suppress(tk.TclError):
+                _tint.refresh()
 
     def _reapply_group_bands(self, tree):
         """v3.9.49 — pasang ulang tag banding KELOMPOK Nama Barang
@@ -2212,6 +2402,45 @@ class DeviasiView(tk.Frame):
                 _ov._invalidate_render_cache()
                 _ov._schedule()
 
+    def _reapply_rank_merge(self, tree):
+        """v3.9.51 — pasang ulang MERGE-VERTIKAL kolom Rank (user:
+        "Merger vertikal sama kaya di tab rincian PO"): nilai rank barang
+        (konstanta kelompok, _rank_map per iid) tampil HANYA di baris
+        PERTAMA tiap kelompok Nama Barang mengikuti URUTAN VISUAL tree
+        (sort kolom lain / filter clone mengubah urutan → head dihitung
+        ulang dari adjacency; nilai per iid TAK HILANG — head baru tinggal
+        mengambil dari _rank_map). Idempoten & O(n)."""
+        try:
+            children = list(tree.get_children(""))
+            if not children:
+                return
+            col_ids = list(tree["columns"])
+            try:
+                r_idx = col_ids.index("Rank")
+                b_idx = col_ids.index("Nama Barang")
+            except ValueError:
+                return
+            prev = None
+            for k in children:
+                try:
+                    vals = list(tree.item(k, "values") or [])
+                except tk.TclError:
+                    continue
+                if r_idx >= len(vals) or b_idx >= len(vals):
+                    continue
+                barang = str(vals[b_idx])
+                is_head = barang != prev
+                prev = barang
+                want = self._rank_map.get(str(k), "") if is_head else ""
+                if str(vals[r_idx]) != want:
+                    vals[r_idx] = want
+                    try:
+                        tree.item(k, values=vals)
+                    except tk.TclError:
+                        continue
+        except tk.TclError:
+            return
+
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
         (tabel utama / clone ⛶). Sort = delete+reinsert → tag cell hilang
@@ -2258,6 +2487,12 @@ class DeviasiView(tk.Frame):
         # generasi render saat dibuka (guard handler + penutupan saat
         # re-render — lihat _close_stale_clones).
         self._register_clone(win, new_tree)
+        # v3.9.51 — strip header kolom In jalan juga di clone ⛶ (overlay
+        # milik tree clone; label anak tree → mati otomatis saat window
+        # clone ditutup).
+        with contextlib.suppress(tk.TclError):
+            HeadingTintOverlay(new_tree, list(self.IN_COLS),
+                               self.IN_HEADER_COLOR)
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
@@ -2381,8 +2616,11 @@ class DeviasiView(tk.Frame):
         """v3.9.6: parser sort format Indonesia: '1.234' = 1234,
         '(1.234)' = -1234, '-' = 0, '12,5' = 12.5, '26,97%' = 26.97.
         (Parser default widgets menganggap '1.234' = 1.234 dan '(5,00)%'
-        = -500 — salah utk format Indonesia; identik fix komparasi v3.9.3.)"""
-        s = str(s).replace("%", "").replace("—", "").strip()
+        = -500 — salah utk format Indonesia; identik fix komparasi v3.9.3.)
+        v3.9.51: prefiks 'Rp ' (fmt_rp_cell — kolom Nominal) dibuang dulu
+        ('Rp 1.825' → 1825, '(Rp 1.825)' → -1825)."""
+        s = str(s).replace("%", "").replace("—", "").replace("Rp", "") \
+            .strip()
         if s in ("-", ""):
             return 0.0
         neg = s.startswith("(") and s.endswith(")")
@@ -2413,7 +2651,7 @@ class DeviasiView(tk.Frame):
         numeric_like = col in (
             "SO_H-2", "SO_H-1", "In_H-1", "SO_H", "In_H",
             "SO_H+1", "In_H+1", "SO_H+2", "Sistem", "Deviasi", "Rank",
-            "Nominal", "Dev to BOM%", "Stok Seharusnya")
+            "Nominal", "Dev to BOM%", "Dev. Bulan Lalu")
         parse = self._parse_num_id if numeric_like else None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
         # v3.9.49 — banding kelompok ikut dipasang ulang (urutan visual
@@ -2514,6 +2752,26 @@ class DeviasiView(tk.Frame):
             return str(int(val))
         except (TypeError, ValueError):
             return str(val)
+
+    @staticmethod
+    def _fmt_dev_lalu(val) -> str:
+        """v3.9.51 — Dev. Bulan Lalu: NaN (tanpa rekap bulan lalu) → '-';
+        0 → '0' (ADA data bernilai nol — dibedakan dari tanpa data);
+        lainnya format Indonesia (minus dalam kurung)."""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "-"
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return str(val)
+        if v == 0:
+            return "0"
+        if v == int(v):
+            s = fmt_int_id(v)
+        else:
+            s = f"{v:,.1f}".replace(",", "\u00a0").replace(
+                ".", ",").replace("\u00a0", ".")
+        return f"({s[1:]})" if v < 0 else s
 
     @staticmethod
     def _fmt_pct(val) -> str:

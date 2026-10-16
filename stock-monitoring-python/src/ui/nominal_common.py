@@ -127,6 +127,31 @@ def fmt_nominal_cell(val) -> str:
     return f"({s})" if neg else s
 
 
+def fmt_rp_cell(val) -> str:
+    """v3.9.51 — CURRENCY RUPIAH utk kolom nominal (user: "Semua data
+    nominal diberi format Currency Rp"): 'Rp 1.825' / 'Rp 1.825,50' /
+    negatif '(Rp 1.825)'; None/NaN/0 → '-' (konvensi sel nominal kosong
+    — konsisten fmt_nominal_cell supaya 0=tanpa-harga & NaN tetap netral
+    secara visual). Dipakai kolom Nominal tab 📦/🧩 Deviasi, mode ⚖
+    Komparasi, mode 💰 Nominal (H), tab 🧮 Nominal Deviasi + popup-nya."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "-"
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return str(val)
+    if v == 0:
+        return "-"
+    neg = v < 0
+    av = abs(v)
+    if av == int(av):
+        s = f"{av:,.0f}".replace(",", ".")
+    else:
+        s = f"{av:,.2f}".replace(",", "X").replace(".", ",") \
+            .replace("X", ".")
+    return f"(Rp {s})" if neg else f"Rp {s}"
+
+
 # ---------------------------------------------------------------------------
 # LOOKUP HARGA PER PASANGAN (barang, satuan-rekap)
 # ---------------------------------------------------------------------------

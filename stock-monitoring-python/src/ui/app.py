@@ -189,7 +189,38 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.50"  # v3.9.50 — DEEP AUDIT 4-AGENT (3-a..3-d): fix zoom kolom tabel + round-trip jendela + filter '-' 5c + precedence berjalan + kontras cek_manual
+APP_VERSION = "3.9.51"  # v3.9.51 — ANALISA DEVIASI LALU→KINI di CEK + Dev. Bulan Lalu (ganti Stok Seharusnya) + Rank merge-vertikal + strip header kolom In + Currency Rp semua nominal + hapus kolom Selisih (Komparasi)
+# v3.9.51 — 5 PERMINTAAN USER (tab 📦 Deviasi GR / 🧩 PCS + Laporan):
+# (1) ANALISA di kolom CEK (user: "kolom Cek tambahkan analisa Penurunan
+#     tertinggi, peningkatan tertinggi atau berubah arah seperti pada
+#     tab laporan deviasi tab analisa. Cuman tidak hanya penurunan tinggi
+#     atau peningkatan tinggi tapi berapa persen ... hitung ... di
+#     absolute dulu"): per pasangan, |Deviasi(H)| vs |Σ Dev bulan lalu|
+#     (3.DEVIASI Tanggal NEGATIF — rekap lalu 25..-31); tanda berlawanan
+#     → 'Berubah Arah'; selisih absolut > toleransi → 'Peningkatan/
+#     Penurunan Tertinggi ±p%' (basis |lalu|; |lalu|=0 → tanpa persen);
+#     Stabil → tanpa label. Segmen ditambah ke teks CEK setelah ' · ';
+#     tag warna & filter ⧩ & snapshot follow-up memakai LABEL UTAMA
+#     (fingerprint ✓ lama tetap cocok).
+# (2) KOLOM RANK MERGE-VERTIKAL per kelompok Nama Barang (pola tab 🛒
+#     Rincian PO): rank kini PER BARANG (Σ|Deviasi| kelompok, frame
+#     terfilter — renumber per tab/filter) ditampilkan sekali di baris
+#     pertama kelompok; baris lanjutan kosong & dipasang ulang mengikuti
+#     urutan visual pasca-sort/clone (_reapply_rank_merge).
+# (3) KOLOM 'Stok Seharusnya' DIHAPUS dari tampilan GR/PCS → diganti
+#     'Dev. Bulan Lalu' (kuantiti, Σ 3.DEVIASI tanggal negatif; NaN →
+#     '-' tanpa rekap lalu, 0 → '0'); rumus W tetap internal utk CEK
+#     'Hitung Manual'.
+# (4) HEADER kolom In (In_H-1/In_H/In_H+1 — dinamis In_13/In_14/In_15
+#     saat H=14) diberi STRIP WARNA TEAL (HeadingTintOverlay widgets —
+#     ttk tak punya bg per-heading; event diteruskan supaya ⧩/resize/
+#     roda tetap bekerja; ikut zoom via _refit_all_tree_columns).
+# (5) SEMUA DATA NOMINAL → CURRENCY 'Rp' (fmt_rp_cell nominal_common):
+#     kolom Nominal 📦/🧩, mode ⚖ Komparasi, mode 💰 Nominal (H) + baris
+#     TOTAL/chip, tab 🧮 Nominal Deviasi + popup + footer; parser sort
+#     & popup ⧩ membuang prefiks 'Rp'. KOLOM 'Selisih' mode ⚖ Komparasi
+#     DIHAPUS dari tabel (user: "hapus juga kolom selish pada tab
+#     laporan deviasi") — nilai internal tetap (Status/analisa/snapshot).
 # v3.9.50 — DEEP AUDIT SEMUA FITUR BARU (user: "Deep audit semua
 # fitur baru dan fix sebar agent" — 4 agent paralel: 3-a zoom/DPI,
 # 3-b pipeline kategori, 3-c UI filter/banding, 3-d regresi+E2E;
@@ -1704,7 +1735,9 @@ class StockMonitorApp:
         deterministik dari konten (tanpa drift pembulatan rasio ×multi-
         langkah), idempoten, dan konsisten dgn apa yang auto-fit render
         data berikutnya akan hasilkan. Tree kosong hanya mengukur heading
-        (murah). Popup yang sedang TERBUKA ikut (janji 'zoom seluruh UI')."""
+        (murah). Popup yang sedang TERBUKA ikut (janji 'zoom seluruh UI').
+        v3.9.51 — strip warna header kolom In (HeadingTintOverlay) ikut
+        di-reposisi (lebar kolom berubah pasca auto-fit)."""
         def _walk(_w):
             try:
                 _kids = _w.winfo_children()
@@ -1715,6 +1748,11 @@ class StockMonitorApp:
             if isinstance(_w, ttk.Treeview):
                 with contextlib.suppress(Exception):
                     auto_fit_columns(_w)
+                # v3.9.51 — reposisi strip header kolom In (bila ada)
+                _tint = getattr(_w, "_heading_tint", None)
+                if _tint is not None and getattr(_tint, "_alive", False):
+                    with contextlib.suppress(Exception):
+                        _tint.refresh()
         with contextlib.suppress(Exception):
             _walk(self.root)
 
