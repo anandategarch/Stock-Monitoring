@@ -383,11 +383,12 @@ class PivotTableView(tk.Frame):
                 df = df[kategori_blank_mask(df["KATEGORI"])]
             elif kategori_filter_mask(df["KATEGORI"], kategori) is not None:
                 # v3.9.49 — entri GABUNGAN default (kategori Rekap
-                # Mentah): SEMUA nilai gabungan + passthrough blank
-                # (kebijakan v3.9.45 (a)).
-                _mmask = kategori_filter_mask(df["KATEGORI"], kategori)
-                _blank = kategori_blank_mask(df["KATEGORI"])
-                df = df[_mmask | _blank]
+                # Mentah). v3.9.53 — kini STRICT (hanya nilai gabungan;
+                # passthrough blank DIHAPUS — user: "kok ada nama barang
+                # yang bukan kategori COM Deviasi + Packaging Deviasi
+                # ..."; kelas 100383 = kategori rekap v3.9.49 + entry
+                # '(Tanpa Kategori)' tetap terjangkau).
+                df = df[kategori_filter_mask(df["KATEGORI"], kategori)]
             elif kategori_passthrough(kategori):
                 _blank = kategori_blank_mask(df["KATEGORI"])
                 df = df[(df["KATEGORI"].astype(str) == kategori)
@@ -664,12 +665,12 @@ class PivotTableView(tk.Frame):
             elif kategori_filter_mask(df["KATEGORI"],
                                       st["kategori"]) is not None:
                 # v3.9.49 — entri GABUNGAN default (kategori Rekap
-                # Mentah): SEMUA nilai gabungan + passthrough blank
-                # (kebijakan v3.9.45 (a)).
-                _mmask = kategori_filter_mask(
-                    df["KATEGORI"], st["kategori"])
-                _blank = kategori_blank_mask(df["KATEGORI"])
-                df = df[_mmask | _blank]
+                # Mentah). v3.9.53 — kini STRICT (hanya nilai gabungan;
+                # passthrough blank DIHAPUS — mirror titik _col_values
+                # di atas; kelas tanpa kategori = entry
+                # '(Tanpa Kategori)').
+                df = df[kategori_filter_mask(
+                    df["KATEGORI"], st["kategori"])]
             elif kategori_passthrough(st["kategori"]):
                 _blank = kategori_blank_mask(df["KATEGORI"])
                 df = df[(df["KATEGORI"].astype(str) == st["kategori"])

@@ -631,3 +631,91 @@ def hitung_nominal_lalu_multi(
             continue
         frames.append((_bulan_label_multi(file_df, n), dfm))
     return frames
+
+
+# ---------------------------------------------------------------------------
+# v3.9.53 — DEVIASI BULAN LALU (KUANTITI) utk tab 📦 Deviasi GR / 🧩 PCS
+# ---------------------------------------------------------------------------
+def dev_lalu_qty_map(file_df: pd.DataFrame | None,
+                     h: int | None = None,
+                     bulan_sel: int | None = None):
+    """v3.9.53 — peta {(resto_norm, bahan_norm): qty_dev_lalu} NILAI ASLI
+    (bertanda — plus surplus / minus kekurangan) dari FILE deviasi resmi
+    (parse_deviasi_file tab ⚖ Komparasi; user: "Deviasi bulan lalu yang
+    ditampilkan di tab deviasi gr dan pcs pakai nilai asli jangan pakai
+    nilai absolute yang ditampilkan. Absolute untuk perhitungan saja" +
+    "sama seperti di tab laporan deviasi secara kuantiti").
+
+    Seleksi IDENTIK hitung_nominal_lalu_pairs (satu sumber kebenaran —
+    angka tab 📋 Laporan Deviasi kolom 'DEV Lalu' & tab ini PERSIS SAMA):
+      - BULAN: bulan_sel atau BULAN TERBARU di file;
+      - MINGGU TER-COCOK H (user: "Week ... menyesuaikan kolom H di tab
+        deviasi GR dan PCS untuk Deviasi bulan lalu" — mirror v3.9.41
+        'jika week 1 maka ambil data week 1 juga'): minggu yang MEMUAT H;
+        tidak ada → terbesar ≤ target, lalu terkecil > target; h=None →
+        minggu terakhir (penutupan bulan);
+      - dedup (resto, bahan) keep="first" + label minggu deterministik
+        (WEEK 3 & WEEK 4 sama-sama _h=25 — nomor minggu terbesar menang).
+
+    Return (map, label) — label = "WEEK n · <bulan>" (dipakai status/
+    legend supaya asal angka JELIHAT; None bila file kosong/tak valid).
+    Tanpa harga/loop iterrows (LEAN — hanya kuantiti)."""
+    empty = ({}, None)
+    if file_df is None or getattr(file_df, "empty", True):
+        return empty
+    need = ("_bulan_num", "_h", "_resto_norm", "_bahan_norm", "DEV Lalu")
+    if any(c not in file_df.columns for c in need):
+        return empty
+    out = pd.DataFrame({
+        "_bulan_num": (pd.to_numeric(file_df["_bulan_num"],
+                                    errors="coerce").fillna(0)
+                       .astype(int).values),
+        "_h": pd.to_numeric(file_df["_h"], errors="coerce").values,
+        "_resto_norm": file_df["_resto_norm"].astype(str).values,
+        "_bahan_norm": file_df["_bahan_norm"].astype(str).values,
+        "qty": (pd.to_numeric(file_df["DEV Lalu"], errors="coerce")
+                .fillna(0.0).values),
+        "Minggu": (file_df["Minggu"].astype(str).values
+                   if "Minggu" in file_df.columns
+                   else np.full(len(file_df), "")),
+    })
+    # (a) bulan TERBARU (atau bulan PILIHAN — parity hitung_nominal_lalu_
+    # pairs; bulan paling akhir di file multi-bulan = 'bulan lalu')
+    _bn = pd.to_numeric(out["_bulan_num"], errors="coerce")
+    _target_bulan = (_bn.max() if bulan_sel is None else int(bulan_sel))
+    out = out[_bn == _target_bulan].copy()
+    if out.empty:
+        return empty
+    # (b) minggu TER-COCOK H (mirror _pilih_minggu_lalu v3.9.41)
+    _weeks_avail = sorted(int(w) for w in out["_h"].dropna().unique()
+                          if pd.notna(w))
+    _wk_sel = _pilih_minggu_lalu(_weeks_avail, h)
+    if _wk_sel is None:
+        return empty
+    out = out[pd.to_numeric(out["_h"], errors="coerce") == _wk_sel].copy()
+    # (c) label minggu deterministik (WEEK 3/4 → _h=25 sama — mirror
+    # audit 61-a/61-b: nomor minggu TERBESAR yang dipilih)
+    _wk_fallback = {7: "WEEK 1", 14: "WEEK 2", 25: "WEEK 3/4"}.get(
+        _wk_sel, f"WEEK cut-off H{_wk_sel}")
+    _wk_label = _wk_fallback
+    if not out.empty:
+        _labs = [str(x).strip().upper()
+                 for x in out["Minggu"].dropna().unique()
+                 if str(x).strip().upper() not in ("", "NAN", "NONE")]
+        if len(_labs) > 1:
+            def _lab_num(lab):
+                m = re.search(r"(\d+)", lab)
+                return int(m.group(1)) if m else 0
+            out = out[out["Minggu"].astype(str).str.strip()
+                      .str.upper() == max(_labs, key=_lab_num)].copy()
+        if not out.empty:
+            _cand = str(out["Minggu"].iloc[0]).strip().upper()
+            if _cand and _cand not in ("NAN", "NONE"):
+                _wk_label = _cand
+    out = out.drop_duplicates(subset=["_resto_norm", "_bahan_norm"],
+                              keep="first")
+    qty_map = {
+        (str(r["_resto_norm"]), str(r["_bahan_norm"])): float(r["qty"])
+        for _, r in out.iterrows()}
+    label = f"{_wk_label} · {_bulan_label_multi(file_df, _target_bulan)}"
+    return (qty_map, label)

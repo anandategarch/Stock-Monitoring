@@ -783,12 +783,11 @@ class NominalRestoView(tk.Frame):
             elif kategori_filter_mask(df["KATEGORI"],
                                       self._kategori_sel) is not None:
                 # v3.9.49 — entri GABUNGAN default (kategori Rekap
-                # Mentah): cocokkan SEMUA nilai + passthrough blank
-                # (kebijakan v3.9.45 (a)).
-                _mmask = kategori_filter_mask(
-                    df["KATEGORI"], self._kategori_sel)
-                _blank = kategori_blank_mask(df["KATEGORI"])
-                df = df[_mmask | _blank]
+                # Mentah). v3.9.53 — kini STRICT (hanya nilai gabungan;
+                # passthrough blank DIHAPUS — mirror deviasi_view; kelas
+                # tanpa kategori = entry '(Tanpa Kategori)').
+                df = df[kategori_filter_mask(
+                    df["KATEGORI"], self._kategori_sel)]
             elif kategori_passthrough(self._kategori_sel):
                 _blank = kategori_blank_mask(df["KATEGORI"])
                 df = df[(df["KATEGORI"].astype(str)

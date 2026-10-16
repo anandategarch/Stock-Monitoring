@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.52", APP_VERSION == "3.9.52",
+    check("Versi = 3.9.53", APP_VERSION == "3.9.53",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -13565,11 +13565,18 @@ def main():
           "parser tidak membuang prefiks Rp")
 
     # --- (c) ANALISA lalu-kini + Dev. Bulan Lalu + Rank merge + tint ---
-    # fixture: bulan lalu = 3.DEVIASI tanggal NEGATIF; H dinamis = 14.
+    # v3.9.53 — fixture: Dev. Bulan Lalu kini dari FILE deviasi (tab ⚖ —
+    # kolom internal parse_deviasi_file) via lalu_provider; baris rekap
+    # 3.DEVIASI tanggal negatif = DECOY 7777 (sumber LAMA — tak boleh
+    # bocor ke kolom). H dinamis = 14 → minggu file WEEK 2 (cut-off 14).
     _top61 = tk.Toplevel(root)
     _top61.geometry("1400x900+5+5")
     from src.ui.deviasi_view import DeviasiView as _DV61
-    _dv61 = _DV61(_top61, satuan_mode="GR")
+
+    def _file61_get():
+        return _file61
+
+    _dv61 = _DV61(_top61, satuan_mode="GR", lalu_provider=_file61_get)
     _dv61.pack(fill="both", expand=True)
     root.update()   # map Toplevel dulu — load_data lazy-refresh saat mapped
 
@@ -13578,12 +13585,34 @@ def main():
                 "Nama Barang": barang, "NAMA RESTO": resto,
                 "SATUAN": "GR"}
 
+    # FILE deviasi (kolom internal parse_deviasi_file): DEV Lalu = nilai
+    # ASLI bertanda. Bulan TERBARU = 9 (baris bulan 8 = decoy -999);
+    # minggu TER-COCOK H=14 → WEEK 2 (baris WEEK 1 = decoy 999).
+    _file61 = pd.DataFrame({
+        "_bulan_num": [9, 9, 8, 9, 9, 9],
+        "_h": [14, 14, 14, 14, 7, 14],
+        "_resto_norm": ["MLGPAR", "PWKTAM", "MLGPAR", "PWKTAM",
+                        "PWKTAM", "MLGPAR"],
+        "_bahan_norm": ["CABE", "CABE", "PENTOL", "PENTOL", "CABE",
+                        "PENTOL"],
+        "DEV Lalu": [100.0, 50.0, -999.0, 30.0, 999.0, -80.0],
+        "Minggu": ["WEEK 2", "WEEK 2", "WEEK 2", "WEEK 2", "WEEK 1",
+                   "WEEK 2"],
+        "Resto": ["1001.MLGPAR", "1001.MLGPAR", "1001.MLGPAR",
+                  "1001.MLGPAR", "1001.MLGPAR", "1001.MLGPAR"],
+        "Nama Barang": ["CABE", "CABE", "PENTOL", "PENTOL", "CABE",
+                        "PENTOL"],
+        "BULAN": ["209.SEP 26", "209.SEP 26", "208.AGT 26",
+                  "209.SEP 26", "209.SEP 26", "209.SEP 26"],
+    })
+
     _rows61 = [
-        # bulan lalu (rekap lalu — tanggal negatif)
-        _row61("3.DEVIASI", -25, 100.0, "CABE", "MLGPAR"),
-        _row61("3.DEVIASI", -26, 50.0, "CABE", "PWKTAM"),
-        _row61("3.DEVIASI", -25, -80.0, "PENTOL", "MLGPAR"),
-        _row61("3.DEVIASI", -25, 30.0, "PENTOL", "PWKTAM"),
+        # DECOY rekap lalu (tanggal negatif) — sumber v3.9.51-52 yang
+        # DIGANTI v3.9.53: nilai 7777 TIDAK boleh muncul di kolom.
+        _row61("3.DEVIASI", -25, 7777.0, "CABE", "MLGPAR"),
+        _row61("3.DEVIASI", -26, 7777.0, "CABE", "PWKTAM"),
+        _row61("3.DEVIASI", -25, -7777.0, "PENTOL", "MLGPAR"),
+        _row61("3.DEVIASI", -25, 7777.0, "PENTOL", "PWKTAM"),
     ]
     for _b61, _r61, _so61, _sis61 in (
             ("CABE", "MLGPAR", 60.0, 100.0),    # dev -40 vs +100 → ARAH
@@ -13636,20 +13665,34 @@ def main():
           "Hitung Manual · Peningkatan Tertinggi +133,3%",
           f"got {None if _kpp61 is None else _val61(_kpp61, 'CEK')!r}")
     _kbm61 = _find61("BUMBU", "MLGPAR")
-    check("(v3.9.51) Pasangan TANPA rekap bulan lalu → tanpa analisa "
+    check("(v3.9.53) Pasangan TANPA baris di FILE deviasi → tanpa analisa "
           "(CEK kosong) + Dev. Bulan Lalu '-'",
           _kbm61 is not None and _val61(_kbm61, "CEK") == ""
           and _val61(_kbm61, "Dev. Bulan Lalu") == "-",
           f"got CEK={_val61(_kbm61, 'CEK')!r} "
           f"lalu={_val61(_kbm61, 'Dev. Bulan Lalu')!r}")
-    check("(v3.9.51) Dev. Bulan Lalu = Σ 3.DEVIASI tanggal NEGATIF "
-          "(100 / 50 / 30 / (80) minus kurung)",
+    check("(v3.9.53) Dev. Bulan Lalu = DEV Lalu FILE deviasi (⚖) — NILAI "
+          "ASLI bertanda (100 / 50 / 30 / (80) minus kurung; decoy rekap "
+          "lalu 7777 TIDAK bocor)",
           _val61(_kcm61, "Dev. Bulan Lalu") == "100"
           and _val61(_kcp61, "Dev. Bulan Lalu") == "50"
           and _val61(_kpp61, "Dev. Bulan Lalu") == "30"
           and _val61(_find61("PENTOL", "MLGPAR"), "Dev. Bulan Lalu")
           == "(80)",
           "nilai kolom Dev. Bulan Lalu salah")
+    check("(v3.9.53) Minggu pembanding MENYESUAIKAN H: H=14 → WEEK 2 "
+          "(baris file WEEK 1 = 999 & bulan LAMA 8 = -999 tak terpakai; "
+          "user: 'Week sudah menyesuaikan kolom H ... untuk Deviasi "
+          "bulan lalu')",
+          _val61(_kcp61, "Dev. Bulan Lalu") == "50"
+          and "7777" not in _val61(_kcm61, "Dev. Bulan Lalu")
+          and "999" not in _val61(_kcp61, "Dev. Bulan Lalu"),
+          f"got {_val61(_kcp61, 'Dev. Bulan Lalu')!r}")
+    check("(v3.9.53) Status menyatakan ASAL angka: 'Dev. Bulan Lalu: "
+          "file ⚖ WEEK 2 · 209.SEP 26' (bulan TERBARU file)",
+          "Dev. Bulan Lalu: file ⚖ WEEK 2 · 209.SEP 26"
+          in _dv61.status_var.get(),
+          f"got {_dv61.status_var.get()!r}")
     check("(v3.9.51) Stabil → tanpa label (toleransi mirror komparasi) "
           "& status footer CEK hanya menghitung label ANOMALI CHECK "
           "(CEK 1 — 3 baris analisa-only tidak terhitung)",
@@ -14067,6 +14110,216 @@ def main():
 
     _dv62.destroy()
     _top62.destroy()
+    root.update()
+
+    # == 63. (v3.9.53) DEV. BULAN LALU FILE DEVIASI (⚖) — nilai asli +
+    #    minggu ikut H + kategori default STRICT (BASKOM) ==
+    print("\n== 63. (v3.9.53) Dev. Bulan Lalu FILE (⚖) nilai asli · minggu "
+          "ikuti H · kategori default STRICT ==")
+    from src.ui.deviasi_view import SharedPivotCache as _SPC63
+    from src.ui.komparasi_deviasi_view import (
+        parse_deviasi_file as _pdf63,
+    )
+    from src.ui.nominal_common import dev_lalu_qty_map as _dlm63
+
+    # --- (a) dev_lalu_qty_map unit: bulan terbaru + minggu cocok H -------
+    _m63a, _l63a = _dlm63(None, h=14)
+    check("(v3.9.53) dev_lalu_qty_map: file None → ({}, None) jujur",
+          _m63a == {} and _l63a is None,
+          f"got {_m63a!r} / {_l63a!r}")
+    _f63a = pd.DataFrame({
+        "_bulan_num": [8, 9, 9, 9],
+        "_h": [25, 7, 14, 25],
+        "_resto_norm": ["MLGPAR", "MLGPAR", "MLGPAR", "PWKTAM"],
+        "_bahan_norm": ["CABE", "CABE", "CABE", "CABE"],
+        "DEV Lalu": [-999.0, 7.0, 14.0, 25.0],
+        "Minggu": ["WEEK 4", "WEEK 1", "WEEK 2", "WEEK 4"],
+        "BULAN": ["208.AGT 26", "209.SEP 26", "209.SEP 26", "209.SEP 26"],
+    })
+    check("(v3.9.53) dev_lalu_qty_map: kolom wajib hilang → ({}, None)",
+          _dlm63(_f63a.drop(columns=["DEV Lalu"]), h=14) == ({}, None),
+          "kolom wajib tak divalidasi")
+    _m63b, _l63b = _dlm63(_f63a, h=14)
+    check("(v3.9.53) dev_lalu_qty_map h=14 → bulan TERBARU (9) + minggu "
+          "cut-off 14 (nilai ASLI 14,0; bulan-8 & label WEEK 4 tak "
+          "terpakai)",
+          _m63b == {("MLGPAR", "CABE"): 14.0}
+          and _l63b == "WEEK 2 · 209.SEP 26",
+          f"got {_m63b!r} / {_l63b!r}")
+    _m63c, _l63c = _dlm63(_f63a, h=7)
+    check("(v3.9.53) dev_lalu_qty_map h=7 → minggu WEEK 1 (7,0 — 'jika "
+          "week 1 maka ambil data week 1 juga' v3.9.41)",
+          _m63c == {("MLGPAR", "CABE"): 7.0}
+          and _l63c == "WEEK 1 · 209.SEP 26",
+          f"got {_m63c!r} / {_l63c!r}")
+    _m63d, _l63d = _dlm63(_f63a, h=None)
+    check("(v3.9.53) dev_lalu_qty_map h=None → minggu TERAKHIR "
+          "(penutupan bulan — kompatibilitas)",
+          _m63d == {("PWKTAM", "CABE"): 25.0}
+          and _l63d == "WEEK 4 · 209.SEP 26",
+          f"got {_m63d!r} / {_l63d!r}")
+    _f63e = pd.DataFrame({
+        "_bulan_num": [9, 9, 9],
+        "_h": [25, 25, 25],
+        "_resto_norm": ["MLGPAR", "MLGPAR", "PWKTAM"],
+        "_bahan_norm": ["CABE", "CABE", "CABE"],
+        "DEV Lalu": [31.0, 34.0, 35.0],
+        "Minggu": ["WEEK 3", "WEEK 4", "WEEK 4"],
+        "BULAN": ["209.SEP 26", "209.SEP 26", "209.SEP 26"],
+    })
+    check("(v3.9.53) WEEK 3 & WEEK 4 sama-sama _h=25 → label minggu "
+          "TERBESAR deterministik (WEEK 4; mirror audit 61-a/61-b)",
+          _dlm63(_f63e, h=25) == ({("MLGPAR", "CABE"): 34.0,
+                                   ("PWKTAM", "CABE"): 35.0},
+                                  "WEEK 4 · 209.SEP 26"),
+          f"got {_dlm63(_f63e, h=25)}")
+    _f63f = pd.DataFrame({
+        "_bulan_num": [9, 9],
+        "_h": [25, 25],
+        "_resto_norm": ["MLGPAR", "MLGPAR"],
+        "_bahan_norm": ["CABE", "CABE"],
+        "DEV Lalu": [31.0, 34.0],
+        "Minggu": ["WEEK 4", "WEEK 4"],
+        "BULAN": ["209.SEP 26", "209.SEP 26"],
+    })
+    check("(v3.9.53) Dedup (resto, bahan) keep-first (baris file ganda "
+          "minggu sama)",
+          _dlm63(_f63f, h=25)[0] == {("MLGPAR", "CABE"): 31.0},
+          f"got {_dlm63(_f63f, h=25)[0]!r}")
+
+    # --- (b) round-trip FILE ASLI (parse_deviasi_file → map) ------------
+    _p63 = make_mock_deviasi_file()
+    _r63 = _pdf63(_p63)
+    check("(v3.9.53) parse file mock OK (7 baris — fixture §komparasi)",
+          _r63["ok"] and _r63["df"] is not None
+          and len(_r63["df"]) == 7,
+          f"got ok={_r63['ok']} "
+          f"n={len(_r63['df']) if _r63['df'] is not None else 0}")
+    _m63f, _l63f = _dlm63(_r63["df"], h=14)
+    check("(v3.9.53) File asli h=14 → minggu WEEK 2: (MLGPAR, AYAM "
+          "FILET) = 113 NILAI ASLI (baris WEEK 1/SBYKET 49/74 & WEEK 4 "
+          "150 tak terpakai — persis kolom 'DEV Lalu' tab ⚖)",
+          _m63f == {("MLGPAR", "AYAM FILET"): 113.0}
+          and _l63f == "WEEK 2 · 201.OKT 26",
+          f"got {_m63f!r} / {_l63f!r}")
+    _m63g, _l63g = _dlm63(_r63["df"], h=7)
+    check("(v3.9.53) File asli h=7 → WEEK 1: 3 pasangan (MLGPAR 49 · "
+          "SBYKET 74 · XYZZZ 5) + BARANG TAK ADA 0",
+          _m63g == {("MLGPAR", "AYAM FILET"): 49.0,
+                    ("SBYKET", "AYAM FILET"): 74.0,
+                    ("XYZZZ", "AYAM FILET"): 5.0,
+                    ("MLGPAR", "BARANG TAK ADA"): 0.0},
+          f"got {_m63g!r}")
+
+    # --- (c) SharedPivotCache: identitas FILE = bagian kunci ------------
+    _c63 = _SPC63()
+    _d63 = pd.DataFrame({"x": [1]})
+    _pv63 = pd.DataFrame({"y": [2]})
+    _fa63 = pd.DataFrame({"a": [3]})
+    _fb63 = pd.DataFrame({"a": [4]})
+    _c63.put(_d63, 14, _pv63, _fa63)
+    check("(v3.9.53) SharedPivotCache.get lalu SAMA → hit; lalu BERBEDA "
+          "(file berganti) → miss otomatis (pivot basi mustahil)",
+          _c63.get(_d63, 14, _fa63) is _pv63
+          and _c63.get(_d63, 14, _fb63) is None
+          and _c63.get(_d63, 14) is None,
+          "kunci identitas file tidak bekerja")
+
+    # --- (d) on_lalu_file_changed: file berganti → kolom ikut ----------
+    _top63 = tk.Toplevel(root)
+    _top63.geometry("1400x900+5+5")
+    from src.ui.deviasi_view import DeviasiView as _DV63
+
+    _file63 = {"cur": _file61.copy()}
+    _dv63 = _DV63(_top63, satuan_mode="GR",
+                  lalu_provider=lambda: _file63["cur"])
+    _dv63.pack(fill="both", expand=True)
+    root.update()
+    _dv63.load_data(pd.DataFrame(_rows61))
+    wait_view(root, _dv63)
+
+    def _find63(barang, resto):
+        for _k in _dv63.tree.get_children(""):
+            if (_dv63.tree.set(_k, "Nama Barang") == barang
+                    and _dv63.tree.set(_k, "Resto") == resto):
+                return _k
+        return None
+
+    _k63c = _find63("CABE", "MLGPAR")
+    check("(v3.9.53) lalu_provider file A → kolom = nilai file A",
+          _k63c is not None
+          and _dv63.tree.set(_k63c, "Dev. Bulan Lalu") == "100",
+          f"got {None if _k63c is None else _dv63.tree.set(_k63c, 'Dev. Bulan Lalu')!r}")
+    _file63["cur"] = _file61.assign(**{"DEV Lalu": [63.0, 63.0, -63.0,
+                                                    63.0, 63.0, -63.0]})
+    _dv63.on_lalu_file_changed()
+    wait_view(root, _dv63)
+    _k63c = _find63("CABE", "MLGPAR")
+    check("(v3.9.53) on_lalu_file_changed (file berganti) → refresh dgn "
+          "file BARU (63,0) tanpa state basi",
+          _k63c is not None
+          and _dv63.tree.set(_k63c, "Dev. Bulan Lalu") == "63",
+          f"got {None if _k63c is None else _dv63.tree.set(_k63c, 'Dev. Bulan Lalu')!r}")
+    _file63["cur"] = None
+    _dv63.on_lalu_file_changed()
+    wait_view(root, _dv63)
+    _k63c = _find63("CABE", "MLGPAR")
+    check("(v3.9.53) File DITUTUP → kolom kini '-' + petunjuk status "
+          "'muat file deviasi di tab 📋 ⚖ Komparasi'",
+          _k63c is not None
+          and _dv63.tree.set(_k63c, "Dev. Bulan Lalu") == "-"
+          and "muat file deviasi" in _dv63.status_var.get(),
+          f"lalu={None if _k63c is None else _dv63.tree.set(_k63c, 'Dev. Bulan Lalu')!r} "
+          f"status={_dv63.status_var.get()!r}")
+
+    # --- (e) KATEGORI default GABUNGAN STRICT (BASKOM tak lagi lolos) --
+    def _row63(barang, resto, jenis, t, nilai, kat):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": t, "NILAI": nilai,
+                "SATUAN": "GR", "KATEGORI": kat, "AKTIF/NON": "AKTIF",
+                "SOURCE KIRIMAN": None}
+
+    _rows63 = []
+    for _r in ("MLGPAR", "SBYKET"):
+        _rows63 += [
+            _row63("CABE", _r, "1.SO", 14, 10.0, "COM DEVIASI - RESTO"),
+            _row63("CABE", _r, "2.SALDO AKHIR", 14, 8.0,
+                   "COM DEVIASI - RESTO"),
+        ]
+    # BASKOM STAINLESS 18 CM — TANPA kategori (kelas passthrough lama:
+    # v3.9.45 (a) membuatnya lolos seleksi default; v3.9.53 STRICT).
+    _rows63 += [
+        _row63("BASKOM STAINLESS 18 CM", "MLGPAR", "1.SO", 14, 10.0, None),
+        _row63("BASKOM STAINLESS 18 CM", "MLGPAR", "2.SALDO AKHIR", 14,
+               8.0, None),
+    ]
+    _dv63.load_data(pd.DataFrame(_rows63))
+    wait_view(root, _dv63)
+    _n63 = [_dv63.tree.set(k, "Nama Barang")
+            for k in _dv63.tree.get_children("")]
+    check("(v3.9.53) Kategori default gabungan STRICT: hanya COM "
+          "DEVIASI/Biaya Packaging — BASKOM TANPA kategori TIDAK lagi "
+          "lolos passthrough (user: 'kok ada nama barang yang bukan "
+          "kategori COM Deviasi + Packaging Deviasi ... coba cek apa ini "
+          "bug?')",
+          _dv63._kategori_sel == _KDL59 and sorted(set(_n63)) == ["CABE"],
+          f"got sel={_dv63._kategori_sel!r} rows={sorted(set(_n63))}")
+    check("(v3.9.53) Status menyatakan jumlah barang tanpa kategori yang "
+          "TERSEMBUNYI (transparan — bukan lenyap senyap)",
+          "1 baris tanpa kategori tersembunyi" in _dv63.status_var.get(),
+          f"got {_dv63.status_var.get()!r}")
+    _dv63._kategori_var.set("(Tanpa Kategori)")
+    _dv63._on_kategori_changed()
+    wait_view(root, _dv63)
+    _n63b = [_dv63.tree.set(k, "Nama Barang")
+             for k in _dv63.tree.get_children("")]
+    check("(v3.9.53) Entry '(Tanpa Kategori)' tetap menampilkan kelas "
+          "BASKOM (akses eksplisit tetap ada)",
+          sorted(set(_n63b)) == ["BASKOM STAINLESS 18 CM"],
+          f"got {sorted(set(_n63b))}")
+
+    _dv63.destroy()
+    _top63.destroy()
     root.update()
 
     root.destroy()

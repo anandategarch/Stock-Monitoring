@@ -1048,9 +1048,10 @@ def run_test_v3949_rekap_kategori():
     check49("kategori_multi_values: seleksi biasa/None → None",
             kategori_multi_values("DEVIASI") is None
             and kategori_multi_values(None) is None)
-    check49("kategori_passthrough: label gabungan ikut passthrough "
-            "(default menyertakan blank)",
-            kategori_passthrough(KATEGORI_DEFAULT_LABEL) is True
+    check49("kategori_passthrough: HANYA legacy 'deviasi' (v3.9.53 — "
+            "label gabungan kini STRICT: barang tanpa kategori TIDAK "
+            "lagi lolos seleksi default, user BASKOM)",
+            kategori_passthrough(KATEGORI_DEFAULT_LABEL) is False
             and kategori_passthrough("deviasi") is True
             and kategori_passthrough("BAHAN") is False)
     _s = _pd.Series(["COM DEVIASI - RESTO", "BAHAN", None,

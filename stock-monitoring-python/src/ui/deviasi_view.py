@@ -1,6 +1,31 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.9.53 (user: "Deviasi bulan lalu yang ditampilkan di tab deviasi gr dan
+pcs pakai nilai asli jangan pakai nilai absolute yang ditampilkan.
+Absolute untuk perhitungan saja" + "Week sudah menyesuaikan kolom H di
+tab deviasi GR dan PCS untuk Deviasi bulan lalu" + "kok ada nama barang
+yang bukan kategori COM Deviasi + Packaging Deviasi misal BASKOM
+STAINLESS 18 CM ... coba cek apa ini bug?"):
+- KOLOM 'Dev. Bulan Lalu' GANTI SUMBER: DEV Lalu FILE deviasi resmi
+  (tab ⚖ Komparasi — parse_deviasi_file via lalu_provider app, pola
+  nominal_resto v3.9.36) — NILAI ASLI bertanda (minus = kekurangan,
+  kurung merah; PLUS = surplus — bukan absolut), minggu pembanding
+  MENYESUAIKAN H + bulan TERBARU file (parity hitung_nominal_lalu_pairs
+  → angka PERSIS sama dgn kolom 'DEV Lalu' tab 📋 Laporan Deviasi —
+  'sama seperti di tab laporan deviasi secara kuantiti'). Dulu
+  v3.9.51-52: Σ 3.DEVIASI tgl negatif rekap lalu (cakupan rekap lalu
+  hanya -25..-31 & nilai mentahnya tak sebanding angka resmi → tampak
+  'nilai absolute'). Tanpa file → '-' + petunjuk status; ABSOLUTE tetap
+  dipakai HANYA utk klasifikasi ANALISA CEK lalu→kini (|kini| vs |lalu|).
+  Identitas file = bagian KUNCI SharedPivotCache (file berganti → cache
+  miss otomatis) + on_lalu_file_changed (clear + refresh; dipanggil app
+  _on_dev_file_loaded) + label 'WEEK n · bulan' dinyatakan di status.
+- FILTER KATEGORI default GABUNGAN kini STRICT (hanya COM DEVIASI -
+  RESTO + Biaya Packaging - RESTO — passthrough barang TANPA kategori
+  dihapus; kelas 100383 tetap terlindungi kategori rekap v3.9.49 +
+  entry '(Tanpa Kategori)' + jumlah tersembunyi dinyatakan di status).
+
 v3.9.34 (user: "Nominal harusnya ada di Deviasi GR dan Deviasi PCS
 juga itu tambah kolom baru dan hapus kolom BK_7 dan OUT_7 misal H = 7"):
 - TAMBAH kolom "Nominal" tepat setelah Deviasi = Harga 41.09
@@ -208,7 +233,10 @@ import pandas as pd
 
 from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
-from .nominal_common import (  # v3.9.34 — kolom Nominal; v3.9.51 — fmt_rp_cell
+from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 — lalu file
+    _norm_name_lalu,  # v3.9.53 — kunci pasangan file deviasi (mirror komparasi)
+    _norm_resto_lalu,  # v3.9.53 — idem (sisi resto)
+    dev_lalu_qty_map,  # v3.9.53 — Dev. Bulan Lalu kuantiti dari FILE deviasi
     fmt_rp_cell,
     lookup_harga_pair,
 )
@@ -267,17 +295,23 @@ class SharedPivotCache:
     """
 
     def __init__(self):
-        self._entry: tuple | None = None   # (data_ref, h, pivot_df)
+        self._entry: tuple | None = None   # (data_ref, h, pivot_df, lalu_ref)
         self.lock = threading.Lock()
 
-    def get(self, data, h):
+    def get(self, data, h, lalu=None):
+        # v3.9.53 — identitas FILE deviasi (sumber kolom 'Dev. Bulan
+        # Lalu') menjadi BAGIAN KUNCI: file berganti (load/tutup tab ⚖)
+        # → otomatis miss → pivot dihitung ulang dgn file baru (entri
+        # basi mustahil — tanpa ini pivot (data,h) lama terus di-hit).
+        # Default lalu=None = perilaku lama (pemanggil tanpa file).
         ent = self._entry
-        if ent is not None and ent[0] is data and ent[1] == h:
+        if (ent is not None and ent[0] is data and ent[1] == h
+                and ent[3] is lalu):
             return ent[2]
         return None
 
-    def put(self, data, h, pivot):
-        self._entry = (data, h, pivot)
+    def put(self, data, h, pivot, lalu=None):
+        self._entry = (data, h, pivot, lalu)
 
     def clear(self):
         self._entry = None
@@ -461,7 +495,10 @@ class DeviasiView(tk.Frame):
         # tab laporan deviasi secara kuantiti") — rumus W tetap dihitung
         # INTERNAL utk kondisi CEK-3 'Hitung Manual' (stok =
         # so_m1+in_h−bk_h−out_h, blok CEK di bawah).
-        ("Dev. Bulan Lalu", 95, "e"),  # Σ 3.DEVIASI Tanggal negatif (rekap lalu)
+        # v3.9.53 — sumber DIGANTI: DEV Lalu FILE deviasi (tab ⚖ Komparasi) —
+        # nilai ASLI bertanda + minggu/bulan MENYESUAIKAN H (dulu Σ 3.DEVIASI
+        # rekap lalu -25..-31 — cakupan terbatas, tak sebanding angka resmi).
+        ("Dev. Bulan Lalu", 95, "e"),
         # v3.9.51 — CEK 120 → 210: label anomali + segmen analisa deviasi
         # lalu→kini (dipisah ' · ').
         ("CEK", 210, "w"),
@@ -520,7 +557,8 @@ class DeviasiView(tk.Frame):
                  shared_cache: SharedPivotCache | None = None,
                  h_state: SharedTanggalH | None = None,
                  h_editable: bool = True,
-                 acr_state: SharedACRThreshold | None = None):
+                 acr_state: SharedACRThreshold | None = None,
+                 lalu_provider: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None   # v3.9.23 (poin 6)
@@ -536,6 +574,12 @@ class DeviasiView(tk.Frame):
         # Total ACR); tanpa acr_state (standalone/test) → 80.0.
         self._acr_state = acr_state
         self.acr_threshold = acr_state.pct if acr_state is not None else 80.0
+        # v3.9.53 — Dev. Bulan Lalu: provider FILE deviasi resmi (app
+        # meneruskan komparasi_view._file_df — pola lalu_provider
+        # nominal_resto v3.9.36). None (standalone/test) → kolom '-' jujur.
+        # File berganti → app memanggil on_lalu_file_changed (clear cache +
+        # refresh — lihat _on_dev_file_loaded).
+        self._lalu_provider = lalu_provider
         self._cached_pivot = None
         self._cached_h = None
         self._shared_cache = shared_cache   # dibagi GR & PCS (v3.3)
@@ -845,8 +889,12 @@ class DeviasiView(tk.Frame):
             # v3.9.51 — strip header kolom In (kiriman — bukan Stock)
             ("header kolom In (kiriman)", self.IN_HEADER_COLOR),
             # v3.9.51 — segmen analisa deviasi lalu-kini di teks CEK
-            # (label legend TANPA panah '→' — cek v3.9.8 static-label)
-            ("analisa dev lalu-kini (teks CEK)", "#475569"),
+            # (label legend TANPA panah '→' — cek v3.9.8 static-label);
+            # v3.9.53 — sumber lalu kini FILE deviasi (⚖), minggu ikut H.
+            ("analisa dev lalu-kini (teks CEK · file ⚖)", "#475569"),
+            # v3.9.53 — kolom Dev. Bulan Lalu = nilai ASLI file deviasi
+            # (⚖; minus merah kurung — BUKAN absolut; minggu menyesuaikan H)
+            ("Dev. Bulan Lalu (file ⚖)", "#dc2626"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
@@ -1004,6 +1052,24 @@ class DeviasiView(tk.Frame):
             self._dirty = False
             self._refresh()
 
+    def on_lalu_file_changed(self):
+        """v3.9.53 — file deviasi (tab ⚖ Komparasi) berganti: load baru /
+        ditutup / auto-load startup. Sumber kolom 'Dev. Bulan Lalu' +
+        ANALISA CEK lalu-kini basi → longgarkan SEMUA cache pivot (identitas
+        file = bagian kunci SharedPivotCache — clear supaya recompute
+        dijamin; dua lapis dgn cache-miss otomatis) + refresh. Tab
+        tersembunyi cukup ditandai dirty (pola _on_shared_h_changed /
+        on_lalu_file_changed nominal_resto v3.9.36). Dipanggil app dari
+        _on_dev_file_loaded di main thread."""
+        self._cached_pivot = None
+        self._cached_h = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        if not self.winfo_ismapped():
+            self._dirty = True
+            return
+        self._refresh()
+
     def _filtered_pivot(self, exclude_col: str | None = None):
         """v3.9.19 — baris pivot YANG TAMPIL SAAT INI (permintaan user:
         "isi filter harus menampilkan data yang ada aja bukan termasuk
@@ -1037,13 +1103,18 @@ class DeviasiView(tk.Frame):
                     kategori_blank_mask(filtered["KATEGORI"])]
             elif kategori_filter_mask(filtered["KATEGORI"],
                                       self._kategori_sel) is not None:
-                # v3.9.49 — entri GABUNGAN default (kategori Rekap Mentah):
-                # cocokkan SEMUA nilai gabungan + passthrough baris kosong
-                # (kebijakan v3.9.45 (a) berlaku utk seleksi default).
-                _mmask = kategori_filter_mask(
-                    filtered["KATEGORI"], self._kategori_sel)
-                _blank = kategori_blank_mask(filtered["KATEGORI"])
-                filtered = filtered[_mmask | _blank]
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap Mentah).
+                # v3.9.53 — kini STRICT: HANYA nilai kategori yang cocok
+                # (user: "kok ada nama barang yang bukan kategori COM
+                # Deviasi + Packaging Deviasi misal BASKOM STAINLESS 18 CM
+                # ... coba cek apa ini bug?" — passthrough blank v3.9.45(a)
+                # membuat barang TANPA kategori ikut tampil di seleksi
+                # default; proteksi kelas 100383 kini dipenuhi kategori
+                # rekap v3.9.49 — kelas tanpa kategori = entry
+                # '(Tanpa Kategori)' + jumlahnya dinyatakan di status,
+                # tidak lenyap senyap). Popup ⧩ konsisten dgn tabel.
+                filtered = filtered[kategori_filter_mask(
+                    filtered["KATEGORI"], self._kategori_sel)]
             elif kategori_passthrough(self._kategori_sel):
                 _blank = kategori_blank_mask(filtered["KATEGORI"])
                 filtered = filtered[
@@ -1349,10 +1420,18 @@ class DeviasiView(tk.Frame):
     # PIVOT COMPUTATION (v3.2 — VEKTORISASI numpy, hasil identik versi lama)
     # =========================================================================
     def _compute_pivot(self, data: pd.DataFrame | None = None,
-                       h: int | None = None) -> pd.DataFrame:
+                       h: int | None = None,
+                       lalu_map: dict | None = None,
+                       lalu_label: str | None = None) -> pd.DataFrame:
         """FIX D-01 (audit 2-d): data/h bisa di-pass eksplisit (identitas
         yang dicapture worker) — default membaca self.* (kompatibel
-        pemanggilan lama/test)."""
+        pemanggilan lama/test).
+
+        v3.9.53 — lalu_map/lalu_label: peta {(resto_norm, bahan_norm):
+        qty} + label 'WEEK n · <bulan>' dari FILE deviasi (dibangun work()
+        via dev_lalu_qty_map sekali per job — pivot di-cache ber-identitas
+        file). None/{} = tanpa file → kolom Dev. Bulan Lalu semua NaN
+        (tampil '-')."""
         if data is None:
             data = self.data
         if h is None:
@@ -1599,23 +1678,32 @@ class DeviasiView(tk.Frame):
         if _saldo_only_rows.any():
             sistem = np.where(_saldo_only_rows, _sistem_t1, sistem)
 
-        # v3.9.51 — DEVIASI BULAN LALU (kuantiti) per pasangan = Σ baris
-        # 3.DEVIASI ber-Tanggal NEGATIF (rekap bulan lalu — tanggal
-        # dinegasikan 25..-31; user: "ganti dengan Deviasi bulan lalu sama
-        # seperti di tab laporan deviasi secara kuantiti"). NaN = pasangan
-        # tanpa baris rekap bulan lalu (tampil '-'); dipakai juga ANALISA
-        # CEK lalu→kini. tnum sudah ter-cache (identitas df dijaga D-01);
-        # key pasangan pola _pk_pivot (barang\x1fresto — satuan pasangan
-        # konstan, GR/PCS dipisah di _prepare_rows per tab).
-        _lmask = (df["JENIS"].astype(str) == "3.DEVIASI") & (tnum < 0)
-        if bool(_lmask.any()):
-            _ldf = df[_lmask]
-            _lkey = (_ldf["Nama Barang"].astype(str) + "\x1f"
-                     + _ldf["NAMA RESTO"].astype(str))
-            _lval = pd.to_numeric(_ldf["NILAI"], errors="coerce").fillna(0)
-            _lmap = _lval.groupby(_lkey).sum()
-            dev_lalu = (_pk_pivot.map(_lmap)
-                        .to_numpy(dtype="float64"))
+        # v3.9.53 — DEVIASI BULAN LALU (kuantiti) per pasangan = DEV Lalu
+        # FILE deviasi resmi (tab ⚖ Komparasi — parse_deviasi_file) — NILAI
+        # ASLI bertanda (user: "Deviasi bulan lalu yang ditampilkan di tab
+        # deviasi gr dan pcs pakai nilai asli jangan pakai nilai absolute
+        # yang ditampilkan. Absolute untuk perhitungan saja"); minggu
+        # pembanding MENYESUAIKAN H (user: "Week ... menyesuaikan kolom H
+        # di tab deviasi GR dan PCS untuk Deviasi bulan lalu" — mirror
+        # _pilih_minggu_lalu v3.9.41 "jika week 1 maka ambil data week 1
+        # juga") + bulan TERBARU file (parity hitung_nominal_lalu_pairs
+        # tab 🧮 — angka PERSIS sama dgn kolom 'DEV Lalu' tab 📋 Laporan
+        # Deviasi). Dulu v3.9.51-52: Σ 3.DEVIASI tgl negatif rekap lalu —
+        # cakupan rekap lalu HANYA tgl -25..-31 (fn_rekap_mentah mode
+        # 'lalu') & nilai mentahnya tak sebanding kuantitas deviasi resmi
+        # → DIGANTI sumber file. NaN = pasangan tanpa file/tanpa baris
+        # pembanding (tampil '-'); ABSOLUTE dipakai HANYA klasifikasi
+        # ANALISA CEK lalu→kini di bawah (|kini| vs |lalu|). Kunci pasangan
+        # (resto_norm, bahan_norm) — mirror normalisasi join komparasi;
+        # satuan pasangan konstan, GR/PCS dipisah di _prepare_rows per tab.
+        if lalu_map:
+            _lkey53 = (pivot["NAMA RESTO"].astype(str)
+                       .map(_norm_resto_lalu) + "\x1f"
+                       + pivot["Nama Barang"].astype(str)
+                       .map(_norm_name_lalu))
+            _lmap53 = {f"{r}\x1f{b}": q
+                       for (r, b), q in lalu_map.items()}
+            dev_lalu = _lkey53.map(_lmap53).to_numpy(dtype="float64")
         else:
             dev_lalu = np.full(n, np.nan, dtype="float64")
 
@@ -1850,8 +1938,13 @@ class DeviasiView(tk.Frame):
             "ACR": acr,
             "Total ACR": total_acr,
             "Dev to BOM%": dev_to_bom,
-            "Dev. Bulan Lalu": dev_lalu,   # v3.9.51 — NaN = tanpa rekap lalu
+            "Dev. Bulan Lalu": dev_lalu,   # v3.9.53 — NaN = tanpa file/pasangan
         })
+        # v3.9.53 — label sumber Dev. Bulan Lalu ("WEEK n · <bulan>") menempel
+        # di frame pivot: view cache-HIT (PCS membaca frame yang SAMA via
+        # SharedPivotCache) → label konsisten antar tab; dibaca _prepare_rows
+        # utk status (None = tanpa file → petunjuk muat file tab 📋 ⚖).
+        result.attrs["dev_lalu_label"] = lalu_label
 
         # v3.9.34 — kolom Nominal = Harga 41.09 (dinormalkan ke satuan
         # pasangan) × Deviasi (helper bersama nominal_common; None → NaN
@@ -1945,6 +2038,18 @@ class DeviasiView(tk.Frame):
             # Kini seluruh operasi job memakai identitas pra-capture.
             data = self.data
             h = self.tanggal_h
+            # v3.9.53 — FILE deviasi (sumber kolom Dev. Bulan Lalu + analisa
+            # CEK lalu-kini) di-capture SEKALI di awal job (pola FIX D-01);
+            # identitasnya jadi BAGIAN KUNCI SharedPivotCache → file
+            # berganti (load baru/tutup di tab ⚖) otomatis cache-MISS →
+            # pivot dihitung ulang dgn file baru (on_lalu_file_changed
+            # juga clear + refresh — dua lapis anti-stale).
+            lalu_df = (self._lalu_provider() if self._lalu_provider
+                       else None)
+            if lalu_df is not None:
+                lalu_map, lalu_label = dev_lalu_qty_map(lalu_df, h=h)
+            else:
+                lalu_map, lalu_label = {}, None
             pivot = None
             cache = self._shared_cache
             if cache is not None:
@@ -1952,13 +2057,14 @@ class DeviasiView(tk.Frame):
                 # bisa refresh bersamaan (Apply H); tanpa lock kedua thread
                 # sama-sama miss → compute dobel + entry tertimpa.
                 with cache.lock:
-                    pivot = cache.get(data, h)
+                    pivot = cache.get(data, h, lalu_df)
                     if pivot is None:
-                        pivot = self._compute_pivot(data, h)
+                        pivot = self._compute_pivot(data, h, lalu_map,
+                                                     lalu_label)
                         if pivot is not None:
-                            cache.put(data, h, pivot)
+                            cache.put(data, h, pivot, lalu_df)
             else:
-                pivot = self._compute_pivot(data, h)
+                pivot = self._compute_pivot(data, h, lalu_map, lalu_label)
             self._cached_pivot = pivot
             self._cached_h = h
             return self._prepare_rows(st)
@@ -2000,6 +2106,7 @@ class DeviasiView(tk.Frame):
         # (fix "ganti kategori tidak terjadi apa apa" — 90% baris '-'
         # membuat passthrough universal v3.9.44 = filter no-op);
         # KATEGORI_BLANK_LABEL = khusus baris tanpa kategori master.
+        _nblank_hidden = 0   # v3.9.53 — transparansi barang blank tersembunyi
         if st.get("kategori") and "KATEGORI" in filtered.columns:
             if st["kategori"] == KATEGORI_BLANK_LABEL:
                 filtered = filtered[
@@ -2017,14 +2124,23 @@ class DeviasiView(tk.Frame):
                                 "kategori '21. DBS Kategori'.")}
             elif kategori_filter_mask(filtered["KATEGORI"],
                                       st["kategori"]) is not None:
-                # v3.9.49 — entri GABUNGAN default (kategori Rekap Mentah):
-                # cocokkan SEMUA nilai gabungan + passthrough baris kosong
-                # (kebijakan v3.9.45 (a) — barang tanpa kategori mana pun
-                # tetap tampil di seleksi default, proteksi kelas 100383).
+                # v3.9.49 — entri GABUNGAN default (kategori Rekap Mentah).
+                # v3.9.53 — kini STRICT: HANYA nilai kategori yang cocok
+                # (user: "kok ada nama barang yang bukan kategori COM
+                # Deviasi + Packaging Deviasi misal BASKOM STAINLESS 18
+                # CM, BASKOM STAINLESS UK 26 CM dll coba cek apa ini
+                # bug?" — passthrough blank v3.9.45 (a) membuat barang
+                # TANPA kategori (BASKOM dll.) ikut tampil di seleksi
+                # default. Proteksi kelas 100383 kini dipenuhi KATEGORI
+                # REKAP v3.9.49 (barang ber-deviasi ber-kategori rekap
+                # tetap tampil, mis. BUMBU PASTA KUAH (V.20)); kelas
+                # TANPA kategori = entry '(Tanpa Kategori)' + jumlah
+                # tersembunyi dinyatakan di status — tidak lenyap senyap).
                 _mmask = kategori_filter_mask(
                     filtered["KATEGORI"], st["kategori"])
-                _blank = kategori_blank_mask(filtered["KATEGORI"])
-                filtered = filtered[_mmask | _blank]
+                _nblank_hidden = int((~_mmask & kategori_blank_mask(
+                    filtered["KATEGORI"])).sum())
+                filtered = filtered[_mmask]
             elif kategori_passthrough(st["kategori"]):
                 _blank = kategori_blank_mask(filtered["KATEGORI"])
                 filtered = filtered[
@@ -2301,6 +2417,27 @@ class DeviasiView(tk.Frame):
             if _nblank:
                 status += (f" · {_nblank} tanpa kategori master "
                            f"(pilih '{KATEGORI_BLANK_LABEL}')")
+        # v3.9.53 — transparansi seleksi default GABUNGAN kini STRICT:
+        # barang tanpa kategori (BASKOM dll.) TERSEMBUNYI → jumlahnya
+        # dinyatakan (bukan lenyap senyap — kelas 100383 tetap bisa
+        # dibuka lewat entry '(Tanpa Kategori)').
+        if _nblank_hidden:
+            status += (f" · {_nblank_hidden} baris tanpa kategori "
+                       f"tersembunyi (lihat '{KATEGORI_BLANK_LABEL}')")
+        # v3.9.53 — asal angka Dev. Bulan Lalu JELIHAT di status: minggu
+        # + bulan file deviasi yang dipakai (minggu MENYESUAIKAN H), atau
+        # petunjuk memuat file bila belum ada (kolom '-' jujur).
+        _lalu_lab = None
+        try:
+            _lalu_lab = pivot_df.attrs.get("dev_lalu_label")
+        except (AttributeError, TypeError, ValueError):
+            _lalu_lab = None
+        if _lalu_lab:
+            status += f" · Dev. Bulan Lalu: file ⚖ {_lalu_lab}"
+        elif "Dev. Bulan Lalu" in filtered.columns \
+                and int(pd.isna(filtered["Dev. Bulan Lalu"]).sum()) > 0:
+            status += (" · Dev. Bulan Lalu: — (muat file deviasi di tab "
+                       "📋 ⚖ Komparasi)")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
                 "rank_map": rank_map,
@@ -2824,9 +2961,12 @@ class DeviasiView(tk.Frame):
 
     @staticmethod
     def _fmt_dev_lalu(val) -> str:
-        """v3.9.51 — Dev. Bulan Lalu: NaN (tanpa rekap bulan lalu) → '-';
-        0 → '0' (ADA data bernilai nol — dibedakan dari tanpa data);
-        lainnya format Indonesia (minus dalam kurung)."""
+        """v3.9.53 — Dev. Bulan Lalu (FILE deviasi ⚖): NaN (tanpa file /
+        pasangan tak ada di file) → '-'; 0 → '0' (ADA data bernilai nol
+        — dibedakan dari tanpa data); lainnya NILAI ASLI bertanda format
+        Indonesia (minus dalam kurung + merah per-cell — plus = surplus
+        polos; absolut TIDAK dipakai di tampilan, hanya di hitungan
+        analisa CEK)."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return "-"
         try:

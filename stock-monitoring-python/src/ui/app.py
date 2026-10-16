@@ -189,7 +189,39 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.52"  # v3.9.52 — MERGE-VERTIKAL VISUAL Rank (overlay blok kontinu, nilai centered) + SATUAN hidden by default Deviasi GR/PCS
+APP_VERSION = "3.9.53"  # v3.9.53 — Dev. Bulan Lalu dari FILE deviasi (⚖ nilai asli, minggu ikut H) + kategori default STRICT
+# v3.9.53 — 3 PERMINTAAN USER (tab 📦 Deviasi GR / 🧩 PCS):
+# (1) DEV. BULAN LALU = NILAI ASLI DARI FILE (user: "Deviasi bulan lalu
+#     yang ditampilkan di tab deviasi gr danpcs pakai nilai asli yangan
+#     pakai nilai absoulte yang ditampilkan. Absoulte untuk perhiutngan
+#     saja"): kolom kini bersumber DEV Lalu FILE deviasi resmi (tab ⚖
+#     Komparasi — parse_deviasi_file via lalu_provider app, pola
+#     nominal_resto v3.9.36) — bertanda (minus kurung merah / plus
+#     surplus), PERSIS angka kolom 'DEV Lalu' tab 📋 Laporan Deviasi
+#     ('sama seperti di tab laporan deviasi secara kuantiti'); absolut
+#     tetap HANYA utk hitungan ANALISA CEK lalu→kini (|kini| vs |lalu|).
+#     Dulu v3.9.51-52 Σ 3.DEVIASI tgl negatif rekap lalu (hanya -25..-31,
+#     nilai mentah tak sebanding → tampak 'nilai absolute'). Tanpa file →
+#     '-' + petunjuk status; file auto-load SAAT STARTUP (maybe_auto_load
+#     _last — parse worker, tidak menunggu tab 📋 dibuka); label
+#     'WEEK n · bulan' dinyatakan di status + legend.
+# (2) MINGGU PEMBANDING MENYESUAIKAN H (user: "Week sudah menyesuaikan
+#     kolom H di tab deviasi GR dan PCS untuk Deviasi bulan lalu"):
+#     _pilih_minggu_lalu v3.9.41 ('jika week 1 maka ambil data week 1') +
+#     bulan TERBARU file (parity hitung_nominal_lalu_pairs tab 🧮).
+#     Identitas file = BAGIAN KUNCI SharedPivotCache + on_lalu_file
+#     _changed (clear + refresh) — pivot basi mustahil saat file
+#     berganti; _on_dev_file_loaded app kini juga menyegarkan GR & PCS.
+# (3) KATEGORI DEFAULT GABUNGAN STRICT (user: "kok ada nama barang yang
+#     bukan kategori COM Deviasi + Packaging Deviasi misal BASKOM
+#     STAINLESS 18 CM, BASKOM STAINLESS UK 26 CM dll coba cek apa ini
+#     bug?"): passthrough barang TANPA kategori dihapus dari seleksi
+#     default (kebijakan v3.9.45 (a) — barang tanpa kategori master
+#     tadinya ikut tampil); kelas 100383 tetap terlindungi KATEGORI
+#     REKAP v3.9.49 + entry '(Tanpa Kategori)' + jumlah tersembunyi
+#     dinyatakan di status (tidak lenyap senyap). Berlaku konsisten:
+#     Deviasi GR/PCS ×2 · Pivot ×2 · 🧮 Nominal Resto (helpers
+#     kategori_passthrough).
 # v3.9.52 — 2 PERMINTAAN USER (tab 📦 Deviasi GR / 🧩 PCS):
 # (1) MERGE-VERTIKAL VISUAL kolom Rank (user: "kolom Rank kok tidak
 #     termerger vertcial seperti kemauanku di atas? ... Merger vertcial
@@ -2702,6 +2734,12 @@ class StockMonitorApp:
                    lambda: self.komparasi_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv),
                    self.komparasi_view)
+        # v3.9.53 — AUTO-LOAD file deviasi terakhir SAAT STARTUP (bukan
+        # menunggu tab 📋 dibuka): kolom 'Dev. Bulan Lalu' tab 📦/🧩 butuh
+        # file aktif SEBELUM user membuka tab apa pun (parse di worker —
+        # anti-beku; file hilang/error → status saja, tanpa dialog).
+        with contextlib.suppress(Exception):
+            self.komparasi_view.maybe_auto_load_last()
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
         # rasio konversi (dari audit_result — pipeline v3.9.32;
         # v3.9.34: sumber lokal _hm/_kv bersama semua view nominal)
@@ -3053,7 +3091,13 @@ class StockMonitorApp:
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=True,
-            acr_state=self._shared_acr)   # v3.9.21 — ambang ACR bersama
+            acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
+            # v3.9.53 — Dev. Bulan Lalu: file deviasi aktif (tab ⚖ Komparasi)
+            # via lalu_provider (pola nominal_resto v3.9.36 — lambda selalu
+            # membaca _file_df AKTIF; file berganti → _on_dev_file_loaded
+            # memanggil on_lalu_file_changed).
+            lalu_provider=lambda: getattr(
+                self.komparasi_view, "_file_df", None))
         self.deviasi_gr_view.pack(fill="both", expand=True)
 
     def _build_deviasi_pcs_tab(self):
@@ -3065,7 +3109,9 @@ class StockMonitorApp:
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=False,
-            acr_state=self._shared_acr)   # v3.9.21 — ambang ACR bersama
+            acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
+            lalu_provider=lambda: getattr(
+                self.komparasi_view, "_file_df", None))   # v3.9.53
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     def _build_in_selisih_tab(self):
@@ -3151,10 +3197,20 @@ class StockMonitorApp:
         ditutup. Tab 🧮 Nominal Deviasi memakai file itu sebagai sumber
         kolom 'Nominal Deviasi Bulan Lalu' popup rincian → snapshot-nya
         basi → segarkan (pola listener SharedTanggalH; tab tersembunyi
-        cukup ditandai dirty — refreshed saat dibuka)."""
+        cukup ditandai dirty — refreshed saat dibuka).
+
+        v3.9.53 — tab 📦 Deviasi GR & 🧩 PCS IKUT: kolom 'Dev. Bulan Lalu'
+        + analisa CEK lalu-kini bersumber file yang sama → on_lalu_file
+        _changed (clear cache pivot — identitas file bagian kunci — +
+        refresh/dirty; user: "Deviasi bulan lalu ... pakai nilai asli")."""
         nr = getattr(self, "nominal_resto_view", None)
         if nr is not None:
             nr.on_lalu_file_changed()
+        for dv in (getattr(self, "deviasi_gr_view", None),
+                   getattr(self, "deviasi_pcs_view", None)):
+            if dv is not None:
+                with contextlib.suppress(Exception):
+                    dv.on_lalu_file_changed()
 
     def _build_nominal_resto_tab(self):
         """v3.9.34 — tab 🧮 Nominal Deviasi: Σ (Harga 41.09 × Qty

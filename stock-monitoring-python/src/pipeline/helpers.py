@@ -189,10 +189,10 @@ def kategori_multi_values(sel) -> "tuple[str, ...] | None":
     (entry default KATEGORI_DEFAULT_LABEL), atau None bila seleksi bukan
     entri gabungan.
 
-    Konsumen memakai ini SEBELUM cabang kategori_passthrough — entri
-    gabungan juga ber-passthrough baris kosong (kebijakan v3.9.45 tetap:
-    barang tanpa kategori mana pun tidak boleh lenyap dari seleksi
-    DEFAULT).
+    Konsumen memakai ini SEBELUM cabang kategori_passthrough. v3.9.53 —
+    seleksi gabungan kini STRICT: view memfilter HANYA nilai gabungan
+    (passthrough baris kosong DIHAPUS — lihat kategori_passthrough (d);
+    user menemukan barang tanpa kategori BASKOM dll. ikut tampil).
     v3.9.50 — [audit 3-b] case-INSENSITIVE (strip+lower — parity
     kategori_passthrough; dulu exact-case: pemanggil programatik dgn
     kapitalisasi beda jatuh ke cabang strict → 0 baris + blank-pass
@@ -243,28 +243,32 @@ def kategori_passthrough(sel) -> bool:
     → mengganti kategori praktis tidak mengubah apa pun (Semua ==
     DEVIASI == 1.347 baris di probe) — filter jadi no-op.
 
-    KEBIJAKAN v3.9.45 (rekonsiliasi dua keluhan user):
+    KEBIJAKAN (v3.9.45 → direvisi v3.9.53):
     (a) default 'Deviasi' TETAP meng-include baris tanpa kategori —
-        perlindungan kelas 100383 (barang ber-deviasi yang belum masuk
-        master tidak boleh lenyap senyap dari tab Deviasi — keluhan
-        v3.9.44);
+        perlindungan kelas 100383 era pra-kategori-rekap (barang
+        ber-deviasi yang belum masuk master tidak boleh lenyap senyap
+        dari tab Deviasi — keluhan v3.9.44);
     (b) seleksi eksplisit LAIN = STRICT (filter bekerja normal —
         keluhan v3.9.45);
     (c) baris tanpa kategori punya entry combobox sendiri
-        (KATEGORI_BLANK_LABEL) utk akses eksplisit.
-    v3.9.49 — entri gabungan DEFAULT (KATEGORI_DEFAULT_LABEL — kategori
-    Rekap Mentah) ikut ber-passthrough (kebijakan (a) berlaku utk
-    seleksi default mana pun; cabang multi-nilai diperiksa view
-    SEBELUM cabang ini).
+        (KATEGORI_BLANK_LABEL) utk akses eksplisit;
+    (d) v3.9.53 — entri GABUNGAN default KATEGORI_DEFAULT_LABEL kini
+        STRICT (TIDAK ber-passthrough): user: "kok ada nama barang yang
+        bukan kategori COM Deviasi + Packaging Deviasi misal BASKOM
+        STAINLESS 18 CM, BASKOM STAINLESS UK 26 CM dll coba cek apa ini
+        bug?" — passthrough blank membuat barang TANPA kategori (mis.
+        perlengkapan BASKOM) ikut tampil di seleksi default. Proteksi
+        kelas 100383 kini DIPENUHI KATEGORI REKAP v3.9.49 (barang
+        ber-deviasi ber-kategori rekap tetap tampil di seleksi default,
+        mis. BUMBU PASTA KUAH (V.20)); kelas tanpa kategori tetap
+        terjangkau lewat entry '(Tanpa Kategori)' + jumlah tersembunyi
+        dinyatakan di status view — tidak lenyap senyap.
     Konsumen: deviasi_view ×2 · nominal_resto_view · pivot_view ×2
     (via re-export widgets).
     """
     if sel is None:
         return False
-    s = str(sel).strip().lower()
-    if s == "deviasi":
-        return True
-    return s == KATEGORI_DEFAULT_LABEL.strip().lower()
+    return str(sel).strip().lower() == "deviasi"
 
 
 # =============================================================================

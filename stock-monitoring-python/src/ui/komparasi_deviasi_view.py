@@ -1174,10 +1174,22 @@ class KomparasiDeviasiView(tk.Frame):
         """Lazy refresh: compute hanya saat pane terlihat.
         v3.9.13: pemanggilan PERTAMA dengan data app + belum ada file →
         AUTO-LOAD file deviasi terakhir (komparasi_last.json; parse di
-        worker — tidak membekukan UI; file hilang → status saja)."""
+        worker — tidak membekukan UI; file hilang → status saja).
+        v3.9.53: auto-load kini juga dipicu app SAAT STARTUP
+        (maybe_auto_load_last — kolom 'Dev. Bulan Lalu' tab 📦/🧩 butuh
+        file aktif sebelum tab 📋 dibuka)."""
         if self._dirty and self.data is not None and not self.data.empty:
             self._dirty = False
             self._refresh()
+        self.maybe_auto_load_last()
+
+    def maybe_auto_load_last(self):
+        """v3.9.53 — AUTO-LOAD file deviasi terakhir (komparasi_last.json)
+        SEKALI per sesi data-app, dipanggil app pasca-pipeline-load
+        (startup) ATAU ensure_refreshed (tab 📋 pertama terlihat —
+        perilaku lama v3.9.13). Parse di worker (anti-beku); file
+        hilang → status saja tanpa dialog; sudah ada file / sudah
+        pernah dicoba → no-op (guard _auto_loaded)."""
         if (not self._auto_loaded and self.data is not None
                 and not self.data.empty and not self._file_paths):
             self._auto_loaded = True
