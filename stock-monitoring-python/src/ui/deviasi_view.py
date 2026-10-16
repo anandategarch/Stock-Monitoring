@@ -886,17 +886,10 @@ class DeviasiView(tk.Frame):
         # sampel tak kena baris head. Override pengukuran membaca nilai
         # RAW per iid (snapshot/_rank_map) utk kedua kolom merge —
         # auto_fit_columns (widgets) menghormati atribut ini.
-        def _autofit_merge_value(iid, col, cur):
-            if col == "Nama Barang":
-                snap = self._row_snaps.get(str(iid))
-                if snap:
-                    return str(snap.get("barang", cur))
-            elif col == "Rank":
-                rk = self._rank_map.get(str(iid))
-                if rk is not None:
-                    return str(rk)
-            return cur
-        self.tree._autofit_value_get = _autofit_merge_value
+        # v3.9.56 — getter jadi METHOD bersama (_merge_value_get): dipakai
+        # juga filter clone ⛶ (value_get attach_clone_filters — nilai RAW
+        # supaya kelompok utuh lolos filter by Nama Barang/Rank).
+        self.tree._autofit_value_get = self._merge_value_get
 
         # v3.9.51 — strip warna header kolom In (kiriman — BUKAN Stock):
         # In_H-1 / In_H / In_H+1 (heading dinamis In_13/In_14/In_15 saat
@@ -1171,6 +1164,23 @@ class DeviasiView(tk.Frame):
                 fmt = self._format_col_series(col, filtered[col])
                 filtered = filtered[fmt.isin(sel)]
         return filtered
+
+    def _merge_value_get(self, iid, col, cur):
+        """v3.9.55/56 — nilai RAW kolom merge-vertikal per iid (sumber:
+        snapshot barang / _rank_map) — dipakai (a) auto_fit_columns
+        pengukuran lebar (tree._autofit_value_get), (b) filter clone ⛶
+        (attach_clone_filters value_get — kelompok utuh lolos filter),
+        (c) sort value_get jalurnya terpisah (closure di _sort_by).
+        Kolom lain → nilai display tree (cur)."""
+        if col == "Nama Barang":
+            snap = self._row_snaps.get(str(iid))
+            if snap:
+                return str(snap.get("barang", cur))
+        elif col == "Rank":
+            rk = self._rank_map.get(str(iid))
+            if rk is not None:
+                return str(rk)
+        return cur
 
     def _col_values(self, col: str) -> list:
         """Nilai unik TERFORMAT utk popup filter header (v3.5 — semua
@@ -2547,6 +2557,9 @@ class DeviasiView(tk.Frame):
         self._render_gen += 1
         self._close_stale_clones()
         self.tree.delete(*self.tree.get_children())
+        # v3.9.56 — reset state sticky merge (baris/nilai baru dari payload
+        # = head-only; tracking display lama tak berlaku lagi)
+        self._clear_group_merge_state(self.tree)
         self._update_headings()
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
@@ -2604,6 +2617,11 @@ class DeviasiView(tk.Frame):
             with contextlib.suppress(tk.TclError):
                 _tint.refresh()
 
+    # v3.9.56 — STICKY MERGE: baris yang MENAMPILKAN nilai nama/rank per
+    # kelompok (tabel utama + clone ⛶ punya state sendiri — iid sama,
+    # viewport beda). {head_iid: disp_iid}; '' = display di head.
+    _MERGE_COLS = ("Nama Barang", "Rank")
+
     def _reapply_group_merge(self, tree):
         """v3.9.55 — MERGE-VERTIKAL NATIVE kolom Nama Barang + Rank +
         BANDING kelompok SERAGAM (menggantikan _reapply_group_bands +
@@ -2622,52 +2640,50 @@ class DeviasiView(tk.Frame):
           (sort kolom lain → kelompok interleave → tiap run kontigu =
           unit merge; run 1-baris menampilkan nilainya — informatif &
           konsisten dgn v3.9.51).
-        - Idempoten & O(n): nilai ditulis ulang hanya bila berubah; tag
-          band diganti hanya bila beda; cache render overlay Tk 8
-          di-invalidate saat band berubah (pola v3.9.40)."""
+
+        v3.9.56 — STICKY DISPLAY (user: "bug nama barang tidak muncul"):
+        nilai head SAAT SCROLL hilang dari viewport (1347 baris: kelompok
+        puluhan baris → viewport penuh baris BLANK). Kini baris display
+        per kelompok = head BILA terlihat, selain itu BARIS PERTAMA
+        kelompok yang TERLIHAT (ala merged-cell Excel yang selalu memuat
+        nilai di area terlihat) — dipindah saat scroll oleh
+        _apply_sticky_merge (hook yscrollcommand + <Configure> +
+        _redraw_overlay_now; idempoten, tulis-diff saja)."""
         band_changed = False
         try:
             children = list(tree.get_children(""))
             if not children:
+                self._clear_group_merge_state(tree)
                 return
             col_ids = list(tree["columns"])
-            try:
-                b_idx = col_ids.index("Nama Barang")
-                r_idx = col_ids.index("Rank")
-            except ValueError:
+            # kolom merge wajib ada (guard ValueError → reset state)
+            if "Nama Barang" not in col_ids or "Rank" not in col_ids:
+                self._clear_group_merge_state(tree)
                 return
             snaps = self._row_snaps
             rank_map = self._rank_map
-            # (iid, barang_raw, values) — barang RAW dari snapshot
+            # (iid, barang_raw) — barang RAW dari snapshot SAJA (nilai
+            # tree tak bisa dipakai: baris display sticky & head bisa
+            # blank saat nilai berpindah — snapshot satu-satunya sumber
+            # kebenaran adjacency; row tanpa snapshot = run kosong).
             rows = []
             for k in children:
-                try:
-                    vals = list(tree.item(k, "values") or [])
-                except tk.TclError:
-                    continue
                 snap = snaps.get(str(k))
                 barang = str(snap.get("barang", "")) if snap else ""
-                if not barang and b_idx < len(vals):
-                    # fallback: nilai tree (head kelompok masih bernilai)
-                    barang = str(vals[b_idx])
-                rows.append((str(k), barang, vals))
+                rows.append((str(k), barang))
+            # v3.9.56 — bangun RUNS kontigu (head_iid, [iids], barang,
+            # rank_text) + tag band; nilai ditulis oleh fase sticky
+            # (desired = posisi display utk viewport SAAT INI).
+            runs = []
             band = 0
-            for idx, (k, barang, vals) in enumerate(rows):
+            for idx, (k, barang) in enumerate(rows):
                 is_head = (idx == 0) or (rows[idx - 1][1] != barang)
                 if is_head:
                     band = 0 if idx == 0 else (band + 1) % 2
-                want_barang = barang if is_head else ""
-                want_rank = str(rank_map.get(k, "")) if is_head else ""
-                changed = False
-                if b_idx < len(vals) and str(vals[b_idx]) != want_barang:
-                    vals[b_idx] = want_barang
-                    changed = True
-                if r_idx < len(vals) and str(vals[r_idx]) != want_rank:
-                    vals[r_idx] = want_rank
-                    changed = True
-                if changed:
-                    with contextlib.suppress(tk.TclError):
-                        tree.item(k, values=vals)
+                    runs.append({"head": k, "start": idx, "iids": [],
+                                 "barang": barang,
+                                 "rank": str(rank_map.get(k, ""))})
+                runs[-1]["iids"].append(k)
                 # tag band — ganti hanya bila beda (pola v3.9.49)
                 new_tag = "grp0" if band == 0 else "grp1"
                 try:
@@ -2681,6 +2697,16 @@ class DeviasiView(tk.Frame):
                 band_changed = True
                 with contextlib.suppress(tk.TclError):
                     tree.item(k, tags=tuple(old_tags) + (new_tag,))
+            # simpan state utk sticky (clone punya state sendiri)
+            tree._grp_runs = runs
+            if getattr(tree, "_grp_disp", None) is None:
+                tree._grp_disp = {}
+            # daftarkan hook scroll/resize SEKALI per tree
+            self._bind_sticky_merge(tree)
+            # fase tulis nilai: NORMALISASI penuh (kebal state awal —
+            # payload head-only / nilai display tersalin clone) → nilai
+            # hanya di baris display utk viewport SAAT INI.
+            self._apply_sticky_merge(tree, force=True)
         except tk.TclError:
             return
         # overlay Tk 8 me-cache warna bg tag-baris per iid (v3.9.40) —
@@ -2691,6 +2717,129 @@ class DeviasiView(tk.Frame):
                 with contextlib.suppress(Exception):
                     _ov._invalidate_render_cache()
                     _ov._schedule()
+
+    def _clear_group_merge_state(self, tree):
+        """v3.9.56 — reset state sticky (tree di-render ulang: baris
+        baru + nilai head-only dari payload — tracking lama tak valid)."""
+        tree._grp_runs = []
+        tree._grp_disp = {}
+
+    def _bind_sticky_merge(self, tree):
+        """v3.9.56 — pasang hook sticky SEKALI per tree (utama + clone ⛶):
+        (1) wrap yscrollcommand — SEMUA sumber scroll (roda/keyboard/drag
+        scrollbar/see()/moveto programatik) bermuara ke sini (Tk memanggil
+        di idle — cukup utk nilai teks, tak perlu sinkron frame);
+        (2) <Configure> — tinggi viewport berubah (resize jendela/zoom);
+        (3) _redraw_overlay_now (widgets) juga memanggil
+        tree._sticky_merge_cb — jalur sinkron-saat-scroll (anti 1-frame
+        tertunda di roda/drag)."""
+        if getattr(tree, "_sticky_merge_bound", False):
+            return
+        tree._sticky_merge_bound = True
+
+        def cb():
+            self._apply_sticky_merge(tree)
+        tree._sticky_merge_cb = cb
+        # (1) wrap yscrollcommand
+        try:
+            orig = str(tree.cget("yscrollcommand"))
+        except tk.TclError:
+            orig = ""
+        if orig and orig not in ("", "{}"):
+            def _cmd(*args, _orig=orig, _cb=cb):
+                with contextlib.suppress(tk.TclError):
+                    tree.tk.call(_orig, *args)
+                _cb()
+            with contextlib.suppress(tk.TclError):
+                tree.configure(yscrollcommand=_cmd)
+        # (2) resize viewport
+        with contextlib.suppress(tk.TclError):
+            tree.bind("<Configure>", lambda e: cb(), add="+")
+
+    def _apply_sticky_merge(self, tree, force=False):
+        """v3.9.56 — pindahkan baris DISPLAY nilai merge per kelompok ke
+        posisi viewport: head bila terlihat, selain itu baris PERTAMA
+        kelompok yang terlihat (sticky — ala merged-cell Excel yang selalu
+        memuat nilai di area terlihat; user: 'bug nama barang tidak
+        muncul').
+
+        Dua mode:
+        - ``force=True`` (render/sort/filter/clone-create): NORMALISASI
+          PENUH — baca values per baris (1 panggilan Tcl/baris, kelas
+          biaya sama dgn v3.9.55) lalu tulis-diff → nilai HANYA di baris
+          display. Kebal dari state awal apa pun (payload head-only,
+          clone ⛶ menyalin nilai display tabel UTAMA, rebuild cache
+          filter clone) + rebuild tracking.
+        - ``force=False`` (hook scroll/resize): tracking diff murah —
+          O(jumlah kelompok) Python + 2 tulis per kelompok yang
+          berpindah display."""
+        runs = getattr(tree, "_grp_runs", None)
+        if not runs:
+            return
+        disp = getattr(tree, "_grp_disp", None)
+        if disp is None:
+            disp = tree._grp_disp = {}
+        try:
+            n = len(tree.get_children(""))
+            if n <= 0:
+                return
+            first, last = tree.yview()
+            col_ids = list(tree["columns"])
+            b_idx = col_ids.index("Nama Barang")
+            r_idx = col_ids.index("Rank")
+        except (tk.TclError, ValueError):
+            return
+        i0 = max(0, int(first * n))
+        i1 = min(n, int(last * n) + 1)
+        if force:
+            # ---- normalisasi penuh (kebal state awal apa pun) ----
+            for r in runs:
+                start, iids = r["start"], r["iids"]
+                end = start + len(iids) - 1
+                head = r["head"]
+                if start >= i1 or end < i0:
+                    desired = head      # di luar viewport → nilai di head
+                elif i0 <= start < i1:
+                    desired = head
+                else:
+                    desired = iids[max(0, i0 - start)]
+                disp[head] = desired
+                for iid in iids:
+                    try:
+                        vals = list(tree.item(iid, "values") or [])
+                    except tk.TclError:
+                        continue
+                    want_b = r["barang"] if iid == desired else ""
+                    want_r = r["rank"] if iid == desired else ""
+                    if b_idx < len(vals) and str(vals[b_idx]) != want_b:
+                        with contextlib.suppress(tk.TclError):
+                            tree.set(iid, "Nama Barang", want_b)
+                    if r_idx < len(vals) and str(vals[r_idx]) != want_r:
+                        with contextlib.suppress(tk.TclError):
+                            tree.set(iid, "Rank", want_r)
+            return
+        # ---- murah: tracking diff (jalur scroll) ----
+        writes = []
+        for r in runs:
+            start, iids = r["start"], r["iids"]
+            end = start + len(iids) - 1
+            head = r["head"]
+            if start >= i1 or end < i0:
+                desired = head          # di luar viewport → nilai di head
+            elif i0 <= start < i1:
+                desired = head
+            else:
+                desired = iids[max(0, i0 - start)]
+            prev = disp.get(head, head)   # payload = nilai di head
+            if prev == desired:
+                continue
+            writes.append((prev, "", ""))
+            writes.append((desired, r["barang"], r["rank"]))
+            disp[head] = desired
+        for iid, barang, rank in writes:
+            with contextlib.suppress(tk.TclError):
+                tree.set(iid, "Nama Barang", barang)
+                tree.set(iid, "Rank", rank)
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
@@ -2719,10 +2868,14 @@ class DeviasiView(tk.Frame):
             # FIX B-02 (audit 2-b): on_after_filter — tag minus per-cell
             # dipasang ulang setelah filter clone REBUILD (delete+insert);
             # fix v3.9.5 19-a #3 dulu hanya diterapkan di komparasi/laporan.
+            # v3.9.56 — value_get merge-aware: filter clone ⛶ by Nama
+            # Barang/Rank mencocokkan nilai RAW snapshot (kelompok UTUH
+            # lolos; nilai tree head-only/sticky sejak merge-vertikal).
             attach_clone_filters(
                 new_tree,
                 [c[0] for c in self.COLUMNS if c[0] != "✓"],
                 get_values=self._col_values,
+                value_get=self._merge_value_get,
                 on_sort=lambda c, d, t=new_tree: self._sort_by(c, reverse=d,
                                                                tree=t),
                 on_after_filter=lambda t=new_tree:

@@ -2224,8 +2224,8 @@ class ColumnManager:
         win.geometry(f"+{x}+{y}")
 
 
-def _tree_row_passes(kw: dict, col_idx: dict, active: dict,
-                     parent_text: str = "") -> bool:
+def _tree_row_passes(iid: str, kw: dict, col_idx: dict, active: dict,
+                     value_get=None, parent_text: str = "") -> bool:
     """Cek 1 baris snapshot {text, values} lolos filter kolom aktif.
 
     '#0' (kolom tree) dicocokkan terhadap TEXT baris — baris ANAK
@@ -2238,6 +2238,12 @@ def _tree_row_passes(kw: dict, col_idx: dict, active: dict,
     (tree["columns"]) — values[] item diindeks secara logis, BUKAN
     urutan tampilan; setelah kolom disembunyikan, index display ≠
     index logis → filter membaca nilai kolom yang SALAH.
+
+    v3.9.56 — ``value_get(iid, col, cur)``: override sumber nilai per
+    baris×kolom (deviasi_view: kolom MERGE-VERTIKAL Nama Barang/Rank —
+    nilai tree hanya di baris head/sticky; tanpa override, filter
+    clone ⛶ by nama hanya meloloskan baris display — kelompok hilang
+    sebagian, laten sejak v3.9.51).
     """
     vals = kw.get("values") or []
     text = str(kw.get("text") or "")
@@ -2247,13 +2253,18 @@ def _tree_row_passes(kw: dict, col_idx: dict, active: dict,
         else:
             k = col_idx.get(c)
             v = str(vals[k]) if (k is not None and 0 <= k < len(vals)) else ""
+            if value_get is not None:
+                with contextlib.suppress((AttributeError, IndexError,
+                                           TypeError, ValueError,
+                                           tk.TclError)):
+                    v = str(value_get(str(iid), c, v))
         if v not in sel:
             return False
     return True
 
 
 def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
-                           on_done=None):
+                           on_done=None, value_get=None):
     """Terapkan filter kolom (nilai TERFORMAT) ke baris tree IN PLACE (v3.6).
 
     Dipakai tabel CLONE (⛶ Perbesar): snapshot item lengkap di-cache saat
@@ -2266,6 +2277,9 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
     TAG PER-CELL — parameter ``on_done`` dipanggil setelah semua baris
     selesai di-insert ulang supaya view bisa memasang ulang tag cell
     (minus merah / warna Status) di clone ⛶.
+
+    v3.9.56 — ``value_get(iid, col, cur)``: sumber nilai RAW per baris
+    (kolom merge-vertikal deviasi_view — nilai tree head-only/sticky).
     """
     # v3.9.13: seleksi KOSONG = filter AKTIF (0 baris, semantik Excel) —
     # dulu truthiness `if s` menelan set() sebagai "tanpa filter".
@@ -2311,12 +2325,14 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
                 # parent 2-level: '#0'/text diuji pada parent, kolom data
                 # diuji pada anak — parent tampil bila ada anak yang lolos
                 kept = [(k, w) for (k, w) in kids
-                        if _tree_row_passes(w, col_idx, active,
-                                            str(kw.get("text") or ""))]
+                        if _tree_row_passes(k, w, col_idx, active,
+                                            value_get=value_get,
+                                            parent_text=str(kw.get("text") or ""))]
                 if kept:
                     items.append(("", iid, kw))
                     items.extend((iid, k, w) for (k, w) in kept)
-            elif _tree_row_passes(kw, col_idx, active):
+            elif _tree_row_passes(iid, kw, col_idx, active,
+                                   value_get=value_get):
                 items.append(("", iid, kw))
 
     prev = getattr(tree, "_row_filter_cancel", None)
@@ -2346,7 +2362,8 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
 
 
 def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
-                         get_values, on_sort=None, on_after_filter=None):
+                         get_values, on_sort=None, on_after_filter=None,
+                         value_get=None):
     """HeaderFilterGroup utk tabel CLONE ⛶ (v3.6).
 
     Sebelumnya clone ⛶ MENYALIN ikon funnel dari heading sumber tapi TIDAK
@@ -2360,12 +2377,18 @@ def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
     clone (dulu: filter di clone menghapus minus-merah & warna Status).
     Callback apply juga disimpan di ``tree._clone_filter_apply``
     (dipakai test / integrasi).
+
+    v3.9.56 — ``value_get(iid, col, cur)``: sumber nilai RAW utk kolom
+    merge-vertikal (deviasi_view) — filter clone by Nama Barang/Rank
+    mencocokkan nilai snapshot per baris, bukan nilai display tree
+    (head-only) → kelompok UTUH lolos filter.
     """
     state: dict = {}
 
     def on_apply(col, sel):
         state[col] = sel
-        apply_tree_row_filters(tree, state, on_done=on_after_filter)
+        apply_tree_row_filters(tree, state, on_done=on_after_filter,
+                               value_get=value_get)
 
     tree._clone_filter_apply = on_apply
     return HeaderFilterGroup(tree, cols, get_values=get_values,
@@ -3794,6 +3817,16 @@ def _redraw_overlay_now(tree: ttk.Treeview) -> None:
     if tint is not None and getattr(tint, "_alive", False):
         with contextlib.suppress(tk.TclError):
             tint.refresh()
+    # v3.9.56 — STICKY MERGE (deviasi_view): nilai Nama Barang/Rank per
+    # kelompok berpindah mengikuti viewport (head tak terlihat → baris
+    # pertama yang terlihat). Hook di sini = jalur SINKRON saat scroll
+    # (roda/drag scrollbar/keyboard — semua memanggil fungsi ini);
+    # wrap yscrollcommand di view menangkap sumber sisanya (idle).
+    # Idempoten — tanpa merge state (tree non-deviasi) = no-op.
+    _sticky = getattr(tree, "_sticky_merge_cb", None)
+    if _sticky is not None:
+        with contextlib.suppress(Exception):
+            _sticky()
 
 
 # v3.9.55 — bindtag BERSAMA utk sinkron overlay pasca keyboard-scroll

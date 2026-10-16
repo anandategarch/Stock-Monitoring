@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.55", APP_VERSION == "3.9.55",
+    check("Versi = 3.9.56", APP_VERSION == "3.9.56",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -14997,6 +14997,189 @@ def main():
     _appmod65._SETTINGS_PATH = _orig_sp65
     import shutil as _sh65
     _sh65.rmtree(_tmpdir65, ignore_errors=True)
+
+    # ==================================================================
+    # §66 — v3.9.56 STICKY MERGE-VERTIKAL + FILTER CLONE MERGE-AWARE
+    # (user: "bug nama barang tidak muncul di tab deviasi gr dan pcs")
+    # ==================================================================
+    # akar: nilai nama/rank HANYA di baris head (v3.9.55 native merge) →
+    # saat scroll melewati head, viewport penuh baris BLANK (kelompok
+    # puluhan baris). FIX: baris display per kelompok = head bila
+    # terlihat, selain itu BARIS PERTAMA kelompok yang TERLIHAT (sticky).
+    _src66 = []
+    for _b66 in ("STICKY A", "STICKY B", "STICKY C"):
+        for _r66 in [f"R{i:02d}" for i in range(1, 25)]:
+            for _j66, _v66 in [("1.SO", 30.0), ("2.SALDO AKHIR", 25.0),
+                               ("SALDO AWAL", 10.0), ("4.IN", 2.0)]:
+                for _t66 in (24, 25, 26, 27):
+                    _src66.append({
+                        "Nama Barang": _b66, "JENIS": _j66,
+                        "NAMA RESTO": _r66, "Tanggal": _t66,
+                        "NILAI": _v66, "SATUAN": "GR",
+                        "AKTIF/NON": "AKTIF", "KATEGORI":
+                        "COM DEVIASI - RESTO", "SOURCE KIRIMAN": "GUDANG"})
+    from src.ui.deviasi_view import DeviasiView as _DV66
+    # Toplevel TERISOLASI: root utama masih ditempati StockMonitorApp
+    # (pack app fill-both) → view di root utama mendapat tinggi 0 →
+    # bbox kosong (vis=0 — ditemukan saat run pertama §66).
+    _top66 = tk.Toplevel(root)
+    _top66.geometry("1500x800+5+5")
+    _dv66 = _DV66(_top66, satuan_mode="GR")
+    _dv66.pack(fill="both", expand=True)
+    _dv66.data = pd.DataFrame(_src66)
+    _dv66._show_content()
+    _dv66._refresh(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _dv66._busy and len(_dv66.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    root.update_idletasks()
+    root.update()
+    _t66 = _dv66.tree
+    _kids66 = list(_t66.get_children(""))
+    check("(v3.9.56) §66 fixture: 72 baris 3 kelompok × 24 baris",
+          len(_kids66) == 72 and len(getattr(_t66, "_grp_runs", [])) == 3,
+          f"rows={len(_kids66)} runs={len(getattr(_t66, '_grp_runs', []))}")
+    _named66 = lambda: [k for k in _t66.get_children("")
+                        if str(_t66.set(k, "Nama Barang")).strip()]
+    # (1) render awal (viewport top) → nilai di HEAD tiap kelompok
+    check("(v3.9.56) sticky: viewport TOP → nilai di HEAD tiap kelompok "
+          "(3 named, head run berurutan)",
+          len(_named66()) == 3
+          and _named66() == [_kids66[0], _kids66[24], _kids66[48]],
+          f"got {_named66()}")
+    # (2) scroll tengah → head grup B & C di luar viewport → nilai
+    # pindah ke baris PERTAMA TERLIHAT tiap kelompok (hook yscrollcommand)
+    _t66.yview_moveto(0.5)
+    for _ in range(40):
+        root.update()
+    _vis66 = [k for k in _t66.get_children("")
+              if _t66.bbox(k) and 0 <= _t66.bbox(k)[1] < _t66.winfo_height()]
+    _vis_named66 = [k for k in _vis66
+                    if str(_t66.set(k, "Nama Barang")).strip()]
+    check("(v3.9.56) sticky: scroll MID → SETIAP kelompok terlihat "
+          "menampilkan NAMA (bug 'nama barang tidak muncul' tuntas)",
+          len(_vis_named66) >= 2
+          and all(str(_t66.set(k, "Nama Barang")).strip()
+                  for k in _vis_named66),
+          f"vis={len(_vis66)} named={len(_vis_named66)}")
+    # display = baris PERTAMA TERLIHAT kelompoknya: baris terlihat
+    # SEBELUM baris display wajib kelompok LAIN (baris sebelumnya
+    # kelompok sama tak terlihat = sudah discroll lewat).
+    _snaps66 = _dv66._row_snaps
+
+    def _brg66(iid):
+        return str((_snaps66.get(str(iid)) or {}).get("barang", ""))
+    _okpos66 = all(
+        _vis66.index(k) == 0 or _brg66(_vis66[_vis66.index(k) - 1])
+        != _brg66(k)
+        for k in _vis_named66)
+    check("(v3.9.56) sticky: display = baris PERTAMA yang TERLIHAT "
+          "dari kelompoknya (baris terlihat sebelumnya = kelompok lain)",
+          _okpos66, f"named={[(k, _brg66(k)) for k in _vis_named66]}")
+    # (3) RANK ikut pindah bersama nama: head grup B (baris 24,
+    # off-screen saat MID) blank; baris display B terisi; head C
+    # (baris 48, terlihat) tetap terisi
+    _rk_disp66 = str(_t66.set(_vis_named66[0], "Rank")).strip() \
+        if _vis_named66 else ""
+    check("(v3.9.56) sticky: RANK ikut berpindah ke baris display "
+          "(head off-screen blank, display terisi)",
+          _rk_disp66 != ""
+          and str(_t66.set(_kids66[24], "Rank")).strip() == "",
+          f"disp_rank={_rk_disp66!r} "
+          f"headB_rank={_t66.set(_kids66[24], 'Rank')!r}")
+    # (4) scroll balik ke ATAS → nilai KEMBALI ke head (idempoten)
+    _t66.yview_moveto(0.0)
+    for _ in range(40):
+        root.update()
+    check("(v3.9.56) sticky: scroll balik TOP → nilai KEMBALI di head "
+          "(tidak ada nilai ganda)",
+          len(_named66()) == 3
+          and _named66() == [_kids66[0], _kids66[24], _kids66[48]],
+          f"got {_named66()}")
+    # (5) sort kolom lain → interleave; nilai tetap 3 + di head run visual
+    _dv66._sort_by("Deviasi", reverse=True)
+    root.update()
+    _kids66b = list(_t66.get_children(""))
+    check("(v3.9.56) sticky pasca-SORT: nilai tetap tepat 1 per kelompok "
+          "(di posisi head viewport)",
+          len(_named66()) == 3,
+          f"got {len(_named66())}")
+    # (6) hook murah idempoten (panggil 2× → state sama)
+    _st66a = _named66()
+    _dv66._apply_sticky_merge(_t66)
+    _dv66._apply_sticky_merge(_t66)
+    check("(v3.9.56) sticky: _apply_sticky_merge IDEMPOTEN (2× panggil "
+          "→ state identik)",
+          _named66() == _st66a, "state berubah")
+    # (7) FILTER CLONE ⛶ MERGE-AWARE (BUG laten v3.9.51: nilai tree
+    # head-only → filter clone by Nama Barang hanya meloloskan baris
+    # display). Kini value_get RAW → kelompok UTUH lolos.
+    _t66.yview_moveto(0.0)
+    for _ in range(20):
+        root.update()
+    _win66, _mt66 = _dv66._maximize()
+    for _ in range(80):
+        root.update()
+        time.sleep(0.01)
+    _n66_0 = len(_mt66.get_children(""))
+    _mt66._clone_filter_apply("Nama Barang", {"STICKY B"})
+    for _ in range(120):
+        root.update()
+        time.sleep(0.01)
+    _n66_1 = len(_mt66.get_children(""))
+    check("(v3.9.56) filter clone ⛶ by Nama Barang: kelompok UTUH "
+          "lolos (24 baris STICKY B — dulu 1 baris display saja)",
+          _n66_1 == 24, f"got {_n66_1} (awal {_n66_0})")
+    _named_c66 = [k for k in _mt66.get_children("")
+                  if str(_mt66.set(k, "Nama Barang")).strip()]
+    check("(v3.9.56) filter clone ⛶: display bernama tepat 1 baris "
+          "di dalam clone",
+          len(_named_c66) == 1
+          and str(_mt66.set(_named_c66[0], "Nama Barang")) == "STICKY B",
+          f"got {_named_c66}")
+    # nilai display clone ikut viewport clone (scroll clone)
+    _mt66.yview_moveto(0.8)
+    for _ in range(40):
+        root.update()
+    _vis_c66 = [k for k in _mt66.get_children("")
+                if _mt66.bbox(k) and 0 <= _mt66.bbox(k)[1]
+                < _mt66.winfo_height()]
+    _vis_c_named = [k for k in _vis_c66
+                    if str(_mt66.set(k, "Nama Barang")).strip()]
+    check("(v3.9.56) sticky di CLONE ⛶: scroll clone → nama tetap "
+          "tampil di viewport clone (state terpisah dari tabel utama)",
+          len(_vis_c_named) >= 1,
+          f"vis={len(_vis_c66)} named={len(_vis_c_named)}")
+    _win66.destroy()
+    for _ in range(20):
+        root.update()
+    # (8) double-click baris LANJUTAN (blank display) tetap buka popup
+    # via snapshot RAW — tree-agnostic
+    _pop66 = []
+    import src.ui.deviasi_popup as _dp66
+    _orig_sp66 = _dp66.show_deviasi_popup
+    _dp66.show_deviasi_popup = (lambda *a, **kw: _pop66.append((a, kw)))
+
+    class _Ev66:
+        pass
+    _lanj66 = _kids66b[1] if len(_kids66b) > 1 else None
+    if _lanj66 and str(_t66.set(_lanj66, "Nama Barang")).strip() == "":
+        _bb66 = _t66.bbox(_lanj66)
+        if _bb66:
+            _ev66 = _Ev66()
+            _ev66.widget = _t66
+            _ev66.x, _ev66.y = _bb66[0] + 150, _bb66[1] + 4
+            _dv66._on_double_click(_ev66)
+            root.update()
+    _dp66.show_deviasi_popup = _orig_sp66
+    check("(v3.9.56) double-click baris lanjutan (display blank) → "
+          "popup tetap terbuka dari SNAPSHOT RAW",
+          len(_pop66) == 1, f"popups={len(_pop66)}")
+    _dv66.destroy()
+    _top66.destroy()
+    root.update()
 
     # bersihkan state file followup uji
     for _p in (followup_path(), resolved_path()):

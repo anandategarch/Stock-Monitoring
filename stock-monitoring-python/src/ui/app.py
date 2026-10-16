@@ -189,7 +189,24 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.55"  # v3.9.55 — merge-vertikal NATIVE + skor resto + anti-glitch scroll + auto-fit startup
+APP_VERSION = "3.9.56"  # v3.9.56 — sticky merge-vertikal (nama barang selalu terlihat saat scroll) + filter clone merge-aware
+# v3.9.56 — FIX BUG USER ("bug nama barang tidak muncul di tab deviasi
+# gr dan pcs dan fix yang lain"):
+# (1) STICKY MERGE-VERTIKAL: v3.9.55 merge native menulis nilai nama/rank
+#     HANYA di baris head kelompok → saat scroll melewati head, viewport
+#     penuh baris BLANK (kelompok bisa puluhan baris) = tampak "nama
+#     barang tidak muncul". Kini baris DISPLAY per kelompok = head bila
+#     terlihat, selain itu BARIS PERTAMA kelompok yang TERLIHAT (ala
+#     merged-cell Excel — nilai selalu ada di area terlihat), dipindah
+#     otomatis saat scroll (hook: wrap yscrollcommand + <Configure> +
+#     _redraw_overlay_now; idempoten tulis-diff; pass murah 0,04 ms;
+#     clone ⛶ punya state viewport sendiri; sort/render/filter =
+#     normalisasi penuh kebal-state-awal).
+# (2) FILTER CLONE ⛶ MERGE-AWARE (bug laten v3.9.51): apply_tree_row_
+#     filters mencocokkan nilai DISPLAY tree → filter clone by Nama
+#     Barang hanya meloloskan baris head/sticky (kelompok hilang
+#     sebagian). Kini value_get(iid, kolom, cur) sumber RAW snapshot
+#     (attach_clone_filters → _merge_value_get) → kelompok UTUH lolos.
 # v3.9.55 — 8 PERMINTAAN USER ("kerjakan no bug no mistakes dan cek ulang
 # jagan asumsi dan no lemet. Deep audit juga program kita biar cepat dan
 # smooth"):
