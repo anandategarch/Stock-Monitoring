@@ -50,6 +50,12 @@ SNAPSHOT_FIELDS = [
     "asal", "resto", "barang", "satuan", "aktif", "h",
     "so", "sistem", "deviasi", "cek",
     "so_m2", "so_m1", "so_p1", "so_p2", "loss_bom",
+    # v3.9.54 (audit 8-a P1-3) — nama versi APP baris asal KOMPARASI
+    # ('resto' snap = bentuk pendek ternormalisasi, 'barang' = nama FILE
+    # → popup detail exact-match data app = 0 baris / popup KOSONG).
+    # Snap lama tanpa field ini → fallback 'barang'/'resto' (perilaku
+    # lama). TIDAK mengubah fingerprint (row_fingerprint md5 9 field).
+    "barang_app", "resto_app",
 ]
 # Kolom tanggal SO di tabel/export (posisi H relatif — heading dinamis
 # menampilkan angka tanggal, mis. H=25 → 23/24/25/26/27)

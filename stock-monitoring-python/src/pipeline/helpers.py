@@ -216,6 +216,46 @@ def kategori_filter_mask(kat, sel):
     return s.isin([v.upper() for v in vals])
 
 
+def kategori_match_mask(kat, sel):
+    """v3.9.54 — mask KANONIK seleksi kategori: SEMUA cabang entri
+    VIRTUAL dalam satu fungsi (semantik PERSIS jalur tampilan view —
+    pivot_view _name_values/_compute_payload · nominal_resto_view ·
+    deviasi_view).
+
+    AKAR BUG (user: "ADA BUG di pop up pivot tabel yang kosong ketika aku
+    double klik"): _on_double_click pivot meneruskan seleksi KATEGORI
+    combobox (DEFAULT = entri gabungan virtual KATEGORI_DEFAULT_LABEL)
+    ke show_details_popup yang memfilter EXACT string — label virtual
+    bukan nilai data → 0 baris → popup KOSONG pada setiap double-click
+    dengan kategori default sejak v3.9.49.
+
+    Cabang (urutan & semantik identik blok filter view):
+    1. KATEGORI_BLANK_LABEL → kategori_blank_mask (baris tanpa kategori);
+    2. entri gabungan → kategori_filter_mask (isin multi-nilai virtual,
+       case-insensitive);
+    3. legacy 'Deviasi' (kategori_passthrough) → exact | blank;
+    4. seleksi eksplisit lain → exact string match.
+
+    Return mask boolean Series; None bila `kat` None ATAU `sel` bukan
+    filter aktif (None/kosong/'(All)') — pemanggil melanjutkan tanpa
+    memfilter.
+    """
+    if kat is None or sel is None:
+        return None
+    sel_s = str(sel)
+    if not sel_s.strip() or sel_s == "(All)":
+        return None
+    if sel_s == KATEGORI_BLANK_LABEL:
+        return kategori_blank_mask(kat)
+    m = kategori_filter_mask(kat, sel_s)
+    if m is not None:
+        return m
+    if kategori_passthrough(sel_s):
+        blank = kategori_blank_mask(kat)
+        return (kat.astype(str) == sel_s) | blank
+    return kat.astype(str) == sel_s
+
+
 def kategori_has_default_values(series) -> bool:
     """v3.9.49 — apakah kolom KATEGORI memuat salah satu nilai rekap
     default (dipakai view utk memasang entry gabungan + seleksi default

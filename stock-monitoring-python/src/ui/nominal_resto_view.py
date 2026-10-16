@@ -112,6 +112,7 @@ from .widgets import (
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
+    identify_to_column,  # v3.9.54 — _event_col_name display-aware
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
@@ -1168,7 +1169,17 @@ class NominalRestoView(tk.Frame):
     def _event_col_name(self, tree, event) -> "str | None":
         """v3.9.36 — nama kolom data pada posisi klik event (None bila
         event tanpa x / kolom tak teridentifikasi — pemanggil
-        program lama tetap dapat popup rincian)."""
+        program lama tetap dapat popup rincian).
+
+        v3.9.54 FIX (audit 8-a P1-4): identify_column() = ID POSISIONAL
+        display ('#2') — dulu dipetakan ke index URUTAN LOGIS
+        tree["columns"] → setelah kolom disembunyikan (ColumnManager /
+        clone ⛶), double-click sel 'Tanpa Harga' resolve kolom SALAH
+        (popup tanpa-harga tidak terbuka / kolom lain terpicu). Kelas
+        fix v3.6/v3.7 yang sudah diterapkan di semua view lain
+        (deviasi/laporan/komparasi/followup/in_selisih/details_popup).
+        Kini memakai identify_to_column (displaycolumns-aware).
+        """
         try:
             cid = tree.identify_column(event.x)
         except (AttributeError, tk.TclError, TypeError):
@@ -1177,9 +1188,7 @@ class NominalRestoView(tk.Frame):
         if not cid or cid == "#0":
             return None
         try:
-            idx = int(str(cid).lstrip("#")) - 1
-            cols = list(tree["columns"])
-            return cols[idx] if 0 <= idx < len(cols) else None
+            return identify_to_column(tree, cid)
         except (ValueError, IndexError, TypeError, tk.TclError):
             return None
 

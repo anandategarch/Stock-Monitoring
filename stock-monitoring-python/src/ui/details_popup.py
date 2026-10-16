@@ -45,6 +45,7 @@ from .widgets import (
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
+    kategori_match_mask,  # v3.9.54 — popup KATEGORI virtual (fix kosong)
     open_tree_maximized,
     run_async,
 )
@@ -64,6 +65,16 @@ COLUMNS = [
 ]
 
 COL_IDS = [c[0] for c in COLUMNS]
+
+# v3.9.54 (audit 8-a P0-1) — JENIS COMPUTED pivot: "6.PEMAKAIAN (COM)"
+# dihitung _compute_com (base + IN − BK − SO; base = SA tgl-1 / SO(t−1))
+# — TIDAK PERNAH menjadi nilai JENIS di data mentah append1 (vocab:
+# SALDO AWAL / 1.SO / 2.SALDO AKHIR / 3.DEVIASI / 4.IN / 5.BARANG MASUK
+# / 7.Selisih IN / 8.BARANG KELUAR / 9.ACR). Exact match popup = 0 baris
+# → popup KOSONG saat double-click baris COM (mode Tanggal). Popup kini
+# menampilkan baris PENYUSUN formulanya (SA/SO/IN/BK).
+_COM_JENIS_LABEL = "6.PEMAKAIAN (COM)"
+_COM_FORMULA_JENIS = ("SALDO AWAL", "1.SO", "4.IN", "8.BARANG KELUAR")
 
 
 class DetailsPopup(tk.Toplevel):
@@ -656,7 +667,8 @@ class DetailsPopup(tk.Toplevel):
 
 def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
-                        filters: dict = None, show_maximize: bool = True):
+                        filters: dict = None, show_maximize: bool = True,
+                        tgl_range=None):
     """Filter data + show popup.
 
     v3.9.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
@@ -664,6 +676,15 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     selalu mengembalikan objek baru (hemat ~10ms + memori di 200k baris).
     v3.9.32: show_maximize=False utk jalur PIVOT (popup sudah ±90% layar
     — tombol ⛶ dihapus per permintaan user).
+    v3.9.54 (audit 8-a): (1) kolom KATEGORI virtual (gabungan default /
+    '(Tanpa Kategori)' / legacy 'Deviasi') → mask kanonik
+    kategori_match_mask — semantik identik jalur tampilan view (dulu
+    exact match = popup KOSONG); (2) JENIS '6.PEMAKAIAN (COM)'
+    (COMPUTED — tak pernah ada di data mentah) → popup menampilkan
+    baris PENYUSUN formula (dulu exact match = 0 baris); (3) param
+    tgl_range=(t1, t2) — rentang tanggal tampilan pivot diteruskan ke
+    popup (parity _compute_payload tnum.between — dulu popup mengabaikan
+    rentang → baris di luar rentang ikut tampil).
     """
     if data is None or data.empty:
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame(),
@@ -672,14 +693,29 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
 
     df = data
 
+    # v3.9.54 — catatan filter-info opsional (formula COM / rentang tgl)
+    _formula_note = None
+    _range_note = None
+
     # Build title parts
     title_parts = []
     if nama_barang:
         df = df[df["Nama Barang"].astype(str) == str(nama_barang)]
         title_parts.append(nama_barang)
     if jenis:
-        df = df[df["JENIS"].astype(str) == str(jenis)]
-        title_parts.append(jenis)
+        if str(jenis) == _COM_JENIS_LABEL:
+            # v3.9.54 FIX (audit 8-a P0-1) — baris 6.PEMAKAIAN (COM) di
+            # pivot adalah COMPUTED (_compute_com: base + IN − BK − SO) —
+            # nilainya TIDAK PERNAH menjadi JENIS di data mentah append1
+            # → exact match lama = popup KOSONG ("Tidak ada source data
+            # untuk kombinasi ini"). Popup kini menampilkan baris
+            # PENYUSUN formula (SA/SO/IN/BK) + keterangan di filter info.
+            df = df[df["JENIS"].astype(str).isin(_COM_FORMULA_JENIS)]
+            title_parts.append(str(jenis))
+            _formula_note = "JENIS=SA+SO+IN+BK (formula COM)"
+        else:
+            df = df[df["JENIS"].astype(str) == str(jenis)]
+            title_parts.append(jenis)
     if tanggal is not None:
         try:
             tgl_int = int(tanggal)
@@ -688,13 +724,48 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
         except (TypeError, ValueError):
             pass
 
+    # v3.9.54 FIX (audit 8-a P1-2) — rentang tanggal tampilan pivot
+    # (parity _compute_payload: tnum.between(t1, t2), kedua mode);
+    # dulu popup mengabaikan rentang → baris di luar rentang yang
+    # difilter tabel tetap muncul di popup.
+    if tgl_range is not None:
+        try:
+            _t1, _t2 = int(tgl_range[0]), int(tgl_range[1])
+            if _t1 > _t2:
+                _t1, _t2 = _t2, _t1
+            df = df[pd.to_numeric(df["Tanggal"], errors="coerce")
+                    .between(_t1, _t2)]
+            _range_note = f"Tgl {_t1}..{_t2}"
+        except (TypeError, ValueError, IndexError):
+            _range_note = None
+
     # Apply additional filters (from active pivot filters)
     filter_info_parts = []
+    for _note in (_formula_note, _range_note):
+        if _note:
+            filter_info_parts.append(_note)
     if filters:
         for col, val in filters.items():
-            if val and val != "(All)" and col in df.columns:
+            if not val or val == "(All)" or col not in df.columns:
+                continue
+            if col == "KATEGORI":
+                # v3.9.54 FIX — POPUP PIVOT KOSONG saat double-click
+                # (user: "ADA BUG di pop up pivot tabel yang kosong ketika
+                # aku double klik"): seleksi KATEGORI combobox view bisa
+                # berupa entri VIRTUAL — entri gabungan DEFAULT
+                # KATEGORI_DEFAULT_LABEL (sejak v3.9.49),
+                # KATEGORI_BLANK_LABEL '(Tanpa Kategori)', legacy
+                # 'Deviasi' (passthrough blank) — exact match lama = 0
+                # baris utk entri virtual. Mask kanonik kategori_match_mask
+                # = semantik IDENTIK jalur tampilan view (popup kini
+                # menampilkan persis baris yang tabel tampilkan).
+                m = kategori_match_mask(df["KATEGORI"], val)
+                if m is None:
+                    continue
+                df = df[m]
+            else:
                 df = df[df[col].astype(str) == str(val)]
-                filter_info_parts.append(f"{col}={val}")
+            filter_info_parts.append(f"{col}={val}")
 
     title = " / ".join(title_parts) if title_parts else "All Data"
     filter_info = ", ".join(filter_info_parts) if filter_info_parts else ""

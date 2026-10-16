@@ -189,7 +189,51 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.53"  # v3.9.53 — Dev. Bulan Lalu dari FILE deviasi (⚖ nilai asli, minggu ikut H) + kategori default STRICT
+APP_VERSION = "3.9.54"  # v3.9.54 — FIX popup pivot KOSONG (kategori virtual) + audit sebar-agent 8-a/8-b
+# v3.9.54 — FIX "ADA BUG di pop up pivot tabel yang kosong ketika aku double
+# klik. Cari bug secara keseluruhan sebar agent dan fix" (user):
+# (1) POPUP PIVOT KOSONG (P0, sejak v3.9.49): _on_double_click pivot
+#     meneruskan seleksi KATEGORI combobox (default = entri GABUNGAN
+#     VIRTUAL KATEGORI_DEFAULT_LABEL) ke show_details_popup yang memfilter
+#     EXACT string — label virtual bukan nilai data → 0 baris → popup
+#     KOSONG di setiap double-click dengan kategori default. FIX:
+#     kategori_match_mask BARU (pipeline/helpers — mask kanonik 4 cabang
+#     virtual: blank-label / gabungan / legacy 'Deviasi' passthrough /
+#     exact; semantik PERSIS jalur tampilan view) dipakai kolom KATEGORI
+#     popup (details_popup) — re-export widgets.
+# (2) AUDIT SEBAR-AGENT (3 agent paralel: 8-a popup-consistency · 8-b
+#     fitur v3.9.51-53 · 8-c baseline) → CONFIRMED & DIFIX:
+#     - (8-a P0-1) popup baris 6.PEMAKAIAN (COM): JENIS COMPUTED (tak
+#       pernah ada di data mentah — _compute_com) → popup kini menampilkan
+#       baris PENYUSUN formula (SA/SO/IN/BK) + catatan 'formula COM'
+#       (dulu exact-match = 0 baris → popup KOSONG di mode Tanggal);
+#     - (8-a P1-2) popup pivot kini meneruskan RENTANG TANGGAL tampilan
+#       (tgl_range — parity _compute_payload tnum.between; dulu baris di
+#       luar rentang tetap muncul di popup);
+#     - (8-a P1-3) popup Follow Up baris asal KOMPARASI: snap menyimpan
+#       'resto' bentuk pendek + 'barang' nama FILE → exact-match data app
+#       = 0 baris. FIX: field snapshot BARU barang_app/resto_app (diisi
+#       komparasi via pair_index bila pair ada di data app; SNAPSHOT_
+#       FIELDS +1 — fingerprint 9 field TAK berubah; snap lama → fallback
+#       perilaku lama);
+#     - (8-a P1-4) nominal_resto _event_col_name: posisi DISPLAY dipetakan
+#       ke urutan LOGIS (kelas bug v3.6/v3.7 — sudah difix di semua view
+#       lain) → setelah hide kolom, double-click sel 'Tanpa Harga' resolve
+#       kolom SALAH. FIX: identify_to_column (displaycolumns-aware);
+#     - (8-b P2) RankMergeOverlay.refresh: run LAMA menembus batas tree
+#       re-render PARSIAL → IndexError di callback Tk. FIX: klip batas
+#       atas children (cap 64 utk perf dipertahankan);
+#     - (8-b P2) sort_tree_by_column default parser: 'Rp-aware'
+#       SETENGAH (dulu buang ',' tapi TIDAK '.' ribuan → 'Rp 1.825' salah
+#       skala 1000×, 'Rp 1.825.567' ValueError → kolom jatuh ke string).
+#       FIX: mirror _parse_num_id ('.' ribuan dibuang, ',' desimal,
+#       kurung negatif, '—'); non-numerik tetap raise → fallback string;
+#     - (8-b doc) docstring rentang minggu komparasi disinkronkan kode
+#       (H 15-31 → WEEK 3/4; file user hanya WEEK 1-4).
+#     Test §64 BARU 31 check (mask kanonik · popup virtual 5 cabang · COM
+#     formula · tgl_range · E2E handler pivot · Follow Up app-namespace +
+#     fallback snap lama · guard overlay · parser Rp/ID · col-name
+#     display-aware). Baseline 1238 → 1269 PASS.
 # v3.9.53 — 3 PERMINTAAN USER (tab 📦 Deviasi GR / 🧩 PCS):
 # (1) DEV. BULAN LALU = NILAI ASLI DARI FILE (user: "Deviasi bulan lalu
 #     yang ditampilkan di tab deviasi gr danpcs pakai nilai asli yangan

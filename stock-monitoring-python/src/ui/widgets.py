@@ -58,6 +58,9 @@ from ..pipeline.helpers import kategori_filter_mask as kategori_filter_mask  # n
 from ..pipeline.helpers import (
     kategori_has_default_values as kategori_has_default_values,  # noqa: PLC0414
 )
+from ..pipeline.helpers import (
+    kategori_match_mask as kategori_match_mask,  # noqa: PLC0414
+)
 from ..pipeline.helpers import kategori_passthrough as kategori_passthrough  # noqa: PLC0414
 from .theme import (
     C_ACCENT,
@@ -3714,8 +3717,15 @@ class RankMergeOverlay:
             if lab is None:
                 continue
             # seleksi baris mana pun dalam kelompok → ikut warna seleksi
-            sel = any(str(children[head_idx + j]) in sel_set
-                      for j in range(min(int(count), 64)))
+            # v3.9.54 FIX (audit 8-b): run LAMA bisa menembus batas tree
+            # hasil re-render PARSIAL (idle-redraw terjadwal di antara
+            # chunk insert_tree_items; set_runs baru belum terdorong) —
+            # guard head_idx tak melindungi BATAS ATAS head_idx+count →
+            # IndexError di callback Tk. Klip ke jumlah baris aktual
+            # (cap 64 baris tetap — keperluan perf saja).
+            _hi = min(head_idx + min(int(count), 64), len(children))
+            sel = any(str(children[j]) in sel_set
+                      for j in range(head_idx, _hi))
             bg = (sel_bg if (sel and sel_bg)
                   else self.band_colors[int(band) % 2])
             fg = (sel_fg if (sel and sel_fg) else "#0f172a")
@@ -3967,15 +3977,25 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
 
     if parse is None:
         def parse(s):
-            # v3.9.51: 'Rp ' (currency — fmt_rp_cell) ikut dibuang supaya
+            # v3.9.51: prefiks 'Rp ' (fmt_rp_cell) ikut dibuang supaya
             # kolom Nominal terurut numerik tanpa parser khusus per view.
-            s = str(s).replace(",", "").replace("%", "") \
-                .replace("Rp", "").replace("Rp", "").strip()
+            # v3.9.54 FIX (audit 8-b — default parser Rp-aware SETENGAH):
+            # '.' pemisah RIBUAN Indonesia belum dibuang → 'Rp 1.825'
+            # ter-parse 1.825 (skala salah 1000×) & 'Rp 1.825.567' ValueError
+            # (kolom utuh jatuh ke fallback string). Kini mirror _parse_num_id
+            # view ('1.825' → 1825 · '12,5' → 12.5 · '(Rp 500)' → -500 ·
+            # '—'/'-' → 0). Non-numerik murni TETAP raise → fallback string
+            # sort (perilaku lama utk kolom teks).
+            s = str(s).replace("%", "").replace("—", "") \
+                .replace("Rp", "").strip()
             if s in ("-", ""):
                 return 0
-            if s.startswith("(") and s.endswith(")"):
-                return -float(s[1:-1])
-            return float(s)
+            neg = s.startswith("(") and s.endswith(")")
+            if neg:
+                s = s[1:-1].strip()
+            s = s.replace(".", "").replace(",", ".")
+            v = float(s)
+            return -v if neg else v
     try:
         keys.sort(key=lambda x: parse(x[0]), reverse=reverse)
     except (ValueError, TypeError):

@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.53", APP_VERSION == "3.9.53",
+    check("Versi = 3.9.54", APP_VERSION == "3.9.54",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -14321,6 +14321,406 @@ def main():
     _dv63.destroy()
     _top63.destroy()
     root.update()
+
+    # =========================================================================
+    # §64 — v3.9.54: FIX "POPUP PIVOT KOSONG saat double-click" + audit
+    # 8-a/8-b (user: "ADA BUG di pop up pivot tabel yang kosong ketika aku
+    # double klik. Cari bug secara keseluruhan sebar agent dan fix")
+    # =========================================================================
+    print("== 64. (v3.9.54) FIX POPUP PIVOT KOSONG + AUDIT SEBAR-AGENT ==")
+    import src.ui.details_popup as _dpm64
+    from src.pipeline.helpers import (
+        KATEGORI_BLANK_LABEL as _KBL64,
+    )
+    from src.pipeline.helpers import (
+        KATEGORI_DEFAULT_LABEL as _KDL64,
+    )
+    from src.pipeline.helpers import (
+        KATEGORI_REKAP_VALUES as _KRV64,
+    )
+    from src.pipeline.helpers import (
+        kategori_match_mask as _kmm64,
+    )
+    from src.ui.details_popup import show_details_popup as _sdp64
+
+    # --- (a) unit kategori_match_mask (mask kanonik cabang virtual) --------
+    _kat64 = pd.Series(["COM DEVIASI - RESTO", "Biaya Packaging - RESTO",
+                        None, "DEVIASI", "SAYURAN"])
+    check("(v3.9.54) kategori_match_mask: guard None/blank/'(All)' → None",
+          _kmm64(None, "x") is None and _kmm64(_kat64, None) is None
+          and _kmm64(_kat64, "(All)") is None
+          and _kmm64(_kat64, "  ") is None)
+    _m64 = list(_kmm64(_kat64, _KDL64))
+    check("(v3.9.54) kategori_match_mask: gabungan → isin 2 nilai rekap",
+          _m64 == [True, True, False, False, False], f"got {_m64}")
+    _m64b = list(_kmm64(_kat64, _KBL64))
+    check("(v3.9.54) kategori_match_mask: '(Tanpa Kategori)' → blank mask",
+          _m64b == [False, False, True, False, False], f"got {_m64b}")
+    _m64c = list(_kmm64(_kat64, "DEVIASI"))
+    check("(v3.9.54) kategori_match_mask: legacy 'DEVIASI' → exact | blank",
+          _m64c == [False, False, True, True, False], f"got {_m64c}")
+    _m64d = list(_kmm64(_kat64, "SAYURAN"))
+    check("(v3.9.54) kategori_match_mask: seleksi eksplisit → exact match",
+          _m64d == [False, False, False, False, True], f"got {_m64d}")
+
+    # --- (b) show_details_popup: KATEGORI virtual — BUG UTAMA USER ----------
+    # fixture: 3 tanggal × {COM, Biaya, blank(None), DEVIASI} = 12 baris
+    _rows64 = []
+    for _t64 in (1, 5, 25):
+        for _kv64 in (_KRV64[0], _KRV64[1], None, "DEVIASI"):
+            _rows64.append({
+                "Nama Barang": "AYAM FILET", "JENIS": "1.SO",
+                "NAMA RESTO": "B.1001.MLGPAR", "Tanggal": _t64,
+                "NILAI": 7.0, "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                "KATEGORI": _kv64, "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": f"RI-{_t64}", "Nomor PO": f"PO-{_t64}",
+                "#Tgl/Jam Pembuatan IT": None})
+    _df64 = pd.DataFrame(_rows64)
+
+    def _pop64(**kw):
+        _p = _sdp64(root, _df64, nama_barang="AYAM FILET",
+                    show_maximize=False, **kw)
+        for _ in range(40):
+            root.update()
+            time.sleep(0.02)
+        return _p, len(_p.tree.get_children(""))
+
+    _p64, _n64 = _pop64(filters={"KATEGORI": _KDL64})
+    check("(v3.9.54) POPUP KOSONG TERFIX: KATEGORI default gabungan "
+          "VIRTUAL (KATEGORI_DEFAULT_LABEL) → popup BERISI 6 baris "
+          "(dulu exact-match = 0 baris — 'Tidak ada source data')",
+          _n64 == 6, f"got {_n64}")
+    _p64b, _n64b = _pop64(filters={"KATEGORI": _KBL64})
+    check("(v3.9.54) popup KATEGORI '(Tanpa Kategori)' → 3 baris blank",
+          _n64b == 3, f"got {_n64b}")
+    _p64c, _n64c = _pop64(filters={"KATEGORI": "DEVIASI"})
+    check("(v3.9.54) popup KATEGORI legacy 'DEVIASI' → exact + blank = 6",
+          _n64c == 6, f"got {_n64c}")
+    _p64d, _n64d = _pop64(filters={"KATEGORI": _KRV64[0]})
+    check("(v3.9.54) popup KATEGORI eksplisit nilai riil → exact 3",
+          _n64d == 3, f"got {_n64d}")
+    _p64e, _n64e = _pop64(filters={"KATEGORI": "(All)"})
+    check("(v3.9.54) popup KATEGORI '(All)' → tanpa filter = 12",
+          _n64e == 12, f"got {_n64e}")
+
+    # --- (c) baris 6.PEMAKAIAN (COM) — JENIS COMPUTED (audit 8-a P0-1) ----
+    _pvdf64 = pd.DataFrame([
+        {"Nama Barang": "AYAM FILET", "JENIS": _j64,
+         "NAMA RESTO": "MLGPAR", "Tanggal": _t64, "NILAI": 5.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": _KRV64[0],
+         "SOURCE KIRIMAN": "GUDANG", "Nomor": f"RI-{_t64}",
+         "Nomor PO": f"PO-{_t64}", "#Tgl/Jam Pembuatan IT": None}
+        for _j64 in ("SALDO AWAL", "1.SO", "4.IN", "8.BARANG KELUAR")
+        for _t64 in (1, 5, 25)])
+    _pcom64 = _sdp64(root, _pvdf64, nama_barang="AYAM FILET",
+                     jenis="6.PEMAKAIAN (COM)", show_maximize=False)
+    for _ in range(40):
+        root.update()
+        time.sleep(0.02)
+    _ncom64 = len(_pcom64.tree.get_children(""))
+    _jset64 = {_pcom64.tree.set(_k, "JENIS")
+               for _k in _pcom64.tree.get_children("")}
+    check("(v3.9.54) popup baris 6.PEMAKAIAN (COM) — JENIS COMPUTED tak "
+          "pernah ada di data → popup kini BERISI 12 baris penyusun "
+          "formula (dulu exact-match = 0 baris → popup KOSONG)",
+          _ncom64 == 12, f"got {_ncom64}")
+    check("(v3.9.54) popup COM hanya memuat JENIS penyusun (SA/SO/IN/BK)",
+          _jset64 == {"SALDO AWAL", "1.SO", "4.IN", "8.BARANG KELUAR"},
+          f"got {_jset64}")
+
+    def _fi64(p):
+        for _w in p.winfo_children():
+            for _c in _w.winfo_children():
+                for _g in _c.winfo_children():
+                    try:
+                        _s = str(_g.cget("text"))
+                    except (AttributeError, tk.TclError):
+                        continue
+                    if _s.startswith("Filter aktif:"):
+                        return _s
+        return ""
+
+    check("(v3.9.54) popup COM: filter info mencatat formula "
+          "('JENIS=SA+SO+IN+BK (formula COM)')",
+          "formula COM" in _fi64(_pcom64), f"got {_fi64(_pcom64)!r}")
+    _pcom64.destroy()
+
+    # --- (d) tgl_range parity rentang tampilan pivot (audit 8-a P1-2) ------
+    _pr64, _nr64 = _pop64(tgl_range=(1, 5))
+    _tgls64 = {_pr64.tree.set(_k, "Tanggal")
+               for _k in _pr64.tree.get_children("")}
+    check("(v3.9.54) popup tgl_range (1,5) → hanya baris Tgl 1/5",
+          _tgls64 == {"1", "5"}, f"got {_tgls64}")
+    _pr64.destroy()
+    _ps64, _ns64 = _pop64(tgl_range=(5, 1))
+    check("(v3.9.54) popup tgl_range TERBALIK (5,1) → dinormalisasi = 8",
+          _ns64 == 8, f"got {_ns64}")
+    check("(v3.9.54) popup filter info mencatat rentang ('Tgl 1..5')",
+          "Tgl 1..5" in _fi64(_ps64), f"got {_fi64(_ps64)!r}")
+    _ps64.destroy()
+    for _p in (_p64, _p64b, _p64c, _p64d, _p64e):
+        _p.destroy()
+    root.update()
+
+    # --- (e) E2E: jalur handler pivot PERSIS (double-click baris barang) ---
+    from src.ui.pivot_view import PivotTableView as _PV64
+
+    _top64 = tk.Toplevel(root)
+    _top64.geometry("1400x900+5+5")
+    _pv64 = _PV64(_top64)
+    _pv64.pack(fill="both", expand=True)
+    _pv64.pivot_mode = "resto"
+    _pv64.data = _pvdf64
+    _pv64._populate_filters()
+    _pv64._show_content()
+    _pv64._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _pv64._busy and _pv64.tree.get_children(""):
+            break
+        time.sleep(0.02)
+    check("(v3.9.54) E2E pivot: default kategori = entri gabungan "
+          "(prasyarat fixture bug user)",
+          _pv64.kategori_var.get() == _KDL64,
+          f"got {_pv64.kategori_var.get()!r}")
+
+    class _Ev64:
+        def __init__(self, widget, x, y):
+            self.widget = widget
+            self.x = x
+            self.y = y
+
+    _kids64 = _pv64.tree.get_children("")
+    _row64 = _kids64[0]
+    _box64 = _pv64.tree.bbox(_row64)
+    if not _box64:  # bbox ''/None = baris tak terlihat → gulir ke atas
+        _pv64.tree.yview_moveto(0.0)
+        root.update()
+        _box64 = _pv64.tree.bbox(_row64)
+    check("(v3.9.54) E2E pivot: baris barang AYAM FILET ter-render",
+          bool(_box64) and _pv64.tree.item(_row64, "text")
+          == "AYAM FILET")
+    _pv64.tgl_start_var.set("1")
+    _pv64.tgl_end_var.set("5")
+
+    _cap64 = {}
+    _orig_sdp64 = _dpm64.show_details_popup
+
+    def _spy64(parent, data, **kw):
+        _cap64.update(kw)
+        _cap64["_popup"] = _orig_sdp64(parent, data, **kw)
+        return _cap64["_popup"]
+
+    _np64 = -1
+    if _box64:
+        _dpm64.show_details_popup = _spy64
+        try:
+            _pv64._on_double_click(_Ev64(_pv64.tree, 10,
+                                         _box64[1] + max(2, _box64[3] // 2)))
+        finally:
+            _dpm64.show_details_popup = _orig_sdp64
+        for _ in range(40):
+            root.update()
+            time.sleep(0.02)
+        _pp64 = _cap64.get("_popup")
+        _np64 = len(_pp64.tree.get_children("")) if _pp64 else -1
+        if _cap64.get("_popup"):
+            _cap64["_popup"].destroy()
+    check("(v3.9.54) E2E double-click pivot (kategori default gabungan + "
+          "rentang 1..5) → popup BERISI 8 baris (BUG USER TERFIX end-to-end)",
+          _np64 == 8, f"got {_np64}")
+    check("(v3.9.54) E2E handler meneruskan tgl_range tampilan (1, 5)",
+          _cap64.get("tgl_range") == (1, 5),
+          f"got {_cap64.get('tgl_range')!r}")
+    check("(v3.9.54) E2E handler meneruskan KATEGORI gabungan ke popup",
+          _cap64.get("filters", {}).get("KATEGORI") == _KDL64,
+          f"got {_cap64.get('filters')!r}")
+    _pv64.destroy()
+    root.update()
+
+    # --- (f) Follow Up popup baris asal KOMPARASI (audit 8-a P1-3) ---------
+    from src.ui.followup import (
+        FollowUpStore,
+        followup_path,
+        resolved_path,
+        row_fingerprint,
+    )
+    from src.ui.followup_view import FollowUpView as _FUV64
+
+    for _p in (followup_path(), resolved_path()):
+        try:
+            _p.unlink()
+        except FileNotFoundError:
+            pass
+    _fudf64 = pd.DataFrame({
+        "Nama Barang": ["Ayam Filet App"] * 3, "JENIS": ["1.SO"] * 3,
+        "NAMA RESTO": ["B.1001.MLGPAR"] * 3, "Tanggal": [1, 2, 3],
+        "NILAI": [10.0, 20.0, 30.0], "Satuan": ["GR"] * 3})
+    _snapk64 = {"asal": "KOMPARASI", "resto": "MLGPAR",
+                "barang": "AYAM  FILET 17", "satuan": "GR",
+                "aktif": "AKTIF", "h": 25, "so": 10.0, "sistem": 120.0,
+                "deviasi": -25.0, "cek": "OK", "so_m2": 5.0, "so_m1": 6.0,
+                "so_p1": 7.0, "so_p2": 8.0, "loss_bom": -0.5,
+                # v3.9.54 — field namespace APP
+                "barang_app": "Ayam Filet App",
+                "resto_app": "B.1001.MLGPAR"}
+    _fp64 = row_fingerprint(_snapk64)
+    _fs64 = FollowUpStore()
+    if _fp64 in _fs64.rows:
+        del _fs64.rows[_fp64]
+    _fs64.toggle(_fp64, _snapk64)
+    check("(v3.9.54) SNAPSHOT_FIELDS persist barang_app/resto_app "
+          "(store.toggle → followup.json)",
+          _fs64.rows[_fp64].get("barang_app") == "Ayam Filet App"
+          and _fs64.rows[_fp64].get("resto_app") == "B.1001.MLGPAR",
+          f"got {_fs64.rows[_fp64].get('barang_app')!r}")
+
+    _fv64 = _FUV64(_top64, store=_fs64, get_data=lambda: _fudf64)
+    _fv64.pack(fill="both", expand=True)
+    root.update()
+    time.sleep(0.15)
+    root.update()
+    _fk64 = _fv64.tree.get_children("")
+    check("(v3.9.54) FU: baris follow-up KOMPARASI ter-render",
+          len(_fk64) == 1, f"got {len(_fk64)}")
+    if _fk64:
+        _fb64 = _fv64.tree.bbox(_fk64[0])
+        _capfu64 = {}
+
+        def _spyfu64(parent, data, **kw):
+            _capfu64.update(kw)
+            return _orig_sdp64(parent, data, **kw)
+
+        if _fb64:
+            _dpm64.show_details_popup = _spyfu64
+            try:
+                _fv64._on_double_click(_Ev64(
+                    _fv64.tree, 60, _fb64[1] + max(2, _fb64[3] // 2)))
+            finally:
+                _dpm64.show_details_popup = _orig_sdp64
+            for _ in range(30):
+                root.update()
+                time.sleep(0.02)
+        check("(v3.9.54) FU popup baris KOMPARASI: nama BARANG versi APP "
+              "dipakai (dulu nama FILE → popup KOSONG)",
+              _capfu64.get("nama_barang") == "Ayam Filet App",
+              f"got {_capfu64.get('nama_barang')!r}")
+        check("(v3.9.54) FU popup baris KOMPARASI: filter NAMA RESTO versi "
+              "APP (dulu short 'MLGPAR' → 0 baris)",
+              _capfu64.get("filters", {}).get("NAMA RESTO")
+              == "B.1001.MLGPAR",
+              f"got {_capfu64.get('filters')!r}")
+    # snap lama tanpa field baru → fallback field lama
+    _snapl64 = {k: v for k, v in _snapk64.items()
+                if k not in ("barang_app", "resto_app")}
+    _capfu2_64 = {}
+    _fs64.toggle(_fp64, _snapl64)  # fp sama (fingerprint 9 field tak berubah)
+    check("(v3.9.54) fingerprint TIDAK berubah oleh field baru "
+          "(barang_app/resto_app di luar md5 9 field)",
+          row_fingerprint(_snapl64) == _fp64)
+    _fs64.toggle(_fp64, _snapl64)  # toggle ulang = ADD
+    _fv64b = _FUV64(_top64, store=_fs64, get_data=lambda: _fudf64)
+    _fv64b.pack(fill="both", expand=True)
+    root.update()
+    time.sleep(0.15)
+    root.update()
+    _fk64b = _fv64b.tree.get_children("")
+    if _fk64b and _fv64b.tree.bbox(_fk64b[0]):
+        _fb64b = _fv64b.tree.bbox(_fk64b[0])
+
+        def _spyfu2_64(parent, data, **kw):
+            _capfu2_64.update(kw)
+            return _orig_sdp64(parent, data, **kw)
+
+        _dpm64.show_details_popup = _spyfu2_64
+        try:
+            _fv64b._on_double_click(_Ev64(
+                _fv64b.tree, 60, _fb64b[1] + max(2, _fb64b[3] // 2)))
+        finally:
+            _dpm64.show_details_popup = _orig_sdp64
+        check("(v3.9.54) snap LAMA tanpa barang_app → fallback nama FILE "
+              "(kompatibilitas followup.json lama)",
+              _capfu2_64.get("nama_barang") == "AYAM  FILET 17",
+              f"got {_capfu2_64.get('nama_barang')!r}")
+    _fs64.toggle(_fp64, _snapl64)   # bersihkan baris uji
+    _fv64.destroy()
+    _fv64b.destroy()
+    _top64.destroy()
+    root.update()
+
+    # --- (g) RankMergeOverlay: guard IndexError run menembus batas (8-b) --
+    from src.ui.widgets import RankMergeOverlay as _RMO64
+
+    _t64 = ttk.Treeview(root, columns=("Rank",), show="tree")
+    _t64.pack()
+    for _i64 in range(495):
+        _t64.insert("", "end", iid=f"row_{_i64}", text=str(_i64))
+    _ov64 = _RMO64(_t64, "Rank")
+    _ov64.set_runs([("row_480", 40, "1", 0)])
+    _t64.yview_moveto(1.0)
+    try:
+        _ov64.refresh()
+        check("(v3.9.54) RankMergeOverlay run menembus batas tree parsial "
+              "→ TANPA IndexError (guard klip batas atas)",
+              True)
+    except IndexError as _e64:
+        check("(v3.9.54) RankMergeOverlay run menembus batas tree parsial "
+              "→ TANPA IndexError (guard klip batas atas)", False,
+              str(_e64))
+    _t64.destroy()
+    root.update()
+
+    # --- (h) sort_tree_by_column default parser Rp-aware penuh (8-b) ------
+    from src.ui.widgets import sort_tree_by_column as _stbc64
+
+    _t64b = ttk.Treeview(root, columns=("Nominal",), show="headings")
+    _t64b.pack()
+    for _i64, _v64 in enumerate(["Rp 1.825.567", "(Rp 500)", "Rp 1.825",
+                                 "-", "Rp 12.560"]):
+        _t64b.insert("", "end", iid=f"s_{_i64}", values=(_v64,))
+    _stbc64(_t64b, "Nominal", reverse=False)
+    _ord64 = [_t64b.set(_k, "Nominal") for _k in _t64b.get_children("")]
+    check("(v3.9.54) sort default parser Rp/Indonesia: '.' ribuan & ',' "
+          "desimal & kurung negatif (dulu 'Rp 1.825' = 1.825 salah skala; "
+          "'Rp 1.825.567' ValueError → fallback string)",
+          _ord64 == ["(Rp 500)", "-", "Rp 1.825", "Rp 12.560",
+                     "Rp 1.825.567"],
+          f"got {_ord64}")
+    _t64b.destroy()
+    root.update()
+
+    # --- (i) nominal_resto _event_col_name display-aware (audit 8-a P1-4) --
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV64
+
+    _nrv64 = _NRV64(root)
+    _nrv64.pack(fill="both", expand=True)
+    root.update()
+    _cols64 = list(_nrv64.tree["columns"])
+    check("(v3.9.54) nominal: kolom Tanpa Harga ada (prasyarat)",
+          "Tanpa Harga" in _cols64, f"got {_cols64[:6]}")
+    _hide64 = next(c for c in _cols64 if c != "Tanpa Harga")
+    _nrv64.tree["displaycolumns"] = [c for c in _cols64 if c != _hide64]
+    _disp64 = [c for c in _cols64 if c != _hide64]
+    _cid64 = f"#{_disp64.index('Tanpa Harga') + 1}"
+    _nrv64.tree.identify_column = lambda x: _cid64  # event sintetis
+
+    class _EvX64:
+        x = 0
+
+    _got64 = _nrv64._event_col_name(_nrv64.tree, _EvX64())
+    check("(v3.9.54) nominal _event_col_name display-aware: setelah hide "
+          f"{_hide64!r}, klik sel Tanpa Harga resolve 'Tanpa Harga' "
+          "(dulu posisi display dipetakan ke urutan LOGIS → kolom SALAH)",
+          _got64 == "Tanpa Harga", f"got {_got64!r}")
+    _nrv64.destroy()
+    root.update()
+
+    # bersihkan state file followup uji
+    for _p in (followup_path(), resolved_path()):
+        try:
+            _p.unlink()
+        except FileNotFoundError:
+            pass
 
     root.destroy()
 

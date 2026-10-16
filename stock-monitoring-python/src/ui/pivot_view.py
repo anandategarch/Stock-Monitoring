@@ -1123,6 +1123,19 @@ class PivotTableView(tk.Frame):
             if val and val != "(All)":
                 active_filters[col] = val
 
+        # v3.9.54 FIX (audit 8-a P1-2) — rentang tanggal TAMPILAN
+        # diteruskan ke popup (parity _compute_payload: tnum.between
+        # — kedua mode memfilter rentang; parse longgar identik
+        # _name_values). Dulu popup mengabaikan rentang → baris tanggal
+        # di luar rentang yang difilter tabel tetap muncul di popup.
+        tgl_range = None
+        try:
+            _t1 = int(float(self.tgl_start_var.get()))
+            _t2 = int(float(self.tgl_end_var.get()))
+            tgl_range = (min(_t1, _t2), max(_t1, _t2))
+        except (TypeError, ValueError):
+            pass
+
         from src.ui.details_popup import show_details_popup
         root = self.winfo_toplevel()
         show_details_popup(
@@ -1131,6 +1144,7 @@ class PivotTableView(tk.Frame):
             jenis=jenis,
             tanggal=tanggal,
             filters=active_filters,
+            tgl_range=tgl_range,
             # v3.9.32 — popup pivot: sudah ±90% layar; tombol ⛶ Perbesar
             # DIHAPUS (user: "besarkan lagi dan HAPUS tombol perbesar
             # popup pivot")

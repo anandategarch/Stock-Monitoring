@@ -190,9 +190,11 @@ VERDIK: Selisih = GR·Saat Ini − DEV·Lalu → Status MATCH (dalam toleransi)
 v3.9.7 — FILTER MINGGU MENGIKUTI H BERSAMA (permintaan user:
 "STATUS BULAN itu berguna buat filter. misal H aku input 7 maka
 hanya tampilkan week 1 aja"): view kini berlangganan SharedTanggalH
-(chip read-only, pola tab Anomali COM). Rentang minggu yang MEMUAT H:
+(chip read-only, pola tab Anomali COM). Rentang minggu yang MEMUAT H
+(v3.9.54 — doc sync dgn kode v3.9.22 _h_to_week_target; dulu doc
+menulis cut-off 31/WEEK 5):
     H 1–7 → WEEK 1 (cut-off 7)      H 8–14  → WEEK 2 (cut-off 14)
-    H 15–25 → WEEK 3/4 (cut-off 25) H 26–31 → WEEK 5 (cut-off 31)
+    H 15–31 → WEEK 3/4 (cut-off 25 — file user hanya ber-WEEK 1–4)
 Default: hanya baris minggu tsb yang tampil (chip minggu aktif
 di-highlight). Centang "Tampilkan semua minggu" utk perilaku lama.
 File tanpa minggu tsb → 0 baris + pesan jujur (minggu di file
@@ -2248,6 +2250,18 @@ class KomparasiDeviasiView(tk.Frame):
                 # tambahan — TIDAK mengubah fingerprint follow-up).
                 "bulan": str(cols_np["BULAN"][i]),
             }
+            # v3.9.54 FIX (audit 8-a P1-3) — nama versi APP utk popup
+            # Follow Up: 'resto' snap = bentuk PENDEK ternormalisasi &
+            # 'barang' = nama FILE (kapital/spasi bisa beda) → popup
+            # detail exact-match vs data app = 0 baris (popup KOSONG utk
+            # baris follow-up asal KOMPARASI). Field BARU tetap TIDAK
+            # mengubah fingerprint (row_fingerprint md5 = 9 field lama)
+            # & hanya terisi bila pair ada di data app saat ini.
+            _pair_app = pair_index.get(
+                (_norm_name(barang), _norm_resto(resto)))
+            if _pair_app is not None:
+                snap["barang_app"] = _pair_app[0]
+                snap["resto_app"] = _pair_app[1]
             fp = row_fingerprint(snap)
             checked = store is not None and store.has(fp)
             values[0] = CHECK_ON if checked else CHECK_OFF

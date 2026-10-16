@@ -635,12 +635,20 @@ class FollowUpView(tk.Frame):
         if not snap:
             return
 
+        # v3.9.54 FIX (audit 8-a P1-3) — baris asal KOMPARASI: snap
+        # 'resto' = bentuk PENDEK ternormalisasi & 'barang' = nama FILE
+        # (kapital/spasi bisa beda) → popup detail exact-match vs data
+        # app = 0 baris (popup KOSONG). Field 'barang_app'/'resto_app'
+        # (v3.9.54 — diisi komparasi bila pair ada di data app) dipakai
+        # BILA ada; snap lama tanpa field baru → fallback field lama.
+        _barang = snap.get("barang_app") or snap.get("barang")
+        _resto = snap.get("resto_app") or snap.get("resto")
+
         from src.ui.details_popup import show_details_popup
         show_details_popup(
             self.winfo_toplevel(), data,
-            nama_barang=snap.get("barang"),
+            nama_barang=_barang,
             jenis=None,
             tanggal=None,
-            filters={"NAMA RESTO": snap.get("resto")} if snap.get("resto")
-            else None,
+            filters={"NAMA RESTO": _resto} if _resto else None,
         )
