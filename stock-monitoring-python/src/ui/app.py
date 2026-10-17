@@ -201,7 +201,7 @@ if __doc__:
 # agent full"): 7 agent audit PARALEL read-only (6-a app/state/threading ·
 # 6-b widgets ·  6-c pivot/laporan/komparasi · 6-d1 deviasi · 6-d2
 # selisih/nominal ·  6-e popup/followup/export ·  6-f pipeline) → 38
-# temuan (2 HIGH / 15 MED / 21 LOW) + puluhan probe verifikasi → 6 agent
+# temuan (2 HIGH / 16 MED / 20 LOW) + puluhan probe verifikasi → 6 agent
 # fix PARALEL kepemilikan-file terpisah + verifikasi utama. SEMUA fix:
 # (6a) export: tombol Export macet-disabled pasca pipeline ERROR/STOP
 # dgn data lama (sinkron semua jalur done) · Excel GAGAL menulis FILE
