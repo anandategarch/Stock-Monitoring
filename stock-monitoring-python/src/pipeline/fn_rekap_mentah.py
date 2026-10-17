@@ -187,8 +187,45 @@ def _combined_to_long(df: pd.DataFrame, mode: str,
                            .where(_kcol.notna(), other=None))
 
     # kolom hari → numeric
+    # FIX 6f-03 (audit 6-f): dua posisi bisa parse ke HARI SAMA (mis.
+    # '5' + 'Sum of 5' pada sheet pivot, atau duplikat kolom '5'/'5.1'
+    # hasil mangling pd.read_excel) — assignment lama MENIMPA senyap
+    # (nilai kolom pertama hilang tanpa jejak; kolom TERAKHIR menang).
+    # Resolve eksplisit + log:
+    # - tepat SATU kolom agregat pivot ('Sum of N') di antara duplikat
+    #   → PAKAI agregat — blok 'Sum of N' adalah kolom rekap resmi
+    #   (workbook real 'SO BULAN LALU': 'Sum of 1'.. = nilai SO, kolom
+    #   plain '01'/'02'/'03' di ujung = kolom bantu avg dgn nilai
+    #   BERBEDA — menjumlah keduanya = kacau);
+    # - sisanya (2+ plain / 2+ agregat) → SUM (min_count=1: semua-NaN
+    #   tetap NaN → terbuang dropna bawah, kehadiran data terjaga).
+    _pos_by_day: dict = {}
+    for _pos, _d in days.items():
+        _pos_by_day.setdefault(_d, []).append(_pos)
+    _dup_days = {_d for _d, _ps in _pos_by_day.items() if len(_ps) > 1}
+    _done_dup: set = set()
     for pos, d in days.items():
-        sel[str(d)] = safe_to_numeric(df.iloc[:, pos])
+        if d not in _dup_days:
+            sel[str(d)] = safe_to_numeric(df.iloc[:, pos])
+            continue
+        if d in _done_dup:
+            continue                 # sudah di-resolve di iterasi pertama
+        _done_dup.add(d)
+        _ps = _pos_by_day[d]
+        _aggs = [p for p in _ps if up[p].startswith("SUM OF")]
+        if len(_aggs) == 1:
+            _use = _aggs[0]
+            sel[str(d)] = safe_to_numeric(df.iloc[:, _use])
+            _skip = [up[p] for p in _ps if p != _use]
+            print(f"  [WARNING] fn_rekap_mentah: hari {d} punya {len(_ps)} "
+                  f"kolom ({', '.join(up[p] for p in _ps)}) — memakai "
+                  f"agregat '{up[_use]}' (dilewati: {', '.join(_skip)})")
+        else:
+            _vals = df.iloc[:, _ps].apply(safe_to_numeric)
+            sel[str(d)] = _vals.sum(axis=1, min_count=1)
+            print(f"  [WARNING] fn_rekap_mentah: hari {d} punya {len(_ps)} "
+                  f"kolom ({', '.join(up[p] for p in _ps)}) — dijumlahkan "
+                  "(SUM semua kolom)")
 
     # filter JENIS (case-insensitive — mirror jenis_filter alur lama)
     if jenis_filter is not None:

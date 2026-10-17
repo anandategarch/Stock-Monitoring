@@ -608,6 +608,16 @@ class NominalRestoView(tk.Frame):
         for c in list(self._col_sel):
             if c not in col_ids:
                 del self._col_sel[c]
+        # FIX 6d2-03 — mirror in_selisih _apply_columns v3.7 (defensive):
+        # reconfigure columns di atas me-reset displaycolumns ke '#all' →
+        # state kolom TERSEMBUNYI user (ColumnManager) WAJIB di-re-apply
+        # setelah rebuild — tanpa ini kolom yang di-hide muncul lagi +
+        # panel ◱ Kolom desync (checkbox basi) saat bulan file deviasi
+        # berubah (multi-bulan ⚖ Komparasi). Prune dulu kolom hidden yang
+        # tak ada lagi (bulan lalu tak lagi dimuat).
+        self._colmgr.hidden = [c for c in self._colmgr.hidden
+                               if c in col_ids]
+        self._colmgr.apply()
 
     def _sort_by(self, col: str, reverse: bool = False):
         if col not in self._result_cols():
@@ -1205,10 +1215,23 @@ class NominalRestoView(tk.Frame):
     def _on_double_click(self, event):
         tree = event.widget
         try:
-            sel = tree.selection()
-            if not sel:
-                return
-            iid = sel[0]
+            # FIX 6d2-04 — resolve baris dari POSISI KLIK (identify_row),
+            # bukan selection(): double-click di AREA KOSONG di bawah
+            # baris terakhir TIDAK mengubah seleksi Tk → kode lama memakai
+            # seleksi LAMA → popup resto SEBELUMNYA terbuka 'dari kotak
+            # kosong' (parity in_selisih_view._on_double_click /
+            # InDetailPopup). getattr: pemanggil programatik/test bisa
+            # mengirim event tanpa posisi → fallback seleksi (perilaku
+            # lama utuh utk jalur tanpa koordinat).
+            _y = getattr(event, "y", None)
+            iid = tree.identify_row(_y) if _y is not None else None
+            if _y is not None and not iid:
+                return          # klik area kosong — jangan buka popup basi
+            if iid is None:
+                sel = tree.selection()
+                if not sel:
+                    return
+                iid = sel[0]
             # v3.9.36 — kolom 'Tanpa Harga' + baris TOTAL → daftar
             # barang tanpa harga SEMUA resto (user: "yang tanpa harga
             # juga bisa pop up untuk tampilkan tanpa harga item apa aja")
@@ -1235,29 +1258,35 @@ class NominalRestoView(tk.Frame):
 
     def _lalu_map(self) -> dict:
         """v3.9.36 — peta (_resto_norm, _bahan_norm) → baris frame
-        Bulan Lalu (snapshot self._lalu_df)."""
+        Bulan Lalu (snapshot self._lalu_df).
+        PERF 6d2 (audit 6-d2) — dibangun VEKTOR (zip kolom +
+        to_dict("records")), bukan `iloc` per baris: pembuatan Series per
+        baris ~100ms @5.000 baris di MAIN thread SETIAP popup rincian
+        dibuka (file deviasi multi-bulan nyata 10-30 ribu baris → ratusan
+        ms). Kontrak konsumen identik: nilai = baris ber-.get kolom (dict
+        record, bukan Series — konsumen hanya memanggil
+        .get("Nominal Lalu") / cek None); kunci ganda: baris TERAKHIR
+        menang (identik semantik loop lama)."""
         lalu = self._lalu_df
         if lalu is None or lalu.empty:
             return {}
-        m = {}
-        for i in range(len(lalu)):
-            r = lalu.iloc[i]
-            m[(str(r["_resto_norm"]), str(r["_bahan_norm"]))] = r
-        return m
+        keys = zip(lalu["_resto_norm"].astype(str).tolist(),
+                   lalu["_bahan_norm"].astype(str).tolist())
+        return dict(zip(keys, lalu.to_dict("records")))
 
     def _lalu_maps(self) -> list:
         """v3.9.45 — list peta (_resto_norm, _bahan_norm) → baris frame
         Bulan Lalu PER BULAN (index 0 = bulan utama self._lalu_df;
         index berikut = bulan ≥2 self._lalu_frames[1:]) — popup rincian
-        multi-bulan."""
+        multi-bulan.
+        PERF 6d2 (audit 6-d2) — vektor per frame (lihat _lalu_map)."""
         maps = []
         for _lab, _fr in self._lalu_frames:
             m = {}
             if _fr is not None and not _fr.empty:
-                for i in range(len(_fr)):
-                    r = _fr.iloc[i]
-                    m[(str(r["_resto_norm"]),
-                       str(r["_bahan_norm"]))] = r
+                keys = zip(_fr["_resto_norm"].astype(str).tolist(),
+                           _fr["_bahan_norm"].astype(str).tolist())
+                m = dict(zip(keys, _fr.to_dict("records")))
             maps.append(m)
         return maps
 

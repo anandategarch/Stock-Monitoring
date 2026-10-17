@@ -125,6 +125,15 @@ class LaporanDeviasiView(tk.Frame):
         self._dirty = False                # lazy refresh (v3.2)
         # v3.9.5 (audit 19-a #1): guard job kedaluwarsa + pembatalan batch
         self._render_gen = 0
+        # FIX 6e-02 (audit 6-e MEDIUM — mirror fix 48-d deviasi_view
+        # v3.9.33): _fp_map iids POSISIONAL row_N dipetakan ulang tiap
+        # re-render (load_data / ganti H / filter ⧩) → clone ⛶ non-modal
+        # (iid disalin saat dibuka) memegang baris LAMA → klik
+        # ✓/double-click di clone basi men-toggle PASANGAN SALAH (persist
+        # followup.json). Kini: clone dicatat saat dibuka (generasi render
+        # di atribut tree clone — handler mengabaikan clone generasi lama)
+        # + DITUTUP saat baris dipetakan ulang.
+        self._clone_wins: list = []
         self._insert_cancel = None
         self._pending_sort = None          # (col, reverse) antre saat busy
         # v3.9.42 — audit 61-c/61-d (F2 P2): snapshot state tampilan utk
@@ -298,6 +307,13 @@ class LaporanDeviasiView(tk.Frame):
     # =========================================================================
     def _on_tree_click(self, event):
         tree = event.widget
+        # FIX 6e-02 (audit 6-e MEDIUM / mirror 48-d P0 deviasi_view):
+        # clone ⛶ generasi lama (dibuka sebelum re-render terakhir —
+        # _fp_map/_row_snaps POSISIONAL row_N sudah dipetakan ulang) →
+        # handler DIABAIKAN senyap; dulu klik ✓ di clone basi
+        # men-toggle pasangan SALAH (persist followup.json).
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         try:
             if tree.identify_region(event.x, event.y) != "cell":
                 return
@@ -315,6 +331,16 @@ class LaporanDeviasiView(tk.Frame):
         fp = self._fp_map.get(row_iid)
         snap = self._row_snaps.get(row_iid)
         if not fp or snap is None:
+            return
+        # FIX 6e-02 — resolution BERBASIS SNAPSHOT (defense-in-depth,
+        # iids posisional): identitas baris tampil (Nama Barang/Resto —
+        # urutan LOGIS values, tak terpengaruh kolom disembunyikan) HARUS
+        # cocok dgn snapshot raw; clone basi (row lama + map baru)
+        # otomatis tak cocok → diabaikan senyap.
+        _vals = tree.item(row_iid, "values")
+        if (not _vals or len(_vals) < 3
+                or str(_vals[1]) != str(snap.get("barang", ""))
+                or str(_vals[2]) != str(snap.get("resto", ""))):
             return
         added = self.store.toggle(fp, snap)
         try:
@@ -445,6 +471,11 @@ class LaporanDeviasiView(tk.Frame):
         reset_autofit_once(self)
         # v3.9.5 (audit 19-a #12): data berganti → job lama dibuang
         self._render_gen += 1
+        # FIX 6e-02 (audit 6-e MEDIUM): data berganti → _fp_map row_N
+        # dipetakan ulang saat render → clone ⛶ hidup DITUTUP + generasi
+        # naik (guard handler ✓/double-click clone — mirror deviasi_view
+        # load_data).
+        self._close_stale_clones()
         if self._insert_cancel is not None:
             self._insert_cancel()
             self._insert_cancel = None
@@ -903,6 +934,12 @@ class LaporanDeviasiView(tk.Frame):
             # batch insert lama masih berjalan → stop dulu (race)
             self._insert_cancel()
             self._insert_cancel = None
+        # FIX 6e-02 (audit 6-e MEDIUM): baris/_fp_map row_N segera
+        # DIGANTI di bawah → clone ⛶ yang masih hidup memegang salinan
+        # LAMA (iid sama, pasangan lain) → DITUTUP (clone basi lebih
+        # buruk daripada tertutup — mirror deviasi_view _render_rows;
+        # generasi sudah dinaikkan _refresh, handler tetap di-guard).
+        self._close_stale_clones()
         self.tree.delete(*self.tree.get_children())
         # _update_headings() sudah memanggil refresh_icons() — v3.9.5
         # (audit 19-b #10): hapus panggilan dobel di sini.
@@ -1020,7 +1057,27 @@ class LaporanDeviasiView(tk.Frame):
             on_render_done=self._reapply_cell_tags)  # v3.9.2 per-cell
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
+        # FIX 6e-02 (audit 6-e MEDIUM): catat clone hidup + generasi render
+        # saat dibuka (tree clone diberi atribut _view_gen; handler
+        # ✓/double-click memeriksanya; clone ditutup saat re-render —
+        # mirror deviasi_view _register_clone).
+        new_tree._view_gen = self._render_gen
+        self._clone_wins.append(win)
         return win, new_tree
+
+    def _close_stale_clones(self):
+        """FIX 6e-02 (audit 6-e MEDIUM — mirror deviasi_view): tutup SEMUA
+        clone ⛶ yang masih hidup — dipanggil saat data/re-render mengganti
+        baris (iid row_N dipetakan ulang; clone basi men-toggle pasangan
+        SALAH). Window yang sudah ditutup user cukup dibersihkan dari
+        daftar."""
+        for w in self._clone_wins:
+            try:
+                if w.winfo_exists():
+                    w.destroy()
+            except tk.TclError:
+                pass
+        self._clone_wins = []
 
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         """Sort kolom — engine LINEAR v3.3 (delete+reinsert).
@@ -1049,6 +1106,12 @@ class LaporanDeviasiView(tk.Frame):
             return
 
         tree = event.widget
+        # FIX 6e-02 (audit 6-e MEDIUM / mirror 48-d P0 deviasi_view):
+        # clone ⛶ generasi lama → _fp_map/_row_snaps tidak lagi cocok
+        # dgn baris clone → DIABAIKAN senyap (baris identifikasi dari
+        # nilai tree clone LAMA akan membuka popup pasangan salah).
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return

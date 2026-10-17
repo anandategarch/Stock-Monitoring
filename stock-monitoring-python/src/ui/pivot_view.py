@@ -684,6 +684,15 @@ class PivotTableView(tk.Frame):
             else:
                 df = df[df["KATEGORI"].astype(str) == st["kategori"]]
 
+        # FIX 6c-01 — snapshot df PRA-filter-rentang (kartu name/resto/
+        # source/kategori tetap berlaku): matrix COM dihitung dari tanggal
+        # PENUH lalu di-slice ke rentang tampilan — mirror
+        # laporan_deviasi_view._compute_com_matrix (so.shift(1) atas matrix
+        # penuh). Tanpa ini SO(t−1)/SA di luar rentang hilang → base kolom
+        # PERTAMA rentang = 0 → COM minus palsu (mis. rentang 4..6 → COM(4)
+        # '(5)' padahal oracle '5') + total COM salah → baris COM bisa
+        # lenyap senyap di ☑ hide-empty.
+        df_predate = df
         # rentang tanggal berlaku untuk kedua mode
         if "Tanggal" in df.columns and not df.empty:
             tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
@@ -746,6 +755,38 @@ class PivotTableView(tk.Frame):
             # di mode Tanggal
             metrics = [m for m in metrics if m != "6.PEMAKAIAN (COM)"]
 
+        # FIX 6c-01 — matrix COM PENUH (hanya bila rentang memotong sisi
+        # KIRI data: tgl_start > tanggal minimum — rentang penuh dari
+        # batas kiri tak memotong konteks SO(t−1)/SA). Pivot atas df
+        # PRA-filter-rentang (semua JENIS, superset kolom rentang) →
+        # _compute_com per item atas full_keys (rantai so_prev + SA(1)
+        # persis laporan) → baris display memakai slice col_keys.
+        com_full = None
+        if mode == "tanggal" and "Tanggal" in getattr(
+                df_predate, "columns", []) and not df_predate.empty:
+            _tall = pd.to_numeric(df_predate["Tanggal"], errors="coerce")
+            _tmin = _tall.min()
+            if pd.notna(_tmin) and st["tgl_start"] > float(_tmin):
+                try:
+                    pivot_full = df_predate.pivot_table(
+                        index=["Nama Barang", "JENIS"],
+                        columns="Tanggal",
+                        values="NILAI",
+                        aggfunc="sum",
+                        fill_value=0,
+                    )
+                    if not pivot_full.empty:
+                        full_keys = sorted(pivot_full.columns.tolist(),
+                                           key=_chrono)
+                        com_full = {
+                            item: self._compute_com(
+                                pivot_full, item, full_keys)
+                            for item in pivot_full.index.get_level_values(
+                                "Nama Barang").unique().tolist()
+                        }
+                except (TypeError, ValueError):
+                    com_full = None   # fallback: jalur lama (pivot rentang)
+
         tree_items = []
         rows_data = []          # v3.9.2 — data mentah utk export
         red_cells = []          # v3.9.2 — cell minus (per-cell merah)
@@ -763,7 +804,16 @@ class PivotTableView(tk.Frame):
                 item_grp = None
             for metric in metrics:
                 if mode == "tanggal" and metric == "6.PEMAKAIAN (COM)":
-                    row_data = self._compute_com(pivot, item, col_keys)
+                    # FIX 6c-01 — COM dari matrix PENUH di-slice ke rentang
+                    # tampilan (SO(t−1)/SA di luar rentang tetap dipakai;
+                    # col_keys ⊆ full_keys karena pivot rentang = subset
+                    # tanggal df_predate). Fallback jalur lama bila matrix
+                    # penuh tak tersedia.
+                    if com_full is not None and item in com_full:
+                        row_data = com_full[item].reindex(col_keys) \
+                            .fillna(0.0)
+                    else:
+                        row_data = self._compute_com(pivot, item, col_keys)
                 elif item_grp is not None:
                     try:
                         row_data = item_grp.loc[metric]
@@ -992,9 +1042,23 @@ class PivotTableView(tk.Frame):
         "pivot tabel nya bisa export excel"): filter + mode + kolom tampil
         ikut serta; nilai minus = font merah per cell (mirror UI)."""
         if not self._last_payload.get("items"):
-            messagebox.showwarning(
-                "Export", "Belum ada data pivot. Jalankan pipeline dulu.",
-                parent=self.winfo_toplevel())
+            # FIX 6c-03 — bedakan dua kasus 0-item: data memang BELUM ADA
+            # (belum pipeline) vs data ADA tapi filter aktif (kategori /
+            # seleksi nama / rentang) meloloskan 0 baris. Dulu selalu
+            # 'Jalankan pipeline dulu' — misleading: pipeline sudah
+            # berjalan, akar masalahnya filter.
+            if self.data is None or getattr(self.data, "empty", True):
+                messagebox.showwarning(
+                    "Export", "Belum ada data pivot. Jalankan pipeline dulu.",
+                    parent=self.winfo_toplevel())
+            else:
+                messagebox.showwarning(
+                    "Export",
+                    "Tidak ada baris pivot yang lolos filter aktif "
+                    "(kategori / seleksi nama / rentang tanggal / "
+                    "☑ sembunyikan baris kosong). Kendurkan atau reset "
+                    "filter dulu.",
+                    parent=self.winfo_toplevel())
             return
         mode = "resto" if self.pivot_mode == "resto" else "tanggal"
         stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")

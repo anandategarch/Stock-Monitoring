@@ -221,6 +221,7 @@ Fitur v3.1 (dipertahankan):
 """
 import contextlib
 import json
+import logging
 import os
 import re
 import threading
@@ -281,6 +282,11 @@ from .widgets import (
     run_async,
     sort_tree_by_column,
 )
+
+# FIX 6d1-06 — logger modul: kegagalan pivot_table tidak lagi ditelan
+# senyap (kelas pola berulang #5) — penyebab di-log sebelum re-raise ke
+# jalur on_error run_async.
+_LOG = logging.getLogger("stock_monitoring.deviasi")
 
 
 class SharedPivotCache:
@@ -556,6 +562,17 @@ class DeviasiView(tk.Frame):
     _CEK_CHECK_LABELS = (
         "Promix 04", "RI Balancing", "Kosong/Non Aktif", "Beda Tanggal",
         "Hitung Manual", "Turun Drastis", "ACR to BOM")
+
+    # FIX 6d1-02 — counter load_data aktif (CLASS-level, dibagi antar
+    # instance GR & PCS yang sama-sama berlangganan SharedTanggalH).
+    # load_data memanggil _h_state.set(default-H-baru) SEBELUM filter
+    # kategori/kolom/aktif di-reset → listener _on_shared_h_changed
+    # (milik instance INI dan instance SAUDARA) me-render dengan state
+    # filter LAMA → tabel kosong transien + status salah, lalu render
+    # kedua dari akhir load_data (render ganda). Saat counter > 0 listener
+    # hanya mensinkronkan state (chip/entry/cache) TANPA refresh — SATU
+    # render benar di akhir load_data tiap view (pola antre _pending_sort).
+    _load_depth = 0
 
     def __init__(self, parent, satuan_mode: str = "GR",
                  go_to_proses: Callable | None = None,
@@ -945,7 +962,12 @@ class DeviasiView(tk.Frame):
         # unsubscribe defensif pola H (lihat _on_view_destroy).
         if self._acr_state is not None:
             self._acr_state.subscribe(self._on_shared_acr_changed)
-        if self._h_state is not None or self._acr_state is not None:
+        # FIX 6d1-05 — binding Destroy juga dipasang saat view memegang
+        # listener FollowUpStore (dulu hanya bila h_state/acr_state ada —
+        # view ber-store tanpa state bersama tak pernah melepas listener
+        # store di _on_view_destroy).
+        if (self._h_state is not None or self._acr_state is not None
+                or self.store is not None):
             # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
             # (pola laporan/komparasi) — tanpa ini listener tetap
             # hidup bila suatu saat view direbuild (dobel-refresh zombie).
@@ -962,6 +984,16 @@ class DeviasiView(tk.Frame):
             self._h_state.unsubscribe(self._on_shared_h_changed)
         if self._acr_state is not None:
             self._acr_state.unsubscribe(self._on_shared_acr_changed)
+        # FIX 6d1-05 — lepas listener FollowUpStore (API remove_listener
+        # v3.9.42 tersedia tapi tak pernah dipasang; _on_view_destroy dulu
+        # hanya me-unsubscribe h_state/acr_state): tanpa ini listener zombie
+        # menumpuk bila view suatu saat direbuild — callback _notify
+        # mendarat di view mati (ditelan guard winfo_exists) + daftar
+        # listener tumbuh tanpa batas.
+        if self.store is not None:
+            with contextlib.suppress(Exception):
+                self.store.remove_listener(
+                    self._on_followup_store_changed)
 
     # v3.9.21 — handler spinbox ambang ACR (dipanggil tombol spin / Enter).
     def _on_acr_threshold_change(self):
@@ -1010,6 +1042,68 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
     # =========================================================================
+    @staticmethod
+    def _fp_stable(row: dict) -> str:
+        """FIX 6d1-01 — fingerprint STABIL: bagian 'cek' dinetralkan.
+
+        row_fingerprint (followup.py) menggabung label CEK ke md5 — label
+        itu VOLATIL: berubah oleh ambang ACR to BOM (kartu Filter — CEK
+        kondisi ke-5) / file deviasi bulan lalu (tab ⚖ — segmen analisa
+        jadi snap['cek']) TANPA baris data berubah → fp berubah → centang
+        ✓ hilang senyap + entri orphan menetap di followup.json. Identitas
+        stabil = 8 field v3.2 (asal|resto|barang|satuan|h|so|sistem|
+        deviasi); format/urutan field row_fingerprint dipertahankan,
+        bagian 'cek' dikosongkan (entri lama yang kebetulan ber-cek kosong
+        otomatis match persis). Entri lama ber-cek tak match string →
+        dicocokkan lewat _legacy_fp_index / _followup_keys_for."""
+        return row_fingerprint({**row, "cek": ""})
+
+    def _legacy_fp_index(self) -> dict:
+        """FIX 6d1-01 — {fp-stabil → kunci-aktual} entri store LAMA.
+
+        Entri followup.json era pra-fix berkunci fp yang memuat label
+        'cek' saat dicentang — kunci itu TIDAK match fp stabil string-nya,
+        tapi identitas stabilnya (dihitung ulang dari snapshot entri)
+        tetap sama → dicocokkan via index ini. Thread worker aman: iterasi
+        di-snapshot dulu (RuntimeError bila store dimutasi bersamaan →
+        index kosong, fallback has(fp) saja)."""
+        store = self.store
+        if store is None or not store.rows:
+            return {}
+        try:
+            items = list(store.rows.items())
+        except RuntimeError:      # dict dimutasi main thread saat iterasi
+            return {}
+        idx: dict = {}
+        for k, s in items:
+            # snapshot json selalu dict (divalidasi FollowUpStore.load);
+            # row_fingerprint total utk input mapping json.
+            sid = self._fp_stable(s)
+            if sid != k:
+                idx.setdefault(sid, k)
+        return idx
+
+    def _followup_keys_for(self, fp: str) -> list:
+        """FIX 6d1-01 — SEMUA kunci store yang mewakili baris ber-fp stabil:
+        kunci stabil itu sendiri + entri lama ber-identitas sama (era
+        fp-volatil bisa meninggalkan >1 entri per baris — uncheck
+        menyapu semuanya, entri orphan tidak menetap)."""
+        store = self.store
+        if store is None:
+            return []
+        try:
+            items = list(store.rows.items())
+        except RuntimeError:
+            return [fp] if store.has(fp) else []
+        keys: list = []
+        for k, s in items:
+            if k == fp:
+                keys.append(k)
+                continue
+            if self._fp_stable(s) == fp:
+                keys.append(k)
+        return keys
+
     def _on_tree_click(self, event):
         tree = event.widget
         # v3.9.33 — AUDIT FIX (48-d HIGH / P0): clone ⛶ generasi lama
@@ -1035,7 +1129,18 @@ class DeviasiView(tk.Frame):
         snap = self._row_snaps.get(row_iid)
         if not fp or snap is None:
             return
-        added = self.store.toggle(fp, snap)
+        # FIX 6d1-01 — _fp_map kini memuat fp STABIL (tanpa 'cek' volatil).
+        # Uncheck: hapus SEMUA entri ber-identitas-stabil sama (kunci stabil
+        # + entri lama era fp-volatil — menyapu duplikat/orphan sekaligus).
+        # Check: tambahkan SATU entri ber-kunci stabil (tahan perubahan
+        # ambang ACR / file lalu berikutnya).
+        keys = self._followup_keys_for(fp)
+        if keys:
+            for k in keys:
+                self.store.toggle(k, snap)
+            added = False
+        else:
+            added = self.store.toggle(fp, snap)
         try:
             tree.set(row_iid, "✓", CHECK_ON if added else CHECK_OFF)
         except tk.TclError:
@@ -1066,6 +1171,9 @@ class DeviasiView(tk.Frame):
             children = self.tree.get_children("")
         except tk.TclError:
             return
+        # FIX 6d1-01 — ☑ bila entri ber-kunci stabil ADA **atau** entri lama
+        # ber-identitas-stabil sama masih terdaftar (fp era volatil).
+        legacy = self._legacy_fp_index()
         for iid in children:
             fp = self._fp_map.get(iid)
             if fp is None:
@@ -1073,7 +1181,8 @@ class DeviasiView(tk.Frame):
             try:
                 self.tree.set(
                     iid, "✓",
-                    CHECK_ON if self.store.has(fp) else CHECK_OFF)
+                    CHECK_ON if (self.store.has(fp) or fp in legacy)
+                    else CHECK_OFF)
             except tk.TclError:
                 return   # tree/view mati di tengah loop — batal
 
@@ -1311,6 +1420,17 @@ class DeviasiView(tk.Frame):
             offset_str = m.group(2)
             offset = int(offset_str) if offset_str else 0
             date = h + offset
+            # FIX 6d1-03 — tanggal 0 / −1 TIDAK pernah ada sebagai tanggal
+            # (rekap bulan lalu memakai kunci −1 = saldo penutupan):
+            # header lama 'SO_0'/'SO_-1' men-label tanggal yang tak pernah
+            # ada. Kolom ber-date 0 menampilkan penutupan bulan lalu
+            # (pemetaan 0→−1 fix 48-b) → label jujur '…_lalu'; date < 0
+            # (H=1, SO dua hari sebelum tanggal 1 — nilai dinolkan di
+            # _compute_pivot) → label '…_—' dengan sel '-'.
+            if date == 0:
+                return f"{prefix}_lalu"
+            if date < 0:
+                return f"{prefix}_\u2014"
             return f"{prefix}_{date}"
         return col_name
 
@@ -1399,15 +1519,26 @@ class DeviasiView(tk.Frame):
         # NONZERO terakhir (rekap user kini mencakup 1..26 → H=26; pola
         # reset kategori default DEVIASI). set() men-trigger listener tab
         # lain (chip PCS/Laporan/Komparasi ikut); nilai sama → no-op.
-        _new_h = self._default_h_from_data(data)
-        if _new_h is not None:
-            if self._h_state is not None:
-                self._h_state.set(_new_h)
+        # FIX 6d1-02 — counter _load_depth (class-level) menahan SEMUA
+        # listener _on_shared_h_changed selama blok ini (instance ini +
+        # saudara GR/PCS): dulu set() me-render DI TENGAH load dengan
+        # filter kategori/kolom/aktif LAMA (render #1 = 0 baris + status
+        # salah) sebelum reset filter di bawah → render #2 dari akhir
+        # load_data. Kini SATU render di akhir load_data (state filter
+        # baru sudah diterapkan).
+        type(self)._load_depth += 1
+        try:
+            _new_h = self._default_h_from_data(data)
+            if _new_h is not None:
+                if self._h_state is not None:
+                    self._h_state.set(_new_h)
+                    self.tanggal_h = self._h_state.h
+                else:
+                    self.tanggal_h = _new_h
+            elif self._h_state is not None and self.tanggal_h != self._h_state.h:
                 self.tanggal_h = self._h_state.h
-            else:
-                self.tanggal_h = _new_h
-        elif self._h_state is not None and self.tanggal_h != self._h_state.h:
-            self.tanggal_h = self._h_state.h
+        finally:
+            type(self)._load_depth -= 1
         if hasattr(self, "_h_chip_var"):
             self._h_chip_var.set(str(self.tanggal_h))
         if self._h_editable and hasattr(self, "tanggal_h_var"):
@@ -1644,7 +1775,14 @@ class DeviasiView(tk.Frame):
                 fill_value=0,
             )
         except Exception:
-            return pd.DataFrame()
+            # FIX 6d1-06 — dulu exception ditelan senyap → frame kosong →
+            # status generik 'Tidak ada data.' TANPA penyebab (kelas pola
+            # berulang #5). Kini: log penyebab + RE-RAISE → run_async
+            # on_error menampilkan status '⚠ Gagal menghitung deviasi:'
+            # + me-reset _busy/_pending (jalur error yang sudah ada).
+            _LOG.warning("deviasi: pivot_table gagal dibangun",
+                         exc_info=True)
+            raise
 
         if pivot.empty:
             return pd.DataFrame()
@@ -1694,7 +1832,16 @@ class DeviasiView(tk.Frame):
                     dtype="float64")
             return np.zeros(n, dtype="float64")
 
-        so_m2 = arr("1.SO", _day_key(h - 2))
+        # FIX 6d1-03 — H=1: SO(H−2) jatuh ke tanggal −1 = kunci rekap
+        # PENUTUPAN bulan lalu — kunci yang SAMA dengan SO(H−1) (lewat
+        # pemetaan 0→−1 fix 48-b) → dua kolom tampil DUPLIKAT saldo
+        # penutupan. "Tanggal dua hari sebelum tanggal 1" tak pernah ada
+        # (kunci −2 tidak ada di data) → kolom jujur kosong (0 → tampil
+        # '-' di _fmt_num — pola `else 0` _prepare_rows); saldo penutupan
+        # tetap tampil SEKALI di SO(H−1). H=2 tak berubah (SO(H−2) =
+        # penutupan by-design fix 48-b); H≥3 tak tersentuh.
+        so_m2 = (np.zeros(n, dtype="float64") if h == 1
+                 else arr("1.SO", _day_key(h - 2)))
         so_m1 = arr("1.SO", _day_key(h - 1))
         in_m1 = arr("4.IN", h - 1)
         so_h = arr("1.SO", h)
@@ -2296,6 +2443,11 @@ class DeviasiView(tk.Frame):
         hl_cells = []     # v3.9.18 — highlight kolom Deviasi & SO_H
         store = self.store
         asal = f"DEVIASI {self.satuan_mode}"
+        # FIX 6d1-01 — index entri store lama (kunci fp era volatil 'cek'):
+        # {identitas-stabil → kunci aktual}. Baris tetap ☑ meski label
+        # CEK-nya berubah pasca-entri (ambang ACR to BOM / file lalu);
+        # uncheck menghapus entri lama tsb via _followup_keys_for.
+        legacy_fp = self._legacy_fp_index()
         # v3.3.1 FIX "Saldo SO kosong semua": vektorisasi v3.2 lupa memasukkan
         # kolom matrix selain SO_H/Sistem/Deviasi ke cols_np → semua kolom
         # SO_H-2 … SO_H+2, In, Out, BK jatuh ke `else 0` → selalu tampil "-".
@@ -2375,8 +2527,12 @@ class DeviasiView(tk.Frame):
                 "so_p2": float(cols_np["SO_H+2"][i]),
                 "loss_bom": float(cols_np["Dev to BOM%"][i]),
             }
-            fp = row_fingerprint(snap)
-            checked = store is not None and store.has(fp)
+            # FIX 6d1-01 — fp STABIL (bagian 'cek' volatil dinetralkan —
+            # lihat _fp_stable): centang bertahan saat label CEK berubah;
+            # entri lama dicocokkan lewat identitas-stabil (legacy_fp).
+            fp = self._fp_stable(snap)
+            checked = store is not None and (
+                store.has(fp) or fp in legacy_fp)
             values[0] = CHECK_ON if checked else CHECK_OFF
             fp_map[f"row_{i}"] = fp
             row_snaps[f"row_{i}"] = snap
@@ -2975,6 +3131,12 @@ class DeviasiView(tk.Frame):
         # FIX B-07: sync juga entry H di tab GR (reset dari tab lain)
         if self._h_editable and hasattr(self, "tanggal_h_var"):
             self.tanggal_h_var.set(str(new_h))
+        # FIX 6d1-02 — load_data (instance ini / saudara GR-PCS) sedang
+        # berjalan: JANGAN refresh di tengah load dengan state filter lama
+        # — akhir load_data memanggil _refresh/_dirty tunggal dengan state
+        # filter baru (lihat _load_depth).
+        if type(self)._load_depth > 0:
+            return
         if self._dirty:
             return          # belum pernah dirender — refresh saat tab dibuka
         # FIX C-08 (audit 2-c): pane TIDAK terlihat → cukup _dirty (pola

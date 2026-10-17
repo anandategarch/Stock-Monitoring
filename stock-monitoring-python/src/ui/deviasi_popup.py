@@ -53,6 +53,7 @@ Deviasi GR/PCS:
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
 import pandas as pd
 
 from .theme import (
@@ -117,6 +118,78 @@ _JENIS_IN = "4.IN"
 _JENIS_SA = "SALDO AWAL"
 _JENIS_BK = "8.BARANG KELUAR"
 _COM_JENIS = (_JENIS_SA, _JENIS_SO, _JENIS_IN, _JENIS_BK)
+
+# FIX 6e-PERF (audit 6-e perf note: 95-125 ms SINKRON di main thread per
+# double-click @ ~216k baris) — lookup pasangan VEKTOR via factorize
+# astype(str) + cache per IDENTITAS objek DataFrame (idiom pipeline
+# immutable-copy: semua view menerima objek append1_df yang SAMA → cache
+# hit lintas GR/PCS + double-click berturut-turut; guard `is not df` ala
+# _cached_data di view — data berganti → cache invalid otomatis).
+# Mask lama df[col].astype(str) == value (objek == per ~216k baris ≈
+# 10-14 ms × 6-7 panggilan = mayoritas waktu popup) diganti kode int
+# (codes == i ≈ 0,1 ms). Hasil IDENTIK: factorize dijalankan ATAS series
+# astype(str) → kecocokan string-nya sama persis dgn == versi lama.
+# Semua pemanggil (handler double-click / test) berjalan di main thread
+# — cache modul tunggal aman.
+_PERF_CACHE: dict = {"df": None, "codes": {}, "com_col_keys": None}
+
+
+def _perf_state(df: pd.DataFrame) -> dict:
+    """FIX 6e-PERF — state cache utk objek df ini (reset saat identitas
+    berganti)."""
+    if _PERF_CACHE["df"] is not df:
+        _PERF_CACHE["df"] = df
+        _PERF_CACHE["codes"] = {}
+        _PERF_CACHE["com_col_keys"] = None
+    return _PERF_CACHE
+
+
+def _col_codes(df: pd.DataFrame, name: str):
+    """FIX 6e-PERF — (codes ndarray, {nilai_str: kode}) utk kolom
+    astype(str) — di-cache per identitas df."""
+    st = _perf_state(df)
+    ent = st["codes"].get(name)
+    if ent is None:
+        s = df[name].astype(str)
+        codes, uniques = pd.factorize(s)
+        ent = (codes, {v: i for i, v in enumerate(uniques.tolist())})
+        st["codes"][name] = ent
+    return ent
+
+
+def _col_code_mask(df: pd.DataFrame, name: str, value) -> np.ndarray:
+    """FIX 6e-PERF — mask boolean ndarray kolom == str(value)
+    (IDENTIK df[name].astype(str) == str(value), via kode factorize;
+    nilai tak ada → semua-False, sama seperti == versi lama)."""
+    codes, lut = _col_codes(df, name)
+    i = lut.get(str(value))
+    if i is None:
+        return np.zeros(codes.shape, dtype=bool)
+    return codes == i
+
+
+def _col_isin_mask(df: pd.DataFrame, name: str, values) -> np.ndarray:
+    """FIX 6e-PERF — mask boolean ndarray kolom astype(str) ∈ values
+    (IDENTIK df[name].astype(str).isin(values))."""
+    codes, lut = _col_codes(df, name)
+    ids = [lut[v] for v in values if v in lut]
+    if not ids:
+        return np.zeros(codes.shape, dtype=bool)
+    return np.isin(codes, ids)
+
+
+def _com_col_keys(df: pd.DataFrame) -> list:
+    """FIX 6e-PERF — kolom tanggal GLOBAL union 4 JENIS COM (persis
+    col_keys _compute_com_series versi lama: sorted set to_numeric
+    Tanggal baris 4 JENIS, kunci _chrono_key) — di-cache per identitas
+    df (deterministik per data)."""
+    st = _perf_state(df)
+    if st["com_col_keys"] is None:
+        m = _col_isin_mask(df, "JENIS", _COM_JENIS)
+        tn = pd.to_numeric(df.loc[m, "Tanggal"], errors="coerce")
+        st["com_col_keys"] = sorted(set(tn.dropna().tolist()),
+                                     key=_chrono_key)
+    return st["com_col_keys"]
 
 
 class DeviasiPopup(tk.Toplevel):
@@ -402,22 +475,21 @@ def _compute_com_series(df: pd.DataFrame, nama_barang: str,
     if df is None or df.empty:
         return {}
 
-    jenis_s = df["JENIS"].astype(str)
     # kolom GLOBAL (semua pasangan — mirror col_keys laporan)
-    glob_t = pd.to_numeric(
-        df.loc[jenis_s.isin(_COM_JENIS), "Tanggal"], errors="coerce")
-    col_keys = sorted(set(glob_t.dropna().tolist()), key=_chrono_key)
+    # FIX 6e-PERF — astype(str)+isin+to_numeric full-frame di-cache per
+    # identitas df (IDENTIK hasil versi lama).
+    col_keys = _com_col_keys(df)
     if not col_keys:
         return {}
 
     # baris pasangan (+satuan) 4 JENIS
-    mask = (
-        (df["Nama Barang"].astype(str) == str(nama_barang))
-        & (df["NAMA RESTO"].astype(str) == str(nama_resto))
-        & jenis_s.isin(_COM_JENIS)
-    )
+    # FIX 6e-PERF — mask via kode factorize (IDENTIK astype(str) == /
+    # isin versi lama; objek == full-frame × 4 diganti kode int).
+    mask = (_col_code_mask(df, "Nama Barang", nama_barang)
+            & _col_code_mask(df, "NAMA RESTO", nama_resto)
+            & _col_isin_mask(df, "JENIS", _COM_JENIS))
     if satuan is not None:
-        mask &= df["SATUAN"].astype(str) == str(satuan)
+        mask &= _col_code_mask(df, "SATUAN", satuan)
     sub = df[mask]
     if sub.empty:
         return {}
@@ -519,15 +591,18 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         return empty
 
     df = data
-    mask = (
-        (df["Nama Barang"].astype(str) == str(nama_barang))
-        & (df["NAMA RESTO"].astype(str) == str(nama_resto))
-        & (df["JENIS"].isin((_JENIS_SALDO, _JENIS_SO, _JENIS_IN)))
-    )
+    # FIX 6e-PERF — mask pasangan via kode factorize astype(str) (cache
+    # per identitas df; IDENTIK hasil mask versi lama — objek == full-
+    # frame × 3 + astype × 3 per popup diganti kode int ≈ 0,1 ms).
+    # JENIS tetap isin RAW (persis versi lama — tanpa astype).
+    mask = (_col_code_mask(df, "Nama Barang", nama_barang)
+            & _col_code_mask(df, "NAMA RESTO", nama_resto)
+            & df["JENIS"].isin(
+                (_JENIS_SALDO, _JENIS_SO, _JENIS_IN)).to_numpy())
     # FIX 35-b — filter SATUAN grup yang diklik (astype(str) dua sisi:
     # encoding identik dgn nilai kolom Satuan yang dirender tree).
     if satuan is not None:
-        mask &= df["SATUAN"].astype(str) == str(satuan)
+        mask &= _col_code_mask(df, "SATUAN", satuan)
     sub = df[mask]
     if sub.empty:
         return empty

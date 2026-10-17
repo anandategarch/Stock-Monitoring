@@ -68,6 +68,18 @@ class Config:
         # v3.5: LightMode DIHAPUS — pipeline selalu mode FULL
         # (SO bulan lalu tanggal -25..-31 selalu terbaca). Key "LightMode"
         # lama di config.json diabaikan dengan aman.
+        # FIX 6f-04 (audit 6-f): blok Folders/Sheets yang bukan objek
+        # dict (salah tulis list/string saat edit manual config.json)
+        # dulu melempar AttributeError/TypeError Inggris mentah dari
+        # setdefault di bawah — pesan ramah pola v3.9.33.
+        for _blok in ("Folders", "Sheets"):
+            if not hasattr(data[_blok], "keys"):
+                raise RuntimeError(
+                    "config.json salah format — key '" + _blok + "' "
+                    "harus objek {\"key\": \"nilai\"}, bukan "
+                    + type(data[_blok]).__name__
+                    + ". Perbaiki di tab ⚙ Pengaturan atau hapus "
+                    "config.json untuk regenerasi.")
         self.Folders = data["Folders"]
         # v3.9.17: key baru di-DEFAULT (config lokal pra-v3.9.17 yang belum
         # memuat 'Pemindahan4205Lalu' — mis. hasil git pull dgn config
@@ -113,8 +125,31 @@ class Config:
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:
         """Return full path untuk folder key (e.g., 'RekapBerjalan')."""
-        return os.path.join(self.RootPath, self.Folders[key])
+        # FIX 6f-04 (audit 6-f): sub-key Folders hilang (config.json
+        # diedit manual — blok Folders diketik ulang) dulu melempar
+        # KeyError Inggris mentah dari pipeline. Pesan ramah Indonesia
+        # pola v3.9.33 _wajib_hilang: sebut key + blok + petunjuk
+        # (app.py on_error menampilkan pesan ini ke user).
+        try:
+            sub = self.Folders[key]
+        except (KeyError, TypeError):
+            raise RuntimeError(
+                f"config.json tidak lengkap — key folder '{key}' tidak ada "
+                "di blok 'Folders' (diedit manual?). Perbaiki di tab "
+                "⚙ Pengaturan atau hapus config.json untuk regenerasi."
+            ) from None
+        return os.path.join(self.RootPath, sub)
 
     def sheet(self, key: str) -> str:
         """Return sheet name untuk key (e.g., 'Penjualan2205')."""
-        return self.Sheets[key]
+        # FIX 6f-04 (audit 6-f): mirror folder() — sub-key Sheets hilang
+        # → RuntimeError pesan Indonesia (bukan KeyError mentah).
+        try:
+            nama = self.Sheets[key]
+        except (KeyError, TypeError):
+            raise RuntimeError(
+                f"config.json tidak lengkap — key sheet '{key}' tidak ada "
+                "di blok 'Sheets' (diedit manual?). Perbaiki di tab "
+                "⚙ Pengaturan atau hapus config.json untuk regenerasi."
+            ) from None
+        return nama

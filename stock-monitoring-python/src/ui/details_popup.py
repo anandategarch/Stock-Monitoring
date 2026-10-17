@@ -77,6 +77,53 @@ _COM_JENIS_LABEL = "6.PEMAKAIAN (COM)"
 _COM_FORMULA_JENIS = ("SALDO AWAL", "1.SO", "4.IN", "8.BARANG KELUAR")
 
 
+def _chrono_lt(a: int, b: int) -> bool:
+    """FIX 6c-02 — urut kronologis tanggal app: -31 … -1 lalu 1 … 31
+    (negatif = bulan lalu; mirror laporan_deviasi_view._chrono /
+    deviasi_popup._chrono_key)."""
+    ka = (0, -a) if a < 0 else (1, a)
+    kb = (0, -b) if b < 0 else (1, b)
+    return ka < kb
+
+
+def _com_prev_global_tgl(data: pd.DataFrame, t: int):
+    """FIX 6c-02 / 6e-04 — tanggal kolom GLOBAL sebelum ``t``.
+
+    Kolom global = union tanggal baris 4 JENIS formula COM di SELURUH
+    frame (mirror col_keys laporan_deviasi_view._compute_com_matrix /
+    deviasi_popup._compute_com_series): so_prev(t) = SO pasangan di
+    tanggal kolom global SEBELUM t (0 bila pasangan tak punya baris
+    di sana) — bukan tanggal pair-sebelumnya. Return None bila tak ada
+    tanggal sebelum t (t = kolom pertama → base com = 0; t == 1 dengan
+    SA pasangan ditangani cabang pemanggil — SA ber-Tanggal 1)."""
+    try:
+        jenis_s = data["JENIS"].astype(str)
+        tn = pd.to_numeric(
+            data.loc[jenis_s.isin(_COM_FORMULA_JENIS), "Tanggal"],
+            errors="coerce").dropna()
+    except (KeyError, TypeError, ValueError):
+        return None
+    prev = None
+    for v in tn.unique().tolist():
+        try:
+            iv = int(v)
+        except (TypeError, ValueError):
+            continue
+        if _chrono_lt(iv, t) and (prev is None or _chrono_lt(prev, iv)):
+            prev = iv
+    return prev
+
+
+def _tgl_lalu_label(t) -> str:
+    """FIX 6e-05 — label tanggal konvensi app: '25•' (bulan lalu) / '25'.
+    (mirror deviasi_popup._fmt_tanggal + heading kolom pivot_view)."""
+    try:
+        d = int(float(t))
+    except (TypeError, ValueError):
+        return str(t)
+    return f"{-d}•" if d < 0 else str(d)
+
+
 class DetailsPopup(tk.Toplevel):
     """Popup window menampilkan source rows untuk kombinasi cell pivot."""
 
@@ -355,6 +402,7 @@ class DetailsPopup(tk.Toplevel):
         n = len(render_df)
         total_nilai = 0.0
         neg_cells = []   # v3.9.2 — per-cell minus (kolom NILAI)
+        has_lalu = False  # FIX 6e-05 — ada tanggal bulan lalu (label •)
         for i in range(n):
             values = []
             has_negative = False
@@ -371,7 +419,10 @@ class DetailsPopup(tk.Toplevel):
                     except (TypeError, ValueError):
                         pass
                 else:
-                    values.append(DetailsPopup._fmt_cell(val, col_name))
+                    _txt = DetailsPopup._fmt_cell(val, col_name)
+                    values.append(_txt)
+                    if col_name == "Tanggal" and _txt.endswith("•"):
+                        has_lalu = True  # FIX 6e-05
             tags = []
             if has_negative:
                 # v3.9.2: minus merah PER CELL (kolom NILAI saja) —
@@ -391,6 +442,9 @@ class DetailsPopup(tk.Toplevel):
                 ".", ",").replace("X", ".")
         # FIX C-03/C-10 (audit 2-c): format ID + 'rows' EN → 'baris'
         status = f"{n} baris · Total NILAI: {total_str}"
+        if has_lalu:
+            # FIX 6e-05 — legend konvensi '25•' (pola deviasi_popup footer)
+            status += " · • = bulan lalu"
         return {"items": items, "status": status, "total": total_nilai,
                 "render_df_len": n, "neg_cells": neg_cells}
 
@@ -658,8 +712,12 @@ class DetailsPopup(tk.Toplevel):
             except Exception:
                 return str(val)
         if col_name == "Tanggal":
+            # FIX 6e-05 — konvensi app: bulan lalu '25•' (dulu mentah
+            # '-25' — terlihat seperti data error; mirror deviasi_popup
+            # _fmt_tanggal + heading kolom pivot_view + legend footer).
             try:
-                return str(int(val))
+                d = int(float(val))
+                return f"{-d}•" if d < 0 else str(d)
             except (TypeError, ValueError):
                 return str(val)
         return str(val)
@@ -696,6 +754,9 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     # v3.9.54 — catatan filter-info opsional (formula COM / rentang tgl)
     _formula_note = None
     _range_note = None
+    # FIX 6c-02 / 6e-04 — tanggal kolom-global SEBELUM t (base formula
+    # COM) utk cabang JENIS COMPUTED + tanggal; None = tanpa ekspansi.
+    _com_prev_tgl = None
 
     # Build title parts
     title_parts = []
@@ -712,14 +773,49 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             # PENYUSUN formula (SA/SO/IN/BK) + keterangan di filter info.
             df = df[df["JENIS"].astype(str).isin(_COM_FORMULA_JENIS)]
             title_parts.append(str(jenis))
-            _formula_note = "JENIS=SA+SO+IN+BK (formula COM)"
+            # FIX 6c-02 / 6e-04 (audit 6-c LOW / 6-e LOW) — filter SATU
+            # tanggal membuat baris BASE formula hilang utk t>1:
+            # COM(t) = SO(t−1) + IN(t) − BK(t) − SO(t) tak bisa
+            # direkonstruksi dari popup (SO(24) penentu COM(25) minus
+            # tidak pernah tampil). Kini baris 1.SO di tanggal kolom
+            # GLOBAL sebelum t ikut ditampilkan (SALDO AWAL — base t=1 —
+            # sudah terfilter di t=1), + catatan filter-info jujur
+            # (SA tidak diklaim utk t>1).
+            _t_probe = None
+            if tanggal is not None:
+                try:
+                    _t_probe = int(tanggal)
+                except (TypeError, ValueError):
+                    _t_probe = None
+            if _t_probe is not None and _t_probe != 1:
+                _com_prev_tgl = _com_prev_global_tgl(data, _t_probe)
+            if _com_prev_tgl is not None:
+                # catatan sementara — finalisasi SETELAH semua filter
+                # (NAMA RESTO bisa membuang baris base → klaim diubah
+                # jujur ke 'base 0'; lihat bawah).
+                _formula_note = "_COM_BASE_PENDING_"
+            elif _t_probe is not None and _t_probe != 1:
+                _formula_note = (
+                    "JENIS=SO+IN+BK (formula COM: base 0 — tidak ada "
+                    "tanggal sebelumnya)")
+            if _formula_note is None:
+                _formula_note = "JENIS=SA+SO+IN+BK (formula COM)"
         else:
             df = df[df["JENIS"].astype(str) == str(jenis)]
             title_parts.append(jenis)
     if tanggal is not None:
         try:
             tgl_int = int(tanggal)
-            df = df[pd.to_numeric(df["Tanggal"], errors="coerce") == tgl_int]
+            if _com_prev_tgl is not None:
+                # FIX 6c-02 / 6e-04 — longgarkan filter tanggal HANYA utk
+                # 1.SO: baris base SO(t−1) ikut tampil.
+                _tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+                _so_m = df["JENIS"].astype(str) == "1.SO"
+                df = df[(_so_m & _tnum.isin([tgl_int, _com_prev_tgl]))
+                        | (~_so_m & (_tnum == tgl_int))]
+            else:
+                df = df[pd.to_numeric(df["Tanggal"], errors="coerce")
+                        == tgl_int]
             title_parts.append(f"Tgl {tgl_int}")
         except (TypeError, ValueError):
             pass
@@ -733,14 +829,44 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             _t1, _t2 = int(tgl_range[0]), int(tgl_range[1])
             if _t1 > _t2:
                 _t1, _t2 = _t2, _t1
-            df = df[pd.to_numeric(df["Tanggal"], errors="coerce")
-                    .between(_t1, _t2)]
+            if _com_prev_tgl is not None:
+                # FIX 6c-02 / 6e-04 — baris BASE SO(t−1) berboleh DI LUAR
+                # rentang tampilan (base bukan bagian rentang — tanpa ini
+                # rentang 4..6 membuang SO(3) yang justru penentu COM(4)).
+                _tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+                _so_m = df["JENIS"].astype(str) == "1.SO"
+                df = df[((_tnum == _com_prev_tgl) & _so_m)
+                        | _tnum.between(_t1, _t2)]
+            else:
+                df = df[pd.to_numeric(df["Tanggal"], errors="coerce")
+                        .between(_t1, _t2)]
             _range_note = f"Tgl {_t1}..{_t2}"
         except (TypeError, ValueError, IndexError):
             _range_note = None
 
     # Apply additional filters (from active pivot filters)
     filter_info_parts = []
+    if _formula_note == "_COM_BASE_PENDING_":
+        # FIX 6c-02 / 6e-04 — finalisasi catatan formula SETELAH semua
+        # filter (klaim baris BASE hanya bila baris 1.SO di tanggal base
+        # benar-benar tampil — pasangan/resto tanpa SO di t−1 → base
+        # com = 0, tak ada baris untuk diklaim).
+        _prev_lbl = _tgl_lalu_label(_com_prev_tgl)
+        try:
+            _tn = pd.to_numeric(df["Tanggal"], errors="coerce")
+            _has_base_row = bool(
+                ((df["JENIS"].astype(str) == "1.SO")
+                 & (_tn == _com_prev_tgl)).any())
+        except (KeyError, TypeError, ValueError):
+            _has_base_row = False
+        if _has_base_row:
+            _formula_note = (
+                f"JENIS=SO+IN+BK + SO {_prev_lbl} BASE "
+                "(formula COM: SO(t−1)+IN−BK−SO)")
+        else:
+            _formula_note = (
+                f"JENIS=SO+IN+BK (formula COM: base 0 — "
+                f"pasangan tanpa SO {_prev_lbl})")
     for _note in (_formula_note, _range_note):
         if _note:
             filter_info_parts.append(_note)

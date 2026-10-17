@@ -84,6 +84,37 @@ DATE_COL_OFFSETS = dict(zip(DATE_COL_IDS, (-2, -1, 0, 1, 2)))
 
 CHECK_ON, CHECK_OFF = "☑", "☐"
 
+# FIX 6d1-04 (audit 6-d1 LOW) — 7 label anomali CEK KANONIK (mirror
+# deviasi_view._CEK_CHECK_LABELS — READ ONLY, jangan uba dua-duanya
+# sekaligus tanpa koordinasi): snapshot 'cek' baris asal DEVIASI dapat
+# berisi segmen ANALISA lalu→kini ('Berubah Arah' / 'Peningkatan
+# Tertinggi +p%' / 'Penurunan Tertinggi -p%') bila baris TIDAK ber-label
+# anomali — footer CEK tab Deviasi tidak menghitungnya sbg anomali.
+# Display Follow Up menandainya 'Analisa: …' supaya dua tab konsisten
+# (bukan tertukar dgn label anomali).
+_CEK_CANONICAL_LABELS = (
+    "Promix 04", "RI Balancing", "Kosong/Non Aktif", "Beda Tanggal",
+    "Hitung Manual", "Turun Drastis", "ACR to BOM",
+)
+_ANALISA_PREFIXES = ("Berubah Arah", "Peningkatan Tertinggi",
+                     "Penurunan Tertinggi")
+
+
+def _cek_display_text(v) -> str:
+    """FIX 6d1-04 — teks kolom Keterangan (CEK) Follow Up: label
+    kanonik tampil apa adanya; segmen ANALISA diberi prefiks
+    'Analisa: ' (baris tsb BUKAN anomali CEK — definisi footer/popup
+    tab Deviasi); label lain (status LAPORAN-COM: MINUS / > MEDIAN /
+    MINUS + > MEDIAN) tetap apa adanya — konsisten dgn tab asalnya."""
+    t = str(v or "").strip()
+    if not t:
+        return "-"
+    if t in _CEK_CANONICAL_LABELS:
+        return t
+    if t.startswith(_ANALISA_PREFIXES):
+        return f"Analisa: {t}"
+    return t
+
 # Path (dynamis — pola config.json di app.py)
 _BASE = Path(__file__).resolve().parent.parent.parent
 

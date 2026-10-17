@@ -139,6 +139,14 @@ def _norm_barang(v) -> str:
 # item, bukan identitas family produksi).
 _VERSI_UJUNG = re.compile(r"V\.?\d+(BARU)?$")
 
+# FIX 6f-01 (audit 6-f) — deteksi kolom RINGKASAN file 42.17 (kolom
+# total/jumlah ber-kurung, mis. 'TOTAL (SEMUA GUDANG)' → resto phantom
+# 'SEMUA GUDANG' + saldo dobel). Word-boundary + case-insensitive
+# supaya nama gudang legit ('GUDANG BDGUKU (BDGUKU)',
+# 'RESTO MALANG (MLGPAR)') TIDAK kena.
+_SUMMARY_COL_RE = re.compile(r"\b(TOTAL|JUMLAH|SUB\s?TOTAL|GRAND|SEMUA)\b",
+                             re.IGNORECASE)
+
 
 def _fam_kat(v_norm: str) -> str:
     """v3.9.41 — kategori ternormalisasi → FAMILY (token versi ujung
@@ -391,6 +399,32 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     id_vars = ["Nama Barang"]
     if sat_col is not None and sat_col in prom.columns:
         id_vars.append(sat_col)
+
+    # FIX 6f-01 (audit 6-f): buang kolom RINGKASAN sebelum melt. Export
+    # Accurate bisa menambah kolom total ber-kurung (mis. 'TOTAL (SEMUA
+    # GUDANG)', 'JUMLAH (ALL)') — melt menjadikannya resto PHANTOM
+    # (between-delimiters 'SEMUA GUDANG') → saldo tiap barang terhitung
+    # 2× (gudang + total). Kolom gudang LEGIT juga ber-kurung — nama
+    # 'GUDANG X (KODE)' / 'RESTO MALANG (MLGPAR)', kode resto di DALAM
+    # kurung — jadi kriteria = token ringkasan (word-boundary,
+    # case/whitespace-insensitive) pada nama kolom: TOTAL / JUMLAH /
+    # SUBTOTAL / GRAND / SEMUA. Kolom non-id TANPA kurung tetap terbuang
+    # oleh mask NAMA RESTO kosong di bawah (perilaku lama).
+    _summary_cols = []
+    for c in prom.columns:
+        if c in id_vars:
+            continue
+        _nm = re.sub(r"\s+", " ", str(c)).strip().upper()
+        if _SUMMARY_COL_RE.search(_nm):
+            _summary_cols.append(c)
+    if _summary_cols:
+        prom = prom.drop(columns=_summary_cols)
+        _show = ", ".join(str(c) for c in _summary_cols[:5])
+        if len(_summary_cols) > 5:
+            _show += f" … (+{len(_summary_cols) - 5})"
+        print(f"    4217 ringkasan: {len(_summary_cols)} kolom "
+              f"total/jumlah dibuang sebelum melt — {_show} (bukan kolom "
+              "gudang resto — mencegah resto phantom + saldo dobel)")
 
     up = prom.melt(id_vars=id_vars, var_name="NAMA RESTO", value_name="Value")
 

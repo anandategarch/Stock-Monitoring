@@ -39,7 +39,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from .followup import CHECK_ON, DATE_COL_IDS, FollowUpStore
+from .followup import CHECK_ON, DATE_COL_IDS, FollowUpStore, _cek_display_text
 from .theme import (
     C_BG,
     C_CARD,
@@ -115,6 +115,17 @@ class FollowUpView(tk.Frame):
         # mengenai baris yang benar WALAUPUN tabel sudah di-sort/di-reorder
         # (bug v3.2: tree.index() + _fp_order → salah baris setelah sort)
         self._iid_fp: dict[str, str] = {}
+        # FIX 6e-01 (audit 6-e HIGH — mirror fix 48-d deviasi_view v3.9.33):
+        # _render() membangun ulang tree + MENGGANTI _iid_fp dgn penomoran
+        # posisi fu_N (store berubah via toggle ✓ dari tab mana pun →
+        # listener _on_store_changed → _render) → fu_N kini menunjuk baris
+        # LAIN, sedangkan clone ⛶ (non-modal, iid disalin saat dibuka) TIDAK
+        # di-refresh → klik ✓ di clone basi menghapus baris SALAH (persist
+        # followup.json). Kini: (1) setiap re-render MENUTUP semua clone hidup,
+        # (2) generasi render dicatat di tree clone saat dibuka — handler
+        # ✓/double-click mengabaikan clone generasi lama (defense-in-depth).
+        self._render_gen = 0
+        self._clone_wins: list = []
         # v3.9.17: minus merah PER CELL (konsisten view lain sejak v3.9.2)
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
@@ -348,7 +359,11 @@ class FollowUpView(tk.Frame):
             _so(snap.get("sistem")),
             dev_txt,
             self._fu_pct(snap.get("loss_bom")),
-            snap.get("cek", "") or "-",
+            # FIX 6d1-04 — segmen ANALISA ('Berubah Arah' / 'Peningkatan
+            # Tertinggi +p%') DIBEDAKAN dari 7 label CEK kanonik (mirror
+            # definisi footer/popup CEK tab Deviasi — baris tsb bukan
+            # anomali CEK); nilai popup filter kolom ikut nilai tampil.
+            _cek_display_text(snap.get("cek", "")),
             _so(snap.get("so")),
             dev_txt,
             self._fu_num(info.get("Selisih")) if info.get("Selisih")
@@ -382,6 +397,13 @@ class FollowUpView(tk.Frame):
             self.header_filters.refresh_icons()
 
     def _render(self):
+        # FIX 6e-01 (audit 6-e HIGH): baris/iid di-render ulang (_iid_fp
+        # segera diganti di bawah dgn penomoran posisi fu_N) → clone ⛶ yang
+        # masih hidup memegang salinan LAMA (iid sama, baris lain) → DITUTUP
+        # (clone basi lebih buruk daripada tertutup) + generasi naik (guard
+        # handler ✓/double-click clone — mirror deviasi_view _render_rows).
+        self._render_gen += 1
+        self._close_stale_clones()
         rows = list(self.store.rows.values())
         self.tree.delete(*self.tree.get_children())
         self._iid_fp = {}
@@ -491,6 +513,12 @@ class FollowUpView(tk.Frame):
     # =========================================================================
     def _on_tree_click(self, event):
         tree = event.widget
+        # FIX 6e-01 (audit 6-e HIGH / mirror 48-d P0 deviasi_view): clone ⛶
+        # generasi lama (dibuka sebelum re-render terakhir — _iid_fp sudah
+        # dipetakan ulang) → handler DIABAIKAN senyap; dulu klik ✓ di clone
+        # basi MENGHAPUS BARIS SALAH dari followup.json.
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         try:
             if tree.identify_region(event.x, event.y) != "cell":
                 return
@@ -578,8 +606,27 @@ class FollowUpView(tk.Frame):
             on_double_click=self._on_double_click,
             on_filter_setup=filter_setup,
             on_render_done=self._reapply_cell_tags)  # v3.9.17 tag per-cell
+        # FIX 6e-01 (audit 6-e HIGH): catat clone hidup + generasi render
+        # saat dibuka (tree clone diberi atribut _view_gen; handler
+        # ✓/double-click memeriksanya; clone ditutup saat re-render —
+        # mirror deviasi_view _register_clone).
+        new_tree._view_gen = self._render_gen
+        self._clone_wins.append(win)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree
+
+    def _close_stale_clones(self):
+        """FIX 6e-01 (audit 6-e HIGH — mirror deviasi_view): tutup SEMUA
+        clone ⛶ yang masih hidup — dipanggil saat _render mengganti baris
+        (iid fu_N dipetakan ulang; clone basi men-toggle baris SALAH).
+        Window yang sudah ditutup user cukup dibersihkan dari daftar."""
+        for w in self._clone_wins:
+            try:
+                if w.winfo_exists():
+                    w.destroy()
+            except tk.TclError:
+                pass
+        self._clone_wins = []
 
     # =========================================================================
     # SORT (v3.3: engine linear + parse khusus status TL)
@@ -612,6 +659,11 @@ class FollowUpView(tk.Frame):
     # =========================================================================
     def _on_double_click(self, event):
         tree = event.widget
+        # FIX 6e-01 (audit 6-e HIGH / mirror 48-d P0 deviasi_view): clone ⛶
+        # generasi lama → _iid_fp tidak lagi cocok dgn baris clone → popup
+        # detail membuka baris SALAH → DIABAIKAN senyap.
+        if getattr(tree, "_view_gen", None) not in (None, self._render_gen):
+            return
         row_iid = tree.identify_row(event.y)
         if not row_iid:
             return

@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.57", APP_VERSION == "3.9.57",
+    check("Versi = 3.9.58", APP_VERSION == "3.9.58",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -6764,7 +6764,10 @@ def main():
 
     import src.ui.deviasi_view as _dvmod31
     _tmpdir31 = _tf31.mkdtemp(prefix="t31_acr_")
-    _origpath31 = _dvmod31.acr_settings_path()
+    # FIX (v3.9.58 audit §68): simpan FUNGSI asalinya (dulu hasil PANGGILAN
+    # Path — restore menimpa fungsi dgn objek → section berikutnya yang
+    # memanggil save_acr_threshold() TypeError 'PosixPath not callable')
+    _origfn31 = _dvmod31.acr_settings_path
     _dvmod31.acr_settings_path = lambda: __import__("pathlib").Path(
         _tmpdir31) / "settings.json"
     try:
@@ -6792,7 +6795,7 @@ def main():
               _dvmod31.load_acr_threshold() == 80.0,
               f"got {_dvmod31.load_acr_threshold()}")
     finally:
-        _dvmod31.acr_settings_path = _origpath31
+        _dvmod31.acr_settings_path = _origfn31
 
     # --- (c) Promix 04 PER-TANGGAL — label ikut sumber tanggal H ---------
     # pasangan: SO tgl-24 promix + SO tgl-25 so-harian → CEK TIDAK Promix
@@ -15408,6 +15411,1948 @@ def main():
     _top67.destroy()
     for _ in range(20):
         root.update()
+
+    # ==================================================================
+    # §68 — (v3.9.58) REGRESI FIX AUDIT 6-x (task 6-a..6-f → fix agent
+    # 7-a..7-f): port probe yang SUDAH TERVERIFIKASI PASS ke suite, agar
+    # perilaku fix tidak tergeser di rilis berikutnya.
+    # ==================================================================
+    print("\n== 68. (v3.9.58) REGRESI FIX AUDIT 6-x (6a export/zoom/worker · "
+          "6b widgets · 6c/6d1 pivot+deviasi · 6d2 in-selisih/nominal · "
+          "6e popup/clone/grab · 6f pipeline) ==")
+
+    import contextlib
+    import gc
+    import io
+    import json
+    import tempfile
+    import threading
+    from types import SimpleNamespace as _SN68
+
+    import numpy as _np68
+
+    import src.ui.app as _appmod68
+    from src.main import PipelineStopped as _PS68
+
+    def _mk68(n=1):
+        return pd.DataFrame({
+            "Nama Barang": [f"BRG{i}" for i in range(n)],
+            "JENIS": ["1.SO"] * n, "Tanggal": [3] * n,
+            "NILAI": [10.0] * n,
+        })
+
+    _tmp68 = tempfile.mkdtemp(prefix="v3958_s68_")
+    _dlg68 = {"err": [], "info": [], "warn": []}
+    _orig_err68 = _appmod68.messagebox.showerror
+    _orig_info68 = _appmod68.messagebox.showinfo
+    _orig_warn68 = _appmod68.messagebox.showwarning
+    _orig_ask68 = _appmod68.filedialog.asksaveasfilename
+    _appmod68.messagebox.showerror = \
+        lambda *a, **k: (_dlg68["err"].append(a), "error")[1]
+    _appmod68.messagebox.showinfo = \
+        lambda *a, **k: (_dlg68["info"].append(a), "ok")[1]
+    _appmod68.messagebox.showwarning = \
+        lambda *a, **k: (_dlg68["warn"].append(a), "ok")[1]
+
+    def _pump68(n=30, dt=0.02):
+        for _ in range(n):
+            root.update()
+            time.sleep(dt)
+
+    try:
+        # ---- (6a-05) statusbar/KPI/log: fmt_int_id + "baris" ----------
+        # (§57 meninggalkan state peringatan folder/file-skip — bersihkan
+        # dulu supaya status final run uji ini hijau polos)
+        app._skipped_files = 0
+        app._pre_missing = []
+        _aud68 = {"df": _mk68(3), "kpi": {"ok": 1, "cutoff": 0, "omit": 0,
+                                          "deviasi_murni": 0,
+                                          "deviasi_qty": 0,
+                                          "dev_murni_po": 0},
+                  "desc": "", "harga_map": {}, "konversi_map": None}
+        app._on_pipeline_done(_mk68(1500), _mk68(1250), pd.DataFrame(),
+                              dict(_aud68), None, False)
+        _pump68(40)
+        _bar68 = app.statusbar.dot._var.get()
+        check("(6a-05) statusbar 'Append1: 1.500 baris · Rincian PO: 1.250 "
+              "baris' (fmt_int_id + 'baris' — dulu grouping EN '1,500 "
+              "rows' + '1 rows')",
+              "Append1: 1.500 baris" in _bar68
+              and "Rincian PO: 1.250 baris" in _bar68
+              and "1,500" not in _bar68 and "rows" not in _bar68,
+              f"got {_bar68!r}")
+        _log68 = app.log_text.get("1.0", "end-1c")
+        check("(6a-05) KPI chip append/rincian = '1.500'/'1.250' + log "
+              "penutup 'Append1: 1.500 baris' & 'Audit Rekonsiliasi: 3 "
+              "baris'",
+              app.kpi_append._value_var.get() == "1.500"
+              and app.kpi_rincian._value_var.get() == "1.250"
+              and "Append1: 1.500 baris" in _log68
+              and "Rincian PO: 1.250 baris" in _log68
+              and "Audit Rekonsiliasi: 3 baris" in _log68,
+              f"kpi={app.kpi_append._value_var.get()!r}")
+
+        # ---- (6a-01) tombol 💾 Export re-enabled jalur ERROR/STOP ------
+        app.btn_export.set_enabled(False)   # replikasi _start_pipeline
+        app.btn_export_tb.set_enabled(False)
+        app.is_running = True
+        app._on_pipeline_done(None, None, None, None,
+                              (RuntimeError("db hancur"), "TB"), False)
+        _pump68(10)
+        _n68a = len(app.append1_df) if app.append1_df is not None else -1
+        check("(6a-01) pipeline ERROR → tombol Export RE-ENABLED (toolbar + "
+              "tab Proses; data run LAMA tetap bisa di-export — dulu mati "
+              "selamanya) + data lama utuh + btn_mulai pulih + is_running "
+              "reset",
+              str(app.btn_export.cget("state")) == "normal"
+              and str(app.btn_export_tb.cget("state")) == "normal"
+              and _n68a == 1500
+              and app.is_running is False
+              and str(app.btn_mulai.cget("state")) == "normal",
+              f"btn={app.btn_export.cget('state')!r} n={_n68a}")
+
+        app.btn_export.set_enabled(False)
+        app.btn_export_tb.set_enabled(False)
+        app.is_running = True
+        app._on_pipeline_done(None, None, None, None,
+                              (_PS68("stop-68"), None), False)
+        _pump68(10)
+        check("(6a-01) pipeline STOP → tombol Export RE-ENABLED + status "
+              "'DIHENTIKAN oleh user.'",
+              str(app.btn_export.cget("state")) == "normal"
+              and str(app.btn_export_tb.cget("state")) == "normal"
+              and app.status_var.get() == "Status: DIHENTIKAN oleh user.",
+              f"btn={app.btn_export.cget('state')!r} "
+              f"status={app.status_var.get()!r}")
+
+        app.append1_df = None
+        app.rincian_po_df = None
+        app.btn_export.set_enabled(False)
+        app.btn_export_tb.set_enabled(False)
+        app._on_pipeline_done(None, None, None, None,
+                              (RuntimeError("x-68"), None), False)
+        _pump68(10)
+        check("(6a-01) ERROR tanpa data apa pun → tombol tetap DISABLED "
+              "(jujur — tidak ada yang bisa di-export)",
+              str(app.btn_export.cget("state")) == "disabled"
+              and str(app.btn_export_tb.cget("state")) == "disabled",
+              f"btn={app.btn_export.cget('state')!r}")
+
+        # siapkan data utk uji export (6a-02/6a-03)
+        app.append1_df = _mk68(3)
+        app.rincian_po_df = pd.DataFrame({
+            "Nomor #": ["PO-A", "PO-B"],
+            "Tanggal": [pd.Timestamp("2024-06-01"),
+                        pd.Timestamp("2024-06-02")],
+            "Nama Barang": ["AYAM FILET", "GULA PASIR"],
+            "Cabang PO": ["1370.MLGPAR", "1370.MLGPAR"],
+        })
+        app.in_detail_df = None
+        app.audit_result = None
+
+        # ---- (6a-02) export atomik: file LAMA utuh saat gagal ----------
+        from openpyxl import load_workbook as _lw68
+
+        def _no_tmp_left68():
+            for _p68 in Path(_tmp68).iterdir():
+                if "tmp" in _p68.name:
+                    return False
+            return True
+
+        _outa68 = str(Path(_tmp68) / "export_normal68.xlsx")
+        _appmod68.filedialog.asksaveasfilename = lambda **kw: _outa68
+        _dlg68["info"].clear()
+        _dlg68["err"].clear()
+        app._export_excel()
+        _t068 = time.time()
+        while (not os.path.exists(_outa68)
+               and time.time() - _t068 < 25):
+            root.update()
+            time.sleep(0.02)
+        _pump68(20)
+        check("(6a-02 prasyarat) export normal: file valid (sheet Append1) "
+              "+ TANPA sisa .tmp + tombol re-enabled via _sync_export_"
+              "buttons",
+              os.path.exists(_outa68)
+              and "Append1" in _lw68(_outa68).sheetnames
+              and _no_tmp_left68()
+              and str(app.btn_export.cget("state")) == "normal",
+              f"ada={os.path.exists(_outa68)} "
+              f"tmp_ok={_no_tmp_left68()}")
+
+        _outb68 = str(Path(_tmp68) / "export_lama68.xlsx")
+        with pd.ExcelWriter(_outb68, engine="openpyxl") as _w68:
+            pd.DataFrame({"MARKER": ["lama"]}).to_excel(
+                _w68, sheet_name="MARKER", index=False)
+        _before68 = Path(_outb68).read_bytes()
+        _orig_aps68 = _appmod68.add_pivot_sheet
+
+        def _boom_pivot68(writer, df, *a, **k):
+            # reproduksi kegagalan mid-write: sheet pertama SUDAH ditulis
+            # lalu exception (pandas __exit__ tetap menyimpan workbook
+            # parsial)
+            df.to_excel(writer, sheet_name="PIVOT_PARTIAL", index=False)
+            raise RuntimeError("boom-mid-export-68")
+
+        _appmod68.add_pivot_sheet = _boom_pivot68
+        try:
+            _appmod68.filedialog.asksaveasfilename = lambda **kw: _outb68
+            _dlg68["err"].clear()
+            _dlg68["info"].clear()
+            app._export_excel()
+            _t068b = time.time()
+            while time.time() - _t068b < 25:
+                root.update()
+                time.sleep(0.02)
+                if len(_dlg68["err"]) >= 1:
+                    break
+            _pump68(20)
+        finally:
+            _appmod68.add_pivot_sheet = _orig_aps68
+        check("(6a-02) gagal MID-WRITE → file LAMA utuh byte-per-byte "
+              "(os.replace atomik; dulu export lama tertimpa parsial/"
+              "korup) + tmp parsial DIHAPUS",
+              Path(_outb68).read_bytes() == _before68
+              and "MARKER" in _lw68(_outb68).sheetnames
+              and not os.path.exists(_outb68 + ".tmp.xlsx")
+              and _no_tmp_left68(),
+              f"same={Path(_outb68).read_bytes() == _before68}")
+        check("(6a-02) dialog 'Export Gagal' (bukan Berhasil) + tombol "
+              "re-enabled setelah kegagalan",
+              len(_dlg68["err"]) == 1 and len(_dlg68["info"]) == 0
+              and str(app.btn_export.cget("state")) == "normal"
+              and str(app.btn_export_tb.cget("state")) == "normal",
+              f"err={len(_dlg68['err'])} info={len(_dlg68['info'])}")
+
+        # ---- (6a-03) guard df KOSONG (bukan None) ----------------------
+        _outc68 = str(Path(_tmp68) / "export_kosong68.xlsx")
+        _fdcalls68 = []
+        _appmod68.filedialog.asksaveasfilename = \
+            lambda **kw: (_fdcalls68.append(kw), _outc68)[1]
+        _saved68 = {k: getattr(app, k)
+                    for k in ("append1_df", "rincian_po_df",
+                              "in_detail_df", "audit_result")}
+        app.append1_df = pd.DataFrame()       # KOSONG tapi bukan None
+        app.rincian_po_df = pd.DataFrame()
+        app.in_detail_df = pd.DataFrame()
+        app.audit_result = {"df": pd.DataFrame()}
+        _dlg68["warn"].clear()
+        _dlg68["err"].clear()
+        try:
+            app._export_excel()
+            _pump68(20)
+        finally:
+            for _k68, _v68 in _saved68.items():
+                setattr(app, _k68, _v68)
+        check("(6a-03) SEMUA dataset KOSONG → pesan ramah 'Tidak ada baris' "
+              "(dulu IndexError 'At least one sheet' + file korup "
+              "tertinggal) + dialog simpan TIDAK dibuka + TIDAK ADA file",
+              len(_dlg68["warn"]) == 1
+              and "Tidak ada baris" in str(_dlg68["warn"][0])
+              and "At least one sheet" not in str(_dlg68["warn"][0])
+              and len(_fdcalls68) == 0
+              and not os.path.exists(_outc68),
+              f"warn={_dlg68['warn']!r}")
+
+        _appmod68.filedialog.asksaveasfilename = \
+            lambda **kw: (_fdcalls68.append(kw), _outc68)[1]
+        _fdcalls68.clear()
+        _dlg68["warn"].clear()
+        app.append1_df = None
+        app.rincian_po_df = None
+        app.in_detail_df = None
+        app.audit_result = None
+        try:
+            app._export_excel()
+            _pump68(20)
+        finally:
+            for _k68, _v68 in _saved68.items():
+                setattr(app, _k68, _v68)
+        check("(6a-03) data None → pesan LAMA 'Belum ada data. Jalankan "
+              "pipeline dulu.' tetap dipertahankan (backward-compat)",
+              len(_dlg68["warn"]) == 1
+              and "Belum ada data. Jalankan pipeline dulu."
+              in str(_dlg68["warn"][0])
+              and len(_fdcalls68) == 0,
+              f"warn={_dlg68['warn']!r}")
+
+        # ---- (6a-04) zoom CTRL+roda: akumulator delta ------------------
+        def _zreset68(z=1.0):
+            app._apply_ui_zoom(z)
+            app._zoom_wheel_acc = 0.0
+
+        def _zw68(delta, n=1):
+            for _ in range(n):
+                app._on_zoom_wheel(_SN68(delta=delta))
+                root.update()
+
+        _zreset68()
+        _zw68(10, n=12)
+        check("(6a-04) zoom akumulator: 12×delta=10 = TEPAT 1 notch → 1.10 "
+              "(dulu ±10% PER EVENT → langsung clamp 2.0 — tak terkendali "
+              "di roda/trackpad resolusi tinggi)",
+              abs(app.ui_zoom - 1.10) < 1e-9, f"zoom={app.ui_zoom}")
+        _zw68(10, n=12)
+        _zb68 = app.ui_zoom
+        _zw68(10, n=6)          # setengah notch — belum ada langkah
+        _zw68(-10, n=1)          # berbalik arah → sisa arah lama dibuang
+        _zw68(-10, n=11)         # lanjut: total 1 notch turun penuh
+        check("(6a-04) 24×delta=10 = 2 notch (1.20) + balik arah membuang "
+              "sisa akumulator (6×+10 tanpa langkah + 1×−10 dibuang + "
+              "11×−10 = 1 notch turun penuh → 1.10)",
+              abs(_zb68 - 1.20) < 1e-9
+              and abs(app.ui_zoom - 1.10) < 1e-9,
+              f"before={_zb68} now={app.ui_zoom} "
+              f"acc={app._zoom_wheel_acc:.3f}")
+        _zreset68()              # pulihkan 100% utk bagian berikutnya
+
+        # ---- (6a-06) BaseException worker: cleanup + propagasi ---------
+        _hook68 = []
+        _orig_hook68 = threading.excepthook
+        _orig_rp68 = _appmod68.run_pipeline
+
+        def _hookfn68(args):
+            _hook68.append(args.exc_type)
+
+        def _run_worker68():
+            app.is_running = True
+            app._refresh_flag = False
+            app.btn_mulai.set_enabled(False)
+            app.btn_stop.set_enabled(True)
+            _t68 = threading.Thread(target=app._run_pipeline_worker,
+                                    daemon=True)
+            app.worker_thread = _t68
+            # Main thread WAJIB berada di mainloop() saat worker menjadwal-
+            # kan root.after (pola produksi; probe 7a_4 membuktikan
+            # root.update() saja tidak memadai). Poll keluar saat worker
+            # mati + state pulih + GC shield dilepas.
+            _t068w = time.time()
+
+            def _poll68():
+                if ((not _t68.is_alive() and app.is_running is False
+                     and _GC_HOLD["depth"] == 0)
+                        or time.time() - _t068w > 12):
+                    root.quit()
+                else:
+                    root.after(120, _poll68)
+            root.after(120, _poll68)
+            _t68.start()
+            root.mainloop()
+            _t68.join(10)
+            _pump68(30)
+            return _t68
+
+        threading.excepthook = _hookfn68
+        try:
+
+            def _die_exit68(verbose=True, stop_event=None):
+                raise SystemExit("sys-exit-boom-68")
+
+            _appmod68.run_pipeline = _die_exit68
+            _dlg68["err"].clear()
+            _hook68.clear()
+            _t68w = _run_worker68()
+            _log68w = app.log_text.get("1.0", "end-1c")
+            check("(6a-06) SystemExit dari worker → thread MATI + exception "
+                  "TETAP PROPAGASI (threading.excepthook menerima — tidak "
+                  "ditelan) + penyelesaian ERROR tetap terjadwal: "
+                  "is_running/btn mulai+stop pulih, GC shield depth 0 + "
+                  "gc aktif, status+log ERROR (dulu is_running menempel "
+                  "seumur sesi)",
+                  not _t68w.is_alive()
+                  and any(_et is SystemExit for _et in _hook68)
+                  and app.is_running is False
+                  and str(app.btn_mulai.cget("state")) == "normal"
+                  and str(app.btn_stop.cget("state")) == "disabled"
+                  and _GC_HOLD["depth"] == 0
+                  and gc.isenabled()
+                  and app.status_var.get() == "Status: ERROR."
+                  and "[ERROR] Pipeline gagal" in _log68w
+                  and "sys-exit-boom-68" in _log68w
+                  and len(_dlg68["err"]) >= 1,
+                  f"alive={_t68w.is_alive()} "
+                  f"hook={[_e.__name__ for _e in _hook68]} "
+                  f"depth={_GC_HOLD['depth']} gc={gc.isenabled()}")
+
+            def _die_ki68(verbose=True, stop_event=None):
+                raise KeyboardInterrupt()
+
+            _appmod68.run_pipeline = _die_ki68
+            _hook68.clear()
+            _t68w2 = _run_worker68()
+            check("(6a-06) KeyboardInterrupt juga dipulihkan (state reset + "
+                  "GC shield lepas) DAN tetap propagasi",
+                  not _t68w2.is_alive()
+                  and any(_et is KeyboardInterrupt for _et in _hook68)
+                  and app.is_running is False
+                  and _GC_HOLD["depth"] == 0 and gc.isenabled()
+                  and str(app.btn_mulai.cget("state")) == "normal",
+                  f"hook={[_e.__name__ for _e in _hook68]} "
+                  f"depth={_GC_HOLD['depth']}")
+        finally:
+            _appmod68.run_pipeline = _orig_rp68
+            threading.excepthook = _orig_hook68
+
+        # ---- (6a-07) docstring header versi dinamis --------------------
+        check("(6a-07) __doc__ runtime membawa versi AKTUAL "
+              f"(v{APP_VERSION} — substitusi import-time, tak basi saat "
+              "bump versi) + placeholder 'vX.Y.Z' hilang",
+              f"v{APP_VERSION}" in (_appmod68.__doc__ or "")
+              and "vX.Y.Z" not in (_appmod68.__doc__ or ""),
+              f"head={(_appmod68.__doc__ or '').splitlines()[1][:60]!r}")
+    finally:
+        _appmod68.messagebox.showerror = _orig_err68
+        _appmod68.messagebox.showinfo = _orig_info68
+        _appmod68.messagebox.showwarning = _orig_warn68
+        _appmod68.filedialog.asksaveasfilename = _orig_ask68
+        shutil.rmtree(_tmp68, ignore_errors=True)
+
+    # ---- 6b: widgets.py (port probe_7b_1/2/3/5/6 — Toplevel terisolasi) --
+    from src.ui import widgets as _wgt68
+
+    _top68b = tk.Toplevel(root)
+    _top68b.geometry("700x520+30+30")
+
+    # (6b-01) TableExpander.restore: urutan [Filter,KPI,SKOR] (in_selisih)
+    _cont68 = tk.Frame(_top68b, bg="white")
+    _cont68.pack(fill="both", expand=True)
+    _A68 = tk.Frame(_cont68)
+    _A68.pack(fill="both", expand=True)
+    _fcard68 = tk.Frame(_cont68, bg="#f00")
+    _fcard68.pack(fill="x")
+    _kpi68 = tk.Frame(_cont68, bg="#0f0")
+    _kpi68.pack(fill="x")
+    _skor68 = tk.Frame(_cont68, bg="#00f")
+    _skor68.pack(fill="x")
+    _tcard68 = tk.Frame(_cont68, bg="#ff0")
+    _tcard68.pack(fill="both", expand=True)
+    _foot68 = tk.Frame(_cont68)
+    _foot68.pack(fill="x")
+    _head68 = tk.Frame(_tcard68)
+    _head68.pack(fill="x")
+    _title68 = tk.Label(_head68, text="TITLE")
+    _title68.pack(side="left")
+    _btn68 = tk.Button(_head68, text="⤢")
+    _btn68.pack(side="right")
+    _names68 = {_A68: "empty", _fcard68: "FCARD", _kpi68: "KPI",
+                _skor68: "SKOR", _tcard68: "TCARD", _foot68: "FOOT"}
+
+    def _order68():
+        return [_names68[_w68] for _w68 in _cont68.pack_slaves()]
+
+    _order0_68 = _order68()
+    _exp68 = _wgt68.TableExpander(_btn68,
+                                  [_fcard68, _kpi68, _skor68, _title68])
+    _exp68.collapse()
+    root.update()
+    _exp68.restore()
+    root.update()
+    _exp68.restore()          # idempoten double-restore
+    root.update()
+    check("(6b-01) TableExpander.restore: urutan [FCARD,KPI,SKOR] PERSIS "
+          "kembali + idempoten double-restore (FIX 6b-01 — dulu grup target "
+          "ber-anchor sama ter-restore TERBALIK urutannya)",
+          _order68() == _order0_68, f"got {_order68()}")
+    for _ in range(5):
+        _exp68.collapse()
+        root.update()
+        _exp68.restore()
+        root.update()
+    check("(6b-01) 5× toggle collapse/restore round-trip tetap stabil",
+          _order68() == _order0_68, f"got {_order68()}")
+
+    # (6b-01) kasus campuran fwd/bwd dalam satu parent [T1,T2,A,T3,T4]
+    _c68m = tk.Frame(_top68b, bg="white")
+    _c68m.pack(fill="both", expand=True)
+    _u68a = tk.Frame(_c68m, bg="#0f0")
+    _u68a.pack(fill="x")
+    _u68b = tk.Frame(_c68m, bg="#00f")
+    _u68b.pack(fill="x")
+    _u68x = tk.Frame(_c68m)
+    _u68x.pack(fill="x")
+    _u68c = tk.Frame(_c68m, bg="#0ff")
+    _u68c.pack(fill="x")
+    _u68d = tk.Frame(_c68m, bg="#f0f")
+    _u68d.pack(fill="x")
+    _nm68m = {_u68a: "T1", _u68b: "T2", _u68x: "A", _u68c: "T3",
+              _u68d: "T4"}
+    _ord68m = [_nm68m[_w68] for _w68 in _c68m.pack_slaves()]
+    _exp68m = _wgt68.TableExpander(tk.Button(_c68m, text="x"),
+                                   [_u68a, _u68b, _u68c, _u68d])
+    _exp68m.collapse()
+    root.update()
+    _exp68m.restore()
+    root.update()
+    check("(6b-01) kasus campuran fwd/bwd [T1,T2,A,T3,T4] round-trip EKSAK",
+          [_nm68m[_w68] for _w68 in _c68m.pack_slaves()] == _ord68m,
+          f"got {[_nm68m[_w68] for _w68 in _c68m.pack_slaves()]}")
+
+    # (6b-02 + 6b-08) Ctrl+C TSV: header tanpa panah + kolom hidden
+    _t68c = ttk.Treeview(_top68b, columns=["nama", "qty", "sat"],
+                         show="headings")
+    _t68c.pack(fill="both", expand=True)
+    for _c68, _txt68 in (("nama", "Nama Barang"), ("qty", "Qty"),
+                         ("sat", "Satuan")):
+        _t68c.heading(_c68, text=_txt68)
+        _t68c.column(_c68, width=120)
+    _t68c.insert("", "end", iid="r1", values=("AYAM", "1", "KG"))
+    _t68c.insert("", "end", iid="r2", values=("BEBEK", "2", "KG"))
+    root.update()
+    _wgt68.sort_tree_by_column(_t68c, "nama")   # pasang panah ↓ di heading
+    root.update()
+    _t68c.selection_set(("r1",))
+    _tsv68 = _wgt68.tree_selection_tsv(_t68c)
+    check("(6b-02) Ctrl+C TSV: header TANPA panah sort (↓/↑) — teks header "
+          "+ nilai baris utuh (FIX 6b-02 — dulu 'Nama Barang ↓' ikut "
+          "ter-copy)",
+          "↓" in str(_t68c.heading("nama", "text"))
+          and "↓" not in _tsv68 and "↑" not in _tsv68
+          and _tsv68.splitlines()[0] == "Nama Barang\tQty\tSatuan"
+          and _tsv68.splitlines()[1] == "AYAM\t1\tKG",
+          f"got {_tsv68!r}")
+    _t68c.configure(displaycolumns=("nama", "qty"))   # sembunyikan 'sat'
+    root.update()
+    _tsv68b = _wgt68.tree_selection_tsv(_t68c)
+    _t68c.configure(displaycolumns=("qty", "nama"))   # + reorder display
+    root.update()
+    _t68c.selection_set(("r1",))
+    _tsv68c = _wgt68.tree_selection_tsv(_t68c)
+    check("(6b-08) Ctrl+C MELEWATI kolom tersembunyi + mengikuti urutan "
+          "display (FIX 6b-08 — dulu kolom hidden ikut ter-copy)",
+          "Satuan" not in _tsv68b
+          and _tsv68b.splitlines()[1] == "AYAM\t1"
+          and _tsv68c.splitlines()[0] == "Qty\tNama Barang"
+          and _tsv68c.splitlines()[1] == "1\tAYAM",
+          f"hidden={_tsv68b!r} reorder={_tsv68c!r}")
+
+    # (6b-03) apply_cell_tag: REPLACE semantics + clear + stale dead-iid
+    _t68d = ttk.Treeview(_top68b, columns=["nama", "qty"], show="headings")
+    _t68d.pack(fill="both", expand=True)
+    for _c68 in ("nama", "qty"):
+        _t68d.heading(_c68, text=_c68)
+        _t68d.column(_c68, width=120)
+    _t68d.insert("", "end", iid="r1", values=("AYAM", "-1"))
+    _t68d.insert("", "end", iid="r2", values=("BEBEK", "-2"))
+    root.update()
+    _wgt68.apply_cell_tag(
+        _t68d, "neg_cell",
+        [("r1", "nama"), ("r1", "qty"), ("r2", "qty")])
+    _wgt68.apply_cell_tag(_t68d, "neg_cell", [("r1", "nama")])
+    check("(6b-03) apply_cell_tag REPLACE: apply A lalu B → HANYA B "
+          "(FIX 6b-03 — dulu sel lama menumpuk, minus merah 'nyangkut' "
+          "pasca filter)",
+          _cell_tag_has47(_t68d, "neg_cell", "r1", "nama")
+          and not _cell_tag_has47(_t68d, "neg_cell", "r1", "qty")
+          and not _cell_tag_has47(_t68d, "neg_cell", "r2", "qty"),
+          f"r1.nama={_cell_tag_has47(_t68d, 'neg_cell', 'r1', 'nama')} "
+          f"r1.qty={_cell_tag_has47(_t68d, 'neg_cell', 'r1', 'qty')}")
+    _n68tag = _wgt68.apply_cell_tag(_t68d, "neg_cell", [])
+    check("(6b-03) list KOSONG menghapus SEMUA sel tag (return 0) — "
+          "semantik clear",
+          _n68tag == 0
+          and not _cell_tag_has47(_t68d, "neg_cell", "r1", "nama"),
+          f"n={_n68tag}")
+    _t68d.delete("r2")      # tracking lama masih memuat iid mati…
+    _wgt68.apply_cell_tag(_t68d, "neg_cell", [("r1", "qty")])
+    check("(6b-03) tracking ber-IID MATI (fallback remove-all) → set baru "
+          "tetap diterapkan tanpa TclError",
+          _cell_tag_has47(_t68d, "neg_cell", "r1", "qty"),
+          f"has={_cell_tag_has47(_t68d, 'neg_cell', 'r1', 'qty')}")
+
+    # (6b-06) insert_tree_items: TclError mid-batch (iid dup)
+    _t68e = ttk.Treeview(_top68b, columns=["c"], show="headings")
+    _t68e.pack(fill="both", expand=True)
+    _t68e.heading("c", text="c")
+    _t68e.column("c", width=80)
+    root.update()
+    _items68 = [("", f"ok{i:03d}", {"values": (f"ok{i:03d}",)})
+                for i in range(50)]
+    _items68.insert(3, ("", "dup", {"values": ("dup",)}))
+    _items68.insert(25, ("", "dup", {"values": ("dup",)}))
+    _items68.insert(47, ("", "dup", {"values": ("dup",)}))
+    _done68 = []
+    _err68 = io.StringIO()
+    with contextlib.redirect_stderr(_err68):
+        _wgt68.insert_tree_items(_t68e, _items68, batch=10, delay=1,
+                                 on_done=lambda: _done68.append(1))
+        _pump68(150, 0.01)
+    check("(6b-06) insert_tree_items: 1.SO TclError mid-batch (iid dup) → "
+          "baris valid TETAP masuk (51/53) + on_done TETAP terpanggil "
+          "1× + catatan stderr (FIX 6b-06 — dulu sisa batch batal senyap)",
+          len(_t68e.get_children("")) == 51
+          and len(_done68) == 1
+          and "insert_tree_items" in _err68.getvalue()
+          and _t68e.exists("dup"),
+          f"n={len(_t68e.get_children(''))} done={len(_done68)}")
+
+    # (6b-07) enable_col_resize idempoten
+    _t68f = ttk.Treeview(_top68b, columns=["a", "b"], show="headings")
+    _t68f.pack(fill="both", expand=True)
+    for _c68 in ("a", "b"):
+        _t68f.heading(_c68, text=_c68)
+        _t68f.column(_c68, width=100)
+    root.update()
+    _wgt68.enable_col_resize(_t68f)
+    _b68 = _t68f.bind("<Button-1>")
+    _m68 = _t68f.bind("<B1-Motion>")
+    _d68 = _t68f.bind("<Double-1>")
+    _wgt68.enable_col_resize(_t68f)      # panggilan ke-2
+    _wgt68.enable_col_resize(_t68f)      # panggilan ke-3
+    check("(6b-07) enable_col_resize IDEMPOTEN (3× panggil → binding "
+          "identik + guard flag _col_resize_bound; FIX 6b-07 — dulu "
+          "handler resize menumpuk)",
+          bool(_b68) and _b68 == _t68f.bind("<Button-1>")
+          and _m68 == _t68f.bind("<B1-Motion>")
+          and _d68 == _t68f.bind("<Double-1>")
+          and getattr(_t68f, "_col_resize_bound", False),
+          f"b1={_t68f.bind('<Button-1>')!r:.40}")
+    _top68b.destroy()
+    root.update()
+
+    # ---- 6e/6c popup: _cek_display_text · clone basi · grab · COM base --
+    # (port probe_7c_verify + probe_6e_grab_modal + probe_6e_kategori_com)
+    from src.ui import followup as _fu68
+    from src.ui.followup import FollowUpStore as _FUS68
+    from src.ui.followup import _cek_display_text as _cdt68
+    from src.ui.followup_view import FollowUpView as _FUV68
+
+    check("(6d1-04) _cek_display_text: label kanonik APA ADANYA, segmen "
+          "ANALISA berprefiks 'Analisa: ', label laporan apa adanya, "
+          "kosong → '-'",
+          _cdt68("ACR to BOM") == "ACR to BOM"
+          and _cdt68("Berubah Arah").startswith("Analisa: ")
+          and _cdt68("Penurunan Tertinggi -25%").startswith("Analisa: ")
+          and _cdt68("MINUS + > MEDIAN") == "MINUS + > MEDIAN"
+          and _cdt68("") == "-",
+          f"got {_cdt68('Berubah Arah')!r}")
+
+    # (6e-01) followup: clone ⛶ basi ditutup + gen-guard + peta fp segar
+    _tmp68fu = tempfile.mkdtemp(prefix="v3958_fu_")
+    _orig_fup68 = _fu68.followup_path
+    _orig_res68 = _fu68.resolved_path
+    _fu68.followup_path = lambda: Path(_tmp68fu) / "followup.json"
+    _fu68.resolved_path = lambda: Path(_tmp68fu) / "followup_resolved.json"
+    try:
+        _store68 = _FUS68()
+
+        def _snap68(barang, resto, cek="", so=10, sistem=12):
+            return {"barang": barang, "resto": resto, "tanggal": 25,
+                    "cek": cek, "so": so, "sistem": sistem,
+                    "satuan": "PCS", "deviasi": so - sistem}
+
+        for _b68 in ("BRAVO", "CHARLIE", "DELTA"):
+            _store68.toggle(f"fp_{_b68}", _snap68(_b68, "MLGPAR"))
+        _top68e = tk.Toplevel(root)
+        _top68e.geometry("1200x800+8+8")
+        _fv68 = _FUV68(_top68e, store=_store68)
+        _fv68.pack(fill="both", expand=True)
+        _fv68._render()
+        root.update()
+        _win68, _clone68 = _fv68._maximize()
+        root.update()
+        check("(6e-01) prasyarat: clone ⛶ followup terbuka",
+              _clone68.winfo_exists() and _win68.winfo_exists())
+        # store berubah dari jalur LAIN (toggle tab deviasi) → re-render
+        _store68.toggle("fp_ECHO", _snap68("ECHO", "SBYKET"))
+        _fv68._render()
+        root.update()
+        check("(6e-01) re-render (toggle dari tab lain) MENUTUP clone basi "
+              "(FIX 6e-01 — dulu clone hidup sementara _iid_fp sudah "
+              "tergantikan → klik ✓ salah baris)",
+              not _clone68.winfo_exists()
+              and not _win68.winfo_exists(),
+              f"clone={_clone68.winfo_exists()} "
+              f"win={_win68.winfo_exists()}")
+
+        # gen-guard: clone yang lolos (simulasi race) → klik diabaikan
+        _win68b, _clone68b = _fv68._maximize()
+        root.update()
+        _fv68._render_gen += 1          # generasi maju TANPA menutup clone
+        _before68fu = set(_store68.rows.keys())
+        _ev68fu = type("E", (), {"widget": _clone68b, "x": 6, "y": 26})()
+        _fv68._on_tree_click(_ev68fu)
+        root.update()
+        check("(6e-01) klik ✓ di clone generasi LAMA diabaikan SENYAP "
+              "(store tak berubah — guard _view_gen)",
+              set(_store68.rows.keys()) == _before68fu,
+              f"before={len(_before68fu)} after={len(_store68.rows)}")
+
+        # clone SEGAR: peta fp benar
+        _win68c, _clone68c = _fv68._maximize()
+        root.update()
+        _target68 = None
+        for _k68 in _clone68c.get_children(""):
+            if "BRAVO" in str(_clone68c.item(_k68, "values")):
+                _target68 = _k68
+                break
+        check("(6e-01) clone SEGAR memetakan fp benar (BRAVO → fp_BRAVO)",
+              _target68 is not None
+              and _fv68._iid_fp.get(_target68) == "fp_BRAVO",
+              f"got {_fv68._iid_fp.get(_target68)!r}")
+        _fv68._close_stale_clones()
+        _fv68.destroy()
+        _top68e.destroy()
+        root.update()
+        _store68.clear()
+    finally:
+        _fu68.followup_path = _orig_fup68
+        _fu68.resolved_path = _orig_res68
+        shutil.rmtree(_tmp68fu, ignore_errors=True)
+
+    # (6e-02) laporan: pelacak clone + guard (light — mirror 6e-01)
+    from src.ui.laporan_deviasi_view import LaporanDeviasiView as _LDV68
+
+    _tmp68la = tempfile.mkdtemp(prefix="v3958_lap_")
+    _fu68.followup_path = lambda: Path(_tmp68la) / "followup.json"
+    _fu68.resolved_path = lambda: Path(_tmp68la) / "followup_resolved.json"
+    try:
+        _store68b = _FUS68()
+        _top68l = tk.Toplevel(root)
+        _top68l.geometry("1400x800+8+8")
+        _lv68 = _LDV68(_top68l, followup_store=_store68b)
+        _lv68.pack(fill="both", expand=True)
+        root.update()
+        _lv68.load_data(append1)
+        wait_view(root, _lv68)
+        _lwin68, _lclone68 = _lv68._maximize()
+        root.update()
+        check("(6e-02) prasyarat: clone ⛶ laporan terbuka + view mencatat "
+              "pelacaknya (_clone_wins/_render_gen/_close_stale_clones)",
+              _lclone68.winfo_exists() and _lwin68.winfo_exists()
+              and hasattr(_lv68, "_clone_wins")
+              and hasattr(_lv68, "_render_gen")
+              and callable(getattr(_lv68, "_close_stale_clones", None)))
+        _lv68.load_data(append1)     # data berganti → baris row_N dipetakan
+        wait_view(root, _lv68)       # ulang → clone basi harus ditutup
+        root.update()
+        check("(6e-02) re-render load_data MENUTUP clone laporan basi "
+              "(FIX 6e-02 — mirror deviasi_view; dulu clone hidup + iid "
+              "row_N tergantikan → klik ✓ salah pasangan)",
+              not _lclone68.winfo_exists()
+              and not _lwin68.winfo_exists(),
+              f"clone={_lclone68.winfo_exists()}")
+
+        # guard path: handler mengabaikan clone generasi basi SENYAP
+        _lwin68b, _lclone68b = _lv68._maximize()
+        root.update()
+        _lv68._render_gen += 5          # clone jadi basi tanpa ditutup
+        _exc68 = None
+        try:
+            _lv68._on_tree_click(
+                type("E", (), {"widget": _lclone68b, "x": 8, "y": 30})())
+        except tk.TclError as _e68:
+            _exc68 = _e68
+        root.update()
+        check("(6e-02) handler guard: klik ✓ di clone generasi basi "
+              "DIABAIKAN senyap (tanpa exception, tanpa toggle store)",
+              _exc68 is None and len(_store68b) == 0,
+              f"exc={_exc68!r} n={len(_store68b)}")
+        _lv68.destroy()
+        _top68l.destroy()
+        root.update()
+        _store68b.clear()
+    finally:
+        _fu68.followup_path = _orig_fup68
+        _fu68.resolved_path = _orig_res68
+        shutil.rmtree(_tmp68la, ignore_errors=True)
+
+    # (6e-03) grab modal DetailsPopup dipulihkan pasca funnel + (6e-05)
+    from src.ui.details_popup import DetailsPopup as _DP68
+    from src.ui.details_popup import show_details_popup as _sdp68
+
+    _top68g = tk.Toplevel(root)
+    _top68g.geometry("800x600+40+40")
+    _gdf68 = pd.DataFrame({
+        "Nama Barang": ["A", "A", "B"], "NAMA RESTO": ["R1", "R1", "R2"],
+        "Tanggal": [1, 2, 3], "JENIS": ["1.SO", "2.SALDO AKHIR", "4.IN"],
+        "NILAI": [5, -3, 7], "Nomor": ["IT.1", "", "RI.9"],
+        "Nomor PO": ["PO.1", "", ""], "KATEGORI": ["X", "X", "Y"],
+        "SOURCE KIRIMAN": ["HO", "HO", "SUP"],
+    })
+    _pop68 = _DP68(_top68g, "Test grab 68", _gdf68)
+    root.update()
+    check("(6e-03) prasyarat: DetailsPopup memegang grab saat terbuka "
+          "(modal)",
+          root.grab_current() is _pop68, f"got {root.grab_current()!r}")
+    _pop68.header_filter.open_popup()      # funnel mengganti grab…
+    root.update()
+    _pop68.header_filter._close()          # …dan melepasnya saat ditutup
+    root.update()
+    check("(6e-03) funnel buka/tutup → grab modal DetailsPopup DIPULIHKAN "
+          "(FIX 6e-03 — dulu grab hilang permanen: main window bisa "
+          "diklik saat popup masih hidup)",
+          root.grab_current() is _pop68,
+          f"got {root.grab_current()!r}")
+    _pop68.destroy()
+    root.update()
+    _top68g.destroy()
+    root.update()
+    check("(6e-05) popup Tanggal '-25' → '25•' (konvensi bulan lalu) + 25 "
+          "tetap '25' (FIX 6e-05 — dulu mentah '-25')",
+          _DP68._fmt_cell(-25, "Tanggal") == "25•"
+          and _DP68._fmt_cell("-25", "Tanggal") == "25•"
+          and _DP68._fmt_cell(25, "Tanggal") == "25",
+          f"got {_DP68._fmt_cell(-25, 'Tanggal')!r}")
+
+    # (6c-02/6e-04) popup COM t>1 memuat baris BASE SO(t−1)
+    _gdf68b = pd.DataFrame({
+        "Nama Barang": ["B1"] * 10, "NAMA RESTO": ["R1"] * 10,
+        "Tanggal": [1, 1, 1, 24, 24, 25, 25, 25, 25, 2],
+        "JENIS": ["SALDO AWAL", "1.SO", "8.BARANG KELUAR", "1.SO",
+                  "8.BARANG KELUAR", "1.SO", "4.IN", "8.BARANG KELUAR",
+                  "2.SALDO AKHIR", "4.IN"],
+        "NILAI": [100, 30, 5, 30, 5, 28, 12, 6, 20, 12],
+        "Nomor": [""] * 10, "Nomor PO": [""] * 10,
+        "KATEGORI": ["X"] * 10, "SOURCE KIRIMAN": ["HO"] * 10,
+    })
+    _cpop68 = _sdp68(root, _gdf68b, nama_barang="B1",
+                     jenis="6.PEMAKAIAN (COM)", tanggal=25,
+                     show_maximize=False)
+    root.update()
+    _crows68 = list(zip(_cpop68.df["Tanggal"].tolist(),
+                        _cpop68.df["JENIS"].tolist()))
+    check("(6c-02/6e-04) popup COM tgl 25 MEMUAT baris BASE SO(24) — "
+          "formula COM: SO(t−1)+IN−BK−SO tak bisa direkonstruksi tanpa "
+          "baris base (FIX 6c-02 — dulu SO(24) tak pernah tampil)",
+          (24, "1.SO") in _crows68 and (25, "1.SO") in _crows68
+          and (25, "4.IN") in _crows68
+          and (25, "8.BARANG KELUAR") in _crows68
+          and (1, "SALDO AWAL") not in _crows68,
+          f"rows={_crows68}")
+
+    def _fi68(p):
+        for _w68 in p.winfo_children():
+            for _c68 in _w68.winfo_children():
+                for _g68c in _c68.winfo_children():
+                    try:
+                        _s68 = str(_g68c.cget("text"))
+                    except (AttributeError, tk.TclError):
+                        continue
+                    if _s68.startswith("Filter aktif:"):
+                        return _s68
+        return ""
+
+    _fi68v = _fi68(_cpop68)
+    check("(6c-02/6e-04) filter_info JUJUR: klaim 'SO 24 BASE' formula COM "
+          "(bukan klaim SALDO AWAL utk t>1)",
+          "SO 24 BASE" in _fi68v and "formula COM" in _fi68v,
+          f"got {_fi68v!r}")
+    _cpop68.destroy()
+    root.update()
+
+    # ---- 6c-01/6c-03: pivot COM rentang mulai > 1 + pesan export ------
+    # (port probe_7d_com — oracle tangan + matrix penuh di-slice ke rentang)
+    import src.ui.pivot_view as _pvmod68
+
+    _BRG68 = ["AYAM", "GULA", "KOPI", "SUSU", "TEH"]
+    _RST68 = ["MLGPAR", "SBYKET", "BDGUKU"]
+
+    def _so68(b):
+        return 10.0 if b != "KOPI" else 8.0
+
+    def _in68(b, t):
+        if b == "KOPI" and t == 6:
+            return 30.0
+        return 5.0 if t % 2 == 0 else 0.0
+
+    def _bk68(b, t):
+        if b == "GULA" and t == 6:
+            return 20.0
+        return 2.0 if t == 3 else 0.0
+
+    def _sa68(b):
+        return None if b == "TEH" else 100.0
+
+    _rows68c = []
+    for _b68 in _BRG68:
+        for _r68 in _RST68:
+            for _t68 in range(1, 7):
+                _rows68c.append({"Nama Barang": _b68, "JENIS": "1.SO",
+                                 "NAMA RESTO": _r68, "Tanggal": _t68,
+                                 "NILAI": _so68(_b68),
+                                 "KATEGORI": "COM DEVIASI - RESTO"})
+                _rows68c.append({"Nama Barang": _b68, "JENIS": "4.IN",
+                                 "NAMA RESTO": _r68, "Tanggal": _t68,
+                                 "NILAI": _in68(_b68, _t68),
+                                 "KATEGORI": "COM DEVIASI - RESTO"})
+                _rows68c.append({"Nama Barang": _b68,
+                                 "JENIS": "8.BARANG KELUAR",
+                                 "NAMA RESTO": _r68, "Tanggal": _t68,
+                                 "NILAI": _bk68(_b68, _t68),
+                                 "KATEGORI": "COM DEVIASI - RESTO"})
+                if _sa68(_b68) is not None:
+                    _rows68c.append({"Nama Barang": _b68,
+                                     "JENIS": "SALDO AWAL",
+                                     "NAMA RESTO": _r68,
+                                     "Tanggal": _t68,
+                                     "NILAI": 100.0 if _t68 == 1 else 0.0,
+                                     "KATEGORI": "COM DEVIASI - RESTO"})
+    _pdf68 = pd.DataFrame(_rows68c)
+    _pdf68["Tanggal"] = _pdf68["Tanggal"].astype("Int64")
+
+    def _fmt_like68(v):
+        if v == 0:
+            return "-"
+        _s68 = f"{v:,.1f}".replace(",", "X").replace(".", ",")
+        _s68 = _s68.replace("X", ".")
+        _s68 = _s68.removesuffix(",0")
+        return f"({_s68[1:]})" if v < 0 else _s68
+
+    def _oracle68(b):
+        _so68v = _so68(b)
+        _base68 = _sa68(b) or 0.0
+        _vals68 = {}
+        _prev68 = None
+        for _t68 in range(1, 7):
+            _bv68 = _base68 if _t68 == 1 else _prev68
+            _vals68[_t68] = (_bv68 + _in68(b, _t68) - _bk68(b, _t68)
+                             - _so68v)
+            _prev68 = _so68v
+        return _vals68
+
+    _top68p = tk.Toplevel(root)
+    _top68p.geometry("1400x900+5+5")
+    _pv68 = _pvmod68.PivotTableView(_top68p)
+    _pv68.pack(fill="both", expand=True)
+    root.update()
+
+    def _pvwait68(pv):
+        for _ in range(400):
+            root.update()
+            if not getattr(pv, "_busy", False) \
+                    and pv.tree.get_children(""):
+                break
+            time.sleep(0.01)
+        _pump68(25)
+
+    _pv68.load_data(_pdf68)
+    _pvwait68(_pv68)
+    _pv68._on_mode_change(1)          # mode TANGGAL
+    _pvwait68(_pv68)
+    _pv68.resto_var.set("MLGPAR")
+    _pv68._refresh_pivot()
+    _pvwait68(_pv68)
+
+    def _metric_row68(pv, barang, metric="6.PEMAKAIAN (COM)"):
+        for _iid68 in pv.tree.get_children(""):
+            if pv.tree.item(_iid68, "text") == barang:
+                for _ch68 in pv.tree.get_children(_iid68):
+                    if pv.tree.item(_ch68, "text") == metric:
+                        return _ch68
+        return None
+
+    def _row_vals68(pv, iid):
+        _cols68 = list(pv.tree["columns"])
+        _vals68 = pv.tree.item(iid, "values")
+        return {_cols68[_i68]: _vals68[_i68]
+                for _i68 in range(min(len(_cols68), len(_vals68)))}
+
+    # (A) rentang PENUH 1..6 == oracle (regresi — jalur lama tak tersentuh)
+    _com68 = _metric_row68(_pv68, "AYAM")
+    _got68 = _row_vals68(_pv68, _com68) if _com68 else {}
+    _orcA68 = _oracle68("AYAM")
+    _mism68 = {str(_t68): (_got68.get(str(_t68)),
+                           _fmt_like68(_orcA68[_t68]))
+               for _t68 in range(1, 7)
+               if _got68.get(str(_t68)) != _fmt_like68(_orcA68[_t68])}
+    check("(6c-01 regresi) rentang PENUH 1..6: COM AYAM/MLGPAR == oracle "
+          "tangan t=1..6 (jalur lama tak tersentuh oleh fix)",
+          _com68 is not None and not _mism68, f"mism={_mism68}")
+
+    # (B) inti 6c-01: rentang 4..6 + ☑ sembunyikan kosong (default ON)
+    _pv68.tgl_start_var.set("4")
+    _pv68.tgl_end_var.set("6")
+    _pv68.hide_empty_var.set(True)
+    _pv68._refresh_pivot()
+    _pvwait68(_pv68)
+    _com68b = _metric_row68(_pv68, "AYAM")
+    _got68b = _row_vals68(_pv68, _com68b) if _com68b else {}
+    check("(6c-01) rentang 4..6 + ☑ sembunyikan kosong → baris COM TETAP "
+          "tampil + COM(4) = '5' (basis so_prev dari MATRIX PENUH — "
+          "SO(3); FIX 6c-01 — dulu '(5)' basis salah + baris COM lenyap)",
+          _com68b is not None and _got68b.get("4") == "5",
+          f"row={_com68b is not None} got={_got68b}")
+    check("(6c-01) COM(5) = '-' (0) / COM(6) = '5' + kolom terbatas "
+          "4..6 (export parity: rows_data = slice tampilan)",
+          _got68b.get("5") == "-" and _got68b.get("6") == "5"
+          and sorted(_got68b.keys()) == ["4", "5", "6"],
+          f"got={_got68b}")
+
+    # (6c-03) pesan export 0-item: BEDA kasus filter vs belum-pipeline
+    _warns68 = []
+    _orig_pw68 = _pvmod68.messagebox.showwarning
+    _pvmod68.messagebox.showwarning = \
+        lambda title, msg, *a, **k: _warns68.append(str(msg))
+    _pv68b2 = None
+    try:
+        _pv68.kategori_var.set("(Tanpa Kategori)")
+        _pv68._refresh_pivot()
+        _pvwait68(_pv68)
+        _n_items68 = len(_pv68._last_payload.get("items") or [])
+        _pv68._on_export_excel()          # data ADA, 0-item karna filter
+        _pv68b2 = _pvmod68.PivotTableView(_top68p)   # tanpa data
+        _pv68b2.pack(fill="both", expand=True)
+        root.update()
+        _pv68b2._on_export_excel()        # data None → pesan pipeline
+    finally:
+        _pvmod68.messagebox.showwarning = _orig_pw68
+    check("(6c-03) export 0-item KARENA FILTER → pesan 'lolos filter' "
+          "(filter aktif disebut; data TIDAK kosong — FIX 6c-03: dulu "
+          "selalu 'Jalankan pipeline dulu' — misleading)",
+          _n_items68 == 0 and not _pdf68.empty
+          and len(_warns68) >= 1
+          and "lolos filter" in _warns68[0]
+          and "Jalankan pipeline" not in _warns68[0],
+          f"items={_n_items68} got={_warns68[0][:70]!r}")
+    check("(6c-03) TANPA data → pesan 'Jalankan pipeline dulu.' (kasus "
+          "memang belum pipeline)",
+          len(_warns68) >= 2
+          and "Jalankan pipeline" in _warns68[1],
+          f"got={_warns68[-1][:60]!r}")
+    with contextlib.suppress(Exception):
+        _pv68b2.destroy()
+    _pv68.destroy()
+    _top68p.destroy()
+    root.update()
+
+    # ---- 6d1-01/02/03: deviasi_view (port probe_7d_fp/load/h1) ---------
+    # FIX (hermetic §68): ambang ACR dipersist ke settings.json — arahkan
+    # ke temp (jangan menulis file runtime repo; fungsi asli dipulihkan)
+    import src.ui.deviasi_view as _dvm68
+    from src.ui.deviasi_view import DeviasiView as _DV68
+    from src.ui.deviasi_view import SharedACRThreshold as _SAT68
+    from src.ui.deviasi_view import SharedPivotCache as _SPC68
+    from src.ui.deviasi_view import SharedTanggalH as _STH68
+    from src.ui.followup import row_fingerprint as _rfp68
+    _origfn68acr = _dvm68.acr_settings_path
+    _tmpdir68acr = tempfile.mkdtemp(prefix="t68_acr_")
+    _dvm68.acr_settings_path = lambda: Path(_tmpdir68acr) / "settings.json"
+
+    # (6d1-01) fingerprint STABIL: bagian 'cek' volatil dinetralkan
+    _rows68d = []
+
+    def _add68(b, r, j, t, v, kat="BAHAN"):
+        _rows68d.append({"Nama Barang": b, "NAMA RESTO": r, "JENIS": j,
+                         "Tanggal": t, "NILAI": float(v), "SATUAN": "GR",
+                         "AKTIF/NON": "AKTIF", "KATEGORI": kat,
+                         "SOURCE DATA": None})
+
+    # BRG X: |dev|=90, total_acr=100 → CEK 'ACR to BOM' @80, hilang @100
+    for _t68 in (25, 26):
+        _add68("BRG X", "R1", "1.SO", _t68, 88 if _t68 == 25 else 90)
+    _add68("BRG X", "R1", "4.IN", 26, 5)
+    _add68("BRG X", "R1", "8.BARANG KELUAR", 26, 1)
+    _add68("BRG X", "R1", "9.ACR", 1, 100)
+    _df68d = pd.DataFrame(_rows68d)
+
+    _tmp68fp = tempfile.mkdtemp(prefix="v3958_fp_")
+    _fu68.followup_path = lambda: Path(_tmp68fp) / "followup.json"
+    _fu68.resolved_path = lambda: Path(_tmp68fp) / "followup_resolved.json"
+    try:
+        _store68c = _FUS68()
+        _acs68 = _SAT68(80.0)
+        _top68d = tk.Toplevel(root)
+        _top68d.geometry("1400x800+5+5")
+        _dv68 = _DV68(_top68d, satuan_mode="GR",
+                      followup_store=_store68c, acr_state=_acs68)
+        _dv68.pack(fill="both", expand=True)
+        root.update()
+        _dv68.load_data(_df68d)
+        wait_view(root, _dv68)
+        _kids68d = list(_dv68.tree.get_children(""))
+        _iidX68 = next(_k68 for _k68 in _kids68d
+                       if _dv68._row_snaps[_k68]["barang"] == "BRG X")
+
+        def _click68(iid):
+            _dv68.tree.see(iid)
+            root.update()
+            _box68 = _dv68.tree.bbox(iid)
+            _dv68._on_tree_click(type(
+                "E", (), {"widget": _dv68.tree, "x": 8,
+                          "y": _box68[1] + 2 if _box68 else 0})())
+            root.update()
+
+        _cek68 = _dv68._row_snaps[_iidX68]["cek"]
+        check("(6d1-01 prasyarat) BRG X ber-CEK 'ACR to BOM' @ambang 80 "
+              "(label VOLATIL — hilang saat ambang 100)",
+              _cek68 == "ACR to BOM", f"got {_cek68!r}")
+        _click68(_iidX68)
+        _fpX68 = _dv68._fp_map[_iidX68]
+        check("(6d1-01) fp baru = fp STABIL (bagian 'cek' dinetralkan — "
+              "BEDA dgn row_fingerprint lama yang memuat label cek)",
+              _fpX68 == _dv68._fp_stable(_dv68._row_snaps[_iidX68])
+              and _fpX68 != _rfp68(_dv68._row_snaps[_iidX68]))
+        _dv68._acr_var.set("100")
+        _dv68._on_acr_threshold_change()
+        wait_view(root, _dv68)
+        _kids68d2 = list(_dv68.tree.get_children(""))
+        _iidX68b = next(_k68 for _k68 in _kids68d2
+                        if _dv68._row_snaps[_k68]["barang"] == "BRG X")
+        check("(6d1-01) ambang ACR 80→100 (label CEK hilang) → ✓ TETAP ☑ "
+              "+ fp SAMA + store TETAP 1 entri (FIX 6d1-01 — dulu ☑ "
+              "hilang/orphan saat label cek berubah)",
+              _dv68._row_snaps[_iidX68b]["cek"] == ""
+              and _dv68.tree.set(_iidX68b, "✓") == "☑"
+              and _dv68._fp_map[_iidX68b] == _fpX68
+              and len(_store68c.rows) == 1,
+              f"cek={_dv68._row_snaps[_iidX68b]['cek']!r} "
+              f"cell={_dv68.tree.set(_iidX68b, '✓')!r} "
+              f"rows={len(_store68c.rows)}")
+
+        # entri LAMA (fp era pra-fix memuat label cek) — backward compat
+        _store68c.clear()
+        _snapX68 = dict(_dv68._row_snaps[_iidX68b])
+        _snapX68["cek"] = "ACR to BOM"
+        _fp_leg68 = _rfp68(_snapX68)       # fp FORMAT LAMA (dgn 'cek')
+        _store68c.toggle(_fp_leg68, _snapX68)
+        _dv68._acr_var.set("80")           # refresh — label CEK muncul lagi
+        _dv68._on_acr_threshold_change()
+        wait_view(root, _dv68)
+        _kids68d3 = list(_dv68.tree.get_children(""))
+        _iidX68c = next(_k68 for _k68 in _kids68d3
+                        if _dv68._row_snaps[_k68]["barang"] == "BRG X")
+        _click68(_iidX68c)                 # uncheck → hapus entri lama
+        check("(6d1-01) entri followup.json LAMA (fp ber-label cek) tetap "
+              "dicocokkan ☑ (identitas stabil) + uncheck MENGHAPUSNYA — "
+              "tanpa orphan",
+              _dv68.tree.set(_iidX68c, "✓") == "☐"
+              and len(_store68c.rows) == 0,
+              f"cell={_dv68.tree.set(_iidX68c, '✓')!r} "
+              f"rows={len(_store68c.rows)}")
+        _dv68.destroy()
+        _top68d.destroy()
+        root.update()
+        _store68c.clear()
+    finally:
+        _fu68.followup_path = _orig_fup68
+        _fu68.resolved_path = _orig_res68
+        shutil.rmtree(_tmp68fp, ignore_errors=True)
+
+    # (6d1-02) load_data H berubah → TEPAT SATU render
+    _rows68e = []
+    _rows68f = []
+
+    def _add68e(b, r, j, t, v, kat):
+        _rows68e.append({"Nama Barang": b, "NAMA RESTO": r, "JENIS": j,
+                         "Tanggal": t, "NILAI": float(v), "SATUAN": "GR",
+                         "AKTIF/NON": "AKTIF", "KATEGORI": kat,
+                         "SOURCE DATA": None})
+
+    for _ri68 in range(6):
+        _r68 = f"R{_ri68:02d}"
+        _add68e("CABE MERAH", _r68, "1.SO", 25, 100, "BAHAN")
+        _add68e("CABE MERAH", _r68, "1.SO", 26, 90, "BAHAN")
+        _add68e("CABE MERAH", _r68, "2.SALDO AKHIR", 26, 0, "BAHAN")
+        _add68e("CABE MERAH", _r68, "4.IN", 26, 5, "BAHAN")
+        _add68e("CABE MERAH", _r68, "9.ACR", 26, 2, "BAHAN")
+    _df68e = pd.DataFrame(_rows68e)
+
+    def _add68f(b, r, j, t, v, kat):
+        _rows68f.append({"Nama Barang": b, "NAMA RESTO": r, "JENIS": j,
+                         "Tanggal": t, "NILAI": float(v), "SATUAN": "GR",
+                         "AKTIF/NON": "AKTIF", "KATEGORI": kat,
+                         "SOURCE DATA": None})
+
+    for _ri68 in range(6):
+        _r68 = f"R{_ri68:02d}"
+        _add68f("PENTOL AYAM", _r68, "1.SO", 29, 100,
+                "COM DEVIASI - RESTO")
+        _add68f("PENTOL AYAM", _r68, "1.SO", 30, 90,
+                "COM DEVIASI - RESTO")
+        _add68f("PENTOL AYAM", _r68, "2.SALDO AKHIR", 30, 0,
+                "COM DEVIASI - RESTO")
+        _add68f("PENTOL AYAM", _r68, "4.IN", 30, 5, "COM DEVIASI - RESTO")
+        _add68f("PENTOL AYAM", _r68, "9.ACR", 30, 2, "COM DEVIASI - RESTO")
+    _df68f = pd.DataFrame(_rows68f)
+
+    def _mk68g(hi):
+        """Data PENTOL AYAM varian H = hi (utk varian lintas-instance —
+        H benar-benar BERUBAH supaya listener PCS terpicu)."""
+        _rows68g = []
+        for _ri68 in range(6):
+            _r68 = f"R{_ri68:02d}"
+            for _j68, _t68, _v68 in (("1.SO", hi - 1, 100.0),
+                                     ("1.SO", hi, 90.0),
+                                     ("2.SALDO AKHIR", hi, 0.0),
+                                     ("4.IN", hi, 5.0),
+                                     ("9.ACR", hi, 2.0)):
+                _rows68g.append({"Nama Barang": "PENTOL AYAM",
+                                 "NAMA RESTO": _r68, "JENIS": _j68,
+                                 "Tanggal": _t68, "NILAI": _v68,
+                                 "SATUAN": "GR",
+                                 "AKTIF/NON": "AKTIF",
+                                 "KATEGORI": "COM DEVIASI - RESTO",
+                                 "SOURCE DATA": None})
+        return pd.DataFrame(_rows68g)
+
+    _top68r = tk.Toplevel(root)
+    _top68r.geometry("1400x800+5+5")
+    _cache68 = _SPC68()
+    _hs68 = _STH68(25)
+    _gr68 = _DV68(_top68r, satuan_mode="GR", shared_cache=_cache68,
+                  h_state=_hs68)
+    _gr68.pack(fill="both", expand=True)
+    root.update()
+    _renders68 = []
+    _orig_rr68 = _DV68._render_rows
+
+    def _counted_rr68(self, payload):
+        _renders68.append((self.tanggal_h, self._kategori_sel,
+                           len(payload.get("items", []))))
+        return _orig_rr68(self, payload)
+
+    _DV68._render_rows = _counted_rr68
+    try:
+        _gr68.load_data(_df68e)          # H → 26
+        wait_view(root, _gr68)
+        _gr68._kategori_var.set("BAHAN")   # state lama utk load ke-2
+        _gr68._on_kategori_changed()
+        wait_view(root, _gr68)
+        _renders68.clear()
+        _gr68.load_data(_df68f)          # H 26→30, kategori → default
+        wait_view(root, _gr68)
+        check("(6d1-02) load_data data baru (H berubah) → TEPAT 1 render "
+              "dgn filter BARU (FIX 6d1-02 — dulu render GANDA: render #1 "
+              "memakai snapshot filter LAMA → tabel kosong transien)",
+              len(_renders68) == 1 and _renders68[0][0] == 30
+              and _renders68[0][2] == 6
+              and _renders68[0][1] != "BAHAN",
+              f"renders={_renders68}")
+
+        # varian lintas-instance: listener PCS DITAHAN saat GR load
+        _pcs68 = _DV68(_top68r, satuan_mode="PCS", shared_cache=_cache68,
+                       h_state=_hs68)
+        _pcs68.pack(fill="both", expand=True)
+        root.update()
+        wait_view(root, _pcs68)
+        _pcs68._kategori_var.set("BAHAN")
+        _pcs68._on_kategori_changed()
+        wait_view(root, _pcs68)
+        _renders_pcs68 = []
+
+        def _counted2_68(self, payload):
+            if self is _pcs68:
+                _renders_pcs68.append((self.tanggal_h,
+                                       self._kategori_sel,
+                                       len(payload.get("items", []))))
+            return _orig_rr68(self, payload)
+
+        _DV68._render_rows = _counted2_68
+        _gr68.load_data(_mk68g(31))     # H 30→31: listener PCS benar2
+        _n_during68 = len(_renders_pcs68)   # TERPICU tapi harus DITAHAN
+        _pcs68.load_data(_mk68g(31))    # PCS memuat data miliknya
+        wait_view(root, _pcs68)
+        wait_view(root, _gr68)
+        check("(6d1-02) varian lintas-instance: listener PCS TERPICU saat "
+              "GR.load_data mengubah H tapi TIDAK me-render (ditahan "
+              "_load_depth class-level) + TEPAT 1 render oleh "
+              "pcs.load_data sendiri dgn H baru",
+              _n_during68 == 0 and len(_renders_pcs68) == 1
+              and _renders_pcs68[0][0] == 31
+              and _renders_pcs68[0][1] != "BAHAN",
+              f"during={_n_during68} renders={_renders_pcs68}")
+        _pcs68.destroy()
+        root.update()
+    finally:
+        _DV68._render_rows = _orig_rr68
+    _gr68.destroy()
+    _top68r.destroy()
+    root.update()
+
+    # (6d1-03) H=1: kolom SO pembanding JUJUR (tanpa duplikat penutupan)
+    def _mk_rows68h(max_t, closing=80):
+        _rows68h = []
+
+        def _addh68(b, r, j, t, v):
+            _rows68h.append({"Nama Barang": b, "NAMA RESTO": r, "JENIS": j,
+                             "Tanggal": t, "NILAI": float(v),
+                             "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                             "KATEGORI": "BAHAN", "SOURCE DATA": None})
+
+        _addh68("BRG A", "R1", "1.SO", -1, closing)   # kunci −1 = penutupan
+        for _t68 in range(1, max_t + 1):
+            _addh68("BRG A", "R1", "1.SO", _t68,
+                    10 if _t68 == max_t else 12)
+        _addh68("BRG A", "R1", "2.SALDO AKHIR", max_t, 0)
+        _addh68("BRG A", "R1", "4.IN", max_t, 2)
+        _addh68("BRG A", "R1", "9.ACR", 1, 5)
+        return pd.DataFrame(_rows68h)
+
+    _top68h = tk.Toplevel(root)
+    _top68h.geometry("1400x800+5+5")
+    _dv68h = _DV68(_top68h, satuan_mode="GR")
+    _dv68h.pack(fill="both", expand=True)
+    root.update()
+    _dv68h.load_data(_mk_rows68h(1))     # SO nonzero terakhir = 1 → H=1
+    wait_view(root, _dv68h)
+    _ok_h1_68 = _dv68h.tanggal_h == 1
+    _v68h = {}
+    _kids68h = list(_dv68h.tree.get_children(""))
+    if _kids68h:
+        _vals68h = _dv68h.tree.item(_kids68h[0], "values")
+        _cols68h = [_c68 for _c68, _, _ in _DV68.COLUMNS]
+        _v68h = {_cols68h[_i68]: _vals68h[_i68]
+                 for _i68 in range(min(len(_cols68h), len(_vals68h)))}
+    check("(6d1-03) H=1: SO(H−1) = penutupan bulan lalu '80' + SO(H−2) "
+          "jujur '-' (FIX 6d1-03 — dulu saldo penutupan DIDUPLIKAT ke "
+          "SO(H−2) karena dua-duanya membaca kunci −1)",
+          _ok_h1_68 and len(_kids68h) == 1
+          and _v68h.get("SO_H-1") == "80"
+          and _v68h.get("SO_H-2") == "-",
+          f"h={_dv68h.tanggal_h} got SO_H-1={_v68h.get('SO_H-1')!r} "
+          f"SO_H-2={_v68h.get('SO_H-2')!r}")
+    check("(6d1-03) H=1: header jujur 'SO_lalu'/'SO_—'/'In_lalu' (dulu "
+          "label tanggal fiktif 'SO_0'/'SO_-1') + snap so_m1 = penutupan "
+          "(CEK/Follow Up tetap berbasis nilai benar)",
+          _dv68h.tree.heading("SO_H-1")["text"] == "SO_lalu"
+          and _dv68h.tree.heading("SO_H-2")["text"] == "SO_\u2014"
+          and _dv68h.tree.heading("In_H-1")["text"] == "In_lalu"
+          and _dv68h.tree.heading("SO_H")["text"] == "SO_1"
+          and _kids68h
+          and float(_dv68h._row_snaps[_kids68h[0]]["so_m1"]) == 80.0,
+          f"hdr=({_dv68h.tree.heading('SO_H-1')['text']!r}, "
+          f"{_dv68h.tree.heading('SO_H-2')['text']!r})")
+    _dv68h.destroy()
+    root.update()
+
+    _dv68h2 = _DV68(_top68h, satuan_mode="GR")
+    _dv68h2.pack(fill="both", expand=True)
+    root.update()
+    _dv68h2.load_data(_mk_rows68h(2))    # H=2
+    wait_view(root, _dv68h2)
+    _kids68h2 = list(_dv68h2.tree.get_children(""))
+    _v68h2 = {}
+    if _kids68h2:
+        _vals68h2 = _dv68h2.tree.item(_kids68h2[0], "values")
+        _v68h2 = {_cols68h[_i68]: _vals68h2[_i68]
+                  for _i68 in range(min(len(_cols68h), len(_vals68h2)))}
+    check("(6d1-03) H=2 by-design (fix 48-b): SO(H−2) = penutupan '80' + "
+          "header 'SO_lalu' + SO(H−1) = SO(1) '12'",
+          _dv68h2.tanggal_h == 2
+          and _v68h2.get("SO_H-2") == "80"
+          and _v68h2.get("SO_H-1") == "12"
+          and _dv68h2.tree.heading("SO_H-2")["text"] == "SO_lalu"
+          and _dv68h2.tree.heading("SO_H-1")["text"] == "SO_1",
+          f"got={_v68h2.get('SO_H-2')!r}/{_v68h2.get('SO_H-1')!r}")
+    _dv68h2.destroy()
+    root.update()
+
+    _dv68h3 = _DV68(_top68h, satuan_mode="GR")
+    _dv68h3.pack(fill="both", expand=True)
+    root.update()
+    _dv68h3.load_data(_mk_rows68h(26))   # H normal
+    wait_view(root, _dv68h3)
+    check("(6d1-03 regresi) H normal (26) tak tersentuh: header "
+          "'SO_24'/'SO_25' (perilaku lama utuh)",
+          _dv68h3.tree.heading("SO_H-2")["text"] == "SO_24"
+          and _dv68h3.tree.heading("SO_H-1")["text"] == "SO_25",
+          f"got={_dv68h3.tree.heading('SO_H-2')['text']!r}")
+    _dv68h3.destroy()
+    _top68h.destroy()
+    root.update()
+    _dvm68.acr_settings_path = _origfn68acr   # pulihkan (hermetic §68)
+
+    # ---- 6d2-01/02: in_selisih_view (port probe_7e_1/2) -----------------
+    from src.pipeline.fn_audit import build_audit_from_app as _bafa68
+    from src.ui.in_selisih_view import InDetailPopup as _IDP68
+    from src.ui.in_selisih_view import InSelisihView as _ISV68
+
+    # (6d2-01) chip popup Rincian IN = nilai MENTAH (payload _keys)
+    _rekap68 = [
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG BESAR", "JENIS": "SO",
+         "Tanggal": 5, "Value": 2000.0},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG BESAR",
+         "JENIS": "BARANG MASUK", "Tanggal": 5, "Value": 1500.0},
+        {"NAMA RESTO": "R2", "Nama Barang": "BRG NEG", "JENIS": "SO",
+         "Tanggal": 5, "Value": 100.0},
+        {"NAMA RESTO": "R3", "Nama Barang": "BRG DES", "JENIS": "SO",
+         "Tanggal": 5, "Value": 999.0},
+        {"NAMA RESTO": "R3", "Nama Barang": "BRG DES",
+         "JENIS": "BARANG MASUK", "Tanggal": 5, "Value": 1234.5},
+    ]
+    _det68 = pd.DataFrame([
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG BESAR", "Tanggal": 5,
+         "Value": 500.0, "Nomor": "IT.2026.09.00001", "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None, "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+        {"NAMA RESTO": "R2", "Nama Barang": "BRG NEG", "Tanggal": 5,
+         "Value": 1500.0, "Nomor": "IT.2026.09.00002", "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None, "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+        {"NAMA RESTO": "R3", "Nama Barang": "BRG DES", "Tanggal": 5,
+         "Value": 500.0, "Nomor": "IT.2026.09.00003", "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None, "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+    ])
+    _audf68, _akpi68, _adesc68 = _bafa68(pd.DataFrame(_rekap68), _det68)
+    _data68 = pd.DataFrame({
+        "Nama Barang": ["BRG BESAR", "BRG NEG", "BRG DES"],
+        "NAMA RESTO": ["R1", "R2", "R3"], "SATUAN": ["GR"] * 3,
+        "KATEGORI": ["DEVIASI"] * 3, "JENIS": ["3.DEVIASI"] * 3,
+        "Tanggal": [5] * 3, "NILAI": [0.0] * 3,
+    })
+
+    _top68i = tk.Toplevel(root)
+    _top68i.geometry("1400x900+5+5")
+    _isv68 = _ISV68(_top68i)
+    _isv68.pack(fill="both", expand=True)
+    root.update()
+    _isv68.load_data(_data68, _det68,
+                     audit_result={"df": _audf68, "kpi": _akpi68,
+                                   "desc": _adesc68})
+    wait_view(root, _isv68)
+    _iids68 = {_isv68.tree.set(_i68, "Resto"): _i68
+               for _i68 in _isv68.tree.get_children("")}
+
+    def _chips68(pop):
+        _out68 = []
+
+        def _walk68(w):
+            _labs68 = [x for x in w.winfo_children()
+                       if isinstance(x, tk.Label)]
+            if len(_labs68) == 2 and not [
+                    x for x in w.winfo_children()
+                    if not isinstance(x, tk.Label)]:
+                _out68.append((str(_labs68[0]["text"]),
+                               str(_labs68[1]["text"])))
+                return
+            for _c68 in w.winfo_children():
+                _walk68(_c68)
+
+        _walk68(pop)
+        return dict(_out68)
+
+    def _dbl68(iid):
+        _isv68.tree.see(iid)
+        root.update()
+        _box68 = _isv68.tree.bbox(iid)
+        if not _box68:
+            return None
+        _isv68._on_double_click(type(
+            "E", (), {"widget": _isv68.tree, "x": _box68[0] + 5,
+                      "y": _box68[1] + 5})())
+        root.update()
+        _wins68 = [w for w in _top68i.winfo_children()
+                   if isinstance(w, _IDP68)]
+        return _wins68[0] if _wins68 else None
+
+    _pop68i = _dbl68(_iids68["R1"])
+    check("(6d2-01) chip popup Rincian IN 'BARANG MASUK' = '1.500' + "
+          "'SELISIH IN' = '1.000' + 'IN TOTAL' = '500' (nilai MENTAH "
+          "payload _keys → fmt_int_id; FIX 6d2-01 — dulu parser EN "
+          "'1,5'/'1' = 1000× salah skala)",
+          _pop68i is not None
+          and _chips68(_pop68i).get("BARANG MASUK") == "1.500"
+          and _chips68(_pop68i).get("SELISIH IN") == "1.000"
+          and _chips68(_pop68i).get("IN TOTAL") == "500",
+          f"chips={_chips68(_pop68i) if _pop68i else None}")
+    with contextlib.suppress(Exception):
+        _pop68i.destroy()
+    root.update()
+    _pop68i2 = _dbl68(_iids68["R3"])
+    check("(6d2-01) desimal: BM '1.234,5' + Selisih '734,5' (dulu parser "
+          "EN '1,2' — 10× salah skala)",
+          _pop68i2 is not None
+          and _chips68(_pop68i2).get("BARANG MASUK") == "1.234,5"
+          and _chips68(_pop68i2).get("SELISIH IN") == "734,5",
+          f"chips={_chips68(_pop68i2) if _pop68i2 else None}")
+    with contextlib.suppress(Exception):
+        _pop68i2.destroy()
+    root.update()
+    _pop68i3 = _dbl68(_iids68["R2"])
+    check("(6d2-01) kolom kosong (raw None) → '-' + negatif kurung "
+          "'(1.500)' + IN '1.500'",
+          _pop68i3 is not None
+          and _chips68(_pop68i3).get("BARANG MASUK") == "-"
+          and _chips68(_pop68i3).get("SELISIH IN") == "(1.500)"
+          and _chips68(_pop68i3).get("IN TOTAL") == "1.500",
+          f"chips={_chips68(_pop68i3) if _pop68i3 else None}")
+    with contextlib.suppress(Exception):
+        _pop68i3.destroy()
+    root.update()
+    _isv68.destroy()
+    _top68i.destroy()
+    root.update()
+
+    # (6d2-02) leaderboard skor resto TETAP UTUH saat baris diklik
+    _rows68s = []
+    _det68s = []
+
+    def _so68s(r, b, t, v):
+        _rows68s.append({"NAMA RESTO": r, "Nama Barang": b, "JENIS": "SO",
+                         "Tanggal": t, "Value": v})
+
+    def _bm68s(r, b, t, v):
+        _rows68s.append({"NAMA RESTO": r, "Nama Barang": b,
+                         "JENIS": "BARANG MASUK", "Tanggal": t,
+                         "Value": v})
+
+    for _t68 in range(1, 15):
+        _so68s("KRONIS", "BUMBU A", _t68, 100.0 * _t68)
+        _bm68s("KRONIS", "BUMBU A", _t68, 10.0)
+    for _i68 in range(1, 6):
+        _so68s("BURIK", f"BRG B{_i68}", 5, 50.0)
+        _bm68s("BURIK", f"BRG B{_i68}", 5, 7.0)
+    for _r68, _p68 in (("TIE1", "T1"), ("TIE2", "T2")):
+        for _t68 in (2, 3):
+            _so68s(_r68, f"{_p68}A", _t68, 10.0)
+            _bm68s(_r68, f"{_p68}A", _t68, 5.0)
+            _so68s(_r68, f"{_p68}B", _t68, 10.0)
+            _bm68s(_r68, f"{_p68}B", _t68, 5.0)
+    _det68s.append({"NAMA RESTO": "NEGASO", "Nama Barang": "NEG X",
+                    "Tanggal": 3, "Value": 20.0, "Nomor": "IT.2026.09.777",
+                    "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+                    "SOURCE IN": "42.05", "JENIS": "IN"})
+    _sdf68, _skpi68, _sdesc68 = _bafa68(pd.DataFrame(_rows68s),
+                                        pd.DataFrame(_det68s))
+    _items68s = ([("BUMBU A", "KRONIS")]
+                 + [(f"BRG B{_i68}", "BURIK") for _i68 in range(1, 6)]
+                 + [(f"{_p68}{_x68}", _r68)
+                    for _r68, _p68 in (("TIE1", "T1"), ("TIE2", "T2"))
+                    for _x68 in "AB"]
+                 + [("NEG X", "NEGASO")])
+    _sdata68 = pd.DataFrame({
+        "Nama Barang": [b for b, _ in _items68s],
+        "NAMA RESTO": [r for _, r in _items68s],
+        "SATUAN": ["GR"] * len(_items68s),
+        "KATEGORI": ["DEVIASI"] * len(_items68s),
+        "JENIS": ["3.DEVIASI"] * len(_items68s),
+        "Tanggal": [1] * len(_items68s),
+        "NILAI": [0.0] * len(_items68s),
+    })
+    _top68s = tk.Toplevel(root)
+    _top68s.geometry("1400x900+5+5")
+    _isv68s = _ISV68(_top68s)
+    _isv68s.pack(fill="both", expand=True)
+    root.update()
+    _isv68s.load_data(_sdata68, pd.DataFrame(_det68s),
+                      audit_result={"df": _sdf68, "kpi": _skpi68,
+                                    "desc": _sdesc68})
+    wait_view(root, _isv68s)
+
+    def _zone_rows68(view):
+        _out68 = []
+        for _w68 in view._skor_zone.winfo_children():
+            _labels68 = [c for c in _w68.winfo_children()
+                         if isinstance(c, tk.Label)]
+            if len(_labels68) >= 5 and str(_labels68[0]["text"]) != "RESTO":
+                _out68.append(tuple(str(l["text"])
+                                    for l in _labels68[:5]))
+        return _out68
+
+    def _hl68(view, resto):
+        for _w68 in view._skor_zone.winfo_children():
+            _labels68 = [c for c in _w68.winfo_children()
+                         if isinstance(c, tk.Label)]
+            if _labels68 and resto in str(_labels68[0]["text"]):
+                try:
+                    return int(str(_w68.cget("highlightthickness")))
+                except (TypeError, ValueError, tk.TclError):
+                    return -1
+        return -1
+
+    _rows68s0 = _zone_rows68(_isv68s)
+    _isv68s._on_skor_row_click("KRONIS")
+    wait_view(root, _isv68s)
+    _rows68s1 = _zone_rows68(_isv68s)
+    _n_kronis68 = sum(1 for _i68 in _isv68s.tree.get_children("")
+                      if _isv68s.tree.set(_i68, "Resto") == "KRONIS")
+    _n_other68 = sum(1 for _i68 in _isv68s.tree.get_children("")
+                     if _isv68s.tree.set(_i68, "Resto") != "KRONIS")
+    check("(6d2-02) klik baris leaderboard → tabel TERFILTER ke resto itu "
+          "(perilaku fokus tetap) + leaderboard TETAP 5 resto dgn rank "
+          "dari SEMUA peserta (FIX 6d2-02 — dulu papan KOLAPSE jadi 1 "
+          "resto)",
+          _rows68s0 and len(_rows68s0) == 5
+          and "KRONIS" in _rows68s0[0][0] and _rows68s0[0][4] == "28"
+          and _n_kronis68 > 0 and _n_other68 == 0
+          and len(_rows68s1) == 5 and _rows68s1[0] == _rows68s0[0]
+          and "NEGASO" in _rows68s1[4][0],
+          f"rows0={len(_rows68s0)} rows1={len(_rows68s1)} "
+          f"kronis={_n_kronis68} other={_n_other68}")
+    check("(6d2-02) highlight is_active utk resto yang diklik (membership "
+          "— dukung multi-select ⧩ Resto), resto lain tidak",
+          _hl68(_isv68s, "KRONIS") == 1 and _hl68(_isv68s, "BURIK") == 0
+          and _isv68s._skor_zone_active_resto == "KRONIS",
+          f"kronis={_hl68(_isv68s, 'KRONIS')} "
+          f"burik={_hl68(_isv68s, 'BURIK')}")
+    _isv68s.destroy()
+    _top68s.destroy()
+    root.update()
+
+    # ---- 6d2-03/04: nominal_resto_view (port probe_7e_3/4) -------------
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV68
+
+    def _mk_fdf68(months):
+        _rows68n = []
+        for _m68 in months:
+            for _i68 in range(3):
+                _rows68n.append({
+                    "_bulan_num": _m68, "_h": 7,
+                    "_resto_norm": "MLGPAR", "_bahan_norm": f"B{_i68}",
+                    "Resto": "MLGPAR", "Nama Barang": f"B{_i68}",
+                    "Satuan": "GR", "DEV Lalu": -1.0,
+                    "Nominal Deviasi Lalu": -100.0,
+                    "Minggu": "WEEK 1", "BULAN": f"BL{_m68}",
+                })
+        return pd.DataFrame(_rows68n)
+
+    _fdf68 = {"df": _mk_fdf68([10])}
+    _top68n = tk.Toplevel(root)
+    _top68n.geometry("1400x900+5+5")
+    _nrv68 = _NRV68(_top68n, lalu_provider=lambda: _fdf68["df"])
+    _nrv68.pack(fill="both", expand=True)
+    root.update()
+    _vdata68 = pd.DataFrame([
+        {"Nama Barang": "B0", "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+         "JENIS": "3.DEVIASI", "Tanggal": 25, "NILAI": -1.0,
+         "KATEGORI": "DEVIASI"},
+        {"Nama Barang": "NOPRICE", "NAMA RESTO": "BDGUKU", "SATUAN": "GR",
+         "JENIS": "3.DEVIASI", "Tanggal": 25, "NILAI": -5.0,
+         "KATEGORI": "DEVIASI"},
+    ])
+    _nrv68.load_data(_vdata68, harga_map={"B0": (500.0, "GR")})
+    wait_view(root, _nrv68)
+    _nrv68._colmgr.hide("Tanpa Harga")
+    root.update()
+    _dc68 = [str(x) for x in _nrv68.tree.cget("displaycolumns")]
+    _fdf68["df"] = _mk_fdf68([10, 9, 8])   # kolom dinamis bertambah
+    _nrv68.on_lalu_file_changed()
+    wait_view(root, _nrv68)
+    _dc68b = [str(x) for x in _nrv68.tree.cget("displaycolumns")]
+    check("(6d2-03) rebuild kolom dinamis ('Lalu <bln>' bertambah 7 kolom) "
+          "→ kolom HIDDEN tetap tersembunyi (FIX 6d2-03 — dulu "
+          "displaycolumns reset '#all' → kolom 'Tanpa Harga' tampil lagi)",
+          "Tanpa Harga" not in _dc68 and "Tanpa Harga" not in _dc68b
+          and "#all" not in _dc68 and "#all" not in _dc68b
+          and len(list(_nrv68.tree["columns"])) == 7
+          and _nrv68._colmgr.hidden == ["Tanpa Harga"],
+          f"dc={_dc68b}")
+
+    # (6d2-04) double-click AREA KOSONG → tanpa popup
+    _kids68n = [k for k in _nrv68.tree.get_children("")
+                if k != "row_total"]
+    _bdg68 = next(k for k in _kids68n
+                  if _nrv68.tree.set(k, "Resto") == "BDGUKU")
+    _nrv68.tree.selection_set(_bdg68)      # seleksi lama = BDGUKU
+    root.update()
+    _box68n = _nrv68.tree.bbox(_bdg68)
+    _y68n = (_box68n[1] + _box68n[3] + 60) if _box68n else 400
+    check("(6d2-04 prasyarat) posisi klik = area KOSONG (identify_row '')",
+          _nrv68.tree.identify_row(_y68n) == "",
+          f"row={_nrv68.tree.identify_row(_y68n)!r}")
+    _nrv68._on_double_click(type(
+        "E", (), {"widget": _nrv68.tree, "x": 60, "y": _y68n})())
+    root.update()
+    check("(6d2-04) double-click AREA KOSONG → TIDAK ada popup (FIX "
+          "6d2-04 — dulu popup baris terseleksi lama terbuka)",
+          len(list(_nrv68._detail_wins)) == 0,
+          f"wins={[w.title() for w in _nrv68._detail_wins]}")
+    _nrv68.destroy()
+    _top68n.destroy()
+    root.update()
+
+    # ---- 6f: pipeline murni (port probe_7f_a/b/c/d — tanpa Tk) ---------
+    from src.config import Config as _Cfg68
+    from src.pipeline import fn_4217 as _m41768
+    from src.pipeline.fn_audit import build_audit_rekap as _bar68
+    from src.pipeline.fn_rekap_mentah import _combined_to_long as _ctl68
+
+    # (6f-01) fn_4217: kolom ringkasan ber-kurung jadi resto PHANTOM
+    _prom68 = pd.DataFrame({
+        "Kategori Barang": ["10.FOOD [WIP] - COM V.3 BARU",
+                            "10.FOOD [RM] - COM- TIDAK BOLEH",
+                            "SUPPLIES [OTHERS]", "10.FOOD [WIP] - COM V.2",
+                            "00.COST"],
+        "Nama Barang": ["BUMBU PASTA KUAH", "TEPUNG ROTI", "SUMPIT KAYU",
+                        "GULA PASIR", "KERTAS MINYAK"],
+        "Kode Barang": ["100383", "100429", "2001", "1002", "3003"],
+        "Nama Satuan": ["GR", "GR", "PCS", "GR", "PCS"],
+        "AMDK MLGPAR (MLGPAR)": [84.0, 10.0, 0.0, 5.0, 2.0],
+        "GUDANG BDGUKU (BDGUKU)": [0.0, 0.0, 3.0, 0.0, 0.0],
+        "TOTAL (SEMUA GUDANG)": [84.0, 10.0, 3.0, 5.0, 2.0],  # ← ringkasan!
+    })
+    _orig_fcf68 = _m41768.fn_combine_folder
+    _orig_rs68 = _m41768._resolve_sheet_4217
+    _m41768.fn_combine_folder = lambda *a, **k: _prom68.copy()
+    _m41768._resolve_sheet_4217 = lambda folder, sheet: sheet
+    try:
+        _out68 = _m41768.fn_4217("f", kategori_whitelist=None)
+    finally:
+        _m41768.fn_combine_folder = _orig_fcf68
+        _m41768._resolve_sheet_4217 = _orig_rs68
+    _restos68 = sorted(_out68["NAMA RESTO"].dropna().unique())
+    _bumbu68 = _out68[_out68["Nama Barang"] == "BUMBU PASTA KUAH"]
+    check("(6f-01) kolom ringkasan 'TOTAL (SEMUA GUDANG)' dibuang pre-melt "
+          "→ resto PHANTOM hilang + resto legit utuh + saldo TIDAK dobel "
+          "(FIX 6f-01 — dulu 'SEMUA GUDANG' jadi resto + BUMBU PASTA KUAH "
+          "2 baris SALDO AWAL 84)",
+          _restos68 == ["BDGUKU", "MLGPAR"]
+          and len(_bumbu68) == 1
+          and _bumbu68["NAMA RESTO"].iloc[0] == "MLGPAR"
+          and float(_bumbu68["Value"].iloc[0]) == 84.0,
+          f"restos={_restos68}")
+
+    _prom68b = pd.DataFrame({
+        "Kategori Barang": ["10.FOOD [RM] - COM V.2"],
+        "Nama Barang": ["BUMBU PASTA KUAH"],
+        "Kode Barang": ["100383"],
+        "Nama Satuan": ["GR"],
+        "RESTO MALANG (MLGPAR)": [84.0],   # gudang legit ber-kurung
+        "JUMLAH (ALL)": [84.0],            # varian ringkasan lain
+        "SUB TOTAL (GRAND)": [84.0],
+    })
+    _m41768.fn_combine_folder = lambda *a, **k: _prom68b.copy()
+    try:
+        _out68b = _m41768.fn_4217("f", kategori_whitelist=None)
+    finally:
+        _m41768.fn_combine_folder = _orig_fcf68
+    _restos68b = sorted(_out68b["NAMA RESTO"].dropna().unique())
+    check("(6f-01) varian token ringkasan lain ('JUMLAH (ALL)' / 'SUB "
+          "TOTAL (GRAND)') juga dibuang + gudang legit ber-kurung "
+          "('RESTO MALANG (MLGPAR)') selamat + nilai utuh",
+          _restos68b == ["MLGPAR"]
+          and float(_out68b["Value"].iloc[0]) == 84.0,
+          f"restos={_restos68b}")
+
+    # (6f-02) fn_audit: kunci grup TUPLE (bukan string 'Resto|Item')
+    _raw68 = pd.DataFrame([
+        {"Resto": "A", "Nama Item": "B|C", "UoM": "", "Tanggal": 1,
+         "Hasil SO": _np68.nan, "Qty SO Harian": 100, "Qty SJ": 0,
+         "Qty RI": 0, "Qty Pembelian": 0, "Selisih Qty": 100},
+        {"Resto": "A|B", "Nama Item": "C", "UoM": "", "Tanggal": 2,
+         "Hasil SO": _np68.nan, "Qty SO Harian": -100, "Qty SJ": 0,
+         "Qty RI": 0, "Qty Pembelian": 0, "Selisih Qty": -100},
+    ])
+    _out68c, _kpi68c = _bar68(_raw68)
+    check("(6f-02) kunci grup TUPLE: ('A','B|C') vs ('A|B','C') = DUA "
+          "grup TERPISAH → DEVIASI MURNI ×2 + saldo TIDAK menyambung "
+          "lintas pasangan (FIX 6f-02 — dulu kunci 'Resto|Item' menyatu → "
+          "CUT-OFF RESOLVED palsu)",
+          _out68c["Status Analisis Audit"].tolist()
+          == ["DEVIASI MURNI", "DEVIASI MURNI"]
+          and _kpi68c["deviasi_murni"] == 2
+          and _kpi68c["cutoff"] == 0
+          and _out68c["Saldo Kumulatif"].tolist() == [100.0, -100.0],
+          f"status={_out68c['Status Analisis Audit'].tolist()} "
+          f"saldo={_out68c['Saldo Kumulatif'].tolist()}")
+
+    # (6f-03) fn_rekap_mentah: dup kolom hari (agregat vs plain)
+    def _day5_68(df):
+        _o68 = _ctl68(df, "berjalan", ["SO"])
+        return _o68[(_o68["NAMA BARANG"] == "A")
+                   & (_o68["Attribute"] == 5)]["Value"].tolist()
+
+    _df68c1 = pd.DataFrame({
+        "NAMA RESTO": ["R1", "R1"], "JENIS": ["SO", "SO"],
+        "NAMA BARANG": ["A", "A"], "SATUAN": ["GR", "GR"],
+        "5": [10.0, 20.0], "Sum of 5": [30.0, 40.0], "6": [1.0, 2.0],
+    })
+    _df68c2 = pd.DataFrame({
+        "NAMA RESTO": ["R1", "R1"], "JENIS": ["SO", "SO"],
+        "NAMA BARANG": ["A", "A"], "SATUAN": ["GR", "GR"],
+        "Sum of 5": [30.0, 40.0], "5": [10.0, 20.0], "6": [1.0, 2.0],
+    })
+    check("(6f-03) dup hari '5' + 'Sum of 5' → agregat DIPILIH [30,40] — "
+          "deterministik di KEDUA urutan kolom (FIX 6f-03 — dulu timpa "
+          "senyap: [30,40] / [10,20] tergantung urutan)",
+          _day5_68(_df68c1) == [30.0, 40.0]
+          and _day5_68(_df68c2) == [30.0, 40.0],
+          f"got={_day5_68(_df68c1)} / {_day5_68(_df68c2)}")
+
+    _df68c3 = pd.DataFrame({
+        "NAMA RESTO": ["R1", "R1"], "JENIS": ["SO", "SO"],
+        "NAMA BARANG": ["A", "A"], "SATUAN": ["GR", "GR"],
+        "5": [10.0, 20.0], "5.1": [30.0, 40.0], "6": [1.0, 2.0],
+    })
+    _df68c4 = pd.DataFrame({
+        "NAMA RESTO": ["R1", "R1", "R1"], "JENIS": ["SO", "SO", "SO"],
+        "NAMA BARANG": ["A", "A", "A"], "SATUAN": ["GR", "GR", "GR"],
+        "5": [10.0, None, None], "5.1": [None, 40.0, None],
+        "6": [1.0, 2.0, 3.0],
+    })
+    _o68c4 = _ctl68(_df68c4, "berjalan", ["SO"])
+    _n5_68 = len(_o68c4[(_o68c4["NAMA BARANG"] == "A")
+                        & (_o68c4["Attribute"] == 5)])
+    check("(6f-03) 2 kolom plain (mangling '5'/'5.1') → SUM [40,60] + NaN "
+          "min_count=1: nilai kolom lain dipakai [10,40] + semua-NaN TIDAK "
+          "membuat baris 0 palsu",
+          _day5_68(_df68c3) == [40.0, 60.0]
+          and _day5_68(_df68c4) == [10.0, 40.0]
+          and _n5_68 == 2,
+          f"plain={_day5_68(_df68c3)} nan={_day5_68(_df68c4)} n={_n5_68}")
+
+    # (6f-04) config: sub-key hilang → RuntimeError pesan Indonesia
+    _tmp68cfg = tempfile.mkdtemp(prefix="v3958_cfg_")
+    _BASE68 = {
+        "RootPath": str(Path(_tmp68cfg)) + "/",
+        "Folders": {"RekapBerjalan": "1. DEVIASI WEEKLY",
+                    "RincianPO": "25. Rincian PO"},
+        "Sheets": {"RekapMentah": "REKAP MENTAH"},
+    }
+
+    def _cfg68(name, cfg):
+        _p68 = str(Path(_tmp68cfg) / f"cfg68_{name}.json")
+        Path(_p68).write_text(json.dumps(cfg), encoding="utf-8")
+        return _Cfg68(_p68)
+
+    _cfgA68 = json.loads(json.dumps(_BASE68))
+    del _cfgA68["Folders"]["RekapBerjalan"]     # user salah tulis ulang
+    _okf68 = False
+    _msgf68 = "tidak ada exception"
+    try:
+        _cfg68("miss_folder", _cfgA68).folder("RekapBerjalan")
+    except RuntimeError as _e68:
+        _okf68 = True
+        _msgf68 = str(_e68)
+    except KeyError as _e68:
+        _msgf68 = f"KeyError mentah: {_e68!r}"
+    check("(6f-04) sub-key Folders hilang → RuntimeError RAMAH pesan "
+          "Indonesia (menyebut key + blok + config.json — FIX 6f-04; dulu "
+          "KeyError('RekapBerjalan') mentah English)",
+          _okf68 and "RekapBerjalan" in _msgf68
+          and "Folders" in _msgf68 and "config.json" in _msgf68,
+          f"got {_msgf68!r}")
+
+    _cfgB68 = json.loads(json.dumps(_BASE68))
+    del _cfgB68["Sheets"]["RekapMentah"]
+    _oks68 = False
+    _msgs68 = "tidak ada exception"
+    try:
+        _cfg68("miss_sheet", _cfgB68).sheet("RekapMentah")
+    except RuntimeError as _e68:
+        _oks68 = True
+        _msgs68 = str(_e68)
+    except KeyError as _e68:
+        _msgs68 = f"KeyError mentah: {_e68!r}"
+    check("(6f-04) sub-key Sheets hilang → RuntimeError ramah juga",
+          _oks68 and "RekapMentah" in _msgs68
+          and "Sheets" in _msgs68 and "config.json" in _msgs68,
+          f"got {_msgs68!r}")
+
+    check("(6f-04 regresi) config VALID → folder()/sheet() tetap benar "
+          "(RootPath + subfolder / nama sheet)",
+          _cfg68("valid", _BASE68)
+          .folder("RekapBerjalan").replace("\\", "/")
+          == str(Path(_tmp68cfg)) + "/1. DEVIASI WEEKLY"
+          and _cfg68("valid", _BASE68).sheet("RekapMentah")
+          == "REKAP MENTAH",
+          "folder()/sheet() valid berubah")
+    shutil.rmtree(_tmp68cfg, ignore_errors=True)
+
+    # ---- PERF 6e: deviasi_popup cache factorize == referensi lama ------
+    from src.ui.deviasi_popup import _COM_JENIS as _COMJ68
+    from src.ui.deviasi_popup import _JENIS_BK as _JBK68
+    from src.ui.deviasi_popup import _JENIS_IN as _JIN68
+    from src.ui.deviasi_popup import _JENIS_SA as _JSA68
+    from src.ui.deviasi_popup import _JENIS_SO as _JSO68
+    from src.ui.deviasi_popup import _chrono_key as _ck68
+    from src.ui.deviasi_popup import _compute_com_series as _ccs68
+
+    def _ref_com68(df, nama_barang, nama_resto, satuan=None):
+        """Referensi gaya-LAMA (old_funcs.py probe 7c_perf_equiv2):
+        astype(str) == + pivot_table per pasangan — tanpa cache
+        factorize. (FIX 6e-PERF hanya boleh mempercepat, NOL perilaku.)"""
+        if df is None or df.empty:
+            return {}
+        _jenis68 = df["JENIS"].astype(str)
+        _glob68 = pd.to_numeric(
+            df.loc[_jenis68.isin(_COMJ68), "Tanggal"], errors="coerce")
+        _cols68 = sorted(set(_glob68.dropna().tolist()), key=_ck68)
+        if not _cols68:
+            return {}
+        _mask68 = ((df["Nama Barang"].astype(str) == str(nama_barang))
+                   & (df["NAMA RESTO"].astype(str) == str(nama_resto))
+                   & _jenis68.isin(_COMJ68))
+        if satuan is not None:
+            _mask68 &= df["SATUAN"].astype(str) == str(satuan)
+        _sub68 = df[_mask68]
+        if _sub68.empty:
+            return {}
+        _tgl68 = pd.to_numeric(_sub68["Tanggal"], errors="coerce")
+        _nil68 = pd.to_numeric(_sub68["NILAI"], errors="coerce")
+        _sub68 = _sub68.assign(_t=_tgl68, _v=_nil68).dropna(subset=["_t"])
+        if _sub68.empty:
+            return {}
+        _sa68 = {}
+        _sar68 = _sub68[_sub68["JENIS"].astype(str) == _JSA68] \
+            .dropna(subset=["_v"])
+        for _t68, _v68 in zip(_sar68["_t"], _sar68["_v"]):
+            _sa68[_t68] = _sa68.get(_t68, 0.0) + float(_v68)
+        _piv68 = _sub68[_sub68["JENIS"].astype(str)
+                        .isin((_JSO68, _JIN68, _JBK68))] \
+            .pivot_table(index="_t", columns="JENIS", values="_v",
+                         aggfunc="sum", fill_value=0.0)
+        for _col68 in (_JSO68, _JIN68, _JBK68):
+            if _col68 not in _piv68.columns:
+                _piv68[_col68] = 0.0
+        _com68 = {}
+        for _i68, _t68 in enumerate(_cols68):
+            try:
+                _is1_68 = int(float(_t68)) == 1
+            except (TypeError, ValueError):
+                _is1_68 = False
+            if _is1_68 and _t68 in _sa68:
+                _base68 = _sa68[_t68]
+            elif _i68 == 0:
+                _base68 = 0.0
+            else:
+                _base68 = float(_piv68[_JSO68].get(_cols68[_i68 - 1], 0.0))
+            _com68[_t68] = (_base68
+                            + float(_piv68[_JIN68].get(_t68, 0.0))
+                            - float(_piv68[_JBK68].get(_t68, 0.0))
+                            - float(_piv68[_JSO68].get(_t68, 0.0)))
+        return _com68
+
+    _rng68 = _np68.random.default_rng(7)
+    _pdf68p = pd.DataFrame({
+        "Nama Barang": _rng68.choice(
+            ["AYAM FILET", "BAKMI", "BAWRANG", "CABE", None, 123], 2000),
+        "NAMA RESTO": _rng68.choice(
+            ["MLGPAR", "SBYKET", "BDGUKU", "041.BDGUKU", None], 2000),
+        "JENIS": _rng68.choice(
+            ["SALDO AWAL", "1.SO", "4.IN", "8.BARANG KELUAR",
+             "2.SALDO AKHIR"], 2000),
+        "Tanggal": _rng68.choice([-25, -3, 1, 7, 14, 25, 31], 2000),
+        "NILAI": _rng68.normal(50, 20, 2000).round(2),
+        "SATUAN": _rng68.choice(["PCS", "KG", None], 2000),
+        "Nomor": [""] * 2000, "Nomor PO": [""] * 2000,
+    })
+    _pdf68p.loc[_rng68.choice(2000, 25), "NILAI"] = _np68.nan
+    _ok68p = True
+    _det68p = []
+    for _b68, _r68, _s68 in (("AYAM FILET", "MLGPAR", "PCS"),
+                              ("BAKMI", "SBYKET", None),
+                              ("CABE", "BDGUKU", "KG"),
+                              (123, None, None)):
+        _a68p = _ccs68(_pdf68p, _b68, _r68, satuan=_s68)
+        _c68p = _ref_com68(_pdf68p, _b68, _r68, satuan=_s68)
+        if not (set(_a68p) == set(_c68p)
+                and all(abs(_a68p[_t68] - _c68p[_t68]) < 1e-9
+                        for _t68 in _c68p)):
+            _ok68p = False
+            _det68p.append((_b68, _r68, _s68))
+    check("(PERF 6e) _compute_com_series (cache factorize 7-c) == "
+          "REFERENSI gaya-lama pada df sintetis 2000 baris × 4 pasangan "
+          "(incl. None/angka/negatif tanggal) — nilai IDENTIK (perf fix "
+          "tidak mengubah hasil)",
+          _ok68p, f"mism={_det68p}")
+
+    _pdf68q = _pdf68p.copy()
+    _m68pair = (_pdf68p["Nama Barang"].astype(str) == "AYAM FILET") \
+        & (_pdf68p["NAMA RESTO"].astype(str) == "MLGPAR") \
+        & (_pdf68p["JENIS"] == "1.SO")
+    _idx68q = _pdf68p.index[_m68pair][0]
+    _pdf68q.loc[_idx68q, "NILAI"] = \
+        float(_pdf68q.loc[_idx68q, "NILAI"]) + 500.0
+    _x68p = _ccs68(_pdf68p, "AYAM FILET", "MLGPAR")
+    _y68p = _ccs68(_pdf68q, "AYAM FILET", "MLGPAR")
+    check("(PERF 6e) cache per-identitas df: dua frame BERBEDA → hasil "
+          "BERBEDA sesuai datanya (cache tak bocor lintas frame; df "
+          "kedua == referensi)",
+          _x68p != _y68p
+          and _y68p == _ref_com68(_pdf68q, "AYAM FILET", "MLGPAR"),
+          f"changed={_x68p != _y68p}")
 
     # bersihkan state file followup uji
     for _p in (followup_path(), resolved_path()):

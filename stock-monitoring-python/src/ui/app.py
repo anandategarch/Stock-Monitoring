@@ -1,9 +1,9 @@
 """
-app.py — Shell UI Stock Monitoring v3.9.22.
+app.py — Shell UI Stock Monitoring vX.Y.Z.
 
 Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
-    │ ⬛ Toolbar gelap: 📊 judul + v3.9.22 + [💾 Export] │
+    │ ⬛ Toolbar gelap: 📊 judul + vX.Y.Z  + [💾 Export] │
     ├────────────────────────────────────────────────────┤
     │ Tab modern ber-ikon (10 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
@@ -189,7 +189,86 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.57"  # v3.9.57 — roda halus daftar nilai filter (akumulator delta + binding popup-wide) + arah X11 by-pattern
+APP_VERSION = "3.9.58"  # v3.9.58 — DEEP AUDIT SEBAR-AGENT 7 paralel (38 temuan → semua fix): export/zoom/worker · widgets · clone basi/grab · pivot COM · pipeline phantom-resto
+# FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
+# memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
+# import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
+# badge sudah benar; APP_VERSION tetap satu-sumber kebenaran versi —
+# TIDAK ada bump versi di fix ini).
+if __doc__:
+    __doc__ = __doc__.replace("vX.Y.Z", f"v{APP_VERSION}")
+# v3.9.58 — DEEP AUDIT SEBAR-AGENT (user: "Deep audit dan fix sebar
+# agent full"): 7 agent audit PARALEL read-only (6-a app/state/threading ·
+# 6-b widgets ·  6-c pivot/laporan/komparasi · 6-d1 deviasi · 6-d2
+# selisih/nominal ·  6-e popup/followup/export ·  6-f pipeline) → 38
+# temuan (2 HIGH / 15 MED / 21 LOW) + puluhan probe verifikasi → 6 agent
+# fix PARALEL kepemilikan-file terpisah + verifikasi utama. SEMUA fix:
+# (6a) export: tombol Export macet-disabled pasca pipeline ERROR/STOP
+# dgn data lama (sinkron semua jalur done) · Excel GAGAL menulis FILE
+# PARSIAL/korup di tujuan (tmp + os.replace atomik; file lama utuh) ·
+# dataset KOSONG "sukses" → IndexError openpyxl + file korup (guard
+# df.empty dgn pesan ramah) · ZOOM CTRL+wheel 10× terlalu sensitif di
+# roda resolusi tinggi (akumulator delta ala v3.9.57) · statusbar/KPI
+# format Inggris "215,950"/"1 rows" → fmt_int_id "215.950"/"1 baris" ·
+# worker pipeline hanya menangkap Exception → BaseException meninggalkan
+# is_running + GC shield mati se-session (cleanup + re-raise) · header
+# docstring basi v3.9.22 → placeholder dinamis.
+# (6b) TableExpander.restore() MEMBALIK grup ber-anchor 'before' sama →
+# layout tab Rekap Selisih IN ter-scramble pasca ⤢→⤡ (urutan asal
+# direkam; restore urut) · Ctrl+C menyalin PANAH SORT ke header TSV +
+# auto-fit mengukur panah · apply_cell_tag Tk9-native ADITIF & list
+# kosong no-op vs dokumen 6 view "replace/clear" (kini semantic replace
+# via tracking + tag cell remove — Tk9) · apply_tree_row_filters cache
+# baris PARSIAL bila filter diklik saat copy clone ⛶ berjalan (cancel
+# SEBELUM snapshot; sumber _full_items) · refresh saat ⤢ expanded →
+# kartu tersembunyi muncul lagi (auto re-hide via <Map>) ·
+# insert_tree_items 1 TclError mid-batch → baris dibuang + on_done tak
+# pernah terpanggil (per-item try + on_done pasti) · enable_col_resize
+# tanpa flag idempoten · Ctrl+C menyalin kolom TERSEMBUNYI.
+# (6c/6d1) PIVOT COM rentang tanggal mulai >1: baris COM minus PALSU
+# (base SO(t−1) dari matriks PENUH, bukan slice; probe '(5)' → '5') +
+# ☑hide-empty bisa menghilangkan baris COM senyap · export 0-item
+# karean FILTER kini pesan jujur (bukan "Jalankan pipeline dulu") ·
+# deviasi fingerprint ✓ MEMUAT field cek VOLATIL → ambang ACR / file
+# lalu ⚖ = centang hilang senyap + orphan (fp stabil cek-dinetralkan +
+# legacy match + sweep) · load_data H-default berubah → render GANDA
+# dgn filter kategori LAMA (transien tabel kosong; kini 1 render) ·
+# H=1: SO_H-2 & SO_H-1 dobel baca kunci −1 + header "SO_0"/"SO_-1"
+# fiktif (jujur '-' + label tanggal nyata) · listener FollowUpStore tak
+# pernah di-unsubscribe (remove_listener dipasang; akar: binding Destroy
+# kondisional) · _compute_pivot telan exception pivot_table senyap.
+# (6d2) popup Rincian IN chips 'Barang Masuk'/'Selisih IN' SKALA 1000×
+# salah (parse display "1.500" EN; kini RAW _keys) · leaderboard SKOR
+# KOLAPSE jadi 1 resto saat baris diklik (skor dari frame pra-filter
+# Resto; highlight is_active hidup lagi) · nominal_resto kolom dinamis
+# reset displaycolumns TANPA colmgr.apply (hidden muncul lagi + panel
+# desinkron) · double-click area kosong membuka popup resto SEBELUMNYA
+# (identify_row) · PERF _lalu_map iterrows main-thread 103ms → vektor
+# (identik nilai, ≥3×).
+# (6e) CLONE ⛶ FOLLOW UP BASI: klik ✓ menghapus baris SALAH (persist
+# followup.json!) — guard _view_gen + clone ditutup saat re-render
+# (mirror 48-d); Laporan Deviasi kelas sama (_fp_map row_N posisional) ·
+# POPUP MODAL kehilangan grab pasca funnel filter dibuka-tutup → main
+# window interaktif di bawah popup "modal" (grab dipulihkan di SEMUA
+# jalur tutup popup AutoFilter + Panel Kolom) · popup COM t>1 tanpa
+# baris BASE SO(t−1) (formula tak bisa direkonstruksi; kini baris base
+# + catatan jujur) · Tanggal mentah '-25' → konvensi '25•' + legenda ·
+# kolom Cek Follow Up menampilkan segmen ANALISA seolah anomali CEK
+# (prefiks 'Analisa: ') · PERF deviasi_popup 95-125ms sinkron main
+# thread → mask factorize di-cache per df (A/B identik).
+# (6f) fn_4217 melt: kolom ringkasan ber-kurung 'TOTAL (SEMUA GUDANG)'
+# jadi resto PHANTOM → saldo 42.17 DOBEL (blacklist token ringkasan —
+# gudang asli tetap lolos) · fn_audit kunci grup "Resto|Item" kolisi
+# konkatenasi (tuple) · _combined_to_long kolom dobel-hari menimpa
+# senyap (preferensi 'Sum of N' / SUM) · Config.folder()/sheet()
+# KeyError mentah bila sub-key hilang (RuntimeError Indonesia ala
+# v3.9.33). VERIFIKASI: test_ui_redesign 1379/1379 PASS (1308 + §68
+# BARU 71 check — port probe terverifikasi: export/zoom/worker ·
+# expander/copy/tag/insert · clone basi 6e-01/02 · grab 6e-03 · COM
+# base 6c-02 · fingerprint stabil 6d1-01 · 1-render 6d1-02 · H=1 ·
+# chips RAW · leaderboard · colmgr · identify_row · phantom-resto ·
+# tuple-key · dobel-hari · config · PERF A/B) + test_mock ALL PASS +
+# ruff 204 < baseline 205 (0 issue baru) + py_compile + smoke 2 entry.
 # v3.9.57 — FIX AUDIT ("scroll daftar nilai filter belum menangani roda
 # mouse beresolusi tinggi — cek ini"):
 # (1) AKUMULATOR RODA HALUS untuk DAFTAR NILAI ber-canvas: fungsi BARU
@@ -1876,19 +1955,35 @@ class StockMonitorApp:
         Windows/macOS: event.delta (±120 per notch, trackpad bisa kecil);
         X11: event.num 4 (naik) / 5 (turun).
         Selalu return \"break\" — mematikan binding kelas pada bindtag
-        berikutnya supaya tabel/log TIDAK ikut bergulir saat zoom."""
+        berikutnya supaya tabel/log TIDAK ikut bergulir saat zoom.
+
+        FIX 6a-04: magnitudo delta kini DIHITUNG — akumulator delta
+        pecahan (pola enable_smooth_wheel_list): kontribusi delta/120
+        dijumlahkan, ``int(acc)`` langkah UI_ZOOM_STEP diterapkan, sisa
+        dibawa ke event berikutnya; berbalik arah → sisa arah lama
+        dibuang. Dulu hanya TANDA delta yang dipakai (±10% per EVENT):
+        roda/trackpad resolusi tinggi mengirim delta < 120 per event
+        (banyak event kecil per notch fisik) → 1 notch = +120% zoom
+        (langsung clamp 200%), praktis tak terkendali di kelas device
+        itu. X11 Button-4/5 tetap 1 langkah per event (perilaku lama)."""
         _d = getattr(event, "delta", 0) or 0
         if _d:
-            _dir = 1 if _d > 0 else -1
-        else:
-            _num = getattr(event, "num", 0) or 0
-            if _num == 4:
-                _dir = 1
-            elif _num == 5:
-                _dir = -1
-            else:
-                return "break"
-        self._apply_ui_zoom(self.ui_zoom + _dir * UI_ZOOM_STEP)
+            acc = getattr(self, "_zoom_wheel_acc", 0.0)
+            # FIX 6a-04: berbalik arah → buang sisa akumulator ARAH LAMA
+            # (tanpa ini sisa arah lama 'memakan' notch pertama arah baru)
+            if acc and ((_d > 0) != (acc > 0)):
+                acc = 0.0
+            acc += _d / 120.0
+            steps = int(acc)          # potong menuju nol; sisa dibawa
+            self._zoom_wheel_acc = acc - steps
+            if steps:
+                self._apply_ui_zoom(self.ui_zoom + steps * UI_ZOOM_STEP)
+            return "break"
+        _num = getattr(event, "num", 0) or 0
+        if _num == 4:
+            self._apply_ui_zoom(self.ui_zoom + UI_ZOOM_STEP)
+        elif _num == 5:
+            self._apply_ui_zoom(self.ui_zoom - UI_ZOOM_STEP)
         return "break"
 
     def _apply_ui_zoom(self, value: float) -> bool:
@@ -2752,6 +2847,39 @@ class StockMonitorApp:
             err = (exc, traceback.format_exc())
             self._schedule_to_main(lambda: self._on_pipeline_done(
                 None, None, None, None, err, _rf))
+        except BaseException as exc:
+            # FIX 6a-06: BaseException (SystemExit/KeyboardInterrupt dari
+            # kedalaman pipeline) dulu LOLOS kedua handler di atas →
+            # _on_pipeline_done tak pernah terjadwal: is_running menempel
+            # True (MULAI/⏹ mati seumur sesi), spinner/elapsed jalan terus,
+            # dan gc_shield_acquire() tak pernah dilepas (gc.disable()
+            # seumur sesi — pola B-20 yang sudah difix di widgets.run_async
+            # tapi tidak di worker app). Kini: jadwalkan penyelesaian ERROR
+            # (melepas shield GC + reset state + log di MAIN thread) LALU
+            # re-raise supaya exception tetap propagasi (KeyboardInterrupt
+            # tidak ditelan).
+            import traceback
+            err = (exc, traceback.format_exc())
+            self._schedule_to_main(lambda: self._on_pipeline_done(
+                None, None, None, None, err, _rf))
+            raise
+
+    def _sync_export_buttons(self) -> None:
+        """FIX 6a-01 — sinkronkan tombol 💾 Export (toolbar + tab Proses)
+        ke ketersediaan data AKTUAL app (kriteria sama dgn guard
+        _export_excel: append1/rincian_po TERSEDIA).
+
+        Dipanggil di SEMUA jalur keluar _on_pipeline_done (sukses / ERROR /
+        STOP) + selesai/gagal export. Dulu hanya jalur SUKSES yang
+        meng-enable: run yang gagal/di-STOP padahal data run LAMA masih
+        tampil meninggalkan tombol mati selamanya — user dipaksa re-run
+        pipeline penuh hanya untuk men-export data lama yang masih valid.
+        (Di jalur ERROR/STOP data run lama sengaja DIPERTAHANKAN — self.
+        append1_df dkk. tidak ditimpa; tombol mengikuti data itu.)"""
+        has_data = (self.append1_df is not None
+                    or self.rincian_po_df is not None)
+        self.btn_export.set_enabled(has_data)
+        self.btn_export_tb.set_enabled(has_data)
 
     def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df,
                           audit_result, error, refresh_files=False):
@@ -2784,6 +2912,9 @@ class StockMonitorApp:
                 self.statusbar.set_status(*_ST_STOP)
                 self.kpi_status.set_value("DIHENTIKAN", "oleh user", C_AMBER)
                 self._append_log_batched(f"\n[STOP] {exc}\n")
+                # FIX 6a-01: jalur STOP juga sinkron tombol export (data
+                # run lama masih tampil & masih bisa di-export)
+                self._sync_export_buttons()
                 return
             self.status_var.set("Status: ERROR.")
             self.statusbar.set_status(*_ST_ERR)
@@ -2796,6 +2927,9 @@ class StockMonitorApp:
                 "Pipeline Gagal",
                 f"Terjadi error:\n{exc}\n\nLihat log di tab Proses untuk detail.",
                 parent=self.root)
+            # FIX 6a-01: jalur ERROR juga sinkron tombol export (data run
+            # lama masih tampil & masih bisa di-export)
+            self._sync_export_buttons()
             return
 
         # Sukses — simpan + muat data ke semua view
@@ -2814,11 +2948,14 @@ class StockMonitorApp:
         audit_kpi = audit_result.get("kpi") if audit_result else None
         audit_n = len(audit_df) if audit_df is not None else 0
         self.status_var.set("Status: SELESAI.")
+        # FIX 6a-05: fmt_int_id + "baris" — dulu grouping EN "215,950
+        # rows" di status bar & KPI padahal log/tabel/chip pakai 215.950
+        # (campuran lokal satu layar) + "1 rows" (plural EN salah).
         self.statusbar.set_status(
-            f"SELESAI — Append1: {len(append1_df):,} rows · "
-            f"Rincian PO: {len(rincian_po_df):,} rows · "
-            f"IN detail: {len(in_detail_df):,} rows · "
-            f"Audit: {audit_n:,} rows", C_GREEN)
+            f"SELESAI — Append1: {fmt_int_id(len(append1_df))} baris · "
+            f"Rincian PO: {fmt_int_id(len(rincian_po_df))} baris · "
+            f"IN detail: {fmt_int_id(len(in_detail_df))} baris · "
+            f"Audit: {fmt_int_id(audit_n)} baris", C_GREEN)
         self.kpi_status.set_value("SELESAI", "data siap dianalisis", C_GREEN)
         # v3.9.46 — audit 66 temuan #1: status hijau di atas adalah
         # PROVISORI — status AKHIR jujur ditetapkan SETELAH semua view
@@ -2826,17 +2963,21 @@ class StockMonitorApp:
         # view / folder hilang / file ter-skip tidak boleh berakhir
         # tampil sebagai sukses penuh. Ditulis dua fase agar chip KPI
         # & log tidak menunggu render view (lambat di data besar).
-        self.kpi_append.set_value(f"{len(append1_df):,}",
+        self.kpi_append.set_value(fmt_int_id(len(append1_df)),
                                   "baris pivot siap di tab 📊")
-        self.kpi_rincian.set_value(f"{len(rincian_po_df):,}",
+        self.kpi_rincian.set_value(fmt_int_id(len(rincian_po_df)),
                                    "baris PO siap di tab 🛒")
-        self._append_log_batched(f"\n  Append1: {len(append1_df)} rows\n")
-        self._append_log_batched(f"  Rincian PO: {len(rincian_po_df)} rows\n")
+        # FIX 6a-05: log penutup ikut fmt_int_id + "baris"
+        self._append_log_batched(
+            f"\n  Append1: {fmt_int_id(len(append1_df))} baris\n")
+        self._append_log_batched(
+            f"  Rincian PO: {fmt_int_id(len(rincian_po_df))} baris\n")
         if audit_df is not None and audit_n:
             # FIX C-03: log audit ikut format Indonesia (1.234.567) —
             # konsisten dgn formatter tabel & KPI chips.
+            # FIX 6a-05: "rows" → "baris" (plural EN di teks Indonesia).
             self._append_log_batched(
-                f"  Audit Rekonsiliasi: {fmt_int_id(audit_n)} rows · "
+                f"  Audit Rekonsiliasi: {fmt_int_id(audit_n)} baris · "
                 f"OK {fmt_int_id(audit_kpi['ok'])} · "
                 f"Cut-off {fmt_int_id(audit_kpi['cutoff'])} · "
                 f"Valid {fmt_int_id(audit_kpi['omit'])} · "
@@ -2950,8 +3091,9 @@ class StockMonitorApp:
                    lambda: self.rincian_view.load_data(
                        rincian_po_df, preserve=_keep_state),
                    self.rincian_view)
-        self.btn_export.set_enabled(True)
-        self.btn_export_tb.set_enabled(True)
+        # FIX 6a-01: enable via sync helper (kriteria ketersediaan data
+        # = guard _export_excel) — jalur ERROR/STOP di atas kini sync juga.
+        self._sync_export_buttons()
 
         # =================================================================
         # v3.9.46 — STATUS AKHIR JUJUR (audit 66 temuan #1 — PRIORITAS #1)
@@ -3245,10 +3387,29 @@ class StockMonitorApp:
 
     def _export_excel(self):
         """Export data (Append1 + Rincian PO + Rincian IN) ke Excel — async + loading."""
-        if self.append1_df is None and self.rincian_po_df is None:
-            messagebox.showwarning(
-                "Export", "Belum ada data. Jalankan pipeline dulu.",
-                parent=self.root)
+        # FIX 6a-03: guard kini juga menolak df KOSONG (bukan hanya None),
+        # untuk SEMUA dataset alur export (Append1 / Rincian PO / Rincian
+        # IN / Audit). Pipeline "sukses" pada folder kosong menghasilkan
+        # DataFrame KOSONG (bukan None) → guard lama lolos → workbook
+        # TANPA sheet → openpyxl IndexError mentah ("At least one sheet
+        # must be visible") + file korup tertinggal di path user. Kini:
+        # pesan ramah + TIDAK ADA file dibuat (dialog simpan pun tidak
+        # dibuka — tiap sheet punya guard .empty sendiri di work()).
+        def _ada_baris(df):
+            return df is not None and not df.empty
+
+        _audit_df = (self.audit_result.get("df")
+                     if self.audit_result else None)
+        if not (_ada_baris(self.append1_df)
+                or _ada_baris(self.rincian_po_df)
+                or _ada_baris(self.in_detail_df)
+                or _ada_baris(_audit_df)):
+            _pesan = ("Tidak ada baris untuk di-export — data yang "
+                      "tersimpan kosong (lihat log tab Proses)."
+                      if (self.append1_df is not None
+                          or self.rincian_po_df is not None)
+                      else "Belum ada data. Jalankan pipeline dulu.")
+            messagebox.showwarning("Export", _pesan, parent=self.root)
             return
         filepath = filedialog.asksaveasfilename(
             title="Simpan sebagai Excel",
@@ -3273,53 +3434,73 @@ class StockMonitorApp:
         self.btn_export_tb.set_enabled(False)
 
         def work():
-            with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-                # v3.8: sheet PIVOT ditulis DULU → jadi tab pertama
-                # (matrix mutasi barang + conditional formatting ala
-                # tab pivot "Mutasi Barang - New" user)
-                add_pivot_sheet(writer, append1_df)
-                if append1_df is not None and not append1_df.empty:
-                    append1_df.to_excel(writer, sheet_name="Append1",
-                                        index=False)
-                if rincian_po_df is not None and not rincian_po_df.empty:
-                    # v3.9.19 (paritas UI): kolom "Nama Resto" — derivasi
-                    # sama dgn rincian_po_view (Cabang PO → kode resto,
-                    # rsplit titik terakhir; tanpa Cabang PO → "") —
-                    # disisipkan tepat setelah Tanggal. Baris tanpa kode
-                    # Cabang PO (parent tak terisi / NA) → "".
-                    po_export = rincian_po_df.copy()
-                    nama_resto = (po_export["Cabang PO"].map(_resto_name)
-                                  if "Cabang PO" in po_export.columns
-                                  else "")
-                    po_cols = list(po_export.columns)
-                    pos = (po_cols.index("Tanggal") + 1
-                           if "Tanggal" in po_cols else 0)
-                    po_export.insert(pos, "Nama Resto", nama_resto)
-                    po_export.to_excel(writer, sheet_name="Rincian PO",
-                                       index=False)
-                # v3.4: detail IN per dokumen (42.05 / 32.24 / 99.01 + nomor)
-                if in_detail_df is not None and not in_detail_df.empty:
-                    in_detail_df.to_excel(writer, sheet_name="Rincian IN",
-                                          index=False)
-                # v3.5: hasil Audit Rekonsiliasi (port macro VBA)
-                if audit_df is not None and not audit_df.empty:
-                    audit_df.to_excel(writer,
-                                      sheet_name="Laporan Deviasi (Audit)",
-                                      index=False)
-            return filepath
+            # FIX 6a-02: tulis ke file SEMENTARA satu folder dgn tujuan —
+            # pandas ExcelWriter.__exit__ memanggil close() TAK-BERSYARAT
+            # (workbook TETAP disimpan walau blok with gagal di tengah) →
+            # menulis langsung ke path tujuan meninggalkan .xlsx PARSIAL/
+            # KORUP yang MENIMPA export LAMA yang baik di path sama.
+            # Kini file tujuan hanya tersentuh os.replace() atomik SETELAH
+            # sukses penuh; kegagalan apa pun (finally) menghapus tmp.
+            # (tmp ber-ekstensi .xlsx — pandas ExcelWriter menolak
+            # ekstensi non-Excel seperti ".tmp".)
+            tmp_path = filepath + ".tmp.xlsx"
+            _ok = False
+            try:
+                with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+                    # v3.8: sheet PIVOT ditulis DULU → jadi tab pertama
+                    # (matrix mutasi barang + conditional formatting ala
+                    # tab pivot "Mutasi Barang - New" user)
+                    add_pivot_sheet(writer, append1_df)
+                    if append1_df is not None and not append1_df.empty:
+                        append1_df.to_excel(writer, sheet_name="Append1",
+                                            index=False)
+                    if rincian_po_df is not None and not rincian_po_df.empty:
+                        # v3.9.19 (paritas UI): kolom "Nama Resto" — derivasi
+                        # sama dgn rincian_po_view (Cabang PO → kode resto,
+                        # rsplit titik terakhir; tanpa Cabang PO → "") —
+                        # disisipkan tepat setelah Tanggal. Baris tanpa kode
+                        # Cabang PO (parent tak terisi / NA) → "".
+                        po_export = rincian_po_df.copy()
+                        nama_resto = (po_export["Cabang PO"].map(_resto_name)
+                                      if "Cabang PO" in po_export.columns
+                                      else "")
+                        po_cols = list(po_export.columns)
+                        pos = (po_cols.index("Tanggal") + 1
+                               if "Tanggal" in po_cols else 0)
+                        po_export.insert(pos, "Nama Resto", nama_resto)
+                        po_export.to_excel(writer, sheet_name="Rincian PO",
+                                           index=False)
+                    # v3.4: detail IN per dokumen (42.05/32.24/99.01 + nomor)
+                    if in_detail_df is not None and not in_detail_df.empty:
+                        in_detail_df.to_excel(writer, sheet_name="Rincian IN",
+                                              index=False)
+                    # v3.5: hasil Audit Rekonsiliasi (port macro VBA)
+                    if audit_df is not None and not audit_df.empty:
+                        audit_df.to_excel(
+                            writer, sheet_name="Laporan Deviasi (Audit)",
+                            index=False)
+                os.replace(tmp_path, filepath)
+                _ok = True
+                return filepath
+            finally:
+                if not _ok:
+                    # FIX 6a-02: gagal mid-write → tmp (parsial — bisa
+                    # tersimpan paksa oleh __exit__ pandas) DIHAPUS; file
+                    # tujuan TIDAK PERNAH tertinggal parsial/korup.
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp_path)
 
         def done(path):
-            if self.append1_df is not None:
-                self.btn_export.set_enabled(True)
-                self.btn_export_tb.set_enabled(True)
+            # FIX 6a-01: re-enable via sync (kriteria ketersediaan data
+            # sama dgn guard export — dulu hanya cek append1_df: export
+            # data rincian-PO-saja meninggalkan tombol mati selamanya).
+            self._sync_export_buttons()
             messagebox.showinfo(
                 "Export Berhasil", f"Data di-export ke:\n{path}",
                 parent=self.root)
 
         def on_error(e):
-            if self.append1_df is not None:
-                self.btn_export.set_enabled(True)
-                self.btn_export_tb.set_enabled(True)
+            self._sync_export_buttons()   # FIX 6a-01 (lihat done())
             messagebox.showerror(
                 "Export Gagal", f"Tidak bisa export:\n{e}", parent=self.root)
 

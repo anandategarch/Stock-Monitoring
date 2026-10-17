@@ -227,8 +227,10 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Jalankan algoritma rekonsiliasi → (df hasil + kolom audit, KPI dict).
 
     Baris diproses PERSIS urutan input; grup = blok kontigu dengan
-    (Resto|Nama Item) sama — perilaku identik macro VBA (input v3.6
-    sudah diurutkan per Resto+Item+Tanggal).
+    pasangan (Resto, Nama Item) sama — perilaku identik macro VBA (input
+    v3.6 sudah diurutkan per Resto+Item+Tanggal). FIX 6f-02: pasangan
+    dibandingkan sebagai TUPLE (bukan konkatenasi 'Resto|Item' — kolisi
+    bila nilai memuat '|').
     """
     n = len(df)
     kpi = {
@@ -259,8 +261,14 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     tgl = pd.to_numeric(df["Tanggal"], errors="coerce").fillna(0) \
         .to_numpy(dtype="float64")
 
-    keys = (df["Resto"].astype(str) + "|" + df["Nama Item"].astype(str)) \
-        .to_numpy()
+    # FIX 6f-02 (audit 6-f): kunci grup = TUPLE (resto, item) — bukan
+    # konkatenasi 'Resto|Item': pasangan ('A','B|C') dan ('A|B','C') dulu
+    # menyatu jadi 'A|B|C' (satu grup palsu — saldo kumulatif lintas
+    # pasangan menyambung, KPI cut-off/deviasi meleset). Tuple
+    # dibandingkan eksak; konsisten dgn kunci pasangan (resto, barang)
+    # di _po_menunggu_pairs / _apply_po_menunggu.
+    keys = list(zip(df["Resto"].astype(str),
+                    df["Nama Item"].astype(str)))
 
     saldo = [0.0] * n
     status = [""] * n

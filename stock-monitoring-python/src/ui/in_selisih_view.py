@@ -401,6 +401,22 @@ def _fmt_num(val) -> str:
     return s
 
 
+def _raw_num(arr, i):
+    """FIX 6d2-01 — nilai numerik MENTAH kolom numpy (None bila kolom tak
+    ada / NaN/invalid) — utk chip ringkasan popup Rincian IN: nilai display
+    diformat _fmt_num Indonesia ('1.500') dan TIDAK boleh di-parse ulang
+    dengan float EN (1.5 — salah skala 1000×)."""
+    if arr is None:
+        return None
+    try:
+        v = arr[i]
+        if pd.isna(v):
+            return None
+        return float(v)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def _fmt_int(val) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
@@ -861,7 +877,11 @@ class InSelisihView(tk.Frame):
         self._pending_sort = None
         self._satuan_map: dict = {}
         self._kategori_map: dict = {}
-        self._keys: list = []
+        # FIX 6d2-05 — payload kunci MENTAH per iid {iid: {resto, barang,
+        # tgl, bm, selisih}} (dibangun _prepare_rows, dikonsumsi
+        # _on_double_click — sebelumnya dead code: dibangun tiap render
+        # tapi tak pernah dibaca; lihat FIX 6d2-01).
+        self._keys: dict = {}
         self.header_filters: HeaderFilterGroup | None = None
         self._colmgr: ColumnManager | None = None
 
@@ -1636,15 +1656,32 @@ class InSelisihView(tk.Frame):
             f = f[(t >= st["tgl_start"]) & (t <= st["tgl_end"])]
 
         # filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
-        # yang tampil di tabel)
+        # yang tampil di tabel).
+        # FIX 6d2-02 — kolom 'Resto' DIKECUALIKAN dari loop dan diterapkan
+        # SETELAH snapshot f_pre: SKOR RESTO dihitung dari frame
+        # PRA-FILTER-RESTO (rentang tanggal + ⧩ kolom lain + varian MODE
+        # HITUNG tetap kontekstual) supaya leaderboard TIDAK kolapse ke 1
+        # resto saat barisnya diklik (klik = fokus TABEL ke resto itu,
+        # bukan menyusutkan papan skor — medali '#1' dari 1 peserta
+        # menyesatkan); highlight is_active _render_resto_scores jadi
+        # benar-benar berfungsi (dulu dead: board terfilter Resto hanya
+        # memuat resto aktif sendiri).
+        _resto_sel = st["col_sel"].get("Resto")
         for col, sel in st["col_sel"].items():
+            if col == "Resto":
+                continue
             if col in f.columns:
                 fmt = _format_col_values(col, f[col])
                 f = f[fmt.isin(sel)]
 
         # v3.9.55 — F3: snapshot frame pra-only_selisih (dasar SKOR RESTO
         # — baris selisih sama baik checkbox aktif / tidak).
+        # FIX 6d2-02 — kini juga pra-filter-Resto (lihat komentar di atas).
         f_pre = f
+
+        if _resto_sel is not None and "Resto" in f.columns:
+            fmt_r = _format_col_values("Resto", f["Resto"])
+            f = f[fmt_r.isin(_resto_sel)]
 
         if st["only_selisih"] and "Selisih IN" in f.columns:
             sv = pd.to_numeric(f["Selisih IN"], errors="coerce").fillna(0)
@@ -1652,8 +1689,10 @@ class InSelisihView(tk.Frame):
 
         # v3.9.55 — F3: SKOR RESTO (user: "Beri Skor per resto dengan
         # selisih terbanyak ... Selisih terbanyak di tiap tanggal dan di
-        # keseluruhan tanggal") — dihitung dari frame TERFILTER (rentang
-        # tanggal + header ⧩ aktif — konteks apa yang sedang dilihat);
+        # keseluruhan tanggal") — dihitung dari frame TERFILTER rentang
+        # tanggal + ⧩ lain (konteks apa yang sedang dilihat) KECUALI
+        # filter Resto (FIX 6d2-02 — klik leaderboard tak boleh
+        # menyusutkan papan skor; baris resto aktif di-highlight);
         # baris selisih = Selisih IN ≠ 0 (tak terpengaruh checkbox
         # 'Hanya Selisih ≠ 0' — skor selalu tentang baris bermasalah).
         # SKOR = jumlah ITEM selisih + jumlah TANGGAL terdampak
@@ -1714,7 +1753,11 @@ class InSelisihView(tk.Frame):
 
         n = len(f)
         items = []
-        keys = []
+        # FIX 6d2-05/6d2-01 — payload kunci MENTAH per iid {iid: raw}:
+        # resto/barang/tgl + bm/selisih numerik mentah (chip ringkasan
+        # popup — display '1.500' Indonesia tidak boleh di-parse float
+        # EN). Dibangun sesuai urutan item row_i (iid stabil di sort/clone).
+        keys = {}
         # FIX C-04 (audit 2-c): minus merah PER CELL di kolom numerik —
         # mirror pola deviasi v3.9.2 (Tk 9 tag cell; fallback Tk 8 = tag
         # baris 'negative' yang sudah dikonfigurasi _setup_tags).
@@ -1723,6 +1766,9 @@ class InSelisihView(tk.Frame):
         for c in _NUM_COLS:
             if c in f.columns:
                 num_raw[c] = pd.to_numeric(f[c], errors="coerce").to_numpy()
+        # FIX 6d2-01 — kolom numerik MENTAH utk chip popup (lihat _raw_num)
+        _bm_np = num_raw.get("Barang Masuk")
+        _sel_np = num_raw.get("Selisih IN")
         for i in range(n):
             values = tuple(formatted[c][i] for c in col_ids)
             st_tag = _STATUS_TAG.get(status_s[i])
@@ -1740,10 +1786,17 @@ class InSelisihView(tk.Frame):
                 tags.append("negative")
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
-            # key utk drill-down: (resto, barang, tgl asli)
+            # key utk drill-down: resto/barang/tgl MENTAH + bm/selisih
+            # mentah per iid (FIX 6d2-05/6d2-01 — lihat komentar deklarasi
+            # `keys` di atas; dikonsumsi _on_double_click)
             t = tgl_np[i]
-            keys.append((resto_np[i], barang_np[i],
-                         None if pd.isna(t) else int(t)))
+            keys[f"row_{i}"] = {
+                "resto": str(resto_np[i]),
+                "barang": str(barang_np[i]),
+                "tgl": None if pd.isna(t) else int(t),
+                "bm": _raw_num(_bm_np, i),
+                "selisih": _raw_num(_sel_np, i),
+            }
 
         # ringkasan status
         # FIX C-10 (audit 2-c): koma ribuan EN ("1,234") terbaca desimal
@@ -1760,7 +1813,7 @@ class InSelisihView(tk.Frame):
         if self.header_filters is not None:
             self.header_filters.refresh_icons()
         self.status_var.set(payload["status"])
-        self._keys = payload.get("keys", [])
+        self._keys = payload.get("keys", {})   # FIX 6d2-05 — {iid: raw}
         self._neg_cells = payload.get("neg_cells", [])  # FIX C-04
         # v3.9.55 — F3: kartu SKOR RESTO ikut render tiap refresh (konteks
         # filter tanggal/⧩ aktif).
@@ -1803,7 +1856,9 @@ class InSelisihView(tk.Frame):
         (n dari N tgl periode) · item selisih · Σ|Selisih| · skor + bar
         proporsional. Top-3 diberi latar medali lembut. KLIK baris = filter
         tabel Resto (klik lagi = lepas) — 'langsung kasih perhatian resto
-        itu'."""
+        itu'. FIX 6d2-02: papan TETAP UTUH saat filter Resto aktif (skor
+        dihitung pra-filter-Resto) — baris resto terseleksi di-highlight
+        amber (is_active), bukan board menyusut jadi 1 baris."""
         zone = self._skor_zone
         for w in zone.winfo_children():
             w.destroy()
@@ -1811,9 +1866,15 @@ class InSelisihView(tk.Frame):
             zone.pack_forget()
             self._skor_zone_active_resto = None
             return
-        active = (self._col_sel.get("Resto") or [None])[0] \
-            if isinstance(self._col_sel.get("Resto"), list) else None
-        self._skor_zone_active_resto = active
+        # FIX 6d2-02 — highlight SEMUA resto terseleksi kolom Resto (klik
+        # leaderboard = 1 resto; popup ⧩ bisa multi-select). Semantik lama
+        # (elemen PERTAMA list) membuat highlight hanya bermakna saat board
+        # sudah kolapse — kini board utuh, highlight jadi sinyal fokus.
+        _sel_resto = self._col_sel.get("Resto")
+        active_set = ({str(x) for x in _sel_resto}
+                      if isinstance(_sel_resto, list) else set())
+        self._skor_zone_active_resto = (min(active_set)
+                                        if active_set else None)
 
         head = tk.Frame(zone, bg=C_CARD)
         head.pack(fill="x", padx=12, pady=(8, 2))
@@ -1837,7 +1898,9 @@ class InSelisihView(tk.Frame):
         max_skor = max(r["skor"] for r in scores) or 1
         for i, r in enumerate(scores[:12]):
             bg = self._SKOR_RANK_BG[i] if i < 3 else C_CARD
-            is_active = (str(r["resto"]) == str(active))
+            # FIX 6d2-02 — membership (bukan == elemen pertama) → semua
+            # resto terseleksi ter-highlight saat board utuh.
+            is_active = (str(r["resto"]) in active_set)
             bg = "#fef3c7" if is_active else bg
             row = tk.Frame(zone, bg=bg, cursor="hand2",
                            highlightbackground="#e2e8f0",
@@ -2180,36 +2243,44 @@ class InSelisihView(tk.Frame):
             return
         col_ids = list(tree["columns"])
         row = dict(zip(col_ids, values))
-        resto = row.get("Resto")
-        barang = row.get("Nama Barang")
-        tgl_txt = str(row.get("Tanggal") or "")
-        if not barang or not tgl_txt:
-            return
-        try:
-            tgl = int(float(tgl_txt.replace(",", "")))
-        except (TypeError, ValueError):
+        # FIX 6d2-01 + 6d2-05 — resolve kunci + nilai MENTAH dari payload
+        # _keys (iid → raw; iid stabil lintas sort/clone ⛶ — sort memakai
+        # move/reinsert dgn iid sama, clone menyalin iid sumber). Display
+        # resto/barang/tgl identik dgn raw (kolom string/int), tapi chip
+        # bm/selisih WAJIB raw: display '1.500' (format Indonesia)
+        # di-parse float EN = 1.5 (salah skala 1000×, bug 6d2-01).
+        # Fallback (payload lama / _keys kosong): parse display via
+        # _parse_num_id — parser Indonesia, BUKAN parser float EN lama.
+        raw = (self._keys.get(row_iid)
+               if isinstance(self._keys, dict) else None)
+        resto = (raw.get("resto") if raw else None) or row.get("Resto")
+        barang = (raw.get("barang") if raw else None) \
+            or row.get("Nama Barang")
+        tgl = (raw.get("tgl") if raw else None)
+        if tgl is None:
+            tgl_txt = str(row.get("Tanggal") or "")
+            try:
+                tgl = int(float(tgl_txt.replace(",", "")))
+            except (TypeError, ValueError):
+                tgl = None
+        if not barang or tgl is None:
             return
 
         det = self._detail_for(resto, barang, tgl)
         if det is None:
             return
 
-        # ringkasan utk chip popup (nilai mentah dari baris)
-        def _num(v):
-            s = str(v).replace(",", "").strip()
-            if s in ("", "-", "None"):
-                return 0.0
-            if s.startswith("(") and s.endswith(")"):
-                return -float(s[1:-1])
-            try:
-                return float(s)
-            except ValueError:
-                return 0.0
-
-        row_summary = {
-            "bm": _num(row.get("Barang Masuk")),
-            "selisih": _num(row.get("Selisih IN")),
-        }
+        # ringkasan utk chip popup — FIX 6d2-01: nilai MENTAH dari payload
+        # _keys (diformat _fmt_num → '1.500' via fmt_int_id); fallback
+        # parse display Indonesia _parse_num_id (bukan float EN lama).
+        if raw is not None:
+            row_summary = {"bm": raw.get("bm") or 0.0,
+                           "selisih": raw.get("selisih") or 0.0}
+        else:
+            row_summary = {
+                "bm": self._parse_num_id(row.get("Barang Masuk")),
+                "selisih": self._parse_num_id(row.get("Selisih IN")),
+            }
         InDetailPopup(self.winfo_toplevel(), resto, barang, tgl, det,
                       row_summary=row_summary)
 

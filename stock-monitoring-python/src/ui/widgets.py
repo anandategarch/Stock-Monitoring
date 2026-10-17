@@ -28,6 +28,7 @@ import contextlib
 import gc as _gc
 import math
 import re
+import sys
 import threading
 import time as _time
 import tkinter as tk
@@ -162,6 +163,33 @@ def validated_tgl_entry(var, *, lo: int, hi: int, fallback: int,
         return fallback
     var.set(str(val))
     return val
+
+
+def _take_grab(win):
+    """FIX 6e-03 (audit 6-e MEDIUM) — ambil grab popup + CATAT pemegang
+    grab sebelumnya. Popup AutoFilter/Panel Kolom membuka grab baru →
+    Tk MENGGANTI grab lama (modal induk — mis. DetailsPopup — kehilangan
+    modalitasnya PERMANEN setelah popup ditutup). Dipulihkan oleh
+    _restore_grab() di SEMUA jalur tutup."""
+    prev = None
+    with contextlib.suppress(tk.TclError):
+        prev = win.grab_current()
+    win._prev_grab = (prev if (prev is not None and prev is not win
+                               and hasattr(prev, "winfo_exists"))
+                      else None)
+    with contextlib.suppress(tk.TclError):
+        win.grab_set()
+
+
+def _restore_grab(win):
+    """FIX 6e-03 — pulihkan grab pemegang sebelumnya (bila masih hidup).
+    Dipanggil SEBELUM destroy popup (setelah grab_release bila ada)."""
+    prev = getattr(win, "_prev_grab", None)
+    if prev is None:
+        return
+    if prev.winfo_exists():
+        with contextlib.suppress(tk.TclError):
+            prev.grab_set()
 
 
 class AccentButton(tk.Button):
@@ -558,16 +586,37 @@ def _tsv_cell(v) -> str:
     return str(v).replace("\t", " ").replace("\n", " ").replace("\r", " ")
 
 
+# FIX 6b-02 (audit 6-b): sufiks panah arah sort yang ditempel _set_sort_arrow
+# ke teks heading — JANGAN ikut tersalin ke header TSV Ctrl+C / terukur oleh
+# auto_fit (satu konstanta bersama dgn _set_sort_arrow).
+_SORT_ARROW_MARKS = (" \u2193", " \u2191")   # " ↓", " ↑"
+
+
+def _strip_sort_arrow(text: str) -> str:
+    """FIX 6b-02 — buang sufiks panah sort (" ↓"/" ↑") dari teks heading."""
+    for m in _SORT_ARROW_MARKS:
+        if text.endswith(m):
+            return text[: -len(m)]
+    return text
+
+
 def tree_selection_tsv(tree: ttk.Treeview) -> str:
     """v3.9.33 — AUDIT FIX (48-f HIGH-#7): susun seleksi tree jadi teks TSV.
 
     Baris pertama = HEADER: label '#0' (bila tree hierarki menampilkannya)
-    + display-name tiap kolom (tree.heading(col)["text"] utk
-    tree["columns"]). Baris berikut = SATU baris per iid terpilih
+    + display-name tiap kolom. Baris berikut = SATU baris per iid terpilih
     (tree.item(iid, "values") di-tab-join). Tree hierarki (pivot parent):
     baris parent disalin APA ADANYA (values-nya sudah agregat) + teks #0
-    sebagai sel pertama — anak TIDAK di-flatten ke baris parent."""
-    cols = [str(c) for c in (tree["columns"] or [])]
+    sebagai sel pertama — anak TIDAK di-flatten ke baris parent.
+
+    FIX 6b-02 (audit 6-b): header diambil dari teks heading TANPA panah
+    sort (↓/↑) — dulu "Nama Barang ↓" ikut tersalin ke Excel.
+    FIX 6b-08 (audit 6-b): kolom mengikuti URUTAN TAMPILAN
+    (displaycolumns) — kolom yang disembunyikan ◱ Kolom TIDAK ikut
+    tersalin; nilai values[] tetap diindeks LOGIS lalu dipetakan ke
+    kolom display."""
+    # FIX 6b-08: kolom display (urutan tampilan), bukan tree["columns"].
+    cols = display_data_columns(tree)
     use_tree_col = False
     try:
         # deteksi kolom #0 (kompatibel Tk 8 & 9 — cget tuple vs string)
@@ -578,20 +627,34 @@ def tree_selection_tsv(tree: ttk.Treeview) -> str:
             use_tree_col = True
     except tk.TclError:
         pass
+    # FIX 6b-08: posisi LOGICAL tiap kolom display utk index values[].
+    try:
+        logical = [str(c) for c in (tree["columns"] or [])]
+    except tk.TclError:
+        logical = []
+    col_pos = {c: i for i, c in enumerate(logical)}
     headers = []
     if use_tree_col:
-        headers.append(_tsv_cell(tree.heading("#0", "text")))
+        headers.append(_tsv_cell(_strip_sort_arrow(
+            str(tree.heading("#0", "text") or ""))))
     for c in cols:
         try:
-            headers.append(_tsv_cell(tree.heading(c, "text") or c))
+            headers.append(_tsv_cell(_strip_sort_arrow(
+                str(tree.heading(c, "text") or c))))
         except tk.TclError:
             headers.append(_tsv_cell(c))
     lines = ["\t".join(headers)]
     for iid in tree.selection():
-        vals = [_tsv_cell(v) for v in tree.item(iid, "values")]
+        vals = list(tree.item(iid, "values") or [])
+        row = []
         if use_tree_col:
-            vals = [_tsv_cell(tree.item(iid, "text"))] + vals
-        lines.append("\t".join(vals))
+            row.append(_tsv_cell(tree.item(iid, "text")))
+        # FIX 6b-08: satu sel per kolom DISPLAY (hidden kolom dilewati).
+        for c in cols:
+            k = col_pos.get(c)
+            row.append(_tsv_cell(vals[k])
+                       if k is not None and 0 <= k < len(vals) else "")
+        lines.append("\t".join(row))
     return "\n".join(lines)
 
 
@@ -1234,12 +1297,29 @@ class TableExpander:
         self._text_restore = text_restore
         self._on_toggle = on_toggle
         self.expanded = False
-        self._saved: list = []   # (widget, manager, options, anchor)
+        # (widget, manager, options, anchor, order_key) — order_key =
+        # (id(parent), urutan pack ASLI) — FIX 6b-01.
+        self._saved: list = []
         try:
             button.configure(command=self.toggle)
         except tk.TclError:
             pass
+        # FIX 6b-05 (audit 6-b): pasang SEKALI — view boleh mem-pack ulang
+        # target saat mode ⤢ aktif (mis. _render_kpi_chips setelah ganti
+        # tanggal); <Map> men-trigger _on_target_map yang menyembunyikan
+        # ulang widget selama self.expanded (lihat _on_target_map).
+        for w in self._targets:
+            try:
+                w.bind("<Map>", self._on_target_map, add="+")
+            except tk.TclError:
+                pass
         self._update_text()
+
+    def is_hidden(self, widget) -> bool:
+        """FIX 6b-05 — helper publik: apakah widget target sedang
+        disembunyikan expander (mode ⤢ aktif). View bisa memakainya utk
+        guard pack() sendiri (pola _render_resto_scores in_selisih)."""
+        return self.expanded and widget in self._targets
 
     # ---------------------------------------------------------------- state --
     def _update_text(self):
@@ -1280,10 +1360,15 @@ class TableExpander:
                 # hitung anchor: sibling non-target BERIKUTNYA (jaga urutan
                 # saat restore) — bila tak ada, sibling non-target sebelumnya
                 anchor = None
+                # FIX 6b-01 (audit 6-b): catat juga POSISI urutan pack ASLI
+                # (id(parent), index) — restore memakainya utk memulihkan
+                # grup target consecutive dgn urutan yang benar.
+                order_key = (id(w.master), 0)
                 try:
                     parent = w.master
                     order = list(parent.pack_slaves())
                     idx = order.index(w)
+                    order_key = (id(parent), idx)
                     nxt = next((s for s in order[idx + 1:]
                                 if id(s) not in target_set), None)
                     if nxt is not None:
@@ -1298,11 +1383,12 @@ class TableExpander:
                 info = dict(info)
                 info.pop("before", None)
                 info.pop("after", None)
-                self._saved.append((w, "pack", info, anchor))
+                self._saved.append((w, "pack", info, anchor, order_key))
                 w.pack_forget()
             elif mgr == "grid":
                 # grid_remove mengingat semua opsi grid — restore = grid()
-                self._saved.append((w, "grid", None, None))
+                self._saved.append((w, "grid", None, None,
+                                    (id(w.master), 0)))
                 w.grid_remove()
         self.expanded = True
         self._update_text()
@@ -1311,26 +1397,74 @@ class TableExpander:
     def restore(self):
         """Kembalikan semua target ke posisi semula (urutan asli).
 
-        FIX B-16 (audit 2-b): iterasi REVERSE. Bug lama: bila ≥2 target
-        pack BERTURUT-turut di AKHIR urutan (semua anchor 'after' widget
-        non-target yang sama), iterasi maju memasang mereka TERBALIK —
-        [A, T1, T2] → [A, T2, T1]. Iterasi mundur menghasilkan urutan
-        benar untuk SEMUA kombinasi anchor after/before (anchor 'before'
-        aman di kedua arah; 'after' butuh mundur)."""
-        for w, mgr, info, anchor in reversed(self._saved):
-            try:
-                if mgr == "pack":
-                    kw = dict(info)
-                    if anchor is not None:
-                        kw[anchor[0]] = anchor[1]
-                    w.pack(**kw)
-                elif mgr == "grid":
-                    w.grid()
-            except tk.TclError:
-                continue
-        self._saved = []
+        FIX B-16 (audit 2-b): grup target di AKHIR urutan (semua anchor
+        'after' widget non-target sama) harus dipasang mundur — iterasi
+        maju memasang mereka TERBALIK ([A, T1, T2] → [A, T2, T1]).
+
+        FIX 6b-01 (audit 6-b): B-16 mundur SEMUA entri — grup anchor
+        'before' yang SAMA (≥2 target pack berturut-turut diikuti tabel
+        yang sama, mis. in_selisih [Filter, KPI, SKOR, tabel]) justru
+        TERBALIK oleh iterasi mundur. Kini entri DIPARTISI:
+        - anchor 'before' / tanpa anchor → dipasang URUT MAJU sesuai
+          posisi pack ASLI (order_key) — tiap pack(before=X) menyisipkan
+          tepat sebelum X;
+        - anchor 'after' (grup ekor) → tetap URUT MUNDUR (kebalikan B-16).
+        Kedua jenis tidak tumpang tindih dalam satu parent: target
+        'after' selalu berada SETELAH non-target terakhir, target
+        'before' selalu SEBELUM suatu non-target."""
+        # FIX 6b-05: expanded dimatikan DULU — re-pack milik restore ini
+        # sendiri tidak boleh ditelan lagi oleh _on_target_map.
         self.expanded = False
+        fwd = []
+        bwd = []
+        for entry in self._saved:
+            anchor = entry[3]
+            if anchor is not None and anchor[0] == "after":
+                bwd.append(entry)
+            else:
+                fwd.append(entry)
+        fwd.sort(key=lambda e: e[4])   # urutan pack ASLI per parent
+        bwd.sort(key=lambda e: e[4])
+        for w, mgr, info, anchor, _key in fwd:
+            self._repack(w, mgr, info, anchor)
+        for w, mgr, info, anchor, _key in reversed(bwd):
+            self._repack(w, mgr, info, anchor)
+        self._saved = []
         self._update_text()
+
+    @staticmethod
+    def _repack(w, mgr, info, anchor):
+        """Pasang ulang SATU target (options + anchor tersimpan)."""
+        try:
+            if mgr == "pack":
+                kw = dict(info)
+                if anchor is not None:
+                    kw[anchor[0]] = anchor[1]
+                w.pack(**kw)
+            elif mgr == "grid":
+                w.grid()
+        except tk.TclError:
+            pass
+
+    def _on_target_map(self, event):
+        """FIX 6b-05 (audit 6-b): target di-pack ulang view (render ulang
+        KPI/SKOR pasca ganti tanggal / reset filter) saat mode ⤢ aktif →
+        sembunyikan LAGI tanpa mengubah anchor tersimpan, supaya kartu
+        tidak muncul sendiri & tombol tidak berbohong ('⤡ Tampilkan …')."""
+        if not self.expanded:
+            return
+        w = event.widget
+        try:
+            mgr = w.winfo_manager()
+        except tk.TclError:
+            return
+        try:
+            if mgr == "pack":
+                w.pack_forget()
+            elif mgr == "grid":
+                w.grid_remove()
+        except tk.TclError:
+            pass
 
     def reset(self):
         """Pulihkan bila sedang collapse (dipanggil load_data supaya layout
@@ -1545,10 +1679,7 @@ class HeaderFilter:
         win.configure(bg=C_CARD)
         win.transient(root)
         win.resizable(False, False)
-        try:
-            win.grab_set()
-        except Exception:
-            pass
+        _take_grab(win)  # FIX 6e-03 — pulihkan grab modal induk saat ditutup
 
         body = tk.Frame(win, bg=C_CARD)
         body.pack(fill="both", expand=True, padx=14, pady=12)
@@ -1861,6 +1992,7 @@ class HeaderFilter:
                 self._popup.grab_release()
             except Exception:
                 pass
+            _restore_grab(self._popup)  # FIX 6e-03 — SEBELUM destroy
             try:
                 self._popup.destroy()
             except Exception:
@@ -2137,6 +2269,7 @@ class ColumnManager:
     # -- panel checklist --------------------------------------------------------
     def open_panel(self):
         if self._panel is not None and self._panel.winfo_exists():
+            _restore_grab(self._panel)  # FIX 6e-03 — tutup toggle
             self._panel.destroy()
             return
         cols = self.columns()
@@ -2149,10 +2282,19 @@ class ColumnManager:
         win.configure(bg=C_CARD)
         win.transient(root)
         win.resizable(False, False)
-        try:
-            win.grab_set()
-        except Exception:
-            pass
+        _take_grab(win)  # FIX 6e-03 — catat pemegang grab sebelumnya
+
+        def _close_panel():
+            # FIX 6e-03 — semua jalur tutup panel memulihkan grab modal
+            # induk (Esc / ✕ Tutup / WM close / toggle) — dulu grab modal
+            # (mis. DetailsPopup) hilang PERMANEN setelah panel ditutup.
+            _restore_grab(win)
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", _close_panel)
 
         body = tk.Frame(win, bg=C_CARD)
         body.pack(fill="both", expand=True, padx=14, pady=12)
@@ -2182,7 +2324,7 @@ class ColumnManager:
                   activeforeground="#ffffff", bd=0, relief="flat",
                   highlightthickness=0, cursor="hand2", font=font(9, "bold"),
                   padx=12, pady=5).pack(side="left")
-        tk.Button(btnrow, text="✕ Tutup (Esc)", command=win.destroy,
+        tk.Button(btnrow, text="✕ Tutup (Esc)", command=_close_panel,
                   bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
                   activeforeground="#ffffff", bd=0, relief="flat",
                   highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -2218,7 +2360,7 @@ class ColumnManager:
                             command=lambda c=c, v=v: _on_toggle(c, v)) \
                 .pack(anchor="w", padx=8, pady=1)
 
-        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Escape>", lambda e: _close_panel())  # FIX 6e-03
         win.update_idletasks()
         x = min(max(self.tree.winfo_rootx() + 40, 0),
                 max(root.winfo_screenwidth() - win.winfo_reqwidth() - 20, 0))
@@ -2283,25 +2425,50 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
 
     v3.9.56 — ``value_get(iid, col, cur)``: sumber nilai RAW per baris
     (kolom merge-vertikal deviasi_view — nilai tree head-only/sticky).
+
+    FIX 6b-04 (audit 6-b): batch insert yang masih berjalan (copy awal
+    clone ⛶) dibatalkan SEBELUM snapshot cache dibangun; bila copy masih
+    in-flight, cache lengkap diambil dari snapshot ``tree._full_items``
+    yang ditinggalkan open_tree_maximized (dulu cache dibangun dari baris
+    PARSIAL → sisa batch dibatalkan → clone terpotong diam-diam).
     """
     # v3.9.13: seleksi KOSONG = filter AKTIF (0 baris, semantik Excel) —
     # dulu truthiness `if s` menelan set() sebagai "tanpa filter".
     active = {c: s for c, s in filters.items() if s is not None}
     try:
+        # FIX 6b-04 (audit 6-b): batalkan batch insert pending DULU —
+        # membangun cache dari baris parsial lalu membatalkan sisa batch
+        # membuat clone kehilangan baris yang belum tersalin.
+        prev = getattr(tree, "_row_filter_cancel", None)
+        if prev is not None:
+            prev()
         cache = getattr(tree, "_row_filter_cache", None)
         if cache is None:
-            def rec(parent, out):
-                for iid in tree.get_children(parent):
-                    it = tree.item(iid)
-                    out.append((parent, iid, {
-                        "text": it.get("text", ""),
-                        "values": it.get("values", ""),
-                        "tags": it.get("tags", ""),
-                        "open": it.get("open", False),
-                    }))
-                    rec(iid, out)
-            cache = []
-            rec("", cache)
+            full = getattr(tree, "_full_items", None)
+            if full:
+                # FIX 6b-04: copy clone masih berjalan — sumber cache =
+                # snapshot PENUH (bukan baris yang sempat ter-insert);
+                # sekaligus finalisasi copy (hide overlay, label baris,
+                # on_render_done) yang tidak akan pernah dipanggil batch
+                # yang baru saja dibatalkan.
+                cache = list(full)
+                finalize = getattr(tree, "_copy_finalize", None)
+                if finalize is not None:
+                    with contextlib.suppress(Exception):
+                        finalize()
+            else:
+                def rec(parent, out):
+                    for iid in tree.get_children(parent):
+                        it = tree.item(iid)
+                        out.append((parent, iid, {
+                            "text": it.get("text", ""),
+                            "values": it.get("values", ""),
+                            "tags": it.get("tags", ""),
+                            "open": it.get("open", False),
+                        }))
+                        rec(iid, out)
+                cache = []
+                rec("", cache)
             tree._row_filter_cache = cache
         if not cache:
             return
@@ -2338,9 +2505,6 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
                                    value_get=value_get):
                 items.append(("", iid, kw))
 
-    prev = getattr(tree, "_row_filter_cancel", None)
-    if prev is not None:
-        prev()
     try:
         tree.delete(*tree.get_children(""))
     except tk.TclError:
@@ -2635,11 +2799,33 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
     v3.3: delay adaptif — tabel besar (>20k baris) memakai 1ms/batch,
     jadi 50k baris tidak lagi menunggu +1 detik ekstra (dulu 10ms/batch).
 
+    FIX 6b-06 (audit 6-b): TclError PER-ITEM (mis. iid duplikat dari bug
+    view / Tcl transien) dulu membatalkan SISA batch + on_done TIDAK
+    pernah dipanggil — caller yang menunggu render_done (reset _busy,
+    pasang tag cell, autofit pertama, hide overlay clone) menunggu
+    selamanya tanpa pesan. Kini item gagal di-skip (dihitung + catatan
+    stderr ringkas), batch lanjut, on_done SELALU dipanggil di akhir
+    (kecuali tree sudah mati — view juga sudah tidak ada).
+
     Return fungsi cancel() utk membatalkan sisa batch.
     """
     if delay is None:
         delay = 10 if len(items) <= 20_000 else 1
-    state = {"i": 0, "cancelled": False}
+    state = {"i": 0, "cancelled": False, "failed": 0, "finished": False}
+
+    def _finish():
+        # FIX 6b-06: dipanggil PERSIS SEKALI di akhir jalur sukses —
+        # jalur error per-item tidak boleh memotong on_done.
+        if state["finished"] or state["cancelled"]:
+            return
+        state["finished"] = True
+        if state["failed"]:
+            # tidak senyap: baris + jumlah ke stderr (tidak per-item supaya
+            # batch 50k tidak membanjiri log)
+            print(f"insert_tree_items: {state['failed']} item dilewati "
+                  f"(TclError — iid duplikat/baris invalid)", file=sys.stderr)
+        if on_done:
+            on_done()
 
     def chunk():
         if state["cancelled"]:
@@ -2651,11 +2837,13 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
             return
         start = state["i"]
         end = min(start + batch, len(items))
-        try:
-            for parent_iid, iid, kw in items[start:end]:
+        # FIX 6b-06 (audit 6-b): try/except PER-ITEM — satu TclError
+        # (iid duplikat) tidak lagi membatalkan sisa batch.
+        for parent_iid, iid, kw in items[start:end]:
+            try:
                 tree.insert(parent_iid, "end", iid=iid, **kw)
-        except tk.TclError:
-            return
+            except tk.TclError:
+                state["failed"] += 1
         state["i"] = end
         if chunk_callback:
             try:
@@ -2666,9 +2854,11 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
             try:
                 tree.after(delay, chunk)
             except tk.TclError:
-                pass
-        elif on_done:
-            on_done()
+                # timer gagal dipasang (tree mati di tengah) — tetap
+                # finalisasi supaya caller tidak menggantung
+                _finish()
+        else:
+            _finish()
 
     if items:
         chunk()
@@ -3536,6 +3726,15 @@ def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
       tag-per-baris; permintaan user "coba cari alternatif lain").
       Semantik replace per tag: panggil ulang dgn daftar lengkap tiap
       reapply (pola yang sudah dipakai semua view).
+    - FIX 6b-03 (audit 6-b): jalur NATIVE Tk 9 kini juga REPLACE (dulu
+      ADDITIF + list kosong = no-op — semantik 'replace'/'clear' yang
+      didokumentasikan view hanya benar di jalur overlay Tk 8). Sel yang
+      SEBELUMNYA ditandai lewat fungsi ini utk tag yang sama tapi TIDAK
+      ada di daftar baru, dilepas via ``tag cell remove``; list kosong =
+      bersihkan semua anggota tag (mirror ``_cellsel_apply_cells``).
+      Perilaku Tk 8 & Tk 9 kini seragam. Pelacakan internal disimpan di
+      ``tree._cell_tags_applied`` (map tag → set sel) — murni internal,
+      API publik tidak berubah.
     Return jumlah cell yang berhasil ditandai.
     """
     if not CELL_TAGS_NATIVE:
@@ -3546,10 +3745,33 @@ def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
             return len(cells or [])
         except tk.TclError:
             return 0
-    if not cells:
-        return 0
-    applied = 0
+    cells = list(cells or [])
     path = str(tree)
+    new_set = {(str(iid), str(col)) for iid, col in cells}
+    # FIX 6b-03: pelacakan sel yang pernah dipasang per (tree, tag) —
+    # atribut internal polos (pola _row_filter_cache/_last_sort).
+    applied_map = getattr(tree, "_cell_tags_applied", None)
+    if applied_map is None:
+        applied_map = {}
+        tree._cell_tags_applied = applied_map
+    old = applied_map.get(tag) or set()
+    if not cells:
+        # FIX 6b-03: list kosong = CLEAR (semantik yang didokumentasikan
+        # semua view sejak v3.9.42/audit 61-c P1-2 — hanya Tk 8 yang
+        # sebelumnya benar-benar melakukannya).
+        if old:
+            _remove_cell_tag(tree, tag, old)
+            applied_map[tag] = set()
+        return 0
+    # FIX 6b-03: lepas anggota LAMA yang tidak ada di daftar baru
+    # (semantik replace) — remove cellList; bila ada iid yang sudah
+    # dihapus user, seluruh remove gagal ("Item not found") → fallback
+    # remove TANPA cellList (lepas semua anggota) lalu daftar baru
+    # dipasang ulang penuh di bawah (hasil akhir ekuivalen).
+    stale = old - new_set
+    if stale:
+        _remove_cell_tag(tree, tag, stale)
+    applied = 0
     for i in range(0, len(cells), chunk):
         part = cells[i:i + chunk]
         spec = tuple((str(iid), str(col)) for iid, col in part)
@@ -3569,7 +3791,26 @@ def apply_cell_tag(tree: ttk.Treeview, tag: str, cells: list,
         with contextlib.suppress(tk.TclError):
             tree.tk.call(path, "tag", "cell", "add", tag, spec2)
             applied += len(part2)
+    applied_map[tag] = set(new_set)
     return applied
+
+
+def _remove_cell_tag(tree: ttk.Treeview, tag: str, cells) -> None:
+    """FIX 6b-03 (audit 6-b) — lepas tag dari sel (Tk 9 ``tag cell
+    remove``). ``cells`` iterable {(iid, col), ...}; bila salah satu iid
+    sudah tidak ada, TclError "Item not found" membatalkan seluruh
+    panggilan → fallback remove TANPA cellList (lepas SEMUA anggota tag —
+    pemanggil selalu memasang ulang daftar lengkap sesudahnya, jadi hasil
+    akhir tetap benar). Best-effort: error ditelan."""
+    path = str(tree)
+    spec = tuple((str(iid), str(col)) for iid, col in cells)
+    try:
+        tree.tk.call(path, "tag", "cell", "remove", tag, spec)
+        return
+    except tk.TclError:
+        pass
+    with contextlib.suppress(tk.TclError):
+        tree.tk.call(path, "tag", "cell", "remove", tag)
 
 
 # --- Sort engine linear (v3.3) ------------------------------------------------
@@ -3698,7 +3939,7 @@ def _set_sort_arrow(tree: ttk.Treeview, col: str, descending: bool) -> None:
     hidup di opsi ``image`` — tidak tersentuh). Heading yang tidak
     berubah teksnya tidak dikonfigurasi ulang sama sekali.
     """
-    marks = (" \u2193", " \u2191")   # " ↓", " ↑"
+    marks = _SORT_ARROW_MARKS   # FIX 6b-02 — konstanta bersama " ↓"/" ↑"
     try:
         cols = [str(c) for c in tree["columns"]]
     except tk.TclError:
@@ -4152,7 +4393,16 @@ def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):
     v3.9.55 — juga memasang SYNC OVERLAY SCROLL (sync_tree_scroll_overlays:
     drag scrollbar + keyboard — dua jalur scroll yang dulu meninggalkan
     label sel warna 1 frame di posisi lama).
+    FIX 6b-07 (audit 6-b): flag idempotensi ``tree._col_resize_bound``
+    (pola _smooth_wheel_bound / _multi_select_bound) — make_tree SUDAH
+    memanggil fungsi ini; view yang memanggil ulang (pola copy-paste)
+    dulu mendapat binding drag/resize/auto-fit GANDA (tiap B1-Motion
+    men-set width 2×, Double-1 auto-fit 2×).
     """
+    # FIX 6b-07 (audit 6-b): dipanggil 2× = double binding — guard.
+    if getattr(tree, "_col_resize_bound", False):
+        return tree
+    tree._col_resize_bound = True
     enable_smooth_wheel(tree)   # v3.9.29 — idempoten (flag)
     sync_tree_scroll_overlays(tree)   # v3.9.55 — idempoten (flag/bindtag)
     state = {"col": None, "start_x": 0, "start_w": 0}
@@ -4307,7 +4557,10 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
 
     for col in cols:
         try:
-            w = meas(str(tree.heading(col, "text") or "")) + pad + 10
+            # FIX 6b-02 (audit 6-b): judul diukur TANPA sufiks panah sort —
+            # kolom terakhir di-sort dulu ikut terukur +~12px (kosmetik).
+            w = meas(_strip_sort_arrow(
+                str(tree.heading(col, "text") or ""))) + pad + 10
         except tk.TclError:
             continue
         if col == "#0":
@@ -4523,6 +4776,18 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     collect("")
 
     def done():
+        # FIX 6b-04 (audit 6-b): idempoten — bisa dipanggil normal oleh
+        # insert_tree_items ATAU oleh apply_tree_row_filters ketika batch
+        # copy dibatalkan di tengah jalan (filter diklik saat "Menyalin
+        # n/total baris…" masih berjalan); tanpa ini overlay loading clone
+        # menempel selamanya.
+        if getattr(new_tree, "_copy_finalized", False):
+            return
+        new_tree._copy_finalized = True
+        # FIX 6b-04: snapshot penuh hanya hidup selama copy — lepas
+        # referensi (memori) + finalizer setelah selesai.
+        new_tree._full_items = None
+        new_tree._copy_finalize = None
         overlay.hide()
         # FIX B-15 (audit 2-b): format ribuan Indonesia — koma EN
         # ("1,346") terbaca desimal dalam konvensi Indonesia.
@@ -4532,6 +4797,13 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
             # dalamnya; kegagalan tidak boleh memutus batch insert clone
             with contextlib.suppress(Exception):
                 on_render_done(new_tree)
+
+    # FIX 6b-04 (audit 6-b): simpan snapshot item PENUH + finalizer di
+    # tree SELAMA copy berjalan — apply_tree_row_filters memakainya bila
+    # filter diklik sebelum copy selesai (cache lengkap, bukan baris
+    # parsial) dan memanggil _copy_finalize utk efek samping done().
+    new_tree._full_items = items
+    new_tree._copy_finalize = done
 
     insert_cancel = insert_tree_items(new_tree, items, batch=600,
                                       on_done=done,
