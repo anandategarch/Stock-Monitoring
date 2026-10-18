@@ -4038,11 +4038,11 @@ class HeadingTintOverlay:
         lab.bind("<Button-1>", press, add="+")
 
 
-# v3.9.55 — RankMergeOverlay DIHAPUS (merge-vertikal kini NATIVE
-# di deviasi_view._reapply_group_merge: nilai head-only + band kelompok
-# seragam — tanpa widget LABEL di atas tree, bebas glitch scroll &
-# mencakup kolom Nama Barang + Rank; lihat riwayat v3.9.52 utk desain
-# overlay lama).
+# v3.9.55 — RankMergeOverlay DIHAPUS (merge-vertikal kini NATIVE:
+# nilai per-baris langsung di payload deviasi_view sejak v3.9.60 —
+# tanpa widget LABEL di atas tree, bebas glitch scroll & mencakup kolom
+# Nama Barang + Rank; v3.9.61 band kelompok ikut dihapus — baris seragam).
+# Riwayat desain overlay lama lihat v3.9.52.
 
 
 def _collect_iids(tree, parent="") -> set:
@@ -4716,6 +4716,181 @@ def enable_smooth_wheel_list(cv: tk.Canvas, *,
     # + handler polos di atas melewatkan event bergaya Control ke
     # fallback 'all' (jalur zoom utk wheel yang jatuh di anak popup).
     bind_ctrl_zoom(cv)
+
+
+def install_wheel_router(top: tk.Misc, *,
+                         get_primary_scrollable=None) -> None:
+    """v3.9.61 — ROUTER RODA SERAKAT-AREA (user: "tab rekap selisih in
+    aku masih tidak bisa scroll pakai wheele mouse").
+
+    AKAR MASALAH (diagnosis v3.9.61, terpasang setelah fix viewport
+    v3.9.60): roda hanya bergulir bila event jatuh PERSIS di widget yang
+    punya binding roda (tree enable_smooth_wheel / canvas
+    enable_smooth_wheel_list). Binding Tk TIDAK BUBBLE dari induk ke
+    anak — bindtag anak = [anak, kelas, TOPLEVEL, all] — jadi:
+
+    1. BARIS leaderboard rekap = Label di dalam frame inner canvas →
+       pointer di atas baris (±90% area papan skor) → TIDAK ada binding
+       yang terpanggil → roda MATI. (v3.9.60 mem-bind canvas + listwrap
+       frame — dua area celah saja.)
+    2. Area krom non-scrollable (kartu KPI · kartu Filter · footer ·
+       legend · baris "+N resto") → roda MATI di SEMUA tab.
+    3. Windows/Tk tertentu mengirim wheel ke widget FOKUS — pointer di
+       atas tabel tapi fokus di Entry/Aplikasi → roda MATI walau tabel
+       sehat.
+
+    SOLUSI: SATU binding di TOPLEVEL utama — bindtag Toplevel ada di
+    rantai SEMUA anak jendela, DAN berjalan SETELAH binding widget/kelas
+    (yang konsumsi roda dengan "break" — tree/canvas smooth-wheel —
+    tidak terganggu, tak ada gulir dobel). Router menggulir scrollable
+    DI BAWAH POINTER (bukan widget penerima event — bereset masalah
+    fokus #3): jalur master dari widget-bawah-pointer dicari naik
+    sampai ketemu ttk.Treeview ATAU tk.Canvas ber-yscrollcommand
+    (canvas dekoratif tanpa scrollbar dilewati). Bila tak ada
+    scrollable di bawah pointer (area krom #2), fallback
+    ``get_primary_scrollable()`` — tabel utama TAB AKTIF (perilaku
+    standar aplikasi modern: roda di area kosong menggulir konten tab).
+
+    Detail aman:
+    - CTRL+roda diteruskan (return None → bindtag 'all' → zoom UI
+      v3.9.48 — jangan dicampur gulir).
+    - Widget-bawah-pointer di TOPLEVEL LAIN (popup filter / clone ⛶ /
+      detail) → diabaikan (jendela itu punya mesin roda sendiri).
+    - Akumulator delta pecahan PER TARGET (pola v3.9.40: berbalik arah
+      → sisa arah lama dibuang) — trackpad resolusi tinggi tetap halus.
+    - Treeview → 1 baris per notch + redraw overlay warna sel SEKARANG
+      (pola _redraw_overlay_now — label overlay tak tertinggal 1 frame).
+    - Canvas → "units" = yscrollincrement (leaderboard rekap v3.9.61
+      men-set-nya = tinggi baris aktual → 1 baris per notch; canvas
+      lain unit = 1/10 tinggi jendela — perilaku bawaan Tk).
+    - Idempoten (flag ``_wheel_router_bound`` di Toplevel)."""
+    if getattr(top, "_wheel_router_bound", False):
+        return
+    top._wheel_router_bound = True
+
+    _ctrl = 0x0004   # bit modifier Control (<MouseWheel> & X11 Button-4/5)
+
+    def _scrollable_under(px, py):
+        try:
+            w = top.winfo_containing(px, py)
+        except tk.TclError:
+            return None
+        if w is None:
+            return None
+        # hanya area jendela INI — popup/clone punya Toplevel sendiri
+        # (mesin roda + grab mereka sendiri; jangan digulir dari luar)
+        try:
+            if w.winfo_toplevel() is not top:
+                return None
+        except tk.TclError:
+            return None
+        cur = w
+        while cur is not None and cur is not top:
+            if isinstance(cur, ttk.Treeview):
+                return cur
+            if isinstance(cur, tk.Canvas):
+                try:
+                    if str(cur.cget("yscrollcommand")):
+                        return cur
+                except tk.TclError:
+                    pass
+            try:
+                cur = cur.master
+            except tk.TclError:
+                return None
+        return None
+
+    def _apply_scroll(target, units) -> bool:
+        try:
+            target.yview_scroll(units, "units")
+        except tk.TclError:
+            return False
+        if isinstance(target, ttk.Treeview):
+            _redraw_overlay_now(target)
+        return True
+
+    def _event_target(event):
+        px = getattr(event, "x_root", None)
+        py = getattr(event, "y_root", None)
+        if px is None or py is None:
+            try:
+                px, py = top.winfo_pointerxy()
+            except tk.TclError:
+                return None
+        target = _scrollable_under(px, py)
+        if target is None and get_primary_scrollable is not None:
+            # fallback hanya bila pointer masih DI JENDELA INI — pointer
+            # di popup/clone ⛶ (Toplevel lain) = mesin roda jendela itu
+            # yang bekerja; jangan ikut menggulir tabel utama dari luar.
+            try:
+                _w = top.winfo_containing(px, py)
+            except tk.TclError:
+                _w = None
+            if _w is None:
+                return None
+            try:
+                if _w.winfo_toplevel() is not top:
+                    return None
+            except tk.TclError:
+                return None
+            try:
+                target = get_primary_scrollable()
+            except Exception:  # noqa: BLE001 — batas API callback view
+                # (callback milik app/view; jangan biarkan exception di
+                # sana mematikan jalur roda utama)
+                target = None
+        if target is None or not isinstance(target, (ttk.Treeview,
+                                                     tk.Canvas)):
+            return None
+        return target
+
+    def _on_wheel(event):
+        state = getattr(event, "state", 0) or 0
+        if isinstance(state, int) and state & _ctrl:
+            return None          # → bindtag 'all' (fallback zoom app)
+        d = getattr(event, "delta", 0) or 0
+        if d == 0:
+            return None
+        target = _event_target(event)
+        if target is None:
+            return None
+        acc = getattr(target, "_wheel_router_acc", 0.0)
+        # ganti arah: buang sisa akumulator ARAH LAMA (pola v3.9.40 —
+        # kontribusi = -d; reset saat tanda kontribusi ≠ tanda akumulator)
+        if acc and ((d > 0) == (acc > 0)):
+            acc = 0.0
+        acc += -d / 120.0
+        steps = int(acc)         # potong menuju nol; sisa diakumulasi
+        target._wheel_router_acc = acc - steps
+        if steps and _apply_scroll(target, steps):
+            return "break"
+        return None
+
+    # X11: arah DIBAWA POLA BINDING (bukan event.num — pola konsisten
+    # enable_smooth_wheel/enable_smooth_wheel_list).
+    def _on_btn_up(event):
+        state = getattr(event, "state", 0) or 0
+        if isinstance(state, int) and state & _ctrl:
+            return None
+        target = _event_target(event)
+        if target is None:
+            return None
+        target._wheel_router_acc = 0.0
+        return "break" if _apply_scroll(target, -1) else None
+
+    def _on_btn_down(event):
+        state = getattr(event, "state", 0) or 0
+        if isinstance(state, int) and state & _ctrl:
+            return None
+        target = _event_target(event)
+        if target is None:
+            return None
+        target._wheel_router_acc = 0.0
+        return "break" if _apply_scroll(target, 1) else None
+
+    top.bind("<MouseWheel>", _on_wheel, add="+")
+    top.bind("<Button-4>", _on_btn_up, add="+")
+    top.bind("<Button-5>", _on_btn_down, add="+")
 
 
 def enable_col_resize(tree: ttk.Treeview, *, edge_px: int = 7):

@@ -517,35 +517,15 @@ class DeviasiView(tk.Frame):
     HIGHLIGHT_COLS = ("Deviasi", "SO_H")
     HIGHLIGHT_BG = "#fef3c7"   # amber-100 — latar lembut, teks tetap terbaca
 
-    # v3.9.49 — SEKAT VISUAL ANTAR KELOMPOK BARANG (user: "dibagian antara
-    # Cabe dan pentol itu ada semacam sekat visual yang membatasi atau
-    # menandakan"): striping per-baris (evenrow/oddrow) DIGANTI banding per
-    # KELOMPOK Nama Barang — grp0/grp1 = pita latar bergantian per kelompok.
-    # v3.9.55 — MERGE-VERTIKAL NATIVE (user: "Merger Vertical Nama barang
-    # dan Rank ... sama kaya di tab rincian PO"): SELURUH baris kelompok kini
-    # SATU WARNA BAND (grp_head #e2e8f0 DIHAPUS — batas warna head-vs-band
-    # v3.9.51-52 membuat kolom Nama Barang/Rank tampak sel TERPISAH, bukan
-    # satu sel tinggi; dulu ditambal RankMergeOverlay LABEL yang ber-glitch
-    # saat scroll). Batas kelompok = PERGANTIAN WARNA band (putih ↔
-    # #9aa7b9 — 2,44:1, fix 2d-02) + nilai Nama Barang/Rank SEKALI di
-    # baris head kelompok
-    # (blank di baris lanjutan — pola tab 🛒 Rincian PO persis).
-    # Tuple-of-tuples (bukan dict) — nilai KONSTAN immutable (mirror COLUMNS
-    # list-of-tuples kelas ini).
-    # v3.9.59 — AUDIT FIX 2d-02: grp1 #f1f5f9 (slate-100) kontras batas
-    # vs grp0 putih hanya 1,096:1 — sekat antar kelompok NYARIS tak
-    # terlihat di monitor ber-kalibrasi rendah (satu-satunya affordance
-    # batas kelompok sejak grp_head dihapus v3.9.55). Digelapkan ke
-    # #9aa7b9 (keluarga slate-400, diterangkan): kontras batas
-    # 2,44:1 ≥ target 2,4:1 (komputasi WCAG — probe fd_band). NOTE:
-    # teks fg berwarna di atas band ini (neg #dc2626, cek_manual #c2410c
-    # yang DIKUNCI test) turun ke ±2:1 — trade-off di bawah kendali main
-    # agent (lihat worklog); teks gelap utama tetap 7,3:1.
-    GRP_TAG_COLORS = (
-        ("grp0", "#ffffff"),      # kelompok genap — putih
-        ("grp1", "#9aa7b9"),      # kelompok ganjil — slate-400 terang
-    )
-    _GRP_TAGS = ("grp0", "grp1")
+    # v3.9.61 — SEKAT WARNA KELOMPOK DIHAPUS (user: "hilangkan warna "
+    # "untuk sekat visual tiap grup nama barang pada tab deviasi gr dan "
+    # "deviasi pcs"): era v3.9.49-60 memakai pita latar grp0/grp1 bergantian
+    # per kelompok Nama Barang (terakhir putih ↔ #9aa7b9). Kini baris
+    # SELURUHNYA latar seragam (putih) — nama barang tetap PER-BARIS di
+    # tiap baris (v3.9.60), kelompok tetap KONTIGU (sort default by
+    # Nama Barang), pewarnaan afektif tersisa hanya teks fg (minus
+    # merah/nol abu/label CEK) + highlight kolom Deviasi/SO_H. Konstanta
+    # GRP_TAG_COLORS/_GRP_TAGS dan mesin _reapply_group_merge dihapus.
 
     CEK_THRESHOLD = 1.3
 
@@ -939,13 +919,11 @@ class DeviasiView(tk.Frame):
         self._in_tint = HeadingTintOverlay(
             self.tree, list(self.IN_COLS), self.IN_HEADER_COLOR)
 
-        # v3.9.60 — NILAI PER-BARIS + BAND KELOMPOK: Nama Barang & Rank
-        # ditulis payload di SETIAP baris kelompoknya (konstanta per
-        # kelompok); sekat visual tetap via band grp0/grp1 bergantian
-        # (GRP_TAG_COLORS) yang dipasang ulang oleh _reapply_group_merge
-        # mengikuti urutan visual (render/sort/clone), TANPA widget
+        # v3.9.60 — NILAI PER-BARIS: Nama Barang & Rank ditulis payload di
+        # SETIAP baris kelompoknya (konstanta per kelompok), TANPA widget
         # tambahan & TANPA state display yang bisa basi (era sticky
-        # v3.9.55-59 dihapus — lihat komentar _prepare_rows).
+        # v3.9.55-59 dihapus — lihat komentar _prepare_rows). v3.9.61 —
+        # sekat warna kelompok dihapus (baris seragam putih).
 
         # Legend CEK
         legend = LegendRow(self.content, [
@@ -1469,11 +1447,10 @@ class DeviasiView(tk.Frame):
         tree = tree if tree is not None else self.tree
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
-        # v3.9.49 — sekat visual antar kelompok Nama Barang (menggantikan
-        # striping evenrow/oddrow di view ini; konfigurasi lama tetap —
-        # clone/instansi lama tak terdampak).
-        for _tag, _bg in self.GRP_TAG_COLORS:
-            tree.tag_configure(_tag, background=_bg)
+        # v3.9.61 — sekat warna kelompok DIHAPUS (user): konfigurasi tag
+        # grp0/grp1 (band latar putih ↔ slate) tidak lagi dipasang; kelas
+        # konfigurasi evenrow/oddrow lama dibiarkan (tak pernah dipakai
+        # di view ini — nilai historis utk instansi kloning lama).
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero_dev", foreground="#64748b")
         # v3.9.2 — minus merah PER CELL (bukan satu baris penuh)
@@ -2505,22 +2482,12 @@ class DeviasiView(tk.Frame):
         # anomali check — jangan menggelembungkan angka 'CEK n' footer.
         _cek_primary61 = cek_series.str.split(" \u00b7 ").str[0]
         cek_count = int(_cek_primary61.isin(self._CEK_CHECK_LABELS).sum())
-        # v3.9.49 — SEKAT VISUAL ANTAR KELOMPOK BARANG: urutan render sudah
-        # di-sort by (Nama Barang, |Dev| desc) → kelompok barang KONTIGU.
-        # Band index = nomor kelompok berjalan (beralih tiap kali Nama
-        # Barang berubah). v3.9.55 — SELURUH baris kelompok SATU band
-        # (grp_head dihapus — merge-vertikal native Nama Barang/Rank:
-        # nilai sekali di head + band seragam = tampak SATU sel tinggi;
-        # batas kelompok = pergantian warna band). Sort kolom lain → band
-        # dipasang ulang oleh _reapply_group_merge mengikuti urutan visual
-        # baru (adjacency dari _row_snaps — nilai kolom Nama Barang kini
-        # head-only di baris lanjutan).
-        barang_np = filtered["Nama Barang"].astype(str).to_numpy()
-        grp_start = np.ones(n, dtype=bool)
-        if n > 1:
-            grp_start[1:] = barang_np[1:] != barang_np[:-1]
-        grp_id = np.cumsum(grp_start) - 1
-        grp_band = grp_id % 2
+        # v3.9.61 — SEKAT WARNA KELOMPOK DIHAPUS (user): urutan render
+        # tetap di-sort by (Nama Barang, |Dev| desc) → kelompok barang
+        # KONTIGU (nama/rank per-baris tetap berdekatan satu kelompok),
+        # TAPI tanpa pita latar bergantian — baris seragam putih. Mesin
+        # band (grp_start/grp_id/grp_band → tag grp0/grp1 + reapply
+        # pasca-sort) dihapus total.
         items = []
         fp_map = {}
         row_snaps = {}
@@ -2577,8 +2544,8 @@ class DeviasiView(tk.Frame):
                     # pemakaian nyata (baris lanjutan kelihatan kosong).
                     # Kini SETIAP baris membawa nilai (konstanta per
                     # kelompok) — nama/rank tak mungkin tak muncul di
-                    # viewport mana pun, sort/clone/scroll mana pun;
-                    # sekat kelompok tetap tampak lewat band grp0/grp1.
+                    # viewport mana pun, sort/clone/scroll mana pun
+                    # (v3.9.61: tanpa band — baris seragam putih).
                     values[j] = self._fmt_int(val)
                 elif col_id == "Nama Barang":
                     # v3.9.60 — idem: nama barang di SEMUA baris
@@ -2694,11 +2661,10 @@ class DeviasiView(tk.Frame):
                 tags.append("cek_drastis")
             elif cek_val == "ACR to BOM":
                 tags.append("cek_acr")
-            # v3.9.49 — banding KELOMPOK (menggantikan evenrow/oddrow):
-            # v3.9.55 — SELURUH baris kelompok SATU band SERAGAM (grp_head
-            # dihapus — merge-vertikal native Nama Barang/Rank; batas
-            # kelompok = pergantian warna band putih ↔ #9aa7b9, fix 2d-02).
-            tags.append("grp0" if int(grp_band[i]) == 0 else "grp1")
+            # v3.9.61 — tanpa tag band kelompok (sekat warna dihapus —
+            # user: "hilangkan warna untuk sekat visual tiap grup nama
+            # barang"); tag tersisa hanya pewarnaan afektif (minus/nol/
+            # label CEK).
 
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
@@ -2845,77 +2811,19 @@ class DeviasiView(tk.Frame):
 
     def _reapply_render_decorations(self, tree):
         """v3.9.49 — pasang ulang SEMUA dekorasi render pasca-insert/sort/
-        filter-clone: tag per-cell (minus/nol/highlight) + BANDING
-        kelompok barang (sekat visual). Satu pintu supaya semua jalur
-        (render_done · _sort_by · on_after_filter clone · on_render_done
-        clone) konsisten.
+        filter-clone: tag per-cell (minus/nol/highlight). Satu pintu supaya
+        semua jalur (render_done · _sort_by · on_after_filter clone ·
+        on_render_done clone) konsisten.
         v3.9.51 — + reposisi strip header kolom In (HeadingTintOverlay).
         v3.9.55-59 — + merge-vertikal nilai nama/rank (era sticky).
-        v3.9.60 — nilai PER-BARIS dari payload (bukan bagian dekorasi);
-        dekorasi tinggal band kelompok via _reapply_group_merge."""
+        v3.9.60 — nilai PER-BARIS dari payload (bukan bagian dekorasi).
+        v3.9.61 — band kelompok DIHAPUS (sekat warna dilepas user);
+        dekorasi tinggal tag per-cell + tint header."""
         self._reapply_cell_tags(tree)
-        self._reapply_group_merge(tree)
         _tint = getattr(tree, "_heading_tint", None)
         if _tint is not None and getattr(_tint, "_alive", False):
             with contextlib.suppress(tk.TclError):
                 _tint.refresh()
-
-    def _reapply_group_merge(self, tree):
-        """v3.9.60 — BANDING KELOMPOK + NILAI PER-BARIS (rewrite).
-
-        v3.9.55-59 (merge-vertikal + sticky display) menyimpan nama/rank
-        HANYA di baris head kelompok lalu MEMINDAHKAN nilai display
-        mengikuti viewport saat scroll (hook yscrollcommand + bbox walk).
-        Pemindahan itulah yang berulang bocor di pemakaian nyata (user:
-        "nama barang tidak muncul dan hanya muncul sekali di tiap grup
-        nama barangnya? kenapa" — kelompok ratusan baris: viewport bisa
-        dipenuhi baris nama KOSONG bila pemindahan display tak jalan).
-        Kini SETIAP baris membawa nilai Nama Barang + Rank langsung dari
-        payload (konstanta per kelompok — tak ada state yang bisa basi,
-        tak ada jalur scroll/sort/clone/Tk-version yang bisa bocor).
-
-        Fungsi ini tinggal memasang ulang TAG BAND kelompok (grp0/grp1
-        bergantian) mengikuti URUTAN VISUAL — sort kolom lain → kelompok
-        interleave → tiap run kontigu = satu band — dari adjacency
-        snapshot RAW (_row_snaps; baris tanpa snapshot = run kosong).
-        Idempoten: tag band ditulis diff saja (pola v3.9.49)."""
-        band_changed = False
-        try:
-            children = list(tree.get_children(""))
-            if not children:
-                return
-            snaps = self._row_snaps
-            rows = []
-            for k in children:
-                snap = snaps.get(str(k))
-                barang = str(snap.get("barang", "")) if snap else ""
-                rows.append((str(k), barang))
-            band = 0
-            for idx, (k, barang) in enumerate(rows):
-                if idx == 0 or rows[idx - 1][1] != barang:
-                    band = 0 if idx == 0 else (band + 1) % 2
-                new_tag = "grp0" if band == 0 else "grp1"
-                try:
-                    old_tags = list(tree.item(k, "tags") or ())
-                except tk.TclError:
-                    old_tags = []
-                if old_tags and old_tags[-1] in self._GRP_TAGS:
-                    if old_tags[-1] == new_tag:
-                        continue
-                    old_tags = old_tags[:-1]
-                band_changed = True
-                with contextlib.suppress(tk.TclError):
-                    tree.item(k, tags=tuple(old_tags) + (new_tag,))
-        except tk.TclError:
-            return
-        # overlay Tk 8 me-cache warna bg tag-baris per iid (v3.9.40) —
-        # band baru = warna baru → invalidate + jadwalkan redraw.
-        if band_changed:
-            _ov = getattr(tree, "_cell_color_overlay", None)
-            if _ov is not None and getattr(_ov, "_alive", False):
-                with contextlib.suppress(Exception):
-                    _ov._invalidate_render_cache()
-                    _ov._schedule()
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
@@ -2962,7 +2870,7 @@ class DeviasiView(tk.Frame):
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
             on_filter_setup=filter_setup,
-            on_render_done=self._reapply_render_decorations)  # v3.9.2/49 per-cell+band
+            on_render_done=self._reapply_render_decorations)  # v3.9.2/49 per-cell
         # v3.9.33 — AUDIT FIX (48-d HIGH / P0): catat clone hidup +
         # generasi render saat dibuka (guard handler + penutupan saat
         # re-render — lihat _close_stale_clones).
@@ -2973,10 +2881,8 @@ class DeviasiView(tk.Frame):
         with contextlib.suppress(tk.TclError):
             HeadingTintOverlay(new_tree, list(self.IN_COLS),
                                self.IN_HEADER_COLOR)
-        # v3.9.60 — band kelompok di clone ⛶ dipasang oleh
-        # _reapply_group_merge (nilai nama/rank sudah per-baris di salinan
-        # item clone — tanpa state display yang perlu dipasang ulang).
-        self._reapply_group_merge(new_tree)
+        # v3.9.61 — tanpa band kelompok di clone ⛶ (sekat warna dihapus);
+        # nilai nama/rank sudah per-baris di salinan item clone.
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
         return win, new_tree

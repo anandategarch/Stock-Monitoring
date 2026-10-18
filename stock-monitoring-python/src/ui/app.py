@@ -183,6 +183,7 @@ from src.ui.widgets import (
     fmt_int_id,
     gc_shield_acquire,
     gc_shield_release,
+    install_wheel_router,
     make_log_console,
     make_tree,
     run_async,
@@ -190,7 +191,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.60"  # v3.9.60 — bug laporan user: (1) Nama Barang/Rank deviasi GR/PCS kembali PER-BARIS (sticky merge dihapus — "nama barang tidak muncul, hanya sekali per grup" tuntas total); (2) viewport tabel Rekap Selisih IN dipulihkan (leaderboard ber-cap ±5 baris + scroll + KPI compact — "tidak bisa scrol")
+APP_VERSION = "3.9.61"  # v3.9.61 — 2 permintaan user: (1) SEKAT WARNA grup Nama Barang tab Deviasi GR/PCS DIHAPUS (baris seragam putih — "hilangkan warna untuk sekat visual tiap grup nama barang"); (2) RODA rekap selisih IN benar-benar bergulir — router roda Toplevel app (roda di atas baris leaderboard/KPI/krom = gulir scrollable-bawah-pointer/tab aktif; fokus- vs pointer-routing Windows tak relevan lagi) + yscrollincrement leaderboard = 1 baris/notch
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -2399,6 +2400,14 @@ class StockMonitorApp:
         self._build_followup_tab()
         self._build_rincian_tab()
         self._build_tab_views()  # FIX A-11: routing tab berbasis widget
+        # v3.9.61 — ROUTER RODA app-wide (user: "tab rekap selisih in aku
+        # masih tidak bisa scroll pakai wheele mouse"): binding Toplevel
+        # menggulir scrollable DI BAWAH POINTER (baris leaderboard = Label
+        # tanpa binding sendiri — dulu mati) + fallback tabel utama tab
+        # AKTIF utk area krom (KPI/Filter/footer). Detail: widgets.
+        # install_wheel_router.
+        install_wheel_router(self.root,
+                             get_primary_scrollable=self._primary_scrollable)
 
     def _on_tab_changed(self, _event=None):
         """Tab baru dipilih → pastikan view-nya sudah di-refresh.
@@ -2443,6 +2452,42 @@ class StockMonitorApp:
             str(self.tab_nominal_resto): self.nominal_resto_view,
             str(self.tab_rincian): self.rincian_view,
         }
+
+    def _primary_scrollable(self):
+        """v3.9.61 — tabel utama TAB AKTIF (fallback router roda —
+        install_wheel_router): dipakai saat roda berputar di area krom
+        non-scrollable (kartu KPI/Filter/footer/legend) supaya konten
+        tab tetap bergulir (perilaku aplikasi modern). Tab 📋 Laporan
+        punya 3 mode pane — pilih view sesuai SegmentBar aktif. Tab
+        ⚙️ Config/🚀 Proses tanpa tabel data → None (roda netral)."""
+        views = getattr(self, "_tab_views", None)
+        if not views:
+            return None
+        try:
+            sel = self.notebook.select()  # string nama widget Tk
+        except tk.TclError:   # teardown / notebook belum siap
+            return None
+        if not sel:
+            return None
+        view = views.get(sel)
+        if view is self._laporan_tab_entry:
+            _active = (getattr(self, "laporan_segment", None).active
+                       if getattr(self, "laporan_segment", None) is not None
+                       else 0)
+            view = (self.komparasi_view if _active == 0
+                    else (self.nominal_view if _active == 2
+                          else self.laporan_view))
+        elif view is None and sel == str(self.tab_followup):
+            # Follow Up tak ada di _tab_views (reaktif store) — tapi
+            # tetap punya tabel utk fallback roda.
+            view = self.followup_view
+        tree = getattr(view, "tree", None)
+        try:
+            if tree is not None and not tree.winfo_exists():
+                return None
+        except tk.TclError:
+            return None
+        return tree
 
     def _update_followup_badge(self):
         """Badge jumlah baris di judul tab Follow Up."""

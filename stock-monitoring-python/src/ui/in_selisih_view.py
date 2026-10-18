@@ -1999,8 +1999,15 @@ class InSelisihView(tk.Frame):
         # tinggi baris aktual (font Windows lebih tinggi dari Xvfb —
         # jangan hardcode piksel), tampilkan maks ±5 baris, dan pasang
         # akumulator roda halus (pola enable_smooth_wheel_list: trackpad
-        # delta kecil + wheel di anak mana pun dari listwrap tetap
-        # menggulir daftar). Scrollbar tipis hanya saat konten meluap.
+        # delta kecil). Scrollbar tipis hanya saat konten meluap.
+        # v3.9.61 — FIX RODA "MASIH TIDAK BISA SCROLL" (user): (a) BARIS
+        # leaderboard = Label di dalam inner — binding Tk tak bubble dari
+        # frame induk → roda di atas BARIS (±90% area papan) MATI;
+        # kini dicover install_wheel_router di Toplevel app (binding
+        # Toplevel ada di bindtag semua anak + cari scrollable-bawah-
+        # pointer); (b) canvas "units" default = 1/10 tinggi jendela
+        # (±13px/notch — terlalu lambat) → yscrollincrement = tinggi
+        # baris aktual → 1 notch = 1 baris (selaras tabel).
         try:
             zone.update_idletasks()
             _rows_in = inner.winfo_children()
@@ -2008,6 +2015,7 @@ class InSelisihView(tk.Frame):
             _row_h = (_req_h // len(_rows_in)) if _rows_in else 24
             _cap_h = min(_req_h, max(_row_h * 5 + 2, 1))
             cv.configure(height=_cap_h)
+            cv.configure(yscrollincrement=max(1, _row_h))
             if _req_h > _cap_h + 2:
                 sb.pack(side="right", fill="y")
             enable_smooth_wheel_list(cv, container=listwrap)

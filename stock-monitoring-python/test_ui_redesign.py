@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.60", APP_VERSION == "3.9.60",
+    check("Versi = 3.9.61", APP_VERSION == "3.9.61",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -13309,54 +13309,48 @@ def main():
           f"kat={_dv59._kategori_var.get()!r} "
           f"aktif={_dv59._aktif_var.get()!r}")
 
-    # --- (d) SEKAT VISUAL: banding kelompok SERAGAM (v3.9.60: nilai
-    #     Nama Barang/Rank PER-BARIS — kontrak baru pasca penghapusan
-    #     sticky merge; band putih/slate tetap bergantian per kelompok) -
+    # --- (d) SEKAT WARNA KELOMPOK DIHAPUS (v3.9.61 — user: "hilangkan
+    #     warna untuk sekat visual tiap grup nama barang pada tab
+    #     deviasi gr dan deviasi pcs"; nilai Nama Barang/Rank tetap
+    #     PER-BARIS kontrak v3.9.60) ---
     _dv59._kategori_var.set("Semua")
     _dv59._on_kategori_changed()
     wait_view(root, _dv59)
     _kids59 = list(_dv59.tree.get_children(""))
     _seq59 = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
               for k in _kids59]
-    check("(v3.9.60) NILAI PER-BARIS + band kelompok SERAGAM: SETIAP "
-          "baris membawa nama kelompoknya (CABE grp0 3-baris · GULA "
-          "grp1 · PENTOL grp0 — user: 'nama barang tidak muncul dan "
-          "hanya muncul sekali di tiap grup nama barangnya' TUNTAS)",
-          _seq59 == [("CABE", "grp0"), ("CABE", "grp0"), ("CABE", "grp0"),
-                     ("GULA SATU", "grp1"),
-                     ("PENTOL", "grp0"), ("PENTOL", "grp0")]
+    check("(v3.9.61) NILAI PER-BARIS TANPA BAND: SETIAP baris membawa "
+          "nama kelompoknya & TANPA tag grp (sekat warna dihapus — "
+          "user: 'hilangkan warna untuk sekat visual tiap grup nama "
+          "barang'; baris seragam putih)",
+          [n for n, _ in _seq59] == ["CABE", "CABE", "CABE",
+                                     "GULA SATU", "PENTOL", "PENTOL"]
+          and all(t is None for _, t in _seq59)
           and not hasattr(_dv59, "_rank_overlay")
           and getattr(_dv59.tree, "_rank_merge", None) is None,
           f"got {_seq59}")
-    # sort kolom lain → band dipasang ulang mengikuti urutan visual
-    # (adjacency dari SNAPSHOT; nilai per-baris ikut barisnya)
+    check("(v3.9.61) mesin band DIHAPUS dari view (GRP_TAG_COLORS / "
+          "_GRP_TAGS / _reapply_group_merge — kelas bug display-state "
+          "tak mungkin kembali)",
+          not hasattr(_dv59, "_reapply_group_merge")
+          and not hasattr(type(_dv59), "GRP_TAG_COLORS")
+          and not hasattr(type(_dv59), "_GRP_TAGS"),
+          "mesin band masih ada")
+    # sort kolom lain → nilai per-baris tetap utuh; TETAP tanpa tag grp
     _dv59._sort_by("Deviasi", reverse=True)
     root.update()
     _kids59b = list(_dv59.tree.get_children(""))
     _seq59b = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
                for k in _kids59b]
-    # ADJACENCY dinilai dari snapshot barang per iid: tiap run kontigu =
-    # satu band seragam; band bergantian antar run; nilai per-baris.
     _snap_names59 = [str((_dv59._row_snaps.get(str(k)) or {})
                          .get("barang", "")) for k in _kids59b]
-    _ok_sort59 = (len(_seq59b) == 6
-                  and all(t in ("grp0", "grp1") for _, t in _seq59b))
-    for _i in range(len(_seq59b)):
-        _ok_sort59 = _ok_sort59 and (_seq59b[_i][0] == _snap_names59[_i])
-        if _i > 0 and _snap_names59[_i] == _snap_names59[_i - 1]:
-            _ok_sort59 = _ok_sort59 and (_seq59b[_i][1]
-                                         == _seq59b[_i - 1][1])
-    check("(v3.9.49) sort kolom lain → band dipasang ulang mengikuti "
-          "urutan visual (adjacency SNAPSHOT; nilai per-baris utuh; "
-          "tanpa crash)",
-          _ok_sort59, f"got {_seq59b}")
-    # re-apply idempoten: tag + nilai tak berubah pada pemanggilan kedua
-    _dv59._reapply_group_merge(_dv59.tree)
-    _seq59c = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
-               for k in _dv59.tree.get_children("")]
-    check("(v3.9.49) _reapply_group_merge IDEMPOTEN (pemanggilan kedua "
-          "tak mengubah tag/nilai)",
-          _seq59c == _seq59b, f"got {_seq59c}")
+    check("(v3.9.61) pasca-SORT: nilai per-baris utuh & tetap TANPA tag "
+          "band (tak ada reapply yang menulis ulang warna)",
+          len(_seq59b) == 6
+          and all(_seq59b[_i][0] == _snap_names59[_i]
+                  for _i in range(len(_seq59b)))
+          and all(t is None for _, t in _seq59b),
+          f"got {_seq59b}")
     _dv59.destroy()
     _top59.destroy()
     root.update()
@@ -13449,8 +13443,8 @@ def main():
     from src.ui.deviasi_view import DeviasiView as _DV60
     _dv60 = _DV60(_top60, satuan_mode="GR")
     _dv60.pack(fill="both", expand=True)
-    check("(v3.9.50) cek_manual fg = #c2410c (kontras ≥3:1 di atas band "
-          "kelompok grp0/grp1 — audit 3-c)",
+    check("(v3.9.50) cek_manual fg = #c2410c (kontras ≥3:1 di atas latar "
+          "putih baris — audit 3-c; v3.9.61 band dihapus)",
           _dv60.tree.tag_configure("cek_manual").get("foreground")
           == "#c2410c",
           f"got {_dv60.tree.tag_configure('cek_manual')!r}")
@@ -13952,9 +13946,10 @@ def main():
     _dv62p.destroy()
 
     # --- (c) v3.9.55: MERGE-VERTIKAL NATIVE (RankMergeOverlay DIHAPUS) --
-    # merge kini TANPA widget di atas tree: nilai Nama Barang/Rank sekali
-    # di baris head run kontigu + band kelompok SERAGAM (grp0/grp1 —
-    # bebas glitch scroll; user: "Merger Vertical Nama barang dan Rank").
+    # merge kini TANPA widget di atas tree: nilai Nama Barang/Rank
+    # per-baris (v3.9.60; era head-only/sticky dihapus) + TANPA band
+    # (v3.9.61 sekat warna dihapus; user: "Merger Vertical Nama barang
+    # dan Rank" → kini nilai nama+rank di tiap baris).
     import src.ui.widgets as _wmod62
     check("(v3.9.55) RankMergeOverlay DIHAPUS dari widgets (merge kini "
           "native — tanpa label overlay di atas tree)",
@@ -13969,15 +13964,15 @@ def main():
     _vals62 = [(_dv62.tree.set(k, "Nama Barang"),
                 _dv62.tree.set(k, "Rank"),
                 _grptag59(_dv62, k)) for k in _kids62]
-    # v3.9.60 — kontrak baru: nilai PER-BARIS (setiap baris kelompok
-    # membawa nama+rank konstanta; era head-only/sticky dihapus).
-    check("(v3.9.60) Merge NATIVE → NILAI PER-BARIS: SETIAP baris "
-          "kelompok membawa Nama Barang + Rank + band SERAGAM "
-          "(BUMBU grp0 · CABE grp1 ×2 · PENTOL grp0 ×2 — user: 'nama "
-          "barang tidak muncul, hanya sekali per grup' TUNTAS)",
-          _vals62 == [("BUMBU", "3", "grp0"),
-                      ("CABE", "2", "grp1"), ("CABE", "2", "grp1"),
-                      ("PENTOL", "1", "grp0"), ("PENTOL", "1", "grp0")],
+    # v3.9.61 — kontrak: nilai PER-BARIS + TANPA tag band (sekat warna
+    # dihapus — baris seragam putih).
+    check("(v3.9.61) Merge NATIVE → NILAI PER-BARIS TANPA BAND: SETIAP "
+          "baris kelompok membawa Nama Barang + Rank & tanpa tag grp "
+          "(user: 'hilangkan warna sekat visual grup nama barang' + "
+          "'nama barang tidak muncul, hanya sekali per grup' TUNTAS)",
+          _vals62 == [("BUMBU", "3", None),
+                      ("CABE", "2", None), ("CABE", "2", None),
+                      ("PENTOL", "1", None), ("PENTOL", "1", None)],
           f"got {_vals62}")
     _snaps62 = [_dv62._row_snaps.get(str(k), {}) for k in _kids62]
     check("(v3.9.55) Snapshot RAW tetap ber-nama barang & rank utk SETIAP "
@@ -14057,8 +14052,8 @@ def main():
     # --- (h) clone ⛶: merge NATIVE ikut ke tree clone --------------------
     _win62, _ct62 = _dv62._maximize()
     _pump62(root, 0.5)
-    check("(v3.9.60) Clone ⛶: nilai per-baris + band diterapkan ke tree "
-          "clone (SEMUA baris bernama/rank; TANPA overlay)",
+    check("(v3.9.61) Clone ⛶: nilai per-baris diterapkan ke tree "
+          "clone TANPA band (SEMUA baris bernama/rank; TANPA overlay)",
           [_ct62.set(k, "Nama Barang") for k in
            _ct62.get_children("")][:2] == ["BUMBU", "CABE"]
           and _ct62.set(list(_ct62.get_children(""))[2], "Rank") == "2"
@@ -15130,17 +15125,13 @@ def main():
     root.update()
     _kids66b = list(_t66.get_children(""))
     _check_all_named66("pasca-SORT kolom lain")
-    # (6) band adjacency pasca-sort: run kontigu = band seragam
-    _names66b = [_brg66(k) for k in _kids66b]
+    # (6) v3.9.61 — TANPA band pasca-sort (sekat warna dihapus; tak ada
+    # mesin reapply yang menulis tag grp lagi)
     _tags66b = [_grptag59(_dv66, k) for k in _kids66b]
-    _ok_band66 = all(
-        _names66b[i] == _names66b[i - 1]
-        and _tags66b[i] == _tags66b[i - 1]
-        or _names66b[i] != _names66b[i - 1]
-        for i in range(1, len(_kids66b)))
-    check("(v3.9.60) pasca-SORT: band kelompok dipasang ulang per "
-          "urutan visual (run kontigu = band seragam)",
-          _ok_band66, "band tidak seragam dalam run")
+    check("(v3.9.61) pasca-SORT: TETAP tanpa tag band (mesin reapply "
+          "dihapus — tak ada penulisan ulang warna kelompok)",
+          all(t is None for t in _tags66b),
+          f"tag grp tersisa: {[t for t in _tags66b if t]}")
     # (7) FILTER CLONE ⛶ MERGE-AWARE (value_get RAW — kelompok UTUH
     # lolos; nilai per-baris ikut salinan item clone).
     _t66.yview_moveto(0.0)
@@ -17569,10 +17560,17 @@ def main():
           _FLASH69 == 2500 and _uses69,
           f"FLASH_MS={_FLASH69} uses={_uses69}")
 
-    # --- 69.G band grup kontras (fix 2d-02) ----------------------------
+    # --- 69.G band grup: DIHAPUS (v3.9.61 — user: "hilangkan warna untuk
+    #     sekat visual tiap grup nama barang pada tab deviasi gr dan
+    #     deviasi pcs"; fix 2d-02 era band → kontrak BARU: sumber bebas
+    #     mesin band & warna band) ---------------------------------------
     _dvsrc69 = (_src69 / "src/ui/deviasi_view.py").read_text(
         encoding="utf-8")
-    _band69 = "#9aa7b9" in _dvsrc69
+    # pola FUNGSIONAL (definisi/penerapan/metode) — komentar riwayat
+    # v3.9.61 boleh MENYEBUT nama band tanpa memicu check
+    _band69 = ("GRP_TAG_COLORS = " in _dvsrc69
+               or 'tags.append("grp' in _dvsrc69
+               or "def _reapply_group_merge" in _dvsrc69)
 
     def _lum69(hexc):
         hexc = hexc.lstrip("#")
@@ -17588,10 +17586,11 @@ def main():
 
     _la69, _lb69 = _lum69("#9aa7b9"), _lum69("#ffffff")
     _ratio69 = (max(_la69, _lb69) + 0.05) / (min(_la69, _lb69) + 0.05)
-    check("(2d-02) band grup alternat #9aa7b9 vs putih ≥2.4:1 — sekat "
-          "kelompok terlihat (dulu #f1f5f9 = 1.096:1)",
-          _band69 and _ratio69 >= 2.4,
-          f"ratio={_ratio69:.3f} band_in_src={_band69}")
+    check("(v3.9.61) band grup DIHAPUS dari deviasi_view (sekat warna "
+          "dilepas user — baris seragam putih; era 2d-02 #9aa7b9 "
+          f"({_ratio69:.2f}:1) RETIRED)",
+          not _band69,
+          f"mesin band masih di sumber (band_in_src={_band69})")
 
     # --- 69.G2 kontras teks panduan (fix 2a-01) -------------------------
     _wsrc69 = (_src69 / "src/ui/widgets.py").read_text(encoding="utf-8")
@@ -17961,8 +17960,181 @@ def main():
     check("(v3.9.60) §70b: RODA di atas tabel rekap → tabel bergulir",
           abs(_ty70b - _ty70a) > 0.0001,
           f"{_ty70a:.4f}→{_ty70b:.4f}")
+    check("(v3.9.61) §70b: yscrollincrement leaderboard = tinggi baris "
+          "aktual (1 notch = 1 baris; dulu unit bawaan canvas = 1/10 "
+          "tinggi jendela ±13px/notch — gulir nyaris tak terasa)",
+          _cv70 is not None and int(_cv70.cget("yscrollincrement")) >= 1,
+          f"incr={_cv70.cget('yscrollincrement') if _cv70 else None}")
     _iv70.destroy()
     _top70b.destroy()
+    root.update()
+
+    # ==================================================================
+    # §71 — v3.9.61 BUG LAPORAN USER: "tab rekap selisih in aku masih
+    # tidak bisa scroll pakai wheele mouse". AKAR (v3.9.60 memperbaiki
+    # viewport saja — roda sendiri masih mati di 3 area): (a) BARIS
+    # leaderboard = Label dalam inner canvas — bindtag anak TIDAK
+    # memuat frame induk → roda di atas BARIS (±90% area papan skor)
+    # MATI; (b) canvas unit bawaan = 1/10 tinggi jendela (±13px/notch);
+    # (c) area krom (kartu KPI/Filter/footer) tanpa binding di SEMUA
+    # tab + varian Tk yang mengirim wheel ke widget FOKUS (pointer di
+    # tabel, fokus di Entry → mati). FIX: install_wheel_router — SATU
+    # binding Toplevel (ada di bindtag SEMUA anak jendela, jalan
+    # SETELAH binding widget 'break') menggulir scrollable DI BAWAH
+    # POINTER (jalur master naik) + fallback tabel utama TAB AKTIF.
+    # ==================================================================
+    print("\n== 71. (v3.9.61) router roda: baris leaderboard + krom "
+          "bergulir (fokus-vs-pointer tak relevan) ==")
+    from src.ui.in_selisih_view import InSelisihView as _ISV71
+    from src.ui.widgets import install_wheel_router as _iwr71
+
+    # --- (a) router terpasang di root app + idempoten -------------------
+    check("(v3.9.61) §71a: router roda terpasang di root APP (flag "
+          "_wheel_router_bound — dipasang _build_tab_views)",
+          bool(getattr(app.root, "_wheel_router_bound", False)))
+    _script71 = root.bind("<MouseWheel>")
+    _iwr71(root, get_primary_scrollable=app._primary_scrollable)
+    check("(v3.9.61) §71a: install_wheel_router IDEMPOTEN (pemanggilan "
+          "kedua tak menambah binding)",
+          root.bind("<MouseWheel>") == _script71,
+          "script berubah saat re-install")
+
+    # --- (b) _primary_scrollable: tabel utama tab AKTIF ------------------
+    app.notebook.select(app.tab_deviasi_gr)
+    root.update()
+    check("(v3.9.61) §71b: fallback router tab Deviasi GR → tree "
+          "deviasi_gr_view (roda di krom menggulir tabel tab aktif)",
+          app._primary_scrollable() is app.deviasi_gr_view.tree)
+    app.notebook.select(app.tab_laporan)
+    root.update()
+    check("(v3.9.61) §71b: fallback tab 📋 Laporan → view sesuai MODE "
+          "SegmentBar aktif (mode 0 = komparasi)",
+          app._primary_scrollable() is app.komparasi_view.tree)
+    app.notebook.select(app.tab_followup)
+    root.update()
+    check("(v3.9.61) §71b: fallback tab ☑ Follow Up → tree followup_view "
+          "(tanpa entry _tab_views tapi tetap punya tabel)",
+          app._primary_scrollable() is app.followup_view.tree)
+    app.notebook.select(app.tab_config)
+    root.update()
+    check("(v3.9.61) §71b: fallback tab ⚙️ Config → None (roda netral — "
+          "tak ada tabel data)",
+          app._primary_scrollable() is None)
+
+    # --- (c) INTEGRASI rekap: roda di atas BARIS leaderboard bergulir ---
+    # NOTE Xvfb (tanpa WM): warp sintetis tak memindahkan pointer NYATA
+    # & winfo_containing pakai urutan tumpukan jendela → posisikan jauh
+    # dari jendela root + LIFT supaya resolusi scrollable-bawah-pointer
+    # deterministik (di Windows asli x_root/y_root event = posisi pointer
+    # OS — resolusi selalu benar).
+    _top71 = tk.Toplevel(root)
+    _top71.geometry("1280x760+620+160")
+    _top71.lift()
+    _iv71 = _ISV71(_top71)
+    _iv71.pack(fill="both", expand=True)
+    root.update()
+    _iv71.load_data(None, None,
+                    {"df": pd.DataFrame(_aud70), "kpi": {
+                        "rows": 90, "ok": 70, "omit": 5, "cutoff": 2,
+                        "deviasi_murni": 10, "dev_murni_po": 3,
+                        "deviasi_qty": -13.0}, "desc": ""})
+    wait_view(root, _iv71)
+    for _ in range(40):
+        root.update()
+        time.sleep(0.01)
+    _top71.lift()
+    root.update()
+    _iwr71(_top71, get_primary_scrollable=lambda: _iv71.tree)
+
+    def _walk71(w):
+        yield w
+        for _ch71 in w.winfo_children():
+            yield from _walk71(_ch71)
+
+    _cv71 = _find_canvas70(_iv71._skor_zone)
+
+    def _row_labels71():
+        # Label BARIS leaderboard = label yang jalur masternya sampai
+        # canvas papan skor (bukan label header/KPI di luar canvas)
+        _out71 = []
+        for _w71 in _walk71(_iv71._skor_zone):
+            if isinstance(_w71, tk.Label) and _cv71 is not None:
+                _cur71 = _w71.master
+                while _cur71 is not None:
+                    if _cur71 is _cv71:
+                        _out71.append(_w71)
+                        break
+                    _cur71 = getattr(_cur71, "master", None)
+        return _out71
+
+    _rows71 = _row_labels71()
+    check("(v3.9.61) §71c: fixture baris leaderboard ditemukan (Label "
+          "dalam canvas — area yang dulu MATI rodanya)",
+          bool(_rows71), f"labels={len(_rows71)}")
+    if _cv71 is not None and _rows71:
+        _cv71.yview_moveto(0.0)
+        root.update()
+        _ya71 = _cv71.yview()[0]
+        # event di LABEL (bukan canvas) + warp → pointer DI ATAS baris —
+        # persis gerakan user; router Toplevel menjaring lewat bindtag
+        _rows71[2].event_generate("<MouseWheel>", x=6, y=6, delta=-120,
+                                  warp=True)
+        for _ in range(10):
+            root.update()
+            time.sleep(0.01)
+        _yb71 = _cv71.yview()[0]
+        check("(v3.9.61) §71c: RODA di atas BARIS leaderboard → daftar "
+              "bergulir (dulu MATI — bindtag Label tanpa binding roda; "
+              "user: 'masih tidak bisa scroll pakai wheele mouse')",
+              abs(_yb71 - _ya71) > 0.001,
+              f"{_ya71:.3f}→{_yb71:.3f}")
+        # CTRL+roda diteruskan (zoom) — bukan gulir; jalur 'all'
+        # di-SWAP sementara (pola §67) supaya zoom ASLI app tak terpicu
+        _ya71c = _cv71.yview()[0]
+        _ty71c = _iv71.tree.yview()[0]
+        _orig_all71 = root.bind_all("<Control-MouseWheel>")
+        _zall71 = []
+        root.bind_all(
+            "<Control-MouseWheel>",
+            lambda _e: (_zall71.append(1), "break")[1])
+        try:
+            _rows71[2].event_generate("<MouseWheel>", x=6, y=6,
+                                      delta=-120, warp=True, state=0x0004)
+            for _ in range(6):
+                root.update()
+        finally:
+            root.bind_all("<Control-MouseWheel>", _orig_all71)
+        check("(v3.9.61) §71c: CTRL+roda DITERUSKAN ke 'all' (jalur zoom "
+              "app — leaderboard & tabel TIDAK bergulir)",
+              _cv71.yview()[0] == _ya71c
+              and _iv71.tree.yview()[0] == _ty71c and _zall71,
+              f"cv={_ya71c:.3f}→{_cv71.yview()[0]:.3f} "
+              f"tree={_ty71c:.4f}→{_iv71.tree.yview()[0]:.4f} "
+              f"zoom_calls={len(_zall71)}")
+
+    # --- (d) roda di area krom (KPI) → fallback tabel utama -------------
+    _kpi_labs71 = [w for w in _walk71(_iv71.kpi_inner)
+                   if isinstance(w, tk.Label)]
+    check("(v3.9.61) §71d: fixture label KPI ditemukan (krom non-"
+          "scrollable)",
+          bool(_kpi_labs71), f"labels={len(_kpi_labs71)}")
+    if _kpi_labs71:
+        _iv71.tree.yview_moveto(0.0)
+        root.update()
+        _ta71 = _iv71.tree.yview()[0]
+        _kpi_labs71[0].event_generate("<MouseWheel>", x=6, y=6,
+                                      delta=-120, warp=True)
+        for _ in range(10):
+            root.update()
+            time.sleep(0.01)
+        _tb71 = _iv71.tree.yview()[0]
+        check("(v3.9.61) §71d: RODA di atas kartu KPI → TABEL UTAMA tab "
+              "bergulir (fallback get_primary_scrollable; dulu MATI di "
+              "semua krom — sekaligus menutup varian fokus-routing Tk)",
+              abs(_tb71 - _ta71) > 0.0001,
+              f"{_ta71:.4f}→{_tb71:.4f}")
+    _iv71.destroy()
+    _top71.destroy()
     root.update()
 
     root.destroy()
