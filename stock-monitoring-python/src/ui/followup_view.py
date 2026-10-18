@@ -33,9 +33,10 @@ Perilaku:
   resolved/pending.
 """
 
+import contextlib
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Optional
 
 import pandas as pd
 
@@ -44,10 +45,12 @@ from .theme import (
     C_BG,
     C_CARD,
     C_HEADER,
+    C_TEXT_MUTED,
     font,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    FLASH_MS,  # v3.9.59 — kanon durasi status flash (bonus, agent B/F)
     AccentButton,
     Card,
     ColumnManager,
@@ -63,6 +66,7 @@ from .widgets import (
     auto_fit_columns,
     enable_col_resize,
     enable_multi_select,
+    fmt_int_id,
     identify_to_column,
     insert_tree_items,
     open_tree_maximized,
@@ -105,7 +109,7 @@ class FollowUpView(tk.Frame):
     """Tab Follow Up: tabel snapshot baris tercentang + ekspor."""
 
     def __init__(self, parent, store: FollowUpStore,
-                 get_data: Optional[Callable[[], Optional[pd.DataFrame]]] = None,
+                 get_data: Callable[[], pd.DataFrame | None] | None = None,
                  go_to_proses: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.store = store
@@ -129,6 +133,13 @@ class FollowUpView(tk.Frame):
         # v3.9.17: minus merah PER CELL (konsisten view lain sejak v3.9.2)
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
+        # v3.9.59 — bonus (FIX 2f-07/2f-08 surfacing via API agent F):
+        # catatan store (last_recovery / last_save_error) → flash status
+        # kartu atas; _status_text = teks status normal terakhir (dasar
+        # restore flash), _store_note = catatan aktif, _note_after timer.
+        self._status_text = "0 baris."
+        self._store_note: str | None = None
+        self._note_after: str | None = None
 
         self._build_ui()
         self._setup_tags()
@@ -140,8 +151,16 @@ class FollowUpView(tk.Frame):
     # =========================================================================
     def _build_ui(self):
         # --- Empty state ---
+        # v3.9.59 — FIX 2e-09: subtitle jujur — daftar terisi dari centang
+        # ✓ di tab Deviasi/Laporan (BUKAN dari pipeline); CTA pipeline
+        # tetap (berguna bila data belum ada), tapi kini ada petunjuk
+        # cara mengisi daftar. Dulu CTA sendirian menyesatkan: user yang
+        # SUDAH menjalankan pipeline mengkliknya dan daftar tetap kosong.
         self.empty = EmptyState(
             self, icon="📌", title="Daftar Follow Up masih kosong",
+            subtitle="Baris masuk daftar lewat centang ✓ di tab 📦 Deviasi "
+                     "GR / 🧩 Deviasi PCS / 📋 Laporan Deviasi — jalankan "
+                     "pipeline dulu bila data belum ada.",
             cta_text="🚀 Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
@@ -220,6 +239,19 @@ class FollowUpView(tk.Frame):
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        # v3.9.59 — FIX 2e-05: footer hint (dulu baris ini KOSONG —
+        # satu-satunya tabel view tanpa footer; kolom ✓ = KELUARKAN
+        # baris, destruktif utk snapshot, tanpa affordance on-screen
+        # apa pun). Perilaku aktual: toggle-off menghapus baris + status
+        # TL/PIC resolved-nya dari followup.json; recovery = centang
+        # ulang di tab Deviasi (snapshot segar, status hilang).
+        self._foot_hint = tk.Label(
+            foot,
+            text="klik ✓ = keluarkan baris dari daftar (status TL/PIC ikut "
+                 "terhapus) · centang ✓ lagi di tab Deviasi utk menambah "
+                 "· Dobel-klik baris = detail sumber",
+            bg=C_CARD, fg=C_TEXT_MUTED, font=font(8))
+        self._foot_hint.pack(side="left")
 
         # Loading overlay
         self.overlay = LoadingOverlay(tbody, "Menyiapkan daftar…")
@@ -243,6 +275,23 @@ class FollowUpView(tk.Frame):
 
         self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+        # v3.9.59 — FIX 2e-05: cursor hand2 saat hover sel kolom ✓ (sinyal
+        # klik-able — pola cheap: <Motion> identify kolom/region).
+        self.tree.bind("<Motion>", self._on_tree_motion, add="+")
+
+    def _on_tree_motion(self, event):
+        """FIX 2e-05 — cursor hand2 di atas sel kolom ✓ (aksi klik =
+        keluarkan baris; tanpa ini cursor default = tak ada sinyal
+        kolom ✓ interaktif)."""
+        tree = event.widget
+        try:
+            hand = (tree.identify_region(event.x, event.y) == "cell"
+                    and identify_to_column(
+                        tree, tree.identify_column(event.x)) == "✓"
+                    and tree.identify_row(event.y))
+            tree.configure(cursor="hand2" if hand else "")
+        except tk.TclError:
+            return
 
     def _setup_tags(self):
         self.tree.tag_configure("evenrow", background="#ffffff")
@@ -307,25 +356,47 @@ class FollowUpView(tk.Frame):
 
     @staticmethod
     def _fu_num(v):
+        """v3.9.59 — FIX 2e-04/2f-14: format angka INDONESIA (pola
+        _fmt_num in_selisih_view / fmt_nominal_cell nominal_common):
+        '1.234' / '1.234,5' / negatif KURUNG '(1.234)' / 0-None-NaN →
+        '-'. Dulu koma ribuan EN + minus saran-tanda ('1,234.5' /
+        '-1,234') — nilai snapshot sama tampil beda gaya antar tab
+        (Deviasi GR '(1.234)' vs Follow Up '-1,234') → risiko salah
+        baca koma desimal/ribuan."""
+        if v in ("", None):
+            return "-"
         try:
             f = float(v)
-            return f"{f:,.0f}" if f == int(f) else f"{f:,.1f}"
         except (TypeError, ValueError):
-            return str(v or "-")
+            return str(v)
+        if pd.isna(f) or f == 0:
+            return "-"
+        neg = f < 0
+        af = abs(f)
+        if af == int(af):
+            s = fmt_int_id(af)
+        else:
+            s = (f"{af:,.1f}".replace(",", "\u00a0")
+                 .replace(".", ",").replace("\u00a0", "."))
+        return f"({s})" if neg else s
 
     @staticmethod
     def _fu_pct(v):
-        """Loss Surplus to BOM — rasio gaya file sample (1.0053 → '1.01';
-        0.0524 → '0.05'; minus kurung). Format mengikuti konvensi _fu_num
-        (desimal titik) supaya parser sort _sort_by tetap benar."""
+        """Loss Surplus to BOM — rasio gaya file sample (1.0053 → '1,01';
+        0.0524 → '0,05'; minus kurung).
+        v3.9.59 — FIX 2f-14: desimal KOMA (dulu titik EN '1.01'); minus
+        tetap kurung; NaN → '-' (bukan 'nan')."""
+        if v in ("", None):
+            return "-"
         try:
             f = float(v)
         except (TypeError, ValueError):
-            return "-" if v in ("", None) else str(v)
-        if f == 0:
+            return str(v)
+        if pd.isna(f) or f == 0:
             return "-"
-        s = f"{f:,.2f}"
-        return f"({s[1:]})" if f < 0 else s
+        s = (f"{abs(f):,.2f}".replace(",", "\u00a0")
+             .replace(".", ",").replace("\u00a0", "."))
+        return f"({s})" if f < 0 else s
 
     def _fu_row_values(self, snap, resolved, info) -> list:
         """Nilai terformat satu baris follow-up (urutan COLUMNS — dipakai
@@ -338,9 +409,9 @@ class FollowUpView(tk.Frame):
             dev_f = float(dev)
         except (TypeError, ValueError):
             dev_f = 0.0
+        # v3.9.59 — FIX 2e-04: _fu_num kini ID + minus kurung sendiri
+        # (dulu re-wrap manual '-' → dobel kurung dengan format baru).
         dev_txt = self._fu_num(dev) if dev_f else "-"
-        if dev_f < 0:
-            dev_txt = f"({dev_txt[1:] if dev_txt.startswith('-') else dev_txt})"
 
         def _so(v):
             try:
@@ -413,6 +484,12 @@ class FollowUpView(tk.Frame):
         if not rows:
             self._show_empty()
             self._refresh_date_headings(rows)
+            # v3.9.59 — FIX 2e-05/bonus 2f-07+2f-08: jalur kosong PUN jujur
+            # (dulu status kartu menyisakan teks render sebelumnya) +
+            # catatan store (korup/persist-gagal) ikut tampil sekali.
+            self._status_text = "0 baris."
+            self._apply_status()
+            self._consume_store_notes()
             return
         self._show_content()
         self._refresh_date_headings(rows)
@@ -480,9 +557,11 @@ class FollowUpView(tk.Frame):
 
         n = len(rows)
         selesai = self.store.resolved_count()
-        self.status_var.set(
+        self._status_text = (
             f"{n} baris · {selesai} selesai · {n - selesai} menunggu"
             + (f" · {n_shown} tampil (filter ⧩)" if n_shown != n else ""))
+        self._apply_status()
+        self._consume_store_notes()
         self.btn_clear.set_enabled(n > 0)
         self.btn_export.set_enabled(n > 0)
 
@@ -507,6 +586,54 @@ class FollowUpView(tk.Frame):
         = clear overlay)."""
         if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
+
+    def _apply_status(self):
+        """v3.9.59 — status kartu atas = teks normal (_status_text) +
+        catatan store aktif (bila ada — flash berjalan)."""
+        if self._store_note:
+            self.status_var.set(f"{self._store_note} · {self._status_text}")
+        else:
+            self.status_var.set(self._status_text)
+
+    def _consume_store_notes(self):
+        """v3.9.59 — bonus (API store agent F, FIX 2f-07/2f-08):
+        ``store.last_recovery`` (followup.json korup → backup .bad,
+        mulai kosong) & ``store.last_save_error`` (gagal persist —
+        disk penuh/file terkunci) kini TAMPIL di tab ini sebagai flash
+        status (dulu hanya [WARNING] di log tab 🚀 Proses — jauh dari
+        aksi ✓). Flag di-reset SETELAH ditampilkan sekali (supaya tiap
+        render tidak mengulang pesan)."""
+        msgs = []
+        rec = getattr(self.store, "last_recovery", None)
+        if rec:
+            msgs.append(f"⚠ followup.json korup — {rec}")
+            with contextlib.suppress(Exception):
+                self.store.last_recovery = None
+        err = getattr(self.store, "last_save_error", None)
+        if err:
+            msgs.append(f"⚠ follow-up TIDAK TERSIMPAN — {err}")
+            with contextlib.suppress(Exception):
+                self.store.last_save_error = None
+        if msgs:
+            self._flash_store_note(" · ".join(msgs))
+
+    def _flash_store_note(self, msg: str):
+        """Flash catatan store di status kartu (2×FLASH_MS), lalu kembali
+        ke teks status normal terbaru."""
+        self._store_note = msg
+        self._apply_status()
+        if self._note_after:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._note_after)
+
+        def restore():
+            self._note_after = None
+            if not self.winfo_exists():
+                return
+            self._store_note = None
+            self._apply_status()
+
+        self._note_after = self.after(FLASH_MS * 2, restore)
 
     # =========================================================================
     # ✓ KLIK = KELUARKAN (v3.3: iid-based — benar setelah sort)
@@ -613,6 +740,8 @@ class FollowUpView(tk.Frame):
         new_tree._view_gen = self._render_gen
         self._clone_wins.append(win)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
+        # v3.9.59 — FIX 2e-05: cursor hand2 kolom ✓ ikut aktif di clone ⛶
+        new_tree.bind("<Motion>", self._on_tree_motion, add="+")
         return win, new_tree
 
     def _close_stale_clones(self):
@@ -639,14 +768,22 @@ class FollowUpView(tk.Frame):
         tree = tree if tree is not None else self.tree
 
         def parse_fu(s):
-            s = str(s).replace(",", "").strip()
+            # v3.9.59 — FIX 2e-04: parser sort format INDONESIA (mirror
+            # default parser widgets v3.9.54 + _parse_num_id deviasi):
+            # '1.234' = 1234 · '12,5' = 12.5 · '(1.234)' = -1234 ·
+            # '-'/'—' = 0. Dulu koma-dibuang ('1,234.5' EN) — dgn format
+            # display baru '1.234,5' akan ter-parse salah skala.
+            s = str(s).strip()
             if s in ("Menunggu", "Selesai"):
                 return 1 if s == "Menunggu" else 2
-            if s in ("-", ""):
+            if s in ("-", "", "—"):
                 return 0
-            if s.startswith("(") and s.endswith(")"):
-                return -float(s[1:-1])
-            return float(s)
+            neg = s.startswith("(") and s.endswith(")")
+            if neg:
+                s = s[1:-1]
+            s = s.replace(".", "").replace(",", ".")
+            v = float(s)
+            return -v if neg else v
 
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse_fu)
         # v3.9.17: delete+reinsert me-reset tag PER-CELL → pasang ulang

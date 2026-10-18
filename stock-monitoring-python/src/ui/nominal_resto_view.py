@@ -230,8 +230,10 @@ def _bind_popup_rescale(win, tree, col_spec) -> None:
 
 
 def _toggle_popup_max(win, tree, col_spec) -> None:
-    """Toggle ⛶ Perbesar: ~layar penuh ↔ geometri normal (kolom ikut
+    """Toggle ⛶ Layar Penuh: ~layar penuh ↔ geometri normal (kolom ikut
     re-scale via binding <Configure>).
+    v3.9.59 — FIX 2e-07/2f-13: label kanon ⛶ = 'Layar Penuh' (aksi
+    resize jendela sendiri ke ~ukuran layar — bukan clone window).
     v3.9.42 — audit 61-b P3: restore memakai ukuran manual TERAKHIR
     (di-save binding <Configure>) — bukan geometri saat toggle pertama."""
     is_max = getattr(win, "_is_max", False)
@@ -260,9 +262,12 @@ def _toggle_popup_max(win, tree, col_spec) -> None:
 
 
 def _popup_head_buttons(head, win, tree, col_spec) -> None:
-    """Tombol ⛶ Perbesar + ↺ Muat Lebar di head popup (pola tombol
-    popup v3.9.32)."""
-    GhostButton(head, text="⛶ Perbesar",
+    """Tombol ⛶ Layar Penuh + ↺ Muat Lebar di head popup (pola tombol
+    popup v3.9.32).
+    v3.9.59 — FIX 2e-07: '⛶ Perbesar' → '⛶ Layar Penuh' (kata
+    'Perbesar' dipakai ⤢ in-place '⤢ Perbesar Tabel' — dua aksi beda
+    tak boleh sebutan sama; ⛶ selalu = Layar Penuh)."""
+    GhostButton(head, text="⛶ Layar Penuh",
                 command=lambda: _toggle_popup_max(win, tree, col_spec)
                 ).pack(side="right", padx=(6, 0))
     GhostButton(head, text="↺ Muat Lebar",
@@ -320,6 +325,10 @@ class NominalRestoView(tk.Frame):
         # v3.9.36 — filter KATEGORI (pola deviasi_view v3.9.19):
         # None = 'Semua' = tanpa filter; default 'Deviasi'.
         self._kategori_sel: str | None = None
+        # v3.9.59 — FIX 2e-03: jumlah baris 3.DEVIASI@H TANPA filter
+        # kategori (dihitung _compute_resto; dipakai pesan status jujur
+        # saat kategori menghabiskan semua baris).
+        self._n_dev_h_unfiltered = 0
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (pola v3.2)
@@ -563,7 +572,13 @@ class NominalRestoView(tk.Frame):
     def _format_col_series(self, col: str, series):
         if col in ("Nominal Deviasi", "Nominal Deviasi Bulan Lalu") \
                 or self._is_lalu_extra(col):
-            return series.map(fmt_nominal_cell)
+            # v3.9.59 — FIX 2f-01 (HIGH, pola deviasi_view v3.9.51 §61f):
+            # daftar nilai popup ⧩ kolom nominal HARUS identik dgn SEL
+            # TABEL (fmt_rp_cell sejak v3.9.51 — 'Rp 1.825'). Dulu
+            # fmt_nominal_cell ('1.825' tanpa Rp) → dropdown ≠ tampilan +
+            # filter clone ⛶ (apply_tree_row_filters mencocokkan nilai
+            # DISPLAY tree vs seleksi) tak pernah cocok → 0 baris.
+            return series.map(fmt_rp_cell)
         return series.astype(str)
 
     def _on_col_filter(self, col: str, selected):
@@ -744,7 +759,7 @@ class NominalRestoView(tk.Frame):
         if data is None or len(data) == 0:
             self.status_var_label.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
@@ -787,6 +802,15 @@ class NominalRestoView(tk.Frame):
             return pd.DataFrame()
         if h is None:
             h = self.tanggal_h
+        # v3.9.59 — FIX 2e-03: hitung PRA-kategori (baris 3.DEVIASI@H
+        # di data mentah) — utk pesan status jujur di jalur render kosong.
+        try:
+            _tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+            self._n_dev_h_unfiltered = int(
+                ((df["JENIS"].astype(str) == "3.DEVIASI")
+                 & (_tnum == h)).sum())
+        except (KeyError, TypeError, ValueError):
+            self._n_dev_h_unfiltered = 0
         # v3.9.36 — filter KATEGORI combobox PRA-COMPUTE (kategori
         # melekat per-baris hasil merge '21. DBS Kategori').
         # v3.9.45 — passthrough HANYA seleksi default 'Deviasi' (kelas
@@ -981,8 +1005,20 @@ class NominalRestoView(tk.Frame):
             self.header_filters.refresh_icons()
 
         if result is None or result.empty:
-            self.status_var_label.set(
-                f"Tidak ada baris DEVIASI tanggal {self.tanggal_h}.")
+            # v3.9.59 — FIX 2e-03: status JUJUR saat KATEGORI menghabiskan
+            # baris — dulu SELALU 'Tidak ada baris DEVIASI tanggal H'
+            # (menyalahkan tanggal H) padahal H punya baris; user terarah
+            # mengubah TANGGAL H sia-sia. Mirror pesan lolos-filter aktif
+            # (pola pivot 6c-03 / deviasi v3.9.49): sebut kategori +
+            # jumlah baris pra-filter.
+            if self._kategori_sel and self._n_dev_h_unfiltered > 0:
+                self.status_var_label.set(
+                    f"0 dari {fmt_int_id(self._n_dev_h_unfiltered)} baris "
+                    f"DEVIASI tanggal {self.tanggal_h} lolos filter aktif "
+                    f"(KATEGORI: {self._kategori_sel}).")
+            else:
+                self.status_var_label.set(
+                    f"Tidak ada baris DEVIASI tanggal {self.tanggal_h}.")
             self._total_var.set("")
 
             def done_empty():
@@ -1001,7 +1037,13 @@ class NominalRestoView(tk.Frame):
                 fmt = self._format_col_series(col, filtered[col])
                 filtered = filtered[fmt.isin(sel)]
         if filtered.empty:
-            self.status_var_label.set("Tidak ada baris setelah filter.")
+            # v3.9.59 — FIX 2e-03 (kolom ⧩): idem jalur kategori — sebut
+            # kolom filter aktif + jumlah baris pra-filter.
+            _act = ", ".join(c for c, s in self._col_sel.items()
+                             if s is not None)
+            self.status_var_label.set(
+                f"0 dari {fmt_int_id(len(result))} resto lolos filter aktif"
+                + (f" ({_act})" if _act else "") + ".")
             self._total_var.set("")
             self._render_done_guard()
             return
@@ -1325,6 +1367,13 @@ class NominalRestoView(tk.Frame):
         win.bind("<Escape>", lambda _e, _w=win: _w.destroy())
         with contextlib.suppress(tk.TclError):
             win.transient(self.winfo_toplevel())
+        # v3.9.59 — FIX 2e-10: MODAL (grab_set) — paritas popup
+        # drill-down tab lain (InDetailPopup in_selisih / deviasi_popup /
+        # DetailsPopup semua grab). Dulu non-modal → jendela utama
+        # tetap interaktif saat popup terbuka + popup ganda menumpuk;
+        # destroy melepas grab otomatis.
+        with contextlib.suppress(tk.TclError):
+            win.grab_set()
 
         body = tk.Frame(win, bg=C_BG)
         body.pack(fill="both", expand=True)
@@ -1515,7 +1564,9 @@ class NominalRestoView(tk.Frame):
         tk.Label(foot, text=foot_txt,
                  bg=C_CARD, fg=C_HEADER, font=font(8, "bold")).pack(
             side="left", padx=10, pady=6)
-        GhostButton(foot, text="Tutup", command=win.destroy).pack(
+        # v3.9.59 — FIX 2f-13: 'Tutup (Esc)' (kanon — popup ini bind
+        # <Escape>; 'Tutup' polos menyembunyikan shortcut).
+        GhostButton(foot, text="Tutup (Esc)", command=win.destroy).pack(
             side="right", padx=10, pady=4)
 
         # v3.9.41 — ukuran BESAR (±94%×88% layar; dulu maks 1000×560)
@@ -1561,6 +1612,13 @@ class NominalRestoView(tk.Frame):
         win.bind("<Escape>", lambda _e, _w=win: _w.destroy())
         with contextlib.suppress(tk.TclError):
             win.transient(self.winfo_toplevel())
+        # v3.9.59 — FIX 2e-10: MODAL (grab_set) — paritas popup
+        # drill-down tab lain (InDetailPopup in_selisih / deviasi_popup /
+        # DetailsPopup semua grab). Dulu non-modal → jendela utama
+        # tetap interaktif saat popup terbuka + popup ganda menumpuk;
+        # destroy melepas grab otomatis.
+        with contextlib.suppress(tk.TclError):
+            win.grab_set()
 
         body = tk.Frame(win, bg=C_BG)
         body.pack(fill="both", expand=True)
@@ -1628,7 +1686,9 @@ class NominalRestoView(tk.Frame):
                             "· nominal '-' (transparan — tidak dihitung)",
                  bg=C_CARD, fg=C_HEADER, font=font(8, "bold")).pack(
             side="left", padx=10, pady=6)
-        GhostButton(foot, text="Tutup", command=win.destroy).pack(
+        # v3.9.59 — FIX 2f-13: 'Tutup (Esc)' (kanon — popup ini bind
+        # <Escape>; 'Tutup' polos menyembunyikan shortcut).
+        GhostButton(foot, text="Tutup (Esc)", command=win.destroy).pack(
             side="right", padx=10, pady=4)
 
         # v3.9.41 — ukuran besar + kolom responsif (pola popup rincian;

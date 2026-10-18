@@ -52,6 +52,19 @@ v3.2:
 
 v3.1 (dipertahankan): filter corong di header, ⛶ perbesar, loading overlay,
 compute/render async.
+
+AUDIT 2c (fix 3-c):
+- 2c-01/2c-02: pesan 0-baris pipeline menunjuk tab yang BENAR
+  ('⚙️ Config' — dulu '⚙ Pengaturan' yang tak ada) DAN naik ke
+  SUBTITLE EmptyState (status footer hidup di dalam content yang
+  tersembunyi di balik EmptyState → teksnya tak pernah terlihat).
+- 2c-04: rentang tanggal terbalik (awal > akhir) kini menukar ISI
+  entry + warning 'Rentang dibalik otomatis' (dulu swap senyap —
+  entry tetap '20 – 5' padahal filter memakai 5..20).
+- 2c-07: tombol tanggal 'Apply' (EN) → 'Terapkan' (parity komparasi).
+- 2c-06: hint footer abu 1 baris 'Dobel-klik baris = detail'.
+- 2f-11: pesan sukses export memakai fmt_int_id ('1.347' — dulu
+  '{n:,}' EN '1,347').
 """
 
 import tkinter as tk
@@ -231,7 +244,9 @@ class PivotTableView(tk.Frame):
         t2 = ttk.Entry(r1, textvariable=self.tgl_end_var, width=6)
         t2.pack(side="left", padx=(2, 6))
         t2.bind("<Return>", lambda e: self._refresh_pivot())
-        GhostButton(r1, text="Apply", command=self._refresh_pivot).pack(
+        # 2c-07 (audit 2c) — 'Apply' (EN) → 'Terapkan' (parity tombol
+        # '↻ Terapkan' komparasi; app 99% Indonesia).
+        GhostButton(r1, text="Terapkan", command=self._refresh_pivot).pack(
             side="left", padx=(0, 18))
 
         self.hide_empty_var = tk.BooleanVar(value=True)
@@ -300,6 +315,11 @@ class PivotTableView(tk.Frame):
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
+        # 2c-06 (audit 2c) — affordance minimal: hint abu 1 baris di
+        # footer (double-click = popup detail; view pivot TIDAK punya
+        # kolom ✓ follow-up — matriks barang × metric).
+        tk.Label(foot, text="Dobel-klik baris = detail", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         # Loading overlay (dibuat setelah tree → stacking di atas)
         self.overlay = LoadingOverlay(tbody, "Menghitung matrix pivot…")
@@ -456,6 +476,26 @@ class PivotTableView(tk.Frame):
         self.content.pack_forget()
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
+    def _set_empty_subtitle(self, subtitle: str):
+        """2c-02 (audit 2c) — panduan diagnostik 0-baris naik ke SUBTITLE
+        EmptyState (parameternya sudah tersedia, belum dipakai). Status
+        label tetap diset, tapi footer hidup DI DALAM self.content yang
+        disembunyikan EmptyState → tanpa subtitle, teks panduan TIDAK
+        PERNAH terlihat user. Widget dibangun ulang hanya bila teks
+        berubah (murah; paling banyak sekali per run pipeline)."""
+        if getattr(self, "_empty_subtitle", None) == subtitle:
+            return
+        self._empty_subtitle = subtitle
+        try:
+            self.empty.destroy()
+        except tk.TclError:
+            pass
+        self.empty = EmptyState(
+            self, icon="📊", title="Belum ada data pivot",
+            subtitle=subtitle,
+            cta_text="🚀 Jalankan Pipeline",
+            on_cta=self._cta_proses)
+
     def _show_content(self):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
@@ -504,6 +544,12 @@ class PivotTableView(tk.Frame):
         # TANPA SYARAT → tabel kosong senyap di belakang pipeline
         # "SELESAI" hijau — user tak tahu harus cek folder data/RootPath).
         if data is None or getattr(data, "empty", True):
+            # 2c-02 (audit 2c) — subtitle EmptyState membawa panduan
+            # RootPath ke tempat TERLIHAT (status footer tersembunyi di
+            # balik EmptyState); 2c-01 — nama tab dibetulkan '⚙️ Config'.
+            self._set_empty_subtitle(
+                "0 baris terbaca dari pipeline — cek folder data / "
+                "RootPath di tab ⚙️ Config")
             self._show_empty()
             self._name_selected = None
             self.header_filter.clear()
@@ -514,7 +560,7 @@ class PivotTableView(tk.Frame):
                 var.set("(All)")
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
             return
         self._show_content()
         self._populate_filters()
@@ -618,7 +664,19 @@ class PivotTableView(tk.Frame):
                                  fallback=31, label="Tanggal akhir",
                                  parent=self)
         if t1 > t2:
+            # 2c-04 (audit 2c) — rentang terbalik: selain menukar nilai
+            # filter, ISI kedua entry ikut ditukar + warning (pola
+            # validated_tgl_entry: invalid = warn + revert; dulu swap
+            # SENYAP — entry tetap '20 – 5' padahal filter memakai 5..20,
+            # membingungkan saat debugging filter).
             t1, t2 = t2, t1
+            messagebox.showwarning(
+                "Rentang dibalik otomatis",
+                "Rentang dibalik otomatis (awal > akhir) — tanggal "
+                f"yang dipakai: {t1} – {t2}.",
+                parent=self.winfo_toplevel())
+            self.tgl_start_var.set(str(t1))
+            self.tgl_end_var.set(str(t2))
         return {
             "name_selected": self._name_selected,
             "resto": self.resto_var.get(),
@@ -1094,11 +1152,13 @@ class PivotTableView(tk.Frame):
             st = payload.get("filters") or {}
             mode = "Per Tanggal" if st.get("mode") == "tanggal" \
                 else "Per Resto"
-            self.status_var.set(f"Export {n:,} baris pivot ({mode}) → "
-                                f"{filepath}")
+            # 2f-11 (audit 2f) — format ribuan Indonesia (fmt_int_id,
+            # '1.347') konsisten permukaan lain (dulu '{n:,}' EN '1,347').
+            self.status_var.set(f"Export {fmt_int_id(n)} baris pivot "
+                                f"({mode}) → {filepath}")
             messagebox.showinfo(
                 "Export Berhasil",
-                f"Matrix pivot ({mode}, {n:,} baris data)\n"
+                f"Matrix pivot ({mode}, {fmt_int_id(n)} baris data)\n"
                 f"di-export ke:\n{filepath}",
                 parent=self.winfo_toplevel())
 

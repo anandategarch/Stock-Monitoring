@@ -108,6 +108,7 @@ import json
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -189,7 +190,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.58"  # v3.9.58 — DEEP AUDIT SEBAR-AGENT 7 paralel (38 temuan → semua fix): export/zoom/worker · widgets · clone basi/grab · pivot COM · pipeline phantom-resto
+APP_VERSION = "3.9.59"  # v3.9.59 — REVIEW UI/UX SEBAR-AGENT 6 paralel (67 temuan → semua fix): statusbar/zoom-bar/KpiRow/HeaderFilter/flash · band+sticky · copy popup · followup format ID · nominal Rp · export atomik · config jujur · pandas<3
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -197,6 +198,76 @@ APP_VERSION = "3.9.58"  # v3.9.58 — DEEP AUDIT SEBAR-AGENT 7 paralel (38 temua
 # TIDAK ada bump versi di fix ini).
 if __doc__:
     __doc__ = __doc__.replace("vX.Y.Z", f"v{APP_VERSION}")
+# v3.9.59 — REVIEW UI/UX SEBAR-AGENT (user: "Review ui UX full sebar
+# agent dan fix"): 6 agent audit UI/UX PARALEL read-only (2-a shell/
+# theme · 2-b widgets · 2-c pivot/komparasi/laporan · 2-d deviasi+popup
+# · 2-e selisih/nominal/PO/followup · 2-f support+cross-cutting) → 67
+# temuan TERVERIFIKASI (1 HIGH / 26 MED / 40 LOW) + 60+ hipotesis
+# ditolak dgn bukti → 6 agent fix PARALEL kepemilikan-file terpisah +
+# verifikasi utama. SEMUA fix: (2a) STATUSBAR pesan panjang kini
+# dipotong '…' (badge versi/zoom tak tertimpa; teks penuh tersimpan;
+# recompute saat resize) · TINGGI bar toolbar/statusbar IKUT ZOOM ×ui_scale
+# (48→96 / 34→68 @200%; dulu judul & badge zoom terpotong) · rujukan
+# tab hantu '⚙ Pengaturan' → '⚙️ Config' (15 situs) · baris tab
+# notebook COMPACT-LABEL saat meluap di zoom tinggi/jendela sempit
+# (tab kanan tetap terjangkau) · hint zoom CTRL+roda tampil sejak
+# start (bukan hanya setelah zoom) · copy EN/ID disatukan ('💾 Export
+# Excel' · '↻ Refresh Sumber' · 'baris Append1' · 'tampilan') · dialog
+# simpan-config menyebut data lama tampil sampai pipeline ulang ·
+# focus_set notebook pasca pipeline-done (12 jalur) · export: nama file
+# ber-timestamp semua jalur + error file-terkunci ramah ID + tawaran
+# 'Buka folder' · waktu proses terakhir 'Data: dd-mm HH:MM' di status.
+# (2b) HeaderFilter: nilai panjang lebar popup DINAMIS (cap 460px,
+# truncation '…') · PREVIEW live-search mengikuti OPERATOR (dulu
+# menampilkan nilai yang TIDAK dipilih Enter; kontrak §94 tetap) ·
+# hint 'Enter = pilih nilai' · NAVIGASI KEYBOARD daftar nilai (Up/
+# Down/Space + ring fokus; Down dari entry masuk daftar) · panel ◱
+# tombol seragam Ghost · FLASH_MS tunggal 2500ms (dulu 3,0 vs 2,5s) ·
+# clone ⛶ berjudul '(salinan)' · KpiRow kartu SERAGAM (uniform grid +
+# tepi simetris) · GhostButton cursor hand2. (2c) pivot: rentang
+# tanggal terbalik → swap + ENTRY DISINKRONKAN + warning (dulu senyap)
+# · Top-N non-numerik → revert + ⚠ (paritas dgn negatif) · guidance
+# 0-baris via SUBTITLE EmptyState (dulu tersembunyi di balik overlay)
+# · 'Apply' → 'Terapkan' · baris MODE kembar di 📋 → 'TAMPILAN' (view-
+# spesifik) · laporan 0-anomali → EmptyState jujur 'tidak ada anomali
+# utk filter aktif' · footer hint 'Dobel-klik = detail · ✓ = pantau' ·
+# export pivot fmt_int_id ('1.347'). (2d) STICKY MERGE: baris display
+# nilai kini BBOX-TERVERIFIKASI (dulu bisa mendarat di baris terpotong
+# tak terlihat pada offset fraksional — gejala 'nama barang tidak
+# muncul' kambuh via drag scrollbar) · BAND grup #9aa7b9 (kontras
+# 2,44:1 vs 1,096:1 — sekat kelompok benar-benar terlihat) ·
+# DeviasiPopup DAPAT COPY (menu klik-kanan Nomor/PO + tombol 📋 +
+# flash — paritas DetailsPopup) · Ctrl+C DetailsPopup: seleksi REGION
+# sel prioritas (dulu menimpa binding region ala Excel) · flash label
+# jujur (Nomor vs Nomor PO) · judul popup wraplength adaptif (bug HANG
+# resize ronde-1 juga diperbaiki: filter event.widget child) · legenda
+# swatch CEK #c2410c sinkron + entri '✓ = pantauan' · messagebox
+# 'Invalid' → 'Input tidak valid' · footer deviasi wrap 2 baris (dulu
+# klip dari kiri). (2e) nominal ⧉ nilai 'Rp …' IDENTIK sel (dulu
+# '1.825' vs 'Rp 1.825' → filter clone 0 baris) · chips Rincian IN +
+# KPI Rekap Selisih WRAP (dulu chip/kartu terakhir hilang @minsize) ·
+# status jujur saat KATEGORI menghabiskan baris · FOLLOW UP angka
+# format INDONESIA ('1.234,5' · '(1.234)' · '-' — dulu EN) · hint ✓
+# destruktif di footer + cursor hand2 · leaderboard '+N resto
+# lainnya' (dulu senyap terpotong 12) · Rincian PO BISA SORT (satu-
+# satunya tabel tanpa sort) · EmptyState follow-up 'centang ✓ di tab
+# Deviasi' (bukan 'jalankan pipeline') · popup nominal MODAL (grab) ·
+# legenda marker nominal ('*'/'—') · export Rekap IN ATOMIK. (2f)
+# config: pesan error rujuk '⚙️ Config' + JUJUR (hapus config.json
+# TIDAK meregenerasi — dulu klaim palsu) · export pivot/selisih/
+# follow-up ATOMIK (tmp+os.replace; dulu timpa parsial) · refresh:
+# file berubah tampil MTIME + folder HILANG tampil baris 'Hilang' ·
+# followup.json korup → PERINGATAN pengguna (dulu senyap: .bad +
+# daftar lenyap) + API last_recovery/last_save_error utk view ·
+# tanggal dialog refresh seragam. (P0) PANDAS 3 COMPAT: fresh install
+# (requirements pandas>=2.0.0 resolve 3.x) CRASH pipeline
+# 'assignment destination is read-only' (to_numpy CoW read-only) →
+# copy=True (pandas 2 & 3) + PIN pandas<3 (semantik astype(str) NaN +
+# parser tanggal berubah di pandas 3 — data diverifikasi di 2.x).
+# VERIFIKASI: test_ui_redesign 1402/1402 PASS (1379 + §69 BARU 23
+# check) + test_mock ALL PASS + ruff 195 < baseline 204 + py_compile
+# + smoke 2 entry tanpa crash.log + probe ≈60 file (audit + fix +
+# verifikasi per-agent). 20 file.
 # v3.9.58 — DEEP AUDIT SEBAR-AGENT (user: "Deep audit dan fix sebar
 # agent full"): 7 agent audit PARALEL read-only (6-a app/state/threading ·
 # 6-b widgets ·  6-c pivot/laporan/komparasi · 6-d1 deviasi · 6-d2
@@ -1743,6 +1814,61 @@ _ST_DONE = ("SELESAI", C_GREEN)
 _ST_STOP = ("DIHENTIKAN oleh user", C_AMBER)
 _ST_ERR = ("ERROR — lihat log", C_RED)
 
+# v3.9.59 — FIX 2a-05 (audit 2-a): label COMPACT baris tab notebook —
+# dipakai bila estimasi lebar baris tab MELUAP (zoom > 100% / jendela
+# sempit — tab paling kanan terpotong dan tak terjangkau mouse;
+# ttk.Notebook tidak punya scroll/shrink tab). Emoji dibuang + label
+# panjang dipendekkan; badge jumlah '☑ Follow Up (N)' tetap membawa
+# (N) — lihat _compact_tab_label / _apply_tab_label_fit.
+_TAB_COMPACT_LABELS = {
+    "⚙️ Config": "Config",
+    "🚀 Proses": "Proses",
+    "📊 Pivot Table": "Pivot",
+    "📦 Deviasi GR": "Deviasi GR",
+    "🧩 Deviasi PCS": "Deviasi PCS",
+    "📤 Rekap Selisih IN": "Selisih IN",
+    "📋 Laporan Deviasi": "Laporan",
+    "🧮 Nominal Deviasi": "Nominal",
+    "☑ Follow Up": "Follow Up",
+    "🛒 Rincian PO": "Rincian PO",
+}
+# Estimasi padding per tab: style TNotebook.Tab padding (12, 9) → 2×12
+# + tabmargins (6, 8, 6, 0) → 2×6 ≈ 36 px per tab.
+_TAB_PAD_EST = 36
+
+
+def _is_file_locked_error(exc: BaseException) -> bool:
+    """v3.9.59 — FIX 2f-09 (audit 2-f): deteksi error "file target
+    terkunci / tak bisa ditulis" — tipikal file export masih dibuka di
+    Excel saat export dijalankan ulang. Dipakai utk memberi user pesan
+    Indonesia yang actionable (bukan exception mentah English)."""
+    if isinstance(exc, PermissionError):
+        return True
+    if isinstance(exc, OSError):
+        # winerror 32 = sharing violation, 5 = access denied (Windows);
+        # errno 13 = EACCES, 26 = ETXTBSY (POSIX).
+        return (getattr(exc, "winerror", None) in (5, 32)
+                or getattr(exc, "errno", None) in (13, 26))
+    return False
+
+
+def _open_folder_in_file_manager(path: str) -> bool:
+    """v3.9.59 — FIX 2f-09 (audit 2-f): buka folder di file manager
+    platform. Windows: os.startfile (API Windows — dicek hasattr dulu);
+    macOS: open; lainnya: xdg-open. Gagal → [WARNING] ke log konsol,
+    JANGAN raise dari jalur UI."""
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(path)          # Windows: Explorer
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return True
+    except OSError as e:
+        print(f"[WARNING] Gagal membuka folder ({path}): {e}")
+        return False
+
 
 # --- Helper: redirect stdout ke Text widget via queue -----------------------
 class StreamToQueue:
@@ -1898,10 +2024,13 @@ class StockMonitorApp:
         self.toolbar = Toolbar(self.root, f"📊 {APP_TITLE}", APP_VERSION)
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        # v3.9.37 — 🔄 Refresh Sumber: dialog pilih file sumber yang mau
+        # v3.9.37 — ↻ Refresh Sumber: dialog pilih file sumber yang mau
         # dibaca ulang (selektif — file lain dari cache bacaan).
+        # v3.9.59 — FIX 2a-09/2f-13: glyph ↻ + SATU label kanonik per aksi
+        # (tombol tab Proses dulu '🔄 Refresh File Sumber…' — dua label
+        # untuk dialog yang sama membuat user ragu itu fitur berbeda).
         self.btn_refresh_tb = self.toolbar.add_action(
-            "🔄 Refresh Sumber", command=self._open_refresh_dialog)
+            "↻ Refresh Sumber", command=self._open_refresh_dialog)
         self.btn_export_tb = self.toolbar.add_action(
             "💾 Export Excel", command=self._export_excel, accent=True)
         # FIX A-02 (audit 2-a): set_enabled → tombol disabled TAMPAK dim
@@ -1912,6 +2041,13 @@ class StockMonitorApp:
         self.statusbar = StatusBar(self.root)
         self.statusbar.pack(side=tk.BOTTOM, fill=tk.X)
         self.statusbar.set_right(f"v{APP_VERSION} · Python Edition")
+        # v3.9.59 — FIX 2a-06 (audit 2-a): discoverability zoom — teks
+        # status AWAL menyebut CTRL+roda SEKALI (hint '(CTRL+roda)' badge
+        # kanan memang hanya tampil saat zoom ≠ 100% — kontrak test §58
+        # dipertahankan; dulu user baru tahu fitur zoom ada SETELAH tak
+        # sengaja menekan CTRL sambil scroll).
+        self.statusbar.set_status(
+            "SIAP — menunggu perintah · CTRL+roda = zoom tampilan", C_GREEN)
 
     # =====================================================================
     # v3.9.48 — ZOOM UI RUNTIME (CTRL + Scroll) — user: "bisa gak kalau
@@ -2044,6 +2180,10 @@ class StockMonitorApp:
         self._invalidate_tree_render_caches()
         # (5) badge
         self._update_zoom_badge()
+        # (5b) v3.9.59 — FIX 2a-05: font baris tab ikut membesar saat zoom
+        # → cek label compact (debounce — geometry baru belum diterapkan
+        # saat baris ini berjalan, <Configure> akan menyusul).
+        self._schedule_tab_label_fit()
         return True
 
     def _on_root_configure(self, event):
@@ -2143,6 +2283,54 @@ class StockMonitorApp:
                     f"{round(self.ui_zoom * 100)}% (CTRL+roda) · "
                     f"Python Edition")
 
+    def _data_time_suffix(self) -> str:
+        """v3.9.59 — FIX 2f-17 (audit 2-f): umur data terakhir untuk
+        statusbar — ' · Data: dd-mm HH:MM' (kosong bila belum pernah
+        ada data). Dulu waktu proses terakhir hanya hidup di dalam
+        dialog 🔄 Refresh — user tak bisa menilai kesegaran tabel dari
+        UI utama."""
+        _ts = getattr(self, "_last_run_finished_at", None)
+        if not _ts:
+            return ""
+        return " · Data: " + time.strftime("%d-%m %H:%M",
+                                           time.localtime(_ts))
+
+    def _focus_notebook_content(self):
+        """v3.9.59 — FIX 2a-11 (audit 2-a): pindahkan fokus keyboard ke
+        konten tab AKTIF setelah pergantian tab programatik (pipeline
+        selesai → tab Pivot). Dipanggil via after_idle supaya tidak
+        mencuri fokus saat user sedang mengetik (Entry/Text/Spinbox
+        aktif → skip). Tanpa ini fokus menempel di root: pengguna
+        keyboard (Tab/panah/Home) harus klik dulu sebelum bisa
+        navigasi tabel."""
+        with contextlib.suppress(Exception):
+            _cur = self.root.focus_get()
+            if isinstance(_cur, (tk.Entry, tk.Text, tk.Spinbox,
+                                 ttk.Spinbox)):
+                return   # user sedang mengetik — jangan ganggu
+            self.notebook.focus_set()   # minimal: Ctrl+Tab traversal hidup
+            _sel = self.notebook.select()
+            if not _sel:
+                return
+            _tab = self.root.nametowidget(_sel)
+            _stack = list(_tab.winfo_children())
+            while _stack:   # BFS → tree pertama tab aktif = fokus tabel
+                _w = _stack.pop(0)
+                if isinstance(_w, ttk.Treeview):
+                    _w.focus_set()
+                    return
+                _stack.extend(_w.winfo_children())
+
+    def _go_to_proses_tab(self):
+        """v3.9.59 — FIX 2a-11 (audit 2-a): pindah ke tab 🚀 Proses secara
+        programatik (tombol 'ke tab Proses' di view kosong +
+        _start_pipeline) lalu pindahkan fokus keyboard ke konten tab
+        via after_idle (lihat _focus_notebook_content). Dulu fokus
+        menempel di tombol pemicu/root — pengguna keyboard harus KLIK
+        dulu setelah pindah tab sebelum Tab/panah bekerja."""
+        self.notebook.select(self.tab_proses)
+        self.root.after_idle(self._focus_notebook_content)
+
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(expand=True, fill="both", padx=10, pady=(2, 6))
@@ -2171,6 +2359,24 @@ class StockMonitorApp:
                           text="🧮 Nominal Deviasi")
         self.notebook.add(self.tab_followup, text="☑ Follow Up")
         self.notebook.add(self.tab_rincian, text="🛒 Rincian PO")
+        # v3.9.59 — FIX 2a-05: register label FULL per tab + pantau
+        # lebar baris tab (fallback label compact saat meluap — badge
+        # '☑ Follow Up (N)' ikut lewat _set_tab_label supaya konsisten).
+        self._tab_full_labels = {
+            str(self.tab_config): "⚙️ Config",
+            str(self.tab_proses): "🚀 Proses",
+            str(self.tab_pivot): "📊 Pivot Table",
+            str(self.tab_deviasi_gr): "📦 Deviasi GR",
+            str(self.tab_deviasi_pcs): "🧩 Deviasi PCS",
+            str(self.tab_in_selisih): "📤 Rekap Selisih IN",
+            str(self.tab_laporan): "📋 Laporan Deviasi",
+            str(self.tab_nominal_resto): "🧮 Nominal Deviasi",
+            str(self.tab_followup): "☑ Follow Up",
+            str(self.tab_rincian): "🛒 Rincian PO",
+        }
+        self._tab_compact_mode = False
+        self._tab_fit_after_id = None
+        self.notebook.bind("<Configure>", self._on_notebook_configure)
         # v3.2: lazy refresh — tab data hanya compute saat TERLIHAT
         # (setelah pipeline selesai hanya tab aktif yang refresh; tab lain
         # menunggu dipilih → app terasa jauh lebih ringan)
@@ -2240,17 +2446,96 @@ class StockMonitorApp:
 
     def _update_followup_badge(self):
         """Badge jumlah baris di judul tab Follow Up."""
-        try:
+        with contextlib.suppress(Exception):
             n = len(self.followup_store)
             # FIX H-1 (audit 2-a hipotesis — TERKONFIRMASI): label tab
             # TANPA spasi ganda + padding ramping → semua tab muat di lebar
             # minimum 1020px (dulu ±1280px — tab paling kanan terpotong /
             # tak terjangkau; kritis juga di Windows 125% scaling).
-            self.notebook.tab(
+            # v3.9.59 — FIX 2a-05: lewat _set_tab_label supaya mode label
+            # compact (baris tab sempit) tetap konsisten dgn badge (N).
+            self._set_tab_label(
                 self.tab_followup,
-                text=f"☑ Follow Up{' (' + str(n) + ')' if n else ''}")
-        except Exception:
-            pass
+                f"☑ Follow Up{' (' + str(n) + ')' if n else ''}")
+
+    # =====================================================================
+    # v3.9.59 — FIX 2a-05 (audit 2-a): BARIS TAB ADAPTIF (label compact)
+    # =====================================================================
+    def _on_notebook_configure(self, _event=None):
+        """<Configure> notebook (resize jendela / zoom) → cek muat
+        atau tidaknya baris tab (debounce — lihat
+        _schedule_tab_label_fit)."""
+        self._schedule_tab_label_fit()
+
+    def _schedule_tab_label_fit(self):
+        """Debounce 120 ms: resize/zoom memicu SERANGAN event
+        <Configure> (tiap langkah geometry) — hanya cek TERAKHIR yang
+        dieksekusi, dan cek itu sendiri idempoten (hanya perubahan mode
+        yang menulis ulang label tab)."""
+        _prev = getattr(self, "_tab_fit_after_id", None)
+        if _prev is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(_prev)
+        self._tab_fit_after_id = self.root.after(
+            120, self._apply_tab_label_fit)
+
+    def _compact_tab_label(self, text: str) -> str:
+        """Label compact dari label full: buang emoji + perpendek via
+        _TAB_COMPACT_LABELS. Suffix badge jumlah ' (N)' (tab Follow Up)
+        dipertahankan — informasi penting."""
+        for _full, _short in _TAB_COMPACT_LABELS.items():
+            if text.startswith(_full):
+                return _short + text[len(_full):]
+        return text
+
+    def _set_tab_label(self, tab, full_label: str):
+        """Simpan label FULL + terapkan ke tab sesuai mode compact
+        (2a-05) — dipakai _update_followup_badge supaya badge (N) tidak
+        menimpa mode label saat baris tab sempit."""
+        self._tab_full_labels[str(tab)] = full_label
+        with contextlib.suppress(tk.TclError):
+            self.notebook.tab(
+                tab, text=(self._compact_tab_label(full_label)
+                           if getattr(self, "_tab_compact_mode", False)
+                           else full_label))
+        self._schedule_tab_label_fit()
+
+    def _apply_tab_label_fit(self):
+        """Terapkan label tab FULL/COMPACT sesuai ruang tersedia.
+
+        Estimasi lebar baris = Σ font.measure(label) + padding per tab
+        (font = named font style TNotebook.Tab pilihan-selected — bold,
+        worst case; ikut ter-rescale saat zoom). Engage compact HANYA
+        bila estimasi FULL meluap DAN zoom > 100% — di 100% label
+        produksi memang muat (padding ramping fix H-1, terukur ±912px <
+        lebar minimum 1020px; estimasi Xvfb lebih lebar karena font
+        substitusi). Kembali ke label FULL begitu muat lagi."""
+        self._tab_fit_after_id = None
+        nb = getattr(self, "notebook", None)
+        if nb is None:
+            return
+        with contextlib.suppress(Exception):
+            _avail = int(nb.winfo_width())
+            if _avail < 60:   # belum ter-map — tunggu <Configure> berikut
+                return
+            _f = font(10, "bold")   # named font style tab (selected)
+            _full = [self._tab_full_labels.get(str(t), nb.tab(t, "text"))
+                     for t in nb.tabs()]
+            _est_full = sum(_f.measure(t) + _TAB_PAD_EST for t in _full)
+            _est_compact = sum(
+                _f.measure(self._compact_tab_label(t)) + _TAB_PAD_EST
+                for t in _full)
+            _want = (_est_full > _avail and self.ui_zoom > 1.0
+                     and _est_compact < _est_full)
+            if _want == getattr(self, "_tab_compact_mode", False):
+                return   # idempoten — jangan tulis label tanpa perubahan
+            self._tab_compact_mode = _want
+            for _t in nb.tabs():
+                _lbl = self._tab_full_labels.get(str(_t))
+                if _lbl is None:
+                    continue
+                nb.tab(_t, text=(self._compact_tab_label(_lbl) if _want
+                                 else _lbl))
 
     # =====================================================================
     # TAB: CONFIG
@@ -2410,7 +2695,12 @@ class StockMonitorApp:
 
         messagebox.showinfo(
             "Berhasil",
-            f"Config disimpan.\n\nRootPath: {new_root}",
+            f"Config disimpan.\n\nRootPath: {new_root}\n\n"
+            # v3.9.59 — FIX 2a-10 (audit 2-a): data/view LAMA masih tampil
+            # sampai pipeline dijalankan ulang — tanpa kalimat ini user
+            # yakin data sudah berganti lalu melihat data lokasi lama.
+            "Data lama tetap tampil sampai pipeline dijalankan ulang "
+            "(klik 🚀 MULAI PROSES untuk membaca folder baru).",
             parent=self.root)
         self._load_config_to_form()
 
@@ -2455,15 +2745,19 @@ class StockMonitorApp:
                                          command=self._copy_log)
         self.btn_salin_log.pack(side="left", padx=(8, 0))
 
-        # v3.9.37 — 🔄 Refresh File Sumber…: dialog selektif (file yang
-        # berubah sejak proses terakhir tercentang default; file lain tak
-        # dibaca ulang — cache bacaan).
+        # v3.9.37 — ↻ Refresh Sumber: dialog selektif (file yang berubah
+        # sejak proses terakhir tercentang default; file lain tak dibaca
+        # ulang — cache bacaan).
+        # v3.9.59 — FIX 2a-09/2f-13: label disamakan dgn toolbar (dulu
+        # '🔄 Refresh File Sumber…' — dua label utk aksi yang sama).
         self.btn_refresh_src = GhostButton(
-            btns, text="🔄 Refresh File Sumber…",
+            btns, text="↻ Refresh Sumber",
             command=self._open_refresh_dialog)
         self.btn_refresh_src.pack(side="left", padx=(8, 0))
 
-        self.btn_export = GhostButton(btns, text="💾 Export ke Excel",
+        # v3.9.59 — FIX 2a-09/2f-13: label disamakan dgn toolbar (dulu
+        # '💾 Export ke Excel' — dua label utk aksi yang sama).
+        self.btn_export = GhostButton(btns, text="💾 Export Excel",
                                       state="disabled",
                                       command=self._export_excel)
         self.btn_export.pack(side="left", padx=(8, 0))
@@ -2486,9 +2780,12 @@ class StockMonitorApp:
                                   "menunggu perintah", C_GREEN)
         self.kpi_elapsed = KpiCard(kpi_row, "Waktu Berjalan", "0.0 dtk",
                                    "sejak MULAI PROSES", C_HEADER)
-        self.kpi_append = KpiCard(kpi_row, "Rows Append1", "—",
+        # v3.9.59 — FIX 2a-09: label KPI berbahasa Indonesia (dulu 'Rows
+        # …' EN — nilai di bawahnya sudah '1.500 baris' per FIX 6a-05,
+        # label saja yang tertinggal).
+        self.kpi_append = KpiCard(kpi_row, "Baris Append1", "—",
                                   "pipeline belum jalan")
-        self.kpi_rincian = KpiCard(kpi_row, "Rows Rincian PO", "—",
+        self.kpi_rincian = KpiCard(kpi_row, "Baris Rincian PO", "—",
                                    "pipeline belum jalan")
         for c in (self.kpi_status, self.kpi_elapsed, self.kpi_append,
                   self.kpi_rincian):
@@ -2717,7 +3014,10 @@ class StockMonitorApp:
                 "Folder data tidak ditemukan",
                 "Folder data berikut TIDAK DITEMUKAN:\n\n" + daftar +
                 "\n\nPipeline tetap dijalankan (data bisa parsial/kosong).\n"
-                "Perbaiki RootPath / Folders di tab ⚙ Pengaturan.",
+                # v3.9.59 — FIX 2a-04: tab yang dimaksud adalah '⚙️
+                # Config' (dulu '⚙ Pengaturan' — tab itu tidak pernah
+                # tampil, panduan jadi dead-end).
+                "Perbaiki RootPath / Folders di tab ⚙️ Config.",
                 parent=self.root)
         # v3.9.46 — audit 66 temuan #1: preflight DIINGAT sampai run usai —
         # status akhir "SELESAI DENGAN PERINGATAN" (folder sumber
@@ -2727,7 +3027,9 @@ class StockMonitorApp:
 
         is_refresh = refresh_files is not False
         if not is_refresh:
-            self.notebook.select(self.tab_proses)
+            # v3.9.59 — FIX 2a-11: pindah tab programatik + fokus ikut
+            # pindah (dulu fokus menempel di tombol MULAI PROSES).
+            self._go_to_proses_tab()
         # v3.9.37 — refresh mode: TETAP di tab aktif (data diperbarui
         # in-place; tab lain menyusul via lazy refresh saat dipilih —
         # "gak harus refresh semua" juga soal gangguan view).
@@ -2947,6 +3249,12 @@ class StockMonitorApp:
         audit_df = audit_result.get("df") if audit_result else None
         audit_kpi = audit_result.get("kpi") if audit_result else None
         audit_n = len(audit_df) if audit_df is not None else 0
+        # v3.9.59 — FIX 2f-17: waktu selesai dicatat di AWAL jalur sukses
+        # (data pipeline sudah balik; loading view menyusul) supaya SEMUA
+        # status SELESAI di bawah bisa menyebut umur data (' · Data:
+        # dd-mm HH:MM') — dulu timestamp ini hanya hidup di dialog 🔄
+        # Refresh, statusbar tak pernah menyebut kesegaran data.
+        self._last_run_finished_at = time.time()
         self.status_var.set("Status: SELESAI.")
         # FIX 6a-05: fmt_int_id + "baris" — dulu grouping EN "215,950
         # rows" di status bar & KPI padahal log/tabel/chip pakai 215.950
@@ -2955,7 +3263,8 @@ class StockMonitorApp:
             f"SELESAI — Append1: {fmt_int_id(len(append1_df))} baris · "
             f"Rincian PO: {fmt_int_id(len(rincian_po_df))} baris · "
             f"IN detail: {fmt_int_id(len(in_detail_df))} baris · "
-            f"Audit: {fmt_int_id(audit_n)} baris", C_GREEN)
+            f"Audit: {fmt_int_id(audit_n)} baris{self._data_time_suffix()}",
+            C_GREEN)
         self.kpi_status.set_value("SELESAI", "data siap dianalisis", C_GREEN)
         # v3.9.46 — audit 66 temuan #1: status hijau di atas adalah
         # PROVISORI — status AKHIR jujur ditetapkan SETELAH semua view
@@ -3115,13 +3424,16 @@ class StockMonitorApp:
         _refresh_sfx = (" — 🔄 file sumber disegarkan"
                         if refresh_files is not False else "")
         if failed_views:
-            _detail = (f"{len(failed_views)} view gagal dimuat ("
-                       + ", ".join(failed_views) + ") — lihat log; view itu "
-                       "masih menampilkan data LAMA")
+            # v3.9.59 — FIX 2a-09: istilah dev 'view' → 'tampilan' pada
+            # teks user (log teknis per-view tetap memakai 'view').
+            _detail = (f"{len(failed_views)} tampilan gagal dimuat ("
+                       + ", ".join(failed_views) + ") — lihat log; "
+                       "tampilan itu masih menampilkan data LAMA")
             self.status_var.set(
-                "Status: SELESAI PARSIAL — sebagian view gagal dimuat.")
+                "Status: SELESAI PARSIAL — sebagian tampilan gagal dimuat.")
             self.statusbar.set_status(
-                f"SELESAI PARSIAL{_refresh_sfx} — ⚠ {_detail}", C_ORANGE)
+                f"SELESAI PARSIAL{_refresh_sfx} — ⚠ "
+                f"{_detail}{self._data_time_suffix()}", C_ORANGE)
             self.kpi_status.set_value("SELESAI PARSIAL", _detail, C_ORANGE)
             self._append_log_batched(
                 f"\n[PERINGATAN] SELESAI PARSIAL — {_detail}.\n")
@@ -3141,7 +3453,8 @@ class StockMonitorApp:
             _warn = "; ".join(_parts) + " — data parsial, lihat log"
             self.status_var.set("Status: SELESAI DENGAN PERINGATAN.")
             self.statusbar.set_status(
-                f"SELESAI DENGAN PERINGATAN{_refresh_sfx} — ⚠ {_warn}",
+                f"SELESAI DENGAN PERINGATAN{_refresh_sfx} — ⚠ "
+                f"{_warn}{self._data_time_suffix()}",
                 C_AMBER)
             self.kpi_status.set_value("SELESAI ⚠", _warn, C_AMBER)
             self._append_log_batched(f"\n[PERINGATAN] {_warn}\n")
@@ -3149,14 +3462,16 @@ class StockMonitorApp:
             # bersih + mode refresh (v3.9.37): TETAP di tab aktif; judul
             # menyebut REFRESH supaya jelas asal datanya.
             self.statusbar.set_status(
-                "SELESAI — 🔄 file sumber disegarkan", C_GREEN)
+                "SELESAI — 🔄 file sumber disegarkan"
+                f"{self._data_time_suffix()}", C_GREEN)
         # bersih + run normal: status hijau provisori (baris atas) sudah
         # tepat — tidak ditimpa.
 
         # v3.9.37 — catat waktu selesai (acuan "berubah" dialog Refresh
-        # File Sumber) + observabilitas cache baca file sumber (file
-        # dibaca ulang vs disajikan cache — silent-failure culture 48).
-        self._last_run_finished_at = time.time()
+        # File Sumber; v3.9.59 FIX 2f-17: kini di-set di AWAL jalur sukses
+        # supaya statusbar ikut menyebutnya) + observabilitas cache baca
+        # file sumber (file dibaca ulang vs disajikan cache —
+        # silent-failure culture 48).
         _ent, _nf, _hit, _miss = read_cache_stats()
         if _nf:
             self._append_log_batched(
@@ -3169,6 +3484,11 @@ class StockMonitorApp:
             # event tab-changed (lazy loading)
             self.notebook.select(self.tab_pivot)
             self.pivot_view.ensure_refreshed()
+            # v3.9.59 — FIX 2a-11: pindahkan fokus keyboard ke konten tab
+            # pivot (via after_idle — tidak mencuri fokus bila user sedang
+            # mengetik; dulu fokus menempel di root sehingga pengguna
+            # keyboard harus KLIK dulu sebelum Tab/panah bekerja).
+            self.root.after_idle(self._focus_notebook_content)
 
             # v3.3: selesai = status bar (hijau) + log — TANPA dialog modal
             # (dulu messagebox "Selesai" mem-blok alur tiap kali pipeline usai)
@@ -3321,7 +3641,7 @@ class StockMonitorApp:
                 can_refresh=self._can_refresh_now)
         except Exception as exc:  # defensive — dialog jangan matikan app
             messagebox.showerror(
-                "Refresh File Sumber",
+                "Refresh Sumber",
                 f"Gagal membuka dialog:\n{exc}", parent=self.root)
 
     def _can_refresh_now(self) -> bool:
@@ -3357,7 +3677,7 @@ class StockMonitorApp:
                 "Sedang Berjalan",
                 "Pipeline sedang berjalan — cache bacaan TIDAK dibuang dan "
                 "refresh DIBATALKAN.\n\nTunggu hingga selesai atau klik "
-                "Stop, lalu buka 🔄 Refresh File Sumber lagi.",
+                "Stop, lalu buka ↻ Refresh Sumber lagi.",
                 parent=self.root)
             return
         worker = getattr(self, "worker_thread", None)
@@ -3366,7 +3686,7 @@ class StockMonitorApp:
                 "Masih Menghentikan",
                 "Pipeline sebelumnya masih berhenti di checkpoint — cache "
                 "bacaan TIDAK dibuang.\n\nTunggu sampai status berubah, "
-                "lalu buka 🔄 Refresh File Sumber lagi.",
+                "lalu buka ↻ Refresh Sumber lagi.",
                 parent=self.root)
             return
         n = read_cache_invalidate(paths)
@@ -3411,11 +3731,15 @@ class StockMonitorApp:
                       else "Belum ada data. Jalankan pipeline dulu.")
             messagebox.showwarning("Export", _pesan, parent=self.root)
             return
+        # v3.9.59 — FIX 2f-10: nama file default ber-timestamp (pola pivot
+        # 'pivot_{mode}_{YYYYmmdd_HHMM}.xlsx') — dulu hanya pivot yang
+        # ber-stempel, jalur utama menimpa export sebelumnya secara default.
         filepath = filedialog.asksaveasfilename(
             title="Simpan sebagai Excel",
             defaultextension=".xlsx",
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-            initialfile="stock_monitoring_export.xlsx",
+            initialfile=("stock_monitoring_"
+                         f"{time.strftime('%Y%m%d_%H%M')}.xlsx"),
         )
         if not filepath:
             return
@@ -3495,14 +3819,30 @@ class StockMonitorApp:
             # sama dgn guard export — dulu hanya cek append1_df: export
             # data rincian-PO-saja meninggalkan tombol mati selamanya).
             self._sync_export_buttons()
-            messagebox.showinfo(
-                "Export Berhasil", f"Data di-export ke:\n{path}",
-                parent=self.root)
+            # v3.9.59 — FIX 2f-09: tawarkan buka folder lokasi file (dulu
+            # user harus menelusuri path manual di Explorer).
+            if messagebox.askyesno(
+                    "Export Berhasil",
+                    f"Data di-export ke:\n{path}\n\nBuka folder lokasi "
+                    "file?", parent=self.root):
+                _open_folder_in_file_manager(
+                    os.path.dirname(os.path.abspath(path)))
 
         def on_error(e):
             self._sync_export_buttons()   # FIX 6a-01 (lihat done())
-            messagebox.showerror(
-                "Export Gagal", f"Tidak bisa export:\n{e}", parent=self.root)
+            # v3.9.59 — FIX 2f-09: detail teknis ke LOG konsol; user diberi
+            # pesan Indonesia yang actionable — file terkunci (masih
+            # dibuka Excel) dulu tampil sebagai exception mentah English.
+            self._append_log_batched(f"\n[ERROR] Export gagal: {e!r}\n")
+            if _is_file_locked_error(e):
+                messagebox.showerror(
+                    "Export Gagal",
+                    "File sedang dibuka (Excel?) — tutup dulu lalu "
+                    f"ulangi.\n\nPath: {filepath}", parent=self.root)
+            else:
+                messagebox.showerror(
+                    "Export Gagal", f"Tidak bisa export:\n{e}",
+                    parent=self.root)
 
         run_async(self.root, work, done, overlay=self._export_overlay,
                   loading_text="Mengekspor ke Excel…", on_error=on_error)
@@ -3512,14 +3852,14 @@ class StockMonitorApp:
     # =====================================================================
     def _build_pivot_tab(self):
         self.pivot_view = PivotTableView(
-            self.tab_pivot, go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            self.tab_pivot, go_to_proses=self._go_to_proses_tab)
         self.pivot_view.pack(fill="both", expand=True)
 
     def _build_deviasi_gr_tab(self):
         # v3.9: tab GR = satu-satunya pemegang input H + Apply H
         self.deviasi_gr_view = DeviasiView(
             self.tab_deviasi_gr, satuan_mode="GR",
-            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            go_to_proses=self._go_to_proses_tab,
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=True,
@@ -3537,7 +3877,7 @@ class StockMonitorApp:
         # (chip read-only + auto-refresh saat H di-apply di tab GR)
         self.deviasi_pcs_view = DeviasiView(
             self.tab_deviasi_pcs, satuan_mode="PCS",
-            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            go_to_proses=self._go_to_proses_tab,
             followup_store=self.followup_store,
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=False,
@@ -3550,7 +3890,7 @@ class StockMonitorApp:
         """v3.4 — tab 📤 Rekap Selisih IN (drill-down rincian dokumen IN)."""
         self.in_selisih_view = InSelisihView(
             self.tab_in_selisih,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            go_to_proses=self._go_to_proses_tab)
         self.in_selisih_view.pack(fill="both", expand=True)
 
     def _build_laporan_tab(self):
@@ -3575,7 +3915,7 @@ class StockMonitorApp:
 
         self.komparasi_view = KomparasiDeviasiView(
             self._laporan_container,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            go_to_proses=self._go_to_proses_tab,
             followup_store=self.followup_store,
             initial_dir=(self.rootpath_var.get().strip()
                          if getattr(self, "rootpath_var", None) is not None
@@ -3586,13 +3926,13 @@ class StockMonitorApp:
             on_file_loaded=self._on_dev_file_loaded)
         self.laporan_view = LaporanDeviasiView(
             self._laporan_container,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            go_to_proses=self._go_to_proses_tab,
             followup_store=self.followup_store,
             h_state=self._shared_h)
         # v3.9.32 — mode Nominal: Harga × Qty Deviasi (+ baris TOTAL)
         self.nominal_view = NominalDeviasiView(
             self._laporan_container,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            go_to_proses=self._go_to_proses_tab,
             h_state=self._shared_h)
         # default: mode 0 (Komparasi) — COM & Nominal tersembunyi
         self.komparasi_view.pack(fill="both", expand=True)
@@ -3659,7 +3999,7 @@ class StockMonitorApp:
         _on_dev_file_loaded)."""
         self.nominal_resto_view = NominalRestoView(
             self.tab_nominal_resto,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses),
+            go_to_proses=self._go_to_proses_tab,
             h_state=self._shared_h,
             lalu_provider=lambda: getattr(
                 self.komparasi_view, "_file_df", None))
@@ -3669,7 +4009,7 @@ class StockMonitorApp:
         self.followup_view = FollowUpView(
             self.tab_followup, self.followup_store,
             get_data=lambda: self.append1_df,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            go_to_proses=self._go_to_proses_tab)
         self.followup_view.pack(fill="both", expand=True)
         # badge tab ikut berubah saat daftar berubah
         self.followup_store.add_listener(
@@ -3678,7 +4018,7 @@ class StockMonitorApp:
     def _build_rincian_tab(self):
         self.rincian_view = RincianPoView(
             self.tab_rincian,
-            go_to_proses=lambda: self.notebook.select(self.tab_proses))
+            go_to_proses=self._go_to_proses_tab)
         self.rincian_view.pack(fill="both", expand=True)
 
 

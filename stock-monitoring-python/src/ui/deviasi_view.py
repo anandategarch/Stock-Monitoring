@@ -205,7 +205,7 @@ sehingga tidak double input"):
   PCS. Input + tombol "Apply H" hanya ada di tab 📦 Deviasi GR (tab
   pertama); tab 🧩 Deviasi PCS menampilkan nilai H (read-only chip) dan
   OTOMATIS ikut refresh saat H diubah — tidak ada double input.
-- Tombol ⤢ "Perbesar Tabel" (ala Waste): ciutkan kartu Filter + judul +
+- Tombol ⤢ "Perbesar" (ala Waste): ciutkan kartu Filter + judul +
   legenda supaya tabel memakai tinggi penuh; ⛶ Layar Penuh = window
   fullscreen.
 
@@ -527,13 +527,23 @@ class DeviasiView(tk.Frame):
     # v3.9.51-52 membuat kolom Nama Barang/Rank tampak sel TERPISAH, bukan
     # satu sel tinggi; dulu ditambal RankMergeOverlay LABEL yang ber-glitch
     # saat scroll). Batas kelompok = PERGANTIAN WARNA band (putih ↔
-    # slate-100) + nilai Nama Barang/Rank SEKALI di baris head kelompok
+    # #9aa7b9 — 2,44:1, fix 2d-02) + nilai Nama Barang/Rank SEKALI di
+    # baris head kelompok
     # (blank di baris lanjutan — pola tab 🛒 Rincian PO persis).
     # Tuple-of-tuples (bukan dict) — nilai KONSTAN immutable (mirror COLUMNS
     # list-of-tuples kelas ini).
+    # v3.9.59 — AUDIT FIX 2d-02: grp1 #f1f5f9 (slate-100) kontras batas
+    # vs grp0 putih hanya 1,096:1 — sekat antar kelompok NYARIS tak
+    # terlihat di monitor ber-kalibrasi rendah (satu-satunya affordance
+    # batas kelompok sejak grp_head dihapus v3.9.55). Digelapkan ke
+    # #9aa7b9 (keluarga slate-400, diterangkan): kontras batas
+    # 2,44:1 ≥ target 2,4:1 (komputasi WCAG — probe fd_band). NOTE:
+    # teks fg berwarna di atas band ini (neg #dc2626, cek_manual #c2410c
+    # yang DIKUNCI test) turun ke ±2:1 — trade-off di bawah kendali main
+    # agent (lihat worklog); teks gelap utama tetap 7,3:1.
     GRP_TAG_COLORS = (
         ("grp0", "#ffffff"),      # kelompok genap — putih
-        ("grp1", "#f1f5f9"),      # kelompok ganjil — slate-100
+        ("grp1", "#9aa7b9"),      # kelompok ganjil — slate-400 terang
     )
     _GRP_TAGS = ("grp0", "grp1")
 
@@ -812,9 +822,10 @@ class DeviasiView(tk.Frame):
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place — ciutkan baris
-        # kontrol supaya tabel memakai seluruh tinggi tab)
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        # v3.9 (ala Waste): ⤢ = Perbesar (in-place — ciutkan baris kontrol
+        # supaya tabel memakai seluruh tinggi tab; v3.9.59 fix 2f-13 label
+        # kanonik ⤢='Perbesar' — dulu '⤢ Perbesar Tabel')
+        btn_expand = GhostButton(head, text="⤢ Perbesar")
         btn_expand.pack(side="right", padx=(0, 6))
         btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
@@ -869,8 +880,22 @@ class DeviasiView(tk.Frame):
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self.status_var = tk.StringVar(value="Belum ada data.")
-        tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
-                 font=font(8, "bold")).pack(side="right")
+        # v3.9.59 — AUDIT FIX 2d-10: status real ±180-250 char, label
+        # single-line pack side=right terpotong dari KIRI (jumlah baris/
+        # Total |Deviasi| — info terpenting — hilang duluan). Kini label
+        # TANPA textvariable: teks ditulis lewat trace status_var (var
+        # tetap PENUH — status_var.get() dipakai assert test & flash)
+        # dgn WRAP maks 2 baris + ekor '…' bila tak muat; wraplength
+        # adaptif lebar footer (bind <Configure>). Baris pertama (KPI
+        # utama) selalu utuh — yang terpotong segmen diagnostik ekor.
+        self.status_label = tk.Label(foot, bg=C_CARD, fg=C_HEADER,
+                                     font=font(8, "bold"), anchor="e",
+                                     justify="right")
+        self.status_label.pack(side="right", fill="x", expand=True)
+        self._status_wrap = 760
+        self.status_var.trace_add("write", self._on_status_var_write)
+        foot.bind("<Configure>", self._on_foot_configure, add="+")
+        self._on_status_var_write()
 
         # Loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(tbody, "Menghitung deviasi…")
@@ -928,7 +953,10 @@ class DeviasiView(tk.Frame):
             ("RI Balancing", "#92400e"),  # v3.9.23 (poin 6) — kondisi ke-1
             ("Kosong/Non Aktif", "#b45309"),
             ("Beda Tanggal", "#2563eb"),
-            ("Hitung Manual", "#ea580c"),
+            # v3.9.59 — AUDIT FIX 2d-04: swatch disinkronkan ke warna
+            # render tag cek_manual #c2410c (fix kontras v3.9.50 — dulu
+            # legend masih #ea580c → pemetaan warna legenda ≠ warna sel).
+            ("Hitung Manual", "#c2410c"),
             ("Turun Drastis", "#dc2626"),
             ("ACR to BOM", "#7c3aed"),   # v3.9.6 — kondisi ke-5
             ("negatif (merah)", "#dc2626"),
@@ -943,11 +971,17 @@ class DeviasiView(tk.Frame):
             # v3.9.53 — kolom Dev. Bulan Lalu = nilai ASLI file deviasi
             # (⚖; minus merah kurung — BUKAN absolut; minggu menyesuaikan H)
             ("Dev. Bulan Lalu (file ⚖)", "#dc2626"),
+            # v3.9.59 — AUDIT FIX 2d-08: kolom ✓ (satu-satunya kolom
+            # ikon-only tanpa affordance — dikecualikan dari filter ⧩)
+            # kini dijelaskan di legenda: mencentang = masuk/keluarkan
+            # daftar pantauan (persist followup.json, tab ☑ Follow Up).
+            ("✓ = tambah/keluarkan dari daftar pantauan (tab ☑ Follow Up)",
+             "#475569"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
 
-        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + judul
+        # v3.9 (ala Waste): ⤢ Perbesar — ciutkan kartu Filter + judul
         # + legenda; tombol toolbar tetap tampil supaya bisa dikembalikan.
         self._expander = TableExpander(
             btn_expand, [self._fcard, title_label, legend])
@@ -1149,6 +1183,59 @@ class DeviasiView(tk.Frame):
         self.status_var.set(
             f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
             f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
+
+    # ------------------------------------------------------------------
+    # v3.9.59 — AUDIT FIX 2d-10: status footer wrap maks 2 baris
+    # ------------------------------------------------------------------
+    def _on_foot_configure(self, event):
+        """wraplength label status mengikuti lebar footer (resize/zoom)."""
+        wl = max(240, int(event.width) - 12)
+        if abs(wl - self._status_wrap) >= 8:
+            self._status_wrap = wl
+            self._on_status_var_write()
+
+    def _on_status_var_write(self, *_):
+        """Render status_var → label (wrap ≤ 2 baris, ekor '…').
+
+        status_var TETAP berisi teks penuh (dibaca test/flash); hanya
+        TAMPILAN label yang dibatasi — dulu label single-line terpotong
+        dari KIRI oleh packer."""
+        try:
+            text = self.status_var.get()
+        except tk.TclError:
+            return
+        lbl = getattr(self, "status_label", None)
+        if lbl is None or not text:
+            if lbl is not None:
+                with contextlib.suppress(tk.TclError):
+                    lbl.configure(text=text)
+            return
+        wl = max(240, getattr(self, "_status_wrap", 760))
+        _f = font(8, "bold")
+        try:
+            line_h = max(1, _f.metrics("linespace"))
+        except (AttributeError, tk.TclError):
+            line_h = 15   # tuple-font pre-root — estimasi aman
+
+        def _fits(t: str) -> bool:
+            with contextlib.suppress(tk.TclError):
+                lbl.configure(text=t, wraplength=wl)
+                return lbl.winfo_reqheight() <= 2 * line_h + 2
+            return False
+
+        if _fits(text):
+            return
+        # potong dari KANAN (biner-search): KPI utama di AWAL teks
+        # dipertahankan; yang terpotong segmen diagnostik panjang di ekor.
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if _fits(text[:mid].rstrip() + "…"):
+                lo = mid
+            else:
+                hi = mid - 1
+        with contextlib.suppress(tk.TclError):
+            lbl.configure(text=text[:lo].rstrip() + "…", wraplength=wl)
 
     # v3.9.33 — AUDIT FIX (48-e P1) -------------------------------------------
     def _on_followup_store_changed(self, store=None):
@@ -1588,7 +1675,7 @@ class DeviasiView(tk.Frame):
             self._show_empty()
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
             return
         # (v3.2) lazy refresh: hanya compute bila tab ini sedang terlihat;
         # tab lain menunggu dipilih (app memanggil ensure_refreshed).
@@ -2607,7 +2694,7 @@ class DeviasiView(tk.Frame):
             # v3.9.49 — banding KELOMPOK (menggantikan evenrow/oddrow):
             # v3.9.55 — SELURUH baris kelompok SATU band SERAGAM (grp_head
             # dihapus — merge-vertikal native Nama Barang/Rank; batas
-            # kelompok = pergantian warna band putih ↔ slate-100).
+            # kelompok = pergantian warna band putih ↔ #9aa7b9, fix 2d-02).
             tags.append("grp0" if int(grp_band[i]) == 0 else "grp1")
 
             items.append(("", f"row_{i}", {"values": values,
@@ -2912,12 +2999,46 @@ class DeviasiView(tk.Frame):
         with contextlib.suppress(tk.TclError):
             tree.bind("<Configure>", lambda e: cb(), add="+")
 
+    def _first_rendered_iid(self, tree, iids, idx: int):
+        """v3.9.59 — AUDIT FIX 2d-01: kandidat display (truncation
+        ``int(first*n)`` — float 54.999…→54, atau ``int(last*n)+1`` yang
+        meleset 1 baris) bisa jatuh di baris yang SAMA SEKALI tak
+        dirender Tk (bbox='' — baris terpotong penuh / tergeser heading)
+        padahal baris BERIKUTNYA kelompok sama terlihat → nilai nama/rank
+        TIDAK muncul lagi (gejala v3.9.56 pada offset scroll fraksional).
+
+        Maju dalam kelompok sampai baris pertama yang BENAR-BENAR
+        terlihat: bbox non-empty DAN 0 ≤ y < tinggi tree (predikat
+        visibilitas persis §66). O(k) — bounded ukuran kelompok;
+        fallback = kandidat semula (defensif: tree belum di-layout /
+        tak ada baris terlihat — perilaku lama)."""
+        fallback = iids[idx]
+        try:
+            vh = tree.winfo_height()
+        except tk.TclError:
+            return fallback
+        for j in range(idx, len(iids)):
+            try:
+                bb = tree.bbox(iids[j])
+            except tk.TclError:
+                bb = ""
+            if bb and 0 <= bb[1] < vh:
+                return iids[j]
+        return fallback
+
     def _apply_sticky_merge(self, tree, force=False):
         """v3.9.56 — pindahkan baris DISPLAY nilai merge per kelompok ke
         posisi viewport: head bila terlihat, selain itu baris PERTAMA
         kelompok yang terlihat (sticky — ala merged-cell Excel yang selalu
         memuat nilai di area terlihat; user: 'bug nama barang tidak
         muncul').
+
+        v3.9.59 — AUDIT FIX 2d-01: kandidat display kini DIVERIFIKASI via
+        ``tree.bbox`` (``_first_rendered_iid``) — truncation
+        ``int(first*n)`` pada offset fraksional memilih baris tak
+        terdirender (bbox='') sementara baris berikutnya kelompok sama
+        terlihat → nilai tak terlihat lagi (4/80 posisi probe audit);
+        cabang force=True memakai logika desired yang sama.
 
         Dua mode:
         - ``force=True`` (render/sort/filter/clone-create): NORMALISASI
@@ -2947,19 +3068,27 @@ class DeviasiView(tk.Frame):
             return
         i0 = max(0, int(first * n))
         i1 = min(n, int(last * n) + 1)
+
+        def _desired(r):
+            start, iids = r["start"], r["iids"]
+            end = start + len(iids) - 1
+            head = r["head"]
+            if start >= i1 or end < i0:
+                return head          # di luar viewport → nilai di head
+            if i0 <= start:
+                # head di jangkauan viewport — bila TAK terdirender
+                # (i1 meleset 1 / tergeser heading) → maju ke baris
+                # pertama kelompok yang benar-benar terlihat (2d-01).
+                return self._first_rendered_iid(tree, iids, 0)
+            return self._first_rendered_iid(
+                tree, iids, max(0, i0 - start))
+
         if force:
             # ---- normalisasi penuh (kebal state awal apa pun) ----
             for r in runs:
-                start, iids = r["start"], r["iids"]
-                end = start + len(iids) - 1
-                head = r["head"]
-                if start >= i1 or end < i0:
-                    desired = head      # di luar viewport → nilai di head
-                elif i0 <= start < i1:
-                    desired = head
-                else:
-                    desired = iids[max(0, i0 - start)]
-                disp[head] = desired
+                desired = _desired(r)
+                disp[r["head"]] = desired
+                iids = r["iids"]
                 for iid in iids:
                     try:
                         vals = list(tree.item(iid, "values") or [])
@@ -2977,15 +3106,8 @@ class DeviasiView(tk.Frame):
         # ---- murah: tracking diff (jalur scroll) ----
         writes = []
         for r in runs:
-            start, iids = r["start"], r["iids"]
-            end = start + len(iids) - 1
             head = r["head"]
-            if start >= i1 or end < i0:
-                desired = head          # di luar viewport → nilai di head
-            elif i0 <= start < i1:
-                desired = head
-            else:
-                desired = iids[max(0, i0 - start)]
+            desired = _desired(r)
             prev = disp.get(head, head)   # payload = nilai di head
             if prev == desired:
                 continue
@@ -3096,12 +3218,16 @@ class DeviasiView(tk.Frame):
         try:
             new_h = int(self.tanggal_h_var.get())
         except ValueError:
-            messagebox.showwarning("Invalid", "Tanggal H harus angka",
+            # v3.9.59 — AUDIT FIX 2d-09: judul dialog EN 'Invalid' →
+            # konvensi app Indonesia (pola widgets._validate_int).
+            messagebox.showwarning("Input tidak valid",
+                                   "Tanggal H harus angka",
                                    parent=self.winfo_toplevel())
             self.tanggal_h_var.set(str(self.tanggal_h))
             return
         if not (1 <= new_h <= 31):
-            messagebox.showwarning("Invalid", "Tanggal H harus 1-31",
+            messagebox.showwarning("Input tidak valid",
+                                   "Tanggal H harus 1-31",
                                    parent=self.winfo_toplevel())
             self.tanggal_h_var.set(str(self.tanggal_h))
             return

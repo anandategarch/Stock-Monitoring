@@ -40,15 +40,22 @@ class Config:
         # v3.9.42 — AUDIT FIX (61-a, F8): JSON rusak (mis. koma kelebihan)
         # dulu melempar json.JSONDecodeError mentah berbahasa Inggris —
         # user bingung tak tahu harus apa. RuntimeError pesan Indonesia
-        # (sudah ditangani app.py on_error → dialog ramah; hapus file =
-        # app regenerasi default otomatis).
+        # (sudah ditangani app.py on_error → dialog ramah).
+        # v3.9.59 — FIX 2f-02/2f-03 (audit 2-f): instruksi lama mengarah ke
+        # 'tab ⚙ Pengaturan' yang TIDAK ADA (tab asli '⚙️ Config') dan
+        # menyuruh menghapus file demi 'regenerasi otomatis' yang TIDAK
+        # terjadi (app justru MENOLAK jalan tanpa config.json — app.py
+        # preflight). Pesan kini jujur: perbaiki manual dgn editor teks.
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             raise RuntimeError(
                 "config.json rusak (JSON tidak valid): " + str(e)
-                + " — perbaiki atau hapus file untuk regenerasi otomatis"
+                + " — perbaiki dengan editor teks (mis. koma kelebihan). "
+                "JANGAN hapus file: app tidak meregenerasi config.json — "
+                "tanpa file ini app menolak jalan (salin ulang contoh "
+                "dari paket SETUP bila file hilang)."
             ) from e
 
         # v3.9.33 — AUDIT FIX (48-f): key wajib hilang → pesan ramah
@@ -58,11 +65,17 @@ class Config:
         _wajib_hilang = [k for k in ("RootPath", "Folders", "Sheets")
                          if not isinstance(data, dict) or k not in data]
         if _wajib_hilang:
+            # v3.9.59 — FIX 2f-02: rujukan tab dulu '⚙ Pengaturan' (tab itu
+            # tidak ada — yang asli '⚙️ Config' app.py, dan tab itu HANYA
+            # bisa mengubah RootPath). Kini: key hilang → edit manual di
+            # config.json (RootPath saja yang bisa via tab ⚙️ Config).
             raise RuntimeError(
                 "config.json tidak lengkap — key berikut hilang: "
                 + ", ".join(_wajib_hilang)
-                + ". Perbaiki di tab ⚙ Pengaturan atau hapus config.json "
-                "untuk regenerasi.")
+                + ". Tambahkan key itu dengan editor teks di config.json "
+                "(contoh isi: README / paket SETUP). Catatan: tab ⚙️ Config "
+                "hanya bisa mengubah RootPath — Folders/Sheets diedit "
+                "langsung di config.json.")
 
         self.RootPath = data["RootPath"]
         # v3.5: LightMode DIHAPUS — pipeline selalu mode FULL
@@ -74,12 +87,14 @@ class Config:
         # setdefault di bawah — pesan ramah pola v3.9.33.
         for _blok in ("Folders", "Sheets"):
             if not hasattr(data[_blok], "keys"):
+                # v3.9.59 — FIX 2f-02/2f-03: pesan jujur (tab ⚙️ Config
+                # hanya RootPath; tidak ada regenerasi otomatis).
                 raise RuntimeError(
                     "config.json salah format — key '" + _blok + "' "
                     "harus objek {\"key\": \"nilai\"}, bukan "
                     + type(data[_blok]).__name__
-                    + ". Perbaiki di tab ⚙ Pengaturan atau hapus "
-                    "config.json untuk regenerasi.")
+                    + ". Perbaiki langsung di config.json dengan editor "
+                    "teks (tab ⚙️ Config hanya mengubah RootPath).")
         self.Folders = data["Folders"]
         # v3.9.17: key baru di-DEFAULT (config lokal pra-v3.9.17 yang belum
         # memuat 'Pemindahan4205Lalu' — mis. hasil git pull dgn config
@@ -117,8 +132,10 @@ class Config:
         # mutasi pemanggil tidak menjinak konstanta modul fn_4217).
         _wl = data.get("KategoriBarang4217", DEFAULT_KATEGORI_WHITELIST)
         if not isinstance(_wl, list) or not all(isinstance(x, str) for x in _wl):
+            # v3.9.59 — FIX 2f-02 (konsisten): rujukan tempat perbaikan =
+            # config.json (key ini tidak bisa diedit dari tab ⚙️ Config).
             print("[PERINGATAN] config 'KategoriBarang4217' harus daftar string — "
-                  "memakai default bawaan (lihat tab ⚙ / config.json)")
+                  "memakai default bawaan (edit key ini di config.json)")
             _wl = list(DEFAULT_KATEGORI_WHITELIST)
         self.KategoriBarang4217 = _wl
 
@@ -133,10 +150,13 @@ class Config:
         try:
             sub = self.Folders[key]
         except (KeyError, TypeError):
+            # v3.9.59 — FIX 2f-02/2f-03: arahkan ke config.json (bukan tab
+            # 'Pengaturan' yang tak ada; hapus file tidak meregenerasi).
             raise RuntimeError(
                 f"config.json tidak lengkap — key folder '{key}' tidak ada "
-                "di blok 'Folders' (diedit manual?). Perbaiki di tab "
-                "⚙ Pengaturan atau hapus config.json untuk regenerasi."
+                "di blok 'Folders' (diedit manual?). Tambahkan key itu "
+                "dengan editor teks di config.json — tab ⚙️ Config hanya "
+                "mengubah RootPath."
             ) from None
         return os.path.join(self.RootPath, sub)
 
@@ -147,9 +167,11 @@ class Config:
         try:
             nama = self.Sheets[key]
         except (KeyError, TypeError):
+            # v3.9.59 — FIX 2f-02/2f-03: mirror folder() — pesan jujur.
             raise RuntimeError(
                 f"config.json tidak lengkap — key sheet '{key}' tidak ada "
-                "di blok 'Sheets' (diedit manual?). Perbaiki di tab "
-                "⚙ Pengaturan atau hapus config.json untuk regenerasi."
+                "di blok 'Sheets' (diedit manual?). Tambahkan key itu "
+                "dengan editor teks di config.json — tab ⚙️ Config hanya "
+                "mengubah RootPath."
             ) from None
         return nama

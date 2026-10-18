@@ -65,13 +65,14 @@ layout v3.9: anak hanya item); ikut filter header ⧩.
 """
 
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
-from typing import Callable, Optional
 
 import pandas as pd
 
 from .theme import C_BG, C_CARD, C_HEADER, C_TEXT_MUTED, font
 from .widgets import (
+    _SORT_ARROW_MARKS,
     Card,
     ColumnManager,
     EmptyState,
@@ -90,6 +91,7 @@ from .widgets import (
     open_tree_maximized,
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
+    sort_tree_by_column,
 )
 
 # Kolom tabel v3.9.37 (6 kolom nilai — Keterangan PO & Tgl/Jam
@@ -136,7 +138,7 @@ class RincianPoView(tk.Frame):
     def __init__(self, parent, data: pd.DataFrame = None,
                  go_to_proses: Callable | None = None):
         super().__init__(parent, bg=C_BG)
-        self.data: Optional[pd.DataFrame] = None
+        self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
         self._busy = False
         self._pending = False
@@ -276,7 +278,9 @@ class RincianPoView(tk.Frame):
             self.tree, _filter_cols,
             get_values=self._col_values,
             on_apply=self._on_col_filter,
-            on_sort=None)
+            # v3.9.59 — FIX 2e-08: sort ⧩ tersambung (dulu None —
+            # satu-satunya tabel data tanpa tombol ↕ Sort di popup).
+            on_sort=lambda c, d: self._sort_by(c, reverse=d))
 
         # v3.6: hide/unhide kolom (klik kanan heading / tombol ◱ Kolom)
         self._colmgr = ColumnManager(
@@ -361,6 +365,96 @@ class RincianPoView(tk.Frame):
         self._preserve_after_render = None
         self._col_sel[col] = selected
         self._refresh()
+
+    def _sort_by(self, col: str, reverse: bool = False, tree=None):
+        """v3.9.59 — FIX 2e-08: sort level PO (baris INDUK).
+        Dulu on_sort=None — satu-satunya tabel data tanpa sort (popup ⧩
+        tanpa tombol ↕) padahal 7 view lain semuanya tersambung; sort
+        per Tanggal/Nomor #/Pemasok bermakna (mengurutkan grup PO).
+        Anak item ikut induk (jalur tree.move hirarki
+        sort_tree_by_column — tag per-cell anotasi ↳ tetap utuh);
+        GRAND TOTAL dipin di ujung (pola _pin_total_row nominal).
+        Kolom level-item (Nama Barang/Satuan) → kunci = anak PERTAMA
+        PO; Tanggal (label panjang '01 Oktober 2026') → kunci ISO
+        supaya urut KRONOLOGIS (sort abjad '01 Oktober' < '02 Juni'
+        salah antar bulan); Kuantitas induk 'Total: N' → N numerik."""
+        tree = tree if tree is not None else self.tree
+        try:
+            cols = ["#0"] + [str(c) for c in tree["columns"]]
+        except tk.TclError:
+            return
+        if col not in cols:
+            return
+        k = (-1 if col == "#0"
+             else [str(c) for c in tree["columns"]].index(col))
+
+        def _key(iid):
+            try:
+                if k < 0:
+                    return str(tree.item(iid, "text") or "")
+                src = iid
+                if col in ("Nama Barang", "Satuan"):
+                    kids = tree.get_children(iid)
+                    if kids:
+                        src = kids[0]     # nilai level-item: anak pertama
+                vals = tree.item(src, "values") or []
+                v = str(vals[k]) if 0 <= k < len(vals) else ""
+                if col == "Kuantitas" and v.startswith("Total:"):
+                    v = v[len("Total:"):].strip()
+                elif col == "Tanggal":
+                    v = self._date_sort_key(v)
+                return v
+            except tk.TclError:
+                return ""
+
+        sort_tree_by_column(tree, col, reverse=reverse, value_get=_key)
+        # GRAND TOTAL selalu di ujung (sort jangan melompatkannya ke atas)
+        try:
+            if tree.exists("grand_total"):
+                tree.move("grand_total", "", "end")
+        except tk.TclError:
+            pass
+        if col == "#0":
+            self._set_arrow0(tree, reverse)
+        else:
+            # sort kolom DATA → panah #0 lama DIBERSIHKAN (_set_sort_arrow
+            # widgets hanya menyapu heading kolom data, bukan #0).
+            self._set_arrow0(tree, None)
+
+    @staticmethod
+    def _date_sort_key(s: str) -> str:
+        """'01 Oktober 2026' → '2026-10-01' (kunci sort KRONOLOGIS;
+        teks lain apa adanya → fallback string sort)."""
+        parts = str(s).split()
+        if len(parts) == 3:
+            try:
+                d = int(parts[0])
+                m = _BULAN_ID.index(parts[1]) + 1
+                y = int(parts[2])
+                return f"{y:04d}-{m:02d}-{d:02d}"
+            except (ValueError, IndexError):
+                pass
+        return str(s)
+
+    @staticmethod
+    def _set_arrow0(tree, reverse) -> None:
+        """FIX 2e-08 — panah arah sort kolom #0 (Nomor #): _set_sort_arrow
+        (widgets, B-21) hanya menulis heading kolom DATA; #0 diberi panah
+        manual di sini (marker kanon sama: ' ↓' menurun / ' ↑' naik).
+        ``reverse=None`` → hanya MENGHAPUS panah (sort pindah ke kolom
+        data — panah #0 basi jangan tertinggal)."""
+        try:
+            cur = str(tree.heading("#0", "text") or "")
+            for m in _SORT_ARROW_MARKS:
+                if cur.endswith(m):
+                    cur = cur[: -len(m)]
+                    break
+            if reverse is not None:
+                cur += (_SORT_ARROW_MARKS[0] if reverse
+                        else _SORT_ARROW_MARKS[1])
+            tree.heading("#0", text=cur)
+        except tk.TclError:
+            pass
 
     def _show_empty(self):
         self.content.pack_forget()
@@ -463,7 +557,7 @@ class RincianPoView(tk.Frame):
         if data is None or len(data) == 0:
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
@@ -756,9 +850,12 @@ class RincianPoView(tk.Frame):
     def _maximize(self):
         def filter_setup(new_tree):
             # v3.6: funnel ⧩ jalan juga di window besar
+            # v3.9.59 — FIX 2e-08: sort ikut aktif di clone ⛶.
             attach_clone_filters(
                 new_tree, ["#0"] + [str(c) for c in new_tree["columns"]],
-                get_values=self._col_values)
+                get_values=self._col_values,
+                on_sort=lambda c, d, t=new_tree: self._sort_by(
+                    c, reverse=d, tree=t))
 
         return open_tree_maximized(
             self.tree, "Rincian PO — Pivot Nomor #",

@@ -1,5 +1,5 @@
 """
-refresh_sources.py — Dialog 🔄 Refresh File Sumber (v3.9.37).
+refresh_sources.py — Dialog ↻ Refresh File Sumber (v3.9.37).
 
 User: "ada tombol refresh untuk file sumber, bisa gak? dan gak harus
 refresh semua tapi".
@@ -8,13 +8,17 @@ refresh semua tapi".
   workbook gabungan rekap) dgn checkbox per file.
 - Default tercentang = file yang BERUBAH sejak proses terakhir (mtime >
   waktu pipeline terakhir selesai) — sisanya tidak dibaca ulang.
-- "🔄 Refresh Terpilih" → hanya file tercentang dibaca ulang dari disk
+- "↻ Refresh Terpilih" → hanya file tercentang dibaca ulang dari disk
   (entry cache bacaan file lain tetap dipakai — invalidasi selektif
   lewat helpers.read_cache_invalidate(paths)).
-- "🔄 Refresh Semua" → seluruh cache dibuang (semua file dibaca ulang).
+- "↻ Refresh Semua" → seluruh cache dibuang (semua file dibaca ulang).
 - Kolom: ☑ · Folder · File · Diubah · Ukuran; file berubah diberi tanda
-  "● berubah" (amber per-cell) + waktu modifikasi tampil di kolom File
-  tooltip-free (ringkas d-m-Y H:M).
+  "● berubah" + WAKTU modifikasi pada sel yang sama (amber per-cell;
+  v3.9.59 FIX 2f-05 — dulu mtime justru hanya tampil utk file yang TAK
+  berubah); file tak berubah → mtime saja; folder sumber HILANG →
+  baris sendiri ber-status 'Hilang' merah, tak bisa diceklis (v3.9.59
+  FIX 2f-06 — dulu discan senyap). Waktu ringkas d-m-Y H:M (kanon
+  timestamp pendek app, FIX 2f-15).
 """
 import datetime
 import os
@@ -29,6 +33,7 @@ from .theme import (
     C_BORDER,
     C_CARD,
     C_HEADER,
+    C_RED,
     C_TEXT_MUTED,
     font,
 )
@@ -47,9 +52,9 @@ def _fmt_size(n: float) -> str:
 
 
 def _fmt_mtime(ts: float) -> str:
-    dt = datetime.datetime.fromtimestamp(ts)
-    return (f"{dt.day:02d}-{dt.month:02d}-{dt.year} "
-            f"{dt.hour:02d}:{dt.minute:02d}")
+    # v3.9.59 — FIX 2f-15: kanon timestamp pendek app '%d-%m-%Y %H:%M'
+    # (output identik implementasi lama, kini eksplisit satu format).
+    return datetime.datetime.fromtimestamp(ts).strftime("%d-%m-%Y %H:%M")
 
 
 class RefreshSourcesDialog(tk.Toplevel):
@@ -69,7 +74,7 @@ class RefreshSourcesDialog(tk.Toplevel):
                  on_refresh: Callable[[list | None], None] | None = None,
                  can_refresh: Callable[[], bool] | None = None):
         super().__init__(parent)
-        self.title("🔄 Refresh File Sumber")
+        self.title("↻ Refresh File Sumber")   # v3.9.59 — FIX 2f-13: satu glyph ↻
         self.configure(bg=C_BG)
         self.minsize(880, 560)
         try:
@@ -109,8 +114,11 @@ class RefreshSourcesDialog(tk.Toplevel):
         RootPath (workbook gabungan rekap — mis. 01.1 CEK STOCK V2.xlsb
         sering diletakkan di RootPath; dibaca fn_rekap_mentah fallback).
 
-        Return list dict {label, path, mtime, size, changed} urut
-        (folder, nama file)."""
+        Return list dict {label, path, mtime, size, changed, missing}
+        urut (folder, nama file). missing=True (v3.9.59 FIX 2f-06):
+        folder konfigurasi yang TIDAK ADA (drive lepas / RootPath
+        salah) → baris placeholder merah 'Hilang' (dulu di-skip senyap
+        — dialog tampak sehat padahal folder tak terbaca)."""
         entries: list = []
         seen: set = set()
         root_path = ""
@@ -120,7 +128,14 @@ class RefreshSourcesDialog(tk.Toplevel):
             folders = dict(getattr(config, "Folders", {}) or {})
 
         def _add(label: str, folder: str):
-            if not folder or not os.path.isdir(folder):
+            if not folder:
+                return
+            if not os.path.isdir(folder):
+                # v3.9.59 — FIX 2f-06: folder hilang TETAP muncul sbg
+                # baris (status 'Hilang', merah, tak bisa diceklis).
+                entries.append({"label": label, "path": "",
+                                "mtime": 0.0, "size": 0.0,
+                                "changed": False, "missing": True})
                 return
             try:
                 files = _list_excel_files(folder)
@@ -164,7 +179,7 @@ class RefreshSourcesDialog(tk.Toplevel):
     def _build_ui(self):
         head = tk.Frame(self, bg=C_BG)
         head.pack(fill="x", padx=16, pady=(14, 4))
-        tk.Label(head, text="🔄 Refresh File Sumber",
+        tk.Label(head, text="↻ Refresh File Sumber",   # 2f-13: satu glyph ↻
                  bg=C_BG, fg=C_HEADER, font=font(13, "bold")).pack(anchor="w")
         tk.Label(head,
                  text="Centang file yang mau dibaca ulang — file lain pakai "
@@ -182,7 +197,9 @@ class RefreshSourcesDialog(tk.Toplevel):
         tools.pack(fill="x", padx=12, pady=(12, 4))
         GhostButton(tools, text="✓ Semua",
                     command=lambda: self._check_all(True)).pack(side="left")
-        GhostButton(tools, text="✓ Kosongkan",
+        # v3.9.59 — FIX 2f-13: glyph ✕ (aksi melepas centang) — ✓ utk
+        # 'Kosongkan' terbaca ambigu (centang-man? kosongkan?).
+        GhostButton(tools, text="✕ Kosongkan",
                     command=lambda: self._check_all(False)).pack(
                         side="left", padx=(6, 0))
         GhostButton(tools, text="✓ Berubah",
@@ -198,8 +215,10 @@ class RefreshSourcesDialog(tk.Toplevel):
         except (AttributeError, tk.TclError):
             pass
         for col, w, anch in (("cek", 40, "center"), ("folder", 260, "w"),
-                             ("file", 300, "w"), ("diubah", 110, "w"),
+                             ("file", 300, "w"), ("diubah", 185, "w"),
                              ("ukuran", 80, "e")):
+            # v3.9.59 — FIX 2f-05: kolom Diubah 110 → 185 (memuat
+            # '● berubah dd-mm-yyyy hh:mm' tanpa terpotong).
             self.tree.column(col, width=w, minwidth=40, anchor=anch,
                              stretch=(col in ("folder", "file")))
             self.tree.heading(col, text={
@@ -207,6 +226,9 @@ class RefreshSourcesDialog(tk.Toplevel):
                 "diubah": "Diubah", "ukuran": "Ukuran"}[col])
         # tanda amber per-cell utk kolom Diubah file berubah
         self.tree.tag_configure("src_changed", foreground=C_AMBER)
+        # v3.9.59 — FIX 2f-06: baris folder sumber HILANG (merah, info
+        # error — konvensi status merah utk kondisi tak sehat).
+        self.tree.tag_configure("src_missing", foreground=C_RED)
         # klik baris (area sel) = toggle centang; Space = toggle terpilih
         self.tree.bind("<Button-1>", self._on_click, add="+")
         self.tree.bind("<space>", self._on_space, add="+")
@@ -219,14 +241,15 @@ class RefreshSourcesDialog(tk.Toplevel):
         tk.Label(foot, textvariable=self.info_var, bg=C_BG,
                  fg=C_TEXT_MUTED, font=font(9, "bold")).pack(side="left")
 
-        self.btn_semua = GhostButton(foot, text="🔄 Refresh Semua",
+        self.btn_semua = GhostButton(foot, text="↻ Refresh Semua",
                                      command=lambda: self._do_refresh(None))
         self.btn_semua.pack(side="right")
         self.btn_terpilih = AccentButton(
-            foot, text="🔄 Refresh Terpilih (0)",
+            foot, text="↻ Refresh Terpilih (0)",
             command=self._do_selected)
         self.btn_terpilih.pack(side="right", padx=(0, 6))
-        GhostButton(foot, text="Tutup",
+        # v3.9.59 — FIX 2f-13: 'Tutup (Esc)' (dialog mem-bind Escape).
+        GhostButton(foot, text="Tutup (Esc)",
                     command=self.destroy).pack(side="right", padx=(0, 6))
 
     # =================================================================
@@ -239,17 +262,30 @@ class RefreshSourcesDialog(tk.Toplevel):
         cells_changed: list = []
         for i, e in enumerate(self._entries):
             iid = f"src_{i}"
+            if e.get("missing"):
+                # v3.9.59 — FIX 2f-06: baris folder HILANG — merah,
+                # TAK BISA diceklis (path kosong, tak ada file utk
+                # di-refresh).
+                self.tree.insert("", "end", iid, values=(
+                    _ICON_OFF, e["label"], "(folder tidak ditemukan)",
+                    "Hilang", ""), tags=("src_missing",))
+                continue
+            # v3.9.59 — FIX 2f-05: file BERUBAH kini menampilkan WAKTU
+            # modifikasi PADA sel badge (dulu justru hanya file TAK
+            # berubah yang menampilkan mtime — info terpenting saat
+            # memutuskan refresh hilang). File tak berubah → mtime saja.
+            if e["changed"]:
+                diubah = ("● berubah " + _fmt_mtime(e["mtime"])
+                          if e["mtime"] else "● berubah")
+            else:
+                diubah = _fmt_mtime(e["mtime"]) if e["mtime"] else ""
             self.tree.insert("", "end", iid, values=(
                 _ICON_OFF, e["label"], os.path.basename(e["path"]),
-                "● berubah" if e["changed"] else "",
-                _fmt_size(e["size"])))
+                diubah, _fmt_size(e["size"])))
             if e["changed"]:
                 self._checked.add(iid)
                 self.tree.set(iid, "cek", _ICON_ON)
                 cells_changed.append((iid, "diubah"))
-            elif e["mtime"]:
-                # waktu modifikasi sbg info kolom Diubah file tak berubah
-                self.tree.set(iid, "diubah", _fmt_mtime(e["mtime"]))
         apply_cell_tag(self.tree, "src_changed", cells_changed)
         self._update_state()
 
@@ -262,6 +298,14 @@ class RefreshSourcesDialog(tk.Toplevel):
 
     def _toggle(self, iid: str) -> None:
         if not iid or not iid.startswith("src_"):
+            return
+        try:
+            idx = int(iid.split("_")[-1])
+        except ValueError:
+            return
+        # v3.9.59 — FIX 2f-06: baris folder hilang tak bisa diceklis
+        if 0 <= idx < len(self._entries) \
+                and self._entries[idx].get("missing"):
             return
         if iid in self._checked:
             self._checked.discard(iid)
@@ -290,6 +334,15 @@ class RefreshSourcesDialog(tk.Toplevel):
         self._checked.clear()
         for iid in self.tree.get_children(""):
             iid = str(iid)
+            # v3.9.59 — FIX 2f-06: 'Semua' TIDAK mencakup baris folder
+            # hilang (tak ada file utk di-refresh).
+            try:
+                idx = int(iid.split("_")[-1])
+            except ValueError:
+                idx = -1
+            if 0 <= idx < len(self._entries) \
+                    and self._entries[idx].get("missing"):
+                continue
             if on:
                 self._checked.add(iid)
                 self.tree.set(iid, "cek", _ICON_ON)
@@ -314,18 +367,27 @@ class RefreshSourcesDialog(tk.Toplevel):
         for iid in sorted(self._checked, key=lambda s: int(s.split("_")[-1])):
             idx = int(iid.split("_")[-1])
             if 0 <= idx < len(self._entries):
-                out.append(self._entries[idx]["path"])
+                e = self._entries[idx]
+                # v3.9.59 — FIX 2f-06: skip baris folder hilang (path "")
+                if e.get("missing") or not e["path"]:
+                    continue
+                out.append(e["path"])
         return out
 
     def _update_state(self):
-        n = len(self._entries)
+        # v3.9.59 — FIX 2f-06: hitung FILE (baris folder-hilang bukan
+        # file) + sampaikan jumlah folder hilang di info bar.
+        n = sum(1 for e in self._entries if not e.get("missing"))
+        n_missing = sum(1 for e in self._entries if e.get("missing"))
         m = sum(1 for e in self._entries if e["changed"])
         _ent, _nf, _hit, _miss = read_cache_stats()
-        self.info_var.set(
-            f"{n} file sumber · {m} berubah sejak proses terakhir · "
-            f"cache: {_nf} file tersimpan")
+        info = (f"{n} file sumber · {m} berubah sejak proses terakhir · "
+                f"cache: {_nf} file tersimpan")
+        if n_missing:
+            info += f" · ⚠ {n_missing} folder hilang"
+        self.info_var.set(info)
         k = len(self._checked)
-        self.btn_terpilih.configure(text=f"🔄 Refresh Terpilih ({k})")
+        self.btn_terpilih.configure(text=f"↻ Refresh Terpilih ({k})")
         self.btn_terpilih.set_enabled(k > 0)
         self.btn_semua.set_enabled(n > 0)
 

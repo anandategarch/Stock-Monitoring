@@ -1,6 +1,19 @@
 """
 komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
 
+AUDIT 2c (fix 3-c):
+- 2c-03: baris ke-4 kartu Filter (sub-mode Tabel/Analisa) kini ber-
+  caption 'TAMPILAN' + opsi 'Tabel'/'📈 Analisa' (dulu 'MODE' + '⚖ Tabel'
+  — KEMBAR dgn bar MODE app di atas tab 📋 yang mengontrol ISI tab;
+  ⚖ dipakai dua makna). Tanpa perubahan logika (index-based).
+- 2c-01/2c-02: pesan 0-baris pipeline menunjuk tab yang BENAR
+  ('⚙️ Config' — dulu '⚙ Pengaturan' yang tak ada) DAN naik ke
+  SUBTITLE EmptyState (status footer tersembunyi di balik EmptyState).
+- 2c-05: Top-N bukan-angka ('abc') kini revert entry + ⚠ status
+  (pola clamp negatif; dulu jatuh senyap ke Top 100, entry tetap 'abc').
+- 2c-06: hint footer abu 'Dobel-klik baris = detail · ✓ = pantau
+  barang'.
+
 v3.9.34 (user: "begitu juga di Laporan Deviasi" — mode ⚖ Komparasi):
 KOLOM BARU "Nominal" = Harga 41.09 (dinormalkan ke satuan baris via peta
 rasio v3.9.31, helper bersama nominal_common.lookup_harga_pair) × "GR
@@ -717,7 +730,8 @@ class KomparasiDeviasiView(tk.Frame):
         # v3.9.13: default tabel = BULAN TERBARU (permintaan multi-file;
         # checkbox "Tampilkan semua bulan" = semua)
         self._show_all_months = tk.BooleanVar(value=False)
-        # v3.9.13: sub-mode kartu filter — ⚖ Tabel / 📈 Analisa
+        # v3.9.13: sub-mode kartu filter — TAMPILAN Tabel / 📈 Analisa
+        # (2c-03: dulu caption 'MODE' — kembar dgn bar MODE app).
         self._analisa_mode = False
         # v3.9.14 (PERF): analisa dirender MALAS — dirty saat data/join/
         # file baru; dirender saat mode 📈 Analisa aktif (dulu dirender
@@ -909,15 +923,22 @@ class KomparasiDeviasiView(tk.Frame):
             padx=8, pady=(2, 3))
         self._render_week_chips()
 
-        # baris ke-4 (v3.9.13): sub-mode — ⚖ Tabel komparasi / 📈 Analisa
+        # baris ke-4 (v3.9.13): TAMPILAN — Tabel komparasi / 📈 Analisa
         # (Top Selisih + Perubahan Arah — adopsi rumus repo Inventory-
         # Control user).
+        # 2c-03 (audit 2c): caption 'MODE' → 'TAMPILAN' + opsi '⚖ Tabel' →
+        # 'Tabel' — bar MODE app di atas tab 📋 (app.py) mengontrol ISI
+        # tab (Komparasi/Anomali COM/Nominal); baris ini HANYA tampilan
+        # sub-komparasi — dua bar ber-caption 'MODE' + opsi ber-prefix ⚖
+        # tampil BERSAMAAN membingungkan (probe audit: BOTH_MODE_BARS_
+        # VISIBLE=1). Tanpa perubahan logika (index-based, _on_mode_change
+        # tak berubah).
         r4 = tk.Frame(fbody, bg=C_CARD)
         r4.pack(fill="x", pady=(8, 0))
-        tk.Label(r4, text="MODE", bg=C_CARD, fg=C_TEXT_MUTED,
+        tk.Label(r4, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self._mode_segment = SegmentBar(
-            r4, ["⚖ Tabel", "📈 Analisa"],
+            r4, ["Tabel", "📈 Analisa"],
             command=lambda idx: self._on_mode_change(idx))
         self._mode_segment.pack(side="left", padx=(6, 0))
 
@@ -974,6 +995,11 @@ class KomparasiDeviasiView(tk.Frame):
         self.status_var_label = tk.StringVar(value="Belum ada file.")
         tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
                  fg=C_HEADER, font=font(8, "bold")).pack(side="right")
+        # 2c-06 (audit 2c) — affordance minimal: hint abu 1 baris di
+        # footer (double-click baris = popup detail; klik sel ✓ =
+        # daftarkan/keluarkan barang dari tab ☑ Follow Up).
+        tk.Label(foot, text="Dobel-klik baris = detail · ✓ = pantau barang",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         self.overlay = LoadingOverlay(tbody, "Membandingkan deviasi…")
 
@@ -1263,6 +1289,27 @@ class KomparasiDeviasiView(tk.Frame):
         self.content.pack_forget()
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
+    def _set_empty_subtitle(self, subtitle: str):
+        """2c-02 (audit 2c) — panduan diagnostik 0-baris naik ke SUBTITLE
+        EmptyState (parameternya sudah tersedia, belum dipakai). Status
+        label tetap diset, tapi footer hidup DI DALAM self.content yang
+        disembunyikan EmptyState → tanpa subtitle, teks panduan TIDAK
+        PERNAH terlihat user. Widget dibangun ulang hanya bila teks
+        berubah (murah; paling banyak sekali per run pipeline)."""
+        if getattr(self, "_empty_subtitle", None) == subtitle:
+            return
+        self._empty_subtitle = subtitle
+        try:
+            self.empty.destroy()
+        except tk.TclError:
+            pass
+        self.empty = EmptyState(
+            self, icon="⚖", title="Belum ada data komparasi",
+            subtitle=subtitle,
+            cta_text="🚀 Jalankan Pipeline",
+            on_cta=lambda: self.go_to_proses() if self.go_to_proses
+            else None)
+
     def _show_content(self):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
@@ -1344,10 +1391,17 @@ class KomparasiDeviasiView(tk.Frame):
         # diterapkan ke data baru).
         self._reset_analisa_filters()
         if _data_empty:
+            # 2c-02 (audit 2c) — subtitle EmptyState membawa panduan
+            # RootPath ke tempat TERLIHAT (status footer tersembunyi di
+            # balik EmptyState); 2c-01 — nama tab dibetulkan '⚙️ Config'
+            # (dulu '⚙ Pengaturan' — tab itu tidak ada di app).
+            self._set_empty_subtitle(
+                "0 baris terbaca dari pipeline — cek folder data / "
+                "RootPath di tab ⚙️ Config")
             self._show_empty()
             self.status_var_label.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
             return
         # lazy refresh — compute hanya bila pane terlihat
         if self.winfo_ismapped():
@@ -2462,6 +2516,9 @@ class KomparasiDeviasiView(tk.Frame):
         tk.Label(head, text="TOP N", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left", padx=(10, 0))
         self._topn_var = tk.StringVar(value="100")
+        # 2c-05 (audit 2c) — nilai valid TERAKHIR: target revert saat
+        # input berikutnya bukan-angka (pola clamp negatif 48-d).
+        self._topn_last_valid = 100
         topn_entry = ttk.Entry(head, textvariable=self._topn_var, width=6)
         topn_entry.pack(side="left", padx=(4, 4))
         topn_entry.bind("<Return>", lambda e: self._render_top_selisih())
@@ -2557,8 +2614,8 @@ class KomparasiDeviasiView(tk.Frame):
         tree.tag_configure("flip_parsial", foreground=C_ACCENT)
 
     def _on_mode_change(self, idx: int):
-        """v3.9.13: ganti sub-mode kartu filter — ⚖ Tabel / 📈 Analisa
-        (dipakai SegmentBar & test).
+        """v3.9.13: ganti sub-mode TAMPILAN kartu filter — Tabel /
+        📈 Analisa (dipakai SegmentBar & test).
         v3.9.14 (PERF): masuk mode 📈 → render hanya bila dirty (data/
         join/file baru sejak render terakhir) — toggle bolak-balik tanpa
         perubahan data tidak me-render ulang."""
@@ -2814,18 +2871,27 @@ class KomparasiDeviasiView(tk.Frame):
         _abs = (pd.to_numeric(d["Selisih"], errors="coerce")
                 .fillna(0).abs().to_numpy())
         d = d.iloc[np.argsort(-_abs, kind="stable")]
+        _warn_txt = ""
         try:
             n = int(float(self._topn_var.get() or 0))
         except (TypeError, ValueError):
-            n = 100
-        _n_warn = False
+            # 2c-05 (audit 2c) — input BUKAN ANGKA diperlakukan seperti
+            # negatif: revert entry ke nilai valid TERAKHIR + ⚠ status
+            # (dulu jatuh SENYAP ke Top 100 — entry tetap 'abc', state
+            # entry-vs-hasil tak sinkron; pola clamp negatif 48-d).
+            n = getattr(self, "_topn_last_valid", 100)
+            self._topn_var.set(str(n))
+            _warn_txt = f" · ⚠ Top N tidak valid → {n}"
         if n < 0:
             # v3.9.33 — AUDIT FIX (48-d LOW): clamp + revert entry +
             # peringatan (pola validated_tgl_entry — input invalid tidak
             # diterima senyap).
             n = 0
-            _n_warn = True
+            _warn_txt = " · ⚠ Top N negatif → 0 (semua baris)"
             self._topn_var.set("0")
+        # 2c-05 — nilai valid (pasca-clamp) = target revert input invalid
+        # berikutnya (disimpan SETELAH clamp supaya tak pernah negatif).
+        self._topn_last_valid = n
         if n > 0:
             d = d.head(n)
         self._top_df = d
@@ -2847,7 +2913,7 @@ class KomparasiDeviasiView(tk.Frame):
         self._top_status_var.set(
             f"{prefix}{m} baris · Top {'semua' if n <= 0 else n}"
             + (" · Lalu = median antar-bulan" if multi else "")
-            + (" · ⚠ Top N negatif → 0 (semua baris)" if _n_warn else ""))
+            + _warn_txt)
         # v3.9.14 (PERF): values dari kolom numpy (dulu iterrows —
         # Series per baris)
         cols_np = {c: d[c].to_numpy() for c in

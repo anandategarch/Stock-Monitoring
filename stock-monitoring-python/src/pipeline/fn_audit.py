@@ -538,7 +538,11 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
     item = audit["Nama Item"].astype(str).str.strip()
     status = audit["Status Analisis Audit"].astype(str)
     detail = audit["Detail & Catatan Audit"].astype(str).tolist()
-    qty = audit["Qty PO Menunggu"].to_numpy(dtype="float64")
+    # pandas 3 (CoW): to_numpy() tanpa konversi dtype → view READ-ONLY →
+    # qty[i] = ... ValueError "assignment destination is read-only"
+    # (fresh install requirements pandas>=2.0.0 kini resolve ke 3.x).
+    # copy=True aman utk pandas 2 & 3 (kwarg ada sejak lama).
+    qty = audit["Qty PO Menunggu"].to_numpy(dtype="float64", copy=True)
     n_flagged = 0
     for i in range(len(audit)):
         items = pairs.get((resto.iat[i], item.iat[i]))

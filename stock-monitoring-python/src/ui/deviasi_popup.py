@@ -57,6 +57,8 @@ import numpy as np
 import pandas as pd
 
 from .theme import (
+    C_ACCENT_DARK,
+    C_ACCENT_SOFT,
     C_BG,
     C_BORDER,
     C_CARD,
@@ -66,12 +68,17 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    FLASH_MS,  # v3.9.59 — fix 2b-07: durasi flash TERSALIN seragam (2500ms)
     AccentButton,
+    GhostButton,
     apply_cell_tag,
     auto_fit_columns,
+    copy_cell_region_tsv,  # v3.9.59 — 2d-03/2d-05: region sel ala Excel
+    copy_tree_selection_tsv,  # v3.9.59 — 2d-03: Ctrl+C multi-baris TSV
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
+    identify_to_column,  # v3.9.59 — 2d-03: posisi display → nama kolom
 )
 
 # (column_id, width, anchor) — persis daftar user: saldo akhir, SO, IN,
@@ -234,6 +241,11 @@ class DeviasiPopup(tk.Toplevel):
         # v3.9.2 (pola): minus merah PER CELL — fallback Tk 8 tag baris
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
+        # v3.9.59 — AUDIT FIX 2d-03: state flash status copy (pola
+        # DetailsPopup — dulu Ctrl+C/TANPA menu klik-kanan & tombol copy,
+        # fitur copy praktis tak terdiscover di popup ini).
+        self._base_status = ""
+        self._flash_after = None
 
         self._build_ui(title)
 
@@ -268,9 +280,27 @@ class DeviasiPopup(tk.Toplevel):
         tk.Label(head_in, text="🔍 Detail Deviasi", bg=C_HEADER,
                  fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
         # judul = NAMA BARANG — NAMA RESTO (dua-duanya, permintaan user)
-        tk.Label(head_in, text=title, bg=C_HEADER, fg="#f1f5f9",
-                 font=font(12, "bold"), wraplength=1020,
-                 justify="left").pack(anchor="w", pady=(2, 0))
+        title_lbl = tk.Label(head_in, text=title, bg=C_HEADER,
+                             fg="#f1f5f9", font=font(12, "bold"),
+                             wraplength=1020, justify="left")
+        title_lbl.pack(anchor="w", pady=(2, 0))
+        # v3.9.59 — AUDIT FIX 2d-07: wraplength ADAPTIF (dulu fixed 1020
+        # — jendela bisa diciutkan sampai minsize 820: judul panjang
+        # berhenti wrap & terpotong kanan; di monitor lebar wrap terlalu
+        # dini). Bind <Configure> popup → wraplength mengikuti lebar.
+        # RESUME-D: bind di TOPLEVEL menangkap event <Configure> SEMUA
+        # widget turunan (bindtags default memuat toplevel) — e.width bisa
+        # = lebar tombol/scrollbar anak → wraplength kacau + loop layout
+        # (probe fd_popup2 hang saat resize). Guard e.widget is self.
+        def _on_title_cfg(e, _lbl=title_lbl):
+            if e.widget is not self:
+                return   # Configure anak (btn/scrollbar) — bukan popup
+            try:
+                _lbl.configure(
+                    wraplength=max(300, min(1020, e.width - 60)))
+            except tk.TclError:
+                pass
+        self.bind("<Configure>", _on_title_cfg, add="+")
 
         btn_fit = tk.Button(
             head_in, text="↔ Auto-Fit", command=self._auto_fit,
@@ -314,15 +344,40 @@ class DeviasiPopup(tk.Toplevel):
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)  # v3.9.32
 
-        # --- Footer: status + tutup ---
+        # v3.9.59 — AUDIT FIX 2d-03: interaksi COPY (port pola DetailsPopup
+        # — menu klik-kanan 5-perintah + Ctrl+C + double-click cell + tombol
+        # footer 📋 + flash TERSALIN; popup ini MEMAKAI kolom Nomor & Nomor
+        # PO jadi paritas interaksi dgn popup kembar seharusnya ada).
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")
+        self.tree.bind("<Double-1>", self._on_double_click, add="+")
+        # bind TANPA add='+' mengganti binding _copy_rows
+        # enable_multi_select — _on_copy_key memprioritaskan region sel
+        # dulu (fix 2d-05) supaya perilaku Ctrl+C tidak menyimpang dari
+        # tabel lain (region aktif → copy region, bukan Nomor baris).
+        self.tree.bind("<Control-c>", self._on_copy_key)
+        self.tree.bind("<Control-C>", self._on_copy_key)
+
+        # --- Footer: status + tombol ---
         foot = tk.Frame(self, bg=C_BG)
         foot.pack(fill="x", padx=12, pady=(0, 12))
 
         self.status_var = tk.StringVar()
-        tk.Label(foot, textvariable=self.status_var, bg=C_BG,
-                 fg=C_TEXT_MUTED, font=font(9)).pack(side="left")
+        self.status_label = tk.Label(foot, textvariable=self.status_var,
+                                     bg=C_BG, fg=C_TEXT_MUTED, font=font(9))
+        self.status_label.pack(side="left")
+
+        # v3.9.59 — 2d-03: tombol footer copy SEMUA nilai unik (pola
+        # DetailsPopup; label & istilah identik).
+        btn_copy_nomor = GhostButton(
+            foot, text="📋 Semua Nomor",
+            command=lambda: self._copy_all_unique("Nomor"))
+        btn_copy_nomor.pack(side="right", padx=(6, 0))
+        btn_copy_po = GhostButton(
+            foot, text="📋 Semua Nomor PO",
+            command=lambda: self._copy_all_unique("Nomor PO"))
+        btn_copy_po.pack(side="right", padx=(6, 0))
         AccentButton(foot, text="Tutup (Esc)",
-                     command=self.destroy).pack(side="right")
+                     command=self.destroy).pack(side="right", padx=(6, 0))
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
@@ -344,7 +399,8 @@ class DeviasiPopup(tk.Toplevel):
         n = len(rows)
 
         if n == 0:
-            self.status_var.set("Tidak ada data utk kombinasi ini.")
+            self._base_status = "Tidak ada data utk kombinasi ini."
+            self.status_var.set(self._base_status)
             return
 
         for i, rec in enumerate(rows.to_dict("records")):
@@ -373,17 +429,199 @@ class DeviasiPopup(tk.Toplevel):
             apply_cell_tag(self.tree, "neg_cell", self._neg_cells)
 
         # footer status: jumlah baris + legenda '•' bila ada bulan lalu
-        has_lalu = any(str(v).endswith("•") for v in rows["Tanggal"])
+        has_lalu = any(str(v).endswith("\u2022") for v in rows["Tanggal"])
         status = f"{n} baris"
         if has_lalu:
-            status += " · • = bulan lalu"
+            status += " \u00b7 \u2022 = bulan lalu"
         if self._h_label:
-            status += f" · H={self._h_label}"
+            status += f" \u00b7 H={self._h_label}"
+        # v3.9.59 — 2d-03: simpan status dasar utk pemulihan flash copy
+        self._base_status = status
         self.status_var.set(status)
 
     def _auto_fit(self):
         """v3.4 (pola) — auto-fit lebar kolom ke konten."""
         auto_fit_columns(self.tree)
+
+    # =====================================================================
+    # v3.9.59 — AUDIT FIX 2d-03: COPY Nomor / Nomor PO (port pola
+    # DetailsPopup: klik-kanan menu konteks + Ctrl+C + double-click cell
+    # + tombol footer 📋 + flash TERSALIN — istilah & urutan identik).
+    # =====================================================================
+    def _copy_to_clipboard(self, text, label: str):
+        text = str(text or "").strip()
+        if not text:
+            self._flash_status("⚠ Tidak ada yang bisa di-copy (nilai kosong).")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        shown = text if len(text) <= 60 else text[:60] + "…"
+        self._flash_status(f"📋 {label} TERSALIN ke clipboard: {shown}")
+
+    def _flash_status(self, msg: str):
+        if self._flash_after:
+            try:
+                self.after_cancel(self._flash_after)
+            except tk.TclError:
+                pass
+        self.status_var.set(msg)
+        self.status_label.configure(fg=C_ACCENT_DARK)
+
+        def restore():
+            # popup bisa ditutup < 3 detik — jangan sentuh widget mati
+            # (pola FIX D-09 DetailsPopup).
+            if not self.winfo_exists():
+                return
+            self.status_var.set(self._base_status)
+            self.status_label.configure(fg=C_TEXT_MUTED)
+
+        # v3.9.59 — fix 2b-07 (agent B): 3000 literal → konstanta bersama
+        # FLASH_MS (2500ms — seragam dgn details_popup/app; pola port
+        # 2d-03 tetap identik hanya durasinya).
+        self._flash_after = self.after(FLASH_MS, restore)
+
+    def _on_context_menu(self, event):
+        tree = event.widget
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+        try:
+            # multi-select: baris yang diklik sudah terseleksi → PERTAHANKAN
+            # seleksi (pola fix 48-c DetailsPopup)
+            if iid not in tree.selection():
+                tree.selection_set(iid)
+            tree.focus(iid)
+        except tk.TclError:
+            pass
+        menu = self._build_copy_menu(iid, tree)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                menu.grab_release()
+            except tk.TclError:
+                pass
+
+    def _build_copy_menu(self, iid, tree):
+        """Bangun menu konteks copy (dipisah dari _on_context_menu supaya
+        bisa diuji/di-invoke tanpa posting menu)."""
+        values = tree.item(iid, "values")
+        if not values:
+            return tk.Menu(self, tearoff=0)
+        row = dict(zip(COL_IDS, values))
+        nomor = str(row.get("Nomor", "") or "").strip()
+        nomor_po = str(row.get("Nomor PO", "") or "").strip()
+
+        def _lbl(s: str) -> str:
+            if not s:
+                return "(kosong)"
+            return s[:26] + ("…" if len(s) > 26 else "")
+
+        menu = tk.Menu(self, tearoff=0, bg=C_CARD, fg=C_HEADER,
+                       activebackground=C_ACCENT_SOFT,
+                       activeforeground=C_ACCENT_DARK,
+                       font=font(9), bd=0, relief="flat")
+        menu.add_command(
+            label=f"📋 Copy Nomor — {_lbl(nomor)}",
+            command=lambda: self._copy_to_clipboard(nomor, "Nomor"))
+        menu.add_command(
+            label=f"📋 Copy Nomor PO — {_lbl(nomor_po)}",
+            command=lambda: self._copy_to_clipboard(nomor_po, "Nomor PO"))
+        # pasangan kedua nomor dokumen baris tanggal itu (tab-separated —
+        # paste Excel: 2 sel)
+        pair = "\t".join(p for p in (nomor, nomor_po) if p)
+        menu.add_command(
+            label=f"📋 Copy Nomor + Nomor PO — {_lbl(nomor or nomor_po)}",
+            command=lambda: self._copy_to_clipboard(
+                pair, "Nomor + Nomor PO"))
+        menu.add_separator()
+        menu.add_command(
+            label="📋 Copy seluruh baris (tab-separated)",
+            command=lambda: self._copy_row(iid, tree))
+        menu.add_command(
+            label="📋 Copy SEMUA Nomor (unik)",
+            command=lambda: self._copy_all_unique("Nomor"))
+        menu.add_command(
+            label="📋 Copy SEMUA Nomor PO (unik)",
+            command=lambda: self._copy_all_unique("Nomor PO"))
+        return menu
+
+    def _copy_row(self, iid, tree):
+        values = tree.item(iid, "values")
+        if not values:
+            return
+        self._copy_to_clipboard("\t".join(str(v) for v in values),
+                                "Baris lengkap")
+
+    def _copy_all_unique(self, col: str):
+        df = self.rows
+        if df is None or df.empty or col not in df.columns:
+            self._flash_status("Tidak ada data untuk di-copy.")
+            return
+        # kolom Nomor/Nomor PO popup ini = GABUNGAN beberapa nomor per
+        # tanggal ('A, B') → pecah per nomor supaya benar2 unik.
+        uniq: set = set()
+        for v in df[col].dropna().astype(str):
+            for part in str(v).split(","):
+                part = part.strip()
+                if part:
+                    uniq.add(part)
+        vals = sorted(uniq)
+        if not vals:
+            self._flash_status("Tidak ada nilai untuk di-copy.")
+            return
+        self._copy_to_clipboard("\n".join(vals),
+                                f"{len(vals)} nilai {col} (unik)")
+
+    def _on_double_click(self, event):
+        """Double-click cell Nomor / Nomor PO → langsung copy nilai cell
+        (pola DetailsPopup; resolve posisi-display → nama kolom aktual
+        supaya kolom disembunyikan tidak salah sasaran)."""
+        tree = event.widget
+        iid = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)
+        if not iid or not col or col == "#0":
+            return
+        col_name = identify_to_column(tree, col)
+        if col_name in ("Nomor", "Nomor PO"):
+            val = tree.set(iid, col_name)
+            self._copy_to_clipboard(val, col_name)
+
+    def _on_copy_key(self, _event):
+        """Ctrl+C (pola DetailsPopup): region sel aktif ala Excel MENANG,
+        >1 baris terpilih → TSV, 1 baris → Nomor (fallback Nomor PO —
+        label flash sesuai kolom ASAL nilai)."""
+        tree = self.tree
+        # 2d-05 — region sel aktif → copy REGION (persis prioritas
+        # widgets._copy_rows; binding ini mengganti binding itu di tree
+        # popup — tanpa cek, seleksi sel yang di-highlight diacuhkan).
+        if getattr(tree, "_cellsel_active", False):
+            n = copy_cell_region_tsv(tree)
+            if n:
+                self._flash_status(
+                    f"📋 {n} baris region TERSALIN (tab-separated) "
+                    f"ke clipboard.")
+                return
+        sel = tree.selection()
+        if not sel:
+            return
+        if len(sel) > 1:
+            n = copy_tree_selection_tsv(tree)
+            if n:
+                self._flash_status(
+                    f"📋 {n} baris TERSALIN (tab-separated) ke clipboard.")
+            return
+        values = tree.item(sel[0], "values")
+        if not values:
+            return
+        row = dict(zip(COL_IDS, values))
+        label = "Nomor"
+        val = str(row.get("Nomor", "") or "")
+        if not val:
+            label = "Nomor PO"
+            val = str(row.get("Nomor PO", "") or "")
+        if val:
+            self._copy_to_clipboard(val, label)
 
     # =====================================================================
     # FORMAT

@@ -78,6 +78,7 @@ from .widgets import (
     EmptyState,
     GhostButton,
     HeaderFilterGroup,
+    LegendRow,
     LoadingOverlay,
     TableExpander,
     apply_cell_tag,
@@ -222,6 +223,22 @@ class NominalDeviasiView(tk.Frame):
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)  # v3.9.32
 
+        # v3.9.59 — FIX 2f-16: LEGENDA MARKER mode 💰 (pola LegendRow
+        # deviasi_view/pivot_view): kolom 'Harga' menampilkan penanda
+        # '*' (satuan rekap tak ter-cover peta rasio → harga 41.09
+        # ditampilkan as-is, Nominal TIDAK dihitung → '-') dan '-'
+        # (barang tak ada/harga kosong di 41.09) — sebelumnya definisi
+        # hanya ada di docstring + popup tanpa-harga tab 🧮; user baru
+        # harus menebak arti marker di sel.
+        legend = LegendRow(self.content, [
+            (("* satuan tak terkonversi — harga 41.09 as-is, "
+              "nominal tak dihitung"), "#b45309"),
+            ("- tanpa harga 41.09 (barang tak ada / harga kosong)",
+             "#64748b"),
+        ])
+        legend.pack(fill="x", padx=12, pady=(6, 0))
+        self._legend = legend
+
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self.status_var_label = tk.StringVar(value="Belum ada data.")
@@ -240,7 +257,8 @@ class NominalDeviasiView(tk.Frame):
             self.tree,
             open_filter=lambda c: self.header_filters.open_popup(c))
 
-        self._expander = TableExpander(btn_expand, [fcard, self._title_label])
+        self._expander = TableExpander(
+            btn_expand, [fcard, self._title_label, self._legend])
 
         # chip H bersama + auto-refresh saat H diubah di tab Deviasi GR
         if self._h_state is not None:
@@ -426,7 +444,7 @@ class NominalDeviasiView(tk.Frame):
         if data is None or len(data) == 0:
             self.status_var_label.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""

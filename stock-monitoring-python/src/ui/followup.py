@@ -21,13 +21,19 @@ Struktur (pola waste_anomaly/followup.py):
   H|SO|Sistem|Deviasi|CEK. Stabil lintas sesi (str(float) dinormalisasi).
 - ``FollowUpStore`` — dict {fp: snapshot} + status tindak lanjut (resolved):
   - toggle(fp, row) → tambah/hapus, return status baru
-  - save/load (atomic write + backup .bad utk file korup)
+  - save/load (atomic write + backup .bad utk file korup; pulihan file
+    korup kini TERLIHAT — flag ``last_recovery`` + [WARNING] log + dialog
+    bila GUI hidup, FIX 2f-07)
+  - gagal persist → flag ``last_save_error`` utk view (FIX 2f-08)
   - export_xlsx(path) → sheet "FOLLOW UP" format file sample + kolom
-    kerja FU (diisi petugas; nilai tersimpan ikut terbawa)
+    kerja FU (diisi petugas; nilai tersimpan ikut terbawa); tulis ATOMIK
+    tmp+os.replace (FIX 2f-04 — file export lama tak tertimpa parsial)
   (v3.8: import_workbook DIHAPUS — fitur "Impor Hasil TL" tidak perlu
   lagi, permintaan user; resolved lama tetap dimuat agar status/PIC
   yang sudah tersimpan sebelumnya tetap tampil.)
-- Modul murni (tanpa Tk) — dipakai view + app.
+- Modul murni — tanpa Tk di IMPORT-TIME (dipakai view + app + test
+  headless); dialog pemulihan 2f-07 meng-import tkinter LAZY dan hanya
+  tampil bila root Tk default hidup (mode GUI).
 """
 from __future__ import annotations
 
@@ -181,6 +187,57 @@ def _backup_corrupt(p: Path) -> None:
         pass
 
 
+def _notify_recovery(store, p: Path, reason: str) -> None:
+    """v3.9.59 — FIX 2f-07 (audit 2-f MED): pulihan file korup kini
+    TERLIHAT oleh user (dulu SENYAP: file di-rename .bad + daftar mulai
+    kosong tanpa pesan — _LOG.warning jatuh ke stderr yang dibuang
+    pythonw/MULAI.bat, user kehilangan seluruh daftar follow-up tanpa
+    tahu cadangan .bad ada).
+
+    Tiga kanal (aman utk jalur headless/test — tanpa root Tk dialog
+    TIDAK pernah dicoba):
+    1. ``store.last_recovery`` = pesan ringkas — view/app (listener
+       v3.9.42) bisa men-surface flash status (API utk view).
+    2. print [WARNING] — stdout app dialihkan ke log internal tab 🚀
+       Proses (pola save-gagal followup v3.9.42).
+    3. messagebox showwarning HANYA bila root Tk default hidup (mode
+       GUI; dibungkus try — store bisa dibuat sebelum mainloop/di
+       thread non-main)."""
+    bad = str(p) + ".bad"
+    msg = (f"File {p.name} rusak ({reason}). Cadangan: {bad}. "
+           "Daftar dimulai kosong.")
+    if store is not None:
+        store.last_recovery = msg
+    print(f"[WARNING] followup: {msg}")
+    try:
+        import tkinter as tk
+    except ImportError:
+        return  # Tk tak tersedia (jalur headless) — cukup flag + log
+    if getattr(tk, "_default_root", None) is None:
+        return  # tanpa root default (test headless) — JANGAN dialog
+    try:
+        from tkinter import messagebox
+        messagebox.showwarning("Follow-Up Rusak", msg)
+    except (tk.TclError, RuntimeError):
+        _LOG.debug("dialog followup-rusak gagal (non-main thread?)",
+                   exc_info=True)
+
+
+def _fmt_added(ts) -> str:
+    """v3.9.59 — FIX 2f-15 (audit 2-f): kolom 'Ditambahkan' export pakai
+    kanon timestamp pendek app '%d-%m-%Y %H:%M' (dulu ISO
+    '2025-11-12 08:30' — gaya ke-4 yang tak konsisten dgn permukaan
+    lain). Snapshot lama/non-ISO → fallback tampilan lama."""
+    s = str(ts or "").strip()
+    if not s:
+        return ""
+    try:
+        return datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").strftime(
+            "%d-%m-%Y %H:%M")
+    except ValueError:
+        return s[:16].replace("T", " ")
+
+
 def _atomic_save(path: Path, data: dict) -> bool:
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -205,6 +262,13 @@ class FollowUpStore:
         self.rows: dict[str, dict] = {}      # fp → snapshot
         self.resolved: dict[str, dict] = {}  # fp → {PIC, KATEGORI, TINDAKAN, ts}
         self._listeners: list = []
+        # v3.9.59 — FIX 2f-07: pesan pulihan file korup TERAKHIR (None =
+        # tak ada) — dibaca view/app utk flash status (lihat
+        # _notify_recovery).
+        self.last_recovery: str | None = None
+        # v3.9.59 — FIX 2f-08: pesan gagal persist TERAKHIR (None = sehat)
+        # — dibaca view/listener setelah toggle/clear (lihat toggle).
+        self.last_save_error: str | None = None
         self.load()
 
     # -- sinkronisasi UI ------------------------------------------------------
@@ -255,7 +319,11 @@ class FollowUpStore:
         senyap: user yakin baris ter-uncheck padahal restart
         mengembalikannya. Kini gagal → print [WARNING] (stdout app
         dialihkan ke log internal; JANGAN messagebox — context bisa
-        bukan main thread). Perubahan tetap di memori (degrade soft)."""
+        bukan main thread). Perubahan tetap di memori (degrade soft).
+        v3.9.59 — FIX 2f-08: gagal juga men-set flag
+        ``self.last_save_error`` SEBELUM _notify() supaya view yang
+        mendengarkan store bisa men-surface flash status di tempat
+        user mencentang (log tab Proses saja terlalu jauh)."""
         if fp in self.rows:
             del self.rows[fp]
             # v3.9.33 — AUDIT FIX (48-e FIX 9): resolved dihapus dari
@@ -265,20 +333,24 @@ class FollowUpStore:
             self.resolved.pop(fp, None)
             ok_resolved = self.save_resolved()
             ok = self.save()
+            self.last_save_error = None if (ok and ok_resolved) else (
+                "gagal menyimpan status followup (file terkunci/disk?) "
+                "— perubahan hanya di memori")
             self._notify()
-            if not (ok and ok_resolved):
-                print("[WARNING] followup: gagal menyimpan status followup "
-                      "(file terkunci/disk?) — perubahan hanya di memori")
+            if self.last_save_error:
+                print(f"[WARNING] followup: {self.last_save_error}")
             return False
         snap = {k: _pyval(row.get(k, "")) for k in SNAPSHOT_FIELDS}
         snap["fp"] = fp
         snap["added_at"] = datetime.now().isoformat(timespec="seconds")
         self.rows[fp] = snap
         ok = self.save()
+        self.last_save_error = None if ok else (
+            "gagal menyimpan status followup (file terkunci/disk?) "
+            "— perubahan hanya di memori")
         self._notify()
-        if not ok:
-            print("[WARNING] followup: gagal menyimpan status followup "
-                  "(file terkunci/disk?) — perubahan hanya di memori")
+        if self.last_save_error:
+            print(f"[WARNING] followup: {self.last_save_error}")
         return True
 
     def clear(self) -> None:
@@ -288,12 +360,15 @@ class FollowUpStore:
         self.resolved.clear()
         # v3.9.42 — audit 61-c/61-d (F5 P3): pola toggle — hasil save tidak
         # diabaikan (gagal persist → [WARNING], lihat toggle).
+        # v3.9.59 — FIX 2f-08: + flag last_save_error utk view (lihat toggle).
         ok = self.save()
         ok_r = self.save_resolved()
+        self.last_save_error = None if (ok and ok_r) else (
+            "gagal menyimpan status followup (file terkunci/disk?) "
+            "— perubahan hanya di memori")
         self._notify()
-        if not (ok and ok_r):
-            print("[WARNING] followup: gagal menyimpan status followup "
-                  "(file terkunci/disk?) — perubahan hanya di memori")
+        if self.last_save_error:
+            print(f"[WARNING] followup: {self.last_save_error}")
 
     # -- persistensi ---------------------------------------------------------------
     def save(self) -> bool:
@@ -322,6 +397,10 @@ class FollowUpStore:
                 _LOG.warning("followup.json korup (%s) — mulai kosong", e)
                 _backup_corrupt(p)
                 self.rows = {}
+                # v3.9.59 — FIX 2f-07: pulihan kini TERLIHAT (flag +
+                # [WARNING] log internal + dialog bila GUI — dulu senyap,
+                # user kehilangan seluruh daftar tanpa pesan).
+                _notify_recovery(self, p, str(e))
         pr = resolved_path()
         if pr.exists():
             try:
@@ -330,10 +409,13 @@ class FollowUpStore:
                 if isinstance(rows, dict):
                     self.resolved = {str(k): r for k, r in rows.items()
                                      if isinstance(r, dict)}
-            except Exception:
+            except Exception as e:
                 _LOG.warning("followup_resolved.json korup → backup .bad")
                 _backup_corrupt(pr)
                 self.resolved = {}
+                # v3.9.59 — FIX 2f-07: mirror jalur followup.json — status
+                # TL/PIC yang hilang juga diberitahukan (flag + log).
+                _notify_recovery(self, pr, f"korup: {e}")
 
     # -- export ------------------------------------------------------------------
     def export_xlsx(self, path: str) -> str:
@@ -402,7 +484,7 @@ class FollowUpStore:
                 info.get("Cek FU", ""), info.get("PIC", ""),
                 snap.get("asal", ""),
                 "Selesai" if info else "Menunggu",
-                (snap.get("added_at", "") or "")[:16].replace("T", " "),
+                _fmt_added(snap.get("added_at", "")),
             ]
             for j, v in enumerate(vals):
                 cell = ws.cell(row=r, column=j + 1, value=v)
@@ -429,7 +511,26 @@ class FollowUpStore:
         for j, c in enumerate(header, start=1):
             ws.column_dimensions[get_column_letter(j)].width = \
                 widths.get(c, 8 if c.isdigit() else 12)
-        wb.save(path)
+        # v3.9.59 — FIX 2f-04 (audit 2-f): tulis ATOMIK (tmp + os.replace —
+        # pola 6a-02 app._export_excel). wb.save() dulu menulis LANGSUNG
+        # ke path tujuan → exception di tengah (disk penuh / styling)
+        # meninggalkan .xlsx PARSIAL yang MENIMPA export LAMA yang baik
+        # di path sama. Kini file tujuan hanya tersentuh os.replace()
+        # atomik SETELAH sukses penuh; kegagalan apa pun (finally)
+        # menghapus tmp (tmp ber-ekstensi .xlsx).
+        tmp_path = str(path) + ".tmp.xlsx"
+        _ok = False
+        try:
+            wb.save(tmp_path)
+            os.replace(tmp_path, str(path))
+            _ok = True
+        finally:
+            if not _ok:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except OSError:
+                    pass
         return path
 
 

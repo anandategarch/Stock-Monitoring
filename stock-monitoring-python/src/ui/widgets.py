@@ -65,7 +65,9 @@ from ..pipeline.helpers import (
 from ..pipeline.helpers import kategori_passthrough as kategori_passthrough  # noqa: PLC0414
 from .theme import (
     C_ACCENT,
+    C_ACCENT_DARK,
     C_ACCENT_HOVER,
+    C_ACCENT_SOFT,
     C_BG,
     C_BORDER,
     C_BORDER_DARK,
@@ -84,6 +86,12 @@ from .theme import (
     setup_tree_tags,
     ui_scale,
 )
+
+# v3.9.59 — fix 2b-07 (audit 2-b): durasi flash status "TERSALIN" kini
+# SATU konstanta bersama (dulu 3000ms di in_selisih_view/details_popup
+# vs 2500ms di app.py — feedback copy tidak seragam antar permukaan).
+# View/app cukup mengimpor konstanta ini untuk after(FLASH_MS, ...).
+FLASH_MS = 2500
 
 # Tombol aksen/berbahaya pakai tk.Button murni: kontrol penuh atas warna
 # (ttk button tidak bisa diwarnai per-widget tanpa mendaftarkan style baru).
@@ -136,6 +144,27 @@ def _filter_value_sort_key(v: str):
     except ValueError:
         return (1, 0.0, str(v))
     return (0, -num if neg else num, str(v))
+
+
+def _ellipsize(text: str, meas, max_px: int) -> str:
+    """v3.9.59 — fix 2a-02/2b-01: potong teks + '…' agar muat ``max_px``.
+
+    ``meas`` = callable Font.measure (teks → lebar px). Teks yang sudah
+    muat dikembalikan APA ADANYA. Pemotongan memakai binary-search jumlah
+    karakter (log₂ n panggilan measure — murah utk teks ratusan char)."""
+    try:
+        if max_px <= 0 or meas(text) <= max_px:
+            return text
+        lo, hi = 1, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if meas(text[:mid] + "…") <= max_px:
+                lo = mid
+            else:
+                hi = mid - 1
+        return text[:lo] + "…"
+    except tk.TclError:
+        return text
 
 
 def validated_tgl_entry(var, *, lo: int, hi: int, fallback: int,
@@ -258,6 +287,10 @@ class GhostButton(ttk.Button):
     """
 
     def __init__(self, parent, text: str, command=None, **kw):
+        # v3.9.59 — fix 2a-07/2b-10 (audit 2-a/2-b): cursor hand2 seperti
+        # Accent/Danger/Toolbar — affordance klik konsisten di semua kelas
+        # tombol (ttk.Button menerima opsi cursor; caller bisa override).
+        kw.setdefault("cursor", "hand2")
         super().__init__(parent, text=text, style="TButton", command=command, **kw)
 
     def set_enabled(self, enabled: bool) -> None:
@@ -359,26 +392,46 @@ class KpiRow(tk.Frame):
                 self.add(c)
 
     def add(self, card: KpiCard):
-        card.grid(row=0, column=len(self._cards), sticky="nsew",
-                  padx=(0 if self._cards else 0, 8))
+        # v3.9.59 — fix 2a-08/2b-08 (audit 2-a/2-b):
+        # (a) grid columnconfigure uniform → semua kolom DIPAKSA sama lebar
+        #     (dulu weight=1 saja membagi ruang SISA — lebar kartu tetap
+        #     beda ±20px, tepi kanan baris KPI tak sejajar);
+        # (b) padx SIMETRIS (4,4) per kartu — dulu conditional mati
+        #     ``0 if self._cards else 0`` + (0,8): tepi kiri 0px vs kanan
+        #     8px DAN kartu terakhir 8px lebih lebar dari yang lain.
+        #     Celah antar kartu = 4+4 = 8px (sama seperti desain lama);
+        #     tepi luar kiri/kanan = 4px masing-masing (simetris).
+        col = len(self._cards)
+        card.grid(row=0, column=col, sticky="nsew", padx=(4, 4))
         self._cards.append(card)
-        self.grid_columnconfigure(len(self._cards) - 1, weight=1)
+        self.grid_columnconfigure(col, weight=1, uniform="kpi")
 
 
 class Toolbar(tk.Frame):
     """Bar gelap slate-900 paling atas: ikon+judul aplikasi, versi, aksi kanan.
 
     add_action(text, command, danger=False, accent=False) → tombol.
+
+    v3.9.59 — fix 2a-03 (audit 2-a): tinggi bar mengikuti ZOOM aktif
+    (``max(48, 48 × ui_scale)``). Dulu fixed 48px + pack_propagate(False)
+    → font named ter-zoom membesar tapi bar tetap → judul aplikasi
+    terpotong mulai ±140% (probe ua_clip3: 47/32px @200%). Pembaruan
+    dipicu <Configure> bar (jendela di-resize oleh zoomer) DAN
+    <Configure> label judul (named font di-rescale rescale_named_fonts
+    → label re-layout → event).
     """
 
+    BASE_H = 48
+
     def __init__(self, parent, title: str, version: str = "", **kw):
-        super().__init__(parent, bg=C_HEADER, height=48, **kw)
+        super().__init__(parent, bg=C_HEADER, height=self._scaled_h(), **kw)
         self.pack_propagate(False)
 
         left = tk.Frame(self, bg=C_HEADER)
         left.pack(side="left", padx=(16, 0), pady=8)
-        tk.Label(left, text=title, bg=C_HEADER, fg="#f1f5f9",
-                 font=font(13, "bold")).pack(side="left")
+        self._title_lbl = tk.Label(left, text=title, bg=C_HEADER,
+                                    fg="#f1f5f9", font=font(13, "bold"))
+        self._title_lbl.pack(side="left")
         if version:
             tk.Label(left, text=f" v{version} ", bg="#1e293b", fg="#5eead4",
                      font=font(8, "bold"), padx=8, pady=2).pack(
@@ -386,6 +439,23 @@ class Toolbar(tk.Frame):
 
         self._actions = tk.Frame(self, bg=C_HEADER)
         self._actions.pack(side="right", padx=(8, 16), pady=8)
+        # 2a-03: hitung ulang tinggi saat zoom berubah (dua jalur lihat
+        # docstring kelas; add="+" supaya tidak mengganti binding lain).
+        self.bind("<Configure>", self._refresh_height, add="+")
+        self._title_lbl.bind("<Configure>", self._refresh_height, add="+")
+
+    @classmethod
+    def _scaled_h(cls) -> int:
+        try:
+            return max(cls.BASE_H, round(cls.BASE_H * ui_scale()))
+        except (TypeError, ValueError):
+            return cls.BASE_H
+
+    def _refresh_height(self, _event=None):
+        h = self._scaled_h()
+        with contextlib.suppress(tk.TclError):
+            if int(self.cget("height")) != h:
+                self.configure(height=h)
 
     def add_action(self, text: str, command=None, accent: bool = False,
                    danger: bool = False) -> tk.Button:
@@ -431,7 +501,13 @@ class Toolbar(tk.Frame):
 
 
 class StatusDot(tk.Frame):
-    """Titik warna + teks status (mis. '● SIAP — menunggu pipeline')."""
+    """Titik warna + teks status (mis. '● SIAP — menunggu pipeline').
+
+    v3.9.59 — fix 2a-02: ``set()`` menyimpan teks PENUH di ``_full``;
+    tampilan bisa dipotong '…' oleh StatusBar._truncate_status() bila
+    ruang kurang (badge kanan tidak tertimpa). ``_var`` tetap variabel
+    tampilan (API test/app lama: statusbar.dot._var.get()).
+    """
 
     def __init__(self, parent, text: str = "SIAP", color: str = C_GREEN, **kw):
         super().__init__(parent, bg=C_CARD, **kw)
@@ -441,22 +517,45 @@ class StatusDot(tk.Frame):
         self._dot = self._canvas.create_oval(1, 1, 9, 9, fill=color,
                                              outline=color)
         self._color = color
+        self._full = text
+        self._fobj = font(9, "bold")
         self._var = tk.StringVar(value=text)
-        tk.Label(self, textvariable=self._var, bg=C_CARD, fg=C_HEADER,
-                 font=font(9, "bold")).pack(side="left")
+        self._lbl = tk.Label(self, textvariable=self._var, bg=C_CARD,
+                             fg=C_HEADER, font=self._fobj)
+        self._lbl.pack(side="left")
 
     def set(self, text: str, color: str):
         self._canvas.itemconfigure(self._dot, fill=color, outline=color)
+        self._color = color
+        self._full = text
         self._var.set(text)
 
 
 class StatusBar(tk.Frame):
-    """Bar status bawah: dot+kiri, info kanan (versi). Border atas slate."""
+    """Bar status bawah: dot+kiri, info kanan (versi). Border atas slate.
+
+    v3.9.59:
+    - fix 2a-02: teks status panjang DIPOTONG '…' selebar ruang tersisa
+      (teks penuh tetap disimpan dot._full) — dulu teks ±243 char menimpa
+      / mengusir badge versi-zoom keluar bar (probe ua_layout2: overlap
+      120px @1020; badge hilang sepenuhnya @200%). Dihitung ulang saat
+      set_status/set_right dan <Configure> (resize jendela — termasuk
+      resize oleh zoomer).
+    - fix 2a-03: tinggi bar mengikuti zoom (max(34, 34 × ui_scale)) —
+      dulu fixed 34px → badge kanan terpotong 2px @100% dan setengah
+      @200% (probe ua_clip3). set_right() dipanggil app._update_zoom_badge
+      di SETIAP perubahan zoom → tinggi ikut di-refresh saat zoom.
+    """
+
+    BASE_H = 34
+    # offset lebar tetap: padx 12×2 (frame kiri) + dot 10 + padx 6
+    # + padx 12×2 (label kanan) + tepi 2.
+    _FIXED_W = 24 + 16 + 24 + 2
 
     def __init__(self, parent, **kw):
         super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
                          highlightthickness=1, **kw)
-        self.configure(height=34)
+        self.configure(height=self._scaled_h())
         self.pack_propagate(False)
 
         left = tk.Frame(self, bg=C_CARD)
@@ -465,15 +564,69 @@ class StatusBar(tk.Frame):
         self.dot.pack(side="left")
 
         self._right_var = tk.StringVar(value="")
-        tk.Label(self, textvariable=self._right_var, bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(9)).pack(
-            side="right", padx=12, pady=8)
+        self._right_lbl = tk.Label(self, textvariable=self._right_var,
+                                   bg=C_CARD, fg=C_TEXT_MUTED, font=font(9))
+        # pady 7 (bukan 8): border 1px + propagate-off memakan 2px interior
+        # — pady 8 menyisakan 16px < req 17px = badge ter-clip 1px di 100%
+        # (audit 2a-03: "di 100% badge versi pun ter-clip 1-2px").
+        self._right_lbl.pack(side="right", padx=12, pady=7)
+        self.bind("<Configure>", self._on_configure, add="+")
+
+    @classmethod
+    def _scaled_h(cls) -> int:
+        try:
+            return max(cls.BASE_H, round(cls.BASE_H * ui_scale()))
+        except (TypeError, ValueError):
+            return cls.BASE_H
+
+    # -- 2a-03: tinggi × zoom ------------------------------------------------
+    def _refresh_height(self):
+        h = self._scaled_h()
+        with contextlib.suppress(tk.TclError):
+            if int(self.cget("height")) != h:
+                self.configure(height=h)
+
+    def _on_configure(self, _event=None):
+        self._refresh_height()
+        self._truncate_status()
+
+    # -- 2a-02: potong teks kiri agar badge kanan utuh ------------------------
+    def _truncate_status(self):
+        """Tampilkan dot._full utuh bila muat; '…' bila melebihi ruang
+        antara dot kiri dan badge kanan. No-op sebelum ter-layout
+        (winfo_width < 60 — <Configure> memicu ulang saat ter-map)."""
+        full = self.dot._full
+        if not full:
+            return
+        try:
+            sb_w = self.winfo_width()
+            if sb_w < 60:
+                return
+            self.update_idletasks()   # lebar badge terbaru (teks baru saja
+                                      # di-set / font ter-rescale zoom)
+            right_w = self._right_lbl.winfo_reqwidth() or 0
+            avail = sb_w - self._FIXED_W - right_w
+            if avail <= 0:
+                return
+            meas = getattr(self.dot._fobj, "measure", None)
+            if meas is None:        # font() tuple fallback (pra-root)
+                return
+            shown = _ellipsize(full, meas, avail)
+        except (tk.TclError, AttributeError):
+            return
+        if self.dot._var.get() != shown:
+            self.dot._var.set(shown)
 
     def set_status(self, text: str, color: str = C_GREEN):
         self.dot.set(text, color)
+        self._truncate_status()
 
     def set_right(self, text: str):
         self._right_var.set(text)
+        # 2a-03: set_right dipanggil _update_zoom_badge (app) tiap zoom
+        # berubah → refresh tinggi + lebar badge di hitungan potongan.
+        self._refresh_height()
+        self._truncate_status()
 
 
 class EmptyState(tk.Frame):
@@ -1540,6 +1693,13 @@ def funnel_image(active: bool = False) -> tk.PhotoImage:
     return img
 
 
+# v3.9.59 — fix 2b-01 (audit 2-b): cap lebar popup daftar nilai +
+# tunjangan ruang non-teks per baris (indikator checkbox ±18px + padx
+# 8×2 + tepi canvas) — teks nilai diukur font(10) (style TCheckbutton).
+_HF_POPUP_CAP = 460
+_HF_CHK_ALLOW = 64
+
+
 class HeaderFilter:
     """Filter kolom yang MENEMPEL DI HEADER Treeview (ala Excel AutoFilter).
 
@@ -1595,6 +1755,14 @@ class HeaderFilter:
         self._all_values: set | None = None          # FIX B-05
         self._list_inner = None                      # FIX B-05
         self._more_label = None                      # FIX B-05
+        # v3.9.59 — fix 2b-01: ruang teks popup (utk '…') + pengukur font;
+        # fix 2b-04: state navigasi keyboard daftar nilai (Up/Down/Space).
+        self._pop_text_px = 0
+        self._pop_meas = None
+        self._nav_cb = None
+        self._nav_entry = None
+        self._nav_box = None
+        self._nav_canvas = None
         self.refresh_icon()
         self._bind_id = tree.bind("<Button-1>", self._on_tree_press, add="+")
 
@@ -1671,6 +1839,25 @@ class HeaderFilter:
         # ditemukan via pencarian & dihitung benar saat filter diterapkan.
         self._values_list = values
         self._all_values = set(values)
+        # v3.9.59 — fix 2b-01 (audit 2-b): lebar popup mengikuti nilai
+        # TERPANJANG (clamp _HF_POPUP_CAP 460px) — dulu ruang teks tetap
+        # ``popup_width-30`` (±284px) → nilai >±40 char terpotong TANPA
+        # '…' dan dua nilai yang sama awalan tak bisa dibedakan (probe
+        # ub_hf: 73-char → 577px vs 284px). Di atas cap teks dipotong
+        # '…'; checkbox/variable tetap mewakili nilai PENUH.
+        try:
+            _cf = font(10)
+            _cf.measure("")            # pastikan objek Font hidup
+            self._pop_meas = _cf.measure
+        except (tk.TclError, AttributeError):
+            self._pop_meas = None
+        _need = 0
+        if self._pop_meas is not None:
+            _meas = self._pop_meas
+            _need = max((_meas(v) for v in values), default=0)
+        pop_w = max(self.popup_width,
+                    min(_need + _HF_CHK_ALLOW, _HF_POPUP_CAP))
+        self._pop_text_px = max(40, pop_w - _HF_CHK_ALLOW)
 
         root = self.tree.winfo_toplevel()
         win = tk.Toplevel(root)
@@ -1699,6 +1886,12 @@ class HeaderFilter:
                               textvariable=self._op_var,
                               values=list(self.SEARCH_OPS))
         op_box.pack(side="left", padx=(6, 0))
+        # v3.9.59 — fix 2b-03 (audit 2-b): hint semantik tombol — fitur
+        # search-to-select (Enter = hasil pencarian jadi seleksi, §94)
+        # tidak terdiscover: semantiknya hanya hidup di docstring.
+        tk.Label(body, text="Enter = pilih nilai terfilter · Esc = tutup",
+                 bg=C_CARD, fg=C_TEXT_SOFT, font=font(9)).pack(
+            fill="x", padx=(22, 0), pady=(2, 0))
 
         # pilih semua + counter
         arow = tk.Frame(body, bg=C_CARD)
@@ -1714,13 +1907,13 @@ class HeaderFilter:
                         highlightthickness=1)
         wrap.pack(fill="both", expand=True, pady=(6, 10))
         cv = tk.Canvas(wrap, bg=C_CARD, highlightthickness=0, bd=0,
-                       width=self.popup_width - 30, height=300)
+                       width=pop_w - 30, height=300)
         sb = ttk.Scrollbar(wrap, orient="vertical", command=cv.yview)
         inner = tk.Frame(cv, bg=C_CARD)
         inner.bind("<Configure>",
                    lambda e: cv.configure(scrollregion=cv.bbox("all")))
         cv.create_window((0, 0), window=inner, anchor="nw",
-                         width=self.popup_width - 30)
+                         width=pop_w - 30)
         cv.configure(yscrollcommand=sb.set)
         cv.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
@@ -1734,6 +1927,25 @@ class HeaderFilter:
         # FIX B-05: simpan container daftar — checkbox LAZY untuk nilai di
         # luar cap dibuat di sini saat pencarian menemukannya.
         self._list_inner = inner
+        # v3.9.59 — fix 2b-04 (audit 2-b): navigasi KEYBOARD daftar nilai
+        # (Up/Down gerakkan fokus baris + auto-scroll, Space toggle).
+        # Binding TINGKAT POPUP (bindtag Toplevel ada di rantai SEMUA anak
+        # — pola enable_smooth_wheel_list): kunci ditekan di entry/label
+        # mana pun tetap menggerakkan fokus. Focus ring = style turunan
+        # "HFFoc.TCheckbutton" (focuscolor TCheckbutton default putih di
+        # kartu putih = tak terlihat — audit 2b-04).
+        self._nav_entry = entry
+        self._nav_box = op_box
+        self._nav_canvas = cv
+        self._nav_cb = None
+        with contextlib.suppress(tk.TclError):
+            _st = ttk.Style(win)
+            _st.configure("HFFoc.TCheckbutton", background=C_ACCENT_SOFT,
+                          focuscolor=C_ACCENT_DARK)
+            _st.map("HFFoc.TCheckbutton",
+                    background=[("active", _CELLSEL_BG)])
+        for _seq in ("<Up>", "<Down>", "<space>"):
+            win.bind(_seq, self._on_nav_key, add="+")
 
         self._vars.clear()
         self._checks.clear()
@@ -1741,8 +1953,8 @@ class HeaderFilter:
             var = tk.BooleanVar(
                 value=self.selected is None or v in self.selected)
             self._vars[v] = var
-            cb = ttk.Checkbutton(inner, text=v, variable=var,
-                                 command=self._on_toggle)
+            cb = ttk.Checkbutton(inner, text=self._disp_text(v),
+                                 variable=var, command=self._on_toggle)
             cb.pack(fill="x", padx=8, pady=1)
             self._checks[v] = cb
         self._more_label = None
@@ -1879,16 +2091,16 @@ class HeaderFilter:
         self._count_var.set(f"{checked}/{total} dipilih")
 
     # -- search-to-select (v3.9.13) --------------------------------------------
-    def _on_search_enter(self, _event=None):
-        """v3.9.13: Enter → hasil pencarian menjadi SELEKSI (permintaan
-        user: "habis search, hasil search-ku itulah yang jadi
-        pilihan-nya"). Query kosong + Enter = reset; 0 hasil = 0 baris."""
-        q = (self._search_var.get() or "").strip().lower()
-        if self._values_list is None:
-            return
-        if not q:
-            self._reset()
-            return
+    def _search_pred(self, q: str):
+        """v3.9.59 — fix 2b-02 (audit 2-b): predikat operator teks SATU
+        sumber kebenaran untuk Enter-search DAN preview live-search.
+
+        Dulu preview (``_filter_list``) memakai contains polos
+        ``q in v.lower()`` sementara Enter memakai operator pilihan —
+        op 'Diawali' + '100' → daftar masih menampilkan nilai yang TIDAK
+        akan dipilih (mis. 'uang 100') → tekan Enter → tabel KOSONG
+        mendadak (feedback menyesatkan). Kontrak Enter (§94: 0 hasil =
+        0 baris) TIDAK berubah — hanya preview yang disinkronkan."""
         op = str(self._op_var.get() or "Mengandung")
 
         def _contains(v: str) -> bool:
@@ -1903,8 +2115,20 @@ class HeaderFilter:
         def _excludes(v: str) -> bool:
             return q not in v.lower()
 
-        pred = {"Diawali": _starts, "Diakhiri": _ends,
+        return {"Diawali": _starts, "Diakhiri": _ends,
                 "Tidak mengandung": _excludes}.get(op, _contains)
+
+    def _on_search_enter(self, _event=None):
+        """v3.9.13: Enter → hasil pencarian menjadi SELEKSI (permintaan
+        user: "habis search, hasil search-ku itulah yang jadi
+        pilihan-nya"). Query kosong + Enter = reset; 0 hasil = 0 baris."""
+        q = (self._search_var.get() or "").strip().lower()
+        if self._values_list is None:
+            return
+        if not q:
+            self._reset()
+            return
+        pred = self._search_pred(q)
         matches = {v for v in self._values_list if pred(v)}
         self._apply_selection(matches)
 
@@ -1933,22 +2157,39 @@ class HeaderFilter:
         cur = allv if self.selected is None else set(self.selected)
         self._apply_selection(allv - cur)
 
+    def _disp_text(self, v: str) -> str:
+        """v3.9.59 — fix 2b-01: teks TAMPILAN checkbox (terpotong '…' bila
+        nilai melebihi ruang popup yang sudah di-cap); variable/state
+        filter tetap memakai nilai PENUH (key ``self._checks``)."""
+        px = self._pop_text_px
+        meas = self._pop_meas
+        if not px or meas is None:
+            return v
+        return _ellipsize(v, meas, px)
+
     def _filter_list(self):
         q = (self._search_var.get() or "").strip().lower()
+        # v3.9.59 — fix 2b-02: preview memakai PREDIKAT OPERATOR yang sama
+        # dengan Enter (self._search_pred) — apa yang terlihat = apa yang
+        # akan terpilih (dulu contains polos → mismatch di op Diawali/
+        # Diakhiri/Tidak mengandung).
+        pred = self._search_pred(q) if q else None
         # FIX B-05: pencarian yang menemukan nilai DI LUAR cap → buat
         # checkbox-nya sekarang (lazy) supaya bisa dilihat & dicentang.
-        if (q and self._values_list is not None
+        if (q and pred is not None
+                and self._values_list is not None
                 and len(self._values_list) > self.MAX_CHECKS
                 and self._list_inner is not None
                 and self._list_inner.winfo_exists()):
             created = False
             for v in self._values_list[self.MAX_CHECKS:]:
-                if v in self._checks or q not in v.lower():
+                if v in self._checks or not pred(v):
                     continue
                 var = tk.BooleanVar(
                     value=self.selected is None or v in self.selected)
                 self._vars[v] = var
-                cb = ttk.Checkbutton(self._list_inner, text=v, variable=var,
+                cb = ttk.Checkbutton(self._list_inner,
+                                     text=self._disp_text(v), variable=var,
                                      command=self._on_toggle)
                 if self._more_label is not None \
                         and self._more_label.winfo_exists():
@@ -1966,10 +2207,115 @@ class HeaderFilter:
             # checkbox milik popup yang sudah mati (state tetap otoritatif).
             if not cb.winfo_exists():
                 continue
-            if not q or q in v.lower():
+            if not q or pred(v):
                 cb.pack(fill="x", padx=8, pady=1)
             else:
                 cb.pack_forget()
+        # 2b-04: baris fokus keyboard yang tersembunyi oleh filter →
+        # lepaskan ring fokusnya (jangan toggle baris tak terlihat).
+        nav = self._nav_cb
+        if (nav is not None and nav.winfo_exists()
+                and nav.winfo_manager() != "pack"):
+            self._nav_clear()
+
+    # -- navigasi keyboard daftar nilai (v3.9.59 — fix 2b-04) ------------------
+    def _nav_rows(self) -> list:
+        """Checkbox yang TAMPIL saat ini (urutan pack = urutan visual).
+        Nilai 'Pilih semua' tidak termasuk (ada di luar canvas)."""
+        inner = self._list_inner
+        if inner is None or not inner.winfo_exists():
+            return []
+        return [w for w in inner.pack_slaves()
+                if isinstance(w, ttk.Checkbutton)]
+
+    def _on_nav_key(self, event):
+        """Up/Down: pindah fokus baris (+auto-scroll); Space: toggle.
+
+        Bindtag Toplevel (rantai semua anak popup). Interaksi asli tidak
+        diganggu: fokus di combobox operator → biarkan default (Up/Down
+        = buka daftar operator); spasi di entry = karakter; fokus di
+        checkbox/tombol → class binding ttk sudah menangani Space
+        SEBELUM bindtag ini (jangan invoke ulang = toggle ganda).
+        RESUME round: Down DI DALAM entry pencarian kini masuk ke baris
+        pertama daftar (pola combobox) — dulu entry = dead-zone: satu-
+        satunya jalan keyboard ke daftar adalah Tab (melewati combobox
+        operator + 'Pilih semua' dulu), padahal alur utama user keyboard
+        adalah ketik filter → turun ke hasil → Space mencentang."""
+        if self._popup is None or not self._popup.winfo_exists():
+            return None
+        seq = str(getattr(event, "keysym", "") or "")
+        if seq not in ("Up", "Down", "space"):
+            return None
+        try:
+            focus = self._popup.focus_get()
+        except tk.TclError:
+            focus = None
+        if focus is self._nav_box:
+            return None
+        rows = self._nav_rows()
+        if not rows:
+            return None
+        if focus is self._nav_entry:
+            if seq == "Down":
+                self._nav_focus(rows[0])
+                return "break"
+            return None        # Up/space di entry = perilaku teks normal
+        if seq in ("Up", "Down"):
+            cur = rows.index(self._nav_cb) if self._nav_cb in rows else -1
+            if seq == "Down":
+                nxt = rows[min(cur + 1, len(rows) - 1)]
+            else:
+                nxt = rows[max(cur - 1, 0)]
+            self._nav_focus(nxt)
+            return "break"
+        # seq == "space": class binding sudah toggle bila fokus di
+        # checkbox/tombol — hanya jalur TANPA fokus (mis. Xvfb) yang perlu
+        # di-invoke manual.
+        if focus is None and self._nav_cb in rows:
+            self._nav_cb.invoke()
+            return "break"
+        return None
+
+    def _nav_focus(self, cb):
+        """Pasang ring fokus (style HFFoc + focus_set) + auto-scroll."""
+        prev = self._nav_cb
+        self._nav_cb = cb
+        with contextlib.suppress(tk.TclError):
+            if prev is not None and prev is not cb and prev.winfo_exists():
+                prev.configure(style="TCheckbutton")
+            if cb is not None and cb.winfo_exists():
+                cb.configure(style="HFFoc.TCheckbutton")
+                cb.focus_force()
+                self._nav_see(cb)
+
+    def _nav_see(self, cb):
+        """Gulir canvas supaya baris fokus tetap terlihat (mata-fokus
+        pengguna keyboard di bawah lipatan)."""
+        cv = self._nav_canvas
+        inner = self._list_inner
+        if cv is None or inner is None:
+            return
+        try:
+            total = inner.winfo_reqheight() or 1
+            y, h = cb.winfo_y(), max(cb.winfo_reqheight(), 1)
+            view_h = cv.winfo_height()
+            top = cv.yview()[0] * total
+            bot = top + view_h
+            if y < top:
+                cv.yview_moveto(max(0.0, (y - 4) / total))
+            elif y + h > bot:
+                cv.yview_moveto(min(1.0, (y + h + 4 - view_h) / total))
+        except tk.TclError:
+            return
+
+    def _nav_clear(self):
+        """Lepas ring fokus navigasi (baris tersembunyi filter/popup
+        ditutup) — state _nav_cb dikosongkan supaya Space tidak toggle
+        baris yang tidak terlihat."""
+        cb, self._nav_cb = self._nav_cb, None
+        if cb is not None and cb.winfo_exists():
+            with contextlib.suppress(tk.TclError):
+                cb.configure(style="TCheckbutton")
 
     def _reset(self):
         # v3.9.13: reset EKSAK — `selected` dibersihkan DULU (state
@@ -2319,16 +2665,14 @@ class ColumnManager:
                 v.set(True)
             _refresh_count()
 
-        tk.Button(btnrow, text="▦ Tampilkan Semua", command=_show_all,
-                  bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
-                  activeforeground="#ffffff", bd=0, relief="flat",
-                  highlightthickness=0, cursor="hand2", font=font(9, "bold"),
-                  padx=12, pady=5).pack(side="left")
-        tk.Button(btnrow, text="✕ Tutup (Esc)", command=_close_panel,
-                  bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
-                  activeforeground="#ffffff", bd=0, relief="flat",
-                  highlightthickness=0, cursor="hand2", font=font(9, "bold"),
-                  padx=12, pady=5).pack(side="right")
+        # v3.9.59 — fix 2b-05 (audit 2-b): tombol panel ◱ Kolom kini
+        # GhostButton terang — sama dengan popup ⧩ Filter (dulu tombol
+        # gelap #1e293b di panel terang: dua popup kembar beda gaya; cursor
+        # hand2 ikut otomatis dari GhostButton — fix 2a-07/2b-10).
+        GhostButton(btnrow, text="▦ Tampilkan Semua",
+                    command=_show_all).pack(side="left")
+        GhostButton(btnrow, text="✕ Tutup (Esc)",
+                    command=_close_panel).pack(side="right")
 
         # checklist scrollable (pivot matrix bisa punya 30+ kolom tanggal)
         cv = tk.Canvas(body, bg=C_CARD, highlightthickness=0,
@@ -4632,7 +4976,10 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     """
     root = source_tree.winfo_toplevel()
     win = tk.Toplevel(root)
-    win.title(f"{title} — Perbesar")
+    # v3.9.59 — fix 2b-09 (audit 2-b): judul menyatakan SALINAN — clone
+    # adalah snapshot; data di dalamnya TIDAK diperbarui saat sumber
+    # re-load/refresh (dulu bisa dianggap live view).
+    win.title(f"{title} — Perbesar (salinan)")
     win.configure(bg=C_BG)
     win.transient(root)
 
@@ -4756,6 +5103,11 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     count_var = tk.StringVar(value="Menyalin tabel…")
     tk.Label(foot, textvariable=count_var, bg=C_CARD, fg=C_TEXT_MUTED,
              font=font(9)).pack(side="left")
+    # v3.9.59 — fix 2b-09: catatan kaki penanda salinan (filter/sort clone
+    # terpisah dari tabel sumber — filter di clone tidak memengaruhi sumber
+    # dan sebaliknya utk baris/nilai).
+    tk.Label(foot, text="Salinan — filter/sort terpisah", bg=C_CARD,
+             fg=C_TEXT_SOFT, font=font(9)).pack(side="right")
 
     overlay = LoadingOverlay(cin, "Menyalin tabel…")
     overlay.show(delay_ms=120)

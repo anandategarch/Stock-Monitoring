@@ -140,6 +140,7 @@ ikut, bukan sekadar filter tampilan).
 v3.6 (lama): default -26 s/d 31.
 """
 import contextlib
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
@@ -168,6 +169,7 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    FLASH_MS,  # v3.9.59 — kanon durasi status flash (bonus, agent B)
     KATEGORI_REKAP_VALUES,  # v3.9.49 — default kategori Rekap Mentah
     Card,
     ColumnManager,
@@ -522,7 +524,7 @@ class InDetailPopup(tk.Toplevel):
             padx=12, pady=5)
         btn_fit.pack(side="right", anchor="ne", padx=(0, 6))
         btn_max = tk.Button(
-            head_in, text="⛶ Perbesar", command=self._maximize,
+            head_in, text="⛶ Layar Penuh", command=self._maximize,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -542,13 +544,24 @@ class InDetailPopup(tk.Toplevel):
             g = df.groupby("SOURCE IN")["Value"].sum()
             totals = {k: float(v) for k, v in g.items()}
         total_in = sum(totals.values())
-        for src, color in _SOURCES:
-            self._chip(chips, f"{src}", totals.get(src, 0.0), color)
-        self._chip(chips, "IN TOTAL", total_in, C_ACCENT_DARK)
+        # v3.9.59 — FIX 2e-01: 8 chip ringkasan dibungkus GRID 4-per-baris
+        # (deterministik 2 baris). Dulu 8× pack side="left" SATU baris →
+        # di popup minsize 700 lebar total chip (~786px+) MELUAP: chip
+        # 'BARANG MASUK' terpotong sebagian & chip 'SELISIH IN' (angka
+        # inti drill-down) SELURUHNYA tak terlihat tanpa indikasi.
+        chip_specs = [(f"{src}", totals.get(src, 0.0), color)
+                      for src, color in _SOURCES]
+        chip_specs.append(("IN TOTAL", total_in, C_ACCENT_DARK))
         if row_summary:
-            self._chip(chips, "Barang Masuk", row_summary.get("bm", 0.0), "#006100")
-            self._chip(chips, "Selisih IN", row_summary.get("selisih", 0.0),
-                       "#dc2626")
+            chip_specs.append(
+                ("Barang Masuk", row_summary.get("bm", 0.0), "#006100"))
+            chip_specs.append(
+                ("Selisih IN", row_summary.get("selisih", 0.0),
+                 "#dc2626"))
+        _last_row = (len(chip_specs) - 1) // 4
+        for _i, (_lab, _val, _col) in enumerate(chip_specs):
+            self._chip(chips, _lab, _val, _col,
+                       row=_i // 4, col=_i % 4, last_row=_last_row)
 
         # --- Tabel dokumen ---
         body = tk.Frame(self, bg=C_BG)
@@ -599,10 +612,14 @@ class InDetailPopup(tk.Toplevel):
         AccentButton(foot, text="Tutup (Esc)", command=self.destroy).pack(
             side="right", padx=(6, 0))
 
-    def _chip(self, parent, label, value, color):
+    def _chip(self, parent, label, value, color, row=0, col=0,
+              last_row=0):
+        """Chip ringkasan — GRID 4-per-baris (v3.9.59 FIX 2e-01; dulu
+        pack side="left" tanpa wrap → terpotong di lebar popup minimum)."""
         box = tk.Frame(parent, bg="#f1f5f9", highlightbackground="#e2e8f0",
                        highlightthickness=1)
-        box.pack(side="left", padx=(0, 8))
+        box.grid(row=row, column=col, padx=(0, 8),
+                 pady=(0, 6 if row < last_row else 0), sticky="w")
         tk.Label(box, text=label.upper(), bg="#f1f5f9", fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(anchor="w", padx=10, pady=(6, 0))
         tk.Label(box, text=_fmt_num(value), bg="#f1f5f9", fg=color,
@@ -740,7 +757,9 @@ class InDetailPopup(tk.Toplevel):
             self.status_var.set(self._base_status)
             self.status_label.configure(fg=C_TEXT_MUTED)
 
-        self._flash_after = self.after(3000, restore)
+        # v3.9.59 — bonus (flag agent B): literal 3000 → FLASH_MS kanon
+        # (widgets) supaya durasi flash seragam antar permukaan.
+        self._flash_after = self.after(FLASH_MS, restore)
 
     def _on_context_menu(self, event):
         tree = event.widget
@@ -1166,7 +1185,7 @@ class InSelisihView(tk.Frame):
                 (self.audit_df is None or self.audit_df.empty):
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙ Pengaturan).")
+                "(cek folder data / RootPath di tab ⚙️ Config).")
 
     # ------------------------------------------------ MODE HITUNG (v3.9.27) --
     def _apply_audit_mode(self):
@@ -1299,10 +1318,20 @@ class InSelisihView(tk.Frame):
              fmt_int_id(k.get('deviasi_qty', 0.0)),
              "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
         ]
-        for label, value, color in chips:
+        # v3.9.59 — FIX 2e-02: 8 kartu KPI dibungkus GRID 4-per-baris
+        # (2 baris deterministik). Dulu 8× pack side="left" SATU baris
+        # (~1014px lebar) → pada WINDOW_MIN app 1020px kartu terakhir
+        # 'SISA GANTUNG (NET)' TERPOTONG +44px tanpa wrap/scroll; font
+        # Windows lebih lebar dari bitmap Xvfb → borderline juga di
+        # jendela default 1280.
+        _last_row = (len(chips) - 1) // 4
+        for _i, (label, value, color) in enumerate(chips):
+            _row, _col = _i // 4, _i % 4
             box = tk.Frame(self.kpi_inner, bg="#f8fafc",
                            highlightbackground="#e2e8f0", highlightthickness=1)
-            box.pack(side="left", padx=(0, 8))
+            box.grid(row=_row, column=_col, padx=(0, 8),
+                     pady=(0, 6 if _row < _last_row else 0),
+                     sticky="w")
             tk.Label(box, text=label, bg="#f8fafc", fg=C_TEXT_MUTED,
                      font=font(8, "bold")).pack(anchor="w", padx=10,
                                                 pady=(6, 0))
@@ -1932,6 +1961,20 @@ class InSelisihView(tk.Frame):
             for ch in row.winfo_children():
                 ch.bind("<Button-1>", lambda e, rs=_resto:
                          self._on_skor_row_click(rs))
+        # v3.9.59 — FIX 2e-06: indikator sisa leaderboard — papan dipotong
+        # di 12 baris (scores[:12]) tapi DULU tanpa jejak apa pun: resto
+        # #13+ (yang juga berselisih) tak terlihat & papan terkesan
+        # lengkap. Baris penutup NON-SKOR (abu-abu, tidak bisa diklik).
+        if len(scores) > 12:
+            more = tk.Frame(zone, bg=C_CARD)
+            more.pack(fill="x", padx=12, pady=(4, 2))
+            tk.Label(
+                more,
+                text=f"+{fmt_int_id(len(scores) - 12)} resto lainnya "
+                     f"(dari {fmt_int_id(len(scores))} resto berskor) — "
+                     "buka filter ⧩ kolom Resto utk daftar lengkap",
+                bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)
+            ).pack(side="left")
         if not getattr(self._expander, "expanded", False):
             # v3.9.55 — saat ⤢ diperbesar (kartu disembunyikan), JANGAN
             # re-pack zona (restore milik TableExpander yang mengelola).
@@ -2010,7 +2053,9 @@ class InSelisihView(tk.Frame):
             win.destroy()
 
         from .widgets import AccentButton
-        AccentButton(btns, text="💾 Export Sekarang", command=_ok).pack(
+        # v3.9.59 — FIX 2f-13: label kanon '💾 Export Excel' (dulu '💾
+        # Export Sekarang' — varian ke-4 label export di 5 permukaan).
+        AccentButton(btns, text="💾 Export Excel", command=_ok).pack(
             side="right")
         GhostButton(btns, text="Tanpa Kolom Audit",
                     command=lambda: (result.update(cols=[]),
@@ -2080,9 +2125,24 @@ class InSelisihView(tk.Frame):
                                          audit_cols=audit_cols)
             if df.empty:
                 return None
-            with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-                write_selisih_sheet(writer, df)
-            return filepath, len(df)
+            # v3.9.59 — FIX 2f-04 (pola app._export_excel 6a-02): export
+            # NON-atomik dulu — exception/styling-gagal DI DALAM blok
+            # `with ExcelWriter` membuat pandas close() MENYIMPAN PAKSA
+            # file PARSIAL ke path tujuan → export lama yang baik di
+            # path sama HILANG. Kini tulis ke tmp → os.replace atomik;
+            # gagal → tmp dihapus, file tujuan tak tersentuh.
+            tmp_path = filepath + ".tmp.xlsx"
+            _ok = False
+            try:
+                with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+                    write_selisih_sheet(writer, df)
+                os.replace(tmp_path, filepath)
+                _ok = True
+                return filepath, len(df)
+            finally:
+                if not _ok:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp_path)
 
         def done(res):
             if res is None:

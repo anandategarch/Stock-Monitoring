@@ -38,6 +38,8 @@ Empat bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
    penomoran JENIS sejak v3.4 = "7.Selisih IN" — rumus disesuaikan,
    5 rumut lain identik karakter-per-karakter.
 """
+import os
+
 import pandas as pd
 from openpyxl.formatting.rule import CellIsRule, FormulaRule, Rule
 from openpyxl.styles import Border, Font, PatternFill, Side
@@ -523,5 +525,25 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
         ws.column_dimensions[get_column_letter(j)].width = 11
     ws.freeze_panes = "B8"
 
-    wb.save(filepath)
+    # v3.9.59 — FIX 2f-04 (audit 2-f): tulis ATOMIK (tmp + os.replace —
+    # pola 6a-02 app._export_excel). wb.save(filepath) dulu menulis
+    # LANGSUNG ke path tujuan → exception di tengah (disk penuh / error
+    # styling) meninggalkan .xlsx PARSIAL yang MENIMPA export LAMA yang
+    # baik di path sama. Kini file tujuan hanya tersentuh os.replace()
+    # atomik SETELAH sukses penuh; kegagalan apa pun (finally) menghapus
+    # tmp (tmp ber-ekstensi .xlsx — ekstensi .tmp polos dihindari demi
+    # konsistensi dgn pola app & file manager preview).
+    tmp_path = str(filepath) + ".tmp.xlsx"
+    _ok = False
+    try:
+        wb.save(tmp_path)
+        os.replace(tmp_path, str(filepath))
+        _ok = True
+    finally:
+        if not _ok:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
     return n_data

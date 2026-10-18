@@ -1,6 +1,17 @@
 """
 laporan_deviasi_view.py — v3.9.3: DAFTAR ANOMALI PEMAKAIAN (COM).
 
+AUDIT 2c (fix 3-c):
+- 2c-08: empty-state parity dgn Pivot/Komparasi — pipeline 0 baris
+  kini tampil EmptyState ber-subtitle panduan (dulu _show_content()
+  TANPA SYARAT → tabel kosong sunyi + kartu filter; user ragu tab
+  rusak atau memang tanpa data). Data ADA tapi 0 baris anomali →
+  EmptyState ber-subtitle status payload (BERMAKNA — bukan error).
+- 2c-01: pesan 0-baris menunjuk tab '⚙️ Config' (dulu '⚙ Pengaturan'
+  — tab itu tidak ada di app).
+- 2c-06: hint footer abu 'Dobel-klik baris = detail · ✓ = pantau
+  barang'.
+
 v3.9.21 (user: "nilai minus juga diberi warna merah pada cell aja di tab
 laporan deviasi"): minus merah PER CELL kini mencakup SEMUA kolom numerik
 (COM · Median · Selisih vs Median — dulu hanya COM).
@@ -261,6 +272,11 @@ class LaporanDeviasiView(tk.Frame):
         self.status_var_label = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var_label, bg=C_CARD,
                  fg=C_HEADER, font=font(8, "bold")).pack(side="right")
+        # 2c-06 (audit 2c) — affordance minimal: hint abu 1 baris di
+        # footer (double-click baris = popup detail; klik sel ✓ =
+        # daftarkan/keluarkan barang dari tab ☑ Follow Up).
+        tk.Label(foot, text="Dobel-klik baris = detail · ✓ = pantau barang",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
 
         # Loading overlay (stacking di atas tree)
         self.overlay = LoadingOverlay(tbody, "Menghitung pemakaian (COM)…")
@@ -434,6 +450,36 @@ class LaporanDeviasiView(tk.Frame):
         self.content.pack_forget()
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
+    def _set_empty_state(self, subtitle: str, with_cta: bool = True):
+        """2c-08/2c-02 (audit 2c) — EmptyState ber-SUBTITLE yang
+        menjelaskan KENAPA kosong (parameter subtitle EmptyState sudah
+        tersedia, belum dipakai):
+        - pipeline 0 baris → panduan RootPath (dgn CTA Jalankan
+          Pipeline — parity Pivot/Komparasi);
+        - data ADA tapi 0 baris anomali → status payload (tanpa CTA —
+          pipeline sudah jalan, tak ada yang perlu dijalankan ulang).
+        Widget dibangun ulang HANYA bila teks/CTA berubah — aman
+        dipanggil dari jalur render (async, berulang)."""
+        key = (subtitle, with_cta)
+        if getattr(self, "_empty_key", None) == key:
+            return
+        self._empty_key = key
+        try:
+            self.empty.destroy()
+        except tk.TclError:
+            pass
+        if with_cta:
+            self.empty = EmptyState(
+                self, icon="📋", title="Belum ada daftar Pemakaian (COM)",
+                subtitle=subtitle,
+                cta_text="🚀 Jalankan Pipeline",
+                on_cta=(lambda: self.go_to_proses()
+                        if self.go_to_proses else None))
+        else:
+            self.empty = EmptyState(
+                self, icon="📋", title="Belum ada daftar Pemakaian (COM)",
+                subtitle=subtitle)
+
     def _show_content(self):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
@@ -488,7 +534,20 @@ class LaporanDeviasiView(tk.Frame):
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
-        self._show_content()
+        # 2c-08 (audit 2c) — parity Pivot/Komparasi: pipeline 0 baris →
+        # EMPTY STATE ber-subtitle panduan (dulu _show_content() TANPA
+        # SYARAT — v3.9.33 hanya memperpanjang footer — → tabel kosong
+        # sunyi + kartu filter; sub-tab kembar 📋 memberi pengalaman
+        # kosong yang berbeda). Footer status tetap diset (kontrak teks
+        # lama 'Belum ada data' + 'Jalankan pipeline' dipertahankan).
+        _data_empty = data is None or len(data) == 0
+        if _data_empty:
+            self._set_empty_state(
+                "0 baris terbaca dari pipeline — cek folder data / "
+                "RootPath di tab ⚙️ Config")
+            self._show_empty()
+        else:
+            self._show_content()
         if preserve:
             # filter header ⧩: _col_sel DIPERTAHANKAN (dibaca lagi oleh
             # _refresh → _prepare_rows) + funnel aktif di-reassert via
@@ -519,11 +578,13 @@ class LaporanDeviasiView(tk.Frame):
         # footer INFORMATIF (teks lama diperpanjang, kata kunci 'Belum
         # ada data' + 'Jalankan pipeline' tetap ada supaya assertion
         # lama tetap lolos).
-        if data is None or len(data) == 0:
+        # 2c-01 (audit 2c) — '⚙ Pengaturan' → '⚙️ Config' (nama tab
+        # asli; tab 'Pengaturan' tidak ada di app).
+        if _data_empty:
             self.status_var_label.set(
                 "Belum ada data. Jalankan pipeline di tab Proses — 0 baris "
                 "terbaca dari pipeline (cek folder data / RootPath di tab "
-                "⚙ Pengaturan).")
+                "⚙️ Config).")
 
     # =========================================================================
     # COMPUTATION — matriks COM (H-independen, cache per data)
@@ -950,6 +1011,19 @@ class LaporanDeviasiView(tk.Frame):
         self._st_minus_cells = payload.get("st_minus_cells", [])
         self._st_above_cells = payload.get("st_above_cells", [])
         self.status_var_label.set(payload["status"])
+        # 2c-08 (audit 2c) — 0 baris anomali (data ADA) → EmptyState
+        # BERMAKNA: subtitle = status payload ('Tidak ada anomali COM
+        # untuk filter aktif' — kosong memang hasil perhitungan, bukan
+        # error/masking; tanpa CTA karena pipeline sudah jalan).
+        # > 0 baris → kembali ke tabel. Toggle dua arah (ganti H /
+        # filter bisa berubah bolak-balik).
+        if payload.get("items"):
+            self._show_content()
+        else:
+            self._set_empty_state(
+                "Tidak ada anomali COM untuk filter aktif — "
+                f"{payload['status']}", with_cta=False)
+            self._show_empty()
 
         def render_done():
             # v3.9.2: tag PER-CELL setelah semua item ter-insert

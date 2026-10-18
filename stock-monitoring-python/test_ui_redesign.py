@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.58", APP_VERSION == "3.9.58",
+    check("Versi = 3.9.59", APP_VERSION == "3.9.59",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -873,9 +873,10 @@ def main():
     check("(v3.9.8) Toolbar tanpa tombol Bantuan",
           not any("Bantuan" in t for t in _shell_txt + _tb_btns),
           f"found {[t for t in _shell_txt + _tb_btns if 'Bantuan' in t]}")
-    check("(v3.9.8 → v3.9.37) Toolbar: 💾 Export Excel + 🔄 Refresh "
-          "Sumber (v3.9.37 — tanpa Bantuan)",
-          _tb_btns == ["🔄 Refresh Sumber", "💾 Export Excel"],
+    check("(v3.9.8 → v3.9.37) Toolbar: 💾 Export Excel + ↻ Refresh "
+          "Sumber (v3.9.37 — tanpa Bantuan; v3.9.59 FIX 2a-09/2f-13: "
+          "glyph kanonik ↻)",
+          _tb_btns == ["↻ Refresh Sumber", "💾 Export Excel"],
           f"got {_tb_btns}")
 
     def _view_static_labels(view):
@@ -886,7 +887,13 @@ def main():
                                       "Hitung Manual", "Turun Drastis",
                                       "ACR to BOM", "negatif (merah)",
                                       "IN", "BARANG MASUK",
-                                      "Selisih ≠ 0", "tgl • = bulan lalu")):
+                                      "Selisih ≠ 0", "tgl • = bulan lalu",
+                                      # fix 3-c 2c-06 (audit 2c): hint
+                                      # footer affordance 1 baris abu
+                                      # ('Dobel-klik baris = detail…') —
+                                      # dikecualikan TERBATAS (bukan
+                                      # teks instruksi massal v3.9.8).
+                                      "Dobel-klik")):
                 continue  # legenda (decode data — dipertahankan)
             out.append(lbl)
         return out
@@ -900,7 +907,8 @@ def main():
                        ("Follow Up", app.followup_view),
                        ("Rincian PO", app.rincian_view)):
         _txt = _view_static_labels(view)
-        check(f"(v3.9.8) {name}: tanpa hint 'klik'/'double-click'/corong",
+        check(f"(v3.9.8) {name}: tanpa hint 'klik'/'double-click'/corong "
+              "(hint footer 'Dobel-klik' fix 2c-06 dikecualikan)",
               not any(("klik" in t.lower() or "double-click" in t.lower()
                        or "corong" in t.lower() or "⧩" in t and "MINGGU" not in t)
                       for t in _txt),
@@ -6635,9 +6643,13 @@ def main():
         _ask30 = _appmod30.filedialog.asksaveasfilename
         _info30 = _appmod30.messagebox.showinfo
         _err30e = _appmod30.messagebox.showerror
+        # v3.9.59 FIX 2f-09: dialog sukses kini askyesno ('Buka folder?')
+        # — patch supaya jalur headless test tidak membuka dialog MODAL.
+        _yes30 = _appmod30.messagebox.askyesno
         _appmod30.filedialog.asksaveasfilename = lambda **kw: _out30e
         _appmod30.messagebox.showinfo = lambda *a, **k: None
         _appmod30.messagebox.showerror = lambda *a, **k: None
+        _appmod30.messagebox.askyesno = lambda *a, **k: False
         try:
             app._export_excel()
             _t030e = time.time()
@@ -6647,6 +6659,7 @@ def main():
             _pump30(0.1)
         finally:
             _appmod30.filedialog.asksaveasfilename = _ask30
+            _appmod30.messagebox.askyesno = _yes30
             _appmod30.messagebox.showinfo = _info30
             _appmod30.messagebox.showerror = _err30e
         return _out30e
@@ -10703,12 +10716,19 @@ def main():
     _dlg49b = _RSD49(root, _Cfg49, last_run_at=time.time() - 3600,
                      on_refresh=_got49.append)
     root.update()
-    check("(v3.9.37) File BERUBAH sejak proses terakhir tercentang "
-          "default (kolom Diubah '● berubah')",
+    # v3.9.59 — FIX 2f-05 (update kontrak): kolom Diubah file berubah kini
+    # '● berubah dd-mm-yyyy hh:mm' (mtime IKUT tampil — dulu hanya badge
+    # tanpa waktu; mtime justru hanya utk file tak berubah — terbalik).
+    check("(v3.9.37→v3.9.59) File BERUBAH sejak proses terakhir tercentang "
+          "default; kolom Diubah = '● berubah' + mtime (FIX 2f-05)",
           len(_dlg49b._checked) == 2 and
-          all(_dlg49b.tree.set(i, "diubah") == "● berubah"
+          all(str(_dlg49b.tree.set(i, "diubah")).startswith("● berubah ")
+              and ":" in str(_dlg49b.tree.set(i, "diubah"))
+              and str(_dlg49b.tree.set(i, "diubah")).count("-") == 2
               for i in _dlg49b.tree.get_children("")),
-          f"checked={len(_dlg49b._checked)}")
+          f"checked={len(_dlg49b._checked)} "
+          f"diubah={[str(_dlg49b.tree.set(i, 'diubah'))
+                    for i in _dlg49b.tree.get_children('')]}")
     # pilih selektif → callback path list; Refresh Semua → callback None
     _dlg49b._check_all(False)
     _first49 = _dlg49b.tree.get_children("")[0]
@@ -11623,9 +11643,10 @@ def main():
                 _btn_txt53.append(_txt53)
             _collect53(c)
     _collect53(_win53)
-    check("(v3.9.41) popup rincian: tombol ⛶ Perbesar + ↺ Muat Lebar "
-          "tersedia (pola popup v3.9.32)",
-          any("Perbesar" in t for t in _btn_txt53)
+    check("(v3.9.41→v3.9.59) popup rincian: tombol ⛶ Layar Penuh (kanon "
+          "2e-07 — dulu '⛶ Perbesar') + ↺ Muat Lebar tersedia (pola "
+          "popup v3.9.32)",
+          any("Layar Penuh" in t for t in _btn_txt53)
           and any("Muat Lebar" in t for t in _btn_txt53),
           f"got {_btn_txt53}")
     # resize jendela → kolom re-scale (binding <Configure>)
@@ -12558,12 +12579,13 @@ def main():
             time.sleep(0.01)
     finally:
         app.pivot_view.load_data = _orig_load57
-    check("(v3.9.46) 1 view gagal → status 'SELESAI PARSIAL — view gagal "
-          "dimuat' (bukan hijau polos)",
+    check("(v3.9.46) 1 view gagal → status 'SELESAI PARSIAL — tampilan "
+          "gagal dimuat' (bukan hijau polos; v3.9.59 FIX 2a-09: istilah "
+          "'view' → 'tampilan' di teks user)",
           "SELESAI PARSIAL" in app.statusbar.dot._var.get()
-          and "view gagal dimuat" in app.statusbar.dot._var.get()
+          and "tampilan gagal dimuat" in app.statusbar.dot._var.get()
           and app.status_var.get() ==
-          "Status: SELESAI PARSIAL — sebagian view gagal dimuat.",
+          "Status: SELESAI PARSIAL — sebagian tampilan gagal dimuat.",
           f"bar={app.statusbar.dot._var.get()!r} "
           f"var={app.status_var.get()!r}")
     check("(v3.9.46) view gagal DITANDAI: status_var pivot menyebut "
@@ -15447,12 +15469,19 @@ def main():
     _orig_info68 = _appmod68.messagebox.showinfo
     _orig_warn68 = _appmod68.messagebox.showwarning
     _orig_ask68 = _appmod68.filedialog.asksaveasfilename
+    # v3.9.59 FIX 2f-09: dialog sukses export kini askyesno ('Buka
+    # folder?') — patch (False) supaya jalur headless test tidak membuka
+    # dialog MODAL dan tidak mencoba membuka file manager.
+    _orig_yes68 = _appmod68.messagebox.askyesno
     _appmod68.messagebox.showerror = \
         lambda *a, **k: (_dlg68["err"].append(a), "error")[1]
     _appmod68.messagebox.showinfo = \
         lambda *a, **k: (_dlg68["info"].append(a), "ok")[1]
     _appmod68.messagebox.showwarning = \
         lambda *a, **k: (_dlg68["warn"].append(a), "ok")[1]
+    _appmod68.messagebox.askyesno = \
+        lambda *a, **k: (_dlg68.setdefault("yes", []).append(a),
+                        False)[1]
 
     def _pump68(n=30, dt=0.02):
         for _ in range(n):
@@ -15804,6 +15833,7 @@ def main():
         _appmod68.messagebox.showerror = _orig_err68
         _appmod68.messagebox.showinfo = _orig_info68
         _appmod68.messagebox.showwarning = _orig_warn68
+        _appmod68.messagebox.askyesno = _orig_yes68
         _appmod68.filedialog.asksaveasfilename = _orig_ask68
         shutil.rmtree(_tmp68, ignore_errors=True)
 
@@ -17353,6 +17383,386 @@ def main():
           _x68p != _y68p
           and _y68p == _ref_com68(_pdf68q, "AYAM FILET", "MLGPAR"),
           f"changed={_x68p != _y68p}")
+
+    # ==================================================================
+    # §69 — (v3.9.59) REGRESI FIX UI/UX AUDIT 2-x (task 2-a..2-f → fix
+    # agent 3-a..3-f): port probe terverifikasi ke suite (pola §68).
+    # ==================================================================
+    print("\n== 69. (v3.9.59) REGRESI FIX UI/UX AUDIT 2-x (statusbar/zoom/"
+          "KpiRow/HeaderFilter/flash/band/followup-fmt/copy/config/"
+          "pivot-swap/nominal-Rp/export-atomik/pandas-pin) ==")
+
+    import src.ui.followup as _fumod69
+    import src.ui.nominal_resto_view as _nrv69
+    import src.ui.pivot_view as _pvmod69
+    from src.ui import theme as _thememod69
+    from src.ui.followup import FollowUpStore as _FUS69
+    from src.ui.followup_view import FollowUpView as _FUV69
+    from src.ui.theme import (
+        rescale_named_fonts as _rsf69,
+        set_ui_scale as _sus69,
+    )
+    from src.ui.widgets import (
+        FLASH_MS as _FLASH69,
+        GhostButton as _GB69,
+        HeaderFilter as _HF69,
+        KpiCard as _KPC69,
+        KpiRow as _KPR69,
+        StatusBar as _SB69,
+        Toolbar as _TB69,
+    )
+
+    _win69 = tk.Toplevel(root)
+    _win69.geometry("1020x650+60+60")
+
+    # --- 69.A StatusBar ellipsis (fix 2a-02) ---------------------------
+    _sb69 = _SB69(_win69)
+    _sb69.pack(side="bottom", fill="x")
+    _sb69.set_right("v3.9.59 · Zoom 100% (CTRL+roda)")
+    _win69.update()
+    _LONG69 = ("SELESAI PARSIAL — 9 tampilan gagal dimuat (Pivot, Deviasi "
+               "GR, Deviasi PCS, Rekap Selisih IN, Anomali COM, Komparasi, "
+               "Nominal, Nominal Deviasi, Rincian PO) — lihat log; "
+               "tampilan itu masih menampilkan data LAMA") * 2
+    _sb69.set_status(_LONG69, "#b45309")
+    for _ in range(4):
+        _win69.update()
+    _r69 = _sb69._right_lbl
+    _badge_intact69 = (_r69.winfo_x() + _r69.winfo_width()
+                       <= _sb69.winfo_width() + 1)
+    _shown69 = _sb69.dot._var.get()
+    check("(2a-02) statusbar pesan panjang → dipotong '…' + badge kanan "
+          "utuh + teks penuh tersimpan",
+          _badge_intact69 and _shown69.endswith("…")
+          and len(_shown69) < len(_LONG69)
+          and _sb69.dot._full == _LONG69,
+          f"shown={len(_shown69)}/{len(_LONG69)} badge={_badge_intact69}")
+    _SHORT69 = "SIAP — menunggu pipeline"
+    _sb69.set_status(_SHORT69, "#16a34a")
+    for _ in range(3):
+        _win69.update()
+    check("(2a-02) statusbar pesan pendek tampil utuh (tanpa '…')",
+          _sb69.dot._var.get() == _SHORT69,
+          repr(_sb69.dot._var.get()))
+
+    # --- 69.B tinggi bar shell ikut zoom (fix 2a-03) -------------------
+    for _k69, _f69 in list(_thememod69._font_cache.items()):
+        if _k69 != "_root":
+            _f69.configure(family="times")
+    _tb69 = _TB69(_win69, "Stock Monitoring", "3.9.59")
+    _tb69.pack(side="top", fill="x")
+    _win69.update()
+    _nc69 = lambda w: w.winfo_height() >= w.winfo_reqheight()
+    _okA69 = (_tb69.winfo_height() == 48 and _sb69.winfo_height() == 34
+              and _nc69(_tb69._title_lbl) and _nc69(_sb69._right_lbl))
+    check("(2a-03) @zoom 100% tinggi bar 48/34 — semua label utuh "
+          "(dulu badge kanan ter-clip 2px)", _okA69,
+          f"tb={_tb69.winfo_height()} sb={_sb69.winfo_height()}")
+    _sus69(2.0)
+    _rsf69()
+    _win69.geometry("1632x900+20+20")
+    _sb69.set_right("v3.9.59 · Zoom 200% (CTRL+roda)")
+    for _ in range(6):
+        _win69.update()
+    _okB69 = (_tb69.winfo_height() == 96 and _sb69.winfo_height() == 68
+              and _nc69(_tb69._title_lbl) and _nc69(_sb69._right_lbl))
+    check("(2a-03) @zoom 200% tinggi bar 96/68 — judul & badge TIDAK "
+          "terpotong (dulu 47/32 & 33/16)", _okB69,
+          f"tb={_tb69.winfo_height()} sb={_sb69.winfo_height()}")
+    _sus69(1.0)
+    _rsf69()
+    _win69.geometry("1020x650+60+60")
+    for _ in range(4):
+        _win69.update()
+
+    # --- 69.C KpiRow seragam (fix 2a-08/2b-08) -------------------------
+    _row69 = _KPR69(_win69)
+    _row69.pack(fill="x")
+    _cards69 = [
+        _KPC69(_row69, "Append1", "1.234", "baris"),
+        _KPC69(_row69, "Rincian PO", "1.250.000", "baris"),
+        _KPC69(_row69, "Dev Murni", "12", "baris"),
+        _KPC69(_row69, "Durasi", "5,2", "detik berjalan"),
+    ]
+    for _c69 in _cards69:
+        _row69.add(_c69)
+    for _ in range(4):
+        _win69.update()
+    _w69 = [c.winfo_width() for c in _cards69]
+    _le69 = _cards69[0].winfo_x()
+    _re69 = _cards69[-1].winfo_x() + _cards69[-1].winfo_width()
+    check("(2a-08/2b-08) KpiRow 4 kartu lebar SAMA ±2px + tepi luar "
+          "simetris (dulu ±20px & kiri 0/kanan 8)",
+          max(_w69) - min(_w69) <= 2 and _le69 == _row69.winfo_width() - _re69,
+          f"w={_w69} l={_le69} r-gap={_row69.winfo_width() - _re69}")
+
+    # --- 69.D GhostButton cursor hand2 (fix 2a-07) ---------------------
+    _gb69 = _GB69(_win69, "Sekunder", command=lambda: None)
+    _gb69.pack()
+    _win69.update()
+    check("(2a-07/2b-10) GhostButton cursor='hand2' (affordance klik "
+          "konsisten dgn Accent/Danger/Toolbar)",
+          str(_gb69.cget("cursor") or _gb69.configure("cursor")[-1] or "")
+          .endswith("hand2")
+          or str(_gb69.cget("cursor")) == "hand2"
+          or "hand2" in str(_gb69.configure("cursor")),
+          str(_gb69.cget("cursor")))
+
+    # --- 69.E HeaderFilter preview = predikat Enter (fix 2b-02) --------
+    _tv69 = ttk.Treeview(_win69, columns=["x"], show="headings")
+    _tv69.heading("x", text="X")
+    _tv69.pack(fill="both", expand=True)
+    _VALS69 = ["uang 100", "100 rupiah", "100", "seratus", "uang 200"]
+    _applied69 = []
+    _hf69 = _HF69(_tv69, "x", get_values=lambda: list(_VALS69),
+                  on_apply=lambda sel: _applied69.append(sel), label="X")
+    _hf69.open_popup()
+    _win69.update()
+    _vis69 = lambda: sorted(
+        v for v, cb in _hf69._checks.items()
+        if cb.winfo_manager() == "pack")
+    _hf69._op_var.set("Diawali")
+    _hf69._search_var.set("100")
+    _hf69._filter_list()
+    _win69.update()
+    _v1_69 = _vis69()
+    check("(2b-02) preview live-search mengikuti operator: 'Diawali'+'100' "
+          "→ HANYA nilai berawalan '100' (dulu 'uang 100' ikut tampil)",
+          _v1_69 == ["100", "100 rupiah"],
+          str(_v1_69))
+    _hf69._on_search_enter()
+    _win69.update()
+    _sel69 = _hf69.selected if _hf69.selected is not None else set(_VALS69)
+    check("(2b-02) Enter → seleksi PERSIS preview (kontrak §94 tetap)",
+          set(_sel69) == set(_v1_69), str(sorted(_sel69)))
+    _hf69._search_var.set("zzz")
+    _hf69._filter_list()
+    _win69.update()
+    _hf69._on_search_enter()
+    _win69.update()
+    check("(2b-02) 'zzz' → 0 nilai preview & Enter = 0 baris (kontrak "
+          "§94 lama TIDAK berubah)",
+          _vis69() == [] and _hf69.selected == set(),
+          f"vis={_vis69()} sel={_hf69.selected}")
+    _hf69._close()
+    _win69.update()
+
+    # --- 69.F konstanta flash bersama (fix 2b-07) ----------------------
+    _src69 = Path(__file__).parent
+    _uses69 = all(
+        "FLASH_MS" in (_src69 / f).read_text(encoding="utf-8")
+        for f in ("src/ui/details_popup.py", "src/ui/deviasi_popup.py",
+                  "src/ui/in_selisih_view.py"))
+    check("(2b-07) FLASH_MS tunggal (2500ms) + dipakai 3 permukaan flash "
+          "(dulu 3000 vs 2500 literal)",
+          _FLASH69 == 2500 and _uses69,
+          f"FLASH_MS={_FLASH69} uses={_uses69}")
+
+    # --- 69.G band grup kontras (fix 2d-02) ----------------------------
+    _dvsrc69 = (_src69 / "src/ui/deviasi_view.py").read_text(
+        encoding="utf-8")
+    _band69 = "#9aa7b9" in _dvsrc69
+
+    def _lum69(hexc):
+        hexc = hexc.lstrip("#")
+        _r69, _g69, _b69 = (int(hexc[i:i + 2], 16) / 255
+                            for i in (0, 2, 4))
+
+        def _lin69(c):
+            return (c / 12.92 if c <= 0.03928
+                    else ((c + 0.055) / 1.055) ** 2.4)
+
+        return (0.2126 * _lin69(_r69) + 0.7152 * _lin69(_g69)
+                + 0.0722 * _lin69(_b69))
+
+    _la69, _lb69 = _lum69("#9aa7b9"), _lum69("#ffffff")
+    _ratio69 = (max(_la69, _lb69) + 0.05) / (min(_la69, _lb69) + 0.05)
+    check("(2d-02) band grup alternat #9aa7b9 vs putih ≥2.4:1 — sekat "
+          "kelompok terlihat (dulu #f1f5f9 = 1.096:1)",
+          _band69 and _ratio69 >= 2.4,
+          f"ratio={_ratio69:.3f} band_in_src={_band69}")
+
+    # --- 69.H format angka Follow Up Indonesia (fix 2e-04/2f-14) -------
+    _cases_num69 = [(1234.5, "1.234,5"), (-1234.0, "(1.234)"),
+                    (1234.0, "1.234"), (float("nan"), "-"), (0, "-"),
+                    (None, "-"), ("", "-")]
+    check("(2e-04/2f-14) FollowUpView._fu_num format Indonesia: "
+          "1.234,5 · (1.234) · '-' (dulu EN '1,234.5'/'-1,234')",
+          all(_FUV69._fu_num(v) == e for v, e in _cases_num69),
+          str([(_FUV69._fu_num(v), e) for v, e in _cases_num69]))
+    _cases_pct69 = [(1.0053, "1,01"), (-0.0524, "(0,05)"),
+                    (0.25, "0,25"), (float("nan"), "-")]
+    check("(2e-04/2f-14) _fu_pct koma-desimal + kurung negatif",
+          all(_FUV69._fu_pct(v) == e for v, e in _cases_pct69),
+          str([(_FUV69._fu_pct(v), e) for v, e in _cases_pct69]))
+
+    # --- 69.I rujukan tab hantu 'Pengaturan' hilang (2a-04/2c-01/2f-02)
+    _phantom69 = []
+    for _f69 in (_src69 / "src").rglob("*.py"):
+        for _ln69 in _f69.read_text(encoding="utf-8").splitlines():
+            if _ln69.lstrip().startswith("#"):
+                continue
+            if "Pengaturan" in _ln69 and "dulu" not in _ln69:
+                _phantom69.append(f"{_f69.name}: {_ln69.strip()[:60]}")
+    check("(2a-04/2c-01/2f-02) 0 rujukan user-facing ke tab hantu "
+          "'⚙ Pengaturan' (semua kini '⚙️ Config' — tab yang benar-benar "
+          "ada)", not _phantom69, str(_phantom69[:3]))
+
+    # --- 69.J pesan config jujur (fix 2f-02/2f-03) ---------------------
+    _cfgsrc69 = (_src69 / "src/config.py").read_text(encoding="utf-8")
+    _cfg_live69 = [l for l in _cfgsrc69.splitlines()
+                   if not l.lstrip().startswith("#")]
+    check("(2f-02) pesan error config merujuk '⚙️ Config' (bukan "
+          "'Pengaturan')",
+          any("⚙️ Config" in l for l in _cfg_live69)
+          and not any("Pengaturan" in l for l in _cfg_live69
+                      if "dulu" not in l), "")
+    check("(2f-03) klaim regenerasi palsu dihapus — pesan kini 'JANGAN "
+          "hapus config.json' (tidak ada kode regenerasi)",
+          any("JANGAN hapus" in l for l in _cfg_live69)
+          and not any("regenerasi" in l for l in _cfg_live69
+                      if "JANGAN" not in l and "dulu" not in l), "")
+
+    # --- 69.K pandas pin + copy=True (fix P0 v3.9.59) ------------------
+    _req69 = (_src69 / "requirements.txt").read_text(encoding="utf-8")
+    _fasrc69 = (_src69 / "src/pipeline/fn_audit.py").read_text(
+        encoding="utf-8")
+    check("(P0) requirements.txt pin pandas<3 (pandas 3 CoW: to_numpy "
+          "read-only + semantik astype/parser — fresh install kini aman)",
+          "pandas>=2.0.0,<3" in _req69, "")
+    check("(P0) fn_audit qty to_numpy(copy=True) — writable di pandas 2 "
+          "DAN 3 (dulu ValueError 'assignment destination is read-only')",
+          'to_numpy(dtype="float64", copy=True)' in _fasrc69, "")
+
+    # --- 69.L pivot rentang terbalik: sinkron + warning (fix 2c-04) ----
+    _rows69 = [{"Nama Barang": "BRG A", "JENIS": "1.SO",
+                "NAMA RESTO": "MLGPAR", "Tanggal": t, "NILAI": 4.0,
+                "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                "KATEGORI": "Deviasi", "SOURCE KIRIMAN": "G1"}
+               for t in (1, 2, 3, 5)]
+    _pv69 = _pvmod69.PivotTableView(_win69, data=pd.DataFrame(_rows69))
+    _pv69.pack(fill="both", expand=True)
+    _win69.update()
+    _warns69 = []
+    _ow69 = _pvmod69.messagebox.showwarning
+    _pvmod69.messagebox.showwarning = \
+        lambda *a, **k: (_warns69.append(str(a)), None)[1]
+    _pv69.tgl_start_var.set("20")
+    _pv69.tgl_end_var.set("5")
+    _st69 = _pv69._filter_state()
+    check("(2c-04) rentang terbalik 20–5 → swap + entry DISINKRONKAN + "
+          "warning 'Rentang dibalik otomatis' (dulu senyap)",
+          _st69["tgl_start"] == 5 and _st69["tgl_end"] == 20
+          and _pv69.tgl_start_var.get() == "5"
+          and _pv69.tgl_end_var.get() == "20"
+          and len(_warns69) == 1
+          and "Rentang dibalik" in _warns69[0],
+          f"st={_st69['tgl_start']}..{_st69['tgl_end']} "
+          f"warns={len(_warns69)}")
+    _warns69.clear()
+    _pv69.tgl_start_var.set("2")
+    _pv69.tgl_end_var.set("5")
+    _st2_69 = _pv69._filter_state()
+    check("(2c-04) rentang normal 2–5 → tanpa warning, filter benar "
+          "(regresi jalur lama)",
+          _st2_69["tgl_start"] == 2 and _st2_69["tgl_end"] == 5
+          and not _warns69, "")
+    _pvmod69.messagebox.showwarning = _ow69
+    _pv69.destroy()
+
+    # --- 69.M nominal ⧉ nilai 'Rp …' + filter clone (fix 2f-01 HIGH) ---
+    _nrows69 = []
+    for _resto69 in ("MLGPAR", "BDGUKU"):
+        for _i69 in range(2):
+            _nrows69.append({
+                "Nama Barang": f"B{_i69}", "NAMA RESTO": _resto69,
+                "SATUAN": "GR", "JENIS": "3.DEVIASI", "Tanggal": 25,
+                "NILAI": -5.0 if _i69 else 5.0, "KATEGORI": "DEVIASI",
+            })
+    _nrv69 = _nrv69.NominalRestoView(
+        _win69, go_to_proses=None, h_state=None,
+        lalu_provider=lambda: None)
+    _nrv69.pack(fill="both", expand=True)
+    _win69.update()
+    _nrv69.load_data(pd.DataFrame(_nrows69),
+                     harga_map={"B0": (500.0, "GR"), "B1": (365.0, "GR")})
+    _t0_69 = time.time()
+    while getattr(_nrv69, "_busy", False) and time.time() - _t0_69 < 15:
+        _win69.update()
+        time.sleep(0.01)
+    _win69.update()
+    _vals69 = _nrv69._col_values("Nominal Deviasi")
+    _cells69 = [str(_nrv69.tree.set(k, "Nominal Deviasi"))
+                for k in _nrv69.tree.get_children("")
+                if k != "row_total"]
+    check("(2f-01) daftar nilai ⧩ kolom nominal = format 'Rp …' IDENTIK "
+          "sel tabel (dulu '1.825' vs sel 'Rp 1.825' → filter clone "
+          "0 baris)",
+          bool(_vals69) and set(_vals69) <= set(_cells69)
+          and all(v.startswith("Rp") for v in _vals69 if v not in
+                  ("", "(Kosong)", "-")),
+          f"vals={_vals69} cells={_cells69}")
+    _rp69 = next((v for v in _vals69 if v.startswith("Rp")), None)
+    if _rp69:
+        from src.ui.widgets import apply_tree_row_filters as _atrf69
+        _atrf69(_nrv69.tree, {"Nominal Deviasi": {_rp69}})
+        _win69.update()
+        time.sleep(0.3)
+        _win69.update()
+        _n_after69 = len([k for k in _nrv69.tree.get_children("")
+                          if k != "row_total"
+                          and _nrv69.tree.item(k, "values")])
+        check("(2f-01) filter clone ⛶ nilai 'Rp …' → baris TETAP tampil "
+              "≥1 (dulu 0)",
+              _n_after69 >= 1, f"rows={_n_after69}")
+    else:
+        check("(2f-01) filter clone ⛶ nilai 'Rp …' → baris TETAP tampil "
+              "≥1 (dulu 0)", False, f"no Rp value in {_vals69}")
+    _nrv69.destroy()
+
+    # --- 69.N export follow-up ATOMIK (fix 2f-04) ----------------------
+    _tmp69d = tempfile.mkdtemp(prefix="v3959_s69_")
+    _orig_fp69, _orig_rp69 = _fumod69.followup_path, _fumod69.resolved_path
+    _fumod69.followup_path = lambda: Path(_tmp69d) / "followup.json"
+    _fumod69.resolved_path = lambda: Path(_tmp69d) / "resolved.json"
+    try:
+        _store69 = _FUS69()
+        _snap69 = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                   "barang": "BRG BESAR", "satuan": "GR",
+                   "aktif": "AKTIF", "h": 25, "so": 1234.5,
+                   "sistem": 2469.0, "deviasi": -1234.5, "cek": "OK",
+                   "so_m2": 5.0, "so_m1": 6.0, "so_p1": 7.0,
+                   "so_p2": 8.0, "loss_bom": -1.0053}
+        _store69.toggle("fp1", _snap69)
+        _x69 = Path(_tmp69d) / "export69.xlsx"
+        _store69.export_xlsx(str(_x69))
+        _good69 = _x69.read_bytes()
+        from openpyxl.workbook import Workbook as _WB69
+        _orig_save69 = _WB69.save
+
+        def _boom69(self, path):
+            raise RuntimeError("simulasi gagal mid-write")
+
+        _WB69.save = _boom69
+        _raised69 = False
+        try:
+            _store69.export_xlsx(str(_x69))
+        except RuntimeError:
+            _raised69 = True
+        finally:
+            _WB69.save = _orig_save69
+        _leftover69 = [f for f in os.listdir(_tmp69d) if ".tmp" in f]
+        check("(2f-04) export follow-up ATOMIK: kegagalan mid-write → "
+              "file LAMA byte-identical + tanpa sisa tmp (dulu timpa "
+              "parsial)",
+              _raised69 and _x69.read_bytes() == _good69
+              and not _leftover69,
+              f"raised={_raised69} same={_x69.read_bytes() == _good69} "
+              f"tmp={_leftover69}")
+    finally:
+        _fumod69.followup_path = _orig_fp69
+        _fumod69.resolved_path = _orig_rp69
+        shutil.rmtree(_tmp69d, ignore_errors=True)
 
     # bersihkan state file followup uji
     for _p in (followup_path(), resolved_path()):

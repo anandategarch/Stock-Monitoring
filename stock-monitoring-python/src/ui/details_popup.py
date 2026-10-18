@@ -7,8 +7,10 @@ LaporanDeviasiView. Fitur v3.1:
   double-click cell kolom Nomor / Nomor PO → langsung tersalin ke clipboard
 - Copy semua Nomor / Nomor PO (unik) via menu konteks / tombol footer
 - Filter Nama Barang menempel di header kolom (corong, Excel-like)
-- Tombol ⛶ Perbesar: buka tabel popup dalam window besar
-  (v3.9.32: HANYA jalur non-pivot; popup pivot ±90% layar tanpa tombol)
+- Tombol ⛶ Layar Penuh: buka tabel popup dalam window besar
+  (v3.9.32: HANYA jalur non-pivot; popup pivot ±90% layar tanpa tombol;
+  v3.9.59 fix 2f-13: label kanonik ⛶='Layar Penuh' — dulu '⛶ Perbesar'…
+  glyph clone-fullscreen dipasangkan label in-place)
 - Loading overlay saat render
 """
 
@@ -31,6 +33,7 @@ from .theme import (
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
+    FLASH_MS,  # v3.9.59 — fix 2b-07: durasi flash TERSALIN seragam (2500ms)
     AccentButton,
     ColumnManager,
     GhostButton,
@@ -39,6 +42,7 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
+    copy_cell_region_tsv,  # v3.9.59 — fix 2d-05: Ctrl+C region sel ala Excel
     copy_tree_selection_tsv,  # v3.9.33 — AUDIT FIX 48-c (Ctrl+C multi-baris)
     enable_col_resize,
     enable_multi_select,
@@ -213,9 +217,10 @@ class DetailsPopup(tk.Toplevel):
                      bg=C_HEADER, fg="#94a3b8", font=font(9)).pack(
                 anchor="w", pady=(2, 0))
 
-        # Aksi di kanan band: ⛶ Perbesar (v3.9.32: HANYA jalur non-pivot
+        # Aksi di kanan band: ⛶ Layar Penuh (v3.9.32: HANYA jalur non-pivot
         # — popup pivot sudah ±90% layar, tombol dihapus per permintaan
-        # user) + ◱ Kolom + ↔ Auto-Fit
+        # user; v3.9.59 fix 2f-13: label kanonik ⛶='Layar Penuh') + ◱ Kolom
+        # + ↔ Auto-Fit
         btn_fit = tk.Button(
             head_in, text="↔ Auto-Fit", command=self._auto_fit,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
@@ -234,7 +239,7 @@ class DetailsPopup(tk.Toplevel):
         self._btn_max = None
         if self._show_maximize:
             btn_max = tk.Button(
-                head_in, text="⛶ Perbesar", command=self._maximize,
+                head_in, text="⛶ Layar Penuh", command=self._maximize,
                 bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
                 activeforeground="#ffffff", bd=0, relief="flat",
                 highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -518,7 +523,10 @@ class DetailsPopup(tk.Toplevel):
             self.status_var.set(self._base_status)
             self.status_label.configure(fg=C_TEXT_MUTED)
 
-        self._flash_after = self.after(3000, restore)
+        # v3.9.59 — fix 2b-07 (agent B): 3000 literal → konstanta bersama
+        # FLASH_MS (2500ms — seragam dgn app/widgets; feedback copy kini
+        # sama durasinya di semua permukaan).
+        self._flash_after = self.after(FLASH_MS, restore)
 
     def _on_context_menu(self, event):
         tree = event.widget
@@ -570,7 +578,7 @@ class DetailsPopup(tk.Toplevel):
             command=lambda: self._copy_all_unique("Nomor PO"))
         menu.add_separator()
         if self._show_maximize:   # v3.9.32 — jalur pivot tanpa ⛶
-            menu.add_command(label="⛶ Perbesar tabel",
+            menu.add_command(label="⛶ Layar Penuh",
                              command=self._maximize)
         try:
             menu.tk_popup(event.x_root, event.y_root)
@@ -623,8 +631,24 @@ class DetailsPopup(tk.Toplevel):
         v3.9.33 — AUDIT FIX (48-c LOW): dulu hanya sel[0] padahal tree ini
         multi-select — seleksi >1 baris kini disalin SEMUA sebagai TSV
         (pola shared widgets.copy_tree_selection_tsv: header + satu baris
-        per iid terpilih)."""
+        per iid terpilih).
+        v3.9.59 — AUDIT FIX 2d-05: binding Ctrl+C popup dipasang TANPA
+        add='+' → MENGGANTI binding _copy_rows enable_multi_select (region
+        sel ala Excel diutamakan di sana) — seleksi sel yang DI-HIGHLIGHT
+        diacuhkan, Ctrl+C menyalin Nomor baris saja. Region aktif kini
+        MENANG dulu (persis prioritas widgets._copy_rows), perilaku lama
+        popup (multi-baris TSV / Nomor) tetap utk tanpa region.
+        v3.9.59 — AUDIT FIX 2d-06: label flash sesuai kolom ASAL nilai
+        (dulu klaim 'Nomor' padahal nilai fallback = Nomor PO)."""
         tree = self.tree
+        # 2d-05 — region sel aktif (seleksi sel ala Excel) → copy REGION
+        if getattr(tree, "_cellsel_active", False):
+            n = copy_cell_region_tsv(tree)
+            if n:
+                self._flash_status(
+                    f"📋 {n} baris region TERSALIN (tab-separated) "
+                    f"ke clipboard.")
+                return
         sel = tree.selection()
         if not sel:
             return
@@ -638,11 +662,14 @@ class DetailsPopup(tk.Toplevel):
         if not values:
             return
         row = dict(zip(COL_IDS, values))
+        # 2d-06 — label = kolom asal nilai yang benar-benar disalin
+        label = "Nomor"
         val = str(row.get("Nomor", "") or "")
         if not val:
+            label = "Nomor PO"
             val = str(row.get("Nomor PO", "") or "")
         if val:
-            self._copy_to_clipboard(val, "Nomor")
+            self._copy_to_clipboard(val, label)
 
     # =====================================================================
     # ⛶ PERBESAR
