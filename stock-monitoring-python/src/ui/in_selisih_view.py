@@ -186,6 +186,7 @@ from .widgets import (
     autofit_tree_once,  # v3.9.55 — F8
     enable_col_resize,
     enable_multi_select,
+    enable_smooth_wheel_list,  # v3.9.60 — leaderboard rekap ber-scroll
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -925,7 +926,9 @@ class InSelisihView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # --- Filter card (v3.5: RESTO combo DIHAPUS → header filter ⧩) ---
-        fcard = Card(self.content, title="Filter")
+        # v3.9.60 — padding dipadatkan (bagian penghematan tinggi konten
+        # tab rekap; lihat komentar _render_resto_scores).
+        fcard = Card(self.content, title="Filter", padding=8)
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         fbody = fcard.body()
 
@@ -933,19 +936,20 @@ class InSelisihView(tk.Frame):
         # SegmentBar (bukan tk opsi lain) — pola mode PIVOT PER 🏪/📅;
         # nama atribut sengaja `mode_bar` (BUKAN `mode_seg` — nama lama
         # dihapus v3.6 dan ditegaskan tidak boleh ada lagi oleh test §13).
-        r_mode = tk.Frame(fbody, bg=C_CARD)
-        r_mode.pack(fill="x", pady=(0, 6))
-        tk.Label(r_mode, text="MODE HITUNG", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.mode_bar = SegmentBar(
-            r_mode, ["📅 Bulan Ini", "📆 Lalu + Ini"], bg=C_CARD,
-            command=self._on_mode_change)
-        self.mode_bar.pack(side="left", padx=(6, 12))
-        tk.Label(r_mode, text="(default: bulan ini saja)", bg=C_CARD,
-                 fg=C_TEXT_MUTED, font=font(8)).pack(side="left")
-
+        # v3.9.60 — SATU BARIS kontrol (MODE HITUNG + TANGGAL + opsi):
+        # dulu 2 baris terpisah (~+28px) — bagian penghematan tinggi
+        # konten tab rekap (lihat komentar _render_resto_scores); catatan
+        # '(default: bulan ini saja)' dilepas (segment sudah
+        # meng-ekspresikan mode aktif).
         r0 = tk.Frame(fbody, bg=C_CARD)
         r0.pack(fill="x")
+        tk.Label(r0, text="MODE HITUNG", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self.mode_bar = SegmentBar(
+            r0, ["📅 Bulan Ini", "📆 Lalu + Ini"], bg=C_CARD,
+            command=self._on_mode_change)
+        self.mode_bar.pack(side="left", padx=(6, 14))
+
         tk.Label(r0, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self.tgl_start_var = tk.StringVar(value="1")  # v3.8: 1–31 berjalan saja
@@ -958,7 +962,7 @@ class InSelisihView(tk.Frame):
         entry_end.pack(side="left", padx=(2, 8))
         entry_end.bind("<Return>", lambda e: self._on_tanggal_change())
         GhostButton(r0, text="Apply", command=self._on_tanggal_change).pack(
-            side="left", padx=(0, 18))
+            side="left", padx=(0, 14))
 
         self.only_selisih_var = tk.BooleanVar(value=True)
         chk = ttk.Checkbutton(
@@ -968,7 +972,7 @@ class InSelisihView(tk.Frame):
         chk.pack(side="left")
 
         GhostButton(r0, text="✕ Reset Filter",
-                    command=self._reset_filter).pack(side="left", padx=(18, 0))
+                    command=self._reset_filter).pack(side="right")
 
         # --- KPI chips (mode Audit — mirror "EXECUTIVE RECONCILIATION
         #     SUMMARY" VBA) ---
@@ -976,7 +980,9 @@ class InSelisihView(tk.Frame):
                                  highlightbackground="#e2e8f0",
                                  highlightthickness=1)
         self.kpi_inner = tk.Frame(self.kpi_card, bg=C_CARD)
-        self.kpi_inner.pack(fill="x", padx=12, pady=8)
+        # v3.9.60 — padding kartu KPI dipadatkan (pady 8→4 — bagian
+        # penghematan tinggi konten; lihat komentar _render_kpi_chips).
+        self.kpi_inner.pack(fill="x", padx=12, pady=4)
 
         # v3.9.55 — F3: kartu SKOR RESTO (user: "Di tab rekap selisih IN.
         # Beri Skor per resto dengan selisih terbanyak supaya aku bisa
@@ -1324,20 +1330,25 @@ class InSelisihView(tk.Frame):
         # 'SISA GANTUNG (NET)' TERPOTONG +44px tanpa wrap/scroll; font
         # Windows lebih lebar dari bitmap Xvfb → borderline juga di
         # jendela default 1280.
+        # v3.9.60 — KPI COMPACT (padat vertikal): kartu KPI + papan skor +
+        # kartu filter menghabiskan tinggi konten (probe: tabel rekap sisa
+        # 92px @1500×850, ≈0 @1020×700 minsize — gejala user "tidak bisa
+        # scrol"): pady chip 6→3, nilai font 11→10 — hemat ~30px tanpa
+        # mengubah informasi.
         _last_row = (len(chips) - 1) // 4
         for _i, (label, value, color) in enumerate(chips):
             _row, _col = _i // 4, _i % 4
             box = tk.Frame(self.kpi_inner, bg="#f8fafc",
                            highlightbackground="#e2e8f0", highlightthickness=1)
             box.grid(row=_row, column=_col, padx=(0, 8),
-                     pady=(0, 6 if _row < _last_row else 0),
+                     pady=(0, 3 if _row < _last_row else 0),
                      sticky="w")
             tk.Label(box, text=label, bg="#f8fafc", fg=C_TEXT_MUTED,
                      font=font(8, "bold")).pack(anchor="w", padx=10,
-                                                pady=(6, 0))
+                                                pady=(3, 0))
             tk.Label(box, text=value, bg="#f8fafc", fg=color,
-                     font=font(11, "bold")).pack(anchor="w", padx=10,
-                                                 pady=(0, 6))
+                     font=font(10, "bold")).pack(anchor="w", padx=10,
+                                                 pady=(0, 3))
         self.kpi_card.pack(fill="x", padx=12, pady=(10, 0),
                            before=(self._skor_zone
                                    if self._skor_zone.winfo_ismapped()
@@ -1924,6 +1935,29 @@ class InSelisihView(tk.Frame):
                      font=font(8, "bold"), width=wpx, anchor="w",
                      padx=6).pack(side="left")
 
+        # v3.9.60 — LIST SCROLLABLE BER-CAP (user: "tab rekap selisih in
+        # tidak bisa scrol"): 12 baris leaderboard + kartu KPI + kartu
+        # filter menghabiskan SELURUH tinggi konten di jendela default/
+        # kecil (probe 1500×850: tabel sisa 92px ≈ 3 baris; di 1020×700
+        # minsize tabel ≈ 0 — tak terlihat, terasa "tidak bisa scroll").
+        # Baris kini di CANVAS ber-scroll dengan tinggi DIBATASI
+        # (±5 baris terlihat; sisanya digulir roda/scrollbar tipis) →
+        # ruang vertikal dikembalikan ke TABEL utama (konten tab ini).
+        listwrap = tk.Frame(zone, bg=C_CARD)
+        listwrap.pack(fill="x", padx=12)
+        cv = tk.Canvas(listwrap, bg=C_CARD, highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(listwrap, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv, bg=C_CARD)
+        _winid = cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        inner.bind(
+            "<Configure>",
+            lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind(
+            "<Configure>",
+            lambda e: cv.itemconfigure(_winid, width=cv.winfo_width()))
+
         max_skor = max(r["skor"] for r in scores) or 1
         for i, r in enumerate(scores[:12]):
             bg = self._SKOR_RANK_BG[i] if i < 3 else C_CARD
@@ -1931,10 +1965,10 @@ class InSelisihView(tk.Frame):
             # resto terseleksi ter-highlight saat board utuh.
             is_active = (str(r["resto"]) in active_set)
             bg = "#fef3c7" if is_active else bg
-            row = tk.Frame(zone, bg=bg, cursor="hand2",
+            row = tk.Frame(inner, bg=bg, cursor="hand2",
                            highlightbackground="#e2e8f0",
                            highlightthickness=1 if is_active else 0)
-            row.pack(fill="x", padx=12, pady=(0, 1))
+            row.pack(fill="x", pady=(0, 1))
             _resto = str(r["resto"])
             vals = (
                 f"#{i + 1}  {_resto}",
@@ -1961,6 +1995,24 @@ class InSelisihView(tk.Frame):
             for ch in row.winfo_children():
                 ch.bind("<Button-1>", lambda e, rs=_resto:
                          self._on_skor_row_click(rs))
+        # v3.9.60 — CAP TINGGI + SCROLL RODA daftar leaderboard: ukur
+        # tinggi baris aktual (font Windows lebih tinggi dari Xvfb —
+        # jangan hardcode piksel), tampilkan maks ±5 baris, dan pasang
+        # akumulator roda halus (pola enable_smooth_wheel_list: trackpad
+        # delta kecil + wheel di anak mana pun dari listwrap tetap
+        # menggulir daftar). Scrollbar tipis hanya saat konten meluap.
+        try:
+            zone.update_idletasks()
+            _rows_in = inner.winfo_children()
+            _req_h = inner.winfo_reqheight()
+            _row_h = (_req_h // len(_rows_in)) if _rows_in else 24
+            _cap_h = min(_req_h, max(_row_h * 5 + 2, 1))
+            cv.configure(height=_cap_h)
+            if _req_h > _cap_h + 2:
+                sb.pack(side="right", fill="y")
+            enable_smooth_wheel_list(cv, container=listwrap)
+        except tk.TclError:
+            pass
         # v3.9.59 — FIX 2e-06: indikator sisa leaderboard — papan dipotong
         # di 12 baris (scores[:12]) tapi DULU tanpa jejak apa pun: resto
         # #13+ (yang juga berselisih) tak terlihat & papan terkesan
@@ -1972,7 +2024,8 @@ class InSelisihView(tk.Frame):
                 more,
                 text=f"+{fmt_int_id(len(scores) - 12)} resto lainnya "
                      f"(dari {fmt_int_id(len(scores))} resto berskor) — "
-                     "buka filter ⧩ kolom Resto utk daftar lengkap",
+                     "buka filter ⧩ kolom Resto utk daftar lengkap "
+                     "(gulir papan skor utk peringkat 6-12)",
                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)
             ).pack(side="left")
         if not getattr(self._expander, "expanded", False):

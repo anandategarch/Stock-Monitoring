@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.59", APP_VERSION == "3.9.59",
+    check("Versi = 3.9.60", APP_VERSION == "3.9.60",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -13309,48 +13309,46 @@ def main():
           f"kat={_dv59._kategori_var.get()!r} "
           f"aktif={_dv59._aktif_var.get()!r}")
 
-    # --- (d) SEKAT VISUAL: banding kelompok SERAGAM (merge-vertikal
-    #     native v3.9.55 — grp_head DIHAPUS: seluruh baris kelompok satu
-    #     band putih/slate bergantian; Nama Barang/Rank head-only) -------
+    # --- (d) SEKAT VISUAL: banding kelompok SERAGAM (v3.9.60: nilai
+    #     Nama Barang/Rank PER-BARIS — kontrak baru pasca penghapusan
+    #     sticky merge; band putih/slate tetap bergantian per kelompok) -
     _dv59._kategori_var.set("Semua")
     _dv59._on_kategori_changed()
     wait_view(root, _dv59)
     _kids59 = list(_dv59.tree.get_children(""))
     _seq59 = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
               for k in _kids59]
-    check("(v3.9.55) MERGE-VERTIKAL NATIVE: Nama Barang head-only + "
-          "band kelompok SERAGAM (CABE grp0 3-baris · GULA grp1 · "
-          "PENTOL grp0 — tanpa grp_head; tampak SATU sel tinggi)",
-          _seq59 == [("CABE", "grp0"), ("", "grp0"), ("", "grp0"),
+    check("(v3.9.60) NILAI PER-BARIS + band kelompok SERAGAM: SETIAP "
+          "baris membawa nama kelompoknya (CABE grp0 3-baris · GULA "
+          "grp1 · PENTOL grp0 — user: 'nama barang tidak muncul dan "
+          "hanya muncul sekali di tiap grup nama barangnya' TUNTAS)",
+          _seq59 == [("CABE", "grp0"), ("CABE", "grp0"), ("CABE", "grp0"),
                      ("GULA SATU", "grp1"),
-                     ("PENTOL", "grp0"), ("", "grp0")]
+                     ("PENTOL", "grp0"), ("PENTOL", "grp0")]
           and not hasattr(_dv59, "_rank_overlay")
           and getattr(_dv59.tree, "_rank_merge", None) is None,
           f"got {_seq59}")
-    # sort kolom lain → band + head-only dipasang ulang mengikuti urutan
-    # visual (adjacency dari SNAPSHOT — nilai tree baris lanjutan blank)
+    # sort kolom lain → band dipasang ulang mengikuti urutan visual
+    # (adjacency dari SNAPSHOT; nilai per-baris ikut barisnya)
     _dv59._sort_by("Deviasi", reverse=True)
     root.update()
     _kids59b = list(_dv59.tree.get_children(""))
     _seq59b = [(_dv59.tree.set(k, "Nama Barang"), _grptag59(_dv59, k))
                for k in _kids59b]
     # ADJACENCY dinilai dari snapshot barang per iid: tiap run kontigu =
-    # satu band seragam; band bergantian antar run; nilai head-only.
+    # satu band seragam; band bergantian antar run; nilai per-baris.
     _snap_names59 = [str((_dv59._row_snaps.get(str(k)) or {})
                          .get("barang", "")) for k in _kids59b]
     _ok_sort59 = (len(_seq59b) == 6
                   and all(t in ("grp0", "grp1") for _, t in _seq59b))
     for _i in range(len(_seq59b)):
-        _is_head = (_i == 0) or (_snap_names59[_i] !=
-                                 _snap_names59[_i - 1])
-        _ok_sort59 = _ok_sort59 and (
-            _seq59b[_i][0] == (_snap_names59[_i] if _is_head else ""))
+        _ok_sort59 = _ok_sort59 and (_seq59b[_i][0] == _snap_names59[_i])
         if _i > 0 and _snap_names59[_i] == _snap_names59[_i - 1]:
             _ok_sort59 = _ok_sort59 and (_seq59b[_i][1]
                                          == _seq59b[_i - 1][1])
     check("(v3.9.49) sort kolom lain → band dipasang ulang mengikuti "
-          "urutan visual (adjacency SNAPSHOT — nilai tree kini blank di "
-          "baris lanjutan; tanpa crash)",
+          "urutan visual (adjacency SNAPSHOT; nilai per-baris utuh; "
+          "tanpa crash)",
           _ok_sort59, f"got {_seq59b}")
     # re-apply idempoten: tag + nilai tak berubah pada pemanggilan kedua
     _dv59._reapply_group_merge(_dv59.tree)
@@ -13767,32 +13765,29 @@ def main():
           and _byb61.get("CABE", [None])[0] == "2"
           and _byb61.get("BUMBU", [None])[0] == "3",
           f"got {_byb61}")
-    check("(v3.9.51) Rank merge-vertikal ala Rincian PO: nilai HANYA di "
-          "baris pertama kelompok (baris lanjutan kosong)",
-          all(len([r for r in rs if r]) <= 1
+    # v3.9.60 — kontrak baru: Rank PER-BARIS (konstanta per kelompok,
+    # semua baris kelompok membawa nilai — bukan head-only).
+    check("(v3.9.60) Rank per-baris ala nilai kelompok: SETIAP baris "
+          "membawa rank konstanta kelompoknya (era head-only dihapus "
+          "bersama sticky merge)",
+          all(len(rs) == len([r for r in rs if r]) or len(rs) == 0
               for rs in _byb61.values())
-          and _rk61[1][1] == "2" and _rk61[2][1] == "",
+          and _rk61[1][1] == "2" and _rk61[2][1] == "2",
           f"got {_rk61}")
     _dv61._sort_by("Deviasi", reverse=True, tree=_dv61.tree)
     root.update()
     _rk61b = [(_val61(_k61, "Nama Barang"), _val61(_k61, "Rank"))
               for _k61 in _dv61.tree.get_children("")]
-    _run_ok61 = True
-    _prev61 = None
-    _seen61 = False
+    # v3.9.60 — pasca-sort: nilai rank tetap konsisten dgn kelompok
+    # barisnya (rank mengikuti BARIS, bukan posisi visual).
+    _byb61b = {}
     for _b61, _r61v in _rk61b:
-        if _b61 != _prev61:
-            _prev61, _seen61 = _b61, False
-        if _r61v:
-            if _seen61:
-                _run_ok61 = False
-            _seen61 = True
-    check("(v3.9.51) Sort kolom lain → merge dipasang ulang per URUTAN "
-          "VISUAL (run kontigu = unit merge — filosofi banding v3.9.49)",
-          _run_ok61
-          and all(r in ("", {"PENTOL": "1", "CABE": "2",
-                             "BUMBU": "3"}[b])
-                  for b, r in _rk61b),
+        _byb61b.setdefault(_b61, set()).add(_r61v)
+    check("(v3.9.51) Sort kolom lain → nilai rank tetap KONSISTEN per "
+          "kelompok (rank ikut barisnya — konstanta kelompok)",
+          all(len(s) == 1 and s.pop() in ("1", "2", "3")
+              for s in _byb61b.values())
+          and len(_rk61b) == 5,
           f"got {_rk61b}")
 
     # --- (e) strip header kolom In (kiriman — bukan Stock) --------------
@@ -13974,12 +13969,15 @@ def main():
     _vals62 = [(_dv62.tree.set(k, "Nama Barang"),
                 _dv62.tree.set(k, "Rank"),
                 _grptag59(_dv62, k)) for k in _kids62]
-    check("(v3.9.55) Merge NATIVE kolom Nama Barang + Rank: nilai HANYA "
-          "di head run (lanjutan blank) + band SERAGAM per kelompok "
-          "(BUMBU grp0 · CABE grp1 ×2 · PENTOL grp0 ×2)",
+    # v3.9.60 — kontrak baru: nilai PER-BARIS (setiap baris kelompok
+    # membawa nama+rank konstanta; era head-only/sticky dihapus).
+    check("(v3.9.60) Merge NATIVE → NILAI PER-BARIS: SETIAP baris "
+          "kelompok membawa Nama Barang + Rank + band SERAGAM "
+          "(BUMBU grp0 · CABE grp1 ×2 · PENTOL grp0 ×2 — user: 'nama "
+          "barang tidak muncul, hanya sekali per grup' TUNTAS)",
           _vals62 == [("BUMBU", "3", "grp0"),
-                      ("CABE", "2", "grp1"), ("", "", "grp1"),
-                      ("PENTOL", "1", "grp0"), ("", "", "grp0")],
+                      ("CABE", "2", "grp1"), ("CABE", "2", "grp1"),
+                      ("PENTOL", "1", "grp0"), ("PENTOL", "1", "grp0")],
           f"got {_vals62}")
     _snaps62 = [_dv62._row_snaps.get(str(k), {}) for k in _kids62]
     check("(v3.9.55) Snapshot RAW tetap ber-nama barang & rank utk SETIAP "
@@ -13989,8 +13987,9 @@ def main():
           and _dv62._rank_map.get(str(_kids62[2])) == "2",
           f"names={_names62} rank_map={_dv62._rank_map}")
 
-    # --- (d) reposisi pasca scroll: TANPA overlay → nilai menempel TREE
-    #     (tidak ada label yang harus mengejar scroll — akar glitch) ----
+    # --- (d) reposisi pasca scroll: nilai PER-BARIS menempel BARISNYA
+    #     (scroll tak mengubah nilai mana pun — tak ada display yang
+    #     dipindahkan; akar glitch & 'nama tak muncul' hilang total) ----
     _dv62.tree.yview_scroll(1, "units")
     root.update()
     _dv62.tree.yview_moveto(0)
@@ -13998,12 +13997,13 @@ def main():
     root.update()
     _dv62.tree.xview_moveto(0)
     root.update()
-    check("(v3.9.55) Scroll y/x: nilai merge tetap head-only pasca scroll "
-          "(native — TANPA label overlay yang bisa tertinggal 1 frame)",
+    check("(v3.9.60) Scroll y/x: nilai per-baris TIDAK berubah pasca "
+          "scroll (tak ada state display; nama/rank utuh di baris "
+          "mana pun — 'bug nama barang tidak muncul' tuntas)",
           [_dv62.tree.set(k, "Nama Barang") for k in
            _dv62.tree.get_children("")][:2] == ["BUMBU", "CABE"]
-          and _dv62.tree.set(_kids62[2], "Rank") == "",
-          "nilai merge berubah pasca scroll")
+          and _dv62.tree.set(_kids62[2], "Rank") == "2",
+          "nilai berubah pasca scroll")
 
     # --- (e) sort interleave ↔ kelompok (merge ikut urutan visual) ------
     _dv62._sort_by("Resto", reverse=False, tree=_dv62.tree)
@@ -14021,11 +14021,10 @@ def main():
     _regroup62 = [(_dv62.tree.set(k, "Nama Barang"),
                    _dv62.tree.set(k, "Rank"))
                   for k in _dv62.tree.get_children("")]
-    check("(v3.9.55) Sort balik via value_get Nama Barang (snapshot — "
-          "nilai tree lanjutan blank) → kelompok KONTIGU kembali: merge "
-          "head-only dipasang ulang otomatis",
+    check("(v3.9.60) Sort balik via value_get Nama Barang (snapshot) → "
+          "kelompok KONTIGU kembali: nilai per-baris utuh otomatis",
           _regroup62 == [("BUMBU", "3"), ("CABE", "2"),
-                         ("", ""), ("PENTOL", "1"), ("", "")],
+                         ("CABE", "2"), ("PENTOL", "1"), ("PENTOL", "1")],
           f"got {_regroup62}")
 
     # --- (f) F6: sync overlay scroll — scrollbar wrap + bindtag keyboard --
@@ -14058,13 +14057,13 @@ def main():
     # --- (h) clone ⛶: merge NATIVE ikut ke tree clone --------------------
     _win62, _ct62 = _dv62._maximize()
     _pump62(root, 0.5)
-    check("(v3.9.55) Clone ⛶: merge native + band diterapkan ke tree "
-          "clone (nilai head-only; TANPA overlay terpasang ulang)",
+    check("(v3.9.60) Clone ⛶: nilai per-baris + band diterapkan ke tree "
+          "clone (SEMUA baris bernama/rank; TANPA overlay)",
           [_ct62.set(k, "Nama Barang") for k in
            _ct62.get_children("")][:2] == ["BUMBU", "CABE"]
-          and _ct62.set(list(_ct62.get_children(""))[2], "Rank") == ""
+          and _ct62.set(list(_ct62.get_children(""))[2], "Rank") == "2"
           and getattr(_ct62, "_rank_merge", None) is None,
-          "clone tanpa merge native: "
+          "clone tanpa nilai per-baris: "
           f"{[(_ct62.set(k, 'Nama Barang'), _ct62.set(k, 'Rank')) for k in _ct62.get_children('')]}")
     _win62.destroy()
     root.update()
@@ -14073,11 +14072,11 @@ def main():
     _dv62.tree.update_idletasks()
     app._refit_all_tree_columns()
     root.update()
-    check("(v3.9.55) app._refit_all_tree_columns (jalur zoom) aman TANPA "
-          "overlay rank (nilai merge utuh pasca auto-fit ulang)",
+    check("(v3.9.60) app._refit_all_tree_columns (jalur zoom) aman "
+          "(nilai per-baris utuh pasca auto-fit ulang)",
           _dv62.tree.set(_kids62[1], "Rank") == "2"
-          and _dv62.tree.set(_kids62[2], "Rank") == "",
-          "nilai merge rusak pasca zoom walk")
+          and _dv62.tree.set(_kids62[2], "Rank") == "2",
+          "nilai rusak pasca zoom walk")
 
     _dv62.destroy()
     _top62.destroy()
@@ -14888,12 +14887,21 @@ def main():
     wait_view(root, _iv65)
 
     def _zone_labels65():
+        # v3.9.60 — leaderboard kini di CANVAS ber-scroll: baris ada di
+        # dalam frame inner (anak CANVAS) — walk REKURSIF semua widget
+        # (label dikumpulkan hanya dari frame bermapped).
         out = []
-        for _w in _iv65._skor_zone.winfo_children():
-            if isinstance(_w, tk.Frame) and _w.winfo_ismapped():
-                out.append([str(l.cget("text"))
-                            for l in _w.winfo_children()
-                            if isinstance(l, tk.Label)])
+
+        def _walk(w):
+            for ch in w.winfo_children():
+                if isinstance(ch, tk.Frame) and ch.winfo_ismapped():
+                    labels = [str(l.cget("text"))
+                              for l in ch.winfo_children()
+                              if isinstance(l, tk.Label)]
+                    if labels:
+                        out.append(labels)
+                _walk(ch)
+        _walk(_iv65._skor_zone)
         return out
 
     _zrows65 = _zone_labels65()
@@ -15024,13 +15032,17 @@ def main():
     _sh65.rmtree(_tmpdir65, ignore_errors=True)
 
     # ==================================================================
-    # §66 — v3.9.56 STICKY MERGE-VERTIKAL + FILTER CLONE MERGE-AWARE
-    # (user: "bug nama barang tidak muncul di tab deviasi gr dan pcs")
+    # §66 — v3.9.60 NILAI NAMA BARANG PER-BARIS (user: "nama barang
+    # tidak muncul dan hanya muncul sekali di tiap grup nama barangnya?
+    # kenapa") — era sticky merge v3.9.56-59 DIHAPUS
     # ==================================================================
-    # akar: nilai nama/rank HANYA di baris head (v3.9.55 native merge) →
-    # saat scroll melewati head, viewport penuh baris BLANK (kelompok
-    # puluhan baris). FIX: baris display per kelompok = head bila
-    # terlihat, selain itu BARIS PERTAMA kelompok yang TERLIHAT (sticky).
+    # akar era lama: nilai nama/rank HANYA di baris head (merge-vertikal
+    # v3.9.55) + baris display DIPINDAHKAN mengikuti viewport saat scroll
+    # (sticky v3.9.56-59). Pemindahan state itulah yang berulang bocor di
+    # pemakaian nyata. FIX RADIKAL: SETIAP baris membawa nilai (payload
+    # per-baris, konstanta per kelompok) — tak ada state display sama
+    # sekali; nama/rank tak mungkin tak muncul di scroll/sort/clone mana
+    # pun. Band + filter clone merge-aware tetap.
     _src66 = []
     for _b66 in ("STICKY A", "STICKY B", "STICKY C"):
         for _r66 in [f"R{i:02d}" for i in range(1, 25)]:
@@ -15063,84 +15075,74 @@ def main():
     root.update()
     _t66 = _dv66.tree
     _kids66 = list(_t66.get_children(""))
-    check("(v3.9.56) §66 fixture: 72 baris 3 kelompok × 24 baris",
-          len(_kids66) == 72 and len(getattr(_t66, "_grp_runs", [])) == 3,
-          f"rows={len(_kids66)} runs={len(getattr(_t66, '_grp_runs', []))}")
-    _named66 = lambda: [k for k in _t66.get_children("")
-                        if str(_t66.set(k, "Nama Barang")).strip()]
-    # (1) render awal (viewport top) → nilai di HEAD tiap kelompok
-    check("(v3.9.56) sticky: viewport TOP → nilai di HEAD tiap kelompok "
-          "(3 named, head run berurutan)",
-          len(_named66()) == 3
-          and _named66() == [_kids66[0], _kids66[24], _kids66[48]],
-          f"got {_named66()}")
-    # (2) scroll tengah → head grup B & C di luar viewport → nilai
-    # pindah ke baris PERTAMA TERLIHAT tiap kelompok (hook yscrollcommand)
-    _t66.yview_moveto(0.5)
-    for _ in range(40):
-        root.update()
-    _vis66 = [k for k in _t66.get_children("")
-              if _t66.bbox(k) and 0 <= _t66.bbox(k)[1] < _t66.winfo_height()]
-    _vis_named66 = [k for k in _vis66
-                    if str(_t66.set(k, "Nama Barang")).strip()]
-    check("(v3.9.56) sticky: scroll MID → SETIAP kelompok terlihat "
-          "menampilkan NAMA (bug 'nama barang tidak muncul' tuntas)",
-          len(_vis_named66) >= 2
-          and all(str(_t66.set(k, "Nama Barang")).strip()
-                  for k in _vis_named66),
-          f"vis={len(_vis66)} named={len(_vis_named66)}")
-    # display = baris PERTAMA TERLIHAT kelompoknya: baris terlihat
-    # SEBELUM baris display wajib kelompok LAIN (baris sebelumnya
-    # kelompok sama tak terlihat = sudah discroll lewat).
+    check("(v3.9.60) §66 fixture: 72 baris 3 kelompok × 24 baris "
+          "(state sticky _grp_runs/_grp_disp DIHAPUS)",
+          len(_kids66) == 72
+          and getattr(_t66, "_grp_runs", None) is None
+          and getattr(_t66, "_grp_disp", None) is None
+          and not hasattr(_dv66, "_apply_sticky_merge"),
+          f"rows={len(_kids66)} "
+          f"runs={getattr(_t66, '_grp_runs', 'NA')}")
     _snaps66 = _dv66._row_snaps
 
     def _brg66(iid):
         return str((_snaps66.get(str(iid)) or {}).get("barang", ""))
-    _okpos66 = all(
-        _vis66.index(k) == 0 or _brg66(_vis66[_vis66.index(k) - 1])
-        != _brg66(k)
-        for k in _vis_named66)
-    check("(v3.9.56) sticky: display = baris PERTAMA yang TERLIHAT "
-          "dari kelompoknya (baris terlihat sebelumnya = kelompok lain)",
-          _okpos66, f"named={[(k, _brg66(k)) for k in _vis_named66]}")
-    # (3) RANK ikut pindah bersama nama: head grup B (baris 24,
-    # off-screen saat MID) blank; baris display B terisi; head C
-    # (baris 48, terlihat) tetap terisi
-    _rk_disp66 = str(_t66.set(_vis_named66[0], "Rank")).strip() \
-        if _vis_named66 else ""
-    check("(v3.9.56) sticky: RANK ikut berpindah ke baris display "
-          "(head off-screen blank, display terisi)",
-          _rk_disp66 != ""
-          and str(_t66.set(_kids66[24], "Rank")).strip() == "",
-          f"disp_rank={_rk_disp66!r} "
-          f"headB_rank={_t66.set(_kids66[24], 'Rank')!r}")
-    # (4) scroll balik ke ATAS → nilai KEMBALI ke head (idempoten)
+
+    def _check_all_named66(tag):
+        # SETIAP baris membawa nama kelompoknya (nilai == snapshot RAW)
+        ok = all(str(_t66.set(k, "Nama Barang")).strip() == _brg66(k)
+                 for k in _t66.get_children(""))
+        check(f"(v3.9.60) {tag}: SETIAP baris menampilkan NAMA BARANG "
+              "kelompoknya (72/72 — 'hanya muncul sekali di tiap grup' "
+              "TUNTAS)",
+              ok, "ada baris tanpa nama / nama salah")
+        return ok
+
+    # (1) render awal (viewport top)
+    _check_all_named66("render awal")
+    # (2) scroll tengah — nilai TIDAK berpindah (tak ada state display)
+    _t66.yview_moveto(0.5)
+    for _ in range(40):
+        root.update()
+    _vis66 = [k for k in _t66.get_children("")
+              if _t66.bbox(k) and 0 <= _t66.bbox(k)[1]
+              < _t66.winfo_height()]
+    check("(v3.9.60) scroll MID → SETIAP baris terlihat tetap bernama "
+          "(viewport penuh nama — bukan blank)",
+          bool(_vis66) and all(
+              str(_t66.set(k, "Nama Barang")).strip() == _brg66(k)
+              for k in _vis66),
+          f"vis={len(_vis66)}")
+    # (3) RANK per-baris: setiap baris kelompok membawa rank konstanta
+    check("(v3.9.60) RANK per-baris: SETIAP baris membawa rank "
+          "kelompoknya (head & lanjutan sama — konstanta)",
+          all(str(_t66.set(k, "Rank")).strip()
+              == str(_dv66._rank_map.get(str(k), ""))
+              for k in _t66.get_children("")),
+          "ada baris tanpa rank")
+    # (4) scroll balik ke ATAS — nilai identik (idempoten by-design)
     _t66.yview_moveto(0.0)
     for _ in range(40):
         root.update()
-    check("(v3.9.56) sticky: scroll balik TOP → nilai KEMBALI di head "
-          "(tidak ada nilai ganda)",
-          len(_named66()) == 3
-          and _named66() == [_kids66[0], _kids66[24], _kids66[48]],
-          f"got {_named66()}")
-    # (5) sort kolom lain → interleave; nilai tetap 3 + di head run visual
+    _check_all_named66("scroll balik TOP")
+    # (5) sort kolom lain → interleave; nilai ikut barisnya (utuh)
     _dv66._sort_by("Deviasi", reverse=True)
     root.update()
     _kids66b = list(_t66.get_children(""))
-    check("(v3.9.56) sticky pasca-SORT: nilai tetap tepat 1 per kelompok "
-          "(di posisi head viewport)",
-          len(_named66()) == 3,
-          f"got {len(_named66())}")
-    # (6) hook murah idempoten (panggil 2× → state sama)
-    _st66a = _named66()
-    _dv66._apply_sticky_merge(_t66)
-    _dv66._apply_sticky_merge(_t66)
-    check("(v3.9.56) sticky: _apply_sticky_merge IDEMPOTEN (2× panggil "
-          "→ state identik)",
-          _named66() == _st66a, "state berubah")
-    # (7) FILTER CLONE ⛶ MERGE-AWARE (BUG laten v3.9.51: nilai tree
-    # head-only → filter clone by Nama Barang hanya meloloskan baris
-    # display). Kini value_get RAW → kelompok UTUH lolos.
+    _check_all_named66("pasca-SORT kolom lain")
+    # (6) band adjacency pasca-sort: run kontigu = band seragam
+    _names66b = [_brg66(k) for k in _kids66b]
+    _tags66b = [_grptag59(_dv66, k) for k in _kids66b]
+    _ok_band66 = all(
+        _names66b[i] == _names66b[i - 1]
+        and _tags66b[i] == _tags66b[i - 1]
+        or _names66b[i] != _names66b[i - 1]
+        for i in range(1, len(_kids66b)))
+    check("(v3.9.60) pasca-SORT: band kelompok dipasang ulang per "
+          "urutan visual (run kontigu = band seragam)",
+          _ok_band66, "band tidak seragam dalam run")
+    # (7) FILTER CLONE ⛶ MERGE-AWARE (value_get RAW — kelompok UTUH
+    # lolos; nilai per-baris ikut salinan item clone).
     _t66.yview_moveto(0.0)
     for _ in range(20):
         root.update()
@@ -15157,31 +15159,29 @@ def main():
     check("(v3.9.56) filter clone ⛶ by Nama Barang: kelompok UTUH "
           "lolos (24 baris STICKY B — dulu 1 baris display saja)",
           _n66_1 == 24, f"got {_n66_1} (awal {_n66_0})")
-    _named_c66 = [k for k in _mt66.get_children("")
-                  if str(_mt66.set(k, "Nama Barang")).strip()]
-    check("(v3.9.56) filter clone ⛶: display bernama tepat 1 baris "
-          "di dalam clone",
-          len(_named_c66) == 1
-          and str(_mt66.set(_named_c66[0], "Nama Barang")) == "STICKY B",
-          f"got {_named_c66}")
-    # nilai display clone ikut viewport clone (scroll clone)
+    check("(v3.9.60) filter clone ⛶: SEMUA 24 baris clone bernama "
+          "'STICKY B' (nilai per-baris ikut salinan)",
+          all(str(_mt66.set(k, "Nama Barang")) == "STICKY B"
+              for k in _mt66.get_children("")),
+          "ada baris clone tanpa nama")
+    # nilai clone tetap per-baris di viewport mana pun (scroll clone)
     _mt66.yview_moveto(0.8)
     for _ in range(40):
         root.update()
     _vis_c66 = [k for k in _mt66.get_children("")
                 if _mt66.bbox(k) and 0 <= _mt66.bbox(k)[1]
                 < _mt66.winfo_height()]
-    _vis_c_named = [k for k in _vis_c66
-                    if str(_mt66.set(k, "Nama Barang")).strip()]
-    check("(v3.9.56) sticky di CLONE ⛶: scroll clone → nama tetap "
-          "tampil di viewport clone (state terpisah dari tabel utama)",
-          len(_vis_c_named) >= 1,
-          f"vis={len(_vis_c66)} named={len(_vis_c_named)}")
+    check("(v3.9.60) di CLONE ⛶: scroll clone → SETIAP baris terlihat "
+          "tetap bernama (tanpa state display)",
+          bool(_vis_c66) and all(
+              str(_mt66.set(k, "Nama Barang")).strip()
+              for k in _vis_c66),
+          f"vis={len(_vis_c66)}")
     _win66.destroy()
     for _ in range(20):
         root.update()
-    # (8) double-click baris LANJUTAN (blank display) tetap buka popup
-    # via snapshot RAW — tree-agnostic
+    # (8) double-click baris LANJUTAN tetap buka popup via snapshot RAW
+    # — tree-agnostic (v3.9.60: nilai kini ada di baris mana pun)
     _pop66 = []
     import src.ui.deviasi_popup as _dp66
     _orig_sp66 = _dp66.show_deviasi_popup
@@ -15190,7 +15190,7 @@ def main():
     class _Ev66:
         pass
     _lanj66 = _kids66b[1] if len(_kids66b) > 1 else None
-    if _lanj66 and str(_t66.set(_lanj66, "Nama Barang")).strip() == "":
+    if _lanj66:
         _bb66 = _t66.bbox(_lanj66)
         if _bb66:
             _ev66 = _Ev66()
@@ -15199,8 +15199,8 @@ def main():
             _dv66._on_double_click(_ev66)
             root.update()
     _dp66.show_deviasi_popup = _orig_sp66
-    check("(v3.9.56) double-click baris lanjutan (display blank) → "
-          "popup tetap terbuka dari SNAPSHOT RAW",
+    check("(v3.9.56) double-click baris lanjutan → popup tetap terbuka "
+          "dari SNAPSHOT RAW",
           len(_pop66) == 1, f"popups={len(_pop66)}")
     _dv66.destroy()
     _top66.destroy()
@@ -16960,9 +16960,18 @@ def main():
                                     "desc": _sdesc68})
     wait_view(root, _isv68s)
 
+    def _walk68(w):
+        # v3.9.60 — leaderboard di canvas ber-scroll: baris nested dalam
+        # frame inner (anak canvas) — walk rekursif.
+        for _ch68 in w.winfo_children():
+            yield _ch68
+            yield from _walk68(_ch68)
+
     def _zone_rows68(view):
         _out68 = []
-        for _w68 in view._skor_zone.winfo_children():
+        for _w68 in _walk68(view._skor_zone):
+            if not isinstance(_w68, tk.Frame):
+                continue
             _labels68 = [c for c in _w68.winfo_children()
                          if isinstance(c, tk.Label)]
             if len(_labels68) >= 5 and str(_labels68[0]["text"]) != "RESTO":
@@ -16971,7 +16980,9 @@ def main():
         return _out68
 
     def _hl68(view, resto):
-        for _w68 in view._skor_zone.winfo_children():
+        for _w68 in _walk68(view._skor_zone):
+            if not isinstance(_w68, tk.Frame):
+                continue
             _labels68 = [c for c in _w68.winfo_children()
                          if isinstance(c, tk.Label)]
             if _labels68 and resto in str(_labels68[0]["text"]):
@@ -17786,6 +17797,173 @@ def main():
             _p.unlink()
         except FileNotFoundError:
             pass
+
+    # ==================================================================
+    # §70 — v3.9.60 BUG LAPORAN USER: (1) nama barang PER-BARIS tab
+    # Deviasi GR/PCS (sticky merge DIHAPUS — user: "nama barang tidak
+    # muncul dan hanya muncul sekali di tiap grup nama barangnya? kenapa
+    # cek dulu deep") · (2) viewport tabel Rekap Selisih IN dipulihkan
+    # (user: "tab rekap selish in tidak bisa scrol" — kartu filter+KPI+
+    # papan skor 12-baris memakan seluruh tinggi konten; leaderboard
+    # kini ber-cap ±5 baris + roda halus + KPI compact)
+    # ==================================================================
+    print("\n== 70. (v3.9.60) laporan user: nama barang per-baris + "
+          "viewport rekap dipulihkan ==")
+
+    # --- (a) DEVIASI GR skala grup panjang: SETIAP baris bernama -------
+    from src.ui.deviasi_view import DeviasiView as _DV70
+    _src70 = []
+    for _b70 in ("BRG 07 (V.20)", "BRG 31 (V.20)", "BRG 55 (V.20)"):
+        for _r70 in [f"RST{i:02d}" for i in range(50)]:
+            for _j70, _v70 in [("1.SO", 30.0), ("2.SALDO AKHIR", 25.0),
+                               ("SALDO AWAL", 10.0)]:
+                for _t70 in (25, 26):
+                    _src70.append({
+                        "Nama Barang": _b70, "JENIS": _j70,
+                        "NAMA RESTO": _r70, "Tanggal": _t70,
+                        "NILAI": _v70, "SATUAN": "GR",
+                        "AKTIF/NON": "AKTIF",
+                        "KATEGORI": "COM DEVIASI - RESTO",
+                        "SOURCE KIRIMAN": "GUDANG"})
+    _top70 = tk.Toplevel(root)
+    _top70.geometry("1500x800+8+8")
+    _dv70 = _DV70(_top70, satuan_mode="GR")
+    _dv70.pack(fill="both", expand=True)
+    _dv70.data = pd.DataFrame(_src70)
+    _dv70._show_content()
+    _dv70._refresh(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _dv70._busy and len(_dv70.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    for _ in range(40):
+        root.update()
+        time.sleep(0.01)
+    _t70 = _dv70.tree
+    _kids70 = list(_t70.get_children(""))
+    _snap70 = _dv70._row_snaps
+    check("(v3.9.60) §70a fixture: 150 baris 3 kelompok × 50 "
+          "(kelompok panjang ala produksi)",
+          len(_kids70) == 150, f"rows={len(_kids70)}")
+    check("(v3.9.60) §70a: SETIAP baris kelompok 50-baris membawa NAMA "
+          "BARANG (payload per-baris — era head-only/sticky dihapus)",
+          all(str(_t70.set(k, "Nama Barang")) ==
+              str((_snap70.get(str(k)) or {}).get("barang", ""))
+              for k in _kids70),
+          "ada baris tanpa nama")
+    _t70.yview_moveto(0.34)   # tengah grup pertama
+    for _ in range(30):
+        root.update()
+    _vis70 = [k for k in _t70.get_children("")
+              if _t70.bbox(k) and 0 <= _t70.bbox(k)[1]
+              < _t70.winfo_height()]
+    check("(v3.9.60) §70a: scroll TENGAH kelompok → SETIAP baris "
+          "terlihat bernama (viewport tak pernah kosong nama)",
+          bool(_vis70) and all(
+              str(_t70.set(k, "Nama Barang")).strip() for k in _vis70),
+          f"vis={len(_vis70)}")
+    _dv70._sort_by("Deviasi", reverse=True)
+    root.update()
+    check("(v3.9.60) §70a: pasca-SORT nilai tetap per-baris utuh (rank "
+          "konstanta kelompok ikut barisnya)",
+          all(str(_t70.set(k, "Nama Barang")).strip()
+              and str(_t70.set(k, "Rank")).strip()
+              for k in _t70.get_children("")),
+          "ada baris tanpa nama/rank pasca sort")
+    _dv70.destroy()
+    _top70.destroy()
+    root.update()
+
+    # --- (b) REKAP SELISIH IN: viewport tabel dipulihkan ---------------
+    from src.ui.in_selisih_view import InSelisihView as _ISV70
+    _arow70 = lambda resto, tgl, brg, so, qso, sel: {
+        "Resto": resto, "Tanggal": tgl, "Nama Item": brg,
+        "Hasil SO": so, "Qty SO Harian": qso,
+        "Penerimaan Sistem": 1.0, "Selisih Harian": sel,
+        "Saldo Kumulatif": 10.0, "Status Analisis Audit": "SELISIH",
+        "Detail & Catatan Audit": ""}
+    _aud70 = []
+    for _r70i in range(15):
+        _rsto70 = f"RST{ _r70i:02d}"
+        for _t70i in (24, 25, 26):
+            for _b70i in ("A", "B"):
+                _aud70.append(_arow70(_rsto70, _t70i,
+                                      f"BRG {_b70i}", 10.0, 2.0, 1.0))
+    _top70b = tk.Toplevel(root)
+    _top70b.geometry("1280x760+8+8")
+    _iv70 = _ISV70(_top70b)
+    _iv70.pack(fill="both", expand=True)
+    root.update()
+    _iv70.load_data(None, None,
+                    {"df": pd.DataFrame(_aud70), "kpi": {
+                        "rows": 90, "ok": 70, "omit": 5, "cutoff": 2,
+                        "deviasi_murni": 10, "dev_murni_po": 3,
+                        "deviasi_qty": -13.0}, "desc": ""})
+    wait_view(root, _iv70)
+    # papan skor dihitung dari payload render → tunggu idle selesai
+    for _ in range(40):
+        root.update()
+        time.sleep(0.01)
+    _zone70 = _iv70._skor_zone
+
+    def _find_canvas70(w):
+        for ch in w.winfo_children():
+            if isinstance(ch, tk.Canvas):
+                return ch
+            _r = _find_canvas70(ch)
+            if _r is not None:
+                return _r
+        return None
+    _cv70 = _find_canvas70(_zone70)
+    _cv_h70 = _cv70.winfo_height() if _cv70 is not None else -1
+    check("(v3.9.60) §70b: papan skor leaderboard kini CANVAS BER-CAP "
+          "±5 baris (dulu 12 baris utuh ~285px menelan tinggi tabel)",
+          _cv70 is not None and 20 <= _cv_h70 <= 150,
+          f"cv={_cv70} h={_cv_h70}")
+    if _cv70 is not None:
+        _y70a = _cv70.yview()[0]
+        _cv70.event_generate("<MouseWheel>", delta=-120, warp=True)
+        root.update()
+        for _ in range(10):
+            root.update()
+            time.sleep(0.01)
+        _y70b = _cv70.yview()[0]
+        check("(v3.9.60) §70b: RODA di atas papan skor → daftar skor "
+              "bergulir (akumulator halus terpasang)",
+              abs(_y70b - _y70a) > 0.001,
+              f"{_y70a:.3f}→{_y70b:.3f}")
+    _txt70 = []
+    for _w70 in _zone70.winfo_children():
+        if isinstance(_w70, tk.Frame):
+            for _l70 in _w70.winfo_children():
+                if isinstance(_l70, tk.Label):
+                    _txt70.append(str(_l70.cget("text")))
+    check("(v3.9.60) §70b: baris '+N resto lainnya' tetap terlihat "
+          "(15 resto → '+3 resto lainnya')",
+          any("resto lainnya" in t and "15" in t for t in _txt70),
+          f"got {[t for t in _txt70 if 'resto' in t][:3]}")
+    _th70 = _iv70.tree.winfo_height()
+    check("(v3.9.60) §70b: VIEWPORT TABEL dipulihkan ≥ 120px @1280x760 "
+          "(dulu ≈0-20px saat KPI+papan skor terisi — 'tidak bisa "
+          "scrol' tuntas)",
+          _th70 >= 120, f"tree_h={_th70}")
+    # roda di atas TABEL menggulir tabel
+    _tw70, _thh70 = _iv70.tree.winfo_width(), _iv70.tree.winfo_height()
+    _ty70a = _iv70.tree.yview()[0]
+    _iv70.tree.event_generate("<MouseWheel>", delta=-120,
+                              x=_tw70 // 2, y=_thh70 // 2, warp=True)
+    root.update()
+    for _ in range(10):
+        root.update()
+        time.sleep(0.01)
+    _ty70b = _iv70.tree.yview()[0]
+    check("(v3.9.60) §70b: RODA di atas tabel rekap → tabel bergulir",
+          abs(_ty70b - _ty70a) > 0.0001,
+          f"{_ty70a:.4f}→{_ty70b:.4f}")
+    _iv70.destroy()
+    _top70b.destroy()
+    root.update()
 
     root.destroy()
 

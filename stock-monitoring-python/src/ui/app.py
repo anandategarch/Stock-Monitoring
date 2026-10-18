@@ -190,7 +190,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.59"  # v3.9.59 — REVIEW UI/UX SEBAR-AGENT 6 paralel (67 temuan → semua fix): statusbar/zoom-bar/KpiRow/HeaderFilter/flash · band+sticky · copy popup · followup format ID · nominal Rp · export atomik · config jujur · pandas<3
+APP_VERSION = "3.9.60"  # v3.9.60 — bug laporan user: (1) Nama Barang/Rank deviasi GR/PCS kembali PER-BARIS (sticky merge dihapus — "nama barang tidak muncul, hanya sekali per grup" tuntas total); (2) viewport tabel Rekap Selisih IN dipulihkan (leaderboard ber-cap ±5 baris + scroll + KPI compact — "tidak bisa scrol")
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
