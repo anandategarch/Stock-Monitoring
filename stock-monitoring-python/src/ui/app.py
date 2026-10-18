@@ -202,7 +202,7 @@ if __doc__:
 # agent dan fix"): 6 agent audit UI/UX PARALEL read-only (2-a shell/
 # theme · 2-b widgets · 2-c pivot/komparasi/laporan · 2-d deviasi+popup
 # · 2-e selisih/nominal/PO/followup · 2-f support+cross-cutting) → 67
-# temuan TERVERIFIKASI (1 HIGH / 26 MED / 40 LOW) + 60+ hipotesis
+# temuan TERVERIFIKASI (1 HIGH / 25 MED / 41 LOW) + 60+ hipotesis
 # ditolak dgn bukti → 6 agent fix PARALEL kepemilikan-file terpisah +
 # verifikasi utama. SEMUA fix: (2a) STATUSBAR pesan panjang kini
 # dipotong '…' (badge versi/zoom tak tertimpa; teks penuh tersimpan;

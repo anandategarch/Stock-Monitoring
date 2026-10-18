@@ -17582,6 +17582,22 @@ def main():
           _band69 and _ratio69 >= 2.4,
           f"ratio={_ratio69:.3f} band_in_src={_band69}")
 
+    # --- 69.G2 kontras teks panduan (fix 2a-01) -------------------------
+    _wsrc69 = (_src69 / "src/ui/widgets.py").read_text(encoding="utf-8")
+    _sub_muted69 = ("fg=C_TEXT_MUTED, font=font(9), anchor=\"w\")"
+                    in _wsrc69)
+    _lm69a, _lm69b = _lum69("#64748b"), _lum69("#ffffff")
+    _ratio_sub69 = (max(_lm69a, _lm69b) + 0.05) / (min(_lm69a, _lm69b) + 0.05)
+    _kpi_soft_left69 = ("fg=C_TEXT_SOFT, font=font(9), anchor=\"w\")"
+                        in _wsrc69)
+    check("(2a-01) subtitle KPI + label panduan pakai C_TEXT_MUTED "
+          "#64748b = 4,76:1 vs kartu putih (WCAG AA 4,5:1 lolos; dulu "
+          "C_TEXT_SOFT #94a3b8 = 2,56:1 — 'lihat log untuk detail' nyaris "
+          "tak terbaca)",
+          _sub_muted69 and _ratio_sub69 >= 4.5 and not _kpi_soft_left69,
+          f"ratio={_ratio_sub69:.2f} muted={_sub_muted69} "
+          f"soft_left={_kpi_soft_left69}")
+
     # --- 69.H format angka Follow Up Indonesia (fix 2e-04/2f-14) -------
     _cases_num69 = [(1234.5, "1.234,5"), (-1234.0, "(1.234)"),
                     (1234.0, "1.234"), (float("nan"), "-"), (0, "-"),

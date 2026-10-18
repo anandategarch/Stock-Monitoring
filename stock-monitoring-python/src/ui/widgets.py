@@ -357,8 +357,12 @@ class KpiCard(tk.Frame):
                  font=font(16, "bold"), anchor="w").pack(fill="x", pady=(2, 0))
 
         self._sub_var = tk.StringVar(value=subtitle)
+        # v3.9.59 fix 2a-01 (audit 2-a): C_TEXT_SOFT #94a3b8 = 2,56:1 di
+        # kartu putih (WCAG AA 4,5:1 gagal) — teks panduan status KPI
+        # (mis. 'lihat log untuk detail' saat ERROR) nyaris tak terbaca.
+        # C_TEXT_MUTED #64748b = 4,76:1 (lolos AA).
         self._sub = tk.Label(txt, textvariable=self._sub_var, bg=C_CARD,
-                             fg=C_TEXT_SOFT, font=font(9), anchor="w")  # FIX A-08
+                             fg=C_TEXT_MUTED, font=font(9), anchor="w")
         if subtitle:
             self._sub.pack(fill="x")
 
@@ -1890,7 +1894,7 @@ class HeaderFilter:
         # search-to-select (Enter = hasil pencarian jadi seleksi, §94)
         # tidak terdiscover: semantiknya hanya hidup di docstring.
         tk.Label(body, text="Enter = pilih nilai terfilter · Esc = tutup",
-                 bg=C_CARD, fg=C_TEXT_SOFT, font=font(9)).pack(
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
             fill="x", padx=(22, 0), pady=(2, 0))
 
         # pilih semua + counter
@@ -1965,7 +1969,7 @@ class HeaderFilter:
                 inner, text=f"… menampilkan {self.MAX_CHECKS} dari "
                             f"{len(values)} nilai — gunakan 🔍 di atas "
                             "untuk mencari & mencentang nilai lain",
-                bg=C_CARD, fg=C_TEXT_SOFT, font=font(9))
+                bg=C_CARD, fg=C_TEXT_MUTED, font=font(9))
             self._more_label.pack(fill="x", padx=8, pady=4)
 
         # tombol aksi
@@ -5107,7 +5111,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     # terpisah dari tabel sumber — filter di clone tidak memengaruhi sumber
     # dan sebaliknya utk baris/nilai).
     tk.Label(foot, text="Salinan — filter/sort terpisah", bg=C_CARD,
-             fg=C_TEXT_SOFT, font=font(9)).pack(side="right")
+             fg=C_TEXT_MUTED, font=font(9)).pack(side="right")
 
     overlay = LoadingOverlay(cin, "Menyalin tabel…")
     overlay.show(delay_ms=120)
