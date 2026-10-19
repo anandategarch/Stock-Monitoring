@@ -124,10 +124,17 @@ from tkinter import filedialog, messagebox, ttk
 import pandas as pd
 
 # Pastikan parent folder di sys.path agar `from src...` jalan
-_BASE = Path(__file__).resolve().parent.parent.parent
+# v3.9.62 — _BASE frozen-aware: dihitung INLINE (bootstrap — sys.path
+# harus siap SEBELUM import src.*); modul bersama app_base_dir() dari
+# src/config.py (dipakai CONFIG_PATH/_SETTINGS_PATH) di-import SETELAH
+# sys.path siap — mode PyInstaller → base = folder .exe.
+_BASE = (Path(sys.executable).resolve().parent
+         if getattr(sys, "frozen", False)
+         else Path(__file__).resolve().parent.parent.parent)
 if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
+from src.config import app_base_dir as _app_base_dir
 from src.main import PipelineStopped, run_pipeline
 from src.pipeline.helpers import (
     read_cache_invalidate,
@@ -186,12 +193,13 @@ from src.ui.widgets import (
     install_wheel_router,
     make_log_console,
     make_tree,
+    open_tree_find,
     run_async,
 )
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.61"  # v3.9.61 — 2 permintaan user: (1) SEKAT WARNA grup Nama Barang tab Deviasi GR/PCS DIHAPUS (baris seragam putih — "hilangkan warna untuk sekat visual tiap grup nama barang"); (2) RODA rekap selisih IN benar-benar bergulir — router roda Toplevel app (roda di atas baris leaderboard/KPI/krom = gulir scrollable-bawah-pointer/tab aktif; fokus- vs pointer-routing Windows tak relevan lagi) + yscrollincrement leaderboard = 1 baris/notch
+APP_VERSION = "3.9.62"  # v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -1751,7 +1759,7 @@ WINDOW_MIN = (1020, 700)
 # senyap). Disimpan saat jendela ditutup (jalur WM_DELETE_WINDOW asli —
 # bukan root.destroy() langsung milik test); dipulihkan saat startup:
 # pertama kali (tanpa state) → MAXIMIZED (auto-fit layar).
-_SETTINGS_PATH = Path(__file__).resolve().parent.parent.parent / "settings.json"
+_SETTINGS_PATH = _app_base_dir() / "settings.json"
 
 
 def _load_window_state():
@@ -1799,8 +1807,10 @@ UI_ZOOM_MAX = 2.0
 UI_ZOOM_STEP = 0.1
 UI_ZOOM_DEFAULT = 1.0
 
-# Path config.json di root project
-CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config.json"
+# Path config.json — v3.9.62 frozen-aware (mode dev: root proyek;
+# mode PyInstaller onedir: folder .exe — build_exe.py menyalin config
+# .json ke samping exe supaya tetap bisa diedit user)
+CONFIG_PATH = _app_base_dir() / "config.json"
 
 # --- Freeze-fix konstanta (dipertahankan dari v2.1.1) -----------------------
 MAX_CHUNKS_PER_POLL = 200       # max chunks diproses per poll cycle
@@ -2408,6 +2418,20 @@ class StockMonitorApp:
         # install_wheel_router.
         install_wheel_router(self.root,
                              get_primary_scrollable=self._primary_scrollable)
+        # v3.9.62 — CARI DI TABEL (Ctrl+F — find-window ala tksheet,
+        # in-house): binding di TOPLEVEL (bindtag Toplevel ada di rantai
+        # SEMUA anak jendela — pola router roda v3.9.61) menjangkar target
+        # = tabel utama tab AKTIF (peta _primary_scrollable yang sama);
+        # popup TreeFindPopup non-modal + highlight + Enter/Shift-Enter.
+        for _seq in ("<Control-f>", "<Control-F>"):
+            self.root.bind(_seq, self._on_find_shortcut)
+
+    def _on_find_shortcut(self, _event=None):
+        """v3.9.62 — Ctrl+F: buka/fokus popup Cari di tabel tab aktif
+        (tab Config/Proses tanpa tabel data → no-op senyap)."""
+        tree = self._primary_scrollable()
+        if tree is not None:
+            open_tree_find(tree)
 
     def _on_tab_changed(self, _event=None):
         """Tab baru dipilih → pastikan view-nya sudah di-refresh.

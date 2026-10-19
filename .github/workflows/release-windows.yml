@@ -1,0 +1,63 @@
+# v3.9.62 — RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir).
+#
+# Trigger:
+#   - push tag "v*"  → build windows-latest + GitHub Release (lampiran zip)
+#   - workflow_dispatch → build manual (artefak bisa diunduh, tanpa Release)
+#
+# Langkah sama persis dgn build lokal: python build_exe.py (memakai
+# stock-monitoring.spec; config.json disalin ke samping .exe).
+# Catatan praktis:
+#   - Antivirus Windows kadang salah menandai exe PyInstaller (false
+#     positive umum): edukasi user "Allow"/smartcreen "More info → Run".
+#   - Versi rilis = nama tag (mis. v3.9.62) — commit versi di APP_VERSION
+#     harus sinkron dgn tag.
+name: Rilis Windows EXE
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: stock-monitoring-python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependensi runtime + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build EXE (onedir)
+        run: python build_exe.py
+
+      - name: Arsipkan folder aplikasi
+        shell: pwsh
+        run: Compress-Archive -Path dist/StockMonitor/* -DestinationPath dist/StockMonitor-windows-x64.zip
+
+      - name: Upload artefak build
+        uses: actions/upload-artifact@v4
+        with:
+          name: StockMonitor-windows-x64
+          path: stock-monitoring-python/dist/StockMonitor-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Buat GitHub Release (khusus tag v*)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: stock-monitoring-python/dist/StockMonitor-windows-x64.zip
+          generate_release_notes: true

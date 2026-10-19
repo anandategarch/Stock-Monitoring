@@ -25,7 +25,25 @@ v3.9.42 — AUDIT FIX (61-a):
 """
 import json
 import os
+import sys
 from pathlib import Path
+
+
+def app_base_dir() -> Path:
+    """v3.9.62 — base direktori aplikasi (FROZEN-AWARE, PyInstaller).
+
+    - Mode dev : root proyek (parent dari ``src/``).
+    - Mode frozen (PyInstaller onedir): folder tempat .exe berada —
+      config.json / settings.json / followup.json / crash.log hidup
+      BERSAMA .exe (bukan di _MEIPASS/_internal yang temporer — file
+      runtime HARUS editable/tahan-update).
+
+    Dipakai semua jalur file runtime: app.py (CONFIG_PATH/_SETTINGS_PATH),
+    followup.py (followup.json), deviasi_view (settings ACR), dan
+    default Config ini — satu sumber kebenaran lintas modul."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
 
 
 class Config:
@@ -33,9 +51,10 @@ class Config:
 
     def __init__(self, config_path: str = None):
         if config_path is None:
-            # Default: config.json di folder yang sama dengan file ini
-            base = Path(__file__).resolve().parent.parent
-            config_path = base / "config.json"
+            # v3.9.62 — app_base_dir() (frozen-aware): mode dev = root
+            # proyek; mode PyInstaller = folder .exe (config.json
+            # dibundel build_exe.py ke samping exe).
+            config_path = app_base_dir() / "config.json"
 
         # v3.9.42 — AUDIT FIX (61-a, F8): JSON rusak (mis. koma kelebihan)
         # dulu melempar json.JSONDecodeError mentah berbahasa Inggris —

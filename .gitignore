@@ -25,3 +25,7 @@ followup*.json.bad
 # v3.9.21 — ambang ACR to BOM (persist lokal per instalasi)
 settings.json
 settings.json.tmp
+
+# v3.9.62 — artefak build PyInstaller (build_exe.py / GHA release-windows)
+stock-monitoring-python/build/
+stock-monitoring-python/dist/

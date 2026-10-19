@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.61", APP_VERSION == "3.9.61",
+    check("Versi = 3.9.62", APP_VERSION == "3.9.62",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -18136,6 +18136,329 @@ def main():
     _iv71.destroy()
     _top71.destroy()
     root.update()
+
+    # =====================================================================
+    print("\n== 72. (v3.9.62) CARI DI TABEL (Ctrl+F — find-window ala "
+          "tksheet, in-house) ==")
+    from src.ui.widgets import (FIND_CUR_TAG, FIND_HIT_TAG,
+                                TreeFindPopup, natural_key,
+                                open_tree_find)
+
+    # --- (a) terpasang di app: binding Ctrl+F + import -------------------
+    _bf72 = root.bind("<Control-f>")
+    check("(v3.9.62) §72a: binding Ctrl+F terpasang di root APP "
+          "(+<Control-F>) — menjangkar tabel utama tab aktif",
+          bool(_bf72) and bool(root.bind("<Control-F>")),
+          f"f={_bf72!r}")
+    check("(v3.9.62) §72a: app._on_find_shortcut membuka popup di tree "
+          "TAB AKTIF (tab Deviasi GR — peta _primary_scrollable v3.9.61)",
+          (app.notebook.select(app.tab_deviasi_gr), root.update(),
+           app._on_find_shortcut(),
+           getattr(app.deviasi_gr_view.tree, "_find_popup", None)
+           is not None)[-1])
+    _pf72 = app.deviasi_gr_view.tree._find_popup
+    if _pf72 is not None:
+        _pf72.close()
+    check("(v3.9.62) §72a: close popup membersihkan referensi "
+          "(tree._find_popup → None)",
+          getattr(app.deviasi_gr_view.tree, "_find_popup", None) is None)
+
+    # --- (b) Ctrl+F lewat EVENT keyboard (jalur bindtag Toplevel) --------
+    app.notebook.select(app.tab_deviasi_gr)
+    root.update()
+    _t72 = app.deviasi_gr_view.tree
+    _t72.focus_force()
+    root.update()
+    _t72.event_generate("<Control-f>", when="now")
+    root.update()
+    _pe72 = getattr(_t72, "_find_popup", None)
+    check("(v3.9.62) §72b: event <Control-f> di TREE sampai ke binding "
+          "root (bindtag Toplevel) → popup terbuka",
+          _pe72 is not None and _pe72.win.winfo_exists())
+    if _pe72 is not None:
+        _pe72.close()
+
+    # --- (c) alur lengkap di tree fixture lokal ---------------------------
+    _top72 = tk.Toplevel(root)
+    _top72.geometry("700x420+80+80")
+    _tr72 = ttk.Treeview(_top72, columns=["nama", "po"], show="headings")
+    _tr72.heading("nama", text="Nama")
+    _tr72.heading("po", text="PO")
+    _tr72.column("nama", width=180)
+    _tr72.column("po", width=120)
+    _tr72.pack(fill="both", expand=True)
+    # baris dgn tag fg milik view (negative) — find HARUS merge, bukan
+    # menimpa (opsi berbeda: find = background saja)
+    _tr72.tag_configure("negative", foreground="#dc2626")
+    for _v72, _p72, _tg72 in (("Barang 2", "PO-1", ()),
+                              ("Barang 10", "PO-2", ("negative",)),
+                              ("barang 1", "PO-10", ()),
+                              ("Gula 5", "PO-2", ("negative",))):
+        _tr72.insert("", "end", values=(_v72, _p72), tags=_tg72)
+    _pop72 = open_tree_find(_tr72)
+    check("(v3.9.62) §72c: open_tree_find → popup hidup + singleton "
+          "(tree._find_popup)",
+          isinstance(_pop72, TreeFindPopup)
+          and _tr72._find_popup is _pop72
+          and open_tree_find(_tr72) is _pop72)
+    _pop72.var.set("barang")
+    _pop72._recompute()
+    check("(v3.9.62) §72c: pencarian CASE-INSENSITIVE semua kolom — "
+          "'barang' cocok 3 baris (Barang 2/10 + barang 1)",
+          len(_pop72._matches) == 3, f"n={len(_pop72._matches)}")
+    _m72 = list(_pop72._matches)
+    check("(v3.9.62) §72c: baris cocok diberi tag highlight (HIT semua + "
+          "CUR baris aktif) — MERGE dgn tag view (negative utuh)",
+          FIND_CUR_TAG in _tr72.item(_m72[0], "tags")
+          and FIND_HIT_TAG in _tr72.item(_m72[1], "tags")
+          and "negative" in _tr72.item(_m72[1], "tags"),
+          f"tags0={_tr72.item(_m72[0], 'tags')}")
+    _pop72._nav(1)
+    _pop72._nav(1)
+    _pop72._nav(1)   # wrap 2→0
+    check("(v3.9.62) §72c: navigasi Enter/Shift-Enter WRAP + status "
+          "'i / N baris cocok'",
+          FIND_CUR_TAG in _tr72.item(_m72[0], "tags")
+          and "1 / 3" in _pop72.status.cget("text"),
+          _pop72.status.cget("text"))
+    # ganti query → recompute; lalu query tak cocok
+    _pop72.var.set("gula")
+    _pop72._recompute()
+    check("(v3.9.62) §72c: query baru dihitung ulang (tag lama "
+          "dibersihkan — 'gula' → 1 cocok)",
+          len(_pop72._matches) == 1
+          and FIND_HIT_TAG not in (_tr72.item(_m72[1], "tags") or ()))
+    _pop72.var.set("zzz-tidak-ada")
+    _pop72._recompute()
+    check("(v3.9.62) §72c: query tanpa cocok → status jujur + tag semua "
+          "dibersihkan",
+          len(_pop72._matches) == 0
+          and "Tidak ada" in _pop72.status.cget("text"))
+    # stale: hapus baris cocok → nav tak crash + auto-recompute
+    _pop72.var.set("gula")
+    _pop72._recompute()
+    for _i72 in list(_tr72.get_children("")):
+        if "Gula" in str(_tr72.item(_i72, "values")):
+            _tr72.delete(_i72)
+    _pop72._nav(1)
+    check("(v3.9.62) §72c: TANGGUH RE-RENDER — iid cocok terhapus → nav "
+          "aman (recompute otomatis, 0 baris tak crash)",
+          len(_pop72._matches) == 0)
+    _iids72 = list(_tr72.get_children(""))
+    _pop72.close()
+    check("(v3.9.62) §72c: ESC/close → SEMUA highlight dibersihkan + "
+          "tag view (negative) tetap utuh",
+          all(FIND_HIT_TAG not in (_tr72.item(_i, "tags") or ())
+              and FIND_CUR_TAG not in (_tr72.item(_i, "tags") or ())
+              for _i in _iids72)
+          and "negative" in (_tr72.item(_iids72[1], "tags") or ()))
+
+    # --- (d) kontras warna highlight (pola lum §69) + opsi bg-only ------
+    def _lum72(hexc):
+        _h72 = hexc.lstrip("#")
+        _r72, _g72, _b72 = (int(_h72[i:i + 2], 16) for i in (0, 2, 4))
+
+        def _f72(c):
+            return (c / 255 / 12.92
+                    if c / 255 <= 0.04045
+                    else ((c / 255 + 0.055) / 1.055) ** 2.4)
+
+        return (0.2126 * _f72(_r72) + 0.7152 * _f72(_g72)
+                + 0.0722 * _f72(_b72))
+
+    from src.ui import widgets as _W72
+    for _tag72, _bg72 in ((FIND_HIT_TAG, _W72.FIND_HIT_BG),
+                          (FIND_CUR_TAG, _W72.FIND_CUR_BG)):
+        _ratio72 = (_lum72(_bg72) + 0.05) / (0.05)  # vs teks hitam
+        check(f"(v3.9.62) §72d: kontras tag find {_tag72} vs teks gelap "
+              f"≥ 2,4:1 (kriteria band §69.G)",
+              _ratio72 >= 2.4, f"{_bg72} ratio={_ratio72:.2f}")
+    check("(v3.9.62) §72d: tag find HANYA background (fg milik view tak "
+          "disentuh — tak ada bentrok opsi)",
+          not dict(_tr72.tag_configure(FIND_HIT_TAG)).get("foreground")
+          and not dict(_tr72.tag_configure(FIND_CUR_TAG)).get("foreground"))
+    _top72.destroy()
+    root.update()
+
+    # =====================================================================
+    print("\n== 73. (v3.9.62) SORT NATURAL (campuran angka+teks — referensi "
+          "tksheet) ==")
+    from src.ui.widgets import _filter_value_sort_key, sort_tree_by_column
+
+    _c73 = [("Barang 2", "Barang 10"), ("R02-9", "R02-777"),
+            ("item 9", "item 10"), ("A 2 B", "A 10 B"),
+            ("PO-2", "PO-10"), ("es 2", "ES 10")]
+    check("(v3.9.62) §73a: natural_key — run digit dibandingkan NUMERIK "
+          "('Barang 2' < 'Barang 10' dsb. ×6)",
+          all(natural_key(_a73) < natural_key(_b73)
+              for _a73, _b73 in _c73))
+    check("(v3.9.62) §73a: natural_key CASE-INSENSITIVE + string kosong "
+          "paling awal",
+          natural_key("ABC 2") == natural_key("abc 2")
+          and natural_key("") == ())
+
+    _top73 = tk.Toplevel(root)
+    _top73.geometry("700x420+80+80")
+    _tr73 = ttk.Treeview(_top73, columns=["nama"], show="headings")
+    _tr73.heading("nama", text="Nama")
+    _tr73.column("nama", width=200)
+    _tr73.pack(fill="both", expand=True)
+    for _v73 in ("Barang 10", "Barang 2", "barang 1", "R02-777",
+                 "R02-9", "AAA"):
+        _tr73.insert("", "end", values=(_v73,))
+    sort_tree_by_column(_tr73, "nama", reverse=False)
+    _got73 = [_tr73.item(_i73, "values")[0]
+              for _i73 in _tr73.get_children("")]
+    check("(v3.9.62) §73b: fallback sort kolom teks = NATURAL ('Barang 2' "
+          "sebelum 'Barang 10'; 'R02-9' sebelum 'R02-777')",
+          _got73 == ["AAA", "barang 1", "Barang 2", "Barang 10",
+                     "R02-9", "R02-777"], str(_got73))
+    sort_tree_by_column(_tr73, "nama", reverse=True)
+    _got73r = [_tr73.item(_i73, "values")[0]
+               for _i73 in _tr73.get_children("")]
+    check("(v3.9.62) §73b: desc = kebalikan asc (kunci konsisten)",
+          _got73r == list(reversed(_got73)), str(_got73r))
+    # jalur NUMERIK tidak tersentuh (regression guard parse Rp/ID)
+    _tr73["columns"] = ["num"]
+    _tr73.heading("num", text="Num")
+    _tr73.column("num", width=160)
+    for _i73 in list(_tr73.get_children("")):
+        _tr73.delete(_i73)
+    for _n73 in ("Rp 1.825", "Rp 500", "12,5%", "(1.825)", "-", "Rp 91"):
+        _tr73.insert("", "end", values=(_n73,))
+    sort_tree_by_column(_tr73, "num", reverse=False)
+    _got73n = [_tr73.item(_i73, "values")[0]
+               for _i73 in _tr73.get_children("")]
+    check("(v3.9.62) §73b: jalur parse NUMERIK utuh (Rp/ribuan/koma/"
+          "negatif-kurung) — natural HANYA fallback teks",
+          _got73n == ["(1.825)", "-", "12,5%", "Rp 91", "Rp 500",
+                      "Rp 1.825"], str(_got73n))
+    # daftar nilai popup filter — cabang teks natural
+    _vals73 = sorted(["NOMOR 10", "nomor 2", "Nomor 1"],
+                     key=_filter_value_sort_key)
+    check("(v3.9.62) §73c: daftar nilai popup filter ⧩ — cabang teks "
+          "NATURAL ('Nomor 1' < 'nomor 2' < 'NOMOR 10')",
+          _vals73 == ["Nomor 1", "nomor 2", "NOMOR 10"], str(_vals73))
+    _top73.destroy()
+    root.update()
+
+    # =====================================================================
+    print("\n== 74. (v3.9.62) RILIS .exe OTOMATIS (GHA+PyInstaller) + "
+          "harness uji + jalur frozen-aware ==")
+    try:
+        import yaml  # PyYAML (env dev); fallback pattern bila tak ada
+    except ImportError:
+        yaml = None
+
+    _sub74 = Path(__file__).resolve().parent
+    _repo74 = _sub74.parent
+    _files74 = {
+        "run_app.py": _sub74 / "run_app.py",
+        "stock-monitoring.spec": _sub74 / "stock-monitoring.spec",
+        "build_exe.py": _sub74 / "build_exe.py",
+        "run_tests.sh": _sub74 / "run_tests.sh",
+        ".github/workflows/release-windows.yml":
+            _repo74 / ".github" / "workflows" / "release-windows.yml",
+    }
+    check("(v3.9.62) §74a: 5 file packaging/harness ADA (run_app.py · "
+          "spec · build_exe.py · run_tests.sh · workflow GHA)",
+          all(_p74.exists() for _p74 in _files74.values()),
+          str({k: v.exists() for k, v in _files74.items()}))
+    _sh74 = (_files74["run_tests.sh"].read_text(encoding="utf-8")
+             if _files74["run_tests.sh"].exists() else "")
+    check("(v3.9.62) §74a: run_tests.sh = harness auto-Xvfb (xdpyinfo + "
+          "setsid Xvfb + exec test_ui_redesign.py + DISPLAY=)",
+          all(_s74 in _sh74 for _s74 in
+              ("xdpyinfo", "setsid Xvfb", "exec \"$PY\" test_ui_redesign.py",
+               'DISPLAY=":$DISPLAY_NUM"')))
+    check("(v3.9.62) §74a: run_tests.sh EXECUTABLE (bit +x)",
+          os.access(_files74["run_tests.sh"], os.X_OK))
+
+    _yml74 = (_files74[".github/workflows/release-windows.yml"]
+              .read_text(encoding="utf-8")
+              if _files74[".github/workflows/release-windows.yml"].exists()
+              else "")
+    _y74ok = False
+    _y74why = "yaml tak terparse"
+    try:
+        if yaml is not None:
+            _y74 = yaml.safe_load(_yml74)
+            _job74 = (_y74 or {}).get("jobs", {}).get("build-windows", {})
+            _steps74 = " ".join(str(_s74.get("run", ""))
+                                for _s74 in _job74.get("steps", []))
+            _y74ok = (_job74.get("runs-on") == "windows-latest"
+                      and "python build_exe.py" in _steps74
+                      and 'tags: ["v*"]' in _yml74)
+        else:
+            # fallback: validasi pola teks (env tanpa PyYAML)
+            _y74ok = all(_p74 in _yml74 for _p74 in
+                         ("runs-on: windows-latest", "python build_exe.py",
+                          'tags: ["v*"]', "softprops/action-gh-release"))
+            _y74why = "pyyaml tak terinstall — pattern check"
+    except Exception as _e74:  # noqa: BLE001 — laporan kejadian saja
+        _y74why = str(_e74)
+    check("(v3.9.62) §74b: workflow GHA VALID (yaml parse · windows-latest "
+          "· trigger tag v* · menjalankan build_exe.py)",
+          _y74ok, _y74why)
+    _spec74 = (_files74["stock-monitoring.spec"].read_text(encoding="utf-8")
+               if _files74["stock-monitoring.spec"].exists() else "")
+    _bexe74 = (_files74["build_exe.py"].read_text(encoding="utf-8")
+               if _files74["build_exe.py"].exists() else "")
+    check("(v3.9.62) §74b: spec = ONEDIR + console=False + "
+          "hiddenimports calamine/pyxlsb (engine Excel lazy pandas) + "
+          "UPX off (antivirus)",
+          all(_s74 in _spec74 for _s74 in
+              ("exclude_binaries=True", "console=False",
+               '"python_calamine"', '"pyxlsb"', "upx=False", "COLLECT")))
+    check("(v3.9.62) §74b: build_exe.py = instalasi pyinstaller otomatis + "
+          "salin config.json ke SAMPING .exe (base frozen-aware)",
+          "pyinstaller" in _bexe74.lower()
+          and "copy2" in _bexe74
+          and "config.json" in _bexe74)
+
+    # --- (c) jalur frozen-aware app_base_dir ------------------------------
+    from src.config import app_base_dir
+
+    _dev74 = app_base_dir()
+    check("(v3.9.62) §74c: app_base_dir DEV = root proyek (parent src/)",
+          _dev74 == _sub74, str(_dev74))
+    _fake74 = _sub74 / "dist" / "StockMonitor" / "StockMonitor.exe"
+    _fake74.parent.mkdir(parents=True, exist_ok=True)
+    _fake74.write_text("stub", encoding="utf-8")
+    _oldfrz74, _oldexe74 = getattr(sys, "frozen", False), sys.executable
+    try:
+        sys.frozen = True
+        sys.executable = str(_fake74)
+        _fz74 = app_base_dir()
+    finally:
+        sys.frozen = _oldfrz74
+        sys.executable = _oldexe74
+    check("(v3.9.62) §74c: app_base_dir FROZEN = folder .exe (config/"
+          "settings/followup/crash.log hidup BERSAMA exe, bukan "
+          "_internal temporer)",
+          _fz74 == _fake74.parent, str(_fz74))
+    _fake74.unlink()
+    with contextlib.suppress(OSError):
+        _fake74.parent.rmdir()
+        (_sub74 / "dist").rmdir()
+    from src.ui import app as _A74
+    from src.ui import deviasi_view as _D74
+    from src.ui import followup as _F74
+    check("(v3.9.62) §74c: SEMUA jalur runtime konsisten app_base_dir "
+          "(CONFIG_PATH · _SETTINGS_PATH · _BASE followup · "
+          "_SETTINGS_BASE ACR + modul bersama is-check — satu sumber "
+          "kebenaran; NOTE: fungsi followup_path() SUDAH di-patch §45 "
+          "utk isolasi temp, konstanta sumber tetap diverifikasi)",
+          _A74.CONFIG_PATH == _dev74 / "config.json"
+          and _A74._SETTINGS_PATH == _dev74 / "settings.json"
+          and _F74._BASE == _dev74
+          and _A74._app_base_dir is app_base_dir
+          and _D74._SETTINGS_BASE == _dev74
+          and _D74.acr_settings_path() == _dev74 / "settings.json")
+    from src.ui import __main__ as _M74
+    check("(v3.9.62) §74c: crash.log launcher __main__ DEV = root proyek "
+          "(frozen = samping exe)",
+          _M74._CRASH_LOG == _dev74 / "crash.log", str(_M74._CRASH_LOG))
 
     root.destroy()
 

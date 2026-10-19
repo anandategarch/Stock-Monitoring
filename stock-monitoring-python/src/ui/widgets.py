@@ -123,10 +123,12 @@ _VALUE_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$|^\d+(?:,\d+)?$")
 
 
 def _filter_value_sort_key(v: str):
-    """Key tuple (numerik_dulu, angka, teks_asli) — teks non-numerik
-    masuk grup kedua (urut abjad), angka grup pertama (naik).
+    """Key tuple (numerik_dulu, angka, kunci_teks) — teks non-numerik
+    masuk grup kedua (urut NATURAL v3.9.62), angka grup pertama (naik).
     v3.9.51: prefiks 'Rp ' (currency — fmt_rp_cell) dibuang dulu supaya
-    nilai nominal tetap terurut numerik di popup filter ⧩."""
+    nilai nominal tetap terurut numerik di popup filter ⧩.
+    v3.9.62: cabang teks memakai natural_key ("Nomor PO 2" < "Nomor
+    PO 10" — dulu leksikografis)."""
     s = str(v).strip()
     if s.endswith("%"):
         s = s[:-1].strip()
@@ -138,12 +140,47 @@ def _filter_value_sort_key(v: str):
     if s[:2].upper() == "RP":
         s = s[2:].lstrip()
     if not s or not _VALUE_NUM_RE.match(s):
-        return (1, 0.0, str(v))
+        return (1, 0.0, natural_key(v))
     try:
         num = float(s.replace(".", "").replace(",", "."))
     except ValueError:
-        return (1, 0.0, str(v))
+        return (1, 0.0, natural_key(v))
     return (0, -num if neg else num, str(v))
+
+
+# v3.9.62 — SORT NATURAL (referensi: fitur "natural sorting" tksheet):
+# fallback string sort dulu memakai urutan Leksikografis — "Barang 10"
+# < "Barang 2" (karakter '1' < '2'), "R02-777" < "R02-9". Kolom teks
+# yang MENYEMBUNYIKAN angka (Nama Barang, Nomor PO, kode rak) terurut
+# salah di mata pengguna.
+_NATURAL_SPLIT_RE = re.compile(r"(\d+)")
+
+
+def natural_key(value) -> tuple:
+    """v3.9.62 — kunci sort NATURAL (campuran angka + teks).
+
+    String dipecah per run digit: tiap potongan jadi tuple
+    (jenis, angka, teks_casefold) — run digit dibandingkan NUMERIK,
+    teks CASE-INSENSITIVE ("item" == "Item"). Contoh:
+        natural_key("Barang 2")  < natural_key("Barang 10")
+        natural_key("R02-9")     < natural_key("R02-777")
+        natural_key("")          == ()  (selalu paling awal ascending)
+
+    Pemakaian: (1) fallback `sort_tree_by_column` saat kolom tak terurut
+    numerik (jalur parse-numerik TIDAK tersentuh); (2) cabang teks
+    `_filter_value_sort_key` (daftar nilai popup filter ⧩).
+    Stabil: nilai dgn kunci sama mempertahankan urutan (sort Python
+    stabil)."""
+    out = []
+    parts = _NATURAL_SPLIT_RE.split(str(value))
+    for idx, part in enumerate(parts):
+        if not part:
+            continue
+        if idx % 2:            # run digit → numerik
+            out.append((1, int(part), ""))
+        else:                  # potongan teks → casefold
+            out.append((0, 0, part.casefold()))
+    return tuple(out)
 
 
 def _ellipsize(text: str, meas, max_px: int) -> str:
@@ -4235,7 +4272,10 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
     try:
         keys.sort(key=lambda x: parse(x[0]), reverse=reverse)
     except (ValueError, TypeError):
-        keys.sort(key=lambda x: str(x[0]), reverse=reverse)
+        # v3.9.62 — fallback NATURAL (referensi tksheet): "Barang 2" <
+        # "Barang 10" (dulu leksikografis terbalik di semua kolom teks
+        # yang menyembunyikan angka — Nama Barang/Nomor PO/kode).
+        keys.sort(key=lambda x: natural_key(str(x[0])), reverse=reverse)
 
     order = [k for _, k in keys]
     # FIX B-21 (audit 2-b): indikator ARAH sort di heading kolom — sebelumnya
@@ -5382,3 +5422,234 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     win.bind("<Escape>", lambda e: win.destroy())
     win.focus_set()
     return win, new_tree
+
+
+# ============================================================================
+# v3.9.62 — CARI DI TABEL (Ctrl+F) — referensi fitur "find window" tksheet,
+# diimplementasikan IN-HOUSE utk ttk.Treeview stdlib (tanpa dependensi baru;
+# tksheet sendiri berhenti dikembangkan kecuali bugfix).
+# ============================================================================
+
+# Tag & warna highlight — keluarga aksen oranye (non-blue, sejalan design
+# sistem #c2410c); opsinya BACKGROUND SAJA supaya TIDAK bentrok dgn tag
+# milik view yang memakai FOREGROUND (negative/zero_dev/CEK) — banding
+# grup sudah dihapus v3.9.61 jadi tak ada tag bg row-level lain.
+FIND_HIT_TAG = "__find_hit"
+FIND_CUR_TAG = "__find_cur"
+FIND_HIT_BG = "#ffedd5"   # orange-100 — SEMUA baris cocok
+FIND_CUR_BG = "#fdba74"   # orange-300 — baris AKTIF (lebih kuat)
+
+
+class TreeFindPopup:
+    """v3.9.62 — popup pencarian baris utk ttk.Treeview (Ctrl+F).
+
+    Perilaku (pola find-window aplikasi modern / tksheet):
+    - substring CASE-INSENSITIVE atas SEMUA kolom (values + teks #0)
+    - semua baris cocok → latar lembut; baris AKTIF → latar kuat +
+      ``tree.see`` (menggulir tabel ke baris itu)
+    - navigasi: Enter = berikutnya · Shift+Enter = sebelumnya (wrap) ·
+      tombol ‹ › · status "i / N baris cocok"
+    - ketik ulang → rehitung DEBOUNCE 160 ms (tabel 29k baris tak
+      discan tiap keystroke)
+    - tangguh thd re-render: iid yang hilang di-skip; bila SEMUA cocok
+      hilang (view reload/filter) → rehitung otomatis dari query aktif
+    - ESC / tombol ✕ / tutup jendela → semua highlight DIBERSIHKAN
+    - satu instance per tree (``tree._find_popup`` — pola _last_sort);
+      non-modal: pengguna tetap bisa menggulir/sort tabel selama buka.
+    """
+
+    _DEBOUNCE_MS = 160
+    _NAV_KEYSYM = frozenset({"Return", "KP_Enter", "Escape", "Tab",
+                              "Shift_L", "Shift_R", "Left", "Right",
+                              "Up", "Down", "Home", "End", "Prior",
+                              "Next", "Control_L", "Control_R"})
+
+    def __init__(self, tree: ttk.Treeview):
+        self.tree = tree
+        self._matches = []          # iid cocok (urut tampil)
+        self._cur = -1              # indeks match aktif
+        self._after_id = None
+        try:
+            tree.tag_configure(FIND_HIT_TAG, background=FIND_HIT_BG)
+            tree.tag_configure(FIND_CUR_TAG, background=FIND_CUR_BG)
+        except tk.TclError:
+            pass
+        top = tree.winfo_toplevel()
+        self.win = tk.Toplevel(top)
+        self.win.title("Cari di tabel")
+        self.win.transient(top)
+        self.win.resizable(False, False)
+        row = ttk.Frame(self.win, padding=(8, 8, 8, 2))
+        row.pack(fill="x")
+        ttk.Label(row, text="Cari:").pack(side="left")
+        self.var = tk.StringVar()
+        self.entry = ttk.Entry(row, textvariable=self.var, width=26)
+        self.entry.pack(side="left", padx=(6, 6))
+        self.entry.bind("<Return>", lambda e: self._nav(1))
+        self.entry.bind("<Shift-Return>", lambda e: self._nav(-1))
+        self.entry.bind("<KeyRelease>", self._on_keyrelease)
+        self._btn_prev = ttk.Button(row, text="‹", width=3,
+                                    command=lambda: self._nav(-1))
+        self._btn_prev.pack(side="left")
+        self._btn_next = ttk.Button(row, text="›", width=3,
+                                    command=lambda: self._nav(1))
+        self._btn_next.pack(side="left", padx=(4, 8))
+        self._btn_close = ttk.Button(row, text="✕", width=3,
+                                     command=self.close)
+        self._btn_close.pack(side="left")
+        self.status = ttk.Label(
+            self.win, padding=(10, 0, 10, 6),
+            text="Ketik untuk mencari — Enter = berikutnya · "
+                 "Shift+Enter = sebelumnya · Esc = tutup")
+        self.status.pack(fill="x")
+        self.win.bind("<Escape>", lambda e: self.close())
+        self.win.protocol("WM_DELETE_WINDOW", self.close)
+        self._place(top)
+        self.entry.focus_set()
+
+    # --- penempatan jendela ------------------------------------------
+    def _place(self, top) -> None:
+        """Kanan-atas jendela pemilik (tak menutupi area kiri tabel)."""
+        with contextlib.suppress(tk.TclError):
+            self.win.update_idletasks()
+            _w = self.win.winfo_reqwidth()
+            _x = top.winfo_rootx() + max(8, top.winfo_width() - _w - 24)
+            _y = top.winfo_rooty() + 56
+            self.win.geometry(f"+{max(_x, 0)}+{max(_y, 0)}")
+
+    # --- highlight tag (merge — jangan hapus tag milik view) ---------
+    def _apply_tag(self, iid, tag: str) -> None:
+        try:
+            tags = tuple(tg for tg in (self.tree.item(iid, "tags") or ())
+                         if tg not in (FIND_HIT_TAG, FIND_CUR_TAG))
+            self.tree.item(iid, tags=tags + (tag,))
+        except tk.TclError:
+            pass   # iid hilang di tengah jalan (re-render / clone ⛶)
+
+    def _clear_tags(self) -> None:
+        for iid in list(self._matches):
+            try:
+                tags = tuple(
+                    tg for tg in (self.tree.item(iid, "tags") or ())
+                    if tg not in (FIND_HIT_TAG, FIND_CUR_TAG))
+                self.tree.item(iid, tags=tags)
+            except tk.TclError:
+                continue
+
+    # --- hitung ulang pencocokan --------------------------------------
+    def _recompute(self) -> None:
+        self._after_id = None
+        self._clear_tags()
+        self._matches = []
+        self._cur = -1
+        q = (self.var.get() or "").strip().casefold()
+        if not q:
+            self._set_status("Ketik untuk mencari — Enter = berikutnya · "
+                             "Shift+Enter = sebelumnya · Esc = tutup")
+            return
+        try:
+            children = list(self.tree.get_children(""))
+        except tk.TclError:
+            return
+        for iid in children:
+            try:
+                it = self.tree.item(iid)
+            except tk.TclError:
+                continue
+            hay = " ".join(str(v) for v in (it.get("values") or ()))
+            txt = str(it.get("text") or "")
+            if q in hay.casefold() or q in txt.casefold():
+                self._matches.append(iid)
+        if not self._matches:
+            self._set_status("Tidak ada baris yang cocok")
+            return
+        for iid in self._matches:
+            self._apply_tag(iid, FIND_HIT_TAG)
+        self._cur = 0
+        self._show_current()
+
+    def _set_status(self, text: str) -> None:
+        with contextlib.suppress(tk.TclError):
+            self.status.configure(text=text)
+
+    def _on_keyrelease(self, event=None) -> None:
+        if event is not None and event.keysym in self._NAV_KEYSYM:
+            return
+        if self._after_id is not None:
+            with contextlib.suppress(Exception):
+                self.tree.after_cancel(self._after_id)
+        self._after_id = self.tree.after(self._DEBOUNCE_MS, self._recompute)
+
+    def _refresh_stale(self) -> None:
+        """Match list basi (view re-render) → saring yang masih ada;
+        bila habis → rehitung penuh dari query."""
+        self._matches = [iid for iid in self._matches
+                         if self.tree.exists(iid)]
+        if not self._matches:
+            if (self.var.get() or "").strip():
+                self._recompute()
+            return
+        if self._cur >= len(self._matches):
+            self._cur = 0
+        self._show_current()
+
+    def _show_current(self) -> None:
+        if not self._matches:
+            return
+        self._cur %= len(self._matches)
+        iid = self._matches[self._cur]
+        self._set_status(f"{self._cur + 1} / {len(self._matches)} "
+                         f"baris cocok")
+        if not self.tree.exists(iid):
+            self._refresh_stale()
+            return
+        for other in self._matches:
+            if other != iid:
+                self._apply_tag(other, FIND_HIT_TAG)
+        self._apply_tag(iid, FIND_CUR_TAG)
+        with contextlib.suppress(tk.TclError):
+            self.tree.see(iid)
+
+    def _nav(self, delta: int) -> None:
+        if not self._matches:
+            if (self.var.get() or "").strip():
+                self._recompute()
+            if not self._matches:
+                return
+        self._cur = (self._cur + delta) % len(self._matches)
+        self._show_current()
+
+    # --- tutup + bersihkan --------------------------------------------
+    def close(self) -> None:
+        if self._after_id is not None:
+            with contextlib.suppress(Exception):
+                self.tree.after_cancel(self._after_id)
+            self._after_id = None
+        self._clear_tags()
+        self._matches = []
+        with contextlib.suppress(Exception):
+            self.tree._find_popup = None
+        with contextlib.suppress(tk.TclError):
+            self.win.destroy()
+
+
+def open_tree_find(tree: ttk.Treeview):
+    """v3.9.62 — buka/fokus popup Cari utk tree (Ctrl+F; satu instance
+    per tree — pola ``tree._find_popup``). Return popup atau None bila
+    tree sudah tak hidup."""
+    try:
+        if not tree.winfo_exists():
+            return None
+    except tk.TclError:
+        return None
+    pop = getattr(tree, "_find_popup", None)
+    if pop is not None:
+        with contextlib.suppress(Exception):
+            if pop.win.winfo_exists():
+                pop.win.deiconify()
+                pop.entry.focus_set()
+                pop.entry.select_range(0, "end")
+                return pop
+    pop = TreeFindPopup(tree)
+    tree._find_popup = pop
+    return pop

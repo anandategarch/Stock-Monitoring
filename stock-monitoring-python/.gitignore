@@ -24,3 +24,7 @@ desktop.ini
 
 # Dev E2E scripts & sandbox (bukan bagian app)
 .dev/
+
+# v3.9.62 — artefak build PyInstaller (build_exe.py)
+build/
+dist/

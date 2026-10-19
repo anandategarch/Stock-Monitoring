@@ -233,6 +233,7 @@ from tkinter import messagebox, ttk
 import numpy as np
 import pandas as pd
 
+from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
 from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 — lalu file
@@ -417,7 +418,8 @@ class SharedACRThreshold:
 
 
 # --- persistensi ambang ACR (settings.json — pola followup.json) ----------
-_SETTINGS_BASE = Path(__file__).resolve().parent.parent.parent
+# v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
+_SETTINGS_BASE = _app_base_dir()
 
 
 def acr_settings_path() -> Path:

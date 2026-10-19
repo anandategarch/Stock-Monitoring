@@ -38,7 +38,13 @@ from pathlib import Path
 # Lokasi crash.log = di samping config.json (root proyek) — konsisten
 # dengan CONFIG_PATH app.py (kebijakan v3.9.42 F1: saat pythonw mati
 # tanpa console, file = satu-satunya jejak yang tersisa).
-_CRASH_LOG = Path(__file__).resolve().parent.parent.parent / "crash.log"
+# v3.9.62 — frozen-aware (PyInstaller): crash.log di samping .exe
+# (base exe), bukan _internal temporer — stdlib-murni, dihitung inline
+# (modul ini sengaja TIDAK meng-import modul proyek di level atas).
+_CRASH_LOG = (
+    Path(sys.executable).resolve().parent / "crash.log"
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent.parent.parent / "crash.log")
 
 
 def _report_import_failure(tb_text: str) -> None:

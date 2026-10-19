@@ -46,6 +46,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
+
 _LOG = logging.getLogger("stock_monitoring.followup")
 
 # Snapshot row keys (persis kolom tabel Follow Up, tanpa ✓/status TL).
@@ -122,7 +124,8 @@ def _cek_display_text(v) -> str:
     return t
 
 # Path (dynamis — pola config.json di app.py)
-_BASE = Path(__file__).resolve().parent.parent.parent
+# v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
+_BASE = _app_base_dir()
 
 
 def followup_path() -> Path:
