@@ -30,6 +30,7 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     font,
+    register_find_tags,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
@@ -49,6 +50,7 @@ from .widgets import (
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
+    install_tree_find_binding,  # v3.9.64 — F-07: Ctrl+F aktif di popup
     kategori_match_mask,  # v3.9.54 — popup KATEGORI virtual (fix kosong)
     open_tree_maximized,
     run_async,
@@ -277,6 +279,9 @@ class DetailsPopup(tk.Toplevel):
         card_in.grid_columnconfigure(0, weight=1)
 
         self._setup_tags(self.tree)
+        # v3.9.64 — FIX (audit 15-c F-07): Ctrl+F aktif DI DALAM popup
+        # (Toplevel sendiri — bindtag-nya tak memuat binding root app).
+        install_tree_find_binding(self, lambda: self.tree)
 
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
@@ -338,6 +343,9 @@ class DetailsPopup(tk.Toplevel):
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
+        # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
+        # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
+        register_find_tags(tree)
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")

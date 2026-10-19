@@ -70,6 +70,7 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     font,
+    register_find_tags,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
@@ -401,6 +402,9 @@ class NominalDeviasiView(tk.Frame):
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
+        # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
+        # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
+        register_find_tags(tree)
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")

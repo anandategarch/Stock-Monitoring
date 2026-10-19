@@ -47,6 +47,7 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     font,
+    register_find_tags,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
@@ -294,6 +295,9 @@ class FollowUpView(tk.Frame):
             return
 
     def _setup_tags(self):
+        # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
+        # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
+        register_find_tags(self.tree)
         self.tree.tag_configure("evenrow", background="#ffffff")
         self.tree.tag_configure("oddrow", background="#f8fafc")
         self.tree.tag_configure("negative", foreground="#dc2626")

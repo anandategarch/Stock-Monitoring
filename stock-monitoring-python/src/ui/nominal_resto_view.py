@@ -117,6 +117,7 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     font,
+    register_find_tags,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
@@ -136,7 +137,6 @@ from .widgets import (
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
-    identify_to_column,  # v3.9.54 — _event_col_name display-aware
     insert_tree_items,
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
@@ -373,6 +373,7 @@ class NominalRestoView(tk.Frame):
         # anak tab SENDIRI (default 'Semua' = global — tidak terikat
         # filter KATEGORI tab Per Resto).
         self._noharga_df: pd.DataFrame | None = None
+        self._nh_neg_cells: list = []   # v3.9.64 — N9: minus merah per-cell anak tab
         self._nh_kategori_sel: str | None = None
         self._nh_col_sel: dict = {
             c[0]: None for c in NOHARGA_COLUMNS}
@@ -748,6 +749,9 @@ class NominalRestoView(tk.Frame):
                  else None)
         sort_tree_by_column(self.tree_noharga, col, reverse=reverse,
                             parse=parse)
+        # v3.9.64 — N9: pasang ulang minus merah per-cell pasca-sort
+        # (sort = move — iid tetap; reapply defensif pola tabel utama)
+        self._reapply_nh_cell_tags()
 
     @staticmethod
     def _kategori_mask_series(kat, sel):
@@ -768,6 +772,14 @@ class NominalRestoView(tk.Frame):
                 kat).fillna(False)
         return kat.astype(str) == str(sel)
 
+    def _reapply_nh_cell_tags(self, _tree=None):
+        """v3.9.64 — FIX (audit 15-a N9): minus merah PER-CELL kolom
+        'Kuantiti Deviasi' anak tab 'Tanpa Harga' (parity tabel utama +
+        popup lama — dulu '(8)' tampil hitam). Dipanggil on_done
+        insert_tree_items (tag cell terpasang SETELAH semua baris hidup)
+        + pasca-sort; apply_cell_tag best-effort (Tk 8 no-op senyap)."""
+        apply_cell_tag(self.tree_noharga, "neg_cell", self._nh_neg_cells)
+
     def _render_noharga(self):
         """Render tabel anak tab 'Tanpa Harga' dari frame GLOBAL
         self._noharga_df + filter kategori/⧩ anak tab (tanpa recompute —
@@ -777,6 +789,14 @@ class NominalRestoView(tk.Frame):
             self._nh_insert_cancel = None
         self.tree_noharga.delete(
             *self.tree_noharga.get_children(""))
+        # v3.9.64 — N8: segarkan ikon ⧩ (pola _render_rows — dulu hanya
+        # di-clear saat load_data, ikon filter aktif bisa tersisa basi)
+        # + N9: reset daftar sel minus + lepas tag cell lama.
+        self._nh_neg_cells = []
+        apply_cell_tag(self.tree_noharga, "neg_cell", [])
+        if getattr(self, "_nh_filters", None) is not None:
+            with contextlib.suppress(Exception):
+                self._nh_filters.refresh_icons()
         self._nh_h_var.set(str(self.tanggal_h))
         df = self._noharga_df
         if df is None:
@@ -816,19 +836,28 @@ class NominalRestoView(tk.Frame):
         f = f.reset_index(drop=True)
         for i in range(len(f)):
             row = f.iloc[i]
+            _qty76 = row.get("Qty Deviasi", 0)
             values = (
                 str(row["Resto"]),
                 self._nh_kategori_disp(row.get("KATEGORI")),
                 str(row["Nama Barang"]),
                 str(row.get("Satuan", "-")),
-                fmt_nominal_cell(row.get("Qty Deviasi", 0)),
+                fmt_nominal_cell(_qty76),
                 self._noharga_ket(row.get("Harga Tampil")),
             )
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
+            # v3.9.64 — N9: nilai Kuantiti Deviasi minus → tag per-cell
+            try:
+                if float(_qty76) < 0:
+                    self._nh_neg_cells.append(
+                        (f"row_{i}", "Kuantiti Deviasi"))
+            except (TypeError, ValueError):
+                pass
         self._nh_insert_cancel = insert_tree_items(
-            self.tree_noharga, items, batch=500)
+            self.tree_noharga, items, batch=500,
+            on_done=self._reapply_nh_cell_tags)
         _n_all = len(df)
         status = (f"{fmt_int_id(len(f))} dari {fmt_int_id(_n_all)} "
                   f"pasangan tanpa harga · GLOBAL semua kategori & resto "
@@ -1048,6 +1077,9 @@ class NominalRestoView(tk.Frame):
 
     def _setup_tags(self, tree=None):
         tree = tree if tree is not None else self.tree
+        # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
+        # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
+        register_find_tags(tree)
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")
@@ -1181,13 +1213,17 @@ class NominalRestoView(tk.Frame):
         if h is None:
             h = self.tanggal_h
         # v3.9.63 — ANAK TAB 'Tanpa Harga' GLOBAL: pasangan tanpa harga
-        # dihitung dari data MENTAH (param `data` — sebelum filter
-        # kategori meng-rebind `df`) supaya TIDAK terikat filter KATEGORI
-        # tab Per Resto (user: "menampilkan secara global"). Dihitung di
-        # worker yang sama (sekali jalan, tak ada recompute saat ganti
-        # anak tab / filter kategori anak tab).
+        # dihitung dari data MENTAH PRA-FILTER (df — SEBELUM filter kategori
+        # meng-rebind df di bawah) supaya TIDAK terikat filter KATEGORI
+        # tab Per Resto (user: "menampilkan secara global").
+        # v3.9.64 — FIX (audit 15-a R3): pakai `df`, BUKAN param `data` —
+        # panggilan programatik _compute_resto() TANPA argumen (data=None)
+        # dulu menghasilkan anak tab KOSONG senyap (df = self.data utk
+        # jalur default; tabel utama tetap benar).
+        # Dihitung di worker yang sama (sekali jalan, tak ada recompute
+        # saat ganti anak tab / filter kategori anak tab).
         self._noharga_df = pasangan_tanpa_harga_global(
-            data, h, self.harga_map, self.konversi_map)
+            df, h, self.harga_map, self.konversi_map)
         # v3.9.59 — FIX 2e-03: hitung PRA-kategori (baris 3.DEVIASI@H
         # di data mentah) — utk pesan status jujur di jalur render kosong.
         try:
@@ -1332,7 +1368,30 @@ class NominalRestoView(tk.Frame):
     # =========================================================================
     def _refresh(self, sync: bool = False):
         if self.data is None or self.data.empty:
+            # v3.9.64 — FIX (audit 15-a R4): data kosong TIDAK boleh
+            # menyisakan baris LAMA di layar — dulu early-return tanpa
+            # clear → tabel utama + anak tab masih menampilkan render
+            # sebelumnya dgn status "Belum ada data." (menyesatkan).
+            # Bersihkan kedua tabel + tag per-cell + frame anak tab,
+            # lalu render anak tab (status anak tab jujur).
+            if self._insert_cancel is not None:
+                self._insert_cancel()
+                self._insert_cancel = None
+            if self._nh_insert_cancel is not None:
+                self._nh_insert_cancel()
+                self._nh_insert_cancel = None
+            self._noharga_df = None
+            self._neg_cells = []
+            self._total_cells = []
+            self._nh_neg_cells = []
+            with contextlib.suppress(tk.TclError):
+                self.tree.delete(*self.tree.get_children(""))
+            apply_cell_tag(self.tree, "neg_cell", [])
+            apply_cell_tag(self.tree, "total_cell", [])
+            self._render_noharga()
             self.status_var_label.set("Belum ada data.")
+            with contextlib.suppress(Exception):
+                self._total_var.set("")
             return
         if self._busy:
             self._pending = True
@@ -1636,32 +1695,6 @@ class NominalRestoView(tk.Frame):
     # =========================================================================
     # DOUBLE-CLICK → POPUP (rincian per resto / tanpa harga)
     # =========================================================================
-    def _event_col_name(self, tree, event) -> "str | None":
-        """v3.9.36 — nama kolom data pada posisi klik event (None bila
-        event tanpa x / kolom tak teridentifikasi — pemanggil
-        program lama tetap dapat popup rincian).
-
-        v3.9.54 FIX (audit 8-a P1-4): identify_column() = ID POSISIONAL
-        display ('#2') — dulu dipetakan ke index URUTAN LOGIS
-        tree["columns"] → setelah kolom disembunyikan (ColumnManager /
-        clone ⛶), double-click sel 'Tanpa Harga' resolve kolom SALAH
-        (popup tanpa-harga tidak terbuka / kolom lain terpicu). Kelas
-        fix v3.6/v3.7 yang sudah diterapkan di semua view lain
-        (deviasi/laporan/komparasi/followup/in_selisih/details_popup).
-        Kini memakai identify_to_column (displaycolumns-aware).
-        """
-        try:
-            cid = tree.identify_column(event.x)
-        except (AttributeError, tk.TclError, TypeError):
-            # event sintetis tanpa x / tree sudah di-destroy
-            return None
-        if not cid or cid == "#0":
-            return None
-        try:
-            return identify_to_column(tree, cid)
-        except (ValueError, IndexError, TypeError, tk.TclError):
-            return None
-
     def _on_double_click(self, event):
         tree = event.widget
         try:

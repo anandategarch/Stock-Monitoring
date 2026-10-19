@@ -6,6 +6,9 @@
 # menjamin display virtual HIDUP sebelum suite berjalan, lalu
 # meneruskan exit code suite (CI-friendly).
 #
+# v3.9.64 — FIX (audit 15-c F-06): xdpyinfo TIDAK lagi hard-require —
+# display hidup dicek via xdpyinfo BILA ADA, fallback probe Tk singkat.
+#
 # Pemakaian (dari folder stock-monitoring-python):
 #   bash run_tests.sh                  # pakai .venv/bin/python bila ada
 #   PYTHON=python3 bash run_tests.sh   # pakai interpreter lain
@@ -31,25 +34,36 @@ else
   PY="$PYTHON"
 fi
 
-if ! command -v xdpyinfo >/dev/null 2>&1; then
-  echo "[test] xdpyinfo tidak ada — pasang paket x11-utils (atau jalankan" >&2
-  echo "[test] dengan DISPLAY aktif: DISPLAY=:0 bash run_tests.sh)" >&2
-  exit 2
-fi
+# --- v3.9.64 — FIX (audit 15-c F-06): cek display TANPA hard-require -----
+# xdpyinfo. Dulu script exit 2 walau Xvfb :N SUDAH HIDUP hanya karena
+# xdpyinfo tidak terpasang (x11-utils opsional). Kini: pakai xdpyinfo bila
+# ada; kalau tidak, probe socket X + sambungan Tk singkat via interpreter
+# terpilih (Python selalu ada di jalur harness ini).
+_xvfb_alive() {
+  [ -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ] || return 1
+  if command -v xdpyinfo >/dev/null 2>&1; then
+    xdpyinfo -display ":$DISPLAY_NUM" >/dev/null 2>&1
+  else
+    DISPLAY=":$DISPLAY_NUM" timeout 6 "$PY" \
+      -c "import tkinter; tkinter.Tk().destroy()" >/dev/null 2>&1
+  fi
+}
 
 # --- pastikan Xvfb :N hidup --------------------------------------------------
-if ! xdpyinfo -display ":$DISPLAY_NUM" >/dev/null 2>&1; then
+if ! _xvfb_alive; then
   echo "[test] memulai Xvfb :$DISPLAY_NUM ..."
   (setsid Xvfb ":$DISPLAY_NUM" -screen 0 1920x1080x24 \
      >"/tmp/xvfb_${DISPLAY_NUM}.log" 2>&1 &)
   for _ in $(seq 1 60); do
-    xdpyinfo -display ":$DISPLAY_NUM" >/dev/null 2>&1 && break
+    _xvfb_alive && break
     sleep 0.1
   done
 fi
 
-if ! xdpyinfo -display ":$DISPLAY_NUM" >/dev/null 2>&1; then
+if ! _xvfb_alive; then
   echo "[test] Xvfb :$DISPLAY_NUM GAGAL hidup — cek /tmp/xvfb_${DISPLAY_NUM}.log" >&2
+  echo "[test] (pastikan Xvfb terpasang: apt install xvfb / x11-utils opsional" >&2
+  echo "[test]  sejak v3.9.64 — display hidup dicek tanpa xdpyinfo)" >&2
   exit 2
 fi
 

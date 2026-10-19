@@ -61,6 +61,31 @@ C_LOG_FG = "#cbd5e1"
 ROW_EVEN = "#ffffff"
 ROW_ODD = "#f8fafc"
 
+# --- Tag highlight CARI (Ctrl+F — v3.9.64) ----------------------------------
+# v3.9.64 — FIX (audit 15-c F-01, pixel-probe Xvfb Tk 9.0.4): prioritas tag
+# ttk.Treeview = URUTAN CREATE (tag yang DI-CONFIGURE lebih dulu MENANG;
+# urutan list tag per-item TIDAK berpengaruh — diuji: prepend di list tetap
+# kalah). Popup Cari (TreeFindPopup) membuka SETELAH view memasang tag
+# zebra/bg → tag find kalah prioritas → highlight ORANYE TIDAK PERNAH
+# TAMPIL di semua tree ber-tag latar baris (🧮 kedua tree, 📋 3 mode, ☑
+# Follow Up, Rekap IN, Rincian-PO parent/TOTAL, Pivot header/anomaly).
+# FIX: tag find WAJIB di-configure SEBELUM tag view — helper
+# register_find_tags() dipanggil di BARIS PERTAMA setup_tree_tags +
+# _setup_tags SETIAP view (idempotent — re-configure tak mengubah prioritas).
+# Opsi background SAJA (fg milik view — negative/zero/CEK — tak tersentuh).
+FIND_HIT_TAG = "__find_hit"
+FIND_CUR_TAG = "__find_cur"
+FIND_HIT_BG = "#ffedd5"   # orange-100 — SEMUA baris cocok
+FIND_CUR_BG = "#fdba74"   # orange-300 — baris AKTIF (lebih kuat)
+
+
+def register_find_tags(tree) -> None:
+    """v3.9.64 — pasang tag highlight Cari SEBELUM tag baris view
+    (prioritas tag Treeview = urutan create — lihat catatan di atas).
+    Idempotent: tag_configure ulang tidak mengubah prioritas."""
+    tree.tag_configure(FIND_HIT_TAG, background=FIND_HIT_BG)
+    tree.tag_configure(FIND_CUR_TAG, background=FIND_CUR_BG)
+
 # --- Font -------------------------------------------------------------------
 _FONT_CANDIDATES = [
     "Segoe UI",      # Windows
@@ -410,7 +435,10 @@ def setup_tree_tags(tree: ttk.Treeview, extra_tags: dict | None = None) -> None:
 
     extra_tags: dict {tag: {"foreground": ..., "background": ...}} untuk
     pewarnaan spesifik view (status, CEK, dsb).
+    v3.9.64 — tag Cari (Ctrl+F) didaftarkan PERTAMA (prioritas create —
+    FIX audit 15-c F-01: highlight find harus menang atas zebra/bg view).
     """
+    register_find_tags(tree)   # v3.9.64 — WAJIB sebelum tag bg view
     tree.tag_configure("evenrow", background=ROW_EVEN)
     tree.tag_configure("oddrow", background=ROW_ODD)
     tree.tag_configure("negative", foreground=C_RED)

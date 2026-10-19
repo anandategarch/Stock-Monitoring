@@ -80,6 +80,10 @@ from .theme import (
     C_RED_SOFT,
     C_TEXT_MUTED,
     C_TEXT_SOFT,
+    FIND_CUR_BG,
+    FIND_CUR_TAG,
+    FIND_HIT_BG,
+    FIND_HIT_TAG,
     bind_ctrl_zoom,
     font,
     mono,
@@ -128,7 +132,9 @@ def _filter_value_sort_key(v: str):
     v3.9.51: prefiks 'Rp ' (currency — fmt_rp_cell) dibuang dulu supaya
     nilai nominal tetap terurut numerik di popup filter ⧩.
     v3.9.62: cabang teks memakai natural_key ("Nomor PO 2" < "Nomor
-    PO 10" — dulu leksikografis)."""
+    PO 10" — dulu leksikografis).
+    v3.9.64: prefiks '+' juga dibuang (fmt_pct_cell bertanda — '+12,5%'
+    dulu masuk grup TEKS sementara '-8,3%' numerik; audit 15-c F-05)."""
     s = str(v).strip()
     if s.endswith("%"):
         s = s[:-1].strip()
@@ -137,6 +143,8 @@ def _filter_value_sort_key(v: str):
         neg, s = True, s[1:-1].strip()
     elif s.startswith("-"):
         neg, s = True, s[1:]
+    elif s.startswith("+"):
+        s = s[1:]
     if s[:2].upper() == "RP":
         s = s[2:].lstrip()
     if not s or not _VALUE_NUM_RE.match(s):
@@ -3211,6 +3219,15 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
                   f"(TclError — iid duplikat/baris invalid)", file=sys.stderr)
         if on_done:
             on_done()
+        # v3.9.64 — FIX (audit 15-c F-03): render penuh selesai → popup
+        # Cari milik tree menghitung ULANG (iid posional row_N dipakai
+        # ulang view pasca re-render; tanpa ini highlight lama mendarat
+        # di baris SALAH — semua iid masih "ada" sehingga _refresh_stale
+        # tidak terpicu).
+        _pop = getattr(tree, "_find_popup", None)
+        if _pop is not None:
+            with contextlib.suppress(Exception):
+                _pop._on_tree_rerendered()
 
     def chunk():
         if state["cancelled"]:
@@ -3247,8 +3264,16 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
 
     if items:
         chunk()
-    elif on_done:
-        on_done()
+    else:
+        # v3.9.64 — F-03: render "kosong" (0 item) juga menuntaskan siklus
+        # render → popup Cari ikut menghitung ulang (query bisa jadi tak
+        # cocok lagi — view terfilter habis).
+        if on_done:
+            on_done()
+        _pop = getattr(tree, "_find_popup", None)
+        if _pop is not None:
+            with contextlib.suppress(Exception):
+                _pop._on_tree_rerendered()
 
     def cancel():
         state["cancelled"] = True
@@ -5292,6 +5317,11 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         except Exception:
             pass
 
+    # v3.9.64 — FIX (audit 15-c F-07): Ctrl+F jalan DI DALAM window clone ⛶
+    # (Toplevel sendiri — bindtag Toplevel-nya tak memuat binding root app;
+    # clone = tabel besar 29k baris, justru paling butuh pencarian).
+    install_tree_find_binding(win, lambda: new_tree)
+
     # v3.4: resize kolom manual + auto-fit — dipasang PERTAMA supaya
     # "break" saat drag/double-click tepi kolom mematikan handler view
     enable_col_resize(new_tree)
@@ -5432,12 +5462,12 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
 
 # Tag & warna highlight — keluarga aksen oranye (non-blue, sejalan design
 # sistem #c2410c); opsinya BACKGROUND SAJA supaya TIDAK bentrok dgn tag
-# milik view yang memakai FOREGROUND (negative/zero_dev/CEK) — banding
-# grup sudah dihapus v3.9.61 jadi tak ada tag bg row-level lain.
-FIND_HIT_TAG = "__find_hit"
-FIND_CUR_TAG = "__find_cur"
-FIND_HIT_BG = "#ffedd5"   # orange-100 — SEMUA baris cocok
-FIND_CUR_BG = "#fdba74"   # orange-300 — baris AKTIF (lebih kuat)
+# milik view yang memakai FOREGROUND (negative/zero_dev/CEK).
+# v3.9.64 — FIX (audit 15-c F-01): konstanta dipindah ke theme.py + tag
+# didaftarkan SEBELUM tag bg view (register_find_tags) — prioritas tag
+# Treeview = URUTAN CREATE; di sini (pembukaan popup) terlambat = highlight
+# kalah oleh zebra evenrow/oddrow dan TIDAK dirender. Re-export utk
+# kompatibilitas (test/§72 mengimpor dari widgets).
 
 
 class TreeFindPopup:
@@ -5463,12 +5493,24 @@ class TreeFindPopup:
                               "Shift_L", "Shift_R", "Left", "Right",
                               "Up", "Down", "Home", "End", "Prior",
                               "Next", "Control_L", "Control_R"})
+    # v3.9.64 — FIX (audit 15-c F-07): popup Cari aktif SELALU SATU di
+    # seluruh app (buka utk tree lain → popup lama ditutup; dulu popup
+    # tree utama + popup anak tab bisa KOEKSISTEN — yang satu menempel
+    # pada tabel tak terlihat).
+    _ACTIVE: TreeFindPopup | None = None
 
     def __init__(self, tree: ttk.Treeview):
         self.tree = tree
         self._matches = []          # iid cocok (urut tampil)
         self._cur = -1              # indeks match aktif
         self._after_id = None
+        self._digest: dict = {}     # v3.9.64 — iid → digest nilai baris saat match
+        # v3.9.64 — single-active (audit 15-c F-07): tutup popup tree LAIN
+        _prev = TreeFindPopup._ACTIVE
+        if _prev is not None:
+            with contextlib.suppress(Exception):
+                _prev.close()
+        TreeFindPopup._ACTIVE = self
         try:
             tree.tag_configure(FIND_HIT_TAG, background=FIND_HIT_BG)
             tree.tag_configure(FIND_CUR_TAG, background=FIND_CUR_BG)
@@ -5536,12 +5578,23 @@ class TreeFindPopup:
             except tk.TclError:
                 continue
 
+    # v3.9.64 — digest nilai baris (audit 15-c F-03): iid posisional
+    # (row_0, row_1, …) DIPAKAI ULANG view saat re-render → iid "masih
+    # ada" tapi isinya baris LAIN; tanpa validasi, highlight/Enter
+    # mendarat di data SALAH senyap.
+    def _row_digest(self, iid) -> str:
+        it = self.tree.item(iid)
+        hay = " ".join(str(v) for v in (it.get("values") or ()))
+        txt = str(it.get("text") or "")
+        return hay + "\x00" + txt
+
     # --- hitung ulang pencocokan --------------------------------------
     def _recompute(self) -> None:
         self._after_id = None
         self._clear_tags()
         self._matches = []
         self._cur = -1
+        self._digest = {}
         q = (self.var.get() or "").strip().casefold()
         if not q:
             self._set_status("Ketik untuk mencari — Enter = berikutnya · "
@@ -5560,6 +5613,7 @@ class TreeFindPopup:
             txt = str(it.get("text") or "")
             if q in hay.casefold() or q in txt.casefold():
                 self._matches.append(iid)
+                self._digest[iid] = hay + "\x00" + txt   # v3.9.64 — F-03
         if not self._matches:
             self._set_status("Tidak ada baris yang cocok")
             return
@@ -5593,6 +5647,15 @@ class TreeFindPopup:
             self._cur = 0
         self._show_current()
 
+    def _on_tree_rerendered(self) -> None:
+        """v3.9.64 — FIX (audit 15-c F-03): tree selesai RE-RENDER PENUH
+        (choke point insert_tree_items) → hitung ulang dari query aktif.
+        Iid posional dipakai ulang view → match lama bisa menempel di
+        data SALAH tanpa satu pun iid hilang (bypass _refresh_stale).
+        Query kosong → _recompute juga membersihkan highlight."""
+        with contextlib.suppress(tk.TclError, AttributeError):
+            self._recompute()
+
     def _show_current(self) -> None:
         if not self._matches:
             return
@@ -5601,6 +5664,17 @@ class TreeFindPopup:
         self._set_status(f"{self._cur + 1} / {len(self._matches)} "
                          f"baris cocok")
         if not self.tree.exists(iid):
+            self._refresh_stale()
+            return
+        # v3.9.64 — F-03: iid hidup tapi isinya BARIS LAIN (iid posional
+        # dipakai ulang) → digest berubah → recompute penuh (rekursif aman:
+        # digest baru tersimpan saat recompute).
+        try:
+            if self._digest.get(iid) is not None \
+                    and self._digest[iid] != self._row_digest(iid):
+                self._recompute()
+                return
+        except tk.TclError:
             self._refresh_stale()
             return
         for other in self._matches:
@@ -5627,6 +5701,8 @@ class TreeFindPopup:
             self._after_id = None
         self._clear_tags()
         self._matches = []
+        if TreeFindPopup._ACTIVE is self:   # v3.9.64 — F-07 single-active
+            TreeFindPopup._ACTIVE = None
         with contextlib.suppress(Exception):
             self.tree._find_popup = None
         with contextlib.suppress(tk.TclError):
@@ -5636,7 +5712,9 @@ class TreeFindPopup:
 def open_tree_find(tree: ttk.Treeview):
     """v3.9.62 — buka/fokus popup Cari utk tree (Ctrl+F; satu instance
     per tree — pola ``tree._find_popup``). Return popup atau None bila
-    tree sudah tak hidup."""
+    tree sudah tak hidup.
+    v3.9.64 — single-active app-wide (audit 15-c F-07): membuka utk tree
+    LAIN otomatis menutup popup lama (constructor TreeFindPopup)."""
     try:
         if not tree.winfo_exists():
             return None
@@ -5653,3 +5731,26 @@ def open_tree_find(tree: ttk.Treeview):
     pop = TreeFindPopup(tree)
     tree._find_popup = pop
     return pop
+
+
+def install_tree_find_binding(top, get_tree) -> None:
+    """v3.9.64 — FIX (audit 15-c F-07): Ctrl+F utk Toplevel NON-root.
+
+    Binding app dipasang di root (bindtag Toplevel hanya memuat root utk
+    widget di jendela UTAMA) — popup rincian (DetailsPopup/DeviasiPopup/
+    InDetailPopup) & clone ⛶ (open_tree_maximized) punya Toplevel sendiri
+    → Ctrl+F mati di sana. Helper ini memasang binding yang sama, dengan
+    target tree dari ``get_tree()`` (dipanggil saat event — tree dibuat
+    setelah binding dipasang pun aman)."""
+    def _open(_event=None):
+        tree = None
+        with contextlib.suppress(Exception):
+            tree = get_tree()
+        if tree is not None:
+            open_tree_find(tree)
+
+    for seq in ("<Control-f>", "<Control-F>"):
+        try:
+            top.bind(seq, _open)
+        except tk.TclError:
+            pass

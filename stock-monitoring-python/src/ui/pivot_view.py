@@ -80,6 +80,7 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     font,
+    register_find_tags,
 )
 from .widgets import (
     CELL_TAGS_SUPPORTED,
@@ -508,6 +509,9 @@ class PivotTableView(tk.Frame):
         = variasi bg-only utk baris Selisih ≠ 0 (font merah per-cell).
         """
         tree = tree if tree is not None else self.tree
+        # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
+        # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
+        register_find_tags(tree)
         for metric, color in self.METRIC_BG.items():
             tree.tag_configure(self._metric_tag(metric), background=color)
 

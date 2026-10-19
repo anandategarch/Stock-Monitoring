@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.63", APP_VERSION == "3.9.63",
+    check("Versi = 3.9.64", APP_VERSION == "3.9.64",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -14669,33 +14669,45 @@ def main():
     _t64b.destroy()
     root.update()
 
-    # --- (i) nominal_resto _event_col_name display-aware (audit 8-a P1-4) --
+    # --- (i) v3.9.64 — dead code _event_col_name DIHAPUS (audit 15-a N7) --
     from src.ui.nominal_resto_view import NominalRestoView as _NRV64
 
     _nrv64 = _NRV64(root)
     _nrv64.pack(fill="both", expand=True)
     root.update()
     _cols64 = list(_nrv64.tree["columns"])
-    # v3.9.63 — kolom uji display-aware kini 'Biaya Packaging' (kolom
-    # 'Tanpa Harga' dihapus).
-    check("(v3.9.54→v3.9.63) nominal: kolom Biaya Packaging ada "
+    check("(v3.9.54→v3.9.64) nominal: kolom Biaya Packaging ada "
           "(prasyarat)",
           "Biaya Packaging" in _cols64, f"got {_cols64[:7]}")
+    # v3.9.64 — cabang double-click kolom 'Tanpa Harga' dihapus v3.9.63
+    # → _event_col_name (satu2nya pemakai identify_to_column di modul
+    # ini) jadi DEAD CODE tanpa pemanggil produksi — metode + import
+    # dihapus; §64 kini menjaga KONTRAK 'tak ada jalur mati' itu.
+    check("(v3.9.64) nominal: dead code _event_col_name DIHAPUS "
+          "(audit 15-a N7 — dulu diuji langsung padahal tanpa pemanggil "
+          "produksi) + import identify_to_column ikut bersih",
+          not hasattr(_nrv64, "_event_col_name")
+          and "identify_to_column" not in (
+              __import__("inspect").getsource(
+                  __import__("src.ui.nominal_resto_view",
+                             fromlist=["x"]))),
+          f"hasattr={hasattr(_nrv64, '_event_col_name')}")
+    # display-aware double-click tetap sehat via jalur PRODUKSI lain:
+    # kolom disembunyikan → _on_double_click tetap resolve baris via
+    # identify_row (FIX 6d2-04) dan tak buka popup dari area kosong.
     _hide64 = next(c for c in _cols64 if c != "Biaya Packaging")
     _nrv64.tree["displaycolumns"] = [c for c in _cols64 if c != _hide64]
-    _disp64 = [c for c in _cols64 if c != _hide64]
-    _cid64 = f"#{_disp64.index('Biaya Packaging') + 1}"
-    _nrv64.tree.identify_column = lambda x: _cid64  # event sintetis
-
     class _EvX64:
-        x = 0
-
-    _got64 = _nrv64._event_col_name(_nrv64.tree, _EvX64())
-    check("(v3.9.54→v3.9.63) nominal _event_col_name display-aware: "
-          f"setelah hide {_hide64!r}, klik sel Biaya Packaging resolve "
-          "'Biaya Packaging' (dulu posisi display dipetakan ke urutan "
-          "LOGIS → kolom SALAH)",
-          _got64 == "Biaya Packaging", f"got {_got64!r}")
+        x = 40
+        y = 8        # area KOSONG di bawah baris terakhir
+        widget = None
+    _EvX64.widget = _nrv64.tree
+    _before64 = len(_nrv64._detail_wins)
+    _nrv64._on_double_click(_EvX64())
+    check("(v3.9.54→v3.9.64) nominal: double-click area kosong TIDAK "
+          "buka popup basi (jalur produksi FIX 6d2-04 tetap utuh)",
+          len(_nrv64._detail_wins) == _before64,
+          f"wins={len(_nrv64._detail_wins)}")
     _nrv64.destroy()
     root.update()
 
@@ -18764,6 +18776,311 @@ def main():
     app.nominal_resto_view._sub_nb.select(
         app.nominal_resto_view._tab_main)
     root.update()
+
+    # =====================================================================
+    # §76 (v3.9.64) — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix
+    #     semua sebar agent no mistakes"): temuan audit 15-a/15-b/15-c —
+    #     find-prioritas-CREATE (pixel-probe) · stale-find iid reuse ·
+    #     single-active popup · kategori word-boundary · _compute_resto()
+    #     default · _refresh data-kosong clear · fmt_pct ribuan/round-0 ·
+    #     ⧩ '+' numerik · minus merah anak tab · harness xdpyinfo · README
+    # =====================================================================
+    print("\n== 76. (v3.9.64) Deep audit 3-agent: find-priority-PIXEL · "
+          "stale-find · single-popup · kategori boundary · clear-empty · "
+          "fmt_pct · anak-tab minus ==")
+    from src.ui.theme import (
+        FIND_HIT_BG as _FHB76,
+    )
+    from src.ui.theme import (
+        FIND_HIT_TAG as _FHT76,
+    )
+    from src.ui.theme import (
+        register_find_tags as _reg76,
+    )
+    from src.ui.widgets import (
+        insert_tree_items as _iti76,
+    )
+
+    # --- (a) unit: register_find_tags ------------------------------------
+    _t76a = ttk.Treeview(root, columns=["a"], show="headings")
+    _t76a.heading("a", text="A")
+    _t76a.column("a", width=120)
+    _reg76(_t76a)
+    check("(v3.9.64) §76a: register_find_tags — tag find terpasang dgn "
+          "bg oranye benar (background-ONLY, tanpa foreground)",
+          str(dict(_t76a.tag_configure(_FHT76))
+              .get("background", "")).strip('"') == _FHB76
+          and not dict(_t76a.tag_configure(_FHT76)).get("foreground"),
+          f"got {dict(_t76a.tag_configure(_FHT76))}")
+    _t76a.destroy()
+
+    # --- (b) PIXEL-PROBE: highlight find MENANG atas zebra (F-01) --------
+    # Audit 15-c F-01 (BUG paling serius): prioritas tag ttk.Treeview =
+    # URUTAN CREATE — find dibuat saat popup dibuka (SETELAH zebra view)
+    # → oranye KALAH & tak pernah dirender di semua tabel ber-tag latar.
+    _IG76 = None
+    try:
+        from PIL import ImageGrab as _IG76
+    except ImportError:
+        _IG76 = None
+    _HAS_PIL76 = _IG76 is not None
+    _top76 = tk.Toplevel(root)
+    _top76.geometry("640x300+40+40")
+    _top76.lift()
+    _tr76 = ttk.Treeview(_top76, columns=["a", "b"], show="headings")
+    _tr76.heading("a", text="A")
+    _tr76.heading("b", text="B")
+    _tr76.column("a", width=280)
+    _tr76.column("b", width=280)
+    _tr76.pack(fill="both", expand=True)
+    _reg76(_tr76)          # FIX v3.9.64 — find DULU (urutan create)
+    _tr76.tag_configure("evenrow", background="#ffffff")
+    _tr76.tag_configure("oddrow", background="#f8fafc")
+    _tr76.insert("", "end", iid="r0", values=("alpha-x", "y1"),
+                 tags=("evenrow",))
+    _tr76.insert("", "end", iid="r1", values=("beta", "y2"),
+                 tags=("oddrow",))
+    _pop76 = open_tree_find(_tr76)
+    _pop76.var.set("alpha")
+    _pop76._recompute()
+    root.update()
+    _top76.update()
+    root.update_idletasks()
+    root.update()
+    _px76 = None
+    if _HAS_PIL76:
+        _img76 = _IG76.grab(xdisplay=os.environ.get("DISPLAY"))
+        _bx76 = _tr76.bbox("r0", column="a")
+        _rx76, _ry76 = _tr76.winfo_rootx(), _tr76.winfo_rooty()
+        # sampel -80px dari tepi kanan sel: bebas glyph teks 'alpha-x'
+        # (kiri) & bebas jendela popup find yang menempel tepi kanan atas
+        _px76 = _img76.getpixel((_rx76 + _bx76[0] + _bx76[2] - 80,
+                                 _ry76 + _bx76[1] + _bx76[3] // 2))
+    check("(v3.9.64) §76b: PIXEL-PROBE Xvfb — highlight __find_cur "
+          "#fdba74 BENAR-BENAR DIRENDER di atas zebra evenrow (urutan "
+          "create: register_find_tags SEBELUM zebra; dulu zebra menang — "
+          "probe audit 15-c: prepend di list per-item pun TAK menang)",
+          _px76 is not None
+          and abs(_px76[0] - 253) < 8 and abs(_px76[1] - 186) < 10
+          and abs(_px76[2] - 116) < 12,
+          f"px={_px76} bbox={_tr76.bbox('r0')} pil={_HAS_PIL76}")
+
+    # --- (c) STALE-FIND: re-render pakai ulang iid → recompute (F-03) ---
+    _tr76.delete(*_tr76.get_children(""))
+    _tr76.insert("", "end", iid="row_0", values=("alpha", "1"))
+    _tr76.insert("", "end", iid="row_1", values=("beta", "2"))
+    _pop76.var.set("alpha")
+    _pop76._recompute()
+    check("(v3.9.64) §76c prasyarat: 1 cocok row_0",
+          len(_pop76._matches) == 1 and _pop76._matches[0] == "row_0",
+          f"matches={_pop76._matches}")
+    _tr76.delete(*_tr76.get_children(""))
+    _iti76(_tr76, [("", "row_0", {"values": ("gamma", "3")}),
+                   ("", "row_1", {"values": ("beta-alpha", "4")})],
+           batch=10)
+    check("(v3.9.64) §76c: insert_tree_items selesai → popup RECOMPUTE "
+          "otomatis (iid row_0 DIPAKAI ULANG utk data baru — dulu semua "
+          "iid 'masih ada' → highlight lama menempel baris SALAH senyap; "
+          "audit 15-c F-03)",
+          len(_pop76._matches) == 1 and _pop76._matches[0] == "row_1"
+          and FIND_HIT_TAG not in (_tr76.item("row_0", "tags") or ()),
+          f"matches={_pop76._matches}")
+
+    # --- (d) digest baris: isi berubah TANPA re-render (F-03 lapis-2) ----
+    _tr76.delete(*_tr76.get_children(""))
+    _tr76.insert("", "end", iid="row_0", values=("alpha", "1"))
+    _pop76.var.set("alpha")
+    _pop76._recompute()
+    _tr76.item("row_0", values=("delta", "9"))   # isi berubah, iid sama
+    _pop76._nav(1)
+    check("(v3.9.64) §76d: digest baris — nav memvalidasi isi; row_0 "
+          "berubah TANPA re-render → recompute (0 cocok + highlight "
+          "bersih)",
+          len(_pop76._matches) == 0
+          and FIND_HIT_TAG not in (_tr76.item("row_0", "tags") or ()),
+          f"matches={_pop76._matches}")
+
+    # --- (e) popup Cari SELALU SATU app-wide (F-07) ----------------------
+    _tr76b = ttk.Treeview(_top76, columns=["c"], show="headings")
+    _tr76b.heading("c", text="C")
+    _tr76b.column("c", width=120)
+    _tr76b.pack(fill="both", expand=True)
+    _pop76b = open_tree_find(_tr76b)
+    check("(v3.9.64) §76e: popup Cari SELALU SATU app-wide — buka utk "
+          "tree LAIN menutup popup lama (dulu popup tree utama + anak "
+          "tab bisa KOEKSISTEN; audit 15-c F-07)",
+          _pop76b is not _pop76
+          and not _pop76.win.winfo_exists()
+          and getattr(_tr76, "_find_popup", None) is None
+          and TreeFindPopup._ACTIVE is _pop76b,
+          f"old_alive={_pop76.win.winfo_exists()}")
+    check("(v3.9.64) §76e: singleton per-tree tetap — buka LAGI utk tree "
+          "sama mengembalikan popup yang sama (deiconify + fokus)",
+          open_tree_find(_tr76b) is _pop76b,
+          "singleton rusak")
+    _pop76b.close()
+    check("(v3.9.64) §76e: close → _ACTIVE bersih + referensi tree lepas",
+          TreeFindPopup._ACTIVE is None
+          and getattr(_tr76b, "_find_popup", None) is None,
+          f"active={TreeFindPopup._ACTIVE}")
+    _top76.destroy()
+    root.update()
+
+    # --- (f) klas kategori WORD-BOUNDARY (15-a R1) ------------------------
+    from src.ui.nominal_common import agregasi_nominal_per_resto as _agr76
+    _dn76 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+        "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
+    } for b, v, k in [
+        ("AYAM FILET", 2.0, "COM DEVIASI - RESTO"),
+        ("TOPLES PLASTIK", 3.0, "Biaya Packaging - CATERING"),
+        ("COMPLIMENT", 4.0, "COMPLIMENT"),
+        ("MANGKOK", 5.0, "COMMERCIAL OTHER"),
+        ("KOTAK", 6.0, "REPACKAGING"),
+    ]])
+    _hmap76 = {b: (10.0, "GR") for b, _v, _k in [
+        ("AYAM FILET", 0, ""), ("TOPLES PLASTIK", 0, ""),
+        ("COMPLIMENT", 0, ""), ("MANGKOK", 0, ""), ("KOTAK", 0, "")]}
+    _kmap76 = {"rasio": {}, "terkecil": {}}
+    _g76f, _pp76f = _agr76(_dn76, 25, _hmap76, _kmap76)
+    _r76f = _g76f.iloc[0]
+    check("(v3.9.64) §76f: klas kategori WORD-BOUNDARY r'\\bCOM\\b'/"
+          "r'\\bPACKAGING\\b' — 'COM DEVIASI - RESTO' ✓ COM · "
+          "'Biaya Packaging - CATERING' ✓ PKG · 'COMPLIMENT'/'COMMERCIAL "
+          "OTHER' ✗ (dulu substring → terhitung COM; audit 15-a R1) · "
+          "'REPACKAGING' ✗ PKG",
+          float(_r76f["COM Deviasi"]) == 20.0
+          and float(_r76f["Biaya Packaging"]) == 30.0
+          and float(_r76f["Nominal Deviasi"]) == 200.0,
+          f"got {_r76f.to_dict()}")
+
+    # --- (g) fmt_pct_cell ribuan + round-0 (15-a N11) ---------------------
+    from src.ui.nominal_common import fmt_pct_cell as _fpc76
+    check("(v3.9.64) §76g: fmt_pct_cell — pemisah RIBUAN '+1.234,6%' "
+          "(dulu '+1234,6%') · pembulatan-0 '0,0%' TANPA tanda (dulu "
+          "'+0,0%' utk 0<v<0,05)",
+          _fpc76(1234.56) == "+1.234,6%"
+          and _fpc76(-1234.5) == "-1.234,5%"
+          and _fpc76(0.04) == "0,0%" and _fpc76(-0.04) == "0,0%"
+          and _fpc76(12.5) == "+12,5%" and _fpc76(0.0) == "0,0%",
+          f"got {_fpc76(1234.56)!r} {_fpc76(-1234.5)!r} "
+          f"{_fpc76(0.04)!r}")
+
+    # --- (h) ⧩ sort '+12,5%' numerik (15-c F-05) --------------------------
+    from src.ui.widgets import _filter_value_sort_key as _fsk76
+    check("(v3.9.64) §76h: ⧩ daftar nilai — '+12,5%' kini GRUP NUMERIK "
+          "(dulu grup TEKS: prefiks '+' tidak dibuang sementara '-8,3%' "
+          "numerik; audit 15-c F-05)",
+          _fsk76("+12,5%")[0] == 0
+          and abs(_fsk76("+12,5%")[1] - 12.5) < 1e-9
+          and _fsk76("-8,3%")[1] == -8.3,
+          f"got {_fsk76('+12,5%')} {_fsk76('-8,3%')}")
+
+    # --- (i) E2E view: _compute_resto() default + anak-tab minus + clear --
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV76
+    _dn76v = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
+    } for b, r, s, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0, "COM DEVIASI - RESTO"),
+        ("GULA PASIR", "MLGPAR", "KG", 12.0, "Biaya Packaging - RESTO"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0,
+         "COM DEVIASI - CATERING"),
+        ("SUMPIT KAYU", "MLGPAR", "PCS", -8.0, None),
+    ]])
+    _hmap76v = {"AYAM FILET": (10.0, "GR")}
+    _kmap76v = {"rasio": {}, "terkecil": {}}
+    _top76v = tk.Toplevel(root)
+    _top76v.geometry("1500x850+8+8")
+    _holder76 = {"df": None}
+    _rv76 = _NRV76(_top76v, lalu_provider=lambda: _holder76["df"])
+    _rv76.pack(fill="both", expand=True)
+    root.update()
+    _rv76.load_data(_dn76v, harga_map=_hmap76v, konversi_map=_kmap76v)
+    _rv76.ensure_refreshed()
+    wait_view(root, _rv76)
+    _rv76._compute_resto()
+    check("(v3.9.64) §76i: _compute_resto() TANPA argumen — frame anak "
+          "tab 'Tanpa Harga' tetap TERISI (dulu param data=None → anak "
+          "tab kosong senyap padahal tabel utama benar; audit 15-a R3)",
+          _rv76._noharga_df is not None
+          and len(_rv76._noharga_df) == 3,
+          f"n={0 if _rv76._noharga_df is None else len(_rv76._noharga_df)}")
+    check("(v3.9.64) §76i: _setup_tags nominal — tag find terdaftar di "
+          "tree utama + anak tab (register_find_tags; F-01)",
+          str(dict(_rv76.tree.tag_configure(_FHT76))
+              .get("background", "")).strip('"') == _FHB76
+          and str(dict(_rv76.tree_noharga.tag_configure(_FHT76))
+                 .get("background", "")).strip('"') == _FHB76,
+          "tag find tidak terpasang")
+    _rv76._render_noharga()
+    root.update()
+    _nhneg76 = (getattr(_rv76.tree_noharga, "_cell_tags_applied", {})
+                .get("neg_cell") or set())
+    check("(v3.9.64) §76i: minus merah PER-CELL anak tab — SUMPIT '(8)' "
+          "+ KOPI '(5)' bertag neg_cell di kolom Kuantiti Deviasi (dulu "
+          "hitam — parity popup lama; audit 15-a N9)",
+          len(_nhneg76) == 2
+          and all(_c == "Kuantiti Deviasi"
+                  for _i, _c in _nhneg76),
+          f"cells={sorted(_nhneg76)}")
+    _rv76.load_data(pd.DataFrame(), harga_map=_hmap76v,
+                    konversi_map=_kmap76v)
+    root.update()
+    check("(v3.9.64) §76i: _refresh data-KOSONG membersihkan KEDUA tabel "
+          "+ tag per-cell + frame anak tab (dulu baris render LAMA "
+          "tersisa dgn status 'Belum ada data.' — menyesatkan; audit "
+          "15-a R4)",
+          len(_rv76.tree.get_children("")) == 0
+          and len(_rv76.tree_noharga.get_children("")) == 0
+          and _rv76._noharga_df is None
+          and "Belum ada data" in _rv76.status_var_label.get(),
+          f"main={len(_rv76.tree.get_children(''))} "
+          f"nh={len(_rv76.tree_noharga.get_children(''))} "
+          f"status={_rv76.status_var_label.get()!r}")
+    _rv76.destroy()
+    _top76v.destroy()
+    root.update()
+
+    # --- (j) SEMUA tree utama app: tag find terdaftar (F-01) --------------
+    _vtrees76 = {
+        "pivot": app.pivot_view.tree,
+        "dev_gr": app.deviasi_gr_view.tree,
+        "dev_pcs": app.deviasi_pcs_view.tree,
+        "in_selisih": app.in_selisih_view.tree,
+        "laporan": app.laporan_view.tree,
+        "komparasi": app.komparasi_view.tree,
+        "nominal": app.nominal_view.tree,
+        "nominal_resto": app.nominal_resto_view.tree,
+        "rincian_po": app.rincian_view.tree,
+        "followup": app.followup_view.tree,
+    }
+    _miss76 = [n76 for n76, t76 in _vtrees76.items()
+               if str(dict(t76.tag_configure(_FHT76))
+                      .get("background", "")).strip('"') != _FHB76]
+    check("(v3.9.64) §76j: SEMUA 10 tree utama — tag find terdaftar "
+          "SEBELUM zebra (highlight Ctrl+F kini tampil di semua tabel "
+          "ber-tag latar; audit 15-c F-01)",
+          not _miss76, f"missing={_miss76}")
+
+    # --- (k) harness run_tests.sh tanpa hard-require xdpyinfo (F-06) ------
+    _rt76 = Path(__file__).with_name("run_tests.sh").read_text(
+        encoding="utf-8")
+    check("(v3.9.64) §76k: run_tests.sh — xdpyinfo TIDAK lagi hard-"
+          "require (fallback probe Tk; audit 15-c F-06: Xvfb :61 hidup "
+          "pun DULU ditolak script)",
+          "_xvfb_alive" in _rt76
+          and "xdpyinfo tidak ada" not in _rt76,
+          f"len={len(_rt76)}")
+
+    # --- (l) README ROOT disinkronkan (F-02) ------------------------------
+    _rr76 = (Path(__file__).resolve().parent.parent
+             / "README.md").read_text(encoding="utf-8")
+    check("(v3.9.64) §76l: README ROOT (../README.md) — headline versi "
+          "terkini v3.9.64 (audit 15-c F-02: masih headline v3.9.62 + "
+          "1454/1454 saat repo sudah v3.9.63/1473)",
+          "Versi terkini: v3.9.64" in _rr76,
+          f"found={'Versi terkini: v3.9.64' in _rr76}")
 
     root.destroy()
 

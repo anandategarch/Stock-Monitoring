@@ -201,7 +201,11 @@ def hitung_persen_kenaikan(h_val, l_val):
 def fmt_pct_cell(val) -> str:
     """v3.9.63 — format sel persen kenaikan/penurunan: '+12,5%' /
     '-8,3%' / '0,0%' (desimal koma Indonesia, 1 digit); None/NaN/'-'
-    → '-' (tak terdefinisi — lihat hitung_persen_kenaikan)."""
+    → '-' (tak terdefinisi — lihat hitung_persen_kenaikan).
+    v3.9.64 — FIX (audit 15-a N11): (a) pemisah RIBUAN ('+1.234,5%' —
+    dulu '+12345,5%'; parser sort _parse_num_id sudah ribuan-aware);
+    (b) pembulatan ke 0 → '0,0%' TANPA tanda (dulu '+0,0%' utk nilai
+    0<v<0,05 — inkonsisten dgn 0 persis)."""
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return "-"
     try:
@@ -210,9 +214,11 @@ def fmt_pct_cell(val) -> str:
         return str(val)
     if pd.isna(v) or np.isinf(v):
         return "-"
-    if v == 0:
+    if round(v, 1) == 0:
         return "0,0%"
-    return f"{v:+.1f}".replace(".", ",") + "%"
+    s = f"{v:+,.1f}".replace(",", "X").replace(".", ",") \
+        .replace("X", ".")
+    return s + "%"
 
 
 # ---------------------------------------------------------------------------
@@ -416,11 +422,20 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
 # ---------------------------------------------------------------------------
 # AGREGASI PER RESTO (tab 🧮 Nominal Deviasi — v3.9.34)
 # ---------------------------------------------------------------------------
-# v3.9.63 — klas kategori utk kolom 'COM Deviasi' / 'Biaya Packaging'
-# (substring case-insensitive pada KATEGORI pasangan; kategori lain —
-# mis. 'DEVIASI'/'TEPAT'/blank — hanya masuk kolom total).
-_KAT_COM_TOKEN = "COM"
-_KAT_PKG_TOKEN = "PACKAGING"
+# v3.9.63 — klas kategori utk kolom 'COM Deviasi' / 'Biaya Packaging'.
+# v3.9.64 — FIX (audit 15-a R1): token kini dicocokkan dgn WORD-BOUNDARY
+# regex (\bCOM\b / \bPACKAGING\b) — substring polos membuat kategori
+# semacam 'COMMERCIAL'/'COMPLIMENT' terhitung COM dan 'REPACKAGING'
+# terhitung PACKAGING (probe audit; domain nilai master DBS tak bisa
+# diverifikasi — boundary = aman utk semua varian kanonik:
+# 'COM DEVIASI - RESTO' / '- CATERING' / 'Biaya Packaging - …' tetap
+# cocok karena COM/PACKAGING-nya berdiri sebagai kata utuh).
+# Kategori lain — mis. 'DEVIASI'/'TEPAT'/blank — hanya masuk kolom
+# total. Kategori yang memuat KEDUA token (mis. label gabungan virtual
+# 'DEVIASI (COM + PACKAGING)' bila suatu saat jadi nilai data) dihitung
+# di KEDUA kolom klas (per kategori — kolom total tetap Σ pasangan).
+_KAT_COM_RE = r"\bCOM\b"
+_KAT_PKG_RE = r"\bPACKAGING\b"
 
 
 def _attach_kategori_pairs(pairs: pd.DataFrame,
@@ -501,11 +516,14 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
              "Nominal Deviasi": ("Nominal", "sum")}))
     # v3.9.63 — Σ nominal per klas kategori (user: "diganti dengan
     # nominal deviasi per kategori: kolom COM Deviasi + kolom
-    # Packaging") — substring case-insensitive; Σ skipna (transparan).
+    # Packaging") — v3.9.64 word-boundary regex (lihat _KAT_*_RE);
+    # Σ skipna (transparan).
     _ku = pairs["KATEGORI"].fillna("").astype(str).str.upper()
-    _com = (pairs.loc[_ku.str.contains(_KAT_COM_TOKEN, na=False)]
+    _com = (pairs.loc[_ku.str.contains(_KAT_COM_RE, regex=True,
+                                       na=False)]
             .groupby("Resto")["Nominal"].sum())
-    _pkg = (pairs.loc[_ku.str.contains(_KAT_PKG_TOKEN, na=False)]
+    _pkg = (pairs.loc[_ku.str.contains(_KAT_PKG_RE, regex=True,
+                                       na=False)]
             .groupby("Resto")["Nominal"].sum())
     g["COM Deviasi"] = (g["Resto"].map(_com).astype("float64")
                         .fillna(0.0))
