@@ -825,12 +825,50 @@ def main():
     app = StockMonitorApp(root)
     sys.stdout, sys.stderr = real_stdout, real_stderr
     root.update_idletasks()
+    # --- v3.9.65 — STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka "
+    #     "udah ke zoom out"): app BARU DIBANGUN harus sudah ber-zoom
+    #     UI_ZOOM_DEFAULT 0.8 (font/rowheight ter-skala, jendela tak
+    #     disentuh). Dicek SEBELUM restore 100% — setelah ini seluruh
+    #     suite berjalan di baseline 100% (kontrak lama utuh).
+    from src.ui import theme as _theme065
+    from src.ui.app import UI_ZOOM_DEFAULT as _ZDEF065
+    from src.ui.app import WINDOW_SIZE as _WSZ065
+    _geo065 = root.geometry()
+    check("(v3.9.65) STARTUP ZOOM-OUT: app terbuka di zoom 80% "
+          "(UI_ZOOM_DEFAULT 0.8 — user: 'waktu aku buka udah ke zoom "
+          "out'; tanpa settings.json → default, bukan 100%)",
+          _ZDEF065 == 0.8 and app.ui_zoom == 0.8
+          and _theme065.ui_scale() == 0.8,
+          f"default={_ZDEF065} zoom={app.ui_zoom} "
+          f"scale={_theme065.ui_scale()}")
+    check("(v3.9.65) STARTUP ZOOM-OUT fonts-only: jendela TIDAK ikut "
+          "mengecil (geometry tetap permintaan awal — ukuran/maximize "
+          "dikuasai restore window_state F8; zoom hanya mengecilkan "
+          "KONTEN → lebih banyak baris terlihat)",
+          _geo065.split("+")[0] == _WSZ065,
+          f"geo={_geo065!r} window_size={_WSZ065!r}")
+    check("(v3.9.65) STARTUP ZOOM-OUT efek berlapis: font(10) → 8pt + "
+          "rowheight 24 + badge 'Zoom 80%'",
+          _theme065.font(10).cget("size") == 8
+          and int(ttk.Style(root).lookup("Treeview", "rowheight")) == 24
+          and "Zoom 80%" in app.statusbar._right_var.get(),
+          f"size={_theme065.font(10).cget('size')} "
+          f"rh={ttk.Style(root).lookup('Treeview', 'rowheight')} "
+          f"badge={app.statusbar._right_var.get()!r}")
+    # restore baseline 100% utk seluruh suite (semua kontrak lama)
+    app._apply_ui_zoom(1.0)
+    root.update()
+    check("(v3.9.65) pasca-restore 100%: badge versi polos kembali "
+          "(baseline suite — kontrak §58(h) identik)",
+          app.statusbar._right_var.get() ==
+          f"v{APP_VERSION} · Python Edition",
+          f"got {app.statusbar._right_var.get()!r}")
     check("App + toolbar + 10 tab terbangun (v3.9.34: tab 🧮 Nominal "
           "Deviasi ditambahkan)",
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.64", APP_VERSION == "3.9.64",
+    check("Versi = 3.9.65", APP_VERSION == "3.9.65",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -13020,11 +13058,17 @@ def main():
     )
 
     # --- (a) konstanta & state awal -----------------------------------------
-    check("(v3.9.48) konstanta zoom: rentang 0.5–2.0, step 0.1, default 1.0",
-          (_ZMIN58, _ZMAX58, _ZSTEP58, _ZDEF58) == (0.5, 2.0, 0.1, 1.0),
+    # v3.9.65 — DEFAULT 0.8 (startup zoom-out) + persist settings.json;
+    # suite berjalan di baseline 100% (restore di §1) — §58 mengets
+    # perilaku RUNTIME dari titik 100% (kontrak v3.9.48 utuh).
+    check("(v3.9.48+v3.9.65) konstanta zoom: rentang 0.5–2.0, step 0.1, "
+          "DEFAULT 0.8 (startup zoom-out — user: 'waktu aku buka udah "
+          "ke zoom out')",
+          (_ZMIN58, _ZMAX58, _ZSTEP58, _ZDEF58) == (0.5, 2.0, 0.1, 0.8),
           f"got {(_ZMIN58, _ZMAX58, _ZSTEP58, _ZDEF58)}")
-    check("(v3.9.48) app.ui_zoom awal = 1.0 (100%) + theme.ui_scale() "
-          "sinkron (restart = zoom reset — by design)",
+    check("(v3.9.48) state §58 = 100% baseline (restore §1) + "
+          "theme.ui_scale() sinkron (v3.9.65: startup kini 80% default "
+          "+ persist ui_zoom — cek §1 & §77)",
           app.ui_zoom == 1.0 and _uisc58() == 1.0,
           f"zoom={app.ui_zoom} scale={_uisc58()}")
     check("(v3.9.48) non-Windows: _dpi_scale = 1.0 (kompensasi geometri "
@@ -13775,42 +13819,49 @@ def main():
           and "Hitung Manual" in _cvals61,
           f"got {_cvals61}")
 
-    # --- (d) Rank MERGE-VERTIKAL per kelompok Nama Barang ---------------
+    # --- (d) Rank PER-BARIS DALAM KELOMPOK (v3.9.65) --------------------
+    # user: "ada bug pada deviasi gr dan deviasi pcs pada kolom rank,
+    # dimana data rank sama semua untuk tiap grup barang" — era
+    # v3.9.51-64 (rank per barang Σ|Deviasi| konstanta seluruh grup)
+    # diganti SEMANTIK SHEET ASLI: rank |Deviasi| BARIS di antara baris
+    # grup barangnya (1 = deviasi terbesar dalam grup; sheet DEVIASI
+    # GR/PCS workbook asli diverifikasi 1.124/1.124 baris dev≠0 EKSAK
+    # — termasuk pola ikat 13,13,13,16 = method="min").
     _rk61 = [(_val61(_k61, "Nama Barang"), _val61(_k61, "Rank"))
              for _k61 in _dv61.tree.get_children("")]
-    _byb61 = {}
-    for _b61, _r61v in _rk61:
-        _byb61.setdefault(_b61, []).append(_r61v)
-    check("(v3.9.51) Rank = PER BARANG (Σ|Deviasi| kelompok terfilter): "
-          "PENTOL 95=1 · CABE 65=2 · BUMBU 20=3",
-          _byb61.get("PENTOL", [None])[0] == "1"
-          and _byb61.get("CABE", [None])[0] == "2"
-          and _byb61.get("BUMBU", [None])[0] == "3",
-          f"got {_byb61}")
-    # v3.9.60 — kontrak baru: Rank PER-BARIS (konstanta per kelompok,
-    # semua baris kelompok membawa nilai — bukan head-only).
-    check("(v3.9.60) Rank per-baris ala nilai kelompok: SETIAP baris "
-          "membawa rank konstanta kelompoknya (era head-only dihapus "
-          "bersama sticky merge)",
-          all(len(rs) == len([r for r in rs if r]) or len(rs) == 0
-              for rs in _byb61.values())
-          and _rk61[1][1] == "2" and _rk61[2][1] == "2",
+    check("(v3.9.65) Rank = PER-BARIS DALAM KELOMPOK (semantik sheet "
+          "asli — user: 'data rank sama semua untuk tiap grup barang' "
+          "DIFIKS): PENTOL PWKTAM(+70)=1 · MLGPAR(+25)=2; CABE "
+          "MLGPAR(−40)=1 · PWKTAM(+25)=2; BUMBU (1 resto)=1 — urutan "
+          "render (Nama Barang, |Dev| desc) = rank asc dalam grup",
+          _rk61 == [("BUMBU", "1"), ("CABE", "1"), ("CABE", "2"),
+                    ("PENTOL", "1"), ("PENTOL", "2")],
           f"got {_rk61}")
+    check("(v3.9.60+v3.9.65) SETIAP baris membawa rank MILIKNYA "
+          "sendiri (nilai tree == _rank_map per iid — bukan konstanta "
+          "grup, bukan head-only)",
+          all(str(_val61(_k61, "Rank")).strip()
+              == str(_dv61._rank_map.get(str(_k61), "")).strip()
+              and str(_val61(_k61, "Rank")).strip() != ""
+              for _k61 in _dv61.tree.get_children("")),
+          "ada baris tanpa rank / rank != rank_map")
     _dv61._sort_by("Deviasi", reverse=True, tree=_dv61.tree)
     root.update()
     _rk61b = [(_val61(_k61, "Nama Barang"), _val61(_k61, "Rank"))
               for _k61 in _dv61.tree.get_children("")]
-    # v3.9.60 — pasca-sort: nilai rank tetap konsisten dgn kelompok
-    # barisnya (rank mengikuti BARIS, bukan posisi visual).
+    # v3.9.65 — pasca-sort: rank menempel di BARISNYA (bukan posisi
+    # visual) — kelompok boleh ter-interleave tapi tiap baris tetap
+    # membawa rank grup-asalnya (PENTOL {1,2} · CABE {1,2} · BUMBU {1}).
     _byb61b = {}
     for _b61, _r61v in _rk61b:
         _byb61b.setdefault(_b61, set()).add(_r61v)
-    check("(v3.9.51) Sort kolom lain → nilai rank tetap KONSISTEN per "
-          "kelompok (rank ikut barisnya — konstanta kelompok)",
-          all(len(s) == 1 and s.pop() in ("1", "2", "3")
-              for s in _byb61b.values())
+    check("(v3.9.65) Sort kolom lain → rank IKUT BARISNYA (tiap baris "
+          "membawa rank grup-asal — PENTOL {1,2} · CABE {1,2} · "
+          "BUMBU {1}; bukan renumber posisi visual)",
+          _byb61b == {"PENTOL": {"1", "2"}, "CABE": {"1", "2"},
+                      "BUMBU": {"1"}}
           and len(_rk61b) == 5,
-          f"got {_rk61b}")
+          f"got {_byb61b} / {_rk61b}")
 
     # --- (e) strip header kolom In (kiriman — bukan Stock) --------------
     check("(v3.9.51) Heading dinamis In: H=14 → In_13 / In_14 / In_15",
@@ -13993,20 +14044,22 @@ def main():
                 _dv62.tree.set(k, "Rank"),
                 _grptag59(_dv62, k)) for k in _kids62]
     # v3.9.61 — kontrak: nilai PER-BARIS + TANPA tag band (sekat warna
-    # dihapus — baris seragam putih).
-    check("(v3.9.61) Merge NATIVE → NILAI PER-BARIS TANPA BAND: SETIAP "
-          "baris kelompok membawa Nama Barang + Rank & tanpa tag grp "
-          "(user: 'hilangkan warna sekat visual grup nama barang' + "
-          "'nama barang tidak muncul, hanya sekali per grup' TUNTAS)",
-          _vals62 == [("BUMBU", "3", None),
-                      ("CABE", "2", None), ("CABE", "2", None),
-                      ("PENTOL", "1", None), ("PENTOL", "1", None)],
+    # dihapus — baris seragam putih). v3.9.65 — Rank PER-BARIS dalam
+    # kelompok (semantik sheet asli; bukan konstanta per barang).
+    check("(v3.9.61+v3.9.65) Merge NATIVE → NILAI PER-BARIS TANPA BAND: "
+          "SETIAP baris membawa Nama Barang + Rank MILIKNYA & tanpa tag "
+          "grp (user: 'hilangkan warna sekat visual grup nama barang' + "
+          "'nama barang tidak muncul, hanya sekali per grup' TUNTAS; "
+          "v3.9.65 rank per-baris: CABE 1,2 · PENTOL 1,2 · BUMBU 1)",
+          _vals62 == [("BUMBU", "1", None),
+                      ("CABE", "1", None), ("CABE", "2", None),
+                      ("PENTOL", "1", None), ("PENTOL", "2", None)],
           f"got {_vals62}")
     _snaps62 = [_dv62._row_snaps.get(str(k), {}) for k in _kids62]
     check("(v3.9.55) Snapshot RAW tetap ber-nama barang & rank utk SETIAP "
           "baris (double-click/popup/sort tetap benar di baris lanjutan)",
           all(s.get("barang") == n for s, n in zip(_snaps62, _names62))
-          and _dv62._rank_map.get(str(_kids62[1])) == "2"
+          and _dv62._rank_map.get(str(_kids62[1])) == "1"
           and _dv62._rank_map.get(str(_kids62[2])) == "2",
           f"names={_names62} rank_map={_dv62._rank_map}")
 
@@ -14045,9 +14098,12 @@ def main():
                    _dv62.tree.set(k, "Rank"))
                   for k in _dv62.tree.get_children("")]
     check("(v3.9.60) Sort balik via value_get Nama Barang (snapshot) → "
-          "kelompok KONTIGU kembali: nilai per-baris utuh otomatis",
-          _regroup62 == [("BUMBU", "3"), ("CABE", "2"),
-                         ("CABE", "2"), ("PENTOL", "1"), ("PENTOL", "1")],
+          "kelompok KONTIGU kembali: nilai per-baris utuh otomatis "
+          "(v3.9.65 rank per-baris dalam kelompok; urutan dalam grup "
+          "ikut urutan resto dari sort Resto sebelumnya — stable sort)",
+          _regroup62 == [("BUMBU", "1"), ("CABE", "1"),
+                         ("CABE", "2"), ("PENTOL", "2"),
+                         ("PENTOL", "1")],
           f"got {_regroup62}")
 
     # --- (f) F6: sync overlay scroll — scrollbar wrap + bindtag keyboard --
@@ -14071,7 +14127,7 @@ def main():
     root.update()
     check("(v3.9.52) Kolom Rank disembunyikan (◱ Kolom) → tanpa crash; "
           "nilai tetap terbaca via tree.set (native — tak ada label)",
-          _dv62.tree.set(_kids62[1], "Rank") == "2",
+          _dv62.tree.set(_kids62[1], "Rank") == "1",
           "nilai Rank hilang saat kolom disembunyikan")
     _dv62._colmgr.hidden = ["Satuan"]
     _dv62._colmgr.apply()
@@ -14096,8 +14152,9 @@ def main():
     app._refit_all_tree_columns()
     root.update()
     check("(v3.9.60) app._refit_all_tree_columns (jalur zoom) aman "
-          "(nilai per-baris utuh pasca auto-fit ulang)",
-          _dv62.tree.set(_kids62[1], "Rank") == "2"
+          "(nilai per-baris utuh pasca auto-fit ulang — rank per-baris "
+          "v3.9.65 tak rusak)",
+          _dv62.tree.set(_kids62[1], "Rank") == "1"
           and _dv62.tree.set(_kids62[2], "Rank") == "2",
           "nilai rusak pasca zoom walk")
 
@@ -15056,15 +15113,18 @@ def main():
           "state bocor")
     _appmod65._save_window_state(1500, 900, True)
     _st65 = _appmod65._load_window_state()
-    check("(v3.9.55) F8: round-trip state jendela (1500×900 maximized) — "
-          "ukuran/maximize TERAKHIR diingat",
-          _st65 == {"w": 1500, "h": 900, "maximized": True},
+    check("(v3.9.55+v3.9.65) F8: round-trip state jendela (1500×900 "
+          "maximized) — ukuran/maximize TERAKHIR diingat (+ key ui_zoom: "
+          "None bila pemanggil tanpa argumen — kompatibel",
+          _st65 == {"w": 1500, "h": 900, "maximized": True,
+                    "ui_zoom": None},
           f"got {_st65}")
     _appmod65._save_window_state(1100, 720, False)
     _st65b = _appmod65._load_window_state()
     check("(v3.9.55) F8: state ditimpa benar (1100×720 windowed) + key "
           "lama acr_threshold dipertahankan (read-modify-write)",
-          _st65b == {"w": 1100, "h": 720, "maximized": False},
+          _st65b == {"w": 1100, "h": 720, "maximized": False,
+                     "ui_zoom": None},
           f"got {_st65b}")
     _appmod65._SETTINGS_PATH = _orig_sp65
     import shutil as _sh65
@@ -19077,10 +19137,168 @@ def main():
     _rr76 = (Path(__file__).resolve().parent.parent
              / "README.md").read_text(encoding="utf-8")
     check("(v3.9.64) §76l: README ROOT (../README.md) — headline versi "
-          "terkini v3.9.64 (audit 15-c F-02: masih headline v3.9.62 + "
+          "terkini v3.9.64+ (audit 15-c F-02: masih headline v3.9.62 + "
           "1454/1454 saat repo sudah v3.9.63/1473)",
-          "Versi terkini: v3.9.64" in _rr76,
-          f"found={'Versi terkini: v3.9.64' in _rr76}")
+          ("Versi terkini: v3.9.65" in _rr76
+           or "Versi terkini: v3.9.64" in _rr76),
+          f"found={'Versi terkini: v3.9.65' in _rr76}")
+
+    # ==================================================================
+    # §77 — v3.9.65 RANK PER-BARIS GROUND-TRUTH (user: "ada bug pada
+    #      deviasi gr dan deviasi pcs pada kolom rank, dimana data rank
+    #      sama semua untuk tiap grup barang") + STARTUP ZOOM-OUT
+    #      (user: "bisa gak waktu aku buka udah ke zoom out")
+    # ==================================================================
+    print("\n== 77. (v3.9.65) Rank per-baris ground-truth (ikat/nol) · "
+          "startup zoom-out + persist ==")
+
+    # --- (a) RANK: pola IKAT (method=min) + baris NOL (rank kosong) ------
+    # fixture: TIE grup (|dev| sama 3 resto → semua rank 1, berikut
+    # MELONCAT ke 3 — pola 13,13,13,16 sheet DEVIASI PCS asli user) +
+    # baris Deviasi==0 → rank KOSONG (972/972 baris nol sheet asli).
+    _src77 = []
+    _dev77 = {
+        "TIE GRUP":  {"RA": 6.0, "RB": -6.0, "RC": 6.0},   # ikat 3-arah
+        "LONCAT":    {"RA": 9.0, "RB": -9.0, "RC": 4.5, "RD": 0.0},
+        "SATU":     {"RA": 1.5},
+    }
+    for _b77, _ds77 in _dev77.items():
+        for _r77, _dv77 in _ds77.items():
+            for _j77, _v77 in [("1.SO", 20.0),
+                               ("2.SALDO AKHIR", 20.0 - _dv77),
+                               ("SALDO AWAL", 10.0), ("4.IN", 2.0)]:
+                for _t77 in range(20, 28):
+                    _src77.append({
+                        "Nama Barang": _b77, "JENIS": _j77,
+                        "NAMA RESTO": _r77, "Tanggal": _t77,
+                        "NILAI": float(_v77), "SATUAN": "GR",
+                        "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                        "SOURCE KIRIMAN": "GUDANG"})
+    _top77 = tk.Toplevel(root)
+    _top77.geometry("1400x900+5+5")
+    from src.ui.deviasi_view import DeviasiView as _DV77
+    _dv77 = _DV77(_top77, satuan_mode="GR")
+    _dv77.pack(fill="both", expand=True)
+    _dv77.data = pd.DataFrame(_src77)
+    _dv77._show_content()
+    _dv77._refresh(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _dv77._busy and len(_dv77.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    root.update()
+    _ranks77 = [(_dv77.tree.set(_k77, "Nama Barang"),
+                 _dv77.tree.set(_k77, "Resto"),
+                 _dv77.tree.set(_k77, "Rank"))
+                for _k77 in _dv77.tree.get_children("")]
+    check("(v3.9.65) §77a: IKAT method=min — |dev| sama berbagi rank "
+          "(TIE GRUP 3×|6| → 1,1,1) & rank berikut MELONCAT (LONCAT: "
+          "2×|9| → 1,1 lalu |4,5| → 3 — pola 13,13,13,16 sheet asli "
+          "user; bukan 1,1,2 & bukan konstanta per grup)",
+          _ranks77 == [
+              ("LONCAT", "RA", "1"), ("LONCAT", "RB", "1"),
+              ("LONCAT", "RC", "3"), ("LONCAT", "RD", ""),
+              ("SATU", "RA", "1"),
+              ("TIE GRUP", "RA", "1"), ("TIE GRUP", "RB", "1"),
+              ("TIE GRUP", "RC", "1")],
+          f"got {_ranks77}")
+    _rd_iid77 = next(iter(
+        k for k in _dv77.tree.get_children("")
+        if _dv77.tree.set(k, "Nama Barang") == "LONCAT"
+        and _dv77.tree.set(k, "Resto") == "RD"), None)
+    check("(v3.9.65) §77a: baris Deviasi==0 → rank KOSONG (mirror sheet "
+          "asli: 972/972 baris nol kosong rank-nya; bukan rank terakhir)",
+          _rd_iid77 is not None
+          and _dv77.tree.set(_rd_iid77, "Rank") == ""
+          and _dv77._rank_map.get(str(_rd_iid77)) == "",
+          "baris nol tidak kosong rank")
+    # sort by Rank numerik — parser _parse_num_id: '' → 0; DESC (default
+    # klik header): 3 teratas, 6× rank-1 (stable — urutan visual lama),
+    # baris nol ('' → 0) terakhir; nilai menempel di barisnya.
+    _dv77._sort_by("Rank", reverse=True, tree=_dv77.tree)
+    root.update()
+    _ranks77b = [(_dv77.tree.set(_k77, "Nama Barang"),
+                  _dv77.tree.set(_k77, "Rank"))
+                 for _k77 in _dv77.tree.get_children("")]
+    check("(v3.9.65) §77a: sort kolom Rank = NUMERIK antar-baris (grup "
+          "interleave — desc: '3' teratas, 6× '1' berikut, baris nol "
+          "('' → 0) terakhir; nilai ikut barisnya — bukan sort teks)",
+          [r for _, r in _ranks77b] ==
+          ["3", "1", "1", "1", "1", "1", "1", ""]
+          and _ranks77b[0] == ("LONCAT", "3")
+          and _ranks77b[-1] == ("LONCAT", ""),
+          f"got {_ranks77b}")
+    _dv77.destroy()
+    _top77.destroy()
+    root.update()
+
+    # --- (b) PERSIST ui_zoom: round-trip + validasi + jalur CLOSE --------
+    import src.ui.app as _appmod77
+    _orig_sp77 = _appmod77._SETTINGS_PATH
+    import tempfile as _tf77
+    from pathlib import Path as _Path77
+    _tmpdir77 = _tf77.mkdtemp(prefix="t3965_zoom_")
+    _appmod77._SETTINGS_PATH = _Path77(_tmpdir77) / "settings.json"
+    _appmod77._save_window_state(1400, 900, False, ui_zoom=1.2)
+    check("(v3.9.65) §77b: round-trip ui_zoom (save 1,2 → load 1,2 — "
+          "level CTRL+roda terakhir dipulihkan saat buka)",
+          (_appmod77._load_window_state() or {}).get("ui_zoom") == 1.2,
+          f"got {(_appmod77._load_window_state() or {}).get('ui_zoom')}")
+    _appmod77._save_window_state(1400, 900, False, ui_zoom=9.9)
+    check("(v3.9.65) §77b: ui_zoom DI LUAR rentang (9,9) → None (validasi "
+          "0.5–2.0; bool/string juga ditolak → fallback default 0.8)",
+          (_appmod77._load_window_state() or {}).get("ui_zoom") is None,
+          f"got {(_appmod77._load_window_state() or {}).get('ui_zoom')}")
+    # jalur CLOSE nyata: _on_close_window menyimpan ui_zoom aktif
+    _app77_is_running = app.is_running
+    app.is_running = False
+    _orig_destroy77 = app.root.destroy
+    app.root.destroy = lambda: None
+    try:
+        app._on_close_window()
+        import json as _json77
+        with open(_appmod77._SETTINGS_PATH, "r", encoding="utf-8") \
+                as _f77:
+            _ws77 = _json77.load(_f77).get("window_state", {})
+        check("(v3.9.65) §77b: jalur CLOSE (WM_DELETE_WINDOW) menyimpan "
+              "ui_zoom aktif ke settings.json (buka berikutnya = "
+              "preferensi terakhir user)",
+              "ui_zoom" in _ws77
+              and abs(float(_ws77.get("ui_zoom", 0))
+                      - float(app.ui_zoom)) < 1e-6,
+              f"saved={_ws77.get('ui_zoom')} live={app.ui_zoom}")
+    finally:
+        app.root.destroy = _orig_destroy77
+        app.is_running = _app77_is_running
+        _appmod77._SETTINGS_PATH = _orig_sp77
+    import shutil as _sh77
+    _sh77.rmtree(_tmpdir77, ignore_errors=True)
+
+    # --- (c) STARTUP ZOOM dari state TERSIMPAN (jalur __init__ nyata) -----
+    import src.ui.app as _appmod77c
+    _orig_lws77 = _appmod77c._load_window_state
+    _appmod77c._load_window_state = lambda: {
+        "w": 1400, "h": 900, "maximized": False, "ui_zoom": 1.2}
+    _real_stdout77, _real_stderr77 = sys.stdout, sys.stderr
+    _top77c = tk.Toplevel(root)
+    try:
+        _app77c = StockMonitorApp(_top77c)
+        sys.stdout, sys.stderr = _real_stdout77, _real_stderr77
+        root.update()
+        check("(v3.9.65) §77c: STARTUP membaca ui_zoom TERSIMPAN "
+              "(settings.json 1,2 → app kedua terbuka 120%, bukan "
+              "default 0.8 — preferensi user menang atas default)",
+              _app77c.ui_zoom == 1.2
+              and _theme065.ui_scale() == 1.2,
+              f"zoom={_app77c.ui_zoom} scale={_theme065.ui_scale()}")
+    finally:
+        sys.stdout, sys.stderr = _real_stdout77, _real_stderr77
+        _appmod77c._load_window_state = _orig_lws77
+        app._apply_ui_zoom(1.0)   # pulihkan baseline font suite
+        root.update()
+        _top77c.destroy()         # widget app77c ikut hancur bersama Toplevel
+        root.update()
 
     root.destroy()
 

@@ -199,7 +199,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.64"  # v3.9.64 — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix semua sebar agent no mistakes") — semua temuan audit 15-a/15-b/15-c difix: (1) HIGHLIGHT Ctrl+F KINI BENAR-BENAR TAMPIL di SEMUA tabel ber-tag latar baris (FIX 15-c F-01, BUG paling serius — prioritas tag Treeview = URUTAN CREATE, diuji pixel-probe Xvfb: find dibuat SETELAH zebra → oranye kalah & tak dirender di 🧮 kedua tree/📋 3 mode/☑ Follow Up/Rekap IN/Rincian-PO/Pivot; FIX = konstanta+register_find_tags di theme.py, dipanggil BARIS PERTAMA setup_tree_tags + _setup_tags 12 view — urutan list tag per-item TIDAK berpengaruh, diuji); (2) Ctrl+F kini JALAN DI DALAM popup rincian (DetailsPopup/DeviasiPopup/InDetailPopup) + window clone ⛶ (install_tree_find_binding — bindtag Toplevel sendiri tak memuat binding root) + popup Cari SELALU SATU app-wide (dulu 2 popup bisa koeksis utk 2 tree); (3) STALE-FIND pasca re-render (15-c F-03): iid posional row_N dipakai ulang view → highlight mendarat di baris SALAH senyap — FIX dua lapis: choke point insert_tree_items → _on_tree_rerendered (recompute otomatis) + validasi digest baris saat navigasi; (4) KLASIFIKASI KATEGORI word-boundary \bCOM\b/\bPACKAGING\b (15-a R1 — 'COMMERCIAL'/'COMPLIMENT' tak lagi terhitung COM, 'REPACKAGING' bukan PACKAGING; varian kanonik - RESTO/- CATERING tetap cocok); (5) _compute_resto() tanpa argumen tak lagi menghasilkan anak tab kosong (15-a R3 — pakai df bukan param data); (6) _refresh data-kosong kini MEMBERSIHKAN kedua tabel + tag per-cell (15-a R4 — dulu baris lama tersisa dgn status 'Belum ada data'); (7) minus merah PER-CELL anak tab Tanpa Harga (15-a N9, parity tabel utama) + refresh_icons ⧩ anak tab (N8) + fmt_pct_cell ribuan '+1.234,5%' & round-0 '0,0%' tanpa tanda (N11) + sort ⧩ '+12,5%' kini numerik (F-05) + dead code _event_col_name dihapus (N7); (8) run_tests.sh tanpa hard-require xdpyinfo (F-06 — fallback probe Tk; Xvfb hidup dicek walau x11-utils absen); (9) README root disinkronkan (F-02 — masih headline v3.9.62). VERIFIKASI: §76 BARU + baterai penuh + ruff baseline + tag v3.9.64 → GHA rilis .exe. v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
+APP_VERSION = "3.9.65"  # v3.9.65 — RANK PER-BARIS + STARTUP ZOOM-OUT (dua permintaan user): (1) FIX BUG RANK tab 📦 Deviasi GR & 🧩 Deviasi PCS (user: "ada bug pada deviasi gr dan deviasi pcs pada kolom rank, dimana data rank sama semua untuk tiap grup barang") — era v3.9.51-64 rank = PER BARANG (Σ|Deviasi| kelompok, SATU angka konstanta seluruh baris grup — warisan display merge-vertikal yang tak ada lagi sejak v3.9.60/61) → user melihat angka sama di tiap grup = dilaporkan bug. RESTORASI SEMANTIK SHEET ASLI: Rank = peringkat |Deviasi| BARIS di antara baris GRUP barangnya (1 = deviasi terbesar dalam grup, per resto), method="min" (seri berbagi rank, rank berikut MELONCAT — diprove pola 13,13,13,16 sheet asli), baris Deviasi==0/NaN → rank KOSONG (972/972 baris nol di sheet asli kosong). GROUND-TRUTH: kolom Rank sheet DEVIASI GR/PCS workbook asli user direkonstruksi & dibandingkan — 1347/1348 EKSAK (selisih tunggal = artefak rumus basu di file user sendiri: Susu Kental Manis DPKMAR tertulis 18, matematis 17). (2) STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka udah ke zoom out") — app TERBUKA di zoom 80% (UI_ZOOM_DEFAULT 0.8): font/rowheight/kolom ter-skala sejak buka → lebih banyak baris terlihat; ukuran/maximize jendela tetap dikuasai restore window_state (zoom startup FONTS-ONLY via _apply_ui_zoom(target, resize_window=False) — jendela TIDAK ikut mengecil); CTRL+roda tetap resize penuh (perilaku v3.9.48 utuh; state baseline __init__ = 1.0 supaya penerapan startup selalu efektif). PLUS PERSIST: level zoom terakhir DISIMPAN ke settings.json (window_state.ui_zoom, validasi 0.5–2.0, tolak bool/string) saat jendela ditutup → buka berikutnya memulai di preferensi user (default 0.8 bila belum ada). VERIFIKASI: probe ground-truth rank (803+545 GR match) + probe zoom startup + §58 konstanta 0.8 + §61/§62 kontrak rank per-baris dirombak + §65 +ui_zoom + §77 BARU (ikat 1,1,1/loncat 1,1,3/nol kosong/sort Rank/persist round-trip+validasi+jalur close/startup dari settings.json via app kedua Toplevel). v3.9.64 — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix semua sebar agent no mistakes") — semua temuan audit 15-a/15-b/15-c difix: (1) HIGHLIGHT Ctrl+F KINI BENAR-BENAR TAMPIL di SEMUA tabel ber-tag latar baris (FIX 15-c F-01, BUG paling serius — prioritas tag Treeview = URUTAN CREATE, diuji pixel-probe Xvfb: find dibuat SETELAH zebra → oranye kalah & tak dirender di 🧮 kedua tree/📋 3 mode/☑ Follow Up/Rekap IN/Rincian-PO/Pivot; FIX = konstanta+register_find_tags di theme.py, dipanggil BARIS PERTAMA setup_tree_tags + _setup_tags 12 view — urutan list tag per-item TIDAK berpengaruh, diuji); (2) Ctrl+F kini JALAN DI DALAM popup rincian (DetailsPopup/DeviasiPopup/InDetailPopup) + window clone ⛶ (install_tree_find_binding — bindtag Toplevel sendiri tak memuat binding root) + popup Cari SELALU SATU app-wide (dulu 2 popup bisa koeksis utk 2 tree); (3) STALE-FIND pasca re-render (15-c F-03): iid posional row_N dipakai ulang view → highlight mendarat di baris SALAH senyap — FIX dua lapis: choke point insert_tree_items → _on_tree_rerendered (recompute otomatis) + validasi digest baris saat navigasi; (4) KLASIFIKASI KATEGORI word-boundary \bCOM\b/\bPACKAGING\b (15-a R1 — 'COMMERCIAL'/'COMPLIMENT' tak lagi terhitung COM, 'REPACKAGING' bukan PACKAGING; varian kanonik - RESTO/- CATERING tetap cocok); (5) _compute_resto() tanpa argumen tak lagi menghasilkan anak tab kosong (15-a R3 — pakai df bukan param data); (6) _refresh data-kosong kini MEMBERSIHKAN kedua tabel + tag per-cell (15-a R4 — dulu baris lama tersisa dgn status 'Belum ada data'); (7) minus merah PER-CELL anak tab Tanpa Harga (15-a N9, parity tabel utama) + refresh_icons ⧩ anak tab (N8) + fmt_pct_cell ribuan '+1.234,5%' & round-0 '0,0%' tanpa tanda (N11) + sort ⧩ '+12,5%' kini numerik (F-05) + dead code _event_col_name dihapus (N7); (8) run_tests.sh tanpa hard-require xdpyinfo (F-06 — fallback probe Tk; Xvfb hidup dicek walau x11-utils absen); (9) README root disinkronkan (F-02 — masih headline v3.9.62). VERIFIKASI: §76 BARU + baterai penuh + ruff baseline + tag v3.9.64 → GHA rilis .exe. v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -1759,11 +1759,15 @@ WINDOW_MIN = (1020, 700)
 # senyap). Disimpan saat jendela ditutup (jalur WM_DELETE_WINDOW asli —
 # bukan root.destroy() langsung milik test); dipulihkan saat startup:
 # pertama kali (tanpa state) → MAXIMIZED (auto-fit layar).
+# v3.9.65 — ZOOM UI ikut dipersist (key 'ui_zoom' dalam window_state;
+# pola sama — read-modify-write atomik): level zoom terakhir user
+# dipulihkan saat buka; tanpa state → UI_ZOOM_DEFAULT (zoom-out).
 _SETTINGS_PATH = _app_base_dir() / "settings.json"
 
 
 def _load_window_state():
-    """{w, h, maximized} tersimpan; None bila tak ada/korup (first open)."""
+    """{w, h, maximized, ui_zoom} tersimpan; None bila tak ada/korup
+    (first open). ui_zoom = float 0.5–2.0 (None bila tak ada/rusak)."""
     try:
         with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -1771,15 +1775,29 @@ def _load_window_state():
         if (isinstance(st, dict) and isinstance(st.get("w"), int)
                 and isinstance(st.get("h"), int)
                 and st["w"] >= WINDOW_MIN[0] and st["h"] >= WINDOW_MIN[1]):
+            # v3.9.65 — zoom tersimpan (validasi rentang; float/int)
+            _z = st.get("ui_zoom")
+            if isinstance(_z, bool) or not isinstance(
+                    _z, (int, float)):
+                _z = None
+            else:
+                _z = float(_z)
+                if not (UI_ZOOM_MIN <= _z <= UI_ZOOM_MAX):
+                    _z = None
             return {"w": st["w"], "h": st["h"],
-                    "maximized": bool(st.get("maximized"))}
+                    "maximized": bool(st.get("maximized")),
+                    "ui_zoom": _z}
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return None
 
 
-def _save_window_state(w: int, h: int, maximized: bool) -> None:
-    """Simpan state jendela (read-modify-write atomik; senyap gagal)."""
+def _save_window_state(w: int, h: int, maximized: bool,
+                       ui_zoom: float | None = None) -> None:
+    """Simpan state jendela (read-modify-write atomik; senyap gagal).
+    v3.9.65 — ui_zoom ikut tersimpan bila diberikan (app asli selalu
+    mengirim self.ui_zoom saat close); tanpa argumen = tanpa key
+    (pemanggil lama tetap bekerja; buka berikutnya pakai default)."""
     old = {}
     try:
         with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -1789,8 +1807,12 @@ def _save_window_state(w: int, h: int, maximized: bool) -> None:
     except (OSError, ValueError, TypeError):
         old = {}
     try:
-        old["window_state"] = {"w": int(w), "h": int(h),
-                               "maximized": bool(maximized)}
+        _st = {"w": int(w), "h": int(h), "maximized": bool(maximized)}
+        # v3.9.65 — zoom terakhir user dipulihkan saat buka (default
+        # zoom-out bila tak tersimpan)
+        if ui_zoom is not None:
+            _st["ui_zoom"] = round(float(ui_zoom), 2)
+        old["window_state"] = _st
         tmp = _SETTINGS_PATH.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(old, f, indent=2, ensure_ascii=False)
@@ -1801,11 +1823,17 @@ def _save_window_state(w: int, h: int, maximized: bool) -> None:
 
 # v3.9.48 — ZOOM UI runtime (CTRL + Scroll) — rentang & langkah.
 # 0.5–2.0 dipilih supaya teks tetap terbaca di kedua ujung (font 8pt
-# di 50% ≈ 4pt = lantai scale_pt 4). Runtime saja — tidak dipersist.
+# di 50% ≈ 4pt = lantai scale_pt 4).
+# v3.9.65 — DEFAULT 0.8 + PERSIST: user: "bisa gak waktu aku buka udah
+# ke zoom out" — app kini TERBUKA dalam keadaan zoom-out 80% (konten
+# lebih banyak muat; langkah roda tetap 0.1 → 90%/100% rapi), dan level
+# zoom CTRL+roda terakhir DISIMPAN ke settings.json (window_state.
+# ui_zoom) → buka berikutnya memulai persis seperti preferensi user.
+# Dulu: selalu 100% tiap restart (preferensi sesi — hilang saat tutup).
 UI_ZOOM_MIN = 0.5
 UI_ZOOM_MAX = 2.0
 UI_ZOOM_STEP = 0.1
-UI_ZOOM_DEFAULT = 1.0
+UI_ZOOM_DEFAULT = 0.8
 
 # Path config.json — v3.9.62 frozen-aware (mode dev: root proyek;
 # mode PyInstaller onedir: folder .exe — build_exe.py menyalin config
@@ -1909,7 +1937,12 @@ class StockMonitorApp:
         # proses unaware = 1.0 → pipeline lama persis).
         # (2) ZOOM RUNTIME — state di bawah, mesin di _setup_ui_zoom.
         self._dpi_scale = self._read_dpi_scale()
-        self.ui_zoom = UI_ZOOM_DEFAULT
+        # v3.9.65 — baseline STATE 1.0 (font masih 100% di titik ini);
+        # zoom startup (tersimpan / UI_ZOOM_DEFAULT 0.8) DITERAPKAN di
+        # akhir __init__ via _apply_ui_zoom(target, resize_window=False)
+        # — jangan set self.ui_zoom = target di sini (panggilan _apply
+        # jadi no-op <1e-6 & font tak pernah ter-skala).
+        self.ui_zoom = 1.0
         # v3.9.50 — [MINOR 3-a] ROUND-TRIP JENDELA: simpan ukuran BASE
         # (= ukuran efektif di zoom 100%) + ukuran EXPECTED (yang kita
         # minta sendiri via geometry — termasuk hasil clamp layar).
@@ -1950,6 +1983,18 @@ class StockMonitorApp:
         #     terbuka persis seperti itu lagi. Simpan saat jendela ditutup
         #     (_on_close_window — jalur WM asli, bukan destroy() test).
         _saved_win = _load_window_state()
+        # v3.9.65 — ZOOM STARTUP (user: "bisa gak waktu aku buka udah ke
+        # zoom out"): target zoom = yang TERPERSIST di settings.json
+        # (window_state.ui_zoom — level CTRL+roda terakhir user), atau
+        # UI_ZOOM_DEFAULT (0.8 = zoom-out) bila belum ada. Diterapkan
+        # SETELAH seluruh UI terbangun (font/rowheight/kolom live —
+        # resize_window=False: ukuran jendela dikuasai restore F8 di
+        # atas, zoom startup hanya mengecilkan KONTEN → lebih banyak
+        # baris/kolom terlihat sejak buka).
+        _saved_zoom = (_saved_win or {}).get("ui_zoom")
+        self._startup_ui_zoom = (float(_saved_zoom)
+                                 if _saved_zoom is not None
+                                 else UI_ZOOM_DEFAULT)
         if _saved_win is not None:
             _sw = int(self.root.winfo_screenwidth())
             _sh = int(self.root.winfo_screenheight())
@@ -2022,6 +2067,21 @@ class StockMonitorApp:
 
         # Load config awal ke tab Config
         self._load_config_to_form()
+
+        # v3.9.65 — TERAPKAN ZOOM STARTUP (user: "bisa gak waktu aku buka
+        # udah ke zoom out"): seluruh UI (toolbar/statusbar/notebook/semua
+        # tree) sudah terbangun → efek berlapis _apply_ui_zoom bekerja
+        # lengkap (named font + rowheight + auto-fit kolom + badge).
+        # resize_window=False — ukuran/maximize jendela dikuasai restore
+        # F8 di atas; zoom startup mengecilkan KONTEN saja. Target =
+        # ui_zoom tersimpan (settings.json) atau UI_ZOOM_DEFAULT 0.8.
+        # self.ui_zoom masih 1.0 (baseline state) → panggilan di bawah
+        # selalu EFEKTIF (bukan no-op); bila target persis 1.0 → skip
+        # (tidak ada yang perlu di-scale).
+        _z_target = round(min(UI_ZOOM_MAX, max(UI_ZOOM_MIN,
+                                               self._startup_ui_zoom)), 2)
+        if abs(_z_target - 1.0) > 1e-6:
+            self._apply_ui_zoom(_z_target, resize_window=False)
 
         # v3.9.33 — AUDIT FIX (48-c LOW): tombol X / WM_DELETE_WINDOW — dulu
         # TANPA handler (48-f: tidak ada WM_DELETE_WINDOW) → pipeline hidup
@@ -2133,7 +2193,8 @@ class StockMonitorApp:
             self._apply_ui_zoom(self.ui_zoom - UI_ZOOM_STEP)
         return "break"
 
-    def _apply_ui_zoom(self, value: float) -> bool:
+    def _apply_ui_zoom(self, value: float,
+                       resize_window: bool = True) -> bool:
         """Terapkan zoom UI (clamp 50%–200%, bulat 2 desimal). Return
         True bila zoom benar-benar berubah (nilai sama = no-op).
 
@@ -2149,7 +2210,15 @@ class StockMonitorApp:
         (4) CACHE RENDER: rowheight berubah → cache CellColorOverlay +
             batching insert virtual di-invalidasi (label sel warna tak
             tertinggal di posisi lama);
-        (5) BADGE persen di status bar kanan."""
+        (5) BADGE persen di status bar kanan.
+
+        v3.9.65 — resize_window=False (STARTUP): terapkan FONT/ROWHEIGHT/
+        KOLOM saja TANPA mengubah ukuran jendela — jendela dibuka persis
+        seperti state tersimpan (maximized/float) & konten ter-zoom-out
+        → lebih banyak baris terlihat (semantik 'sudah ke zoom out saat
+        dibuka'); jendela baru ×rasio saat user CTRL+roda (jalur lama).
+        Runtime CTRL+roda tetap resize_window=True (perilaku v3.9.48
+        utuh)."""
         _new = round(min(UI_ZOOM_MAX, max(UI_ZOOM_MIN, value)), 2)
         _old = self.ui_zoom
         if abs(_new - _old) < 1e-6:
@@ -2169,8 +2238,11 @@ class StockMonitorApp:
         # (3) jendela + minsize proporsional — v3.9.50: target = BASE×zoom
         # (bukan current×rasio) supaya round-trip lewat clamp layar pulih
         # eksak; resize manual terus ditrack ke base via _on_root_configure.
+        # v3.9.65 — resize_window=False (startup) LEWATI geometry: ukuran
+        # jendela dikuasai penuh oleh restore window_state (F8) — zoom
+        # startup hanya mengecilkan KONTEN; base/expected tak disentuh.
         with contextlib.suppress(Exception):
-            if self._zoom_base_wh is not None:
+            if resize_window and self._zoom_base_wh is not None:
                 _bw, _bh = self._zoom_base_wh
                 _sw, _sh = (self.root.winfo_screenwidth(),
                             self.root.winfo_screenheight())
@@ -3637,7 +3709,9 @@ class StockMonitorApp:
         mekanisme masing-masing saat berubah). Idle → langsung tutup.
         v3.9.55 — F8: sebelum destroy, STATE JENDELA (ukuran/maximize)
         disimpan ke settings.json → sesi berikutnya terbuka persis
-        seperti kebiasaan user (tanpa adjust manual)."""
+        seperti kebiasaan user (tanpa adjust manual).
+        v3.9.65 — ZOOM ikut tersimpan (ui_zoom): level CTRL+roda
+        terakhir dipulihkan saat buka (default 0.8 bila belum ada)."""
         worker = getattr(self, "worker_thread", None)
         pipeline_hIDup = (self.is_running
                           or (worker is not None and worker.is_alive()))
@@ -3647,13 +3721,14 @@ class StockMonitorApp:
                 "dihentikan paksa)",
                 parent=self.root):
             return
-        # v3.9.55 — simpan state jendela (F8)
+        # v3.9.55 — simpan state jendela (F8); v3.9.65 — + zoom terakhir
         with contextlib.suppress(Exception):
             _max = self._is_root_maximized()
             _w = int(self.root.winfo_width())
             _h = int(self.root.winfo_height())
             if _w >= WINDOW_MIN[0] and _h >= WINDOW_MIN[1]:
-                _save_window_state(_w, _h, _max)
+                _save_window_state(_w, _h, _max,
+                                   ui_zoom=getattr(self, "ui_zoom", None))
         self.root.destroy()
 
     def _stop_pipeline(self):

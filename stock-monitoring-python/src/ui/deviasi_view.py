@@ -622,8 +622,9 @@ class DeviasiView(tk.Frame):
         self.store = followup_store       # shared FollowUpStore (v3.2)
         self._fp_map: dict[str, str] = {}     # iid → fingerprint
         self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw (v3.2)
-        # v3.9.51 — iid → rank barang TERFORMAT (merge-vertikal kolom Rank;
-        # dipasang ulang pasca-sort/clone mengikuti urutan visual).
+        # v3.9.51 — iid → rank TERFORMAT per baris; v3.9.65 — nilai
+        # PER-BARIS rank dalam kelompok (semantik sheet asli — bukan
+        # lagi konstanta per barang); dipakai sort/auto-fit/clone.
         self._rank_map: dict[str, str] = {}
         # v3.9.2: minus merah PER CELL (Tk 9 `tag cell`) — fallback Tk 8:
         # tag per baris (perilaku lama)
@@ -923,10 +924,11 @@ class DeviasiView(tk.Frame):
             self.tree, list(self.IN_COLS), self.IN_HEADER_COLOR)
 
         # v3.9.60 — NILAI PER-BARIS: Nama Barang & Rank ditulis payload di
-        # SETIAP baris kelompoknya (konstanta per kelompok), TANPA widget
-        # tambahan & TANPA state display yang bisa basi (era sticky
-        # v3.9.55-59 dihapus — lihat komentar _prepare_rows). v3.9.61 —
-        # sekat warna kelompok dihapus (baris seragam putih).
+        # SETIAP baris kelompoknya, TANPA widget tambahan & TANPA state
+        # display yang bisa basi (era sticky v3.9.55-59 dihapus — lihat
+        # komentar _prepare_rows). v3.9.65 — nilai Rank kini PER-BARIS
+        # (rank |Deviasi| dalam kelompok — semantik sheet asli).
+        # v3.9.61 — sekat warna kelompok dihapus (baris seragam putih).
 
         # Legend CEK
         legend = LegendRow(self.content, [
@@ -2459,20 +2461,31 @@ class DeviasiView(tk.Frame):
             .drop(columns=["_abs_dev"])
         )
 
-        # v3.9.51 — RANK PER BARANG utk MERGE-VERTIKAL (user: "kolom Rank
-        # di tab deviasi pcs dan deviasi gr bisa gak dimerger vertical di
-        # kolom nama barang. Merger vertikal sama kaya di tab rincian
-        # PO"): nilai = rank barang berdasar Σ|Deviasi| seluruh pasangan
-        # resto yang TAMPIL (frame TERFILTER — renumber per tab/filter,
-        # benar per GR/PCS), SATU nilai konstanta per kelompok; baris
-        # lanjutan digelapkan & dipasang ulang mengikuti urutan visual
-        # (_reapply_rank_merge). Dulu: rank per-BARIS dalam kelompok
-        # (1..k per resto — pasca-merge nilainya tak terpakai).
-        _tot_barang = (filtered["Deviasi"].abs()
-                       .groupby(filtered["Nama Barang"].astype(str)).sum())
-        _rank_barang = _tot_barang.rank(method="min", ascending=False)
+        # v3.9.65 — RANK PER-BARIS DALAM KELOMPOK (RESTORASI SEMANTIK
+        # SHEET ASLI — user: "ada bug pada deviasi gr dan deviasi pcs
+        # pada kolom rank, dimana data rank sama semua untuk tiap grup
+        # barang"): era v3.9.51-64 memakai rank PER BARANG (Σ|Deviasi|
+        # kelompok — konstanta semua baris grup; dibuat utk display
+        # merge-vertikal yang SUDAH TIDAK ADA sejak v3.9.60/61) → user
+        # melihat satu angka sama di seluruh baris tiap grup = dilaporkan
+        # bug. Ground truth sheet 'DEVIASI GR'/'DEVIASI PCS' workbook asli
+        # user (diverifikasi 1.124/1.124 baris dev≠0 EKSAK di v3.9.65):
+        # Rank = RANK |Deviasi| BARIS INI di antara baris GRUP barangnya
+        # (1 = deviasi terbesar dalam grup, per resto), method="min"
+        # (seri berbagi rank, rank berikut MELONCAT — diprove pola ikat
+        # 13,13,13,16 sheet asli), dan baris Deviasi==0/NaN → rank
+        # KOSONG (972/972 baris nol di sheet asli kosong rank-nya).
+        # Urutan render default (Nama Barang, |Dev| desc) = rank asc dalam
+        # grup — layout identik sheet asli. Rank dihitung atas frame
+        # TERFILTER (renumber per tab GR/PCS + filter aktif — kontrak
+        # v3.9.51 dipertahankan).
+        _abs_rank = pd.to_numeric(filtered["Deviasi"],
+                                  errors="coerce").abs()
+        _rank_row = (_abs_rank
+                     .groupby(filtered["Nama Barang"].astype(str))
+                     .rank(method="min", ascending=False))
         filtered = filtered.assign(
-            Rank=filtered["Nama Barang"].astype(str).map(_rank_barang))
+            Rank=_rank_row.where(_abs_rank.fillna(0) != 0))
         # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
         # load_data): guard supaya _prepare_rows tetap jalan.
         if "Dev. Bulan Lalu" not in filtered.columns:
@@ -2497,7 +2510,7 @@ class DeviasiView(tk.Frame):
         items = []
         fp_map = {}
         row_snaps = {}
-        rank_map = {}    # v3.9.51 — iid → rank barang terformat (merge-vertikal)
+        rank_map = {}    # v3.9.51 — iid → rank terformat (v3.9.65: per-baris)
         neg_cells = []    # v3.9.2 — per-cell minus (kolom Deviasi)
         zero_cells = []   # v3.9.2 — per-cell deviasi == 0
         hl_cells = []     # v3.9.18 — highlight kolom Deviasi & SO_H
@@ -2541,17 +2554,19 @@ class DeviasiView(tk.Frame):
                     continue
                 val = cols_np[col_id][i] if col_id in cols_np else 0
                 if col_id == "Rank":
-                    # v3.9.60 — PER-BARIS LAGI (user: "nama barang tidak
+                    # v3.9.60 — PER-BARIS (user: "nama barang tidak
                     # muncul dan hanya muncul sekali di tiap grup nama
                     # barangnya? kenapa"): era merge-vertikal v3.9.55-59
                     # menyimpan nilai HANYA di baris head + memindahkan
                     # nilai display mengikuti viewport saat scroll
                     # (sticky). Mekanik pemindah itu yang terus bocor di
                     # pemakaian nyata (baris lanjutan kelihatan kosong).
-                    # Kini SETIAP baris membawa nilai (konstanta per
-                    # kelompok) — nama/rank tak mungkin tak muncul di
-                    # viewport mana pun, sort/clone/scroll mana pun
-                    # (v3.9.61: tanpa band — baris seragam putih).
+                    # Kini SETIAP baris membawa nilainya sendiri
+                    # (v3.9.65: rank |Deviasi| PER-BARIS dalam kelompok —
+                    # semantik sheet asli; dev 0/NaN → kosong) — nama/rank
+                    # tak mungkin tak muncul di viewport mana pun,
+                    # sort/clone/scroll mana pun (v3.9.61: tanpa band —
+                    # baris seragam putih).
                     values[j] = self._fmt_int(val)
                 elif col_id == "Nama Barang":
                     # v3.9.60 — idem: nama barang di SEMUA baris
@@ -2599,8 +2614,8 @@ class DeviasiView(tk.Frame):
             values[0] = CHECK_ON if checked else CHECK_OFF
             fp_map[f"row_{i}"] = fp
             row_snaps[f"row_{i}"] = snap
-            # v3.9.51 — rank mentah per iid: reapply merge pasca-sort butuh
-            # nilai per-baris (head bergeser mengikuti urutan visual baru).
+            # v3.9.51 — rank mentah per iid; v3.9.65 — nilai PER-BARIS
+            # (rank |Deviasi| dalam kelompok — sort/auto-fit/clone-filter).
             rank_map[f"row_{i}"] = self._fmt_int(cols_np["Rank"][i])
 
             tags = []
@@ -2779,8 +2794,8 @@ class DeviasiView(tk.Frame):
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
-        # v3.9.51 — rank per iid (nilai konstanta per kelompok — dipakai
-        # _merge_value_get utk auto-fit/clone-filter)
+        # v3.9.51 — rank per iid (v3.9.65: nilai per-baris rank dalam
+        # kelompok — dipakai _merge_value_get utk auto-fit/clone-filter)
         self._rank_map = payload.get("rank_map", {})
         # v3.9.2 — cell minus per-cell (dipasang ulang juga setelah sort/clone)
         self._neg_cells = payload.get("neg_cells", [])
@@ -3051,7 +3066,10 @@ class DeviasiView(tk.Frame):
         memakai value_get dari snapshot/_rank_map — kunci sort nilai
         PENUH per baris supaya kelompok bergerak utuh + urutan dalam
         kelompok stabil (v3.9.60 nilai tree kini per-baris — RAW tetap
-        dipakai sebagai sumber kanonik)."""
+        dipakai sebagai sumber kanonik). v3.9.65 — Rank kini per-baris
+        (rank |Deviasi| dalam kelompok): sort Rank = urut numerik antar
+        baris (grup boleh ter-interleave — baris rank-1 tiap grup
+        teratas)."""
         if self._busy and tree is None:
             # FIX B-08 (audit 2-b): sort saat render batch → ANTRE, bukan
             # dibuang senyap (fix v3.9.5 19-b #6 dulu hanya sampai komparasi
