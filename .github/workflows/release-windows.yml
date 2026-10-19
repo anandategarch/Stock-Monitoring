@@ -43,6 +43,11 @@ jobs:
 
       - name: Build EXE (onedir)
         run: python build_exe.py
+        env:
+          # FIX run #39188486096: console Windows runner (cp1252) tak bisa
+          # encode karakter unicode di log build — paksa stdio Python UTF-8
+          # (build_exe.py juga reconfigure sendiri; ini lapis kedua).
+          PYTHONIOENCODING: utf-8
 
       - name: Arsipkan folder aplikasi
         shell: pwsh

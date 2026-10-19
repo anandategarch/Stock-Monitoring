@@ -18411,10 +18411,14 @@ def main():
               ("exclude_binaries=True", "console=False",
                '"python_calamine"', '"pyxlsb"', "upx=False", "COLLECT")))
     check("(v3.9.62) §74b: build_exe.py = instalasi pyinstaller otomatis + "
-          "salin config.json ke SAMPING .exe (base frozen-aware)",
+          "salin config.json ke SAMPING .exe (base frozen-aware) + guard "
+          "UNICODE console Windows (reconfigure UTF-8 — run GHA "
+          "#39188486096 gagal cp1252 '→' pasca-build sukses)",
           "pyinstaller" in _bexe74.lower()
           and "copy2" in _bexe74
-          and "config.json" in _bexe74)
+          and "config.json" in _bexe74
+          and "reconfigure" in _bexe74
+          and "PYTHONIOENCODING" in _yml74)
 
     # --- (c) jalur frozen-aware app_base_dir ------------------------------
     from src.config import app_base_dir

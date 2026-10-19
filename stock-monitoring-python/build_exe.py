@@ -29,6 +29,19 @@ HERE = Path(__file__).resolve().parent
 DIST_APP = HERE / "dist" / "StockMonitor"
 
 
+def _utf8_stdio() -> None:
+    """FIX run GHA #39188486096: console Windows default cp1252/cp437 tak
+    bisa meng-encode karakter '→' di pesan log → UnicodeEncodeError SETELAH
+    build sukses (PyInstaller selesai, print terakhir yang crash).
+    Reconfigure stdout/stderr ke UTF-8 (Python ≥3.7; best-effort — gagal
+    reconfigure = diam, pesan berikut tetap ASCII aman)."""
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
+
 def _ensure_pyinstaller() -> None:
     try:
         import PyInstaller  # noqa: F401
@@ -41,6 +54,7 @@ def _ensure_pyinstaller() -> None:
 
 
 def main() -> int:
+    _utf8_stdio()
     _ensure_pyinstaller()
     print("[build] menjalankan PyInstaller (onedir) ...")
     subprocess.check_call(
