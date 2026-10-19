@@ -19229,6 +19229,46 @@ def main():
           and _ranks77b[0] == ("LONCAT", "3")
           and _ranks77b[-1] == ("LONCAT", ""),
           f"got {_ranks77b}")
+    # --- (d) BONUS bug laten: popup ⧩ Rank TERISI + filter BERFUNGSI -----
+    # v3.9.65 — Rank = kolom DERIVED (dihitung _prepare_rows; tak pernah
+    # ada di pivot mentah) → _col_values lama return [] → popup ⧩ Rank
+    # SELALU KOSONG sejak v3.9.51 & seleksinya DITELAN SENYAP oleh loop
+    # col_sel (kolom tak ada di frame). Kini: daftar nilai = rank yang
+    # tampil + filter diterapkan pasca-assign.
+    _cv77 = {str(x) for x in _dv77._col_values("Rank")}
+    check("(v3.9.65) §77d: popup ⧩ Rank TERISI (dulu SELALU KOSONG di "
+          "semua versi — kolom derived tak pernah ada di pivot mentah): "
+          "nilai = {'1', '3', ''} persis rank yang tampil "
+          "(1 = 6 baris · 3 = loncat pasca ikat · '' = baris dev 0)",
+          _cv77 == {"1", "3", ""},
+          f"got {_cv77}")
+    _pl77b = _dv77._prepare_rows({"col_sel": {"Rank": {"3"}},
+                                  "tanggal_h": 25, "kategori": None,
+                                  "aktif": None})
+    _rows77b = [(sn.get("barang"), sn.get("resto"))
+                for sn in _pl77b["row_snaps"].values()]
+    check("(v3.9.65) §77d: filter ⧩ Rank = {'3'} BERFUNGSI (dulu "
+          "DITELAN SENYAP — loop col_sel tak melihat kolom derived): "
+          "hanya LONCAT/RC (baris rank-3) yang tampil",
+          len(_pl77b["items"]) == 1
+          and _rows77b == [("LONCAT", "RC")],
+          f"got n={len(_pl77b['items'])} rows={_rows77b}")
+    _pl77c = _dv77._prepare_rows({"col_sel": {"Rank": {"1"}},
+                                  "tanggal_h": 25, "kategori": None,
+                                  "aktif": None})
+    _pl77d = _dv77._prepare_rows({"col_sel": {"Rank": {""}},
+                                  "tanggal_h": 25, "kategori": None,
+                                  "aktif": None})
+    _rows77d = [(sn.get("barang"), sn.get("resto"))
+                for sn in _pl77d["row_snaps"].values()]
+    check("(v3.9.65) §77d: filter ⧩ Rank = {'1'} → 6 baris rank-1 tiap "
+          "kelompok (LONCAT ×2 · SATU ×1 · TIE GRUP ×3) & = {''} → hanya "
+          "baris TANPA rank (LONCAT/RD dev 0)",
+          len(_pl77c["items"]) == 6
+          and len(_pl77d["items"]) == 1
+          and _rows77d == [("LONCAT", "RD")],
+          f"got n1={len(_pl77c['items'])} n0={len(_pl77d['items'])} "
+          f"rows={_rows77d}")
     _dv77.destroy()
     _top77.destroy()
     root.update()

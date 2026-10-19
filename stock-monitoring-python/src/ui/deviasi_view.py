@@ -1370,9 +1370,30 @@ class DeviasiView(tk.Frame):
         sendiri dikecualikan) — dulu pivot MENTAH: tab PCS bisa
         menampilkan nilai CEK yang hanya ada di baris GR (mis. "Beda
         Tanggal" padahal tidak ada baris PCS ber-CEK itu) dan KATEGORI
-        Deviasi menampilkan nilai dari kategori lain."""
+        Deviasi menampilkan nilai dari kategori lain.
+        v3.9.65 — Rank = kolom DERIVED (dihitung _prepare_rows atas
+        frame terfilter; tak pernah ada di pivot MENTAH) — dulu popup ⧩
+        Rank SELALU KOSONG di semua versi sejak v3.9.51. Kini rumus
+        rank dihitung ulang atas frame tampil-saat-ini supaya daftar ⧩
+        = rank yang TAMPIL di tabel (renumber per filter — konsisten
+        dgn render) & filter ⧩ Rank BERFUNGSI (diterapkan pasca-assign
+        di _prepare_rows)."""
         pivot_df = self._filtered_pivot(exclude_col=col)
         if pivot_df is None or pivot_df.empty or col not in pivot_df.columns:
+            # v3.9.65 — kolom derived Rank: hitung rumus rank atas frame
+            # yang sama dgn sumber nilai popup (tanpa filter Rank itu
+            # sendiri — perilaku AutoFilter Excel).
+            if (col == "Rank" and pivot_df is not None
+                    and not pivot_df.empty
+                    and "Deviasi" in pivot_df.columns
+                    and "Nama Barang" in pivot_df.columns):
+                _abs = pd.to_numeric(pivot_df["Deviasi"],
+                                     errors="coerce").abs()
+                _rk = (_abs.groupby(pivot_df["Nama Barang"].astype(str))
+                       .rank(method="min", ascending=False))
+                return self._format_col_series(
+                    "Rank", _rk.where(_abs.fillna(0) != 0)) \
+                    .unique().tolist()
             return []
         return self._format_col_series(col, pivot_df[col]).unique().tolist()
 
@@ -2486,6 +2507,21 @@ class DeviasiView(tk.Frame):
                      .rank(method="min", ascending=False))
         filtered = filtered.assign(
             Rank=_rank_row.where(_abs_rank.fillna(0) != 0))
+        # v3.9.65 — filter ⧩ kolom Rank (derived): loop col_sel di atas
+        # melewatkannya (kolom Rank baru ADA setelah assign ini — pivot
+        # mentah tak memuatnya; dulu seleksi ⧩ Rank DITELAN SENYAP).
+        # Diterapkan SETELAH rank dihitung: kecocokan nilai TERFORMAT
+        # identik dgn kolom lain ('1' = baris rank-1 tiap kelompok,
+        # '' = baris tanpa rank/dev 0).
+        _sel_rank = st["col_sel"].get("Rank")
+        if _sel_rank is not None and len(filtered):
+            _fmt_rank = self._format_col_series("Rank", filtered["Rank"])
+            filtered = filtered[_fmt_rank.isin(_sel_rank)]
+            if filtered.empty:
+                return {"items": [], "kpi": (0, 0.0, 0),
+                        "status": f"Tidak ada data "
+                                  f"{'GR' if self.satuan_mode == 'GR' else 'PCS'} "
+                                  f"setelah filter."}
         # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
         # load_data): guard supaya _prepare_rows tetap jalan.
         if "Dev. Bulan Lalu" not in filtered.columns:
