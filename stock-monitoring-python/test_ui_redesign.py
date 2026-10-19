@@ -830,7 +830,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.62", APP_VERSION == "3.9.62",
+    check("Versi = 3.9.63", APP_VERSION == "3.9.63",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -9929,23 +9929,26 @@ def main():
             _rv46.tree.item(_i46, "values")
             for _i46 in _rv46.tree.get_children("")}
     _mlg46 = _r46.get("MLGPAR")
-    check("(v3.9.34→v3.9.51) 🧮 Nominal Deviasi: MLGPAR = 3 barang · 1 "
-          "tanpa harga · Σ 20+180.000 = 'Rp 180.020' (KOPI tanpa harga "
-          "tak ikut; Currency Rp v3.9.51)",
-          _mlg46 is not None and _mlg46[1] == "3" and _mlg46[2] == "1"
-          and _mlg46[3] == "Rp 180.020",
+    # v3.9.63 — kolom baru COM Deviasi/Biaya Packaging ('-' = Σ 0 —
+    # fixture tanpa kategori COM/Packaging) + Persen ('-' tanpa file
+    # lalu); kolom N Barang/Tanpa Harga DIHAPUS.
+    check("(v3.9.34→v3.9.63) 🧮 Nominal Deviasi: MLGPAR Σ 20+180.000 = "
+          "'Rp 180.020' (KOPI tanpa harga tak ikut; Currency Rp v3.9.51) "
+          "· COM/Packaging '-' (0) · Persen '-' (tanpa file)",
+          _mlg46 is not None and _mlg46[1] == "-" and _mlg46[2] == "-"
+          and _mlg46[3] == "Rp 180.020" and _mlg46[4] == "-"
+          and _mlg46[5] == "-",
           f"got {_mlg46}")
     _bdg46 = _r46.get("BDGSET")
-    check("(v3.9.34→v3.9.51) 🧮 Nominal Deviasi: BDGSET = 1 barang · "
+    check("(v3.9.34→v3.9.63) 🧮 Nominal Deviasi: BDGSET = 1 barang · "
           "'Rp 30'",
-          _bdg46 is not None and _bdg46[1] == "1" and _bdg46[2] == "0"
-          and _bdg46[3] == "Rp 30",
+          _bdg46 is not None and _bdg46[3] == "Rp 30",
           f"got {_bdg46}")
     _tot46 = _r46.get("TOTAL")
-    check("(v3.9.34→v3.9.51) 🧮 Nominal Deviasi: baris TOTAL = 4 barang "
-          "· 1 tanpa · Σ 'Rp 180.050'",
+    check("(v3.9.34→v3.9.63) 🧮 Nominal Deviasi: baris TOTAL Σ "
+          "'Rp 180.050' (tanpa kolom N Barang/Tanpa Harga — v3.9.63)",
           _tot46 is not None and _tot46[0] == "TOTAL"
-          and _tot46[1] == "4" and _tot46[2] == "1"
+          and _tot46[1] == "-" and _tot46[2] == "-"
           and _tot46[3] == "Rp 180.050",
           f"got {_tot46}")
     check("(v3.9.34) 🧮 Nominal Deviasi: heading dinamis "
@@ -10296,12 +10299,13 @@ def main():
     _r48 = {str(_rv48.tree.set(_i48, "Resto")):
             _rv48.tree.item(_i48, "values")
             for _i48 in _rv48.tree.get_children("")}
-    check("(v3.9.36→v3.9.51) 🧮: filter KATEGORI Deviasi diterapkan — "
-          "GULA (TEPAT) terbuang: MLGPAR 2 barang (1 tanpa) 'Rp 20'; "
-          "TOTAL 3 barang 'Rp 50'",
-          _r48.get("MLGPAR") is not None and _r48["MLGPAR"][1] == "2"
-          and _r48["MLGPAR"][2] == "1" and _r48["MLGPAR"][3] == "Rp 20"
-          and _r48.get("TOTAL") is not None and _r48["TOTAL"][1] == "3"
+    check("(v3.9.36→v3.9.63) 🧮: filter KATEGORI Deviasi diterapkan — "
+          "GULA (TEPAT) terbuang: MLGPAR 'Rp 20'; TOTAL 'Rp 50' "
+          "(kolom COM/Packaging '-' — DEVIASI/TEPAT bukan klas "
+          "COM/PACKAGING; N Barang/Tanpa Harga dihapus v3.9.63)",
+          _r48.get("MLGPAR") is not None and _r48["MLGPAR"][1] == "-"
+          and _r48["MLGPAR"][2] == "-" and _r48["MLGPAR"][3] == "Rp 20"
+          and _r48.get("TOTAL") is not None
           and _r48["TOTAL"][3] == "Rp 50",
           f"got {_r48}")
     check("(v3.9.36) 🧮: footer status menyebut KATEGORI aktif",
@@ -10396,69 +10400,77 @@ def main():
     _r48b = {str(_rv48.tree.set(_i48, "Resto")):
              _rv48.tree.item(_i48, "values")
              for _i48 in _rv48.tree.get_children("")}
-    check("(v3.9.36) 🧮: KATEGORI 'Semua' → GULA kembali (MLGPAR 3 "
-          "barang · 2 tanpa harga — GULA tak terkonversi + KOPI tak ada "
-          "di 41.09)",
-          _r48b.get("MLGPAR") is not None and _r48b["MLGPAR"][1] == "3"
-          and _r48b["MLGPAR"][2] == "2",
-          f"got {_r48b}")
+    check("(v3.9.36→v3.9.63) 🧮: KATEGORI 'Semua' → GULA kembali — Σ "
+          "tetap 'Rp 20' (GULA & KOPI tanpa harga transparan); jumlah "
+          "tanpa harga kini di ANAK TAB (2 baris global)",
+          _r48b.get("MLGPAR") is not None
+          and _r48b["MLGPAR"][3] == "Rp 20"
+          and len(_rv48.tree_noharga.get_children("")) == 2,
+          f"got {_r48b} "
+          f"nh={len(_rv48.tree_noharga.get_children(''))}")
 
-    # double-click sel kolom 'Tanpa Harga' → popup daftar + alasan
-    _mlg48 = next(_i48 for _i48 in _rv48.tree.get_children("")
-                  if _rv48.tree.set(_i48, "Resto") == "MLGPAR")
-    _bb48 = _rv48.tree.bbox(_mlg48, "#3")
-    check("(v3.9.36) 🧮: bbox sel 'Tanpa Harga' tersedia (kolom #3)",
-          bool(_bb48), "bbox kosong")
-    if _bb48:
-        _rv48._close_detail_wins()
-        _e48b = tk.Event()
-        _e48b.widget = _rv48.tree
-        _e48b.x = _bb48[0] + 5
-        _e48b.y = _bb48[1] + 5
-        _rv48.tree.selection_set(_mlg48)
-        _rv48._on_double_click(_e48b)
-        root.update()
-        wait_view(root, _rv48)
-        _nh48 = _findtree48(_rv48._detail_wins[0])
-        _nrow48 = {str(_nh48.set(_k48, "Nama Barang")): _nh48.item(
-            _k48, "values") for _k48 in _nh48.get_children("")}
-        check("(v3.9.36) 🧮 POPUP TANPA HARGA (double-click sel kolom "
-              "Tanpa Harga): kolom Resto/Barang/Satuan/Qty/Keterangan + "
-              "ALASAN — GULA 'satuan tak terkonversi (15 GR*)', KOPI "
-              "'tak ada di 41.09'",
-              list(_nh48["columns"]) == [
-                  "Nama Resto", "Nama Barang", "Satuan",
-                  "Kuantiti Deviasi", "Keterangan"]
-              and _nrow48.get("GULA PASIR") is not None
-              and "tak terkonversi" in _nrow48["GULA PASIR"][4]
-              and "15 GR*" in _nrow48["GULA PASIR"][4]
-              and _nrow48.get("KOPI BUBUK 100G") is not None
-              and "41.09" in _nrow48["KOPI BUBUK 100G"][4]
-              and len(_nrow48) == 2,
-              f"cols={list(_nh48['columns'])} got {_nrow48}")
-        # baris TOTAL + kolom Tanpa Harga → SEMUA resto
-        _rv48._close_detail_wins()
-        _tot48 = next(_i48 for _i48 in _rv48.tree.get_children("")
-                      if _rv48.tree.set(_i48, "Resto") == "TOTAL")
-        _bt48 = _rv48.tree.bbox(_tot48, "#3")
-        if _bt48:
-            _e48c = tk.Event()
-            _e48c.widget = _rv48.tree
-            _e48c.x = _bt48[0] + 5
-            _e48c.y = _bt48[1] + 5
-            _rv48.tree.selection_set(_tot48)
-            _rv48._on_double_click(_e48c)
-            root.update()
-            wait_view(root, _rv48)
-            _nh48b = _findtree48(_rv48._detail_wins[0])
-            check("(v3.9.36) 🧮: double-click sel Tanpa Harga baris TOTAL "
-                  "→ popup SEMUA resto (2 barang MLGPAR)",
-                  _nh48b is not None
-                  and len(_nh48b.get_children("")) == 2,
-                  f"got {len(_nh48b.get_children('')) if _nh48b else 0}")
-        else:
-            check("(v3.9.36) 🧮: bbox TOTAL Tanpa Harga tersedia",
-                  False, "bbox kosong")
+    # v3.9.63 — ANAK TAB 'Tanpa Harga' GLOBAL (menggantikan popup
+    # double-click kolom 'Tanpa Harga' yang dihapus; user: "yang tanpa
+    # harga ... buat anak tab baru di nominal deviasi yang menampilkan
+    # secara global"): kolom + Kategori + alasan + default 'Semua'.
+    _nh48rows = {str(_rv48.tree_noharga.set(_k48, "Nama Barang")):
+                 _rv48.tree_noharga.item(_k48, "values")
+                 for _k48 in _rv48.tree_noharga.get_children("")}
+    check("(v3.9.63) 🧮 ANAK TAB 'Tanpa Harga' GLOBAL: kolom "
+          "Resto/Kategori/Barang/Satuan/Qty/Keterangan + ALASAN — GULA "
+          "'satuan tak terkonversi (15 GR*)' kategori TEPAT, KOPI 'tak "
+          "ada di 41.09' kategori DEVIASI",
+          list(_rv48.tree_noharga["columns"]) == [
+              "Resto", "Kategori", "Nama Barang", "Satuan",
+              "Kuantiti Deviasi", "Keterangan"]
+          and set(_nh48rows) == {"GULA PASIR", "KOPI BUBUK 100G"}
+          and _nh48rows["GULA PASIR"][1] == "TEPAT"
+          and "tak terkonversi" in _nh48rows["GULA PASIR"][5]
+          and "15 GR*" in _nh48rows["GULA PASIR"][5]
+          and _nh48rows["KOPI BUBUK 100G"][1] == "DEVIASI"
+          and "41.09" in _nh48rows["KOPI BUBUK 100G"][5],
+          f"cols={list(_rv48.tree_noharga['columns'])} got {_nh48rows}")
+    # filter KATEGORI anak tab SENDIRI ('DEVIASI' → hanya KOPI) — tanpa
+    # recompute (frame global dipakai ulang)
+    _rv48._nh_kategori_var.set("DEVIASI")
+    _rv48._on_nh_kategori_changed()
+    root.update()
+    _nh48kids = _rv48.tree_noharga.get_children("")
+    check("(v3.9.63) 🧮 anak tab: filter KATEGORI sendiri — 'DEVIASI' → "
+          "hanya KOPI (GULA TEPAT tersembunyi)",
+          len(_nh48kids) == 1
+          and str(_rv48.tree_noharga.set(
+              _nh48kids[0], "Nama Barang")) == "KOPI BUBUK 100G",
+          f"rows={len(_nh48kids)}")
+    _rv48._nh_reset_filter()
+    root.update()
+    check("(v3.9.63) 🧮 anak tab: ✕ Reset Filter → kembali 'Semua' "
+          "(GLOBAL 2 baris)",
+          _rv48._nh_kategori_var.get() == "Semua"
+          and _rv48._nh_kategori_sel is None
+          and len(_rv48.tree_noharga.get_children("")) == 2,
+          f"var={_rv48._nh_kategori_var.get()!r}")
+    # anak tab TIDAK terikat filter kategori tab utama
+    _rv48._kategori_var.set("DEVIASI")
+    _rv48._on_kategori_changed()
+    wait_view(root, _rv48)
+    check("(v3.9.63) 🧮 anak tab GLOBAL: filter KATEGORI tab utama "
+          "('DEVIASI' → GULA terbuang dari tabel utama) TIDAK "
+          "memengaruhi anak tab (tetap 2 baris)",
+          len(_rv48.tree_noharga.get_children("")) == 2,
+          f"rows={len(_rv48.tree_noharga.get_children(''))}")
+    # baris TOTAL double-click → TANPA popup (cabang kolom Tanpa Harga
+    # dihapus v3.9.63 — dulu sel TOTAL membuka popup semua resto)
+    _tot48 = next(_i48 for _i48 in _rv48.tree.get_children("")
+                  if _rv48.tree.set(_i48, "Resto") == "TOTAL")
+    _rv48.tree.selection_set(_tot48)
+    _e48c = tk.Event()
+    _e48c.widget = _rv48.tree
+    _rv48._on_double_click(_e48c)
+    root.update()
+    check("(v3.9.63) 🧮: double-click baris TOTAL → TANPA popup",
+          len(_rv48._detail_wins) == 0,
+          f"wins={[w.title() for w in _rv48._detail_wins]}")
 
     # reset filter → kategori kembali ke DEFAULT 'Deviasi'
     _rv48._reset_filter()
@@ -10935,16 +10947,21 @@ def main():
               == "-" for _i50 in _rv50.tree.get_children(""))
           and "belum dimuat" in _rv50.status_var_label.get(),
           f"footer={_rv50.status_var_label.get()!r}")
-    # qty-0 view-level: NOLDEV tak menambah 'Tanpa Harga'
+    # qty-0 view-level: NOLDEV tak dihitung 'tanpa harga' (anak tab
+    # global 0 baris — kolom Tanpa Harga dihapus v3.9.63)
     _r50v = {str(_rv50.tree.set(_i50, "Resto")):
              _rv50.tree.item(_i50, "values")
              for _i50 in _rv50.tree.get_children("")}
-    check("(v3.9.38) 🧮 view: pasangan qty-0 (NOLDEV) tak dihitung 'Tanpa "
-          "Harga' — MLGPAR 2 barang · 0 tanpa",
+    check("(v3.9.38→v3.9.63) 🧮 view: pasangan qty-0 (NOLDEV) tak "
+          "dihitung 'tanpa harga' — anak tab global 0 baris + MLGPAR "
+          "'Rp 20' (persen '-' — lalu kosong)",
           _r50v.get("MLGPAR") is not None
-          and _r50v["MLGPAR"][1] == "2"
-          and _r50v["MLGPAR"][2] == "0",
-          f"got {_r50v.get('MLGPAR')}")
+          and _r50v["MLGPAR"][3] == "Rp 20"
+          and _r50v["MLGPAR"][5] == "-"
+          and (_rv50._noharga_df is None or _rv50._noharga_df.empty)
+          and len(_rv50.tree_noharga.get_children("")) == 0,
+          f"got {_r50v.get('MLGPAR')} "
+          f"nh={len(_rv50.tree_noharga.get_children(''))}")
     # file masuk → kolom lalu = Σ NOMINAL RESMI file per resto
     _holder50["df"] = _fdf50
     _rv50.on_lalu_file_changed()
@@ -10952,15 +10969,20 @@ def main():
     _r50w = {str(_rv50.tree.set(_i50, "Resto")):
              _rv50.tree.item(_i50, "values")
              for _i50 in _rv50.tree.get_children("")}
-    check("(v3.9.38→v3.9.51) 🧮: kolom Bulan Lalu per resto = Σ NOMINAL "
+    check("(v3.9.38→v3.9.63) 🧮: kolom Bulan Lalu per resto = Σ NOMINAL "
           "RESMI file (MLGPAR 'Rp 999' — angka file, bukan recompute) + "
-          "baris TOTAL menjumlah + resto tanpa baris '-'",
+          "baris TOTAL menjumlah + resto tanpa baris '-' + PERSEN "
+          "penurunan (MLGPAR 20→999 = -98,0%; TOTAL 50→999 = -95,0%; "
+          "BDGSET lalu '-' → persen '-')",
           _r50w.get("MLGPAR") is not None
           and _r50w["MLGPAR"][4] == "Rp 999"
+          and _r50w["MLGPAR"][5] == "-98,0%"
           and _r50w.get("BDGSET") is not None
           and _r50w["BDGSET"][4] == "-"
+          and _r50w["BDGSET"][5] == "-"
           and _r50w.get("TOTAL") is not None
-          and _r50w["TOTAL"][4] == "Rp 999",
+          and _r50w["TOTAL"][4] == "Rp 999"
+          and _r50w["TOTAL"][5] == "-95,0%",
           f"got {_r50w}")
     check("(v3.9.38→v3.9.51) 🧮: footer 'TOTAL LALU' + chip TOTAL · "
           "LALU (versus bulan lalu — Currency Rp)",
@@ -12469,11 +12491,13 @@ def main():
                     konversi_map={"rasio": {}, "terkecil": {}})
     _nv56.ensure_refreshed()
     wait_view(root, _nv56)
-    check("(v3.9.45) 🧮 tree: kolom dinamis 'Lalu 203.SEP 26' (bulan "
-          "≥2) muncul setelah kolom Bulan Lalu utama",
+    check("(v3.9.45→v3.9.63) 🧮 tree: kolom dinamis 'Lalu 203.SEP 26' "
+          "(bulan ≥2) muncul SETELAH kolom basis v3.9.63 (COM/"
+          "Packaging/Persen — N Barang/Tanpa Harga dihapus)",
           list(_nv56.tree["columns"]) == [
-              "Resto", "N Barang", "Tanpa Harga", "Nominal Deviasi",
-              "Nominal Deviasi Bulan Lalu", "Lalu 203.SEP 26"],
+              "Resto", "COM Deviasi", "Biaya Packaging",
+              "Nominal Deviasi", "Nominal Deviasi Bulan Lalu",
+              "Persen Kenaikan/Penurunan", "Lalu 203.SEP 26"],
           f"got {list(_nv56.tree['columns'])}")
     check("(v3.9.45) 🧮 heading bulan utama menyebut LABEL bulan file "
           "(204.OKT 26) + minggu ter-cocok",
@@ -12482,18 +12506,22 @@ def main():
           f"got {_nv56.tree.heading('Nominal Deviasi Bulan Lalu')['text']!r}")
     _mlg56 = next((_i for _i in _nv56.tree.get_children("")
                    if _nv56.tree.set(_i, "Resto") == "MLGPAR"), None)
-    check("(v3.9.45→v3.9.51) 🧮 baris MLGPAR: Sekarang 'Rp 20' · Lalu "
-          "OKT 'Rp 1.130' · SEP '-' (AYAM-MLGPAR tak ada di bulan SEP)",
+    # v3.9.63 — COM/Packaging '-' (kategori DEVIASI bukan klas) + persen
+    # (20 vs 1.130 → -98,2% penurunan).
+    check("(v3.9.45→v3.9.63) 🧮 baris MLGPAR: COM/PKG '-' · Sekarang "
+          "'Rp 20' · Lalu OKT 'Rp 1.130' · persen '-98,2%' · SEP '-' "
+          "(AYAM-MLGPAR tak ada di bulan SEP)",
           _mlg56 is not None
           and _nv56.tree.item(_mlg56, "values") ==
-          ("MLGPAR", "1", "0", "Rp 20", "Rp 1.130", "-"),
+          ("MLGPAR", "-", "-", "Rp 20", "Rp 1.130", "-98,2%", "-"),
           f"got {_nv56.tree.item(_mlg56, 'values') if _mlg56 else None}")
     _tot56 = next((_i for _i in _nv56.tree.get_children("")
                    if _i == "row_total"), None)
-    check("(v3.9.45→v3.9.51) 🧮 TOTAL row: kolom SEP ikut (nilai '-')",
+    check("(v3.9.45→v3.9.63) 🧮 TOTAL row: kolom SEP ikut (nilai '-') + "
+          "persen TOTAL '-98,2%'",
           _tot56 is not None
           and _nv56.tree.item(_tot56, "values") ==
-          ("TOTAL", "1", "0", "Rp 20", "Rp 1.130", "-"),
+          ("TOTAL", "-", "-", "Rp 20", "Rp 1.130", "-98,2%", "-"),
           f"got {_nv56.tree.item(_tot56, 'values') if _tot56 else None}")
     check("(v3.9.45→v3.9.51) 🧮 chip TOTAL menyebut pembanding bulan "
           "≥2 (SEP) — nilai Rp",
@@ -14648,22 +14676,26 @@ def main():
     _nrv64.pack(fill="both", expand=True)
     root.update()
     _cols64 = list(_nrv64.tree["columns"])
-    check("(v3.9.54) nominal: kolom Tanpa Harga ada (prasyarat)",
-          "Tanpa Harga" in _cols64, f"got {_cols64[:6]}")
-    _hide64 = next(c for c in _cols64 if c != "Tanpa Harga")
+    # v3.9.63 — kolom uji display-aware kini 'Biaya Packaging' (kolom
+    # 'Tanpa Harga' dihapus).
+    check("(v3.9.54→v3.9.63) nominal: kolom Biaya Packaging ada "
+          "(prasyarat)",
+          "Biaya Packaging" in _cols64, f"got {_cols64[:7]}")
+    _hide64 = next(c for c in _cols64 if c != "Biaya Packaging")
     _nrv64.tree["displaycolumns"] = [c for c in _cols64 if c != _hide64]
     _disp64 = [c for c in _cols64 if c != _hide64]
-    _cid64 = f"#{_disp64.index('Tanpa Harga') + 1}"
+    _cid64 = f"#{_disp64.index('Biaya Packaging') + 1}"
     _nrv64.tree.identify_column = lambda x: _cid64  # event sintetis
 
     class _EvX64:
         x = 0
 
     _got64 = _nrv64._event_col_name(_nrv64.tree, _EvX64())
-    check("(v3.9.54) nominal _event_col_name display-aware: setelah hide "
-          f"{_hide64!r}, klik sel Tanpa Harga resolve 'Tanpa Harga' "
-          "(dulu posisi display dipetakan ke urutan LOGIS → kolom SALAH)",
-          _got64 == "Tanpa Harga", f"got {_got64!r}")
+    check("(v3.9.54→v3.9.63) nominal _event_col_name display-aware: "
+          f"setelah hide {_hide64!r}, klik sel Biaya Packaging resolve "
+          "'Biaya Packaging' (dulu posisi display dipetakan ke urutan "
+          "LOGIS → kolom SALAH)",
+          _got64 == "Biaya Packaging", f"got {_got64!r}")
     _nrv64.destroy()
     root.update()
 
@@ -17045,20 +17077,24 @@ def main():
     ])
     _nrv68.load_data(_vdata68, harga_map={"B0": (500.0, "GR")})
     wait_view(root, _nrv68)
-    _nrv68._colmgr.hide("Tanpa Harga")
+    # v3.9.63 — hide 'Biaya Packaging' (kolom 'Tanpa Harga' dihapus);
+    # basis kini 6 kolom (+ Persen) → +2 bulan lalu dinamis = 8.
+    _nrv68._colmgr.hide("Biaya Packaging")
     root.update()
     _dc68 = [str(x) for x in _nrv68.tree.cget("displaycolumns")]
     _fdf68["df"] = _mk_fdf68([10, 9, 8])   # kolom dinamis bertambah
     _nrv68.on_lalu_file_changed()
     wait_view(root, _nrv68)
     _dc68b = [str(x) for x in _nrv68.tree.cget("displaycolumns")]
-    check("(6d2-03) rebuild kolom dinamis ('Lalu <bln>' bertambah 7 kolom) "
-          "→ kolom HIDDEN tetap tersembunyi (FIX 6d2-03 — dulu "
-          "displaycolumns reset '#all' → kolom 'Tanpa Harga' tampil lagi)",
-          "Tanpa Harga" not in _dc68 and "Tanpa Harga" not in _dc68b
+    check("(6d2-03) rebuild kolom dinamis ('Lalu <bln>' bertambah 2 "
+          "kolom) → kolom HIDDEN tetap tersembunyi (FIX 6d2-03 — dulu "
+          "displaycolumns reset '#all' → kolom 'Biaya Packaging' tampil "
+          "lagi)",
+          "Biaya Packaging" not in _dc68
+          and "Biaya Packaging" not in _dc68b
           and "#all" not in _dc68 and "#all" not in _dc68b
-          and len(list(_nrv68.tree["columns"])) == 7
-          and _nrv68._colmgr.hidden == ["Tanpa Harga"],
+          and len(list(_nrv68.tree["columns"])) == 8
+          and _nrv68._colmgr.hidden == ["Biaya Packaging"],
           f"dc={_dc68b}")
 
     # (6d2-04) double-click AREA KOSONG → tanpa popup
@@ -18463,6 +18499,271 @@ def main():
     check("(v3.9.62) §74c: crash.log launcher __main__ DEV = root proyek "
           "(frozen = samping exe)",
           _M74._CRASH_LOG == _dev74 / "crash.log", str(_M74._CRASH_LOG))
+
+    # =====================================================================
+    # §75 (v3.9.63) — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user:
+    #     "kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal
+    #     deviasi per kategori yaitu kolom COM Deviasi + kolom Biaya
+    #     Packaging ... Persen kenaikan/penurunan (bisa sort) ... dan itu
+    #     buat anak tab baru di nominal deviasi yang menampilkan secara
+    #     global")
+    # =====================================================================
+    print("\n== 75. (v3.9.63) 🧮 Nominal Deviasi: kolom COM/Packaging per "
+          "kategori + Persen Kenaikan/Penurunan + anak tab Tanpa Harga "
+          "global ==")
+
+    # --- (a) pure: agregasi per klas kategori + KATEGORI di pairs ------
+    from src.ui.nominal_common import (
+        agregasi_nominal_per_resto as _agr75,
+    )
+    from src.ui.nominal_common import (
+        fmt_pct_cell as _fpc75,
+    )
+    from src.ui.nominal_common import (
+        hitung_persen_kenaikan as _hpk75,
+    )
+    from src.ui.nominal_common import (
+        pasangan_tanpa_harga_global as _pth75,
+    )
+    _dn75 = pd.DataFrame([{
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
+        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
+    } for b, r, s, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", 2.0, "COM DEVIASI - RESTO"),
+        ("GULA PASIR", "MLGPAR", "KG", 12.0, "Biaya Packaging - RESTO"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0,
+         "COM DEVIASI - CATERING"),
+        ("SUMPIT KAYU", "MLGPAR", "PCS", -8.0, None),
+        ("AYAM FILET", "BDGSET", "GR", 3.0, "COM DEVIASI - RESTO"),
+        ("SENDOK PLASTIK", "BDGSET", "PCS", 4.0,
+         "Biaya Packaging - CATERING"),
+    ]])
+    _hmap75 = {"AYAM FILET": (10.0, "GR"),
+               "SENDOK PLASTIK": (2.0, "PCS")}
+    _kmap75 = {"rasio": {}, "terkecil": {}}
+    _g75, _pp75 = _agr75(_dn75, 25, _hmap75, _kmap75)
+    _gm75 = {str(r["Resto"]): r for _, r in _g75.iterrows()}
+    check("(v3.9.63) agregasi per klas kategori: MLGPAR COM Deviasi = 20 "
+          "(AYAM 2×10 — KOPI CATERING tanpa harga skipna) · Biaya "
+          "Packaging = 0 (GULA tanpa harga) · BDGSET COM = 30 (RESTO) · "
+          "BDGSET Packaging = 8 (SENDOK 4×2 — varian CATERING tetap "
+          "klas PACKAGING: substring) · kategori lain/blank hanya di "
+          "kolom total",
+          "COM Deviasi" in _g75.columns
+          and "Biaya Packaging" in _g75.columns
+          and float(_gm75["MLGPAR"]["COM Deviasi"]) == 20.0
+          and float(_gm75["MLGPAR"]["Biaya Packaging"]) == 0.0
+          and float(_gm75["MLGPAR"]["Nominal Deviasi"]) == 20.0
+          and float(_gm75["BDGSET"]["COM Deviasi"]) == 30.0
+          and float(_gm75["BDGSET"]["Biaya Packaging"]) == 8.0
+          and int(_gm75["MLGPAR"]["N Barang"]) == 4,
+          f"got MLGPAR={_gm75['MLGPAR'].to_dict()} "
+          f"BDGSET={_gm75['BDGSET'].to_dict()}")
+    check("(v3.9.63) agregasi: KATEGORI di-tempel ke frame pasangan (map "
+          "per Nama Barang; barang tanpa kategori → NaN)",
+          "KATEGORI" in _pp75.columns
+          and str(_pp75[_pp75["Nama Barang"] == "AYAM FILET"]
+                  ["KATEGORI"].iloc[0]) == "COM DEVIASI - RESTO"
+          and str(_pp75[_pp75["Nama Barang"] == "GULA PASIR"]
+                  ["KATEGORI"].iloc[0]) == "Biaya Packaging - RESTO"
+          and str(_pp75[_pp75["Nama Barang"] == "KOPI BUBUK 100G"]
+                  ["KATEGORI"].iloc[0]) == "COM DEVIASI - CATERING"
+          and pd.isna(_pp75[_pp75["Nama Barang"] == "SUMPIT KAYU"]
+                      ["KATEGORI"].iloc[0]),
+          f"cols={list(_pp75.columns)}")
+    _nh75 = _pth75(_dn75, 25, _hmap75, _kmap75)
+    check("(v3.9.63) pasangan_tanpa_harga_global: pasangan Nominal NaN "
+          "dari data MENTAH (GULA/KOPI/SUMPIT — urut |Qty| menurun 12/8/5) "
+          "+ kolom KATEGORI per pasangan",
+          list(_nh75["Nama Barang"]) == ["GULA PASIR", "SUMPIT KAYU",
+                                         "KOPI BUBUK 100G"]
+          and list(_nh75.columns) == [
+              "Resto", "KATEGORI", "Nama Barang", "Satuan",
+              "Qty Deviasi", "Harga Tampil", "Nominal"]
+          and str(_nh75[_nh75["Nama Barang"] == "GULA PASIR"]
+                  ["KATEGORI"].iloc[0]) == "Biaya Packaging - RESTO",
+          f"got {list(_nh75['Nama Barang'])}")
+
+    # --- (b) pure: hitung_persen_kenaikan + fmt_pct_cell ----------------
+    check("(v3.9.63) hitung_persen_kenaikan: (H−Lalu)÷|Lalu|×100 — "
+          "kenaikan +50% · penurunan −75% · Lalu minus → arah dari "
+          "(H−Lalu) 150% · NaN bila lalu kosong · lalu 0 & H≠0 → None · "
+          "keduanya 0 → 0.0",
+          _hpk75(150.0, 100.0) == 50.0
+          and abs((_hpk75(50.0, 200.0) or 0) + 75.0) < 1e-9
+          and _hpk75(50.0, -100.0) == 150.0
+          and _hpk75(None, 100.0) is None
+          and _hpk75(50.0, None) is None
+          and _hpk75(50.0, 0.0) is None
+          and _hpk75(0.0, 0.0) == 0.0,
+          f"got {_hpk75(150.0, 100.0)} {_hpk75(50.0, 200.0)} "
+          f"{_hpk75(50.0, -100.0)}")
+    check("(v3.9.63) fmt_pct_cell: '+12,5%' / '-8,3%' / '0,0%' / '-' "
+          "(koma desimal Indonesia + tanda arah)",
+          _fpc75(12.5) == "+12,5%" and _fpc75(-8.3) == "-8,3%"
+          and _fpc75(0.0) == "0,0%" and _fpc75(None) == "-"
+          and _fpc75(float("nan")) == "-",
+          f"got {_fpc75(12.5)!r} {_fpc75(-8.3)!r} {_fpc75(None)!r}")
+
+    # --- (c) view E2E: kolom COM/Packaging + Persen sort + anak tab -----
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV75
+
+    _top75 = tk.Toplevel(root)
+    _top75.geometry("1500x850+5+5")
+    _holder75 = {"df": None}
+    _rv75 = _NRV75(_top75, lalu_provider=lambda: _holder75["df"])
+    _rv75.pack(fill="both", expand=True)
+    root.update()
+    _rv75.load_data(_dn75, harga_map=_hmap75, konversi_map=_kmap75)
+    _rv75.ensure_refreshed()
+    wait_view(root, _rv75)
+    check("(v3.9.63) 🧮 E2E: format kolom baru = Resto · COM Deviasi · "
+          "Biaya Packaging · Nominal Deviasi (H) · Nominal Deviasi Bulan "
+          "Lalu · Persen Kenaikan/Penurunan (N Barang/Tanpa Harga "
+          "DIHAPUS; default kategori gabungan COM+Packaging aktif)",
+          list(_rv75.tree["columns"]) == [
+              "Resto", "COM Deviasi", "Biaya Packaging",
+              "Nominal Deviasi", "Nominal Deviasi Bulan Lalu",
+              "Persen Kenaikan/Penurunan"]
+          and _rv75._kategori_var.get() == "Deviasi (COM + Packaging)",
+          f"cols={list(_rv75.tree['columns'])} "
+          f"kat={_rv75._kategori_var.get()!r}")
+    _r75 = {str(_rv75.tree.set(_i75, "Resto")):
+            _rv75.tree.item(_i75, "values")
+            for _i75 in _rv75.tree.get_children("")}
+    check("(v3.9.63) 🧮 E2E kategori COM+Packaging (filter default): "
+          "SUMPIT (tanpa kategori) TERBUANG dari tabel utama — MLGPAR "
+          "COM 'Rp 20' · Packaging '-' (GULA terbuang/tdk berharga) · "
+          "BDGSET COM 'Rp 30'",
+          _r75.get("MLGPAR") is not None
+          and _r75["MLGPAR"][1] == "Rp 20"
+          and _r75["MLGPAR"][2] == "-"
+          and _r75.get("BDGSET") is not None
+          and _r75["BDGSET"][1] == "Rp 30"
+          and "SUMPIT" not in str(_r75),
+          f"got {_r75}")
+    _rv75._kategori_var.set("Semua")
+    _rv75._on_kategori_changed()
+    wait_view(root, _rv75)
+    _r75b = {str(_rv75.tree.set(_i75, "Resto")):
+             _rv75.tree.item(_i75, "values")
+             for _i75 in _rv75.tree.get_children("")}
+    check("(v3.9.63) 🧮 E2E kategori 'Semua': Packaging MLGPAR tetap '-' "
+          "(GULA tanpa harga — Σ skipna transparan, BUKAN 0 palsu) + "
+          "Persen '-' (tanpa file lalu) + footer menyebut anak tab",
+          _r75b.get("MLGPAR") is not None
+          and _r75b["MLGPAR"][1] == "Rp 20"
+          and _r75b["MLGPAR"][2] == "-"
+          and _r75b["MLGPAR"][4] == "-" and _r75b["MLGPAR"][5] == "-"
+          and "anak tab Tanpa Harga" in _rv75.status_var_label.get()
+          and "3 pasangan tanpa harga" in _rv75.status_var_label.get(),
+          f"got {_r75b} status={_rv75.status_var_label.get()!r}")
+
+    # persen terisi saat file lalu masuk + sort numerik %-aware
+    _holder75["df"] = pd.DataFrame({
+        "Resto": ["1001.MLGPAR", "1001.MLGPAR", "1001.MLGPAR"],
+        "Nama Barang": ["AYAM FILET", "GULA PASIR", "SUMPIT KAYU"],
+        "Satuan": ["GR", "GR", "PCS"],
+        "Minggu": ["WEEK 4"] * 3,
+        "DEV Lalu": [10.0, 12.0, 8.0],
+        "Nominal Deviasi Lalu": [100.0, 180.0, 96.0],
+        "BULAN": ["204.OKT 26"] * 3,
+        "_bulan_num": [10] * 3,
+        "_resto_norm": ["MLGPAR"] * 3,
+        "_bahan_norm": ["AYAM FILET", "GULA PASIR", "SUMPIT KAYU"],
+        "_h": [28] * 3,
+    })
+    _rv75.on_lalu_file_changed()
+    wait_view(root, _rv75)
+    _r75c = {str(_rv75.tree.set(_i75, "Resto")):
+             _rv75.tree.item(_i75, "values")
+             for _i75 in _rv75.tree.get_children("")}
+    check("(v3.9.63) 🧮 E2E file lalu: MLGPAR Lalu 'Rp 376' (100+180+96 — "
+          "Semua: SUMPIT ikut) → Persen '-94,7%' (penurunan) + TOTAL "
+          "(H 58 = MLGPAR 20 + BDGSET 38) → '-84,6%'",
+          _r75c.get("MLGPAR") is not None
+          and _r75c["MLGPAR"][4] == "Rp 376"
+          and _r75c["MLGPAR"][5] == "-94,7%"
+          and _r75c.get("TOTAL") is not None
+          and _r75c["TOTAL"][4] == "Rp 376"
+          and _r75c["TOTAL"][5] == "-84,6%",
+          f"got {_r75c}")
+    _rv75._sort_by("Persen Kenaikan/Penurunan", reverse=True)
+    root.update()
+    _p75 = [_rv75.tree.item(_i75, "values")[5]
+            for _i75 in _rv75.tree.get_children("")
+            if _i75 != "row_total"]
+    check("(v3.9.63) 🧮 SORT Persen BISA (user: 'bisa sort') — parser "
+          "%-aware: menurun = '-' (BDGSET 0) → '-94,7%' (MLGPAR) + TOTAL "
+          "tetap dipin ujung",
+          _p75 == ["-", "-94,7%"]
+          and str(_rv75.tree.set(
+              _rv75.tree.get_children("")[-1], "Resto")) == "TOTAL",
+          f"got {_p75}")
+    # ⧩ daftar nilai persen identik sel tabel
+    check("(v3.9.63) 🧮 ⧩ Persen: daftar nilai = format sel ('-94,7%')",
+          set(_rv75._col_values("Persen Kenaikan/Penurunan"))
+          <= {"-", "-94,7%"},
+          f"got {_rv75._col_values('Persen Kenaikan/Penurunan')}")
+
+    # anak tab: default GLOBAL 'Semua' + kolom Kategori + filter
+    _tabs75 = [str(_rv75._sub_nb.tab(_t75, "text"))
+               for _t75 in _rv75._sub_nb.tabs()]
+    check("(v3.9.63) 🧮 E2E ANAK TAB: sub-notebook 2 anak tab ('Per "
+          "Resto' + 'Tanpa Harga') + default kategori anak 'Semua' "
+          "(GLOBAL) + kolom Kategori + SUMPIT '(Tanpa Kategori)'",
+          _tabs75 == ["Per Resto", "Tanpa Harga"]
+          and _rv75._nh_kategori_var.get() == "Semua"
+          and "Kategori" in list(_rv75.tree_noharga["columns"])
+          and any(
+              _rv75.tree_noharga.set(_k75, "Nama Barang") == "SUMPIT KAYU"
+              and _rv75.tree_noharga.set(_k75, "Kategori")
+              == "(Tanpa Kategori)"
+              for _k75 in _rv75.tree_noharga.get_children("")),
+          f"tabs={_tabs75}")
+    _rv75._nh_kategori_var.set("Deviasi (COM + Packaging)")
+    _rv75._on_nh_kategori_changed()
+    root.update()
+    _nh75b = {str(_rv75.tree_noharga.set(_k75, "Nama Barang"))
+              for _k75 in _rv75.tree_noharga.get_children("")}
+    check("(v3.9.63) 🧮 anak tab filter 'Deviasi (COM + Packaging)' → "
+          "HANYA GULA (Biaya Packaging - RESTO) — KOPI (COM CATERING: "
+          "di luar 2 nilai rekap) & SUMPIT (tanpa kategori) tersembunyi "
+          "(STRICT v3.9.53 — 'hanya menampilkan sesuai kategori aja')",
+          _nh75b == {"GULA PASIR"},
+          f"got {_nh75b}")
+    # primary_tree utk fallback router roda (anak tab aktif)
+    _rv75._sub_nb.select(_rv75._tab_noharga)
+    root.update()
+    check("(v3.9.63) 🧮 primary_tree(): anak tab aktif → tree anak tab "
+          "(fallback router roda di krom anak tab menggulir tabel "
+          "TERLIHAT)",
+          _rv75.primary_tree() is _rv75.tree_noharga)
+    _rv75._sub_nb.select(_rv75._tab_main)
+    root.update()
+    check("(v3.9.63) 🧮 primary_tree(): tab utama aktif → tree utama",
+          _rv75.primary_tree() is _rv75.tree)
+    _rv75.destroy()
+    _top75.destroy()
+    root.update()
+
+    # --- (d) app: _primary_scrollable mengikuti anak tab aktif ---------
+    app.notebook.select(app.tab_nominal_resto)
+    root.update()
+    check("(v3.9.63) app._primary_scrollable: tab 🧮 anak 'Per Resto' → "
+          "tree utama nominal_resto_view",
+          app._primary_scrollable() is app.nominal_resto_view.tree)
+    app.nominal_resto_view._sub_nb.select(
+        app.nominal_resto_view._tab_noharga)
+    root.update()
+    check("(v3.9.63) app._primary_scrollable: tab 🧮 anak 'Tanpa Harga' "
+          "aktif → tree ANAK TAB (roda di krom anak tab bergulir tabel "
+          "yang terlihat — bukan tabel tersembunyi)",
+          app._primary_scrollable()
+          is app.nominal_resto_view.tree_noharga)
+    app.nominal_resto_view._sub_nb.select(
+        app.nominal_resto_view._tab_main)
+    root.update()
 
     root.destroy()
 

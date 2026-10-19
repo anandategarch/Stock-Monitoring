@@ -66,6 +66,26 @@ Perhitungan = src/ui/nominal_common.py (satu sumber kebenaran dgn
 mode 💰 Nominal (H) tab 📋 Laporan Deviasi, kolom Nominal tab 📦
 Deviasi GR/🧩 PCS & mode ⚖ Komparasi — v3.9.34).
 
+v3.9.63 — RESTRUKTURISASI KOLOM + ANAK TAB (user: "kolom N Barang
+dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori
+yaitu kolom COM Deviasi + kolom Biaya Packaging ... jadi format kolomnya
+Resto · Com deviasi · Biaya packaging · Nominal deviasi H · Nominal
+deviasi bulan lalu · Persen kenaikan/penurunan (bisa sort) ... dan itu
+buat anak tab baru di nominal deviasi yang menampilkan secara global"):
+  - KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' = Σ nominal pasangan
+    per klas kategori (substring 'COM'/'PACKAGING' — nominal_common);
+    'N Barang' + 'Tanpa Harga' DIHAPUS dari tabel (Σ pasangan & jumlah
+    tanpa harga tetap dihitung agregasi — footer status + anak tab).
+  - KOLOM BARU 'Persen Kenaikan/Penurunan' = (H − Lalu) ÷ |Lalu| × 100
+    (hitung_persen_kenaikan; sort numerik + minus merah per-cell).
+  - ANAK TAB (sub-notebook): 'Per Resto' (tabel utama + filter KATEGORI
+    utama — perilaku lama) + 'Tanpa Harga' BARU — daftar barang tanpa
+    harga GLOBAL (semua resto & kategori, TANPA filter kategori tab
+    utama — pasangan_tanpa_harga_global) + kolom Kategori + filter
+    KATEGORI SENDIRI (default 'Semua' = global; memilih 'Deviasi (COM +
+    Packaging)' → hanya menampilkan sesuai kategori itu — permintaan
+    user). Menggantikan popup double-click kolom 'Tanpa Harga'.
+
 TANGGAL H = state bersama (SharedTanggalH — chip read-only + auto-
 refresh dari tab 📦 Deviasi GR; pola mode Nominal). Minus merah
 per-cell; format angka Indonesia; filter header ⧩ + sort (TOTAL dipin
@@ -84,8 +104,11 @@ from .nominal_common import (
     _norm_resto_lalu,
     agregasi_nominal_per_resto,
     fmt_nominal_cell,
+    fmt_pct_cell,  # v3.9.63 — kolom Persen Kenaikan/Penurunan
     fmt_rp_cell,
     hitung_nominal_lalu_multi,  # v3.9.45 — multi-bulan file deviasi
+    hitung_persen_kenaikan,  # v3.9.63 — idem
+    pasangan_tanpa_harga_global,  # v3.9.63 — anak tab Tanpa Harga global
 )
 from .theme import (
     C_ACCENT,
@@ -139,9 +162,15 @@ POPUP_COLUMNS = [
     ("Nominal Deviasi Bulan Lalu", 160, "e"),
 ]
 
-# kolom popup barang TANPA HARGA (double-click sel kolom 'Tanpa Harga')
+# kolom popup barang TANPA HARGA — v3.9.63 kini ANAK TAB 'Tanpa Harga'
+# GLOBAL (menggantikan popup double-click kolom 'Tanpa Harga' yang
+# dihapus; user: "buat anak tab baru di nominal deviasi yang menampilkan
+# secara global") + kolom KATEGORI (user: "sesuai kategori yang
+# difilter misal deviasi COM +packaging berarti hanya menampilkan
+# sesuai kategori aja" — kategori terlihat & bisa difilter sendiri).
 NOHARGA_COLUMNS = [
-    ("Nama Resto", 110, "w"),
+    ("Resto", 110, "w"),
+    ("Kategori", 150, "w"),
     ("Nama Barang", 260, "w"),
     ("Satuan", 70, "w"),
     ("Kuantiti Deviasi", 120, "e"),
@@ -279,18 +308,34 @@ def _popup_head_buttons(head, win, tree, col_spec) -> None:
 class NominalRestoView(tk.Frame):
     """Tab 🧮 Nominal Deviasi — Σ (Harga × Qty Deviasi) per resto."""
 
+    # v3.9.63 — format kolom baru (user: "kolom N Barang dan Tanpa harga
+    # hapus aja diganti dengan nominal deviasi per kategori ... Resto ·
+    # Com deviasi · Biaya packaging · Nominal deviasi H · Nominal deviasi
+    # bulan lalu · Persen kenaikan/penurunan (bisa sort)"):
+    #   - 'COM Deviasi'/'Biaya Packaging' = Σ nominal per klas kategori
+    #     (agregasi_nominal_per_resto; resto tanpa pasangan klas → 0.0
+    #     tampil '-' via fmt_rp_cell);
+    #   - 'Persen Kenaikan/Penurunan' = (H − Lalu) ÷ |Lalu| × 100 —
+    #     sort numerik (parser '%'-aware) + minus merah per-cell.
+    # 'N Barang'/'Tanpa Harga' DIHAPUS (jumlah tanpa harga kini di anak
+    # tab 'Tanpa Harga' + footer status).
     COLUMNS = [
         ("Resto", 130, "w"),
-        ("N Barang", 80, "e"),
-        ("Tanpa Harga", 80, "e"),
+        ("COM Deviasi", 120, "e"),
+        ("Biaya Packaging", 120, "e"),
         ("Nominal Deviasi", 130, "e"),   # heading dinamis "(H=n)"
         # v3.9.38 — user: "Nominal Deviasi total per resto juga tambahan
         # di tab nominal deviasi ini buat versus bulan lalu"
         ("Nominal Deviasi Bulan Lalu", 130, "e"),
+        # v3.9.63 — user: "Persen kenaikan/penurunan (bisa sort)"
+        ("Persen Kenaikan/Penurunan", 110, "e"),
     ]
 
-    NUMERIC_COLS = ("N Barang", "Tanpa Harga", "Nominal Deviasi",
-                    "Nominal Deviasi Bulan Lalu")
+    # v3.9.63 — klas nominal + persen (parser sort _parse_num_id kini
+    # '%'-aware: '+12,5%' → 12.5).
+    NUMERIC_COLS = ("COM Deviasi", "Biaya Packaging", "Nominal Deviasi",
+                    "Nominal Deviasi Bulan Lalu",
+                    "Persen Kenaikan/Penurunan")
 
     # v3.9.45 — id kolom BASIS (statis) — pembanding utk register kolom
     # dinamis 'Lalu <label>' di _ensure_tree_columns.
@@ -322,6 +367,16 @@ class NominalRestoView(tk.Frame):
         # kolom dinamis 'Lalu <label>' (self._lalu_extra).
         self._lalu_frames: list = []
         self._lalu_extra: list = []   # [(col_id, label, week)] bulan ≥2
+        # v3.9.63 — ANAK TAB 'Tanpa Harga' (global): frame pasangan tanpa
+        # harga dari data MENTAH (pasangan_tanpa_harga_global — dihitung
+        # di _compute_resto bersama tabel utama) + filter kategori & ⧩
+        # anak tab SENDIRI (default 'Semua' = global — tidak terikat
+        # filter KATEGORI tab Per Resto).
+        self._noharga_df: pd.DataFrame | None = None
+        self._nh_kategori_sel: str | None = None
+        self._nh_col_sel: dict = {
+            c[0]: None for c in NOHARGA_COLUMNS}
+        self._nh_insert_cancel = None
         # v3.9.36 — filter KATEGORI (pola deviasi_view v3.9.19):
         # None = 'Semua' = tanpa filter; default 'Deviasi'.
         self._kategori_sel: str | None = None
@@ -363,8 +418,20 @@ class NominalRestoView(tk.Frame):
 
         self.content = tk.Frame(self, bg=C_BG)
 
+        # v3.9.63 — ANAK TAB (user: "dan itu buat anak tab baru di nominal
+        # deviasi yang menampilkan secara global"): sub-notebook 2 anak
+        # tab — 'Per Resto' (tabel utama + filter KATEGORI utama —
+        # perilaku lama utuh) + 'Tanpa Harga' (daftar barang tanpa harga
+        # GLOBAL semua resto & kategori + filter kategori SENDIRI).
+        self._sub_nb = ttk.Notebook(self.content)
+        self._sub_nb.pack(fill="both", expand=True)
+        self._tab_main = tk.Frame(self._sub_nb, bg=C_BG)
+        self._tab_noharga = tk.Frame(self._sub_nb, bg=C_BG)
+        self._sub_nb.add(self._tab_main, text="Per Resto")
+        self._sub_nb.add(self._tab_noharga, text="Tanpa Harga")
+
         # --- Filter card: chip H bersama (read-only) + TOTAL chip ---
-        fcard = Card(self.content, title="Filter")
+        fcard = Card(self._tab_main, title="Filter")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         self._fcard = fcard
         fbody = fcard.body()
@@ -389,8 +456,7 @@ class NominalRestoView(tk.Frame):
                     command=self._reset_filter).pack(side="left",
                                                      padx=(18, 0))
         tk.Label(r1, text="double-click resto → rincian per barang · "
-                            "double-click sel Tanpa Harga → daftar tanpa "
-                            "harga",
+                            "barang tanpa harga → anak tab 'Tanpa Harga'",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="right")
 
@@ -421,7 +487,7 @@ class NominalRestoView(tk.Frame):
             side="left", padx=(12, 0))
 
         # --- Tabel card ---
-        tcard = Card(self.content)
+        tcard = Card(self._tab_main)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
         tbody = tcard.body()
 
@@ -499,6 +565,279 @@ class NominalRestoView(tk.Frame):
             self._h_state.subscribe(self._on_shared_h_changed)
             self.bind("<Destroy>", self._on_view_destroy, add="+")
 
+        # v3.9.63 — anak tab 'Tanpa Harga' (global) — dibangun SETELAH
+        # tree utama (header_filters/_colmgr utama tak terganggu).
+        self._build_noharga_tab()
+
+    # =========================================================================
+    # v3.9.63 — ANAK TAB 'TANPA HARGA' (GLOBAL)
+    # =========================================================================
+    def _build_noharga_tab(self):
+        """v3.9.63 — ANAK TAB 'Tanpa Harga' (user: "barang yang tidak ada
+        harga nya sesuai kategori yang difilter misal deviasi COM +
+        packaging berarti hanya menampilkan sesuai kategori aja. dan itu
+        buat anak tab baru di nominal deviasi yang menampilkan secara
+        global"): daftar pasangan tanpa harga GLOBAL (semua resto &
+        kategori — pasangan_tanpa_harga_global, TANPA filter kategori
+        tab Per Resto) + kolom Kategori + combobox KATEGORI sendiri
+        (default 'Semua' = global; memilih kategori/gabungan → hanya
+        menampilkan sesuai kategori itu). Menggantikan popup double-click
+        kolom 'Tanpa Harga' (kolomnya dihapus v3.9.63)."""
+        fcard = Card(self._tab_noharga, title="Filter")
+        fcard.pack(fill="x", padx=12, pady=(12, 0))
+        fbody = fcard.body()
+
+        r = tk.Frame(fbody, bg=C_CARD)
+        r.pack(fill="x")
+        self._nh_h_var = tk.StringVar(value=str(self.tanggal_h))
+        tk.Label(r, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        _nh_chip = tk.Frame(r, bg="#f1f5f9",
+                            highlightbackground="#e2e8f0",
+                            highlightthickness=1)
+        _nh_chip.pack(side="left", padx=(6, 14))
+        tk.Label(_nh_chip, textvariable=self._nh_h_var, bg="#f1f5f9",
+                 fg=C_ACCENT, font=font(11, "bold")).pack(
+            padx=10, pady=(2, 3))
+        tk.Label(r, text="KATEGORI", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._nh_kategori_var = tk.StringVar(value="Semua")
+        self._nh_kategori_combo = ttk.Combobox(
+            r, textvariable=self._nh_kategori_var, state="readonly",
+            width=34, font=font(9))
+        self._nh_kategori_combo.pack(side="left", padx=(6, 0))
+        self._nh_kategori_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self._on_nh_kategori_changed())
+        GhostButton(r, text="✕ Reset Filter",
+                    command=self._nh_reset_filter).pack(
+            side="left", padx=(12, 0))
+        tk.Label(r, text="GLOBAL — semua resto & kategori (tidak terikat "
+                         "filter tab Per Resto) · barang tanpa harga tidak "
+                         "ikut Σ Nominal Deviasi",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="right")
+
+        # --- Tabel card ---
+        tcard = Card(self._tab_noharga)
+        tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+        tbody = tcard.body()
+
+        head = tk.Frame(tbody, bg=C_CARD)
+        head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        tk.Label(head, text="Barang Tanpa Harga — global (semua resto & "
+                            "kategori) — tidak ikut Σ Nominal Deviasi",
+                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
+            side="left")
+        GhostButton(head, text="↔ Auto-Fit",
+                    command=lambda: auto_fit_columns(
+                        self.tree_noharga)).pack(side="right")
+
+        _nh_ids = [c[0] for c in NOHARGA_COLUMNS]
+        self.tree_noharga = ttk.Treeview(
+            tbody, columns=_nh_ids, show="headings",
+            selectmode="extended")
+        for col_name, width, anchor in NOHARGA_COLUMNS:
+            self.tree_noharga.column(col_name, width=width, minwidth=34,
+                                     anchor=anchor)
+            self.tree_noharga.heading(col_name, text=col_name)
+
+        vsb = ttk.Scrollbar(tbody, orient="vertical",
+                            command=self.tree_noharga.yview)
+        hsb = ttk.Scrollbar(tbody, orient="horizontal",
+                            command=self.tree_noharga.xview)
+        self.tree_noharga.configure(yscrollcommand=vsb.set,
+                                    xscrollcommand=hsb.set)
+        self.tree_noharga.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        tbody.grid_rowconfigure(1, weight=1)
+        tbody.grid_columnconfigure(0, weight=1)
+
+        enable_col_resize(self.tree_noharga)
+        enable_multi_select(self.tree_noharga)
+        self._setup_tags(self.tree_noharga)
+
+        foot = tk.Frame(tbody, bg=C_CARD)
+        foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self._nh_status_var = tk.StringVar(value="Belum ada data.")
+        tk.Label(foot, textvariable=self._nh_status_var, bg=C_CARD,
+                 fg=C_HEADER, font=font(8, "bold")).pack(side="right")
+
+        # filter header ⧩ + sort (pola tabel utama; nilai = DISPLAY)
+        self._nh_filters = HeaderFilterGroup(
+            self.tree_noharga, _nh_ids,
+            get_values=self._nh_col_values,
+            on_apply=self._on_nh_col_filter,
+            on_sort=lambda c, d: self._sort_noharga_by(c, reverse=d))
+
+    def primary_tree(self):
+        """v3.9.63 — tree utama utk FALLBACK router roda app (pola
+        app._primary_scrollable): anak tab 'Tanpa Harga' aktif → tree
+        anak tab (roda di krom kartu Filter anak tab bergulir tabelnya);
+        selain itu tree utama 'Per Resto'."""
+        try:
+            if str(self._sub_nb.select()) == str(self._tab_noharga):
+                return self.tree_noharga
+        except tk.TclError:
+            pass
+        return self.tree
+
+    def _on_nh_kategori_changed(self):
+        """Combobox KATEGORI anak tab berubah → re-render TABEL anak tab
+        saja (frame global SUDAH dihitung — tanpa recompute pipeline)."""
+        val = self._nh_kategori_var.get()
+        self._nh_kategori_sel = None if (not val or val == "Semua") else val
+        self._render_noharga()
+
+    def _nh_reset_filter(self):
+        """Reset filter anak tab: kategori kembali 'Semua' (GLOBAL) + ⧩
+        bersih → re-render."""
+        for c in self._nh_col_sel:
+            self._nh_col_sel[c] = None
+        self._nh_filters.clear_all()
+        self._nh_kategori_var.set("Semua")
+        self._nh_kategori_sel = None
+        self._render_noharga()
+
+    def _nh_format_col_series(self, col: str, series):
+        """Format nilai kolom anak tab utk ⧩ (identik dgn sel tampil)."""
+        if col == "Kuantiti Deviasi":
+            return series.map(fmt_nominal_cell)
+        if col == "Kategori":
+            return series.map(self._nh_kategori_disp)
+        return series.astype(str)
+
+    @staticmethod
+    def _nh_kategori_disp(kat) -> str:
+        """Kategori pasangan utk tampilan anak tab (blank → '(Tanpa
+        Kategori)' — konvensi label combobox)."""
+        s = str(kat).strip() if kat is not None else ""
+        if s.lower() in ("", "nan", "none", "-"):
+            return KATEGORI_BLANK_LABEL
+        return s
+
+    def _nh_col_values(self, col: str) -> list:
+        """Nilai unik TERFORMAT utk popup ⧩ anak tab (pola _col_values:
+        seleksi kolom LAIN diterapkan dulu supaya daftar selaras)."""
+        df = self._noharga_df
+        if df is None or df.empty or col not in df.columns:
+            return []
+        f = df
+        m = self._kategori_mask_series(f["KATEGORI"],
+                                       self._nh_kategori_sel)
+        if m is not None:
+            f = f[m]
+        for c, sel in self._nh_col_sel.items():
+            if sel is None or c == col or c not in f.columns:
+                continue
+            fmt = self._nh_format_col_series(c, f[c])
+            f = f[fmt.isin(sel)]
+        if f.empty:
+            return []
+        return self._nh_format_col_series(col, f[col]).unique().tolist()
+
+    def _on_nh_col_filter(self, col: str, selected):
+        self._nh_col_sel[col] = selected
+        self._render_noharga()
+
+    def _sort_noharga_by(self, col: str, reverse: bool = False):
+        """Sort kolom anak tab (pola _sort_by; 'Kuantiti Deviasi'
+        numerik — parser persen/Indonesia sama)."""
+        parse = (self._parse_num_id if col == "Kuantiti Deviasi"
+                 else None)
+        sort_tree_by_column(self.tree_noharga, col, reverse=reverse,
+                            parse=parse)
+
+    @staticmethod
+    def _kategori_mask_series(kat, sel):
+        """v3.9.63 — mask kategori KANONIK utk render anak tab (semantik
+        PERSIS blok filter _compute_resto: blank-label → blank mask;
+        entri gabungan → kategori_filter_mask; legacy 'Deviasi' →
+        passthrough blank; lainnya strict exact). sel kosong → None
+        (tanpa filter)."""
+        if not sel:
+            return None
+        if sel == KATEGORI_BLANK_LABEL:
+            return kategori_blank_mask(kat)
+        m = kategori_filter_mask(kat, sel)
+        if m is not None:
+            return m
+        if kategori_passthrough(sel):
+            return (kat.astype(str) == str(sel)) | kategori_blank_mask(
+                kat).fillna(False)
+        return kat.astype(str) == str(sel)
+
+    def _render_noharga(self):
+        """Render tabel anak tab 'Tanpa Harga' dari frame GLOBAL
+        self._noharga_df + filter kategori/⧩ anak tab (tanpa recompute —
+        frame dihitung _compute_resto bersama tabel utama)."""
+        if getattr(self, "_nh_insert_cancel", None) is not None:
+            self._nh_insert_cancel()
+            self._nh_insert_cancel = None
+        self.tree_noharga.delete(
+            *self.tree_noharga.get_children(""))
+        self._nh_h_var.set(str(self.tanggal_h))
+        df = self._noharga_df
+        if df is None:
+            self._nh_status_var.set(
+                "Belum ada data — 0 baris terbaca dari pipeline (cek "
+                "folder data / RootPath di tab ⚙️ Config).")
+            return
+        if df.empty:
+            self._nh_status_var.set(
+                "Tidak ada pasangan tanpa harga " + (
+                    f"(KATEGORI {self._nh_kategori_sel})."
+                    if self._nh_kategori_sel
+                    else f"tanggal H={self.tanggal_h} — semua pasangan "
+                         "ber-harga 41.09."))
+            return
+        f = df
+        m = self._kategori_mask_series(f["KATEGORI"],
+                                       self._nh_kategori_sel)
+        if m is not None:
+            f = f[m]
+        # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
+        for col, sel in self._nh_col_sel.items():
+            if sel is not None and col in f.columns:
+                fmt = self._nh_format_col_series(col, f[col])
+                f = f[fmt.isin(sel)]
+        if f.empty:
+            _act = ", ".join(c for c, s in self._nh_col_sel.items()
+                             if s is not None)
+            self._nh_status_var.set(
+                f"0 dari {fmt_int_id(len(df))} pasangan tanpa harga "
+                f"lolos filter aktif"
+                + (f" (KATEGORI: {self._nh_kategori_sel})"
+                   if self._nh_kategori_sel else "")
+                + (f" ({_act})" if _act else "") + ".")
+            return
+        items = []
+        f = f.reset_index(drop=True)
+        for i in range(len(f)):
+            row = f.iloc[i]
+            values = (
+                str(row["Resto"]),
+                self._nh_kategori_disp(row.get("KATEGORI")),
+                str(row["Nama Barang"]),
+                str(row.get("Satuan", "-")),
+                fmt_nominal_cell(row.get("Qty Deviasi", 0)),
+                self._noharga_ket(row.get("Harga Tampil")),
+            )
+            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            items.append(("", f"row_{i}",
+                          {"values": values, "tags": tuple(tags)}))
+        self._nh_insert_cancel = insert_tree_items(
+            self.tree_noharga, items, batch=500)
+        _n_all = len(df)
+        status = (f"{fmt_int_id(len(f))} dari {fmt_int_id(_n_all)} "
+                  f"pasangan tanpa harga · GLOBAL semua kategori & resto "
+                  f"· TANGGAL H = {self.tanggal_h}")
+        if self._nh_kategori_sel:
+            status += f" · KATEGORI {self._nh_kategori_sel}"
+        status += " · nominal '-' (transparan — tidak dihitung Σ)"
+        self._nh_status_var.set(status)
+
     def _on_view_destroy(self, event):
         if event.widget is self and self._h_state is not None:
             with contextlib.suppress(Exception):
@@ -570,7 +909,10 @@ class NominalRestoView(tk.Frame):
         return self._format_col_series(col, f[col]).unique().tolist()
 
     def _format_col_series(self, col: str, series):
-        if col in ("Nominal Deviasi", "Nominal Deviasi Bulan Lalu") \
+        # v3.9.63 — klas nominal per kategori (COM Deviasi/Biaya
+        # Packaging) ikut format Rp; kolom Persen → fmt_pct_cell.
+        if col in ("COM Deviasi", "Biaya Packaging",
+                   "Nominal Deviasi", "Nominal Deviasi Bulan Lalu") \
                 or self._is_lalu_extra(col):
             # v3.9.59 — FIX 2f-01 (HIGH, pola deviasi_view v3.9.51 §61f):
             # daftar nilai popup ⧩ kolom nominal HARUS identik dgn SEL
@@ -579,6 +921,9 @@ class NominalRestoView(tk.Frame):
             # filter clone ⛶ (apply_tree_row_filters mencocokkan nilai
             # DISPLAY tree vs seleksi) tak pernah cocok → 0 baris.
             return series.map(fmt_rp_cell)
+        if col == "Persen Kenaikan/Penurunan":
+            # v3.9.63 — nilai ⧩ identik dgn sel tabel ('+12,5%').
+            return series.map(fmt_pct_cell)
         return series.astype(str)
 
     def _on_col_filter(self, col: str, selected):
@@ -658,13 +1003,26 @@ class NominalRestoView(tk.Frame):
             pass
 
     @staticmethod
+    def _safe_float(v):
+        """v3.9.63 — float aman utk minus-merah per-cell (None/NaN/'-'/
+        string non-angka → None; pola try/float lama diringkas)."""
+        try:
+            if v is None or pd.isna(v):
+                return None
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _parse_num_id(s):
         """Parser sort format Indonesia (pola mode Nominal): '1.234' =
         1234, '(1.234)' = -1234, '-' = 0, '12,5' = 12.5.
         v3.9.51: prefiks 'Rp ' dibuang DULU (fmt_rp_cell — kolom nominal:
-        'Rp 1.825' → 1825, '(Rp 1.825)' → -1825) SEBELUM split parts[0]."""
+        'Rp 1.825' → 1825, '(Rp 1.825)' → -1825) SEBELUM split parts[0].
+        v3.9.63: sufiks '%' juga dibuang (fmt_pct_cell — kolom Persen
+        Kenaikan/Penurunan: '+12,5%' → 12.5, '-8,3%' → -8.3; '-' → 0)."""
         s = str(s).replace("—", "").replace("Rp ", "") \
-            .replace("Rp", "").strip()
+            .replace("Rp", "").replace("%", "").strip()
         parts = s.split()
         if parts:
             s = parts[0]
@@ -750,6 +1108,22 @@ class NominalRestoView(tk.Frame):
         _kv45 += kategori_vals
         self._kategori_combo["values"] = _kv45
         self._reset_kategori()
+        # v3.9.63 — combobox KATEGORI ANAK TAB 'Tanpa Harga': daftar
+        # nilai sama dgn tab utama; DEFAULT 'Semua' = GLOBAL (user:
+        # "menampilkan secara global") — memilih kategori/gabungan →
+        # hanya menampilkan sesuai kategori itu (user: "misal deviasi
+        # COM +packaging berarti hanya menampilkan sesuai kategori aja").
+        # Filter ⧩ anak tab + frame global ikut di-reset.
+        self._nh_kategori_combo["values"] = _kv45
+        self._nh_kategori_var.set("Semua")
+        self._nh_kategori_sel = None
+        for c in self._nh_col_sel:
+            self._nh_col_sel[c] = None
+        self._nh_filters.clear_all()
+        self._noharga_df = None
+        if self._nh_insert_cancel is not None:
+            self._nh_insert_cancel()
+            self._nh_insert_cancel = None
         # lazy refresh — compute hanya bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -787,9 +1161,12 @@ class NominalRestoView(tk.Frame):
     # =========================================================================
     def _compute_resto(self, data: pd.DataFrame | None = None,
                        h: int | None = None) -> pd.DataFrame:
-        """Frame per resto: [Resto, N Barang, Tanpa Harga, Nominal
-        Deviasi] urut |Σ| menurun. self._pairs_df (rincian popup),
-        self._lalu_df (pasangan file deviasi — v3.9.36) dan
+        """Frame per resto: [Resto, COM Deviasi, Biaya Packaging, Nominal
+        Deviasi, Nominal Deviasi Bulan Lalu, Persen Kenaikan/Penurunan]
+        urut |Σ| menurun (v3.9.63 — 'N Barang'/'Tanpa Harga' tetap
+        dihitung di agregasi tapi TIDAK ditampilkan). self._pairs_df
+        (rincian popup), self._lalu_df (pasangan file deviasi — v3.9.36),
+        self._noharga_df (anak tab Tanpa Harga global — v3.9.63) dan
         self._result_df (snapshot filter) ikut diisi."""
         df = self.data if data is None else data
         if df is None or df.empty:
@@ -799,9 +1176,18 @@ class NominalRestoView(tk.Frame):
             self._lalu_loaded = False
             self._lalu_frames = []      # v3.9.45
             self._lalu_extra = []
+            self._noharga_df = None     # v3.9.63
             return pd.DataFrame()
         if h is None:
             h = self.tanggal_h
+        # v3.9.63 — ANAK TAB 'Tanpa Harga' GLOBAL: pasangan tanpa harga
+        # dihitung dari data MENTAH (param `data` — sebelum filter
+        # kategori meng-rebind `df`) supaya TIDAK terikat filter KATEGORI
+        # tab Per Resto (user: "menampilkan secara global"). Dihitung di
+        # worker yang sama (sekali jalan, tak ada recompute saat ganti
+        # anak tab / filter kategori anak tab).
+        self._noharga_df = pasangan_tanpa_harga_global(
+            data, h, self.harga_map, self.konversi_map)
         # v3.9.59 — FIX 2e-03: hitung PRA-kategori (baris 3.DEVIASI@H
         # di data mentah) — utk pesan status jujur di jalur render kosong.
         try:
@@ -897,6 +1283,15 @@ class NominalRestoView(tk.Frame):
             _fr = next((_f for _l, _f in self._lalu_frames[1:]
                         if f"Lalu {_l}" == _cid), None)
             self._assign_lalu_column(g, pairs, _cid, _fr)
+        # v3.9.63 — KOLOM 'Persen Kenaikan/Penurunan' (user: "Persen
+        # kenaikan/penurunan (bisa sort)"): (H − Lalu) ÷ |Lalu| × 100
+        # per resto vs kolom Bulan Lalu UTAMA (hitung_persen_kenaikan —
+        # None bila tak terdefinisi: lalu kosong/0 dgn H ≠ 0).
+        g["Persen Kenaikan/Penurunan"] = pd.Series(
+            [hitung_persen_kenaikan(_h, _l) for _h, _l in zip(
+                g["Nominal Deviasi"],
+                g["Nominal Deviasi Bulan Lalu"])],
+            index=g.index, dtype="float64")
         # snapshot utk filter header (SEBELUM filter diterapkan)
         self._result_df = g.copy()
         return g
@@ -1003,6 +1398,11 @@ class NominalRestoView(tk.Frame):
                 text=_cid + (f" ({_wk})" if _wk else ""))
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
+        # v3.9.63 — render ANAK TAB 'Tanpa Harga' GLOBAL di sini (SEBELUM
+        # cabang kosong): frame dihitung _compute_resto dari data mentah
+        # — tak tergantung hasil/filter kategori tabel utama, jadi tetap
+        # dirender walau tabel utama kosong/terfilter habis.
+        self._render_noharga()
 
         if result is None or result.empty:
             # v3.9.59 — FIX 2e-03: status JUJUR saat KATEGORI menghabiskan
@@ -1061,10 +1461,16 @@ class NominalRestoView(tk.Frame):
             totals_extra[_cid] = (
                 float(filtered[_cid].dropna().sum())
                 if _cid in filtered.columns else 0.0)
-        total_barang = int(filtered["N Barang"].sum()) \
-            if "N Barang" in filtered.columns else 0
-        total_noharga = int(filtered["Tanpa Harga"].sum()) \
-            if "Tanpa Harga" in filtered.columns else 0
+        # v3.9.63 — total per klas kategori + jumlah tanpa harga GLOBAL
+        # (frame anak tab) — 'N Barang'/'Tanpa Harga' tak lagi jadi
+        # kolom tabel (user: "hapus aja").
+        total_com = float(filtered["COM Deviasi"].dropna().sum()) \
+            if "COM Deviasi" in filtered.columns else 0.0
+        total_pkg = float(
+            filtered["Biaya Packaging"].dropna().sum()) \
+            if "Biaya Packaging" in filtered.columns else 0.0
+        _nh_total = (len(self._noharga_df)
+                     if self._noharga_df is not None else 0)
         n_neg = int((filtered["Nominal Deviasi"] < 0).sum())
 
         items = []
@@ -1078,45 +1484,41 @@ class NominalRestoView(tk.Frame):
                           in self._lalu_extra]
             values = [
                 str(row["Resto"]),
-                fmt_int_id(int(row.get("N Barang", 0) or 0)),
-                fmt_int_id(int(row.get("Tanpa Harga", 0) or 0)),
+                # v3.9.63 — Σ nominal per klas kategori (user: "diganti
+                # dengan nominal deviasi per kategori: kolom COM Deviasi
+                # + kolom Packaging") — 0.0 → '-' (fmt_rp_cell).
+                fmt_rp_cell(row.get("COM Deviasi")),
+                fmt_rp_cell(row.get("Biaya Packaging")),
                 # v3.9.51 — Currency Rp (user: "Semua data nominal diberi
                 # format Currency Rp").
                 fmt_rp_cell(nom),
                 fmt_rp_cell(nom_l),
+                # v3.9.63 — persen kenaikan/penurunan vs bulan lalu
+                # (user: "Persen kenaikan/penurunan (bisa sort)").
+                fmt_pct_cell(row.get("Persen Kenaikan/Penurunan")),
             ] + [fmt_rp_cell(v) for v in vals_extra]
             values = tuple(values)
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-            nom_v = None
-            try:
-                if nom is not None and not pd.isna(nom):
-                    nom_v = float(nom)
-            except (TypeError, ValueError):
-                nom_v = None
-            # v3.9.38 — minus merah per-cell kolom Bulan Lalu (pola
-            # kolom Sekarang + popup)
-            noml_v = None
-            try:
-                if nom_l is not None and not pd.isna(nom_l):
-                    noml_v = float(nom_l)
-            except (TypeError, ValueError):
-                noml_v = None
-            _neg_any = ((nom_v is not None and nom_v < 0)
-                        or (noml_v is not None and noml_v < 0))
+            # v3.9.63 — minus merah per-cell SEMUA kolom nominal + persen
+            # (COM Deviasi/Biaya Packaging/persen ikut — pola kolom Lalu).
+            com_v = self._safe_float(row.get("COM Deviasi"))
+            pkg_v = self._safe_float(row.get("Biaya Packaging"))
+            pct_v = self._safe_float(
+                row.get("Persen Kenaikan/Penurunan"))
+            nom_v = self._safe_float(nom)
+            noml_v = self._safe_float(nom_l)
+            _neg_any = any(v is not None and v < 0
+                           for v in (com_v, pkg_v, nom_v, noml_v, pct_v))
             if self._cell_tags:
-                if nom_v is not None and nom_v < 0:
-                    self._neg_cells.append((f"row_{i}",
-                                            "Nominal Deviasi"))
-                if noml_v is not None and noml_v < 0:
-                    self._neg_cells.append((f"row_{i}",
-                                            "Nominal Deviasi Bulan Lalu"))
+                for _v, _c in ((com_v, "COM Deviasi"),
+                               (pkg_v, "Biaya Packaging"),
+                               (nom_v, "Nominal Deviasi"),
+                               (noml_v, "Nominal Deviasi Bulan Lalu"),
+                               (pct_v, "Persen Kenaikan/Penurunan")):
+                    if _v is not None and _v < 0:
+                        self._neg_cells.append((f"row_{i}", _c))
                 for _j, _ev in enumerate(vals_extra):
-                    _evf = None
-                    try:
-                        if _ev is not None and not pd.isna(_ev):
-                            _evf = float(_ev)
-                    except (TypeError, ValueError):
-                        _evf = None
+                    _evf = self._safe_float(_ev)
                     if _evf is not None and _evf < 0:
                         self._neg_cells.append(
                             (f"row_{i}", self._lalu_extra[_j][0]))
@@ -1126,13 +1528,16 @@ class NominalRestoView(tk.Frame):
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
 
-        # baris TOTAL di ujung (jumlah semua resto tampil); v3.9.51 → Rp
+        # baris TOTAL di ujung (jumlah semua resto tampil); v3.9.51 → Rp;
+        # v3.9.63 → + Σ COM/Packaging + persen TOTAL (vs Lalu utama).
         values_total = (
             "TOTAL",
-            fmt_int_id(total_barang),
-            fmt_int_id(total_noharga),
+            fmt_rp_cell(total_com),
+            fmt_rp_cell(total_pkg),
             fmt_rp_cell(total_nom),
             fmt_rp_cell(total_lalu),
+            fmt_pct_cell(
+                hitung_persen_kenaikan(total_nom, total_lalu)),
         ) + tuple(fmt_rp_cell(totals_extra[_cid])
                    for _cid, _l, _w in self._lalu_extra)
         items.append(("", "row_total",
@@ -1146,8 +1551,11 @@ class NominalRestoView(tk.Frame):
             status += f" · KATEGORI {self._kategori_sel}"
         if n_neg:
             status += f" · {fmt_int_id(n_neg)} resto minus"
-        if total_noharga:
-            status += f" · {fmt_int_id(total_noharga)} pasangan tanpa harga"
+        # v3.9.63 — jumlah tanpa harga GLOBAL (anak tab — kolom 'Tanpa
+        # Harga' dihapus dari tabel; user: "dan itu buat anak tab baru").
+        if _nh_total:
+            status += (f" · {fmt_int_id(_nh_total)} pasangan tanpa harga "
+                       "(anak tab Tanpa Harga)")
         # v3.9.38 — versus bulan lalu di footer (chip TOTAL juga);
         # v3.9.41 — minggu pembanding TER-COCOK H disebut (user:
         # "sesuaikan week nya ... supaya jelas minggu mana");
@@ -1274,17 +1682,13 @@ class NominalRestoView(tk.Frame):
                 if not sel:
                     return
                 iid = sel[0]
-            # v3.9.36 — kolom 'Tanpa Harga' + baris TOTAL → daftar
-            # barang tanpa harga SEMUA resto (user: "yang tanpa harga
-            # juga bisa pop up untuk tampilkan tanpa harga item apa aja")
+            # v3.9.63 — cabang kolom 'Tanpa Harga' DIHAPUS (kolomnya tak
+            # ada lagi; daftar tanpa harga kini anak tab 'Tanpa Harga').
+            # Baris TOTAL → tanpa popup (dulu: sel Tanpa Harga TOTAL →
+            # popup SEMUA resto).
             if iid == "row_total":
-                if self._event_col_name(tree, event) == "Tanpa Harga":
-                    self._show_noharga_popup(None)
                 return
             resto = str(tree.set(iid, "Resto"))
-            if self._event_col_name(tree, event) == "Tanpa Harga":
-                self._show_noharga_popup(resto)
-                return
         except tk.TclError:
             return
         self._show_resto_popup(resto)
@@ -1582,125 +1986,12 @@ class NominalRestoView(tk.Frame):
         win.focus_set()
 
     # -------------------------------------------------------------------------
-    # POPUP BARANG TANPA HARGA (v3.9.36)
+    # v3.9.63 — popup barang TANPA HARGA DIHAPUS (double-click sel kolom
+    # 'Tanpa Harga' — kolomnya tak ada lagi): daftar tanpa harga kini
+    # ANAK TAB 'Tanpa Harga' GLOBAL (selalu terlihat + filter kategori
+    # sendiri — lihat _build_noharga_tab/_render_noharga; popup per-resto
+    # digantikan penuh).
     # -------------------------------------------------------------------------
-    def _show_noharga_popup(self, resto: "str | None"):
-        """Popup daftar barang TANPA HARGA (double-click sel kolom 'Tanpa
-        Harga'; user: "yang tanpa harga juga bisa pop up untuk tampilkan
-        tanpa harga item apa aja"). resto=None → SEMUA resto (baris
-        TOTAL). Kolom Keterangan menjelaskan ALASAN (tak ada di 41.09 /
-        satuan tak terkonversi — dari 'Harga Tampil' pairs)."""
-        pairs = self._pairs_df
-        if pairs is None or pairs.empty:
-            return
-        if "Nominal" not in pairs.columns:
-            return
-        sub = pairs[pairs["Nominal"].isna()].copy()
-        if resto is not None:
-            sub = sub[sub["Resto"].astype(str) == str(resto)].copy()
-        title_resto = str(resto) if resto is not None else "SEMUA RESTO"
-
-        win = tk.Toplevel(self)
-        win.title(f"Barang Tanpa Harga — {title_resto} (H={self.tanggal_h})")
-        self._detail_wins.append(win)
-        win.protocol("WM_DELETE_WINDOW", win.destroy)
-        # v3.9.42 — audit 61-b P3: idem popup rincian (Destroy cleanup +
-        # Esc menutup + fokus supaya Esc langsung aktif).
-        win.bind("<Destroy>", lambda _e, _w=win: (
-            _w in self._detail_wins and self._detail_wins.remove(_w)),
-            add="+")
-        win.bind("<Escape>", lambda _e, _w=win: _w.destroy())
-        with contextlib.suppress(tk.TclError):
-            win.transient(self.winfo_toplevel())
-        # v3.9.59 — FIX 2e-10: MODAL (grab_set) — paritas popup
-        # drill-down tab lain (InDetailPopup in_selisih / deviasi_popup /
-        # DetailsPopup semua grab). Dulu non-modal → jendela utama
-        # tetap interaktif saat popup terbuka + popup ganda menumpuk;
-        # destroy melepas grab otomatis.
-        with contextlib.suppress(tk.TclError):
-            win.grab_set()
-
-        body = tk.Frame(win, bg=C_BG)
-        body.pack(fill="both", expand=True)
-
-        head = tk.Frame(body, bg=C_CARD)
-        head.pack(fill="x")
-        tk.Label(head, text=f"Barang TANPA HARGA — {title_resto} · "
-                            "tidak ikut Σ Nominal Deviasi",
-                 bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
-            side="left", padx=10, pady=8)
-        tk.Label(head,
-                 text="harga = file 41.09 (folder 09.Harga)",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
-            side="right", padx=10)
-
-        col_ids = [c[0] for c in NOHARGA_COLUMNS]
-        tree = ttk.Treeview(body, columns=col_ids, show="headings",
-                            selectmode="extended")
-        # v3.9.50 — [MINOR audit 3-a] choke-point (parity popup resto di
-        # atas + 14 call site tree lain — smooth wheel + CTRL-zoom).
-        enable_col_resize(tree)
-        # v3.9.41 — tombol ⛶/↺ + kolom responsif (popup dulu kecil)
-        _popup_head_buttons(head, win, tree, NOHARGA_COLUMNS)
-        for col_name, width, anchor in NOHARGA_COLUMNS:
-            tree.column(col_name, width=width, minwidth=34,
-                        anchor=anchor)
-            tree.heading(col_name, text=col_name)
-        tree.tag_configure("evenrow", background="#ffffff")
-        tree.tag_configure("oddrow", background="#f8fafc")
-
-        items = []
-        sub = sub.reset_index(drop=True)
-        for i in range(len(sub)):
-            row = sub.iloc[i]
-            ket = self._noharga_ket(row.get("Harga Tampil"))
-            values = (
-                str(row["Resto"]), str(row["Nama Barang"]),
-                str(row.get("Satuan", "-")),
-                fmt_nominal_cell(row.get("Qty Deviasi", 0)),
-                ket,
-            )
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-            items.append(("", f"row_{i}",
-                          {"values": values, "tags": tuple(tags)}))
-
-        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
-        # v3.9.42 — audit 61-b P2: + scrollbar horizontal — total lebar
-        # basis kolom (800px) MELAMPAUI avail di minsize lama
-        # (760−36=724) → kolom Keterangan TERPOTONG & tak terjangkau
-        # (probe: 14% kanan terpotong tanpa hsb).
-        wrap = tk.Frame(body, bg=C_BG)
-        hsb = ttk.Scrollbar(wrap, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set,
-                       xscrollcommand=hsb.set)
-        hsb.pack(side="bottom", fill="x")
-        tree.pack(side="top", fill="both", expand=True)
-        wrap.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
-        enable_multi_select(tree)   # Ctrl+A + Ctrl+C TSV
-        insert_tree_items(tree, items, batch=500)
-
-        foot = tk.Frame(body, bg=C_CARD)
-        foot.pack(fill="x")
-        tk.Label(foot, text=f"{fmt_int_id(len(sub))} barang tanpa harga "
-                            "· nominal '-' (transparan — tidak dihitung)",
-                 bg=C_CARD, fg=C_HEADER, font=font(8, "bold")).pack(
-            side="left", padx=10, pady=6)
-        # v3.9.59 — FIX 2f-13: 'Tutup (Esc)' (kanon — popup ini bind
-        # <Escape>; 'Tutup' polos menyembunyikan shortcut).
-        GhostButton(foot, text="Tutup (Esc)", command=win.destroy).pack(
-            side="right", padx=10, pady=4)
-
-        # v3.9.41 — ukuran besar + kolom responsif (pola popup rincian;
-        # user: "pop up ... kurang besar dan lebar")
-        # v3.9.42 — cap dinaikkan (1600×900; audit 61-b P2) + minsize
-        # di-clamp ke geometri layar (audit 61-b P3).
-        _w41n, _h41n = _popup_geometry(win, w_max=1600, h_max=900,
-                                       w_frac=0.82, h_frac=0.8)
-        _scale_popup_columns(tree, NOHARGA_COLUMNS, _w41n - 36)
-        _bind_popup_rescale(win, tree, NOHARGA_COLUMNS)
-        win.minsize(min(760, _w41n), min(360, _h41n))
-        win.focus_set()
 
     @staticmethod
     def _noharga_ket(harga_tampil) -> str:

@@ -1780,21 +1780,23 @@ def run_test():
     wait_view(root, rv)
     _rrows = {str(rv.tree.set(i, "Resto")): rv.tree.item(i, "values")
               for i in rv.tree.get_children("")}
+    # v3.9.63 — kolom N Barang/Tanpa Harga dihapus; kini [Resto, COM
+    # Deviasi, Biaya Packaging, Nominal, Lalu, Persen] — mock tanpa
+    # kategori COM/Packaging → '-' (Σ 0 via fmt_rp_cell).
     _m = _rrows.get("MLGPAR")
-    assert _m is not None and str(_m[1]) == "4" and str(_m[2]) == "1" \
+    assert _m is not None and str(_m[1]) == "-" and str(_m[2]) == "-" \
         and _m[3] == "(Rp 1.919.058)", (
-        f"v3.9.51: MLGPAR = 4 barang · 1 tanpa harga · Σ (Rp 1.919.058) "
+        f"v3.9.63: MLGPAR Σ (Rp 1.919.058) "
         f"(GULA 1.916.250 + CINCAU 1.800 + BUMBU 1.008; FRUCTOSE tak "
-        f"ikut; Currency Rp) — got {_m}")
+        f"ikut; COM/Packaging '-' tanpa klas kategori) — got {_m}")
     _rt = _rrows.get("TOTAL")
-    assert _rt is not None and str(_rt[1]) == "4" and str(_rt[2]) == "1" \
+    assert _rt is not None and str(_rt[1]) == "-" and str(_rt[2]) == "-" \
         and _rt[3] == "(Rp 1.919.058)", (
-        f"v3.9.51: baris TOTAL Σ (Rp 1.919.058) — got {_rt}")
+        f"v3.9.63: baris TOTAL Σ (Rp 1.919.058) — got {_rt}")
     assert "H=1" in str(rv.tree.heading("Nominal Deviasi")["text"]), (
         "v3.9.34: heading dinamis 'Nominal Deviasi (H=1)'")
-    print("    ✓ v3.9.51: 🧮 Nominal Deviasi E2E Currency Rp — MLGPAR 4 "
-          "barang · 1 tanpa harga · Σ (Rp 1.919.058) + TOTAL + heading H "
-          "dinamis")
+    print("    ✓ v3.9.63: 🧮 Nominal Deviasi E2E — MLGPAR Σ (Rp 1.919.058) "
+          "+ COM/Packaging '-' + TOTAL + heading H dinamis")
 
     # v3.9.34 — (6c) KOLOM Nominal tab Deviasi GR (harga × Deviasi)
     dv34 = DeviasiView(root, satuan_mode="GR")

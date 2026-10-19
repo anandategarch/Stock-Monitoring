@@ -47,6 +47,25 @@ perilaku lama (minggu terakhir = penutupan bulan — kompatibilitas
 pemanggil lama). Kolom internal '_minggu' = label minggu terpilih
 (dipakai label popup/footer supaya minggu pembanding JELIHAT).
 
+v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: "kolom N
+Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per
+kategori ... dan itu buat anak tab baru di nominal deviasi yang
+menampilkan secara global"):
+  - agregasi_nominal_per_resto kini juga menghasilkan kolom 'COM
+    Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori:
+    substring case-insensitive 'COM' / 'PACKAGING' pada KATEGORI
+    pasangan — 'COM DEVIASI - RESTO'/'- CATERING' → COM,
+    'Biaya Packaging - RESTO' → PACKAGING; kategori lain hanya masuk
+    kolom total) DAN menempel kolom KATEGORI pada frame pasangan
+    (dipakai klasifikasi + anak tab Tanpa Harga).
+  - pasangan_tanpa_harga_global — BARU: pasangan tanpa harga dari data
+    MENTAH (TANPA filter kategori tab utama — global semua kategori &
+    resto) utk ANAK TAB 'Tanpa Harga' (menggantikan popup double-click
+    kolom 'Tanpa Harga' yang kolomnya dihapus).
+  - hitung_persen_kenaikan / fmt_pct_cell — BARU: kolom 'Persen
+    Kenaikan/Penurunan' tab 🧮 ((H − Lalu) ÷ |Lalu| × 100; NaN bila
+    lalu kosong/0 dgn H ≠ 0 — tak terdefinisi; 0 bila keduanya 0).
+
 ATURAN HARGA (identik sejak v3.9.32, kini satu sumber kebenaran):
   - harga_map   : {barang: (harga|None, satuan41-upper)} — global dari
                   file 41.09 (folder 09.Harga); Harga = Nilai Saldo
@@ -150,6 +169,50 @@ def fmt_rp_cell(val) -> str:
         s = f"{av:,.2f}".replace(",", "X").replace(".", ",") \
             .replace("X", ".")
     return f"(Rp {s})" if neg else f"Rp {s}"
+
+
+def hitung_persen_kenaikan(h_val, l_val):
+    """v3.9.63 — persen kenaikan/penurunan Nominal Deviasi vs bulan lalu
+    (kolom baru tab 🧮, user: "Persen kenaikan/penurunan (bisa sort)"):
+    (H − Lalu) ÷ |Lalu| × 100 (ber-tanda — positif = kenaikan).
+
+    Tak terdefinisi (→ None, tampil '-'): H atau Lalu kosong/NaN, atau
+    Lalu PERSIS 0 dengan H ≠ 0 (pembagi nol — kenaikan tak terhingga
+    tak bisa direpresentasikan sort-able). Keduanya 0 → 0.0 (tak
+    berubah). Absolut Lalu dipakai supaya ARAH tetap dari (H−Lalu)
+    meski Lalu minus (perbandingan vs besaran bulan lalu — bukan
+    flip tanda)."""
+    def _f(v):
+        try:
+            if v is None or pd.isna(v):
+                return None
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    h, l = _f(h_val), _f(l_val)
+    if h is None or l is None:
+        return None
+    if l == 0.0:
+        return 0.0 if h == 0.0 else None
+    return (h - l) / abs(l) * 100.0
+
+
+def fmt_pct_cell(val) -> str:
+    """v3.9.63 — format sel persen kenaikan/penurunan: '+12,5%' /
+    '-8,3%' / '0,0%' (desimal koma Indonesia, 1 digit); None/NaN/'-'
+    → '-' (tak terdefinisi — lihat hitung_persen_kenaikan)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "-"
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return str(val)
+    if pd.isna(v) or np.isinf(v):
+        return "-"
+    if v == 0:
+        return "0,0%"
+    return f"{v:+.1f}".replace(".", ",") + "%"
 
 
 # ---------------------------------------------------------------------------
@@ -353,26 +416,101 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
 # ---------------------------------------------------------------------------
 # AGREGASI PER RESTO (tab 🧮 Nominal Deviasi — v3.9.34)
 # ---------------------------------------------------------------------------
+# v3.9.63 — klas kategori utk kolom 'COM Deviasi' / 'Biaya Packaging'
+# (substring case-insensitive pada KATEGORI pasangan; kategori lain —
+# mis. 'DEVIASI'/'TEPAT'/blank — hanya masuk kolom total).
+_KAT_COM_TOKEN = "COM"
+_KAT_PKG_TOKEN = "PACKAGING"
+
+
+def _attach_kategori_pairs(pairs: pd.DataFrame,
+                           data: pd.DataFrame | None) -> pd.DataFrame:
+    """v3.9.63 — tempel kolom KATEGORI pada frame pasangan (map per
+    Nama Barang dari data mentah — kategori master '21. DBS Kategori' /
+    rekap mentah melekat per-BARANG, konstan lintas resto & tanggal;
+    `groupby().first()` mengambil nilai non-kosong pertama).
+
+    Pasangan barang tanpa kategori → NaN (blank — klasifikasi bukan
+    COM/Packaging; anak tab Tanpa Harga menampilkannya '(Tanpa
+    Kategori)'). Bila data tak ber-kolom KATEGORI → seluruh NaN."""
+    if pairs is None or pairs.empty:
+        return pairs
+    out = pairs.copy()
+    if data is None or "KATEGORI" not in getattr(data, "columns", []):
+        out["KATEGORI"] = pd.Series(
+            [float("nan")] * len(out), index=out.index, dtype="float64")
+        return out
+    _dk = data.dropna(subset=["KATEGORI"])
+    _kat = _dk.groupby(_dk["Nama Barang"].astype(str))["KATEGORI"].first()
+    out["KATEGORI"] = out["Nama Barang"].astype(str).map(_kat)
+    return out
+
+
+def pasangan_tanpa_harga_global(
+        data: pd.DataFrame | None, h: int, harga_map: dict | None,
+        konversi_map: dict | None) -> pd.DataFrame:
+    """v3.9.63 — frame barang TANPA HARGA GLOBAL (ANAK TAB 'Tanpa Harga'
+    tab 🧮 Nominal Deviasi; user: "barang yang tidak ada harga nya
+    sesuai kategori yang difilter ... dan itu buat anak tab baru di
+    nominal deviasi yang menampilkan secara global").
+
+    Pasangan qty-deviasi ≠ 0 dengan Nominal NaN (barang tak ada di
+    41.09 / satuan tak terkonversi) dari data MENTAH — TANPA filter
+    kategori tab utama (GLOBAL: semua kategori & resto; filter kategori
+    anak tab diterapkan di view saat render). Kolom: [Resto, KATEGORI,
+    Nama Barang, Satuan, Qty Deviasi, Harga Tampil, Nominal] urut
+    |Qty Deviasi| menurun (warisan urutan hitung_nominal_pairs)."""
+    pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map)
+    if pairs is None or pairs.empty or "Nominal" not in pairs.columns:
+        return pd.DataFrame()
+    out = pairs[pairs["Nominal"].isna()].copy()
+    if out.empty:
+        return out
+    out = _attach_kategori_pairs(out, data)
+    return out[["Resto", "KATEGORI", "Nama Barang", "Satuan",
+                "Qty Deviasi", "Harga Tampil", "Nominal"]] \
+        .reset_index(drop=True)
+
+
 def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
                                harga_map: dict | None,
                                konversi_map: dict | None) -> tuple:
     """→ (frame_per_resto, frame_pasangan).
 
-    frame_per_resto: [Resto, N Barang, Tanpa Harga, Nominal Deviasi]
-    urut |Nominal Deviasi| MENURUN. Σ nominal skipna (pasangan tanpa
-    harga tidak dihitung — transparan). frame_pasangan = output
-    hitung_nominal_pairs (utk popup rincian per resto).
+    frame_per_resto: [Resto, N Barang, Tanpa Harga, Nominal Deviasi,
+    COM Deviasi, Biaya Packaging] urut |Nominal Deviasi| MENURUN. Σ
+    nominal skipna (pasangan tanpa harga tidak dihitung — transparan).
+    v3.9.63 — 'COM Deviasi'/'Biaya Packaging' = Σ nominal pasangan per
+    klas kategori (lihat _attach_kategori_pairs / token klas); resto
+    tanpa pasangan klas itu → 0.0 (tampil '-' via fmt_rp_cell).
+    frame_pasangan = output hitung_nominal_pairs + kolom KATEGORI
+    (utk popup rincian + anak tab Tanpa Harga).
     """
     pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map)
     if pairs.empty:
         return pd.DataFrame(columns=["Resto", "N Barang", "Tanpa Harga",
-                                     "Nominal Deviasi"]), pairs
+                                     "Nominal Deviasi", "COM Deviasi",
+                                     "Biaya Packaging"]), pairs
+    # v3.9.63 — kategori per pasangan (klas COM/Packaging + anak tab)
+    pairs = _attach_kategori_pairs(pairs, data)
     g = (pairs.groupby("Resto", as_index=False)
          .agg(**{
              "N Barang": ("Nominal", "size"),
              "Tanpa Harga": ("Nominal",
                              lambda s: int(pd.isna(s).sum())),
              "Nominal Deviasi": ("Nominal", "sum")}))
+    # v3.9.63 — Σ nominal per klas kategori (user: "diganti dengan
+    # nominal deviasi per kategori: kolom COM Deviasi + kolom
+    # Packaging") — substring case-insensitive; Σ skipna (transparan).
+    _ku = pairs["KATEGORI"].fillna("").astype(str).str.upper()
+    _com = (pairs.loc[_ku.str.contains(_KAT_COM_TOKEN, na=False)]
+            .groupby("Resto")["Nominal"].sum())
+    _pkg = (pairs.loc[_ku.str.contains(_KAT_PKG_TOKEN, na=False)]
+            .groupby("Resto")["Nominal"].sum())
+    g["COM Deviasi"] = (g["Resto"].map(_com).astype("float64")
+                        .fillna(0.0))
+    g["Biaya Packaging"] = (g["Resto"].map(_pkg).astype("float64")
+                            .fillna(0.0))
     g["_abs"] = g["Nominal Deviasi"].abs().fillna(0)
     g = g.sort_values("_abs", ascending=False,
                       kind="mergesort").drop(columns=["_abs"])

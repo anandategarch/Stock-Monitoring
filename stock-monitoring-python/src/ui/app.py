@@ -199,7 +199,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.62"  # v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
+APP_VERSION = "3.9.63"  # v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -2505,7 +2505,15 @@ class StockMonitorApp:
             # Follow Up tak ada di _tab_views (reaktif store) — tapi
             # tetap punya tabel utk fallback roda.
             view = self.followup_view
-        tree = getattr(view, "tree", None)
+        # v3.9.63 — view dgn ANAK TAB (tab 🧮 Nominal Deviasi —
+        # sub-notebook 'Per Resto'/'Tanpa Harga'): primary_tree()
+        # memilih tree anak tab AKTIF (fallback roda di krom anak tab
+        # menggulir tabel yang TERLIHAT, bukan tabel tersembunyi).
+        _pt63 = getattr(view, "primary_tree", None)
+        if callable(_pt63):
+            tree = _pt63() or getattr(view, "tree", None)
+        else:
+            tree = getattr(view, "tree", None)
         try:
             if tree is not None and not tree.winfo_exists():
                 return None
