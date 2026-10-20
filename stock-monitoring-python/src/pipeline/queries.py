@@ -225,7 +225,8 @@ def query_9901(config) -> pd.DataFrame:
 
 def query_out(config) -> pd.DataFrame:
     """
-    22.05 sales (ACR) only. JENIS = "OUT".
+    22.05 sales — SEMUA dokumen masuk (v3.9.70: filter kode ACR dihapus,
+    user: "semua kode masuk perhitungan"). JENIS = "OUT".
 
     Previously combined with 4215 Kirim. Split per user request:
     COM formula needs BK = 42.15 Kirim only (separate from sales).

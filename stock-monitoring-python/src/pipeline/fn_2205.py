@@ -3,6 +3,14 @@ fn_2205.py — Mirror persis fn2205 di M code.
 Rincian Penjualan per Barang (modul 22.05) → sumber OUT.
 OPTIMIZED: vectorized text operations via .str accessor.
 
+v3.9.70 — SEMUA KODE MASUK PERHITUNGAN (user: "pada file 2205 sekarang
+tidak perlu filter kode ACR lagi tapi semua kode masuk perhitungan"):
+filter M Table.SelectRows(...Text.StartsWith([#"Nomor #"], "ACR"))
+DIHAPUS — seluruh dokumen penjualan 22.05 (semua Nomor # — ACR./SI./
+RETUR./dll.) kini masuk sumber OUT; 'Nomor #' TAK LAGI kolom wajib
+(bukan lagi kunci filter — hilang pun baris tetap diproses; identitas
+cukup Nama Pelanggan + Nama Barang).
+
 v3.9.33 — AUDIT FIX (48-a):
 - guard kolom — identitas ('Nomor #' = kunci filter ACR, 'Nama
   Pelanggan' → NAMA RESTO, 'Nama Barang') hilang → WARNING keras +
@@ -47,7 +55,10 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
     # sel = Table.SelectColumns(prom, {"Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"})
-    needed = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"]
+    # v3.9.70 — 'Nomor #' TIDAK lagi dibutuhkan (filter ACR dihapus:
+    # user "semua kode masuk perhitungan"); identitas cukup Nama
+    # Pelanggan + Nama Barang.
+    needed = ["Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"]
     available = [c for c in needed if c in prom.columns]
     sel = prom[available].copy()
 
@@ -57,7 +68,9 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
     # baris dibuang → frame kosong ber-schema standar (degradasi
     # per-sumber: sumber lain tetap jalan; schema output IDENTIK —
     # concat query_out/append1 tak berubah). VALUE hilang → NA.
-    _ident_hilang = [c for c in ("Nomor #", "Nama Pelanggan", "Nama Barang")
+    # v3.9.70 — 'Nomor #' dicabut dari identitas (bukan lagi kunci
+    # filter ACR — cukup Nama Pelanggan + Nama Barang).
+    _ident_hilang = [c for c in ("Nama Pelanggan", "Nama Barang")
                      if c not in sel.columns]
     if _ident_hilang:
         print(f"  [fn_2205] WARNING: kolom identitas hilang "
@@ -65,10 +78,13 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
               f"bergeser? pipeline lanjut tanpa sumber 22.05 ini)")
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
-    # fil = Table.SelectRows(sel, each Text.StartsWith([#"Nomor #"], "ACR"))
-    # Vectorized: .str.startswith
-    sel["Nomor #"] = safe_to_str(sel["Nomor #"])
-    fil = sel[sel["Nomor #"].str.startswith("ACR", na=False)].copy()
+    # v3.9.70 — SEMUA KODE MASUK (user: "pada file 2205 sekarang tidak
+    # perlu filter kode ACR lagi tapi semua kode masuk perhitungan"):
+    # M lama Table.SelectRows(sel, each Text.StartsWith([#"Nomor #"],
+    # "ACR")) DIHAPUS — dulu baris non-ACR (mis. SI./RETUR.) dibuang
+    # senyap dari sumber OUT; kini SELURUH dokumen penjualan 22.05
+    # masuk perhitungan.
+    fil = sel.copy()
 
     # typed: vectorized
     fil["Nama Pelanggan"] = safe_to_str(fil["Nama Pelanggan"])

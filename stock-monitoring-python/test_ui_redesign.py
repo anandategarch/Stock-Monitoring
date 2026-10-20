@@ -874,7 +874,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.69", APP_VERSION == "3.9.69",
+    check("Versi = 3.9.70", APP_VERSION == "3.9.70",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -19794,7 +19794,8 @@ def main():
             _out79.append(tuple(_m79.get(_h79) for _h79 in headers79))
         return _out79
 
-    # fn_2205 tanpa 'Kuantitas' (VALUE) — identitas utuh → 2 baris ACR
+    # fn_2205 tanpa 'Kuantitas' (VALUE) — identitas utuh → 3 baris masuk
+    # (v3.9.70: SEMUA kode — baris SI ikut; filter ACR dihapus)
     _h2205_79 = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
                  "Kuantitas", "Satuan", "@Harga"]
     _d2205_79 = [
@@ -19811,10 +19812,12 @@ def main():
         _famrows79(_h2205v79, _d2205_79, full79=_h2205_79),
         sheet79=_SH2205_79)
     check("(v3.9.67) §79c: fn_2205 kolom VALUE 'Kuantitas' hilang → "
-          "WARNING keras + 2 baris ACR tetap masuk dgn Value NA "
-          "(dulu NA SENYAP — qty OUT 22.05 lenyap tanpa jejak)",
+          "WARNING keras + 3 baris (SEMUA kode — ACR + SI; v3.9.70 "
+          "filter ACR dihapus: dulu hanya 2 baris ACR) tetap masuk "
+          "dgn Value NA (dulu NA SENYAP — qty OUT 22.05 lenyap tanpa "
+          "jejak)",
           "kolom VALUE 'Kuantitas'" in _log2205_79
-          and len(_df2205_79) == 2
+          and len(_df2205_79) == 3
           and _df2205_79["Value"].isna().all(),
           f"rows={len(_df2205_79)} log={_log2205_79[-200:]!r}")
 
@@ -19894,7 +19897,7 @@ def main():
     check("(v3.9.67) §79d: fn_2205 kolom 'Tanggal' hilang → WARNING "
           "+ Tanggal NA (dulu NA senyap — baris lenyap dari kolom hari)",
           "kolom 'Tanggal' tidak ditemukan" in _log2205t_79
-          and len(_df2205t_79) == 2
+          and len(_df2205t_79) == 3   # v3.9.70: SEMUA kode (ACR+SI)
           and _df2205t_79["Tanggal"].isna().all(),
           f"rows={len(_df2205t_79)} log={_log2205t_79[-200:]!r}")
 
@@ -20586,6 +20589,113 @@ def main():
               "27-data-parsial-selesai-parsial",
               "28-deviasi-maximized"))
           and "_SETTINGS_PATH" in _sh82)
+
+    print()
+    print("== §83. (v3.9.70) AUDIT ULANG v3.9.69 — AKUNTANSI CACHE SAAT "
+          "EVIKSI + 2205 SEMUA KODE MASUK ==")
+
+    # -- (a) fn_2205 SEMUA KODE MASUK (user: "pada file 2205 sekarang
+    #       tidak perlu filter kode ACR lagi tapi semua kode masuk
+    #       perhitungan") ------------------------------------------------
+    _h2205_83 = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
+                 "Kuantitas"]
+    _d2205_83 = [
+        ["ACR.2026.10.001", _dt79(2026, 10, 5), "KONSUMEN (CKGPAH)",
+         "GULA (V.20)", 10.0],
+        ["SI.2026.10.002", _dt79(2026, 10, 6), "KONSUMEN (MLGPAR)",
+         "KOPI (V.20)", 7.5],
+        ["RETUR.2026.10.003", _dt79(2026, 10, 7), "KONSUMEN (BDGUKU)",
+         "TEH (V.20)", 50.0],
+    ]
+    _df2205_83, _log2205_83 = _run79(
+        lambda _p83: _f2205_79(_p83),
+        _famrows79(_h2205_83, _d2205_83, full79=_h2205_83),
+        sheet79=_SH2205_79)
+    check("(v3.9.70) §83a-1: fn_2205 SEMUA KODE MASUK — baris non-ACR "
+          "(SI./RETUR.) tidak lagi dibuang dari sumber OUT (dulu hanya "
+          "Nomor # berawalan ACR yang tersaring)",
+          len(_df2205_83) == 3
+          and list(_df2205_83["Nama Barang"]) == ["GULA (V.20)",
+                                                  "KOPI (V.20)",
+                                                  "TEH (V.20)"]
+          and list(_df2205_83["NAMA RESTO"]) == ["CKGPAH", "MLGPAR",
+                                                 "BDGUKU"]
+          and abs(float(_df2205_83["Value"].iloc[2]) - 50.0) < 1e-9
+          and list(_df2205_83["Tanggal"]) == [5, 6, 7],
+          f"rows={len(_df2205_83)} log={_log2205_83[-200:]!r}")
+
+    # tanpa kolom 'Nomor #' sama sekali → baris TETAP masuk (kolom tak
+    # lagi wajib — dulu ident-guard membuang SELURUH sumber dg WARNING)
+    _h2205n_83 = ["Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"]
+    _df2205n_83, _log2205n_83 = _run79(
+        lambda _p83: _f2205_79(_p83),
+        _famrows79(_h2205n_83, _d2205_83, full79=_h2205_83),
+        sheet79=_SH2205_79)
+    check("(v3.9.70) §83a-2: fn_2205 TANPA kolom 'Nomor #' → baris tetap "
+          "diproses TANPA warning (kolom bukan lagi kunci filter; dulu "
+          "seluruh sumber dibuang WARNING krn kolom wajib)",
+          len(_df2205n_83) == 3 and "WARNING" not in _log2205n_83,
+          f"rows={len(_df2205n_83)} log={_log2205n_83[-200:]!r}")
+
+    # -- (b) P2 audit ulang: akuntansi cache saat eviksi ------------------
+    _max_lama83 = _hp82._READ_CACHE_MAX_CELLS
+    try:
+        _hp82.read_cache_invalidate(None)
+        _hp82._READ_CACHE_MAX_CELLS = 100
+        _dfa83 = pd.DataFrame({"a": range(15), "b": range(15)})   # 30
+        _dfb83 = pd.DataFrame({"a": range(20), "b": range(20)})   # 40
+        _dfc83 = pd.DataFrame({"a": range(10), "b": range(10)})  # 20
+        _dfA83 = pd.DataFrame({"a": range(25), "b": range(25)})  # 50
+        _hp82._read_cache_put(("k83a", "sh"), "s1", _dfa83)
+        _hp82._read_cache_put(("k83b", "sh"), "s1", _dfb83)
+        _hp82._read_cache_put(("k83c", "sh"), "s1", _dfc83)   # counter 90
+        # TIMPA entry TERTUA (k83a) saat hampir penuh — penggantian
+        # memicu eviksi; dulu entry lama masih di dict → bila ikut
+        # ter-eviksi FIFO selnya dikurangi DUA KALI (contoh audit:
+        # counter 80 padahal isi 110 — bisa negatif).
+        _hp82._read_cache_put(("k83a", "sh"), "s2", _dfA83)
+        _sum83 = sum(e.get("cells", 0)
+                     for e in _hp82._READ_CACHE.values())
+        check("(v3.9.70) §83b-1: GANTI entry tertua saat cache hampir "
+              "penuh → counter == Σ sel dict TANPA dobel-kurang (audit "
+              "ulang v3.9.69: entry lama dibiarkan di dict → eviksi "
+              "mengurangi kontribusinya LAGI — counter 80 padahal isi "
+              "110; v3.9.70: entry lama DILEPAS (pop) dulu, kontribusi "
+              "dikembalikan SEKALI)",
+              _hp82._READ_CACHE_CELLS == 70 and _sum83 == 70
+              and len(_hp82._READ_CACHE) == 2
+              and ("k83b", "sh") not in _hp82._READ_CACHE
+              and ("k83a", "sh") in _hp82._READ_CACHE
+              and ("k83c", "sh") in _hp82._READ_CACHE,
+              f"cells={_hp82._READ_CACHE_CELLS} sum={_sum83} "
+              f"n={len(_hp82._READ_CACHE)}")
+        _got83 = _hp82._read_cache_get(("k83a", "sh"), "s2")
+        check("(v3.9.70) §83b-1b: entry hasil ganti tersaji benar (frame "
+              "50 sel, sig baru) + entry tetangga utuh disajikan",
+              _got83 is not None and len(_got83) == 25
+              and _hp82._read_cache_get(("k83c", "sh"), "s1") is not None,
+              f"got={None if _got83 is None else len(_got83)}")
+
+        # frame LEBIH BESAR dari batas maksimum → DITOLAK tanpa
+        # mengosongkan cache (dulu: eviksi menghabiskan SEMUA entry
+        # dulu, baru guard menolak — cache terbuang percuma)
+        _dfbig83 = pd.DataFrame({"a": range(150), "b": range(150)})  # 300
+        _n83 = len(_hp82._READ_CACHE)
+        _hp82._read_cache_put(("k83d", "sh"), "s1", _dfbig83)
+        _sum83b = sum(e.get("cells", 0)
+                      for e in _hp82._READ_CACHE.values())
+        check("(v3.9.70) §83b-2: frame MELEBIHI batas maksimum → "
+              "DITOLAK SEBELUM eviksi — cache lain UTUH (dulu eviksi "
+              "mengosongkan seluruh cache demi frame yang pasti ditolak "
+              "guard juga)",
+              len(_hp82._READ_CACHE) == _n83
+              and ("k83d", "sh") not in _hp82._READ_CACHE
+              and _hp82._READ_CACHE_CELLS == 70 and _sum83b == 70,
+              f"n={len(_hp82._READ_CACHE)} (was {_n83}) "
+              f"cells={_hp82._READ_CACHE_CELLS} sum={_sum83b}")
+    finally:
+        _hp82._READ_CACHE_MAX_CELLS = _max_lama83
+        _hp82.read_cache_invalidate(None)
 
     root.destroy()
 

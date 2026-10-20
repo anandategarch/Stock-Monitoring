@@ -409,7 +409,8 @@ def _read_cache_get(key, sig):
 def _read_cache_put(key, sig, df) -> None:
     """Simpan copy frame ke cache (evict FIFO bila guard sel terlampaui).
     Frame yang DISIMPAN adalah copy — frame asli dikembalikan ke
-    pemanggil (boleh dimutasi bebas)."""
+    pemanggil (boleh dimutasi bebas). Frame yang melebihi batas sel
+    sendirian DITOLAK sebelum eviksi (cache lain tak diganggu)."""
     if sig is None or df is None:
         return
     try:
@@ -420,14 +421,23 @@ def _read_cache_put(key, sig, df) -> None:
         return
     global _READ_CACHE_CELLS
     with _READ_CACHE_LOCK:
-        # v3.9.69 — P2.1 (audit eksternal ke-2): timpa entry LAMA dg key
-        # sama WAJIB mengembalikan kontribusi selnya dulu — dulu counter
-        # hanya ditambah sel entry baru (100 sel → ditimpa 150 sel →
-        # counter 250, padahal isi cache 150) → eviksi prematur/entry
-        # baru ditolak guard krn counter semu (pemicu nyata: file berubah
-        # mtime+size antar-run TANPA explicit Refresh → sig-mismatch →
-        # jalur put key-sama). Salah akuntansi, bukan salah data.
-        _old = _READ_CACHE.get(key)
+        # v3.9.70 — audit ulang v3.9.69 (P2): frame raksasa yang melebihi
+        # guard SENDIRIAN ditolak SEBELUM eviksi — dulu loop eviksi
+        # mengosongkan SELURUH cache demi frame yang akhirnya ditolak
+        # guard juga (cache lain terbuang percuma).
+        if cells > _READ_CACHE_MAX_CELLS:
+            return
+        # v3.9.70 — audit ulang v3.9.69 (P2, lanjutan fix v3.9.69): entry
+        # lama key-sama DILEPAS dari dict (pop) → kontribusi selnya
+        # dikembalikan SEKALI. Fix v3.9.69 hanya mengurangi counter TANPA
+        # melepas entry → bila entry lama ikut ter-eviksi FIFO, selnya
+        # dikurangi DUA KALI (contoh audit, batas 100: A=30 B=40 C=20 →
+        # ganti A→50 → eviksi hapus A-lama → counter 80 padahal isi dict
+        # 110; counter bisa negatif → keputusan eviksi/tolak kacau).
+        # Salah akuntansi, bukan salah data. (Riwayat v3.9.69/P2.1:
+        # dulu counter hanya ditambah sel baru — 100 → ditimpa 150 →
+        # counter 250; pemicu nyata sig-mismatch mtime+size antar-run.)
+        _old = _READ_CACHE.pop(key, None)
         if _old is not None:
             _READ_CACHE_CELLS -= _old.get("cells", 0)
         # evict FIFO sampai muat (dict = urutan insert)
@@ -437,7 +447,7 @@ def _read_cache_put(key, sig, df) -> None:
             _READ_CACHE.pop(_old_k, None)
             _READ_CACHE_CELLS -= _old.get("cells", 0)
         if _READ_CACHE_CELLS + cells > _READ_CACHE_MAX_CELLS:
-            return  # file raksasa melebihi guard sendirian → tak di-cache
+            return  # defensif (hanya bila MAX menyusut saat runtime)
         _READ_CACHE[key] = {"sig": sig, "df": df.copy(), "cells": cells}
         _READ_CACHE_CELLS += cells
         _READ_CACHE_MISS_FILES.add(key[0])
