@@ -1,6 +1,11 @@
 """
 pivot_view.py — Pivot matrix view (v3.2).
 
+v3.9.69 — P1.1 (audit eksternal ke-2): semantik ☑ "Sembunyikan baris
+kosong" = SEMUA sel baris 0/kosong (dulu "total ≤ 0" — baris deviasi
+negatif/cancel-out tersembunyinya juga; sinyal retur justru penting).
+Konsisten di DUA jalur: render _compute_payload + daftar ⧩ #0.
+
 v3.9.33 — AUDIT FIX (48-d/48-f, fix 49-a):
 - (LOW) fallback validasi TANGGAL AWAL kini -31 (dulu 1 — input
   invalid SENYAP mempersempit rentang; kini revert ke batas kiri
@@ -21,8 +26,9 @@ TAMPIL (RESTO mode Tanggal + SOURCE + KATEGORI + rentang Tanggal +
 Dua mode pivot (segment "PIVOT PER" di atas tabel):
 - 🏪 RESTO (default): baris = Nama Barang × JENIS, kolom = NAMA RESTO,
   nilai = total NILAI per resto dalam rentang Tanggal. Hanya baris dengan
-  total > 0 yang ditampilkan (☑ "Sembunyikan baris kosong", default ON);
-  kolom Total sengaja TIDAK ditampilkan (total hanya dipakai utk filtering).
+  SEMUA sel 0/kosong yang disembunyikan (☑ "Sembunyikan baris kosong",
+  default ON — semantik v3.9.69: baris dengan sel ≠ 0 TAMPIL, termasuk
+  sel negatif/cancel-out); kolom Total sengaja TIDAK ditampilkan.
   Contoh: item yang hanya ada di resto MLGPAR tetap tampil (nilainya ada),
   item tanpa nilai di semua resto disembunyikan.
 - 📅 TANGGAL: kolom = Tanggal (perilaku v3.0) + rentang tanggal.
@@ -255,8 +261,12 @@ class PivotTableView(tk.Frame):
             side="left", padx=(0, 18))
 
         self.hide_empty_var = tk.BooleanVar(value=True)
+        # v3.9.69 — P1.1 (audit eksternal ke-2): semantik "kosong" = SEMUA
+        # sel baris 0/kosong (dulu "total ≤ 0" — baris cancel-out/retur
+        # yang SELURUH selnya negatif ikut tersembunyi padahal menyimpan
+        # informasi deviasi penting; total +10/−10 juga tersembunyi).
         self.chk_hide_empty = ttk.Checkbutton(
-            r1, text="Sembunyikan baris kosong (total ≤ 0)",
+            r1, text="Sembunyikan baris kosong (semua sel 0)",
             variable=self.hide_empty_var,
             command=self._refresh_pivot)
         self.chk_hide_empty.pack(side="left", padx=(0, 18))
@@ -382,9 +392,10 @@ class PivotTableView(tk.Frame):
         barang yang TAMPIL SAAT INI (perilaku AutoFilter Excel — filter
         kolom lain diterapkan dulu, kolom sendiri dikecualikan): RESTO
         (mode Tanggal saja) + SOURCE + KATEGORI + rentang Tanggal + ☑
-        "Sembunyikan baris kosong" (barang tanpa metric ber-total > 0
-        memang tak ditampilkan). Dulu: semua nama di data mentah — nama
-        barang yang barisnya sudah terfilter tetap muncul di popup.
+        "Sembunyikan baris kosong" (barang tanpa metric ber-sel ≠ 0
+        memang tak ditampilkan — semantik v3.9.69: kosong = SEMUA sel
+        0/kosong). Dulu: semua nama di data mentah — nama barang yang
+        barisnya sudah terfilter tetap muncul di popup.
         Vektor (tanpa pivot tree) — murah, dipanggil saat popup dibuka."""
         df = self.data
         if df is None or df.empty or "Nama Barang" not in df.columns:
@@ -440,8 +451,17 @@ class PivotTableView(tk.Frame):
         if df.empty:
             return []
         if self.hide_empty_var.get() and {"JENIS", "NILAI"} <= set(df.columns):
-            # barang tampil = punya ≥1 metric ber-total > 0 (aturan
-            # hide-empty di _compute_payload — total per (barang × JENIS))
+            # barang tampil = punya ≥1 SEL MATRIKS ≠ 0 — PERSIS aturan
+            # hide-empty di _compute_payload (semantik v3.9.69: baris
+            # "kosong" = SEMUA sel 0/kosong; dulu total per (barang ×
+            # JENIS) → baris cancel-out (−5,−2,−3) tak konsisten
+            # tersembunyikan). Sel matriks = agregat per KOLOM PIVOT:
+            # mode resto → (barang × JENIS × resto), mode tanggal →
+            # (barang × JENIS × tanggal) — agregasi di granularity
+            # PERSIS sel yang dirender supaya popup tak pernah menawarkan
+            # barang yang barisnya pasti tersembunyi (mis. +10/−10
+            # resto-sama → sel agregat 0 → baris TERSEMBUNYI → tak
+            # ditawarkan; +10/−10 resto-BEDA → sel ≠ 0 → tampil).
             metrics = [m for m in self.METRICS
                        if m != "6.PEMAKAIAN (COM)"
                        or self.pivot_mode == "tanggal"]
@@ -450,9 +470,17 @@ class PivotTableView(tk.Frame):
             if f.empty:
                 return []
             vals = pd.to_numeric(f["NILAI"], errors="coerce").fillna(0)
-            grp = vals.groupby([f["Nama Barang"].astype(str),
-                                f["JENIS"].astype(str)]).sum()
-            return sorted({nb for nb, _m in grp[grp > 0].index})
+            _grp_cols = [f["Nama Barang"].astype(str),
+                         f["JENIS"].astype(str)]
+            _key_col = ("NAMA RESTO" if self.pivot_mode == "resto"
+                        else "Tanggal")
+            if _key_col in f.columns:
+                _grp_cols.append(f[_key_col].astype(str))
+            grp = vals.groupby(_grp_cols).sum()
+            nz = grp[grp != 0]
+            if nz.empty:
+                return []
+            return sorted({ix[0] for ix in nz.index})
         return df["Nama Barang"].dropna().astype(str).unique().tolist()
 
     def _on_name_filter(self, selected):
@@ -969,14 +997,21 @@ class PivotTableView(tk.Frame):
                 else:
                     row_data = empty_series
 
-                total = 0.0
+                # v3.9.69 — P1.1 (audit eksternal ke-2): semantik
+                # "kosong" = SEMUA sel baris 0/kosong — BUKAN "total ≤ 0"
+                # (dulu baris cancel-out (−5,−2,−3) & total +10/−10 ikut
+                # tersembunyikan padahal deviasi negatif justru sinyal
+                # penting; audit: "perilaku terbukti + tes bisa lulus
+                # walau perilaku bisnis diragukan" — kini baris tampil
+                # bila ada SATU sel bernilai ≠ 0, termasuk negatif).
                 try:
-                    total = float(pd.to_numeric(
-                        row_data, errors="coerce").fillna(0).sum())
+                    vals = pd.to_numeric(row_data, errors="coerce")\
+                        .fillna(0)
+                    if hide_empty and not bool(vals.ne(0).any()):
+                        continue  # baris SEMUA sel nol/kosong → sembunyikan
                 except Exception:
-                    total = 0.0
-                if hide_empty and total <= 0:
-                    continue  # baris tanpa nilai → sembunyikan
+                    if hide_empty:
+                        continue  # baris tak terbaca angka → kosongkan
 
                 tags = self._compute_row_tags(metric, item, row_data,
                                               col_keys)

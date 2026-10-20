@@ -1,4 +1,10 @@
-"""run_app.py — entry FROZEN PyInstaller (v3.9.66) + jalur dev alternatif.
+"""run_app.py — entry FROZEN PyInstaller + jalur dev alternatif.
+
+Rilis perbaikan-bug audit eksternal ke-2 (butir 6.3): literal versi
+DIHAPUS dari docstring (headline masih menyebut versi 3 rilis lama saat
+audit — dokumen versi-tunggal membasi tiap rilis; versi kanonik =
+src/ui/app.py APP_VERSION + banner runtime; kontrak §82f: file ini
+bebas literal pola-versi — ditengahi tes statis).
 
 Kenapa ada file ini:
 - Entry release `python -m src.ui` memakai konteks PACKAGE (-m) — PyInstaller
@@ -6,11 +12,13 @@ Kenapa ada file ini:
   package `src` tak terlacak dari dir skrip. Entry di ROOT proyek ini
   meng-import `src.ui.app.main` → seluruh grafik import (pandas, openpyxl,
   python-calamine, pyxlsb) terlacak penuh oleh Analysis.
-- Proteksi kegagalan IMPORT tetap ada (paritas src/ui/__main__.py v3.9.43):
+- Proteksi kegagalan IMPORT tetap ada (paritas proteksi src/ui/__main__.py
+  era audit-import):
   console exe = False (GUI) → traceback ditulis ke crash.log DI SAMPING
   .exe (app_base_dir frozen-aware) + dialog best-effort — exe tidak bisa
   mati senyap.
-- Proteksi runtime DI DALAM main() (v3.9.42 F1) tidak diduplikasi.
+- Proteksi runtime DI DALAM main() (audit F1 era-handler-crash) tidak
+  diduplikasi.
 """
 import contextlib
 import sys

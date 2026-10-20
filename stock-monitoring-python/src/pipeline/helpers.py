@@ -420,6 +420,16 @@ def _read_cache_put(key, sig, df) -> None:
         return
     global _READ_CACHE_CELLS
     with _READ_CACHE_LOCK:
+        # v3.9.69 — P2.1 (audit eksternal ke-2): timpa entry LAMA dg key
+        # sama WAJIB mengembalikan kontribusi selnya dulu — dulu counter
+        # hanya ditambah sel entry baru (100 sel → ditimpa 150 sel →
+        # counter 250, padahal isi cache 150) → eviksi prematur/entry
+        # baru ditolak guard krn counter semu (pemicu nyata: file berubah
+        # mtime+size antar-run TANPA explicit Refresh → sig-mismatch →
+        # jalur put key-sama). Salah akuntansi, bukan salah data.
+        _old = _READ_CACHE.get(key)
+        if _old is not None:
+            _READ_CACHE_CELLS -= _old.get("cells", 0)
         # evict FIFO sampai muat (dict = urutan insert)
         while (_READ_CACHE_CELLS + cells > _READ_CACHE_MAX_CELLS
                and _READ_CACHE):

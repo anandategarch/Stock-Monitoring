@@ -2,6 +2,12 @@
 screenshot_ui.py — Render app (versi dinamis — lihat banner saat run)
 + screenshot tiap tab & fitur baru.
 
+v3.9.69 — HARNESS v2.1 (audit eksternal ke-2, 6.1): 4 skenario sisa
+audit: (25) filter aktif lintas-sesi (close→reopen app kedua),
+(26) ☑ hide-empty dgn nilai NEGATIF (semantik v3.9.69 P1.1 — baris
+negatif TAMPIL, baris semua-nol tersembunyi), (27) data parsial
+"SELESAI PARSIAL" via jalur _load_view nyata, (28) clone ⛶ deviasi.
+
 v3.9.68 — HARNESS v2 (audit eksternal T4): header versi DINAMIS ikut
 APP_VERSION (dulu literal "v3.3" basi 14 rilis — bisa menyesatkan QA)
 + skenario baru: nominal per-resto, anak tab Tanpa Harga, zoom
@@ -267,6 +273,108 @@ def main():
     pump(root, 0.5)
     shot("24-jendela-kecil")
     root.geometry(_geo24)
+    pump(root, 0.3)
+
+    # =====================================================================
+    # v3.9.69 — HARNESS v2.1 (audit eksternal ke-2, 6.1): 4 skenario sisa
+    # =====================================================================
+
+    # (25) FILTER PERSIST LINTAS-SESI — filter ⧩ deviasi (dari skenario
+    # 22: hanya ADONAN GORENG MEKAR) di-capture + disimpan (jalur produksi
+    # saat jendela ditutup) → APP KEDUA (Toplevel) membuka data yang sama
+    # lalu restore → filter + corong AKTIF tanpa disentuh. _SETTINGS_PATH
+    # dipindah ke TEMP dulu supaya settings.json NYATA tidak tertimpa
+    # (side-effect harness = pola bersih followup.json v3.9.68).
+    import shutil as _sh25
+    import tempfile as _tf25
+    from pathlib import Path as _Path25
+
+    import src.ui.app as _appmod25
+    _tmp25 = _tf25.mkdtemp(prefix="shots_persist_t3969_")
+    _orig_sp25 = _appmod25._SETTINGS_PATH
+    _appmod25._SETTINGS_PATH = _Path25(_tmp25) / "settings.json"
+    _snap25 = app._capture_filter_state()
+    _appmod25._save_filter_state(_snap25)
+    top25 = tk.Toplevel(root)
+    top25.geometry("1380x840+20+20")
+    # StreamToQueue app KEDUA jangan menelan log harness — pola restore
+    # yang sama dgn app pertama di main() (tanpa ini, print sesudah
+    # sini — termasuk shot 25-28 + banner SELESAI — masuk queue app
+    # kedua yang mati setelah destroy → log harness TERPOTONG senyap;
+    # ditemukan empiris saat run: PNG 25-28 tersimpan tapi baris 📸-nya
+    # lenyap dari output).
+    _real25 = sys.stdout, sys.stderr
+    app25 = StockMonitorApp(top25)
+    sys.stdout, sys.stderr = _real25
+    pump(root, 0.5)
+    app25.deviasi_gr_view.load_data(append1)
+    select_and_wait(top25, app25, app25.tab_deviasi_gr,
+                    app25.deviasi_gr_view)
+    # Guard produksi _apply_saved_filters_once menunda restore bila
+    # append1_df masih None (belum ada run pipeline — "tunda ke run
+    # berikutnya"). Mirror status pasca-pipeline (data tersedia) supaya
+    # jalur restore PRODUksi betul-betul ditempuh — bukan restore
+    # per-view manual.
+    app25.append1_df = append1
+    app25._apply_saved_filters_once()
+    wait_view(top25, app25.deviasi_gr_view)
+    pump(root, 0.4)
+    shot("25-filter-persist-lintas-sesi")
+    _appmod25._SETTINGS_PATH = _orig_sp25
+    _sh25.rmtree(_tmp25, ignore_errors=True)
+    top25.destroy()
+    pump(root, 0.3)
+
+    # (26) ☑ HIDE-EMPTY + NILAI NEGATIF — semantik v3.9.69 (P1.1):
+    # "kosong" = SEMUA sel 0 (bukan total ≤ 0) → baris RETUR SUSU
+    # (semua sel negatif) & CANCEL OUT (+10 MLGPAR / −10 SBYKET —
+    # resto-BEDA, total 0 tapi sel ≠ 0) TAMPIL (minus merah per-cell),
+    # BRG NOL (semua sel 0) tersembunyi. (NB: +10/−10 di RESTO-SAMA
+    # tersembunyi — sel agregat 0; lihat §82a-3b.)
+    _p26 = pd.DataFrame([
+        {"Nama Barang": b, "NAMA RESTO": r, "SATUAN": "GR", "Tanggal": t,
+         "JENIS": j, "NILAI": v, "KATEGORI": k, "SOURCE KIRIMAN": "GUDANG",
+         "AKTIF/NON": "AKTIF"}
+        for b, r, t, j, v, k in [
+            ("RETUR SUSU", "MLGPAR", 1, "3.DEVIASI", -5.0, "BAHAN"),
+            ("RETUR SUSU", "SBYKET", 2, "3.DEVIASI", -6.0, "BAHAN"),
+            ("CANCEL OUT", "MLGPAR", 1, "3.DEVIASI", 10.0, "BAHAN"),
+            ("CANCEL OUT", "SBYKET", 2, "3.DEVIASI", -10.0, "BAHAN"),
+            ("BRG NOL", "MLGPAR", 1, "1.SO", 0.0, "BAHAN"),
+            ("BRG NOL", "SBYKET", 2, "1.SO", 0.0, "BAHAN"),
+        ]])
+    app.pivot_view.load_data(_p26)
+    select_and_wait(root, app, app.tab_pivot, app.pivot_view)
+    pump(root, 0.3)
+    shot("26-pivot-hideempty-negatif")
+    app.pivot_view.load_data(append1)   # pulihkan utk skenario berikutnya
+    select_and_wait(root, app, app.tab_pivot, app.pivot_view)
+
+    # (27) DATA PARSIAL — "SELESAI PARSIAL" via jalur NYATA _load_view:
+    # satu tampilan (🛒 Rincian PO) gagal memuat → status akhir oranye +
+    # log [PERINGATAN] + view masih menampilkan data LAMA (kontrak
+    # v3.9.46). _on_pipeline_done dipanggil dgn tampilan yang di-sabotase
+    # (pola §80h — monkeypatch instance, dipulihkan setelahnya).
+    _orig_load27 = app.rincian_view.load_data
+
+    def _boom27(*_a, **_k):
+        raise RuntimeError("simulasi-tampilan-gagal-t3969")
+
+    app.rincian_view.load_data = _boom27
+    app._on_pipeline_done(append1, None, None, None, None, False)
+    app.rincian_view.load_data = _orig_load27
+    pump(root, 1.0)
+    shot("27-data-parsial-selesai-parsial")
+
+    # (28) CLONE ⛶ DEVIASI — jendela perbesar tabel Deviasi GR (filter +
+    # ikon corong + minus merah ikut; sebelumnya hanya pivot yang
+    # di-screenshot dalam mode perbesar).
+    app.notebook.select(app.tab_deviasi_gr)
+    pump(root, 0.3)
+    win28, _tree28 = app.deviasi_gr_view._maximize()
+    pump(root, 0.8)
+    shot("28-deviasi-maximized")
+    win28.destroy()
     pump(root, 0.3)
 
     # v3.9.68 — BERSIHKAN STATE SIDE-EFFECT: skenario 8b men-✓ 2 baris ke

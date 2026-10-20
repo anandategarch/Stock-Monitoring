@@ -166,17 +166,28 @@ def _pyval(v):
 
 
 def row_fingerprint(row: dict) -> str:
-    """md5 identitas baris (stabil lintas sesi)."""
+    """md5 identitas baris (stabil lintas sesi).
+
+    v3.9.69 — hardening (audit eksternal ke-2, risiko rendah): tiap part
+    di-ESCAPE dulu (``\\`` → ``\\\\``, ``|`` → ``\\|``) sebelum di-join —
+    menutup bentrok teoretis "A|B"+"C" ≡ "A"+"B|C" (nilai memuat pipe).
+    BACKWARD-COMPAT: utk data bebas-pipe (semua data nyata saat ini —
+    audit: "belum terbukti di data sekarang") hash TIDAK berubah sama
+    sekali, jadi followup.json lama tetap cocok; hash berubah HANYA utk
+    nilai yang memang ber-pipe (yang dulu ambigu sejak awal)."""
+    def _esc(v: str) -> str:
+        return v.replace("\\", "\\\\").replace("|", "\\|")
+
     parts = [
-        str(row.get("asal", "") or "").strip(),
-        str(row.get("resto", "") or "").strip(),
-        str(row.get("barang", "") or "").strip(),
-        str(row.get("satuan", "") or "").strip(),
-        _norm_num(row.get("h")),
-        _norm_num(row.get("so")),
-        _norm_num(row.get("sistem")),
-        _norm_num(row.get("deviasi")),
-        str(row.get("cek", "") or "").strip(),
+        _esc(str(row.get("asal", "") or "").strip()),
+        _esc(str(row.get("resto", "") or "").strip()),
+        _esc(str(row.get("barang", "") or "").strip()),
+        _esc(str(row.get("satuan", "") or "").strip()),
+        _esc(_norm_num(row.get("h"))),
+        _esc(_norm_num(row.get("so"))),
+        _esc(_norm_num(row.get("sistem"))),
+        _esc(_norm_num(row.get("deviasi"))),
+        _esc(str(row.get("cek", "") or "").strip()),
     ]
     key = "|".join(parts)
     return hashlib.md5(key.encode("utf-8", "surrogatepass")).hexdigest()

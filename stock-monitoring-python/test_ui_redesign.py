@@ -874,7 +874,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.68", APP_VERSION == "3.9.68",
+    check("Versi = 3.9.69", APP_VERSION == "3.9.69",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -2967,7 +2967,9 @@ def main():
               True)   # info saja — sandbox test memakai Tk 9
 
     # (b) PIVOT standalone — data dengan MINUS (baris TIDAK memerah penuh)
-    # NB: total baris harus > 0 agar tidak disembunyikan hide-empty (ON)
+    # NB v3.9.69: baris tampil bila ada sel ≠ 0 (semantik P1.1 — dulu
+    # total > 0 disyaratkan; DEVIASI (-6,10) & Selisih IN (0,5) memenuhi
+    # keduanya; Selisih IN (0,0) tetap tersembunyi = semua-nol).
     neg_rows_src = []
     for barang, so_v, sa_v, dev_vals, sel_vals in [
             ("BARANG MINUS", 4.0, 20.0, (-6.0, 10.0), (0.0, 5.0)),
@@ -6549,7 +6551,7 @@ def main():
             str(_pv30d5.tree.tag_configure("neg_cell",
                                            "foreground")).lower() == "#dc2626"
     check("(v3.9.20/35-c2) Pivot: sel minus bertag neg_cell #dc2626 "
-          "(baris ber-total > 0)",
+          "(baris tampil — semantik v3.9.69 P1.1: ada sel ≠ 0)",
           _neg_ok30, f"dev_iid={_dev_iid30}")
     _top30d5.destroy()
     root.update()
@@ -12344,10 +12346,11 @@ def main():
     # (e) PivotTableView — passthrough kategori kosong (2 titik filter:
     # _col_values + _compute_payload): barang KATEGORI None tampil saat
     # kategori BAHAN dipilih. Fixture mirror data nyata 100383 (SALDO
-    # AKHIR 84.000 + 3.DEVIASI -84) — WAJIB ada baris positif: default
-    # hide_empty menyembunyikan metric total ≤ 0 (dulu fixture hanya
-    # 3.DEVIASI negatif → semua baris hidden → tree kosong, BUKAN bug
-    # passthrough).
+    # AKHIR 84.000 + 3.DEVIASI -84) — WAJIB ada baris positif: baris
+    # SEMUA-NOL disembunyikan hide-empty (semantik v3.9.69 P1.1 —
+    # "kosong" = semua sel 0; dulu "total ≤ 0" sehingga fixture
+    # Deviasi-only-negatif semuanya hidden → tree kosong, BUKAN bug
+    # passthrough; kini baris -84 justru ikut tampil).
     _pd55 = pd.DataFrame([{
         "Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
         "Tanggal": 1, "JENIS": j, "NILAI": v, "KATEGORI": k,
@@ -18480,11 +18483,17 @@ def main():
           str({k: v.exists() for k, v in _files74.items()}))
     _sh74 = (_files74["run_tests.sh"].read_text(encoding="utf-8")
              if _files74["run_tests.sh"].exists() else "")
-    check("(v3.9.62) §74a: run_tests.sh = harness auto-Xvfb (xdpyinfo + "
-          "setsid Xvfb + exec test_ui_redesign.py + DISPLAY=)",
+    # v3.9.69 — kontrak diperbarui ikut 6.2 (audit ke-2): harness kini
+    # menjalankan test_ui_redesign + test_mock (exec dihapus supaya
+    # kegagalan kedua tak disembunyikan; exit = gagal bila salah satu
+    # gagal).
+    check("(v3.9.62→v3.9.69) §74a: run_tests.sh = harness auto-Xvfb "
+          "(xdpyinfo + setsid Xvfb + test_ui_redesign.py + test_mock.py "
+          "+ DISPLAY= — tanpa exec, keduanya selalu dijalankan)",
           all(_s74 in _sh74 for _s74 in
-              ("xdpyinfo", "setsid Xvfb", "exec \"$PY\" test_ui_redesign.py",
-               'DISPLAY=":$DISPLAY_NUM"')))
+              ("xdpyinfo", "setsid Xvfb", 'test_ui_redesign.py "$@"',
+               "test_mock.py", 'DISPLAY=":$DISPLAY_NUM"'))
+          and 'exec "$PY" test_ui_redesign.py' not in _sh74)
     check("(v3.9.62) §74a: run_tests.sh EXECUTABLE (bit +x)",
           os.access(_files74["run_tests.sh"], os.X_OK))
 
@@ -20241,6 +20250,342 @@ def main():
               "21-deviasi-kosong-seleksi-kosong", "22-deviasi-corong-aktif",
               "23-deviasi-popup-filter-open", "24-jendela-kecil")),
           f"path={_sh81}")
+
+    # =====================================================================
+    print()
+    print("== §82. (v3.9.69) PERBAIKI SEMUA BUG — AUDIT EKSTERNAL KE-2 "
+          "(P1.1 hide-empty · P1.2 status peringatan · P2.1 cache · "
+          "P2.2 config · minor 6.1/6.2/6.3 + fingerprint) ==")
+
+    # -- (a) P1.1: semantik ☑ hide-empty = SEMUA sel 0 (bukan total ≤ 0) -
+    # baris cancel-out/retur seluruh-NEGATIF kini TAMPIL (dulu total ≤ 0
+    # → tersembunyinya; deviasi negatif = sinyal penting), baris SEMUA-
+    # NOL tetap tersembunyikan, dan daftar ⧩ #0 KONSISTEN dgn baris
+    # yang dirender (barang semua-nol tak ditawarkan di popup).
+    _rows82 = []
+    for _b82, _r82, _t82, _j82, _v82 in [
+            ("RETUR SUSU", "MLGPAR", 1, "3.DEVIASI", -5.0),
+            ("RETUR SUSU", "SBYKET", 2, "3.DEVIASI", -6.0),
+            ("CANCEL OUT", "MLGPAR", 1, "3.DEVIASI", 10.0),
+            ("CANCEL OUT", "SBYKET", 2, "3.DEVIASI", -10.0),
+            # agregat PER RESTO = 0 (+10 t1 −10 t2 di MLGPAR) → sel matriks
+            # 0 → baris TERSEMBUNYI + tak ditawarkan popup (konsistensi
+            # jalur #0 dgn render — granularitas sel, bukan baris mentah)
+            ("CANCEL SAME", "MLGPAR", 1, "3.DEVIASI", 10.0),
+            ("CANCEL SAME", "MLGPAR", 2, "3.DEVIASI", -10.0),
+            ("BRG NOL", "MLGPAR", 1, "1.SO", 0.0),
+            ("BRG NOL", "SBYKET", 2, "1.SO", 0.0)]:
+        _rows82.append({
+            "Nama Barang": _b82, "NAMA RESTO": _r82, "Tanggal": _t82,
+            "JENIS": _j82, "NILAI": _v82, "SATUAN": "GR",
+            "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+            "SOURCE KIRIMAN": "GUDANG"})
+    from src.ui.pivot_view import PivotTableView as _PV82
+    _top82 = tk.Toplevel(root)
+    _top82.geometry("1300x800+30+30")
+    _pv82 = _PV82(_top82)
+    _pv82.pack(fill="both", expand=True)
+    _pv82.data = pd.DataFrame(_rows82)
+    _pv82._populate_filters()
+    _pv82._show_content()
+    _pv82._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _pv82._busy and len(_pv82.tree.get_children("")):
+            break
+        time.sleep(0.02)
+
+    def _pv_parents82(pv):
+        return [pv.tree.item(_p, "text") for _p in pv.tree.get_children("")]
+
+    def _pv_metric_child82(pv, parent_text, metric):
+        for _p in pv.tree.get_children(""):
+            if pv.tree.item(_p, "text") != parent_text:
+                continue
+            for _c in pv.tree.get_children(_p):
+                if pv.tree.item(_c, "text") == metric:
+                    return _c
+        return None
+
+    _par82 = _pv_parents82(_pv82)
+    check("(v3.9.69) §82a-1: baris seluruh-NEGATIF TAMPIL (RETUR SUSU — "
+          "cancel-out/retur tak lagi lenyap di balik ☑; dulu total -11 "
+          "≤ 0 → tersembunyikan)",
+          "RETUR SUSU" in _par82, f"parents={_par82}")
+    check("(v3.9.69) §82a-2: baris total 0 tapi sel ≠ 0 TAMPIL (CANCEL "
+          "OUT +10/−10 RESTO-BEDA — dulu total 0 → tersembunyikan)",
+          "CANCEL OUT" in _par82, f"parents={_par82}")
+    check("(v3.9.69) §82a-3: baris SEMUA sel NOL tetap TERSEMBUNYI "
+          "(BRG NOL — semantik 'kosong' sejati)",
+          "BRG NOL" not in _par82, f"parents={_par82}")
+    check("(v3.9.69) §82a-3b: +10/−10 RESTO-SAMA → sel agregat 0 → "
+          "TERSEMBUNYI (matriks menjumlahkan per kolom — konsisten dgn "
+          "render, bukan per baris mentah)",
+          "CANCEL SAME" not in _par82, f"parents={_par82}")
+    check("(v3.9.69) §82a-4: baris 3.DEVIASI RETUR SUSU hadir sbg child "
+          "(metrik negatif dirender, sel minus merah per-cell)",
+          _pv_metric_child82(_pv82, "RETUR SUSU", "3.DEVIASI") is not None)
+    check("(v3.9.69) §82a-5: daftar ⧩ #0 KONSISTEN dgn baris yang "
+          "dirender — agregat PER SEL MATRIKS (barang semua-nol & "
+          "cancel-out-resto-sama TIDAK ditawarkan; sel ≠ 0 ditawarkan)",
+          sorted(set(_pv82._name_values())) == ["CANCEL OUT", "RETUR SUSU"],
+          f"got={sorted(set(_pv82._name_values()))}")
+    check("(v3.9.69) §82a-6: label checkbox jujur — 'semua sel 0' "
+          "(dulu menjanjikan semantik 'total ≤ 0' yang menyesatkan)",
+          "semua sel 0" in str(_pv82.chk_hide_empty.cget("text")))
+    # OFF → semua baris (termasuk BRG NOL + CANCEL SAME) tampil — kontrak
+    # hide-empty OFF tak berubah
+    _pv82.hide_empty_var.set(False)
+    _pv82._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _pv82._busy and len(_pv82.tree.get_children("")):
+            break
+        time.sleep(0.02)
+    check("(v3.9.69) §82a-7: ☑ OFF → BRG NOL + CANCEL SAME kembali tampil "
+          "(kontrak hide-empty OFF tak berubah)",
+          "BRG NOL" in _pv_parents82(_pv82)
+          and "CANCEL SAME" in _pv_parents82(_pv82),
+          f"parents={_pv_parents82(_pv82)}")
+    _pv82.destroy()
+    _top82.destroy()
+    root.update()
+
+    # -- (b) P1.2: kontrak pola peringatan pipeline -----------------------
+    # 1) SEMUA literal print WARNING di modul pipeline (src/pipeline/*.py
+    #    + src/main.py) WAJIB tertangkap _PIPELINE_WARN_RE — format baru
+    #    tanpa update pola = tes gagal (cegah regresi senyap ke depan).
+    _warn_lits82 = []
+    _src_dir82 = _Path78(__file__).resolve().parent / "src"
+    for _f82 in sorted((_src_dir82 / "pipeline").glob("*.py")) + \
+            [_src_dir82 / "main.py"]:
+        for _ln82 in _f82.read_text(encoding="utf-8").splitlines():
+            if "WARNING" in _ln82 and "print(" in _ln82:
+                _q82 = _ln82.find('"')
+                _br82 = _ln82.find("{", _q82)
+                _lit82 = _ln82[_q82:(_br82 if _br82 > 0 else len(_ln82))]
+                _warn_lits82.append((_f82.name, _lit82))
+    _uncovered82 = [
+        (_fn82, _lit82) for _fn82, _lit82 in _warn_lits82
+        if not _appmod78._PIPELINE_WARN_RE.search(_lit82)
+        and not _lit82.lstrip(' "').startswith("[WARNING] Skip file")]
+    check("(v3.9.69) §82b-1: KONTRAK POLA — setiap print WARNING pipeline "
+          "tertangkap _PIPELINE_WARN_RE (atau sengaja-dikecualikan Skip "
+          "file via _skipped_files); format baru wajib update pola",
+          len(_warn_lits82) >= 20 and not _uncovered82,
+          f"n={len(_warn_lits82)} uncovered={_uncovered82[:3]}")
+    check("(v3.9.69) §82b-2: warning UI TIDAK dihitung (bukan jejak run "
+          "pipeline) + Skip file tak dobel-hitung (tetap jalur "
+          "_skipped_files)",
+          not _appmod78._PIPELINE_WARN_RE.search(
+              "[WARNING] Gagal membuka folder (D:\\x): akses ditolak")
+          and not _appmod78._PIPELINE_WARN_RE.search(
+              "[WARNING] followup: gagal menyimpan")
+          and not _appmod78._PIPELINE_WARN_RE.search(
+              "[WARNING] Gagal membuat backup config: disk penuh")
+          and not _appmod78._PIPELINE_WARN_RE.search(
+              "[WARNING] Skip file terkunci.xlsx: PermissionError"))
+    # 3) _poll_log_queue menghitung peringatan skema dari log stream
+    app._schema_warnings = 0
+    app._skipped_files = 0
+    app.log_queue.put(
+        "  [fn_2205] WARNING: kolom VALUE 'Kuantitas' tidak ditemukan "
+        "— 12 baris.\n")
+    app.log_queue.put(
+        "  [WARNING] combine_folder /data/22.05: 2 file menyumbang "
+        "baris identik.\n")
+    _deadline82 = time.time() + 2.0
+    while time.time() < _deadline82 and app._schema_warnings < 2:
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.69) §82b-3: _poll_log_queue menghitung peringatan skema "
+          "([fn_2205] WARNING + combine_folder → _schema_warnings=2; "
+          "dulu hanya Skip file yang pernah dihitung — skema lenyap di "
+          "balik status hijau)",
+          app._schema_warnings == 2 and app._skipped_files == 0,
+          f"schema={app._schema_warnings} skip={app._skipped_files}")
+    app.log_queue.put("  [WARNING] Skip file rusak.xlsx: zipped\n")
+    _deadline82 = time.time() + 2.0
+    while time.time() < _deadline82 and app._skipped_files < 1:
+        root.update()
+        time.sleep(0.01)
+    check("(v3.9.69) §82b-4: Skip file tetap jalur LAMA (_skipped_files, "
+          "tanpa dobel-hitung _schema_warnings)",
+          app._skipped_files == 1 and app._schema_warnings == 2,
+          f"schema={app._schema_warnings} skip={app._skipped_files}")
+    # 4) E2E status akhir: hanya peringatan skema (tanpa folder hilang /
+    #    file skip / view gagal) → SELESAI DENGAN PERINGATAN (amber) —
+    #    jalur nyata _on_pipeline_done (data kosong: view empty-state).
+    app._schema_warnings = 2
+    app._skipped_files = 0
+    app._pre_missing = []
+    app._on_pipeline_done(None, None, None, None, None, False)
+    root.update()
+    _stfull82 = str(getattr(app.statusbar.dot, "_full", ""))
+    check("(v3.9.69) §82b-5: STATUS AKHIR JUJUR — 2 peringatan format "
+          "pipeline → 'SELESAI DENGAN PERINGATAN' + bagian 'peringatan "
+          "format file sumber' (dulu status tetap HIJAU 'SELESAI' "
+          "padahal sumber data berpotensi lenyap/nyasar)",
+          "SELESAI DENGAN PERINGATAN" in _stfull82
+          and "2 peringatan format file sumber" in _stfull82
+          and app.status_var.get() == "Status: SELESAI DENGAN PERINGATAN.",
+          f"st={_stfull82!r} var={app.status_var.get()!r}")
+
+    # -- (c) P2.1: akuntansi cache baca — timpa key-sama ------------------
+    import src.pipeline.helpers as _hp82
+    _hp82.read_cache_invalidate(None)
+    _dfa82 = pd.DataFrame({"a": range(10), "b": range(10)})    # 20 sel
+    _dfb82 = pd.DataFrame({"a": range(75), "b": range(75)})    # 150 sel
+    _hp82._read_cache_put(("f82", "sh"), "sig-lama", _dfa82)
+    _hp82._read_cache_put(("f82", "sh"), "sig-baru", _dfb82)   # TIMPA
+    check("(v3.9.69) §82c-1: TIMPA key-sama → counter = 150 (kontribusi "
+          "sel entry lama DIKEMBALIKAN; skenario audit: dulu 20+150=170 "
+          "→ eviksi prematur / guard menolak entry baru — pemicu nyata "
+          "sig-mismatch mtime+size antar-run)",
+          _hp82._READ_CACHE_CELLS == 150 and len(_hp82._READ_CACHE) == 1,
+          f"cells={_hp82._READ_CACHE_CELLS} "
+          f"n={len(_hp82._READ_CACHE)}")
+    _gotc82 = _hp82._read_cache_get(("f82", "sh"), "sig-baru")
+    check("(v3.9.69) §82c-2: entry hasil timpa tersaji benar (frame "
+          "baru 75 baris, sig baru) — perilaku data tak berubah",
+          _gotc82 is not None and len(_gotc82) == 75,
+          f"got={None if _gotc82 is None else len(_gotc82)}")
+    _hp82.read_cache_invalidate(None)
+    check("(v3.9.69) §82c-3: invalidate → counter 0 (akuntansi pulih "
+          "penuh)",
+          _hp82._READ_CACHE_CELLS == 0 and not _hp82._READ_CACHE)
+
+    # -- (d) P2.2: config struktur salah → jujur, app HIDUP ----------------
+    import json as _json82
+    _tmpd82 = _tf78.mkdtemp(prefix="cfg_t3969_")
+    _orig_cp82 = _appmod78.CONFIG_PATH
+    try:
+        # (1) akar = list → ERROR jujur (dulu AttributeError `.get` →
+        #     crash.log startup; audit: validasi kelas Config tak membantu
+        #     karena UI gagal lebih dulu)
+        _appmod78.CONFIG_PATH = _Path78(_tmpd82) / "cfg_list.json"
+        _appmod78.CONFIG_PATH.write_text('["bukan", "dict"]',
+                                         encoding="utf-8")
+        app._load_config_to_form()
+        _kids82 = app.info_tree.get_children("")
+        _v82 = (app.info_tree.item(_kids82[0], "values")
+                if len(_kids82) else ())
+        check("(v3.9.69) §82d-1: akar JSON list → ERROR jujur di Info "
+              "Config + RootPath kosong (app TETAP HIDUP — dulu "
+              "AttributeError crash.log)",
+              len(_kids82) == 1 and str(_v82[0]) == "ERROR"
+              and "struktur salah" in str(_v82[1])
+              and app.rootpath_var.get() == "",
+              f"n={len(_kids82)} v={_v82!r}")
+        # (2) Folders = list → baris ⚠ (dulu AttributeError `.items()`)
+        _appmod78.CONFIG_PATH = _Path78(_tmpd82) / "cfg_folders.json"
+        _appmod78.CONFIG_PATH.write_text(
+            _json82.dumps({"RootPath": "D:\\data\\",
+                           "Folders": ["salah"], "Sheets": {}}),
+            encoding="utf-8")
+        app._load_config_to_form()
+
+        def _walk82(iid):
+            _out82 = [app.info_tree.item(iid, "values")]
+            for _ch82 in app.info_tree.get_children(iid):
+                _out82.extend(_walk82(_ch82))
+            return _out82
+
+        _vals_all82 = []
+        for _k82 in app.info_tree.get_children(""):
+            _vals_all82.extend(_walk82(_k82))
+        _texts82 = " || ".join(
+            str(_v82) for _vals82 in _vals_all82 for _v82 in _vals82)
+        check("(v3.9.69) §82d-2: Folders = list → baris ⚠ 'bukan objek "
+              "JSON' TAMPIL jujur (tipe terbaca); RootPath sah tetap "
+              "terbaca (dulu AttributeError `.items()` → crash.log "
+              "startup)",
+              "bukan objek JSON" in _texts82
+              and "(list)" in _texts82
+              and app.rootpath_var.get() == "D:\\data\\",
+              f"txt={_texts82[:120]!r}")
+        # (3) RootPath = list → dikosongkan aman (bukan TclError)
+        _appmod78.CONFIG_PATH = _Path78(_tmpd82) / "cfg_rp.json"
+        _appmod78.CONFIG_PATH.write_text(
+            _json82.dumps({"RootPath": ["D:\\x"], "Folders": {},
+                           "Sheets": {}}), encoding="utf-8")
+        app._load_config_to_form()
+        check("(v3.9.69) §82d-3: RootPath non-string dikosongkan AMAN "
+              "(StringVar menolak list — dulu TclError; kini jujur "
+              "kosong, app hidup)",
+              app.rootpath_var.get() == "",
+              f"rp={app.rootpath_var.get()!r}")
+    finally:
+        _appmod78.CONFIG_PATH = _orig_cp82
+        shutil.rmtree(_tmpd82, ignore_errors=True)
+        app._load_config_to_form()   # pulihkan tampilan Info Config nyata
+    root.update()
+
+    # -- (e) 6.2: run_tests.sh menjalankan test_mock.py --------------------
+    _rt82 = (_Path78(__file__).resolve().parent / "run_tests.sh")\
+        .read_text(encoding="utf-8")
+    check("(v3.9.69) §82e: run_tests.sh kini MENJALANKAN test_mock.py "
+          "juga (setara job CI tests; dulu hanya test_ui_redesign — "
+          "baterai mock tak pernah tesar di jalur harness lokal; tanpa "
+          "exec supaya kegagalan kedua tak disembunyikan)",
+          "test_mock.py" in _rt82
+          and 'exec "$PY" test_ui_redesign.py' not in _rt82)
+
+    # -- (f) 6.3: run_app.py bebas literal versi ----------------------------
+    _ra82 = (_Path78(__file__).resolve().parent / "run_app.py")\
+        .read_text(encoding="utf-8")
+    check("(v3.9.69) §82f: run_app.py BEBAS literal 'v3.9.' (dulu "
+          "docstring masih menyebut versi 3 rilis lama — dokumen "
+          "versi-tunggal membasi tiap rilis; versi kanonik APP_VERSION)",
+          "v3.9." not in _ra82)
+
+    # -- (g) fingerprint follow-up: escape pipe, backward-compat ----------
+    import hashlib as _hl82
+
+    from src.ui.followup import _norm_num as _nn82
+    from src.ui.followup import row_fingerprint as _fp82
+    _base82 = {"asal": "DEVIASI GR", "resto": "MLGPAR", "barang": "AYAM",
+               "satuan": "GR", "h": 25, "so": 10.0, "sistem": 120.0,
+               "deviasi": -25.0, "cek": "OK"}
+    _old_join82 = "|".join([
+        "DEVIASI GR", "MLGPAR", "AYAM", "GR",
+        _nn82(_base82["h"]), _nn82(_base82["so"]),
+        _nn82(_base82["sistem"]), _nn82(_base82["deviasi"]), "OK"])
+    check("(v3.9.69) §82g-1: BACKWARD-COMPAT — data bebas-pipe: hash "
+          "IDENTIK algoritma lama (followup.json existing tetap cocok)",
+          _fp82(_base82) == _hl82.md5(
+              _old_join82.encode("utf-8", "surrogatepass")).hexdigest(),
+          f"new={_fp82(_base82)}")
+    _pa82 = {**_base82, "asal": "A|B", "resto": "C"}
+    _pb82 = {**_base82, "asal": "A", "resto": "B|C"}
+    _pa_old82 = "|".join(["A|B", "C", "AYAM", "GR",
+                          _nn82(_base82["h"]), _nn82(_base82["so"]),
+                          _nn82(_base82["sistem"]),
+                          _nn82(_base82["deviasi"]), "OK"])
+    _pb_old82 = "|".join(["A", "B|C", "AYAM", "GR",
+                          _nn82(_base82["h"]), _nn82(_base82["so"]),
+                          _nn82(_base82["sistem"]),
+                          _nn82(_base82["deviasi"]), "OK"])
+    check("(v3.9.69) §82g-2: bentrok pipe DITUTUP — 'A|B'+'C' ≠ "
+          "'A'+'B|C' (bukti algoritma LAMA memang bentrok: join identik; "
+          "audit: 'belum terbukti di data sekarang' — kini mustahil)",
+          _fp82(_pa82) != _fp82(_pb82)
+          and _pa_old82 == _pb_old82,
+          f"new_a={_fp82(_pa82)[:8]} new_b={_fp82(_pb82)[:8]}")
+
+    # -- (h) 6.1: harness screenshot v2.1 — 4 skenario sisa audit ----------
+    _sh82 = (_Path78(__file__).resolve().parent / "screenshot_ui.py")\
+        .read_text(encoding="utf-8")
+    check("(v3.9.69) §82h: harness v2.1 — 4 skenario sisa audit (25 "
+          "filter persist lintas-sesi · 26 hide-empty negatif · 27 data "
+          "parsial · 28 clone ⛶ deviasi) + settings temp anti "
+          "side-effect",
+          all(_s in _sh82 for _s in (
+              "25-filter-persist-lintas-sesi",
+              "26-pivot-hideempty-negatif",
+              "27-data-parsial-selesai-parsial",
+              "28-deviasi-maximized"))
+          and "_SETTINGS_PATH" in _sh82)
 
     root.destroy()
 

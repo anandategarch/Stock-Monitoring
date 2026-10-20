@@ -68,5 +68,19 @@ if ! _xvfb_alive; then
 fi
 
 echo "[test] DISPLAY=:$DISPLAY_NUM · interpreter: $PY"
+
+# v3.9.69 — 6.2 (audit eksternal ke-2): test_mock.py IKUT dijalankan oleh
+# harness lokal (dulu hanya test_ui_redesign — baterai mock pipeline tak
+# pernah tesar lewat jalur ini; job CI 'tests' sudah menjalankan keduanya
+# sejak v3.9.68 — kini jalur lokal pun setara). Exit code = gagal bila
+# SALAH SATU saja gagal (CI-friendly, tanpa exec supaya keduanya tetap
+# dijalankan dan kegagalan pertama tak menyembunyikan yang kedua).
+_rc=0
 echo "[test] menjalankan: $PY test_ui_redesign.py $*"
-DISPLAY=":$DISPLAY_NUM" exec "$PY" test_ui_redesign.py "$@"
+DISPLAY=":$DISPLAY_NUM" "$PY" test_ui_redesign.py "$@" || _rc=$?
+echo "[test] menjalankan: $PY test_mock.py"
+DISPLAY=":$DISPLAY_NUM" "$PY" test_mock.py || _rc=$?
+if [ "$_rc" -ne 0 ]; then
+  echo "[test] GAGAL — exit code $_rc (lihat output blok yang gagal di atas)" >&2
+fi
+exit "$_rc"
