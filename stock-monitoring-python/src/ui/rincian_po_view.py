@@ -81,9 +81,11 @@ from .widgets import (
     LoadingOverlay,
     TableExpander,
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -846,6 +848,44 @@ class RincianPoView(tk.Frame):
             self._col_sel[c] = None
         self.header_filters.clear_all()
         self._refresh()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.rincian_po')."""
+        st = col_sel_to_json(self._col_sel)
+        st["cabang"] = self.cabang_var.get()
+        st["status_pesanan"] = self.status_pesanan_var.get()
+        return st
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state.
+
+        Combobox CABANG/STATUS divalidasi terhadap values data BARU
+        (pola preserve v3.9.42 — nilai hilang → "(All)" default tetap;
+        tanpa ini settings.json basi memasang filter 0-baris senyap)."""
+        if not isinstance(state, dict):
+            return
+        if self.data is None or bool(getattr(self.data, "empty", True)):
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        for key, var, combo in (
+                ("cabang", self.cabang_var, self.cabang_combo),
+                ("status_pesanan", self.status_pesanan_var,
+                 self.status_combo)):
+            v = state.get(key)
+            if not isinstance(v, str):
+                continue
+            try:
+                vals = list(combo["values"])
+            except tk.TclError:
+                vals = []
+            if v in vals and var.get() != v:
+                var.set(v)
+                changed = True
+        if changed and self.winfo_ismapped():
+            self._refresh()
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)

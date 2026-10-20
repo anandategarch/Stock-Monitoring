@@ -2476,6 +2476,91 @@ class HeaderFilterGroup:
             f.detach()
 
 
+# --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 roadmap #1) --------
+#
+# Generalisasi persist ui_zoom v3.9.65 ke FILTER: kombinasi filter terakhir
+# per tab disimpan saat jendela ditutup (settings.json key 'filter_state')
+# dan dipulihkan SEKALI setelah run pipeline PERTAMA sesi berikutnya
+# (load_data me-reset filter — restore menyusul setelahnya; kontrak
+# "run berikutnya = reset" v3.9.33 tetap utuh).
+# Serialisasi state ⧩ (set|None per kolom) JSON-safe + validasi defensif
+# (kolom/nilai tak dikenal diabaikan senyap — settings.json korup tidak
+# bisa menyuntik tipe aneh ke view).
+
+def col_sel_to_json(col_sel: dict) -> dict:
+    """v3.9.66 — state filter header ⧩ → JSON-safe.
+
+    {kolom: set|None} → {kolom: [nilai terurut]} — hanya entri AKTIF
+    (None = tanpa filter, tidak disimpan; set() kosong disimpan sebagai
+    [] agar snapshot tetap EKSAK — pemulihannya difilter di
+    col_sel_from_json)."""
+    out: dict = {}
+    try:
+        items = list((col_sel or {}).items())
+    except AttributeError:
+        return out
+    for col, sel in items:
+        if sel is None:
+            continue
+        try:
+            out[str(col)] = sorted({str(v) for v in set(sel)})
+        except TypeError:
+            continue
+    return out
+
+
+def col_sel_from_json(raw, allowed) -> dict:
+    """v3.9.66 — JSON → state filter header ⧩ (kebalikan col_sel_to_json).
+
+    VALIDASI defensif:
+    - hanya kolom yang ada di `allowed` (kolom view saat ini) yang
+      dipulihkan — kolom hilang / schema berganti diabaikan senyap;
+    - hanya nilai string yang diterima (korupsi settings.json tidak
+      bisa menyuntik objek arbitrer);
+    - seleksi KOSONG ([]) DILEWATI — set() = "0 baris" (semantik
+      v3.9.13) dan tidak pernah menjadi hasil restore yang berguna;
+      restore tidak boleh menghasilkan tabel kosong misterius.
+    Return {kolom: set(nilai)} — hanya entri yang lolos validasi."""
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        allowed_set = {str(c) for c in allowed}
+    except TypeError:
+        return {}
+    out: dict = {}
+    for col, vals in raw.items():
+        c = str(col)
+        if (c not in allowed_set
+                or not isinstance(vals, (list, tuple, set, frozenset))):
+            continue
+        s = {v for v in vals if isinstance(v, str)}
+        if s:
+            out[c] = s
+    return out
+
+
+def apply_col_sel_restore(view, state, col_sel: dict, group) -> bool:
+    """v3.9.66 — pulihkan bagian seleksi ⧩ view dari snapshot.
+
+    Tulis kembali `col_sel[col]` (state otoritatif yang dibaca
+    _refresh/_prepare_rows) + pasang ikon corong via
+    HeaderFilterGroup.set_selected (pola preserve v3.9.42 — tanpa ini
+    funnel tetap mati padahal filter aktif). Return True bila ada
+    seleksi yang dipulihkan (caller melanjutkan combo/checkbox lalu
+    refresh bila perlu)."""
+    if not isinstance(state, dict):
+        return False
+    sel_map = col_sel_from_json(state, col_sel.keys())
+    changed = False
+    for col, sel in sel_map.items():
+        col_sel[col] = sel
+        if group is not None:
+            with contextlib.suppress(Exception):
+                group.set_selected(col, sel)
+        changed = True
+    return changed
+
+
 # --- Column hide/unhide (v3.6) --------------------------------------------------
 
 class ColumnManager:

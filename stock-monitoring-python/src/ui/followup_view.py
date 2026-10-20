@@ -63,8 +63,10 @@ from .widgets import (
     TableExpander,
     _filter_value_sort_key,
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -357,6 +359,30 @@ class FollowUpView(tk.Frame):
     def _on_col_filter(self, col: str, selected):
         self._col_sel[col] = selected
         self._render()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    # Follow Up: sumber data = FollowUpStore (persist sendiri di
+    # followup.json) — guard toko kosong (belum ada ✓ yang disimpan).
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.followup')."""
+        return col_sel_to_json(self._col_sel)
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state.
+        _render sinkron (kecil — daftar ✓ user), tanpa lazy dirty flag —
+        aman dipanggil kapan pun setelah store terisi."""
+        if not isinstance(state, dict):
+            return
+        try:
+            if not self.store.rows:
+                return
+        except AttributeError:
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        if changed:
+            self._render()
 
     @staticmethod
     def _fu_num(v):

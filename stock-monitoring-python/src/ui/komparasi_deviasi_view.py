@@ -261,9 +261,11 @@ from .widgets import (
     SegmentBar,
     TableExpander,
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -1269,6 +1271,69 @@ class KomparasiDeviasiView(tk.Frame):
         self._render_week_chips()
         self._update_month_chip()
         self._refresh()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    # Snapshot / pulihkan filter tab ⚖ Komparasi: 3 checkbox tampilan
+    # (semua minggu/bulan/resto) + seleksi ⧩ tabel UTAMA + 2 tabel
+    # analisa (Top Selisih / Perubahan Arah — v3.9.19a). PATH FILE
+    # deviasi TIDAK ikut (sumber data, bukan filter — auto-load startup
+    # v3.9.53 mengurusnya sendiri).
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.komparasi')."""
+        st = col_sel_to_json(self._col_sel)
+        st["show_all_weeks"] = bool(self._show_all_weeks.get())
+        st["show_all_months"] = bool(self._show_all_months.get())
+        st["show_all_resto"] = bool(self._show_all_resto.get())
+        _top = col_sel_to_json(self._top_sel)
+        if _top:
+            st["top_sel"] = _top
+        _flip = col_sel_to_json(self._flip_sel)
+        if _flip:
+            st["flip_sel"] = _flip
+        return st
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state (pola
+        deviasi_view: state ditulis dulu; refresh SEKALI via jalur
+        _on_option_changed bila checkbox berubah — label minggu/chip
+        ikut sinkron — atau _refresh langsung bila hanya ⧩)."""
+        if not isinstance(state, dict):
+            return
+        if self.data is None or bool(getattr(self.data, "empty", True)):
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        _opts_changed = False
+        for key, var in (("show_all_weeks", self._show_all_weeks),
+                        ("show_all_months", self._show_all_months),
+                        ("show_all_resto", self._show_all_resto)):
+            v = state.get(key)
+            if (isinstance(v, bool)
+                    and v != bool(var.get())):
+                var.set(v)
+                _opts_changed = True
+        # tabel analisa: state ⧩ + ikon (mirror preserve v3.9.42)
+        _top_state = state.get("top_sel")
+        if (isinstance(_top_state, dict)
+                and apply_col_sel_restore(
+                    self, _top_state, self._top_sel,
+                    self._top_filters)):
+            changed = True
+        _flip_state = state.get("flip_sel")
+        if (isinstance(_flip_state, dict)
+                and apply_col_sel_restore(
+                    self, _flip_state, self._flip_sel,
+                    self._flip_filters)):
+            changed = True
+        if not (changed or _opts_changed):
+            return
+        if not self.winfo_ismapped():
+            return   # dirty flag load_data terpasang — compute saat dibuka
+        if _opts_changed:
+            self._on_option_changed()
+        else:
+            self._refresh()
 
     def _update_month_chip(self):
         """v3.9.13: chip BULAN aktif — bulan TERBARU di file (per NOMOR

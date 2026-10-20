@@ -67,6 +67,7 @@ AUDIT 2c (fix 3-c):
   '{n:,}' EN '1,347').
 """
 
+import contextlib  # v3.9.66 — suppress senyap jalur restore filter
 import tkinter as tk
 from collections.abc import Callable
 from datetime import datetime
@@ -99,6 +100,8 @@ from .widgets import (
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8
+    col_sel_from_json,  # v3.9.66 — filter persisten antar sesi
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -580,6 +583,82 @@ class PivotTableView(tk.Frame):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
         if self._dirty and self.data is not None and not self.data.empty:
             self._dirty = False
+            self._refresh_pivot()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    # Snapshot / pulihkan kombinasi filter Matrix Pivot (mode PIVOT PER,
+    # RESTO/SOURCE/KATEGORI, rentang TANGGAL, checkbox baris kosong,
+    # seleksi ⧩ Nama Barang #0) — pola deviasi_view (lihat catatan sana).
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.pivot')."""
+        st = {
+            "mode": self.pivot_mode,
+            "resto": self.resto_var.get(),
+            "source": self.source_var.get(),
+            "kategori": self.kategori_var.get(),
+            "tgl_start": self.tgl_start_var.get(),
+            "tgl_end": self.tgl_end_var.get(),
+            "hide_empty": bool(self.hide_empty_var.get()),
+        }
+        _name = col_sel_to_json({"#0": self._name_selected})
+        if "#0" in _name:
+            st["name_sel"] = _name["#0"]
+        return st
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state.
+
+        Combobox divalidasi terhadap values data BARU (pola preserve
+        v3.9.42 — nilai hilang → "(All)" default tetap); mode lewat
+        jalur segment yang sama dgn klik user (set_active_silent +
+        _apply_mode_ui — tanpa refresh tambahan; refresh SEKALI di
+        akhir bila ada perubahan)."""
+        if not isinstance(state, dict):
+            return
+        if self.data is None or bool(getattr(self.data, "empty", True)):
+            return
+        changed = False
+        _m = state.get("mode")
+        if (_m in ("resto", "tanggal") and _m != self.pivot_mode):
+            self.pivot_mode = _m
+            with contextlib.suppress(Exception):
+                self.mode_seg.set_active_silent(
+                    0 if _m == "resto" else 1)
+            self._apply_mode_ui()
+            changed = True
+        for key, var, combo in (
+                ("resto", self.resto_var, self.resto_combo),
+                ("source", self.source_var, self.source_combo),
+                ("kategori", self.kategori_var, self.kategori_combo)):
+            v = state.get(key)
+            if not isinstance(v, str):
+                continue
+            try:
+                vals = list(combo["values"])
+            except tk.TclError:
+                vals = []
+            if v in vals and var.get() != v:
+                var.set(v)
+                changed = True
+        for key, var in (("tgl_start", self.tgl_start_var),
+                         ("tgl_end", self.tgl_end_var)):
+            v = state.get(key)
+            if (isinstance(v, str) and v
+                    and var.get() != v):
+                var.set(v)
+                changed = True
+        v = state.get("hide_empty")
+        if isinstance(v, bool) and v != bool(self.hide_empty_var.get()):
+            self.hide_empty_var.set(v)
+            changed = True
+        _ns = col_sel_from_json({"#0": state.get("name_sel")}, ("#0",))
+        if "#0" in _ns:
+            self._name_selected = _ns["#0"]
+            with contextlib.suppress(Exception):
+                self.header_filter.set_selected(self._name_selected)
+            changed = True
+        if changed and self.winfo_ismapped():
             self._refresh_pivot()
 
     def _populate_filters(self):

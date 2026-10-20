@@ -199,7 +199,7 @@ from src.ui.widgets import (
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.65"  # v3.9.65 — RANK PER-BARIS + STARTUP ZOOM-OUT (dua permintaan user): (1) FIX BUG RANK tab 📦 Deviasi GR & 🧩 Deviasi PCS (user: "ada bug pada deviasi gr dan deviasi pcs pada kolom rank, dimana data rank sama semua untuk tiap grup barang") — era v3.9.51-64 rank = PER BARANG (Σ|Deviasi| kelompok, SATU angka konstanta seluruh baris grup — warisan display merge-vertikal yang tak ada lagi sejak v3.9.60/61) → user melihat angka sama di tiap grup = dilaporkan bug. RESTORASI SEMANTIK SHEET ASLI: Rank = peringkat |Deviasi| BARIS di antara baris GRUP barangnya (1 = deviasi terbesar dalam grup, per resto), method="min" (seri berbagi rank, rank berikut MELONCAT — diprove pola 13,13,13,16 sheet asli), baris Deviasi==0/NaN → rank KOSONG (972/972 baris nol di sheet asli kosong). GROUND-TRUTH: kolom Rank sheet DEVIASI GR/PCS workbook asli user direkonstruksi & dibandingkan — 1347/1348 EKSAK (selisih tunggal = artefak rumus basu di file user sendiri: Susu Kental Manis DPKMAR tertulis 18, matematis 17). (2) STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka udah ke zoom out") — app TERBUKA di zoom 80% (UI_ZOOM_DEFAULT 0.8): font/rowheight/kolom ter-skala sejak buka → lebih banyak baris terlihat; ukuran/maximize jendela tetap dikuasai restore window_state (zoom startup FONTS-ONLY via _apply_ui_zoom(target, resize_window=False) — jendela TIDAK ikut mengecil); CTRL+roda tetap resize penuh (perilaku v3.9.48 utuh; state baseline __init__ = 1.0 supaya penerapan startup selalu efektif). PLUS PERSIST: level zoom terakhir DISIMPAN ke settings.json (window_state.ui_zoom, validasi 0.5–2.0, tolak bool/string) saat jendela ditutup → buka berikutnya memulai di preferensi user (default 0.8 bila belum ada). VERIFIKASI: probe ground-truth rank (803+545 GR match) + probe zoom startup + §58 konstanta 0.8 + §61/§62 kontrak rank per-baris dirombak + §65 +ui_zoom + §77 BARU (ikat 1,1,1/loncat 1,1,3/nol kosong/sort Rank/persist round-trip+validasi+jalur close/startup dari settings.json via app kedua Toplevel). v3.9.64 — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix semua sebar agent no mistakes") — semua temuan audit 15-a/15-b/15-c difix: (1) HIGHLIGHT Ctrl+F KINI BENAR-BENAR TAMPIL di SEMUA tabel ber-tag latar baris (FIX 15-c F-01, BUG paling serius — prioritas tag Treeview = URUTAN CREATE, diuji pixel-probe Xvfb: find dibuat SETELAH zebra → oranye kalah & tak dirender di 🧮 kedua tree/📋 3 mode/☑ Follow Up/Rekap IN/Rincian-PO/Pivot; FIX = konstanta+register_find_tags di theme.py, dipanggil BARIS PERTAMA setup_tree_tags + _setup_tags 12 view — urutan list tag per-item TIDAK berpengaruh, diuji); (2) Ctrl+F kini JALAN DI DALAM popup rincian (DetailsPopup/DeviasiPopup/InDetailPopup) + window clone ⛶ (install_tree_find_binding — bindtag Toplevel sendiri tak memuat binding root) + popup Cari SELALU SATU app-wide (dulu 2 popup bisa koeksis utk 2 tree); (3) STALE-FIND pasca re-render (15-c F-03): iid posional row_N dipakai ulang view → highlight mendarat di baris SALAH senyap — FIX dua lapis: choke point insert_tree_items → _on_tree_rerendered (recompute otomatis) + validasi digest baris saat navigasi; (4) KLASIFIKASI KATEGORI word-boundary \bCOM\b/\bPACKAGING\b (15-a R1 — 'COMMERCIAL'/'COMPLIMENT' tak lagi terhitung COM, 'REPACKAGING' bukan PACKAGING; varian kanonik - RESTO/- CATERING tetap cocok); (5) _compute_resto() tanpa argumen tak lagi menghasilkan anak tab kosong (15-a R3 — pakai df bukan param data); (6) _refresh data-kosong kini MEMBERSIHKAN kedua tabel + tag per-cell (15-a R4 — dulu baris lama tersisa dgn status 'Belum ada data'); (7) minus merah PER-CELL anak tab Tanpa Harga (15-a N9, parity tabel utama) + refresh_icons ⧩ anak tab (N8) + fmt_pct_cell ribuan '+1.234,5%' & round-0 '0,0%' tanpa tanda (N11) + sort ⧩ '+12,5%' kini numerik (F-05) + dead code _event_col_name dihapus (N7); (8) run_tests.sh tanpa hard-require xdpyinfo (F-06 — fallback probe Tk; Xvfb hidup dicek walau x11-utils absen); (9) README root disinkronkan (F-02 — masih headline v3.9.62). VERIFIKASI: §76 BARU + baterai penuh + ruff baseline + tag v3.9.64 → GHA rilis .exe. v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
+APP_VERSION = "3.9.66"  # v3.9.66 — FILTER PERSISTEN ANTAR SESI (user: "kerjakan quick win" — roadmap Wave 1 quick-win #1, pola Snipe-IT, generalisasi persist ui_zoom v3.9.65): kombinasi filter terakhir PER TAB kini diingat antar sesi — zoom 80% sudah diingat sejak v3.9.65, FILTER belum. (1) CAPTURE saat jendela ditutup (_on_close_window → _capture_filter_state semua view → _save_filter_state settings.json key 'filter_state', read-modify-write atomik pola window_state; TIDAK menimpa bila sesi belum pernah run pipeline — append1_df None → state tersimpan lama dipertahankan). (2) RESTORE SEKALI sesudah fan-out load_data run pipeline PERTAMA sesi berikutnya (_apply_saved_filters_once — load_data me-reset filter v3.9.33, restore menyusul DI ATASNYA; run pipeline BERIKUTNYA di sesi yang sama TETAP RESET — restore tak pernah menimpa kerja user; data kosong → tunda ke run berikut; gagal per-view diisolasi ke log pola _load_view). Cakupan 10 view + state app: Pivot (mode 🏪/📅, RESTO/SOURCE/KATEGORI, rentang TANGGAL, checkbox baris kosong, ⧩ Nama Barang #0) · Deviasi GR & PCS (⧩ semua kolom + combobox KATEGORI + AKTIF/NON — nilai divalidasi vs values data baru, pola preserve v3.9.42) · Rekap Selisih IN (MODE HITUNG Bulan Ini/Lalu+Ini, rentang TANGGAL, checkbox Hanya Selisih ≠ 0, ⧩ — default kategori v3.9.22 tetap, snapshot ⧩ KATEGORI eksplisit menimpanya) · ⚖ Komparasi (3 checkbox semua-minggu/bulan/resto + ⧩ tabel utama + 2 tabel analisa Top/Flip) · 📋 Laporan & 💰 Nominal (⧩) · 🧮 Nominal Deviasi (⧩ + KATEGORI tabel Per Resto + anak tab Tanpa Harga: ⧩ + KATEGORI global) · ☑ Follow Up (⧩) · 🛒 Rincian PO (⧩ + CABANG/STATUS divalidasi) · MODE tab 📋 (SegmentBar Komparasi/Anomali/Nominal — key '_app.laporan_mode', dipulihkan via show_laporan_mode jalur persis klik user). TIDAK ikut: TANGGAL H (jendela data bersama dgn default dinamis dari data v3.9.22), AMBANG ACR (ambang analisa), path file deviasi ⚖ (sumber data — auto-load v3.9.53), tab aktif sub-notebook 🧮 (pemilih tampilan). (3) SERIALISASI defensif widgets.py col_sel_to_json/col_sel_from_json/apply_col_sel_restore: set|None → list terurut (JSON-safe); pemulihan hanya kolom yang MASIH ada di view + nilai string; seleksi KOSONG (set() = "0 baris" semantik v3.9.13) TIDAK PERNAH dipulihkan (anti tabel-kosong-misterius); ikon corong dipasang ulang via set_selected (pola preserve v3.9.42 — tanpa ini funnel mati padahal filter aktif). VERIFIKASI: §78 BARU + baterai penuh + ruff baseline. v3.9.65 — RANK PER-BARIS + STARTUP ZOOM-OUT (dua permintaan user): (1) FIX BUG RANK tab 📦 Deviasi GR & 🧩 Deviasi PCS (user: "ada bug pada deviasi gr dan deviasi pcs pada kolom rank, dimana data rank sama semua untuk tiap grup barang") — era v3.9.51-64 rank = PER BARANG (Σ|Deviasi| kelompok, SATU angka konstanta seluruh baris grup — warisan display merge-vertikal yang tak ada lagi sejak v3.9.60/61) → user melihat angka sama di tiap grup = dilaporkan bug. RESTORASI SEMANTIK SHEET ASLI: Rank = peringkat |Deviasi| BARIS di antara baris GRUP barangnya (1 = deviasi terbesar dalam grup, per resto), method="min" (seri berbagi rank, rank berikut MELONCAT — diprove pola 13,13,13,16 sheet asli), baris Deviasi==0/NaN → rank KOSONG (972/972 baris nol di sheet asli kosong). GROUND-TRUTH: kolom Rank sheet DEVIASI GR/PCS workbook asli user direkonstruksi & dibandingkan — 1347/1348 EKSAK (selisih tunggal = artefak rumus basu di file user sendiri: Susu Kental Manis DPKMAR tertulis 18, matematis 17). (2) STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka udah ke zoom out") — app TERBUKA di zoom 80% (UI_ZOOM_DEFAULT 0.8): font/rowheight/kolom ter-skala sejak buka → lebih banyak baris terlihat; ukuran/maximize jendela tetap dikuasai restore window_state (zoom startup FONTS-ONLY via _apply_ui_zoom(target, resize_window=False) — jendela TIDAK ikut mengecil); CTRL+roda tetap resize penuh (perilaku v3.9.48 utuh; state baseline __init__ = 1.0 supaya penerapan startup selalu efektif). PLUS PERSIST: level zoom terakhir DISIMPAN ke settings.json (window_state.ui_zoom, validasi 0.5–2.0, tolak bool/string) saat jendela ditutup → buka berikutnya memulai di preferensi user (default 0.8 bila belum ada). VERIFIKASI: probe ground-truth rank (803+545 GR match) + probe zoom startup + §58 konstanta 0.8 + §61/§62 kontrak rank per-baris dirombak + §65 +ui_zoom + §77 BARU (ikat 1,1,1/loncat 1,1,3/nol kosong/sort Rank/persist round-trip+validasi+jalur close/startup dari settings.json via app kedua Toplevel). v3.9.64 — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix semua sebar agent no mistakes") — semua temuan audit 15-a/15-b/15-c difix: (1) HIGHLIGHT Ctrl+F KINI BENAR-BENAR TAMPIL di SEMUA tabel ber-tag latar baris (FIX 15-c F-01, BUG paling serius — prioritas tag Treeview = URUTAN CREATE, diuji pixel-probe Xvfb: find dibuat SETELAH zebra → oranye kalah & tak dirender di 🧮 kedua tree/📋 3 mode/☑ Follow Up/Rekap IN/Rincian-PO/Pivot; FIX = konstanta+register_find_tags di theme.py, dipanggil BARIS PERTAMA setup_tree_tags + _setup_tags 12 view — urutan list tag per-item TIDAK berpengaruh, diuji); (2) Ctrl+F kini JALAN DI DALAM popup rincian (DetailsPopup/DeviasiPopup/InDetailPopup) + window clone ⛶ (install_tree_find_binding — bindtag Toplevel sendiri tak memuat binding root) + popup Cari SELALU SATU app-wide (dulu 2 popup bisa koeksis utk 2 tree); (3) STALE-FIND pasca re-render (15-c F-03): iid posional row_N dipakai ulang view → highlight mendarat di baris SALAH senyap — FIX dua lapis: choke point insert_tree_items → _on_tree_rerendered (recompute otomatis) + validasi digest baris saat navigasi; (4) KLASIFIKASI KATEGORI word-boundary \bCOM\b/\bPACKAGING\b (15-a R1 — 'COMMERCIAL'/'COMPLIMENT' tak lagi terhitung COM, 'REPACKAGING' bukan PACKAGING; varian kanonik - RESTO/- CATERING tetap cocok); (5) _compute_resto() tanpa argumen tak lagi menghasilkan anak tab kosong (15-a R3 — pakai df bukan param data); (6) _refresh data-kosong kini MEMBERSIHKAN kedua tabel + tag per-cell (15-a R4 — dulu baris lama tersisa dgn status 'Belum ada data'); (7) minus merah PER-CELL anak tab Tanpa Harga (15-a N9, parity tabel utama) + refresh_icons ⧩ anak tab (N8) + fmt_pct_cell ribuan '+1.234,5%' & round-0 '0,0%' tanpa tanda (N11) + sort ⧩ '+12,5%' kini numerik (F-05) + dead code _event_col_name dihapus (N7); (8) run_tests.sh tanpa hard-require xdpyinfo (F-06 — fallback probe Tk; Xvfb hidup dicek walau x11-utils absen); (9) README root disinkronkan (F-02 — masih headline v3.9.62). VERIFIKASI: §76 BARU + baterai penuh + ruff baseline + tag v3.9.64 → GHA rilis .exe. v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -1821,6 +1821,69 @@ def _save_window_state(w: int, h: int, maximized: bool,
         return
 
 
+# v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win #1 roadmap Wave 1,
+# pola Snipe-IT): kombinasi filter terakhir PER TAB disimpan saat
+# jendela ditutup (settings.json key 'filter_state') & dipulihkan
+# SEKALI setelah load_data run pipeline PERTAMA sesi berikutnya.
+# load_data me-reset filter (kontrak v3.9.33) — restore menyusul
+# SETELAHNYA; run pipeline BERIKUTNYA di sesi yang sama tetap reset
+# (perilaku lama utuh — restore tidak pernah menimpa kerja user).
+# View-key stabil → nama atribut app (pemetaan tunggal, tak pernah
+# berganti nama tab/emoji).
+_FILTER_VIEW_KEYS = (
+    ("pivot", "pivot_view"),
+    ("deviasi_gr", "deviasi_gr_view"),
+    ("deviasi_pcs", "deviasi_pcs_view"),
+    ("in_selisih", "in_selisih_view"),
+    ("komparasi", "komparasi_view"),
+    ("laporan", "laporan_view"),
+    ("nominal", "nominal_view"),
+    ("nominal_resto", "nominal_resto_view"),
+    ("followup", "followup_view"),
+    ("rincian_po", "rincian_view"),
+)
+
+
+def _load_filter_state():
+    """v3.9.66 — baca key 'filter_state' settings.json →
+    {view_key: dict} | None (tak ada/korup → None).
+    Validasi: hanya dict-of-dict yang diterima (entry korup dibuang
+    senyap — view lain tetap dipulihkan)."""
+    try:
+        with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        st = data.get("filter_state")
+        if not isinstance(st, dict):
+            return None
+        out = {str(k): v for k, v in st.items()
+               if isinstance(v, dict) and v}
+        return out or None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def _save_filter_state(state: dict) -> None:
+    """v3.9.66 — simpan {view_key: dict} ke key 'filter_state'
+    (read-modify-write atomik — pola _save_window_state; window_state
+    & kunci lain tak tersentuh). Gagal → senyap (fitur best-effort)."""
+    old = {}
+    try:
+        with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["filter_state"] = (state if isinstance(state, dict) else {})
+        tmp = _SETTINGS_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, _SETTINGS_PATH)
+    except (OSError, ValueError, TypeError):
+        return
+
+
 # v3.9.48 — ZOOM UI runtime (CTRL + Scroll) — rentang & langkah.
 # 0.5–2.0 dipilih supaya teks tetap terbaca di kedua ujung (font 8pt
 # di 50% ≈ 4pt = lantai scale_pt 4).
@@ -1983,6 +2046,12 @@ class StockMonitorApp:
         #     terbuka persis seperti itu lagi. Simpan saat jendela ditutup
         #     (_on_close_window — jalur WM asli, bukan destroy() test).
         _saved_win = _load_window_state()
+        # v3.9.66 — FILTER PERSISTEN: kombinasi filter terakhir per tab
+        # dibaca SEKALI di startup; DIPULIHKAN setelah load_data run
+        # pipeline PERTAMA (load_data me-reset filter — restore menyusul;
+        # run berikutnya tetap reset — kontrak v3.9.33). File tak ada /
+        # korup → None (sesi baru bersih, perilaku lama).
+        self._filter_restore_state = _load_filter_state()
         # v3.9.65 — ZOOM STARTUP (user: "bisa gak waktu aku buka udah ke
         # zoom out"): target zoom = yang TERPERSIST di settings.json
         # (window_state.ui_zoom — level CTRL+roda terakhir user), atau
@@ -3549,6 +3618,11 @@ class StockMonitorApp:
                    lambda: self.rincian_view.load_data(
                        rincian_po_df, preserve=_keep_state),
                    self.rincian_view)
+        # v3.9.66 — FILTER PERSISTEN: pulihkan kombinasi filter terakhir
+        # per tab SEKALI (hanya run pertama sesi dgn data non-kosong;
+        # load_data barusan me-reset filter — restore menyusul di atasnya;
+        # view yang gagal dimuat skip sendiri lewat guard data kosong).
+        self._apply_saved_filters_once()
         # FIX 6a-01: enable via sync helper (kriteria ketersediaan data
         # = guard _export_excel) — jalur ERROR/STOP di atas kini sync juga.
         self._sync_export_buttons()
@@ -3700,6 +3774,68 @@ class StockMonitorApp:
             pass
         return False
 
+    # =====================================================================
+    # v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win #1 Wave 1)
+    # =====================================================================
+    def _apply_saved_filters_once(self):
+        """v3.9.66 — pulihkan kombinasi filter terakhir per tab SEKALI.
+
+        Dipanggil _on_pipeline_done SETELAH fan-out load_data (yang
+        me-reset semua filter). Syarat: data non-kosong (0 baris →
+        restore ditunda ke run berikutnya — belum ada yang bisa
+        difilter). Setelah dipakai → state dilepas (run BERIKUTNYA
+        sesi ini kembali ke perilaku reset v3.9.33 — restore tidak
+        pernah menimpa kerja user di sesi berjalan). Gagal per-view
+        diabaikan SENYAP (best-effort — semua view method sudah
+        defensif; pola suppress cleanup ruff-baseline v3.9.64) —
+        view lain tetap dipulihkan. Mode tab 📋 (SegmentBar) ikut
+        dipulihkan via show_laporan_mode (jalur persis klik user)."""
+        st = getattr(self, "_filter_restore_state", None)
+        if not st:
+            return
+        _df = getattr(self, "append1_df", None)
+        if _df is None or bool(getattr(_df, "empty", True)):
+            return   # tunda — data belum ada, coba lagi run berikutnya
+        self._filter_restore_state = None   # SEKALI saja per sesi
+        for key, attr in _FILTER_VIEW_KEYS:
+            view = getattr(self, attr, None)
+            if view is None:
+                continue
+            state = st.get(key)
+            if not state:
+                continue
+            with contextlib.suppress(Exception):
+                view.restore_filter_state(state)
+        # mode tab 📋 (state APP — bukan view): key khusus '_app'
+        _appst = st.get("_app")
+        if isinstance(_appst, dict):
+            _m = _appst.get("laporan_mode")
+            if isinstance(_m, int) and not isinstance(_m, bool) \
+                    and _m in (0, 1, 2):
+                with contextlib.suppress(Exception):
+                    self.show_laporan_mode(_m)
+
+    def _capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot SEMUA view → {view_key: dict} (+ '_app').
+
+        Dipanggil _on_close_window. View tanpa data/tanpa filter aktif
+        menghasilkan dict kecil/kosong → dibuang (settings.json ramping).
+        Kegagalan per-view diabaikan senyap (best-effort — menutup app
+        tidak boleh pernah gagal karena snapshot; pola suppress
+        cleanup ruff-baseline v3.9.64)."""
+        out: dict = {}
+        for key, attr in _FILTER_VIEW_KEYS:
+            view = getattr(self, attr, None)
+            if view is None:
+                continue
+            with contextlib.suppress(Exception):
+                s = view.capture_filter_state()
+                if isinstance(s, dict) and s:
+                    out[key] = s
+        out["_app"] = {"laporan_mode":
+                       int(getattr(self, "_laporan_mode_idx", 0) or 0)}
+        return out
+
     def _on_close_window(self):
         """v3.9.33 — AUDIT FIX (48-c LOW): handler tombol X.
 
@@ -3711,7 +3847,12 @@ class StockMonitorApp:
         disimpan ke settings.json → sesi berikutnya terbuka persis
         seperti kebiasaan user (tanpa adjust manual).
         v3.9.65 — ZOOM ikut tersimpan (ui_zoom): level CTRL+roda
-        terakhir dipulihkan saat buka (default 0.8 bila belum ada)."""
+        terakhir dipulihkan saat buka (default 0.8 bila belum ada).
+        v3.9.66 — FILTER ikut tersimpan (filter_state): kombinasi
+        filter terakhir per tab dipulihkan saat buka — TIDAK disimpan
+        bila sesi ini belum pernah menjalankan pipeline (append1_df
+        None): menutup app sebelum run manapun TIDAK boleh menimpa
+        kombinasi tersimpan yang masih baik."""
         worker = getattr(self, "worker_thread", None)
         pipeline_hIDup = (self.is_running
                           or (worker is not None and worker.is_alive()))
@@ -3729,6 +3870,12 @@ class StockMonitorApp:
             if _w >= WINDOW_MIN[0] and _h >= WINDOW_MIN[1]:
                 _save_window_state(_w, _h, _max,
                                    ui_zoom=getattr(self, "ui_zoom", None))
+        # v3.9.66 — simpan kombinasi filter terakhir per tab (hanya bila
+        # sesi ini pernah menjalankan pipeline — append1_df ada; menutup
+        # app sebelum run TIDAK menimpa state tersimpan yang masih baik).
+        with contextlib.suppress(Exception):
+            if getattr(self, "append1_df", None) is not None:
+                _save_filter_state(self._capture_filter_state())
         self.root.destroy()
 
     def _stop_pipeline(self):
@@ -4102,6 +4249,9 @@ class StockMonitorApp:
         if idx not in (0, 1, 2):
             idx = 0
         self.laporan_segment.set_active_silent(idx)
+        # v3.9.66 — mode terakhir direkam utk filter persist (key
+        # '_app.laporan_mode' — dipulihkan _apply_saved_filters_once).
+        self._laporan_mode_idx = idx
         # lepas semua pane lalu pack pane aktif (urutan pack konsisten)
         self.laporan_view.pack_forget()
         self.nominal_view.pack_forget()

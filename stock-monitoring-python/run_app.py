@@ -1,4 +1,4 @@
-"""run_app.py — entry FROZEN PyInstaller (v3.9.65) + jalur dev alternatif.
+"""run_app.py — entry FROZEN PyInstaller (v3.9.66) + jalur dev alternatif.
 
 Kenapa ada file ini:
 - Entry release `python -m src.ui` memakai konteks PACKAGE (-m) — PyInstaller

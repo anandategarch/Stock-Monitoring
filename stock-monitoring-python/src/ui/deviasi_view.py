@@ -267,9 +267,11 @@ from .widgets import (
     TableExpander,
     _set_sort_arrow,  # v3.9.33 — AUDIT FIX (48-d): pasang ulang panah sort
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8: auto-fit sekali per muat data
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -1460,6 +1462,61 @@ class DeviasiView(tk.Frame):
     def _reset_aktif(self):
         self._aktif_var.set("Semua")
         self._aktif_sel = None
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    # Snapshot / pulihkan kombinasi filter view ini (app menyimpan semua
+    # view ke settings.json saat jendela ditutup + memanggil restore SEKALI
+    # setelah load_data run pipeline PERTAMA sesi berikutnya).
+    # TANGGAL H & AMBANG ACR TIDAK ikut: H = jendela data bersama dgn
+    # default dinamis dari data (v3.9.22 — "tanggal harusnya tanggal 26"),
+    # ACR = ambang ANALISA (bukan penyaringan baris).
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.deviasi_gr/deviasi_pcs')."""
+        st = col_sel_to_json(self._col_sel)
+        st["kategori"] = self._kategori_var.get()
+        if hasattr(self, "_aktif_var"):
+            st["aktif"] = self._aktif_var.get()
+        return st
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state.
+
+        Combobox KATEGORI/AKTIF divalidasi terhadap values data BARU
+        (pola preserve v3.9.42): nilai hilang → seleksi default tetap
+        (tidak memasang filter 0-baris senyap). View tersembunyi → CUKUP
+        menulis state (dirty flag load_data masih terpasang — compute
+        saat tab dibuka memakai state yang sudah dipulihkan)."""
+        if not isinstance(state, dict):
+            return
+        if self.data is None or bool(getattr(self.data, "empty", True)):
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        _kv = state.get("kategori")
+        if isinstance(_kv, str):
+            try:
+                _kvals = list(self._kategori_combo["values"])
+            except tk.TclError:
+                _kvals = []
+            if _kv in _kvals and self._kategori_var.get() != _kv:
+                self._kategori_var.set(_kv)
+                self._kategori_sel = (None if _kv == "Semua" else _kv)
+                changed = True
+        if hasattr(self, "_aktif_var"):
+            _av = state.get("aktif")
+            if isinstance(_av, str):
+                try:
+                    _avals = list(self._aktif_combo["values"])
+                except tk.TclError:
+                    _avals = []
+                if (_av in _avals
+                        and self._aktif_var.get() != _av):
+                    self._aktif_var.set(_av)
+                    self._aktif_sel = (None if _av == "Semua" else _av)
+                    changed = True
+        if changed and self.winfo_ismapped():
+            self._refresh()
 
     def _show_empty(self):
         self.content.pack_forget()

@@ -83,9 +83,11 @@ from .widgets import (
     LoadingOverlay,
     TableExpander,
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -298,6 +300,24 @@ class NominalDeviasiView(tk.Frame):
             self._col_sel[c] = None
         self.header_filters.clear_all()
         self._refresh()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.nominal')."""
+        return col_sel_to_json(self._col_sel)
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state (pola
+        deviasi_view — lihat catatan lengkap di sana)."""
+        if not isinstance(state, dict):
+            return
+        if self.data is None or bool(getattr(self.data, "empty", True)):
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        if changed and self.winfo_ismapped():
+            self._refresh()
 
     def _col_values(self, col: str) -> list:
         """Nilai unik TERFORMAT utk popup filter header.

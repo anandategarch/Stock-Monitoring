@@ -182,9 +182,11 @@ from .widgets import (
     TableExpander,
     _filter_value_sort_key,
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     enable_smooth_wheel_list,  # v3.9.60 — leaderboard rekap ber-scroll
@@ -1300,6 +1302,64 @@ class InSelisihView(tk.Frame):
             self._col_sel[c] = None
         if self.header_filters is not None:
             self.header_filters.clear_all()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    # Snapshot / pulihkan kombinasi filter Rekap Selisih IN (MODE HITUNG,
+    # rentang TANGGAL, checkbox 'Hanya Selisih ≠ 0', seleksi ⧩ semua
+    # kolom) — pola deviasi_view (lihat catatan sana). Default kategori
+    # v3.9.22 (_apply_default_kategori) tetap jalan di load_data; snapshot
+    # ⧩ KATEGORI menimpanya bila ada (seleksi eksplisit user menang).
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.in_selisih')."""
+        st = col_sel_to_json(self._col_sel)
+        st["mode_lalu_ini"] = bool(self._mode_bulan_lalu)
+        st["tgl_start"] = self.tgl_start_var.get()
+        st["tgl_end"] = self.tgl_end_var.get()
+        st["only_selisih"] = bool(self.only_selisih_var.get())
+        return st
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state.
+
+        Switch mode lewat jalur yang sama dgn klik user (set_active_
+        silent + _apply_audit_mode + _render_kpi_chips — TANPA refresh
+        tambahan; rentang tgl di-override dari snapshot SETELAH switch
+        karena switch mode me-reset rentang ke default mode). Rentang
+        tgl tetap tervalidasi validated_tgl_entry saat refresh (nilai
+        korup dari settings.json di-revert + warning — perilaku lama)."""
+        if not isinstance(state, dict):
+            return
+        _no_data = ((self.audit_df is None
+                    or bool(getattr(self.audit_df, "empty", True)))
+                   and (self.data is None
+                        or bool(getattr(self.data, "empty", True))))
+        if _no_data:
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        _m = state.get("mode_lalu_ini")
+        if (isinstance(_m, bool) and _m != bool(self._mode_bulan_lalu)):
+            self._mode_bulan_lalu = _m
+            if getattr(self, "mode_bar", None) is not None:
+                self.mode_bar.set_active_silent(1 if _m else 0)
+            self._apply_audit_mode()
+            self._render_kpi_chips()
+            changed = True
+        for key, var in (("tgl_start", self.tgl_start_var),
+                         ("tgl_end", self.tgl_end_var)):
+            v = state.get(key)
+            if (isinstance(v, str) and v
+                    and var.get() != v):
+                var.set(v)
+                changed = True
+        v = state.get("only_selisih")
+        if (isinstance(v, bool)
+                and v != bool(self.only_selisih_var.get())):
+            self.only_selisih_var.set(v)
+            changed = True
+        if changed and self.winfo_ismapped():
+            self._refresh()
 
     # ------------------------------------------------------- KPI CHIPS ----
     def _render_kpi_chips(self):

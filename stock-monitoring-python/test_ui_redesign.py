@@ -825,6 +825,12 @@ def main():
     app = StockMonitorApp(root)
     sys.stdout, sys.stderr = real_stdout, real_stderr
     root.update_idletasks()
+    # v3.9.66 — FILTER PERSISTEN: netralkan restore antar-sesi milik
+    # mesin dev (settings.json asli di sekitar repo) supaya baterai
+    # DETERMINISTIK — suite memuat data dgn pola load_data/_on_pipeline_
+    # done sendiri; §78 menguji jalur restore dgn state yang DISIAPKAN
+    # eksplisit (bukan state sisa mesin user).
+    app._filter_restore_state = None
     # --- v3.9.65 — STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka "
     #     "udah ke zoom out"): app BARU DIBANGUN harus sudah ber-zoom
     #     UI_ZOOM_DEFAULT 0.8 (font/rowheight ter-skala, jendela tak
@@ -868,7 +874,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.65", APP_VERSION == "3.9.65",
+    check("Versi = 3.9.66", APP_VERSION == "3.9.66",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -19338,6 +19344,302 @@ def main():
         app._apply_ui_zoom(1.0)   # pulihkan baseline font suite
         root.update()
         _top77c.destroy()         # widget app77c ikut hancur bersama Toplevel
+        root.update()
+
+    # =====================================================================
+    print("== §78. (v3.9.66) FILTER PERSISTEN ANTAR SESI (quick win W1) ==")
+    # Roadmap Wave 1 #1 (pola Snipe-IT): kombinasi filter terakhir per tab
+    # diingat (zoom 80% sudah diingat sejak v3.9.65 — filter kini ikut).
+    # -- (a) UNIT: serialisasi ⧩ JSON-safe + validasi defensif ------------
+    from src.ui.widgets import KATEGORI_BLANK_LABEL as _KBL78
+    from src.ui.widgets import col_sel_from_json as _cfj78
+    from src.ui.widgets import col_sel_to_json as _csj78
+    _j78 = _csj78({"A": {"y", "x"}, "B": None, "C": set(), "D": ["m", "a"]})
+    check("(v3.9.66) §78a: col_sel_to_json — hanya entri AKTIF, nilai "
+          "TERURUT (list JSON-safe); None tak disimpan; set() kosong "
+          "tetap EKSAK → []",
+          _j78 == {"A": ["x", "y"], "C": [], "D": ["a", "m"]},
+          f"got {_j78}")
+    _r78 = _cfj78(_j78, ["A", "C", "E"])
+    check("(v3.9.66) §78a: col_sel_from_json — kolom tak dikenal (D/E) "
+          "dibuang senyap; seleksi [] DILEWATI (set() = '0 baris' "
+          "v3.9.13 — restore tak boleh menghasilkan tabel kosong "
+          "misterius)",
+          _r78 == {"A": {"x", "y"}}, f"got {_r78}")
+    check("(v3.9.66) §78a: col_sel_from_json defensif — raw None/bukan "
+          "dict/nilai bukan list/nilai non-string → {} (korupsi "
+          "settings.json tak bisa menyuntik tipe aneh)",
+          _cfj78(None, ["A"]) == {} and _cfj78("korup", ["A"]) == {}
+          and _cfj78({"A": 7}, ["A"]) == {}
+          and _cfj78({"A": [1, None]}, ["A"]) == {})
+
+    # -- (b) settings.json: RMW atomik + validasi load ---------------------
+    import shutil as _sh78
+    import tempfile as _tf78
+    from pathlib import Path as _Path78
+
+    import src.ui.app as _appmod78
+    _orig_sp78 = _appmod78._SETTINGS_PATH
+    _tmp78 = _tf78.mkdtemp(prefix="t3966_filter_")
+    _appmod78._SETTINGS_PATH = _Path78(_tmp78) / "settings.json"
+    try:
+        _appmod78._save_window_state(1400, 900, False)   # kunci lain ADA
+        _appmod78._save_filter_state({"pivot": {"mode": "tanggal"}})
+        check("(v3.9.66) §78b: round-trip filter_state + RMW — kunci "
+              "window_state LAMA tak tergeser (pola _save_window_state)",
+              _appmod78._load_filter_state()
+              == {"pivot": {"mode": "tanggal"}}
+              and (_appmod78._load_window_state() or {}).get("w") == 1400)
+        _appmod78._save_filter_state(
+            {"ok": {"a": 1}, "bad": "korup", "_app": {"laporan_mode": 2}})
+        check("(v3.9.66) §78b: validasi load — entri bukan-dict dibuang "
+              "senyap, entry valid tetap dipulihkan",
+              _appmod78._load_filter_state()
+              == {"ok": {"a": 1}, "_app": {"laporan_mode": 2}})
+        with open(_appmod78._SETTINGS_PATH, "w", encoding="utf-8") as _f78:
+            _f78.write("{ BU KAN JSON VALID")
+        check("(v3.9.66) §78b: settings.json KORUP → None (graceful — "
+              "sesi baru bersih, perilaku lama)",
+              _appmod78._load_filter_state() is None)
+    finally:
+        _appmod78._SETTINGS_PATH = _orig_sp78
+        _sh78.rmtree(_tmp78, ignore_errors=True)
+
+    # -- (c) E2E DeviasiView: capture → load_data RESET → restore --------
+    dv78 = app.deviasi_gr_view
+    select_and_wait(root, app, app.tab_deviasi_gr, dv78)
+    # muat data fixture SEKALI di awal blok: section sebelumnya bisa
+    # meninggalkan data LAIN di view ini — combo values/_col_values lalu
+    # konsisten dgn snapshot-restore (kategori harus ADA di values data
+    # yang sama dgn saat restore — pola validasi preserve v3.9.42).
+    dv78.load_data(append1)
+    wait_view(root, dv78)
+    _kval78 = next((v for v in list(dv78._kategori_combo["values"])
+                    if v not in ("Semua", _KBL78)), "Semua")
+    _nbv78 = next((v for v in dv78._col_values("Nama Barang") if v), "")
+    dv78._kategori_var.set(_kval78)
+    dv78._kategori_sel = (_kval78 if _kval78 != "Semua" else None)
+    dv78._on_col_filter("Nama Barang", {_nbv78})
+    wait_view(root, dv78)
+    _rows78 = len(dv78.tree.get_children())
+    _snap78 = dv78.capture_filter_state()
+    check("(v3.9.66) §78c: capture — kategori eksplisit + ⧩ kolom masuk "
+          "snapshot (JSON-safe, nilai terurut)",
+          _snap78.get("kategori") == _kval78
+          and _snap78.get("Nama Barang") == [_nbv78]
+          and _snap78.get("aktif") == "Semua", f"got {_snap78}")
+    dv78.load_data(append1)   # mirror fan-out app — me-RESET (v3.9.33)
+    wait_view(root, dv78)
+    check("(v3.9.66) §78c: load_data me-RESET filter (⧩ None + kategori "
+          "default) — restore TIDAK boleh dilewati",
+          dv78._col_sel["Nama Barang"] is None
+          and dv78._kategori_sel is None,
+          f"col_sel={dv78._col_sel['Nama Barang']} "
+          f"kat={dv78._kategori_sel}")
+    dv78.restore_filter_state(_snap78)
+    wait_view(root, dv78)
+    check("(v3.9.66) §78c: restore — combobox kategori + ⧩ kolom kembali "
+          "PERSIS + jumlah baris terfilter SAMA dgn kondisi pra-close",
+          dv78._kategori_var.get() == _kval78
+          and dv78._col_sel["Nama Barang"] == {_nbv78}
+          and len(dv78.tree.get_children()) == _rows78,
+          f"kat={dv78._kategori_var.get()!r} "
+          f"rows={len(dv78.tree.get_children())} want {_rows78}")
+    _hf78 = dv78.header_filters._filters.get("Nama Barang")
+    check("(v3.9.66) §78c: ikon corong ⧩ ikut NYALA (set_selected — pola "
+          "preserve v3.9.42: funnel aktif ↔ filter aktif konsisten)",
+          _hf78 is not None and _hf78.selected == {_nbv78},
+          f"sel={getattr(_hf78, 'selected', None)!r}")
+    dv78.restore_filter_state(
+        {"Nama Barang": ["TIDAK ADA BARANG"], "kategori": "TIDAK ADA KAT"})
+    check("(v3.9.66) §78c: snapshot BASI aman — kategori tak ada di values "
+          "data BARU DITOLAK (default tetap; 0-baris senyap dicegah); "
+          "nilai ⧩ asing tetap dipasang (semantik Excel — funnel "
+          "menyala, tombol ✕ Reset tersedia)",
+          dv78._kategori_var.get() != "TIDAK ADA KAT"
+          and dv78._col_sel["Nama Barang"] == {"TIDAK ADA BARANG"})
+    # bersihkan state test (ikut jalur produksi: ⧩ None + ikon off)
+    dv78._on_col_filter("Nama Barang", None)
+    dv78.header_filters.set_selected("Nama Barang", None)
+    wait_view(root, dv78)
+
+    # -- (d) E2E Pivot: mode + rentang tanggal + checkbox + ⧩ #0 ---------
+    pv78 = app.pivot_view
+    select_and_wait(root, app, app.tab_pivot, pv78)
+    # (pola §78c: data fixture dimuat dulu supaya ⧩/combo konsisten)
+    pv78.load_data(append1)
+    wait_view(root, pv78)
+    # simulasikan preferensi user: mode tanggal + rentang kustom +
+    # checkbox + ⧩ #0 (semua berbeda dari default view baru)
+    pv78._on_mode_change(1)          # 📅 Tanggal (jalur klik user)
+    pv78.tgl_start_var.set("-7")
+    pv78.tgl_end_var.set("14")
+    pv78.hide_empty_var.set(False)
+    _pvnb78 = next((v for v in pv78._name_values() if v), "")
+    pv78._on_name_filter({_pvnb78})
+    wait_view(root, pv78)
+    _pvsnap78 = pv78.capture_filter_state()
+    check("(v3.9.66) §78d: capture pivot — mode tanggal + rentang kustom "
+          "+ hide_empty False + ⧩ #0 (satu snapshot utk SEMUA kontrol)",
+          _pvsnap78.get("mode") == "tanggal"
+          and _pvsnap78.get("tgl_start") == "-7"
+          and _pvsnap78.get("tgl_end") == "14"
+          and _pvsnap78.get("hide_empty") is False
+          and _pvsnap78.get("name_sel") == [_pvnb78],
+          f"got {_pvsnap78}")
+    # KONTRAK load_data pivot: hanya ⧩ #0 + combo (validasi v3.9.33) yang
+    # di-reset; mode/tgl/hide_empty PERSIST in-session (view BARU selalu
+    # mulai default) → kembalikan manual ke default utk mensimulasikan
+    # view startup baru, lalu restore di atasnya (persis alur produksi).
+    pv78.load_data(append1)
+    wait_view(root, pv78)
+    pv78._on_mode_change(0)
+    pv78.tgl_start_var.set("-31")
+    pv78.tgl_end_var.set("31")
+    pv78.hide_empty_var.set(True)
+    wait_view(root, pv78)
+    check("(v3.9.66) §78d: baseline pasca-load_data — ⧩ #0 di-reset ke "
+          "None + mode default (load_data TIDAK menyentuh mode/tgl/hide "
+          "— persist in-session; view baru mulai default)",
+          pv78.pivot_mode == "resto"
+          and pv78._name_selected is None,
+          f"mode={pv78.pivot_mode} name={pv78._name_selected!r}")
+    pv78.restore_filter_state(_pvsnap78)
+    wait_view(root, pv78)
+    check("(v3.9.66) §78d: restore pivot — SEMUA kontrol kembali (mode "
+          "tanggal via set_active_silent + _apply_mode_ui; tgl; "
+          "checkbox; ⧩ #0)",
+          pv78.pivot_mode == "tanggal"
+          and pv78.mode_seg.active == 1
+          and pv78.tgl_start_var.get() == "-7"
+          and pv78.tgl_end_var.get() == "14"
+          and pv78.hide_empty_var.get() is False
+          and pv78._name_selected == {_pvnb78})
+    # bersihkan state test pivot (default — blok §78f tak menjangkau)
+    pv78._on_mode_change(0)
+    pv78._on_name_filter(None)
+    wait_view(root, pv78)
+
+    # -- (e) Rincian PO: combo CABANG divalidasi vs values data baru ------
+    rv78 = app.rincian_view
+    select_and_wait(root, app, app.tab_rincian, rv78)
+    _cbv78 = next((v for v in list(rv78.cabang_combo["values"])
+                   if v != "(All)"), "(All)")
+    rv78.cabang_var.set("(All)")
+    rv78.restore_filter_state({"cabang": "CABANG TAK ADA",
+                               "status_pesanan": 42})
+    check("(v3.9.66) §78e: validasi combo — cabang basi DITOLAK (default "
+          "(All) tetap; tipe aneh diabaikan) — pola preserve v3.9.42 "
+          "anti 0-baris senyap",
+          rv78.cabang_var.get() == "(All)",
+          f"got {rv78.cabang_var.get()!r}")
+    rv78.restore_filter_state({"cabang": _cbv78})
+    wait_view(root, rv78)
+    check("(v3.9.66) §78e: restore valid — cabang kembali terpilih "
+          "(nilai yang MASIH ADA di data dipulihkan)",
+          rv78.cabang_var.get() == _cbv78,
+          f"got {rv78.cabang_var.get()!r}")
+
+    # -- (f) APP: _apply_saved_filters_once via _on_pipeline_done ---------
+    select_and_wait(root, app, app.tab_deviasi_gr, dv78)
+    from src.pipeline.fn_audit import build_audit_from_app as _baf78
+    _ad78, _ak78, _as78 = _baf78(rekap_so, in_detail)
+    _ares78 = {"df": _ad78, "kpi": _ak78, "desc": _as78}
+    # (f1) run dgn data KOSONG → restore DITUNDA (belum ada yang bisa
+    # difilter — state utk run berikutnya)
+    app._filter_restore_state = {"deviasi_gr": {"kategori": _kval78,
+                                               "Nama Barang": [_nbv78]},
+                                 "_app": {"laporan_mode": 2}}
+    app._on_pipeline_done(pd.DataFrame(), rincian, in_detail, None, None)
+    check("(v3.9.66) §78f: run dgn data KOSONG → restore DITUNDA (state "
+          "tak dikonsumsi — menanti run dgn data)",
+          app._filter_restore_state is not None)
+    # (f2) run PERTAMA dgn data → restore diterapkan + dikonsumsi SEKALI
+    app._on_pipeline_done(append1, rincian, in_detail, _ares78, None)
+    wait_view(root, app.deviasi_gr_view)
+    check("(v3.9.66) §78f: run pertama dgn data — restore DITERAPKAN "
+          "(kategori + ⧩ dari settings.json) + state dikonsumsi SEKALI",
+          dv78._kategori_var.get() == _kval78
+          and dv78._col_sel["Nama Barang"] == {_nbv78}
+          and app._filter_restore_state is None,
+          f"kat={dv78._kategori_var.get()!r}")
+    check("(v3.9.66) §78f: mode tab 📋 ikut dipulihkan (key '_app' → "
+          "show_laporan_mode(2) 💰 Nominal — jalur persis klik user)",
+          getattr(app, "_laporan_mode_idx", 0) == 2
+          and app.laporan_segment.active == 2)
+    # (f3) run KEDUA dgn data → filter di-RESET (kontrak v3.9.33: run
+    # berikutnya reset; restore tak pernah menimpa kerja user sesi)
+    app._on_pipeline_done(append1, rincian, in_detail, _ares78, None)
+    wait_view(root, app.deviasi_gr_view)
+    check("(v3.9.66) §78f: run KEDUA sesi — filter di-RESET (kategori "
+          "default + ⧩ None; restore tidak diulang)",
+          dv78._kategori_sel is None
+          and dv78._col_sel["Nama Barang"] is None,
+          f"kat={dv78._kategori_sel} col={dv78._col_sel['Nama Barang']}")
+
+    # -- (g) JALUR CLOSE: capture semua view → settings.json --------------
+    select_and_wait(root, app, app.tab_deviasi_gr, dv78)
+    dv78._on_col_filter("Nama Barang", {_nbv78})
+    wait_view(root, dv78)
+    _orig_sp78b = _appmod78._SETTINGS_PATH
+    _tmp78b = _tf78.mkdtemp(prefix="t3966_close_")
+    _appmod78._SETTINGS_PATH = _Path78(_tmp78b) / "settings.json"
+    _app78_running = app.is_running
+    app.is_running = False
+    _orig_destroy78 = app.root.destroy
+    app.root.destroy = lambda: None
+    try:
+        app._on_close_window()
+        import json as _json78
+        with open(_appmod78._SETTINGS_PATH, "r", encoding="utf-8") as _f78:
+            _data78 = _json78.load(_f78)
+        _fs78 = _data78.get("filter_state", {})
+        check("(v3.9.66) §78g: jalur CLOSE menyimpan SEMUA view + _app ke "
+              "filter_state (deviasi_gr berisi ⧩ aktif; window_state ikut "
+              "tersimpan di file yang sama — RMW)",
+              isinstance(_fs78.get("deviasi_gr"), dict)
+              and _fs78["deviasi_gr"].get("Nama Barang") == [_nbv78]
+              and isinstance(_fs78.get("_app"), dict)
+              and "window_state" in _data78,
+              f"keys={sorted(_fs78.keys())}")
+    finally:
+        app.root.destroy = _orig_destroy78
+        app.is_running = _app78_running
+        _appmod78._SETTINGS_PATH = _orig_sp78b
+        _sh78.rmtree(_tmp78b, ignore_errors=True)
+
+    # -- (h) STARTUP: app kedua baca filter_state + restore E2E ----------
+    # (pola §77c — app kedua di Toplevel; _load_filter_state dipatch)
+    _orig_lfs78 = _appmod78._load_filter_state
+    _appmod78._load_filter_state = lambda: {
+        "deviasi_gr": {"kategori": _kval78,
+                       "Nama Barang": [_nbv78]}}
+    _top78 = tk.Toplevel(root)
+    _rs78b, _re78b = sys.stdout, sys.stderr
+    try:
+        _app78b = StockMonitorApp(_top78)
+        sys.stdout, sys.stderr = _rs78b, _re78b
+        root.update()
+        check("(v3.9.66) §78h: STARTUP membaca filter_state (settings.json "
+              "→ _filter_restore_state disiapkan di __init__; tanpa file "
+              "→ None — perilaku lama)",
+              _app78b._filter_restore_state
+              == {"deviasi_gr": {"kategori": _kval78,
+                                 "Nama Barang": [_nbv78]}})
+        _app78b._on_pipeline_done(append1, rincian, in_detail,
+                                  _ares78, None)
+        wait_view(root, _app78b.deviasi_gr_view)
+        check("(v3.9.66) §78h: E2E LINTAS-SESI — app kedua menjalankan "
+              "pipeline → kategori + ⧩ Nama Barang dipulihkan PERSIS "
+              "(buka-tutup app: filter kembali tanpa diseting ulang)",
+              _app78b.deviasi_gr_view._kategori_var.get() == _kval78
+              and _app78b.deviasi_gr_view._col_sel["Nama Barang"]
+              == {_nbv78},
+              f"kat={_app78b.deviasi_gr_view._kategori_var.get()!r}")
+    finally:
+        sys.stdout, sys.stderr = _rs78b, _re78b
+        _appmod78._load_filter_state = _orig_lfs78
+        _top78.destroy()
         root.update()
 
     root.destroy()

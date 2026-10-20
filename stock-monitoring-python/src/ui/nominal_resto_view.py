@@ -131,9 +131,11 @@ from .widgets import (
     LoadingOverlay,
     TableExpander,
     apply_cell_tag,
+    apply_col_sel_restore,  # v3.9.66 — filter persisten antar sesi
     attach_clone_filters,
     auto_fit_columns,
     autofit_tree_once,  # v3.9.55 — F8
+    col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
     fmt_int_id,
@@ -700,6 +702,73 @@ class NominalRestoView(tk.Frame):
         self._nh_kategori_var.set("Semua")
         self._nh_kategori_sel = None
         self._render_noharga()
+
+    # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
+    # Snapshot / pulihkan kedua tabel tab 🧮: Per Resto (⧩ + KATEGORI) +
+    # anak tab Tanpa Harga (⧩ + KATEGORI global). TAB AKTIF sub-notebook
+    # TIDAK ikut (pemilih tampilan, bukan filter — restore tetap membuka
+    # tab 'Per Resto' default).
+    def capture_filter_state(self) -> dict:
+        """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
+        ke settings.json, key 'filter_state.nominal_resto')."""
+        st = col_sel_to_json(self._col_sel)
+        st["kategori"] = self._kategori_var.get()
+        _nh = col_sel_to_json(self._nh_col_sel)
+        if _nh:
+            st["nh_col_sel"] = _nh
+        st["nh_kategori"] = self._nh_kategori_var.get()
+        return st
+
+    def restore_filter_state(self, state) -> None:
+        """v3.9.66 — pulihkan snapshot capture_filter_state.
+
+        Combobox KATEGORI (keduanya) divalidasi terhadap values data
+        BARU (pola preserve v3.9.42). Refresh SEKALI di akhir bila ada
+        perubahan: _refresh men-render kedua tabel (utama + anak tab,
+        v3.9.64 FIX 6) memakai state yang sudah dipulihkan; bila
+        `_noharga_df` belum siap, render anak tab menyusul dari hasil
+        compute worker (jalur normal)."""
+        if not isinstance(state, dict):
+            return
+        if self.data is None or bool(getattr(self.data, "empty", True)):
+            return
+        changed = apply_col_sel_restore(
+            self, state, self._col_sel, self.header_filters)
+        _kv = state.get("kategori")
+        if isinstance(_kv, str):
+            try:
+                _kvals = list(self._kategori_combo["values"])
+            except tk.TclError:
+                _kvals = []
+            if (_kv in _kvals
+                    and self._kategori_var.get() != _kv):
+                self._kategori_var.set(_kv)
+                self._kategori_sel = (None if _kv == "Semua" else _kv)
+                changed = True
+        _nh_state = state.get("nh_col_sel")
+        if (isinstance(_nh_state, dict)
+                and apply_col_sel_restore(
+                    self, _nh_state, self._nh_col_sel,
+                    self._nh_filters)):
+            changed = True
+        _nk = state.get("nh_kategori")
+        if isinstance(_nk, str):
+            try:
+                _nvals = list(self._nh_kategori_combo["values"])
+            except tk.TclError:
+                _nvals = []
+            if (_nk in _nvals
+                    and self._nh_kategori_var.get() != _nk):
+                self._nh_kategori_var.set(_nk)
+                self._nh_kategori_sel = (
+                    None if _nk == "Semua" else _nk)
+                changed = True
+        if not changed:
+            return
+        if self.winfo_ismapped():
+            self._refresh()
+        # tab tersembunyi → dirty flag load_data terpasang; anak tab
+        # ikut di-render oleh _refresh saat tab dibuka.
 
     def _nh_format_col_series(self, col: str, series):
         """Format nilai kolom anak tab utk ⧩ (identik dgn sel tampil)."""
