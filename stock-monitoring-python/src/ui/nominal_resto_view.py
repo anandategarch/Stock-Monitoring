@@ -148,6 +148,7 @@ from .widgets import (
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 # kolom popup rincian per resto (double-click) — v3.9.36 (user: "pop up
@@ -705,9 +706,11 @@ class NominalRestoView(tk.Frame):
 
     # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
     # Snapshot / pulihkan kedua tabel tab 🧮: Per Resto (⧩ + KATEGORI) +
-    # anak tab Tanpa Harga (⧩ + KATEGORI global). TAB AKTIF sub-notebook
-    # TIDAK ikut (pemilih tampilan, bukan filter — restore tetap membuka
-    # tab 'Per Resto' default).
+    # anak tab Tanpa Harga (⧩ + KATEGORI global). v3.9.68 — anak tab
+    # AKTIF kini IKUT disimpan & dipulihkan (audit eksternal T6: user
+    # yang terakhir menyelidiki 'Tanpa Harga' tidak perlu berpindah
+    # subtab ulang tiap buka app; pemilih tampilan — dipulihkan TANPA
+    # memicu refresh, terpisah dari logika filter data).
     def capture_filter_state(self) -> dict:
         """v3.9.66 — snapshot filter aktif → dict JSON-safe (app simpan
         ke settings.json, key 'filter_state.nominal_resto')."""
@@ -717,6 +720,10 @@ class NominalRestoView(tk.Frame):
         if _nh:
             st["nh_col_sel"] = _nh
         st["nh_kategori"] = self._nh_kategori_var.get()
+        # v3.9.68 — T6 (audit eksternal): anak tab aktif ikut diingat.
+        st["subtab"] = ("noharga"
+                       if str(self._sub_nb.select())
+                       == str(self._tab_noharga) else "perresto")
         return st
 
     def restore_filter_state(self, state) -> None:
@@ -732,6 +739,15 @@ class NominalRestoView(tk.Frame):
             return
         if self.data is None or bool(getattr(self.data, "empty", True)):
             return
+        # v3.9.68 — T6 (audit eksternal): pulihkan anak tab AKTIF dulu
+        # (pemilih tampilan — TANPA memicu refresh; nilai asing/absen →
+        # tetap default 'Per Resto').
+        _sub = state.get("subtab")
+        with contextlib.suppress(tk.TclError):
+            if _sub == "noharga":
+                self._sub_nb.select(self._tab_noharga)
+            elif _sub == "perresto":
+                self._sub_nb.select(self._tab_main)
         changed = apply_col_sel_restore(
             self, state, self._col_sel, self.header_filters)
         _kv = state.get("kategori")
@@ -892,6 +908,12 @@ class NominalRestoView(tk.Frame):
                 fmt = self._nh_format_col_series(col, f[col])
                 f = f[fmt.isin(sel)]
         if f.empty:
+            # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebabnya
+            # seleksi ⧩ KOSONG → pesan jujur eksplisit + cara keluar.
+            _hint = zero_row_filter_message(self._nh_col_sel)
+            if _hint:
+                self._nh_status_var.set(_hint)
+                return
             _act = ", ".join(c for c, s in self._nh_col_sel.items()
                              if s is not None)
             self._nh_status_var.set(
@@ -1565,13 +1587,20 @@ class NominalRestoView(tk.Frame):
                 fmt = self._format_col_series(col, filtered[col])
                 filtered = filtered[fmt.isin(sel)]
         if filtered.empty:
-            # v3.9.59 — FIX 2e-03 (kolom ⧩): idem jalur kategori — sebut
-            # kolom filter aktif + jumlah baris pra-filter.
-            _act = ", ".join(c for c, s in self._col_sel.items()
-                             if s is not None)
-            self.status_var_label.set(
-                f"0 dari {fmt_int_id(len(result))} resto lolos filter aktif"
-                + (f" ({_act})" if _act else "") + ".")
+            # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebabnya
+            # seleksi ⧩ KOSONG → pesan jujur eksplisit (bukan generik).
+            _hint = zero_row_filter_message(self._col_sel)
+            if _hint:
+                self.status_var_label.set(_hint)
+            else:
+                # v3.9.59 — FIX 2e-03 (kolom ⧩): idem jalur kategori —
+                # sebut kolom filter aktif + jumlah baris pra-filter.
+                _act = ", ".join(c for c, s in self._col_sel.items()
+                                 if s is not None)
+                self.status_var_label.set(
+                    f"0 dari {fmt_int_id(len(result))} resto lolos "
+                    f"filter aktif"
+                    + (f" ({_act})" if _act else "") + ".")
             self._total_var.set("")
             self._render_done_guard()
             return

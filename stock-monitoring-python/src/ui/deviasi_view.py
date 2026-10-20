@@ -285,6 +285,7 @@ from .widgets import (
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 # FIX 6d1-06 — logger modul: kegagalan pivot_table tidak lagi ditelan
@@ -2527,10 +2528,15 @@ class DeviasiView(tk.Frame):
                 filtered = filtered[fmt.isin(sel)]
 
         if filtered.empty:
+            # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebab 0
+            # baris adalah seleksi ⧩ KOSONG (filter aktif — bisa terjadi
+            # lintas sesi via restore), katakan EXPLISIT + cara keluar.
+            _hint = zero_row_filter_message(st["col_sel"])
+            _generic = (f"Tidak ada data "
+                        f"{'GR' if self.satuan_mode == 'GR' else 'PCS'} "
+                        f"setelah filter.")
             return {"items": [], "kpi": (0, 0.0, 0),
-                    "status": f"Tidak ada data "
-                              f"{'GR' if self.satuan_mode == 'GR' else 'PCS'} "
-                              f"setelah filter."}
+                    "status": _hint or _generic}
 
         filtered = (
             filtered
@@ -2575,10 +2581,15 @@ class DeviasiView(tk.Frame):
             _fmt_rank = self._format_col_series("Rank", filtered["Rank"])
             filtered = filtered[_fmt_rank.isin(_sel_rank)]
             if filtered.empty:
+                # v3.9.68 — TRI-STATE (audit eksternal T1): idem titik
+                # filter kolom di atas — pesan jujur bila seleksi ⧩ Rank
+                # kosong (bukan pesan generik).
+                _hint_r = zero_row_filter_message(st["col_sel"])
+                _generic_r = (f"Tidak ada data "
+                              f"{'GR' if self.satuan_mode == 'GR' else 'PCS'} "
+                              f"setelah filter.")
                 return {"items": [], "kpi": (0, 0.0, 0),
-                        "status": f"Tidak ada data "
-                                  f"{'GR' if self.satuan_mode == 'GR' else 'PCS'} "
-                                  f"setelah filter."}
+                        "status": _hint_r or _generic_r}
         # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
         # load_data): guard supaya _prepare_rows tetap jalan.
         if "Dev. Bulan Lalu" not in filtered.columns:

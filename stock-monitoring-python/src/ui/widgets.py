@@ -1828,9 +1828,19 @@ class HeaderFilter:
     def set_selected(self, values):
         """v3.9.22 — set state seleksi SECARA PROGRAMATIK (default filter,
         mis. KATEGORI=DEVIASI di Rekap Selisih IN) + refresh ikon corong.
-        None/kosong = tampil semua (tanpa filter)."""
-        vals = list(values) if values else None
-        self.selected = set(vals) if vals is not None else None
+        v3.9.68 — TRI-STATE (audit eksternal T1): None = tanpa filter;
+        koleksi KOSONG (set()/[]) = filter AKTIF yang menyaring 0 baris
+        — ikon corong TETAP MENYALA. Dulu ``list(values) if values else
+        None`` menelan koleksi kosong sebagai None → corong mati padahal
+        filter aktif 0 baris (restore tri-state membuat kondisi ini
+        kini bisa terjadi lintas sesi)."""
+        if values is None:
+            self.selected = None
+        else:
+            try:
+                self.selected = set(values)
+            except TypeError:
+                self.selected = None
         self.refresh_icon()
 
     # -- ikon corong ---------------------------------------------------------
@@ -2517,9 +2527,13 @@ def col_sel_from_json(raw, allowed) -> dict:
       dipulihkan — kolom hilang / schema berganti diabaikan senyap;
     - hanya nilai string yang diterima (korupsi settings.json tidak
       bisa menyuntik objek arbitrer);
-    - seleksi KOSONG ([]) DILEWATI — set() = "0 baris" (semantik
-      v3.9.13) dan tidak pernah menjadi hasil restore yang berguna;
-      restore tidak boleh menghasilkan tabel kosong misterius.
+    - v3.9.68 — TRI-STATE (audit eksternal T1): seleksi KOSONG ([])
+      kini DIPULIHKAN sebagai set() kosong = filter AKTIF "0 baris"
+      (semantik v3.9.13) — dulu dibuang, sehingga kondisi "user
+      sengaja tidak memilih nilai apa pun" lenyap lintas sesi dan
+      tabel tiba-tiba menampilkan semua baris lagi. Perilaku data
+      identik in-session; kolom ⧩ yang dimaksud kini jujur menampilkan
+      pesan 0-baris (zero_row_filter_message) di tiap view.
     Return {kolom: set(nilai)} — hanya entri yang lolos validasi."""
     if not isinstance(raw, dict):
         return {}
@@ -2532,6 +2546,9 @@ def col_sel_from_json(raw, allowed) -> dict:
         c = str(col)
         if (c not in allowed_set
                 or not isinstance(vals, (list, tuple, set, frozenset))):
+            continue
+        if len(vals) == 0:
+            out[c] = set()      # tri-state: seleksi kosong = 0 baris
             continue
         s = {v for v in vals if isinstance(v, str)}
         if s:
@@ -2559,6 +2576,33 @@ def apply_col_sel_restore(view, state, col_sel: dict, group) -> bool:
                 group.set_selected(col, sel)
         changed = True
     return changed
+
+
+def col_sel_empty_columns(col_sel: dict) -> list:
+    """v3.9.68 — kolom ⧩ yang seleksinya KOSONG (set() = filter aktif
+    yang menyaring 0 baris — semantik v3.9.13; lihat col_sel_from_json
+    tri-state). Dipakai view utk pesan status yang jujur."""
+    try:
+        return [str(c) for c, s in (col_sel or {}).items()
+                if s is not None and len(s) == 0]
+    except (TypeError, ValueError, AttributeError):
+        return []
+
+
+def zero_row_filter_message(col_sel: dict) -> str | None:
+    """v3.9.68 — pesan jujur saat tabel 0 baris KARENA seleksi ⧩ kosong
+    (audit eksternal T1: "filter aktif → 0 baris" yang disengaja tidak
+    boleh disamakan dengan "tanpa filter"; pengguna diberi tahu
+    KENAPA kosong + cara keluar). Return None bila tidak ada seleksi
+    kosong (penyebab 0 baris bukan ⧩ kosong — status generik view
+    tetap dipakai)."""
+    cols = col_sel_empty_columns(col_sel)
+    if not cols:
+        return None
+    return ("0 baris — semua nilai tidak dipilih pada filter ⧩ "
+            + ", ".join(f"'{c}'" for c in cols)
+            + " (klik corong ⧩ di header kolom lalu centang "
+              "'Pilih semua' / pilih kembali nilainya)")
 
 
 # --- Column hide/unhide (v3.6) --------------------------------------------------
@@ -5839,3 +5883,136 @@ def install_tree_find_binding(top, get_tree) -> None:
             top.bind(seq, _open)
         except tk.TclError:
             pass
+
+
+# --- Tooltip grup tab notebook (v3.9.68) ------------------------------------------
+
+class NotebookTabTooltips:
+    """v3.9.68 — tooltip saat hover baris tab notebook (audit eksternal
+    T5: 10 tab utama → beban navigasi; label COMPACT fallback v3.9.59
+    memendekkan nama tab saat lebar sempit sehingga fungsi tab bisa
+    kurang jelas).
+
+    Solusi minim risiko (TANPA sidebar/redesign — urutan tab sudah
+    mengikuti kelompok alur kerja): tooltip menampilkan LABEL PENUH +
+    nama KELOMPOK alur kerja:
+      Operasional            — ⚙️ Config · 🚀 Proses · 📊 Pivot Table
+      Pemeriksaan & Rekonsiliasi — 📦 GR · 🧩 PCS · 📤 Rekap Selisih IN
+      Analisis               — 📋 Laporan · 🧮 Nominal Deviasi
+      Tindak Lanjut          — ☑ Follow Up · 🛒 Rincian PO
+
+    - Hover di atas tab (elemen 'label') → tooltip muncul setelah
+      ``delay_ms``; pindah ke tab lain → tooltip mengikuti; keluar dari
+      baris tab → hilang.
+    - Posisi mengikuti pointer (winfo_pointerx/y) — aman multi-monitor.
+    - ``show(tab_key)`` / ``hide()`` publik utk pengujian (tanpa perlu
+      sintesis event Motion pada koordinat tab yang bervariasi).
+    - ``index("@x,y")`` Python wrapper menaikkan ValueError pada posisi
+      kosong — karena itu resolusi tab memakai panggilan Tcl mentah
+      (return '' bila bukan area tab; terverifikasi Xvfb :99).
+    """
+
+    def __init__(self, notebook, *, full_labels: dict, groups: dict,
+                 delay_ms: int = 350):
+        self.nb = notebook
+        self.full_labels = dict(full_labels or {})
+        self.groups = dict(groups or {})
+        self._delay_ms = int(delay_ms)
+        self._after_id = None
+        self._tip = None
+        self._tip_key = None
+        notebook.bind("<Motion>", self._on_motion, add="+")
+        notebook.bind("<Leave>", self._on_leave, add="+")
+
+    # -- resolusi tab pada koordinat ---------------------------------------
+    def _tab_key_at(self, x, y) -> str | None:
+        try:
+            idx = self.nb.tk.call(self.nb._w, "index",
+                                  f"@{int(x)},{int(y)}")
+        except tk.TclError:
+            return None
+        s = str(idx).strip()
+        if not s:
+            return None           # bukan area tab (halaman/notebook kosong)
+        try:
+            tabs = list(self.nb.tabs())
+            i = int(s)
+        except (tk.TclError, ValueError, TypeError):
+            return None
+        if 0 <= i < len(tabs):
+            return str(tabs[i])
+        return None
+
+    # -- event --------------------------------------------------------------
+    def _on_motion(self, event):
+        key = self._tab_key_at(event.x, event.y)
+        if key is None:
+            self.hide()
+            return
+        if key == self._tip_key and self._tip is not None \
+                and self._tip.winfo_exists():
+            return                # tooltip utk tab ini sudah tampil
+        self.hide()
+        self._after_id = self.nb.after(
+            self._delay_ms, lambda: self.show(key))
+
+    def _on_leave(self, _event=None):
+        self.hide()
+
+    # -- tampil / sembunyi (publik — dipakai timer & pengujian) -------------
+    def show(self, tab_key: str):
+        """Tampilkan tooltip utk tab ``tab_key`` (key = str(widget tab))."""
+        self._cancel_timer()
+        if tab_key == self._tip_key and self._tip is not None \
+                and self._tip.winfo_exists():
+            return
+        self._destroy_tip()
+        label = self.full_labels.get(tab_key)
+        group = self.groups.get(tab_key)
+        if label is None or group is None:
+            self._tip_key = None
+            return
+        tip = tk.Toplevel(self.nb)
+        tip.withdraw()
+        tip.overrideredirect(True)
+        with contextlib.suppress(tk.TclError):
+            tip.attributes("-topmost", True)
+        tk.Label(tip, text=f"{label} — kelompok: {group}",
+                 bg="#0f172a", fg="#f8fafc", font=font(9),
+                 padx=10, pady=5).pack()
+        with contextlib.suppress(tk.TclError):
+            px = self.nb.winfo_pointerx() or self.nb.winfo_rootx()
+            py = self.nb.winfo_pointery() or self.nb.winfo_rooty()
+            tip.geometry(f"+{px + 14}+{py + 18}")
+        tip.deiconify()
+        self._tip = tip
+        self._tip_key = tab_key
+
+    def hide(self):
+        """Sembunyikan tooltip + batalkan timer yang tertunda."""
+        self._cancel_timer()
+        self._destroy_tip()
+
+    def _cancel_timer(self):
+        if self._after_id is not None:
+            with contextlib.suppress(tk.TclError):
+                self.nb.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _destroy_tip(self):
+        if self._tip is not None:
+            with contextlib.suppress(tk.TclError):
+                self._tip.destroy()
+        self._tip = None
+        self._tip_key = None
+
+    def current_text(self) -> str:
+        """Teks tooltip yang sedang tampil ('' bila tidak ada) — helper
+        pengujian."""
+        if self._tip is None or not self._tip.winfo_exists():
+            return ""
+        kids = self._tip.winfo_children()
+        for w in kids:
+            if isinstance(w, tk.Label):
+                return str(w.cget("text"))
+        return ""

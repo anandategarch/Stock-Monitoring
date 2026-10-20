@@ -1,28 +1,136 @@
-# v3.9.62 — RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir).
+# v3.9.68 — GERBANG TES SEBELUM RILIS (audit eksternal T3: "workflow
+# rilis otomatis membangun dan mengemas aplikasi, tetapi tidak
+# menjalankan suite pengujian UI dalam workflow tersebut").
+#
+# Struktur baru:
+#   1. job `tests` (ubuntu-latest + Xvfb 1920x1080) — gerbang kualitas:
+#      ruff (baseline maks 201, ruff dipin 0.17.x — rule-set default
+#      ruff melebar antar versi) · py_compile seluruh file · validasi
+#      config.json · test_ui_redesign.py (suite penuh) · test_mock.py ·
+#      smoke 2 entry (hidup sampai timeout tanpa crash.log).
+#   2. job `build-windows` — NEEDS: tests → build EXE + rilis HANYA
+#      bila gerbang tes HIJAU. "Build success" tidak lagi menjadi
+#      satu-satunya penanda aplikasi siap dipakai.
 #
 # Trigger:
-#   - push tag "v*"  → build windows-latest + GitHub Release (lampiran zip)
-#   - workflow_dispatch → build manual (artefak bisa diunduh, tanpa Release)
+#   - push ke main / PR ke main → hanya job tests (gerbang regresi tiap
+#     perubahan; build EXE dilewati — hemat runner)
+#   - push tag "v*" → tests + build + GitHub Release (lampiran zip)
+#   - workflow_dispatch → tests + build manual (artefak bisa diunduh,
+#     tanpa Release)
 #
-# Langkah sama persis dgn build lokal: python build_exe.py (memakai
-# stock-monitoring.spec; config.json disalin ke samping .exe).
-# Catatan praktis:
+# Catatan praktis lama tetap berlaku:
 #   - Antivirus Windows kadang salah menandai exe PyInstaller (false
 #     positive umum): edukasi user "Allow"/smartcreen "More info → Run".
-#   - Versi rilis = nama tag (mis. v3.9.62) — commit versi di APP_VERSION
+#   - Versi rilis = nama tag (mis. v3.9.68) — commit versi di APP_VERSION
 #     harus sinkron dgn tag.
-name: Rilis Windows EXE
+name: Gerbang Tes & Rilis Windows EXE
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  tests:
+    name: Gerbang tes (suite UI + mock + ruff + py_compile + smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: stock-monitoring-python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Xvfb + Tk (suite UI butuh display 1920x1080)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb tk
+          python -c "import tkinter; print('tkinter OK', tkinter.TkVersion)"
+
+      - name: Dependensi runtime + alat dev (ruff & Pillow dipin)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # ruff DIPIN: baseline gerbang (maks 201) dihitung dengan
+          # 0.17.x — rule-set default ruff melebar antar versi, pin
+          # membuat baseline deterministik di runner manapun.
+          # Pillow: pixel-probe §76 (opsional saat lokal, tapi di CI
+          # diaktifkan penuh supaya cek visual tak dilewati).
+          pip install ruff==0.17.1 pillow
+
+      - name: Ruff — gerbang baseline (maks 201 isu)
+        run: |
+          OUT=$(ruff check . 2>&1 || true)
+          echo "$OUT" | tail -2
+          N=$(echo "$OUT" | grep -oE "Found [0-9]+ error" | grep -oE "[0-9]+" | head -1)
+          if [ -z "$N" ]; then
+            echo "::error::ruff tidak menghasilkan ringkasan 'Found N errors'"
+            exit 1
+          fi
+          echo "Ruff: $N isu (baseline maks 201)"
+          if [ "$N" -gt 201 ]; then
+            echo "::error::Ruff naik di atas baseline 201 ($N isu) — bersihkan isu baru sebelum rilis"
+            exit 1
+          fi
+
+      - name: py_compile seluruh file Python
+        run: |
+          python -m compileall -q src run_app.py build_exe.py \
+            test_ui_redesign.py test_mock.py screenshot_ui.py bench_views.py
+          echo "py_compile OK"
+
+      - name: Validasi config.json
+        run: python -c "import json; json.load(open('config.json', encoding='utf-8')); print('config.json OK')"
+
+      - name: Suite UI penuh (Xvfb 1920x1080 — 2 tes layout sensitif resolusi)
+        timeout-minutes: 25
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python3 test_ui_redesign.py
+
+      - name: Pipeline mock end-to-end (Xvfb)
+        timeout-minutes: 10
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python3 test_mock.py
+
+      - name: Smoke 2 entry (hidup sampai timeout, tanpa crash.log)
+        run: |
+          rm -f crash.log
+          set +e
+          timeout 20 xvfb-run -a python3 run_app.py >/dev/null 2>&1
+          C1=$?
+          rm -f crash.log
+          timeout 20 xvfb-run -a python3 -m src.ui >/dev/null 2>&1
+          C2=$?
+          set -e
+          echo "exit: $C1 $C2 (124/0 = hidup sampai timeout = OK)"
+          for c in "$C1" "$C2"; do
+            case "$c" in
+              0|124) ;;
+              *) echo "::error::entry exit $c — crash dini"; exit 1 ;;
+            esac
+          done
+          if [ -f crash.log ]; then
+            echo "::error::crash.log tertulis saat smoke"
+            cat crash.log
+            exit 1
+          fi
+          echo "Smoke OK — gerbang tes LULUS"
+
   build-windows:
+    name: Build & rilis EXE (hanya setelah gerbang tes HIJAU)
+    needs: tests
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     defaults:
       run:

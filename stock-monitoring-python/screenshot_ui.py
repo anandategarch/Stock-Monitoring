@@ -1,5 +1,13 @@
 """
-screenshot_ui.py — Render app v3.3 + screenshot tiap tab & fitur baru.
+screenshot_ui.py — Render app (versi dinamis — lihat banner saat run)
++ screenshot tiap tab & fitur baru.
+
+v3.9.68 — HARNESS v2 (audit eksternal T4): header versi DINAMIS ikut
+APP_VERSION (dulu literal "v3.3" basi 14 rilis — bisa menyesatkan QA)
++ skenario baru: nominal per-resto, anak tab Tanpa Harga, zoom
+50/80/100/200%, tabel kosong jujur (⧩ seleksi kosong), corong aktif,
+popup filter deviasi, jendela kecil.
+
 Jalankan di bawah Xvfb (DISPLAY=:99).
 
 Output: /tmp/shots/*.png
@@ -16,7 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import tkinter as tk
 
-from src.ui.app import StockMonitorApp
+from src.ui.app import APP_VERSION, StockMonitorApp
 from test_ui_redesign import (
     make_mock_append1,
     make_mock_rincian,
@@ -47,6 +55,8 @@ def pump(root, seconds=0.5):
 
 
 def main():
+    print(f"screenshot_ui.py — Render app v{APP_VERSION} "
+          "+ screenshot tiap tab & fitur baru (harness v2).")
     real_stdout, real_stderr = sys.stdout, sys.stderr
     root = tk.Tk()
     root.geometry("1440x900+0+0")
@@ -201,9 +211,77 @@ def main():
     shot("14-loading-overlay")
     app.pivot_view.overlay.hide()
 
+    # v3.9.68 — HARNESS v2 (audit eksternal T4): cakupan UI versi terkini.
+    # (15) 🧮 Nominal Deviasi — tabel Per Resto
+    app.nominal_resto_view.load_data(append1)
+    select_and_wait(root, app, app.tab_nominal_resto,
+                    app.nominal_resto_view)
+    shot("15-nominal-deviasi-per-resto")
+
+    # (16) 🧮 anak tab 'Tanpa Harga' (global)
+    app.nominal_resto_view._sub_nb.select(
+        app.nominal_resto_view._tab_noharga)
+    pump(root, 0.5)
+    shot("16-nominal-tanpa-harga")
+
+    # (17-20) Zoom 50% / 80% / 100% / 200% (fonts-only — jendela tetap)
+    app.notebook.select(app.tab_deviasi_gr)
+    pump(root, 0.3)
+    for _z, _nm in ((0.5, "17-zoom-50"), (0.8, "18-zoom-80"),
+                    (1.0, "19-zoom-100"), (2.0, "20-zoom-200")):
+        app._apply_ui_zoom(_z, resize_window=False)
+        pump(root, 0.4)
+        shot(_nm)
+    app._apply_ui_zoom(0.8, resize_window=False)   # kembali default
+    pump(root, 0.3)
+
+    # (21) Tabel kosong JUJUR — seleksi ⧩ 'Nama Barang' KOSONG (tri-state
+    # v3.9.68): status footer menjelaskan penyebab + cara keluar.
+    _dv = app.deviasi_gr_view
+    _dv._col_sel["Nama Barang"] = set()
+    _dv.header_filters.set_selected("Nama Barang", set())
+    _dv._refresh(sync=True)
+    pump(root, 0.4)
+    shot("21-deviasi-kosong-seleksi-kosong")
+
+    # (22) Corong ⧩ AKTIF — 1 barang terpilih (ikon menyala + baris
+    # tersaring) + status tersaring.
+    _dv._col_sel["Nama Barang"] = {"ADONAN GORENG MEKAR"}
+    _dv.header_filters.set_selected("Nama Barang", {"ADONAN GORENG MEKAR"})
+    _dv._refresh(sync=True)
+    pump(root, 0.4)
+    shot("22-deviasi-corong-aktif")
+
+    # (23) Popup filter ⧩ deviasi TERBUKA (pilih semua + counter + cari)
+    _hf23 = _dv.header_filters._filters.get("Nama Barang")
+    if _hf23 is not None:
+        _hf23.open_popup()
+        pump(root, 0.4)
+        shot("23-deviasi-popup-filter-open")
+        _hf23._close()
+        pump(root, 0.2)
+
+    # (24) Jendela KECIL (1024x620) — label tab compact + layout sempit
+    _geo24 = root.geometry()
+    root.geometry("1024x620+0+0")
+    pump(root, 0.5)
+    shot("24-jendela-kecil")
+    root.geometry(_geo24)
+    pump(root, 0.3)
+
+    # v3.9.68 — BERSIHKAN STATE SIDE-EFFECT: skenario 8b men-✓ 2 baris ke
+    # follow-up (store PERSISTEN followup.json) — tanpa pembersihan, run
+    # harness membuat run suite BERIKUTNYA gagal di blok follow-up
+    # (store app dibangun saat STARTUP — sebelum tes sempat menghapus
+    # file-nya, baris sisa sudah di memori).
+    try:
+        app.followup_store.clear()
+    except Exception as _e:  # noqa: BLE001 — cleanup best-effort harness
+        print(f"  ! cleanup followup store: {_e}")
+
     pump(root, 0.2)
     root.destroy()
-    print("SELESAI — semua screenshot di", OUT)
+    print(f"SELESAI v{APP_VERSION} — semua screenshot di", OUT)
 
 
 if __name__ == "__main__":

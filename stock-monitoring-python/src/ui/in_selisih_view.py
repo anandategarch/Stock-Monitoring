@@ -199,6 +199,7 @@ from .widgets import (
     run_async,
     sort_tree_by_column,
     validated_tgl_entry,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
@@ -1845,7 +1846,11 @@ class InSelisihView(tk.Frame):
             resto_scores = []
 
         if f.empty:
-            return {"items": [], "status": "Tidak ada data setelah filter.",
+            # v3.9.68 — TRI-STATE (audit eksternal T1): pesan jujur bila
+            # penyebabnya seleksi ⧩ KOSONG (filter aktif → 0 baris).
+            return {"items": [],
+                    "status": (zero_row_filter_message(st["col_sel"])
+                               or "Tidak ada data setelah filter."),
                     "resto_scores": resto_scores}
 
         col_ids = [c[0] for c in COLUMNS]

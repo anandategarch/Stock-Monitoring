@@ -115,6 +115,7 @@ from .widgets import (
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
     validated_tgl_entry,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 # NB: write_pivot_display_sheet di-import LAZY di _do_export_excel —
@@ -841,7 +842,12 @@ class PivotTableView(tk.Frame):
 
         if df.empty:
             out = dict(empty)
-            out["status"] = "Tidak ada data setelah filter."
+            # v3.9.68 — TRI-STATE (audit eksternal T1): seleksi #0
+            # KOSONG = filter aktif 0 baris — pesan jujur + cara keluar
+            # (bukan pesan generik "Tidak ada data setelah filter.").
+            out["status"] = (zero_row_filter_message(
+                {"Nama Barang": st.get("name_selected")})
+                or "Tidak ada data setelah filter.")
             return out
 
         mode = st["mode"]

@@ -275,6 +275,7 @@ from .widgets import (
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 # ---------------------------------------------------------------------------
@@ -2287,9 +2288,12 @@ class KomparasiDeviasiView(tk.Frame):
                 fmt = self._format_col_series(col, filtered[col])
                 filtered = filtered[fmt.isin(sel)]
         if filtered.empty:
+            # v3.9.68 — TRI-STATE (audit eksternal T1): pesan jujur bila
+            # penyebabnya seleksi ⧩ KOSONG (filter aktif → 0 baris).
             return {"gen": gen, "new_file": new_file,
-                    "items": [], "status":
-                    "Tidak ada baris setelah filter."}
+                    "items": [], "status": (
+                        zero_row_filter_message(st["col_sel"])
+                        or "Tidak ada baris setelah filter.")}
 
         # v3.9.5 (audit 19-a #7): hitungan status diambil SETELAH filter
         # header — footer "174 baris · MATCH: 7" padahal MATCH=0 di baris

@@ -75,6 +75,7 @@ from .widgets import (
     open_tree_maximized,
     run_async,
     sort_tree_by_column,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 # kolom tabel Follow Up — FORMAT FILE SAMPLE (v3.9.6):
@@ -587,9 +588,16 @@ class FollowUpView(tk.Frame):
 
         n = len(rows)
         selesai = self.store.resolved_count()
-        self._status_text = (
-            f"{n} baris · {selesai} selesai · {n - selesai} menunggu"
-            + (f" · {n_shown} tampil (filter ⧩)" if n_shown != n else ""))
+        # v3.9.68 — TRI-STATE (audit eksternal T1): 0 baris tampil karena
+        # seleksi ⧩ KOSONG → pesan jujur + cara keluar (bukan status
+        # generik "N baris · 0 tampil").
+        _hint = (zero_row_filter_message(self._col_sel)
+                 if not n_shown else None)
+        self._status_text = (_hint
+                             or (f"{n} baris · {selesai} selesai · "
+                                 f"{n - selesai} menunggu"
+                                 + (f" · {n_shown} tampil (filter ⧩)"
+                                    if n_shown != n else "")))
         self._apply_status()
         self._consume_store_notes()
         self.btn_clear.set_enabled(n > 0)

@@ -90,6 +90,7 @@ from .widgets import (
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 
@@ -873,9 +874,12 @@ class LaporanDeviasiView(tk.Frame):
                 filtered = filtered[fmt.isin(sel)]
 
         if filtered.empty:
+            # v3.9.68 — TRI-STATE (audit eksternal T1): pesan jujur bila
+            # penyebabnya seleksi ⧩ KOSONG (filter aktif → 0 baris).
             return {"gen": gen, "items": [],
-                    "status": "Tidak ada baris COM minus / di atas median "
-                              "setelah filter."}
+                    "status": (zero_row_filter_message(st["col_sel"])
+                               or "Tidak ada baris COM minus / di atas "
+                                  "median setelah filter.")}
 
         # sort default: Nama Barang lalu COM terbesar dulu
         filtered = filtered.sort_values(

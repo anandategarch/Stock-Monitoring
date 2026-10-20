@@ -874,7 +874,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.67", APP_VERSION == "3.9.67",
+    check("Versi = 3.9.68", APP_VERSION == "3.9.68",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -19365,11 +19365,12 @@ def main():
           _j78 == {"A": ["x", "y"], "C": [], "D": ["a", "m"]},
           f"got {_j78}")
     _r78 = _cfj78(_j78, ["A", "C", "E"])
-    check("(v3.9.66) §78a: col_sel_from_json — kolom tak dikenal (D/E) "
-          "dibuang senyap; seleksi [] DILEWATI (set() = '0 baris' "
-          "v3.9.13 — restore tak boleh menghasilkan tabel kosong "
-          "misterius)",
-          _r78 == {"A": {"x", "y"}}, f"got {_r78}")
+    check("(v3.9.68) §78a: col_sel_from_json TRI-STATE — kolom tak "
+          "dikenal (D/E) dibuang; seleksi [] kini DIPULIHKAN sebagai "
+          "set() KOSONG (filter aktif '0 baris' — audit eksternal T1: "
+          "kondisi yang disengaja user tidak lagi lenyap lintas sesi; "
+          "pesan jujur zero_row_filter_message menuntun keluar)",
+          _r78 == {"A": {"x", "y"}, "C": set()}, f"got {_r78}")
     check("(v3.9.66) §78a: col_sel_from_json defensif — raw None/bukan "
           "dict/nilai bukan list/nilai non-string → {} (korupsi "
           "settings.json tak bisa menyuntik tipe aneh)",
@@ -19887,6 +19888,359 @@ def main():
           and len(_df2205t_79) == 2
           and _df2205t_79["Tanggal"].isna().all(),
           f"rows={len(_df2205t_79)} log={_log2205t_79[-200:]!r}")
+
+    print()
+    print("== §80. (v3.9.68) FILTER PERSIST v2 — TRI-STATE + OBSERVABILITAS "
+          "+ SUBTAB (audit eksternal T1+T2+T6) ==")
+    import contextlib as _cl80
+    import io as _io80
+
+    from src.ui.widgets import col_sel_empty_columns as _csec80
+    from src.ui.widgets import zero_row_filter_message as _zrfm80
+
+    # -- (a) UNIT: helper kolom-kosong + pesan jujur ------------------------
+    check("(v3.9.68) §80a: col_sel_empty_columns — hanya kolom ber-"
+          "seleksi KOSONG (set()); None/ber-nilai diabaikan; input "
+          "korup → []",
+          _csec80({"A": set(), "B": None, "C": {"x"}}) == ["A"]
+          and _csec80({}) == [] and _csec80(None) == []
+          and _csec80("korup") == [],
+          f"got {_csec80({'A': set(), 'B': None, 'C': {'x'}})!r}")
+    _msg80 = _zrfm80({"Nama Barang": set()})
+    check("(v3.9.68) §80a: zero_row_filter_message — menyebut '0 baris', "
+          "kolom ⧩ bersangkutan, 'semua nilai tidak dipilih', dan cara "
+          "keluar 'Pilih semua'",
+          isinstance(_msg80, str) and "0 baris" in _msg80
+          and "'Nama Barang'" in _msg80
+          and "semua nilai tidak dipilih" in _msg80
+          and "Pilih semua" in _msg80,
+          f"got {_msg80!r}")
+    check("(v3.9.68) §80a: zero_row_filter_message → None bila TIDAK ada "
+          "seleksi kosong (status generik view tetap dipakai)",
+          _zrfm80({"A": None, "B": {"x"}}) is None
+          and _zrfm80({}) is None and _zrfm80(None) is None)
+
+    # -- (b) E2E Pivot #0: seleksi kosong → 0 baris + pesan jujur -----------
+    pv80 = app.pivot_view
+    select_and_wait(root, app, app.tab_pivot, pv80)
+    pv80._on_name_filter(set())
+    wait_view(root, pv80)
+    check("(v3.9.68) §80b: pivot — ⧩ #0 seleksi KOSONG → 0 baris + "
+          "status JUJUR menyebut kolom & 'Pilih semua' (dulu pesan "
+          "generik 'Tidak ada data setelah filter.')",
+          len(pv80.tree.get_children()) == 0
+          and "semua nilai tidak dipilih" in pv80.status_var.get()
+          and "'Nama Barang'" in pv80.status_var.get(),
+          f"rows={len(pv80.tree.get_children())} "
+          f"st={pv80.status_var.get()!r}")
+    pv80._on_name_filter(None)
+    wait_view(root, pv80)
+
+    # -- (c) PURE rincian_po._prepare_rows: pesan jujur vs generik ----------
+    rc80 = app.rincian_view
+    rc80.data = make_mock_rincian()
+    _pay80c = rc80._prepare_rows(
+        {"cabang": "(All)", "status_pesanan": "(All)",
+         "col_sel": {"Nama Barang": set()}})
+    check("(v3.9.68) §80c: rincian PO — col_sel kosong → payload status "
+          "pesan JUJUR (bukan generik)",
+          _pay80c["items"] == []
+          and "semua nilai tidak dipilih" in _pay80c["status"],
+          f"got {_pay80c['status']!r}")
+    _pay80c2 = rc80._prepare_rows(
+        {"cabang": "(All)", "status_pesanan": "(All)",
+         "col_sel": {"Nama Barang": {"TIDAK ADA BARANG"}}})
+    check("(v3.9.68) §80c: rincian PO — seleksi ber-nilai tapi tak cocok "
+          "→ status GENERIK dipertahankan (hint hanya utk seleksi "
+          "kosong)",
+          _pay80c2["items"] == []
+          and _pay80c2["status"] == "Tidak ada data setelah filter.",
+          f"got {_pay80c2['status']!r}")
+
+    # -- (d) E2E Deviasi in-session: pesan jujur + corong tetap menyala -----
+    dv80 = app.deviasi_gr_view
+    select_and_wait(root, app, app.tab_deviasi_gr, dv80)
+    dv80._kategori_var.set("Semua")
+    dv80._kategori_sel = None
+    # jalur produksi: popup ⧩ menulis state HeaderFilter + emit → view
+    dv80.header_filters.set_selected("Nama Barang", set())
+    dv80._on_col_filter("Nama Barang", set())
+    wait_view(root, dv80)
+    _hf80 = dv80.header_filters._filters.get("Nama Barang")
+    check("(v3.9.68) §80d: deviasi — seleksi ⧩ KOSONG in-session → 0 "
+          "baris + status JUJUR + state HeaderFilter TERISI (corong "
+          "MENYALA — set_selected tri-state tak menelan set())",
+          len(dv80.tree.get_children()) == 0
+          and "semua nilai tidak dipilih" in dv80.status_var.get()
+          and _hf80 is not None and _hf80.selected == set(),
+          f"rows={len(dv80.tree.get_children())} "
+          f"st={dv80.status_var.get()!r} "
+          f"sel={getattr(_hf80, 'selected', None)!r}")
+
+    # -- (e) E2E Deviasi lintas sesi: capture [] → restore set() ------------
+    _snap80 = dv80.capture_filter_state()
+    check("(v3.9.68) §80e: capture TRI-STATE — seleksi kosong TERSIMPAN "
+          "sebagai [] (snapshot EKSAK — tidak dibuang)",
+          _snap80.get("Nama Barang") == [],
+          f"got {_snap80!r}")
+    dv80.load_data(append1)          # mirror fan-out — RESET (v3.9.33)
+    wait_view(root, dv80)
+    dv80.restore_filter_state(_snap80)
+    wait_view(root, dv80)
+    _hf80e = dv80.header_filters._filters.get("Nama Barang")
+    check("(v3.9.68) §80e: RESTORE TRI-STATE — seleksi kosong DIPULIHKAN "
+          "apa adanya (set() — tabel TETAP 0 baris; dulu dibuang → "
+          "tabel tiba-tiba menampilkan semua baris lagi padahal user "
+          "sengaja memilih nol)",
+          dv80._col_sel["Nama Barang"] == set()
+          and len(dv80.tree.get_children()) == 0
+          and _hf80e is not None and _hf80e.selected == set(),
+          f"sel={dv80._col_sel['Nama Barang']!r} "
+          f"rows={len(dv80.tree.get_children())}")
+    check("(v3.9.68) §80e: status pasca-restore tetap JUJUR (menyebut "
+          "kolom + cara keluar)",
+          "semua nilai tidak dipilih" in dv80.status_var.get()
+          and "'Nama Barang'" in dv80.status_var.get()
+          and "Pilih semua" in dv80.status_var.get(),
+          f"st={dv80.status_var.get()!r}")
+    # bersihkan (jalur produksi)
+    dv80._on_col_filter("Nama Barang", None)
+    dv80.header_filters.set_selected("Nama Barang", None)
+    wait_view(root, dv80)
+
+    # -- (f) OBSERVABILITAS: gagal SIMPAN kini DI-LOG (dulu senyap) ---------
+    _orig_sp80 = _appmod78._SETTINGS_PATH
+    _buf80f = _io80.StringIO()
+    with _cl80.redirect_stdout(_buf80f):
+        _appmod78._SETTINGS_PATH = _Path78(
+            "/nonexistent-dir-t3968/settings.json")
+        _appmod78._save_filter_state({"pivot": {"mode": "resto"}})
+        _appmod78._SETTINGS_PATH = _orig_sp80
+    check("(v3.9.68) §80f: _save_filter_state GAGAL → [PERINGATAN] DI-LOG "
+          "(audit T2 — dulu return senyap: user tak pernah tahu "
+          "preferensinya gagal tersimpan)",
+          "PERINGATAN" in _buf80f.getvalue()
+          and "MENYIMPAN" in _buf80f.getvalue(),
+          f"got {_buf80f.getvalue()!r}")
+
+    # -- (g) OBSERVABILITAS: gagal BACA dibuffer + entry korup DI-LOG -------
+    _tmp80g = _tf78.mkdtemp(prefix="t3968_load_")
+    _orig_sp80g = _appmod78._SETTINGS_PATH
+    _appmod78._SETTINGS_PATH = _Path78(_tmp80g) / "settings.json"
+    try:
+        _appmod78._SETTINGS_PATH.write_text("{ KORUP T3968",
+                                            encoding="utf-8")
+        _buf80g = _io80.StringIO()
+        with _cl80.redirect_stdout(_buf80g):
+            _st80g = _appmod78._load_filter_state()
+        check("(v3.9.68) §80g: settings.json KORUP → None + warning "
+              "DI-BUFFER ke _FILTER_LOAD_WARNINGS (dipanggil "
+              "PRA-StreamToQueue — app mem-flush ke console log)",
+              _st80g is None
+              and any("gagal membaca" in w
+                      for w in _appmod78._FILTER_LOAD_WARNINGS),
+              f"st={_st80g!r} "
+              f"w={_appmod78._FILTER_LOAD_WARNINGS!r}")
+        _appmod78._SETTINGS_PATH.write_text(
+            '{"window_state": {"w": 1400}}', encoding="utf-8")
+        _buf80g2 = _io80.StringIO()
+        with _cl80.redirect_stdout(_buf80g2):
+            _st80g2 = _appmod78._load_filter_state()
+        check("(v3.9.68) §80g: file VALID tanpa key filter_state → None "
+              "TANPA warning (bukan kegagalan)",
+              _st80g2 is None
+              and _appmod78._FILTER_LOAD_WARNINGS == []
+              and "PERINGATAN" not in _buf80g2.getvalue(),
+              f"st={_st80g2!r} w={_appmod78._FILTER_LOAD_WARNINGS!r}")
+        _appmod78._SETTINGS_PATH.write_text(
+            '{"filter_state": {"ok": {"a": 1}, "bad": "korup"}}',
+            encoding="utf-8")
+        _st80g3 = _appmod78._load_filter_state()
+        check("(v3.9.68) §80g: entry korup dibuang + DI-LOG (view lain "
+              "tetap dipulihkan)",
+              _st80g3 == {"ok": {"a": 1}}
+              and any("entry korup dibuang" in w and "bad" in w
+                      for w in _appmod78._FILTER_LOAD_WARNINGS),
+              f"st={_st80g3!r} "
+              f"w={_appmod78._FILTER_LOAD_WARNINGS!r}")
+    finally:
+        _appmod78._SETTINGS_PATH = _orig_sp80g
+        _sh78.rmtree(_tmp80g, ignore_errors=True)
+
+    # -- (h) OBSERVABILITAS: gagal RESTORE per-view + statusbar ringkas -----
+    app.append1_df = append1
+    _orig_rfs80_dv = dv80.restore_filter_state
+    _orig_rfs80_pv = pv80.restore_filter_state
+    _spy80 = {"n": 0}
+
+    def _boom80_restore(_state):
+        raise RuntimeError("uji-kegagalan-t3968")
+
+    def _spy80_restore(_state):
+        _spy80["n"] += 1
+
+    dv80.restore_filter_state = _boom80_restore
+    pv80.restore_filter_state = _spy80_restore
+    app._filter_restore_state = {
+        "deviasi_gr": {"Nama Barang": ["x"]},
+        "pivot": {"mode": "tanggal"},
+    }
+    _buf80h = _io80.StringIO()
+    with _cl80.redirect_stdout(_buf80h):
+        app._apply_saved_filters_once()
+    dv80.restore_filter_state = _orig_rfs80_dv
+    pv80.restore_filter_state = _orig_rfs80_pv
+    check("(v3.9.68) §80h: restore GAGAL per-view → DI-LOG (tab + "
+          "penyebab) + statusbar ringkas + VIEW LAIN tetap dipulihkan "
+          "+ state dikonsumsi SEKALI (audit T2 — dulu suppress senyap; "
+          "retry sengaja TIDAK: run-2 me-reset filter v3.9.33)",
+          "gagal memulihkan" in _buf80h.getvalue()
+          and "deviasi_gr" in _buf80h.getvalue()
+          and "uji-kegagalan-t3968" in _buf80h.getvalue()
+          and _spy80["n"] == 1
+          and app._filter_restore_state is None
+          and app.status_var.get().startswith("⚠ Filter 1 tab gagal"),
+          f"log={_buf80h.getvalue()!r} spy={_spy80} "
+          f"st={app.status_var.get()!r}")
+
+    # -- (i) OBSERVABILITAS: gagal SNAPSHOT per-view DI-LOG, close aman -----
+    _orig_cap80 = app.followup_view.capture_filter_state
+
+    def _boom80_capture():
+        raise RuntimeError("uji-snapshot-t3968")
+
+    app.followup_view.capture_filter_state = _boom80_capture
+    _buf80i = _io80.StringIO()
+    with _cl80.redirect_stdout(_buf80i):
+        _cap80 = app._capture_filter_state()
+    app.followup_view.capture_filter_state = _orig_cap80
+    check("(v3.9.68) §80i: snapshot GAGAL per-view → DI-LOG; menutup app "
+          "TETAP tidak pernah gagal (_app tetap terisi)",
+          "gagal mengambil" in _buf80i.getvalue()
+          and "followup" in _buf80i.getvalue()
+          and isinstance(_cap80.get("_app"), dict),
+          f"log={_buf80i.getvalue()!r} keys={sorted(_cap80.keys())}")
+
+    # -- (j) T6: subtab aktif 🧮 ikut disimpan & dipulihkan ------------------
+    nr80 = app.nominal_resto_view
+    nr80.load_data(append1)
+    select_and_wait(root, app, app.tab_nominal_resto, nr80)
+    nr80._sub_nb.select(nr80._tab_main)
+    _snap_nr80a = nr80.capture_filter_state()
+    check("(v3.9.68) §80j: capture — subtab AKTIF ikut (default "
+          "'perresto'; dulu TIDAK ikut sama sekali — audit T6)",
+          _snap_nr80a.get("subtab") == "perresto",
+          f"got {_snap_nr80a.get('subtab')!r}")
+    nr80._sub_nb.select(nr80._tab_noharga)
+    _snap_nr80b = nr80.capture_filter_state()
+    check("(v3.9.68) §80j: capture — subtab 'Tanpa Harga' → 'noharga'",
+          _snap_nr80b.get("subtab") == "noharga",
+          f"got {_snap_nr80b.get('subtab')!r}")
+    nr80._sub_nb.select(nr80._tab_main)
+    nr80.restore_filter_state(_snap_nr80b)
+    check("(v3.9.68) §80j: restore — subtab 'noharga' DIPULIHKAN (user "
+          "yang terakhir menyelidiki barang tanpa harga tidak perlu "
+          "berpindah ulang tiap buka app)",
+          str(nr80._sub_nb.select()) == str(nr80._tab_noharga),
+          f"sel={nr80._sub_nb.select()!r}")
+    nr80.restore_filter_state({"subtab": "perresto"})
+    check("(v3.9.68) §80j: restore — 'perresto' kembali; snapshot TANPA "
+          "key subtab → tetap posisi saat ini (tidak memaksa default)",
+          str(nr80._sub_nb.select()) == str(nr80._tab_main)
+          and (nr80.restore_filter_state({}) or True)
+          and str(nr80._sub_nb.select()) == str(nr80._tab_main),
+          f"sel={nr80._sub_nb.select()!r}")
+
+    print()
+    print("== §81. (v3.9.68) TOOLTIP GRUP TAB + GERBANG TES CI "
+          "(audit eksternal T5+T3) ==")
+    # -- (a) objek tooltip + grup lengkap -----------------------------------
+    tt81 = getattr(app, "_tab_tooltips", None)
+    check("(v3.9.68) §81a: NotebookTabTooltips terpasang + grup 10 tab "
+          "LENGKAP (Operasional 3 · Pemeriksaan & Rekonsiliasi 3 · "
+          "Analisis 2 · Tindak Lanjut 2 — audit T5 tanpa sidebar)",
+          tt81 is not None and len(app._tab_groups) == 10
+          and sum(g == "Operasional"
+                  for g in app._tab_groups.values()) == 3
+          and sum(g == "Pemeriksaan & Rekonsiliasi"
+                  for g in app._tab_groups.values()) == 3
+          and sum(g == "Analisis"
+                  for g in app._tab_groups.values()) == 2
+          and sum(g == "Tindak Lanjut"
+                  for g in app._tab_groups.values()) == 2,
+          f"grup={app._tab_groups!r}")
+
+    # -- (b) teks tooltip per kelompok (show publik — tanpa sintesis event) -
+    tt81.show(str(app.tab_deviasi_gr))
+    _t81a = tt81.current_text()
+    tt81.show(str(app.tab_config))
+    _t81b = tt81.current_text()
+    tt81.show(str(app.tab_laporan))
+    _t81c = tt81.current_text()
+    tt81.show(str(app.tab_followup))
+    _t81d = tt81.current_text()
+    check("(v3.9.68) §81b: teks tooltip = LABEL PENUH + kelompok alur "
+          "kerja (menambakan label compact saat jendela sempit)",
+          "📦 Deviasi GR" in _t81a
+          and "Pemeriksaan & Rekonsiliasi" in _t81a
+          and "⚙️ Config" in _t81b and "Operasional" in _t81b
+          and "📋 Laporan Deviasi" in _t81c and "Analisis" in _t81c
+          and "☑ Follow Up" in _t81d and "Tindak Lanjut" in _t81d,
+          f"a={_t81a!r} b={_t81b!r} c={_t81c!r} d={_t81d!r}")
+
+    # -- (c) hide bersih -----------------------------------------------------
+    tt81.hide()
+    check("(v3.9.68) §81c: hide() → tooltip hilang total (widget "
+          "distruct + state None)",
+          tt81.current_text() == "" and tt81._tip is None,
+          f"text={tt81.current_text()!r} tip={tt81._tip!r}")
+
+    # -- (d) binding Motion/Leave terpasang di notebook ---------------------
+    check("(v3.9.68) §81d: binding <Motion>/<Leave> terpasang di "
+          "notebook (tooltip hidup via hover)",
+          bool(app.notebook.bind("<Motion>"))
+          and bool(app.notebook.bind("<Leave>")),
+          f"motion={app.notebook.bind('<Motion>')!r}")
+
+    # -- (e) resolusi tab @x,y (Tcl mentah — wrapper Python ValueError '') --
+    _key81 = tt81._tab_key_at(60, 10)
+    check("(v3.9.68) §81e: _tab_key_at — koordinat area tab → key tab "
+          "valid; koordinat di luar baris tab → None",
+          _key81 in app._tab_groups
+          and tt81._tab_key_at(2000, 400) is None,
+          f"key={_key81!r} luar={tt81._tab_key_at(2000, 400)!r}")
+    tt81.hide()
+
+    # -- (f) GERBANG CI: workflow memuat suite + mock + ruff + needs tests --
+    _wf81 = (_Path78(__file__).resolve().parents[1]
+             / ".github" / "workflows" / "release-windows.yml")
+    _wf81t = _wf81.read_text(encoding="utf-8")
+    check("(v3.9.68) §81f: release-windows.yml = GERBANG TES — job tests "
+          "(xvfb-run 1920x1080 + test_ui_redesign + test_mock + ruff pin "
+          "0.17.1 baseline 201 + py_compile + smoke crash.log) dan build "
+          "EXE needs: tests (audit T3 — rilis tidak lagi hijau hanya "
+          "karena build sukses)",
+          all(s in _wf81t for s in (
+              "tests:", "build-windows:", "needs: tests",
+              "xvfb-run", "1920x1080", "test_ui_redesign.py",
+              "test_mock.py", "ruff==0.17.1", "-gt 201",
+              "compileall", "crash.log")),
+          f"path={_wf81}")
+
+    # -- (g) HARNESS SCREENSHOT v2: versi dinamis + skenario baru -----------
+    _sh81 = (_Path78(__file__).resolve().parent / "screenshot_ui.py")
+    _sh81t = _sh81.read_text(encoding="utf-8")
+    check("(v3.9.68) §81g: screenshot_ui.py v2 — versi DINAMIS ikut "
+          "APP_VERSION (header 'Render app v3.3' basi DIHAPUS) + 10 "
+          "skenario baru (audit T4)",
+          "APP_VERSION" in _sh81t
+          and "Render app v3.3" not in _sh81t
+          and all(s in _sh81t for s in (
+              "15-nominal-deviasi-per-resto", "16-nominal-tanpa-harga",
+              "17-zoom-50", "18-zoom-80", "19-zoom-100", "20-zoom-200",
+              "21-deviasi-kosong-seleksi-kosong", "22-deviasi-corong-aktif",
+              "23-deviasi-popup-filter-open", "24-jendela-kecil")),
+          f"path={_sh81}")
 
     root.destroy()
 

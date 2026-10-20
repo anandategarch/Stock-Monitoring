@@ -96,6 +96,7 @@ from .widgets import (
     reset_autofit_once,  # v3.9.55 — F8
     run_async,
     sort_tree_by_column,
+    zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
 
 
@@ -630,7 +631,12 @@ class NominalDeviasiView(tk.Frame):
                     fmt = self._format_col_series(col, filtered[key])
                     filtered = filtered[fmt.isin(sel)]
             if filtered.empty:
-                self.status_var_label.set("Tidak ada baris setelah filter.")
+                # v3.9.68 — TRI-STATE (audit eksternal T1): seleksi ⧩
+                # kosong = filter aktif 0 baris — pesan jujur + cara
+                # keluar (bukan pesan generik).
+                self.status_var_label.set(
+                    zero_row_filter_message(self._col_sel)
+                    or "Tidak ada baris setelah filter.")
                 self._total_var.set("")
             else:
                 col_ids = self._result_cols()
