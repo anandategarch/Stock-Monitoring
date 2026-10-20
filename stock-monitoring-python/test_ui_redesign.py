@@ -4879,10 +4879,21 @@ def main():
     root.update()                # pump — chunk lama harus sudah dibatalkan
     wait_view(root, kv)
     _n5e_b = len(kv._flip_tree.get_children(""))
+    # v3.9.70 — STABILITAS: assertion _n5e_a==400 FLAKY di runner CI
+    # (run tag 39405501512 FAIL render-1=500 render-2=500; run main
+    # 39404404213 commit SAMA LULUS; suite lokal 2× LULUS). Akar: chunk
+    # antre (after() delay-0, 100 sisa) bisa dieksekusi DI DALAM
+    # root.update() sebelum pengukuran bila penjadwalan runner lambat —
+    # race murni, bukan regresi produk (render-2==500 = pembatalan
+    # chunk lama BEKERJA di run yang gagal sekalipun; tanpa fix
+    # pembatalan, render-2 = 600). Kontrak produk yang dijaga =
+    # render-2 TEPAT 500 (tak pernah 600 baris basi); nilai transien
+    # render-1 (400 vs 500) = kebetelan granularity batch terhadap
+    # penjadwalan, diterima keduanya.
     check("(v3.9.15a) Render ulang tabel analisa membatalkan sisa batch "
           "insert lama (500 flip: 400 sync + 100 antre → tanpa fix 100 "
           "baris basi nempel kembali → 600)",
-          _n5e_a == 400 and _n5e_b == 500,
+          _n5e_a in (400, 500) and _n5e_b == 500,
           f"render-1={_n5e_a} render-2={_n5e_b}")
     os.unlink(f5e)
 
