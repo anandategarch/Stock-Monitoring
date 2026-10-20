@@ -10,6 +10,13 @@ v3.9.33 — AUDIT FIX (48-a):
   VALUE ('Kuantitas'/'Tanggal') hilang → NA (schema output tetap).
 - sheet_name param — queries.query_2205 me-resolve key config
   Sheets['Penjualan2205'] (config lama tanpa key tetap dapat default).
+
+v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan format,
+user: "misal suatu saat format tarikan dari accurate berubah aman gak?"):
+kolom VALUE ('Kuantitas') & 'Tanggal' yang hilang/di-rename kini
+DI-WARNING keras — dulu NA SENYAP (qty OUT 22.05 lenyap dari pivot
+tanpa jejak log apa pun; uji mutasi: rename 'Kuantitas'→'Qty' →
+2 baris masuk Value NA nol warning). Perilaku data TIDAK berubah.
 """
 import pandas as pd
 
@@ -75,6 +82,11 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
     if "Tanggal" in fil.columns:
         fil["Tanggal"] = date_to_day(fil["Tanggal"])
     else:
+        # v3.9.67 — HARDENING FORMAT: Tanggal hilang dulu NA SENYAP
+        # (baris tanpa hari → lenyap dari kolom hari pivot).
+        print(f"  [fn_2205] WARNING: kolom 'Tanggal' tidak ditemukan — "
+              f"{len(fil)} baris masuk dengan Tanggal NA (header "
+              f"di-rename/hilang oleh export baru Accurate?)")
         fil["Tanggal"] = pd.array([pd.NA] * len(fil), dtype="Int64")
     fil["NAMA RESTO"] = vec_text_between_delimiters(fil["Nama Pelanggan"], "(", ")")
 
@@ -82,6 +94,12 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
     if "Kuantitas" in fil.columns:
         fil = fil.rename(columns={"Kuantitas": "Value"})
     if "Value" not in fil.columns:
+        # v3.9.67 — HARDENING FORMAT: kolom VALUE hilang dulu NA SENYAP —
+        # qty OUT 22.05 lenyap dari pivot tanpa jejak di log.
+        print(f"  [fn_2205] WARNING: kolom VALUE 'Kuantitas' tidak "
+              f"ditemukan — {len(fil)} baris masuk dengan Value NA "
+              f"(qty OUT 22.05 lenyap — header di-rename/hilang oleh "
+              f"export baru Accurate?)")
         fil["Value"] = pd.Series([float("nan")] * len(fil), index=fil.index)
 
     # fin = Table.SelectColumns(ren, {"Tanggal", "NAMA RESTO", "Nama Barang", "Value"})

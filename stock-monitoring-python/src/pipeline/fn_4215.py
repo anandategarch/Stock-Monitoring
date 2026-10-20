@@ -13,6 +13,14 @@ v3.9.33 — AUDIT FIX (48-a):
 - sheet_name param — queries.query_4215_gudang_kirim me-resolve key
   config Sheets['Pemindahan4215'] (config lama tanpa key tetap dapat
   default).
+
+v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan format
+export Accurate, user: "misal suatu saat format tarikan dari accurate
+berubah aman gak?"): kolom VALUE ('Kts Diterima') & 'Tanggal' yang
+hilang/di-rename kini DI-WARNING keras di loop NA-fill final_cols
+(mencakup cabang kirim & terima) — dulu NA SENYAP (qty pemindahan
+42.15 lenyap tanpa jejak log; pola fn_2205 v3.9.67). Perilaku data
+TIDAK berubah.
 """
 import pandas as pd
 
@@ -102,9 +110,21 @@ def fn_4215(folder_path: str, side: str,
             # v3.9.33 — AUDIT FIX (48-a): loop NA-fill kini REACHABLE
             # (dulu dead code — KeyError terjadi lebih awal); dtype
             # disesuaikan kolomnya supaya concat query tetap konsisten.
+            # v3.9.67 — HARDENING FORMAT: VALUE/Tanggal hilang kini ikut
+            # DI-WARNING (dulu NA SENYAP — qty pemindahan 42.15 lenyap
+            # tanpa jejak log; pola fn_2205 v3.9.67).
             if c == "Tanggal":
+                print(f"  [fn_4215] WARNING: kolom 'Tanggal' tidak "
+                      f"ditemukan — {len(sel)} baris masuk dengan "
+                      f"Tanggal NA (header di-rename/hilang oleh export "
+                      f"baru Accurate?)")
                 sel[c] = pd.array([pd.NA] * len(sel), dtype="Int64")
             elif c == "Value":
+                print(f"  [fn_4215] WARNING: kolom VALUE 'Kts Diterima' "
+                      f"tidak ditemukan — {len(sel)} baris masuk dengan "
+                      f"Value NA (qty pemindahan 42.15 {side} lenyap — "
+                      f"header di-rename/hilang oleh export baru "
+                      f"Accurate?)")
                 sel[c] = pd.Series([float("nan")] * len(sel), index=sel.index)
             else:
                 sel[c] = pd.NA

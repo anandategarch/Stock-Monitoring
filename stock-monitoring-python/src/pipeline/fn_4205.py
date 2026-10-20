@@ -13,6 +13,13 @@ v3.9.31: kolom konversi satuan '#Sat. Kirim'/'Rasio Satuan'/
 SATUAN TERKECIL (peta konversi PO Menunggu → satuan terkecil —
 konversi_satuan.build_konversi_map; kolom ekstra TIDAK ikut pivot
 append1, pola 'SOURCE IN' v3.9.29).
+
+v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan format
+export Accurate, user: "misal suatu saat format tarikan dari accurate
+berubah aman gak?"): kolom VALUE ('#Qty. Terkecil') & 'Tanggal
+#Terima' yang hilang/di-rename kini DI-WARNING keras — dulu NA SENYAP
+(qty IN 42.05 lenyap tanpa jejak log; pola fn_2205 v3.9.67). Perilaku
+data TIDAK berubah.
 """
 import pandas as pd
 
@@ -64,6 +71,13 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
     # Numeric
     if "#Qty. Terkecil" in sel.columns:
         sel["#Qty. Terkecil"] = safe_to_numeric(sel["#Qty. Terkecil"])
+    else:
+        # v3.9.67 — HARDENING FORMAT: kolom VALUE hilang dulu NA SENYAP —
+        # qty IN 42.05 lenyap dari pivot tanpa jejak di log.
+        print(f"  [fn_4205] WARNING: kolom VALUE '#Qty. Terkecil' tidak "
+              f"ditemukan — {len(sel)} baris masuk dengan Value NA "
+              f"(qty IN 42.05 lenyap — header di-rename/hilang oleh "
+              f"export baru Accurate?)")
     # Datetime (only for #Tgl/Jam — NOT Tanggal #Terima, which goes through date_to_day)
     # v3.9.28: to_datetime_robust — file .xlsb (pyxlsb) memberi serial mentah;
     # pd.to_datetime biasa membacanya sbg nanodetik-epoch → 1970-01-01.
@@ -74,6 +88,12 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
     # date_to_day internally calls pd.to_datetime, so no need for separate conversion
     if "Tanggal #Terima" in sel.columns:
         sel["Tanggal #Terima"] = date_to_day(sel["Tanggal #Terima"])
+    else:
+        # v3.9.67 — HARDENING FORMAT: Tanggal hilang dulu NA SENYAP
+        # (baris tanpa hari → lenyap dari kolom hari pivot).
+        print(f"  [fn_4205] WARNING: kolom 'Tanggal #Terima' tidak "
+              f"ditemukan — {len(sel)} baris masuk dengan Tanggal NA "
+              f"(header di-rename/hilang oleh export baru Accurate?)")
     if "Gudang #Terima" in sel.columns:
         sel["NAMA RESTO"] = vec_text_between_delimiters(sel["Gudang #Terima"], "(", ")")
 

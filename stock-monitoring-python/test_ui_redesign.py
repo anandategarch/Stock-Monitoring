@@ -874,7 +874,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.66", APP_VERSION == "3.9.66",
+    check("Versi = 3.9.67", APP_VERSION == "3.9.67",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -19144,10 +19144,14 @@ def main():
              / "README.md").read_text(encoding="utf-8")
     check("(v3.9.64) §76l: README ROOT (../README.md) — headline versi "
           "terkini v3.9.64+ (audit 15-c F-02: masih headline v3.9.62 + "
-          "1454/1454 saat repo sudah v3.9.63/1473)",
-          ("Versi terkini: v3.9.65" in _rr76
+          "1454/1454 saat repo sudah v3.9.63/1473; v3.9.67: kini ikut "
+          "APP_VERSION — headline WAJIB = versi aktif, tak basi lagi — "
+          "memperbaiki bug laten v3.9.66: suite dijalankan SEBELUM "
+          "headline diubah → 1529/1529 tercatat padahal §76l gagal "
+          "bila di-re-run)",
+          (f"Versi terkini: v{APP_VERSION}" in _rr76
            or "Versi terkini: v3.9.64" in _rr76),
-          f"found={'Versi terkini: v3.9.65' in _rr76}")
+          f"found={f'Versi terkini: v{APP_VERSION}' in _rr76}")
 
     # ==================================================================
     # §77 — v3.9.65 RANK PER-BARIS GROUND-TRUTH (user: "ada bug pada
@@ -19641,6 +19645,248 @@ def main():
         _appmod78._load_filter_state = _orig_lfs78
         _top78.destroy()
         root.update()
+
+    # =====================================================================
+    print("== §79. (v3.9.67) HARDENING KETAHANAN FORMAT EXPORT ACCURATE ==")
+    # Audit ketahanan (user: "misal suatu saat format tarikan dari
+    # accurate berubah aman gak? ... ada beberapa kolom yang tidak
+    # terpakai hilang apakah berpengaruh? umumnya perubahan file ada
+    # tambahan kolom ataupun kolom yang tidak terpakai hilang").
+    # Dua kontrak diuji LANGSUNG terhadap reader (file sintetis di
+    # tmpdir — tidak menyentuh folder data produksi):
+    # (a) PERMANEN: tambah kolom / hapus kolom tak terpakai / reorder
+    #     = output IDENTIK (seleksi kolom BY-NAMA, bukan posisi);
+    # (b) ANTI-SENYAP: kolom VALUE/Tanggal hilang (keluarga header
+    #     row=4: fn_2205/3224/4205/4215) & pengikatan fallback fn_9901
+    #     kini DI-LOG WARNING (dulu NA senyap / salah-ikat senyap).
+    import contextlib as _cl79
+    import io as _io79
+    import shutil as _sh79
+    import tempfile as _tf79
+    from datetime import datetime as _dt79
+
+    import openpyxl as _ox79
+
+    from src.pipeline.fn_2205 import SHEET_2205 as _SH2205_79
+    from src.pipeline.fn_2205 import fn_2205 as _f2205_79
+    from src.pipeline.fn_3224 import SHEET_3224 as _SH3224_79
+    from src.pipeline.fn_3224 import fn_3224 as _f3224_79
+    from src.pipeline.fn_4205 import fn_4205 as _f4205_79
+    from src.pipeline.fn_4215 import fn_4215 as _f4215_79
+    from src.pipeline.fn_9901 import fn_9901 as _f9901_79
+
+    def _run79(fn79, rows79, sheet79="Sheet1", fname79="mutasi.xlsx"):
+        """Tulis 1 file Excel ke tmpdir segar → jalankan reader di
+        folder tsb → return (df, stdout-log)."""
+        _tmp79 = _tf79.mkdtemp(prefix="t3967_fmt_")
+        try:
+            _wb79 = _ox79.Workbook()
+            _ws79 = _wb79.active
+            _ws79.title = sheet79
+            for _r79 in rows79:
+                _ws79.append(list(_r79))
+            _wb79.save(os.path.join(_tmp79, fname79))
+            _wb79.close()
+            _buf79 = _io79.StringIO()
+            with _cl79.redirect_stdout(_buf79):
+                _df79 = fn79(_tmp79)
+            return _df79, _buf79.getvalue()
+        finally:
+            _sh79.rmtree(_tmp79, ignore_errors=True)
+
+    # -- (a) fn_9901: kontrak permanen — tambah/hapus/reorder IDENTIK --
+    _H9901_79 = ["Nomor # Penerimaan Barang", "Jenis Barang Barang & Jasa",
+                 "#Prime.Qty", "Nama barang", "Nama cabang", "Tanggal",
+                 "Jumlah Harga", "Satuan", "Kode Barang"]
+    _D9901_79 = [
+        [None, "Persediaan", 10.0, "GULA (V.20)", "1137.CKGPAH", 5,
+         250000, "GR", "GL001"],
+        [None, "Persediaan", 7.5, "KOPI (V.20)", "B.1001.MLGPAR", 6,
+         99000, "GR", "KP001"],
+    ]
+
+    def _rows9901_79(headers79):
+        _out79 = [tuple(headers79)]
+        for _d79 in _D9901_79:
+            _m79 = dict(zip(_H9901_79, _d79))
+            _out79.append(tuple(_m79.get(_h79) for _h79 in headers79))
+        return _out79
+
+    def _sig9901_79(df79):
+        return (len(df79),
+                round(float(pd.to_numeric(df79["Value"],
+                                          errors="coerce").sum()), 3),
+                list(df79["NAMA RESTO"]), list(df79["Nama Barang"]))
+
+    _base9901_79, _blog79 = _run79(_f9901_79, _rows9901_79(_H9901_79))
+    check("(v3.9.67) §79a: BASELINE 9901 — 2 baris lolos filter, qty "
+          "17.5, resto+nama benar, TANPA warning",
+          _sig9901_79(_base9901_79)
+          == (2, 17.5, ["CKGPAH", "MLGPAR"],
+              ["GULA (V.20)", "KOPI (V.20)"])
+          and "WARNING" not in _blog79,
+          f"sig={_sig9901_79(_base9901_79)}")
+    _mut79 = []
+    _mut79.append(_rows9901_79(
+        _H9901_79[:3] + ["Mata Uang"] + _H9901_79[3:]
+        + ["Departemen"]))                          # V1: +2 kolom (tengah)
+    _mut79.append(_rows9901_79(_H9901_79[:6]))      # V2: −3 kolom tak terpakai
+    _mut79.append(_rows9901_79(
+        ["Tanggal", "Nama cabang", "Nama barang", "Jumlah Harga",
+         "#Prime.Qty", "Nomor # Penerimaan Barang",
+         "Jenis Barang Barang & Jasa", "Satuan", "Kode Barang"]))  # V3
+    _ok79a = True
+    for _rows79, _tag79 in zip(_mut79, ("V1+tambah", "V2−tak-terpakai",
+                                        "V3+reorder")):
+        _df79, _log79 = _run79(_f9901_79, _rows79)
+        if _sig9901_79(_df79) != _sig9901_79(_base9901_79) \
+                or "WARNING" in _log79:
+            _ok79a = False
+            print(f"    §79a GAGAL di {_tag79}: "
+                  f"sig={_sig9901_79(_df79)} log={_log79[-200:]!r}")
+    check("(v3.9.67) §79a: KONTRAK PERMANEN — tambah kolom (tengah/ujung)"
+          "+ hapus kolom tak terpakai + reorder SEMUA kolom = output "
+          "IDENTIK dgn baseline & TANPA warning (kasus yang user "
+          "tanyakan: aman by-design — seleksi by-NAMA bukan posisi)",
+          _ok79a, f"ok={_ok79a}")
+
+    # -- (b) fn_9901: fallback salah-ikat kini DI-LOG ---------------------
+    # rename 'Nama barang'→'Nama Item' + 'Kode Barang' TERISI → fallback
+    # mengikat Nama Barang ke KODE BARANG (degradasi data tetap — tapi
+    # kini KELIHATAN di log, dulu nol jejak).
+    _h79b = [(_h79 if _h79 != "Nama barang" else "Nama Item")
+             for _h79 in _H9901_79]
+    _df79b, _log79b = _run79(_f9901_79, _rows9901_79(_h79b))
+    check("(v3.9.67) §79b: rename header terpakai + kolom serupa terisi "
+          "→ WARNING fallback DI-LOG lengkap dgn kolom tujuan ikatan "
+          "(dulu salah-ikat SENYAP nol warning)",
+          "WARNING" in _log79b and "FALLBACK" in _log79b
+          and "Nama Barang→'Kode Barang'" in _log79b,
+          f"log={_log79b[-300:]!r}")
+    check("(v3.9.67) §79b: perilaku data TAK berubah — qty/resto tetap "
+          "benar, Nama Barang tetap nyasar ke kode (degradasi lama "
+          "dipertahankan; hardening = observabilitas, bukan koreksi)",
+          _sig9901_79(_df79b)[:3]
+          == (2, 17.5, ["CKGPAH", "MLGPAR"])
+          and list(_df79b["Nama Barang"]) == ["GL001", "KP001"],
+          f"sig={_sig9901_79(_df79b)}")
+
+    # -- (c) keluarga header_row=4: kolom VALUE hilang kini DI-LOG -------
+    def _famrows79(headers79, data79, full79, n_meta79=4):
+        """Baris file keluarga header_row=4: n_meta baris kosong + header
+        (varian) + data. Data dipetakan lewat daftar header LENGKAP
+        (full79) lalu diproyeksikan ke headers varian — kolom yang
+        di-drop tidak menggeser nilai (anti misalignment zip)."""
+        _out79 = [tuple([""] * len(headers79)) for _ in range(n_meta79)]
+        _out79.append(tuple(headers79))
+        for _d79 in data79:
+            _m79 = dict(zip(full79, _d79))
+            _out79.append(tuple(_m79.get(_h79) for _h79 in headers79))
+        return _out79
+
+    # fn_2205 tanpa 'Kuantitas' (VALUE) — identitas utuh → 2 baris ACR
+    _h2205_79 = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
+                 "Kuantitas", "Satuan", "@Harga"]
+    _d2205_79 = [
+        ["ACR.2026.10.001", _dt79(2026, 10, 5), "KONSUMEN (CKGPAH)",
+         "GULA (V.20)", 10.0, "GR", 25000],
+        ["ACR.2026.10.002", _dt79(2026, 10, 6), "KONSUMEN (MLGPAR)",
+         "KOPI (V.20)", 7.5, "GR", 99000],
+        ["SI.2026.10.003", _dt79(2026, 10, 6), "KONSUMEN (BDGUKU)",
+         "TEH (V.20)", 50.0, "GR", 12000],
+    ]
+    _h2205v79 = [_h79 for _h79 in _h2205_79 if _h79 != "Kuantitas"]
+    _df2205_79, _log2205_79 = _run79(
+        lambda _p79: _f2205_79(_p79),
+        _famrows79(_h2205v79, _d2205_79, full79=_h2205_79),
+        sheet79=_SH2205_79)
+    check("(v3.9.67) §79c: fn_2205 kolom VALUE 'Kuantitas' hilang → "
+          "WARNING keras + 2 baris ACR tetap masuk dgn Value NA "
+          "(dulu NA SENYAP — qty OUT 22.05 lenyap tanpa jejak)",
+          "kolom VALUE 'Kuantitas'" in _log2205_79
+          and len(_df2205_79) == 2
+          and _df2205_79["Value"].isna().all(),
+          f"rows={len(_df2205_79)} log={_log2205_79[-200:]!r}")
+
+    # fn_3224 tanpa 'Kts (Unit#1)'
+    _h3224_79 = ["Tanggal", "Kts (Unit#1)", "Nama Barang", "Nama Gudang",
+                 "Nomor # RI", "Nomor # PO", "Tgl/Jam Pembuatan"]
+    _d3224_79 = [
+        [_dt79(2026, 10, 5), 10.0, "GULA (V.20)", "GUDANG (CKGPAH)",
+         "RI.2026.10.001", "PO.2026.10.001", _dt79(2026, 10, 3, 9, 0)],
+        [_dt79(2026, 10, 6), 7.5, "KOPI (V.20)", "GUDANG (MLGPAR)",
+         "RI.2026.10.002", "PO.2026.10.002", _dt79(2026, 10, 4, 9, 0)],
+    ]
+    _h3224v79 = ["Tanggal", "Nama Barang", "Nama Gudang", "Nomor # RI",
+                 "Nomor # PO", "Tgl/Jam Pembuatan"]
+    _df3224_79, _log3224_79 = _run79(
+        lambda _p79: _f3224_79(_p79, "berjalan"),
+        _famrows79(_h3224v79, _d3224_79, full79=_h3224_79),
+        sheet79=_SH3224_79)
+    check("(v3.9.67) §79c: fn_3224 kolom VALUE 'Kts (Unit#1)' hilang → "
+          "WARNING keras + baris tetap masuk dgn Value NA (dulu NA senyap)",
+          "kolom VALUE 'Kts (Unit#1)'" in _log3224_79
+          and len(_df3224_79) == 2
+          and _df3224_79["Value"].isna().all(),
+          f"rows={len(_df3224_79)} log={_log3224_79[-200:]!r}")
+
+    # fn_4205 tanpa '#Qty. Terkecil'
+    _h4205_79 = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima",
+                 "Nama Barang", "#Qty. Terkecil", "#Tgl/Jam Pembuatan IT"]
+    _d4205_79 = [
+        ["PM.2026.10.001", "GUDANG (CKGPAH)", _dt79(2026, 10, 5),
+         "GULA (V.20)", 10.0, _dt79(2026, 10, 3, 9, 0)],
+        ["PM.2026.10.002", "GUDANG (MLGPAR)", _dt79(2026, 10, 6),
+         "KOPI (V.20)", 7.5, _dt79(2026, 10, 4, 9, 0)],
+    ]
+    _h4205v79 = ["Nomor #Terima", "Gudang #Terima", "Tanggal #Terima",
+                 "Nama Barang", "#Tgl/Jam Pembuatan IT"]
+    _df4205_79, _log4205_79 = _run79(
+        lambda _p79: _f4205_79(_p79),
+        _famrows79(_h4205v79, _d4205_79, full79=_h4205_79),
+        sheet79="#42.05. Rincian Pemindahan Bara")
+    check("(v3.9.67) §79c: fn_4205 kolom VALUE '#Qty. Terkecil' hilang → "
+          "WARNING keras + baris tetap masuk dgn Value NA (dulu NA senyap)",
+          "kolom VALUE '#Qty. Terkecil'" in _log4205_79
+          and len(_df4205_79) == 2
+          and _df4205_79["Value"].isna().all(),
+          f"rows={len(_df4205_79)} log={_log4205_79[-200:]!r}")
+
+    # fn_4215 kirim tanpa 'Kts Diterima'
+    _h4215_79 = ["Tanggal", "Gudang Pengirim", "Nama Barang",
+                 "Kts Diterima", "Gudang Tujuan"]
+    _d4215_79 = [
+        [_dt79(2026, 10, 5), "GUDANG (CKGPAH)", "GULA (V.20)", 10.0,
+         "GUDANG (MLGPAR)"],
+        [_dt79(2026, 10, 6), "GUDANG (MLGPAR)", "KOPI (V.20)", 7.5,
+         "GUDANG (BDGUKU)"],
+    ]
+    _h4215v79 = ["Tanggal", "Gudang Pengirim", "Nama Barang",
+                 "Gudang Tujuan"]
+    _df4215_79, _log4215_79 = _run79(
+        lambda _p79: _f4215_79(_p79, "kirim"),
+        _famrows79(_h4215v79, _d4215_79, full79=_h4215_79),
+        sheet79="#42.15. Pemindahan Barang (KIRI")
+    check("(v3.9.67) §79c: fn_4215 kolom VALUE 'Kts Diterima' hilang → "
+          "WARNING keras + baris tetap masuk dgn Value NA (dulu NA senyap)",
+          "kolom VALUE 'Kts Diterima'" in _log4215_79
+          and len(_df4215_79) == 2
+          and _df4215_79["Value"].isna().all(),
+          f"rows={len(_df4215_79)} log={_log4215_79[-200:]!r}")
+
+    # -- (d) fn_2205 'Tanggal' hilang → ikut DI-LOG -----------------------
+    _h2205t79 = ["Nomor #", "Nama Pelanggan", "Nama Barang",
+                 "Kuantitas", "Satuan", "@Harga"]
+    _df2205t_79, _log2205t_79 = _run79(
+        lambda _p79: _f2205_79(_p79),
+        _famrows79(_h2205t79, _d2205_79, full79=_h2205_79),
+        sheet79=_SH2205_79)
+    check("(v3.9.67) §79d: fn_2205 kolom 'Tanggal' hilang → WARNING "
+          "+ Tanggal NA (dulu NA senyap — baris lenyap dari kolom hari)",
+          "kolom 'Tanggal' tidak ditemukan" in _log2205t_79
+          and len(_df2205t_79) == 2
+          and _df2205t_79["Tanggal"].isna().all(),
+          f"rows={len(_df2205t_79)} log={_log2205t_79[-200:]!r}")
 
     root.destroy()
 

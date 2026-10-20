@@ -15,6 +15,12 @@ v3.9.33 — AUDIT FIX (48-a): guard kolom — identitas ('Nama Barang'/
 'Nama Gudang') hilang → WARNING keras + baris dibuang (degradasi
 per-sumber, bukan KeyError total); VALUE ('Kts (Unit#1)'/'Tanggal')
 hilang → NA (schema output tetap identik — pola fn_4205).
+v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan format
+export Accurate, user: "misal suatu saat format tarikan dari accurate
+berubah aman gak?"): kolom VALUE ('Kts (Unit#1)') & 'Tanggal' yang
+hilang/di-rename kini DI-WARNING keras — dulu NA SENYAP (qty IN 32.24
+lenyap dari pivot tanpa jejak log; pola fn_2205 v3.9.67). Perilaku
+data TIDAK berubah.
 """
 import pandas as pd
 
@@ -89,6 +95,12 @@ def fn_3224(folder_path: str, mode: str,
     if "Kts (Unit#1)" in sel.columns:
         sel["Kts (Unit#1)"] = safe_to_numeric(sel["Kts (Unit#1)"])
     else:
+        # v3.9.67 — HARDENING FORMAT: kolom VALUE hilang dulu NA SENYAP —
+        # qty IN 32.24 lenyap dari pivot tanpa jejak di log.
+        print(f"  [fn_3224] WARNING: kolom VALUE 'Kts (Unit#1)' tidak "
+              f"ditemukan — {len(sel)} baris masuk dengan Value NA "
+              f"(qty IN 32.24 lenyap — header di-rename/hilang oleh "
+              f"export baru Accurate?)")
         sel["Kts (Unit#1)"] = pd.Series(
             [float("nan")] * len(sel), index=sel.index)
 
@@ -101,6 +113,10 @@ def fn_3224(folder_path: str, mode: str,
         # v3.9.33 — AUDIT FIX (48-a): Tanggal hilang → Int64-NA (dtype
         # konsisten dgn date_to_day supaya concat query_in tak berganti
         # dtype)
+        # v3.9.67 — HARDENING FORMAT: + WARNING keras (dulu NA senyap).
+        print(f"  [fn_3224] WARNING: kolom 'Tanggal' tidak ditemukan — "
+              f"{len(sel)} baris masuk dengan Tanggal NA (header "
+              f"di-rename/hilang oleh export baru Accurate?)")
         sel["Tanggal"] = pd.array([pd.NA] * len(sel), dtype="Int64")
 
     # ren

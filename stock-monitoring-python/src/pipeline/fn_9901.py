@@ -36,6 +36,20 @@ resto_from_cabang_po (bagian setelah titik TERAKHIR, NA/float-safe).
 Dulu membelah di titik PERTAMA → cabang ber-format 'B.1001.MLGPAR'
 menjadi '1001.MLGPAR' (resto phantom — tidak cocok dgn sumber lain →
 IN 9901 resto itu lenyap dari pivot).
+
+v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan,
+user: "misal suatu saat format tarikan dari accurate berubah aman gak?").
+Eksperimen 6 varian mutasi format membuktikan: tambah kolom / hapus
+kolom tak terpakai / reorder = IDENTIK (seleksi kolom by-NAMA, bukan
+posisi). Dua celah SENYAP ditemukan & ditutup:
+- Rename header terpakai ('Nama barang' → nama lain) + ada kolom lain
+  ber-substring 'barang' terisi ('Kode Barang') → fallback _find_column
+  mengikat kolom yang SALAH tanpa jejak (uji nyata: Nama Barang nyasar
+  ke kode barang 'GL001'/'KP001', qty benar, nol warning). Kini SETIAP
+  pengikatan lewat fallback (bukan nama persis kandidat) DI-LOG
+  WARNING lengkap dgn kolom tujuan ikatannya.
+- (keluarga header_row=4: lihat fn_2205/3224/4205/4215 — kolom VALUE
+  hilang kini ikut di-WARNING, dulu NA senyap.)
 """
 import os
 
@@ -234,6 +248,36 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
     if missing:
         print(f"  [fn_9901] WARNING: could not find columns: {missing}")
         print(f"  [fn_9901] Available columns: {list(prom.columns)}")
+
+    # v3.9.67 — HARDENING FORMAT: kolom yang diikat lewat FALLBACK
+    # (substring match — bukan nama persis kandidat) kini DI-LOG keras.
+    # Uji mutasi format: rename 'Nama barang' → 'Nama Item' + kolom
+    # 'Kode Barang' terisi → fallback mengikat Nama Barang ke KODE
+    # BARANG secara SENYAP (qty/resto benar, nama nyasar ke kode item;
+    # barang lalu tak cocok sumber lain → tersekat di pivot tanpa jejak).
+    _fallback_binds = []
+    for _label, _col, _cands in (
+        ("Nomor # Penerimaan", col_nomor_penerimaan,
+         ("Nomor # Penerimaan Barang", "Nomor # Penerimaan",
+          "Nomor Penerimaan Barang", "Nomor Penerimaan")),
+        ("Jenis Barang", col_jenis,
+         ("Jenis Barang Barang & Jasa", "Jenis Barang", "Barang & Jasa")),
+        ("Qty", col_qty,
+         ("#Prime.Qty", "Prime.Qty", "Prime Qty", "#Prime Qty")),
+        ("Nama Barang", col_nama_barang,
+         ("Nama barang", "Nama Barang", "NAMA BARANG", "Barang")),
+        ("Nama Cabang", col_nama_cabang,
+         ("Nama cabang", "Nama Cabang", "Cabang")),
+        ("Tanggal", col_tanggal, ("Tanggal", "TGL", "Date")),
+    ):
+        if _col is not None:
+            _cand_l = {str(c).strip().lower() for c in _cands}
+            if str(_col).strip().lower() not in _cand_l:
+                _fallback_binds.append(f"{_label}→'{_col}'")
+    if _fallback_binds:
+        print(f"  [fn_9901] WARNING: kolom diikat lewat FALLBACK (bukan "
+              f"nama persis): {', '.join(_fallback_binds)} — cek header "
+              f"file 9901 (di-rename/diubah oleh export baru Accurate?)")
 
     # --- Filter 1: Nomor # Penerimaan Barang = Blank ---
     if col_nomor_penerimaan is not None:
