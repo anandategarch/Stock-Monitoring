@@ -49,31 +49,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      # Python via uv (python-build-standalone) — BUNDLES Tcl/Tk 9.0:
+      # suite memakai fitur per-cell tag ("tag cell has" §21/§35/§76 —
+      # minus merah per-sel) yang hanya ada di Tk 9; python sistem
+      # ubuntu (tk 8.6 apt) membuat suite CRASH di §21 (terbukti run
+      # pertama). Paritas penuh dengan environment dev (Tk 9.0.4).
+      # Catatan: build EXE Windows tetap Tk 8.6 (setup-python) — app
+      # memang degrade gracefully (CELL_TAGS_SUPPORTED, per-cell tag
+      # no-op) di produksi; gerbang ini menguji environment dev-parity.
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Xvfb + Tk (suite UI butuh display 1920x1080)
+      - name: Python 3.12 (python-build-standalone — Tcl/Tk 9 bundled)
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv python install 3.12
+          uv venv --python 3.12 .venv
+
+      - name: Xvfb (suite UI butuh display 1920x1080)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb tk
-          python -c "import tkinter; print('tkinter OK', tkinter.TkVersion)"
+          sudo apt-get install -y --no-install-recommends xvfb xauth
 
       - name: Dependensi runtime + alat dev (ruff & Pillow dipin)
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          export PATH="$HOME/.local/bin:$PATH"
           # ruff DIPIN: baseline gerbang (maks 201) dihitung dengan
           # 0.17.x — rule-set default ruff melebar antar versi, pin
           # membuat baseline deterministik di runner manapun.
           # Pillow: pixel-probe §76 (opsional saat lokal, tapi di CI
           # diaktifkan penuh supaya cek visual tak dilewati).
-          pip install ruff==0.17.1 pillow
+          uv pip install --python .venv/bin/python -r requirements.txt
+          uv pip install --python .venv/bin/python ruff==0.17.1 pillow
+
+      - name: Verifikasi tkinter + Tk 9 (paritas per-cell tag suite)
+        run: |
+          xvfb-run -a .venv/bin/python -c \
+            "import tkinter as tk; r = tk.Tk(); \
+             print('tkinter OK', tk.TkVersion); \
+             assert tk.TkVersion >= 9, 'suite butuh Tk 9 (per-cell tag)'; \
+             r.destroy()"
 
       - name: Ruff — gerbang baseline (maks 201 isu)
         run: |
-          OUT=$(ruff check . 2>&1 || true)
+          OUT=$(.venv/bin/ruff check . 2>&1 || true)
           echo "$OUT" | tail -2
           N=$(echo "$OUT" | grep -oE "Found [0-9]+ error" | grep -oE "[0-9]+" | head -1)
           if [ -z "$N" ]; then
@@ -88,29 +107,29 @@ jobs:
 
       - name: py_compile seluruh file Python
         run: |
-          python -m compileall -q src run_app.py build_exe.py \
+          .venv/bin/python -m compileall -q src run_app.py build_exe.py \
             test_ui_redesign.py test_mock.py screenshot_ui.py bench_views.py
           echo "py_compile OK"
 
       - name: Validasi config.json
-        run: python -c "import json; json.load(open('config.json', encoding='utf-8')); print('config.json OK')"
+        run: .venv/bin/python -c "import json; json.load(open('config.json', encoding='utf-8')); print('config.json OK')"
 
       - name: Suite UI penuh (Xvfb 1920x1080 — 2 tes layout sensitif resolusi)
         timeout-minutes: 25
-        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python3 test_ui_redesign.py
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" .venv/bin/python test_ui_redesign.py
 
       - name: Pipeline mock end-to-end (Xvfb)
         timeout-minutes: 10
-        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python3 test_mock.py
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" .venv/bin/python test_mock.py
 
       - name: Smoke 2 entry (hidup sampai timeout, tanpa crash.log)
         run: |
           rm -f crash.log
           set +e
-          timeout 20 xvfb-run -a python3 run_app.py >/dev/null 2>&1
+          timeout 20 xvfb-run -a .venv/bin/python run_app.py >/dev/null 2>&1
           C1=$?
           rm -f crash.log
-          timeout 20 xvfb-run -a python3 -m src.ui >/dev/null 2>&1
+          timeout 20 xvfb-run -a .venv/bin/python -m src.ui >/dev/null 2>&1
           C2=$?
           set -e
           echo "exit: $C1 $C2 (124/0 = hidup sampai timeout = OK)"
