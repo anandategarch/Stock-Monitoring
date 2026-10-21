@@ -1,6 +1,18 @@
 """
 pivot_view.py — Pivot matrix view (v3.2).
 
+v3.9.71 — FREEZE KOLOM NAMA BARANG (user: "di tab pivot tabel gak
+bsia freeze kolom nama barang ya? sehingga jika aku scroll ke kanan
+bisa kefreze"): kolom #0 (nama barang + baris metric) kini TAMPIL DI
+TREE BEKU KIRI (widgets.FrozenNamePane) dan DISEMBUNYIKAN di tree
+utama (width 0 + _autofit_skip) — menggulir ke KANAN tidak lagi
+menggeser nama barang (kontrak freeze ala Excel). Scroll vertikal +
+seleksi tersinkron dua arah; funnel ⧩ Nama Barang menempel di heading
+tree beku; clone ⛶ Layar Penuh ikut memakai freeze-pane (open_tree_
+maximized frozen_name=True — funnel clone di sisi beku, filter baris
+tetap dijalankan di tree utama clone, isi beku disalin ulang setelah
+filter/sort).
+
 v3.9.69 — P1.1 (audit eksternal ke-2): semantik ☑ "Sembunyikan baris
 kosong" = SEMUA sel baris 0/kosong (dulu "total ≤ 0" — baris deviasi
 negatif/cancel-out tersembunyinya juga; sinyal retur justru penting).
@@ -96,6 +108,7 @@ from .widgets import (
     Card,
     ColumnManager,
     EmptyState,
+    FrozenNamePane,  # v3.9.71 — freeze kolom nama barang
     GhostButton,
     HeaderFilter,
     LegendRow,
@@ -105,7 +118,6 @@ from .widgets import (
     apply_cell_tag,
     attach_clone_filters,
     auto_fit_columns,
-    autofit_tree_once,  # v3.9.55 — F8
     col_sel_from_json,  # v3.9.66 — filter persisten antar sesi
     col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
@@ -281,7 +293,7 @@ class PivotTableView(tk.Frame):
 
         # Header tabel: judul + segment mode + tombol perbesar
         head = tk.Frame(tbody, bg=C_CARD)
-        head.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        head.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 6))
         title_label = tk.Label(head, text="Matrix Pivot", bg=C_CARD,
                                fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
@@ -309,24 +321,45 @@ class PivotTableView(tk.Frame):
 
         self.tree = ttk.Treeview(tbody, show="tree headings", selectmode="extended")
 
+        # v3.9.71 — FREEZE KOLOM NAMA BARANG (user: "di tab pivot tabel gak
+        # bsia freeze kolom nama barang ya? sehingga jika aku scroll ke
+        # kanan bisa kefreze"): #0 pindah ke TREE BEKU kiri (FrozenNamePane)
+        # — tree utama menyembunyikan #0 (width 0 + _autofit_skip) dan
+        # hanya menggulir kolom matrix horizontal → nama barang TETAP
+        # terlihat saat scroll ke kanan.
+        self.frozen = FrozenNamePane(
+            self.tree, tbody, heading="Nama Barang",
+            setup_tags=lambda t: self._setup_tags(t))
+        self.name_tree = self.frozen.tree        # alias publik (test/clone)
+        self.tree._frozen_pane = self.frozen     # dibaca clone ⛶ (lebar)
+        self.tree._autofit_skip = {"#0"}         # auto-fit jangan buka #0
+
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        # v3.9.71 — yscrollcommand chain: scrollbar + tree beku mengikuti
+        self._tree_vsb = vsb
+        self.tree.configure(yscrollcommand=self._on_tree_yscroll,
+                            xscrollcommand=hsb.set)
 
-        self.tree.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-        hsb.grid(row=2, column=0, sticky="ew")
+        self.frozen.pane.grid(row=1, column=0, sticky="ns")
+        self.tree.grid(row=1, column=1, sticky="nsew")
+        vsb.grid(row=1, column=2, sticky="ns")
+        hsb.grid(row=2, column=0, columnspan=2, sticky="ew")
         tbody.grid_rowconfigure(1, weight=1)
-        tbody.grid_columnconfigure(0, weight=1)
+        tbody.grid_columnconfigure(1, weight=1)
 
         # v3.4: drag tepi heading = resize lebar kolom; double-click tepi =
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)  # v3.9.32
+        # v3.9.71 — sisi beku: resize lebar kolom nama + multi-select
+        # (Ctrl+A/seleksi tersinkron dua arah oleh pane)
+        enable_col_resize(self.name_tree)
+        enable_multi_select(self.name_tree)
 
         # Footer card: status
         foot = tk.Frame(tbody, bg=C_CARD)
-        foot.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        foot.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 0))
         self.status_var = tk.StringVar(value="Belum ada data.")
         tk.Label(foot, textvariable=self.status_var, bg=C_CARD, fg=C_HEADER,
                  font=font(8, "bold")).pack(side="right")
@@ -354,10 +387,14 @@ class PivotTableView(tk.Frame):
             btn_expand, [fcard, title_label, legend])
 
         self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
+        # v3.9.71 — sisi beku: double-click baris nama = popup detail juga
+        self.name_tree.bind("<Double-1>", self._on_double_click, add="+")
 
         # Filter "Nama Barang" menempel di header kolom #0
+        # v3.9.71 — #0 kini hidup di TREE BEKU (freeze kolom nama barang);
+        # funnel + popup + ikon aktif mengikuti pindah ke sana.
         self.header_filter = HeaderFilter(
-            self.tree, "#0",
+            self.name_tree, "#0",
             get_values=self._name_values,
             on_apply=self._on_name_filter,
             label="Nama Barang")
@@ -371,6 +408,14 @@ class PivotTableView(tk.Frame):
 
         self._apply_mode_ui()
 
+    def _on_tree_yscroll(self, first, last):
+        """v3.9.71 — chain yscrollcommand tree utama: scrollbar tetap
+        ter-update + TREE BEKU mengikuti posisi gulir (guard anti-loop
+        di FrozenNamePane.follow_right — roda mouse di sisi nama jalan
+        lewat chain balik pane._on_left_scroll)."""
+        self._tree_vsb.set(first, last)
+        self.frozen.follow_right(first, last)
+
     def _open_col_filter(self, col: str):
         """Filter teks di view Pivot tersedia untuk kolom nama (#0); kolom
         matrix (resto/tanggal) difilter lewat kontrol RESTO/TANGGAL di atas
@@ -382,8 +427,12 @@ class PivotTableView(tk.Frame):
         return self.header_filter.open_popup()
 
     def _auto_fit(self):
-        """v3.4 — auto-fit lebar semua kolom ke konten."""
+        """v3.4 — auto-fit lebar semua kolom ke konten.
+        v3.9.71 — dua sisi freeze-pane: kolom matrix di tree utama
+        (#0 di-skip via _autofit_skip supaya tetap tersembunyi) +
+        kolom nama di tree beku."""
         auto_fit_columns(self.tree)
+        auto_fit_columns(self.frozen.tree, columns=["#0"])
 
     def _name_values(self) -> list:
         """Nilai popup filter Nama Barang.
@@ -572,6 +621,8 @@ class PivotTableView(tk.Frame):
         self.data = data
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
+        # v3.9.71 — freeze-pane: flag auto-fit sisi beku ikut di-reset
+        self._autofit_once_frozen = False
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
@@ -1109,8 +1160,15 @@ class PivotTableView(tk.Frame):
             pass
         self.tree["columns"] = cols
         width = 90 if payload.get("col_kind") == "resto" else 70
-        self.tree.column("#0", width=280, minwidth=180)
+        # v3.9.71 — #0 di tree utama DISEMBUNYIKAN (freeze kolom nama:
+        # nama tampil di TREE BEKU; heading tetap diset supaya teks/
+        # clone konsisten — tidak terlihat karena width 0).
+        self.tree.column("#0", width=0, minwidth=0, stretch=False)
         self.tree.heading("#0", text="Nama Barang")
+        # tree beku: kolom nama + funnel (HeaderFilter menempel di sini)
+        self.frozen.tree.column("#0", width=280, minwidth=180,
+                                stretch=False)
+        self.frozen.tree.heading("#0", text="Nama Barang")
         for c in cols:
             self.tree.column(c, width=width, minwidth=50, anchor="e",
                              stretch=True)
@@ -1143,7 +1201,11 @@ class PivotTableView(tk.Frame):
             if self._cell_tags:
                 apply_cell_tag(self.tree, "neg_cell", self._red_cells)
             # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
-            autofit_tree_once(self, self.tree)
+            # v3.9.71 — freeze-pane: auto-fit DUA sisi; sisi matrix di
+            # sini (render_done batch kanan), sisi nama di on_done batch
+            # kiri (lihat mirror_items di bawah — tabel kecil: batch
+            # kanan selesai SINKRON sebelum insert kiri jalan).
+            self._autofit_first_load("main")
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -1151,6 +1213,35 @@ class PivotTableView(tk.Frame):
 
         insert_tree_items(self.tree, payload["items"], batch=500,
                           on_done=render_done)
+        # v3.9.71 — TREE BEKU: isi identik (nama barang + baris metric,
+        # tag warna sama; batch sendiri, batch lama otomatis dibatalkan);
+        # auto-fit kolom nama di on_done batch KIRI sendiri supaya
+        # pengukuran nama betul-betul melihat baris yang sudah masuk.
+        self.frozen.mirror_items(
+            payload["items"], batch=500,
+            on_done=lambda: self._autofit_first_load("frozen"))
+
+    def _autofit_first_load(self, side: str = "main"):
+        """v3.9.71 — auto-fit SEKALI per muat data (pola v3.9.55 F8: flag
+        di-reset load_data), PER-SISI freeze-pane:
+        - side="main": kolom matrix tree utama — dipanggil render_done
+          (batch kanan selesai; #0 di-skip via _autofit_skip);
+        - side="frozen": kolom #0 nama tree beku — dipanggil on_done
+          batch kiri (utk tabel kecil batch kanan selesai SINKRON
+          sebelum insert kiri jalan — mengukur di render_done akan
+          melihat tree beku MASIH KOSONG)."""
+        if side == "main":
+            if getattr(self, "_autofit_once", False):
+                return
+            self._autofit_once = True
+            with contextlib.suppress(Exception):
+                auto_fit_columns(self.tree)     # #0 tersembunyi di-skip
+        else:
+            if getattr(self, "_autofit_once_frozen", False):
+                return
+            self._autofit_once_frozen = True
+            with contextlib.suppress(Exception):
+                auto_fit_columns(self.frozen.tree, columns=["#0"])
 
     def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series,
                           tanggals: list) -> tuple:
@@ -1303,13 +1394,25 @@ class PivotTableView(tk.Frame):
 
         def filter_setup(new_tree):
             # funnel #0 (Nama Barang) jalan juga di window besar
-            # FIX B-02 (audit 2-b): on_after_filter — tag minus merah matrix
-            # dipasang ulang setelah filter clone REBUILD (mirror deviasi;
-            # fix v3.9.5 19-a #3 dulu terlewat di view ini).
+            # v3.9.71 — clone memakai FREEZE-PANE: funnel menempel di
+            # TREE BEKU clone (tree utama clone menyembunyikan #0), tapi
+            # filter BARIS tetap dijalankan di tree utama clone
+            # (attach_clone_filters filter_tree — cache snapshot
+            # _full_items hidup di sisi kanan); setelah rebuild, sisi
+            # beku disalin ulang lalu tag minus dipasang kembali.
+            pane = getattr(new_tree, "_frozen_pane", None)
+            target = pane.tree if pane is not None else new_tree
+
+            def _after_filter(_t=None):
+                if pane is not None:
+                    pane.mirror_from_right()
+                cells_setup(new_tree)
+
             attach_clone_filters(
-                new_tree, ["#0"],
+                target, ["#0"],
                 get_values=self._name_values,
-                on_after_filter=lambda t=new_tree: cells_setup(t))
+                on_after_filter=_after_filter,
+                filter_tree=new_tree)
 
         # v3.9.2: clone = insert ulang → tag cell minus ter-reset →
         # pasang ulang di clone (iid identik dengan tabel sumber)
@@ -1324,7 +1427,8 @@ class PivotTableView(tk.Frame):
             setup_tags=lambda t: self._setup_tags(t),
             on_double_click=self._on_double_click,
             on_filter_setup=filter_setup,
-            on_render_done=cells_setup)
+            on_render_done=cells_setup,
+            frozen_name=True)   # v3.9.71 — freeze kolom nama di clone ⛶
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP DETAILS

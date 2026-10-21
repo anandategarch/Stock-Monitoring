@@ -3052,7 +3052,7 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
 
 def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
                          get_values, on_sort=None, on_after_filter=None,
-                         value_get=None):
+                         value_get=None, filter_tree=None):
     """HeaderFilterGroup utk tabel CLONE ⛶ (v3.6).
 
     Sebelumnya clone ⛶ MENYALIN ikon funnel dari heading sumber tapi TIDAK
@@ -3071,15 +3071,26 @@ def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
     merge-vertikal (deviasi_view) — filter clone by Nama Barang/Rank
     mencocokkan nilai snapshot per baris, bukan nilai display tree
     (head-only) → kelompok UTUH lolos filter.
+
+    v3.9.71 — ``filter_tree``: tree yang BARISNYA difilter bila berbeda
+    dari tree tempat funnel menempel (freeze-pane pivot: funnel di tree
+    beku kiri, baris difilter di tree utama kanan — cache snapshot
+    `_full_items`/`_row_filter_cancel` hidup di sisi kanan). Default
+    None = tree itu sendiri (perilaku lama, 12 view lain tak berubah);
+    hook `_clone_filter_apply` dipasang di KEDUA tree supaya test yang
+    membacanya dari tree utama clone tetap jalan.
     """
     state: dict = {}
+    target = tree if filter_tree is None else filter_tree
 
     def on_apply(col, sel):
         state[col] = sel
-        apply_tree_row_filters(tree, state, on_done=on_after_filter,
+        apply_tree_row_filters(target, state, on_done=on_after_filter,
                                value_get=value_get)
 
     tree._clone_filter_apply = on_apply
+    if filter_tree is not None and filter_tree is not tree:
+        filter_tree._clone_filter_apply = on_apply
     return HeaderFilterGroup(tree, cols, get_values=get_values,
                              on_apply=on_apply, on_sort=on_sort)
 
@@ -5229,6 +5240,15 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
 
     cols = list(columns) if columns is not None else _tree_display_columns(tree)
 
+    # v3.9.71 — kolom beku (freeze-pane pivot): tree dgn atribut
+    # `_autofit_skip` (set nama kolom) tidak menyentuh kolom yang
+    # di-skip — tree utama pivot menyembunyikan #0 (width 0, nama tampil
+    # di tree beku kiri); tanpa ini auto-fit me-LEBARKAN kembali #0 dan
+    # nama muncul DOBEL di sisi kanan.
+    _skip = getattr(tree, "_autofit_skip", None)
+    if _skip:
+        cols = [c for c in cols if str(c) not in _skip]
+
     try:
         children = tree.get_children("")
     except tk.TclError:
@@ -5317,12 +5337,190 @@ def reset_autofit_once(view) -> None:
     view._autofit_once = False
 
 
+class FrozenNamePane:
+    """v3.9.71 — FREEZE KOLOM NAMA BARANG (user: "di tab pivot tabel gak
+    bsia freeze kolom nama barang ya? sehingga jika aku scroll ke kanan
+    bisa kefreze") — split-pane ala spreadsheet utk ttk.Treeview.
+
+    ttk.Treeview TIDAK punya kolom beku native; pola standar Tk = DUA
+    tree berdampingan dgn iid/hirarki/teks/tag IDENTIK:
+    - tree KIRI (``self.tree``): hanya kolom #0 — nama barang (parent)
+      + baris metric (anak), heading + funnel menempel di sini;
+    - tree KANAN (``right`` — tree utama view): #0 DISEMBUNYIKAN
+      (width 0 + ``_autofit_skip``), hanya kolom matrix; scroll
+      HORIZONTAL hanya milik sisi kanan → nama barang TIDAK ikut
+      bergeser saat menggulir ke kanan (kontrak freeze).
+
+    Sinkronisasi otomatis dua arah (guard anti-loop):
+    - scroll VERTIKAL: roda mouse di salah satu sisi → sisi lain ikut;
+      scrollbar milik view/pemanggil (vsb) tetap di-update lewat
+      yscrollcommand tree utama yang memanggil ``follow_right``;
+    - SELEKSI: klik / Ctrl+A / panah keyboard di salah satu sisi
+      tersinkron — double-click popup & copy TSV tetap jalan per sisi
+      (iid identik, handler view tree-agnostic).
+
+    Isi kiri dibangun ulang lewat ``mirror_items(items)`` (render utama)
+    atau ``mirror_from_right()`` (setelah filter/sort clone ⛶ mengubah
+    isi kanan) supaya selalu identik dgn kanan.
+    """
+
+    def __init__(self, right: ttk.Treeview, parent, *,
+                 heading: str = "Nama Barang", width: int = 280,
+                 minwidth: int = 180, setup_tags=None,
+                 selectmode: str = "extended"):
+        self.right = right
+        self._y_sync = False
+        self._sel_sync = False
+        self._insert_cancel = None
+
+        self.pane = tk.Frame(parent, bg=C_CARD)
+        self.tree = ttk.Treeview(self.pane, show="tree headings",
+                                 selectmode=selectmode)
+        self.tree.pack(side="left", fill="both", expand=True)
+        # garis pemisah tipis ala freeze-pane Excel
+        tk.Frame(self.pane, bg=C_BORDER, width=1).pack(
+            side="left", fill="y")
+        self.tree.heading("#0", text=heading)
+        self.tree.column("#0", width=width, minwidth=minwidth,
+                         stretch=False)
+        if setup_tags is not None:
+            # tag styling IDENTIK tree utama (warna metric/in_row/bm_row
+            # mewarnai sel nama juga — urutan register_find_tags tetap
+            # dijaga oleh setup_tags milik view, pola FIX 15-c F-01)
+            with contextlib.suppress(Exception):
+                setup_tags(self.tree)
+
+        # roda mouse di atas kolom beku → tree utama ikut (chain balik
+        # lewat yscrollcommand utama: vsb ikut ter-update)
+        self.tree.configure(yscrollcommand=self._on_left_scroll)
+        # seleksi dua arah (iid identik kedua sisi)
+        self.tree.bind("<<TreeviewSelect>>",
+                       lambda _e: self._sync_selection(self.tree,
+                                                       self.right),
+                       add="+")
+        right.bind("<<TreeviewSelect>>",
+                   lambda _e: self._sync_selection(self.right,
+                                                   self.tree),
+                   add="+")
+
+    # -- scroll vertikal dua arah -------------------------------------------
+    def _on_left_scroll(self, first, last):
+        """Tree beku digulir (roda mouse di area nama) → tree utama ikut
+        (yscrollcommand utama lalu men-update scrollbar + follow_right
+        diblokir guard)."""
+        if self._y_sync:
+            return
+        self._y_sync = True
+        try:
+            self.right.yview_moveto(float(first))
+        except tk.TclError:
+            pass
+        finally:
+            self._y_sync = False
+
+    def follow_right(self, first, last):
+        """Tree utama digulir → tree beku mengikuti. Dipanggil dari
+        yscrollcommand tree utama (pemanggil tetap memegang vsb.set —
+        pane hanya menyinkronkan baris nama, bukan scrollbar)."""
+        if self._y_sync:
+            return
+        self._y_sync = True
+        try:
+            self.tree.yview_moveto(float(first))
+        except tk.TclError:
+            pass
+        finally:
+            self._y_sync = False
+
+    # -- seleksi dua arah ----------------------------------------------------
+    def _sync_selection(self, src, dst):
+        # v3.9.71 FIX LOOP: <<TreeviewSelect>> diproses LEWAT ANTREAN
+        # event — flag _sel_sync tidak melintasi batas antrean (handler
+        # sisi lain jalan SETELAH flag direset → ping-pong tak terbatas;
+        # terbukti hang saat smoke). Guard utama kini KESAMAAN SELEKSI:
+        # menulis hanya bila beda — event pantulan berhenti sendiri
+        # karena seleksi sudah sama (flag tetap dipertahankan sbg lapis
+        # kedua utk event yang diproses sinkron, mis. event_generate
+        # di test).
+        if self._sel_sync:
+            return
+        try:
+            sel = set(src.selection())
+            cur = set(dst.selection())
+        except tk.TclError:
+            return
+        if sel == cur:
+            return
+        self._sel_sync = True
+        try:
+            dst.selection_set(list(sel))
+        except tk.TclError:
+            pass   # iid belum ada di sisi lain (render berjalan) — abaikan
+        finally:
+            self._sel_sync = False
+
+    # -- mirror isi ------------------------------------------------------------
+    def mirror_items(self, items, *, batch: int = 500, on_done=None):
+        """Bangun ulang isi tree beku dari daftar item sumber
+        [(parent_iid, iid, kwargs)] — HANYA text/tags/open yang dibawa
+        (kolom matrix tidak ada di sisi kiri). Batch async; batch lama
+        dibatalkan dulu supaya re-render di tengah insert tidak
+        menyisakan baris basi (pola insert_tree_items)."""
+        cancel = self._insert_cancel
+        if cancel is not None:
+            with contextlib.suppress(Exception):
+                cancel()
+        try:
+            self.tree.delete(*self.tree.get_children(""))
+        except tk.TclError:
+            return None
+        name_items = [
+            (p, iid, {"text": (kw or {}).get("text", ""),
+                      "tags": (kw or {}).get("tags", ""),
+                      "open": bool((kw or {}).get("open", False))})
+            for (p, iid, kw) in items]
+        self._insert_cancel = insert_tree_items(
+            self.tree, name_items, batch=batch, on_done=on_done)
+        return self._insert_cancel
+
+    def mirror_from_right(self, *, batch: int = 500, on_done=None):
+        """Sinkronkan tree beku dari isi tree utama SAAT INI — dipakai
+        clone ⛶ setelah filter baris / sort mengubah sisi kanan."""
+        items = []
+
+        def _rec(parent):
+            for iid in self.right.get_children(parent):
+                it = self.right.item(iid)
+                items.append((parent, iid, {
+                    "text": it.get("text", ""),
+                    "tags": it.get("tags", ""),
+                    "open": bool(it.get("open", False)),
+                }))
+                _rec(iid)
+
+        try:
+            _rec("")
+        except tk.TclError:
+            return None
+        return self.mirror_items(items, batch=batch, on_done=on_done)
+
+    def cancel_pending(self):
+        """Batalkan batch insert yang masih berjalan (window clone
+        ditutup di tengah salin — pola FIX B-07 audit 2-b)."""
+        cancel = self._insert_cancel
+        if cancel is not None:
+            with contextlib.suppress(Exception):
+                cancel()
+            self._insert_cancel = None
+
+
 # --- Maximize table (fullscreen clone) ----------------------------------------
 
 def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                         setup_tags=None, on_double_click=None,
                         on_sort_setup=None, on_context_menu=None,
-                        on_filter_setup=None, on_render_done=None):
+                        on_filter_setup=None, on_render_done=None,
+                        frozen_name: bool = False):
     """Buka window besar berisi clone penuh dari source_tree — tombol ⛶.
 
     setup_tags(new_tree)   : pasang tag styling (mis. self._setup_tags).
@@ -5339,6 +5537,16 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                              selesai di-insert (batch async). Dipakai view
                              utk memasang ulang TAG PER-CELL (minus merah)
                              di clone — insert ulang menghapus tag cell.
+    frozen_name (v3.9.71)  : True = clone memakai FREEZE-PANE kolom nama
+                             (pola FrozenNamePane — tab Pivot matrix):
+                             tree beku kiri berisi #0, tree utama clone
+                             menyembunyikan #0 + isi kiri disalin dari
+                             kanan. View membaca ``new_tree._frozen_pane``
+                             di dalam on_filter_setup utk memasang funnel
+                             di sisi beku (filter baris lewat
+                             attach_clone_filters(..., filter_tree=
+                             new_tree)). Default False = perilaku lama
+                             (12 view lain tak tersentuh).
 
     v3.6: displaycolumns (kolom tersembunyian) disalin dari sumber; clone
     punya ColumnManager sendiri (klik kanan heading / tombol ◱ Kolom) yang
@@ -5349,6 +5557,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     """
     root = source_tree.winfo_toplevel()
     win = tk.Toplevel(root)
+    frozen_pane = None          # v3.9.71 — diisi bila frozen_name=True
     # v3.9.59 — fix 2b-09 (audit 2-b): judul menyatakan SALINAN — clone
     # adalah snapshot; data di dalamnya TIDAK diperbarui saat sumber
     # re-load/refresh (dulu bisa dianggap live view).
@@ -5377,7 +5586,12 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     tk.Label(hi, text=title, bg=C_HEADER, fg="#f1f5f9",
              font=font(12, "bold")).pack(side="left", padx=(8, 0))
     tk.Button(
-        hi, text="↔ Auto-Fit", command=lambda: auto_fit_columns(new_tree),
+        hi, text="↔ Auto-Fit",
+        command=lambda: (
+            auto_fit_columns(new_tree),
+            # v3.9.71 — clone freeze-pane: kolom nama (tree beku) ikut
+            (auto_fit_columns(frozen_pane.tree, columns=["#0"])
+             if frozen_pane is not None else None)),
         bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
         activeforeground="#ffffff", bd=0, relief="flat",
         highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -5427,6 +5641,14 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         except tk.TclError:
             continue
 
+    # v3.9.71 — clone freeze-pane: #0 di tree utama clone WAJIB tersembunyi
+    # (nama tampil di tree beku; sumber biasanya sudah width-0 tapi clone
+    # bisa dibuka pra-render — paksa konsisten) + auto-fit tak menyentuh
+    # #0 di sisi ini.
+    if frozen_name:
+        new_tree.column("#0", width=0, minwidth=0, stretch=False)
+        new_tree._autofit_skip = {"#0"}
+
     # v3.6: salin state kolom tersembunyi (displaycolumns) sumber → clone
     try:
         dc = source_tree.cget("displaycolumns")
@@ -5456,6 +5678,21 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     enable_col_resize(new_tree)
     enable_multi_select(new_tree)  # v3.9.32
 
+    # v3.9.71 — clone freeze-pane: tree beku + resize/multi-select di
+    # sisi nama (lebar kolom mengikuti sisi beku sumber bila ada).
+    if frozen_name:
+        _src_pane = getattr(source_tree, "_frozen_pane", None)
+        _w = 280
+        if _src_pane is not None:
+            with contextlib.suppress(Exception):
+                _w = int(_src_pane.tree.column("#0", "width") or 280)
+        frozen_pane = FrozenNamePane(
+            new_tree, cin, heading="Nama Barang", width=_w,
+            setup_tags=setup_tags)
+        new_tree._frozen_pane = frozen_pane   # dibaca on_filter_setup view
+        enable_col_resize(frozen_pane.tree)
+        enable_multi_select(frozen_pane.tree)
+
     # v3.6: hide/unhide kolom di clone (klik kanan heading / tombol ◱ Kolom)
     # — mirror ke tabel sumber supaya state konsisten setelah window tutup
     clone_colmgr = ColumnManager(new_tree, mirror=source_tree)
@@ -5469,15 +5706,32 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
 
     vsb = ttk.Scrollbar(cin, orient="vertical", command=new_tree.yview)
     hsb = ttk.Scrollbar(cin, orient="horizontal", command=new_tree.xview)
-    new_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-    new_tree.grid(row=0, column=0, sticky="nsew")
-    vsb.grid(row=0, column=1, sticky="ns")
-    hsb.grid(row=1, column=0, sticky="ew")
-    cin.grid_rowconfigure(0, weight=1)
-    cin.grid_columnconfigure(0, weight=1)
+    if frozen_pane is not None:
+        # v3.9.71 — clone freeze-pane: vsb tetap milik tree utama, tree
+        # beku mengikuti lewat FrozenNamePane; hsb hanya sisi matrix —
+        # nama TIDAK ikut scroll horizontal (kontrak freeze).
+        new_tree.configure(
+            xscrollcommand=hsb.set,
+            yscrollcommand=lambda f, l: (
+                vsb.set(f, l), frozen_pane.follow_right(f, l)))
+        frozen_pane.pane.grid(row=0, column=0, sticky="ns")
+        new_tree.grid(row=0, column=1, sticky="nsew")
+        vsb.grid(row=0, column=2, sticky="ns")
+        hsb.grid(row=1, column=0, columnspan=2, sticky="ew")
+        cin.grid_rowconfigure(0, weight=1)
+        cin.grid_columnconfigure(1, weight=1)
+    else:
+        new_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        new_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        cin.grid_rowconfigure(0, weight=1)
+        cin.grid_columnconfigure(0, weight=1)
 
     foot = tk.Frame(cin, bg=C_CARD)
-    foot.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+    foot.grid(row=2, column=0,
+              columnspan=(3 if frozen_pane is not None else 2),
+              sticky="ew", pady=(6, 0))
     count_var = tk.StringVar(value="Menyalin tabel…")
     tk.Label(foot, textvariable=count_var, bg=C_CARD, fg=C_TEXT_MUTED,
              font=font(9)).pack(side="left")
@@ -5540,6 +5794,10 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                                       chunk_callback=lambda n, t: count_var.set(
                                           f"Menyalin {fmt_int_id(n)}/"
                                           f"{fmt_int_id(t)} baris…"))
+    # v3.9.71 — clone freeze-pane: sisi nama ikut tersalin (batch sendiri,
+    # iid/teks/tag identik — text/tags/open saja, kolom matrix tak dibawa)
+    if frozen_pane is not None:
+        frozen_pane.mirror_items(items, batch=600)
     # FIX B-07 (audit 2-b): daftarkan cancel batch ke tree — memfilter /
     # menyortir clone saat copy awal masih berjalan kini MEMBATALKAN batch
     # lama dulu (apply_tree_row_filters mengecek atribut ini); dulu cache
@@ -5550,6 +5808,9 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         # batalkan batch + timer yang masih pending saat window ditutup
         if event.widget is win:
             insert_cancel()
+            # v3.9.71 — clone freeze-pane: batch sisi nama ikut dibatalkan
+            if frozen_pane is not None:
+                frozen_pane.cancel_pending()
             overlay.hide()
             # FIX B-18 (audit 2-b): lepas registrasi backref colmgr clone
             # dari tree sumber — tanpa ini daftar _mirror_backrefs tumbuh

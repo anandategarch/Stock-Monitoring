@@ -86,8 +86,9 @@ def main():
     shot("3-pivot-resto")
 
     # Header filter popup terbuka (klik heading #0)
+    # v3.9.71 — funnel #0 menempel di TREE BEKU (freeze kolom nama barang)
     root.update()
-    app.pivot_view.tree.event_generate("<Button-1>", x=20, y=10)
+    app.pivot_view.name_tree.event_generate("<Button-1>", x=20, y=10)
     pump(root, 0.4)
     shot("4-pivot-resto-headerfilter-open")
 

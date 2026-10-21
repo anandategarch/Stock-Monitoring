@@ -874,7 +874,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.70", APP_VERSION == "3.9.70",
+    check("Versi = 3.9.71", APP_VERSION == "3.9.71",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1123,7 +1123,9 @@ def main():
     check("HeaderFilter terpasang di #0", isinstance(hf, HeaderFilter))
     app.notebook.select(app.tab_pivot)
     root.update()
-    pv.tree.event_generate("<Button-1>", x=20, y=10)
+    # v3.9.71 — funnel #0 menempel di TREE BEKU (freeze kolom nama barang:
+    # #0 di tree utama disembunyikan width-0)
+    pv.name_tree.event_generate("<Button-1>", x=20, y=10)
     root.update()
     check("Klik heading #0 → popup filter terbuka",
           hf._popup is not None and hf._popup.winfo_exists())
@@ -19805,8 +19807,9 @@ def main():
             _out79.append(tuple(_m79.get(_h79) for _h79 in headers79))
         return _out79
 
-    # fn_2205 tanpa 'Kuantitas' (VALUE) — identitas utuh → 3 baris masuk
-    # (v3.9.70: SEMUA kode — baris SI ikut; filter ACR dihapus)
+    # fn_2205 tanpa 'Kuantitas' (VALUE) — identitas utuh → 2 baris masuk
+    # (v3.9.71: TANPA kode SI — baris SI kembali tersaring; kode lain
+    # [ACR.] tetap masuk)
     _h2205_79 = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
                  "Kuantitas", "Satuan", "@Harga"]
     _d2205_79 = [
@@ -19823,12 +19826,12 @@ def main():
         _famrows79(_h2205v79, _d2205_79, full79=_h2205_79),
         sheet79=_SH2205_79)
     check("(v3.9.67) §79c: fn_2205 kolom VALUE 'Kuantitas' hilang → "
-          "WARNING keras + 3 baris (SEMUA kode — ACR + SI; v3.9.70 "
-          "filter ACR dihapus: dulu hanya 2 baris ACR) tetap masuk "
-          "dgn Value NA (dulu NA SENYAP — qty OUT 22.05 lenyap tanpa "
-          "jejak)",
+          "WARNING keras + 2 baris ACR (v3.9.71: baris SI kembali "
+          "tersaring — user '22.05 tanpa kode SI'; v3.9.70 sempat membuka "
+          "SEMUA kode) tetap masuk dgn Value NA (dulu NA SENYAP — qty "
+          "OUT 22.05 lenyap tanpa jejak)",
           "kolom VALUE 'Kuantitas'" in _log2205_79
-          and len(_df2205_79) == 3
+          and len(_df2205_79) == 2
           and _df2205_79["Value"].isna().all(),
           f"rows={len(_df2205_79)} log={_log2205_79[-200:]!r}")
 
@@ -19908,7 +19911,7 @@ def main():
     check("(v3.9.67) §79d: fn_2205 kolom 'Tanggal' hilang → WARNING "
           "+ Tanggal NA (dulu NA senyap — baris lenyap dari kolom hari)",
           "kolom 'Tanggal' tidak ditemukan" in _log2205t_79
-          and len(_df2205t_79) == 3   # v3.9.70: SEMUA kode (ACR+SI)
+          and len(_df2205t_79) == 2   # v3.9.71: TANPA kode SI (ACR saja)
           and _df2205t_79["Tanggal"].isna().all(),
           f"rows={len(_df2205t_79)} log={_log2205t_79[-200:]!r}")
 
@@ -20602,12 +20605,13 @@ def main():
           and "_SETTINGS_PATH" in _sh82)
 
     print()
-    print("== §83. (v3.9.70) AUDIT ULANG v3.9.69 — AKUNTANSI CACHE SAAT "
-          "EVIKSI + 2205 SEMUA KODE MASUK ==")
+    print("== §83. (v3.9.70→3.9.71) AUDIT ULANG v3.9.69 — AKUNTANSI CACHE "
+          "SAAT EVIKSI + 2205 SEMUA KODE MASUK KECUALI SI ==")
 
-    # -- (a) fn_2205 SEMUA KODE MASUK (user: "pada file 2205 sekarang
-    #       tidak perlu filter kode ACR lagi tapi semua kode masuk
-    #       perhitungan") ------------------------------------------------
+    # -- (a) fn_2205 SEMUA KODE MASUK KECUALI SI (user: "22.05 tanpa
+    #       kode SI ya maaf aku lupa bilang kemarin" — lanjutan v3.9.70
+    #       "pada file 2205 sekarang tidak perlu filter kode ACR lagi
+    #       tapi semua kode masuk perhitungan") -----------------------
     _h2205_83 = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
                  "Kuantitas"]
     _d2205_83 = [
@@ -20622,30 +20626,34 @@ def main():
         lambda _p83: _f2205_79(_p83),
         _famrows79(_h2205_83, _d2205_83, full79=_h2205_83),
         sheet79=_SH2205_79)
-    check("(v3.9.70) §83a-1: fn_2205 SEMUA KODE MASUK — baris non-ACR "
-          "(SI./RETUR.) tidak lagi dibuang dari sumber OUT (dulu hanya "
-          "Nomor # berawalan ACR yang tersaring)",
-          len(_df2205_83) == 3
+    check("(v3.9.71) §83a-1: fn_2205 TANPA KODE SI — baris SI. dibuang, "
+          "kode lain (ACR./RETUR.) TETAP masuk (v3.9.70 membuka semua "
+          "kode; user: 'maaf aku lupa bilang kemarin' — SI dikecualikan) "
+          "+ INFO jumlah baris SI ter-log",
+          len(_df2205_83) == 2
           and list(_df2205_83["Nama Barang"]) == ["GULA (V.20)",
-                                                  "KOPI (V.20)",
                                                   "TEH (V.20)"]
-          and list(_df2205_83["NAMA RESTO"]) == ["CKGPAH", "MLGPAR",
-                                                 "BDGUKU"]
-          and abs(float(_df2205_83["Value"].iloc[2]) - 50.0) < 1e-9
-          and list(_df2205_83["Tanggal"]) == [5, 6, 7],
+          and list(_df2205_83["NAMA RESTO"]) == ["CKGPAH", "BDGUKU"]
+          and abs(float(_df2205_83["Value"].iloc[1]) - 50.0) < 1e-9
+          and list(_df2205_83["Tanggal"]) == [5, 7]
+          and "[fn_2205] INFO: 1 baris kode SI dikecualikan" in _log2205_83,
           f"rows={len(_df2205_83)} log={_log2205_83[-200:]!r}")
 
-    # tanpa kolom 'Nomor #' sama sekali → baris TETAP masuk (kolom tak
-    # lagi wajib — dulu ident-guard membuang SELURUH sumber dg WARNING)
+    # tanpa kolom 'Nomor #' sama sekali → baris tetap diproses APA
+    # ADANYA + WARNING jujur (kode SI jadi tak teridentifikasi — v3.9.70
+    # dulu tanpa warning; sebelum v3.9.70 seluruh sumber dibuang)
     _h2205n_83 = ["Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"]
     _df2205n_83, _log2205n_83 = _run79(
         lambda _p83: _f2205_79(_p83),
         _famrows79(_h2205n_83, _d2205_83, full79=_h2205_83),
         sheet79=_SH2205_79)
-    check("(v3.9.70) §83a-2: fn_2205 TANPA kolom 'Nomor #' → baris tetap "
-          "diproses TANPA warning (kolom bukan lagi kunci filter; dulu "
-          "seluruh sumber dibuang WARNING krn kolom wajib)",
-          len(_df2205n_83) == 3 and "WARNING" not in _log2205n_83,
+    check("(v3.9.71) §83a-2: fn_2205 TANPA kolom 'Nomor #' → 3 baris "
+          "tetap diproses + WARNING keras (kode SI TIDAK bisa "
+          "dikecualikan — peringatan ikut menaikkan status run; v3.9.70 "
+          "tanpa warning; era filter ACR dulu seluruh sumber dibuang)",
+          len(_df2205n_83) == 3
+          and "[fn_2205] WARNING: kolom 'Nomor #' tidak ditemukan"
+          in _log2205n_83,
           f"rows={len(_df2205n_83)} log={_log2205n_83[-200:]!r}")
 
     # -- (b) P2 audit ulang: akuntansi cache saat eviksi ------------------
@@ -20707,6 +20715,175 @@ def main():
     finally:
         _hp82._READ_CACHE_MAX_CELLS = _max_lama83
         _hp82.read_cache_invalidate(None)
+
+    print()
+    print("== §84. (v3.9.71) FREEZE KOLOM NAMA BARANG (TAB PIVOT) + 2205 "
+          "TANPA KODE SI ==")
+
+    # -- (a) freeze-pane: kontrak utama + sinkronisasi ----------------------
+    # user: "di tab pivot tabel gak bsia freeze kolom nama barang ya?
+    # sehingga jika aku scroll ke kanan bisa kefreze"
+    from src.ui.pivot_view import PivotTableView as _PV84
+
+    _top84 = tk.Toplevel(root)
+    _pv84 = _PV84(_top84)
+    _pv84.pack(fill="both", expand=True)
+    root.update()
+    _rows84 = []
+    for _i84 in range(40):
+        _brg84 = f"BARANG BEKU UJI {(_i84 + 1):03d}"
+        for _rs84 in ("MLGPAR", "SBYKET"):
+            _rows84.append({"Tanggal": 1, "NAMA RESTO": _rs84,
+                            "Nama Barang": _brg84, "JENIS": "3.DEVIASI",
+                            "NILAI": -2, "SOURCE KIRIMAN": "-",
+                            "KATEGORI": "Deviasi"})
+    _pv84.load_data(pd.DataFrame(_rows84))
+    root.update()
+    _pv84.ensure_refreshed()
+    _dl84 = time.time() + 5.0
+    while time.time() < _dl84 and (_pv84._busy
+                                   or not len(_pv84.tree.get_children(""))):
+        root.update()
+        time.sleep(0.01)
+    root.update()
+    check("(v3.9.71) §84a-1: FREEZE — #0 di tree utama DISEMBUNYIKAN "
+          "(width 0) & tree beku menampilkan kolom nama (width > 0; "
+          "render selesai 40 barang)",
+          int(_pv84.tree.column("#0", "width")) == 0
+          and _pv84.name_tree is _pv84.frozen.tree
+          and int(_pv84.name_tree.column("#0", "width")) > 0
+          and len(_pv84.tree.get_children("")) == 40,
+          f"w0={_pv84.tree.column('#0', 'width')} "
+          f"wf={_pv84.name_tree.column('#0', 'width')} "
+          f"n={len(_pv84.tree.get_children(''))}")
+    _p84 = _pv84.tree.get_children("")[0]
+    _p84n = next(iter(_pv84.name_tree.get_children("")))
+    check("(v3.9.71) §84a-2: tree beku IDENTIK — iid parent/anak + teks "
+          "sama (mirror_items membawa text/tags/open; kolom matrix tetap "
+          "hanya di tree utama — data utama TIDAK pindah, test lama aman)",
+          _p84n == _p84
+          and _pv84.name_tree.item(_p84, "text")
+          == _pv84.tree.item(_p84, "text")
+          and len(_pv84.name_tree.get_children(_p84))
+          == len(_pv84.tree.get_children(_p84))
+          and list(_pv84.tree["columns"]) == ["MLGPAR", "SBYKET"],
+          f"iid0 sama? {_p84n == _p84}")
+    _pv84.tree.yview_moveto(0.5)
+    root.update()
+    check("(v3.9.71) §84a-3: scroll vertikal UTAMA → tree beku mengikuti "
+          "(guard anti-loop _y_sync)",
+          abs(_pv84.tree.yview()[0] - 0.5) < 0.02
+          and abs(_pv84.name_tree.yview()[0] - 0.5) < 0.02,
+          f"utama={_pv84.tree.yview()[0]:.3f} "
+          f"beku={_pv84.name_tree.yview()[0]:.3f}")
+    _pv84.name_tree.yview_moveto(0.25)
+    root.update()
+    check("(v3.9.71) §84a-4: scroll di BEKU (roda mouse di kolom nama) → "
+          "tree utama ikut (chain balik _on_left_scroll)",
+          abs(_pv84.tree.yview()[0] - 0.25) < 0.02,
+          f"utama={_pv84.tree.yview()[0]:.3f}")
+    _c84 = _pv84.tree.get_children(_p84)[0]
+    _pv84.tree.selection_set(_c84)
+    root.update()
+    check("(v3.9.71) §84a-5: seleksi UTAMA → beku tersinkron — guard "
+          "KESAMAAN SELEKSI (BUG empiris smoke pertama: <<TreeviewSelect>> "
+          "lewat antrean event, flag tak melintasi antrean → ping-pong "
+          "HANG; kini menulis hanya bila beda)",
+          set(_pv84.tree.selection()) == set(_pv84.name_tree.selection()),
+          f"utama={set(_pv84.tree.selection())} "
+          f"beku={set(_pv84.name_tree.selection())}")
+    _pv84.name_tree.selection_set(
+        _pv84.name_tree.get_children("")[5])
+    root.update()
+    check("(v3.9.71) §84a-6: seleksi di BEKU → utama tersinkron (dua arah)",
+          set(_pv84.tree.selection()) == set(_pv84.name_tree.selection()),
+          f"utama={set(_pv84.tree.selection())}")
+    _pv84.tree.xview_moveto(1.0)
+    root.update()
+    check("(v3.9.71) §84a-7: scroll HORIZONTAL utama → pane beku TIDAK "
+          "ikut (xview beku tetap 0.0–1.0 penuh — nama barang tak "
+          "bergeser: KONTRAK FREEZE yang diminta user)",
+          _pv84.name_tree.xview() == (0.0, 1.0),
+          f"xview beku={_pv84.name_tree.xview()}")
+    _pv84._auto_fit()
+    root.update()
+    check("(v3.9.71) §84a-8: ↔ Auto-Fit TIDAK membuka kembali #0 utama "
+          "(skip via _autofit_skip) & kolom nama beku ikut ter-fit "
+          "(dulu auto-fit melebarkan #0 tersembunyi)",
+          int(_pv84.tree.column("#0", "width")) == 0
+          and int(_pv84.name_tree.column("#0", "width")) > 0,
+          f"w0={_pv84.tree.column('#0', 'width')} "
+          f"wf={_pv84.name_tree.column('#0', 'width')}")
+    _win84, _mt84 = _pv84._maximize()
+    _dl84 = time.time() + 6.0
+    while time.time() < _dl84 and not getattr(_mt84, "_copy_finalized",
+                                              False):
+        root.update()
+        time.sleep(0.01)
+    root.update()
+    _cp84 = getattr(_mt84, "_frozen_pane", None)
+    check("(v3.9.71) §84a-9: clone ⛶ Layar Penuh IKUT freeze-pane — #0 "
+          "clone tersembunyi, pane beku isi sama (iid identik), hook "
+          "_clone_filter_apply tetap di tree utama clone (kompatibilitas "
+          "§30/6527) + funnel clone menempel di pane beku",
+          _cp84 is not None
+          and int(_mt84.column("#0", "width")) == 0
+          and len(_cp84.tree.get_children(""))
+          == len(_mt84.get_children(""))
+          and list(_cp84.tree.get_children(""))
+          == list(_mt84.get_children(""))
+          and callable(getattr(_mt84, "_clone_filter_apply", None))
+          and callable(getattr(_cp84.tree, "_clone_filter_apply", None)),
+          f"pane={_cp84 is not None} "
+          f"n={len(_mt84.get_children(''))} "
+          f"npane={len(_cp84.tree.get_children('')) if _cp84 else -1}")
+    _mt84._clone_filter_apply("#0", {"BARANG BEKU UJI 010"})
+    _dl84 = time.time() + 6.0
+    while time.time() < _dl84 and not (
+            len(_mt84.get_children("")) == 1
+            and len(_cp84.tree.get_children("")) == 1):
+        root.update()
+        time.sleep(0.01)
+    root.update()
+    check("(v3.9.71) §84a-10: filter ⧩ clone (funnel sisi beku, filter "
+          "baris via tree utama — attach_clone_filters filter_tree) → "
+          "KEDUA sisi tersinkron 1 barang dgn nama benar (dulu funnel "
+          "clone menempel di #0 yang tersembunyi = tak bisa diklik)",
+          len(_mt84.get_children("")) == 1
+          and len(_cp84.tree.get_children("")) == 1
+          and _cp84.tree.item(_cp84.tree.get_children("")[0], "text")
+          == "BARANG BEKU UJI 010",
+          f"n={len(_mt84.get_children(''))} "
+          f"npane={len(_cp84.tree.get_children(''))}")
+    _win84.destroy()
+    root.update()
+    _pv84.destroy()
+    _top84.destroy()
+    root.update()
+
+    # -- (b) 2205 tanpa kode SI — kontrak unit tambahan ---------------------
+    _h84b = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
+             "Kuantitas"]
+    _d84b = [
+        ["si.2026.10.004", _dt79(2026, 10, 8), "KONSUMEN (SBYKET)",
+         "SIRUP (V.20)", 3.0],      # lowercase 'si.' — BUKAN kode SI
+        [None, _dt79(2026, 10, 9), "KONSUMEN (CKGPAH)",
+         "KOPI KOPI (V.20)", 2.0],  # Nomor # kosong — BUKAN SI
+    ]
+    _df84b, _log84b = _run79(
+        lambda _p84b: _f2205_79(_p84b),
+        _famrows79(_h84b, _d84b, full79=_h84b),
+        sheet79=_SH2205_79)
+    check("(v3.9.71) §84b-1: prefix SI CASE-SENSITIVE (mirror M "
+          "Text.StartsWith — 'si.' lowercase TETAP masuk) + Nomor # "
+          "kosong/None = BUKAN SI (baris tetap masuk) + file tanpa baris "
+          "SI → log bersih TANPA [fn_2205] INFO/WARNING",
+          len(_df84b) == 2
+          and list(_df84b["Nama Barang"]) == ["SIRUP (V.20)",
+                                             "KOPI KOPI (V.20)"]
+          and "[fn_2205] INFO" not in _log84b
+          and "WARNING" not in _log84b,
+          f"rows={len(_df84b)} log={_log84b[-200:]!r}")
 
     root.destroy()
 

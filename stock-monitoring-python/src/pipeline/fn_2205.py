@@ -3,13 +3,21 @@ fn_2205.py — Mirror persis fn2205 di M code.
 Rincian Penjualan per Barang (modul 22.05) → sumber OUT.
 OPTIMIZED: vectorized text operations via .str accessor.
 
+v3.9.71 — TANPA KODE SI (user: "22.05 tanpa kode SI ya maaf aku lupa
+bilang kemarin" — penyempurnaan permintaan v3.9.70 "semua kode masuk"):
+baris dengan Nomor # berawalan "SI" kini DIKECUALIKAN dari sumber OUT;
+SEMUA kode lain (ACR./RETUR./dll.) tetap masuk perhitungan. 'Nomor #'
+kembali dibaca sebagai kunci filter (tetap BUKAN kolom wajib identitas:
+hilang → baris diproses APA ADANYA + WARNING jujur, karena kode SI jadi
+tak teridentifikasi — status run "SELESAI DENGAN PERINGATAN"). Baris SI
+yang dikecualikan diberitahu di log ([fn_2205] INFO: N baris) — bukan
+peringatan, murni jejak observabilitas filter bisnis yang disengaja.
+
 v3.9.70 — SEMUA KODE MASUK PERHITUNGAN (user: "pada file 2205 sekarang
 tidak perlu filter kode ACR lagi tapi semua kode masuk perhitungan"):
 filter M Table.SelectRows(...Text.StartsWith([#"Nomor #"], "ACR"))
-DIHAPUS — seluruh dokumen penjualan 22.05 (semua Nomor # — ACR./SI./
-RETUR./dll.) kini masuk sumber OUT; 'Nomor #' TAK LAGI kolom wajib
-(bukan lagi kunci filter — hilang pun baris tetap diproses; identitas
-cukup Nama Pelanggan + Nama Barang).
+DIHAPUS — seluruh dokumen penjualan 22.05 masuk sumber OUT; 'Nomor #'
+TAK LAGI kolom wajib (identitas cukup Nama Pelanggan + Nama Barang).
 
 v3.9.33 — AUDIT FIX (48-a):
 - guard kolom — identitas ('Nomor #' = kunci filter ACR, 'Nama
@@ -55,10 +63,12 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
     # sel = Table.SelectColumns(prom, {"Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"})
-    # v3.9.70 — 'Nomor #' TIDAK lagi dibutuhkan (filter ACR dihapus:
-    # user "semua kode masuk perhitungan"); identitas cukup Nama
-    # Pelanggan + Nama Barang.
-    needed = ["Tanggal", "Nama Pelanggan", "Nama Barang", "Kuantitas"]
+    # v3.9.71 — 'Nomor #' DIBACA LAGI sebagai kunci filter SI (user:
+    # "22.05 tanpa kode SI") — tetap BUKAN kolom wajib identitas
+    # (ident-guard tetap cukup Nama Pelanggan + Nama Barang; kolom
+    # hilang → baris diproses APA ADANYA + WARNING, lihat blok filter).
+    needed = ["Nomor #", "Tanggal", "Nama Pelanggan", "Nama Barang",
+              "Kuantitas"]
     available = [c for c in needed if c in prom.columns]
     sel = prom[available].copy()
 
@@ -78,13 +88,30 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
               f"bergeser? pipeline lanjut tanpa sumber 22.05 ini)")
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 
-    # v3.9.70 — SEMUA KODE MASUK (user: "pada file 2205 sekarang tidak
-    # perlu filter kode ACR lagi tapi semua kode masuk perhitungan"):
-    # M lama Table.SelectRows(sel, each Text.StartsWith([#"Nomor #"],
-    # "ACR")) DIHAPUS — dulu baris non-ACR (mis. SI./RETUR.) dibuang
-    # senyap dari sumber OUT; kini SELURUH dokumen penjualan 22.05
-    # masuk perhitungan.
-    fil = sel.copy()
+    # v3.9.71 — TANPA KODE SI (user: "22.05 tanpa kode SI ya maaf aku
+    # lupa bilang kemarin"): v3.9.70 membuka SEMUA kode masuk; kini
+    # hanya kode SI yang dikecualikan — semua kode lain (ACR./RETUR./
+    # dll.) tetap masuk. Mirror semantik filter M lama (Text.StartsWith
+    # case-sensitive): prefix "SI" case-sensitive, bukan "si.", dan
+    # Nomor # kosong/NA dianggap BUKAN SI (baris tetap masuk).
+    # 'Nomor #' tetap BUKAN kolom wajib identitas: hilang → baris
+    # diproses APA ADANYA + WARNING keras (kode SI tak teridentifikasi
+    # — data berpotensi tercemar SI; peringatan ini ikut menaikkan
+    # status akhir run, pola §82b).
+    if "Nomor #" in sel.columns:
+        _kode = safe_to_str(sel["Nomor #"])
+        _si = _kode.str.startswith("SI", na=False)
+        if bool(_si.any()):
+            print(f"  [fn_2205] INFO: {int(_si.sum())} baris kode SI "
+                  f"dikecualikan dari perhitungan (22.05 tanpa kode "
+                  f"SI — kode lain tetap masuk)")
+        fil = sel.loc[~_si].copy()
+    else:
+        print(f"  [fn_2205] WARNING: kolom 'Nomor #' tidak ditemukan — "
+              f"{len(sel)} baris diproses APA ADANYA, kode SI TIDAK "
+              f"bisa dikecualikan (header di-rename/hilang oleh export "
+              f"baru Accurate?)")
+        fil = sel.copy()
 
     # typed: vectorized
     fil["Nama Pelanggan"] = safe_to_str(fil["Nama Pelanggan"])
