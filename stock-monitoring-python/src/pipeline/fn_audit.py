@@ -155,6 +155,16 @@ def detect_data_period(in_detail_df: pd.DataFrame | None):
         t = pd.to_datetime(in_detail_df["#Tgl/Jam Pembuatan IT"],
                            errors="coerce").dropna()
         if not t.empty:
+            # v3.10.1 — FIX P2 (bug hunt 1-a): 1 timestamp nyasar bulan
+            # DEPAN (typo tanggal dokumen) dulu membalik periode →
+            # month_len/rentang tanggal view salah. Bulan depan relatif
+            # jam sistem tidak mungkin jadi periode data yang sah —
+            # dibuang; data bulan-bulan lampau tetap sah (app memproses
+            # data lama). Semua terbuang → fallback kode Nomor.
+            _now = pd.Timestamp.now()
+            t = t[(t.dt.year * 12 + t.dt.month)
+                  <= (_now.year * 12 + _now.month)]
+        if not t.empty:
             best = (int(t.max().year), int(t.max().month))
     if best is None and "Nomor" in cols:
         for v in in_detail_df["Nomor"]:
@@ -193,11 +203,14 @@ def _attach_so_kemarin(out: pd.DataFrame,
 
     - "Qty BM Rekap"    : salinan BM rekap lama (display — bukan basis);
     - "Qty SO Kemarin"  : SO(t−1) — pengamatan SO TERAKHIR sebelum t
-                          (ffill dalam pasangan; baris tanpa SO sendiri
+                          (ffill PER-PASANGAN — v3.10.1: tidak pernah
+                          mewarisi lintas pasangan; baris tanpa SO sendiri
                           tetap dapat SO-kemarin utk display, ΔSO-nya
-                          NaN); Tanggal 1 → SALDO AWAL prioritas (mirror
-                          pivot _compute_com v3.9.5), fallback SO lalu;
-                          baris pertama bulan lalu → NaN;
+                          NaN); BARIS PERTAMA pasangan di bulan berjalan
+                          → SALDO AWAL prioritas (v3.10.1: dulu hanya
+                          tgl==1; mirror pivot _compute_com v3.9.5),
+                          fallback SO lalu; baris pertama pasangan /
+                          baris bulan lalu tanpa observasi → NaN;
     - "Qty Delta SO"    : Hasil SO − Qty SO Kemarin (NaN bila SO(t)
                           belum direkam / tak ada basis).
     """
@@ -211,25 +224,36 @@ def _attach_so_kemarin(out: pd.DataFrame,
     item = out["Nama Item"].astype(str)
     new_pair = (resto != resto.shift(1)) | (item != item.shift(1))
 
-    # ffill SO dalam pasangan: nilai teramati TERAKHIR sebelum baris t
-    # (anti-bocor antar pasangan: baris PERTAMA pasangan tanpa SO sendiri
-    # tidak boleh mewarisi SO pasangan sebelumnya — di-null; baris pertama
-    # yang PUNYA SO tetap tersimpan sbg observasi).
-    so_ff = so.ffill()
-    so_ff[new_pair & so.isna()] = np.nan
+    # ffill SO DALAM PASANGAN: nilai teramati TERAKHIR sebelum baris t.
+    # v3.10.1 — FIX P0 (bug hunt 1-a/1-b): ffill GLOBAL + patch anti-bocor
+    # lama (null baris PERTAMA pasangan tanpa SO) hanya menyembuhkan 2
+    # baris pertama — baris ke-3+ pasangan yang belum punya SO tetap
+    # MEWARISI SO pasangan SEBELUMNYA ("SO Kemarin" = stok barang lain;
+    # ΔSO baris-SO-pertama pasangan dibandingkan ke SO pasangan lain →
+    # Selisih/Status/COM salah). Kini ffill & shift PER-PASANGAN via
+    # groupby id pasangan — tidak ada warisan lintas pasangan sama sekali
+    # (baris pertama pasangan otomatis NaN oleh groupby-shift).
+    pair_id = np.cumsum(new_pair.to_numpy(dtype="int64"))
+    so_ff = so.groupby(pair_id).ffill()
+    so_prev = so_ff.groupby(pair_id).shift(1)
 
-    so_prev = so_ff.shift(1)
-    so_prev[new_pair] = np.nan      # baris pertama pasangan: tak ada basis
-
-    # Tanggal 1 → SALDO AWAL prioritas (parity pivot COM v3.9.5)
+    # SALDO AWAL prioritas di batas bulan (parity pivot COM v3.9.5).
+    # v3.10.1 — FIX P1 (bug hunt 1-a): jangkar SA diperluas dari tgl==1
+    # ke BARIS PERTAMA pasangan di bulan berjalan (tgl berapapun):
+    # pasangan tanpa baris tanggal 1 (aktivitas pertama tgl 2+) sebelumnya
+    # TANPA basis sama sekali (ΔSO NaN→0 → Selisih −IN phantom "gantung
+    # semu" di varian Bulan Ini) padahal SA tersedia. Baris tgl 1 selalu
+    # baris pertama bulan-berjalan pasangannya (sort kronologis) →
+    # generalisasi ini MENGULANGI perilaku tgl-1 lama + menutup lubangnya.
     tgl = pd.to_numeric(out["Tanggal"], errors="coerce")
     if saldo_awal_map:
         sa_vals = [saldo_awal_map.get((r, b))
                    for r, b in zip(resto, item)]
         sa = pd.to_numeric(pd.Series(sa_vals, index=out.index),
                            errors="coerce")
-        is_t1 = tgl == 1
-        so_prev = so_prev.mask(is_t1 & sa.notna(), sa)
+        is_cur = (tgl >= 1).fillna(False)
+        first_cur = is_cur.groupby(pair_id).cumsum() == 1
+        so_prev = so_prev.mask(first_cur & sa.notna(), sa)
 
     out["Qty SO Kemarin"] = so_prev.astype("float64")
     out["Qty Delta SO"] = (so - so_prev).astype("float64")
@@ -786,12 +810,13 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     ``bulan_lalu``:
     - True  : SEMUA data (default pipeline; baris bulan lalu ber-Tanggal
               negatif ikut — saldo kumulatif menyambung dari bulan lalu).
-    - False : baris Tanggal negatif DIBUANG sebelum engine → audit murni
+    - False : baris Tanggal negatif dibuang SETELAH basis SO-kemarin
+              dihitung (v3.10.1 — dulu sebelum build_audit_input, basis
+              baris pertama bulan berjalan ikut lenyap) → audit murni
               bulan berjalan (1..31) — mirror sheet LAPORAN_DEVIASI
               (output macro VBA user = 2.798 pasangan × 31 hari, tanpa
-              tanggal negatif). Pembanding delta SO tanggal 1 jadi SO
-              pertama YANG TERSISA di bulan berjalan (baris bulan lalu
-              tidak ada).
+              tanggal negatif). Pembanding tanggal pertama = SALDO AWAL
+              / SO terakhir bulan lalu (masih diketahui dari basis).
 
     v3.9.30 — param ``po_pending_df``: Rincian PO 32.43 (frame mentah
     tanpa filter KATEGORI — difilter status 'Menunggu diproses' internal
@@ -825,11 +850,19 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     # sebelumnya — mis. ⏹ ditekan pas Rincian PO selesai — langsung
     # terasa; dulu harus menunggu varian audit PERTAMA selesai penuh)
     stop_check(stop_event, "audit rekonsiliasi (persiapan)")
-    if not bulan_lalu:
-        rekap_so_df = _filter_bulan_ini(rekap_so_df)
-        in_detail_df = _filter_bulan_ini(in_detail_df)
     raw = build_audit_input(rekap_so_df, in_detail_df,
                             saldo_awal_map=saldo_awal_map)
+    if not bulan_lalu:
+        # v3.10.1 — FIX P1 (bug hunt 1-a): baris bulan lalu dibuang SETELAH
+        # basis SO-kemarin dihitung (dulu difilter SEBELUM build_audit_input
+        # → SO bulan lalu ikut terbuang → baris PERTAMA bulan berjalan
+        # pasangan tanpa baris tgl-1 TANPA basis: ΔSO NaN→0 → Selisih −IN
+        # phantom "gantung semu" di varian Bulan Ini, padahal varian PENUH
+        # atas baris yang sama menampilkan angka benar). Engine tetap murni
+        # bulan berjalan (saldo kumulatif mulai dari baris pertama bulan
+        # ini — kontrak mirror LAPORAN_DEVIASI v3.9.27 utuh); yang membawa
+        # informasi bulan lalu HANYA kolom basis "Qty SO Kemarin".
+        raw = _filter_bulan_ini(raw).reset_index(drop=True)
     # v3.9.72 — checkpoint ⏹ pasca build input (agregasi groupby vektor;
     # Stop saat agregasi tak perlu menunggu engine jalan)
     stop_check(stop_event, "audit rekonsiliasi (input)")

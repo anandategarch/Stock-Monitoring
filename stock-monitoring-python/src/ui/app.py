@@ -161,7 +161,7 @@ from src.ui.deviasi_view import (
     SharedTanggalH,
     load_acr_threshold,
 )
-from src.ui.export_sheets import add_pivot_sheet
+from src.ui.export_sheets import ExportCancelled, add_pivot_sheet
 from src.ui.followup import FollowUpStore
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
@@ -242,7 +242,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.10"  # v3.10 — BASIS SELISIH BARU "SO KEMARIN" + KOLOM COM + MODE 📈 ANALISA (user: "ubah logika selisih in dengan selisih dengan so kemarin" · "tambahkan kolom COm di rekap selisih in" · "gali potensi analisa di tab rekap selisih in" · "Misal bulan ini hanya sampai tanggal 30 maka tidak perlu ada tanggal 31 begitu juga di bulan kemarin"): (1) PIPELINE/fn_audit — SELISIH IN kini = (SO(t)−SO(t−1)) − IN (kenaikan stok fisik vs penerimaan sistem; positif = fisik naik lebih banyak → RI belum diinput; negatif = IN masuk sistem tapi stok tak bertambah) · _attach_so_kemarin BARU: "Qty BM Rekap" (display) · "Qty SO Kemarin" (ffill dalam pasangan anti-bocor antar pasangan; Tanggal 1 → SALDO AWAL 42.17 prioritas, fallback SO terakhir; baris pertama pasangan → NaN) · "Qty Delta SO" · SLOT ENGINE "Qty SO Harian" diisi ΔSO → Selisih Harian = ΔSO − IN (BM rekap TETAP hidup sebagai kolom display; "Qty SO Harian" di-rename "Qty Delta SO" di output — anti-keliru semantik) · KOLOM COM = SO(t−1) + IN − BK − SO(t) (pemakaian aktual; "Qty BK" per baris dari peta 42.15 Kirim) · KPI BARU com_minus · main._extract_append1_maps: peta SALDO AWAL 42.17 + BARANG KELUAR 42.15 dari output append1 (format long JENIS/NILAI) · detect_data_period + month_lengths: PANJANG BULAN ASLI dari data (September 30 hari → tak ada tanggal 31; bulan kemarin ikut kalender; fallback 31 utk pemanggil lama) · audit_result membawa period/month_len/lalu_month_len. (2) VIEW in_selisih — KOLOM BARU "SO Kemarin" + "COM" (format lama tanpa kolom v3.10 → tampil '-', kompatibel pemanggil lama) · MODE TAMPILAN 📋 Tabel | 📈 Analisa (SegmentBar; toggle tanpa recompute — payload analisa dihitung worker _refresh sekali) · ANALISA 6 SEKSI di worker (_compute_analisa): Umur Gantung aging 0-3/4-7/8-14/15-30/>30 hari (tanggal bulan lalu kontinu via panjang bulan asli) · Leaderboard Resto (Σ|selisih| + trend paruh awal vs akhir) · Sistemik vs Lokal (barang gantung ≥3 resto vs ops resto) · Resolve-Rate (pernah gantung → teratasi vs masih; hari bersih) · Anomali ΔSO (naik tanpa IN / turun tanpa BK&IN) · COM Minus (barang "muncul dari mana-mana") · RENTANG TANGGAL pakai panjang bulan asli dari audit_result (month_len/lalu_month_len) · KPI chip "BASIS SELISIH: SO KEMARIN (ΔSO−IN)" + "COM MINUS" · CATATAN AUDIT BARU: B4b "SO belum direkam (ΔSO tak diketahui — selisih menunggu input SO)" + B5 "COM −n (pemakaian negatif — cek input SO)" · POPUP Rincian IN: chip SO KEMARIN + COM (nilai 0 MEANINGFUL → '0' via _fmt_num_keepzero; None → chip disembunyikan, bukan 0 palsu) · _keys payload + so_kemarin/com mentah (FIX 6d2-01 parity). (3) EXPORT — AUDIT_EXPORT_COLUMNS + "SO Kemarin" + "COM" (numerik; NaN → sel kosong konsisten Hasil SO). (4) FIX INTEGRASI — numpy import di in_selisih_view (NameError worker 'np' — tabel 0 baris senyap) · _compute_base jalur legacy: df["Qty SO Harian"] Series (bukan literal string → NaN kolom penuh) · _fmt_num_keepzero utk chip nol-meaningful. TES: fixture lama (§42 PO Menunggu, §43 konversi, 6d2-01 chip, 6d2-02 leaderboard, C-04 oracle) disinkron basis ΔSO — SO pembasis ditambah supaya baris ber-selisih tetap terbentuk; oracle neg_cells + kolom SO Kemarin/COM. VERIFIKASI: test_ui_redesign 1624/1624 PASS (Xvfb 1920×1080) · test_mock ALL PASS · ruff · py_compile.
+APP_VERSION = "3.10.1"  # v3.10.1 — BUG HUNT LENGKAP (user: "Find bug lengkap dan fix"): 3 subagent audit paralel (1-a fn_audit/pipeline · 1-b in_selisih_view · 1-c export/main/app wiring) + probe Xvfb/headless → 17 bug terkonfirmasi & ditutup. (1) P0 ×3: FIX P0-1 fn_audit._attach_so_kemarin ffill GLOBAL BOCOR ANTAR PASANGAN (anti-leak lama hanya me-null 2 baris pertama pasangan tanpa-SO; baris ke-3+ mewarisi SO pasangan SEBELUMNYA → "SO Kemarin" = stok barang LAIN + ΔSO baris-SO-pertama dibandingkan ke SO pasangan lain → Selisih/Status/COM/KPI salah; kini ffill+shift PER-PASANGAN via groupby id pasangan) · FIX P0-2 main._extract_append1_maps peta SA = 0.0 ARTIFACT (unpivot append1 memancarkan baris 'SALDO AWAL' NILAI=0 tiap tanggal teramati dari fillna(0) wide + urutan frame tanggal-negatif-duluan → "first non-null" memilih 0.0 di tgl −25..−31 BUKAN nilai SA asli tgl 1 → basis t=1 salah 0.0, LEBIH BURUK dari tanpa peta: menopengi fallback SO-lalu yang benar via mask sa.notna() — setiap angka v3.10 di Tanggal 1 salah: Qty SO Kemarin/ΔSO/Selisih/Saldo/Status/COM/KPI com_minus/export; kini peta dari baris NILAI≠0 saja — fn_4217 sendiri memfilter Value≠0; bk_map ikut dibebaskan dari artifact 0: memori/loop ramping, angka tak berubah) · FIX P0-3 in_selisih_view._render_resto_scores mode 📈 Analisa + REFRESH APAPUN → TclError "before=_tcard unmapped" (tabel card dilepas _apply_view_mode; pola FIX yang sama dulu hanya diterapkan di _render_kpi_chips) di done-callback → render_done tak jalan → _busy menggantung → VIEW MATI PERMANEN sampai restart (trigger: Apply TANGGAL · klik SKOR RESTO · MODE HITUNG · checkbox Selisih≠0 · ✕ Reset · F5/pipeline re-run · toggle-awal-saat-refresh-in-flight; kini anchor kandidat pertama yang masih managed _tcard→_analisa_card). (2) P1 ×6: FIX P1-4 jangkar SA diperluas tgl==1 → BARIS PERTAMA pasangan di bulan berjalan (pasangan tanpa baris tgl-1/aktivitas mulai tgl 2+ dulu TANPA basis → ΔSO NaN→0 → Selisih −IN phantom "gantung semu" di varian Bulan Ini padahal varian PENUH benar; tgl 1 selalu baris pertama bulan-berjalan pasangannya → generalisasi mengulang perilaku lama + menutup lubang) · FIX P1-5 build_audit_from_app bulan_lalu=False: baris bulan lalu dibuang SETELAH basis SO-kemarin dihitung (dulu difilter SEBELUM build_audit_input → SO-lalu ikut terbuang → phantom idem; engine tetap murni bulan berjalan — kontrak mirror LAPORAN_DEVIASI v3.9.27 utuh, HANYA kolom basis yang membawa info bulan lalu) · FIX P1-6 _compute_analisa ordinal lintas-bulan SALAH (tgl+lalu utk negatif MEMBALIK urutan dalam blok bulan lalu: ordn(-31)=0 < ordn(-25)=6 padahal hari 25 < hari 31 + umur lintas bulan menggelembung 2×lalu → aging bucket/trend paruh/resolve-rate "baris TERAKHIR" seksi 1/2/4 salah di mode 📆 Lalu+Ini — mode 📅 Bulan Ini tanpa negatif tak tersentuh; kini -tgl: hari-lalu d → d, hari-ini d → lalu+d — probe: umur 39→20 hari, bucket >30→15-30, teratasi 0→1) · FIX P1-7 seksi 6 COM MINUS "sum" = Σ|COM| SEMUA baris (dulu hanya TOP-5 → kontradiksi chip meta "COM MINUS n (Σ)" di panel yang sama: 7 baris → 25 vs 28; top-5 tetap utk daftar tampilan) · FIX P1-8 app._export_excel EXPORT BATAL = DEAD WIRING v3.9.72 (should_cancel/ExportCancelled ADA di export_sheets tapi TAK PERNAH dipakai app: add_pivot_sheet tanpa should_cancel · on_error tanpa cabang ExportCancelled · overlay tanpa tombol → export besar sheet PIVOT sel-per-sel tak bisa dibatalkan; kini: tombol ⏹ Batal di LoadingOverlay.set_cancel_command (klik = disabled "Membatalkan…" + set Event; hide() me-reset run-bersih) → threading.Event → dicek tiap 32 baris PIVOT + antar-sheet _raise_if_cancelled; on_error cabang ExportCancelled → status "Export dibatalkan." + log INFO BUKAN dialog error — kontrak v3.9.72 akhirnya terpasang) · FIX P1-9 catatan B3 narasi arah "IN a > BM b" bisa PALSU di basis ΔSO−IN (probe: "Selisih IN 20 (BM 10 > IN 13)" — BM kini kolom display bukan basis; kini utk format v3.10 arah = ΔSO vs IN, ΔSO tak diketahui → catatan basis "basis SO kemarin tak ada"). (3) P2/P3 ×8: FIX P2-10 _compute_base kolom BM di-GUARD (frame v3.10 parsial punya "Qty SO Kemarin" tanpa "Qty BM Rekap" dulu KeyError → seluruh tabel gagal via on_error; kini degrade NA '-' seperti kolom v3.10 lain) · FIX P2-11 B4b hanya utk format v3.10 (basis lama BM−IN tak bergantung SO — klaim "ΔSO tak diketahui" salah di format lama) · FIX P2-12 B5 narasi "COM -n" (dulu "COM (n)" — kurung akuntan aneh di kalimat) · FIX P2-13 tabel kolom "SO Kemarin"/"COM" 0 → '0' via _fmt_num_keepzero (_KEEPZERO_COLS _format_col_values; 0 MEANINGFUL: SO kemarin 0 = stok kosong kemarin, COM 0 = pemakaian pas balik — dulu '-' tak terbedakan dari belum-direkam; paritas chip popup v3.10 & export yang menulis 0; filter header ikut konsisten) · FIX P2-14 detect_data_period timestamp nyasar bulan-DEPAN dibuang (1 dok typo tanggal dulu membalik periode → month_len/rentang tanggal view/ordinal salah; bulan depan relatif jam sistem tak mungkin periode data sah; data lampau tetap sah — semua terbuang → fallback kode Nomor) · FIX P3-15 KPI chip COM MINUS disembunyikan utk kpi format lama tanpa kunci com_minus (dulu hijau '0' palsu — chip BASIS SELISIH di sebelahnya jujur 'BM REKAP (BM−IN)') · FIX P3-16 _sync_export_buttons kriteria = PERSIS guard _export_excel 4 dataset + .empty (dulu hanya append1/rincian is-not-None → data audit/IN-saja: tombol mati padahal export jalan — docstring "kriteria sama guard" kini benar-benar benar) · FIX P3-17 dialog simpan export utama parent=self.root (transient ke jendela app; jalur in_selisih sudah benar). TES: 2 fixture disinkron ke kriteria tombol export baru (§57 isolasi-view kini diberi data run NYATA mock §3 — frame kosong dulu lolos asersi hanya karena kriteria lama is-not-None; §68 6a-01 "tanpa data apa pun" kini benar-benar mengosongkan SEMUA 4 dataset — audit_result 3-baris warisan 6a-05 ADALAH data yang bisa di-export/sheet Laporan Deviasi). VERIFIKASI: test_ui_redesign 1624/1624 PASS (Xvfb 1920×1080) · test_mock ALL PASS · probe 35 check (ffill per-pasangan · peta SA non-zero artifact · jangkar SA first-cur · strip-setelah-basis varian Bulan Ini · ordinal analisa/umur/bucket/resolve · seksi-6 sum penuh · Analisa+refresh tanpa TclError dgn _busy reset + toggle balik + tabel terisi · tombol ⏹ overlay Event/disabled/hide-reset · periode bulan-depan-dibuang) · ruff 200 ≤ 201 net 0 (catatan lokal "207" = 7 isu file probe bench/ tak-tertrack yang tak pernah sampai CI — file dibersihkan) · py_compile semua file berubah.
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -3850,7 +3850,7 @@ class StockMonitorApp:
     def _sync_export_buttons(self) -> None:
         """FIX 6a-01 — sinkronkan tombol 💾 Export (toolbar + tab Proses)
         ke ketersediaan data AKTUAL app (kriteria sama dgn guard
-        _export_excel: append1/rincian_po TERSEDIA).
+        _export_excel: 4 dataset non-kosong).
 
         Dipanggil di SEMUA jalur keluar _on_pipeline_done (sukses / ERROR /
         STOP) + selesai/gagal export. Dulu hanya jalur SUKSES yang
@@ -3858,9 +3858,20 @@ class StockMonitorApp:
         tampil meninggalkan tombol mati selamanya — user dipaksa re-run
         pipeline penuh hanya untuk men-export data lama yang masih valid.
         (Di jalur ERROR/STOP data run lama sengaja DIPERTAHANKAN — self.
-        append1_df dkk. tidak ditimpa; tombol mengikuti data itu.)"""
-        has_data = (self.append1_df is not None
-                    or self.rincian_po_df is not None)
+        append1_df dkk. tidak ditimpa; tombol mengikuti data itu.)
+        v3.10.1 — FIX P3 (bug hunt 1-c): kriteria kini PERSIS guard
+        _export_excel (4 dataset + .empty — dulu hanya append1/rincian
+        PO is-not-None: data audit/IN-saja membuat tombol mati padahal
+        export jalan)."""
+        def _ada_baris(df):
+            return df is not None and not df.empty
+
+        _audit_df = (self.audit_result.get("df")
+                     if self.audit_result else None)
+        has_data = (_ada_baris(self.append1_df)
+                    or _ada_baris(self.rincian_po_df)
+                    or _ada_baris(self.in_detail_df)
+                    or _ada_baris(_audit_df))
         self.btn_export.set_enabled(has_data)
         self.btn_export_tb.set_enabled(has_data)
 
@@ -4555,6 +4566,7 @@ class StockMonitorApp:
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
             initialfile=("stock_monitoring_"
                          f"{time.strftime('%Y%m%d_%H%M')}.xlsx"),
+            parent=self.root,   # v3.10.1 — FIX P3: dialog transient ke app
         )
         if not filepath:
             return
@@ -4568,9 +4580,26 @@ class StockMonitorApp:
         if not hasattr(self, "_export_overlay"):
             self._export_overlay = LoadingOverlay(self.root,
                                                   "Mengekspor ke Excel…")
+        # v3.10.1 — FIX P1 (bug hunt 1-c): fitur "EXPORT BATAL" v3.9.72
+        # ternyata DEAD WIRING — should_cancel/ExportCancelled ada di
+        # export_sheets tapi TIDAK PERNAH dipakai app (add_pivot_sheet
+        # dipanggil tanpa should_cancel; on_error tanpa cabang
+        # ExportCancelled; overlay tanpa tombol batal) → export besar
+        # (sheet PIVOT ditulis sel per sel — bagian terpanjang) tak bisa
+        # dibatalkan. Kini: tombol ⏹ Batal di overlay → threading.Event
+        # → dicek tiap 32 baris PIVOT (add_pivot_sheet) + antar sheet;
+        # batal → tmp dibuang finally, file tujuan tak tersentuh, status
+        # "Export dibatalkan" (BUKAN dialog error — kontrak v3.9.72).
+        cancel_evt = threading.Event()
         self._export_overlay.show("Mengekspor ke Excel…", delay_ms=0)
+        self._export_overlay.set_cancel_command(cancel_evt.set)
         self.btn_export.set_enabled(False)
         self.btn_export_tb.set_enabled(False)
+
+        def _raise_if_cancelled(stage: str):
+            if cancel_evt.is_set():
+                raise ExportCancelled(
+                    f"Export dibatalkan pengguna ({stage})")
 
         def work():
             # FIX 6a-02: tulis ke file SEMENTARA satu folder dgn tujuan —
@@ -4589,10 +4618,13 @@ class StockMonitorApp:
                     # v3.8: sheet PIVOT ditulis DULU → jadi tab pertama
                     # (matrix mutasi barang + conditional formatting ala
                     # tab pivot "Mutasi Barang - New" user)
-                    add_pivot_sheet(writer, append1_df)
+                    add_pivot_sheet(writer, append1_df,
+                                    should_cancel=cancel_evt.is_set)
+                    _raise_if_cancelled("sebelum sheet Append1")
                     if append1_df is not None and not append1_df.empty:
                         append1_df.to_excel(writer, sheet_name="Append1",
                                             index=False)
+                    _raise_if_cancelled("sebelum sheet Rincian PO")
                     if rincian_po_df is not None and not rincian_po_df.empty:
                         # v3.9.19 (paritas UI): kolom "Nama Resto" — derivasi
                         # sama dgn rincian_po_view (Cabang PO → kode resto,
@@ -4609,10 +4641,12 @@ class StockMonitorApp:
                         po_export.insert(pos, "Nama Resto", nama_resto)
                         po_export.to_excel(writer, sheet_name="Rincian PO",
                                            index=False)
+                    _raise_if_cancelled("sebelum sheet Rincian IN")
                     # v3.4: detail IN per dokumen (42.05/32.24/99.01 + nomor)
                     if in_detail_df is not None and not in_detail_df.empty:
                         in_detail_df.to_excel(writer, sheet_name="Rincian IN",
                                               index=False)
+                    _raise_if_cancelled("sebelum sheet Laporan Deviasi")
                     # v3.5: hasil Audit Rekonsiliasi (port macro VBA)
                     if audit_df is not None and not audit_df.empty:
                         audit_df.to_excel(
@@ -4645,6 +4679,14 @@ class StockMonitorApp:
 
         def on_error(e):
             self._sync_export_buttons()   # FIX 6a-01 (lihat done())
+            # v3.10.1 — kontrak v3.9.72 yang dulu tak terpasang: BATAL =
+            # status ramah + log INFO, BUKAN dialog error (file tujuan tak
+            # pernah tersentuh — tmp dibuang finally FIX 6a-02).
+            if isinstance(e, ExportCancelled):
+                self._append_log_batched(
+                    f"\n[INFO] Export dibatalkan: {e}\n")
+                self.statusbar.set_status("Export dibatalkan.", C_AMBER)
+                return
             # v3.9.59 — FIX 2f-09: detail teknis ke LOG konsol; user diberi
             # pesan Indonesia yang actionable — file terkunci (masih
             # dibuka Excel) dulu tampil sebagai exception mentah English.

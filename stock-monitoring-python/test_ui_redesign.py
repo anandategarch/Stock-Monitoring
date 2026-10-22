@@ -912,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.10", APP_VERSION == "3.10",
+    check("Versi = 3.10.1", APP_VERSION == "3.10.1",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -12873,7 +12873,13 @@ def main():
 
     app.pivot_view.load_data = _boom57
     try:
-        app._on_pipeline_done(pd.DataFrame(), pd.DataFrame(),
+        # v3.10.1 — fixture sync: kriteria tombol export kini 4 dataset
+        # non-kosong (PERSIS guard _export_excel — fix 1-c BUG-P). Frame
+        # kosong dulu lolos asersi hanya karena kriteria lama cek
+        # is-not-None; skenario isolasi-view kini diberi data run NYATA
+        # (mock §3) supaya "tombol Export tetap enabled" menguji maksud
+        # aslinya: data ADA, SATU view gagal, tombol tetap hidup.
+        app._on_pipeline_done(append1, pd.DataFrame(),
                               pd.DataFrame(), dict(_aud57), None, False)
         for _ in range(6):
             root.update()
@@ -15886,6 +15892,14 @@ def main():
 
         app.append1_df = None
         app.rincian_po_df = None
+        # v3.10.1 — fixture sync: kriteria tombol export kini 4 dataset
+        # (PERSIS guard _export_excel): "tanpa data apa pun" harus benar-
+        # benar kosong SEMUA dataset — audit_result 3-baris warisan 6a-05
+        # di atas ADALAH data yang bisa di-export (sheet Laporan Deviasi);
+        # dulu tak pernah dibersihkan karena kriteria lama hanya membaca
+        # append1/rincian.
+        app.in_detail_df = None
+        app.audit_result = None
         app.btn_export.set_enabled(False)
         app.btn_export_tb.set_enabled(False)
         app._on_pipeline_done(None, None, None, None,

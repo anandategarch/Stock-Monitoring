@@ -1341,6 +1341,7 @@ class LoadingOverlay(tk.Frame):
                          highlightthickness=1, **kw)
         inner = tk.Frame(self, bg=C_CARD)
         inner.pack(padx=24, pady=14)
+        self._inner = inner   # v3.10.1 — host tombol ⏹ Batal (export)
         self.spinner = Spinner(inner, bg=C_CARD)
         self.spinner.pack(side="left", padx=(0, 12))
         self._var = tk.StringVar(value=text)
@@ -1349,7 +1350,49 @@ class LoadingOverlay(tk.Frame):
         self._show_after = None
         self._visible = False
         self._cursor_held = False   # FIX B-17: klaim cursor "watch" aktif?
+        # v3.10.1 — EXPORT BATAL (fix dead wiring v3.9.72): tombol ⏹ opsional
+        # (overlay app._export_excel). cmd callable → tombol tampil (klik =
+        # disabled "Membatalkan…" + panggil cmd — work() memeriksa flag di
+        # checkpoint berikutnya lalu raise ExportCancelled); None → dilepas.
+        self._cancel_command = None
+        self._cancel_btn = None
         self.bind("<Destroy>", self._on_destroy, add="+")
+
+    def set_cancel_command(self, cmd):
+        """v3.10.1 — pasang/lepas tombol ⏹ Batal di chip loading.
+
+        Dipakai app utk export besar (sheet PIVOT ditulis sel per sel —
+        bagian terpanjang): work() menerima ``should_cancel`` yang
+        memeriksa Event/flag yang dset tombol ini. hide() me-reset supaya
+        run berikutnya mulai bersih."""
+        self._cancel_command = cmd
+        if cmd is None:
+            if self._cancel_btn is not None:
+                with contextlib.suppress(tk.TclError):
+                    self._cancel_btn.pack_forget()
+            return
+        if self._cancel_btn is None:
+            self._cancel_btn = tk.Button(
+                self._inner, text="⏹ Batal", font=font(9, "bold"),
+                bg="#dc2626", fg="white", activebackground="#b91c1c",
+                activeforeground="white", bd=0, relief="flat",
+                cursor="hand2", padx=10, pady=2,
+                command=self._on_cancel_click)
+        self._cancel_btn.configure(state="normal", text="⏹ Batal")
+        self._cancel_btn.pack(side="left", padx=(10, 0))
+
+    def _on_cancel_click(self):
+        cmd = self._cancel_command
+        if cmd is None:
+            return
+        if self._cancel_btn is not None:
+            with contextlib.suppress(tk.TclError):
+                self._cancel_btn.configure(state="disabled",
+                                           text="⏹ Membatalkan…")
+        # (contextlib.suppress — bukan except-pass — menjaga gerbang ruff
+        # S110/BLE001; cmd = Event.set milik app, realistis tak melempar)
+        with contextlib.suppress(Exception):
+            cmd()
 
     def show(self, text: str | None = None, delay_ms: int = 180):
         if text:
@@ -1412,6 +1455,13 @@ class LoadingOverlay(tk.Frame):
             except Exception:
                 pass
             self._show_after = None
+        # v3.10.1 — lepas tombol ⏹ Batal + status "Membatalkan…" (run
+        # berikutnya mulai bersih; klik batal yang datang terlambat tak
+        # memicu Event run baru).
+        self._cancel_command = None
+        if self._cancel_btn is not None:
+            with contextlib.suppress(tk.TclError):
+                self._cancel_btn.pack_forget()
         try:
             self.place_forget()
             self.spinner.stop()

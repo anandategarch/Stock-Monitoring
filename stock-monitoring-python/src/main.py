@@ -35,9 +35,15 @@ def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dic
     (format long JENIS/NILAI) utk basis "SO kemarin" + kolom COM audit:
 
     - saldo_awal_map {(resto, barang): nilai} dari baris JENIS 'SALDO
-      AWAL' (42.17 — first non-null per pasangan);
+      AWAL' (42.17) — v3.10.1: HANYA baris NILAI ≠ 0 (baris NILAI=0 di
+      output long adalah ARTIFACT fillna(0) unpivot append1 yang
+      memancarkan 'SALDO AWAL' 0 di tiap tanggal teramati; fn_4217
+      sendiri memfilter Value ≠ 0 → 0 tidak pernah SA sah), first
+      non-null per pasangan;
     - bk_map {(resto, barang, tgl): Σqty} dari baris JENIS
-      '8.BARANG KELUAR' (42.15 Kirim).
+      '8.BARANG KELUAR' (42.15 Kirim) — v3.10.1: baris NILAI=0 artifact
+      juga dibuang (peta hanya memuat pasangan-tgl yang benar-benar
+      ber-BK — angka tak berubah, memori/loop jauh lebih kecil).
 
     Frame kosong/tanpa kolom JENIS/NILAI → peta kosong (audit jalan
     tanpa SA/BK — fallback NaN/0 di fn_audit)."""
@@ -51,7 +57,16 @@ def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dic
     jenis = append1_df["JENIS"].astype(str)
     _sa = append1_df[jenis == "SALDO AWAL"]
     if not _sa.empty and {"NAMA RESTO", "Nama Barang"} <= cols:
+        # v3.10.1 — FIX P0 (bug hunt 1-a/1-c): tanpa filter ini urutan
+        # frame (tanggal negatif duluan hasil sort fn_running_stock)
+        # membuat "first non-null" memilih ARTIFACT 0.0 di tgl −25..−31,
+        # BUKAN nilai SA asli di tanggal 1 → basis t=1 salah 0.0 — LEBIH
+        # BURUK dari tanpa peta: nilai 0.0 menopengi fallback SO-lalu
+        # yang benar lewat mask sa.notna() di fn_audit.
         _vals = pd.to_numeric(_sa["NILAI"], errors="coerce")
+        _keep = _vals.notna() & (_vals != 0)
+        _sa = _sa[_keep]
+        _vals = _vals[_keep]
         for r, b, v in zip(_sa["NAMA RESTO"].astype(str),
                            _sa["Nama Barang"].astype(str), _vals):
             if pd.notna(v) and (r, b) not in sa:
@@ -60,11 +75,16 @@ def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dic
     if not _bk.empty and {"NAMA RESTO", "Nama Barang", "Tanggal"} <= cols:
         _t = pd.to_numeric(_bk["Tanggal"], errors="coerce")
         _vals = pd.to_numeric(_bk["NILAI"], errors="coerce").fillna(0.0)
+        # v3.10.1 — buang artifact NILAI=0 (idem SA) — angka Σ tak
+        # berubah (0 tak menambah), peta memori/loop jauh lebih ramping.
+        _keep = (_vals != 0) & _t.notna()
+        _bk = _bk[_keep]
+        _t = _t[_keep]
+        _vals = _vals[_keep]
         for r, b, t, v in zip(_bk["NAMA RESTO"].astype(str),
                               _bk["Nama Barang"].astype(str), _t, _vals):
-            if pd.notna(t):
-                key = (r, b, int(t))
-                bk[key] = bk.get(key, 0.0) + float(v)
+            key = (r, b, int(t))
+            bk[key] = bk.get(key, 0.0) + float(v)
     return sa, bk
 
 

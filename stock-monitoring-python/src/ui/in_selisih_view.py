@@ -258,6 +258,14 @@ _ALL_COLS = [c[0] for c in COLUMNS]
 _NUM_COLS = {"Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
              "Selisih IN", "COM", "Saldo", "PO Menunggu"}
 
+# v3.10.1 — FIX P2 (bug hunt 1-c): kolom yang NOLNYA MEANINGFUL — 0
+# ditampilkan '0' (bukan '-' paritas _fmt_num): "SO Kemarin" 0 = stok
+# memang kosong kemarin; "COM" 0 = pemakaian pas balik. Tabel dulu
+# menampilkan '-' utk 0 sah → tak terbedakan dari "belum direkam"/
+# "tak ada basis" (NaN) — inkonsisten dgn chip popup (_fmt_num_
+# keepzero) & export (menulis 0) yang sama-sama v3.10.
+_KEEPZERO_COLS = {"SO Kemarin", "COM"}
+
 # Warna status — mirror conditional formatting VBA (soft colors)
 _STATUS_TAG = {
     "OK (Matching)": "st_ok",
@@ -506,9 +514,12 @@ def _fmt_jam(val) -> str:
 
 def _format_col_values(col: str, series: pd.Series) -> pd.Series:
     """Format satu kolom DataFrame → string tampilan (dipakai filter header
-    & render — nilai filter selalu identik dgn yang tampil di tabel)."""
+    & render — nilai filter selalu identik dgn yang tampil di tabel).
+    v3.10.1 — "SO Kemarin"/"COM" pakai _fmt_num_keepzero (0 meaningful)."""
     if col == "Tanggal":
         return series.map(_fmt_int)
+    if col in _KEEPZERO_COLS:
+        return series.map(_fmt_num_keepzero)
     if col in _NUM_COLS:
         return series.map(_fmt_num)
     return series.astype(str)
@@ -1560,12 +1571,19 @@ class InSelisihView(tk.Frame):
             ("SISA GANTUNG (NET)",
              fmt_int_id(k.get('deviasi_qty', 0.0)),
              "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
-            # v3.10 — COM minus: baris pemakaian aktual < 0 (barang
-            # "muncul dari mana-mana" — sinyal input SO salah/kurang).
-            ("COM MINUS",
-             fmt_int_id(k.get('com_minus', 0)),
-             "#dc2626" if k.get('com_minus', 0) else "#16a34a"),
         ]
+        # v3.10 — COM minus: baris pemakaian aktual < 0 (barang
+        # "muncul dari mana-mana" — sinyal input SO salah/kurang).
+        # v3.10.1 — FIX P3 (bug hunt 1-c): chip hanya utk data yang
+        # BENAR-BENAR punya angkanya — kpi format lama (tanpa kunci
+        # 'com_minus') dulu tampil hijau '0' (angka basis BM−IN tak
+        # punya COM; chip BASIS SELISIH di sebelahnya justru jujur
+        # menulis 'BM REKAP (BM−IN)').
+        if _basis_v310 or "com_minus" in k:
+            chips.append(("COM MINUS",
+                          fmt_int_id(k.get('com_minus', 0)),
+                          "#dc2626" if k.get('com_minus', 0)
+                          else "#16a34a"))
         # v3.9.59 — FIX 2e-02: kartu KPI dibungkus GRID 4-per-baris
         # (deterministik; v3.10: 10 kartu = 3 baris). Dulu pack
         # side="left" SATU baris (~1014px lebar) → pada WINDOW_MIN app
@@ -1702,6 +1720,15 @@ class InSelisihView(tk.Frame):
         # pemanggil lama tanpa kolom v3.10) → fallback slot lama (BM rekap
         # juga isinya — perilaku identik pra-v3.10).
         _v310 = "Qty SO Kemarin" in df.columns
+        # v3.10.1 — FIX P2 (bug hunt 1-b): kolom BM di-GUARD (frame v3.10
+        # PARSIAL — punya "Qty SO Kemarin" tapi tanpa "Qty BM Rekap" —
+        # dulu KeyError 'Qty BM Rekap' → seluruh tabel gagal via on_error;
+        # kini degrade kolom NA '-' seperti kolom v3.10 lain).
+        _bm_col = None
+        if "Qty BM Rekap" in df.columns:
+            _bm_col = "Qty BM Rekap"
+        elif "Qty SO Harian" in df.columns:
+            _bm_col = "Qty SO Harian"
 
         def _num_or_na(src_col: str) -> pd.Series:
             """Kolom numerik v3.10 — hilang di format lama → NA (tampil
@@ -1720,9 +1747,10 @@ class InSelisihView(tk.Frame):
             # ΔSO-nya ditampilkan di kolom "SO Kemarin"/implisit Selisih IN.
             # (FIX: else-branch WAJIB df["Qty SO Harian"] — literal string
             # di-pd.to_numeric = NaN kolom penuh, BM legacy lenyap.)
-            "Barang Masuk": pd.to_numeric(
-                df["Qty BM Rekap"] if _v310 else df["Qty SO Harian"],
-                errors="coerce"),
+            "Barang Masuk": (pd.to_numeric(df[_bm_col], errors="coerce")
+                             if _bm_col is not None else
+                             pd.Series([pd.NA] * len(df),
+                                       index=df.index, dtype="Float64")),
             "SO Kemarin": _num_or_na("Qty SO Kemarin"),
             "COM": _num_or_na("Qty COM"),
             "IN": pd.to_numeric(df["Penerimaan Sistem"], errors="coerce"),
@@ -1777,7 +1805,10 @@ class InSelisihView(tk.Frame):
         # (RI Balancing · Nomor Dobel · Selisih IN · BM kosong)
         # di-APPEND ke catatan engine VBA (" | "); catatan VBA asli
         # tetap di posisi pertama — isi lama tidak berubah.
-        _notes = self._build_audit_notes(out, in_detail)
+        # v3.10.1 — flag basis diteruskan supaya narasi B3/B4b jujur utk
+        # format lama (BM−IN) vs v3.10 (ΔSO−IN).
+        _notes = self._build_audit_notes(out, in_detail,
+                                         basis_v310=_v310)
         if _notes:
             out["Catatan Audit"] = [
                 _join_notes(vba, _notes.get((r, t, b)))
@@ -1788,7 +1819,8 @@ class InSelisihView(tk.Frame):
         return out
 
     def _build_audit_notes(self, out: pd.DataFrame,
-                           in_detail: pd.DataFrame | None) -> dict:
+                           in_detail: pd.DataFrame | None,
+                           basis_v310: bool = False) -> dict:
         """v3.9.23 (poin B — user: "catatan Audit pada tab rekap
         selisih IN") — catatan audit OTOMATIS per baris tabel
         (Resto, Tanggal, Nama Barang), dihitung dari detail dokumen
@@ -1858,16 +1890,24 @@ class InSelisihView(tk.Frame):
                     _add(r, t, b, f"Nomor dobel: {txt}")
 
         # --- B3 + B4: dari angka baris tabel itu sendiri (vektor) ---
-        # B4 DIDAHULUKAN dari B3: Selisih = BM − IN identitas aljabar —
-        # bila BM 0 & IN > 0 maka selisih PASTI ≠ 0, dan diagnosis yang
-        # benar bukan "selisih angka" melainkan "input rekap belum
-        # diisi" (B3 umum hanya bila BM & IN sama-sama terisi).
+        # B4 DIDAHULUKAN dari B3 (format lama: Selisih = BM − IN identitas
+        # aljabar — bila BM 0 & IN > 0 maka selisih PASTI ≠ 0, dan diagnosis
+        # yang benar bukan "selisih angka" melainkan "input rekap belum
+        # diisi"; B3 umum hanya bila BM & IN sama-sama terisi).
+        # v3.10.1 — FIX P1 (bug hunt 1-a/1-b): narasi v3.10 jujur ke basis
+        # ΔSO−IN — pertidaksamaan lama "IN a > BM b" bisa PALSU (BM kini
+        # kolom display, bukan basis: probe "Selisih IN 20 (BM 10 > IN
+        # 13)"). ΔSO diketahui → arah membandingkan ΔSO vs IN; ΔSO tak
+        # diketahui → catatan basis (bukan pertidaksamaan ngawur).
         bm = pd.to_numeric(out["Barang Masuk"], errors="coerce") \
             .fillna(0).to_numpy(dtype="float64")
         ins = pd.to_numeric(out["IN"], errors="coerce") \
             .fillna(0).to_numpy(dtype="float64")
         sel = pd.to_numeric(out["Selisih IN"], errors="coerce") \
             .fillna(0).to_numpy(dtype="float64")
+        dsov = (pd.to_numeric(out["Delta SO"], errors="coerce")
+                .to_numpy(dtype="float64")
+                if "Delta SO" in out.columns else None)
         # v3.10 — B4b (Hasil SO kosong) & B5 (COM minus): kolom mungkin
         # tak ada di format lama → penuh NaN → catatan tak pernah muncul.
         sov = (pd.to_numeric(out["Hasil SO"], errors="coerce")
@@ -1881,10 +1921,16 @@ class InSelisihView(tk.Frame):
             b = out["Nama Barang"].iat[i]
             t = out["Tanggal"].iat[i]
             if comv is not None and not np.isnan(comv[i]) and comv[i] < 0:
+                # v3.10.1 — FIX P2 (bug hunt 1-b): 'COM -n' di NARASI (dulu
+                # 'COM (n)' — kurung akuntan tabel jadi aneh di kalimat).
                 _add(r, t, b,
-                     f"COM {_fmt_num(comv[i])} (pemakaian negatif — "
+                     f"COM -{_fmt_num(abs(comv[i]))} (pemakaian negatif — "
                      f"cek input SO)")
-            if sov is not None and np.isnan(sov[i]) and ins[i] > 0:
+            if (basis_v310 and sov is not None and np.isnan(sov[i])
+                    and ins[i] > 0):
+                # v3.10.1 — FIX P2 (bug hunt 1-b): B4b hanya utk format
+                # v3.10 — di basis lama BM−IN selisih TIDAK bergantung SO,
+                # klaim "ΔSO tak diketahui" salah.
                 _add(r, t, b,
                      "SO belum direkam (ΔSO tak diketahui — selisih "
                      "menunggu input SO)")
@@ -1893,9 +1939,20 @@ class InSelisihView(tk.Frame):
                      f"BM 0 padahal IN {_fmt_num(ins[i])} "
                      f"(input rekap belum diisi)")
             elif sel[i] != 0:
-                arah = (f"IN {_fmt_num(ins[i])} > BM {_fmt_num(bm[i])}"
-                        if sel[i] < 0 else
-                        f"BM {_fmt_num(bm[i])} > IN {_fmt_num(ins[i])}")
+                if basis_v310:
+                    if dsov is not None and not np.isnan(dsov[i]):
+                        arah = (f"IN {_fmt_num(ins[i])} > "
+                                f"ΔSO {_fmt_num(dsov[i])}"
+                                if sel[i] < 0 else
+                                f"ΔSO {_fmt_num(dsov[i])} > "
+                                f"IN {_fmt_num(ins[i])}")
+                    else:
+                        arah = ("basis SO kemarin tak ada (ΔSO belum "
+                                "dapat dihitung)")
+                else:
+                    arah = (f"IN {_fmt_num(ins[i])} > BM {_fmt_num(bm[i])}"
+                            if sel[i] < 0 else
+                            f"BM {_fmt_num(bm[i])} > IN {_fmt_num(ins[i])}")
                 _add(r, t, b,
                      f"Selisih IN {_fmt_num(sel[i])} ({arah})")
         return notes
@@ -1990,10 +2047,20 @@ class InSelisihView(tk.Frame):
         })
 
         # -- ordinal lintas bulan (tanggal -25..-31 lalu → 1..31 ini) --
+        # v3.10.1 — FIX P1 (bug hunt 1-a/1-b): semantik app = Tanggal
+        # negatif ADALAH hari bulan lalu (tgl=-25 → hari 25; -31 → hari
+        # 31 = hari TERAKHIR bulan lalu — dinegasikan fn_rekap_mentah,
+        # diurutkan kronologis _k2=-tgl oleh fn_audit). Ordinal kontigu
+        # yang benar: hari-lalu d → d (yaitu -tgl), hari-ini d → lalu+d.
+        # Rumus lama (tgl+lalu utk negatif) MEMBALIK urutan dalam blok
+        # bulan lalu (ordn(-31)=0 < ordn(-25)=6 padahal hari 25 < hari 31)
+        # + menggelembung umur lintas bulan 2×lalu — aging/trend paruh/
+        # resolve-rate "baris terakhir" seksi 1/2/4 salah di mode 📆
+        # Lalu + Ini (mode 📅 Bulan Ini tanpa negatif — tak tersentuh).
         lalu = float(self._lalu_month_len)
         with np.errstate(invalid="ignore"):
             ordn = np.where(np.isnan(tgl), np.nan,
-                            np.where(tgl < 0, tgl + lalu, lalu + tgl))
+                            np.where(tgl < 0, -tgl, lalu + tgl))
         out = dict(empty)
         out["meta"] = meta
 
@@ -2133,12 +2200,16 @@ class InSelisihView(tk.Frame):
         # --- seksi 6: COM MINUS -----------------------------------------
         try:
             if n_com_minus:
-                idx = np.flatnonzero(_com_ok & (com < 0))
-                idx = idx[np.argsort(com[idx])][:5]
+                # v3.10.1 — FIX P1/P2 (bug hunt 1-b/1-c): "sum" = Σ|COM|
+                # SEMUA baris COM-minus (dulu hanya TOP-5 — kontradiksi dgn
+                # chip meta "COM MINUS n (Σ)" yang menjumlahkan semua,
+                # dua angka beda utk metrik sama dalam satu panel); top-5
+                # tetap hanya utk DAFTAR tampilan.
+                _all_minus = np.flatnonzero(_com_ok & (com < 0))
+                idx = _all_minus[np.argsort(com[_all_minus])][:5]
                 out["com_minus"] = {
                     "n": n_com_minus,
-                    "sum": float(-com[idx if len(idx) else
-                                  (_com_ok & (com < 0))].sum()),
+                    "sum": float(-com[_all_minus].sum()),
                     "top": [
                         {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
                          "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
@@ -2913,7 +2984,21 @@ class InSelisihView(tk.Frame):
         if not getattr(self._expander, "expanded", False):
             # v3.9.55 — saat ⤢ diperbesar (kartu disembunyikan), JANGAN
             # re-pack zona (restore milik TableExpander yang mengelola).
-            zone.pack(fill="x", padx=12, pady=(10, 0), before=self._tcard)
+            # v3.10.1 — FIX P0 (bug hunt 1-b): mode 📈 Analisa melepas
+            # _tcard → before=_tcard unmapped = TclError di done-callback
+            # refresh → render_done tak jalan → _busy menggantung → view
+            # MATI PERMANEN (semua _refresh berikut early-return) sampai
+            # restart app. Pilih kandidat anchor pertama yang masih managed
+            # (pola _render_kpi_chips v3.10); tanpa before bila tak ada.
+            _anchor = None
+            for _cand in (self._tcard, self._analisa_card):
+                if _cand.winfo_manager() == "pack":
+                    _anchor = _cand
+                    break
+            if _anchor is not None:
+                zone.pack(fill="x", padx=12, pady=(10, 0), before=_anchor)
+            else:
+                zone.pack(fill="x", padx=12, pady=(10, 0))
 
     def _on_skor_row_click(self, resto: str):
         """v3.9.55 — F3: klik baris skor → TOGGLE filter kolom Resto
