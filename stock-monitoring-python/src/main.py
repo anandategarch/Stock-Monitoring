@@ -21,8 +21,51 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import Config
 from src.pipeline.append1 import build_append1
 from src.pipeline.fn_4109 import build_harga_map, fn_4109
-from src.pipeline.fn_audit import build_audit_from_app, extract_po_pending
+from src.pipeline.fn_audit import (
+    build_audit_from_app,
+    detect_data_period,
+    extract_po_pending,
+    month_lengths,
+)
 from src.pipeline.rincian_po import build_rincian_po
+
+
+def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dict]":
+    """v3.10 — peta SALDO AWAL & BARANG KELUAR dari output append1
+    (format long JENIS/NILAI) utk basis "SO kemarin" + kolom COM audit:
+
+    - saldo_awal_map {(resto, barang): nilai} dari baris JENIS 'SALDO
+      AWAL' (42.17 — first non-null per pasangan);
+    - bk_map {(resto, barang, tgl): Σqty} dari baris JENIS
+      '8.BARANG KELUAR' (42.15 Kirim).
+
+    Frame kosong/tanpa kolom JENIS/NILAI → peta kosong (audit jalan
+    tanpa SA/BK — fallback NaN/0 di fn_audit)."""
+    sa: dict = {}
+    bk: dict = {}
+    if append1_df is None or getattr(append1_df, "empty", True):
+        return sa, bk
+    cols = set(getattr(append1_df, "columns", []))
+    if "JENIS" not in cols or "NILAI" not in cols:
+        return sa, bk
+    jenis = append1_df["JENIS"].astype(str)
+    _sa = append1_df[jenis == "SALDO AWAL"]
+    if not _sa.empty and {"NAMA RESTO", "Nama Barang"} <= cols:
+        _vals = pd.to_numeric(_sa["NILAI"], errors="coerce")
+        for r, b, v in zip(_sa["NAMA RESTO"].astype(str),
+                           _sa["Nama Barang"].astype(str), _vals):
+            if pd.notna(v) and (r, b) not in sa:
+                sa[(r, b)] = float(v)
+    _bk = append1_df[jenis == "8.BARANG KELUAR"]
+    if not _bk.empty and {"NAMA RESTO", "Nama Barang", "Tanggal"} <= cols:
+        _t = pd.to_numeric(_bk["Tanggal"], errors="coerce")
+        _vals = pd.to_numeric(_bk["NILAI"], errors="coerce").fillna(0.0)
+        for r, b, t, v in zip(_bk["NAMA RESTO"].astype(str),
+                              _bk["Nama Barang"].astype(str), _t, _vals):
+            if pd.notna(t):
+                key = (r, b, int(t))
+                bk[key] = bk.get(key, 0.0) + float(v)
+    return sa, bk
 
 
 class PipelineStopped(Exception):
@@ -147,6 +190,24 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     if verbose:
         print(f"  IN detail (v3.4): {len(in_detail_df)} rows")
 
+    # v3.10 — basis "SO kemarin" + COM: peta SA 42.17 & BK 42.15 dari
+    # append1 + periode data (panjang bulan ASLI — September 30 hari →
+    # tak ada tanggal 31; bulan kemarin ikut kalender; user: "Misal bulan
+    # ini hanya sampai tanggal 30 maka tidak perlu ada tanggal 31 begitu
+    # juga di bulan kemarin").
+    saldo_awal_map, bk_map = _extract_append1_maps(append1_df)
+    period = detect_data_period(in_detail_df)
+    if period is None:
+        import datetime as _dt
+        _now = _dt.datetime.now()
+        period = (_now.year, _now.month)
+    month_len, lalu_month_len = month_lengths(period)
+    if verbose:
+        print(f"  Basis selisih v3.10: SO kemarin (ΔSO − IN) · "
+              f"SA {len(saldo_awal_map):,} pasangan · BK {len(bk_map):,} "
+              f"baris · periode {period[0]:04d}-{period[1]:02d} "
+              f"({month_len} hari; lalu {lalu_month_len} hari)")
+
     # 4. Audit Rekonsiliasi (v3.6 — dari DATA APP: rekap SO + BM + IN per
     #    tanggal; tanpa sheet '29 Rekap Barang Masuk')
     if verbose:
@@ -157,8 +218,14 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         rekap_so_holder.get("df"), in_detail_df,
         po_pending_df=po_pending_df,
         konversi=konversi_holder.get("map"),
+        saldo_awal_map=saldo_awal_map,
+        bk_map=bk_map,
         stop_event=stop_event)
-    audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
+    audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc,
+                    # v3.10 — panjang bulan asli utk rentang filter view
+                    "period": [int(period[0]), int(period[1])],
+                    "month_len": int(month_len),
+                    "lalu_month_len": int(lalu_month_len)}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
     # Selisih IN (user: "pada rekap selisih in bisa mode hitung bulan lalu
@@ -172,6 +239,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     audit_df2, audit_kpi2, audit_desc2 = build_audit_from_app(
         rekap_so_holder.get("df"), in_detail_df, po_pending_df=po_pending_df,
         bulan_lalu=False, konversi=konversi_holder.get("map"),
+        saldo_awal_map=saldo_awal_map,
+        bk_map=bk_map,
         stop_event=stop_event)
     audit_result["df_bulan_ini"] = audit_df2
     audit_result["kpi_bulan_ini"] = audit_kpi2

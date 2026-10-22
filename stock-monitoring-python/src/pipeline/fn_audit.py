@@ -1,6 +1,54 @@
 """
 fn_audit.py — Audit Rekonsiliasi: engine VBA + input dari DATA APP (v3.6).
 
+v3.10 — BASIS SELISIH BARU: "SELISIH DENGAN SO KEMARIN" (user: "ubah
+logika selisih in dengan selisih dengan so kemarin" + "tambahkan kolom
+COm di rekap selisih in"). Input engine slot "Qty SO Harian" kini diisi
+ΔSO = Hasil SO(t) − SO(t−1) (bukan lagi BM rekap manual) →
+
+    Selisih Harian = (SO(t) − SO(t−1)) − Penerimaan Sistem
+
+positif = stok fisik naik LEBIH BANYAK dari yang dicatat sistem (barang
+diterima tapi RI belum diinput); negatif = IN sistem masuk tapi stok
+fisik tidak bertambah. BM rekap (input resto — MASIH HIDUP, terverifikasi
+user; sebelumnya salah diklaim mati dari snapshot workbook saja) tetap
+dibawa sebagai kolom display "Qty BM Rekap" (TIDAK lagi jadi basis
+selisih/saldo/status).
+
+Basis "SO kemarin": pengamatan SO sebelumnya per pasangan (baris audit
+sudah kronologis; SO bolong → pakai SO terakhir yang TERAMATI — ffill):
+- Tanggal 1 → SALDO AWAL 42.17 prioritas (mirror pivot _compute_com
+  v3.9.5 — angka COM konsisten antar tab), fallback SO terakhir bulan
+  lalu, fallback NaN (ΔSO tak diketahui → engine melihat 0 → baris IN
+  jadi gantung sampai SO diisi — konvensi lama "deviasi sampai terisi").
+- Baris pertama bulan lalu (−25..−31) → NaN (tidak ada pengamatan lebih
+  awal di window data).
+
+KOLOM BARU pada audit_df:
+- "Qty SO Kemarin" — SO(t−1) basis delta (NaN → '-');
+- "Qty Delta SO" — ΔSO (nilai slot engine, eks-slot "Qty SO Harian");
+- "Qty BM Rekap" — BM rekap lama (display/data-quality);
+- "Qty BK" — Barang Keluar 42.15 per (pasangan, tanggal) — bahan COM;
+- "Qty COM" — pemakaian aktual kanonik:
+      COM(t) = SO(t−1) + IN(t) − BK(t) − SO(t)
+  (PERSIS formula 6.PEMAKAIAN (COM) pivot / Laporan Deviasi / Komparasi
+  — jangan bikin rumus keempat). KPI baru 'com_minus' = jumlah baris
+  COM < 0 (barang "muncul dari mana-mana" — sinyal input SO).
+
+Aturan VALID engine (SO Naik + BM=0 + IN>0) menjadi INERT di basis baru:
+SO naik yang match IN kini otomatis selisih 0 → "OK (Matching)" (lebih
+benar daripada flag VALID). Engine build_audit_rekap SENDIRI TIDAK
+diubah — hanya SUMBER slot input yang diganti (pola yang sama dgn
+v3.6 saat mengganti sheet 29 → data app).
+
+PANJANG BULAN (user: "Misal bulan ini hanya sampai tanggal 30 maka
+tidak perlu ada tanggal 31 begitu juga di bulan kemarin"): helper
+detect_data_period(in_detail) → (tahun, bulan) dari timestamp dokumen
+terbaru (#Tgl/Jam Pembuatan IT; fallback kode dokumen RI.YYYY.MM);
+pemanggil (main.py) menghitung month_len/lalu_len via calendar dan
+membawanya di audit_result utk view (rentang filter dinamis — bukan
+hardcode 31).
+
 v3.6 (permintaan user): sheet '29 Rekap Barang Masuk' TIDAK DIBACA LAGI.
 Logika macro VBA "BuatLaporanDeviasiSampel" diaplikasikan langsung ke data
 yang SUDAH dibaca pipeline, dengan tambahan kolom SO (Hasil SO) + kolom
@@ -59,7 +107,8 @@ baris DEVIASI MURNI + KPI 'dev_murni_po' (deviasi murni explainable
 vs perlu audit fisik). Engine VBA TIDAK diubah — enrichment dipasang
 SETELAH build_audit_rekap; pemanggil lama (tanpa PO) tak tersentuh.
 """
-from typing import Optional
+import calendar
+import re
 
 import numpy as np
 import pandas as pd
@@ -85,15 +134,122 @@ def _agg_sum(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
     return d.groupby(_KEY_COLS, as_index=False, dropna=False)[value_col].sum()
 
 
-def build_audit_input(rekap_so_df: Optional[pd.DataFrame],
-                      in_detail_df: Optional[pd.DataFrame]) -> pd.DataFrame:
-    """Bangun input audit (10 kolom kanonik) dari data app.
+# v3.10 — kode dokumen RI/IT/PI: PREFIKS.TAHUN.BULAN.NOMOR (utk deteksi
+# periode data bila kolom timestamp kosong — mirror doc_codes, TANPA
+# import modul ui dari pipeline (arah import ui→pipeline saja).
+_PERIOD_CODE_RE = re.compile(r"^[A-Za-z]+\.(\d{4})\.(\d{1,2})\.")
+
+
+def detect_data_period(in_detail_df: pd.DataFrame | None):
+    """v3.10 — (tahun, bulan) periode data berjalan dari detail IN:
+    bulan dari TIMESTAMP dokumen terbaru ('#Tgl/Jam Pembuatan IT'),
+    fallback bulan terbesar dari kode dokumen Nomor ('RI.2026.09.1'),
+    fallback None (pemanggil memakai bulan sistem). Dipakai utk PANJANG
+    BULAN asli (September 30 hari → tak ada tanggal 31; bulan kemarin
+    juga sesuai kalender)."""
+    best = None
+    if in_detail_df is None or getattr(in_detail_df, "empty", True):
+        return None
+    cols = set(getattr(in_detail_df, "columns", []))
+    if "#Tgl/Jam Pembuatan IT" in cols:
+        t = pd.to_datetime(in_detail_df["#Tgl/Jam Pembuatan IT"],
+                           errors="coerce").dropna()
+        if not t.empty:
+            best = (int(t.max().year), int(t.max().month))
+    if best is None and "Nomor" in cols:
+        for v in in_detail_df["Nomor"]:
+            m = _PERIOD_CODE_RE.match(str(v or "").strip())
+            if m:
+                try:
+                    y, mo = int(m.group(1)), int(m.group(2))
+                except ValueError:
+                    continue
+                if 1 <= mo <= 12 and (best is None or (y, mo) > best):
+                    best = (y, mo)
+    return best
+
+
+def month_lengths(period) -> "tuple[int, int]":
+    """v3.10 — (panjang_bulan_ini, panjang_bulan_lalu) dari (tahun, bulan)
+    hasil detect_data_period — kalender ASLI (September 30 hari → tak ada
+    tanggal 31; Februari ikut kabisat). None/invalid → (31, 31) —
+    perilaku lama (rentang penuh 1..31 / -31..31)."""
+    try:
+        y, m = int(period[0]), int(period[1])
+        assert 1 <= m <= 12
+    except (TypeError, ValueError, IndexError, AssertionError):
+        return 31, 31
+    len_ini = calendar.monthrange(y, m)[1]
+    pm = m - 1 or 12
+    py = y - 1 if m == 1 else y
+    len_lalu = calendar.monthrange(py, pm)[1]
+    return len_ini, len_lalu
+
+
+def _attach_so_kemarin(out: pd.DataFrame,
+                       saldo_awal_map: "dict | None" = None) -> pd.DataFrame:
+    """v3.10 — tambahkan kolom basis "SO kemarin" ke input audit
+    (out SUDAH kronologis per (Resto, Nama Item)):
+
+    - "Qty BM Rekap"    : salinan BM rekap lama (display — bukan basis);
+    - "Qty SO Kemarin"  : SO(t−1) — pengamatan SO TERAKHIR sebelum t
+                          (ffill dalam pasangan; baris tanpa SO sendiri
+                          tetap dapat SO-kemarin utk display, ΔSO-nya
+                          NaN); Tanggal 1 → SALDO AWAL prioritas (mirror
+                          pivot _compute_com v3.9.5), fallback SO lalu;
+                          baris pertama bulan lalu → NaN;
+    - "Qty Delta SO"    : Hasil SO − Qty SO Kemarin (NaN bila SO(t)
+                          belum direkam / tak ada basis).
+    """
+    bm = (out["Qty SO Harian"].copy() if "Qty SO Harian" in out.columns
+          else pd.Series(np.nan, index=out.index, dtype="float64"))
+    out["Qty BM Rekap"] = bm
+
+    so = pd.to_numeric(out["Hasil SO"], errors="coerce") \
+        .astype("float64")
+    resto = out["Resto"].astype(str)
+    item = out["Nama Item"].astype(str)
+    new_pair = (resto != resto.shift(1)) | (item != item.shift(1))
+
+    # ffill SO dalam pasangan: nilai teramati TERAKHIR sebelum baris t
+    # (anti-bocor antar pasangan: baris PERTAMA pasangan tanpa SO sendiri
+    # tidak boleh mewarisi SO pasangan sebelumnya — di-null; baris pertama
+    # yang PUNYA SO tetap tersimpan sbg observasi).
+    so_ff = so.ffill()
+    so_ff[new_pair & so.isna()] = np.nan
+
+    so_prev = so_ff.shift(1)
+    so_prev[new_pair] = np.nan      # baris pertama pasangan: tak ada basis
+
+    # Tanggal 1 → SALDO AWAL prioritas (parity pivot COM v3.9.5)
+    tgl = pd.to_numeric(out["Tanggal"], errors="coerce")
+    if saldo_awal_map:
+        sa_vals = [saldo_awal_map.get((r, b))
+                   for r, b in zip(resto, item)]
+        sa = pd.to_numeric(pd.Series(sa_vals, index=out.index),
+                           errors="coerce")
+        is_t1 = tgl == 1
+        so_prev = so_prev.mask(is_t1 & sa.notna(), sa)
+
+    out["Qty SO Kemarin"] = so_prev.astype("float64")
+    out["Qty Delta SO"] = (so - so_prev).astype("float64")
+    return out
+
+
+def build_audit_input(rekap_so_df: pd.DataFrame | None,
+                      in_detail_df: pd.DataFrame | None,
+                      saldo_awal_map: "dict | None" = None) -> pd.DataFrame:
+    """Bangun input audit (10 kolom kanonik + 3 kolom basis v3.10) dari
+    data app.
 
     rekap_so_df : rekap mentah long (JENIS 'SO' / 'BARANG MASUK') —
                   keluaran query_full_rekap_mentah_so (dipapankan dari
                   build_append1 via rekap_so_out).
     in_detail_df: detail IN per dokumen (SOURCE IN 42.05 / 42.05 (Bulan
                   Lalu) / 32.24 / 32.24 (Bulan Lalu) / 99.01).
+    saldo_awal_map: v3.10 — {(resto, barang): nilai SA 42.17} basis
+                  "SO kemarin" di Tanggal 1 (None = tanpa SA — fallback
+                  SO terakhir / NaN; kompatibel pemanggil lama).
     """
     empty = pd.DataFrame(columns=AUDIT_INPUT_COLUMNS)
 
@@ -180,7 +336,10 @@ def build_audit_input(rekap_so_df: Optional[pd.DataFrame],
     out = out.sort_values(["Resto", "Nama Item", "_k1", "_k2"],
                           kind="mergesort", na_position="last")
     out = out.drop(columns=["_k1", "_k2"]).reset_index(drop=True)
-    return out
+    # v3.10 — basis "SO kemarin" SETELAH sort (butuh urutan kronologis
+    # per pasangan); kolom kanonik 10 tetap DI DEPAN (struktur input VBA
+    # utuh — engine & pemanggil lama tak tersentuh).
+    return _attach_so_kemarin(out, saldo_awal_map)
 
 
 # =============================================================================
@@ -596,14 +755,31 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
     kpi["dev_murni_po"] = n_flagged
 
 
-def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
-                         in_detail_df: Optional[pd.DataFrame],
+def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
+                         in_detail_df: pd.DataFrame | None,
                          po_pending_df: "pd.DataFrame | None" = None,
                          bulan_lalu: bool = True,
                          konversi: "dict | None" = None,
+                         saldo_awal_map: "dict | None" = None,
+                         bk_map: "dict | None" = None,
                          stop_event=None
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
+
+    v3.10 — BASIS "SELISIH DENGAN SO KEMARIN": slot engine "Qty SO
+    Harian" diisi ΔSO (keluaran _attach_so_kemarin via build_audit_input)
+    → Selisih Harian = (SO(t)−SO(t−1)) − Penerimaan Sistem. BM rekap
+    dibawa sebagai kolom display "Qty BM Rekap". Param baru:
+    - ``saldo_awal_map``: {(resto, barang): SA 42.17} — basis t=1
+      (None = tanpa SA, fallback SO terakhir/NaN — kompatibel pemanggil
+      lama/test);
+    - ``bk_map``: {(resto, barang, tgl): qty BK 42.15} — bahan kolom
+      "Qty COM" (None = COM dihitung dgn BK 0 — masih valid utk data
+      tanpa 42.15).
+    Kolom output baru: Qty BM Rekap · Qty SO Kemarin · Qty Delta SO ·
+    Qty BK · Qty COM; KPI baru 'com_minus'. Kolom "Qty SO Harian"
+    DI-RENAME jadi "Qty Delta SO" di output (nama slot engine tak
+    pernah muncul di audit_df baru — anti-keliru semantik BM vs delta).
 
     v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
     hanya hitung bulan ini. Tapi default hitung bulan ini aja") — param
@@ -652,7 +828,8 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
     if not bulan_lalu:
         rekap_so_df = _filter_bulan_ini(rekap_so_df)
         in_detail_df = _filter_bulan_ini(in_detail_df)
-    raw = build_audit_input(rekap_so_df, in_detail_df)
+    raw = build_audit_input(rekap_so_df, in_detail_df,
+                            saldo_awal_map=saldo_awal_map)
     # v3.9.72 — checkpoint ⏹ pasca build input (agregasi groupby vektor;
     # Stop saat agregasi tak perlu menunggu engine jalan)
     stop_check(stop_event, "audit rekonsiliasi (input)")
@@ -661,16 +838,65 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
         if po_pending_df is not None else None
     if raw.empty:
         kpi0 = {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
-                "deviasi_qty": 0.0, "ok": 0}
+                "deviasi_qty": 0.0, "ok": 0, "com_minus": 0}
+        # v3.10 — skema konsisten walau kosong (kolom basis baru hadir)
+        for c in ("Qty BM Rekap", "Qty SO Kemarin", "Qty Delta SO",
+                  "Qty BK", "Qty COM"):
+            raw[c] = pd.Series(dtype="float64")
         if po_pairs is not None:
             # skema konsisten walau tanpa data rekap (kolom + kpi PO ada)
             raw["Qty PO Menunggu"] = pd.Series(
                 dtype="float64")
             kpi0["dev_murni_po"] = 0
         return raw, kpi0, "tidak ada data rekap SO / IN utk audit"
-    audit, kpi = build_audit_rekap(raw, stop_event=stop_event)
+
+    # v3.10 — SWAP SLOT ENGINE: "Qty SO Harian" ← ΔSO (basis selisih
+    # baru); BM rekap sudah disalin ke "Qty BM Rekap" oleh
+    # build_audit_input. "Qty Delta SO" ganda di-drop supaya output
+    # pasca-rename tidak dobel kolom.
+    engine_in = raw.drop(columns=["Qty Delta SO"], errors="ignore").copy()
+    engine_in["Qty SO Harian"] = pd.to_numeric(
+        raw["Qty Delta SO"], errors="coerce")
+    _pener = (pd.to_numeric(raw["Qty SJ"], errors="coerce").fillna(0)
+              + pd.to_numeric(raw["Qty RI"], errors="coerce").fillna(0)
+              + pd.to_numeric(raw["Qty Pembelian"], errors="coerce")
+              .fillna(0))
+    engine_in["Selisih Qty"] = \
+        engine_in["Qty SO Harian"].fillna(0) - _pener
+
+    audit, kpi = build_audit_rekap(engine_in, stop_event=stop_event)
+    # v3.10 — nama jujur di output: slot engine = ΔSO (bukan BM)
+    audit = audit.rename(columns={"Qty SO Harian": "Qty Delta SO"})
     if po_pairs is not None:
         _apply_po_menunggu(audit, kpi, po_pairs, stop_event=stop_event)
+
+    # v3.10 — KOLOM COM (formula kanonik pivot): COM = SO(t−1) + IN −
+    # BK − SO(t); NaN bila SO(t) atau basis SO-kemarin tak tersedia.
+    # Qty BK per baris dari bk_map {(resto, barang, tgl)} (loop Python
+    # di worker — ≤86k baris, sekali per run).
+    _so = pd.to_numeric(audit["Hasil SO"], errors="coerce")
+    _prev = pd.to_numeric(audit["Qty SO Kemarin"], errors="coerce")
+    _in_sys = pd.to_numeric(audit["Penerimaan Sistem"],
+                            errors="coerce").fillna(0.0)
+    _bk_vals = []
+    _r = audit["Resto"].astype(str)
+    _b = audit["Nama Item"].astype(str)
+    _t = pd.to_numeric(audit["Tanggal"], errors="coerce")
+    if bk_map:
+        for r, b, t in zip(_r, _b, _t):
+            key = (r, b, int(t)) if pd.notna(t) else None
+            _bk_vals.append(
+                float(bk_map[key]) if key is not None and key in bk_map
+                else np.nan)
+    else:
+        _bk_vals = [np.nan] * len(audit)
+    _bk = pd.Series(_bk_vals, index=audit.index, dtype="float64")
+    audit["Qty BK"] = _bk
+    _com = (_prev + _in_sys - _bk.fillna(0.0) - _so).astype("float64")
+    _com = _com.where(_so.notna() & _prev.notna(), np.nan)
+    audit["Qty COM"] = _com
+    kpi["com_minus"] = int((_com < 0).sum())
+
     # v3.9.72 — checkpoint ⏹ pasca engine (varian kedua tak perlu mulai
     # bila Stop sudah masuk — engine dipanggil 2× per run)
     stop_check(stop_event, "audit rekonsiliasi (perkaya PO menunggu selesai)")
@@ -682,7 +908,9 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
     desc = (f"Data app (rekap SO + BM + IN 42.05/32.24/99.01 "
             f"{cakupan}) · "
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
-            f"SO {n_so:,} · IN {n_in:,}")
+            f"SO {n_so:,} · IN {n_in:,} · "
+            f"basis selisih: SO kemarin (ΔSO − IN)"
+            f" · COM minus {kpi.get('com_minus', 0):,}")
     if po_pairs:
         _tot_po = sum(q for v in po_pairs.values()
                       for _n, q, _s, _u in v)

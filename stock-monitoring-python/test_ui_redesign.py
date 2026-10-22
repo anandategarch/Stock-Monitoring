@@ -732,7 +732,14 @@ def make_mock_deviasi_file() -> str:
 
 
 def make_mock_in_detail() -> pd.DataFrame:
-    """Mock detail IN per dokumen (v3.4) — 3 sumber + Nomor."""
+    """Mock detail IN per dokumen (v3.4) — 3 sumber + Nomor.
+
+    v3.10 — basis selisih "SO kemarin" (ΔSO − IN): skenario fixture
+    disesuaikan supaya SEMUA status engine tetap tercakup (lihat
+    make_mock_rekap_so): AYAM SO naik persis = IN → OK; KOPI +100 lalu
+    −100 → CUT-OFF RESOLVED; SUSU ΔSO melebihi IN +80 → DEVIASI MURNI
+    "Sisa Gantung: +80" (identik teks cek lama); GULA SO naik match IN
+    → OK (VALID kini inert di basis baru)."""
     rows = []
     # 42.05 (pemindahan/SJ) — AYAM FILET MLGPAR tgl 5,10,15
     for tgl, nomor, qty in [(5, "IT.2026.09.00101", 500.0),
@@ -749,10 +756,23 @@ def make_mock_in_detail() -> pd.DataFrame:
         "Tanggal": 10, "Value": 300.0, "Nomor": "RI.2026.09.009",
         "Nomor PO": "PO-010", "#Tgl/Jam Pembuatan IT": None,
         "SOURCE IN": "32.24", "JENIS": "IN"})
-    # 42.05 — KOPI BUBUK 100G MLGPAR tgl 8 (utk uji CUT-OFF RESOLVED v3.6)
+    # 42.05 — KOPI BUBUK 100G MLGPAR tgl 5 & 8 (utk uji CUT-OFF RESOLVED:
+    # v3.10 basis ΔSO — ΔSO t5 +200 − IN 100 = +100; t8 ΔSO 0 − 100 = −100
+    # → saldo kembali 0 → kedua baris CUT-OFF RESOLVED)
     rows.append({
         "NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK 100G",
-        "Tanggal": 8, "Value": 100.0, "Nomor": "IT.2026.09.00404",
+        "Tanggal": 5, "Value": 100.0, "Nomor": "IT.2026.09.00404",
+        "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+        "SOURCE IN": "42.05", "JENIS": "IN"})
+    rows.append({
+        "NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK 100G",
+        "Tanggal": 8, "Value": 100.0, "Nomor": "IT.2026.09.00405",
+        "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+        "SOURCE IN": "42.05", "JENIS": "IN"})
+    # 42.05 — SUSU UHT 1L MLGPAR tgl 5 (ΔSO +160 − IN 80 = +80 gantung)
+    rows.append({
+        "NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+        "Tanggal": 5, "Value": 80.0, "Nomor": "IT.2026.09.00505",
         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
         "SOURCE IN": "42.05", "JENIS": "IN"})
     # 99.01 (pembelian tanpa penerimaan) — GULA PASIR SBYKET tgl 5
@@ -768,11 +788,16 @@ def make_mock_rekap_so() -> pd.DataFrame:
     """Mock rekap mentah (JENIS 'SO' + 'BARANG MASUK') — input Audit
     Rekonsiliasi dari data app (v3.6).
 
-    Skenario status yang dihasilkan (bersama make_mock_in_detail):
-    - AYAM FILET/MLGPAR tgl 5,10,15 : BM == IN          → OK (Matching)
-    - GULA PASIR/SBYKET tgl 5        : SO naik+BM=0+IN  → VALID
-    - KOPI BUBUK/MLGPAR tgl 3→8     : +100 lalu -100   → CUT-OFF RESOLVED
-    - SUSU UHT 1L/MLGPAR tgl 2       : BM 80 tanpa IN   → DEVIASI MURNI
+    Skenario status yang dihasilkan (bersama make_mock_in_detail) —
+    v3.10 basis "SELISIH DENGAN SO KEMARIN": Selisih Harian =
+    (SO(t) − SO(t−1)) − IN; BM rekap tetap hadir sbg kolom display:
+    - AYAM FILET/MLGPAR t4→5,10,15 : ΔSO == IN      → OK (Matching) ×4
+    - GULA PASIR/SBYKET t5          : ΔSO +1200 == IN 1200 → OK (Matching)
+                                     (VALID kini INERT di basis baru —
+                                     SO naik yang match IN otomatis 0)
+    - KOPI BUBUK/MLGPAR t5→8       : +100 lalu −100 → CUT-OFF RESOLVED ×2
+    - SUSU UHT 1L/MLGPAR t5        : ΔSO +160 − IN 80 = +80 gantung
+                                     → DEVIASI MURNI "Sisa Gantung: +80"
     """
     rows = []
 
@@ -785,16 +810,29 @@ def make_mock_rekap_so() -> pd.DataFrame:
                      "JENIS": "BARANG MASUK", "Tanggal": tgl,
                      "Value": val})
 
-    for t in (4, 5, 10, 15):
-        so("AYAM FILET", "MLGPAR", t, 100.0 * t)
-    bm("AYAM FILET", "MLGPAR", 5, 500.0)    # IN 500  → selisih 0
-    bm("AYAM FILET", "MLGPAR", 10, 1050.0)  # IN 1050 → selisih 0
-    bm("AYAM FILET", "MLGPAR", 15, 250.0)   # IN 250  → selisih 0
+    # v3.10 — SO naik PERSIS sebesar IN tiap tanggal pengamatan:
+    # t4 400 → t5 900 (Δ+500 = IN 500) → t10 1950 (Δ+1050 = IN 1050)
+    # → t15 2200 (Δ+250 = IN 250) — semua baris OK (Matching).
+    so("AYAM FILET", "MLGPAR", 4, 400.0)
+    so("AYAM FILET", "MLGPAR", 5, 900.0)
+    so("AYAM FILET", "MLGPAR", 10, 1950.0)
+    so("AYAM FILET", "MLGPAR", 15, 2200.0)
+    bm("AYAM FILET", "MLGPAR", 5, 500.0)    # BM rekap display = IN 500
+    bm("AYAM FILET", "MLGPAR", 10, 1050.0)  # BM rekap display = IN 1050
+    bm("AYAM FILET", "MLGPAR", 15, 250.0)   # BM rekap display = IN 250
     so("GULA PASIR", "SBYKET", 4, 100.0)
-    so("GULA PASIR", "SBYKET", 5, 1300.0)   # SO naik +1200, BM=0, IN=1200
-    so("KOPI BUBUK 100G", "MLGPAR", 3, 50.0)
-    bm("KOPI BUBUK 100G", "MLGPAR", 3, 100.0)  # +100 …
-    bm("SUSU UHT 1L", "MLGPAR", 2, 80.0)      # gantung +80
+    so("GULA PASIR", "SBYKET", 5, 1300.0)   # ΔSO +1200 == IN 1200 → OK
+    # KOPI: t3 100 → t5 300 (Δ+200, IN 100 → +100) → t8 TANPA baris SO
+    # (IN saja — Hasil SO NaN: ΔSO tak diketahui → slot engine 0 →
+    # selisih −100) — saldo kembali 0 → CUT-OFF RESOLVED ×2; sekaligus
+    # menutup cek lama "Hasil SO NaN di tanggal tanpa SO".
+    so("KOPI BUBUK 100G", "MLGPAR", 3, 100.0)
+    so("KOPI BUBUK 100G", "MLGPAR", 5, 300.0)
+    bm("KOPI BUBUK 100G", "MLGPAR", 3, 100.0)  # BM rekap display (tgl 3)
+    # SUSU: t2 100 → t5 260 (Δ+160, IN 80) → +80 gantung murni.
+    so("SUSU UHT 1L", "MLGPAR", 2, 100.0)
+    so("SUSU UHT 1L", "MLGPAR", 5, 260.0)
+    bm("SUSU UHT 1L", "MLGPAR", 2, 80.0)      # BM rekap display (tgl 2)
     return pd.DataFrame(rows)
 
 
@@ -874,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.9.72", APP_VERSION == "3.9.72",
+    check("Versi = 3.10", APP_VERSION == "3.10",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -2021,36 +2059,44 @@ def main():
     tree_in = iv.tree
     kids_in = list(tree_in.get_children(""))
     check("Rekap Selisih IN: baris anomali tampil (default Hanya Selisih ≠ 0)",
-          len(kids_in) == 4, f"got {len(kids_in)}")
+          len(kids_in) == 3, f"got {len(kids_in)}")
     hdrs = [tree_in.heading(c)["text"] for c in COL_IDS]
-    check("(v3.9.30) Kolom = 13: + Hasil SO + Saldo + PO Menunggu + "
-          "Hasil Audit + Catatan",
+    check("(v3.9.30) Kolom = 15: + Hasil SO + Saldo + PO Menunggu + "
+          "Hasil Audit + Catatan (v3.10: + SO Kemarin + COM)",
           hdrs == ["Resto", "Tanggal", "Nama Barang", "KATEGORI", "Satuan",
-                   "Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo",
+                   "Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
+                   "Selisih IN", "COM", "Saldo",
                    "PO Menunggu", "Hasil Audit", "Catatan Audit"],
           f"got {hdrs}")
     check("(v3.6) Tidak ada segment Ringkas|Audit lagi (SATU tabel)",
           not hasattr(iv, "mode_seg"))
-    # baris ber-selisih: KOPI tgl3 (BM=100, IN=0, SO=50)
-    kopi3 = None
+    # baris ber-selisih (basis ΔSO v3.10): KOPI tgl5 (+100 — ΔSO 200,
+    # IN 100), KOPI tgl8 (−100 — SO belum direkam, ΔSO tak diketahui),
+    # SUSU tgl5 (+80 — ΔSO 160, IN 80)
+    kopi5 = None
     for k in kids_in:
         vals = tree_in.item(k, "values")
-        if vals[2] == "KOPI BUBUK 100G" and vals[1] == "3":
-            kopi3 = k
-    if kopi3:
-        r = {c: tree_in.set(kopi3, c) for c in COL_IDS}
-        check("Selisih IN = BM − IN (KOPI tgl3: BM 100, IN '-' → 100)",
-              r["Barang Masuk"] == "100" and r["IN"] == "-"
-              and r["Selisih IN"] == "100", f"got {r}")
-        check("(v3.6) Kolom SO terisi (KOPI tgl3 SO=50)",
-              r["Hasil SO"] == "50", f"got {r['Hasil SO']!r}")
+        if vals[2] == "KOPI BUBUK 100G" and vals[1] == "5":
+            kopi5 = k
+    if kopi5:
+        r = {c: tree_in.set(kopi5, c) for c in COL_IDS}
+        check("(v3.10) Selisih IN = ΔSO − IN (KOPI tgl5: ΔSO 200, IN 100 "
+              "→ +100)",
+              r["SO Kemarin"] == "100" and r["Hasil SO"] == "300"
+              and r["IN"] == "100" and r["Selisih IN"] == "100"
+              and r["Barang Masuk"] == "-",
+              f"got {r}")
+        check("(v3.10) Kolom COM tampil (KOPI tgl5: 100+100−0−300 = "
+              "−100 → '(100)' minus)",
+              r["COM"] == "(100)", f"got {r['COM']!r}")
         check("(v3.6) Kolom Hasil Audit terisi",
               r["Hasil Audit"] == "CUT-OFF RESOLVED",
               f"got {r['Hasil Audit']!r}")
     st_cells = {tree_in.set(k, "Hasil Audit") for k in kids_in}
-    check("(v3.6) Status VBA tampil (VALID/CUT-OFF/DEVIASI)",
-          {"VALID (Sistem Masuk)", "CUT-OFF RESOLVED",
-           "DEVIASI MURNI"} <= st_cells, f"got {st_cells}")
+    check("(v3.6) Status VBA tampil (CUT-OFF/DEVIASI; VALID inert v3.10)",
+          {"CUT-OFF RESOLVED", "DEVIASI MURNI"} <= st_cells
+          and "VALID (Sistem Masuk)" not in st_cells,
+          f"got {st_cells}")
     check("(v3.6) KPI chips tampil (audit data app)",
           iv.kpi_card.winfo_ismapped())
     tags0 = iv.tree.item(kids_in[0], "tags") if kids_in else ()
@@ -2062,8 +2108,8 @@ def main():
     iv._refresh()
     wait_view(root, iv)
     kids_in = list(tree_in.get_children(""))
-    check("Hanya Selisih OFF → semua baris audit tampil (9)",
-          len(kids_in) == 9, f"got {len(kids_in)}")
+    check("Hanya Selisih OFF → semua baris audit tampil (11)",
+          len(kids_in) == 11, f"got {len(kids_in)}")
 
     # ---- drill-down: double-click baris AYAM FILET MLGPAR tgl 10 ----
     target = None
@@ -2115,8 +2161,106 @@ def main():
             clip = root.clipboard_get()
             check("Copy Semua Nomor → clipboard berisi IT./RI. unik",
                   "IT.2026.09.00202" in clip and "RI.2026.09.009" in clip)
+            # v3.10 — chip popup basis "SO kemarin": SO KEMARIN + COM
+            # (AYAM t10: SO kemarin 900, COM 900+1050−0−1950 = 0)
+            def _walk_labels(w, acc):
+                for _ch in w.winfo_children():
+                    if isinstance(_ch, tk.Label):
+                        acc.append(str(_ch.cget("text")))
+                    else:
+                        _walk_labels(_ch, acc)
+            _chip_labels: list = []
+            _walk_labels(pop, _chip_labels)
+            check("(v3.10) Popup Rincian IN: chip SO KEMARIN tampil (900)",
+                  any(t == "SO KEMARIN" for t in _chip_labels),
+                  f"got {_chip_labels[:14]}")
+            _i_sok = _chip_labels.index("SO KEMARIN") \
+                if "SO KEMARIN" in _chip_labels else -1
+            check("(v3.10) Popup: nilai chip SO KEMARIN = 900",
+                  _i_sok >= 0 and _chip_labels[_i_sok + 1] == "900",
+                  f"got {_chip_labels[_i_sok:_i_sok + 2]}")
+            check("(v3.10) Popup Rincian IN: chip COM tampil (0)",
+                  "COM" in _chip_labels
+                  and _chip_labels[_chip_labels.index("COM") + 1] == "0",
+                  f"got {_chip_labels[:14]}")
             pop.destroy()
             root.update()
+
+    # ==================================================================
+    print("== 13b. v3.10 — BASIS 'SO KEMARIN': KPI chips + MODE 📈 ANALISA ==")
+    # KPI chips: BASIS SELISIH (format v3.10 terdeteksi) + COM MINUS = 2
+    _kpi_labels: list = []
+
+    def _walk_labels2(w, acc):
+        for _ch in w.winfo_children():
+            if isinstance(_ch, tk.Label):
+                acc.append(str(_ch.cget("text")))
+            else:
+                _walk_labels2(_ch, acc)
+    _walk_labels2(iv.kpi_card, _kpi_labels)
+    check("(v3.10) KPI chip BASIS SELISIH = 'SO KEMARIN (ΔSO−IN)' "
+          "(audit_df membawa kolom v3.10)",
+          "BASIS SELISIH" in _kpi_labels
+          and _kpi_labels[_kpi_labels.index("BASIS SELISIH") + 1]
+          == "SO KEMARIN (ΔSO−IN)",
+          f"got {_kpi_labels[:12]}")
+    check("(v3.10) KPI chip COM MINUS = 2 (KOPI t5 −100 + SUSU t5 −80)",
+          "COM MINUS" in _kpi_labels
+          and _kpi_labels[_kpi_labels.index("COM MINUS") + 1] == "2",
+          f"got {_kpi_labels[-8:]}")
+
+    # --- MODE TAMPILAN 📋 Tabel | 📈 Analisa (user: "gali potensi analisa
+    #     di tab rekap selisih in") --------------------------------------
+    check("(v3.10) SegmentBar MODE TAMPILAN (📋 Tabel | 📈 Analisa) tampil",
+          hasattr(iv, "view_bar") and iv.view_bar.winfo_ismapped()
+          and iv._view_analisa is False)
+    iv._on_view_mode_change(1)
+    root.update()
+    check("(v3.10) Mode 📈: tabel card dilepas, panel analisa terpasang",
+          iv._view_analisa is True
+          and iv._tcard.winfo_manager() == ""
+          and iv._analisa_card.winfo_manager() == "pack",
+          f"tcard={iv._tcard.winfo_manager()!r} "
+          f"analisa={iv._analisa_card.winfo_manager()!r}")
+    _am = (iv._analisa_payload or {}).get("meta") or {}
+    check("(v3.10) Payload analisa: 11 baris konteks · 3 gantung · "
+          "Σ|selisih| 280 · basis v3.10 · COM minus 2",
+          _am.get("n_konteks") == 11 and _am.get("n_gantung") == 3
+          and abs((_am.get("sum_abs") or 0) - 280.0) < 0.001
+          and _am.get("basis_v310") is True
+          and _am.get("n_com_minus") == 2,
+          f"got {_am}")
+    _an_labels: list = []
+    _walk_labels2(iv._analisa_card, _an_labels)
+    check("(v3.10) Panel analisa: 6 seksi dirender (Umur/Leaderboard/"
+          "Sistemik/Resolve/Anomali ΔSO/COM Minus)",
+          all(t in _an_labels for t in (
+              "⏳ 1 · UMUR GANTUNG (AGING)",
+              "🏆 2 · LEADERBOARD RESTO — Σ|Selisih IN|",
+              "🧭 3 · SISTEMIK vs LOKAL",
+              "♻️ 4 · RESOLVE-RATE",
+              "🔎 5 · ANOMALI ΔSO",
+              "📉 6 · COM MINUS — pemakaian negatif")),
+          f"got {[t for t in _an_labels if t and t[0] in '⏳🏆🧭♻️🔎📉']}")
+    check("(v3.10) Analisa: teks tertua + COM minus top hadir",
+          any("tertua" in t for t in _an_labels)
+          and any("KOPI BUBUK 100G" in t for t in _an_labels),
+          f"got {[t for t in _an_labels if 'tertua' in t][:2]}")
+    # KPI chips tetap ter-pack saat mode analisa (anchor pack adaptif)
+    check("(v3.10) KPI card tetap tampil saat mode 📈 (anchor pack adaptif)",
+          iv.kpi_card.winfo_manager() == "pack",
+          f"got {iv.kpi_card.winfo_manager()!r}")
+    # toggle balik ke 📋 Tabel — tanpa recompute (payload cache)
+    iv._on_view_mode_change(0)
+    root.update()
+    check("(v3.10) Toggle balik ke 📋 Tabel: tabel card kembali terpasang",
+          iv._view_analisa is False
+          and iv._tcard.winfo_manager() == "pack"
+          and iv._analisa_card.winfo_manager() == "",
+          f"tcard={iv._tcard.winfo_manager()!r} "
+          f"analisa={iv._analisa_card.winfo_manager()!r}")
+    # restore state awal utk seksi berikutnya (checkbox ON)
+    iv.only_selisih_var.set(True)
 
     # ==================================================================
     print("== 14. v3.6 — AUDIT REKONSILIASI × DATA APP + FIX/KOLOM ==")
@@ -2130,41 +2274,92 @@ def main():
 
     # --- (a) build_audit_input: rekap + in_detail → 10 kolom kanonik ---
     raw = build_audit_input(rekap_so, in_detail)
-    check("build_audit_input: 10 kolom kanonik (struktur input VBA)",
-          list(raw.columns) == AUDIT_INPUT_COLUMNS,
+    check("build_audit_input: 10 kolom kanonik (struktur input VBA) "
+          "+ 3 kolom basis v3.10",
+          list(raw.columns)[:len(AUDIT_INPUT_COLUMNS)] == AUDIT_INPUT_COLUMNS
+          and list(raw.columns)[len(AUDIT_INPUT_COLUMNS):] ==
+          ["Qty BM Rekap", "Qty SO Kemarin", "Qty Delta SO"],
           f"got {list(raw.columns)}")
-    check("build_audit_input: baris = union aktivitas (SO/BM/IN) = 9",
-          len(raw) == 9, f"got {len(raw)}")
+    check("build_audit_input: baris = union aktivitas (SO/BM/IN) = 11",
+          len(raw) == 11, f"got {len(raw)}")
     check("build_audit_input: urut per (Resto, Item, Tanggal)",
           raw["Resto"].tolist()[:4] == ["MLGPAR"] * 4
           and raw["Tanggal"].tolist()[:2] == [4, 5],
           f"got {list(zip(raw['Resto'], raw['Tanggal']))[:5]}")
     so_g4 = raw[(raw["Nama Item"] == "GULA PASIR")
                 & (raw["Tanggal"] == 4)]
+    _kopi8 = raw[(raw["Nama Item"] == "KOPI BUBUK 100G")
+                 & (raw["Tanggal"] == 8)]
     check("build_audit_input: Hasil SO hadir di tanggal SO (NaN selain itu)",
           float(so_g4["Hasil SO"].iloc[0]) == 100.0
-          and raw[raw["Nama Item"] == "SUSU UHT 1L"]["Hasil SO"].isna().all(),
+          and _kopi8["Hasil SO"].isna().all()
+          and float(raw[(raw["Nama Item"] == "SUSU UHT 1L")
+                        & (raw["Tanggal"] == 5)]["Hasil SO"].iloc[0])
+          == 260.0,
           f"got {so_g4['Hasil SO'].tolist()}")
+    # v3.10 — basis "SO kemarin": kolom Qty SO Kemarin (ffill dlm
+    # pasangan; tgl pertama pasangan NaN) + Qty Delta SO + BM rekap
+    # dipisah jadi kolom display.
+    _kr = raw.set_index(["Nama Item", "Tanggal"])
+    _kr_dump = raw[["Nama Item", "Tanggal", "Qty SO Kemarin",
+                    "Qty Delta SO"]].to_dict("records")
+    check("(v3.10) Qty SO Kemarin: ffill dlm pasangan, baris awal NaN",
+          bool(pd.isna(_kr.loc[("KOPI BUBUK 100G", 3),
+                               "Qty SO Kemarin"]))
+          and float(_kr.loc[("KOPI BUBUK 100G", 5),
+                            "Qty SO Kemarin"]) == 100.0
+          # t8 tanpa SO sendiri → SO kemarin tetap 300 (display), ΔSO NaN
+          and float(_kr.loc[("KOPI BUBUK 100G", 8),
+                            "Qty SO Kemarin"]) == 300.0
+          and bool(pd.isna(_kr.loc[("KOPI BUBUK 100G", 8),
+                                   "Qty Delta SO"])),
+          f"got {_kr_dump}")
 
-    # --- (b) engine: aturan VBA pada data app ---
+    # --- (b) engine: aturan VBA pada data app (basis ΔSO sejak v3.10) ---
     sts = audit_df["Status Analisis Audit"].tolist()
-    check("Engine: OK (Matching) saat BM == IN",
+    check("Engine: OK (Matching) saat ΔSO == IN",
           "OK (Matching)" in sts)
-    check("Engine: VALID (Sistem Masuk) (SO naik + BM=0 + IN>0)",
-          "VALID (Sistem Masuk)" in sts)
+    check("Engine v3.10: VALID INERT — SO naik yang match IN → OK "
+          "(bukan VALID; slot BM=0 tak relevan lagi)",
+          "VALID (Sistem Masuk)" not in sts
+          and sts.count("OK (Matching)") == 8,
+          f"got {sorted(set(sts))}")
     check("Engine: CUT-OFF RESOLVED (+100 lalu −100)",
           sts.count("CUT-OFF RESOLVED") == 2)
     check("Engine: DEVIASI MURNI (sisa gantung)",
           "DEVIASI MURNI" in sts)
-    check("Engine: KPI lengkap dari data app",
-          audit_kpi["rows"] == 9 and audit_kpi["omit"] == 1
+    check("Engine: KPI lengkap dari data app (basis ΔSO)",
+          audit_kpi["rows"] == 11 and audit_kpi["omit"] == 0
           and audit_kpi["cutoff"] == 2 and audit_kpi["deviasi_murni"] == 1
-          and abs(audit_kpi["deviasi_qty"] - 80.0) < 0.001,
+          and abs(audit_kpi["deviasi_qty"] - 80.0) < 0.001
+          and audit_kpi.get("com_minus") == 2,
           f"got {audit_kpi}")
     dm = audit_df[audit_df["Status Analisis Audit"] == "DEVIASI MURNI"]
     check("Engine: catatan Sisa Gantung VBA-style",
           "Sisa Gantung: +80" in str(dm.iloc[0]["Detail & Catatan Audit"]),
           f"got {dm.iloc[0]['Detail & Catatan Audit']!r}")
+    # v3.10 — kolom output baru + KPI com_minus; Selisih Harian = ΔSO − IN
+    check("(v3.10) Kolom output audit baru: SO Kemarin/Delta SO/BM Rekap/"
+          "BK/COM + slot lama di-rename",
+          {"Qty SO Kemarin", "Qty Delta SO", "Qty BM Rekap", "Qty BK",
+           "Qty COM"} <= set(audit_df.columns)
+          and "Qty SO Harian" not in audit_df.columns,
+          f"got {list(audit_df.columns)}")
+    _ak = audit_df.set_index(["Nama Item", "Tanggal"])
+    _ak_dump = audit_df[["Nama Item", "Tanggal", "Qty Delta SO",
+                         "Selisih Harian"]].to_dict("records")
+    check("(v3.10) Selisih Harian = ΔSO − IN (KOPI t5: 200 − 100 = +100)",
+          float(_ak.loc[("KOPI BUBUK 100G", 5), "Selisih Harian"]) == 100.0
+          and float(_ak.loc[("KOPI BUBUK 100G", 5), "Qty Delta SO"]) == 200.0,
+          f"got {_ak_dump}")
+    check("(v3.10) COM = SO(t−1) + IN − BK − SO(t) (KOPI t5: 100+100−"
+          "0−300 = −100 → COM minus; SUSU t5: −80)",
+          float(_ak.loc[("KOPI BUBUK 100G", 5), "Qty COM"]) == -100.0
+          and float(_ak.loc[("SUSU UHT 1L", 5), "Qty COM"]) == -80.0,
+          f"got {audit_df['Qty COM'].tolist()}")
+    check("(v3.10) desc audit menyebut basis + COM minus",
+          "SO kemarin" in audit_desc and "COM minus 2" in audit_desc,
+          f"got {audit_desc!r}")
 
     # --- (v3.9.6) TANGGAL 1: PEMBANDING SO = SO BULAN LALU (user:
     #     "tab selisih in jika tanggal 1 pembanding SO nya SO bulan
@@ -3892,7 +4087,11 @@ def main():
         _sv2 = pd.to_numeric(_fb["Selisih IN"], errors="coerce").fillna(0)
         _fb = _fb[_sv2 != 0]
     _neg_oracle = 0
-    for _c in ("Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo"):
+    # v3.10 — oracle ikut menghitung kolom numerik baru (SO Kemarin/COM):
+    # COM minus kini sumber sel negatif (KOPI t5 −100 + SUSU t5 −80) di
+    # samping Selisih IN negatif (KOPI t8).
+    for _c in ("Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
+               "Selisih IN", "COM", "Saldo"):
         if _c in _fb.columns:
             _neg_oracle += int((pd.to_numeric(_fb[_c], errors="coerce")
                                 .fillna(0) < 0).sum())
@@ -8763,20 +8962,29 @@ def main():
     # skenario: SUSU BM 80 tanpa IN → DEVIASI MURNI +80 (ber-PO menunggu
     # 50 — explainable); KOPI BM 100 tanpa IN → DEVIASI MURNI +100 (PO
     # 'Selesai' — BUKAN penjelas, perlu audit fisik)
+    # v3.10 — basis ΔSO: baris DEVIASI MURNI = tanggal SO KEDUA (ΔSO
+    # tanpa IN); SO pertama (basis) + BM tetap hadir sbg baris OK/display.
     _rk42 = pd.DataFrame([
         {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
          "JENIS": "SO", "Tanggal": 2, "Value": 100.0},
         {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
          "JENIS": "BARANG MASUK", "Tanggal": 2, "Value": 80.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "JENIS": "SO", "Tanggal": 4, "Value": 180.0},   # ΔSO +80
         {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK",
          "JENIS": "SO", "Tanggal": 3, "Value": 50.0},
         {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK",
          "JENIS": "BARANG MASUK", "Tanggal": 3, "Value": 100.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI BUBUK",
+         "JENIS": "SO", "Tanggal": 5, "Value": 150.0},   # ΔSO +100
     ])
     _aud42, _kpi42, _desc42 = _baf42(_rk42, None,
                                      po_pending_df=_semua42["df"])
-    _susu42 = _aud42[_aud42["Nama Item"] == "SUSU UHT 1L"].iloc[0]
-    _kopi42 = _aud42[_aud42["Nama Item"] == "KOPI BUBUK"].iloc[0]
+    # baris DEVIASI MURNI = tanggal SO kedua (v3.10 basis ΔSO)
+    _susu42 = _aud42[(_aud42["Nama Item"] == "SUSU UHT 1L")
+                     & (_aud42["Tanggal"] == 4)].iloc[0]
+    _kopi42 = _aud42[(_aud42["Nama Item"] == "KOPI BUBUK")
+                     & (_aud42["Tanggal"] == 5)].iloc[0]
     check("(v3.9.30) audit: kolom 'Qty PO Menunggu' (pair-level — 50 utk "
           "SUSU, 0 utk KOPI tanpa PO menunggu)",
           "Qty PO Menunggu" in _aud42.columns and
@@ -9094,15 +9302,20 @@ def main():
           f"got {_note43b!r}")
 
     # --- (e) build_audit_from_app dgn konversi: kolom + catatan + desc
+    # v3.10 — basis ΔSO: DEVIASI MURNI di tanggal SO kedua (ΔSO +120
+    # tanpa IN); SO pertama (basis) + BM baris OK/display.
     _rk43 = pd.DataFrame([
         {"NAMA RESTO": "MLGPAR", "Nama Barang": "AIR MINERAL BOTOL (V.20)",
          "JENIS": "SO", "Tanggal": 2, "Value": 100.0},
         {"NAMA RESTO": "MLGPAR", "Nama Barang": "AIR MINERAL BOTOL (V.20)",
          "JENIS": "BARANG MASUK", "Tanggal": 2, "Value": 120.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "AIR MINERAL BOTOL (V.20)",
+         "JENIS": "SO", "Tanggal": 4, "Value": 220.0},   # ΔSO +120
     ])
     _aud43, _kpi43, _desc43 = _baf43(_rk43, None, po_pending_df=_po43,
                                      konversi=_km43)
     _air43r = _aud43[_aud43["Nama Item"] == "AIR MINERAL BOTOL (V.20)"]
+    _air43dev = _air43r[_air43r["Tanggal"] == 4].iloc[0]   # baris DEVIASI
     check("(v3.9.31→3.9.33) audit: kolom 'Qty PO Menunggu' = jumlah item "
           "TERKONVERSI SAJA utk pasangan campur (120 BOTOL — 3 DUS "
           "fallback tak dijumlahkan, tampak di catatan; audit 48-b FIX 4)",
@@ -9113,8 +9326,8 @@ def main():
           "terkecil + penanda fallback",
           "PO Menunggu: PO.2026.09.5001 (qty 120 BOTOL), "
           "PO.2026.09.5002 (qty 3 DUS*)" in
-          str(_air43r["Detail & Catatan Audit"].iloc[0]),
-          f"got {_air43r['Detail & Catatan Audit'].iloc[0]!r}")
+          str(_air43dev["Detail & Catatan Audit"]),
+          f"got {_air43dev['Detail & Catatan Audit']!r}")
     check("(v3.9.31) audit: desc 'qty sat. terkecil' + hitungan "
           "'tdk terkonversi' (transparansi fallback)",
           "qty sat. terkecil" in _desc43 and
@@ -16905,7 +17118,13 @@ def main():
     from src.ui.in_selisih_view import InSelisihView as _ISV68
 
     # (6d2-01) chip popup Rincian IN = nilai MENTAH (payload _keys)
+    # v3.10 — basis ΔSO: R1 & R3 diberi SO pembasis (tgl 3) supaya ΔSO
+    # terdefinisi di tgl 5 — nilai chip BM/selisih/IN TOTAL yang diperiksa
+    # (1.500 / 1.000 / 500 · desimal 1.234,5 / 734,5) TETAP persis skenario
+    # lama; R2 tanpa SO → selisih −IN penuh (perilaku lama utuh).
     _rekap68 = [
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG BESAR", "JENIS": "SO",
+         "Tanggal": 3, "Value": 500.0},
         {"NAMA RESTO": "R1", "Nama Barang": "BRG BESAR", "JENIS": "SO",
          "Tanggal": 5, "Value": 2000.0},
         {"NAMA RESTO": "R1", "Nama Barang": "BRG BESAR",
@@ -16913,7 +17132,9 @@ def main():
         {"NAMA RESTO": "R2", "Nama Barang": "BRG NEG", "JENIS": "SO",
          "Tanggal": 5, "Value": 100.0},
         {"NAMA RESTO": "R3", "Nama Barang": "BRG DES", "JENIS": "SO",
-         "Tanggal": 5, "Value": 999.0},
+         "Tanggal": 3, "Value": 500.0},
+        {"NAMA RESTO": "R3", "Nama Barang": "BRG DES", "JENIS": "SO",
+         "Tanggal": 5, "Value": 1734.5},
         {"NAMA RESTO": "R3", "Nama Barang": "BRG DES",
          "JENIS": "BARANG MASUK", "Tanggal": 5, "Value": 1234.5},
     ]
@@ -17034,17 +17255,25 @@ def main():
                          "JENIS": "BARANG MASUK", "Tanggal": t,
                          "Value": v})
 
+    # v3.10 — basis ΔSO: tiap resto diberi SO pembasis (KRONIS/TIE: tgl -1
+    # bulan lalu; BURIK: tgl 3) supaya baris ber-selisih tetap TERBENTUK di
+    # tanggal pengamatan — skor leaderboard (28/6/6/6/2), jumlah baris, dan
+    # urutan peserta TETAP persis skenario lama; TIE t3 SO 10→15 (ΔSO ≠ 0).
     for _t68 in range(1, 15):
         _so68s("KRONIS", "BUMBU A", _t68, 100.0 * _t68)
         _bm68s("KRONIS", "BUMBU A", _t68, 10.0)
+    _so68s("KRONIS", "BUMBU A", -1, 0.0)          # basis ΔSO utk tgl 1
     for _i68 in range(1, 6):
+        _so68s("BURIK", f"BRG B{_i68}", 3, 43.0)  # basis ΔSO utk tgl 5
         _so68s("BURIK", f"BRG B{_i68}", 5, 50.0)
         _bm68s("BURIK", f"BRG B{_i68}", 5, 7.0)
     for _r68, _p68 in (("TIE1", "T1"), ("TIE2", "T2")):
-        for _t68 in (2, 3):
-            _so68s(_r68, f"{_p68}A", _t68, 10.0)
+        for _x68 in "AB":
+            _so68s(_r68, f"{_p68}{_x68}", -1, 5.0)   # basis ΔSO utk tgl 2
+        for _t68, _v68 in ((2, 10.0), (3, 15.0)):
+            _so68s(_r68, f"{_p68}A", _t68, _v68)
             _bm68s(_r68, f"{_p68}A", _t68, 5.0)
-            _so68s(_r68, f"{_p68}B", _t68, 10.0)
+            _so68s(_r68, f"{_p68}B", _t68, _v68)
             _bm68s(_r68, f"{_p68}B", _t68, 5.0)
     _det68s.append({"NAMA RESTO": "NEGASO", "Nama Barang": "NEG X",
                     "Tanggal": 3, "Value": 20.0, "Nomor": "IT.2026.09.777",

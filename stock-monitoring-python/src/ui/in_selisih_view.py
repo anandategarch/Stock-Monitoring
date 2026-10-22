@@ -1,6 +1,29 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.10 — LOGIKA BARU "SELISIH DENGAN SO KEMARIN" + KOLOM COM + MODE
+📈 ANALISA + PANJANG BULAN ASLI (user: "ubah logika selisih in dengan
+selisih dengan so kemarin" · "tambahkan kolom COm di rekap selisih in"
+· "gali potensi analisa di tab rekap selisih in" · "Misal bulan ini
+hanya sampai tanggal 30 maka tidak perlu ada tanggal 31 begitu juga di
+bulan kemarin"):
+
+- SELISIH IN kini = (SO(t) − SO(t−1)) − IN — selisih kenaikan stok
+  fisik vs penerimaan sistem (positif = fisik naik LEBIH banyak dari
+  sistem catat → RI belum diinput; negatif = IN masuk sistem tapi stok
+  tak bertambah). Kolom BARU "SO Kemarin" (basis) & "COM" di tabel;
+  pipeline menghitung (fn_audit v3.10 — slot engine diisi ΔSO; BM rekap
+  TETAP hidup sbg kolom display; SALDO/STATUS audit ikut basis baru).
+- MODE TAMPILAN "📋 Tabel | 📈 Analisa" — 6 seksi analisa: Umur Gantung
+  (aging) · Leaderboard Resto (gantung) · Sistemik vs Lokal ·
+  Resolve-Rate · Anomali ΔSO · COM Minus (lihat _compute_analisa).
+- RENTANG TANGGAL memakai PANJANG BULAN ASLI dari data (audit_result
+  'month_len'/'lalu_month_len' — September 30 hari → rentang 1..30,
+  tanpa tanggal 31; bulan kemarin −25..−30; fallback 31 utk pemanggil
+  lama/test tanpa kunci).
+- KPI chip "COM MINUS" + catatan audit B5 "COM −n" + B4b "SO belum
+  direkam"; popup Rincian IN dapat chip COM.
+
 v3.9.31 (user: "kolom Kuantitas di Rincian PO masih satuan besar (karton)
 bukan satuan kecil (botol) seperti sheet barang masuk — tidak match waktu
 cari deviasi murni") — KONVERSI SATUAN PO MENUNGGU:
@@ -142,9 +165,11 @@ v3.6 (lama): default -26 s/d 31.
 import contextlib
 import os
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Optional
+from typing import ClassVar
 
+import numpy as np  # v3.10 — _compute_analisa (umur/ordnal/COM) + isnan
 import pandas as pd
 
 from .doc_codes import (
@@ -216,10 +241,12 @@ COLUMNS = [
     ("KATEGORI", 110, "w"),
     ("Satuan", 56, "w"),
     ("Hasil SO", 90, "e"),         # ← kolom SO (v3.6)
-    ("Barang Masuk", 110, "e"),    # = Qty SO Harian (input rekap)
+    ("SO Kemarin", 92, "e"),       # v3.10 — SO(t−1) basis selisih baru
+    ("Barang Masuk", 110, "e"),    # = BM rekap (input resto — display)
     ("IN", 96, "e"),               # = Penerimaan Sistem (42.05+32.24+99.01)
-    ("Selisih IN", 100, "e"),      # = Barang Masuk − IN
-    ("Saldo", 100, "e"),           # saldo kumulatif audit
+    ("Selisih IN", 100, "e"),      # v3.10 = (SO(t)−SO(t−1)) − IN
+    ("COM", 92, "e"),              # v3.10 — pemakaian SO(t−1)+IN−BK−SO(t)
+    ("Saldo", 100, "e"),           # saldo kumulatif audit (basis baru)
     ("PO Menunggu", 96, "e"),      # v3.9.30 — qty PO 32.43 'Menunggu diproses'
     ("Hasil Audit", 150, "w"),     # ← kolom hasil audit (v3.6)
     ("Catatan Audit", 260, "w"),
@@ -228,8 +255,8 @@ COLUMNS = [
 _ALL_COLS = [c[0] for c in COLUMNS]
 
 # Kolom numerik (utk format & filter nilai)
-_NUM_COLS = {"Hasil SO", "Barang Masuk", "IN", "Selisih IN", "Saldo",
-             "PO Menunggu"}
+_NUM_COLS = {"Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
+             "Selisih IN", "COM", "Saldo", "PO Menunggu"}
 
 # Warna status — mirror conditional formatting VBA (soft colors)
 _STATUS_TAG = {
@@ -409,6 +436,33 @@ def _fmt_num(val) -> str:
     return s
 
 
+def _fmt_num_keepzero(val) -> str:
+    """v3.10 — varian _fmt_num utk nilai yang NOLNYA MEANINGFUL (chip
+    popup 'SO Kemarin' / 'COM'): 0 → '0' (SO kemarin 0 = stok memang
+    kosong kemarin; COM 0 = pemakaian pas balik); hanya None/NaN → '-'.
+    Sisanya identik _fmt_num (ribuan Indonesia, negatif kurung)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "-"
+    try:
+        if pd.isna(val):
+            return "-"
+    except (TypeError, ValueError):
+        pass
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return str(val)
+    if v == 0:
+        return "0"
+    if v == int(v):
+        s = fmt_int_id(v)
+    else:
+        s = f"{v:,.1f}".replace(",", "\u00a0").replace(".", ",").replace("\u00a0", ".")
+    if v < 0:
+        return f"({s[1:]})"
+    return s
+
+
 def _raw_num(arr, i):
     """FIX 6d2-01 — nilai numerik MENTAH kolom numpy (None bila kolom tak
     ada / NaN/invalid) — utk chip ringkasan popup Rincian IN: nilai display
@@ -555,19 +609,36 @@ class InDetailPopup(tk.Toplevel):
         # di popup minsize 700 lebar total chip (~786px+) MELUAP: chip
         # 'BARANG MASUK' terpotong sebagian & chip 'SELISIH IN' (angka
         # inti drill-down) SELURUHNYA tak terlihat tanpa indikasi.
-        chip_specs = [(f"{src}", totals.get(src, 0.0), color)
+        chip_specs = [(f"{src}", totals.get(src, 0.0), color, _fmt_num)
                       for src, color in _SOURCES]
-        chip_specs.append(("IN TOTAL", total_in, C_ACCENT_DARK))
+        chip_specs.append(("IN TOTAL", total_in, C_ACCENT_DARK, _fmt_num))
         if row_summary:
             chip_specs.append(
-                ("Barang Masuk", row_summary.get("bm", 0.0), "#006100"))
+                ("Barang Masuk", row_summary.get("bm", 0.0), "#006100",
+                 _fmt_num))
+            # v3.10 — basis "SO kemarin": chip SO Kemarin + COM (pemakaian
+            # aktual) — hadir hanya bila datanya ada (format v3.10);
+            # None → chip disembunyikan (bukan 0 palsu). Nilai 0 MEANINGFUL
+            # (SO kemarin 0 = stok memang kosong; COM 0 = pemakaian pas
+            # balik) → diformat _fmt_num_keepzero (bukan '-' semu).
+            _sok = row_summary.get("so_kemarin")
+            if _sok is not None:
+                chip_specs.append(("SO Kemarin", _sok, "#0f766e",
+                                   _fmt_num_keepzero))
             chip_specs.append(
                 ("Selisih IN", row_summary.get("selisih", 0.0),
-                 "#dc2626"))
+                 "#dc2626", _fmt_num))
+            _com = row_summary.get("com")
+            if _com is not None:
+                chip_specs.append(
+                    ("COM", _com,
+                     "#dc2626" if _com < 0 else "#006100",
+                     _fmt_num_keepzero))
         _last_row = (len(chip_specs) - 1) // 4
-        for _i, (_lab, _val, _col) in enumerate(chip_specs):
+        for _i, (_lab, _val, _col, _fmt) in enumerate(chip_specs):
             self._chip(chips, _lab, _val, _col,
-                       row=_i // 4, col=_i % 4, last_row=_last_row)
+                       row=_i // 4, col=_i % 4, last_row=_last_row,
+                       fmt=_fmt)
 
         # --- Tabel dokumen ---
         body = tk.Frame(self, bg=C_BG)
@@ -622,16 +693,18 @@ class InDetailPopup(tk.Toplevel):
             side="right", padx=(6, 0))
 
     def _chip(self, parent, label, value, color, row=0, col=0,
-              last_row=0):
+              last_row=0, fmt=_fmt_num):
         """Chip ringkasan — GRID 4-per-baris (v3.9.59 FIX 2e-01; dulu
-        pack side="left" tanpa wrap → terpotong di lebar popup minimum)."""
+        pack side="left" tanpa wrap → terpotong di lebar popup minimum).
+        v3.10 — param ``fmt``: chip SO Kemarin/COM memakai
+        _fmt_num_keepzero (0 MEANINGFUL → '0', bukan '-')."""
         box = tk.Frame(parent, bg="#f1f5f9", highlightbackground="#e2e8f0",
                        highlightthickness=1)
         box.grid(row=row, column=col, padx=(0, 8),
                  pady=(0, 6 if row < last_row else 0), sticky="w")
         tk.Label(box, text=label.upper(), bg="#f1f5f9", fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(anchor="w", padx=10, pady=(6, 0))
-        tk.Label(box, text=_fmt_num(value), bg="#f1f5f9", fg=color,
+        tk.Label(box, text=fmt(value), bg="#f1f5f9", fg=color,
                  font=font(11, "bold")).pack(anchor="w", padx=10, pady=(0, 6))
 
     def _setup_tags(self, tree=None):
@@ -867,8 +940,20 @@ class InSelisihView(tk.Frame):
 
     def __init__(self, parent, go_to_proses: Callable | None = None):
         super().__init__(parent, bg=C_BG)
-        self.data: Optional[pd.DataFrame] = None
-        self.in_detail: Optional[pd.DataFrame] = None
+        self.data: pd.DataFrame | None = None
+        self.in_detail: pd.DataFrame | None = None
+        # v3.10 — PANJANG BULAN ASLI (user: "Misal bulan ini hanya sampai
+        # tanggal 30 maka tidak perlu ada tanggal 31 begitu juga di bulan
+        # kemarin"): default 31 (pemanggil lama/test); di-update load_data
+        # dari audit_result['month_len'/'lalu_month_len'] (pipeline →
+        # fn_audit.detect_data_period → calendar.monthrange).
+        self._month_len = 31
+        self._lalu_month_len = 31
+        # v3.10 — MODE TAMPILAN: 0 = 📋 Tabel (default), 1 = 📈 Analisa
+        self._view_analisa = False
+        # payload analisa terakhir dari worker _refresh (di-render ulang
+        # oleh _render_analisa saat mode aktif / toggle balik)
+        self._analisa_payload: dict = {}
         # v3.9.72 — FIX 2 (task 2-b): cache Series pra-string-kan kolom
         # kunci popup detail IN (double-click _detail_for) — dibangun
         # SEKALI di worker _refresh per identitas in_detail; side-dict
@@ -876,7 +961,7 @@ class InSelisihView(tk.Frame):
         # di-reset load_data (identitas frame dicek saat pemakaian).
         self._scols_cache: dict = {}
         self._scols_cache_detail = None
-        self.audit_df: Optional[pd.DataFrame] = None
+        self.audit_df: pd.DataFrame | None = None
         self.audit_kpi: dict = {}
         self.audit_desc: str = ""
         # v3.9.27 — MODE HITUNG (user: "pada rekap selisih in bisa mode
@@ -967,6 +1052,19 @@ class InSelisihView(tk.Frame):
             r0, ["📅 Bulan Ini", "📆 Lalu + Ini"], bg=C_CARD,
             command=self._on_mode_change)
         self.mode_bar.pack(side="left", padx=(6, 14))
+
+        # v3.10 — MODE TAMPILAN: 📋 Tabel (default) | 📈 Analisa (user:
+        # "gali potensi analisa di tab rekap selisih in") — 6 seksi
+        # analisa atas frame TERFILTER (rentang tanggal + ⧩ + MODE HITUNG;
+        # checkbox 'Hanya Selisih ≠ 0' DIABAIKAN — analisa memang tentang
+        # baris bermasalah). Nama atribut `view_bar` (bukan mode_bar —
+        # kontrak test §13 mode_seg lama tetap tidak dihidupkan).
+        tk.Label(r0, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self.view_bar = SegmentBar(
+            r0, ["📋 Tabel", "📈 Analisa"], bg=C_CARD,
+            command=self._on_view_mode_change)
+        self.view_bar.pack(side="left", padx=(6, 14))
 
         tk.Label(r0, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
@@ -1072,6 +1170,13 @@ class InSelisihView(tk.Frame):
 
         self.overlay = LoadingOverlay(tbody, "Menghitung rekap Selisih IN…")
 
+        # v3.10 — MODE 📈 ANALISA: panel pengganti tabel (di-pack saat
+        # mode aktif; tabel card di-pack_forget — data tetap dihitung &
+        # tabel tetap di-render supaya toggle balik ⚡ tanpa recompute).
+        self._analisa_card = tk.Frame(self.content, bg=C_CARD,
+                                      highlightbackground="#e2e8f0",
+                                      highlightthickness=1)
+
         # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + KPI
         # chips + kartu SKOR RESTO + judul; tombol toolbar tetap tampil
         # utk mengembalikan.
@@ -1158,6 +1263,19 @@ class InSelisihView(tk.Frame):
         # = None (mode "Bulan Ini" jatuh ke varian penuh — kompatibel,
         # angkanya identik saat memang tak ada data bulan lalu).
         if audit_result:
+            # v3.10 — PANJANG BULAN ASLI dari pipeline (September 30 hari
+            # → rentang 1..30 tanpa tanggal 31; bulan kemarin −25..−30).
+            # Nilai invalid/tidak ada → 31 (perilaku lama, pemanggil test).
+            try:
+                _ml = int(audit_result.get("month_len") or 31)
+            except (TypeError, ValueError):
+                _ml = 31
+            try:
+                _ll = int(audit_result.get("lalu_month_len") or 31)
+            except (TypeError, ValueError):
+                _ll = 31
+            self._month_len = _ml if 28 <= _ml <= 31 else 31
+            self._lalu_month_len = _ll if 28 <= _ll <= 31 else 31
             self._audit_full = (audit_result.get("df"),
                                 audit_result.get("kpi") or {},
                                 audit_result.get("desc") or "")
@@ -1179,7 +1297,7 @@ class InSelisihView(tk.Frame):
         if getattr(self, "mode_bar", None) is not None:
             self.mode_bar.set_active_silent(0)
         self.tgl_start_var.set("1")
-        self.tgl_end_var.set("31")
+        self.tgl_end_var.set(str(self._month_len))
         self._apply_audit_mode()
         self._cached_base = None
         # v3.9.33 — AUDIT FIX (48-e FIX 6): seluruh identitas cache ikut
@@ -1249,17 +1367,44 @@ class InSelisihView(tk.Frame):
     def _on_mode_change(self, idx: int):
         """v3.9.27 — toggle MODE HITUNG (SegmentBar). idx 0 = 📅 Bulan Ini
         (default), 1 = 📆 Lalu + Ini. Ganti varian audit + rentang tanggal
-        + refresh (KPI chips ikut varian lewat _render_kpi_chips)."""
+        + refresh (KPI chips ikut varian lewat _render_kpi_chips).
+        v3.10 — rentang sisi bulan-lalu memakai PANJANG BULAN KEMARIN
+        ASLI (−25..−30 utk bulan 30-hari — tanpa tanggal 31)."""
         self._mode_bulan_lalu = (idx == 1)
         self._apply_audit_mode()
         self._render_kpi_chips()
         if self._mode_bulan_lalu:
-            self.tgl_start_var.set("-31")   # semua data bulan lalu (-25..-31)
-            self.tgl_end_var.set("31")
+            self.tgl_start_var.set(str(-self._lalu_month_len))
+            self.tgl_end_var.set(str(self._month_len))
         else:
             self.tgl_start_var.set("1")     # v3.8 default berjalan saja
-            self.tgl_end_var.set("31")
+            self.tgl_end_var.set(str(self._month_len))
         self._refresh()
+
+    # ------------------------------------------------ MODE TAMPILAN (v3.10)
+    def _on_view_mode_change(self, idx: int):
+        """v3.10 — toggle MODE TAMPILAN (SegmentBar). idx 0 = 📋 Tabel
+        (default), 1 = 📈 Analisa. Toggle = pergantian panel TABEL ↔
+        ANALISA tanpa recompute (payload analisa dihitung worker _refresh
+        yang sama dgn tabel; kedua panel di-render dari satu payload)."""
+        self._view_analisa = (idx == 1)
+        self._apply_view_mode()
+        if self._view_analisa:
+            # panel analisa dirender dari payload terakhir; bila belum
+            # ada (first toggle sebelum refresh selesai) — refresh.
+            self._render_analisa(self._analisa_payload)
+            if not self._analisa_payload:
+                self._refresh()
+
+    def _apply_view_mode(self):
+        """v3.10 — pasang/lepas panel sesuai MODE TAMPILAN aktif."""
+        if self._view_analisa:
+            self._tcard.pack_forget()
+            self._analisa_card.pack(fill="both", expand=True,
+                                    padx=12, pady=(10, 0))
+        else:
+            self._analisa_card.pack_forget()
+            self._tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
 
     def _default_kategori_value(self) -> "str | None":
         """v3.9.22 — nilai KATEGORI 'Deviasi' persis seperti tertulis di
@@ -1387,12 +1532,21 @@ class InSelisihView(tk.Frame):
         k = self.audit_kpi
         # FIX C-03: KPI chips ikut format Indonesia (1.234.567, bukan
         # 1,234,567) — konsisten dgn formatter tabel.
+        # v3.10 — chip BASIS SELISIH kedua: basis "SO kemarin" aktif iff
+        # audit_df membawa kolom v3.10 (pipeline baru); format lama/test
+        # → chip basis lama (jujur, bukan mengklaim basis baru).
+        _basis_v310 = bool(
+            self.audit_df is not None
+            and "Qty SO Kemarin" in getattr(self.audit_df, "columns", []))
         chips = [
             # v3.9.27 — chip mode di depan: varian audit yang menopang
             # angka-angka di bawahnya (Bulan Ini = baris negatif dibuang).
             ("MODE HITUNG",
              "📅 BULAN INI" if not self._mode_bulan_lalu else "📆 LALU + INI",
              "#0e7490"),
+            ("BASIS SELISIH",
+             "SO KEMARIN (ΔSO−IN)" if _basis_v310 else "BM REKAP (BM−IN)",
+             "#0f766e" if _basis_v310 else "#64748b"),
             ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
             ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
             ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
@@ -1406,11 +1560,16 @@ class InSelisihView(tk.Frame):
             ("SISA GANTUNG (NET)",
              fmt_int_id(k.get('deviasi_qty', 0.0)),
              "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
+            # v3.10 — COM minus: baris pemakaian aktual < 0 (barang
+            # "muncul dari mana-mana" — sinyal input SO salah/kurang).
+            ("COM MINUS",
+             fmt_int_id(k.get('com_minus', 0)),
+             "#dc2626" if k.get('com_minus', 0) else "#16a34a"),
         ]
-        # v3.9.59 — FIX 2e-02: 8 kartu KPI dibungkus GRID 4-per-baris
-        # (2 baris deterministik). Dulu 8× pack side="left" SATU baris
-        # (~1014px lebar) → pada WINDOW_MIN app 1020px kartu terakhir
-        # 'SISA GANTUNG (NET)' TERPOTONG +44px tanpa wrap/scroll; font
+        # v3.9.59 — FIX 2e-02: kartu KPI dibungkus GRID 4-per-baris
+        # (deterministik; v3.10: 10 kartu = 3 baris). Dulu pack
+        # side="left" SATU baris (~1014px lebar) → pada WINDOW_MIN app
+        # 1020px kartu terakhir TERPOTONG +44px tanpa wrap/scroll; font
         # Windows lebih lebar dari bitmap Xvfb → borderline juga di
         # jendela default 1280.
         # v3.9.60 — KPI COMPACT (padat vertikal): kartu KPI + papan skor +
@@ -1432,10 +1591,20 @@ class InSelisihView(tk.Frame):
             tk.Label(box, text=value, bg="#f8fafc", fg=color,
                      font=font(10, "bold")).pack(anchor="w", padx=10,
                                                  pady=(0, 3))
-        self.kpi_card.pack(fill="x", padx=12, pady=(10, 0),
-                           before=(self._skor_zone
-                                   if self._skor_zone.winfo_ismapped()
-                                   else self._tcard))
+        # v3.10 — anchor pack harus widget yang SEDANG di-pack: mode 📈
+        # Analisa melepas tabel card (before=_tcard unmapped → TclError);
+        # pilih kandidat pertama yang masih managed (_skor_zone → _tcard
+        # → _analisa_card), tanpa before bila tak ada (empty state awal).
+        _anchor = None
+        for _cand in (self._skor_zone, self._tcard, self._analisa_card):
+            if _cand.winfo_manager() == "pack":
+                _anchor = _cand
+                break
+        if _anchor is not None:
+            self.kpi_card.pack(fill="x", padx=12, pady=(10, 0),
+                               before=_anchor)
+        else:
+            self.kpi_card.pack(fill="x", padx=12, pady=(10, 0))
 
     # --------------------------------------------------- VALUES & FILTER ---
     def _col_values(self, col: str) -> list:
@@ -1526,14 +1695,39 @@ class InSelisihView(tk.Frame):
         if data is not None and not data.empty:
             self._ensure_maps(data)
 
+        # v3.10 — deteksi format audit: kolom basis "SO kemarin" hadir
+        # (pipeline v3.10) → "Barang Masuk" = BM rekap DISPLAY ("Qty BM
+        # Rekap"; slot "Qty SO Harian" sudah di-rename "Qty Delta SO" oleh
+        # fn_audit — TIDAK lagi dibaca di jalur ini). Format LAMA (test /
+        # pemanggil lama tanpa kolom v3.10) → fallback slot lama (BM rekap
+        # juga isinya — perilaku identik pra-v3.10).
+        _v310 = "Qty SO Kemarin" in df.columns
+
+        def _num_or_na(src_col: str) -> pd.Series:
+            """Kolom numerik v3.10 — hilang di format lama → NA (tampil
+            '-' / sel kosong export, konsisten 'Hasil SO')."""
+            if src_col in df.columns:
+                return pd.to_numeric(df[src_col], errors="coerce")
+            return pd.Series([pd.NA] * len(df), index=df.index,
+                             dtype="Float64")
+
         out = pd.DataFrame({
             "Resto": df["Resto"].astype(str),
             "Tanggal": pd.to_numeric(df["Tanggal"], errors="coerce"),
             "Nama Barang": df["Nama Item"].astype(str),
             "Hasil SO": pd.to_numeric(df["Hasil SO"], errors="coerce"),
-            "Barang Masuk": pd.to_numeric(df["Qty SO Harian"],
-                                           errors="coerce"),
+            # v3.10 — BM rekap = KOLOM DISPLAY (bukan lagi basis selisih);
+            # ΔSO-nya ditampilkan di kolom "SO Kemarin"/implisit Selisih IN.
+            # (FIX: else-branch WAJIB df["Qty SO Harian"] — literal string
+            # di-pd.to_numeric = NaN kolom penuh, BM legacy lenyap.)
+            "Barang Masuk": pd.to_numeric(
+                df["Qty BM Rekap"] if _v310 else df["Qty SO Harian"],
+                errors="coerce"),
+            "SO Kemarin": _num_or_na("Qty SO Kemarin"),
+            "COM": _num_or_na("Qty COM"),
             "IN": pd.to_numeric(df["Penerimaan Sistem"], errors="coerce"),
+            # v3.10 — Selisih IN = Selisih Harian engine; di basis baru
+            # nilainya = ΔSO − IN (slot engine diisi ΔSO oleh fn_audit).
             "Selisih IN": pd.to_numeric(df["Selisih Harian"],
                                          errors="coerce"),
             "Saldo": pd.to_numeric(df["Saldo Kumulatif"], errors="coerce"),
@@ -1567,6 +1761,12 @@ class InSelisihView(tk.Frame):
                                          errors="coerce") \
                 if col_in in df.columns else pd.Series(
                     [pd.NA] * len(out), dtype="Float64")
+        # v3.10 — kolom bantu analisa (TIDAK ditampilkan di tabel — sumber
+        # seksi 📈 Anomali ΔSO / COM Minus mode Analisa; format lama → NA):
+        # "Delta SO" = ΔSO mentah; "Qty BK" = barang keluar 42.15 per baris.
+        for col_out, col_in in (("Delta SO", "Qty Delta SO"),
+                                 ("Qty BK", "Qty BK")):
+            out[col_out] = _num_or_na(col_in)
         out.insert(3, "KATEGORI",
                    [self._kategori_map.get(b, "-")
                     for b in out["Nama Barang"]])
@@ -1609,6 +1809,15 @@ class InSelisihView(tk.Frame):
         B4 · BM kosong — BM 0 padahal IN sistem > 0 (input rekap
             belum diisi — data quality, mirror temuan audit 37-a
             R1): "BM 0 padahal IN 13 (input rekap belum diisi)".
+        B4b · SO belum direkam (v3.10 basis "SO kemarin") — baris
+            beraktivitas IN tapi Hasil SO kosong → ΔSO tak diketahui
+            → Selisih IN bulan baru tampak −IN penuh (gantung semu)
+            sampai SO diisi: "SO belum direkam (ΔSO tak diketahui —
+            selisih menunggu input SO)".
+        B5 · COM minus (v3.10) — pemakaian aktual COM = SO(t−1) + IN
+            − BK − SO(t) < 0 (barang "muncul dari mana-mana" —
+            sinyal kuat input SO salah/kurang): "COM −n (pemakaian
+            negatif — cek input SO)".
 
         Return dict {(resto, tgl_num, barang): [note, ...]} — baris
         tanpa temuan tidak masuk (catatan VBA tetap sendirian).
@@ -1659,10 +1868,26 @@ class InSelisihView(tk.Frame):
             .fillna(0).to_numpy(dtype="float64")
         sel = pd.to_numeric(out["Selisih IN"], errors="coerce") \
             .fillna(0).to_numpy(dtype="float64")
+        # v3.10 — B4b (Hasil SO kosong) & B5 (COM minus): kolom mungkin
+        # tak ada di format lama → penuh NaN → catatan tak pernah muncul.
+        sov = (pd.to_numeric(out["Hasil SO"], errors="coerce")
+               .to_numpy(dtype="float64") if "Hasil SO" in out.columns
+               else None)
+        comv = (pd.to_numeric(out["COM"], errors="coerce")
+                .to_numpy(dtype="float64") if "COM" in out.columns
+                else None)
         for i in range(len(out)):
             r = out["Resto"].iat[i]
             b = out["Nama Barang"].iat[i]
             t = out["Tanggal"].iat[i]
+            if comv is not None and not np.isnan(comv[i]) and comv[i] < 0:
+                _add(r, t, b,
+                     f"COM {_fmt_num(comv[i])} (pemakaian negatif — "
+                     f"cek input SO)")
+            if sov is not None and np.isnan(sov[i]) and ins[i] > 0:
+                _add(r, t, b,
+                     "SO belum direkam (ΔSO tak diketahui — selisih "
+                     "menunggu input SO)")
             if bm[i] == 0 and ins[i] > 0:
                 _add(r, t, b,
                      f"BM 0 padahal IN {_fmt_num(ins[i])} "
@@ -1674,6 +1899,255 @@ class InSelisihView(tk.Frame):
                 _add(r, t, b,
                      f"Selisih IN {_fmt_num(sel[i])} ({arah})")
         return notes
+
+    # ---------------------------------------------- ANALISA MODE (v3.10)
+    def _compute_analisa(self, f: "pd.DataFrame | None") -> dict:
+        """v3.10 — MODE 📈 ANALISA: 6 seksi analisa atas frame konteks
+        (TERFILTER rentang tanggal + ⧩ kolom + filter Resto + varian MODE
+        HITUNG; checkbox 'Hanya Selisih ≠ 0' DIABAIKAN — analisa memang
+        tentang baris bermasalah). Dijalankan DI WORKER _refresh (pola
+        FIX D-01/D-08 — pandas di luar main thread), hasil masuk payload
+        _prepare_rows → _render_analisa.
+
+        Seksi (user: "gali potensi analisa di tab rekap selisih in"):
+        1. UMUR GANTUNG   — aging baris selisih (bucket 0-3/4-7/8-14/
+                            15-30/>30 hari sejak tanggal kejadian ke
+                            tanggal data TERAKHIR; tanggal bulan lalu
+                            dihitung kontinu lintas bulan via panjang
+                            bulan asli);
+        2. LEADERBOARD    — resto dgn Σ|Selisih| terbesar + TREND paruh
+                            awal vs akhir periode (membaik/memburuk);
+        3. SISTEMIK/LOKAL — barang gantung di ≥3 resto (masalah master/
+                            barang) vs lokal (ops resto) + share;
+        4. RESOLVE-RATE   — pasangan yang PERNAH gantung tapi baris
+                            TERAKHIR-nya sudah 0 (teratasi) vs masih
+                            gantung; + hari bersih (tanggal tanpa
+                            gantung);
+        5. ANOMALI ΔSO    — ΔSO naik tanpa IN (masuk tak tercatat) /
+                            turun tanpa BK & tanpa IN (COM tak tercatat
+                            / input SO salah) + top |ΔSO| outlier;
+        6. COM MINUS      — pemakaian aktual < 0 (barang 'muncul dari
+                            mana-mana' — sinyal input SO kurang/salah).
+
+        Semua seksi defensif (KeyError/TypeError → seksi kosong) —
+        analisa tidak pernah mematikan refresh tabel.
+        """
+        meta = {"n_konteks": 0, "n_gantung": 0, "sum_abs": 0.0,
+                "n_resto": 0, "n_barang": 0, "n_tgl": 0,
+                "basis_v310": False, "periode": "",
+                "n_com_minus": 0, "sum_com_minus": 0.0}
+        empty = {"meta": meta, "umur": [], "umur_max": None,
+                 "resto": [], "sistemik": {"items": [],
+                 "n_baris_sistemik": 0, "n_baris_lokal": 0,
+                 "n_item_sistemik": 0},
+                 "resolve": {"pernah": 0, "teratasi": 0, "masih": 0,
+                             "rate": None, "n_tgl": 0, "hari_bersih": 0},
+                 "anomali": {"naik_tanpa_in": 0, "turun_tanpa_bk": 0,
+                             "dso_unknown": 0, "top": []},
+                 "com_minus": {"n": 0, "sum": 0.0, "top": []}}
+        if f is None or f.empty or "Selisih IN" not in f.columns:
+            return empty
+
+        sel = pd.to_numeric(f["Selisih IN"], errors="coerce") \
+            .fillna(0.0).to_numpy(dtype="float64")
+        ins = pd.to_numeric(f["IN"], errors="coerce") \
+            .fillna(0.0).to_numpy(dtype="float64")
+        tgl = pd.to_numeric(f["Tanggal"], errors="coerce") \
+            .to_numpy(dtype="float64")
+        resto_s = f["Resto"].astype(str).to_numpy()
+        barang_s = f["Nama Barang"].astype(str).to_numpy()
+        dso = (pd.to_numeric(f["Delta SO"], errors="coerce")
+               .to_numpy(dtype="float64")
+               if "Delta SO" in f.columns
+               else np.full(len(f), np.nan))
+        bk = (pd.to_numeric(f["Qty BK"], errors="coerce")
+              .to_numpy(dtype="float64")
+              if "Qty BK" in f.columns
+              else np.full(len(f), np.nan))
+        com = (pd.to_numeric(f["COM"], errors="coerce")
+               .to_numpy(dtype="float64")
+               if "COM" in f.columns
+               else np.full(len(f), np.nan))
+
+        gantung = sel != 0.0
+        n_g = int(gantung.sum())
+        sum_abs = float(np.abs(sel[gantung]).sum()) if n_g else 0.0
+        _com_ok = np.isfinite(com)
+        n_com_minus = int(((_com_ok) & (com < 0)).sum())
+        meta.update({
+            "n_konteks": len(f), "n_gantung": n_g,
+            "sum_abs": sum_abs,
+            "n_resto": int(f["Resto"].nunique()),
+            "n_barang": int(f["Nama Barang"].nunique()),
+            "n_tgl": int(f["Tanggal"].nunique()),
+            # basis v3.10 aktif iff kolom ΔSO benar-benar terisi (format
+            # lama → semua NaN → seksi ΔSO tampil 'format lama')
+            "basis_v310": bool(np.isfinite(dso).any()),
+            "n_com_minus": n_com_minus,
+            "sum_com_minus": float(-com[(_com_ok) & (com < 0)].sum()),
+            "periode": (f"bulan ini {self._month_len} hari · "
+                        f"bulan kemarin {self._lalu_month_len} hari"),
+        })
+
+        # -- ordinal lintas bulan (tanggal -25..-31 lalu → 1..31 ini) --
+        lalu = float(self._lalu_month_len)
+        with np.errstate(invalid="ignore"):
+            ordn = np.where(np.isnan(tgl), np.nan,
+                            np.where(tgl < 0, tgl + lalu, lalu + tgl))
+        out = dict(empty)
+        out["meta"] = meta
+
+        # --- seksi 1: UMUR GANTUNG (aging) ------------------------------
+        try:
+            if n_g:
+                o = ordn[gantung]
+                max_o = float(np.nanmax(np.where(np.isnan(ordn),
+                                                 np.nan, ordn))) \
+                    if not np.all(np.isnan(ordn)) else lalu
+                umur = max_o - o
+                umur = np.where(np.isnan(umur), 0.0, umur)
+                edges = ((0, 3, "0–3 hari"), (4, 7, "4–7 hari"),
+                         (8, 14, "8–14 hari"), (15, 30, "15–30 hari"),
+                         (31, 10 ** 9, "> 30 hari"))
+                buckets = []
+                for lo, hi, label in edges:
+                    m = (umur >= lo) & (umur <= hi)
+                    if m.any():
+                        buckets.append((label, int(m.sum()),
+                                        float(np.abs(sel[gantung][m]).sum())))
+                out["umur"] = buckets
+                # baris tertua (umur maks) — resto/barang/tgl utk narasi
+                _i = int(np.argmax(umur))
+                _gi = int(np.flatnonzero(gantung)[_i])
+                out["umur_max"] = {
+                    "umur": float(umur[_i]),
+                    "resto": str(resto_s[_gi]), "barang": str(barang_s[_gi]),
+                    "tgl": (None if np.isnan(tgl[_gi]) else int(tgl[_gi])),
+                    "selisih": float(sel[_gi])}
+        except (KeyError, TypeError, ValueError, IndexError):
+            pass
+
+        # --- seksi 2: LEADERBOARD RESTO + TREND -------------------------
+        try:
+            if n_g:
+                rows_g = pd.DataFrame({
+                    "r": resto_s[gantung], "t": ordn[gantung],
+                    "abs": np.abs(sel[gantung])})
+                med = float(rows_g["t"].median()) if len(rows_g) else 0.0
+                lb = []
+                for resto, g in rows_g.groupby("r", sort=False):
+                    awal = float(g[g["t"] < med]["abs"].sum())
+                    akhir = float(g[g["t"] >= med]["abs"].sum())
+                    trend = ("memburuk ↘" if akhir > awal * 1.05 else
+                             ("membaik ↗" if akhir * 1.05 < awal
+                              else "stabil →"))
+                    lb.append({
+                        "resto": str(resto), "n_items": len(g),
+                        "n_dates": int(g["t"].nunique()),
+                        "sum_abs": float(g["abs"].sum()),
+                        "awal": awal, "akhir": akhir, "trend": trend})
+                lb.sort(key=lambda d: (-d["sum_abs"], -d["n_items"],
+                                       d["resto"]))
+                _tot = sum(d["sum_abs"] for d in lb) or 1.0
+                for d in lb:
+                    d["share"] = d["sum_abs"] / _tot
+                out["resto"] = lb[:8]
+        except (KeyError, TypeError, ValueError, IndexError):
+            pass
+
+        # --- seksi 3: SISTEMIK vs LOKAL ---------------------------------
+        try:
+            if n_g:
+                rows_g = pd.DataFrame({
+                    "b": barang_s[gantung], "r": resto_s[gantung],
+                    "abs": np.abs(sel[gantung])})
+                per_item = rows_g.groupby("b", sort=False).agg(
+                    n_resto=("r", "nunique"), n_baris=("abs", "size"),
+                    sum_abs=("abs", "sum"))
+                sis = per_item[per_item["n_resto"] >= 3] \
+                    .sort_values("sum_abs", ascending=False)
+                items = [{"barang": str(b), "n_resto": int(r["n_resto"]),
+                          "n_baris": int(r["n_baris"]),
+                          "sum_abs": float(r["sum_abs"])}
+                         for b, r in sis.head(8).iterrows()]
+                sistemik_set = set(sis.index)
+                is_sistemik = rows_g["b"].isin(sistemik_set)
+                out["sistemik"] = {
+                    "items": items,
+                    "n_item_sistemik": len(sis),
+                    "n_baris_sistemik": int(is_sistemik.sum()),
+                    "n_baris_lokal": int((~is_sistemik).sum()),
+                }
+        except (KeyError, TypeError, ValueError, IndexError):
+            pass
+
+        # --- seksi 4: RESOLVE-RATE --------------------------------------
+        try:
+            keys = list(zip(resto_s, barang_s))
+            dfk = pd.DataFrame({"k": keys, "o": ordn,
+                                "neq": (sel != 0.0).astype(int)})
+            dfk = dfk.sort_values(["k", "o"], kind="mergesort",
+                                  na_position="last")
+            grp = dfk.groupby("k", sort=False)
+            pernah = grp["neq"].max()
+            last_neq = grp.tail(1).set_index("k")["neq"]
+            pernah = pernah[pernah > 0]
+            teratasi = int((last_neq.reindex(pernah.index) == 0).sum())
+            n_pernah = len(pernah)
+            rate = (teratasi / n_pernah) if n_pernah else None
+            tgl_unik = dfk["o"].dropna().unique()
+            tgl_gantung = dfk[dfk["neq"] > 0]["o"].dropna().unique()
+            out["resolve"] = {
+                "pernah": n_pernah, "teratasi": teratasi,
+                "masih": n_pernah - teratasi, "rate": rate,
+                "n_tgl": len(tgl_unik),
+                "hari_bersih": int(len(tgl_unik) - len(tgl_gantung)),
+            }
+        except (KeyError, TypeError, ValueError, IndexError):
+            pass
+
+        # --- seksi 5: ANOMALI ΔSO ---------------------------------------
+        try:
+            if meta["basis_v310"]:
+                naik = np.isfinite(dso) & (dso > 0)
+                turun = np.isfinite(dso) & (dso < 0)
+                bk_zero = ~(np.isfinite(bk) & (bk != 0.0))
+                out["anomali"] = {
+                    "naik_tanpa_in": int((naik & (ins == 0)).sum()),
+                    "turun_tanpa_bk": int(
+                        (turun & (ins == 0) & bk_zero).sum()),
+                    "dso_unknown": int(
+                        (~np.isfinite(dso) & (ins != 0)).sum()),
+                    "top": [
+                        {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
+                         "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
+                         "dso": float(dso[i])}
+                        for i in np.argsort(
+                            np.where(np.isfinite(dso), np.abs(dso),
+                                     -1.0))[-5:][::-1]
+                        if np.isfinite(dso[i])],
+                }
+        except (KeyError, TypeError, ValueError, IndexError):
+            pass
+
+        # --- seksi 6: COM MINUS -----------------------------------------
+        try:
+            if n_com_minus:
+                idx = np.flatnonzero(_com_ok & (com < 0))
+                idx = idx[np.argsort(com[idx])][:5]
+                out["com_minus"] = {
+                    "n": n_com_minus,
+                    "sum": float(-com[idx if len(idx) else
+                                  (_com_ok & (com < 0))].sum()),
+                    "top": [
+                        {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
+                         "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
+                         "com": float(com[i])}
+                        for i in idx],
+                }
+        except (KeyError, TypeError, ValueError, IndexError):
+            pass
+        return out
 
     def _ensure_maps(self, df):
         """Lookup satuan per (barang, resto) + kategori per barang (v3.5)."""
@@ -1824,6 +2298,12 @@ class InSelisihView(tk.Frame):
             fmt_r = _format_col_values("Resto", f["Resto"])
             f = f[fmt_r.isin(_resto_sel)]
 
+        # v3.10 — snapshot konteks analisa: POST rentang tanggal + ⧩ +
+        # filter Resto, PRA checkbox 'Hanya Selisih ≠ 0' (analisa memang
+        # tentang baris bermasalah — checkbox display tidak boleh
+        # mengosongkan mode 📈 Analisa).
+        f_analisa = f
+
         if st["only_selisih"] and "Selisih IN" in f.columns:
             sv = pd.to_numeric(f["Selisih IN"], errors="coerce").fillna(0)
             f = f[sv != 0]
@@ -1880,7 +2360,11 @@ class InSelisihView(tk.Frame):
             return {"items": [],
                     "status": (zero_row_filter_message(st["col_sel"])
                                or "Tidak ada data setelah filter."),
-                    "resto_scores": resto_scores}
+                    "resto_scores": resto_scores,
+                    # v3.10 — analisa tetap dihitung dari konteks pra-
+                    # checkbox (mode 📈 tidak ikut kosong saat checkbox
+                    # 'Hanya Selisih ≠ 0' menyaring tabel kosong).
+                    "analisa": self._compute_analisa(f_analisa)}
 
         col_ids = [c[0] for c in COLUMNS]
 
@@ -1914,6 +2398,9 @@ class InSelisihView(tk.Frame):
         # FIX 6d2-01 — kolom numerik MENTAH utk chip popup (lihat _raw_num)
         _bm_np = num_raw.get("Barang Masuk")
         _sel_np = num_raw.get("Selisih IN")
+        # v3.10 — chip popup "SO Kemarin" & "COM" (raw, bukan display)
+        _sok_np = num_raw.get("SO Kemarin")
+        _com_np = num_raw.get("COM")
         for i in range(n):
             values = tuple(formatted[c][i] for c in col_ids)
             st_tag = _STATUS_TAG.get(status_s[i])
@@ -1941,6 +2428,11 @@ class InSelisihView(tk.Frame):
                 "tgl": None if pd.isna(t) else int(t),
                 "bm": _raw_num(_bm_np, i),
                 "selisih": _raw_num(_sel_np, i),
+                # v3.10 — basis "SO kemarin" + pemakaian aktual utk chip
+                # popup (None bila kolom tak ada di format lama → chip
+                # disembunyikan, bukan 0 palsu).
+                "so_kemarin": _raw_num(_sok_np, i),
+                "com": _raw_num(_com_np, i),
             }
 
         # ringkasan status
@@ -1951,7 +2443,10 @@ class InSelisihView(tk.Frame):
             pd.Series(status_s).value_counts().head(3).items())
         return {"items": items, "status": status_txt, "keys": keys,
                 "neg_cells": neg_cells,
-                "resto_scores": resto_scores}
+                "resto_scores": resto_scores,
+                # v3.10 — payload analisa mode 📈 (dihitung worker ini;
+                # checkbox 'Hanya Selisih ≠ 0' diabaikan — lihat f_analisa)
+                "analisa": self._compute_analisa(f_analisa)}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -1963,6 +2458,11 @@ class InSelisihView(tk.Frame):
         # v3.9.55 — F3: kartu SKOR RESTO ikut render tiap refresh (konteks
         # filter tanggal/⧩ aktif).
         self._render_resto_scores(payload.get("resto_scores") or [])
+        # v3.10 — mode 📈 Analisa: payload analisa disimpan (toggle balik
+        # ⚡ tanpa recompute) & panel dirender bila mode sedang aktif.
+        self._analisa_payload = payload.get("analisa") or {}
+        if self._view_analisa:
+            self._render_analisa(self._analisa_payload)
 
         def render_done():
             # FIX C-04: tag per-cell dipasang SETELAH insert batch selesai
@@ -1989,6 +2489,275 @@ class InSelisihView(tk.Frame):
         v3.9.42 — audit 61-c P1-2: guard non-kosong dihapus."""
         if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
+
+    # ------------------------------------------------ ANALISA RENDER (v3.10)
+    _A_TREND_FG: ClassVar[dict[str, str]] = {
+        "memburuk ↘": "#b91c1c", "membaik ↗": "#15803d",
+        "stabil →": "#64748b"}
+
+    def _render_analisa(self, payload: dict):
+        """v3.10 — bangun ulang panel 📈 ANALISA dari payload worker
+        (6 seksi — lihat _compute_analisa). Dipanggil _render_rows saat
+        mode aktif & _on_view_mode_change (payload cache)."""
+        zone = self._analisa_card
+        for w in zone.winfo_children():
+            w.destroy()
+        m = (payload or {}).get("meta")
+        if not m:
+            tk.Label(zone, text=(
+                "Belum ada data analisa — jalankan pipeline dulu."),
+                bg=C_CARD, fg=C_TEXT_MUTED, font=font(10)).pack(pady=24)
+            return
+
+        head = tk.Frame(zone, bg=C_CARD)
+        head.pack(fill="x", padx=14, pady=(10, 2))
+        tk.Label(head, text="📈 ANALISA REKONSILIASI — Potensi Temuan",
+                 bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
+            side="left")
+        tk.Label(head, text=(
+            "konteks: rentang tanggal + ⧩ + MODE HITUNG aktif · "
+            "checkbox 'Hanya Selisih ≠ 0' diabaikan"),
+            bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="right")
+
+        # --- meta chips (mini) — 7 kartu grid 4-per-baris ---------------
+        chips = [
+            ("BARIS KONTEKS", fmt_int_id(m["n_konteks"]), "#0f766e"),
+            ("BARIS GANTUNG", fmt_int_id(m["n_gantung"]),
+             "#dc2626" if m["n_gantung"] else "#16a34a"),
+            ("Σ|SELISIH IN|", _fmt_num(m["sum_abs"]), "#c65911"),
+            ("RESTO × BARANG",
+             f"{fmt_int_id(m['n_resto'])} × {fmt_int_id(m['n_barang'])}",
+             "#0f766e"),
+            ("BASIS SELISIH",
+             "SO KEMARIN (ΔSO−IN)" if m["basis_v310"]
+             else "BM REKAP (BM−IN)",
+             "#0f766e" if m["basis_v310"] else "#64748b"),
+            ("COM MINUS",
+             f"{fmt_int_id(m['n_com_minus'])} ({_fmt_num(m['sum_com_minus'])})",
+             "#dc2626" if m["n_com_minus"] else "#16a34a"),
+            ("PANJANG BULAN", m.get("periode") or "—", "#64748b"),
+        ]
+        chipbox = tk.Frame(zone, bg=C_CARD)
+        chipbox.pack(fill="x", padx=14, pady=(4, 2))
+        _last = (len(chips) - 1) // 4
+        for _i, (_lab, _val, _col) in enumerate(chips):
+            b = tk.Frame(chipbox, bg="#f8fafc",
+                         highlightbackground="#e2e8f0",
+                         highlightthickness=1)
+            b.grid(row=_i // 4, column=_i % 4, padx=(0, 8),
+                   pady=(0, 4 if _i // 4 < _last else 0), sticky="w")
+            tk.Label(b, text=_lab, bg="#f8fafc", fg=C_TEXT_MUTED,
+                     font=font(7, "bold")).pack(anchor="w", padx=8,
+                                                pady=(2, 0))
+            tk.Label(b, text=_val, bg="#f8fafc", fg=_col,
+                     font=font(9, "bold")).pack(anchor="w", padx=8,
+                                                pady=(0, 2))
+
+        # --- body scrollable (pola listwrap SKOR RESTO) -----------------
+        bodywrap = tk.Frame(zone, bg=C_CARD)
+        bodywrap.pack(fill="both", expand=True, padx=14, pady=(4, 10))
+        cv = tk.Canvas(bodywrap, bg=C_CARD, highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(bodywrap, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv, bg=C_CARD)
+        _winid = cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        inner.bind("<Configure>",
+                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>",
+                lambda e: cv.itemconfigure(_winid, width=cv.winfo_width()))
+
+        def _sec(title, subtitle=""):
+            sec = tk.Frame(inner, bg=C_CARD,
+                           highlightbackground="#e2e8f0",
+                           highlightthickness=1)
+            sec.pack(fill="x", pady=(0, 8))
+            h = tk.Frame(sec, bg="#f8fafc")
+            h.pack(fill="x")
+            tk.Label(h, text=title, bg="#f8fafc", fg=C_HEADER,
+                     font=font(9, "bold")).pack(side="left", padx=10,
+                                                pady=4)
+            if subtitle:
+                tk.Label(h, text=subtitle, bg="#f8fafc",
+                         fg=C_TEXT_MUTED, font=font(8)).pack(
+                    side="right", padx=10)
+            body = tk.Frame(sec, bg=C_CARD)
+            body.pack(fill="x", padx=10, pady=(2, 8))
+            return body
+
+        def _line(parent, texts, widths, bold=False, fg=None, bg=C_CARD,
+                  bar=None, bar_bg="#64748b"):
+            row = tk.Frame(parent, bg=bg)
+            row.pack(fill="x", pady=(0, 1))
+            for txt, w in zip(texts, widths):
+                tk.Label(row, text=str(txt), bg=bg,
+                         fg=(fg or C_HEADER), width=w, anchor="w",
+                         padx=4, font=font(8, "bold" if bold else
+                                           "normal")).pack(side="left")
+            if bar is not None:
+                tk.Frame(row, bg=bar_bg, height=6,
+                         width=max(4, int(bar))).pack(
+                    side="left", padx=(8, 0), pady=(5, 0))
+            return row
+
+        def _muted(parent, txt):
+            tk.Label(parent, text=txt, bg=C_CARD, fg=C_TEXT_MUTED,
+                     font=font(8)).pack(anchor="w", pady=(2, 0))
+
+        # == 1. UMUR GANTUNG =============================================
+        b1 = _sec("⏳ 1 · UMUR GANTUNG (AGING)",
+                  "berapa lama selisih menunggu — sejak tanggal kejadian "
+                  "ke tanggal data terakhir")
+        if payload.get("umur"):
+            _line(b1, ("RENTANG UMUR", "BARIS", "Σ|SELISIH|"),
+                  (22, 10, 16), bold=True, fg=C_TEXT_MUTED)
+            _mx = max((n for _, n, _ in payload["umur"]), default=1) or 1
+            for label, n, s in payload["umur"]:
+                _line(b1, (label, fmt_int_id(n), _fmt_num(s)),
+                      (22, 10, 16), bar=120 * n / _mx,
+                      bar_bg="#c65911")
+            um = payload.get("umur_max")
+            if um:
+                _muted(b1, f"tertua: {fmt_int_id(um['umur'])} hari — "
+                           f"{um['barang']} @ {um['resto']} "
+                           f"tgl {um['tgl']} "
+                           f"(selisih {_fmt_num(um['selisih'])})")
+        else:
+            _muted(b1, "tidak ada baris gantung di konteks ini ✓")
+
+        # == 2. LEADERBOARD RESTO + TREND ================================
+        b2 = _sec("🏆 2 · LEADERBOARD RESTO — Σ|Selisih IN|",
+                  "trend: paruh awal vs akhir periode (median tanggal)")
+        if payload.get("resto"):
+            _line(b2, ("RESTO", "ITEM", "TGL", "Σ|SELISIH|", "SHARE",
+                       "TREND"),
+                  (26, 8, 7, 13, 9, 12), bold=True, fg=C_TEXT_MUTED)
+            _mx2 = max((d["sum_abs"] for d in payload["resto"]),
+                       default=1.0) or 1.0
+            for i, d in enumerate(payload["resto"]):
+                _line(b2, (
+                    f"#{i + 1}  {d['resto']}",
+                    fmt_int_id(d["n_items"]),
+                    fmt_int_id(d["n_dates"]),
+                    _fmt_num(d["sum_abs"]),
+                    f"{d['share'] * 100:.0f}%",
+                    d["trend"]),
+                    (26, 8, 7, 13, 9, 12),
+                    bold=(i < 3),
+                    fg=(self._A_TREND_FG.get(d["trend"]) if i < 3
+                        else None),
+                    bar=120 * d["sum_abs"] / _mx2,
+                    bar_bg="#b91c1c" if i == 0 else "#64748b")
+        else:
+            _muted(b2, "tidak ada resto bermasalah di konteks ini ✓")
+
+        # == 3. SISTEMIK vs LOKAL ========================================
+        s3 = payload.get("sistemik") or {}
+        b3 = _sec("🧭 3 · SISTEMIK vs LOKAL",
+                  "barang = ≥3 resto (master/sistemik) · <3 resto (ops "
+                  "lokal)")
+        n_sis = s3.get("n_baris_sistemik", 0)
+        n_lok = s3.get("n_baris_lokal", 0)
+        _n_tot = (n_sis + n_lok) or 1
+        _line(b3, (
+            (f"SISTEMIK: {fmt_int_id(n_sis)} baris "
+             f"({n_sis * 100 / _n_tot:.0f}%)"),
+            (f"LOKAL: {fmt_int_id(n_lok)} baris "
+             f"({n_lok * 100 / _n_tot:.0f}%)")),
+            (34, 30), bold=True,
+            fg="#b45309" if n_sis else "#15803d")
+        if s3.get("items"):
+            _line(b3, ("BARANG", "RESTO", "BARIS", "Σ|SELISIH|"),
+                  (30, 8, 8, 14), bold=True, fg=C_TEXT_MUTED)
+            _mx3 = max((d["sum_abs"] for d in s3["items"]),
+                       default=1.0) or 1.0
+            for d in s3["items"]:
+                _line(b3, (d["barang"], fmt_int_id(d["n_resto"]),
+                           fmt_int_id(d["n_baris"]), _fmt_num(d["sum_abs"])),
+                      (30, 8, 8, 14), bar=100 * d["sum_abs"] / _mx3,
+                      bar_bg="#b45309")
+        else:
+            _muted(b3, "tidak ada barang gantung lintas ≥3 resto ✓")
+
+        # == 4. RESOLVE-RATE =============================================
+        r4 = payload.get("resolve") or {}
+        b4 = _sec("♻️ 4 · RESOLVE-RATE",
+                  "pasangan pernah gantung yang baris TERAKHIR-nya sudah "
+                  "0 = teratasi")
+        rate = r4.get("rate")
+        if rate is not None:
+            # bar progres dua-warna (hijau teratasi / merah masih)
+            barf = tk.Frame(b4, bg=C_CARD)
+            barf.pack(anchor="w", pady=(2, 4))
+            _W = 240
+            tk.Frame(barf, bg="#16a34a", height=10,
+                     width=max(4, int(_W * rate))).pack(side="left")
+            tk.Frame(barf, bg="#dc2626", height=10,
+                     width=max(4, _W - int(_W * rate))).pack(side="left")
+            tk.Label(barf, text=f"  {rate * 100:.0f}%",
+                     bg=C_CARD, fg="#15803d",
+                     font=font(10, "bold")).pack(side="left")
+        _line(b4, (
+            f"PERNAH GANTUNG: {fmt_int_id(r4.get('pernah', 0))} pasangan",
+            f"TERATASI: {fmt_int_id(r4.get('teratasi', 0))}",
+            f"MASIH: {fmt_int_id(r4.get('masih', 0))}"),
+            (30, 18, 16), bold=True)
+        _muted(b4, f"hari bersih (tanpa gantung): "
+                   f"{fmt_int_id(r4.get('hari_bersih', 0))} dari "
+                   f"{fmt_int_id(r4.get('n_tgl', 0))} tanggal teramati")
+
+        # == 5. ANOMALI ΔSO ==============================================
+        a5 = payload.get("anomali") or {}
+        b5 = _sec("🔎 5 · ANOMALI ΔSO",
+                  "kenaikan/penurunan stok fisik yang tak menjelaskan diri")
+        if m["basis_v310"]:
+            _line(b5, (
+                (f"ΔSO naik TANPA IN: {fmt_int_id(a5.get('naik_tanpa_in', 0))}"),
+                (f"ΔSO turun TANPA BK/IN: "
+                 f"{fmt_int_id(a5.get('turun_tanpa_bk', 0))}"),
+                (f"ΔSO tak diketahui: {fmt_int_id(a5.get('dso_unknown', 0))}")),
+                (26, 26, 22), bold=True,
+                fg="#b45309" if (a5.get("naik_tanpa_in")
+                                 or a5.get("turun_tanpa_bk")) else "#15803d")
+            if a5.get("top"):
+                _line(b5, ("RESTO", "BARANG", "TGL", "ΔSO"),
+                      (14, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
+                for d in a5["top"]:
+                    _line(b5, (d["resto"], d["barang"],
+                               fmt_int_id(d["tgl"]), _fmt_num(d["dso"])),
+                          (14, 30, 7, 12),
+                          fg=("#b91c1c" if d["dso"] < 0 else "#0f766e"))
+        else:
+            _muted(b5, "format data lama — kolom ΔSO tak tersedia "
+                       "(jalankan pipeline v3.10 utk analisis ΔSO)")
+
+        # == 6. COM MINUS =================================================
+        c6 = payload.get("com_minus") or {}
+        b6 = _sec("📉 6 · COM MINUS — pemakaian negatif",
+                  "COM = SO(t−1) + IN − BK − SO(t) < 0 → barang "
+                  "'muncul dari mana-mana' (sinyal input SO)")
+        if c6.get("n"):
+            _line(b6, (f"{fmt_int_id(c6['n'])} baris",
+                       f"Σ|COM| {_fmt_num(c6.get('sum', 0.0))}"),
+                  (16, 20), bold=True, fg="#dc2626")
+            _line(b6, ("RESTO", "BARANG", "TGL", "COM"),
+                  (14, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
+            for d in c6.get("top") or []:
+                _line(b6, (d["resto"], d["barang"], fmt_int_id(d["tgl"]),
+                           _fmt_num(d["com"])),
+                      (14, 30, 7, 12), fg="#b91c1c")
+        else:
+            _muted(b6, "tidak ada COM negatif di konteks ini ✓"
+                       if m["basis_v310"] else
+                       "kolom COM tak tersedia (format data lama)")
+
+        # roda halus di canvas analisa (pola skor-zone: 1 notch = ±40px)
+        try:
+            cv.configure(yscrollincrement=40)
+            enable_smooth_wheel_list(cv)
+        except (tk.TclError, AttributeError):
+            pass
 
     # --------------------------------------------------- SKOR RESTO (F3) --
     _SKOR_RANK_BG = ("#fef3c7", "#e2e8f0", "#fffbeb")   # emas/perak/perunggu lembut
@@ -2382,8 +3151,8 @@ class InSelisihView(tk.Frame):
             self.mode_bar.set_active_silent(0)
         self._apply_audit_mode()
         self._render_kpi_chips()
-        self.tgl_start_var.set("1")    # v3.8: 1–31 bulan berjalan saja
-        self.tgl_end_var.set("31")
+        self.tgl_start_var.set("1")    # v3.8: bulan berjalan saja (v3.10: 1..panjang bulan)
+        self.tgl_end_var.set(str(self._month_len))
         self.only_selisih_var.set(True)
         self._reset_filter_states()
         self._apply_default_kategori()   # v3.9.22 — default Deviasi
@@ -2499,18 +3268,30 @@ class InSelisihView(tk.Frame):
         # ringkasan utk chip popup — FIX 6d2-01: nilai MENTAH dari payload
         # _keys (diformat _fmt_num → '1.500' via fmt_int_id); fallback
         # parse display Indonesia _parse_num_id (bukan float EN lama).
+        # v3.10 — + so_kemarin & com (None = kolom tak ada → chip popup
+        # disembunyikan, tidak menampilkan 0 palsu).
         if raw is not None:
             row_summary = {"bm": raw.get("bm") or 0.0,
-                           "selisih": raw.get("selisih") or 0.0}
+                           "selisih": raw.get("selisih") or 0.0,
+                           "so_kemarin": raw.get("so_kemarin"),
+                           "com": raw.get("com")}
         else:
+            # '-' = nilai memang kosong (SO belum direkam / tanpa kolom
+            # v3.10) → None → chip disembunyikan (bukan 0 palsu).
+            def _num_or_none(key):
+                v = row.get(key)
+                return None if v in (None, "", "-") \
+                    else self._parse_num_id(v)
             row_summary = {
                 "bm": self._parse_num_id(row.get("Barang Masuk")),
                 "selisih": self._parse_num_id(row.get("Selisih IN")),
+                "so_kemarin": _num_or_none("SO Kemarin"),
+                "com": _num_or_none("COM"),
             }
         InDetailPopup(self.winfo_toplevel(), resto, barang, tgl, det,
                       row_summary=row_summary)
 
-    def _detail_for(self, resto, barang, tgl) -> Optional[pd.DataFrame]:
+    def _detail_for(self, resto, barang, tgl) -> pd.DataFrame | None:
         """Ambil detail IN utk (resto, barang, tgl).
 
         v3.9.72 — FIX 2 (task 2-b): tiga mask astype(str)/to_numeric atas
