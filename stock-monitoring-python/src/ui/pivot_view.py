@@ -617,8 +617,14 @@ class PivotTableView(tk.Frame):
     # =========================================================================
     # DATA LOADING
     # =========================================================================
-    def load_data(self, data: pd.DataFrame):
+    def load_data(self, data: pd.DataFrame,
+                  in_detail: pd.DataFrame | None = None):
         self.data = data
+        # v3.11 — rincian IN per sumber (42.05/32.24/99.01) dari
+        # pipeline: sumber kolom "KETERANGAN PO" popup double-click
+        # (potensi PO belum dibuat — po_keterangan). None/pemanggil
+        # lama/test → kolom keterangan popup kosong.
+        self.in_detail = in_detail
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
         # v3.9.71 — freeze-pane: flag auto-fit sisi beku ikut di-reset
@@ -1509,6 +1515,9 @@ class PivotTableView(tk.Frame):
             # DIHAPUS (user: "besarkan lagi dan HAPUS tombol perbesar
             # popup pivot")
             show_maximize=False,
+            # v3.11 — kolom KETERANGAN PO popup (menggantikan kolom
+            # KATEGORI & SOURCE KIRIMAN yang dihapus)
+            in_detail=getattr(self, "in_detail", None),
         )
 
     # =========================================================================

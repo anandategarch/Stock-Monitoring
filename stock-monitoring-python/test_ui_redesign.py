@@ -912,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.10.1", APP_VERSION == "3.10.1",
+    check("Versi = 3.11", APP_VERSION == "3.11",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -2061,11 +2061,15 @@ def main():
     check("Rekap Selisih IN: baris anomali tampil (default Hanya Selisih ≠ 0)",
           len(kids_in) == 3, f"got {len(kids_in)}")
     hdrs = [tree_in.heading(c)["text"] for c in COL_IDS]
-    check("(v3.9.30) Kolom = 15: + Hasil SO + Saldo + PO Menunggu + "
-          "Hasil Audit + Catatan (v3.10: + SO Kemarin + COM)",
+    # v3.11 — kolom "SO Kemarin" (saldo kemarin) DIHAPUS + "COM" pindah
+    # ke kanan "Hasil SO" (user: "di tab rekap selisin in hapus kolom
+    # saldo kemarin. Kolom COM pindah disebelah kanan Hasil SO")
+    check("(v3.9.30/v3.11) Kolom = 14: + Hasil SO + Saldo + PO Menunggu + "
+          "Hasil Audit + Catatan (v3.10: + COM; v3.11: − SO Kemarin, COM "
+          "pindah kanan Hasil SO)",
           hdrs == ["Resto", "Tanggal", "Nama Barang", "KATEGORI", "Satuan",
-                   "Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
-                   "Selisih IN", "COM", "Saldo",
+                   "Hasil SO", "COM", "Barang Masuk", "IN",
+                   "Selisih IN", "Saldo",
                    "PO Menunggu", "Hasil Audit", "Catatan Audit"],
           f"got {hdrs}")
     check("(v3.6) Tidak ada segment Ringkas|Audit lagi (SATU tabel)",
@@ -2082,7 +2086,7 @@ def main():
         r = {c: tree_in.set(kopi5, c) for c in COL_IDS}
         check("(v3.10) Selisih IN = ΔSO − IN (KOPI tgl5: ΔSO 200, IN 100 "
               "→ +100)",
-              r["SO Kemarin"] == "100" and r["Hasil SO"] == "300"
+              r["Hasil SO"] == "300"
               and r["IN"] == "100" and r["Selisih IN"] == "100"
               and r["Barang Masuk"] == "-",
               f"got {r}")
@@ -2841,12 +2845,13 @@ def main():
         "99.01": [0.0, 0.0, 0.0],
     })
     ex = build_selisih_export_df(base, 1, 31)
-    check("(v3.8) Export selisih: kolom persis (Resto..Selisih, rename "
-          "Sheet Barang Masuk/Kiriman HO/Kiriman Supplier/Pembelian)",
+    check("(v3.8/v3.11) Export selisih: kolom persis (Resto..Selisih, "
+          "COM di kanan Hasil SO, rename Sheet Barang Masuk/Kiriman "
+          "HO/Kiriman Supplier/Pembelian)",
           list(ex.columns) == SELISIH_EXPORT_COLUMNS and
           SELISIH_EXPORT_COLUMNS == [
               "Resto", "Tanggal", "Nama Barang", "Kategori", "Satuan",
-              "Hasil SO", "Sheet Barang Masuk", "Kiriman HO",
+              "Hasil SO", "COM", "Sheet Barang Masuk", "Kiriman HO",
               "Kiriman Supplier", "Pembelian by Resto", "Selisih"],
           f"got {list(ex.columns)}")
     check("(v3.8) Export selisih: hanya baris tgl 1-31 (baris -25 keluar)",
@@ -4087,10 +4092,11 @@ def main():
         _sv2 = pd.to_numeric(_fb["Selisih IN"], errors="coerce").fillna(0)
         _fb = _fb[_sv2 != 0]
     _neg_oracle = 0
-    # v3.10 — oracle ikut menghitung kolom numerik baru (SO Kemarin/COM):
-    # COM minus kini sumber sel negatif (KOPI t5 −100 + SUSU t5 −80) di
-    # samping Selisih IN negatif (KOPI t8).
-    for _c in ("Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
+    # v3.10 — oracle ikut menghitung kolom numerik baru (COM minus kini
+    # sumber sel negatif (KOPI t5 −100 + SUSU t5 −80) di samping Selisih
+    # IN negatif (KOPI t8)). v3.11 — "SO Kemarin" KELUAR oracle: kolom
+    # tabel dihapus → sel minus kolom itu tak lagi dirender/dihitung.
+    for _c in ("Hasil SO", "Barang Masuk", "IN",
                "Selisih IN", "COM", "Saldo"):
         if _c in _fb.columns:
             _neg_oracle += int((pd.to_numeric(_fb[_c], errors="coerce")
@@ -5383,10 +5389,12 @@ def main():
         _row18("BRG Z", "RESTO Y", "1.SO", 25, 77.0),
     ])
     pr18 = build_popup_rows(pop_df18, "BRG X", "RESTO Y")
-    check("(v3.9.18→v3.9.25) Popup rows: skema 8 kolom "
-          "(Tanggal/Saldo Akhir/SO/IN/Nomor/Nomor PO/COM/Deviasi)",
+    check("(v3.9.18→v3.11) Popup rows: skema 9 kolom "
+          "(Tanggal/Saldo Akhir/SO/IN/Nomor/Nomor PO/COM/Deviasi/"
+          "Keterangan PO)",
           list(pr18.columns) == ["Tanggal", "Saldo Akhir", "SO", "IN",
-                                 "Nomor", "Nomor PO", "COM", "Deviasi"],
+                                 "Nomor", "Nomor PO", "COM", "Deviasi",
+                                 "Keterangan PO"],
           f"got {list(pr18.columns)}")
     check("(v3.9.18) Popup rows: 3 tanggal (pasangan lain terfilter)",
           len(pr18) == 3, f"got {len(pr18)}")
@@ -5413,12 +5421,13 @@ def main():
           isinstance(pop18, DeviasiPopup))
     check("(v3.9.18) Popup judul memuat Nama Barang — Nama Resto (satuan)",
           pop18._title == "BRG X — RESTO Y  (GR)", f"got {pop18._title!r}")
-    check("(v3.9.18→v3.9.25→v3.9.55) Popup tabel: 8 kolom persis "
-          "(URUTAN BARU v3.9.55: Tanggal, SO, Saldo Akhir, Deviasi, "
-          "COM, IN, Nomor, Nomor PO — user)",
+    check("(v3.9.18→v3.9.25→v3.9.55→v3.11) Popup tabel: 9 kolom persis "
+          "(URUTAN v3.9.55: Tanggal, SO, Saldo Akhir, Deviasi, COM, IN, "
+          "Nomor, Nomor PO; v3.11: + Keterangan PO — user)",
           list(pop18.tree["columns"]) == ["Tanggal", "SO", "Saldo Akhir",
                                           "Deviasi", "COM", "IN",
-                                          "Nomor", "Nomor PO"],
+                                          "Nomor", "Nomor PO",
+                                          "Keterangan PO"],
           f"got {list(pop18.tree['columns'])}")
     _pk18 = list(pop18.tree.get_children(""))
     check("(v3.9.18) Popup tabel: 3 baris; baris-1 bulan lalu '26•'",
@@ -17775,15 +17784,29 @@ def main():
     from src.ui.followup_view import FollowUpView as _FUV69
     from src.ui.theme import (
         rescale_named_fonts as _rsf69,
+    )
+    from src.ui.theme import (
         set_ui_scale as _sus69,
     )
     from src.ui.widgets import (
         FLASH_MS as _FLASH69,
+    )
+    from src.ui.widgets import (
         GhostButton as _GB69,
+    )
+    from src.ui.widgets import (
         HeaderFilter as _HF69,
+    )
+    from src.ui.widgets import (
         KpiCard as _KPC69,
+    )
+    from src.ui.widgets import (
         KpiRow as _KPR69,
+    )
+    from src.ui.widgets import (
         StatusBar as _SB69,
+    )
+    from src.ui.widgets import (
         Toolbar as _TB69,
     )
 
@@ -18513,9 +18536,13 @@ def main():
     # =====================================================================
     print("\n== 72. (v3.9.62) CARI DI TABEL (Ctrl+F — find-window ala "
           "tksheet, in-house) ==")
-    from src.ui.widgets import (FIND_CUR_TAG, FIND_HIT_TAG,
-                                TreeFindPopup, natural_key,
-                                open_tree_find)
+    from src.ui.widgets import (
+        FIND_CUR_TAG,
+        FIND_HIT_TAG,
+        TreeFindPopup,
+        natural_key,
+        open_tree_find,
+    )
 
     # --- (a) terpasang di app: binding Ctrl+F + import -------------------
     _bf72 = root.bind("<Control-f>")
@@ -21127,6 +21154,172 @@ def main():
           and "[fn_2205] INFO" not in _log84b
           and "WARNING" not in _log84b,
           f"rows={len(_df84b)} log={_log84b[-200:]!r}")
+
+    # ==================================================================
+    print("== §86. (v3.11) SALDO SISTEM 42.17 '6. 42.17' + KETERANGAN PO "
+          "+ REKAP SELISIH IN (kolom/export) ==")
+
+    # -- (a) po_keterangan — unit: scope + trigger ------------------------
+    from src.ui.po_keterangan import (
+        POTENSI_PO_LABEL as _PO_LBL,
+    )
+    from src.ui.po_keterangan import (
+        potensi_po_map as _po_map,
+    )
+    _rows86 = lambda b, r, t, j, v, src=None: {
+        "Nama Barang": b, "NAMA RESTO": r, "Tanggal": t, "JENIS": j,
+        "NILAI": v, "SATUAN": "GR", "SOURCE KIRIMAN": src}
+    _data86 = pd.DataFrame([
+        _rows86("AYAM", "R1", 4, "5.BARANG MASUK", 10, "Eksternal"),
+        _rows86("AYAM", "R1", 3, "1.SO", 50, "Eksternal"),
+        _rows86("AYAM", "R1", 4, "1.SO", 80, "Eksternal"),
+        _rows86("AYAM", "R1", 4, "4.IN", 0, "Eksternal"),
+        _rows86("GULA", "R2", 4, "5.BARANG MASUK", 5, "Internal"),
+        _rows86("GULA", "R2", 4, "1.SO", 3, "Internal"),
+    ])
+    _det86 = pd.DataFrame({
+        "Nama Barang": ["AYAM"], "NAMA RESTO": ["R1"], "Tanggal": [4],
+        "Value": [0.0], "SOURCE IN": ["42.05"]})
+    _m86 = _po_map(_data86, _det86)
+    check("(v3.11) po_keterangan: eksternal BM+SO naik tanpa 3224/9901 → "
+          "potensi PO tgl 4 (internal TIDAK diberi keterangan)",
+          _m86.get(("AYAM", "R1")) == frozenset({4})
+          and ("GULA", "R2") not in _m86,
+          f"got {_m86}")
+    _det86b = pd.DataFrame({
+        "Nama Barang": ["AYAM"], "NAMA RESTO": ["R1"], "Tanggal": [4],
+        "Value": [3.0], "SOURCE IN": ["32.24"]})
+    check("(v3.11) po_keterangan: 3224 ≠ 0 menutup keterangan (RI sudah "
+          "masuk — PO sudah dibuat)",
+          ("AYAM", "R1") not in _po_map(_data86, _det86b))
+    _data86c = _data86.copy()
+    _data86c["SOURCE KIRIMAN"] = [None] * 6
+    _det86c = pd.DataFrame({
+        "Nama Barang": ["AYAM"], "NAMA RESTO": ["R9"], "Tanggal": [9],
+        "Value": [7.0], "SOURCE IN": ["32.24"]})
+    check("(v3.11) po_keterangan: scope item-level — barang ADA di file "
+          "32.24 (resto LAIN, pasangan ini tanpa SOURCE KIRIMAN) tetap "
+          "diberi keterangan",
+          _po_map(_data86c, _det86c).get(("AYAM", "R1")) == frozenset({4}),
+          f"got {_po_map(_data86c, _det86c)}")
+    check("(v3.11) po_keterangan: tanpa in_detail → peta KOSONG (kondisi "
+          "tak berlaku — 3224/9901 tak terverifikasi; pola degrade "
+          "pemanggil lama/test)",
+          _po_map(_data86, None) == {},
+          f"got {_po_map(_data86, None)}")
+
+    # -- (b) deviasi_view: SALDO SISTEM 42.17 menimpa kolom Sistem --------
+    from src.ui.deviasi_view import DeviasiView as _DV86
+    _v86 = _DV86(root, satuan_mode="GR")
+    _r86a = _v86._compute_pivot(_data86, h=4)
+    _s_run = float(_r86a.loc[0, "Sistem"])
+    _v86.saldo_sistem_map = {("AYAM", "R1"): 95.0}
+    _r86b = _v86._compute_pivot(_data86, h=4)
+    _s_file = float(_r86b.loc[0, "Sistem"])
+    _v86.saldo_sistem_map = {("BARANG LAIN", "R9"): 5.0}
+    _r86c = _v86._compute_pivot(_data86, h=4)
+    _v86.saldo_sistem_map = {("AYAM", "R1"): 0.0}
+    _r86d = _v86._compute_pivot(_data86, h=4)
+    check("(v3.11) Deviasi Sistem: file 42.17 '6. 42.17' MENIMPA "
+          "running-stock (fallback bila pasangan tak ada di peta; saldo 0 "
+          "sistem = informasi sah yang ikut menimpa)",
+          _s_file == 95.0 and _s_file != _s_run
+          and float(_r86c.loc[0, "Sistem"]) == _s_run
+          and float(_r86d.loc[0, "Sistem"]) == 0.0,
+          f"run={_s_run} file={_s_file} fallback={_r86c.loc[0, 'Sistem']} "
+          f"zero={_r86d.loc[0, 'Sistem']}")
+
+    # -- (c) CEK "Potensi PO belum dibuat" di tanggal analisa H -----------
+    _v86.saldo_sistem_map = {}
+    _v86.in_detail = _det86
+    _cek_h4 = str(_v86._compute_pivot(_data86, h=4).loc[0, "CEK"])
+    _cek_h3 = str(_v86._compute_pivot(_data86, h=3).loc[0, "CEK"])
+    check("(v3.11) CEK: segmen 'Potensi PO belum dibuat' menyala di H "
+          "dgn BM (tgl 4) — TIDAK menyala di tanggal tanpa BM (tgl 3)",
+          _PO_LBL in _cek_h4 and _PO_LBL not in _cek_h3,
+          f"H4={_cek_h4!r} H3={_cek_h3!r}")
+
+    # -- (d) popup deviasi: kolom Keterangan PO --------------------------
+    from src.ui.deviasi_popup import build_popup_rows as _bpr86
+    _pop86 = _bpr86(_data86, "AYAM", "R1", satuan="GR", in_detail=_det86)
+    _ket86 = dict(zip(_pop86["Tanggal"], _pop86["Keterangan PO"]))
+    check("(v3.11) Popup deviasi GR/PCS: kolom 'Keterangan PO' terisi di "
+          "tanggal trigger (tgl 4) & kosong di tanggal lain; tanpa "
+          "in_detail → kolom ada tapi kosong (pemanggil lama)",
+          list(_ket86.values()).count(_PO_LBL) == 1
+          and _ket86.get("4") == _PO_LBL
+          and _bpr86(_data86, "AYAM", "R1")["Keterangan PO"]
+          .eq("").all(),
+          f"got {_ket86}")
+
+    # -- (e) popup pivot: KATEGORI & SOURCE KIRIMAN diganti KETERANGAN PO -
+    import inspect as _inspect86
+
+    from src.ui.details_popup import show_details_popup as _sdp86
+    _popd86 = _sdp86(root, _data86, nama_barang="AYAM",
+                     jenis="5.BARANG MASUK", tanggal=4, in_detail=_det86)
+    wait_view(root, _popd86)
+    _cols86 = list(_popd86.tree["columns"])
+    _kids86 = list(_popd86.tree.get_children(""))
+    _ketd86 = _popd86.tree.set(_kids86[0], "KETERANGAN PO") \
+        if _kids86 else ""
+    check("(v3.11) Popup pivot: kolom KATEGORI & SOURCE KIRIMAN DIHAPUS "
+          "→ diganti KETERANGAN PO (user: 'hapus kategori dan source "
+          "kiriman ganti dengan keterangan PO')",
+          "KATEGORI" not in _cols86 and "SOURCE KIRIMAN" not in _cols86
+          and "KETERANGAN PO" in _cols86,
+          f"got {_cols86}")
+    check("(v3.11) Popup pivot: nilai KETERANGAN PO = label potensi di "
+          "baris (pasangan × tanggal trigger)",
+          _ketd86 == _PO_LBL, f"got {_ketd86!r}")
+    _popd86.destroy()
+
+    # -- (f) export selisih: urut KRONOLOGIS + COM kanan Hasil SO ---------
+    from src.ui.export_sheets import build_selisih_export_df as _bse86
+    _base86 = pd.DataFrame({
+        "Resto": ["R1"] * 8,
+        "Tanggal": pd.array([1, -25, 2, -31, -26, 3, -30, 1],
+                            dtype="Int64"),
+        "Nama Barang": ["AYAM"] * 8,
+        "KATEGORI": ["FOOD"] * 8, "Satuan": ["GR"] * 8,
+        "Hasil SO": [10.0, 5.0, 11.0, 8.0, 6.0, 12.0, 9.0, 10.0],
+        "COM": [1.0, None, 2.0, None, None, 3.0, None, 1.0],
+        "Barang Masuk": [0] * 8, "IN": [0] * 8,
+        "42.05": [0] * 8, "32.24": [0] * 8, "99.01": [0] * 8,
+        "Selisih IN": [1.0, 0, 2.0, 0, 0, 3.0, 0, 1.0],
+        "Saldo": [9.0] * 8, "PO Menunggu": [0] * 8,
+        "Hasil Audit": ["OK"] * 8, "Catatan Audit": [""] * 8,
+    })
+    _ex86 = _bse86(_base86, -31, 31, audit_cols=["Saldo"])
+    check("(v3.11) Export selisih: Tanggal urut KRONOLOGIS — blok bulan "
+          "lalu 25•,26•,…,31• dulu LALU 1,2,… (dulu sort numerik "
+          "membalik blok lalu: −31 paling awal — user: 'tanggal tampilkan "
+          "urut yaitu 25,26 sampai tanggal hari ini')",
+          list(_ex86["Tanggal"]) == [-25, -26, -30, -31, 1, 1, 2, 3],
+          f"got {list(_ex86['Tanggal'])}")
+    check("(v3.11) Export selisih: COM = kolom INTI tepat di kanan "
+          "'Hasil SO' (NaN → sel kosong, bukan 0)",
+          list(_ex86.columns).index("COM")
+          == list(_ex86.columns).index("Hasil SO") + 1
+          and int(_ex86["COM"].isna().sum()) == 4,
+          f"cols={list(_ex86.columns)}")
+
+    # -- (g) kontrak pipeline: key saldo_sistem_map + config default ------
+    import src.main as _main86
+    from src.config import Config as _Cfg86
+    _src_main = _inspect86.getsource(_main86)
+    check("(v3.11) Pipeline: audit_result membawa 'saldo_sistem_map' "
+          "(append1 saldo_sistem_out → app → Deviasi GR/PCS)",
+          '"saldo_sistem_map"' in _src_main
+          and "saldo_sistem_out" in _src_main)
+    import src.pipeline.append1 as _ap86
+    check("(v3.11) append1: baca 42.17 folder '6. 42.17' (query_4217_"
+          "saldo_sistem — format sama saldo awal, keep_zero)",
+          "query_4217_saldo_sistem" in _inspect86.getsource(_ap86))
+    check("(v3.11) config: Folders['SaldoSistem4217'] default '6. 42.17' "
+          "(config lama tanpa key tetap jalan)",
+          'self.Folders.setdefault("SaldoSistem4217", "6. 42.17")'
+          in _inspect86.getsource(_Cfg86))
 
     root.destroy()
 

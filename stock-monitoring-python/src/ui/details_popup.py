@@ -57,6 +57,14 @@ from .widgets import (
 )
 
 # Column definitions: (column_id, width, anchor)
+# v3.11 — kolom KATEGORI & SOURCE KIRIMAN DIHAPUS, diganti KETERANGAN
+# PO (user: "Pop up di tab deviasi gr dan deviasi pcs dan pivot tabel
+# hapus kategori dan source kiriman ganti dengna keterangan PO"):
+# keterangan PO = "Potensi PO belum dibuat" per baris (pasangan ×
+# tanggal — po_keterangan; diisi bila show_details_popup menerima
+# in_detail — jalur pivot; pemanggil tanpa in_detail → kolom kosong).
+# Filter KATEGORI pivot (kategori_match_mask) TETAP berfungsi — ia
+# memfilter kolom DATA df['KATEGORI'], bukan kolom tampilan popup.
 COLUMNS = [
     ("Nama Barang", 140, "w"),
     ("NAMA RESTO", 80, "w"),
@@ -66,8 +74,7 @@ COLUMNS = [
     ("Nomor", 130, "w"),
     ("Nomor PO", 130, "w"),
     ("#Tgl/Jam Pembuatan IT", 140, "w"),
-    ("KATEGORI", 80, "w"),
-    ("SOURCE KIRIMAN", 100, "w"),
+    ("KETERANGAN PO", 170, "w"),
 ]
 
 COL_IDS = [c[0] for c in COLUMNS]
@@ -768,7 +775,8 @@ class DetailsPopup(tk.Toplevel):
 def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
                         filters: dict = None, show_maximize: bool = True,
-                        tgl_range=None, scols_cache: "dict | None" = None):
+                        tgl_range=None, scols_cache: "dict | None" = None,
+                        in_detail: pd.DataFrame | None = None):
     """Filter data + show popup.
 
     v3.9.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
@@ -793,6 +801,13 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     penuh (index identik); subset pasca-mask pertama kecil → astype
     langsung (guard len == n_base). Popup TIDAK menyimpan kolom cache
     di df → export/copy/tree tak pernah melihatnya.
+
+    v3.11 — param ``in_detail`` (rincian IN per sumber 42.05/32.24/99.01
+    dari view — jalur PIVOT): mengisi kolom tampilan "KETERANGAN PO"
+    (potensi PO belum dibuat per pasangan × tanggal — po_keterangan;
+    peta dihitung atas FRAME PENUH ``data`` karena filter jenis/tanggal
+    popup membuang baris BM/SO yang justru menentukan trigger). None /
+    pemanggil lama (komparasi/laporan/followup) → kolom kosong.
     """
     if data is None or data.empty:
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame(),
@@ -964,6 +979,30 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
 
     title = " / ".join(title_parts) if title_parts else "All Data"
     filter_info = ", ".join(filter_info_parts) if filter_info_parts else ""
+
+    # v3.11 — KETERANGAN PO per baris (pasangan × tanggal baris itu):
+    # "Potensi PO belum dibuat" bila trigger menyala (BM ada + SO naik +
+    # 3224=0 + 9901=0, pasangan eksternal/campuran/ada-di-file-32.24).
+    # Peta dihitung atas FRAME PENUH data (df filter popup bisa membuang
+    # baris BM/SO penentu trigger) + di-cache per identitas → double-
+    # click berulang gratis. Tanpa in_detail → kolom kosong (dipenuhi
+    # "" otomatis oleh _prepare_rows — pemanggil lama tak berubah).
+    if in_detail is not None and df is not None and not df.empty:
+        from .po_keterangan import POTENSI_PO_LABEL, potensi_po_map
+        _po_m = potensi_po_map(data, in_detail)
+        if _po_m:
+            _b_s = df["Nama Barang"].astype(str)
+            _r_s = df["NAMA RESTO"].astype(str)
+            _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
+            _ket = []
+            for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
+                _lbl = ""
+                if _tt is not None and pd.notna(_tt):
+                    _tg = _po_m.get((_bb, _rr))
+                    if _tg and int(_tt) in _tg:
+                        _lbl = POTENSI_PO_LABEL
+                _ket.append(_lbl)
+            df = df.assign(**{"KETERANGAN PO": _ket})
 
     popup = DetailsPopup(parent, title, df.reset_index(drop=True),
                          filter_info, show_maximize=show_maximize)

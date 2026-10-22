@@ -243,6 +243,10 @@ from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 �
     fmt_rp_cell,
     lookup_harga_pair,
 )
+from .po_keterangan import (  # v3.11 — keterangan PO "Potensi PO belum
+    POTENSI_PO_LABEL,     # dibuat" di CEK + popup (32.24/eksternal/campuran)
+    potensi_po_map,
+)
 from .theme import (
     C_ACCENT,
     C_BG,
@@ -1662,7 +1666,8 @@ class DeviasiView(tk.Frame):
     def load_data(self, data: pd.DataFrame,
                   in_detail: pd.DataFrame | None = None,
                   harga_map: dict | None = None,
-                  konversi_map: dict | None = None):
+                  konversi_map: dict | None = None,
+                  saldo_sistem_map: dict | None = None):
         self.data = data
         # v3.9.23 (poin 6) — detail dokumen IN per-dokumen (query_in):
         # sumber CEK "RI Balancing" kolom utama (bulan Nomor RI ≠ bulan
@@ -1675,6 +1680,15 @@ class DeviasiView(tk.Frame):
         # lama → tanpa harga → SEMUA sel Nominal tampil '-' (kompatibel).
         self.harga_map = harga_map or {}
         self.konversi_map = konversi_map
+        # v3.11 — SALDO SISTEM 42.17 (folder '6. 42.17', format sama dgn
+        # saldo awal; user: "khusus saldo sistem di tab deviasi gr dan
+        # deviasi pcs ambil dari folder ...\\6. 42.17"): peta
+        # {(Nama Barang, NAMA RESTO): nilai} MENIMPA kolom Sistem pada
+        # tanggal analisa H; pasangan tak ada di peta (folder kosong /
+        # barang tak bersaldo di 42.17) → fallback running-stock
+        # (perilaku lama — "lainnya tak perlu diubah"). None/pemanggil
+        # lama/test → peta kosong → tabel identik pra-v3.11.
+        self.saldo_sistem_map = saldo_sistem_map or {}
         self._harga_pair_cache = None   # dibangun ulang di _compute_pivot
         self._ri_bal_cache = None   # v3.9.23 — cache pasangan per (df, h)
         self._cached_pivot = None
@@ -2057,6 +2071,34 @@ class DeviasiView(tk.Frame):
         if _saldo_only_rows.any():
             sistem = np.where(_saldo_only_rows, _sistem_t1, sistem)
 
+        # v3.11 — SALDO SISTEM dari file 42.17 folder '6. 42.17' (format
+        # sama dgn saldo awal; user: "harusnya khusus saldo sistem di
+        # tab deviasi gr dan deviasi pcs ambil dari folder ...6. 42.17.
+        # Lain nya tak perlu diubah"). Pasangan yang ADA di peta
+        # (pipeline: append1 → query_4217_saldo_sistem, keep_zero —
+        # saldo 0 sistem = informasi sah) → Sistem = nilai file (snapshot
+        # 42.17 yang user tarik saat analisa), MENIMPA running-stock &
+        # cabang saldo-only di atas. Pasangan TAK ada di peta → nilai
+        # running-stock tetap dipakai (fallback perilaku lama — folder
+        # kosong / barang tak bersaldo di 42.17). Kolom lain (SO_H,
+        # Deviasi = SO_H − Sistem, Nominal, Rank) mengikuti otomatis.
+        _ss_map = getattr(self, "saldo_sistem_map", None) or {}
+        if _ss_map:
+            _ss_lookup = {f"{b}\x1f{r}": v
+                          for (b, r), v in _ss_map.items()}
+            _ss_vals = _pk_pivot.map(_ss_lookup)
+            _ss_mask = _ss_vals.notna().to_numpy()
+            if _ss_mask.any():
+                sistem = np.where(
+                    _ss_mask,
+                    _ss_vals.fillna(0.0).to_numpy(dtype="float64"),
+                    sistem)
+                _LOG.info(
+                    "deviasi %s: saldo sistem 42.17 ('6. 42.17') menimpa "
+                    "kolom Sistem utk %d/%d pasangan (sisanya fallback "
+                    "running-stock)",
+                    self.satuan_mode, int(_ss_mask.sum()), n)
+
         # v3.9.53 — DEVIASI BULAN LALU (kuantiti) per pasangan = DEV Lalu
         # FILE deviasi resmi (tab ⚖ Komparasi — parse_deviasi_file) — NILAI
         # ASLI bertanda (user: "Deviasi bulan lalu yang ditampilkan di tab
@@ -2287,10 +2329,38 @@ class DeviasiView(tk.Frame):
                            .replace("\u00a0", "."))
                     _lab = f"{_lab} {'+' if _p > 0 else '-'}{_sp}%"
                 ana.append(_lab)
-        if any(ana):
+        # v3.11 — KETERANGAN PO "Potensi PO belum dibuat" (user: "khusus
+        # nama barang yang ada di file 32.24 atau eksternal atau campuran
+        # tambah logika misal BARANG MASUK ada SO naik tapi 3224 0 dan
+        # 9901 0 maka tambah keterangan = Potensi PO belum dibuat"):
+        # segmen CEK pada TANGGAL ANALISA H — pasangan bersuplai
+        # eksternal/campuran (32.24/9901) dgn BM rekap > 0 + SO naik,
+        # namun TANPA penerimaan sistem 32.24 & 9901 → fisik naik tanpa
+        # jejak sistem → besar kemungkinan PO belum dibuat di Accurate.
+        # Logika/scope lengkap + cache per identitas data: po_keterangan.
+        try:
+            _po_map = potensi_po_map(data, self.in_detail)
+        except Exception:  # noqa: BLE001 — keterangan ≠ tabel gagal
+            _LOG.debug("deviasi: peta keterangan PO gagal dibangun",
+                       exc_info=True)
+            _po_map = {}
+        _po_seg = np.zeros(n, dtype=bool)
+        if _po_map:
+            _h_int = int(h)
+            _po_seg = np.array(
+                [_h_int in _po_map.get((b, r), ())
+                 for b, r in zip(barang_s,
+                                 pivot["NAMA RESTO"].astype(str))],
+                dtype=bool,
+            )
+
+        if any(ana) or _po_seg.any():
             cek = np.array(
-                [f"{c} \u00b7 {a}" if (c and a) else (c or a)
-                 for c, a in zip(cek, ana)], dtype=object)
+                [" \u00b7 ".join(p for p in (c,
+                                             POTENSI_PO_LABEL if po else "",
+                                             a) if p)
+                 for c, po, a in zip(cek, _po_seg, ana)],
+                dtype=object)
 
         result = pd.DataFrame({
             "Resto": pivot["NAMA RESTO"].astype(str).to_numpy(),
@@ -3377,6 +3447,10 @@ class DeviasiView(tk.Frame):
             nama_resto=nama_resto,
             satuan=satuan,
             h=self.tanggal_h,
+            # v3.11 — kolom "Keterangan PO" popup: peta potensi PO butuh
+            # rincian IN per sumber (32.24/9901) — sumber yang sama dgn
+            # CEK "Potensi PO belum dibuat".
+            in_detail=self.in_detail,
         )
 
     # =========================================================================

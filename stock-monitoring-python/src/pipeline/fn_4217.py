@@ -221,7 +221,8 @@ def _find_col(prom_columns, kandidat):
 def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
             sheet_name: str = SHEET_4217,
             protected_barangs: list | set | None = None,
-            stop_event=None) -> pd.DataFrame:
+            stop_event=None,
+            keep_zero: bool = False) -> pd.DataFrame:
     """
     Mirror M: fn4217(folderPath).
 
@@ -241,6 +242,13 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
 
     stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
     antar file — audit 1-d). Default None = perilaku lama.
+
+    keep_zero: v3.11 — JANGAN buang baris Value == 0 (mirror M tetap
+    memfilter ≠0 utk SALDO AWAL — default False = perilaku lama).
+    Dipakai pembacaan SALDO SISTEM 42.17 (folder "6. 42.17"): saldo
+    sistem 0 ADALAH informasi (sistem bilang stok kosong — bukan "tak
+    ada data"), jadi baris 0 harus tetap masuk peta; NaN/blank-resto
+    tetap dibuang.
 
     Output columns: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS, SATUAN
     (SATUAN = 'Nama Satuan' file per barang; file tanpa kolom → '').
@@ -457,11 +465,14 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     up["Value"] = pd.to_numeric(up["Value"], errors="coerce")
 
     # fil = Table.SelectRows(addJ, each [Value] <> 0 and [Value] <> null and [NAMA RESTO] <> "")
+    # v3.11 — keep_zero=True (baca SALDO SISTEM 42.17): syarat Value ≠ 0
+    # DILEPAS (0 = saldo sistem kosong — informasi sah); NaN Value &
+    # NAMA RESTO kosong tetap dibuang.
     mask = (
-        up["Value"].notna() &
-        (up["Value"] != 0) &
-        up["NAMA RESTO"].notna() &
-        (up["NAMA RESTO"].astype(str).str.strip() != "")
+        up["Value"].notna()
+        & (keep_zero | (up["Value"] != 0))
+        & up["NAMA RESTO"].notna()
+        & (up["NAMA RESTO"].astype(str).str.strip() != "")
     )
     fil = up[mask].reset_index(drop=True)
 

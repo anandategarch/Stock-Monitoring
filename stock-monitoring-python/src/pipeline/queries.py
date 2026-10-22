@@ -88,6 +88,38 @@ def query_4217(config, protected_barangs: list | set | None = None,
                    stop_event=stop_event)
 
 
+def query_4217_saldo_sistem(config, protected_barangs: list | set | None = None,
+                            stop_event=None) -> pd.DataFrame:
+    """v3.11 — SALDO SISTEM 42.17 dari folder TERPISAH 'SaldoSistem4217'
+    (config Folders, default '6. 42.17'; user: "khusus saldo sistem di
+    tab deviasi gr dan deviasi pcs ambil dari folder ...\\6. 42.17.
+    Format nya sama dengan 42.17 saldo awal").
+
+    Format file = SAMA dengan 42.17 saldo awal (sheet '#42.17. Kuantitas
+    Barang per Gu' — key config Sheets['SaldoAwal4217'] dipakai ulang),
+    HANYA folder yang beda: file 42.17 di folder ini ditarik user saat
+    analisa (saldo sistem TERKINI), sedangkan folder '6.1 42.17 Saldo
+    Awal' berisi snapshot awal bulan. Perbedaan perilaku vs query_4217:
+    keep_zero=True (saldo 0 = sistem kosong — informasi sah, bukan
+    artifact; baris 0 TETAP masuk supaya peta bisa menimpa running-stock
+    dgn 0).
+
+    protected_barangs: sama dgn query_4217 — pasangan ber-transaksi
+    selalu lolos whitelist kategori (saldo sistem tidak boleh hilang
+    hanya karena kategorinya di luar whitelist).
+
+    Folder kosong/tanpa file → frame kosong (peta kosong → tab Deviasi
+    GR/PCS jatuh kembali ke nilai running-stock — perilaku lama)."""
+    return fn_4217(config.folder("SaldoSistem4217"),
+                   kategori_whitelist=getattr(config, "KategoriBarang4217",
+                                              None),
+                   sheet_name=_sheet_cfg(config, "SaldoAwal4217",
+                                         SHEET_4217),
+                   protected_barangs=protected_barangs,
+                   stop_event=stop_event,
+                   keep_zero=True)
+
+
 # =============================================================================
 # TRANSACTION QUERIES
 # =============================================================================

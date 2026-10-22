@@ -166,10 +166,15 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     in_detail_holder: dict = {}
     rekap_so_holder: dict = {}
     konversi_holder: dict = {}
+    # v3.11 — peta SALDO SISTEM 42.17 (folder '6. 42.17') → kolom
+    # Sistem tab Deviasi GR/PCS (user: saldo sistem ambil dari file 42.17
+    # yang ditarik saat analisa, bukan running-stock akumulasi).
+    saldo_sistem_holder: dict = {}
     append1_df = build_append1(config, stop_event=stop_event,
                                in_detail_out=in_detail_holder,
                                rekap_so_out=rekap_so_holder,
-                               konversi_out=konversi_holder)
+                               konversi_out=konversi_holder,
+                               saldo_sistem_out=saldo_sistem_holder)
 
     # FIX: check stop_event after Append1 build
     if stop_event is not None and stop_event.is_set():
@@ -245,7 +250,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
                     # v3.10 — panjang bulan asli utk rentang filter view
                     "period": [int(period[0]), int(period[1])],
                     "month_len": int(month_len),
-                    "lalu_month_len": int(lalu_month_len)}
+                    "lalu_month_len": int(lalu_month_len),
+                    # v3.11 — peta saldo sistem 42.17 (folder '6. 42.17')
+                    # utk kolom Sistem tab Deviasi GR/PCS (app meneruskan
+                    # ke deviasi_gr_view/deviasi_pcs_view.load_data)
+                    "saldo_sistem_map": (saldo_sistem_holder.get("map")
+                                         or {})}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
     # Selisih IN (user: "pada rekap selisih in bisa mode hitung bulan lalu

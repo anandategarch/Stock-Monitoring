@@ -33,6 +33,7 @@ from .helpers import kategori_blank_mask
 from .konversi_satuan import build_konversi_map
 from .queries import (
     query_4217,
+    query_4217_saldo_sistem,
     query_barang_keluar,
     query_dbs_kategori,
     query_full_rekap_mentah_so,
@@ -263,7 +264,8 @@ def _collect_protected_barangs(dfs: list) -> set:
 
 def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                  rekap_so_out: dict | None = None,
-                 konversi_out: dict | None = None) -> pd.DataFrame:
+                 konversi_out: dict | None = None,
+                 saldo_sistem_out: dict | None = None) -> pd.DataFrame:
     """
     Mirror M: shared Append1.
     Pipeline lengkap dari source data sampai output long format.
@@ -287,6 +289,19 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
     v3.9.72 — kini diteruskan KE DALAM semua query sumber (checkpoint ⏹
     antar file read_excel — audit 1-d; lihat helpers.stop_check).
+
+    v3.11 — saldo_sistem_out: dict opsional; diisi peta SALDO SISTEM 42.17
+    {(Nama Barang, NAMA RESTO): nilai} dari folder config
+    Folders['SaldoSistem4217'] (default '6. 42.17' — format file SAMA
+    dgn 42.17 saldo awal; user: "khusus saldo sistem di tab deviasi gr
+    dan deviasi pcs ambil dari folder ...\\6. 42.17"). Pasangan di peta
+    MENIMPA kolom Sistem tab Deviasi GR/PCS; pasangan TIDAK ada di peta
+    (folder kosong / barang tak bersaldo) → fallback running-stock
+    (perilaku lama). Dibaca SETELAH _protected_barangs tersedia →
+    whitelist kategori tak pernah memutus pasangan ber-transaksi
+    (pola lookup dua arah v3.9.39). Kerusakan file → degradasi anggun
+    (peta kosong + warning — pipeline utama tetap jalan; pola harga
+    41.09 v3.9.33).
     """
     print("  [Append1] Mode: FULL (LightMode dihapus v3.5)")
     print("  [Append1] Loading master data...")
@@ -340,6 +355,45 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
               f"({_n_barang} barang · {_n_resto} resto)")
     else:
         print(f"    4217 (Saldo Awal): {len(q4217)} rows")
+
+    # v3.11 — SALDO SISTEM 42.17 (folder '6. 42.17', format sama dgn
+    # saldo awal): peta {(Nama Barang, NAMA RESTO): nilai} utk menimpa
+    # kolom Sistem tab Deviasi GR/PCS. Baca di sini (bukan main.py)
+    # karena _protected_barangs hidup di fungsi ini. Degradasi anggun:
+    # file rusak/format aneh → peta kosong + warning, pipeline lanjut
+    # (pola harga 41.09 v3.9.33); PipelineStopped TETAP diteruskan.
+    # keep_last: >1 file di folder → snapshot TERAKHIR (urutan nama file)
+    # menang — file 42.17 ditarik berkali-kali sepanjang bulan.
+    if saldo_sistem_out is not None:
+        # (inline import — pola checkpoint 4217/IN di bawah; main.py
+        # meng-import append1 → import modul-level = circular)
+        from src.main import PipelineStopped
+        saldo_sistem_out["map"] = {}
+        try:
+            _ss_df = query_4217_saldo_sistem(
+                config, protected_barangs=_protected_barangs,
+                stop_event=stop_event)
+        except PipelineStopped:
+            raise
+        except Exception as e:  # noqa: BLE001 — degradasi anggun by design
+            print(f"    [WARNING] 42.17 Saldo Sistem (folder '6. 42.17') "
+                  f"dilewati: {e}")
+            _ss_df = pd.DataFrame()
+        if _ss_df is not None and not _ss_df.empty \
+                and {"Nama Barang", "NAMA RESTO", "Value"} <= set(
+                    _ss_df.columns):
+            _ss = _ss_df[["Nama Barang", "NAMA RESTO", "Value"]].copy()
+            _ss["Nama Barang"] = _ss["Nama Barang"].astype(str)
+            _ss["NAMA RESTO"] = _ss["NAMA RESTO"].astype(str)
+            _ss["Value"] = pd.to_numeric(_ss["Value"], errors="coerce")
+            _ss = _ss.dropna(subset=["Value"]).drop_duplicates(
+                subset=["Nama Barang", "NAMA RESTO"], keep="last")
+            saldo_sistem_out["map"] = {
+                (b, r): float(v) for b, r, v in zip(
+                    _ss["Nama Barang"], _ss["NAMA RESTO"], _ss["Value"])}
+        _n_ss = len(saldo_sistem_out["map"])
+        print(f"    42.17 Saldo Sistem (v3.11): {_n_ss:,} pasangan "
+              "(folder '6. 42.17') — menimpa kolom Sistem Deviasi GR/PCS")
 
     # FIX: Stop checkpoint after 4217 load
     if stop_event is not None and stop_event.is_set():

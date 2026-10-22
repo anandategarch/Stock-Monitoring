@@ -112,6 +112,11 @@ COLUMNS = [
     ("IN", 110, "e"),
     ("Nomor", 200, "w"),
     ("Nomor PO", 190, "w"),
+    # v3.11 — keterangan PO (user: "Pop up di tab deviasi gr dan deviasi
+    # pcs dan pivot tabel hapus kategori dan source kiriman ganti
+    # dengna keterangan PO"): potensi PO belum dibuat per tanggal
+    # (logika sama dgn segmen CEK tabel — po_keterangan).
+    ("Keterangan PO", 170, "w"),
 ]
 
 COL_IDS = [c[0] for c in COLUMNS]
@@ -796,7 +801,8 @@ def _compute_com_series(df: pd.DataFrame, nama_barang: str,
 
 
 def build_popup_rows(data: pd.DataFrame, nama_barang: str,
-                     nama_resto: str, satuan: str | None = None
+                     nama_resto: str, satuan: str | None = None,
+                     in_detail: pd.DataFrame | None = None
                      ) -> pd.DataFrame:
     """Pure pandas (thread-safe) — siapkan baris popup per Tanggal.
 
@@ -830,9 +836,16 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     2-satuan hanya dari data satuan eksplisit, persis bentuk yang
     dimodelkan indeks pivot. None = tanpa filter satuan (perilaku lama
     utk pemanggil lain).
+
+    v3.11 — kolom "Keterangan PO" (in_detail diberikan): potensi PO
+    belum dibuat per tanggal (BM ada + SO naik + 3224=0 + 9901=0,
+    pasangan eksternal/campuran/ada-di-32.24 — po_keterangan; level
+    PASANGAN, tidak dibedakan per grup satuan — sama dgn segmen CEK
+    tabel utama). in_detail None/pemanggil lama → kolom kosong semua.
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
-                                  "Nomor", "Nomor PO", "COM", "Deviasi"])
+                                  "Nomor", "Nomor PO", "COM", "Deviasi",
+                                  "Keterangan PO"])
     if data is None or data.empty:
         return empty
 
@@ -916,6 +929,15 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     # 4 JENIS → NaN (kolom kosong, bukan 0).
     out["COM"] = [_com_by_t.get(t, float("nan")) for t in out["_t"]]
 
+    # v3.11 — KETERANGAN PO per tanggal (potensi PO belum dibuat —
+    # logika & scope sama dgn segmen CEK tabel; level pasangan).
+    # Perhitungan di-cache per identitas (data, in_detail) → popup
+    # berulang tidak menghitung ulang (pola _PERF_CACHE modul ini).
+    from .po_keterangan import potensi_po_label_for
+    out["Keterangan PO"] = [
+        potensi_po_label_for(data, in_detail, nama_barang, nama_resto, t)
+        for t in out["_t"]]
+
     # label tampilan + urut kronologis (numerik — negatif abs 25..31
     # < positif 101..131, jadi bulan lalu dulu lalu 1..31)
     out["Tanggal"] = out["_t"].map(_fmt_tanggal)
@@ -928,22 +950,28 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         out[col] = out[col].map(DeviasiPopup._fmt_num)
 
     return out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor",
-                "Nomor PO", "COM", "Deviasi"]]
+                "Nomor PO", "COM", "Deviasi", "Keterangan PO"]]
 
 
 def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
                        nama_resto: str, satuan: str | None = None,
-                       h: int | None = None):
+                       h: int | None = None,
+                       in_detail: pd.DataFrame | None = None):
     """Buka popup ringkas utk pasangan (barang, resto).
 
     Dipanggil dari DeviasiView._on_double_click (tab Deviasi GR & PCS,
     termasuk window clone ⛶ — event.widget-agnostic).
+
+    v3.11 — in_detail: rincian IN per sumber (42.05/32.24/99.01) dari
+    view — sumber kolom "Keterangan PO" (potensi PO belum dibuat);
+    None/pemanggil lama → kolom kosong (test kompatibel).
     """
     title = f"{nama_barang} — {nama_resto}"
     if satuan:
         title += f"  ({satuan})"
 
-    rows = build_popup_rows(data, nama_barang, nama_resto, satuan=satuan)
+    rows = build_popup_rows(data, nama_barang, nama_resto, satuan=satuan,
+                            in_detail=in_detail)
     h_label = _fmt_tanggal(h) if h is not None else ""
     popup = DeviasiPopup(parent, title, rows, h_label=h_label)
     return popup

@@ -5,16 +5,23 @@ Empat bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
 
 1. build_selisih_export_df(base, tgl_start, tgl_end, audit_cols=None)
    Rekap Selisih IN PER RESTO (permintaan user v3.8): kolom
-   Resto, Tanggal, Nama Barang, Kategori, Satuan, Hasil SO,
+   Resto, Tanggal, Nama Barang, Kategori, Satuan, Hasil SO, COM,
    Sheet Barang Masuk (input rekap), Kiriman HO (42.05),
    Kiriman Supplier (32.24), Pembelian by Resto (99.01), Selisih —
-   urut Resto → Tanggal → Nama Barang, hanya baris dalam rentang
-   tanggal aktif (default 1–31 bulan berjalan).
+   urut Resto → Tanggal (KRONOLOGIS: bulan lalu 25•,26•…31• lalu 1..)
+   → Nama Barang, hanya baris dalam rentang tanggal aktif (default
+   1–31 bulan berjalan).
    v3.9 (permintaan user "waktu ekspor tambahin hasil auditnya aja
    tapi ada opsi buat tambahin kolom tersebut atau tidak"):
    audit_cols = daftar kolom audit opsional yang DITAMBAHKAN setelah
    Selisih — pilihan valid: "Hasil Audit", "Saldo", "Catatan Audit"
    (None/[] = tanpa kolom audit — perilaku v3.8).
+   v3.11 (user: "di tab rekap selisin in hapus kolom saldo kemarin.
+   Kolom COM pindah disebelah kanan Hasil SO ... terutama pada hasil
+   export file excel nya"): "SO Kemarin" DIHAPUS dari opsi export;
+   "COM" naik jadi kolom INTI tepat di kanan "Hasil SO" (paritas
+   tabel UI); urut Tanggal ekspor kini KRONOLOGIS — dulu sort numerik
+   menempatkan blok bulan-lalu TERBALIK (-31 dulu sebelum -25).
 
 2. add_pivot_sheet(writer, append1_df, should_cancel=None)
    Sheet "PIVOT" — mirror tab pivot "Mutasi Barang - New" milik user
@@ -53,6 +60,7 @@ app._export_excel work()).
 import os
 from collections.abc import Callable
 
+import numpy as np
 import pandas as pd
 
 # Urutan metric — identik pivot_view.METRICS (satu sumber kebenaran)
@@ -86,8 +94,13 @@ C_BM_FILL = "FFC6EFCE"
 C_HDR_FILL = "FFB4C6E7"      # dxf8: theme8 tint 0.6 (header tgl bulan lalu)
 
 # Kolom export Selisih IN per resto (nama PERSIS permintaan user v3.8)
+# v3.11 — "COM" jadi kolom INTI tepat di kanan "Hasil SO" (user:
+# "Kolom COM pindah disebelah kanan Hasil SO ... terutama pada hasil
+# export file excel nya") — paritas urutan tabel UI; NaN (SO belum
+# direkam/basis tak ada) → sel KOSONG konsisten "Hasil SO".
 SELISIH_EXPORT_COLUMNS = [
     "Resto", "Tanggal", "Nama Barang", "Kategori", "Satuan", "Hasil SO",
+    "COM",
     "Sheet Barang Masuk", "Kiriman HO", "Kiriman Supplier",
     "Pembelian by Resto", "Selisih",
 ]
@@ -102,8 +115,12 @@ SELISIH_EXPORT_COLUMNS = [
 # v3.9: kolom hasil audit OPSIONAL (ditambahkan setelah Selisih bila
 # dipilih di dialog export). v3.10: + "SO Kemarin" & "COM" (basis
 # selisih baru — numerik, NaN → sel kosong).
+# v3.11 — "SO Kemarin" DIHAPUS & "COM" dipindah jadi kolom INTI
+# (user: "hapus kolom saldo kemarin. Kolom COM pindah disebelah kanan
+# Hasil SO") — keduanya keluar dari daftar opsi; "COM" kini selalu
+# ikut (posisi tetap di SELISIH_EXPORT_COLUMNS di atas).
 AUDIT_EXPORT_COLUMNS = ["Hasil Audit", "Saldo", "Catatan Audit",
-                        "PO Menunggu", "SO Kemarin", "COM"]
+                        "PO Menunggu"]
 
 
 # =============================================================================
@@ -123,7 +140,14 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
     InSelisihView._compute_base — sudah membawa komponen 42.05/32.24/99.01).
 
     - Filter: rentang tanggal aktif (default 1–31 = bulan berjalan saja).
-    - Urut: Resto → Tanggal → Nama Barang.
+    - Urut: Resto → Tanggal KRONOLOGIS → Nama Barang. v3.11 — dulu
+      sort Tanggal NUMERIK menempatkan blok bulan-lalu TERBALIK
+      (−31, −30, …, −25 sebelum 1..N) — mode 📆 Lalu+Ini membuat
+      export tampak acak (user: "Misal aku pakai mode bulan lalu + ini
+      maka tanggal tampilkan urut yaitu 25,26 sampai tanggal hari ini
+      di bulan ini terutama pada hasil export file excel nya"). Kini
+      kunci kronologis (0, −t) untuk t<0 / (1, t) utk t≥1 — mirror
+      _chrono / fn_audit _k1/_k2: 25•, 26•, … 31•, 1, 2, … hari ini.
     - Hasil SO: NaN → sel kosong (tanggal tanpa SO tercatat);
       komponen IN & selisih: NaN → 0.
     - v3.9: audit_cols = subset ["Hasil Audit", "Saldo", "Catatan Audit"]
@@ -158,6 +182,9 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
                    if "Satuan" in f.columns else
                    pd.Series(["-"] * len(f), index=f.index)),
         "Hasil SO": _num_col(f, "Hasil SO"),
+        # v3.11 — COM kolom INTI di kanan Hasil SO (paritas tabel UI;
+        # NaN → sel KOSONG di bawah — konsisten "Hasil SO", 0 → 0).
+        "COM": _num_col(f, "COM").astype("Float64"),
         "Sheet Barang Masuk": _num_col(f, "Barang Masuk").fillna(0.0),
         "Kiriman HO": _num_col(f, "42.05").fillna(0.0),
         "Kiriman Supplier": _num_col(f, "32.24").fillna(0.0),
@@ -177,21 +204,34 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
             # v3.9.31 — nilai terkonversi satuan terkecil (fallback qty
             # PO asli utk pasangan tak terkonversi — label '*' di catatan)
             out[col] = _num_col(f, "PO Menunggu").fillna(0.0)
-        elif col in ("SO Kemarin", "COM"):
-            # v3.10 — numerik; NaN (SO belum direkam / basis tak ada)
-            # tetap sel KOSONG di Excel (bukan 0 — konsisten Hasil SO)
-            out[col] = _num_col(f, col).astype("Float64")
         elif col in f.columns:
             out[col] = f[col].astype(str)
         else:
             out[col] = ""
 
-    out = out.sort_values(["Resto", "Tanggal", "Nama Barang"],
+    # v3.11 — URUT KRONOLOGIS (mirror fn_audit _k1/_k2 + _chrono):
+    # tanggal negatif (bulan lalu) diurutkan HARI NAIK (25•, 26•, …,
+    # 31•) LALU tanggal berjalan 1..N — sort numerik lama membalik blok
+    # bulan-lalu (−31 paling awal). mergesort = stabil (baris
+    # Nama Barang dlm tanggal sama tetap terurut alfabetis).
+    # (float64 — Int64/pd.NA di np.where menghasilkan object + pd.NA
+    # yang tak terurut bersih; NaN float + na_position="last" aman.)
+    _tnum = pd.to_numeric(out["Tanggal"], errors="coerce") \
+        .astype("float64")
+    out = out.assign(
+        _k1=np.where(_tnum < 0, 0, 1),
+        _k2=np.where(_tnum < 0, -_tnum, _tnum),
+    )
+    out = out.sort_values(["Resto", "_k1", "_k2", "Nama Barang"],
                           kind="mergesort", na_position="last") \
-        .reset_index(drop=True)
+        .drop(columns=["_k1", "_k2"]).reset_index(drop=True)
     # Hasil SO NaN → None (sel kosong di Excel, bukan 0)
     out["Hasil SO"] = out["Hasil SO"].astype("Float64").where(
         out["Hasil SO"].notna(), other=None)
+    # v3.11 — COM NaN → None (sel kosong — konsisten Hasil SO; 0 tetap
+    # tertulis 0 — pemakaian pas balik adalah informasi).
+    out["COM"] = out["COM"].astype("Float64").where(
+        out["COM"].notna(), other=None)
     return out[SELISIH_EXPORT_COLUMNS + audit_cols]
 
 
@@ -217,7 +257,7 @@ def write_selisih_sheet(writer, df: pd.DataFrame,
 
     widths = {
         "Resto": 14, "Tanggal": 10, "Nama Barang": 32, "Kategori": 18,
-        "Satuan": 10, "Hasil SO": 14, "Sheet Barang Masuk": 18,
+        "Satuan": 10, "Hasil SO": 14, "COM": 12, "Sheet Barang Masuk": 18,
         "Kiriman HO": 14, "Kiriman Supplier": 16,
         "Pembelian by Resto": 18, "Selisih": 14,
         # v3.9: kolom audit opsional

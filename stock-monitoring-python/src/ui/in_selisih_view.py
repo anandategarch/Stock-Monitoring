@@ -241,11 +241,16 @@ COLUMNS = [
     ("KATEGORI", 110, "w"),
     ("Satuan", 56, "w"),
     ("Hasil SO", 90, "e"),         # ← kolom SO (v3.6)
-    ("SO Kemarin", 92, "e"),       # v3.10 — SO(t−1) basis selisih baru
+    # v3.11 — kolom "SO Kemarin" (saldo kemarin) DIHAPUS dari tabel
+    # (user: "di tab rekap selisin in hapus kolom saldo kemarin") —
+    # nilai TETAP dihitung engine (basis Selisih IN = ΔSO − IN) & tetap
+    # tampil di chip popup Rincian IN; hanya kolom tabel yang hilang.
+    ("COM", 92, "e"),              # v3.11 — pindah ke KANAN 'Hasil SO'
+                                      # (user: "Kolom COM pindah disebelah
+                                      # kanan Hasil SO")
     ("Barang Masuk", 110, "e"),    # = BM rekap (input resto — display)
     ("IN", 96, "e"),               # = Penerimaan Sistem (42.05+32.24+99.01)
     ("Selisih IN", 100, "e"),      # v3.10 = (SO(t)−SO(t−1)) − IN
-    ("COM", 92, "e"),              # v3.10 — pemakaian SO(t−1)+IN−BK−SO(t)
     ("Saldo", 100, "e"),           # saldo kumulatif audit (basis baru)
     ("PO Menunggu", 96, "e"),      # v3.9.30 — qty PO 32.43 'Menunggu diproses'
     ("Hasil Audit", 150, "w"),     # ← kolom hasil audit (v3.6)
@@ -255,16 +260,18 @@ COLUMNS = [
 _ALL_COLS = [c[0] for c in COLUMNS]
 
 # Kolom numerik (utk format & filter nilai)
-_NUM_COLS = {"Hasil SO", "SO Kemarin", "Barang Masuk", "IN",
-             "Selisih IN", "COM", "Saldo", "PO Menunggu"}
+# v3.11 — "SO Kemarin" keluar (kolom tabel dihapus; nilai tetap hidup
+# di base utk chip popup/analisa/export-less).
+_NUM_COLS = {"Hasil SO", "COM", "Barang Masuk", "IN",
+             "Selisih IN", "Saldo", "PO Menunggu"}
 
 # v3.10.1 — FIX P2 (bug hunt 1-c): kolom yang NOLNYA MEANINGFUL — 0
-# ditampilkan '0' (bukan '-' paritas _fmt_num): "SO Kemarin" 0 = stok
-# memang kosong kemarin; "COM" 0 = pemakaian pas balik. Tabel dulu
-# menampilkan '-' utk 0 sah → tak terbedakan dari "belum direkam"/
-# "tak ada basis" (NaN) — inkonsisten dgn chip popup (_fmt_num_
-# keepzero) & export (menulis 0) yang sama-sama v3.10.
-_KEEPZERO_COLS = {"SO Kemarin", "COM"}
+# ditampilkan '0' (bukan '-' paritas _fmt_num): "COM" 0 = pemakaian
+# pas balik. Tabel dulu menampilkan '-' utk 0 sah → tak terbedakan
+# dari "belum direkam"/"tak ada basis" (NaN) — inkonsisten dgn chip
+# popup (_fmt_num_keepzero) & export (menulis 0).
+# v3.11 — "SO Kemarin" keluar set (kolom tabel dihapus).
+_KEEPZERO_COLS = {"COM"}
 
 # Warna status — mirror conditional formatting VBA (soft colors)
 _STATUS_TAG = {
@@ -2469,8 +2476,13 @@ class InSelisihView(tk.Frame):
         # FIX 6d2-01 — kolom numerik MENTAH utk chip popup (lihat _raw_num)
         _bm_np = num_raw.get("Barang Masuk")
         _sel_np = num_raw.get("Selisih IN")
-        # v3.10 — chip popup "SO Kemarin" & "COM" (raw, bukan display)
-        _sok_np = num_raw.get("SO Kemarin")
+        # v3.11 — "SO Kemarin" DIHAPUS dari _NUM_COLS (kolom tabel
+        # dihapus user) tapi nilai chip popup Rincian IN TETAP hidup:
+        # array mentah dibaca LANGSUNG dari frame base (bukan lewat
+        # num_raw _NUM_COLS — supaya TIDAK ikut loop neg_cells per-cell
+        # utk kolom yang tak dirender lagi).
+        _sok_np = (pd.to_numeric(f["SO Kemarin"], errors="coerce")
+                   .to_numpy() if "SO Kemarin" in f.columns else None)
         _com_np = num_raw.get("COM")
         for i in range(n):
             values = tuple(formatted[c][i] for c in col_ids)

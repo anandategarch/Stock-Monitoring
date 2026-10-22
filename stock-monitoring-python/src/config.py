@@ -120,6 +120,12 @@ class Config:
         # ter-modifikasi — tetap jalan tanpa KeyError; nama folder kanonis).
         self.Folders.setdefault("Pemindahan4205Lalu",
                                 "4.1 4205 Bulan Lalu")
+        # v3.11 — SALDO SISTEM 42.17: folder TERPISAH dari saldo awal
+        # (user: "khusus saldo sistem di tab deviasi gr dan deviasi pcs
+        # ambil dari folder ...6. 42.17. Format nya sama dengan 42.17
+        # saldo awal"). Config lama tanpa key tetap jalan (default
+        # in-memory, mirror pola Pemindahan4205Lalu/Harga di atas).
+        self.Folders.setdefault("SaldoSistem4217", "6. 42.17")
         self.Sheets = data["Sheets"]
         # FIX R-3 (audit 34-d): key sheet khusus folder 42.05 bulan lalu —
         # di-default ke nilai sheet berjalan (pola 32.24: nama sheet sama utk
