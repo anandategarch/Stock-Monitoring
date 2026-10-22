@@ -630,6 +630,10 @@ class RincianPoView(tk.Frame):
         - ANAK (putih, zebra): HANYA item — Nama Barang, Satuan, Kuantitas.
         """
         df = self.data
+        # v3.9.72 — FIX 5 (audit UX 2-b): total ITEM pra filter
+        # CABANG/STATUS/⧩ — utk status "... · N dari M item" (parity
+        # pivot "terfilter X/Y").
+        _total_items = len(df)
         for col, val in [("Cabang PO", st["cabang"]),
                          ("Status Pesanan Pembelian", st["status_pesanan"])]:
             if val and val != "(All)" and col in df.columns:
@@ -790,7 +794,7 @@ class RincianPoView(tk.Frame):
                                    _fmt_qty(total_qty)],
                        "tags": ("grand_total",), "open": False}))
 
-        status = (f"{po_count} PO · {item_count} item · "
+        status = (f"{po_count} PO · {item_count} dari {_total_items} item · "
                   f"Total Kuantitas: {_fmt_qty(total_qty)}")
         return {"items": items, "kpi": (po_count, item_count, total_qty),
                 "status": status}

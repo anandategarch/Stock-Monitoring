@@ -64,7 +64,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from .helpers import resto_from_cabang_po
+from .helpers import resto_from_cabang_po, stop_check
 from .konversi_satuan import lookup_rasio
 
 # Kolom kanonik input audit (struktur identik input VBA / sheet 29)
@@ -223,7 +223,8 @@ def _fmt_signed(v: float) -> str:
     return "0"
 
 
-def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+def build_audit_rekap(df: pd.DataFrame,
+                     stop_event=None) -> tuple[pd.DataFrame, dict]:
     """Jalankan algoritma rekonsiliasi → (df hasil + kolom audit, KPI dict).
 
     Baris diproses PERSIS urutan input; grup = blok kontigu dengan
@@ -231,6 +232,12 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     v3.6 sudah diurutkan per Resto+Item+Tanggal). FIX 6f-02: pasangan
     dibandingkan sebagai TUPLE (bukan konkatenasi 'Resto|Item' — kolisi
     bila nilai memuat '|').
+
+    stop_event: v3.9.72 — threading.Event opsional (audit 1-d: loop
+    baris Python murni ini TIDAK terputus ⏹ dulu). Checkpoint per GRUP
+    (input ter-sort per pasangan → grup ≈ ≤62 baris: 31 hari × 2 varian
+    bulan) + tiap 1024 baris dalam grup patologis (input tak ter-sort →
+    satu grup raksasa). Default None = perilaku lama.
     """
     n = len(df)
     kpi = {
@@ -279,6 +286,11 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
     group_start = 0
     while group_start < n:
+        # v3.9.72 — checkpoint ⏹ per grup (audit 1-d; engine = loop
+        # baris Python murni — dulu ⏹ tak terasa sampai engine selesai)
+        if not (group_start & 1023):
+            stop_check(stop_event,
+                       f"audit rekonsiliasi (baris {group_start:,}/{n:,})")
         group_end = group_start
         while group_end + 1 < n and keys[group_end + 1] == keys[group_start]:
             group_end += 1
@@ -287,6 +299,12 @@ def build_audit_rekap(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         start_idx = -1          # sentinel (VBA startIdx = 0, array 1-based)
 
         for i in range(group_start, group_end + 1):
+            # v3.9.72 — checkpoint ⏹ tiap 1024 baris dalam grup patologis
+            # (input tak ter-sort → SATU grup bisa raksasa; grup normal
+            # ≤62 baris tak pernah kena cabang ini)
+            if not (i & 1023):
+                stop_check(stop_event,
+                           f"audit rekonsiliasi (baris {i:,}/{n:,})")
             sel_val = selisih[i]
             has_so = not np.isnan(hasil_so[i])
             delta_so = 0.0
@@ -506,7 +524,7 @@ def _join_engine_note(existing: str, note: str) -> str:
 
 
 def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
-                       pairs: dict) -> None:
+                       pairs: dict, stop_event=None) -> None:
     """v3.9.30 — perkaya hasil audit dgn info PO Menunggu (mutasi in
     place — frame fresh milik build_audit_from_app):
 
@@ -529,6 +547,10 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
       membedakan deviasi murni EXPLAINABLE (menunggu PO diproses →
       akan resolve saat RI masuk) vs yang perlu audit fisik.
     - KPI 'dev_murni_po': jumlah baris DEVIASI MURNI ber-PO menunggu.
+
+    stop_event: v3.9.72 — threading.Event opsional; checkpoint ⏹ tiap
+    2048 baris (audit 1-d — loop Python murni atas SEMUA baris audit;
+    dipanggil 2× per run: varian penuh + varian bulan-ini).
     """
     audit["Qty PO Menunggu"] = 0.0
     kpi["dev_murni_po"] = 0
@@ -545,6 +567,11 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
     qty = audit["Qty PO Menunggu"].to_numpy(dtype="float64", copy=True)
     n_flagged = 0
     for i in range(len(audit)):
+        # v3.9.72 — checkpoint ⏹ tiap 2048 baris (audit 1-d; pasangan PO
+        # menunggu sedikit tapi scan-nya SELURUH baris audit)
+        if not (i & 2047):
+            stop_check(stop_event,
+                       f"perkaya PO Menunggu (baris {i:,}/{len(audit):,})")
         items = pairs.get((resto.iat[i], item.iat[i]))
         if not items:
             continue
@@ -573,7 +600,8 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
                          in_detail_df: Optional[pd.DataFrame],
                          po_pending_df: "pd.DataFrame | None" = None,
                          bulan_lalu: bool = True,
-                         konversi: "dict | None" = None
+                         konversi: "dict | None" = None,
+                         stop_event=None
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
 
@@ -606,14 +634,28 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
     terkonversi → qty as-is + '*' (disetujui user). None = perilaku
     v3.9.30 persis (qty satuan PO tanpa label).
 
+    stop_event: v3.9.72 — threading.Event opsional (audit 1-d: fase
+    audit TIDAK punya checkpoint sama sekali — ⏹ menunggu KEDUA varian
+    engine + enrichment selesai). Dicek antar tahap (filter bulan →
+    input → engine → PO menunggu) & diteruskan ke loop baris internal
+    (build_audit_rekap/_apply_po_menunggu). Default None = perilaku
+    lama (pemanggil test tanpa stop tetap jalan).
+
     Return (audit_df, kpi, source_desc). audit_df kosong + kpi["rows"]=0
     bila tidak ada data rekap SO / IN sama sekali; source_desc menjelaskan
     asal data (untuk status UI).
     """
+    # v3.9.72 — checkpoint ⏹ sebelum tahap apapun (Stop saat fase
+    # sebelumnya — mis. ⏹ ditekan pas Rincian PO selesai — langsung
+    # terasa; dulu harus menunggu varian audit PERTAMA selesai penuh)
+    stop_check(stop_event, "audit rekonsiliasi (persiapan)")
     if not bulan_lalu:
         rekap_so_df = _filter_bulan_ini(rekap_so_df)
         in_detail_df = _filter_bulan_ini(in_detail_df)
     raw = build_audit_input(rekap_so_df, in_detail_df)
+    # v3.9.72 — checkpoint ⏹ pasca build input (agregasi groupby vektor;
+    # Stop saat agregasi tak perlu menunggu engine jalan)
+    stop_check(stop_event, "audit rekonsiliasi (input)")
     po_pairs = _po_menunggu_pairs(
         extract_po_pending(po_pending_df), konversi) \
         if po_pending_df is not None else None
@@ -626,9 +668,12 @@ def build_audit_from_app(rekap_so_df: Optional[pd.DataFrame],
                 dtype="float64")
             kpi0["dev_murni_po"] = 0
         return raw, kpi0, "tidak ada data rekap SO / IN utk audit"
-    audit, kpi = build_audit_rekap(raw)
+    audit, kpi = build_audit_rekap(raw, stop_event=stop_event)
     if po_pairs is not None:
-        _apply_po_menunggu(audit, kpi, po_pairs)
+        _apply_po_menunggu(audit, kpi, po_pairs, stop_event=stop_event)
+    # v3.9.72 — checkpoint ⏹ pasca engine (varian kedua tak perlu mulai
+    # bila Stop sudah masuk — engine dipanggil 2× per run)
+    stop_check(stop_event, "audit rekonsiliasi (perkaya PO menunggu selesai)")
     n_so = int(pd.to_numeric(raw["Hasil SO"], errors="coerce")
                .notna().sum())
     n_in = int((pd.to_numeric(audit["Penerimaan Sistem"], errors="coerce")

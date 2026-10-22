@@ -19,11 +19,18 @@ no-match → kategori kosong → terfilter).
 """
 import pandas as pd
 
-from .helpers import fn_combine_folder, safe_to_numeric, safe_to_str, to_datetime_robust
+from .helpers import (
+    fn_combine_folder,
+    safe_to_numeric,
+    safe_to_str,
+    stop_check,
+    to_datetime_robust,
+)
 from .queries import query_dbs_kategori
 
 
-def build_rincian_po(config, semua_out: dict | None = None) -> pd.DataFrame:
+def build_rincian_po(config, semua_out: dict | None = None,
+                     stop_event=None) -> pd.DataFrame:
     """
     Mirror M: shared #"Rincian PO".
 
@@ -37,11 +44,22 @@ def build_rincian_po(config, semua_out: dict | None = None) -> pd.DataFrame:
     disimpan ke ``semua_out["df"]``. PO barang non-DEVIASI tidak
     terbaca query utama; audit PO Menunggu perlu SEMUA pasangan.
     Return value TIDAK berubah (tetap terfilter DEVIASI).
+
+    stop_event: v3.9.72 — threading.Event opsional (audit 1-d: dulu fase
+    Rincian PO tak punya SATU checkpoint pun — ⏹ baru terasa setelah
+    seluruh folder 32.43 + merge kategori selesai). Diteruskan ke
+    fn_combine_folder (checkpoint ⏹ antar file PO) & query_dbs_kategori
+    + cek pasca-load. Default None = perilaku lama (pemanggil test/CLI
+    tanpa stop tetap jalan).
     """
     # Source = fnCombineFolder(RincianPO, PesananPO, false) + Skip(3) + Skip(1) + Promote
     # = pandas header=4
     sheet_name = config.sheet("PesananPO")
-    prom = fn_combine_folder(config.folder("RincianPO"), sheet_name, header_row=4)
+    prom = fn_combine_folder(config.folder("RincianPO"), sheet_name,
+                             header_row=4, stop_event=stop_event)
+    # v3.9.72 — checkpoint ⏹ pasca baca folder PO (Stop yang terjadi di
+    # tengah baca file TERAKHIR tak perlu menunggu merge selesai)
+    stop_check(stop_event, "merge Rincian PO")
     if prom.empty:
         # v3.9.30 — semua_out tetap terisi (frame kosong) supaya audit
         # PO Menunggu punya skema konsisten walau folder kosong
@@ -84,7 +102,7 @@ def build_rincian_po(config, semua_out: dict | None = None) -> pd.DataFrame:
             sel[col] = to_datetime_robust(sel[col])
 
     # BufferedKategori + Merged (LeftOuter on Nama Barang = NAMA BARANG)
-    dbs_kategori = query_dbs_kategori(config)
+    dbs_kategori = query_dbs_kategori(config, stop_event=stop_event)
     if len(dbs_kategori) > 0 and "Nama Barang" in sel.columns:
         kat = dbs_kategori[["NAMA BARANG", "KATEGORI"]].copy()
         kat = kat.rename(columns={"NAMA BARANG": "Nama Barang", "KATEGORI": "DBS_Kategori.KATEGORI"})

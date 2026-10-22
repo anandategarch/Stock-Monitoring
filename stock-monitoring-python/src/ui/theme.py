@@ -49,9 +49,19 @@ C_ACCENT_DARK = "#134e4a"    # teal-900 — teks di atas seleksi
 #  dihapus — view memakai hex literal untuk warna baris khusus)
 C_RED = "#dc2626"
 C_RED_SOFT = "#fef2f2"
-C_ORANGE = "#ea580c"
+# v3.9.72 — FIX (audit UX 2-c / WCAG AA): C_ORANGE #ea580c (orange-600,
+# kontras 3,56:1) & C_GREEN #16a34a (green-600, 3,30:1) GAGAL AA 4,5:1
+# saat dipakai sbg warna DOT status / strip aksen KPI / teks nilai chip
+# (in_selisih memakai hex literal saudaranya utk TEKS nilai KPI di atas
+# #f8fafc). Digelapkan ke level-700: C_ORANGE #c2410c ≈4,52:1 & C_GREEN
+# #15803d ≈4,54:1 di atas putih (C_CARD) — lolos AA sbg TEKS DAN jauh
+# di atas ambang 3:1 WCAG 1.4.11 utk objek grafis (dot/bar aksen).
+# CATATAN integrasi: 2 hex literal #16a34a lama masih hidup di
+# in_selisih_view.py:1386,1397 (teks nilai KPI — file di luar scope
+# agent ini) → sengaja DILAPORKAN, bukan diubah.
+C_ORANGE = "#c2410c"
 C_AMBER = "#b45309"
-C_GREEN = "#16a34a"
+C_GREEN = "#15803d"
 
 # Konsol log (mirror Waste: #0b1220)
 C_LOG_BG = "#0b1220"
@@ -383,6 +393,24 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     root.option_add("*TCombobox*Listbox.selectBackground", C_ACCENT_SOFT)
     root.option_add("*TCombobox*Listbox.selectForeground", C_ACCENT_DARK)
     root.option_add("*TCombobox*Listbox.font", (fam, scale_pt(10)))
+
+    # --- Spinbox (v3.9.72 — FIX audit 2-c konsistensi kartu) ---------------
+    # ttk.Spinbox dipakai view (AMBANG ACR di deviasi_view.py:786) berdampingan
+    # dgn TEntry/TCombobox yang sudah ter-style — tanpa blok ini field-nya
+    # jatuh ke default clam-abu + panah gelap yang menonjol di kartu putih.
+    # Konsisten TEntry: field putih + border slate + border teal saat fokus;
+    # panah = C_TEXT_MUTED (kanon arrow scrollbar/combobox) + area tombol
+    # memudar ke #f8fafc saat aktif (pola hover TButton #f8fafc).
+    style.configure("TSpinbox", fieldbackground=C_CARD, foreground=C_HEADER,
+                    bordercolor=C_BORDER, arrowcolor=C_TEXT_MUTED,
+                    background=C_CARD, padding=(8, 4))
+    style.map("TSpinbox",
+              bordercolor=[("focus", C_ACCENT), ("invalid", C_RED)],
+              fieldbackground=[("readonly", C_CARD), ("disabled", "#f8fafc")],
+              foreground=[("disabled", C_TEXT_SOFT)],
+              arrowcolor=[("disabled", C_TEXT_SOFT),
+                          ("pressed", C_HEADER), ("active", C_HEADER)],
+              background=[("active", "#f8fafc")])
 
     # --- Checkbutton ---
     style.configure("TCheckbutton", background=C_CARD, foreground=C_HEADER,

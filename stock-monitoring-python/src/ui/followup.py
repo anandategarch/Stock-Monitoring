@@ -283,6 +283,14 @@ class FollowUpStore:
         # v3.9.59 — FIX 2f-08: pesan gagal persist TERAKHIR (None = sehat)
         # — dibaca view/listener setelah toggle/clear (lihat toggle).
         self.last_save_error: str | None = None
+        # v3.9.72 — FIX 3 (task 2-b): mode TANGGUH penulisan JSON. Toggle
+        # ✓ di tab Follow Up memicu 2 tulis file SINKRON di UI thread
+        # (followup.json + followup_resolved.json); rapid toggle = badai
+        # I/O disk. View memasang mode ini SEKITAR toggle-nya sendiri lalu
+        # menjadwalkan SATU flush debounce 200ms (after) — default tetap
+        # SINKRON (toggle dari tab lain / pemanggil test tak berubah).
+        self._defer_saves = False
+        self._dirty_saves = False
         self.load()
 
     # -- sinkronisasi UI ------------------------------------------------------
@@ -325,6 +333,48 @@ class FollowUpStore:
         return sum(1 for fp in self.rows if fp in self.resolved)
 
     # -- mutasi -------------------------------------------------------------------
+    def set_defer_saves(self, enabled: bool) -> None:
+        """v3.9.72 — FIX 3 (task 2-b): aktif/nonaktif mode TANGGUH
+        penulisan JSON (dipakai view Follow Up sekitar toggle ✓-nya
+        sendiri). Saat aktif, _persist_* hanya MENANDAI dirty — penulisan
+        dicatat utk SATU flush gabungan via flush_saves() (debounce
+        after(200ms) milik view). Default nonaktif = perilaku lama
+        (sinkron) — toggle dari tab lain / pemanggil programatik / test
+        tak berubah."""
+        self._defer_saves = bool(enabled)
+
+    def flush_saves(self) -> None:
+        """v3.9.72 — FIX 3: tulis followup.json + followup_resolved.json
+        SEKARANG bila ada perubahan tertunda (dipanggil debounce view /
+        teardown view). Gagal → flag ``last_save_error`` + [WARNING]
+        (pola toggle v3.9.42/2f-08 — view men-surface flash status)."""
+        if not self._dirty_saves:
+            return
+        self._dirty_saves = False
+        ok = self.save()
+        ok_r = self.save_resolved()
+        self.last_save_error = None if (ok and ok_r) else (
+            "gagal menyimpan status followup (file terkunci/disk?) "
+            "— perubahan hanya di memori")
+        if self.last_save_error:
+            print(f"[WARNING] followup: {self.last_save_error}")
+
+    def _persist_rows(self) -> bool:
+        """v3.9.72 — FIX 3: satu pintu penulisan rows — sinkron default;
+        mode defer = tandai dirty (flush via flush_saves, hasil optimistik
+        True — kegagalan dilaporkan saat flush)."""
+        if self._defer_saves:
+            self._dirty_saves = True
+            return True
+        return self.save()
+
+    def _persist_resolved(self) -> bool:
+        """v3.9.72 — FIX 3: idem _persist_rows utk followup_resolved.json."""
+        if self._defer_saves:
+            self._dirty_saves = True
+            return True
+        return self.save_resolved()
+
     def toggle(self, fp: str, row: dict) -> bool:
         """Tambah/hapus baris. Return True bila kini TERDAFTAR.
 
@@ -345,8 +395,10 @@ class FollowUpStore:
             # orphan tetap hidup di file dan muncul lagi setelah restart.
             # Simpan sekarang (baris yang ditambah ulang mulai bersih).
             self.resolved.pop(fp, None)
-            ok_resolved = self.save_resolved()
-            ok = self.save()
+            # v3.9.72 — FIX 3: _persist_* = sinkron default / defer bila
+            # view Follow Up sedang mode tangguh (debounce 200ms).
+            ok_resolved = self._persist_resolved()
+            ok = self._persist_rows()
             self.last_save_error = None if (ok and ok_resolved) else (
                 "gagal menyimpan status followup (file terkunci/disk?) "
                 "— perubahan hanya di memori")
@@ -358,7 +410,8 @@ class FollowUpStore:
         snap["fp"] = fp
         snap["added_at"] = datetime.now().isoformat(timespec="seconds")
         self.rows[fp] = snap
-        ok = self.save()
+        # v3.9.72 — FIX 3: idem jalur hapus (satu pintu _persist_*).
+        ok = self._persist_rows()
         self.last_save_error = None if ok else (
             "gagal menyimpan status followup (file terkunci/disk?) "
             "— perubahan hanya di memori")

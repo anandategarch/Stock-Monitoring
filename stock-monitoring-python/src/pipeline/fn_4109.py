@@ -27,11 +27,12 @@ Output: DataFrame [Kategori, Nama Barang, Satuan, Harga] — 1 baris per
 barang (harga GLOBAL lintas resto; duplikat nama barang → baris
 terakhir menang, konsisten grup).
 """
+import os
 import re
 
 import pandas as pd
 
-from .helpers import _list_excel_files, _list_sheet_names, fn_buka_sheet
+from .helpers import _list_excel_files, _list_sheet_names, fn_buka_sheet, stop_check
 
 SHEET_4109_DEFAULT = "#41.09. Nilai Persediaan [ALL]"
 
@@ -165,11 +166,18 @@ def _extract_4109(raw: pd.DataFrame) -> pd.DataFrame | None:
         .reset_index(drop=True)
 
 
-def fn_4109(folder_path: str, sheet_name: str = SHEET_4109_DEFAULT) -> pd.DataFrame:
+def fn_4109(folder_path: str, sheet_name: str = SHEET_4109_DEFAULT,
+            stop_event=None) -> pd.DataFrame:
     """Baca folder harga 41.09 → DataFrame [Kategori, Nama Barang,
     Satuan, Harga] (harga GLOBAL per barang — file 41.09 tanpa dimensi
     resto). Folder kosong/tidak ada → DataFrame KOSONG + log (fitur
-    harga menonaktifkan diri senyap; pipeline tetap jalan)."""
+    harga menonaktifkan diri senyap; pipeline tetap jalan).
+
+    stop_event: v3.9.72 — threading.Event opsional; checkpoint ⏹ di kepala
+    loop file (audit 1-d). NB: dipanggil main.py dalam try/except-degradasi
+    — Stop yang terjadi di sini tertelan sebagai 'Harga dilewati', lalu
+    dicek LANGSUNG oleh checkpoint utama main.py (hasil run dibuang juga
+    karena Stop). Default None = perilaku lama."""
     files = _list_excel_files(folder_path)
     if not files:
         print(f"    41.09 Harga: folder '{folder_path}' kosong/tidak "
@@ -178,6 +186,9 @@ def fn_4109(folder_path: str, sheet_name: str = SHEET_4109_DEFAULT) -> pd.DataFr
 
     frames = []
     for f in files:
+        # v3.9.72 — checkpoint ⏹ ANTAR file harga (di luar try: Stop ≠
+        # skip-file; file 41.09 bisa besar — beberapa detik per baca)
+        stop_check(stop_event, f"baca harga 41.09 {os.path.basename(f)!r}")
         try:
             raw = _buka_4109(f, sheet_name)
         except Exception as e:

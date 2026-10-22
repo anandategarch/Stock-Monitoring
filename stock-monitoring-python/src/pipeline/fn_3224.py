@@ -51,15 +51,18 @@ _EMPTY_COLUMNS_3224 = ["Tanggal", "NAMA RESTO", "Nama Barang", "Value",
 
 
 def fn_3224(folder_path: str, mode: str,
-            sheet_name: str = SHEET_3224) -> pd.DataFrame:
+            sheet_name: str = SHEET_3224, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fn3224(folderPath, mode).
     mode: "berjalan" atau "lalu".
     sheet_name: default SHEET_3224 (FIX R-3 audit 34-d — query lalu bisa
     me-resolve nama sheet folder bulan lalu; jalur berjalan tak berubah).
+    stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
+    antar file — audit 1-d). Default None = perilaku lama.
     """
     # expand = fnCombineFolder + Skip(3) + PromoteHeaders = header=4
-    prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4,
+                             stop_event=stop_event)
     if prom.empty:
         return pd.DataFrame(columns=_EMPTY_COLUMNS_3224)
 

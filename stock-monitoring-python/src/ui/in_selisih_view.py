@@ -869,6 +869,13 @@ class InSelisihView(tk.Frame):
         super().__init__(parent, bg=C_BG)
         self.data: Optional[pd.DataFrame] = None
         self.in_detail: Optional[pd.DataFrame] = None
+        # v3.9.72 — FIX 2 (task 2-b): cache Series pra-string-kan kolom
+        # kunci popup detail IN (double-click _detail_for) — dibangun
+        # SEKALI di worker _refresh per identitas in_detail; side-dict
+        # (BUKAN kolom df → tree/export/copy tak pernah melihatnya),
+        # di-reset load_data (identitas frame dicek saat pemakaian).
+        self._scols_cache: dict = {}
+        self._scols_cache_detail = None
         self.audit_df: Optional[pd.DataFrame] = None
         self.audit_kpi: dict = {}
         self.audit_desc: str = ""
@@ -1139,6 +1146,10 @@ class InSelisihView(tk.Frame):
                   audit_result: dict | None = None):
         self.data = data
         self.in_detail = in_detail
+        # v3.9.72 — FIX 2 (task 2-b): frame detail IN berganti → cache
+        # pra-string-kan basi → reset (dibangun ulang worker _refresh).
+        self._scols_cache = {}
+        self._scols_cache_detail = None
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
         # v3.9.27 — MODE HITUNG: simpan KEDUA varian audit dari pipeline
@@ -1722,6 +1733,19 @@ class InSelisihView(tk.Frame):
             data = self.data
             audit_df = self.audit_df
             in_detail = self.in_detail   # v3.9.23 (poin B) — capture sama
+            # v3.9.72 — FIX 2 (task 2-b): pra-string-kan kolom kunci popup
+            # detail IN SEKALI per data (DI WORKER — bebas blokir UI):
+            # _detail_for menjalankan 3 mask astype(str)/to_numeric atas
+            # frame PENUH per double-click (50-150ms+ sinkron). Identitas
+            # in_detail dicek — load_data mengganti frame (dan me-reset
+            # cache) → cache basi tak terpakai.
+            if in_detail is not None and not in_detail.empty \
+                    and self._scols_cache_detail is not in_detail:
+                self._scols_cache = {
+                    c: in_detail[c].astype(str)
+                    for c in ("NAMA RESTO", "Nama Barang")
+                    if c in in_detail.columns}
+                self._scols_cache_detail = in_detail
             if (self._cached_base is None
                     or self._cached_base_data is not data
                     or self._cached_base_detail is not in_detail
@@ -1759,6 +1783,11 @@ class InSelisihView(tk.Frame):
         base = self._cached_base
         if base is None or base.empty:
             return {"items": [], "status": "Tidak ada data."}
+
+        # v3.9.72 — FIX 5 (audit UX 2-b): total baris base (pra filter
+        # tanggal/⧩/checkbox) — utk status "n dari N baris" (parity
+        # pivot "terfilter X/Y").
+        _total_base_rows = len(base)
 
         f = base
         # rentang tanggal — display-only (audit dihitung dari data penuh;
@@ -1917,7 +1946,7 @@ class InSelisihView(tk.Frame):
         # ringkasan status
         # FIX C-10 (audit 2-c): koma ribuan EN ("1,234") terbaca desimal
         # dalam konvensi ID — kini fmt_int_id (⨯ konsistensi footer lain).
-        status_txt = f"{n} baris · " + " · ".join(
+        status_txt = f"{n} dari {_total_base_rows} baris · " + " · ".join(
             f"{k}: {fmt_int_id(v)}" for k, v in
             pd.Series(status_s).value_counts().head(3).items())
         return {"items": items, "status": status_txt, "keys": keys,
@@ -2482,7 +2511,14 @@ class InSelisihView(tk.Frame):
                       row_summary=row_summary)
 
     def _detail_for(self, resto, barang, tgl) -> Optional[pd.DataFrame]:
-        """Ambil detail IN utk (resto, barang, tgl)."""
+        """Ambil detail IN utk (resto, barang, tgl).
+
+        v3.9.72 — FIX 2 (task 2-b): tiga mask astype(str)/to_numeric atas
+        frame PENUH per double-click (50-150ms+ @data real) kini memakai
+        cache Series pra-string-kan (dibangun SEKALI di worker _refresh;
+        identitas frame dicek supaya cache basi tak terpakai; reindex ke
+        index subset pasca-mask tetap MURAH vs astype(str) ulang — mask
+        boolean hanya menyusut baris, index subset selalu ⊂ index asli)."""
         det = self.in_detail
         if det is None or det.empty:
             # tidak ada detail IN (mis. sumber 42.05/3224/9901 kosong) —
@@ -2491,9 +2527,17 @@ class InSelisihView(tk.Frame):
                                          "Tanggal", "Value", "Nomor",
                                          "Nomor PO", "#Tgl/Jam Pembuatan IT",
                                          "SOURCE IN", "JENIS"])
+        scols = (self._scols_cache
+                 if self._scols_cache_detail is det else None)
+
+        def _s(col):
+            s = (scols or {}).get(col)
+            return s.reindex(d.index) if s is not None \
+                else d[col].astype(str)
+
         d = det
-        d = d[d["NAMA RESTO"].astype(str) == str(resto)]
-        d = d[d["Nama Barang"].astype(str) == str(barang)]
+        d = d[_s("NAMA RESTO") == str(resto)]
+        d = d[_s("Nama Barang") == str(barang)]
         t = pd.to_numeric(d["Tanggal"], errors="coerce")
         d = d[t == tgl]
         if d.empty:

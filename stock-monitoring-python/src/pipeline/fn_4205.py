@@ -40,15 +40,18 @@ from .konversi_satuan import (
 
 
 def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara",
-            mode: str = "berjalan") -> pd.DataFrame:
+            mode: str = "berjalan", stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fn4205(folderPath).
     mode: "berjalan" (as-is) atau "lalu" (v3.9.17 — 5 hari terakhir +
     Tanggal dinegasikan, mirror fn_3224).
+    stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
+    antar file — audit 1-d). Default None = perilaku lama.
     Output columns: Nomor, NAMA RESTO, Tanggal, Nama Barang, Value, #Tgl/Jam Pembuatan IT
     """
     # Source + Skip(3) + Promote = header=4
-    prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4,
+                             stop_event=stop_event)
     if prom.empty:
         return pd.DataFrame(columns=["Nomor", "NAMA RESTO", "Tanggal", "Nama Barang",
                                       "Value", "#Tgl/Jam Pembuatan IT",

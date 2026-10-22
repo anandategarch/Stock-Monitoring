@@ -37,15 +37,19 @@ SHEET_4215 = "#42.15. Pemindahan Barang (KIRI"
 
 
 def fn_4215(folder_path: str, side: str,
-            sheet_name: str = SHEET_4215) -> pd.DataFrame:
+            sheet_name: str = SHEET_4215, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fn4215(folderPath, side).
     side: "kirim" (Gudang Pengirim → NAMA RESTO) atau "terima" (Gudang Tujuan → NAMA RESTO).
 
     sheet_name: v3.9.33 — AUDIT FIX (48-a): default SHEET_4215; query
     me-resolve config Sheets['Pemindahan4215'].
+
+    stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
+    antar file — audit 1-d). Default None = perilaku lama.
     """
-    prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4,
+                             stop_event=stop_event)
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 

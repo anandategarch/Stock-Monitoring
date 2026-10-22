@@ -74,6 +74,7 @@ from .helpers import (
     promote_headers,
     safe_to_numeric,
     safe_to_str,
+    stop_check,
 )
 
 # Kolom base schema rekap mentah (urutan output konsisten format lama)
@@ -286,11 +287,14 @@ def _promote_at(df: pd.DataFrame, hr: int) -> pd.DataFrame:
 
 def _read_combined_file(file_path: str, mode: str,
                         jenis_filter: Optional[List[str]],
-                        sheet_filter=None) -> Optional[pd.DataFrame]:
+                        sheet_filter=None, stop_event=None) -> Optional[pd.DataFrame]:
     """Cari sheet rekap-mentah (combined) dalam satu file; baca → long.
 
     sheet_filter(sn) → bool: filter nama sheet (dipakai pemisah bulan
     berjalan vs bulan lalu saat scan folder induk/RootPath — v3.4).
+
+    stop_event: v3.9.72 — checkpoint ⏹ di kepala loop sheet (di luar try
+    supaya PipelineStopped tidak tertelan jalur skip-sheet — audit 1-d).
 
     v3.7 ENGINE TURBO: dgn engine calamine, sheet dibaca SEKALI penuh
     (peek nrows=8 di calamine mem-parse seluruh sheet juga — 0,17s vs
@@ -309,6 +313,10 @@ def _read_combined_file(file_path: str, mode: str,
     engine_kwargs = {"engine": engine} if engine else {}
     single_parse = engine == "calamine"
     for sn in _list_sheet_names(file_path):
+        # v3.9.72 — checkpoint ⏹ ANTAR sheet (stop ≠ skip-sheet; workbook
+        # gabungan bisa puluhan sheet, tiap baca bisa detik-an)
+        stop_check(stop_event,
+                   f"baca rekap mentah {os.path.basename(file_path)!r}:{sn}")
         if sheet_filter is not None and not sheet_filter(sn):
             continue
         raw = None
@@ -364,7 +372,8 @@ def _log_sisa_workbook(sisa_files: list) -> None:
 
 
 def _read_combined_rekap(folder_path: str, mode: str,
-                         jenis_filter: Optional[List[str]]) -> Optional[pd.DataFrame]:
+                         jenis_filter: Optional[List[str]],
+                         stop_event=None) -> Optional[pd.DataFrame]:
     """Fallback: cari workbook gabungan ber-schema rekap mentah.
 
     Urutan scan (v3.4):
@@ -372,6 +381,9 @@ def _read_combined_rekap(folder_path: str, mode: str,
        RekapBerjalan/RekapLalu.
     2. folder induk / RootPath — file gabungan user sering disimpan di
        RootPath.
+
+    stop_event: v3.9.72 — checkpoint ⏹ di kepala loop file kedua langkah
+    (audit 1-d; cek di luar try/except per-file).
 
     v3.9.42 — AUDIT FIX (61-a, F5): pemisah bulan via NAMA SHEET kini
     berlaku utk KEDUA langkah (dulu hanya langkah-2): workbook gabungan
@@ -390,8 +402,11 @@ def _read_combined_rekap(folder_path: str, mode: str,
     # 1. folder itu sendiri (v3.9.42 — kini ikut filter nama sheet)
     files_here = _list_excel_files(folder_path)
     for i, f in enumerate(files_here):
+        # v3.9.72 — checkpoint ⏹ ANTAR file scan (baca workbook bisa lama)
+        stop_check(stop_event, f"scan rekap gabungan {os.path.basename(f)!r}")
         out = _read_combined_file(f, mode, jenis_filter,
-                                  sheet_filter=sheet_filter)
+                                  sheet_filter=sheet_filter,
+                                  stop_event=stop_event)
         if out is not None:
             _log_sisa_workbook(files_here[i + 1:])
             return out
@@ -401,8 +416,12 @@ def _read_combined_rekap(folder_path: str, mode: str,
             and os.path.abspath(parent) != os.path.abspath(folder_path):
         files_parent = _list_excel_files(parent)
         for i, f in enumerate(files_parent):
+            # v3.9.72 — checkpoint ⏹ ANTAR file scan (RootPath bisa banyak file)
+            stop_check(stop_event,
+                       f"scan rekap gabungan (induk) {os.path.basename(f)!r}")
             out = _read_combined_file(f, mode, jenis_filter,
-                                      sheet_filter=sheet_filter)
+                                      sheet_filter=sheet_filter,
+                                      stop_event=stop_event)
             if out is not None:
                 _log_sisa_workbook(files_parent[i + 1:])
                 return out
@@ -411,22 +430,30 @@ def _read_combined_rekap(folder_path: str, mode: str,
     return None
 
 
-def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str]] = None) -> pd.DataFrame:
+def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str]] = None,
+                    stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fnRekapMentah(folderPath, mode, optional jenisFilter).
 
     mode: "berjalan" (tanggal 1..31) atau "lalu" (tanggal 25..31, dinegasikan).
     jenis_filter: list JENIS yang di-keep. None = no filter.
 
+    stop_event: v3.9.72 — threading.Event opsional; diteruskan ke
+    fn_combine_folder (loop file per-resto) + fallback scan workbook
+    gabungan (loop file & sheet) — checkpoint ⏹ audit 1-d. Default None
+    = perilaku lama.
+
     Output columns: NAMA RESTO, SOURCE DATA, JENIS, STATUS, NAMA BARANG, SATUAN, Attribute, Value
     """
     # === STEP 1: fnCombineFolder(folderPath, "REKAP MENTAH") dengan doPromote=null ===
     # raw=True: baca tanpa header, add_name_col=True: tambah kolom "Name" (file name)
-    expand = fn_combine_folder(folder_path, "REKAP MENTAH", raw=True, add_name_col=True)
+    expand = fn_combine_folder(folder_path, "REKAP MENTAH", raw=True,
+                               add_name_col=True, stop_event=stop_event)
     if expand.empty:
         # v3.3.1 FALLBACK: sumber gabungan (.xlsb / sheet apa pun ber-schema
         # rekap mentah, NAMA RESTO dari kolom) — fix "Saldo SO kosong semua"
-        combined = _read_combined_rekap(folder_path, mode, jenis_filter)
+        combined = _read_combined_rekap(folder_path, mode, jenis_filter,
+                                        stop_event=stop_event)
         if combined is not None:
             return combined
         return pd.DataFrame(columns=_BASE_COLS + ["Attribute", "Value"])

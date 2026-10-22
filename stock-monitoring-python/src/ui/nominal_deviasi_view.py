@@ -94,7 +94,9 @@ from .widgets import (
     insert_tree_items,
     open_tree_maximized,
     reset_autofit_once,  # v3.9.55 — F8
+    restore_tree_view,  # v3.9.72 — FIX 6: pulihkan scroll+seleksi pasca rebuild
     run_async,
+    snapshot_tree_view,  # v3.9.72 — FIX 6: snapshot sebelum delete+re-render
     sort_tree_by_column,
     zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
@@ -541,10 +543,22 @@ class NominalDeviasiView(tk.Frame):
         data = self.data
         h = self.tanggal_h
         gen = self._render_gen
+        # v3.9.72 — FIX 1 (task 2-b): filter ⧩ + materialisasi baris
+        # pindah ke WORKER (pola deviasi_view._refresh — capture state
+        # `st` di awal job). Dulu _render_rows menyaring pandas + loop
+        # format per baris di MAIN thread (satu-satunya view yang masih
+        # begitu — 7 sibling melakukannya di worker): 50-150ms+ blokir UI
+        # per klik filter dan LoadingOverlay tak pernah sempat menutup
+        # jalur itu (after() tak bisa menembak di tengah blok).
+        st = {
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
+        }
 
         def work():
             # capture identitas pra-capture (pola FIX D-01)
-            return self._compute_nominal(data, h)
+            result = self._compute_nominal(data, h)
+            return self._prepare_rows(result, st, h)
 
         def done(payload):
             # v3.9.33 — AUDIT FIX (48-e FIX 3, pola sibling laporan /
@@ -589,13 +603,127 @@ class NominalDeviasiView(tk.Frame):
         """
         return fmt_nominal_cell(val)
 
-    def _render_rows(self, result: pd.DataFrame):
+    def _prepare_rows(self, result, st: dict, h: int) -> dict:
+        """v3.9.72 — FIX 1 (task 2-b): filter ⧩ + materialisasi items +
+        hitungan status/TOTAL — PURE pandas di WORKER (pola
+        deviasi_view._prepare_rows; helper nominal_common murni tanpa
+        sentuhan widget). Dulu seluruh blok ini hidup di _render_rows
+        (main thread) → blokir 50-150ms+ per klik filter. Pesan status
+        jalur kosong dipertahankan PERSIS (justru dihitung di worker
+        supaya jumlah pra-filter tak basi)."""
+        col_sel = st["col_sel"]
+        if result is None or result.empty:
+            return {"items": [], "neg_cells": [], "total_cells": [],
+                    "status": f"Tidak ada baris DEVIASI tanggal {h}.",
+                    "total_chip": ""}
+
+        # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
+        filtered = result
+        for col, sel in col_sel.items():
+            if sel is not None and col in filtered.columns:
+                key = "Harga Tampil" if col == "Harga" else col
+                fmt = self._format_col_series(col, filtered[key])
+                filtered = filtered[fmt.isin(sel)]
+        if filtered.empty:
+            # v3.9.68 — TRI-STATE (audit eksternal T1): seleksi ⧩
+            # kosong = filter aktif 0 baris — pesan jujur + cara
+            # keluar (bukan pesan generik).
+            return {"items": [], "neg_cells": [], "total_cells": [],
+                    "status": (zero_row_filter_message(col_sel)
+                                or "Tidak ada baris setelah filter."),
+                    "total_chip": ""}
+
+        col_ids = self._result_cols()
+        n = len(filtered)
+        total_nom = float(filtered["Nominal"].dropna().sum()) \
+            if "Nominal" in filtered.columns else 0.0
+        total_qty = float(filtered["Qty Deviasi"].sum()) \
+            if "Qty Deviasi" in filtered.columns else 0.0
+        n_no_harga = int(filtered["Nominal"].isna().sum()) \
+            if "Nominal" in filtered.columns else 0
+
+        items = []
+        neg_cells = []
+        for i in range(n):
+            row = filtered.iloc[i]
+            harga_disp = str(row.get("Harga Tampil", "-") or "-")
+            qty = row.get("Qty Deviasi", 0)
+            nom = row.get("Nominal")
+            values = (
+                str(row["Nama Barang"]), str(row["Resto"]),
+                str(row["Satuan"]), harga_disp,
+                self._fmt_cell_num(qty),
+                # v3.9.51 — Nominal: Currency Rp (user: "Semua data
+                # nominal diberi format Currency Rp") — NaN tetap
+                # '-' (tanpa harga).
+                fmt_rp_cell(nom) if nom is not None
+                and not pd.isna(nom) else "-",
+            )
+            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            # minus per-cell: Qty Deviasi & Nominal (Tk 8 fallback baris)
+            try:
+                qv = float(qty)
+            except (TypeError, ValueError):
+                qv = 0.0
+            nom_v = None
+            try:
+                if nom is not None and not pd.isna(nom):
+                    nom_v = float(nom)
+            except (TypeError, ValueError):
+                nom_v = None
+            if self._cell_tags:
+                if qv < 0:
+                    neg_cells.append((f"row_{i}", "Qty Deviasi"))
+                if nom_v is not None and nom_v < 0:
+                    neg_cells.append((f"row_{i}", "Nominal"))
+            elif qv < 0 or (nom_v is not None and nom_v < 0):
+                tags.append("negative")
+            items.append(("", f"row_{i}",
+                          {"values": values, "tags": tuple(tags)}))
+
+        # baris TOTAL di ujung (jumlah qty + nominal) — minus dalam
+        # kurung konsisten dgn baris data; v3.9.51 nominal → Rp.
+        values_total = (
+            "TOTAL", "", "", "", self._fmt_cell_num(total_qty),
+            fmt_rp_cell(total_nom),
+        )
+        items.append(("", "row_total",
+                      {"values": values_total,
+                       "tags": ("total",)}))
+        total_cells = [("row_total", col) for col in col_ids]
+
+        status = (f"{fmt_int_id(n)} pasangan · TANGGAL H = "
+                  f"{h}")
+        if n_no_harga:
+            status += f" · {fmt_int_id(n_no_harga)} tanpa harga"
+        # v3.9.42 — audit 61-b P2: chip TOTAL memakai format tabel
+        # (v3.9.51: nominal → Currency Rp; qty tetap fmt lama —
+        # dulu fmt_int_id (dibulatkan) → chip ≠ baris TOTAL di
+        # bawahnya utk nilai yang sama).
+        total_chip = (f"TOTAL {fmt_rp_cell(total_nom)} "
+                      f"({self._fmt_cell_num(total_qty)} qty)")
+        return {"items": items, "neg_cells": neg_cells,
+                "total_cells": total_cells, "status": status,
+                "total_chip": total_chip}
+
+    def _render_rows(self, payload: dict):
+        """v3.9.72 — FIX 1 (task 2-b): hanya sentuhan WIDGET — populasi
+        tree dari payload worker (items/status/chip/sel minus sudah
+        dihitung _prepare_rows). v3.9.33 — AUDIT FIX (48-e FIX 2): jalur
+        kosong (tanpa baris DEVIASI di H / habis terfilter) TIDAK
+        me-reset _busy / membuang _pending sendiri — SEMUA jalur render
+        berakhir di render_done (satu-satunya titik reset), sehingga
+        refresh H yang mengantre saat compute tetap dieksekusi."""
         if self._insert_cancel is not None:
             self._insert_cancel()
             self._insert_cancel = None
+        # v3.9.72 — FIX 6: simpan posisi scroll+seleksi SEBELUM delete
+        # (rebuild karena filter/H — jangan lompat ke atas di tengah
+        # daftar; restore di render_done setelah batch insert selesai).
+        snap = snapshot_tree_view(self.tree)
         self.tree.delete(*self.tree.get_children(""))
-        self._neg_cells = []
-        self._total_cells = []
+        self._neg_cells = payload.get("neg_cells", [])
+        self._total_cells = payload.get("total_cells", [])
         # v3.9.33 — AUDIT FIX (48-e FIX 1b): _result_df TIDAK lagi
         # ditimpa df PENUH hasil compute — snapshot DISPLAY (kolom
         # "Harga Tampil") dari _compute_nominal dipertahankan supaya
@@ -610,107 +738,14 @@ class NominalDeviasiView(tk.Frame):
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
 
-        # v3.9.33 — AUDIT FIX (48-e FIX 2): jalur kosong (tanpa baris
-        # DEVIASI di H / habis terfilter) TIDAK lagi me-reset _busy /
-        # membuang _pending sendiri — SEMUA jalur render berakhir di
-        # render_done (satu-satunya titik reset), sehingga refresh H
-        # yang mengantre saat compute tetap dieksekusi (dulu: ganti H
-        # saat jalur kosong → refresh hilang senyap, chip sudah menunjuk
-        # H baru tapi tabel masih H lama).
-        items = []
-        if result is None or result.empty:
-            self.status_var_label.set(
-                f"Tidak ada baris DEVIASI tanggal {self.tanggal_h}.")
-            self._total_var.set("")
-        else:
-            # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
-            filtered = result
-            for col, sel in self._col_sel.items():
-                if sel is not None and col in filtered.columns:
-                    key = "Harga Tampil" if col == "Harga" else col
-                    fmt = self._format_col_series(col, filtered[key])
-                    filtered = filtered[fmt.isin(sel)]
-            if filtered.empty:
-                # v3.9.68 — TRI-STATE (audit eksternal T1): seleksi ⧩
-                # kosong = filter aktif 0 baris — pesan jujur + cara
-                # keluar (bukan pesan generik).
-                self.status_var_label.set(
-                    zero_row_filter_message(self._col_sel)
-                    or "Tidak ada baris setelah filter.")
-                self._total_var.set("")
-            else:
-                col_ids = self._result_cols()
-                n = len(filtered)
-                total_nom = float(filtered["Nominal"].dropna().sum()) \
-                    if "Nominal" in filtered.columns else 0.0
-                total_qty = float(filtered["Qty Deviasi"].sum()) \
-                    if "Qty Deviasi" in filtered.columns else 0.0
-                n_no_harga = int(filtered["Nominal"].isna().sum()) \
-                    if "Nominal" in filtered.columns else 0
-
-                for i in range(n):
-                    row = filtered.iloc[i]
-                    harga_disp = str(row.get("Harga Tampil", "-") or "-")
-                    qty = row.get("Qty Deviasi", 0)
-                    nom = row.get("Nominal")
-                    values = (
-                        str(row["Nama Barang"]), str(row["Resto"]),
-                        str(row["Satuan"]), harga_disp,
-                        self._fmt_cell_num(qty),
-                        # v3.9.51 — Nominal: Currency Rp (user: "Semua data
-                        # nominal diberi format Currency Rp") — NaN tetap
-                        # '-' (tanpa harga).
-                        fmt_rp_cell(nom) if nom is not None
-                        and not pd.isna(nom) else "-",
-                    )
-                    tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-                    # minus per-cell: Qty Deviasi & Nominal (Tk 8 fallback baris)
-                    try:
-                        qv = float(qty)
-                    except (TypeError, ValueError):
-                        qv = 0.0
-                    nom_v = None
-                    try:
-                        if nom is not None and not pd.isna(nom):
-                            nom_v = float(nom)
-                    except (TypeError, ValueError):
-                        nom_v = None
-                    if self._cell_tags:
-                        if qv < 0:
-                            self._neg_cells.append((f"row_{i}", "Qty Deviasi"))
-                        if nom_v is not None and nom_v < 0:
-                            self._neg_cells.append((f"row_{i}", "Nominal"))
-                    elif qv < 0 or (nom_v is not None and nom_v < 0):
-                        tags.append("negative")
-                    items.append(("", f"row_{i}",
-                                  {"values": values, "tags": tuple(tags)}))
-
-                # baris TOTAL di ujung (jumlah qty + nominal) — minus dalam
-                # kurung konsisten dgn baris data; v3.9.51 nominal → Rp.
-                values_total = (
-                    "TOTAL", "", "", "", self._fmt_cell_num(total_qty),
-                    fmt_rp_cell(total_nom),
-                )
-                items.append(("", "row_total",
-                              {"values": values_total,
-                               "tags": ("total",)}))
-                for col in col_ids:
-                    self._total_cells.append(("row_total", col))
-
-                status = (f"{fmt_int_id(n)} pasangan · TANGGAL H = "
-                          f"{self.tanggal_h}")
-                if n_no_harga:
-                    status += f" · {fmt_int_id(n_no_harga)} tanpa harga"
-                self.status_var_label.set(status)
-                # v3.9.42 — audit 61-b P2: chip TOTAL memakai format tabel
-                # (v3.9.51: nominal → Currency Rp; qty tetap fmt lama —
-                # dulu fmt_int_id (dibulatkan) → chip ≠ baris TOTAL di
-                # bawahnya utk nilai yang sama).
-                self._total_var.set(
-                    f"TOTAL {fmt_rp_cell(total_nom)} "
-                    f"({self._fmt_cell_num(total_qty)} qty)")
+        self.status_var_label.set(payload.get("status", ""))
+        self._total_var.set(payload.get("total_chip", ""))
 
         def render_done():
+            # v3.9.72 — FIX 6: pulihkan scroll+seleksi (yview fraction;
+            # seleksi difilter ke iid yang masih ada — utility menang
+            # rebuild terfilter yang menghilangkan baris terpilih).
+            restore_tree_view(self.tree, snap)
             # v3.9.33 — AUDIT FIX (48-e FIX 3): satu-satunya titik reset
             # _busy (setelah batch insert selesai) + proses refresh/sort
             # yang mengantre (pola render_done laporan/in_selisih).
@@ -730,7 +765,8 @@ class NominalDeviasiView(tk.Frame):
         # items kosong → insert_tree_items memanggil on_done SINKRON →
         # render_done tetap berjalan (reset _busy + proses _pending).
         self._insert_cancel = insert_tree_items(
-            self.tree, items, batch=500, on_done=render_done)
+            self.tree, payload.get("items", []), batch=500,
+            on_done=render_done)
 
     def _reapply_cell_tags(self, tree):
         """Pasang ulang tag per-cell (sort/clone = delete+reinsert → tag

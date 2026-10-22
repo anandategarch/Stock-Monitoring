@@ -1749,6 +1749,12 @@ _HF_POPUP_CAP = 460
 _HF_CHK_ALLOW = 64
 
 
+# v3.9.72 — PERF (audit 1-a FIX 7): debounce live-search popup ⧩ — jeda
+# 120ms cukup terasa instan utk preview, menampung burst keystroke
+# (dulu setiap keystroke = pack/forget 3000 checkbox 8.6-42.6ms).
+_HF_SEARCH_DEBOUNCE_MS = 120
+
+
 class HeaderFilter:
     """Filter kolom yang MENEMPEL DI HEADER Treeview (ala Excel AutoFilter).
 
@@ -1812,6 +1818,11 @@ class HeaderFilter:
         self._nav_entry = None
         self._nav_box = None
         self._nav_canvas = None
+        # v3.9.72 — PERF (audit 1-a FIX 7): id timer debounce pencarian —
+        # KeyRelease menjalankan _filter_list per keystroke (8.6-42.6ms
+        # pack/forget ×3000 checkbox); ketik cepat kini bergabung jadi 1x
+        # saat jeda (after 120ms; timer di tree — popup boleh ditutup dulu).
+        self._search_after = None
         self.refresh_icon()
         self._bind_id = tree.bind("<Button-1>", self._on_tree_press, add="+")
 
@@ -1936,7 +1947,12 @@ class HeaderFilter:
         tk.Label(srow, text="🔍", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
         entry = ttk.Entry(srow, textvariable=self._search_var)
         entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
-        entry.bind("<KeyRelease>", lambda e: self._filter_list())
+        # v3.9.72 — PERF (audit 1-a FIX 7): DEBOUNCE 120ms — _filter_list
+        # dulu jalan per keystroke (pack/forget O(#checkbox) 8.6-42.6ms ×
+        # 3000 nilai); burst ketik kini coalesce jadi SATU penyaringan saat
+        # jeda. Enter tetap INSTAN (jalur _on_search_enter membatalkan timer
+        # + menerapkan seleksi seketika).
+        entry.bind("<KeyRelease>", self._on_search_key)
         # v3.9.13 (permintaan user: "habis search, hasil search-ku itulah
         # yang jadi pilihan-nya") — Enter menjadikan hasil pencarian
         # SELEKSI; operator teks ala Excel AutoFilter di sampingnya.
@@ -2177,10 +2193,43 @@ class HeaderFilter:
         return {"Diawali": _starts, "Diakhiri": _ends,
                 "Tidak mengandung": _excludes}.get(op, _contains)
 
+    def _cancel_search_timer(self):
+        """v3.9.72 — FIX 7: batalkan timer debounce yang masih pending
+        (dipanggil Enter [instan] & _close — dua keystroke path).
+        Idempoten + TclError-safe (tree bisa sudah mati)."""
+        if self._search_after is not None:
+            with contextlib.suppress(Exception):
+                self.tree.after_cancel(self._search_after)
+            self._search_after = None
+
+    def _on_search_key(self, event=None):
+        """v3.9.72 — FIX 7: KeyRelease → jadwalkan _filter_list via debounce
+        (bukan langsung): ketik 'gula' = 4 keystroke → 4× O(#checkbox)
+        pack/forget dulu; kini 1× setelah jeda. Tombol navigasi/modifier
+        (query tak berubah) di-skip murni. Timer dipasang di TREE (hidup
+        lebih lama drp popup — sisa timer setelah popup ditutup no-op
+        aman: _filter_list memeriksa winfo_exists tiap checkbox)."""
+        ks = str(getattr(event, "keysym", "") or "")
+        if ks in ("Return", "KP_Enter", "Escape", "Tab", "Left", "Right",
+                  "Up", "Down", "Home", "End", "Prior", "Next",
+                  "Shift_L", "Shift_R", "Control_L", "Control_R"):
+            return
+        self._cancel_search_timer()
+        self._search_after = self.tree.after(
+            _HF_SEARCH_DEBOUNCE_MS, self._search_flush)
+
+    def _search_flush(self):
+        self._search_after = None
+        self._filter_list()
+
     def _on_search_enter(self, _event=None):
         """v3.9.13: Enter → hasil pencarian menjadi SELEKSI (permintaan
         user: "habis search, hasil search-ku itulah yang jadi
-        pilihan-nya"). Query kosong + Enter = reset; 0 hasil = 0 baris."""
+        pilihan-nya"). Query kosong + Enter = reset; 0 hasil = 0 baris.
+        v3.9.72 — FIX 7: Enter INSTAN — timer debounce live-preview
+        dibatalkan (Enter memfilter daftarnya sendiri lewat _apply_selection
+        → _filter_list sinkron; sisa timer hanya akan mengulang kerja sama)."""
+        self._cancel_search_timer()
         q = (self._search_var.get() or "").strip().lower()
         if self._values_list is None:
             return
@@ -2392,6 +2441,7 @@ class HeaderFilter:
         self._close()
 
     def _close(self):
+        self._cancel_search_timer()   # v3.9.72 — FIX 7: sisa debounce dibuang
         if self._popup is not None:
             try:
                 self._popup.grab_release()
@@ -2891,6 +2941,14 @@ class ColumnManager:
         win.geometry(f"+{x}+{y}")
 
 
+# v3.9.72 — PERF (audit 1-a FIX 1b): debounce apply filter clone ⛶ —
+# toggle checkbox beruntun (centang 5 nilai = 5 klik cepat) bergabung
+# jadi SATU rebuild dgn state final, bukan 5× freeze ~0.5-2.3s @29k.
+# 130ms cukup pendek utk terasa instan, cukup panjang utk menampung
+# burst klik; after() tetap dipanen di bawah grab_set (popup modal).
+_CLONE_FILTER_DEBOUNCE_MS = 130
+
+
 def _tree_row_passes(iid: str, kw: dict, col_idx: dict, active: dict,
                      value_get=None, parent_text: str = "") -> bool:
     """Cek 1 baris snapshot {text, values} lolos filter kolom aktif.
@@ -2953,6 +3011,13 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
     in-flight, cache lengkap diambil dari snapshot ``tree._full_items``
     yang ditinggalkan open_tree_maximized (dulu cache dibangun dari baris
     PARSIAL → sisa batch dibatalkan → clone terpotong diam-diam).
+
+    v3.9.72 — PERF (audit 1-a FIX 1): return handle ``cancel()`` batch
+    insert (None bila tidak ada batch yang berjalan — cache kosong /
+    tree mati) supaya pemanggil (attach_clone_filters) tahu apakah
+    ``on_done`` akan pernah dipanggil — dasar guard busy/pending; sort
+    batched (``_sort_insert_cancel``) juga dibatalkan dulu supaya
+    filter/sort yang berlomba tidak menyisakan baris tak terurut.
     """
     # v3.9.13: seleksi KOSONG = filter AKTIF (0 baris, semantik Excel) —
     # dulu truthiness `if s` menelan set() sebagai "tanpa filter".
@@ -2964,6 +3029,14 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
         prev = getattr(tree, "_row_filter_cancel", None)
         if prev is not None:
             prev()
+        # v3.9.72 — PERF (audit 1-a FIX 1): batch SORT yang masih berjalan
+        # juga dibatalkan — sort lama (async utk tabel besar) melanjutkan
+        # insert setelah delete di bawah = baris tak terfilter menyusup
+        # balik ke clone.
+        _prev_sort = getattr(tree, "_sort_insert_cancel", None)
+        if _prev_sort is not None:
+            with contextlib.suppress(Exception):
+                _prev_sort()
         cache = getattr(tree, "_row_filter_cache", None)
         if cache is None:
             full = getattr(tree, "_full_items", None)
@@ -2979,6 +3052,12 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
                     with contextlib.suppress(Exception):
                         finalize()
             else:
+                # v3.9.72 — PERF (audit 1-a FIX 1d): cache di-hitung SEKALI
+                # per sesi popup (disimpan di tree._row_filter_cache,
+                # dipakai ulang semua apply berikutnya) — loop tree.item()
+                # per baris (~678ms @29k) tidak diulang tiap toggle; clone
+                # ⛶ normal sudah menyediakan _full_items dari salinan awal
+                # (jalur rec() di bawah = fallback tree tanpa snapshot).
                 def rec(parent, out):
                     for iid in tree.get_children(parent):
                         it = tree.item(iid)
@@ -2993,12 +3072,12 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
                 rec("", cache)
             tree._row_filter_cache = cache
         if not cache:
-            return
+            return None
         kids_map: dict = {}
         for parent, iid, kw in cache:
             kids_map.setdefault(parent, []).append((iid, kw))
     except tk.TclError:
-        return
+        return None
 
     # v3.7 FIX: index values = urutan kolom LOGIS (bukan display) —
     # nilai item Treeview diindeks sesuai tree["columns"]
@@ -3030,24 +3109,37 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
     try:
         tree.delete(*tree.get_children(""))
     except tk.TclError:
-        return
+        return None
 
     # FIX B-14 (audit 2-b): rebuild dari cache memakai URUTAN ASLI —
     # toggle filter dulu mengembalikan urutan sort senyap. Kini sort
     # TERAKHIR tree (tree._last_sort, dicatat sort_tree_by_column)
     # dijalankan ulang SEBELUM on_done, jadi tag per-cell dipasang pada
     # URUTAN FINAL (sort dulu, reapply tag sesudahnya).
+    # v3.9.72 — PERF (audit 1-a FIX 1c): sort hanya dijalankan bila user
+    # benar-benar pernah menyortir (guard _last_sort None — clone yang
+    # tak pernah di-sort TIDAK membayar sort ulang ~1.2s @29k per toggle)
+    # dan kini berantai lewat on_done-nya sort_tree_by_column (async utk
+    # tabel besar — on_done tag tetap dipasang pada urutan FINAL).
     def _done():
         ls = getattr(tree, "_last_sort", None)
-        if ls is not None:
-            with contextlib.suppress(Exception):
-                sort_tree_by_column(
-                    tree, ls[0], reverse=ls[1], parse=ls[2],
-                    value_get=(ls[3] if len(ls) > 3 else None))
-        if on_done:
-            on_done()
+        if ls is None:
+            if on_done:
+                on_done()
+            return
+        try:
+            sort_tree_by_column(
+                tree, ls[0], reverse=ls[1], parse=ls[2],
+                value_get=(ls[3] if len(ls) > 3 else None),
+                on_done=on_done)
+        except Exception:  # noqa: BLE001 — defensive reapply path
+            # kegagalan sort tidak boleh menelan on_done (pemanggil
+            # memakainya utk reset busy/pending + reapply tag per-cell)
+            if on_done:
+                on_done()
     tree._row_filter_cancel = insert_tree_items(tree, items, batch=600,
                                                 on_done=_done)
+    return tree._row_filter_cancel
 
 
 def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
@@ -3079,14 +3171,72 @@ def attach_clone_filters(tree: ttk.Treeview, cols: list, *,
     None = tree itu sendiri (perilaku lama, 12 view lain tak berubah);
     hook `_clone_filter_apply` dipasang di KEDUA tree supaya test yang
     membacanya dari tree utama clone tetap jalan.
+
+    v3.9.72 — PERF (audit 1-a FIX 1a/1b): tiap toggle checkbox dulu
+    menjalankan rebuild PENUH sinkron (~2.3s freeze @29k) TANPA guard —
+    popup modal (grab_set) mem-serial semua klik. Kini (a) DEBOUNCE
+    ~130ms (after() tetap jalan di bawah grab): toggle beruntun bergabung
+    jadi SATU rebuild dgn state final; (b) _busy/_pending COALESCING
+    (mirror deviasi_view._refresh): klik saat rebuild berjalan → antre,
+    dijalankan SEKALI lagi di on_done (klik tak pernah hilang, tak pernah
+    dobel-rebuild). after() di bawah Toplevel → timer tetap memanen
+    event pump test yang menunggu apply final.
     """
     state: dict = {}
     target = tree if filter_tree is None else filter_tree
+    # v3.9.72 — box state busy/pending/timer (pola deviasi _busy/_pending)
+    box = {"busy": False, "pending": False, "after": None}
+
+    def _apply_now():
+        # jalankan rebuild SEKARANG; busy=true selama delete+insert+resort
+        # berjalan (cleared oleh _filter_done di on_done rantai apply).
+        box["busy"] = True
+        started = None
+
+        def _chain():
+            # on_after_filter view (reapply tag per-cell / mirror pane beku)
+            # dijalankan sebelum busy dilepas — gagal pun (defensive) tetap
+            # dilanjutkan supaya pending-flag tidak menggantung.
+            if on_after_filter:
+                with contextlib.suppress(Exception):
+                    on_after_filter()
+            _filter_done()
+
+        # suppress (bukan except): kegagalan rebuild = started tetap None →
+        # _filter_done manual di bawah (busy/pending tak menggantung).
+        with contextlib.suppress(Exception):
+            started = apply_tree_row_filters(
+                target, state, on_done=_chain,
+                value_get=value_get)
+        if not started:
+            # rebuild tidak memulai batch (cache kosong / tree mati) —
+            # on_done TIDAK akan pernah dipanggil → selesaikan manual
+            # supaya busy/pending tidak menggantung selamanya.
+            _filter_done()
+
+    def _filter_done():
+        box["busy"] = False
+        if box["pending"]:
+            box["pending"] = False
+            _apply_now()
+
+    def _apply_debounced():
+        box["after"] = None
+        if box["busy"]:
+            # rebuild masih berjalan → antre (dijalankan sekali di akhir)
+            box["pending"] = True
+            return
+        _apply_now()
 
     def on_apply(col, sel):
         state[col] = sel
-        apply_tree_row_filters(target, state, on_done=on_after_filter,
-                               value_get=value_get)
+        # debounce: cepat-toggle (klik beruntun di popup) bergabung jadi
+        # 1 rebuild dgn state final; timer lama dibatalkan dulu.
+        if box["after"] is not None:
+            with contextlib.suppress(Exception):
+                target.after_cancel(box["after"])
+        box["after"] = target.after(_CLONE_FILTER_DEBOUNCE_MS,
+                                     _apply_debounced)
 
     tree._clone_filter_apply = on_apply
     if filter_tree is not None and filter_tree is not tree:
@@ -3487,6 +3637,15 @@ class CellColorOverlay:
     Baris TERSELEKSI: bg/fg seleksi (style.map 'selected') dipakai HANYA
     bila sel tidak punya opsi tag-nya sendiri (sel berwarna tetap tampak
     berwarna saat barisnya dipilih).
+
+    v3.9.72 — FIX (audit 1-a FIX 3): baris TERSELEKSI kini MENANG atas
+    warna tag sel (parity perilaku seleksi Treeview native — sebelumnya
+    tabel penuh sel minus-merah/amber membuat seleksi baris TIDAK
+    terlihat sama sekali: user tak tahu baris mana yang diklik).
+    PENGECUALIAN: sel REGION seleksi-sel interaktif (tag ``cellsel`` —
+    enable_cell_select) TETAP memakai warnanya sendiri di atas seleksi:
+    region sengaja diberi warna lebih pekat dari seleksi baris (teal-200
+    vs teal-100) supaya feedback drag Ctrl+C per-sel tetap terlihat.
     """
 
     # <Button-1> ditangani handler `press` khusus (deteksi double manual)
@@ -3507,6 +3666,7 @@ class CellColorOverlay:
         self._tag_cells: dict = {}      # tag -> set[(iid, col)]
         self._tag_opts: dict = {}       # tag -> {background/foreground}
         self._by_iid: dict = {}         # iid -> [(col, opts), ...]
+        self._keep_sel_cells: set = set()  # v3.9.72 — FIX 3: sel region cellsel
         self._labels: dict = {}         # (iid, col) -> tk.Label (AKTIF)
         self._pool: list = []           # v3.9.29 — label nganggur (reuse)
         self._last_frac: dict = {}      # v3.9.29 — frac terakhir per opt
@@ -3728,14 +3888,21 @@ class CellColorOverlay:
         """Gabungkan semua tag sel → indeks per iid (hanya sel dgn opsi
         warna — tag tanpa background/foreground tak digambar)."""
         merged: dict = {}
+        # v3.9.72 — FIX 3: sel REGION seleksi-sel (cellsel) dikecualikan
+        # dari override seleksi-baris (region = feedback interaksi aktif —
+        # warnanya memang sengaja lebih pekat drp seleksi baris).
+        keep_sel: set = set()
         for tag, spec in self._tag_cells.items():
             opts = self._tag_opts.get(tag) or {}
             if not opts:
                 continue
+            if tag == _CELLSEL_TAG:
+                keep_sel |= spec
             for key in spec:
                 cell = merged.setdefault(key, {})
                 for k, v in opts.items():
                     cell[k] = v
+        self._keep_sel_cells = keep_sel
         by: dict = {}
         for (iid, col), opts in merged.items():
             by.setdefault(iid, []).append((col, opts))
@@ -3845,6 +4012,19 @@ class CellColorOverlay:
                 anchor = self._col_anchor(col)
                 bg = opts.get("background") or bg_row
                 fg = opts.get("foreground") or fg_row
+                # v3.9.72 — FIX (audit 1-a FIX 3): SELEKSI MENANG atas
+                # warna tag sel (parity native): baris terpilih tetap
+                # terlihat terpilih di tabel berwarna. fg seleksi dipakai
+                # bila tersedia (kontras terjaga); sel region ``cellsel``
+                # dikecualikan (feedback drag per-sel, lihat _rebuild).
+                # Redraw seleksi sudah terjadwal lewat binding
+                # <<TreeviewSelect>> yang ada di __init__ (murah & idempoten
+                # — cfg-skip v3.9.40 membuat no-op bila warna tak berubah).
+                if (iid in sel_set and sel_bg
+                        and key not in self._keep_sel_cells):
+                    bg = sel_bg
+                    if sel_fg:
+                        fg = sel_fg
                 # v3.9.40 — LOMPATI configure bila tak berubah: saat
                 # scroll, teks/warna/anchor/font sel identik (hanya posisi
                 # y yang bergeser) — configure ulang = invalidasi paint
@@ -3936,6 +4116,16 @@ class CellColorOverlay:
                 # state hanya bila int; delta HANYA utk <MouseWheel> dan
                 # bila int; num TIDAK PERNAH dikirim (event_generate
                 # menurunkan %b dari pola seq itu sendiri).
+                #
+                # v3.9.72 — FIX (audit 1-a FIX 4): semua jalur sukses
+                # terforward kini ``return "break"`` — event ASLI di label
+                # berhenti di bindtag label, TIDAK lanjut naik ke binding
+                # Toplevel (router roda install_wheel_router) yang menggulir
+                # tree yang SAMA dua kali (X11: 1 notch = 2 baris; probe
+                # /home/z/my-project/bench/probe_double_scroll.py). Bila
+                # terforward GAGAL (TclError), sengaja TIDAK break supaya
+                # binding di atas label tetap dapat kesempatan menangani
+                # event (fallback, bukan mati total).
                 try:
                     if _seq in ("<Button-4>", "<Button-5>"):
                         # X11 roda di sel warna: event_generate sintetis
@@ -3949,7 +4139,7 @@ class CellColorOverlay:
                         except tk.TclError:
                             return
                         _redraw_overlay_now(tree)
-                        return
+                        return "break"
                     lx, ly = lab.winfo_x(), lab.winfo_y()
                     kw = {"x": lx + event.x, "y": ly + event.y,
                           "warp": False}
@@ -3967,7 +4157,8 @@ class CellColorOverlay:
                             kw["delta"] = d
                     tree.event_generate(_seq, **kw)
                 except tk.TclError:
-                    pass
+                    return
+                return "break"
             return handler
 
         for seq in self._FORWARD_SEQS:
@@ -4103,6 +4294,12 @@ class HeadingTintOverlay:
         self.color = color
         self._labels: dict = {}
         self._alive = True
+        # v3.9.72 — PERF (audit 1-a FIX 6): frac xview terakhir — guard
+        # anti-refresh-berlebih (pola CellColorOverlay._last_frac): callback
+        # xscrollcommand ikut terpanggil saat insert/delete baris meski
+        # offset horizontal TIDAK berubah → refresh() penuh (baca lebar semua
+        # kolom + place label) tiap batch render = boros di tabel besar.
+        self._last_frac: tuple | None = None
         # registrasi mandiri (pola CellColorOverlay): handler zoom/refresh
         # menemukan overlay via atribut ini tanpa perlu view menyimpan.
         with contextlib.suppress(AttributeError, tk.TclError):
@@ -4130,7 +4327,13 @@ class HeadingTintOverlay:
             if _orig:
                 with contextlib.suppress(tk.TclError):
                     self.tree.tk.call(_orig, first, last)
-            self.refresh()
+            # v3.9.72 — FIX 6: hanya refresh bila frac xview BENAR-benar
+            # berubah (pola _last_frac CellColorOverlay) — callback ulang
+            # tanpa pergeseran horizontal cukup di-skip.
+            frac = (str(first), str(last))
+            if self._alive and frac != self._last_frac:
+                self._last_frac = frac
+                self.refresh()
 
         with contextlib.suppress(tk.TclError):
             self.tree.configure(**{opt: wrap})
@@ -4207,7 +4410,7 @@ class HeadingTintOverlay:
                                 -1 if _seq == "<Button-4>" else 1, "units")
                         except tk.TclError:
                             return
-                        return
+                        return "break"
                     lx, ly = lab.winfo_x(), lab.winfo_y()
                     kw = {"x": lx + event.x, "y": ly + event.y,
                           "warp": False}
@@ -4220,7 +4423,12 @@ class HeadingTintOverlay:
                             kw["delta"] = d
                     tree.event_generate(_seq, **kw)
                 except tk.TclError:
-                    pass
+                    return
+                # v3.9.72 — FIX (audit 1-a FIX 4): "break" setelah teruskan
+                # — tanpa ini event lanjut naik ke bindtag Toplevel → router
+                # roda menggulir tree yang SAMA 2× (double-scroll X11;
+                # mirror CellColorOverlay._bind_forward).
+                return "break"
             return handler
 
         for seq in ("<Button-3>", "<ButtonRelease-1>", "<B1-Motion>",
@@ -4365,8 +4573,17 @@ def _remove_cell_tag(tree: ttk.Treeview, tag: str, cells) -> None:
 
 # --- Sort engine linear (v3.3) ------------------------------------------------
 
+# v3.9.72 — PERF (audit 1-a FIX 2): tabel datar ≥ ambang ini di-sort via
+# insert_tree_items BATCHED (after() per batch) — delete+reinsert sinkron
+# membekukan UI 352ms@20k / 1164ms@29k per klik heading. Di bawah ambang,
+# jalur sinkron lama dipertahankan (seketika + return-contract lama utk
+# caller/test yang membaca urutan langsung setelah panggilan).
+_SORT_ASYNC_MIN_ROWS = 1500
+
+
 def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
-                        parse=None, value_get=None) -> None:
+                        parse=None, value_get=None,
+                        on_done=None) -> None:
     """Sort baris top-level tree berdasarkan kolom — WAKTU LINEAR (v3.3).
 
     Versi lama (v3.0-v3.2): ``tree.move(k, "", i)`` per baris → O(n²)
@@ -4383,6 +4600,17 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
     v3.9.55 — ``value_get(iid)``: override sumber nilai sort per baris
     (deviasi_view memakainya utk kolom MERGE-VERTIKAL Nama Barang/Rank —
     nilai tree baris lanjutan blank; kunci sort = nilai RAW snapshot).
+
+    v3.9.72 — ``on_done`` (audit 1-a FIX 2): callback dipanggil SEKALI di
+    akhir sort. Tabel datar besar (≥ _SORT_ASYNC_MIN_ROWS) memakai jalur
+    INSERT BATCHED (pola insert_tree_items — UI tetap responsif) sehingga
+    PENYELESAIANNYA ASINKRON: pemanggil yang butuh kerja pasca-sort (reapply
+    tag per-cell clone ⛶, dsb.) harus bekerja di on_done, bukan langsung
+    setelah fungsi kembali. Seleksi + posisi scroll (yview fraction)
+    di-snapshot sebelum delete dan dipulihkan di on_done. Batch insert
+    sort yang masih berjalan dibatalkan bila sort BARU dimulai (handle
+    cancel disimpan di ``tree._sort_insert_cancel`` — pola
+    _row_filter_cancel).
     """
     # FIX B-14 (audit 2-b): catat sort TERAKHIR di tree — apply_tree_row_
     # filters (rebuild clone pasca toggle filter) menjalankan ulang sort
@@ -4394,6 +4622,8 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
         pass
     children = list(tree.get_children(""))
     if len(children) < 2:
+        if on_done:
+            on_done()
         return
     try:
         col_idx = list(tree["columns"]).index(col)
@@ -4448,11 +4678,20 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
     # ↕, tabel berubah urutan tanpa jejak). Panah lama di kolom lain dibersihkan.
     _set_sort_arrow(tree, col, reverse)
     if order == children:
+        if on_done:
+            on_done()
         return
     try:
         sel = set(tree.selection())
     except tk.TclError:
         sel = set()
+    # v3.9.72 — PERF (audit 1-a FIX 2): posisi scroll di-snapshot SEBELUM
+    # delete supaya bisa dipulihkan pasca reinsert (delete me-reset yview
+    # ke atas — baris yang sedang dilihat user "melompat" ke puncak tabel).
+    try:
+        yv = float(tree.yview()[0])
+    except (tk.TclError, ValueError, IndexError):
+        yv = 0.0
 
     # FIX B-09 (audit 2-b): tree BERHIRARKI → tree.move per baris top-level
     # (subtree anak, text #0, dan state open IKUT TERJAGA — jalur lama
@@ -4468,6 +4707,50 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
                 tree.move(k, "", i)
             except tk.TclError:
                 pass
+        if on_done:
+            on_done()
+        return
+
+    def _restore_and_done():
+        """Pulihkan seleksi + yview LALU on_done — dipakai jalur sinkron
+        (langsung) maupun batched (dari on_done insert_tree_items)."""
+        keep = [k for k in order if k in sel]
+        if keep:
+            try:
+                tree.selection_set(keep)
+            except tk.TclError:
+                pass
+        if yv > 0.0:
+            with contextlib.suppress(tk.TclError):
+                tree.yview_moveto(yv)
+        if on_done:
+            on_done()
+
+    # v3.9.72 — PERF (audit 1-a FIX 2): tabel datar BESAR → insert BATCHED
+    # (pola insert_tree_items): delete+reinsert sinkron = 352ms@20k /
+    # 1164ms@29k freeze per klik heading. Batch sort LAMA yang masih
+    # berjalan dibatalkan dulu (sort baru mengalahkan sort lama — pola
+    # _row_filter_cancel FIX B-07). Seleksi+yview dipulihkan di on_done
+    # (iid identik dipakai ulang sehingga seleksi tetap valid).
+    if len(order) >= _SORT_ASYNC_MIN_ROWS:
+        prev = getattr(tree, "_sort_insert_cancel", None)
+        if prev is not None:
+            with contextlib.suppress(Exception):
+                prev()
+        items = [("", k, {"text": info[k].get("text", ""),
+                          "values": info[k].get("values"),
+                          "open": info[k].get("open", False),
+                          "tags": tuple(info[k].get("tags") or ())})
+                 for k in order]
+        try:
+            tree.delete(*children)
+        except tk.TclError:
+            if on_done:
+                on_done()
+            return
+        cancel = insert_tree_items(tree, items, batch=600,
+                                   on_done=_restore_and_done)
+        tree._sort_insert_cancel = cancel
         return
 
     tree.delete(*children)
@@ -4476,12 +4759,7 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
         tree.insert("", "end", iid=k, text=it.get("text", ""),
                     values=it.get("values"), open=it.get("open", False),
                     tags=tuple(it.get("tags") or ()))
-    keep = [k for k in order if k in sel]
-    if keep:
-        try:
-            tree.selection_set(keep)
-        except tk.TclError:
-            pass
+    _restore_and_done()
 
 
 def _set_sort_arrow(tree: ttk.Treeview, col: str, descending: bool) -> None:
@@ -4512,6 +4790,72 @@ def _set_sort_arrow(tree: ttk.Treeview, col: str, descending: bool) -> None:
         if txt != cur:
             with contextlib.suppress(tk.TclError):
                 tree.heading(c, text=txt)
+
+
+# --- Snapshot / restore view-state tree (v3.9.72) -------------------------------
+#
+# PERF/UX (audit 1-a FIX 8): utilitas bersama utk view yang me-rebuild
+# tabel (clear + insert batched) — pola yang SUDAH dipakai laporan_deviasi
+# (_restore_view_state) & rincian_po tapi HARUS ditulis ulang per view.
+# Pemakaian (di view):
+#     snap = snapshot_tree_view(self.tree)      # SEBELUM delete + re-render
+#     ... run_async / insert_tree_items(..., on_done=render_done)
+#     def render_done():
+#         restore_tree_view(self.tree, snap)    # di callback render selesai
+# sort_tree_by_column sendiri sudah menyimpan seleksi+yview secara internal
+# (FIX 2); helper ini utk jalur rebuild MILIK VIEW.
+
+
+def snapshot_tree_view(tree: ttk.Treeview) -> dict | None:
+    """Simpan posisi scroll + seleksi SEBUAH tree utk dipulihkan pasca
+    rebuild (clear + re-insert batched).
+
+    Return ``{"yview": (first, last), "selection": [iid, ...]}`` atau
+    None bila tree mati / tanpa baris (tak ada yang perlu dipulihkan).
+    Sengaja TRIVIAL & TclError-safe: dipanggil di jalur render panas,
+    kegagalan (tree mati di tengah refresh) tidak boleh melempar.
+    """
+    try:
+        if not tree.winfo_exists():
+            return None
+        kids = tree.get_children("")
+        if not kids:
+            return None
+        return {"yview": tuple(tree.yview()),
+                "selection": list(tree.selection())}
+    except tk.TclError:
+        return None
+
+
+def restore_tree_view(tree: ttk.Treeview, snap: dict | None,
+                      *, restore_selection: bool = True) -> None:
+    """Pulihkan posisi scroll (yview fraction) + seleksi dari snapshot
+    `snapshot_tree_view` — panggil di callback RENDER SELESAI (on_done
+    insert_tree_items / render_done view), bukan seketika setelah delete.
+
+    - ``snap`` None / rusak → no-op aman (view baru/empty state).
+    - Seleksi DIFILTER ke iid yang MASIH ADA (rebuild terfilter bisa
+      menghilangkan baris terpilih — selection_set dgn iid mati menimbulkan
+      TclError); ``restore_selection=False`` utk rebuild yang memang
+      harus me-reset seleksi (mis. ganti mode tampilan).
+    - yview dipulihkan SEBELUM seleksi (see() seleksi bisa menggeser
+      scroll; urutan ini menjaga posisi akhir = posisi user).
+    """
+    if not snap:
+        return
+    try:
+        yv = snap.get("yview") or (0.0, 1.0)
+        with contextlib.suppress(tk.TclError, ValueError, TypeError):
+            tree.yview_moveto(float(yv[0]))
+        if restore_selection:
+            sel = [str(i) for i in (snap.get("selection") or ())
+                   if tree.exists(str(i))]
+            if sel:
+                with contextlib.suppress(tk.TclError):
+                    tree.selection_set(sel)
+    except (tk.TclError, TypeError, ValueError, AttributeError):
+        # snap rusak (bukan dict hasil snapshot_tree_view) → no-op aman
+        pass
 
 
 # --- Column resize + auto-fit (v3.4) -------------------------------------------
@@ -5746,18 +6090,76 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
 
     items = []
 
-    def collect(parent):
-        for iid in source_tree.get_children(parent):
-            it = source_tree.item(iid)
-            items.append((parent, iid, {
-                "text": it.get("text", ""),
-                "values": it.get("values", ""),
-                "tags": it.get("tags", ""),
-                "open": it.get("open", False),
-            }))
-            collect(iid)
+    # v3.9.72 — PERF (audit 1-a FIX 9): collect() snapshot sinkron
+    # (~678ms @29k) MEMBLOK main thread SEBELUM overlay loading (after
+    # 120ms) sempat tergambar → klik ⛶ terasa mati tanpa umpan balik.
+    # Kini snapshot diambil per-chunk via after() (antrean event tetap
+    # hidup → overlay tergambar dulu, UI responsif). Kontrak FIX 6b-04
+    # DIJAGA: ``_full_items`` dipasang SEKARANG (list yang tumbuh) dan
+    # cancel pada fase collect = FLUSH sisa snapshot SINKRON →
+    # apply_tree_row_filters (filter diklik di tengah salin) selalu
+    # mendapat snapshot PENUH, bukan baris parsial.
+    _COPY_CHUNK = 1500      # ~25ms/chunk — antar after() layar tetap hidup
+    copy_state = {"phase": "collect", "idx": 0, "cancelled": False,
+                  "timer": None}
 
-    collect("")
+    todo: list[tuple[str, str]] = []      # (parent, iid) urutan pre-order
+
+    def _index(parent):
+        # indeks dulu (murah — hanya get_children, ~34ms @29k), baru
+        # snapshot item() yang mahal di-chunk.
+        for iid in source_tree.get_children(parent):
+            todo.append((parent, str(iid)))
+            _index(iid)
+
+    try:
+        _index("")
+    except tk.TclError:
+        todo = []
+
+    def _snap_one(parent: str, iid: str):
+        it = source_tree.item(iid)
+        items.append((parent, iid, {
+            "text": it.get("text", ""),
+            "values": it.get("values", ""),
+            "tags": it.get("tags", ""),
+            "open": it.get("open", False),
+        }))
+
+    def _flush_collect():
+        # selesaikan sisa snapshot SEKARANG (sinkron) — hanya dipakai
+        # jalur cancel (filter/sort di tengah salin): cache filter butuh
+        # daftar PENUH (FIX 6b-04 — dulu cache parsial = clone terpotong).
+        i = copy_state["idx"]
+        n = len(todo)
+        while i < n:
+            _snap_one(*todo[i])
+            i += 1
+        copy_state["idx"] = n
+
+    def _snap_chunk():
+        copy_state["timer"] = None
+        if copy_state["cancelled"]:
+            return
+        try:
+            if not (win.winfo_exists() and new_tree.winfo_exists()):
+                return
+        except tk.TclError:
+            return
+        end = min(copy_state["idx"] + _COPY_CHUNK, len(todo))
+        i = copy_state["idx"]
+        while i < end:
+            _snap_one(*todo[i])
+            i += 1
+        copy_state["idx"] = end
+        if end < len(todo):
+            try:
+                copy_state["timer"] = win.after(1, _snap_chunk)
+            except tk.TclError:
+                _flush_collect()
+                _start_insert()
+            return
+        _start_insert()
 
     def done():
         # FIX 6b-04 (audit 6-b): idempoten — bisa dipanggil normal oleh
@@ -5782,27 +6184,67 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
             with contextlib.suppress(Exception):
                 on_render_done(new_tree)
 
+    _insert_cancel_fn = [lambda: None]    # diisi _start_insert (bawah)
+
+    def _start_insert():
+        copy_state["phase"] = "insert"
+        if copy_state["cancelled"] or not items:
+            # dibatalkan (filter sudah mengambil alih) / sumber kosong →
+            # tetap finalisasi (hide overlay + label + on_render_done);
+            # insert_tree_items([]) memanggil done() sendiri via jalur
+            # items-kosong, cancel-fn no-op.
+            if not items:
+                _insert_cancel_fn[0] = insert_tree_items(
+                    new_tree, items, batch=600, on_done=done)
+            return
+        _insert_cancel_fn[0] = insert_tree_items(
+            new_tree, items, batch=600, on_done=done,
+            chunk_callback=lambda n, t: count_var.set(
+                f"Menyalin {fmt_int_id(n)}/{fmt_int_id(t)} baris…"))
+        # v3.9.71 — clone freeze-pane: sisi nama ikut tersalin (batch
+        # sendiri, iid/teks/tag identik — text/tags/open saja, kolom
+        # matrix tak dibawa)
+        if frozen_pane is not None:
+            frozen_pane.mirror_items(items, batch=600)
+
+    def insert_cancel():
+        # FIX B-07 (audit 2-b) + v3.9.72 FIX 9: SATU handle utk dua fase —
+        # memfilter/menutup window saat SALIN masih berjalan membatalkan
+        # salinan (fase collect: sisa snapshot di-flush sinkron supaya
+        # cache filter PENUH; fase insert: stop batch).
+        if copy_state["cancelled"]:
+            return
+        copy_state["cancelled"] = True
+        if copy_state["timer"] is not None:
+            with contextlib.suppress(Exception):
+                win.after_cancel(copy_state["timer"])
+            copy_state["timer"] = None
+        if copy_state["phase"] == "collect":
+            # flush hanya bila clone masih hidup (destroy = tak ada yang
+            # membaca _full_items lagi — hemat 678ms saat menutup).
+            try:
+                if new_tree.winfo_exists():
+                    _flush_collect()
+            except tk.TclError:
+                pass
+            copy_state["phase"] = "cancelled"
+            return
+        with contextlib.suppress(Exception):
+            _insert_cancel_fn[0]()
+
     # FIX 6b-04 (audit 6-b): simpan snapshot item PENUH + finalizer di
     # tree SELAMA copy berjalan — apply_tree_row_filters memakainya bila
     # filter diklik sebelum copy selesai (cache lengkap, bukan baris
     # parsial) dan memanggil _copy_finalize utk efek samping done().
     new_tree._full_items = items
     new_tree._copy_finalize = done
-
-    insert_cancel = insert_tree_items(new_tree, items, batch=600,
-                                      on_done=done,
-                                      chunk_callback=lambda n, t: count_var.set(
-                                          f"Menyalin {fmt_int_id(n)}/"
-                                          f"{fmt_int_id(t)} baris…"))
-    # v3.9.71 — clone freeze-pane: sisi nama ikut tersalin (batch sendiri,
-    # iid/teks/tag identik — text/tags/open saja, kolom matrix tak dibawa)
-    if frozen_pane is not None:
-        frozen_pane.mirror_items(items, batch=600)
     # FIX B-07 (audit 2-b): daftarkan cancel batch ke tree — memfilter /
     # menyortir clone saat copy awal masih berjalan kini MEMBATALKAN batch
     # lama dulu (apply_tree_row_filters mengecek atribut ini); dulu cache
     # filter dibangun dari baris PARSIAL → clone rusak diam-diam.
     new_tree._row_filter_cancel = insert_cancel
+
+    _snap_chunk()   # mulai salinan batched (overlay tergambar duluan)
 
     def _on_win_destroy(event):
         # batalkan batch + timer yang masih pending saat window ditutup
@@ -5895,6 +6337,11 @@ class TreeFindPopup:
         self._cur = -1              # indeks match aktif
         self._after_id = None
         self._digest: dict = {}     # v3.9.64 — iid → digest nilai baris saat match
+        # v3.9.72 — PERF (audit 1-a FIX 5): iid match AKTIF saat ini — dasar
+        # re-tag INKREMENTAL saat navigasi (‹/›/Enter hanya memindah CUR-tag
+        # drp baris lama ke baris baru; dulu _show_current menulis ulang tag
+        # ke SEMUA match tiap langkah = 68ms/step @20k baris banyak-match).
+        self._cur_iid = None
         # v3.9.64 — single-active (audit 15-c F-07): tutup popup tree LAIN
         _prev = TreeFindPopup._ACTIVE
         if _prev is not None:
@@ -5959,6 +6406,7 @@ class TreeFindPopup:
             pass   # iid hilang di tengah jalan (re-render / clone ⛶)
 
     def _clear_tags(self) -> None:
+        self._cur_iid = None   # v3.9.72 — FIX 5: basis incremental ikut reset
         for iid in list(self._matches):
             try:
                 tags = tuple(
@@ -6067,10 +6515,21 @@ class TreeFindPopup:
         except tk.TclError:
             self._refresh_stale()
             return
-        for other in self._matches:
-            if other != iid:
-                self._apply_tag(other, FIND_HIT_TAG)
-        self._apply_tag(iid, FIND_CUR_TAG)
+        # v3.9.72 — PERF (audit 1-a FIX 5): re-tag INKREMENTAL — pindahkan
+        # CUR-tag drp baris AKTIF LAMA ke baris baru (2 penulisan tree.item
+        # per langkah, bukan O(semua-match) 68ms/step @20k). HIT-tag semua
+        # match dipasang SEKALI oleh _recompute (query baru); _apply_tag
+        # MERGE dgn tag milik view (zebra/cek/negative utuh — tuple tag
+        # ditulis ulang dgn tag lain dipertahankan; prioritas tag Treeview
+        # = URUTAN CREATE, urutan dalam tuple TIDAK berpengaruh — aman).
+        old = self._cur_iid
+        if old != iid:
+            if old is not None:
+                # baris lama kembali jadi match biasa (HIT); _apply_tag
+                # menelan TclError bila iid lama sudah terhapus view.
+                self._apply_tag(old, FIND_HIT_TAG)
+            self._apply_tag(iid, FIND_CUR_TAG)
+            self._cur_iid = iid
         with contextlib.suppress(tk.TclError):
             self.tree.see(iid)
 

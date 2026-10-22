@@ -47,18 +47,22 @@ def _sheet_cfg(config, key: str, default: str) -> str:
     return str(val) if val else default
 
 
-def query_dbs_kategori(config) -> pd.DataFrame:
+def query_dbs_kategori(config, stop_event=None) -> pd.DataFrame:
     """Mirror M: shared DBS_Kategori = fnDBSKategori(Config[RootPath] & Config[Folders][DBSKategori])
 
     v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['DBSKategori']
-    (default 'Sheet1' — perilaku lama)."""
+    (default 'Sheet1' — perilaku lama).
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama."""
     return fn_dbs_kategori(config.folder("DBSKategori"),
                            sheet_name=_sheet_cfg(config, "DBSKategori",
-                                                 SHEET_DBS_KATEGORI))
+                                                 SHEET_DBS_KATEGORI),
+                           stop_event=stop_event)
 
 
-def query_4217(config, protected_barangs: list | set | None = None
-               ) -> pd.DataFrame:
+def query_4217(config, protected_barangs: list | set | None = None,
+               stop_event=None) -> pd.DataFrame:
     """Mirror M: shared #"4217" = fn4217(Config[RootPath] & Config[Folders][SaldoAwal4217])
 
     v3.9.32: whitelist kategori dari config ("KategoriBarang4217") ikut
@@ -71,47 +75,59 @@ def query_4217(config, protected_barangs: list | set | None = None
     di sumber lain — rekap/IN/out/BK; diisi build_append1) diteruskan ke
     fn_4217: baris barang itu SELALU lolos whitelist kategori (saldo awal
     tidak boleh hilang — akar "barang ada di 42.17 tapi tidak muncul di
-    Deviasi GR")."""
+    Deviasi GR").
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama."""
     return fn_4217(config.folder("SaldoAwal4217"),
                    kategori_whitelist=getattr(config, "KategoriBarang4217",
                                               None),
                    sheet_name=_sheet_cfg(config, "SaldoAwal4217",
                                          SHEET_4217),
-                   protected_barangs=protected_barangs)
+                   protected_barangs=protected_barangs,
+                   stop_event=stop_event)
 
 
 # =============================================================================
 # TRANSACTION QUERIES
 # =============================================================================
 
-def query_2205(config) -> pd.DataFrame:
+def query_2205(config, stop_event=None) -> pd.DataFrame:
     """Mirror M: shared #"2205" = fn2205(Config[RootPath] & Config[Folders][Penjualan2205])
 
     v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['Penjualan2205']
-    (default '#22.05. Rincian Penjualan per B' — perilaku lama)."""
+    (default '#22.05. Rincian Penjualan per B' — perilaku lama).
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama."""
     return fn_2205(config.folder("Penjualan2205"),
                    sheet_name=_sheet_cfg(config, "Penjualan2205",
-                                         SHEET_2205))
+                                         SHEET_2205),
+                   stop_event=stop_event)
 
 
-def query_4215_gudang_kirim(config) -> pd.DataFrame:
+def query_4215_gudang_kirim(config, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: shared #"4215_Gudang Kirim" = let
         fn4215(Kirim4215, "kirim"), filter NAMA RESTO <> ""
 
     v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['Pemindahan4215']
     (default '#42.15. Pemindahan Barang (KIRI' — perilaku lama).
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama.
     """
     result = fn_4215(config.folder("Kirim4215"), "kirim",
                      sheet_name=_sheet_cfg(config, "Pemindahan4215",
-                                           SHEET_4215))
+                                           SHEET_4215),
+                     stop_event=stop_event)
     if not result.empty and "NAMA RESTO" in result.columns:
         mask = result["NAMA RESTO"].notna() & (result["NAMA RESTO"].astype(str).str.strip() != "")
         result = result[mask].reset_index(drop=True)
     return result
 
 
-def query_3224(config) -> pd.DataFrame:
+def query_3224(config, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: shared #"3224" = let
         fn3224(RI3224, "berjalan"), Changed Type #Tgl/Jam Pembuatan IT → datetime
@@ -119,17 +135,21 @@ def query_3224(config) -> pd.DataFrame:
     v3.9.33 — AUDIT FIX (48-a): sheet dari config Sheets['Penerimaan3224']
     (default SHEET_3224 — perilaku lama; query lalu memakai nilai yang
     sama sebagai probe _resolve_lalu_sheet, mirror pola 42.05).
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama.
     """
     result = fn_3224(config.folder("RI3224"), "berjalan",
                      sheet_name=_sheet_cfg(config, "Penerimaan3224",
-                                           SHEET_3224))
+                                           SHEET_3224),
+                     stop_event=stop_event)
     if "#Tgl/Jam Pembuatan IT" in result.columns:
         # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah
         result["#Tgl/Jam Pembuatan IT"] = to_datetime_robust(result["#Tgl/Jam Pembuatan IT"])
     return result
 
 
-def query_3224_bulan_lalu(config) -> pd.DataFrame:
+def query_3224_bulan_lalu(config, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: shared #"3224_Bulan Lalu" = let
         fn3224(RI3224Lalu, "lalu"), Changed Type #Tgl/Jam Pembuatan IT → datetime
@@ -137,6 +157,9 @@ def query_3224_bulan_lalu(config) -> pd.DataFrame:
     FIX R-3 (audit 34-d): sheet folder lalu di-resolve via
     _resolve_lalu_sheet (fallback deterministik prefiks modul '#32.24') —
     folder lalu dgn sheet bernama beda tidak lagi 0 baris senyap.
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama.
     """
     folder = config.folder("RI3224Lalu")
     # v3.9.33 — AUDIT FIX (48-a): probe nama sheet lalu memakai key config
@@ -144,7 +167,8 @@ def query_3224_bulan_lalu(config) -> pd.DataFrame:
     # jadi fallback bila nama tak ada di folder lalu).
     sheet_name = _resolve_lalu_sheet(
         folder, _sheet_cfg(config, "Penerimaan3224", SHEET_3224), "#32.24")
-    result = fn_3224(folder, "lalu", sheet_name=sheet_name)
+    result = fn_3224(folder, "lalu", sheet_name=sheet_name,
+                     stop_event=stop_event)
     if "#Tgl/Jam Pembuatan IT" in result.columns:
         # v3.9.28: to_datetime_robust — .xlsb/pyxlsb memberi serial mentah
         result["#Tgl/Jam Pembuatan IT"] = to_datetime_robust(result["#Tgl/Jam Pembuatan IT"])
@@ -185,13 +209,17 @@ def _resolve_lalu_sheet(folder_path: str, sheet_name: str,
     return sheet_name
 
 
-def query_4205(config) -> pd.DataFrame:
-    """Mirror M: shared #"4205" = fn4205(Config[RootPath] & Config[Folders][Pemindahan4205])"""
+def query_4205(config, stop_event=None) -> pd.DataFrame:
+    """Mirror M: shared #"4205" = fn4205(Config[RootPath] & Config[Folders][Pemindahan4205])
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama."""
     sheet_name = config.sheet("Pemindahan4205")
-    return fn_4205(config.folder("Pemindahan4205"), sheet_name=sheet_name)
+    return fn_4205(config.folder("Pemindahan4205"), sheet_name=sheet_name,
+                   stop_event=stop_event)
 
 
-def query_4205_bulan_lalu(config) -> pd.DataFrame:
+def query_4205_bulan_lalu(config, stop_event=None) -> pd.DataFrame:
     """v3.9.17 — mirror pola shared #"3224_Bulan Lalu": fn_4205(mode="lalu")
     atas folder Pemindahan4205Lalu ("4.1 4205 Bulan Lalu") → penambah IN
     periode ujung bulan lalu (5 hari terakhir file, Tanggal dinegasikan —
@@ -201,58 +229,72 @@ def query_4205_bulan_lalu(config) -> pd.DataFrame:
     FIX R-3 (audit 34-d): sheet folder lalu kini dari key DEDIKASI
     'Pemindahan4205Lalu' (di-default ke nilai berjalan — pola 32.24)
     + fallback deterministik prefiks modul '#42.05' via
-    _resolve_lalu_sheet → sheet lalu bernama beda ≠ 0 baris senyap."""
+    _resolve_lalu_sheet → sheet lalu bernama beda ≠ 0 baris senyap.
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama."""
     folder = config.folder("Pemindahan4205Lalu")
     sheet_name = _resolve_lalu_sheet(
         folder, config.sheet("Pemindahan4205Lalu"), "#42.05")
-    return fn_4205(folder, sheet_name=sheet_name, mode="lalu")
+    return fn_4205(folder, sheet_name=sheet_name, mode="lalu",
+                   stop_event=stop_event)
 
 
-def query_9901(config) -> pd.DataFrame:
+def query_9901(config, stop_event=None) -> pd.DataFrame:
     """Process 9901 file (mutasi tanpa nomor penerimaan) → sumber IN tambahan.
 
     Filter: Nomor # Penerimaan Barang = blank, Jenis = Persediaan.
     Kolom: #Prime.Qty → Value, Nama barang → Nama Barang,
           Nama cabang → NAMA RESTO (extract after ".", e.g., "1137.CKGPAH" → "CKGPAH"),
           Tanggal → Tanggal (day).
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file ×
+    sheet — audit 1-d). Default None = perilaku lama.
     """
-    return fn_9901(config.folder("Data9901"))
+    return fn_9901(config.folder("Data9901"), stop_event=stop_event)
 
 
 # =============================================================================
 # OUT & IN (combine queries)
 # =============================================================================
 
-def query_out(config) -> pd.DataFrame:
+def query_out(config, stop_event=None) -> pd.DataFrame:
     """
     22.05 sales — SEMUA dokumen masuk KECUALI kode SI (v3.9.71, user:
     "22.05 tanpa kode SI ya maaf aku lupa bilang kemarin" — lanjutan
     v3.9.70 "semua kode masuk": Nomor # berawalan "SI." dikecualikan;
     ACR./RETUR./dll. tetap masuk). JENIS = "OUT".
 
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama.
+
     Previously combined with 4215 Kirim. Split per user request:
     COM formula needs BK = 42.15 Kirim only (separate from sales).
     """
-    q2205 = query_2205(config)
+    q2205 = query_2205(config, stop_event=stop_event)
     if not q2205.empty:
         q2205 = q2205.copy()
         q2205["JENIS"] = "OUT"
     return q2205 if not q2205.empty else pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
 
-def query_barang_keluar(config) -> pd.DataFrame:
+def query_barang_keluar(config, stop_event=None) -> pd.DataFrame:
     """
     42.15 Kirim (goods sent to other branches). JENIS = "BARANG KELUAR".
     Separated from OUT per user request.
+
+    stop_event: v3.9.72 — diteruskan ke reader (checkpoint ⏹ antar file —
+    audit 1-d). Default None = perilaku lama.
     """
-    result = query_4215_gudang_kirim(config)
+    result = query_4215_gudang_kirim(config, stop_event=stop_event)
     if not result.empty:
         result = result.copy()
         result["JENIS"] = "BARANG KELUAR"
     return result if not result.empty else pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value", "JENIS"])
 
 
-def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
+def query_in(config, detail_out: dict | None = None,
+             stop_event=None) -> pd.DataFrame:
     """
     IN source = Table.Combine({3224, 3224_Bulan_Lalu, 4205,
     4205_Bulan_Lalu (v3.9.17 — folder "4.1 4205 Bulan Lalu", penambah IN
@@ -280,12 +322,15 @@ def query_in(config, detail_out: dict | None = None) -> pd.DataFrame:
     dari pipeline karena sudah digantikan oleh 9901 (folder 30. 9901).
     9901 pakai #Prime.Qty (sudah unit utama) — tidak perlu konversi satuan.
     fn_pi.py + fn_konversi_satuan.py sudah dihapus dari codebase.
+
+    stop_event: v3.9.72 — diteruskan ke SEMUA sub-query sumber IN
+    (checkpoint ⏹ antar file — audit 1-d). Default None = perilaku lama.
     """
-    q3224 = query_3224(config)
-    q3224_lalu = query_3224_bulan_lalu(config)   # v3.5: selalu baca bulan lalu
-    q4205 = query_4205(config)
-    q4205_lalu = query_4205_bulan_lalu(config)  # v3.9.17: penambah IN ujung bulan lalu
-    q9901 = query_9901(config)
+    q3224 = query_3224(config, stop_event=stop_event)
+    q3224_lalu = query_3224_bulan_lalu(config, stop_event=stop_event)   # v3.5: selalu baca bulan lalu
+    q4205 = query_4205(config, stop_event=stop_event)
+    q4205_lalu = query_4205_bulan_lalu(config, stop_event=stop_event)  # v3.9.17: penambah IN ujung bulan lalu
+    q9901 = query_9901(config, stop_event=stop_event)
     print(f"    9901 (mutasi tanpa penerimaan): {len(q9901)} rows")
 
     tagged = [
@@ -344,7 +389,7 @@ IN_DETAIL_COLUMNS = [
 # Full Rekap Mentah SO
 # =============================================================================
 
-def query_full_rekap_mentah_so(config) -> pd.DataFrame:
+def query_full_rekap_mentah_so(config, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: shared #"Full Rekap Mentah SO" = let
         a = fnRekapMentah(RekapBerjalan, "berjalan", {"BARANG MASUK", "SO"}),
@@ -354,12 +399,18 @@ def query_full_rekap_mentah_so(config) -> pd.DataFrame:
         e = select {NAMA RESTO, Nama Barang, JENIS, Tanggal, Value},
         f = Tanggal → Int64
 
+    stop_event: v3.9.72 — diteruskan ke fn_rekap_mentah kedua folder
+    (checkpoint ⏹ antar file per-resto & antar sheet fallback gabungan —
+    audit 1-d). Default None = perilaku lama.
+
     (v3.5: LightMode dihapus — RekapLalu SELALU dibaca.)
     """
     jenis_filter = ["BARANG MASUK", "SO"]
 
-    a = fn_rekap_mentah(config.folder("RekapBerjalan"), "berjalan", jenis_filter=jenis_filter)
-    b = fn_rekap_mentah(config.folder("RekapLalu"), "lalu", jenis_filter=jenis_filter)   # v3.5: selalu
+    a = fn_rekap_mentah(config.folder("RekapBerjalan"), "berjalan", jenis_filter=jenis_filter,
+                        stop_event=stop_event)
+    b = fn_rekap_mentah(config.folder("RekapLalu"), "lalu", jenis_filter=jenis_filter,
+                        stop_event=stop_event)   # v3.5: selalu
 
     # c = Table.Combine({b, a}) — b first
     parts = []

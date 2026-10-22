@@ -770,6 +770,12 @@ class KomparasiDeviasiView(tk.Frame):
         # v3.9.5 (audit 19-b #4): identitas df utk cache (id() bisa
         # dipakai ulang CPython setelah GC; identitas objek lebih aman)
         self._cached_data = None
+        # v3.9.72 — FIX 2 (task 2-b): cache Series pra-string-kan kolom
+        # kunci popup drill-down (double-click) — dibangun SEKALI di
+        # worker _refresh per identitas data; side-dict (BUKAN kolom df
+        # → export/copy/tree tak pernah melihatnya), di-reset load_data.
+        self._scols_cache: dict = {}
+        self._scols_cache_data = None
         self._satuan_lookup: dict = {}
         self._aktif_lookup: dict = {}   # v3.9.5 (audit 19-b #5): AKTIF/NON
         self._result_df = None
@@ -1434,6 +1440,11 @@ class KomparasiDeviasiView(tk.Frame):
         self._cached_mats = None
         self._cached_signature = None
         self._cached_data = None
+        # v3.9.72 — FIX 2 (task 2-b): data berganti → cache kolom pra-
+        # string-kan popup drill-down basi → reset (dibangun ulang
+        # worker _refresh berikutnya).
+        self._scols_cache = {}
+        self._scols_cache_data = None
         self._satuan_lookup = {}
         self._aktif_lookup = {}
         self._result_df = None
@@ -1970,6 +1981,20 @@ class KomparasiDeviasiView(tk.Frame):
             # refresh berikutnya SKIP recompute (angka basi senyap;
             # gen-guard hanya membuang RENDER basi, bukan cache salah-label).
             data = self.data
+            # v3.9.72 — FIX 2 (task 2-b): pra-string-kan kolom kunci popup
+            # drill-down SEKALI per data (DI WORKER — bebas blokir UI):
+            # double-click Komparasi menjalankan mask astype(str) berantai
+            # atas frame ~200k baris di show_details_popup (50-150ms+
+            # sinkron per klik). Identitas data dicek — load_data mengganti
+            # self.data (dan me-reset cache) → cache basi tak terpakai.
+            if data is not None and not data.empty \
+                    and self._scols_cache_data is not data:
+                self._scols_cache = {
+                    c: data[c].astype(str)
+                    for c in ("Nama Barang", "JENIS", "NAMA RESTO",
+                              "SOURCE KIRIMAN", "KATEGORI")
+                    if c in data.columns}
+                self._scols_cache_data = data
             if (self._cached_mats is None
                     or self._cached_data is not data):
                 self._cached_mats = self._compute_matrices(data)
@@ -2234,6 +2259,11 @@ class KomparasiDeviasiView(tk.Frame):
         # resto/bulan/minggu) — sumber mode 📈 Analisa.
         self._join_df = df.copy()
 
+        # v3.9.72 — FIX 5 (audit UX 2-b): total pasangan file deviasi
+        # (pra SEMUA filter view: resto/bulan/minggu/⧩) — utk status
+        # "m dari N baris" (parity pivot "terfilter X/Y").
+        _total_pairs = len(df)
+
         # default: sembunyikan resto di luar data saat ini
         # (dipakai mask POSISI fdf — harus sebelum filter bulan/minggu
         # yang me-reset index; merge kiri mempertahankan urutan baris)
@@ -2426,7 +2456,8 @@ class KomparasiDeviasiView(tk.Frame):
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
 
-        status = (f"{m} baris · MATCH: {n_match} · SELISIH: {n_sel} · "
+        status = (f"{m} dari {_total_pairs} baris · "
+                  f"MATCH: {n_match} · SELISIH: {n_sel} · "
                   f"H tdk ada: {n_noh} · di luar data saat ini: "
                   f"{n_noapp}")
         # v3.9.13: prefiks bulan aktif (filter bulan-terbaru — multi-file)
@@ -3504,6 +3535,10 @@ class KomparasiDeviasiView(tk.Frame):
             jenis=None,
             tanggal=h,
             filters=active_filters,
+            # v3.9.72 — FIX 2 (task 2-b): cache kolom pra-string-kan
+            # (dibangun worker _refresh) — mask double-click popup tak
+            # lagi astype(str) frame penuh sinkron.
+            scols_cache=self._scols_cache,
         )
 
     # =========================================================================

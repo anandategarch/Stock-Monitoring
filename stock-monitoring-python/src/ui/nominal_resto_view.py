@@ -146,7 +146,9 @@ from .widgets import (
     kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
     reset_autofit_once,  # v3.9.55 — F8
+    restore_tree_view,  # v3.9.72 — FIX 6: pulihkan scroll+seleksi pasca rebuild
     run_async,
+    snapshot_tree_view,  # v3.9.72 — FIX 6: snapshot sebelum delete+re-render
     sort_tree_by_column,
     zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
@@ -394,6 +396,9 @@ class NominalRestoView(tk.Frame):
         self._render_gen = 0
         self._insert_cancel = None
         self._pending_sort = None
+        # v3.9.72 — FIX 6: snapshot scroll+seleksi rebuild terakhir
+        # (dipulihkan di _render_done / _render_done_guard).
+        self._view_snap = None
         self._result_df = None
         self._pairs_df: pd.DataFrame | None = None   # rincian popup
         self._detail_wins: list = []       # popup rincian hidup
@@ -1492,9 +1497,21 @@ class NominalRestoView(tk.Frame):
         data = self.data
         h = self.tanggal_h
         gen = self._render_gen
+        # v3.9.72 — FIX 1 (task 2-b): filter ⧩ + materialisasi baris
+        # pindah ke WORKER (pola deviasi_view._refresh — capture `st` di
+        # awal job; sub-tab Tanpa Harga & heading tetap di main thread).
+        # Dulu _render_rows menyaring pandas + loop format per resto di
+        # MAIN thread (satu-satunya view yang masih begitu): blokir
+        # 50-150ms+ per klik filter/KATEGORI + LoadingOverlay tak sempat
+        # menutup jalur itu.
+        st = {
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
+        }
 
         def work():
-            return self._compute_resto(data, h)
+            result = self._compute_resto(data, h)
+            return self._prepare_rows(result, st, h)
 
         def done(payload):
             if gen != self._render_gen:
@@ -1515,45 +1532,15 @@ class NominalRestoView(tk.Frame):
                   loading_text="Menghitung nominal per resto…",
                   on_error=on_error, sync=sync)
 
-    def _render_rows(self, result: pd.DataFrame):
-        if self._insert_cancel is not None:
-            self._insert_cancel()
-            self._insert_cancel = None
-        self.tree.delete(*self.tree.get_children(""))
-        self._close_detail_wins()    # data baru → popup rincian basi
-        self._neg_cells = []
-        self._total_cells = []
-        # v3.9.45 — kolom dinamis 'Lalu <label>' per bulan file deviasi
-        # (multi-file ⚖ Komparasi): sinkronkan dulu SEBELUM heading
-        # (heading kolom baru baru bisa dipasang).
-        self._ensure_tree_columns()
-
-        # heading dinamis mengikuti TANGGAL H
-        self.tree.heading(
-            "Nominal Deviasi",
-            text=f"Nominal Deviasi (H={self.tanggal_h})")
-        # v3.9.41 — heading lalu menyebut MINGGU pembanding ter-cocok;
-        # v3.9.45 — multi-bulan: bulan utama + label bulan ≥2 di
-        # heading kolom dinamis (label bulan + minggu masing-masing).
-        _lab0 = (self._lalu_frames[0][0]
-                 if self._lalu_frames else None)
-        self.tree.heading(
-            "Nominal Deviasi Bulan Lalu",
-            text=("Nominal Deviasi Bulan Lalu"
-                  + (f" · {_lab0}" if _lab0 else "")
-                  + (f" ({self._lalu_week})" if self._lalu_week else "")))
-        for _cid, _lab, _wk in self._lalu_extra:
-            self.tree.heading(
-                _cid,
-                text=_cid + (f" ({_wk})" if _wk else ""))
-        if getattr(self, "header_filters", None) is not None:
-            self.header_filters.refresh_icons()
-        # v3.9.63 — render ANAK TAB 'Tanpa Harga' GLOBAL di sini (SEBELUM
-        # cabang kosong): frame dihitung _compute_resto dari data mentah
-        # — tak tergantung hasil/filter kategori tabel utama, jadi tetap
-        # dirender walau tabel utama kosong/terfilter habis.
-        self._render_noharga()
-
+    def _prepare_rows(self, result, st: dict, h: int) -> dict:
+        """v3.9.72 — FIX 1 (task 2-b): filter ⧩ + materialisasi items +
+        status/TOTAL/chip — PURE pandas di WORKER (pola
+        deviasi_view._prepare_rows; helper nominal_common murni, tanpa
+        sentuhan widget). Dulu seluruh blok ini hidup di _render_rows
+        (main thread) → blokir 50-150ms+ per klik filter. Pesan status
+        jujur jalur kosong (KATEGORI / ⧩) dipertahankan PERSIS — jumlah
+        pra-filter dihitung di worker (tak basi)."""
+        col_sel = st["col_sel"]
         if result is None or result.empty:
             # v3.9.59 — FIX 2e-03: status JUJUR saat KATEGORI menghabiskan
             # baris — dulu SELALU 'Tidak ada baris DEVIASI tanggal H'
@@ -1562,48 +1549,38 @@ class NominalRestoView(tk.Frame):
             # (pola pivot 6c-03 / deviasi v3.9.49): sebut kategori +
             # jumlah baris pra-filter.
             if self._kategori_sel and self._n_dev_h_unfiltered > 0:
-                self.status_var_label.set(
+                status = (
                     f"0 dari {fmt_int_id(self._n_dev_h_unfiltered)} baris "
-                    f"DEVIASI tanggal {self.tanggal_h} lolos filter aktif "
+                    f"DEVIASI tanggal {h} lolos filter aktif "
                     f"(KATEGORI: {self._kategori_sel}).")
             else:
-                self.status_var_label.set(
-                    f"Tidak ada baris DEVIASI tanggal {self.tanggal_h}.")
-            self._total_var.set("")
-
-            def done_empty():
-                self._busy = False
-                if self._pending:
-                    self._pending = False
-                    self._refresh()
-
-            done_empty()
-            return
+                status = f"Tidak ada baris DEVIASI tanggal {h}."
+            return {"items": [], "neg_cells": [], "total_cells": [],
+                    "status": status, "total_chip": ""}
 
         # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
         filtered = result
-        for col, sel in self._col_sel.items():
+        for col, sel in col_sel.items():
             if sel is not None and col in filtered.columns:
                 fmt = self._format_col_series(col, filtered[col])
                 filtered = filtered[fmt.isin(sel)]
         if filtered.empty:
             # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebabnya
             # seleksi ⧩ KOSONG → pesan jujur eksplisit (bukan generik).
-            _hint = zero_row_filter_message(self._col_sel)
+            _hint = zero_row_filter_message(col_sel)
             if _hint:
-                self.status_var_label.set(_hint)
+                status = _hint
             else:
                 # v3.9.59 — FIX 2e-03 (kolom ⧩): idem jalur kategori —
                 # sebut kolom filter aktif + jumlah baris pra-filter.
-                _act = ", ".join(c for c, s in self._col_sel.items()
+                _act = ", ".join(c for c, s in col_sel.items()
                                  if s is not None)
-                self.status_var_label.set(
+                status = (
                     f"0 dari {fmt_int_id(len(result))} resto lolos "
                     f"filter aktif"
                     + (f" ({_act})" if _act else "") + ".")
-            self._total_var.set("")
-            self._render_done_guard()
-            return
+            return {"items": [], "neg_cells": [], "total_cells": [],
+                    "status": status, "total_chip": ""}
 
         col_ids = self._result_cols()
         n = len(filtered)
@@ -1631,6 +1608,7 @@ class NominalRestoView(tk.Frame):
         n_neg = int((filtered["Nominal Deviasi"] < 0).sum())
 
         items = []
+        neg_cells = []
         for i in range(n):
             row = filtered.iloc[i]
             nom = row.get("Nominal Deviasi", 0)
@@ -1673,11 +1651,11 @@ class NominalRestoView(tk.Frame):
                                (noml_v, "Nominal Deviasi Bulan Lalu"),
                                (pct_v, "Persen Kenaikan/Penurunan")):
                     if _v is not None and _v < 0:
-                        self._neg_cells.append((f"row_{i}", _c))
+                        neg_cells.append((f"row_{i}", _c))
                 for _j, _ev in enumerate(vals_extra):
                     _evf = self._safe_float(_ev)
                     if _evf is not None and _evf < 0:
-                        self._neg_cells.append(
+                        neg_cells.append(
                             (f"row_{i}", self._lalu_extra[_j][0]))
                         _neg_any = True
             elif _neg_any:
@@ -1699,11 +1677,10 @@ class NominalRestoView(tk.Frame):
                    for _cid, _l, _w in self._lalu_extra)
         items.append(("", "row_total",
                       {"values": values_total, "tags": ("total",)}))
-        for col in col_ids:
-            self._total_cells.append(("row_total", col))
+        total_cells = [("row_total", col) for col in col_ids]
 
         status = (f"{fmt_int_id(n)} resto · TANGGAL H = "
-                  f"{self.tanggal_h}")
+                  f"{h}")
         if self._kategori_sel:
             status += f" · KATEGORI {self._kategori_sel}"
         if n_neg:
@@ -1729,29 +1706,95 @@ class NominalRestoView(tk.Frame):
                            f"{_wkx}")
         else:
             status += " · LALU: file deviasi belum dimuat (⚖ Komparasi)"
-        self.status_var_label.set(status)
         if self._lalu_loaded:
             _wk2 = (f" · MINGGU {self._lalu_week}"
                     if self._lalu_week else "")
-            _chip = (f"TOTAL {fmt_rp_cell(total_nom)} · "
-                     f"LALU {fmt_rp_cell(total_lalu)}{_wk2}")
+            total_chip = (f"TOTAL {fmt_rp_cell(total_nom)} · "
+                          f"LALU {fmt_rp_cell(total_lalu)}{_wk2}")
             # v3.9.45 — chip: pembanding bulan ≥2 (ringkas — label bulan)
             for _cid, _lab, _wk in self._lalu_extra[:3]:
-                _chip += (f" · {_lab} "
-                          f"{fmt_rp_cell(totals_extra.get(_cid, 0.0))}")
+                total_chip += (f" · {_lab} "
+                               f"{fmt_rp_cell(totals_extra.get(_cid, 0.0))}")
             if len(self._lalu_extra) > 3:
-                _chip += f" · +{len(self._lalu_extra) - 3} bulan lagi"
-            self._total_var.set(_chip)
+                total_chip += f" · +{len(self._lalu_extra) - 3} bulan lagi"
         else:
-            self._total_var.set(
-                f"TOTAL {fmt_rp_cell(total_nom)}")
+            total_chip = f"TOTAL {fmt_rp_cell(total_nom)}"
+        return {"items": items, "neg_cells": neg_cells,
+                "total_cells": total_cells, "status": status,
+                "total_chip": total_chip}
+
+    def _render_rows(self, payload: dict):
+        """v3.9.72 — FIX 1 (task 2-b): hanya sentuhan WIDGET — populasi
+        tree dari payload worker (items/status/chip/sel minus dihitung
+        _prepare_rows di worker). Sub-tab 'Tanpa Harga' tetap dirender
+        di sini (frame global dihitung _compute_resto)."""
+        if self._insert_cancel is not None:
+            self._insert_cancel()
+            self._insert_cancel = None
+        # v3.9.72 — FIX 6: simpan posisi scroll+seleksi SEBELUM delete
+        # (rebuild karena filter/KATEGORI/H); dipulihkan di
+        # _render_done / _render_done_guard (kedua jalur keluar).
+        self._view_snap = snapshot_tree_view(self.tree)
+        self.tree.delete(*self.tree.get_children(""))
+        self._close_detail_wins()    # data baru → popup rincian basi
+        self._neg_cells = []
+        self._total_cells = []
+        # v3.9.45 — kolom dinamis 'Lalu <label>' per bulan file deviasi
+        # (multi-file ⚖ Komparasi): sinkronkan dulu SEBELUM heading
+        # (heading kolom baru baru bisa dipasang).
+        self._ensure_tree_columns()
+
+        # heading dinamis mengikuti TANGGAL H
+        self.tree.heading(
+            "Nominal Deviasi",
+            text=f"Nominal Deviasi (H={self.tanggal_h})")
+        # v3.9.41 — heading lalu menyebut MINGGU pembanding ter-cocok;
+        # v3.9.45 — multi-bulan: bulan utama + label bulan ≥2 di
+        # heading kolom dinamis (label bulan + minggu masing-masing).
+        _lab0 = (self._lalu_frames[0][0]
+                 if self._lalu_frames else None)
+        self.tree.heading(
+            "Nominal Deviasi Bulan Lalu",
+            text=("Nominal Deviasi Bulan Lalu"
+                  + (f" · {_lab0}" if _lab0 else "")
+                  + (f" ({self._lalu_week})" if self._lalu_week else "")))
+        for _cid, _lab, _wk in self._lalu_extra:
+            self.tree.heading(
+                _cid,
+                text=_cid + (f" ({_wk})" if _wk else ""))
+        if getattr(self, "header_filters", None) is not None:
+            self.header_filters.refresh_icons()
+        # v3.9.63 — render ANAK TAB 'Tanpa Harga' GLOBAL di sini (SEBELUM
+        # cabang kosong): frame dihitung _compute_resto dari data mentah
+        # — tak tergantung hasil/filter kategori tabel utama, jadi tetap
+        # dirender walau tabel utama kosong/terfilter habis.
+        self._render_noharga()
+
+        self._neg_cells = payload.get("neg_cells", [])
+        self._total_cells = payload.get("total_cells", [])
+        self.status_var_label.set(payload.get("status", ""))
+        with contextlib.suppress(Exception):
+            self._total_var.set(payload.get("total_chip", ""))
+
+        # v3.9.72 — jalur kosong (tanpa baris / habis terfilter):
+        # items kosong → insert_tree_items memanggil on_done SINKRON,
+        # tapi lewat guard supaya tag cell lama juga dilepas
+        # (satu pintu keluar — pola 48-e FIX 2/3).
+        if not payload.get("items"):
+            self._render_done_guard()
+            return
 
         self._insert_cancel = insert_tree_items(
-            self.tree, items, batch=500, on_done=self._render_done)
+            self.tree, payload["items"], batch=500, on_done=self._render_done)
 
     def _render_done_guard(self):
         """Jalur hasil-kosong tetap berakhir di render_done (reset
         _busy + proses pending — pola 48-e FIX 2/3 mode Nominal)."""
+        # v3.9.72 — FIX 6: pulihkan scroll+seleksi (yview fraction;
+        # seleksi difilter ke iid yang masih ada) — jalur kosong juga
+        # rebuild, posisi user jangan lompat ke atas.
+        restore_tree_view(self.tree, self._view_snap)
+        self._view_snap = None
         self._reapply_cell_tags(self.tree)
         # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
         autofit_tree_once(self, self.tree)
@@ -1766,6 +1809,11 @@ class NominalRestoView(tk.Frame):
             self._sort_by(col, reverse=rev)
 
     def _render_done(self):
+        # v3.9.72 — FIX 6: pulihkan scroll+seleksi pasca batch insert
+        # (rebuild filter/KATEGORI/H — jangan lompat ke atas di tengah
+        # daftar; lalu buang snapshot supaya sort/clone berikutnya bebas).
+        restore_tree_view(self.tree, self._view_snap)
+        self._view_snap = None
         self._reapply_cell_tags(self.tree)
         # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
         autofit_tree_once(self, self.tree)

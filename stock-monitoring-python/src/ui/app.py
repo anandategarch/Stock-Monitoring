@@ -136,7 +136,19 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 from src.config import app_base_dir as _app_base_dir
-from src.main import PipelineStopped, run_pipeline
+# v3.9.72 — FIX (audit UX 2-c / startup -300..500ms): import src.main
+# TIDAK LAGI di level modul — rantai import itu menyeret SELURUH graf
+# pipeline (semua fn_*.py + queries + rincian_po) plus openpyxl (via
+# export_sheets) ke waktu STARTUP app padahal pipeline baru dibutuhkan
+# saat user klik MULAI. Kontrak nama TETAP: run_pipeline/PipelineStopped
+# tetap atribut modul src.ui.app (test §68 mem-monkeypatch
+# _appmod.run_pipeline sebelum menjalankan worker) → keduanya None di
+# import-time dan diikat SEKALI oleh _ensure_pipeline_symbols() di
+# KEPALA worker (sebelum blok try — except-clause butuh nama terikat).
+# Test yang mem-patch src.ui.app.run_pipeline TIDAK ditimpa: binding
+# run_pipeline hanya dilakukan bila masih None.
+run_pipeline = None          # diikat _ensure_pipeline_symbols() (worker)
+PipelineStopped = None       # idem — dipakai except worker + isinstance
 from src.pipeline.helpers import (
     read_cache_invalidate,
     read_cache_reset_counters,
@@ -199,9 +211,38 @@ from src.ui.widgets import (
     run_async,
 )
 
+
+def _ensure_pipeline_symbols():
+    """v3.9.72 — FIX (audit UX 2-c / startup): import src.main SEKALI
+    secara LAZY (pertama kali dipanggil) dan kembalikan kelas
+    PipelineStopped.
+
+    Mengapa helper (bukan import langsung di fungsi worker): except-
+    clause ``except PipelineStopped:`` mengevaluasi NAMA MODUL pada saat
+    exception propagasi — binding global HARUS sudah terjadi SEBELUM
+    blok try; helper ini dipanggil di KEPALA worker (jalur asli) dan
+    lazily di _on_pipeline_done (jalur test yang memanggil done secara
+    langsung dgn instance _PS68 — src.main biasanya sudah di sys.modules
+    saat itu, binding = murah).
+
+    Anti-timpa monkeypatch test: ``run_pipeline`` hanya diikat bila masih
+    None — test §68 mem-patch src.ui.app.run_pipeline SEBELUM worker
+    jalan; patch itu bukan None → binding dilewati → worker tetap
+    memanggil versi patch. PipelineStopped dipakai sbg penanda
+    'sudah diimport' (kelas tak pernah dipatch test → aman)."""
+    global run_pipeline, PipelineStopped
+    if PipelineStopped is None:
+        from src.main import PipelineStopped as _PS
+        PipelineStopped = _PS
+        if run_pipeline is None:
+            from src.main import run_pipeline as _RP
+            run_pipeline = _RP
+    return PipelineStopped
+
+
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.9.71"  # v3.9.71 — TANPA KODE SI 22.05 + FREEZE KOLOM NAMA BARANG PIVOT (user: "22.05 tanpa kode SI ya maaf aku lupa bilang kemarin" — lanjutan v3.9.70 "semua kode masuk": Nomor # berawalan SI. dikecualikan, ACR./RETUR./dll. tetap masuk; + "di tab pivot tabel gak bsia freeze kolom nama barang ya? sehingga jika aku scroll ke kanan bisa kefreze"): (1) fn_2205 TANPA KODE SI — mask SI case-sensitive (mirror M Text.StartsWith; "si." lowercase + Nomor # kosong/None BUKAN SI), 'Nomor #' kembali jadi kunci filter TAPI tetap BUKAN kolom wajib identitas (hilang → baris diproses APA ADANYA + WARNING keras — ikut status amber pola §82b, kode SI jadi tak teridentifikasi); baris SI yang dikecualikan diberitahu via [fn_2205] INFO (bukan warning — jejak observabilitas filter bisnis yang disengaja); queries.query_out disinkron. (2) FREEZE-PANE PIVOT — widgets.FrozenNamePane BARU: DUA tree iid-identik (kiri = #0 nama barang + baris metric, kanan = kolom matrix dgn #0 width-0 + _autofit_skip), scroll vertikal + seleksi TERSINKRON DUA ARAH (guard utama KESAMAAN SELEKSI — flag tak melintasi antrean event <<TreeviewSelect>>: smoke pertama HANG ping-pong tak terbatas), hsb hanya milik sisi matrix → nama barang TIDAK bergeser saat scroll ke kanan (kontrak freeze ala Excel); funnel ⧩ Nama Barang pindah ke heading tree beku (HeaderFilter + screenshot/tes disinkron); auto-fit DUA sisi (sisi beku diukur di on_done batch kiri sendiri — tabel kecil: batch kanan selesai SINKRON sebelum insert kiri jalan); clone ⛶ Layar Penuh IKUT freeze (open_tree_maximized frozen_name=True OPT-IN — 12 view lain tak tersentuh; attach_clone_filters param filter_tree: funnel menempel di sisi beku, baris difilter di tree utama clone, hook _clone_filter_apply dipasang di KEDUA sisi utk kompatibilitas test; pasca filter/sort clone sisi beku disalin ulang mirror_from_right). VERIFIKASI: §84 BARU 11 check (freeze kontrak utama + iid/teks identik + yview 2-arah + seleksi 2-arah + xview beku tetap 0.0-1.0 + auto-fit tak membuka #0 + clone 2 sisi tersinkron pasca filter + SI case-sensitive/None/log-bersih) + §83a-1/a-2 & §79c/§79d disinkron (SI kembali tersaring; tanpa Nomor # kini WARNING jujur — dulu v3.9.70 senyap) + §0 versi 3.9.71. # v3.9.70 — AUDIT ULANG v3.9.69 (P2 CACHE SAAT EVIKSI) + 2205 SEMUA KODE MASUK (audit eksternal commit d0734ca: perbaikan cache v3.9.69 masih menyisakan entry lama di dict ketika eviksi dimulai; user: "pada file 2205 sekarang tidak perlu filter kode ACR lagi tapi semua kode masuk perhitungan"): (1) P2 AKUNTANSI CACHE SAAT EVIKSI — _read_cache_put kini MELEPAS entry lama key-sama dari dict (pop) SEBELUM eviksi FIFO → kontribusi selnya dikembalikan SEKALI (fix v3.9.69 hanya mengurangi counter TANPA melepas entry → bila entry lama ikut ter-eviksi FIFO, selnya dikurangi DUA KALI; contoh audit batas 100: A=30 B=40 C=20 → ganti A→50 → eviksi hapus A-lama → counter 80 padahal isi dict 110 — cache melewati batas; counter bisa negatif → keputusan eviksi/tolak kacau); frame yang melebihi batas maksimum SENDIRIAN kini DITOLAK SEBELUM eviksi (dulu loop eviksi mengosongkan SELURUH cache demi frame yang akhirnya ditolak guard juga — audit: "tangani frame yang melebihi batas sebelum menghapus cache lain"); dampak pengendalian memori/performa cache, bukan kebenaran data; TES BARU persis rekomendasi audit: ganti entry-tertua saat cache hampir penuh + frame lebih besar dari batas maksimum. (2) 2205 SEMUA KODE MASUK PERHITUNGAN (permintaan user) — fn_2205: filter M Text.StartsWith([#"Nomor #"], "ACR") DIHAPUS — seluruh dokumen penjualan 22.05 (SEMUA Nomor # — ACR./SI./RETUR./dll.) kini masuk sumber OUT; 'Nomor #' TAK LAGI kolom wajib (bukan lagi kunci filter — hilang pun baris tetap diproses; identitas cukup Nama Pelanggan + Nama Barang); queries.query_out ikut disinkron ("22.05 sales (ACR) only" basi). VERIFIKASI: §83 BARU 5 check (fn_2205 semua kode masuk · tanpa kolom 'Nomor #' aman tanpa warning · ganti entry-tertua hampir-penuh: counter == Σ sel dict tanpa dobel-kurang · entry hasil ganti tersaji benar · frame > batas ditolak tanpa mengosongkan cache) + §79c/§79d disinkron (3 baris — fixture memang memuat baris SI; dulu tersaring) + §0 versi 3.9.70. # v3.9.69 — PERBAIKI SEMUA BUG HASIL VALIDASI AUDIT EKSTERNAL KE-2 (user: "perbaiki semua bug" — audit kedua tervalidasi 100% akurat di Task-24, semua temuan masih-open dieksekusi penuh): (1) P1.1 ☑ HIDE-EMPTY PIVOT — "kosong" = SEMUA sel baris 0/kosong (dulu "total ≤ 0": baris cancel-out/retur seluruh-negatif & +10/−10 tersembunyinya padahal deviasi negatif justru sinyal penting; label checkbox kini "semua sel 0"; konsisten di DUA jalur — render _compute_payload + daftar ⧩ #0 _name_values: tiap baris df = satu sel → "ada ≥1 nilai ≠ 0" ≡ "≥1 metric tak semua-nol", daftar popup tak pernah menawarkan barang yang barisnya pasti tersembunyi); (2) P1.2 PERINGATAN SKEMA MENAIKKAN STATUS — _PIPELINE_WARN_RE menghitung peringatan format modul pipeline ([fn_XXXX] WARNING · [WARNING] combine_folder/4217/File harga/Harga 41.09 · [Append1] WARNING) di _poll_log_queue → _schema_warnings → status akhir "SELESAI DENGAN PERINGATAN" + bagian "N peringatan format file sumber (skema kolom berubah — lihat log)" (dulu hanya [WARNING] Skip file yang dihitung; peringatan hardening v3.9.67 lenyap di balik status HIJAU padahal data sumber berpotensi lenyap/nyasar; Skip file TETAP lewat _skipped_files anti hitung-ganda; peringatan UI sengaja tak dihitung; KONTRAK §82b: pola wajib menangkap SEMUA literal WARNING pipeline, format baru tanpa update pola = tes gagal); (3) P2.1 AKUNTANSI CACHE BACA — _read_cache_put menimpa key-sama kini MENGEMBALIKAN sel entry lama dulu (skenario audit 100→150 dulu counter 250 → eviksi prematur/entry baru ditolak guard; pemicu nyata sig-mismatch mtime+size antar-run tanpa Refresh eksplisit; dampak performa saja, bukan kebenaran data); (4) P2.2 CONFIG STARTUP DEFENSIF — akar non-dict (JSON list) & Folders/Sheets non-dict kini TERTANGANI + tampil jujur di area Info Config (baris ⚠ / ERROR, pola defensif _config_dpi_aware), RootPath non-str dikosongkan aman — dulu AttributeError `.get`/`.items()` di __init__ → crash.log + dialog, app tak jalan; (5) MINOR: run_tests.sh kini MENJALANKAN test_mock.py juga (setara job CI); harness screenshot +4 skenario sisa audit (25 filter-persist lintas-sesi via app kedua + settings temp anti side-effect · 26 hide-empty negatif · 27 data-parsial SELESAI PARSIAL jalur _load_view nyata · 28 clone ⛶ deviasi); docstring run_app.py bebas literal versi (masih v3.9.66 basi); row_fingerprint escape pipe — backward-compat: hash IDENTIK utk data bebas-pipe, beda HANYA utk nilai ber-pipe yang memang ambigu sejak awal. VERIFIKASI: §82 BARU (semantik pivot + kontrak pola warning + akuntansi cache + config defensif + fingerprint + harness static) + baterai penuh + ruff baseline + gerbang CI hijau pra-rilis. # v3.9.68 — GERBANG TES CI + EKSEKUSI AUDIT UI/UX EKSTERNAL (audit pihak ketiga 6 temuan, semua tervalidasi akurat lalu dijalankan): (1) T3 GERBANG TES — workflow GHA kini menjalankan test_ui_redesign (Xvfb 1920×1080) + test_mock + ruff (gerbang baseline ≤201, pin ruff==0.17.1) + py_compile + validasi config.json + smoke 2 entry di ubuntu-latest SEBELUM build EXE (build-windows needs: tests) + tes ikut jalan tiap push main/PR — rilis tidak lagi hijau hanya karena build sukses; (2) T1 TRI-STATE seleksi ⧩ kosong — restore kini memulihkan [] sebagai set() (filter aktif "0 baris" — dulu DIBUANG, tabel tampil semua baris lagi padahal user sengaja memilih nol) + HeaderFilter.set_selected tak lagi menelan koleksi kosong sebagai None (corong tetap menyala) + pesan jujur "0 baris — semua nilai tidak dipilih pada filter ⧩ 'X'…" di 10 titik render 9 view (deviasi GR/PCS, pivot, laporan, nominal, nominal-resto utama+anak tab, followup, rincian PO, rekap IN, komparasi); (3) T2 OBSERVABILITAS persist — kegagalan LOAD (buffer _FILTER_LOAD_WARNINGS di-flush setelah StreamToQueue aktif) / SAVE / SNAPSHOT / RESTORE per-view kini DI-LOG + statusbar ringkas (dulu senyap total — debugging "filter saya hilang" mustahil); restore TETAP sekali per sesi (retry akan menimpa kerja user — kontrak v3.9.33); (4) T5 TOOLTIP GRUP TAB — hover baris tab → label PENUH + kelompok alur kerja (Operasional / Pemeriksaan & Rekonsiliasi / Analisis / Tindak Lanjut; NotebookTabTooltips widgets.py; urutan tab sudah sesuai kelompok — tanpa sidebar/redesign); (5) T6 SUBTAB 🧮 aktif ikut disimpan & dipulihkan (dulu selalu kembali 'Per Resto'); (6) T4 HARNESS SCREENSHOT v2 — versi dinamis ikut APP_VERSION + 9 skenario baru (nominal per-resto / anak tab tanpa harga / zoom 50-80-100-200 / tabel kosong jujur / corong aktif / popup filter deviasi / jendela kecil). VERIFIKASI: §80/§81 BARU + baterai penuh + ruff baseline + GHA 'Gerbang Tes' hijau sebelum rilis. v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT ACCURATE (user: "program ini kan banyak ambil dari beberapa file tarikan dari accurate online. misal suatu saat format tarikan dari accurete berubah aman gak? misal pada file 9901. ada beberapa koom yang tidak terpakai hilang apakah berpengaruh? umum nya perubahan file ada tambahan kolom ataupun kolom yang tidak terpakai hilang"): AUDIT KETAHANAN FORMAT + TUTUP 2 CELAH SENYAP (nol perubahan perilaku data — murni observabilitas). Eksperimen empiris 6 varian mutasi file 9901 + 5 varian 22.05 (tambah kolom di tengah / hapus kolom tak terpakai / reorder / rename kolom terpakai / hapus kolom VALUE / geser baris header) MEMBUKTIKAN: (A) AMAN-BY-DESIGN utk kasus yang user sebut — tambah kolom & hilangnya kolom tak terpakai = output IDENTIK baris+qty (semua reader seleksi kolom BY-NAMA bukan posisi; concat by-name union kolom; fn_9901 fleksibel kandidat persis→substring dgn exclude harga/nilai; fn_4109 & fn_rekap_mentah deteksi baris header DINAMIS scan-by-nama; nama sheet pun tahan: 9901 baca SEMUA sheet, keluarga punya fallback prefiks modul + key config Sheets). (B) 2 CELAH SENYAP ditemukan & DITUTUP: (1) fn_9901 — rename header terpakai ('Nama barang'→'Nama Item') + kolom lain ber-substring 'barang' terisi ('Kode Barang') → fallback _find_column SALAH-IKAT SENYAP (uji nyata: Nama Barang nyasar ke kode 'GL001'/'KP001', qty/resto benar, NOL warning; barang lalu tak cocok sumber lain → tersekat pivot tanpa jejak) → kini SETIAP pengikatan lewat fallback DI-LOG WARNING lengkap label→kolom tujuan; (2) keluarga header_row=4 (fn_2205/fn_3224/fn_4205/fn_4215) — kolom VALUE ('Kuantitas'/'Kts (Unit#1)'/'#Qty. Terkecil'/'Kts Diterima') & 'Tanggal' hilang/di-rename → dulu NA SENYAP (qty sumber lenyap dari pivot tanpa jejak log) → kini WARNING keras di titik NA-fill (n baris + nama kolom + sumber). Degradasi per-sumber TETAP (sumber lain jalan, tak pernah KeyError total — pola audit fix 48-a/61-a); semua WARNING tampil di log console internal (stdout→StreamToQueue). VERIFIKASI: §79 BARU (9 cek: kontrak permanen output-identik tambah/hapus/reorder + fallback-bind 9901 ter-log + VALUE-missing ter-log 4 reader + Tanggal-missing 2205) + eksperimen mutasi 11 varian + baterai penuh + ruff baseline. v3.9.66 — FILTER PERSISTEN ANTAR SESI (user: "kerjakan quick win" — roadmap Wave 1 quick-win #1, pola Snipe-IT, generalisasi persist ui_zoom v3.9.65): kombinasi filter terakhir PER TAB kini diingat antar sesi — zoom 80% sudah diingat sejak v3.9.65, FILTER belum. (1) CAPTURE saat jendela ditutup (_on_close_window → _capture_filter_state semua view → _save_filter_state settings.json key 'filter_state', read-modify-write atomik pola window_state; TIDAK menimpa bila sesi belum pernah run pipeline — append1_df None → state tersimpan lama dipertahankan). (2) RESTORE SEKALI sesudah fan-out load_data run pipeline PERTAMA sesi berikutnya (_apply_saved_filters_once — load_data me-reset filter v3.9.33, restore menyusul DI ATASNYA; run pipeline BERIKUTNYA di sesi yang sama TETAP RESET — restore tak pernah menimpa kerja user; data kosong → tunda ke run berikut; gagal per-view diisolasi ke log pola _load_view). Cakupan 10 view + state app: Pivot (mode 🏪/📅, RESTO/SOURCE/KATEGORI, rentang TANGGAL, checkbox baris kosong, ⧩ Nama Barang #0) · Deviasi GR & PCS (⧩ semua kolom + combobox KATEGORI + AKTIF/NON — nilai divalidasi vs values data baru, pola preserve v3.9.42) · Rekap Selisih IN (MODE HITUNG Bulan Ini/Lalu+Ini, rentang TANGGAL, checkbox Hanya Selisih ≠ 0, ⧩ — default kategori v3.9.22 tetap, snapshot ⧩ KATEGORI eksplisit menimpanya) · ⚖ Komparasi (3 checkbox semua-minggu/bulan/resto + ⧩ tabel utama + 2 tabel analisa Top/Flip) · 📋 Laporan & 💰 Nominal (⧩) · 🧮 Nominal Deviasi (⧩ + KATEGORI tabel Per Resto + anak tab Tanpa Harga: ⧩ + KATEGORI global) · ☑ Follow Up (⧩) · 🛒 Rincian PO (⧩ + CABANG/STATUS divalidasi) · MODE tab 📋 (SegmentBar Komparasi/Anomali/Nominal — key '_app.laporan_mode', dipulihkan via show_laporan_mode jalur persis klik user). TIDAK ikut: TANGGAL H (jendela data bersama dgn default dinamis dari data v3.9.22), AMBANG ACR (ambang analisa), path file deviasi ⚖ (sumber data — auto-load v3.9.53), tab aktif sub-notebook 🧮 (pemilih tampilan). (3) SERIALISASI defensif widgets.py col_sel_to_json/col_sel_from_json/apply_col_sel_restore: set|None → list terurut (JSON-safe); pemulihan hanya kolom yang MASIH ada di view + nilai string; seleksi KOSONG (set() = "0 baris" semantik v3.9.13) TIDAK PERNAH dipulihkan (anti tabel-kosong-misterius); ikon corong dipasang ulang via set_selected (pola preserve v3.9.42 — tanpa ini funnel mati padahal filter aktif). VERIFIKASI: §78 BARU + baterai penuh + ruff baseline. v3.9.65 — RANK PER-BARIS + STARTUP ZOOM-OUT (dua permintaan user): (1) FIX BUG RANK tab 📦 Deviasi GR & 🧩 Deviasi PCS (user: "ada bug pada deviasi gr dan deviasi pcs pada kolom rank, dimana data rank sama semua untuk tiap grup barang") — era v3.9.51-64 rank = PER BARANG (Σ|Deviasi| kelompok, SATU angka konstanta seluruh baris grup — warisan display merge-vertikal yang tak ada lagi sejak v3.9.60/61) → user melihat angka sama di tiap grup = dilaporkan bug. RESTORASI SEMANTIK SHEET ASLI: Rank = peringkat |Deviasi| BARIS di antara baris GRUP barangnya (1 = deviasi terbesar dalam grup, per resto), method="min" (seri berbagi rank, rank berikut MELONCAT — diprove pola 13,13,13,16 sheet asli), baris Deviasi==0/NaN → rank KOSONG (972/972 baris nol di sheet asli kosong). GROUND-TRUTH: kolom Rank sheet DEVIASI GR/PCS workbook asli user direkonstruksi & dibandingkan — 1347/1348 EKSAK (selisih tunggal = artefak rumus basu di file user sendiri: Susu Kental Manis DPKMAR tertulis 18, matematis 17). (2) STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka udah ke zoom out") — app TERBUKA di zoom 80% (UI_ZOOM_DEFAULT 0.8): font/rowheight/kolom ter-skala sejak buka → lebih banyak baris terlihat; ukuran/maximize jendela tetap dikuasai restore window_state (zoom startup FONTS-ONLY via _apply_ui_zoom(target, resize_window=False) — jendela TIDAK ikut mengecil); CTRL+roda tetap resize penuh (perilaku v3.9.48 utuh; state baseline __init__ = 1.0 supaya penerapan startup selalu efektif). PLUS PERSIST: level zoom terakhir DISIMPAN ke settings.json (window_state.ui_zoom, validasi 0.5–2.0, tolak bool/string) saat jendela ditutup → buka berikutnya memulai di preferensi user (default 0.8 bila belum ada). VERIFIKASI: probe ground-truth rank (803+545 GR match) + probe zoom startup + §58 konstanta 0.8 + §61/§62 kontrak rank per-baris dirombak + §65 +ui_zoom + §77 BARU (ikat 1,1,1/loncat 1,1,3/nol kosong/sort Rank/persist round-trip+validasi+jalur close/startup dari settings.json via app kedua Toplevel). v3.9.64 — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix semua sebar agent no mistakes") — semua temuan audit 15-a/15-b/15-c difix: (1) HIGHLIGHT Ctrl+F KINI BENAR-BENAR TAMPIL di SEMUA tabel ber-tag latar baris (FIX 15-c F-01, BUG paling serius — prioritas tag Treeview = URUTAN CREATE, diuji pixel-probe Xvfb: find dibuat SETELAH zebra → oranye kalah & tak dirender di 🧮 kedua tree/📋 3 mode/☑ Follow Up/Rekap IN/Rincian-PO/Pivot; FIX = konstanta+register_find_tags di theme.py, dipanggil BARIS PERTAMA setup_tree_tags + _setup_tags 12 view — urutan list tag per-item TIDAK berpengaruh, diuji); (2) Ctrl+F kini JALAN DI DALAM popup rincian (DetailsPopup/DeviasiPopup/InDetailPopup) + window clone ⛶ (install_tree_find_binding — bindtag Toplevel sendiri tak memuat binding root) + popup Cari SELALU SATU app-wide (dulu 2 popup bisa koeksis utk 2 tree); (3) STALE-FIND pasca re-render (15-c F-03): iid posional row_N dipakai ulang view → highlight mendarat di baris SALAH senyap — FIX dua lapis: choke point insert_tree_items → _on_tree_rerendered (recompute otomatis) + validasi digest baris saat navigasi; (4) KLASIFIKASI KATEGORI word-boundary \bCOM\b/\bPACKAGING\b (15-a R1 — 'COMMERCIAL'/'COMPLIMENT' tak lagi terhitung COM, 'REPACKAGING' bukan PACKAGING; varian kanonik - RESTO/- CATERING tetap cocok); (5) _compute_resto() tanpa argumen tak lagi menghasilkan anak tab kosong (15-a R3 — pakai df bukan param data); (6) _refresh data-kosong kini MEMBERSIHKAN kedua tabel + tag per-cell (15-a R4 — dulu baris lama tersisa dgn status 'Belum ada data'); (7) minus merah PER-CELL anak tab Tanpa Harga (15-a N9, parity tabel utama) + refresh_icons ⧩ anak tab (N8) + fmt_pct_cell ribuan '+1.234,5%' & round-0 '0,0%' tanpa tanda (N11) + sort ⧩ '+12,5%' kini numerik (F-05) + dead code _event_col_name dihapus (N7); (8) run_tests.sh tanpa hard-require xdpyinfo (F-06 — fallback probe Tk; Xvfb hidup dicek walau x11-utils absen); (9) README root disinkronkan (F-02 — masih headline v3.9.62). VERIFIKASI: §76 BARU + baterai penuh + ruff baseline + tag v3.9.64 → GHA rilis .exe. v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
+APP_VERSION = "3.9.72"  # v3.9.72 — BATCH PERFORMA & UX INTERAKSI (audit eksternal ke-3 + benchmark live Xvfb; user: "CEK REPO KU BERIKUT REVIEW SECARA MENDALAM UI UX DAN PERFORMA ... KETIKA AKU PAKAI APLIKASI NYA DALAM PROSES SCROLL, FILTER, SELECT ATAU INTERAKSI APAPUN" → semua temuan dieksekusi): (1) WIDGETS — clone-filter ⛶ kini COALESCE+DEBOUNCE (toggle beruntun = SATU rebuild, bukan 2,3s freeze per toggle @29k baris; guard busy/pending pola deviasi_view; re-sort clone hanya bila sort state aktif) · sort_tree_by_column tabel datar ≥1500 baris INSERT BATCHED ASINKRON (seleksi+yview di-snapshot & dipulihkan; sort baru membatalkan batch sort lama; jalur kecil tetap sinkron — kontrak §58 utuh) · TreeFindPopup re-tag INKREMENTAL saat navigasi Enter/‹› (dulu re-tag SEMUA match per langkah — 68ms/step @20k) · HeaderFilter search DEBOUNCE 120ms (dulu pack/forget ribuan checkbox per keystroke) · FIX DOUBLE-SCROLL X11: handler forward wheel overlay sel kini return "break" (dulu event lanjut ke router Toplevel → 1 notch = 2 baris di sel berwarna; Windows tak terpengaruh; terverifikasi probe: 1 baris/notch) · HeadingTintOverlay guard frac (parity CellColorOverlay) · CellColorOverlay SELEKSI MENANG atas warna sel (Tk9 parity — baris terpilih terlihat di tabel banyak sel merah/hijau; redraw di-schedule saat <<TreeviewSelect>>) · util BARU snapshot_tree_view/restore_tree_view (dipakai view utk pertahankan scroll+seleksi) · open_tree_maximized collect ASINKRON (overlay "Menyalin tabel…" muncul sebelum collect 678ms @29k). (2) VIEWS — nominal deviasi/resto filter+format PINDAH KE WORKER (dulu satu-satunya view compute di main thread — 50-150ms freeze per klik filter) · popup drill-down Komparasi/Rekap-IN: kolom kunci pra-string-kan SEKALI per data (cache side-dict di worker; dulu astype(str) berantai atas frame 200k baris per double-click 50-150ms+) · Follow Up toggle OPTIMISTIK (update/hapus SATU baris — bukan reload penuh + scroll reset ke atas; tulis JSON digabung debounce 200ms) · zebra DEVIASI GR/PCS dipulihkan (lenyap sejak v3.9.61 — konstanta tema ROW_EVEN/ODD; tag Cari tetap prioritas) · status "n dari N baris" (Deviasi/Komparasi/Rekap-IN/Rincian-PO — parity pivot "terfilter X/Y") · preserve scroll+seleksi pasca filter/rebuild (snapshot_tree_view — deviasi/pivot mode/komparasi/rekap-IN/nominal) · label "Apply"→"Terapkan" (Rekap-IN) · InDetailPopup geometri adaptif + clamp dua sisi (dulu fixed 1000×560 satu sisi) · hover kursor tangan kolom ✓ deviasi (parity followup). (3) APP SHELL — ZOOM burst CTRL+roda di-DEBOUNCE di level handler (refit kolom — bagian termahal ±60-150ms/langkah — dibayar SEKALI di ujung burst; _apply_ui_zoom LANGSUNG tetap sinkron: kontrak §58/§68 utuh) · import pipeline LAZY (startup −300..500ms: src.main+openpyxl+pyxlsb tak lagi ditarik saat import app) · FOKUS masuk konten tab saat KLIK mouse (dulu hanya switch programatik — arrow-key mati sampai klik tabel) · SHORTCUT KEYBOARD BARU: F5/Ctrl+R run pipeline (no-op senyap saat berjalan) · Ctrl+0 reset zoom default · Ctrl+plus/minus/equal zoom (keyboard-only users — WCAG 2.1.1) · KONTRAS WCAG AA: C_GREEN #16a34a→#15803d & C_ORANGE #ea580c→#c2410c (dulu 3,30:1/3,56:1 gagal AA 4,5:1 sbg teks status/KPI) · style TSpinbox (AMBANG ACR tak lagi abu-abu clam) · preflight folder scan KE WORKER (dulu glob+stat 15 folder sinkron di main thread saat klik MULAI) · EXPORT BATAL: should_cancel dicek per sheet/baris + tombol batal + dialog file parent=root · POSISI jendela (x,y) ikut persist non-maximized (validasi anti jendela-hilang saat monitor dicabut). (4) PIPELINE — stop_event DITERUSKAN ke build_rincian_po/build_audit/audit-loop/antar-file-read via helpers.stop_check (probe: ⏹ saat fase baca file 4,75s→0,63s abort; mid-engine 40ms; dulu menunggu fase selesai) · fn_4109 kegagalan import os diperbaiki. VERIFIKASI: test_ui_redesign 1607/1607 PASS (Xvfb 1920×1080) · test_mock ALL PASS · ruff 187 < baseline 201 · py_compile semua file · probe double-scroll PASS (1 baris/notch di sel berwarna) · benchmark @20k baris: sort sync 352ms→~370ms sync-read + insert async, Ctrl+wheel burst 798ms→1 flush, wheel 2,65ms/notch tetap. # v3.9.71 — TANPA KODE SI 22.05 + FREEZE KOLOM NAMA BARANG PIVOT (user: "22.05 tanpa kode SI ya maaf aku lupa bilang kemarin" — lanjutan v3.9.70 "semua kode masuk": Nomor # berawalan SI. dikecualikan, ACR./RETUR./dll. tetap masuk; + "di tab pivot tabel gak bsia freeze kolom nama barang ya? sehingga jika aku scroll ke kanan bisa kefreze"): (1) fn_2205 TANPA KODE SI — mask SI case-sensitive (mirror M Text.StartsWith; "si." lowercase + Nomor # kosong/None BUKAN SI), 'Nomor #' kembali jadi kunci filter TAPI tetap BUKAN kolom wajib identitas (hilang → baris diproses APA ADANYA + WARNING keras — ikut status amber pola §82b, kode SI jadi tak teridentifikasi); baris SI yang dikecualikan diberitahu via [fn_2205] INFO (bukan warning — jejak observabilitas filter bisnis yang disengaja); queries.query_out disinkron. (2) FREEZE-PANE PIVOT — widgets.FrozenNamePane BARU: DUA tree iid-identik (kiri = #0 nama barang + baris metric, kanan = kolom matrix dgn #0 width-0 + _autofit_skip), scroll vertikal + seleksi TERSINKRON DUA ARAH (guard utama KESAMAAN SELEKSI — flag tak melintasi antrean event <<TreeviewSelect>>: smoke pertama HANG ping-pong tak terbatas), hsb hanya milik sisi matrix → nama barang TIDAK bergeser saat scroll ke kanan (kontrak freeze ala Excel); funnel ⧩ Nama Barang pindah ke heading tree beku (HeaderFilter + screenshot/tes disinkron); auto-fit DUA sisi (sisi beku diukur di on_done batch kiri sendiri — tabel kecil: batch kanan selesai SINKRON sebelum insert kiri jalan); clone ⛶ Layar Penuh IKUT freeze (open_tree_maximized frozen_name=True OPT-IN — 12 view lain tak tersentuh; attach_clone_filters param filter_tree: funnel menempel di sisi beku, baris difilter di tree utama clone, hook _clone_filter_apply dipasang di KEDUA sisi utk kompatibilitas test; pasca filter/sort clone sisi beku disalin ulang mirror_from_right). VERIFIKASI: §84 BARU 11 check (freeze kontrak utama + iid/teks identik + yview 2-arah + seleksi 2-arah + xview beku tetap 0.0-1.0 + auto-fit tak membuka #0 + clone 2 sisi tersinkron pasca filter + SI case-sensitive/None/log-bersih) + §83a-1/a-2 & §79c/§79d disinkron (SI kembali tersaring; tanpa Nomor # kini WARNING jujur — dulu v3.9.70 senyap) + §0 versi 3.9.71. # v3.9.70 — AUDIT ULANG v3.9.69 (P2 CACHE SAAT EVIKSI) + 2205 SEMUA KODE MASUK (audit eksternal commit d0734ca: perbaikan cache v3.9.69 masih menyisakan entry lama di dict ketika eviksi dimulai; user: "pada file 2205 sekarang tidak perlu filter kode ACR lagi tapi semua kode masuk perhitungan"): (1) P2 AKUNTANSI CACHE SAAT EVIKSI — _read_cache_put kini MELEPAS entry lama key-sama dari dict (pop) SEBELUM eviksi FIFO → kontribusi selnya dikembalikan SEKALI (fix v3.9.69 hanya mengurangi counter TANPA melepas entry → bila entry lama ikut ter-eviksi FIFO, selnya dikurangi DUA KALI; contoh audit batas 100: A=30 B=40 C=20 → ganti A→50 → eviksi hapus A-lama → counter 80 padahal isi dict 110 — cache melewati batas; counter bisa negatif → keputusan eviksi/tolak kacau); frame yang melebihi batas maksimum SENDIRIAN kini DITOLAK SEBELUM eviksi (dulu loop eviksi mengosongkan SELURUH cache demi frame yang akhirnya ditolak guard juga — audit: "tangani frame yang melebihi batas sebelum menghapus cache lain"); dampak pengendalian memori/performa cache, bukan kebenaran data; TES BARU persis rekomendasi audit: ganti entry-tertua saat cache hampir penuh + frame lebih besar dari batas maksimum. (2) 2205 SEMUA KODE MASUK PERHITUNGAN (permintaan user) — fn_2205: filter M Text.StartsWith([#"Nomor #"], "ACR") DIHAPUS — seluruh dokumen penjualan 22.05 (SEMUA Nomor # — ACR./SI./RETUR./dll.) kini masuk sumber OUT; 'Nomor #' TAK LAGI kolom wajib (bukan lagi kunci filter — hilang pun baris tetap diproses; identitas cukup Nama Pelanggan + Nama Barang); queries.query_out ikut disinkron ("22.05 sales (ACR) only" basi). VERIFIKASI: §83 BARU 5 check (fn_2205 semua kode masuk · tanpa kolom 'Nomor #' aman tanpa warning · ganti entry-tertua hampir-penuh: counter == Σ sel dict tanpa dobel-kurang · entry hasil ganti tersaji benar · frame > batas ditolak tanpa mengosongkan cache) + §79c/§79d disinkron (3 baris — fixture memang memuat baris SI; dulu tersaring) + §0 versi 3.9.70. # v3.9.69 — PERBAIKI SEMUA BUG HASIL VALIDASI AUDIT EKSTERNAL KE-2 (user: "perbaiki semua bug" — audit kedua tervalidasi 100% akurat di Task-24, semua temuan masih-open dieksekusi penuh): (1) P1.1 ☑ HIDE-EMPTY PIVOT — "kosong" = SEMUA sel baris 0/kosong (dulu "total ≤ 0": baris cancel-out/retur seluruh-negatif & +10/−10 tersembunyinya padahal deviasi negatif justru sinyal penting; label checkbox kini "semua sel 0"; konsisten di DUA jalur — render _compute_payload + daftar ⧩ #0 _name_values: tiap baris df = satu sel → "ada ≥1 nilai ≠ 0" ≡ "≥1 metric tak semua-nol", daftar popup tak pernah menawarkan barang yang barisnya pasti tersembunyi); (2) P1.2 PERINGATAN SKEMA MENAIKKAN STATUS — _PIPELINE_WARN_RE menghitung peringatan format modul pipeline ([fn_XXXX] WARNING · [WARNING] combine_folder/4217/File harga/Harga 41.09 · [Append1] WARNING) di _poll_log_queue → _schema_warnings → status akhir "SELESAI DENGAN PERINGATAN" + bagian "N peringatan format file sumber (skema kolom berubah — lihat log)" (dulu hanya [WARNING] Skip file yang dihitung; peringatan hardening v3.9.67 lenyap di balik status HIJAU padahal data sumber berpotensi lenyap/nyasar; Skip file TETAP lewat _skipped_files anti hitung-ganda; peringatan UI sengaja tak dihitung; KONTRAK §82b: pola wajib menangkap SEMUA literal WARNING pipeline, format baru tanpa update pola = tes gagal); (3) P2.1 AKUNTANSI CACHE BACA — _read_cache_put menimpa key-sama kini MENGEMBALIKAN sel entry lama dulu (skenario audit 100→150 dulu counter 250 → eviksi prematur/entry baru ditolak guard; pemicu nyata sig-mismatch mtime+size antar-run tanpa Refresh eksplisit; dampak performa saja, bukan kebenaran data); (4) P2.2 CONFIG STARTUP DEFENSIF — akar non-dict (JSON list) & Folders/Sheets non-dict kini TERTANGANI + tampil jujur di area Info Config (baris ⚠ / ERROR, pola defensif _config_dpi_aware), RootPath non-str dikosongkan aman — dulu AttributeError `.get`/`.items()` di __init__ → crash.log + dialog, app tak jalan; (5) MINOR: run_tests.sh kini MENJALANKAN test_mock.py juga (setara job CI); harness screenshot +4 skenario sisa audit (25 filter-persist lintas-sesi via app kedua + settings temp anti side-effect · 26 hide-empty negatif · 27 data-parsial SELESAI PARSIAL jalur _load_view nyata · 28 clone ⛶ deviasi); docstring run_app.py bebas literal versi (masih v3.9.66 basi); row_fingerprint escape pipe — backward-compat: hash IDENTIK utk data bebas-pipe, beda HANYA utk nilai ber-pipe yang memang ambigu sejak awal. VERIFIKASI: §82 BARU (semantik pivot + kontrak pola warning + akuntansi cache + config defensif + fingerprint + harness static) + baterai penuh + ruff baseline + gerbang CI hijau pra-rilis. # v3.9.68 — GERBANG TES CI + EKSEKUSI AUDIT UI/UX EKSTERNAL (audit pihak ketiga 6 temuan, semua tervalidasi akurat lalu dijalankan): (1) T3 GERBANG TES — workflow GHA kini menjalankan test_ui_redesign (Xvfb 1920×1080) + test_mock + ruff (gerbang baseline ≤201, pin ruff==0.17.1) + py_compile + validasi config.json + smoke 2 entry di ubuntu-latest SEBELUM build EXE (build-windows needs: tests) + tes ikut jalan tiap push main/PR — rilis tidak lagi hijau hanya karena build sukses; (2) T1 TRI-STATE seleksi ⧩ kosong — restore kini memulihkan [] sebagai set() (filter aktif "0 baris" — dulu DIBUANG, tabel tampil semua baris lagi padahal user sengaja memilih nol) + HeaderFilter.set_selected tak lagi menelan koleksi kosong sebagai None (corong tetap menyala) + pesan jujur "0 baris — semua nilai tidak dipilih pada filter ⧩ 'X'…" di 10 titik render 9 view (deviasi GR/PCS, pivot, laporan, nominal, nominal-resto utama+anak tab, followup, rincian PO, rekap IN, komparasi); (3) T2 OBSERVABILITAS persist — kegagalan LOAD (buffer _FILTER_LOAD_WARNINGS di-flush setelah StreamToQueue aktif) / SAVE / SNAPSHOT / RESTORE per-view kini DI-LOG + statusbar ringkas (dulu senyap total — debugging "filter saya hilang" mustahil); restore TETAP sekali per sesi (retry akan menimpa kerja user — kontrak v3.9.33); (4) T5 TOOLTIP GRUP TAB — hover baris tab → label PENUH + kelompok alur kerja (Operasional / Pemeriksaan & Rekonsiliasi / Analisis / Tindak Lanjut; NotebookTabTooltips widgets.py; urutan tab sudah sesuai kelompok — tanpa sidebar/redesign); (5) T6 SUBTAB 🧮 aktif ikut disimpan & dipulihkan (dulu selalu kembali 'Per Resto'); (6) T4 HARNESS SCREENSHOT v2 — versi dinamis ikut APP_VERSION + 9 skenario baru (nominal per-resto / anak tab tanpa harga / zoom 50-80-100-200 / tabel kosong jujur / corong aktif / popup filter deviasi / jendela kecil). VERIFIKASI: §80/§81 BARU + baterai penuh + ruff baseline + GHA 'Gerbang Tes' hijau sebelum rilis. v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT ACCURATE (user: "program ini kan banyak ambil dari beberapa file tarikan dari accurate online. misal suatu saat format tarikan dari accurete berubah aman gak? misal pada file 9901. ada beberapa koom yang tidak terpakai hilang apakah berpengaruh? umum nya perubahan file ada tambahan kolom ataupun kolom yang tidak terpakai hilang"): AUDIT KETAHANAN FORMAT + TUTUP 2 CELAH SENYAP (nol perubahan perilaku data — murni observabilitas). Eksperimen empiris 6 varian mutasi file 9901 + 5 varian 22.05 (tambah kolom di tengah / hapus kolom tak terpakai / reorder / rename kolom terpakai / hapus kolom VALUE / geser baris header) MEMBUKTIKAN: (A) AMAN-BY-DESIGN utk kasus yang user sebut — tambah kolom & hilangnya kolom tak terpakai = output IDENTIK baris+qty (semua reader seleksi kolom BY-NAMA bukan posisi; concat by-name union kolom; fn_9901 fleksibel kandidat persis→substring dgn exclude harga/nilai; fn_4109 & fn_rekap_mentah deteksi baris header DINAMIS scan-by-nama; nama sheet pun tahan: 9901 baca SEMUA sheet, keluarga punya fallback prefiks modul + key config Sheets). (B) 2 CELAH SENYAP ditemukan & DITUTUP: (1) fn_9901 — rename header terpakai ('Nama barang'→'Nama Item') + kolom lain ber-substring 'barang' terisi ('Kode Barang') → fallback _find_column SALAH-IKAT SENYAP (uji nyata: Nama Barang nyasar ke kode 'GL001'/'KP001', qty/resto benar, NOL warning; barang lalu tak cocok sumber lain → tersekat pivot tanpa jejak) → kini SETIAP pengikatan lewat fallback DI-LOG WARNING lengkap label→kolom tujuan; (2) keluarga header_row=4 (fn_2205/fn_3224/fn_4205/fn_4215) — kolom VALUE ('Kuantitas'/'Kts (Unit#1)'/'#Qty. Terkecil'/'Kts Diterima') & 'Tanggal' hilang/di-rename → dulu NA SENYAP (qty sumber lenyap dari pivot tanpa jejak log) → kini WARNING keras di titik NA-fill (n baris + nama kolom + sumber). Degradasi per-sumber TETAP (sumber lain jalan, tak pernah KeyError total — pola audit fix 48-a/61-a); semua WARNING tampil di log console internal (stdout→StreamToQueue). VERIFIKASI: §79 BARU (9 cek: kontrak permanen output-identik tambah/hapus/reorder + fallback-bind 9901 ter-log + VALUE-missing ter-log 4 reader + Tanggal-missing 2205) + eksperimen mutasi 11 varian + baterai penuh + ruff baseline. v3.9.66 — FILTER PERSISTEN ANTAR SESI (user: "kerjakan quick win" — roadmap Wave 1 quick-win #1, pola Snipe-IT, generalisasi persist ui_zoom v3.9.65): kombinasi filter terakhir PER TAB kini diingat antar sesi — zoom 80% sudah diingat sejak v3.9.65, FILTER belum. (1) CAPTURE saat jendela ditutup (_on_close_window → _capture_filter_state semua view → _save_filter_state settings.json key 'filter_state', read-modify-write atomik pola window_state; TIDAK menimpa bila sesi belum pernah run pipeline — append1_df None → state tersimpan lama dipertahankan). (2) RESTORE SEKALI sesudah fan-out load_data run pipeline PERTAMA sesi berikutnya (_apply_saved_filters_once — load_data me-reset filter v3.9.33, restore menyusul DI ATASNYA; run pipeline BERIKUTNYA di sesi yang sama TETAP RESET — restore tak pernah menimpa kerja user; data kosong → tunda ke run berikut; gagal per-view diisolasi ke log pola _load_view). Cakupan 10 view + state app: Pivot (mode 🏪/📅, RESTO/SOURCE/KATEGORI, rentang TANGGAL, checkbox baris kosong, ⧩ Nama Barang #0) · Deviasi GR & PCS (⧩ semua kolom + combobox KATEGORI + AKTIF/NON — nilai divalidasi vs values data baru, pola preserve v3.9.42) · Rekap Selisih IN (MODE HITUNG Bulan Ini/Lalu+Ini, rentang TANGGAL, checkbox Hanya Selisih ≠ 0, ⧩ — default kategori v3.9.22 tetap, snapshot ⧩ KATEGORI eksplisit menimpanya) · ⚖ Komparasi (3 checkbox semua-minggu/bulan/resto + ⧩ tabel utama + 2 tabel analisa Top/Flip) · 📋 Laporan & 💰 Nominal (⧩) · 🧮 Nominal Deviasi (⧩ + KATEGORI tabel Per Resto + anak tab Tanpa Harga: ⧩ + KATEGORI global) · ☑ Follow Up (⧩) · 🛒 Rincian PO (⧩ + CABANG/STATUS divalidasi) · MODE tab 📋 (SegmentBar Komparasi/Anomali/Nominal — key '_app.laporan_mode', dipulihkan via show_laporan_mode jalur persis klik user). TIDAK ikut: TANGGAL H (jendela data bersama dgn default dinamis dari data v3.9.22), AMBANG ACR (ambang analisa), path file deviasi ⚖ (sumber data — auto-load v3.9.53), tab aktif sub-notebook 🧮 (pemilih tampilan). (3) SERIALISASI defensif widgets.py col_sel_to_json/col_sel_from_json/apply_col_sel_restore: set|None → list terurut (JSON-safe); pemulihan hanya kolom yang MASIH ada di view + nilai string; seleksi KOSONG (set() = "0 baris" semantik v3.9.13) TIDAK PERNAH dipulihkan (anti tabel-kosong-misterius); ikon corong dipasang ulang via set_selected (pola preserve v3.9.42 — tanpa ini funnel mati padahal filter aktif). VERIFIKASI: §78 BARU + baterai penuh + ruff baseline. v3.9.65 — RANK PER-BARIS + STARTUP ZOOM-OUT (dua permintaan user): (1) FIX BUG RANK tab 📦 Deviasi GR & 🧩 Deviasi PCS (user: "ada bug pada deviasi gr dan deviasi pcs pada kolom rank, dimana data rank sama semua untuk tiap grup barang") — era v3.9.51-64 rank = PER BARANG (Σ|Deviasi| kelompok, SATU angka konstanta seluruh baris grup — warisan display merge-vertikal yang tak ada lagi sejak v3.9.60/61) → user melihat angka sama di tiap grup = dilaporkan bug. RESTORASI SEMANTIK SHEET ASLI: Rank = peringkat |Deviasi| BARIS di antara baris GRUP barangnya (1 = deviasi terbesar dalam grup, per resto), method="min" (seri berbagi rank, rank berikut MELONCAT — diprove pola 13,13,13,16 sheet asli), baris Deviasi==0/NaN → rank KOSONG (972/972 baris nol di sheet asli kosong). GROUND-TRUTH: kolom Rank sheet DEVIASI GR/PCS workbook asli user direkonstruksi & dibandingkan — 1347/1348 EKSAK (selisih tunggal = artefak rumus basu di file user sendiri: Susu Kental Manis DPKMAR tertulis 18, matematis 17). (2) STARTUP ZOOM-OUT (user: "bisa gak waktu aku buka udah ke zoom out") — app TERBUKA di zoom 80% (UI_ZOOM_DEFAULT 0.8): font/rowheight/kolom ter-skala sejak buka → lebih banyak baris terlihat; ukuran/maximize jendela tetap dikuasai restore window_state (zoom startup FONTS-ONLY via _apply_ui_zoom(target, resize_window=False) — jendela TIDAK ikut mengecil); CTRL+roda tetap resize penuh (perilaku v3.9.48 utuh; state baseline __init__ = 1.0 supaya penerapan startup selalu efektif). PLUS PERSIST: level zoom terakhir DISIMPAN ke settings.json (window_state.ui_zoom, validasi 0.5–2.0, tolak bool/string) saat jendela ditutup → buka berikutnya memulai di preferensi user (default 0.8 bila belum ada). VERIFIKASI: probe ground-truth rank (803+545 GR match) + probe zoom startup + §58 konstanta 0.8 + §61/§62 kontrak rank per-baris dirombak + §65 +ui_zoom + §77 BARU (ikat 1,1,1/loncat 1,1,3/nol kosong/sort Rank/persist round-trip+validasi+jalur close/startup dari settings.json via app kedua Toplevel). v3.9.64 — DEEP AUDIT 3-AGENT PARALEL (user: "Deep audit dan fix semua sebar agent no mistakes") — semua temuan audit 15-a/15-b/15-c difix: (1) HIGHLIGHT Ctrl+F KINI BENAR-BENAR TAMPIL di SEMUA tabel ber-tag latar baris (FIX 15-c F-01, BUG paling serius — prioritas tag Treeview = URUTAN CREATE, diuji pixel-probe Xvfb: find dibuat SETELAH zebra → oranye kalah & tak dirender di 🧮 kedua tree/📋 3 mode/☑ Follow Up/Rekap IN/Rincian-PO/Pivot; FIX = konstanta+register_find_tags di theme.py, dipanggil BARIS PERTAMA setup_tree_tags + _setup_tags 12 view — urutan list tag per-item TIDAK berpengaruh, diuji); (2) Ctrl+F kini JALAN DI DALAM popup rincian (DetailsPopup/DeviasiPopup/InDetailPopup) + window clone ⛶ (install_tree_find_binding — bindtag Toplevel sendiri tak memuat binding root) + popup Cari SELALU SATU app-wide (dulu 2 popup bisa koeksis utk 2 tree); (3) STALE-FIND pasca re-render (15-c F-03): iid posional row_N dipakai ulang view → highlight mendarat di baris SALAH senyap — FIX dua lapis: choke point insert_tree_items → _on_tree_rerendered (recompute otomatis) + validasi digest baris saat navigasi; (4) KLASIFIKASI KATEGORI word-boundary \bCOM\b/\bPACKAGING\b (15-a R1 — 'COMMERCIAL'/'COMPLIMENT' tak lagi terhitung COM, 'REPACKAGING' bukan PACKAGING; varian kanonik - RESTO/- CATERING tetap cocok); (5) _compute_resto() tanpa argumen tak lagi menghasilkan anak tab kosong (15-a R3 — pakai df bukan param data); (6) _refresh data-kosong kini MEMBERSIHKAN kedua tabel + tag per-cell (15-a R4 — dulu baris lama tersisa dgn status 'Belum ada data'); (7) minus merah PER-CELL anak tab Tanpa Harga (15-a N9, parity tabel utama) + refresh_icons ⧩ anak tab (N8) + fmt_pct_cell ribuan '+1.234,5%' & round-0 '0,0%' tanpa tanda (N11) + sort ⧩ '+12,5%' kini numerik (F-05) + dead code _event_col_name dihapus (N7); (8) run_tests.sh tanpa hard-require xdpyinfo (F-06 — fallback probe Tk; Xvfb hidup dicek walau x11-utils absen); (9) README root disinkronkan (F-02 — masih headline v3.9.62). VERIFIKASI: §76 BARU + baterai penuh + ruff baseline + tag v3.9.64 → GHA rilis .exe. v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: 'kolom N Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori ... dan itu buat anak tab baru di nominal deviasi yang menampilkan secara global'): (1) KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori — substring COM/PACKAGING; kategori lain hanya masuk kolom total) + 'Persen Kenaikan/Penurunan' ((H−Lalu)÷|Lalu|×100 — sort numerik %-aware + minus merah; kolom lama N Barang & Tanpa Harga DIHAPUS dari tabel); (2) ANAK TAB BARU 'Tanpa Harga' (sub-notebook tab 🧮): daftar barang tanpa harga GLOBAL semua resto & kategori — TIDAK terikat filter kategori tab Per Resto (pasangan_tanpa_harga_global) + kolom Kategori + combobox KATEGORI sendiri default 'Semua' (memilih 'Deviasi (COM + Packaging)' → hanya menampilkan sesuai kategori itu) — menggantikan popup double-click kolom Tanpa Harga; (3) app._primary_scrollable kini primary_tree() utk view ber-anak-tab (fallback router roda = tree anak tab AKTIF). v3.9.62 — IMPROVE dari riset referensi GitHub (4 fitur, tanpa dark-mode & login multi-user sesuai permintaan): (1) CARI DI TABEL Ctrl+F (find-window ala tksheet, in-house tanpa dependensi: substring case-insensitive semua kolom + highlight + navigasi Enter/Shift-Enter + status i/N — tabel 29k baris akhirnya bisa dicari); (2) SORT NATURAL campuran angka+teks ("Barang 2" < "Barang 10" — dulu leksikografis terbalik; fallback sort_tree_by_column + daftar nilai popup filter); (3) RILIS .exe OTOMATIS (GitHub Actions + PyInstaller onedir + build_exe.py + run_app.py + jalur frozen-aware app_base_dir — config/settings/followup/crash.log hidup di samping .exe); (4) HARNESS UJI OTOMATIS run_tests.sh (auto-Xvfb, manfaat pytest-xvfb tanpa konversi pytest). High-DPI Windows dipastikan SUDAH in-house sejak v3.9.46-48 (rantai per-monitor-v2 + kompensasi geometri + tk scaling — setara tkinter-unblur)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -1795,11 +1836,17 @@ def _load_window_state():
 
 
 def _save_window_state(w: int, h: int, maximized: bool,
-                       ui_zoom: float | None = None) -> None:
+                       ui_zoom: float | None = None,
+                       x: int | None = None, y: int | None = None) -> None:
     """Simpan state jendela (read-modify-write atomik; senyap gagal).
     v3.9.65 — ui_zoom ikut tersimpan bila diberikan (app asli selalu
     mengirim self.ui_zoom saat close); tanpa argumen = tanpa key
-    (pemanggil lama tetap bekerja; buka berikutnya pakai default)."""
+    (pemanggil lama tetap bekerja; buka berikutnya pakai default).
+    v3.9.72 — FIX 9 (audit UX 2-c): POSISI jendela (x, y) ikut
+    tersimpan bila diberikan — pemanggil HANYA mengirimnya saat jendela
+    TIDAK maximized (posisi maximized tak bermakna / bisa negatif di
+    multi-monitor). Restore memvalidasi jarak masuk akal (anti jendela
+    hilang di monitor yang sudah tidak ada — lihat _restore_pos)."""
     old = {}
     try:
         with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -1814,6 +1861,11 @@ def _save_window_state(w: int, h: int, maximized: bool,
         # zoom-out bila tak tersimpan)
         if ui_zoom is not None:
             _st["ui_zoom"] = round(float(ui_zoom), 2)
+        # v3.9.72 — FIX 9: posisi jendela (hanya non-maximized; None =
+        # key tidak ditulis → settings lama tanpa x/y tetap kompatibel)
+        if x is not None and y is not None:
+            _st["x"] = int(x)
+            _st["y"] = int(y)
         old["window_state"] = _st
         tmp = _SETTINGS_PATH.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -1960,6 +2012,17 @@ UI_ZOOM_MIN = 0.5
 UI_ZOOM_MAX = 2.0
 UI_ZOOM_STEP = 0.1
 UI_ZOOM_DEFAULT = 0.8
+# v3.9.72 — FIX (audit UX 2-c / perf): jendela debounce BURST zoom roda.
+# Setiap langkah zoom menjalankan _apply_ui_zoom yang (a) auto-fit ULANG
+# SEMUA Treeview (root+popup+clone — _refit_all_tree_columns, terukur
+# ±60ms dgn data pivot) dan (b) update badge → StatusBar._truncate_status
+# mem-flush update_idletasks SELURUH app (±76ms setelah named-font berubah
+# size) = 126-154ms PER LANGKAH. Burst 6 notch = 0,76-1,54s UI beku.
+# Solusi: langkah PERTAMA (roda idle) tetap sinkron penuh MINUS refit
+# kolom; langkah berikutnya dalam jendela ini hanya memperbarui STATE
+# (self.ui_zoom — kontrak test §58/§68 membaca nilai SEGERA) dan satu
+# flush tunggal di ujung burst menjalankan efek visual + refit SEKALI.
+ZOOM_BURST_MS = 130
 
 # Path config.json — v3.9.62 frozen-aware (mode dev: root proyek;
 # mode PyInstaller onedir: folder .exe — build_exe.py menyalin config
@@ -2069,6 +2132,15 @@ class StockMonitorApp:
         # — jangan set self.ui_zoom = target di sini (panggilan _apply
         # jadi no-op <1e-6 & font tak pernah ter-skala).
         self.ui_zoom = 1.0
+        # v3.9.72 — FIX burst-roda: state mesin debounce zoom (lihat
+        # _zoom_step/_zoom_flush). _zoom_after_id = timer flush pending,
+        # _zoom_pending = target yang efek visualnya masih ditangguhkan,
+        # _zoom_last_step_at = waktu (monotonic) langkah roda terakhir
+        # (deteksi burst: langkah baru < ZOOM_BURST_MS sejak langkah
+        # sebelumnya = roda masih berputar cepat).
+        self._zoom_after_id = None
+        self._zoom_pending = None
+        self._zoom_last_step_at = 0.0
         # v3.9.50 — [MINOR 3-a] ROUND-TRIP JENDELA: simpan ukuran BASE
         # (= ukuran efektif di zoom 100%) + ukuran EXPECTED (yang kita
         # minta sendiri via geometry — termasuk hasil clamp layar).
@@ -2134,8 +2206,24 @@ class StockMonitorApp:
                              WINDOW_MIN[0]), _sw))
             _h = int(min(max(_saved_win.get("h", WINDOW_H),
                              WINDOW_MIN[1]), _sh))
+            # v3.9.72 — FIX 9 (audit UX 2-c): pulihkan POSISI jendela
+            # (x/y tersimpan saat close non-maximized). Validasi anti
+            # "jendela hilang": posisi hanya dipakai bila SEBAGIAN
+            # terlihat di layar primer saat ini (monitor yang dulu ada
+            # bisa sudah dicabut — Tk tak punya akses geometri monitor
+            # lain portabel). Toleransi negatif kecil (−120px) untuk
+            # monitor kiri/atas multi-monitor; titlebar minimal harus
+            # berada DI DALAM layar (y ≥ 0). Gagal validasi → fallback
+            # perilaku lama (center default Tk).
+            _px = _saved_win.get("x")
+            _py = _saved_win.get("y")
+            _pos = ""
+            if (isinstance(_px, int) and isinstance(_py, int)
+                    and -120 <= _px <= _sw - 100
+                    and 0 <= _py <= _sh - 60):
+                _pos = f"+{_px}+{_py}"
             with contextlib.suppress(tk.TclError):
-                self.root.geometry(f"{_w}x{_h}")
+                self.root.geometry(f"{_w}x{_h}{_pos}")
             self._zoom_base_wh = (_w, _h)
             self._zoom_expected_wh = (_w, _h)
             if _saved_win.get("maximized"):
@@ -2297,7 +2385,60 @@ class StockMonitorApp:
                      "<Control-Button-5>"):
             self.root.bind_all(_seq, self._on_zoom_wheel)
             self.root.bind_class("Listbox", _seq, ctrl_wheel_dispatch)
+        # v3.9.72 — FIX 4 (audit UX 2-c): SHORTCUT KEYBOARD.
+        # Audit: zoom hanya via CTRL+roda (pengguna keyboard-only tak
+        # bisa zoom — WCAG 2.1.1), run pipeline hanya via tombol 🚀 MULAI
+        # (tanpa F5/Ctrl+R standar desktop). Kini:
+        #   CTRL + / CTRL =  → zoom in 1 langkah (jalur _zoom_step —
+        #                      burst keyboard ikut di-debounce, bukan
+        #                      refit-storm; keysym kp_add/kp_equal numpad
+        #                      ikut ditangkap)
+        #   CTRL −          → zoom out 1 langkah
+        #   CTRL 0          → reset ke UI_ZOOM_DEFAULT (0.8 — "normal"
+        #                      app ini; jalur _apply_ui_zoom langsung =
+        #      sinkron, mengambil alih flush pending seperti panggilan
+        #      programatik lain)
+        #   F5 / CTRL+R     → jalankan pipeline (guard is_running: no-op
+        #                      senyap saat sedang berjalan — TANPA dialog
+        #                      spam, beda dgn klik tombol yang informatif)
+        # Semua handler return "break" (mematikan propagasi bindtag —
+        # pola _on_zoom_wheel).
+        for _seq in ("<Control-plus>", "<Control-equal>",
+                     "<Control-KP_Add>", "<Control-KP_Equal>"):
+            self.root.bind_all(_seq, self._on_zoom_key_in)
+        self.root.bind_all("<Control-minus>", self._on_zoom_key_out)
+        self.root.bind_all("<Control-KP_Subtract>", self._on_zoom_key_out)
+        self.root.bind_all("<Control-0>", self._on_zoom_key_reset)
+        self.root.bind_all("<F5>", self._on_run_shortcut)
+        for _seq in ("<Control-r>", "<Control-R>"):
+            self.root.bind_all(_seq, self._on_run_shortcut)
         self._update_zoom_badge()
+
+    def _on_zoom_key_in(self, event=None):
+        """v3.9.72 — FIX 4: CTRL+/= zoom in 1 langkah (debounce burst)."""
+        self._zoom_step(1)
+        return "break"
+
+    def _on_zoom_key_out(self, event=None):
+        """v3.9.72 — FIX 4: CTRL− zoom out 1 langkah (debounce burst)."""
+        self._zoom_step(-1)
+        return "break"
+
+    def _on_zoom_key_reset(self, event=None):
+        """v3.9.72 — FIX 4: CTRL0 reset zoom ke default startup (0.8)."""
+        try:
+            self._apply_ui_zoom(UI_ZOOM_DEFAULT)
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _on_run_shortcut(self, event=None):
+        """v3.9.72 — FIX 4: F5/Ctrl+R jalankan pipeline (no-op senyap
+        saat sedang berjalan — anti dialog spam dari keyboard repeat)."""
+        if getattr(self, "is_running", False):
+            return "break"
+        self._start_pipeline(refresh_files=False)
+        return "break"
 
     def _on_zoom_wheel(self, event):
         """CTRL + roda: arah atas = perbesar, bawah = perkecil.
@@ -2314,7 +2455,14 @@ class StockMonitorApp:
         roda/trackpad resolusi tinggi mengirim delta < 120 per event
         (banyak event kecil per notch fisik) → 1 notch = +120% zoom
         (langsung clamp 200%), praktis tak terkendali di kelas device
-        itu. X11 Button-4/5 tetap 1 langkah per event (perilaku lama)."""
+        itu. X11 Button-4/5 tetap 1 langkah per event (perilaku lama).
+
+        v3.9.72 — FIX (audit UX 2-c / perf): langkah kini masuk
+        _zoom_step() yang MENDEBOUNCE BURST — roda berputar cepat =
+        efek visual + refit kolom SEKALI di ujung burst (dulu 126-154ms
+        per langkah ×6 notch = 0,76-1,54s UI beku; lihat ZOOM_BURST_MS).
+        Nilai self.ui_zoom tetap berubah SEGERA per langkah (kontrak
+        test §58/§68 membaca nilai tanpa menunggu timer)."""
         _d = getattr(event, "delta", 0) or 0
         if _d:
             acc = getattr(self, "_zoom_wheel_acc", 0.0)
@@ -2326,19 +2474,98 @@ class StockMonitorApp:
             steps = int(acc)          # potong menuju nol; sisa dibawa
             self._zoom_wheel_acc = acc - steps
             if steps:
-                self._apply_ui_zoom(self.ui_zoom + steps * UI_ZOOM_STEP)
+                self._zoom_step(steps)
             return "break"
         _num = getattr(event, "num", 0) or 0
         if _num == 4:
-            self._apply_ui_zoom(self.ui_zoom + UI_ZOOM_STEP)
+            self._zoom_step(1)
         elif _num == 5:
-            self._apply_ui_zoom(self.ui_zoom - UI_ZOOM_STEP)
+            self._zoom_step(-1)
         return "break"
 
+    def _zoom_step(self, steps: int):
+        """v3.9.72 — FIX (audit UX 2-c): jalur anti-jank utk SATU/BEBERAPA
+        langkah zoom — dipakai roda-CTRL (Windows delta / X11 Button-4/5)
+        DAN shortcut keyboard Ctrl+plus/minus (FIX 4) supaya keyboard
+        burst juga tidak refit-storm.
+
+        DESAIN (mengapa BUKAN debounce penuh di level handler roda):
+        - §58(d/g) meng-assert zoom/font/rowheight/jendela/badge SINKRON
+          seketika setelah SATU notch dari roda idle → langkah PERTAMA
+          tetap memanggil _apply_ui_zoom efek-murah-sinkron (refit kolom
+          — bagian ±60ms termahal — yang DITANGGUHKAN; tidak pernah
+          di-assert di jalur roda).
+        - §68(6a-04) membaca self.ui_zoom SEGERA per langkah pembentuk
+          notch (root.update() tidak memajukan waktu 130ms) → di dalam
+          burst, STATE di-update sinkron dan efek visualnya menyusul di
+          _zoom_flush tunggal (after(ZOOM_BURST_MS) terus di-re-schedule
+          selama langkah masih datang).
+        - §58(f): di batas clamp 50%/200% langkah = no-op senyap.
+        Clamp & pembulatan target IDENTIK _apply_ui_zoom supaya nilai
+        state tidak bisa berbeda antar jalur."""
+        _target = round(min(UI_ZOOM_MAX, max(
+            UI_ZOOM_MIN, self.ui_zoom + steps * UI_ZOOM_STEP)), 2)
+        if abs(_target - self.ui_zoom) < 1e-6:
+            return   # di batas clamp — no-op (kontrak §58f)
+        _now = time.monotonic()
+        _hot = (self._zoom_after_id is not None
+                or (_now - self._zoom_last_step_at)
+                < ZOOM_BURST_MS / 1000.0)
+        self._zoom_last_step_at = _now
+        if not _hot:
+            # Leading edge — langkah tunggal (roda idle): efek murah
+            # SINKRON (font/tema/jendela/badge: kontrak §58d); refit
+            # kolom dijadwalkan bersama flush (bagian ±60ms termahal).
+            # (_apply_ui_zoom meng-reset _zoom_pending → pasang ULANG
+            # SETELAH panggilan, urutan penting supaya flush tetap tahu
+            # targetnya dan menjalankan refit yang ditangguhkan.)
+            self._apply_ui_zoom(_target, refit_columns=False)
+        else:
+            # Burst: STATE segera (kontrak §68 — ui_zoom == target tepat
+            # setelah event), efek visual digabung ke flush tunggal.
+            self.ui_zoom = _target
+        self._zoom_pending = _target
+        self._schedule_zoom_flush()
+
+    def _schedule_zoom_flush(self):
+        """v3.9.72 — (re-)jadwalkan flush debounce zoom: selama langkah
+        roda/keyboard terus datang dalam jendela ZOOM_BURST_MS, timer
+        di-cancel & dipasang ulang → efek visual + refit kolom total
+        hanya SEKALI di ujung burst."""
+        if self._zoom_after_id is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._zoom_after_id)
+        self._zoom_after_id = self.root.after(
+            ZOOM_BURST_MS, self._zoom_flush)
+
+    def _zoom_flush(self):
+        """v3.9.72 — ujung burst/idle: jalankan efek visual zoom pada
+        target final SEKALI (font/tema/jendela/badge + REFIT SEMUA kolom
+        tree — bagian termahal yang sengaja ditangguhkan _zoom_step).
+        Guard 'basi': bila _apply_ui_zoom dipanggil LANGSUNG di tengah
+        penantian (test/startup/Ctrl+0), pending ini sudah terwakili →
+        nilai state tak cocok lagi → skip."""
+        self._zoom_after_id = None
+        _t = self._zoom_pending
+        self._zoom_pending = None
+        if _t is None or abs(_t - self.ui_zoom) > 1e-6:
+            return   # basi — di-supersede pemanggilan langsung
+        self._apply_zoom_effects()   # paksa efek pada self.ui_zoom aktif
+
     def _apply_ui_zoom(self, value: float,
-                       resize_window: bool = True) -> bool:
+                       resize_window: bool = True,
+                       refit_columns: bool = True) -> bool:
         """Terapkan zoom UI (clamp 50%–200%, bulat 2 desimal). Return
         True bila zoom benar-benar berubah (nilai sama = no-op).
+
+        v3.9.72 — param ``refit_columns`` (FIX audit UX 2-c): False =
+        lewati _refit_all_tree_columns (bagian ±60ms termahal). Dipakai
+        jalur RODA/_zoom_step (refit digabung ke flush debounce supaya
+        burst tidak refit-storm). Pemanggilan LANGSUNG (test § v3.9.50 /
+        startup) tetap default True = sinkron penuh — kontrak test
+        meng-assert lebar kolom & geometry SEGERA pasca panggilan.
+        Pemanggilan langsung juga MEMBATALKAN flush pending (state-nya
+        diambil alih; guard 'basi' _zoom_flush = sabuk kedua).
 
         Efek berlapis (urutan penting — style font membaca zoom aktif):
         (1) FONT NAMED: set_ui_scale + rescale_named_fonts — semua teks
@@ -2366,6 +2593,26 @@ class StockMonitorApp:
         if abs(_new - _old) < 1e-6:
             return False
         self.ui_zoom = _new
+        # v3.9.72 — pemanggilan LANGSUNG mengambil alih flush pending:
+        # efeknya sudah sinkron di bawah — timer debounce tidak perlu
+        # jalan (nilai state & visual akan sama).
+        if self._zoom_after_id is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._zoom_after_id)
+            self._zoom_after_id = None
+        self._zoom_pending = None
+        self._apply_zoom_effects(resize_window=resize_window,
+                                 refit_columns=refit_columns)
+        return True
+
+    def _apply_zoom_effects(self, resize_window: bool = True,
+                            refit_columns: bool = True):
+        """v3.9.72 — lapisan EFEK zoom pada self.ui_zoom AKTIF (dipisah
+        dari _apply_ui_zoom supaya _zoom_flush bisa MEMAKSA efek pada
+        target yang nilai statenya sudah terpasang oleh jalur burst).
+        Idempoten: font/tema/jendela/badge pada nilai sama = no-op murah
+        (configure size sama, geometry string sama, teks badge sama)."""
+        _new = self.ui_zoom
         # (1) named font bersama — live ke semua pemakai
         set_ui_scale(_new)
         rescale_named_fonts()
@@ -2376,7 +2623,11 @@ class StockMonitorApp:
         # zoom + bounds auto_fit ter-skala → kolom mengikuti zoom (dulu
         # hanya font/rowheight/jendela — konten tabel terpotong di zoom
         # >±110% karena clamp max_width statis 340px).
-        self._refit_all_tree_columns()
+        # v3.9.72 — refit_columns=False (jalur roda): DITANGGUHKAN ke
+        # flush debounce (lihat _zoom_step) — walk SEMUA tree + Font.
+        # measure per kolom (±60ms) tidak pernah per langkah burst.
+        if refit_columns:
+            self._refit_all_tree_columns()
         # (3) jendela + minsize proporsional — v3.9.50: target = BASE×zoom
         # (bukan current×rasio) supaya round-trip lewat clamp layar pulih
         # eksak; resize manual terus ditrack ke base via _on_root_configure.
@@ -2409,7 +2660,6 @@ class StockMonitorApp:
         # → cek label compact (debounce — geometry baru belum diterapkan
         # saat baris ini berjalan, <Configure> akan menyusul).
         self._schedule_tab_label_fit()
-        return True
 
     def _on_root_configure(self, event):
         """v3.9.50 — [MINOR 3-a] lacak ukuran jendela utk base zoom.
@@ -3349,43 +3599,15 @@ class StockMonitorApp:
         # Kontrak: src/pipeline/helpers.preflight_folders(cfg) —
         # missing [(key, full_path)] folder Folders yang tidak ada;
         # counts [(key, n_file_excel)] per folder (folder hilang → 0).
-        pre_missing: list = []
-        try:
-            from src.config import Config
-            from src.pipeline.helpers import preflight_folders
-            pre_missing, pre_counts = preflight_folders(Config(str(CONFIG_PATH)))
-            for key, n in pre_counts:
-                self._append_log_batched(f"  Pre-flight {key}: "
-                                         f"{fmt_int_id(n)} file excel\n")
-        except ImportError:
-            # helper belum tersedia saat runtime → skip pre-flight graceful
-            pre_missing = []
-        except Exception as exc:  # defensive: config rusak dll — jangan blokir run
-            pre_missing = []
-            self._append_log_batched(
-                f"\n[PERINGATAN] Pre-flight folder dilewati: {exc}\n")
-
-        if pre_missing:
-            daftar = "\n".join(f"  • {key} → {path}"
-                               for key, path in pre_missing)
-            self._append_log_batched(
-                "\n[PERINGATAN] Folder data TIDAK DITEMUKAN —\n"
-                + daftar +
-                "\n  Pipeline tetap dijalankan (data jadi parsial/kosong).\n")
-            messagebox.showwarning(
-                "Folder data tidak ditemukan",
-                "Folder data berikut TIDAK DITEMUKAN:\n\n" + daftar +
-                "\n\nPipeline tetap dijalankan (data bisa parsial/kosong).\n"
-                # v3.9.59 — FIX 2a-04: tab yang dimaksud adalah '⚙️
-                # Config' (dulu '⚙ Pengaturan' — tab itu tidak pernah
-                # tampil, panduan jadi dead-end).
-                "Perbaiki RootPath / Folders di tab ⚙️ Config.",
-                parent=self.root)
-        # v3.9.46 — audit 66 temuan #1: preflight DIINGAT sampai run usai —
-        # status akhir "SELESAI DENGAN PERINGATAN" (folder sumber
-        # bermasalah) membutuhkan daftar ini di _on_pipeline_done (dulu
-        # hanya tampil sekali di awal run lalu tertutup status hijau).
-        self._pre_missing = list(pre_missing)
+        # v3.9.72 — FIX 7 (audit UX 2-c / perf): scan preflight dipindah ke
+        # THREAD WORKER (_preflight_from_worker) — glob+stat 15 folder di
+        # MAIN thread membekukan klik→feedback (RootPath network share =
+        # multi-detik). Hasil di-marshal balik via after(0) persis dgn UX
+        # lama (log + dialog + status amber + self._pre_missing utk status
+        # akhir). Reset dulu supaya run INI bersih sebelum hasil scan balik
+        # (antrean after FIFO: hasil preflight SELALU sebelum _on_pipeline
+        # _done — preflight dijalankan pertama di kepala worker).
+        self._pre_missing = []
 
         is_refresh = refresh_files is not False
         if not is_refresh:
@@ -3414,12 +3636,10 @@ class StockMonitorApp:
             self.status_var.set("Status: menjalankan pipeline…")
             self.statusbar.set_status(*_ST_RUN)
         self.status_spinner.start()
-        if pre_missing:
-            # v3.9.33 — status AMBER sebelum run: folder data bermasalah jangan
-            # tertutup status "berjalan" polos (48-f: kegagalan senyap).
-            self.statusbar.set_status(
-                "Pipeline berjalan… ⚠ folder data tidak ditemukan — lihat log",
-                C_AMBER)
+        # v3.9.72 — FIX 7: blok status AMBER "folder tidak ditemukan" kini
+        # dipasang oleh _show_preflight_result (hasil scan dari worker,
+        # sesaat setelah baris ini) — bukan sinkron di sini (lihat
+        # _preflight_from_worker).
         self.kpi_status.set_value(
             "MENYEGARKAN…" if is_refresh else "MENJALANKAN",
             "file sumber diproses ulang…" if is_refresh
@@ -3491,18 +3711,44 @@ class StockMonitorApp:
         sudah ditutup (destructor memanggil Tcl dari thread bukan-main →
         segfault CPython 3.12+Tk). Dilepas di _on_pipeline_done (main
         thread) setelah thread dipastikan mati.
+
+        v3.9.72 — FIX 2 (lazy import) + FIX 7 (preflight off-main-thread):
+        (a) _ensure_pipeline_symbols() dipanggil SEBELUM blok try — nama
+            global PipelineStopped HARUS terikat sebelum except-clause
+            dievaluasi; alias lokal _PS dipakai di except supaya tetap
+            aman bila import modul gagal (dibungkus try sendiri →
+            _on_pipeline_done jalur ERROR, bukan crash senyap thread).
+        (b) preflight folder diskscan DI SINI (kepala worker) — lihat
+            _preflight_from_worker; log/dialog/status di-marshal ke main
+            thread (worker TIDAK pernah menyentuh widget — kontrak 48-c).
         """
         gc_shield_acquire()
         # v3.9.37 — flag refresh (False/None/list) dibaca saat SELESAI:
         # worker tak membaca state app lain saat berjalan (pola lama).
         _rf = getattr(self, "_refresh_flag", False)
+        # v3.9.72 — FIX 2: import pipeline lazy; kegagalan import (instal
+        # rusak) → jalur ERROR _on_pipeline_done (dialog + log + state
+        # reset di main thread) — dulu import seperti ini terjadi di
+        # import-time app (crash.log sebelum UI sempat tampil).
+        try:
+            _PS = _ensure_pipeline_symbols()
+        except Exception as _imp_exc:
+            import traceback as _tb_imp
+            _err = (_imp_exc, _tb_imp.format_exc())
+            self._schedule_to_main(lambda: self._on_pipeline_done(
+                None, None, None, None, _err, _rf))
+            return
+        # v3.9.72 — FIX 7: preflight folder di worker thread (beku-main-
+        # thread fix). FIFO after(): hasilnya selalu sampai SEBELUM
+        # _on_pipeline_done run ini.
+        self._preflight_from_worker()
         try:
             append1_df, rincian_po_df, in_detail_df, audit_result = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
             self._schedule_to_main(lambda: self._on_pipeline_done(
                 append1_df, rincian_po_df, in_detail_df, audit_result, None,
                 _rf))
-        except PipelineStopped as exc:
+        except _PS as exc:   # PipelineStopped — alias lokal (lazy-safe)
             err = (exc, None)
             self._schedule_to_main(lambda: self._on_pipeline_done(
                 None, None, None, None, err, _rf))
@@ -3527,6 +3773,79 @@ class StockMonitorApp:
             self._schedule_to_main(lambda: self._on_pipeline_done(
                 None, None, None, None, err, _rf))
             raise
+
+    def _preflight_from_worker(self):
+        """v3.9.72 — FIX 7 (audit UX 2-c): PRE-FLIGHT folder data di
+        WORKER THREAD (dulu sinkron di _start_pipeline main thread:
+        glob+stat 15 folder membekukan UI saat klik MULAI — RootPath di
+        network share = multi-detik).
+
+        Bagian worker: pure disk I/O + susun baris log. SEMUA sisi UI
+        (log console, dialog peringatan, status amber, self._pre_missing)
+        di-marshal ke main thread lewat _schedule_to_main (kontrak 48-c:
+        worker tidak pernah menyentuh widget). Kontrak hasil IDENTIK
+        jalur lama: missing=[(key,path)], counts=[(key,n)] — folder
+        hilang tetap LANJUT run (degrade terlihat, v3.9.33 48-f)."""
+        log_lines: list = []
+        missing: list = []
+        try:
+            from src.config import Config
+            from src.pipeline.helpers import preflight_folders
+            missing, counts = preflight_folders(Config(str(CONFIG_PATH)))
+            for key, n in counts:
+                log_lines.append(f"  Pre-flight {key}: "
+                                 f"{fmt_int_id(n)} file excel\n")
+        except ImportError:
+            # helper belum tersedia saat runtime → skip pre-flight graceful
+            missing = []
+        except Exception as exc:  # defensive: config rusak — jangan blokir run
+            missing = []
+            log_lines.append(
+                f"\n[PERINGATAN] Pre-flight folder dilewati: {exc}\n")
+        self._schedule_to_main(lambda: self._show_preflight_result(
+            missing, log_lines))
+
+    def _show_preflight_result(self, missing: list, log_lines: list):
+        """v3.9.72 — FIX 7: sisi MAIN-THREAD hasil preflight (dipanggil
+        via after(0) dari worker). MEREPLIKASI UX jalur lama persis:
+        baris 'Pre-flight <key>: N file excel' → log; folder hilang →
+        log + dialog peringatan + statusbar AMBER (bila pipeline masih
+        berjalan) + self._pre_missing (dipakai status akhir jujur
+        v3.9.46 — 'SELESAI DENGAN PERINGATAN')."""
+        try:
+            for _ln in log_lines:
+                self._append_log_batched(_ln)
+            if missing:
+                daftar = "\n".join(f"  • {key} → {path}"
+                                   for key, path in missing)
+                self._append_log_batched(
+                    "\n[PERINGATAN] Folder data TIDAK DITEMUKAN —\n"
+                    + daftar +
+                    "\n  Pipeline tetap dijalankan (data jadi parsial/kosong).\n")
+                messagebox.showwarning(
+                    "Folder data tidak ditemukan",
+                    "Folder data berikut TIDAK DITEMUKAN:\n\n" + daftar +
+                    "\n\nPipeline tetap dijalankan (data bisa parsial/kosong).\n"
+                    # v3.9.59 — FIX 2a-04: tab yang dimaksud adalah '⚙️
+                    # Config' (dulu '⚙ Pengaturan' — tab itu tidak pernah
+                    # tampil, panduan jadi dead-end).
+                    "Perbaiki RootPath / Folders di tab ⚙️ Config.",
+                    parent=self.root)
+                # v3.9.33 — status AMBER selama run: kegagalan folder jangan
+                # tertutup status "berjalan" polos (48-f: kegagalan senyap).
+                # (dipasang di sini — bukan di _start_pipeline — karena hasil
+                # scan kini datang asinkron dari worker.)
+                if self.is_running:
+                    self.statusbar.set_status(
+                        "Pipeline berjalan… ⚠ folder data tidak ditemukan "
+                        "— lihat log", C_AMBER)
+            # v3.9.46 — audit 66 temuan #1: preflight DIINGAT sampai run
+            # usai (dibaca _on_pipeline_done utk status akhir jujur).
+            self._pre_missing = list(missing)
+        except Exception:
+            # defensive: jangan pernah biarkan hasil preflight mematikan
+            # run yang sedang berjalan (informasional, bukan gating).
+            pass
 
     def _sync_export_buttons(self) -> None:
         """FIX 6a-01 — sinkronkan tombol 💾 Export (toolbar + tab Proses)
@@ -3571,7 +3890,17 @@ class StockMonitorApp:
 
         if error is not None:
             exc, tb = error
-            if isinstance(exc, PipelineStopped):
+            # v3.9.72 — FIX 2 (lazy import): PipelineStopped global diikat
+            # oleh worker; jalur test memanggil _on_pipeline_done LANGSUNG
+            # dgn instance src.main.PipelineStopped (_PS68) tanpa worker →
+            # binding lazy di sini (src.main biasanya sudah ada di
+            # sys.modules saat itu — murah). isinstance(None) mustahil:
+            # bila import gagal, _PS tetap None → dianggap error biasa.
+            _PS = PipelineStopped
+            if _PS is None:
+                with contextlib.suppress(Exception):
+                    _PS = _ensure_pipeline_symbols()
+            if _PS is not None and isinstance(exc, _PS):
                 self.status_var.set("Status: DIHENTIKAN oleh user.")
                 self.statusbar.set_status(*_ST_STOP)
                 self.kpi_status.set_value("DIHENTIKAN", "oleh user", C_AMBER)
@@ -4044,14 +4373,19 @@ class StockMonitorApp:
                 "dihentikan paksa)",
                 parent=self.root):
             return
-        # v3.9.55 — simpan state jendela (F8); v3.9.65 — + zoom terakhir
+        # v3.9.55 — simpan state jendela (F8); v3.9.65 — + zoom terakhir;
+        # v3.9.72 — FIX 9: + POSISI x/y (hanya saat TIDAK maximized —
+        # posisi maximized bisa negatif/tak bermakna di multi-monitor)
         with contextlib.suppress(Exception):
             _max = self._is_root_maximized()
             _w = int(self.root.winfo_width())
             _h = int(self.root.winfo_height())
             if _w >= WINDOW_MIN[0] and _h >= WINDOW_MIN[1]:
-                _save_window_state(_w, _h, _max,
-                                   ui_zoom=getattr(self, "ui_zoom", None))
+                _save_window_state(
+                    _w, _h, _max,
+                    ui_zoom=getattr(self, "ui_zoom", None),
+                    x=None if _max else int(self.root.winfo_x()),
+                    y=None if _max else int(self.root.winfo_y()))
         # v3.9.66 — simpan kombinasi filter terakhir per tab (hanya bila
         # sesi ini pernah menjalankan pipeline — append1_df ada; menutup
         # app sebelum run TIDAK menimpa state tersimpan yang masih baik).

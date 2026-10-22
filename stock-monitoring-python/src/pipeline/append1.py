@@ -285,12 +285,17 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     botol — tidak match waktu cari deviasi murni").
 
     stop_event: threading.Event — jika set, raise PipelineStopped di checkpoint.
+    v3.9.72 — kini diteruskan KE DALAM semua query sumber (checkpoint ⏹
+    antar file read_excel — audit 1-d; lihat helpers.stop_check).
     """
     print("  [Append1] Mode: FULL (LightMode dihapus v3.5)")
     print("  [Append1] Loading master data...")
     # Pre-load master queries (dipakai multiple times)
     # FIX: query_27_konversi_satuan dihapus — PI sudah digantikan 9901, konversi gak dipakai lagi
-    dbs_kategori = query_dbs_kategori(config)
+    # v3.9.72 — stop_event diteruskan ke SEMUA query sumber (audit 1-d:
+    # checkpoint ⏹ antar file read_excel — dulu hanya dicek SETELAH 5 sumber
+    # penuh terbaca; fase baca = fase TERLAMA pipeline)
+    dbs_kategori = query_dbs_kategori(config, stop_event=stop_event)
     print(f"    DBS Kategori: {len(dbs_kategori)} rows")
 
     # =========================================================================
@@ -304,18 +309,19 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # ber-transaksi (dulu: barang di luar whitelist terbuang senyap dari
     # 42.17 → saldo awal hilang → Sistem salah / barang "tidak muncul";
     # urutan M code asli {4217, ...} tidak mengubah hasil gabungan).
-    full_rekap_so = query_full_rekap_mentah_so(config)
+    full_rekap_so = query_full_rekap_mentah_so(config, stop_event=stop_event)
     print(f"    Full Rekap Mentah SO: {len(full_rekap_so)} rows")
     if rekap_so_out is not None:
         rekap_so_out["df"] = full_rekap_so
 
-    out_df = query_out(config)
+    out_df = query_out(config, stop_event=stop_event)
     print(f"    OUT (22.05 sales): {len(out_df)} rows")
 
-    keluar_df = query_barang_keluar(config)
+    keluar_df = query_barang_keluar(config, stop_event=stop_event)
     print(f"    BARANG KELUAR (42.15 Kirim): {len(keluar_df)} rows")
 
-    in_df = query_in(config, detail_out=in_detail_out)
+    in_df = query_in(config, detail_out=in_detail_out,
+                     stop_event=stop_event)
     print(f"    IN: {len(in_df)} rows")
     if in_detail_out is not None:
         print(f"    IN detail (per dokumen, v3.4): {len(in_detail_out.get('df'))} rows")
@@ -325,7 +331,8 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     print(f"    4217 dua arah: {len(_protected_barangs):,} nama barang "
           "ber-pasangan (rekap/IN/out/BK) → dilindungi dari whitelist")
 
-    q4217 = query_4217(config, protected_barangs=_protected_barangs)
+    q4217 = query_4217(config, protected_barangs=_protected_barangs,
+                       stop_event=stop_event)
     if not q4217.empty:
         _n_resto = q4217["NAMA RESTO"].nunique()
         _n_barang = q4217["Nama Barang"].nunique()

@@ -16,18 +16,23 @@ SHEET_DBS_KATEGORI = "Sheet1"
 
 
 def fn_dbs_kategori(folder_path: str,
-                    sheet_name: str = SHEET_DBS_KATEGORI) -> pd.DataFrame:
+                    sheet_name: str = SHEET_DBS_KATEGORI,
+                    stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fnDBSKategori(folderPath).
 
     sheet_name: v3.9.33 — AUDIT FIX (48-a): default 'Sheet1'; query
     me-resolve config Sheets['DBSKategori'].
 
+    stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
+    antar file — audit 1-d). Default None = perilaku lama.
+
     Output columns: NAMA BARANG, KATEGORI, JENIS, SOURCE KIRIMAN, AKTIF/NON (all text)
     """
     # src = fnCombineFolder(folderPath, "Sheet1", false) + PromoteHeaders
     # = pandas header=0
-    src = fn_combine_folder(folder_path, sheet_name, header_row=0)
+    src = fn_combine_folder(folder_path, sheet_name, header_row=0,
+                            stop_event=stop_event)
     if src.empty:
         return pd.DataFrame(columns=["NAMA BARANG", "KATEGORI", "JENIS", "SOURCE KIRIMAN", "AKTIF/NON"])
 

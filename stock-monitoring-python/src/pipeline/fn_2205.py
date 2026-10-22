@@ -48,17 +48,22 @@ from .helpers import (
 SHEET_2205 = "#22.05. Rincian Penjualan per B"
 
 
-def fn_2205(folder_path: str, sheet_name: str = SHEET_2205) -> pd.DataFrame:
+def fn_2205(folder_path: str, sheet_name: str = SHEET_2205,
+            stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fn2205(folderPath).
 
     sheet_name: v3.9.33 — AUDIT FIX (48-a): default SHEET_2205; query
     berjalan me-resolve config Sheets['Penjualan2205'].
 
+    stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
+    antar file — audit 1-d). Default None = perilaku lama.
+
     Output columns: Tanggal, NAMA RESTO, Nama Barang, Value
     """
     # expand = fnCombineFolder(folderPath, sheet, true) + Skip(3) + PromoteHeaders = header=4
-    prom = fn_combine_folder(folder_path, sheet_name, header_row=4)
+    prom = fn_combine_folder(folder_path, sheet_name, header_row=4,
+                             stop_event=stop_event)
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])
 

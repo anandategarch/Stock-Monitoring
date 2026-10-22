@@ -249,6 +249,8 @@ from .theme import (
     C_CARD,
     C_HEADER,
     C_TEXT_MUTED,
+    ROW_EVEN,  # v3.9.72 — FIX 4: zebra dari konstanta tema (bukan hex)
+    ROW_ODD,   # v3.9.72 — FIX 4: idem
     font,
     register_find_tags,
 )
@@ -283,7 +285,9 @@ from .widgets import (
     kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
     reset_autofit_once,  # v3.9.55 — F8
+    restore_tree_view,  # v3.9.72 — FIX 6: pulihkan scroll+seleksi pasca rebuild
     run_async,
+    snapshot_tree_view,  # v3.9.72 — FIX 6: snapshot sebelum delete+re-render
     sort_tree_by_column,
     zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )
@@ -996,6 +1000,28 @@ class DeviasiView(tk.Frame):
         self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
         # v3.2: klik sel kolom ✓ → toggle follow-up (tree-agnostic)
         self.tree.bind("<Button-1>", self._on_tree_click, add="+")
+        # v3.9.72 — FIX 7 (task 2-b): cursor hand2 saat hover sel kolom ✓
+        # (pola followup_view 2e-05 — sinyal klik-able; guard perubahan
+        # nilai supaya configure() tak dipanggil tiap event Motion).
+        self.tree.bind("<Motion>", self._on_tree_motion, add="+")
+
+    def _on_tree_motion(self, event):
+        """v3.9.72 — FIX 7 (task 2-b): cursor hand2 di atas sel kolom ✓
+        (aksi klik = centang follow-up; tanpa ini cursor default = tak
+        ada sinyal kolom ✓ interaktif — parity followup_view 2e-05).
+        Guard perubahan: cursor hanya dikonfigurasi saat NILAINYA berubah
+        (configure() per event Motion = Tcl churn di tabel 30k baris)."""
+        tree = event.widget
+        try:
+            hand = (tree.identify_region(event.x, event.y) == "cell"
+                    and identify_to_column(
+                        tree, tree.identify_column(event.x)) == "✓"
+                    and tree.identify_row(event.y))
+            _cur = "hand2" if hand else ""
+            if str(tree.cget("cursor")) != _cur:
+                tree.configure(cursor=_cur)
+        except tk.TclError:
+            return
 
     def _on_view_destroy(self, event):
         if event.widget is not self:
@@ -1532,12 +1558,17 @@ class DeviasiView(tk.Frame):
         # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
         # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
         register_find_tags(tree)
-        tree.tag_configure("evenrow", background="#ffffff")
-        tree.tag_configure("oddrow", background="#f8fafc")
+        # v3.9.72 — FIX 4 (task 2-b): ZEBRA diaktifkan kembali (v3.9.61
+        # menghapus SEMUA latar baris saat sekat GRUP dimatikan atas
+        # permintaan user — zebra genap/ganjil ikut lenyap padahal semua
+        # view utama lain memakainya; baris seragam putih menyulitkan
+        # pelacakan baris lebar 20+ kolom). Konstanta tema ROW_EVEN/
+        # ROW_ODD (bukan hex); URUTAN create tetap find-tags DULU
+        # (15-c F-01 — tag Cari tetap menang atas zebra).
+        tree.tag_configure("evenrow", background=ROW_EVEN)
+        tree.tag_configure("oddrow", background=ROW_ODD)
         # v3.9.61 — sekat warna kelompok DIHAPUS (user): konfigurasi tag
-        # grp0/grp1 (band latar putih ↔ slate) tidak lagi dipasang; kelas
-        # konfigurasi evenrow/oddrow lama dibiarkan (tak pernah dipakai
-        # di view ini — nilai historis utk instansi kloning lama).
+        # grp0/grp1 (band latar putih ↔ slate) tidak lagi dipasang.
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero_dev", foreground="#64748b")
         # v3.9.2 — minus merah PER CELL (bukan satu baris penuh)
@@ -2444,6 +2475,11 @@ class DeviasiView(tk.Frame):
             filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() == "GR"]
         else:
             filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() != "GR"]
+        # v3.9.72 — FIX 5 (audit UX 2-b): total baris TAB (pra filter
+        # KATEGORI/AKTIF/⧩) — utk status "n dari N baris" (parity dgn
+        # pivot "terfilter X/Y" — user tahu filter aktif menyaring
+        # sebagian data, bukan data memang cuma segitu).
+        _total_tab_rows = len(filtered)
 
         # v3.9.13: filter KATEGORI POST-PIVOT (SharedPivotCache tetap dihitung
         # 1× utk GR+PCS — permintaan user: "tambah filter kategori di tab
@@ -2795,7 +2831,8 @@ class DeviasiView(tk.Frame):
                                             "tags": tuple(tags)}))
 
         status = (
-            f"{n} baris {self.satuan_mode} · Total |Deviasi| "
+            f"{n} dari {_total_tab_rows} baris {self.satuan_mode} · "
+            f"Total |Deviasi| "
             f"{self._fmt_num(total_dev)} · CEK {cek_count} · "
             f"H={st['tanggal_h']}")
         # v3.9.45 — transparansi passthrough: seleksi default Deviasi

@@ -92,7 +92,8 @@ def _chrono_lt(a: int, b: int) -> bool:
     return ka < kb
 
 
-def _com_prev_global_tgl(data: pd.DataFrame, t: int):
+def _com_prev_global_tgl(data: pd.DataFrame, t: int,
+                         scols: "dict | None" = None):
     """FIX 6c-02 / 6e-04 — tanggal kolom GLOBAL sebelum ``t``.
 
     Kolom global = union tanggal baris 4 JENIS formula COM di SELURUH
@@ -101,9 +102,15 @@ def _com_prev_global_tgl(data: pd.DataFrame, t: int):
     tanggal kolom global SEBELUM t (0 bila pasangan tak punya baris
     di sana) — bukan tanggal pair-sebelumnya. Return None bila tak ada
     tanggal sebelum t (t = kolom pertama → base com = 0; t == 1 dengan
-    SA pasangan ditangani cabang pemanggil — SA ber-Tanggal 1)."""
+    SA pasangan ditangani cabang pemanggil — SA ber-Tanggal 1).
+
+    v3.9.72 — FIX 2 (task 2-b): param ``scols`` = cache Series pra-
+    string-kan milik view (sejajar index ``data``) — astype(str) JENIS
+    atas frame 200k baris tadinya diulang per double-click COM."""
     try:
-        jenis_s = data["JENIS"].astype(str)
+        jenis_s = ((scols or {}).get("JENIS")
+                   if (scols or {}).get("JENIS") is not None
+                   else data["JENIS"].astype(str))
         tn = pd.to_numeric(
             data.loc[jenis_s.isin(_COM_FORMULA_JENIS), "Tanggal"],
             errors="coerce").dropna()
@@ -761,7 +768,7 @@ class DetailsPopup(tk.Toplevel):
 def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
                         filters: dict = None, show_maximize: bool = True,
-                        tgl_range=None):
+                        tgl_range=None, scols_cache: "dict | None" = None):
     """Filter data + show popup.
 
     v3.9.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
@@ -778,6 +785,14 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     tgl_range=(t1, t2) — rentang tanggal tampilan pivot diteruskan ke
     popup (parity _compute_payload tnum.between — dulu popup mengabaikan
     rentang → baris di luar rentang ikut tampil).
+    v3.9.72 — FIX 2 (task 2-b): param ``scols_cache`` = side-cache dict
+    {kolom: Series astype(str)} milik view (dibangun worker, di-invalidate
+    load_data) — mask string PERTAMA atas frame penuh (~200k baris)
+    memakai cache alih-alih astype(str) ulang per double-click
+    (50-150ms+ sinkron). Cache hanya dipakai SELAMA df masih frame
+    penuh (index identik); subset pasca-mask pertama kecil → astype
+    langsung (guard len == n_base). Popup TIDAK menyimpan kolom cache
+    di df → export/copy/tree tak pernah melihatnya.
     """
     if data is None or data.empty:
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame(),
@@ -785,6 +800,21 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
         return popup
 
     df = data
+    # v3.9.72 — FIX 2: panjang frame ASLI — guard pemakaian cache
+    # (mask progresif hanya MENYUSUT; len sama = df masih identik data
+    # → index cache sejajar → mask alignable).
+    _n_base = len(df)
+
+    def _scol(col: str):
+        """v3.9.72 — FIX 2: Series kolom utk mask string — pakai cache
+        pra-string-kan view bila df masih frame penuh; selain itu
+        astype(str) df saat ini (subset kecil). Semantik IDENTIK: cache
+        = hasil astype(str) frame asli (NaN → 'nan' — sama persis dgn
+        jalur astype langsung)."""
+        s = (scols_cache or {}).get(col)
+        if s is not None and len(df) == _n_base:
+            return s
+        return df[col].astype(str)
 
     # v3.9.54 — catatan filter-info opsional (formula COM / rentang tgl)
     _formula_note = None
@@ -796,7 +826,7 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     # Build title parts
     title_parts = []
     if nama_barang:
-        df = df[df["Nama Barang"].astype(str) == str(nama_barang)]
+        df = df[_scol("Nama Barang") == str(nama_barang)]
         title_parts.append(nama_barang)
     if jenis:
         if str(jenis) == _COM_JENIS_LABEL:
@@ -806,7 +836,7 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             # → exact match lama = popup KOSONG ("Tidak ada source data
             # untuk kombinasi ini"). Popup kini menampilkan baris
             # PENYUSUN formula (SA/SO/IN/BK) + keterangan di filter info.
-            df = df[df["JENIS"].astype(str).isin(_COM_FORMULA_JENIS)]
+            df = df[_scol("JENIS").isin(_COM_FORMULA_JENIS)]
             title_parts.append(str(jenis))
             # FIX 6c-02 / 6e-04 (audit 6-c LOW / 6-e LOW) — filter SATU
             # tanggal membuat baris BASE formula hilang utk t>1:
@@ -823,7 +853,8 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 except (TypeError, ValueError):
                     _t_probe = None
             if _t_probe is not None and _t_probe != 1:
-                _com_prev_tgl = _com_prev_global_tgl(data, _t_probe)
+                _com_prev_tgl = _com_prev_global_tgl(
+                    data, _t_probe, scols=scols_cache)
             if _com_prev_tgl is not None:
                 # catatan sementara — finalisasi SETELAH semua filter
                 # (NAMA RESTO bisa membuang baris base → klaim diubah
@@ -836,7 +867,7 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             if _formula_note is None:
                 _formula_note = "JENIS=SA+SO+IN+BK (formula COM)"
         else:
-            df = df[df["JENIS"].astype(str) == str(jenis)]
+            df = df[_scol("JENIS") == str(jenis)]
             title_parts.append(jenis)
     if tanggal is not None:
         try:
@@ -845,7 +876,7 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 # FIX 6c-02 / 6e-04 — longgarkan filter tanggal HANYA utk
                 # 1.SO: baris base SO(t−1) ikut tampil.
                 _tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
-                _so_m = df["JENIS"].astype(str) == "1.SO"
+                _so_m = _scol("JENIS") == "1.SO"
                 df = df[(_so_m & _tnum.isin([tgl_int, _com_prev_tgl]))
                         | (~_so_m & (_tnum == tgl_int))]
             else:
@@ -869,7 +900,7 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 # rentang tampilan (base bukan bagian rentang — tanpa ini
                 # rentang 4..6 membuang SO(3) yang justru penentu COM(4)).
                 _tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
-                _so_m = df["JENIS"].astype(str) == "1.SO"
+                _so_m = _scol("JENIS") == "1.SO"
                 df = df[((_tnum == _com_prev_tgl) & _so_m)
                         | _tnum.between(_t1, _t2)]
             else:
@@ -890,7 +921,7 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
         try:
             _tn = pd.to_numeric(df["Tanggal"], errors="coerce")
             _has_base_row = bool(
-                ((df["JENIS"].astype(str) == "1.SO")
+                ((_scol("JENIS") == "1.SO")
                  & (_tn == _com_prev_tgl)).any())
         except (KeyError, TypeError, ValueError):
             _has_base_row = False
@@ -920,12 +951,15 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 # baris utk entri virtual. Mask kanonik kategori_match_mask
                 # = semantik IDENTIK jalur tampilan view (popup kini
                 # menampilkan persis baris yang tabel tampilkan).
-                m = kategori_match_mask(df["KATEGORI"], val)
+                # v3.9.72 — FIX 2: _scol() = cache pra-string-kan saat df
+                # masih frame penuh (kategori_blank_mask mengenali artefak
+                # 'nan' dari NaN — jalur cache IDENTIK jalur astype).
+                m = kategori_match_mask(_scol("KATEGORI"), val)
                 if m is None:
                     continue
                 df = df[m]
             else:
-                df = df[df[col].astype(str) == str(val)]
+                df = df[_scol(col) == str(val)]
             filter_info_parts.append(f"{col}={val}")
 
     title = " / ".join(title_parts) if title_parts else "All Data"

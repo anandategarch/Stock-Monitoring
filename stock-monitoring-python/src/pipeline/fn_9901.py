@@ -103,14 +103,19 @@ def _find_column(df_cols, candidates, contains_any=None, exclude=None):
     return None
 
 
-def fn_9901(folder_path: str) -> pd.DataFrame:
+def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
     """
     Process 9901 file in folder_path. Returns DataFrame with columns:
     Tanggal, NAMA RESTO, Nama Barang, Value
+
+    stop_event: v3.9.72 — threading.Event opsional; checkpoint ⏹ di kepala
+    loop file & sheet (audit 1-d: dulu ⏹ menunggu folder 9901 penuh
+    terbaca). Cek DI LUAR try/except-skip supaya PipelineStopped tidak
+    tertelan jalur skip-sheet. Default None = perilaku lama.
     """
     # The 9901 file may have varying sheet names. Try common ones.
     # First, attempt to list files and find a sheet name.
-    from .helpers import _list_excel_files, fn_buka_sheet
+    from .helpers import _list_excel_files, fn_buka_sheet, stop_check
     files = _list_excel_files(folder_path)
     if not files:
         print(f"  [fn_9901] No Excel files found in: {folder_path}")
@@ -118,6 +123,8 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
 
     dfs = []
     for f in files:
+        # v3.9.72 — checkpoint ⏹ ANTAR file (di luar try: Stop ≠ skip-file)
+        stop_check(stop_event, f"baca 9901 {os.path.basename(f)!r}")
         try:
             # Try to find a suitable sheet. Many 9901 exports have a single sheet
             # or use the default first sheet. We'll read all sheets and concat.
@@ -129,6 +136,9 @@ def fn_9901(folder_path: str) -> pd.DataFrame:
             sheet_names = [0]  # fallback to first sheet
 
         for sn in sheet_names:
+            # v3.9.72 — checkpoint ⏹ ANTAR sheet (di luar try: Stop ≠
+            # skip-sheet; file 9901 bisa multi-sheet besar per file)
+            stop_check(stop_event, f"baca sheet 9901 {os.path.basename(f)!r}:{sn}")
             try:
                 df = fn_buka_sheet(f, sn, header_row=0)
             except Exception:

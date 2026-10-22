@@ -536,8 +536,25 @@ def _list_sheet_names(file_path: str) -> List[str]:
         return []
 
 
+def stop_check(stop_event, fase: str) -> None:
+    """v3.9.72 — checkpoint ⏹ Stop (audit 1-d: Stop dulu hanya dicek di 5
+    titik; fase baca file/rincian PO/audit tak tersentuh → ⏹ menunggu
+    fase PENUH selesai).
+
+    Mekanisme IDENTIK checkpoint append1.py (lazy import): PipelineStopped
+    hidup di src.main yang MEMUAT seluruh paket pipeline → import
+    level-modul = sirkular; import DI DALAM fungsi aman karena saat
+    pipeline berjalan src.main pasti sudah termuat penuh (dipanggil dari
+    run_pipeline), dan saat modul dipakai sendirian (test) import fresh
+    src.main → rantai pipeline-modules sudah ada di sys.modules → putus.
+    Semua pemanggilan default None = perilaku lama (tanpa biaya cek)."""
+    if stop_event is not None and stop_event.is_set():
+        from src.main import PipelineStopped
+        raise PipelineStopped(f"Dihentikan saat {fase}")
+
+
 def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
-                   raw: bool = False) -> pd.DataFrame:
+                   raw: bool = False, stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fnBukaSheet(binary, sheetName, doPromote).
     Baca sheet tertentu dari file Excel.
@@ -551,7 +568,16 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
     raw=False: baca dengan header di baris header_row (0-indexed).
               Mirror M doPromote=true + Skip(N) + PromoteHeaders.
               header_row=4 = skip rows 0-3, row 4 jadi header.
+
+    stop_event: v3.9.72 — threading.Event opsional; dicek SEBELUM baca
+              (disk/cache) supaya loop pemanggil bisa berhenti ANTAR sheet.
+              PEMANGGIL dgn try/except-skip harus cek di loop-nya sendiri
+              (raise ini TIDAK boleh tertelan jalur skip-file — pola
+              fn_combine_folder/fn_9901 memakai cek di kepala loop).
     """
+    # v3.9.72 — checkpoint ⏹ sebelum baca (openpyxl bisa detik-detik per
+    # file 9MB; tanpa cek, ⏹ baru terasa setelah SELURUH folder selesai)
+    stop_check(stop_event, f"baca sheet {os.path.basename(file_path)!r}")
     # v3.3.1: pilih engine eksplisit untuk .xlsb (openpyxl tidak bisa .xlsb;
     # pandas default-engine pun butuh pyxlsb terinstall — beri pesan jelas)
     # v3.9.37: cache bacaan (signature mtime+ukuran) — file tak berubah
@@ -594,7 +620,8 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
 
 def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
                        raw: bool = False, add_name_col: bool = False,
-                       ffill_cols: "list[str] | None" = None) -> pd.DataFrame:
+                       ffill_cols: "list[str] | None" = None,
+                       stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fnCombineFolder(folderPath, sheetName, doPromote).
 
@@ -615,6 +642,15 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
                 uji 48-a: file-2 grup pertama mewarisi kategori terakhir
                 file-1). Bisa berisi beberapa kandidat nama kolom — semua
                 yang ada di file di-ffill. Default None = perilaku lama.
+
+    stop_event: v3.9.72 — threading.Event opsional; dicek di KEPALA loop
+                per file (checkpoint ANTAR baca file — audit 1-d: dulu ⏹
+                baru bereaksi setelah folder penuh terbaca). Cek sengaja
+                DI LUAR try/except-skip-file supaya PipelineStopped TIDAK
+                tertelan jalur WARNING-skip (baris file baik-baik saja
+                dianggap rusak). fn_buka_sheet TIDAK diberi stop_event
+                dari sini — cek kepala-loop sudah cukup (baca file tunggal
+                memang tak bisa dipotong di tengah).
     """
     files = _list_excel_files(folder_path)
     if not files:
@@ -627,6 +663,8 @@ def fn_combine_folder(folder_path: str, sheet_name: str, header_row: int = 0,
     # SALDO/IN/OUT 2× tanpa jejak apa pun di log.
     kontribusi = []      # (basename, n_baris) per file yang berhasil dibaca
     for f in files:
+        # v3.9.72 — checkpoint ⏹ ANTAR file (di luar try: Stop ≠ skip-file)
+        stop_check(stop_event, f"combine folder {os.path.basename(f)!r}")
         try:
             if raw:
                 df = fn_buka_sheet(f, sheet_name, raw=True)

@@ -16,7 +16,7 @@ Empat bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
    Selisih — pilihan valid: "Hasil Audit", "Saldo", "Catatan Audit"
    (None/[] = tanpa kolom audit — perilaku v3.8).
 
-2. add_pivot_sheet(writer, append1_df)
+2. add_pivot_sheet(writer, append1_df, should_cancel=None)
    Sheet "PIVOT" — mirror tab pivot "Mutasi Barang - New" milik user
    (dibaca langsung dari file-nya): layout identik —
      baris 1-3 : NAMA RESTO / SOURCE KIRIMAN / KATEGORI = (All)
@@ -37,19 +37,42 @@ Empat bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
    Catatan: file lama user memakai "6.Selisih IN" (penomoran pra-v3.4);
    penomoran JENIS sejak v3.4 = "7.Selisih IN" — rumus disesuaikan,
    5 rumut lain identik karakter-per-karakter.
+
+v3.9.72 — (FIX 2 audit UX 2-c) import openpyxl kini LAZY per-fungsi:
+app.py mengimpor modul ini saat STARTUP (add_pivot_sheet utk tombol
+Export) — import openpyxl level-modul menyeret ±210ms rantai openpyxl
+ke startup app padahal export adalah aksi user yang jarang. Import di
+dalam fungsi = gratis setelah pemanggilan pertama (sys.modules cache).
+
+v3.9.72 — (FIX 8 audit UX 2-c) dukungan BATAL export: ExportCancelled
++ param should_cancel pada add_pivot_sheet (dicek per-baris — sheet
+PIVOT ditulis sel per sel via openpyxl = bagian terpanjang yg bisa
+dipotong halus; sheet DataFrame lain dipotong ANTAR-sheet oleh
+app._export_excel work()).
 """
 import os
+from collections.abc import Callable
 
 import pandas as pd
-from openpyxl.formatting.rule import CellIsRule, FormulaRule, Rule
-from openpyxl.styles import Border, Font, PatternFill, Side
-from openpyxl.styles.differential import DifferentialStyle
-from openpyxl.utils import get_column_letter
 
 # Urutan metric — identik pivot_view.METRICS (satu sumber kebenaran)
 from .pivot_view import PivotTableView
 
+
+class ExportCancelled(RuntimeError):
+    """v3.9.72 — FIX 8 (audit UX 2-c): export DIBATALKAN user (tombol
+    ⏹ / Esc saat overlay export aktif). RuntimeError jinak — jalur
+    on_error app._export_excel memetakan ke pesan status "Export
+    dibatalkan" (bukan dialog error); file tujuan tak pernah tersentuh
+    (tmp dibuang oleh finally FIX 6a-02)."""
+
+
+# Urutan metric — identik pivot_view.METRICS (satu sumber kebenaran).
+# v3.9.72 — FIX integrasi: baris ini terhapus saat penyisipan class
+# ExportCancelled di atas (NameError METRICS di build_pivot_matrix) —
+# dipulihkan PERSIS seperti sebelumnya.
 METRICS = list(PivotTableView.METRICS)
+
 
 # Warna CF — dibaca dari dxf file "Mutasi Barang - New - Copy.xlsx"
 C_SO_GREEN = "FF00B050"      # dxf14: bold + hijau
@@ -168,7 +191,13 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
 def write_selisih_sheet(writer, df: pd.DataFrame,
                         sheet_name: str = "Selisih IN per Resto") -> None:
     """Tulis df (keluaran build_selisih_export_df) ke sheet aktif writer +
-    styling: header bold, freeze panes, autofilter, lebar kolom."""
+    styling: header bold, freeze panes, autofilter, lebar kolom.
+    v3.9.72 — openpyxl di-import LAZY di dalam fungsi (FIX 2: rantai
+    ±210ms openpyxl tidak lagi dibayar saat STARTUP app)."""
+    # v3.9.72 — lazy openpyxl (FIX 2): lihat catatan modul.
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
     df.to_excel(writer, sheet_name=sheet_name, index=False)
     ws = writer.sheets[sheet_name]
 
@@ -250,9 +279,23 @@ def build_pivot_matrix(append1_df: pd.DataFrame) -> tuple:
 
 
 def add_pivot_sheet(writer, append1_df: pd.DataFrame,
-                    sheet_name: str = "PIVOT") -> bool:
+                    sheet_name: str = "PIVOT",
+                    should_cancel: Callable[[], bool] | None = None) -> bool:
     """Tambah sheet PIVOT ke writer aktif (panggil SEBELUM sheet lain agar
-    jadi tab pertama). Return True bila sheet dibuat."""
+    jadi tab pertama). Return True bila sheet dibuat.
+
+    v3.9.72 — FIX 8 (audit UX 2-c): ``should_cancel`` opsional dicek tiap
+    32 baris data (sheet PIVOT ditulis SEL PER SEL — bagian terpanjang
+    export, satu-satunya yang bisa dipotong HALUS); True → raise
+    ExportCancelled → tmp dibuang finally FIX 6a-02, file tujuan tak
+    pernah tersentuh, app memetakan ke status "Export dibatalkan".
+    v3.9.72 — openpyxl di-import LAZY di dalam fungsi (FIX 2)."""
+    # v3.9.72 — lazy openpyxl (FIX 2): lihat catatan modul.
+    from openpyxl.formatting.rule import CellIsRule, FormulaRule, Rule
+    from openpyxl.styles import Border, Font, PatternFill, Side
+    from openpyxl.styles.differential import DifferentialStyle
+    from openpyxl.utils import get_column_letter
+
     rows, date_cols = build_pivot_matrix(append1_df)
     if not rows or not date_cols:
         return False
@@ -282,7 +325,16 @@ def add_pivot_sheet(writer, append1_df: pd.DataFrame,
     bold = Font(bold=True)
     r = 7
     first_metric_row = None
+    # v3.9.72 — FIX 8: cek batal tiap 32 baris (murah: satu pemanggilan
+    # lambda per iterasi ke-32; sheet 100k baris tetap responsif ⏹).
+    _cancel_n = 0
     for label, is_item, vals in rows:
+        _cancel_n += 1
+        if (should_cancel is not None and (_cancel_n % 32) == 0
+                and should_cancel()):
+            raise ExportCancelled(
+                "Export dibatalkan pengguna (sheet PIVOT, baris "
+                f"{_cancel_n})")
         cell = ws.cell(row=r, column=1, value=label)
         if is_item:
             cell.font = bold
@@ -423,7 +475,11 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
     mode_label = "Per Tanggal" if mode == "tanggal" else "Per Resto"
     t1, t2 = st.get("tgl_start", 1), st.get("tgl_end", 31)
 
+    # v3.9.72 — lazy openpyxl (FIX 2): lihat catatan modul. (Font dipakai
+    # di seluruh styling sheet display; get_column_letter utk lebar kolom.)
     from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_name[:31]

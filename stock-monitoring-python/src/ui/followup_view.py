@@ -144,11 +144,22 @@ class FollowUpView(tk.Frame):
         self._status_text = "0 baris."
         self._store_note: str | None = None
         self._note_after: str | None = None
+        # v3.9.72 — FIX 3 (task 2-b): toggle ✓ OPTIMISTIK di view ini —
+        # id after() render penuh (listener) + timer flush JSON debounce
+        # disimpan supaya bisa dibatalkan / digabung (lihat
+        # _toggle_row_incremental / _on_store_changed).
+        self._render_after: str | None = None
+        self._save_after: str | None = None
+        self._suppress_render_notify = False
 
         self._build_ui()
         self._setup_tags()
         store.add_listener(self._on_store_changed)
         self._render()
+        # v3.9.72 — FIX 3: flush tulisan JSON tertunda saat view dibongkar
+        # (app close / tab dihancurkan) — tanpa ini toggle <200ms sebelum
+        # close bisa hilang dari followup.json.
+        self.bind("<Destroy>", self._on_view_destroy, add="+")
 
     # =========================================================================
     # UI BUILD
@@ -311,13 +322,47 @@ class FollowUpView(tk.Frame):
     # =========================================================================
     # RENDER
     # =========================================================================
+    def _on_view_destroy(self, event):
+        """v3.9.72 — FIX 3: buang timer + FLUSH tulisan JSON tertunda saat
+        view dibongkar (guard event.widget — binding <Destroy> naik dari
+        anak)."""
+        if event.widget is not self:
+            return
+        for _attr in ("_save_after", "_note_after"):
+            _id = getattr(self, _attr, None)
+            if _id is not None:
+                with contextlib.suppress(Exception):
+                    self.after_cancel(_id)
+                setattr(self, _attr, None)
+        with contextlib.suppress(Exception):
+            self.store.flush_saves()
+
     def _on_store_changed(self, store):
         # dipanggil listener store (toggle dari tab lain)
         try:
             if self.winfo_exists():
-                self.after(0, self._render)
+                # v3.9.72 — FIX 3: toggle ✓ dari VIEW INI menangani UI-nya
+                # sendiri secara INKREMENTAL (baris dihapus tanpa
+                # re-render penuh — scroll melompat ke atas di tengah
+                # daftar); render penuh listener dITEKAN utk notifikasi itu
+                # (state sudah sinkron saat handler berjalan).
+                if self._suppress_render_notify:
+                    return
+                # koales: notifikasi beruntun (toggle cepat lintas tab)
+                # → batalkan after(0) lama, jadwalkan ulang (render membaca
+                # state terkini — aman digabung).
+                if self._render_after is not None:
+                    with contextlib.suppress(Exception):
+                        self.after_cancel(self._render_after)
+                self._render_after = self.after(0, self._render_scheduled)
         except tk.TclError:
             pass
+
+    def _render_scheduled(self):
+        """v3.9.72 — FIX 3: wrapper after(0) — bersihkan id timer lalu
+        jalankan render penuh (listener jalur tab lain / clear)."""
+        self._render_after = None
+        self._render()
 
     def _show_empty(self):
         self.content.pack_forget()
@@ -701,8 +746,104 @@ class FollowUpView(tk.Frame):
         fp = self._iid_fp.get(row_iid)
         snap = self.store.rows.get(fp)
         if snap:
-            # toggle → off (keluarkan); _render dipanggil via listener
+            # toggle → off (keluarkan); dulu: listener → _render PENUH
+            # (delete-all + reinsert-all — scroll melompat ke atas di
+            # tengah daftar + 2 tulis JSON sinkron di UI thread).
+            # v3.9.72 — FIX 3 (task 2-b): klik di TABEL UTAMA → update
+            # INKREMENTAL (hapus hanya baris itu + status); klik di CLONE
+            # ⛶ tetap jalur lama (render penuh MENUTUP clone basi —
+            # kontrak FIX 6e-01, clone tak bisa diberbarui in-place).
+            if tree is self.tree:
+                self._toggle_row_incremental(row_iid, fp, snap)
+            else:
+                self.store.toggle(fp, snap)
+
+    def _toggle_row_incremental(self, row_iid: str, fp: str, snap: dict):
+        """v3.9.72 — FIX 3 (task 2-b): keluarkan SATU baris tanpa
+        re-render penuh.
+        - UI: tree.delete(iid) baris itu saja (iid stabil — peta
+          _iid_fp/neg_cells baris lain tak tergeser); scroll & seleksi
+          baris lain TERJAGA (dulu lompat ke atas).
+        - Status kartu + tombol dihitung ulang dari store (n/selesai/
+          n_shown — loop kecil, store daftar ✓ user).
+        - Persist: mode defer diaktifkan SEKITAR toggle → SATU flush
+          gabungan debounce 200ms (rapid toggle tidak menghantam disk
+          2 file per klik); flush juga di _on_view_destroy (teardown).
+        - Baris terakhir → jatuh ke _render() penuh (jalur kosong:
+          empty state + heading + status — trivial, tanpa baris)."""
+        self._suppress_render_notify = True
+        self.store.set_defer_saves(True)
+        try:
             self.store.toggle(fp, snap)
+        finally:
+            self.store.set_defer_saves(False)
+            self._suppress_render_notify = False
+        # satu flush gabungan (debounce 200ms) — timer lama dibatalkan
+        if self._save_after is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._save_after)
+        try:
+            self._save_after = self.after(200, self._flush_followup_saves)
+        except tk.TclError:
+            self._flush_followup_saves()
+            return
+
+        # --- update UI inkremental ---
+        if not self.store.rows:
+            self._render()          # jalur kosong (empty state + status)
+            return
+        with contextlib.suppress(tk.TclError):
+            self.tree.delete(row_iid)
+        self._iid_fp.pop(row_iid, None)
+        # sel minus milik iid terhapus dibuang; iid baris lain stabil
+        # (penomoran fu_N tak digeser — hanya render penuh yang menomori
+        # ulang) → tag cell lain tetap valid.
+        if any(c[0] == row_iid for c in self._neg_cells):
+            self._neg_cells = [c for c in self._neg_cells
+                               if c[0] != row_iid]
+        self._reapply_cell_tags(self.tree)
+        self._update_status_after_toggle()
+
+    def _update_status_after_toggle(self):
+        """v3.9.72 — FIX 3: status kartu + tombol pasca penghapusan
+        inkremental — logika teks IDENTIK _render (n · selesai · menunggu
+        · tampil bila ⧩ aktif; hint jujur bila 0 tampil karena seleksi
+        ⧩ kosong); n_shown dihitung ulang dgn filter ⧩ yang sama (store
+        kecil — loop murah, jauh lebih ringan dari re-render penuh)."""
+        rows = list(self.store.rows.values())
+        n = len(rows)
+        selesai = self.store.resolved_count()
+        col_idx = {c[0]: j for j, c in enumerate(COLUMNS)}
+        active = [(col_idx[c], s) for c, s in self._col_sel.items()
+                  if s is not None]
+        n_shown = 0
+        for snap in rows:
+            if not active:
+                n_shown = n
+                break
+            info = self.store.resolved.get(snap.get("fp", ""), {})
+            values = self._fu_row_values(snap, bool(info), info)
+            if all(str(values[j]) in s for j, s in active):
+                n_shown += 1
+        _hint = (zero_row_filter_message(self._col_sel)
+                 if not n_shown else None)
+        self._status_text = (_hint
+                             or (f"{n} baris · {selesai} selesai · "
+                                 f"{n - selesai} menunggu"
+                                 + (f" · {n_shown} tampil (filter ⧩)"
+                                    if n_shown != n else "")))
+        self._apply_status()
+        self._consume_store_notes()
+        self.btn_clear.set_enabled(n > 0)
+        self.btn_export.set_enabled(n > 0)
+
+    def _flush_followup_saves(self):
+        """v3.9.72 — FIX 3: callback debounce 200ms — tulis followup.json
+        + followup_resolved.json SEKARANG (gabungan seluruh toggle sejak
+        timer terakhir); kegagalan di-surface ke status (pola 2f-08)."""
+        self._save_after = None
+        self.store.flush_saves()
+        self._consume_store_notes()
 
     # =========================================================================
     # AKSI: EXPORT / KOSONGKAN

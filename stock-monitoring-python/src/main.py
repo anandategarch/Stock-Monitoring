@@ -39,6 +39,12 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         verbose: Print progress
         stop_event: threading.Event — jika set, pipeline akan berhenti di checkpoint
                     berikutnya dengan raise PipelineStopped
+                    v3.9.72 (audit 1-d): checkpoint kini JUGA di dalam fase
+                    baca file (fn_combine_folder/fn_9901/fn_rekap_mentah/
+                    fn_4109 — antar file/sheet), fase Rincian PO & Audit
+                    (rincian_po.build_rincian_po, fn_audit.build_audit_
+                    from_app + loop baris internal) — bukan lagi 5 titik
+                    kasar yang menunggu fase penuh selesai.
 
     Returns:
         Tuple (append1_df, rincian_po_df, in_detail_df, audit_result)
@@ -121,7 +127,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # (barang non-DEVIASI-master pun PO-nya ikut terbaca; query utama
     # tab 🛒 Rincian PO tetap terfilter DEVIASI persis mirror M)
     po_semua: dict = {}
-    rincian_po_df = build_rincian_po(config, semua_out=po_semua)
+    rincian_po_df = build_rincian_po(config, semua_out=po_semua,
+                                     stop_event=stop_event)
     po_pending_df = extract_po_pending(po_semua.get("df"))
 
     # FIX: check stop_event after Rincian PO build
@@ -149,7 +156,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     audit_df, audit_kpi, audit_desc = build_audit_from_app(
         rekap_so_holder.get("df"), in_detail_df,
         po_pending_df=po_pending_df,
-        konversi=konversi_holder.get("map"))
+        konversi=konversi_holder.get("map"),
+        stop_event=stop_event)
     audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
@@ -163,7 +171,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # tidak berubah.
     audit_df2, audit_kpi2, audit_desc2 = build_audit_from_app(
         rekap_so_holder.get("df"), in_detail_df, po_pending_df=po_pending_df,
-        bulan_lalu=False, konversi=konversi_holder.get("map"))
+        bulan_lalu=False, konversi=konversi_holder.get("map"),
+        stop_event=stop_event)
     audit_result["df_bulan_ini"] = audit_df2
     audit_result["kpi_bulan_ini"] = audit_kpi2
     audit_result["desc_bulan_ini"] = audit_desc2
@@ -178,8 +187,15 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # try/except → log warning + peta harga kosong (mode Nominal (H)
     # menonaktifkan diri dgn anggun; view lain tetap jalan).
     try:
-        harga_df = fn_4109(config.folder("Harga"), config.sheet("Harga"))
+        harga_df = fn_4109(config.folder("Harga"), config.sheet("Harga"),
+                           stop_event=stop_event)
         audit_result["harga_map"] = build_harga_map(harga_df)
+    except PipelineStopped:
+        # v3.9.72 — ⏹ saat baca harga 41.09: teruskan ke checkpoint utama
+        # di bawah — JANGAN didegradasi jadi peta harga kosong (Stop =
+        # permintaan user, bukan file rusak; jalur degradasi by-design
+        # hanya utk kerusakan struktur file)
+        raise
     except Exception as e:  # noqa: BLE001 — degradasi anggun by design
         print(f"  [WARNING] Harga 41.09 dilewati: {e}")
         audit_result["harga_map"] = {}

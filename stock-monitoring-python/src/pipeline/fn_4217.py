@@ -220,7 +220,8 @@ def _find_col(prom_columns, kandidat):
 
 def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
             sheet_name: str = SHEET_4217,
-            protected_barangs: list | set | None = None) -> pd.DataFrame:
+            protected_barangs: list | set | None = None,
+            stop_event=None) -> pd.DataFrame:
     """
     Mirror M: fn4217(folderPath).
 
@@ -238,6 +239,9 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     default = nama sheet export standar — pemanggil lama tak berubah).
     v3.9.39: bila nama persis tidak ada di file → fallback prefiks '#42.17'.
 
+    stop_event: v3.9.72 — diteruskan ke fn_combine_folder (checkpoint ⏹
+    antar file — audit 1-d). Default None = perilaku lama.
+
     Output columns: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS, SATUAN
     (SATUAN = 'Nama Satuan' file per barang; file tanpa kolom → '').
     """
@@ -250,7 +254,8 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     # kategori TERAKHIR file-1 (bleed lintas file). Mirror pola per-file
     # fn_4109.
     prom = fn_combine_folder(folder_path, sheet_resolved, header_row=4,
-                             ffill_cols=_KANDIDAT_KATEGORI)
+                             ffill_cols=_KANDIDAT_KATEGORI,
+                             stop_event=stop_event)
     if prom.empty:
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
