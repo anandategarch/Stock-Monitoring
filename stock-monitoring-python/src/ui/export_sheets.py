@@ -133,13 +133,63 @@ def _num_col(f: pd.DataFrame, name: str) -> pd.Series:
     return pd.Series(pd.NA, index=f.index, dtype="Float64")
 
 
+# ---------------------------------------------------------------------------
+# v3.11.1 — KUNCI/LABEL TANGGAL LINTAS BULAN (audit 12-c2)
+# ---------------------------------------------------------------------------
+# Encoding pipeline: Tanggal negatif = HARI bulan lalu (−25 = hari 25,
+# −30/−31 = penutupan). Di blok negatif, urutan NUMERIK = kronologis
+# TERBALIK → filter/sort/label numerik mentah salah arah.
+def tgl_chrono_key(v):
+    """Kunci kronologis skalar: t=−25 → (0,25) < t=−26 → (0,26) < t=1 →
+    (1,1) — identik _chrono / fn_audit _k1/_k2 (satu konvensi app)."""
+    try:
+        iv = int(v)
+    except (TypeError, ValueError):
+        return (2, str(v))
+    return (0, -iv) if iv < 0 else (1, iv)
+
+
+def tgl_range_mask(t: pd.Series, start: int, end: int) -> pd.Series:
+    """Mask rentang tanggal KRONOLOGIS (v3.11.1 — FIX P1 audit 12-c2
+    bug B1): filter numerik lama (t >= start) & (t <= end) membuat
+    start=−25 (maksud user: “mulai hari 25”) membuang hari 26•..31•
+    SENYAP — di blok negatif, numerik = kronologis terbalik (“start”
+    berperan sebagai “end”). Bandingkan via kunci kronologis mirror
+    sort fn_audit/export. NaN → False (baris tanpa tanggal dibuang —
+    perilaku lama)."""
+    tv = pd.to_numeric(t, errors="coerce")
+    sk = tgl_chrono_key(start)
+    ek = tgl_chrono_key(end)
+    k1 = pd.Series(np.where(tv < 0, 0, 1), index=t.index)
+    k2 = pd.Series(np.where(tv < 0, -tv, tv), index=t.index)
+    ge = (k1 > sk[0]) | ((k1 == sk[0]) & (k2 >= sk[1]))
+    le = (k1 < ek[0]) | ((k1 == ek[0]) & (k2 <= ek[1]))
+    return ge & le
+
+
+def tgl_label(v):
+    """Label tanggal bulan-lalu: −25 → '25•' (positif apa adanya, NaN →
+    NaN/None). Konvensi '•' = bulan lalu — mirror header sheet PIVOT
+    (legend '• = bulan lalu' ditulis footer sheet selisih/audit).
+    v3.11.1 — FIX P2 audit 12-c2 bug B2 (user: “tanggal TAMPILKAN urut
+    yaitu 25,26 … terutama pada hasil export file excel” — angka minus
+    mentah tanpa legend tak terbaca)."""
+    try:
+        iv = int(v)
+    except (TypeError, ValueError):
+        return v
+    return f"{-iv}•" if iv < 0 else iv
+
+
 def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
                             tgl_end: int = 31,
                             audit_cols: list | None = None) -> pd.DataFrame:
     """Bangun tabel rekap Selisih IN per resto dari base (keluaran
     InSelisihView._compute_base — sudah membawa komponen 42.05/32.24/99.01).
 
-    - Filter: rentang tanggal aktif (default 1–31 = bulan berjalan saja).
+    - Filter: rentang tanggal aktif KRONOLOGIS (default 1–31 = bulan
+      berjalan saja; start negatif = hari bulan lalu — v3.11.1 FIX P1
+      audit 12-c2: numerik mentah membuang 26•..31• saat start=−25).
     - Urut: Resto → Tanggal KRONOLOGIS → Nama Barang. v3.11 — dulu
       sort Tanggal NUMERIK menempatkan blok bulan-lalu TERBALIK
       (−31, −30, …, −25 sebelum 1..N) — mode 📆 Lalu+Ini membuat
@@ -162,8 +212,9 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
         return empty
 
     f = base
-    t = pd.to_numeric(f["Tanggal"], errors="coerce")
-    f = f[(t >= tgl_start) & (t <= tgl_end)]
+    # v3.11.1 — FIX P1 (audit 12-c2 B1): rentang KRONOLOGIS — numerik
+    # mentah (t >= start) membuang hari 26•..31• saat start=−25.
+    f = f[tgl_range_mask(f["Tanggal"], tgl_start, tgl_end)]
     if f.empty:
         return empty
 
@@ -225,6 +276,11 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
     out = out.sort_values(["Resto", "_k1", "_k2", "Nama Barang"],
                           kind="mergesort", na_position="last") \
         .drop(columns=["_k1", "_k2"]).reset_index(drop=True)
+    # v3.11.1 — FIX P2 (audit 12-c2 B2): LABEL tanggal bulan-lalu
+    # '25•' (setelah sort — sort tetap numerik di atas). Positif tetap
+    # int; legend '• = bulan lalu' ditulis footer sheet (user: "tanggal
+    # tampilkan urut yaitu 25,26 … terutama pada hasil export").
+    out["Tanggal"] = out["Tanggal"].map(tgl_label)
     # Hasil SO NaN → None (sel kosong di Excel, bukan 0)
     out["Hasil SO"] = out["Hasil SO"].astype("Float64").where(
         out["Hasil SO"].notna(), other=None)
@@ -271,6 +327,14 @@ def write_selisih_sheet(writer, df: pd.DataFrame,
     if len(df) > 0:
         ws.auto_filter.ref = (f"A1:{get_column_letter(len(df.columns))}"
                               f"{len(df) + 1}")
+        # v3.11.1 — legend bulan-lalu (audit 12-c2 B2): sel Tanggal
+        # ber-label '25•' tanpa penjelas = angka ajaib; footer kecil di
+        # bawah tabel (di luar rentang autofilter).
+        if "Tanggal" in df.columns and any(
+                str(v).endswith("•") for v in df["Tanggal"]):
+            _leg = ws.cell(row=len(df) + 3, column=1,
+                           value="• = tanggal bulan lalu")
+            _leg.font = Font(italic=True, color="FF64748B")
 
 
 # =============================================================================

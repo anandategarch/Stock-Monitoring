@@ -467,6 +467,13 @@ def build_audit_rekap(df: pd.DataFrame,
     def _tgl_int(i: int) -> int:
         return int(tgl[i])
 
+    def _tgl_lbl(v: int) -> str:
+        # v3.11.1 — FIX P2 (audit 12-c2, kelas B2): label tanggal utk
+        # catatan audit — bulan-lalu negatif → '28•' ("Periode Tgl -28 -
+        # 1" tak terbaca; konvensi '•' = bulan lalu, mirror label tabel
+        # & export). Jeda/angka lain tak tersentuh.
+        return f"{-int(v)}•" if v < 0 else str(int(v))
+
     group_start = 0
     while group_start < n:
         # v3.9.72 — checkpoint ⏹ per grup (audit 1-d; engine = loop
@@ -524,13 +531,15 @@ def build_audit_rekap(df: pd.DataFrame,
                                 if selisih[j] != 0.0:
                                     status[j] = ST_CUTOFF
                                     detail[j] = (f"Beda {jeda} Hari "
-                                                 f"(Periode Tgl {start_tgl} - "
-                                                 f"{end_tgl})")
+                                                 f"(Periode Tgl "
+                                                 f"{_tgl_lbl(start_tgl)} - "
+                                                 f"{_tgl_lbl(end_tgl)})")
                                     kpi["cutoff"] += 1
                                 else:
                                     status[j] = ST_IN_CUTOFF
                                     detail[j] = (f"Rentang Cut-off Tgl "
-                                                 f"{start_tgl} - {end_tgl}")
+                                                 f"{_tgl_lbl(start_tgl)} - "
+                                                 f"{_tgl_lbl(end_tgl)}")
                         cum = 0.0
                         start_idx = -1
 
@@ -542,7 +551,7 @@ def build_audit_rekap(df: pd.DataFrame,
                     if selisih[j] != 0.0:
                         status[j] = ST_DEV_MURNI
                         detail[j] = (f"Sisa Gantung: {_fmt_signed(cum)} "
-                                     f"(Sejak Tgl {open_tgl})")
+                                     f"(Sejak Tgl {_tgl_lbl(open_tgl)})")
                         kpi["deviasi_murni"] += 1
                     else:
                         status[j] = ST_OK

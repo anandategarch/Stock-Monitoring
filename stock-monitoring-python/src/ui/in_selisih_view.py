@@ -19,8 +19,11 @@ bulan kemarin"):
   Resolve-Rate · Anomali ΔSO · COM Minus (lihat _compute_analisa).
 - RENTANG TANGGAL memakai PANJANG BULAN ASLI dari data (audit_result
   'month_len'/'lalu_month_len' — September 30 hari → rentang 1..30,
-  tanpa tanggal 31; bulan kemarin −25..−30; fallback 31 utk pemanggil
-  lama/test tanpa kunci).
+  tanpa tanggal 31; fallback 31 utk pemanggil lama/test tanpa kunci).
+  v3.11.1 — semantik rentang KRONOLOGIS (audit 12-c2 B1): entry −25 =
+  "mulai hari 25 bulan lalu"; default mode 📆 Lalu+Ini = −25..N (hari
+  pertama blok rekap lalu; dulu default numerik-min −lalu_len & filter
+  numerik mentah — start=−25 membuang 26•..31• senyap).
 - KPI chip "COM MINUS" + catatan audit B5 "COM −n" + B4b "SO belum
   direkam"; popup Rincian IN dapat chip COM.
 
@@ -73,7 +76,7 @@ HITUNG (SegmentBar "MODE HITUNG", baris pertama kartu Filter):
   user (tgl 1..31, tanpa tanggal negatif). Rentang tampil 1..31.
 - "📆 Lalu + Ini": audit = varian PENUH (incl. bulan lalu — saldo
   kumulatif menyambung dari 25..31 bulan lalu; perilaku v3.6-v3.9.26).
-  Rentang tampil -31..31.
+  Rentang tampil −25..N (kronologis — v3.11.1).
 Kedua varian dihitung SEKALI oleh pipeline (kunci audit_result
 "df"/"kpi"/"desc" + "df_bulan_ini"/"kpi_bulan_ini"/"desc_bulan_ini");
 mode hanya MEMILIH varian (tanpa recompute). KPI chips + Saldo + Hasil
@@ -182,6 +185,9 @@ from .doc_codes import (
 from .export_sheets import (
     AUDIT_EXPORT_COLUMNS,
     build_selisih_export_df,
+    tgl_chrono_key,
+    tgl_label,
+    tgl_range_mask,
     write_selisih_sheet,
 )
 from .theme import (
@@ -271,7 +277,10 @@ _NUM_COLS = {"Hasil SO", "COM", "Barang Masuk", "IN",
 # dari "belum direkam"/"tak ada basis" (NaN) — inkonsisten dgn chip
 # popup (_fmt_num_keepzero) & export (menulis 0).
 # v3.11 — "SO Kemarin" keluar set (kolom tabel dihapus).
-_KEEPZERO_COLS = {"COM"}
+# v3.11.1 — + "Hasil SO" (audit 12-c2 B4): SO tercatat 0 = stok
+# terhitung KOSONG (informasi sah) — tabel dulu '-' tak terbedakan
+# dari "belum direkam" (NaN), sementara export menulis 0.
+_KEEPZERO_COLS = {"COM", "Hasil SO"}
 
 # Warna status — mirror conditional formatting VBA (soft colors)
 _STATUS_TAG = {
@@ -519,12 +528,25 @@ def _fmt_jam(val) -> str:
         return str(val)
 
 
+def _fmt_tgl_ui(val) -> str:
+    """Label tanggal utk TABEL & daftar nilai filter: '25•' / '5'
+    (string — paritas _fmt_int lama utk positif supaya kecocokan ⧩
+    filter header dgn nilai TERFORMAT tetap konsisten; NaN → '')."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    lab = tgl_label(val)
+    return lab if isinstance(lab, str) else str(lab)
+
+
 def _format_col_values(col: str, series: pd.Series) -> pd.Series:
     """Format satu kolom DataFrame → string tampilan (dipakai filter header
     & render — nilai filter selalu identik dgn yang tampil di tabel).
-    v3.10.1 — "SO Kemarin"/"COM" pakai _fmt_num_keepzero (0 meaningful)."""
+    v3.10.1 — "SO Kemarin"/"COM" pakai _fmt_num_keepzero (0 meaningful).
+    v3.11.1 — Tanggal bulan-lalu ber-label '25•' (audit 12-c2 B2 —
+    konvensi pivot; angka minus mentah tak terbaca; entry rentang
+    tetap numerik −25..−31)."""
     if col == "Tanggal":
-        return series.map(_fmt_int)
+        return series.map(_fmt_tgl_ui)
     if col in _KEEPZERO_COLS:
         return series.map(_fmt_num_keepzero)
     if col in _NUM_COLS:
@@ -1093,7 +1115,12 @@ class InSelisihView(tk.Frame):
         tk.Label(r0, text="–", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
         self.tgl_end_var = tk.StringVar(value="31")  # v3.6: 31 BULAN BERJALAN
         entry_end = ttk.Entry(r0, textvariable=self.tgl_end_var, width=6)
-        entry_end.pack(side="left", padx=(2, 8))
+        # v3.11.1 — legend bulan-lalu (audit 12-c2 B2): label tanggal
+        # '25•' di tabel, entry rentang tetap numerik −25..−31.
+        entry_end.pack(side="left", padx=(2, 2))
+        tk.Label(r0, text="• = bulan lalu (input: −25…−31)", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(7)).pack(
+            side="left", padx=(4, 8))
         entry_end.bind("<Return>", lambda e: self._on_tanggal_change())
         GhostButton(r0, text="Apply", command=self._on_tanggal_change).pack(
             side="left", padx=(0, 14))
@@ -1386,13 +1413,17 @@ class InSelisihView(tk.Frame):
         """v3.9.27 — toggle MODE HITUNG (SegmentBar). idx 0 = 📅 Bulan Ini
         (default), 1 = 📆 Lalu + Ini. Ganti varian audit + rentang tanggal
         + refresh (KPI chips ikut varian lewat _render_kpi_chips).
-        v3.10 — rentang sisi bulan-lalu memakai PANJANG BULAN KEMARIN
-        ASLI (−25..−30 utk bulan 30-hari — tanpa tanggal 31)."""
+        v3.11.1 — default start = −25 (HARI PERTAMA blok rekap lalu —
+        rekap lalu selalu 25•..akhir bulan). Semantik rentang KRONOLOGIS
+        (audit 12-c2 B1): −25 = "mulai hari 25"; −31 = hari TERAKHIR
+        bulan lalu (bukan lagi "semua" numerik-min lama — default lama
+        −lalu_len justru menyembunyikan 25•..30• di bawah filter baru).
+        User: "tanggal tampilkan urut yaitu 25,26 sampai tanggal hari ini"."""
         self._mode_bulan_lalu = (idx == 1)
         self._apply_audit_mode()
         self._render_kpi_chips()
         if self._mode_bulan_lalu:
-            self.tgl_start_var.set(str(-self._lalu_month_len))
+            self.tgl_start_var.set("-25")
             self.tgl_end_var.set(str(self._month_len))
         else:
             self.tgl_start_var.set("1")     # v3.8 default berjalan saja
@@ -1671,8 +1702,10 @@ class InSelisihView(tk.Frame):
         except (AttributeError, TypeError, ValueError):
             t_start = t_end = None
         if t_start is not None and t_end is not None:
-            t = pd.to_numeric(f["Tanggal"], errors="coerce")
-            f = f[(t >= t_start) & (t <= t_end)]
+            # v3.11.1 — FIX P1 (audit 12-c2 B1): rentang KRONOLOGIS —
+            # filter numerik (t >= start) membuang hari 26•..31• saat
+            # user mengetik start −25 (maksud "mulai hari 25").
+            f = f[tgl_range_mask(f["Tanggal"], t_start, t_end)]
         for c, sel in self._col_sel.items():
             if sel is None or c == col or c not in f.columns:
                 continue
@@ -1923,6 +1956,13 @@ class InSelisihView(tk.Frame):
         comv = (pd.to_numeric(out["COM"], errors="coerce")
                 .to_numpy(dtype="float64") if "COM" in out.columns
                 else None)
+
+        def _nz(v) -> str:
+            # v3.11.1 — FIX P3 (audit 12-c2 B5): angka 0 di NARASI dicetak
+            # '0' (bukan '-' — narasi lama "IN - > ΔSO (200)" tak
+            # terbaca; 0 = IN/ΔSO/BM nihil adalah informasi).
+            return "0" if float(v) == 0 else _fmt_num(v)
+
         for i in range(len(out)):
             r = out["Resto"].iat[i]
             b = out["Nama Barang"].iat[i]
@@ -1948,18 +1988,18 @@ class InSelisihView(tk.Frame):
             elif sel[i] != 0:
                 if basis_v310:
                     if dsov is not None and not np.isnan(dsov[i]):
-                        arah = (f"IN {_fmt_num(ins[i])} > "
-                                f"ΔSO {_fmt_num(dsov[i])}"
+                        arah = (f"IN {_nz(ins[i])} > "
+                                f"ΔSO {_nz(dsov[i])}"
                                 if sel[i] < 0 else
-                                f"ΔSO {_fmt_num(dsov[i])} > "
-                                f"IN {_fmt_num(ins[i])}")
+                                f"ΔSO {_nz(dsov[i])} > "
+                                f"IN {_nz(ins[i])}")
                     else:
                         arah = ("basis SO kemarin tak ada (ΔSO belum "
                                 "dapat dihitung)")
                 else:
-                    arah = (f"IN {_fmt_num(ins[i])} > BM {_fmt_num(bm[i])}"
+                    arah = (f"IN {_nz(ins[i])} > BM {_nz(bm[i])}"
                             if sel[i] < 0 else
-                            f"BM {_fmt_num(bm[i])} > IN {_fmt_num(ins[i])}")
+                            f"BM {_nz(bm[i])} > IN {_nz(ins[i])}")
                 _add(r, t, b,
                      f"Selisih IN {_fmt_num(sel[i])} ({arah})")
         return notes
@@ -2345,8 +2385,10 @@ class InSelisihView(tk.Frame):
         # rentang tanggal — display-only (audit dihitung dari data penuh;
         # ini hanya menyembunyikan baris dari tampilan)
         if st["tgl_start"] is not None and st["tgl_end"] is not None:
-            t = pd.to_numeric(f["Tanggal"], errors="coerce")
-            f = f[(t >= st["tgl_start"]) & (t <= st["tgl_end"])]
+            # v3.11.1 — FIX P1 (audit 12-c2 B1): rentang KRONOLOGIS —
+            # numerik mentah membuang hari 26•..31• saat start=−25.
+            f = f[tgl_range_mask(f["Tanggal"],
+                                 st["tgl_start"], st["tgl_end"])]
 
         # filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel).
@@ -3146,7 +3188,10 @@ class InSelisihView(tk.Frame):
         tgl_end = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
                                       fallback=31, label="Tanggal akhir",
                                       parent=self)
-        if tgl_start > tgl_end:
+        # v3.11.1 — FIX (audit 12-c2 B1): swap pakai KUNCI KRONOLOGIS —
+        # numerik mentah menukar arah yang salah utk kombinasi negatif
+        # (start=5, end=−25 → kronologis end < start → ditukar).
+        if tgl_chrono_key(tgl_start) > tgl_chrono_key(tgl_end):
             tgl_start, tgl_end = tgl_end, tgl_start
 
         def work():
@@ -3276,6 +3321,25 @@ class InSelisihView(tk.Frame):
             return 0.0
         return -v if neg else v
 
+    def _parse_tgl_chrono(self, s):
+        """v3.11.1 — parser sort kolom Tanggal KRONOLOGIS (audit 12-c2
+        B3): parse numerik mentah (default) membalik blok bulan-lalu —
+        ASC menempatkan 30• dulu (kelas bug urutan yang dikeluhkan
+        user). Label '25•' = HARI BULAN LALU → kunci blok-0 (negatif);
+        angka polos = bulan berjalan (blok-1); '-25' mentah juga
+        diterima (blok-0)."""
+        s = str(s).strip()
+        lalu = s.endswith("•")
+        if lalu:
+            s = s[:-1].strip()
+        try:
+            iv = int(float(s))
+        except (TypeError, ValueError):
+            return (2, s)
+        if lalu and iv > 0:
+            iv = -iv
+        return tgl_chrono_key(iv)
+
     def _sort_by(self, col: str, reverse: bool = True, tree=None):
         # FIX B-08 (audit 2-b): sort saat render batch → ANTRE (pola
         # _pending_sort komparasi/laporan v3.9.5 — view ini terlewat).
@@ -3285,7 +3349,13 @@ class InSelisihView(tk.Frame):
         tree = tree if tree is not None else self.tree
         # FIX B-01: parser angka Indonesia utk kolom numerik (sort numerik
         # benar — bukan string/fallback-salah).
-        parse = self._parse_num_id if col in _NUM_COLS else None
+        # v3.11.1 — Tanggal: parser kronologis lintas bulan (B3).
+        if col == "Tanggal":
+            parse = self._parse_tgl_chrono
+        elif col in _NUM_COLS:
+            parse = self._parse_num_id
+        else:
+            parse = None
         sort_tree_by_column(tree, col, reverse=reverse, parse=parse)
         # FIX B-03 (audit 2-b): delete+reinsert me-reset tag PER-CELL →
         # pasang ulang (identik deviasi/komparasi/laporan).

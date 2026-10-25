@@ -912,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11", APP_VERSION == "3.11",
+    check("Versi = 3.11.1", APP_VERSION == "3.11.1",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -8402,8 +8402,10 @@ def main():
     check("(v3.9.27) Mode '📆 Lalu + Ini': varian penuh aktif (3 baris "
           "incl. -25)",
           _iv37.audit_df is _full37 and len(_iv37.audit_df) == 3)
-    check("(v3.9.27) Mode Lalu + Ini: rentang -31..31",
-          _iv37.tgl_start_var.get() == "-31" and
+    check("(v3.9.27) Mode Lalu + Ini: rentang default −25..31 (v3.11.1 — "
+          "kronologis: −25 = hari PERTAMA blok rekap lalu; −31 = hari "
+          "TERAKHIR lalu, bukan lagi numerik-min 'semua')",
+          _iv37.tgl_start_var.get() == "-25" and
           _iv37.tgl_end_var.get() == "31")
     check("(v3.9.27) Mode Lalu + Ini: baris bulan lalu TAMPIL (3)",
           _rows37() == 3, f"rows={_rows37()}")
@@ -8412,8 +8414,10 @@ def main():
     _tgl_vals37 = set()
     for _k37 in _iv37.tree.get_children(""):
         _tgl_vals37.add(_iv37.tree.set(_k37, "Tanggal"))
-    check("(v3.9.27) Mode Lalu + Ini: kolom Tanggal memuat -25",
-          "-25" in _tgl_vals37, f"tgl={sorted(_tgl_vals37)}")
+    check("(v3.11.1) Mode Lalu + Ini: kolom Tanggal ber-label '25•' "
+          "(konvensi • = bulan lalu — paritas deviasi_popup & export; "
+          "dulu angka minus mentah)",
+          "25•" in _tgl_vals37, f"tgl={sorted(_tgl_vals37)}")
 
     # kembali ke Bulan Ini
     _iv37.mode_bar._select(0)
@@ -8425,12 +8429,12 @@ def main():
           _iv37.tgl_start_var.get() == "1")
 
     # auto-upgrade: ketik tanggal negatif saat mode Bulan Ini
-    _iv37.tgl_start_var.set("-26")
+    _iv37.tgl_start_var.set("-25")
     _iv37.tgl_end_var.set("31")
     _iv37._on_tanggal_change()
     wait_view(root, _iv37)
     root.update()
-    check("(v3.9.27) AUTO-UPGRADE: rentang negatif (-26) di mode Bulan "
+    check("(v3.9.27) AUTO-UPGRADE: rentang negatif (−25) di mode Bulan "
           "Ini → otomatis '📆 Lalu + Ini' (baris bulan lalu ada)",
           _iv37._mode_bulan_lalu and _iv37.mode_bar.active == 1 and
           _rows37() == 3, f"rows={_rows37()}")
@@ -21290,12 +21294,15 @@ def main():
         "Saldo": [9.0] * 8, "PO Menunggu": [0] * 8,
         "Hasil Audit": ["OK"] * 8, "Catatan Audit": [""] * 8,
     })
-    _ex86 = _bse86(_base86, -31, 31, audit_cols=["Saldo"])
-    check("(v3.11) Export selisih: Tanggal urut KRONOLOGIS — blok bulan "
-          "lalu 25•,26•,…,31• dulu LALU 1,2,… (dulu sort numerik "
-          "membalik blok lalu: −31 paling awal — user: 'tanggal tampilkan "
-          "urut yaitu 25,26 sampai tanggal hari ini')",
-          list(_ex86["Tanggal"]) == [-25, -26, -30, -31, 1, 1, 2, 3],
+    _ex86 = _bse86(_base86, -25, 31, audit_cols=["Saldo"])
+    check("(v3.11.1) Export selisih: Tanggal urut KRONOLOGIS + LABEL "
+          "'25•' — blok bulan lalu 25•,26•,…,31• dulu LALU 1,2,…; "
+          "positif tetap numerik; rentang KRONOLOGIS start=−25 = "
+          "'mulai hari 25' (dulu filter numerik: sort membalik blok lalu "
+          "+ start=−25 membuang 26•..31• — user: 'tanggal tampilkan urut "
+          "yaitu 25,26 sampai tanggal hari ini')",
+          list(_ex86["Tanggal"]) == ["25•", "26•", "30•", "31•",
+                                      1, 1, 2, 3],
           f"got {list(_ex86['Tanggal'])}")
     check("(v3.11) Export selisih: COM = kolom INTI tepat di kanan "
           "'Hasil SO' (NaN → sel kosong, bukan 0)",
@@ -21320,6 +21327,218 @@ def main():
           "(config lama tanpa key tetap jalan)",
           'self.Folders.setdefault("SaldoSistem4217", "6. 42.17")'
           in _inspect86.getsource(_Cfg86))
+
+    # ==================================================================
+    print("== §87. (v3.11.1) BUG HUNT — batas bulan po_keterangan · rentang "
+          "kronologis · label 25• · sort-race · expander ==")
+
+    # -- (a) po_keterangan: basis SO TERAKHIR TERCATAT + gate verifiability
+    _det87 = lambda b, r, t, v, s: {
+        "Nama Barang": b, "NAMA RESTO": r, "Tanggal": t, "Value": v,
+        "SOURCE IN": s}
+    _pm87 = lambda d, i: _po_map(pd.DataFrame(d), pd.DataFrame(i))
+    check("(v3.11.1) po_keterangan: t=1 SO DATAR vs penutupan → TIDAK "
+          "berlabel (dulu kunci −1 hampa → dibanding 0 → label palsu "
+          "tiap awal bulan walau SO datar/turun)",
+          _pm87([_rows86("AYAM", "R1", -30, "1.SO", 100, "Eksternal"),
+                 _rows86("AYAM", "R1", 1, "1.SO", 100, "Eksternal"),
+                 _rows86("AYAM", "R1", 1, "5.BARANG MASUK", 10,
+                         "Eksternal")],
+                [_det87("AYAM", "R1", 1, 0.0, "42.05")]) == {},
+          "got non-empty")
+    check("(v3.11.1) po_keterangan: t=1 SO TURUN (500→100) → TIDAK "
+          "berlabel",
+          _pm87([_rows86("AYAM", "R1", -30, "1.SO", 500, "Eksternal"),
+                 _rows86("AYAM", "R1", 1, "1.SO", 100, "Eksternal"),
+                 _rows86("AYAM", "R1", 1, "5.BARANG MASUK", 10,
+                         "Eksternal")],
+                [_det87("AYAM", "R1", 1, 0.0, "42.05")]) == {},
+          "got non-empty")
+    check("(v3.11.1) po_keterangan: t=1 SO NAIK vs penutupan NYATA → "
+          "berlabel (penutupan kini terbaca dari kunci terkecil, bukan "
+          "kunci hampa −1)",
+          _pm87([_rows86("AYAM", "R1", -30, "1.SO", 50, "Eksternal"),
+                 _rows86("AYAM", "R1", 1, "1.SO", 100, "Eksternal"),
+                 _rows86("AYAM", "R1", 1, "5.BARANG MASUK", 10,
+                         "Eksternal")],
+                [_det87("AYAM", "R1", 1, 0.0, "42.05")])
+          == {("AYAM", "R1"): frozenset({1})},
+          "got lain")
+    check("(v3.11.1) po_keterangan: 25• TANPA SO lebih awal → TIDAK "
+          "berlabel (−24 tak pernah diimpor pipeline — degrade, bukan "
+          "baseline 0)",
+          _pm87([_rows86("AYAM", "R1", -25, "1.SO", 100),
+                 _rows86("AYAM", "R1", -25, "5.BARANG MASUK", 5)],
+                [_det87("AYAM", "R1", -25, 0.0, "42.05")]) == {},
+          "got non-empty")
+    check("(v3.11.1) po_keterangan: gate verifiability — 26• di LUAR "
+          "jendela import 3224-lalu (5 hari terakhir file) → TIDAK "
+          "berlabel walau RI hari itu ADA di file ('3224=0' tak "
+          "terverifikasi — dulu label tetap menyala)",
+          _pm87([_rows86("AYAM", "R1", -25, "1.SO", 100),
+                 _rows86("AYAM", "R1", -26, "1.SO", 150),
+                 _rows86("AYAM", "R1", -26, "5.BARANG MASUK", 5)],
+                [_det87("AYAM", "R1", -31, 7.0, "32.24 (Bulan Lalu)"),
+                 _det87("AYAM", "R1", 4, 0.0, "42.05")]) == {},
+          "got non-empty")
+    check("(v3.11.1) po_keterangan: 27• DALAM jendela + SO naik + tanpa "
+          "RI → berlabel",
+          _pm87([_rows86("AYAM", "R1", -26, "1.SO", 100),
+                 _rows86("AYAM", "R1", -27, "1.SO", 150),
+                 _rows86("AYAM", "R1", -27, "5.BARANG MASUK", 5)],
+                [_det87("AYAM", "R1", -31, 7.0, "32.24 (Bulan Lalu)"),
+                 _det87("AYAM", "R1", 4, 0.0, "42.05")])
+          == {("AYAM", "R1"): frozenset({-27})},
+          "got lain")
+
+    # -- (b) rentang KRONOLOGIS + label '25•' ---------------------------
+    from src.ui.export_sheets import tgl_label as _tl87
+    check("(v3.11.1) tgl_label: −25 → '25•', 5 → 5 (numerik), NaN "
+          "passthrough",
+          _tl87(-25) == "25•" and _tl87(5) == 5
+          and not isinstance(_tl87(float("nan")), str))
+    _ex87b = _bse86(_base86, -26, 31)
+    check("(v3.11.1) Export rentang kronologis start=−26 → 26•..31• + "
+          "berjalan (dulu filter numerik: start negatif membuang hari "
+          "SEBELUMNYA secara kronologis — arah terbalik)",
+          list(_ex87b["Tanggal"]) == ["26•", "30•", "31•", 1, 1, 2, 3],
+          f"got {list(_ex87b['Tanggal'])}")
+    _ex87c = _bse86(_base86, -31, 31)
+    check("(v3.11.1) Export rentang start=−31 = 'mulai hari 31•' (hari "
+          "TERAKHIR bulan lalu — semantik kronologis; default mode "
+          "Lalu+Ini kini −25 = hari PERTAMA blok rekap lalu)",
+          list(_ex87c["Tanggal"]) == ["31•", 1, 1, 2, 3],
+          f"got {list(_ex87c['Tanggal'])}")
+
+    # -- (c) UI: Tanggal '25•' + Hasil SO 0 → '0' (keepzero) ------------
+    from src.ui.in_selisih_view import (
+        InSelisihView as _ISV87,
+    )
+    from src.ui.in_selisih_view import (
+        _format_col_values as _fcv87,
+    )
+    _s87 = pd.Series([1, -25, -26], dtype="Int64")
+    check("(v3.11.1) Tabel: kolom Tanggal ber-label '25•'/'26•'/1 "
+          "(string — konsisten dgn daftar nilai ⧩ filter header)",
+          list(_fcv87("Tanggal", _s87)) == ["1", "25•", "26•"],
+          f"got {list(_fcv87('Tanggal', _s87))}")
+    check("(v3.11.1) Tabel: Hasil SO 0 → '0' (keepzero — dulu '-' tak "
+          "terbedakan dari belum-direkam; paritas COM & export)",
+          list(_fcv87("Hasil SO", pd.Series([0.0, float("nan")])))
+          == ["0", "-"],
+          f"got {list(_fcv87('Hasil SO', pd.Series([0.0, float('nan')])))}")
+    check("(v3.11.1) Sort Tanggal: parser kronologis '25•' < '26•' < '1' "
+          "(klik header tak lagi membalik blok bulan-lalu)",
+          _ISV87._parse_tgl_chrono(None, "25•")
+          < _ISV87._parse_tgl_chrono(None, "26•")
+          < _ISV87._parse_tgl_chrono(None, "1"))
+
+    # -- (d) deviasi_view: SO_H-1 di H=1 = penutupan NYATA ---------------
+    _data87d = pd.DataFrame([
+        _rows86("AYAM", "R1", -30, "1.SO", 500),
+        _rows86("AYAM", "R1", 1, "1.SO", 100),
+        _rows86("AYAM", "R1", 1, "5.BARANG MASUK", 10),
+    ])
+    _r87d = _v86._compute_pivot(_data87d, h=1)
+    check("(v3.11.1) Deviasi H=1: SO_H-1 = penutupan SO(−30)=500 (dulu "
+          "kunci −1 hampa → 0 — W/'Stok Seharusnya'/CEK salah basis)",
+          float(_r87d.loc[0, "SO_H-1"]) == 500.0,
+          f"got {_r87d.loc[0, 'SO_H-1']}")
+    _v86.saldo_sistem_map = {("  ayam ", "R1"): 77.0}
+    _r87e = _v86._compute_pivot(_data86, h=4)
+    check("(v3.11.1) Saldo sistem: kunci ber-drift whitespace/case TETAP "
+          "match (normalisasi konvensi join file lalu — dulu miss senyap)",
+          float(_r87e.loc[0, "Sistem"]) == 77.0,
+          f"got {_r87e.loc[0, 'Sistem']}")
+    _v86.saldo_sistem_map = {}
+
+    # -- (e) catatan audit: label tanggal bulan-lalu --------------------
+    _rs87 = pd.DataFrame([
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": -25, "SATUAN": "GR", "Value": 100.0},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": -26, "SATUAN": "GR", "Value": 200.0},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": 1, "SATUAN": "GR", "Value": 100.0},
+    ])
+    _det87b = pd.DataFrame([
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "Tanggal": 1,
+         "Value": 0.0, "Nomor": "RI.2026.10.1", "Nomor PO": None,
+         "#Tgl/Jam Pembuatan IT": None, "SOURCE IN": "42.05",
+         "JENIS": "IN"},
+    ])
+    _aud87, _kpi87, _ = _baf37(_rs87, _det87b)
+    _notes87 = " | ".join(
+        _aud87["Detail & Catatan Audit"].astype(str).tolist())
+    check("(v3.11.1) Catatan audit: tanggal bulan-lalu ber-label '26•' "
+          "(\"Periode Tgl 26• - 1\" — dulu 'Periode Tgl -26 - 1' angka "
+          "minus mentah tak terbaca)",
+          "Periode Tgl 26• - 1" in _notes87,
+          f"got {_notes87!r}")
+
+    # -- (f) sort race: sort#2 saat batch sort#1 masih in-flight ---------
+    from src.ui.widgets import sort_tree_by_column as _stbc87
+    _top87 = tk.Toplevel(root)
+    _tree87 = ttk.Treeview(_top87, columns=["a", "b"], show="headings")
+    _tree87.pack()
+    for _c87 in ("a", "b"):
+        _tree87.heading(_c87, text=_c87)
+    _N87 = 3000
+    for _i87 in range(_N87):
+        _tree87.insert("", "end", iid=f"r{_i87}", values=(_i87, _i87 % 7))
+    _stbc87(_tree87, "a", reverse=True)   # async (≥1500 baris)
+    for _ in range(6):                    # pump parsial (batch in-flight)
+        root.update()
+        _top87.update()
+        time.sleep(0.01)
+    _stbc87(_tree87, "b", reverse=True)   # sort#2 saat batch#1 berjalan
+    _t0_87 = time.time()
+    while time.time() - _t0_87 < 20:
+        root.update()
+        _top87.update()
+        if (len(_tree87.get_children("")) == _N87
+                and getattr(_tree87, "_sort_insert_cancel", None) is None):
+            break
+        time.sleep(0.01)
+    _f87 = [float(_tree87.set(k, "b"))
+            for k in _tree87.get_children("")]
+    check("(v3.11.1) Sort race: sort#2 saat batch sort#1 in-flight → "
+          "SEMUA baris utuh (3000) + urut PENUH kolom b (dulu: 600 baris "
+          "hilang permanen / urutan campuran + restore basi)",
+          len(_f87) == _N87 and _f87 == sorted(_f87, reverse=True),
+          f"rows={len(_f87)} sorted={_f87 == sorted(_f87, reverse=True)}")
+    _top87.destroy()
+
+    # -- (g) TableExpander: restore saat anchor ter-unmap (mode view) ----
+    from src.ui.widgets import TableExpander as _TE87
+    _top87b = tk.Toplevel(root)
+    _btn87 = ttk.Button(_top87b, text="x")
+    _t1_87 = ttk.Frame(_top87b)
+    _t2_87 = ttk.Frame(_top87b)
+    _nt87 = ttk.Frame(_top87b)            # non-target = anchor restore
+    _btn87.pack(side="top", fill="x")
+    _nt87.pack(side="top", fill="x")
+    _t1_87.pack(side="top", fill="x", before=_nt87)
+    _t2_87.pack(side="top", fill="x", before=_nt87)
+    root.update()
+    _exp87 = _TE87(_btn87, [_t1_87, _t2_87])
+    _exp87.collapse()
+    root.update()
+    _ok_collapse = (_t1_87.winfo_manager() != "pack"
+                    and _t2_87.winfo_manager() != "pack")
+    _nt87.pack_forget()                   # mode view melepas kartu anchor
+    root.update()
+    _exp87.restore()
+    root.update()
+    check("(v3.11.1) Expander: restore saat anchor ter-unmap (mirror mode "
+          "📈 Analisa melepas _tcard) → SEMUA target KEMBALI ter-pack "
+          "(dulu: pack(before=anchor-mati) TclError → target hilang "
+          "PERMANEN dari layout)",
+          _ok_collapse and _t1_87.winfo_manager() == "pack"
+          and _t2_87.winfo_manager() == "pack",
+          f"collapse_ok={_ok_collapse} t1={_t1_87.winfo_manager()!r} "
+          f"t2={_t2_87.winfo_manager()!r}")
+    _top87b.destroy()
 
     root.destroy()
 

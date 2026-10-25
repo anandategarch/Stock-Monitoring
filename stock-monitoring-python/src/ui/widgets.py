@@ -1677,26 +1677,87 @@ class TableExpander:
                 fwd.append(entry)
         fwd.sort(key=lambda e: e[4])   # urutan pack ASLI per parent
         bwd.sort(key=lambda e: e[4])
+        # v3.11.1 — FIX (audit 12-d probe9b): anchor target (_tcard dsb.)
+        # bisa ter-LEPAS oleh pergantian MODE view (📈 Analisa unpack kartu
+        # tabel) → pack(before=_tcard) TclError → target DILEWATI SENYAP =
+        # widget HILANG PERMANEN dari layout (refresh/load_data pun tak
+        # mengembalikan semuanya). Fallback: bila anchor tak ter-map,
+        # pasang relatif non-target TER-MAP di parent sama — fwd: 'before'
+        # non-target pertama (posisi atas blok); bwd: 'after' non-target
+        # terakhir — urutan relatif target tetap terjaga; tanpa non-target
+        # ter-map → tanpa anchor (append — tetap TAMPIL).
+        _targets = {e[0] for e in fwd}
+        _targets.update(e[0] for e in bwd)
+        _fb_cache: dict = {}
+
+        def _fb_anchor(w, kind):
+            key = (str(w.master), kind) if w is not None else None
+            if key is None or key in _fb_cache:
+                return _fb_cache.get(key) if key else None
+            pick = None
+            try:
+                slaves = [s for s in w.master.pack_slaves()
+                          if s not in _targets]
+                if slaves:
+                    pick = (("before", slaves[0]) if kind == "fwd"
+                            else ("after", slaves[-1]))
+            except tk.TclError:
+                pick = None
+            _fb_cache[key] = pick
+            return pick
+
         for w, mgr, info, anchor, _key in fwd:
-            self._repack(w, mgr, info, anchor)
+            self._repack(w, mgr, info, anchor,
+                         fb=lambda _w: _fb_anchor(_w, "fwd"))
         for w, mgr, info, anchor, _key in reversed(bwd):
-            self._repack(w, mgr, info, anchor)
+            self._repack(w, mgr, info, anchor,
+                         fb=lambda _w: _fb_anchor(_w, "bwd"))
         self._saved = []
         self._update_text()
 
     @staticmethod
-    def _repack(w, mgr, info, anchor):
-        """Pasang ulang SATU target (options + anchor tersimpan)."""
+    def _repack(w, mgr, info, anchor, fb=None):
+        """Pasang ulang SATU target (options + anchor tersimpan).
+        v3.11.1 — anchor tak ter-map (mode view melepas kartu anchor)
+        → fallback anchor pengganti via ``fb`` (lihat restore); ujung
+        tandu: pasang tanpa anchor — target TETAP tampil, tak hilang."""
+        orig = anchor
+        if anchor is not None:
+            try:
+                if anchor[1].winfo_manager() is None:
+                    anchor = None   # terlepas (mode view) → jalur fallback
+            except tk.TclError:
+                anchor = None
+        kw = dict(info)
+        if anchor is not None:
+            kw[anchor[0]] = anchor[1]
         try:
             if mgr == "pack":
-                kw = dict(info)
-                if anchor is not None:
-                    kw[anchor[0]] = anchor[1]
                 w.pack(**kw)
-            elif mgr == "grid":
+                return
+            if mgr == "grid":
                 w.grid()
+                return
+            return
         except tk.TclError:
             pass
+        # fallback hanya relevan utk pack (grid tidak ber-anchor)
+        if mgr == "pack" and (fb is not None or orig is not None):
+            if fb is not None:
+                try:
+                    alt = fb(w)
+                    kw2 = dict(info)
+                    if alt is not None:
+                        kw2[alt[0]] = alt[1]
+                    w.pack(**kw2)
+                    return
+                except tk.TclError:
+                    pass
+            # ujung tandu: tanpa anchor — TETAP TAMPIL (dulu: hilang).
+            try:
+                w.pack(**dict(info))
+            except tk.TclError:
+                pass
 
     def _on_target_map(self, event):
         """FIX 6b-05 (audit 6-b): target di-pack ulang view (render ulang
@@ -3615,9 +3676,45 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
             with contextlib.suppress(Exception):
                 _pop._on_tree_rerendered()
 
+    def _flush():
+        """v3.11.1 — FIX sort-race (audit 12-d probe1b): sisipkan SISA
+        batch secara SINKRON + tuntaskan siklus (dipanggil sort BARU
+        sebelum snapshot children — batch lama yang sekadar dibatalkan
+        membuat baris yang belum ter-insert HILANG PERMANEN dari tree:
+        600/3000). Idempoten: batch selesai/dibatalkan → no-op; chunk
+        terjadwal berikutnya melihat state["i"] == len → no-op."""
+        if state["finished"] or state["cancelled"]:
+            return
+        try:
+            if not tree.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        start = state["i"]
+        for parent_iid, iid, kw in items[start:]:
+            try:
+                tree.insert(parent_iid, "end", iid=iid, **kw)
+            except tk.TclError:
+                state["failed"] += 1
+        state["i"] = len(items)
+        state["finished"] = True
+        if state["failed"]:
+            print(f"insert_tree_items: {state['failed']} item dilewati "
+                  f"(TclError — iid duplikat/baris invalid)",
+                  file=sys.stderr)
+        if on_done:
+            on_done()
+        _pop = getattr(tree, "_find_popup", None)
+        if _pop is not None:
+            with contextlib.suppress(Exception):
+                _pop._on_tree_rerendered()
+
     def cancel():
         state["cancelled"] = True
 
+    # v3.11.1 — flush dipasang sbg atribut cancel (kompatibel penuh:
+    # pemanggil lama tetap memanggil cancel()).
+    cancel.flush = _flush
     return cancel
 
 
@@ -4670,6 +4767,22 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
         tree._last_sort = (col, bool(reverse), parse, value_get)
     except Exception:
         pass
+    # v3.11.1 — FIX sort-race (audit 12-d probe1b KASUS A/B): batch sort
+    # LAMA yang masih in-flight harus di-FLUSH (sisipkan sisa barisnya
+    # secara sinkron) SEBELUM snapshot children — sort#2 dulu:
+    # · jalur async mem-BATALKAN batch lama → baris yang belum ter-insert
+    #   HILANG PERMANEN dari tree (probe: 600/3000);
+    # · jalur sinkron TIDAK membatalkan → sisa batch lama tetap menulis
+    #   urutan LAMA di ekor tabel (urutan campuran) + restore
+    #   seleksi/yview basi dari sort#1.
+    # Flush → tree LENGKAP dulu; sort#2 bekerja atas himpunan penuh.
+    # (flush no-op bila batch lama sudah selesai.)
+    _prev_cancel = getattr(tree, "_sort_insert_cancel", None)
+    if _prev_cancel is not None and hasattr(_prev_cancel, "flush"):
+        with contextlib.suppress(Exception):
+            _prev_cancel.flush()
+        with contextlib.suppress(Exception):
+            tree._sort_insert_cancel = None
     children = list(tree.get_children(""))
     if len(children) < 2:
         if on_done:
@@ -4763,7 +4876,12 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
 
     def _restore_and_done():
         """Pulihkan seleksi + yview LALU on_done — dipakai jalur sinkron
-        (langsung) maupun batched (dari on_done insert_tree_items)."""
+        (langsung) maupun batched (dari on_done insert_tree_items).
+        v3.11.1 — bersihkan referensi batch (memori: closure memegang
+        daftar item; flush berikutnya no-op)."""
+        with contextlib.suppress(Exception):
+            if getattr(tree, "_sort_insert_cancel", None) is not None:
+                tree._sort_insert_cancel = None
         keep = [k for k in order if k in sel]
         if keep:
             try:

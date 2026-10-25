@@ -1818,16 +1818,6 @@ class DeviasiView(tk.Frame):
 
         df = data
 
-        tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
-        # v3.9.33 — AUDIT FIX (48-b P1): H=2 → kunci −1 (penutupan bulan
-        # lalu — rekap lalu dinegasikan) ikut window supaya lookup
-        # _day_key SO(H−2) menemukan barisnya (H=1 sudah termuat alami:
-        # range −1..3). H≥3 tak berubah.
-        if h == 2:
-            tanggal_range.append(-1)
-        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.ACR",
-                          "8.BARANG KELUAR"]
-
         # cache to_numeric(Tanggal) per objek data (hindari recompute tiap H)
         # FIX D-01: di-key IDENTITAS objek — reset/reset-silang dari main
         # thread tidak bisa membuat cache milik data lain terpakai.
@@ -1836,6 +1826,32 @@ class DeviasiView(tk.Frame):
             tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
             self._tnum = tnum
             self._tnum_data = df
+
+        # v3.11.1 — kunci PENUTUPAN nyata (audit 12-a/12-b bug 4): kunci
+        # negatif TERKECIL yang ber-baris SO (rekap lalu = −25..−31 →
+        # penutupan = −30/−31, hari TERAKHIR bulan lalu). Premis lama fix
+        # 48-b "−1 = saldo penutupan bulan lalu" SALAH — pipeline TIDAK
+        # PERNAH memproduksi kunci −1 (42.17 → tgl 1; 3224/4205 lalu = 5
+        # hari terakhir) → SO_H-1 di H=1 selalu 0 padahal penutupan ada
+        # → W/'Stok Seharusnya'/CEK H=1 salah basis. Tanpa SO bulan-lalu
+        # di frame → fallback −1 (inert — arr() 0, perilaku lama).
+        _so_lalu_keys = tnum[(df["JENIS"] == "1.SO") & (tnum < 0)]
+        _closing_key = (int(_so_lalu_keys.min())
+                        if len(_so_lalu_keys) else -1)
+
+        tanggal_range = [h - 2, h - 1, h, h + 1, h + 2]
+        # v3.9.33 — AUDIT FIX (48-b P1, MAKSUD asli): H≤2 → kunci penutupan
+        # ikut window supaya lookup _day_key SO(H−2)/SO(H−1) menemukan
+        # barisnya. v3.11.1: kunci penutupan NYATA menggantikan myth −1
+        # (H=1 dulu range −1..3 — kolom penutupan tak pernah ada di
+        # pivot → SO_H-1 selalu 0). H≥3 tak berubah.
+        if h <= 2 and _closing_key not in tanggal_range:
+            tanggal_range.append(_closing_key)
+        relevant_jenis = ["1.SO", "2.SALDO AKHIR", "4.IN", "9.ACR",
+                          "8.BARANG KELUAR"]
+
+        # cache to_numeric(Tanggal) per objek data — dipindah ke ATAS
+        # (v3.11.1: kunci penutupan butuh tnum sebelum tanggal_range).
         mask = (df["JENIS"].isin(relevant_jenis)) & (tnum.isin(tanggal_range))
 
         # v3.9.32 — BARANG 42.17-ONLY (user: "kenapa barang yang hanya ada
@@ -2008,15 +2024,24 @@ class DeviasiView(tk.Frame):
         n = len(pivot)
 
         # v3.9.33 — AUDIT FIX (48-b P1): kunci tanggal SO bulan-lalu. Rekap
-        # bulan lalu bernomor NEGATIF (−1 = saldo penutupan bulan lalu) dan
-        # Tanggal 0 TIDAK PERNAH ada (baris template kosong). Lookup
-        # SO(H−1)/SO(H−2) lama membaca kunci 0 saat H≤2 → SELALU 0: di H=1,
-        # SO bulan lalu (kunci −1) hanya terbaca sebagai SO(H−2) sehingga
-        # W/CEK/Stok Seharusnya salah. Pemetaan 0 → −1: H=1 → SO(H−1) =
-        # penutupan bulan lalu; H=2 → SO(H−2) = penutupan; H≥3 tak berubah
-        # (konsisten fix fn_audit v3.9.6).
+        # bulan lalu bernomor NEGATIF dan Tanggal 0 TIDAK PERNAH ada (baris
+        # template kosong). Lookup SO(H−1)/SO(H−2) lama membaca kunci 0 saat
+        # H≤2 → SELALU 0: di H=1, SO bulan lalu hanya terbaca sebagai
+        # SO(H−2) sehingga W/CEK/Stok Seharusnya salah.
+        # v3.11.1 — FIX (audit 12-a/12-b bug 4): premis lama “−1 = saldo
+        # penutupan bulan lalu” SALAH — pipeline TIDAK PERNAH memproduksi
+        # kunci −1 (rekap lalu = −25..−31; 42.17 → tgl 1; 3224/4205 lalu =
+        # 5 hari terakhir). Penutupan = hari TERAKHIR bulan lalu yang
+        # tercatat SO = kunci NEGATIF TERKECIL di frame. Pemetaan 0 →
+        # kunci penutupan NYATA itu: H=1 → SO(H−1) = penutupan; H=2 →
+        # SO(H−2) = penutupan; H≥3 tak berubah (konsisten fix fn_audit
+        # v3.9.6). Tanpa SO bulan-lalu di frame → fallback −1 (inert —
+        # arr() 0, perilaku lama). (Kunci dihitung di ATAS, sebelum
+        # tanggal_range — window H≤2 memuatnya supaya lookup menemukan
+        # barisnya.)
+
         def _day_key(t) -> int:
-            return -1 if t == 0 else t
+            return _closing_key if t == 0 else t
 
         def arr(jenis: str, tgl) -> np.ndarray:
             """Kolom (JENIS, Tanggal) sebagai array float64 (0 bila absen) —
@@ -2084,9 +2109,18 @@ class DeviasiView(tk.Frame):
         # Deviasi = SO_H − Sistem, Nominal, Rank) mengikuti otomatis.
         _ss_map = getattr(self, "saldo_sistem_map", None) or {}
         if _ss_map:
-            _ss_lookup = {f"{b}\x1f{r}": v
+            # v3.11.1 — kunci dinormalisasi (upper + rapat spasi + segmen
+            # resto setelah titik — konvensi join file lalu/komparasi):
+            # drift whitespace/case file 42.17 ('AYAM ', 'ayam') tak lagi
+            # me-miss override SENYAP (audit 12-a probe 2.2/2.4 — data asli
+            # terukur 0 drift, murni hardening; nama persis tetap match).
+            _ss_lookup = {f"{_norm_name_lalu(b)}\x1f{_norm_resto_lalu(r)}": v
                           for (b, r), v in _ss_map.items()}
-            _ss_vals = _pk_pivot.map(_ss_lookup)
+            _ss_keys = (pivot["Nama Barang"].astype(str)
+                        .map(_norm_name_lalu) + "\x1f"
+                        + pivot["NAMA RESTO"].astype(str)
+                        .map(_norm_resto_lalu))
+            _ss_vals = _ss_keys.map(_ss_lookup)
             _ss_mask = _ss_vals.notna().to_numpy()
             if _ss_mask.any():
                 sistem = np.where(

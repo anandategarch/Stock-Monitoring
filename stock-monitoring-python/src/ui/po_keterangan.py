@@ -10,11 +10,21 @@ Semantik: pasangan barang×resto yang suplainya EKSTERNAL/CAMPURAN
 internal 42.05) yang pada suatu tanggal:
   - BARANG MASUK tercatat di rekap resto (JENIS '5.BARANG MASUK' > 0),
     DAN
-  - SO NAIK (SO(t) > SO(t−1); SO(t−1) tak tercatat → 0 — konvensi
-    arr() deviasi_view; t=1 → dibandingkan dgn kunci −1 penutupan
-    bulan lalu, mirror _day_key deviasi), TAPI
+  - SO NAIK dibanding SO TERAKHIR TERCATAT sebelum tanggal itu per
+    pasangan (v3.11.1 — dulu kunci literal t−1/t+1/−1: kunci −1
+    TIDAK PERNAH diproduksi pipeline (rekap lalu = −25..−31;
+    penutupan = hari TERAKHIR bulan lalu) → t=1 dibandingkan 0, bukan
+    penutupan → label palsu tiap awal bulan walau SO datar/turun;
+    −25 dibandingkan −24 yang tak pernah diimpor → label palsu 25•.
+    Kini: SO tercatat terakhir sebelum t; tANPA basis tercatat →
+    keterangan TIDAK menyala utk t=1 & blok bulan-lalu ("SO naik"
+    tak terverifikasi — pola degrade modul); t≥2 tengah bulan
+    berjalan tetap konvensi 0 (arr() deviasi, perilaku lama)), TAPI
   - penerimaan sistem 32.24 = 0 DAN 9901 = 0 (tak ada dokumen RI/
-    mutasi Accurate utk pasangan itu pada tanggal itu)
+    mutasi Accurate utk pasangan itu pada tanggal itu — dan tanggal
+    itu TERVERIFIKABEL: file RI 32.24/42.05 bulan-lalu hanya membawa
+    5 hari terakhir, tanggal 25•/26• tak bisa diverifikasi → tidak
+    memicu (audit 12-b bug 3))
 → fisik naik & rekap mencatat penerimaan, namun sistem tidak pernah
   menerima → besar kemungkinan PO belum dibuat di Accurate (tanpa PO,
   RI tidak bisa diinput) → keterangan "Potensi PO belum dibuat".
@@ -41,6 +51,8 @@ double-click popup berulang / refresh filter dgn data sama tidak
 menghitung ulang (pola _PERF_CACHE deviasi_popup; cache MEMEGANG
 referensi objek → identitas 'is' aman dari reuse alamat GC).
 """
+import bisect
+
 import pandas as pd
 
 POTENSI_PO_LABEL = "Potensi PO belum dibuat"
@@ -53,21 +65,19 @@ _SRC_EKSTERNAL = ("Eksternal", "Campuran")
 
 _CACHE: dict = {"data": None, "in_detail": None, "map": {}}
 
+# v3.11.1 — jendela import file RI bulan-lalu (fn_3224/fn_4205 mode
+# 'lalu': Tanggal >= maxT-4 → hanya 5 hari terakhir FILE yang dibawa
+# pipeline) sedangkan rekap lalu 7 hari (−25..−31) → tanggal 25•/26•
+# TIDAK TERVERIFIKABEL oleh in_detail (audit 12-b bug 3).
+_LALU_WINDOW = 4
 
-def _prev_day_key(t: int):
-    """Tanggal kunci SO hari SEBELUM ``t`` (konvensi rekap/deviasi):
-    t>1 → t−1 · t==1 → −1 (saldo penutupan bulan lalu — mirror
-    deviasi_view._day_key(0)) · t<0 → t+1 (hari sebelumnya bulan lalu:
-    prev 25• = 24• — urutan kronologis bulan lalu menurun numerik) ·
-    t==0/t==−1→None (hari tak ada → SO prev dibaca 0)."""
-    if t == 1:
-        return -1
-    if t > 1:
-        return t - 1
-    if t < 0:
-        p = t + 1
-        return p if p != 0 else None
-    return None
+
+def _chrono_key(t: int):
+    """Kunci kronologis lintas bulan (v3.11.1): bulan-lalu (negatif)
+    diurut HARI naik lalu bulan berjalan — t=−25 → (0,25) < t=−26 →
+    (0,26) < t=1 → (1,1). Identik _chrono export_sheets / _k1/_k2
+    fn_audit (satu konvensi app)."""
+    return (0, -t) if t < 0 else (1, t)
 
 
 def _build_map(data: pd.DataFrame, in_detail) -> dict:
@@ -118,13 +128,20 @@ def _build_map(data: pd.DataFrame, in_detail) -> dict:
     cand = cand.assign(_t=lambda d: d["_t"].astype("int64")) \
         .groupby(["_b", "_r", "_t"], as_index=False)["_v"].sum()
 
-    # --- SO per (pasangan, tgl) — peta lookup.
+    # --- SO per (pasangan, tgl) — peta lookup + struktur kronologis
+    # per pasangan (v3.11.1: basis SO terakhir tercatat sebelum t).
     so_map: dict = {}
     _so = core[(core["_j"] == _JENIS_SO) & core["_t"].notna()]
     if not _so.empty:
         _so = _so.assign(_t=lambda d: d["_t"].astype("int64"))
         for k, x in _so.groupby(["_b", "_r", "_t"])["_v"].sum().items():
             so_map[k] = float(x)
+    so_pairs: dict = {}
+    for (b, r, t), v in so_map.items():
+        so_pairs.setdefault((b, r), []).append((_chrono_key(t), t, v))
+    for k, entries in list(so_pairs.items()):
+        lst = sorted(entries, key=lambda e: e[0])
+        so_pairs[k] = ([e[0] for e in lst], [e[2] for e in lst])
 
     # --- penerimaan sistem 32.24 / 9901 per (pasangan, tgl) — peta.
     in32: dict = {}
@@ -146,13 +163,44 @@ def _build_map(data: pd.DataFrame, in_detail) -> dict:
             for k, x in _d.groupby(["_b", "_r", "_t"])["_v"].sum().items():
                 target[k] = float(x)
 
-    # --- trigger per kandidat: BM ada + SO naik + 3224=0 + 9901=0.
+    # --- v3.11.1 — cakupan VERIFIABLE sumber 32.24 bulan-lalu: jendela
+    # import fn_3224/fn_4205 'lalu' = [maxT−4, maxT] hari file; hari
+    # maksimum yang ter-import di in_detail = hari maksimum file.
+    # Tanpa baris 32.24-lalu sama sekali (folder/file tak ada) → seluruh
+    # blok bulan-lalu tak terverifikasi.
+    _si32_lalu = det["_s"].str.startswith("32.24") & (det["_t"] < 0)
+    _lalu_max = (int(-det.loc[_si32_lalu, "_t"].max())
+                 if bool(_si32_lalu.any()) else None)
+
+    def _lalu_verifiable(ti: int) -> bool:
+        if ti >= 0:
+            return True
+        if _lalu_max is None:
+            return False
+        d = -ti
+        return (_lalu_max - _LALU_WINDOW) <= d <= _lalu_max
+
+    # --- trigger per kandidat: BM ada + SO naik (vs SO terakhir
+    # tercatat sebelum t) + tanggal terverifikasi + 3224=0 + 9901=0.
     out: dict = {}
     for bb, rr, tt in zip(cand["_b"], cand["_r"], cand["_t"]):
         ti = int(tt)
+        if not _lalu_verifiable(ti):
+            continue
         so_t = so_map.get((bb, rr, ti), 0.0)
-        _pk = _prev_day_key(ti)
-        so_prev = so_map.get((bb, rr, _pk), 0.0) if _pk is not None else 0.0
+        ckeys, vals = so_pairs.get((bb, rr), ((), ()))
+        i = bisect.bisect_left(ckeys, _chrono_key(ti)) - 1
+        if i >= 0:
+            so_prev = vals[i]
+        elif ti >= 2:
+            # tengah bulan berjalan tanpa SO tercatat lebih awal →
+            # konvensi arr() 0 (perilaku lama dipertahankan).
+            so_prev = 0.0
+        else:
+            # t=1 / blok bulan-lalu TANPA basis SO tercatat → "SO naik"
+            # tak terverifikasi → jangan memicu (degrade — audit 12-b
+            # bug 1/2: label palsu di batas bulan).
+            continue
         if not so_t > so_prev:
             continue
         if in32.get((bb, rr, ti), 0.0) != 0.0:
