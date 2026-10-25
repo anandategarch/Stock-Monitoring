@@ -230,6 +230,7 @@ import os
 import re
 import tkinter as tk
 from collections.abc import Callable
+from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
@@ -711,6 +712,12 @@ class KomparasiDeviasiView(tk.Frame):
         self.konversi_map: dict | None = None
         self._fp_map: dict[str, str] = {}
         self._row_snaps: dict[str, dict] = {}
+        # v3.11.2 — export Excel "sesuai tampilan" (permintaan user:
+        # "Tambahkan export Excel di tab laporan deviasi yang sudah ada
+        # pop up nya"): baris mentah terakhir yang dirender (post filter
+        # ⧩ + minggu/bulan, urutan payload — kontrak export pivot v3.9.2).
+        self._export_rows: list = []
+        self._export_cols: list = []
         self._busy = False
         self._pending = False
         self._dirty = False                 # lazy refresh
@@ -964,6 +971,13 @@ class KomparasiDeviasiView(tk.Frame):
             head, text="Komparasi Deviasi — Lalu vs Saat Ini",
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         self._title_label.pack(side="left")
+        # v3.11.2 — 💾 Export Excel SESUAI TAMPILAN (pola pivot v3.9.2:
+        # filter ⧩ + minggu/bulan + H aktif ikut; urutan = payload render
+        # terakhir; sub-mode 📈 Analisa punya tabel sendiri — tombol ini
+        # hanya tampil di sub-mode Tabel bersama kartu tabelnya).
+        btn_export = GhostButton(head, text="💾 Export Excel",
+                                 command=self._on_export_excel)
+        btn_export.pack(side="right", padx=(0, 6))
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
@@ -1656,6 +1670,13 @@ class KomparasiDeviasiView(tk.Frame):
         self._update_month_chip()
         self.tree.delete(*self.tree.get_children())
         self._result_df = None
+        # v3.11.2 — snapshot export ikut dibersihkan: _close_file
+        # mengosongkan tree TANPA re-render (tidak lewat _render_rows_
+        # inner) → tanpa ini _export_rows BASI dari file lama → tombol
+        # 💾 export lolos guard dan mengekspor baris file yang SUDAH
+        # ditutup (ditemukan oleh suite §88(c) saat menulis guard test).
+        self._export_rows = []
+        self._export_cols = []
         self._neg_cells = []
         self._st_match_cells = []
         self._st_diff_cells = []
@@ -2347,6 +2368,11 @@ class KomparasiDeviasiView(tk.Frame):
                     "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
                     "GR Saat Ini", "Nominal", "Selisih", "Status")}
         items = []
+        # v3.11.2 — baris mentah utk export Excel "sesuai tampilan"
+        # (post filter ⧩ + minggu/bulan, urutan render; NaN dinormalisasi
+        # writer → sel kosong; kolom = COLUMNS tanpa ✓).
+        export_rows = []
+        export_cols = [c[0] for c in self.COLUMNS if c[0] != "✓"]
         fp_map = {}
         row_snaps = {}
         neg_cells = []
@@ -2391,6 +2417,16 @@ class KomparasiDeviasiView(tk.Frame):
                       # v3.9.34 — TEPAT SETELAH GR Saat Ini (urutan COLUMNS)
                       fmt_vals["Nominal"],
                       status]
+            # v3.11.2 — nilai MENTAH (NaN → sel kosong oleh writer;
+            # %TO BOM Lalu & DEV Saat Ini = rasio → format persen di
+            # writer) supaya bisa dihitung di Excel.
+            export_rows.append(
+                [resto, barang, str(cols_np["Satuan"][i]),
+                 cols_np["BOM Lalu"][i], cols_np["COM Lalu"][i],
+                 cols_np["DEV Lalu"][i], cols_np["%TO BOM Lalu"][i],
+                 cols_np["BOM Saat Ini"][i], cols_np["COM Saat Ini"][i],
+                 cols_np["DEV Saat Ini"][i], cols_np["GR Saat Ini"][i],
+                 cols_np["Nominal"][i], status])
 
             snap = {
                 "asal": "KOMPARASI",
@@ -2481,7 +2517,8 @@ class KomparasiDeviasiView(tk.Frame):
                 "neg_cells": neg_cells,
                 "st_match_cells": st_match_cells,
                 "st_diff_cells": st_diff_cells,
-                "st_missing_cells": st_missing_cells}
+                "st_missing_cells": st_missing_cells,
+                "export_rows": export_rows, "export_cols": export_cols}
 
     def _render_rows(self, payload: dict):
         try:
@@ -2508,6 +2545,10 @@ class KomparasiDeviasiView(tk.Frame):
         self._update_headings()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
+        # v3.11.2 — snapshot export "sesuai tampilan" (payload terakhir;
+        # jalur 0-baris / file ditutup → kosong → tombol export menjelaskan)
+        self._export_rows = payload.get("export_rows") or []
+        self._export_cols = payload.get("export_cols") or []
         # v3.9.5 (audit 19-a #2): simpan pair index utk popup detail
         self._pair_index = payload.get("pair_index", {})
         self._neg_cells = payload.get("neg_cells", [])
@@ -3540,6 +3581,107 @@ class KomparasiDeviasiView(tk.Frame):
             # lagi astype(str) frame penuh sinkron.
             scols_cache=self._scols_cache,
         )
+
+    # =========================================================================
+    # 💾 EXPORT EXCEL (v3.11.2 — sesuai tampilan; pola pivot v3.9.2)
+    # =========================================================================
+    def _on_export_excel(self):
+        """v3.11.2 — Export tabel komparasi SESUAI TAMPILAN (permintaan
+        user: "Tambahkan export Excel di tab laporan deviasi yang sudah
+        ada pop up nya"): filter ⧩ + minggu (cut-off H) + bulan aktif
+        ikut; urutan = payload render terakhir (Resto → Nama Barang →
+        H). Sub-mode 📈 Analisa punya tabel sendiri — tombol ini miliki
+        sub-mode Tabel."""
+        if not self._export_rows:
+            # FIX 6c-03 (pola pivot): bedakan 2 kasus 0-baris — file
+            # BELUM dimuat vs file ADA tapi filter aktif 0 baris.
+            if self._file_df is None:
+                messagebox.showwarning(
+                    "Export", "Belum ada file deviasi. Muat file dulu "
+                    "(kartu Filter — alamat file / 📂 pilih file).",
+                    parent=self.winfo_toplevel())
+            elif self.data is None or getattr(self.data, "empty", True):
+                messagebox.showwarning(
+                    "Export", "Belum ada data app. Jalankan pipeline dulu.",
+                    parent=self.winfo_toplevel())
+            else:
+                messagebox.showwarning(
+                    "Export",
+                    "Tidak ada baris komparasi yang lolos filter aktif "
+                    "(minggu / bulan / seleksi ⧩ kosong). Kendurkan atau "
+                    "reset filter dulu.", parent=self.winfo_toplevel())
+            return
+        stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
+        # v3.9.59 (pola 2f-10): nama file default ber-stempel.
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Komparasi Deviasi (sesuai tampilan)",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile=f"komparasi_deviasi_{stamp}.xlsx",
+            parent=self.winfo_toplevel(),
+        )
+        if not filepath:
+            return
+        self._do_export_excel(filepath)
+
+    def _do_export_excel(self, filepath: str):
+        """Inti export — dipisah dari _on_export_excel supaya bisa
+        dipanggil langsung oleh test tanpa dialog (pola pivot)."""
+        # lazy import — hindari circular import (export_sheets → pivot_view)
+        from .export_sheets import write_table_display_sheet
+        rows = [list(r) for r in (self._export_rows or [])]
+        cols = [str(c) for c in (self._export_cols or [])]
+        h = int(self.tanggal_h)
+        # meta: file aktif (nama pendek) + H — info yang sama dgn label UI.
+        _fname = ""
+        if isinstance(getattr(self, "_file_meta", None), dict):
+            _fname = str(self._file_meta.get("file_name") or "")
+        if not _fname and self._file_paths:
+            _fname = os.path.basename(str(self._file_paths[0]))
+
+        def work():
+            return write_table_display_sheet(
+                filepath, "Komparasi Deviasi", cols, rows,
+                meta_rows=[
+                    ("SUMBER", ("⚖ Komparasi File Deviasi — Lalu vs "
+                                "Saat Ini")),
+                    ("FILE", _fname or "(tanpa nama file)"),
+                    ("TANGGAL H", str(h)),
+                ],
+                pct_cols=("%TO BOM Lalu", "DEV Saat Ini"),
+                widths={"Resto": 14, "Nama Barang": 32, "Satuan": 10,
+                        "BOM Lalu": 12, "COM Lalu": 12, "DEV Lalu": 12,
+                        "%TO BOM Lalu": 13, "BOM Saat Ini": 12,
+                        "COM Saat Ini": 12, "DEV Saat Ini": 12,
+                        "GR Saat Ini": 12, "Nominal": 14, "Status": 24},
+                note="%TO BOM Lalu & DEV Saat Ini = rasio % TO BOM · "
+                     "Nominal = Harga 41.09 × GR Saat Ini · sel kosong = "
+                     "tanpa nilai · export sesuai tampilan (filter minggu/"
+                     "bulan/⧩ + H aktif ikut)",
+            )
+
+        def done(n):
+            if not n:
+                messagebox.showwarning(
+                    "Export", "Tidak ada baris komparasi untuk diekspor.",
+                    parent=self.winfo_toplevel())
+                return
+            self.status_var_label.set(
+                f"Export {fmt_int_id(n)} baris komparasi → {filepath}")
+            messagebox.showinfo(
+                "Export Berhasil",
+                f"Komparasi Deviasi ({fmt_int_id(n)} baris, "
+                f"H={h})\ndi-export ke:\n{filepath}",
+                parent=self.winfo_toplevel())
+
+        def on_error(e):
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}",
+                parent=self.winfo_toplevel())
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengekspor komparasi deviasi…",
+                  on_error=on_error)
 
     # =========================================================================
     # HELPERS

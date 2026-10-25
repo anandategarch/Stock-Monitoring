@@ -56,6 +56,12 @@ v3.9.72 — (FIX 8 audit UX 2-c) dukungan BATAL export: ExportCancelled
 PIVOT ditulis sel per sel via openpyxl = bagian terpanjang yg bisa
 dipotong halus; sheet DataFrame lain dipotong ANTAR-sheet oleh
 app._export_excel work()).
+
+v3.11.2 — 5. write_table_display_sheet(filepath, sheet_name, columns,
+   rows, ...): writer tabel GENERIK "sesuai tampilan" utk tab 📋
+   Laporan Deviasi (permintaan user: "Tambahkan export Excel di tab
+   laporan deviasi yang sudah ada pop up nya") — dipakai 3 mode:
+   ⚖ Komparasi File Deviasi · 🚨 Anomali COM (H) · 💰 Nominal (H).
 """
 import os
 from collections.abc import Callable
@@ -714,3 +720,151 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
             except OSError:
                 pass
     return n_data
+
+
+# =============================================================================
+# 5. WRITER TABEL GENERIK "SESUAI TAMPILAN" (v3.11.2 — tab 📋 Laporan Deviasi)
+# =============================================================================
+def _cell_value(v):
+    """Normalisasi nilai sel utk write_table_display_sheet.
+    Return (None, None) bila kosong (None/NaN/NA → sel KOSONG — konsisten
+    export Selisih IN "Hasil SO"), (True, float) utk angka, (False, str)
+    utk teks. bool → teks (tak pernah angka)."""
+    if v is None:
+        return None, None
+    if isinstance(v, str):
+        return False, v
+    try:
+        if pd.isna(v):          # NaN / pd.NA / pd.NaT (skalar saja)
+            return None, None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, bool):
+        return False, str(v)
+    if isinstance(v, (int, float, np.integer, np.floating)):
+        try:
+            return True, float(v)
+        except (TypeError, ValueError, OverflowError):
+            return False, str(v)
+    return False, str(v)
+
+
+def write_table_display_sheet(filepath, sheet_name, columns, rows,
+                              meta_rows=None, pct_cols=(), widths=None,
+                              note=None, bold_last_rows=0) -> int:
+    """v3.11.2 — Export TABEL GENERIK SESUAI TAMPILAN ke .xlsx tunggal
+    (permintaan user: "Tambahkan export Excel di tab laporan deviasi yang
+    sudah ada pop up nya") — dipakai 3 mode tab 📋 Laporan Deviasi:
+    ⚖ Komparasi File Deviasi · 🚨 Anomali COM (H) · 💰 Nominal (H).
+
+    - columns: daftar nama kolom (label PERSIS heading tabel UI — dinamis
+      ikut mode, mis. "COM (H=25)"); rows: list baris nilai MENTAH (angka
+      numerik asli — bukan string format ID — supaya bisa dihitung di
+      Excel; None/NaN → sel kosong; urutan = urutan payload render =
+      filter ⧩/mode aktif ikut, sort default view — kontrak yang sama dgn
+      export pivot v3.9.2 "sesuai tampilan").
+    - meta_rows: list (key, value) di atas header (pola layout
+      write_pivot_display_sheet — SUMBER/TANGGAL H/FILE).
+    - Angka: format per-cell mirror konvensi export pivot — bulat
+      "#,##0;[Red](#,##0)" / pecahan "#,##0.0;[Red](#,##0.0)" → minus
+      otomatis MERAH + KURUNG via number-format Excel ([Red]) — murah utk
+      baris besar (tanpa objek Font per sel).
+    - pct_cols: nama kolom RASIO (0..1) → format "0.0%;[Red](0.0%)"
+      (kolom %TO BOM Lalu / DEV Saat Ini komparasi — paritas UI yang
+      menampilkan persen).
+    - bold_last_rows: N baris TERAKHIR ditebalkan + fill lembut (baris
+      TOTAL mode 💰 Nominal — jumlah kolom yang tampil, transparan).
+    - widths: dict kolom → lebar (default 12); note: legend kecil di bawah
+      tabel (italic abu — pola footer legend sheet Selisih/Audit v3.11.1).
+    - Tulis ATOMIK (tmp + os.replace — pola 2f-04/6a-02; kegagalan apa
+      pun meninggalkan file tujuan tak tersentuh).
+    Return jumlah baris data yang ditulis (0 = tabel kosong, file TIDAK
+    dibuat)."""
+    columns = [str(c) for c in (columns or [])]
+    rows = [list(r) for r in (rows or [])]
+    if not columns or not rows:
+        return 0
+    pct_cols = set(pct_cols or ())
+
+    # v3.9.72 — lazy openpyxl (FIX 2): lihat catatan modul.
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = str(sheet_name)[:31]
+
+    # --- baris meta (ala layout pivot display: SUMBER/TANGGAL H/FILE) ---
+    r = 1
+    for k, v in (meta_rows or []):
+        ws.cell(row=r, column=1, value=str(k)).font = Font(
+            bold=True, color="FF475569")
+        ws.cell(row=r, column=2, value=str(v))
+        r += 1
+    if meta_rows:
+        r += 1                      # satu baris kosong pemisah
+
+    hdr_row = r
+    head_font = Font(bold=True, color="FF1E293B")
+    head_fill = PatternFill("solid", start_color="FFE2E8F0",
+                            end_color="FFE2E8F0")
+    for j, col in enumerate(columns, start=1):
+        c = ws.cell(row=hdr_row, column=j, value=col)
+        c.font = head_font
+        c.fill = head_fill
+
+    fmt_int = "#,##0;[Red](#,##0)"
+    fmt_dec = "#,##0.0;[Red](#,##0.0)"
+    fmt_pct = "0.0%;[Red](0.0%)"
+    total_fill = PatternFill("solid", start_color="FFF1F5F9",
+                             end_color="FFF1F5F9")
+    n = len(rows)
+    bold_last_rows = max(0, min(int(bold_last_rows or 0), n))
+    for i, row in enumerate(rows, start=1):
+        rr = hdr_row + i
+        is_total = i > n - bold_last_rows
+        for j, col in enumerate(columns, start=1):
+            v = row[j - 1] if j - 1 < len(row) else None
+            is_num, val = _cell_value(v)
+            if val is None and not is_num:
+                continue            # sel kosong (None/NaN)
+            cell = ws.cell(row=rr, column=j)
+            if is_num:
+                cell.value = val
+                cell.number_format = (fmt_pct if col in pct_cols else
+                                      (fmt_int if _is_int(val) else fmt_dec))
+            else:
+                cell.value = val
+            if is_total:
+                cell.font = Font(bold=True)
+                cell.fill = total_fill
+    last_row = hdr_row + n
+
+    # legend kecil di bawah tabel (di luar rentang autofilter)
+    if note:
+        _note = ws.cell(row=last_row + 2, column=1, value=str(note))
+        _note.font = Font(italic=True, color="FF64748B")
+
+    for j, col in enumerate(columns, start=1):
+        ws.column_dimensions[get_column_letter(j)].width = \
+            (widths or {}).get(col, 12)
+    ws.freeze_panes = f"A{hdr_row + 1}"
+    ws.auto_filter.ref = (f"A{hdr_row}:{get_column_letter(len(columns))}"
+                          f"{last_row}")
+
+    # v3.9.59 — FIX 2f-04: tulis ATOMIK (tmp + os.replace — pola 6a-02).
+    tmp_path = str(filepath) + ".tmp.xlsx"
+    _ok = False
+    try:
+        wb.save(tmp_path)
+        os.replace(tmp_path, str(filepath))
+        _ok = True
+    finally:
+        if not _ok:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+    return n

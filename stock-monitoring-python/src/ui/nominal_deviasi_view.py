@@ -47,7 +47,8 @@ Indonesia; filter header ⧩ + sort + ⛶ Layar Penuh + ⤢ Perbesar Tabel +
 import contextlib
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import ttk
+from datetime import datetime
+from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
 
@@ -135,6 +136,12 @@ class NominalDeviasiView(tk.Frame):
         self._insert_cancel = None
         self._pending_sort = None
         self._result_df = None
+        # v3.11.2 — export Excel "sesuai tampilan" (permintaan user:
+        # "Tambahkan export Excel di tab laporan deviasi yang sudah ada
+        # pop up nya"): baris mentah terakhir yang dirender (post filter ⧩,
+        # urutan payload — kontrak export pivot v3.9.2).
+        self._export_rows: list = []
+        self._export_cols: list = []
         self._col_sel: dict = {c: None for c in
                                [c[0] for c in self.COLUMNS]}
         # v3.9.2 minus merah PER CELL (fallback Tk 8 per baris)
@@ -196,6 +203,12 @@ class NominalDeviasiView(tk.Frame):
             head, text="Nominal Deviasi — Harga 41.09 × Qty Deviasi (kolom H)",
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         self._title_label.pack(side="left")
+        # v3.11.2 — 💾 Export Excel SESUAI TAMPILAN (pola pivot v3.9.2:
+        # filter ⧩ + H aktif ikut; urutan = payload render terakhir;
+        # baris TOTAL ikut di ekor — ditebalkan writer).
+        btn_export = GhostButton(head, text="💾 Export Excel",
+                                 command=self._on_export_excel)
+        btn_export.pack(side="right", padx=(0, 6))
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
@@ -644,6 +657,13 @@ class NominalDeviasiView(tk.Frame):
 
         items = []
         neg_cells = []
+        # v3.11.2 — baris mentah utk export Excel "sesuai tampilan"
+        # (post filter ⧩, urutan render |Nominal|↓; Harga/Nominal None →
+        # sel kosong oleh writer — paritas marker '-'/baris tanpa harga
+        # UI; baris TOTAL ditambahkan di ekor).
+        export_rows = []
+        export_cols = ["Nama Barang", "Resto", "Satuan", "Harga",
+                       f"Qty Deviasi (H={h})", "Nominal"]
         for i in range(n):
             row = filtered.iloc[i]
             harga_disp = str(row.get("Harga Tampil", "-") or "-")
@@ -659,6 +679,13 @@ class NominalDeviasiView(tk.Frame):
                 fmt_rp_cell(nom) if nom is not None
                 and not pd.isna(nom) else "-",
             )
+            # v3.11.2 — nilai MENTAH (Harga/Nominal NaN → sel kosong;
+            # format Rp via number-format Excel di writer) supaya bisa
+            # dihitung di Excel.
+            _harga_raw = row.get("Harga")
+            export_rows.append(
+                [str(row["Nama Barang"]), str(row["Resto"]),
+                 str(row["Satuan"]), _harga_raw, qty, nom])
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
             # minus per-cell: Qty Deviasi & Nominal (Tk 8 fallback baris)
             try:
@@ -691,6 +718,10 @@ class NominalDeviasiView(tk.Frame):
                       {"values": values_total,
                        "tags": ("total",)}))
         total_cells = [("row_total", col) for col in col_ids]
+        # v3.11.2 — baris TOTAL ikut export (di ekor, ditebalkan writer —
+        # bold_last_rows=1; jumlah kolom yang tampil, transparan — kontrak
+        # baris TOTAL UI v3.9.33).
+        export_rows.append(["TOTAL", "", "", None, total_qty, total_nom])
 
         status = (f"{fmt_int_id(n)} pasangan · TANGGAL H = "
                   f"{h}")
@@ -704,7 +735,8 @@ class NominalDeviasiView(tk.Frame):
                       f"({self._fmt_cell_num(total_qty)} qty)")
         return {"items": items, "neg_cells": neg_cells,
                 "total_cells": total_cells, "status": status,
-                "total_chip": total_chip}
+                "total_chip": total_chip,
+                "export_rows": export_rows, "export_cols": export_cols}
 
     def _render_rows(self, payload: dict):
         """v3.9.72 — FIX 1 (task 2-b): hanya sentuhan WIDGET — populasi
@@ -764,6 +796,10 @@ class NominalDeviasiView(tk.Frame):
 
         # items kosong → insert_tree_items memanggil on_done SINKRON →
         # render_done tetap berjalan (reset _busy + proses _pending).
+        # v3.11.2 — snapshot export "sesuai tampilan" (payload terakhir;
+        # jalur 0-baris / tanpa data → kosong → tombol export menjelaskan).
+        self._export_rows = payload.get("export_rows") or []
+        self._export_cols = payload.get("export_cols") or []
         self._insert_cancel = insert_tree_items(
             self.tree, payload.get("items", []), batch=500,
             on_done=render_done)
@@ -778,6 +814,95 @@ class NominalDeviasiView(tk.Frame):
         # meninggalkan label STALE).
         apply_cell_tag(tree, "neg_cell", self._neg_cells)
         apply_cell_tag(tree, "total_cell", self._total_cells)
+
+    # =========================================================================
+    # 💾 EXPORT EXCEL (v3.11.2 — sesuai tampilan; pola pivot v3.9.2)
+    # =========================================================================
+    def _on_export_excel(self):
+        """v3.11.2 — Export nominal deviasi SESUAI TAMPILAN (permintaan
+        user: "Tambahkan export Excel di tab laporan deviasi yang sudah
+        ada pop up nya"): filter ⧩ + TANGGAL H aktif ikut; urutan =
+        payload render terakhir (|Nominal| menurun); baris TOTAL di ekor
+        (ditebalkan writer)."""
+        if not self._export_rows:
+            # FIX 6c-03 (pola pivot): bedakan 2 kasus 0-baris — data
+            # BELUM ADA vs data ADA tapi 0 baris DEVIASI@H / filter ⧩.
+            if self.data is None or getattr(self.data, "empty", True):
+                messagebox.showwarning(
+                    "Export", "Belum ada data. Jalankan pipeline dulu.",
+                    parent=self.winfo_toplevel())
+            else:
+                messagebox.showwarning(
+                    "Export",
+                    "Tidak ada baris nominal yang lolos filter aktif "
+                    "(0 baris DEVIASI di TANGGAL H / seleksi ⧩ kosong). "
+                    "Kendurkan atau reset filter dulu.",
+                    parent=self.winfo_toplevel())
+            return
+        stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
+        # v3.9.59 (pola 2f-10): nama file default ber-stempel.
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Nominal Deviasi (sesuai tampilan)",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile=f"nominal_deviasi_H{self.tanggal_h}_{stamp}.xlsx",
+            parent=self.winfo_toplevel(),
+        )
+        if not filepath:
+            return
+        self._do_export_excel(filepath)
+
+    def _do_export_excel(self, filepath: str):
+        """Inti export — dipisah dari _on_export_excel supaya bisa
+        dipanggil langsung oleh test tanpa dialog (pola pivot)."""
+        # lazy import — hindari circular import (export_sheets → pivot_view)
+        from .export_sheets import write_table_display_sheet
+        rows = [list(r) for r in (self._export_rows or [])]
+        cols = [str(c) for c in (self._export_cols or [])]
+        h = int(self.tanggal_h)
+
+        def work():
+            return write_table_display_sheet(
+                filepath, "Nominal Deviasi (H)", cols, rows,
+                meta_rows=[
+                    ("SUMBER", ("💰 Nominal (H) — Harga 41.09 × Qty "
+                                "Deviasi")),
+                    ("TANGGAL H", str(h)),
+                ],
+                widths={"Nama Barang": 32, "Resto": 12, "Satuan": 10,
+                        "Harga": 14, f"Qty Deviasi (H={h})": 14,
+                        "Nominal": 16},
+                # baris TOTAL (terakhir) ditebalkan + fill lembut.
+                bold_last_rows=1,
+                note="Nominal = Harga 41.09 × Qty Deviasi · sel kosong "
+                     "(Harga/Nominal) = tanpa harga 41.09 / satuan tak "
+                     "terkonversi ('*' di UI) · baris TOTAL = jumlah "
+                     "kolom yang tampil · export sesuai tampilan (filter "
+                     "⧩ + TANGGAL H aktif ikut)",
+            )
+
+        def done(n):
+            if not n:
+                messagebox.showwarning(
+                    "Export", "Tidak ada baris nominal untuk diekspor.",
+                    parent=self.winfo_toplevel())
+                return
+            self.status_var_label.set(
+                f"Export {fmt_int_id(n)} baris nominal → {filepath}")
+            messagebox.showinfo(
+                "Export Berhasil",
+                f"Nominal Deviasi (H={h}, {fmt_int_id(n)} baris termasuk "
+                f"TOTAL)\ndi-export ke:\n{filepath}",
+                parent=self.winfo_toplevel())
+
+        def on_error(e):
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}",
+                parent=self.winfo_toplevel())
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengekspor nominal deviasi…",
+                  on_error=on_error)
 
     # =========================================================================
     # TOOLBAR TABEL

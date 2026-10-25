@@ -49,7 +49,8 @@ bila dibutuhkan):
 
 import contextlib
 import tkinter as tk
-from tkinter import ttk
+from datetime import datetime
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
 import numpy as np
@@ -165,6 +166,12 @@ class LaporanDeviasiView(tk.Frame):
         self._aktif_lookup: dict = {}   # v3.9.5 (audit 19-b #5)
         self._satuan_lookup: dict = {}
         self._result_df = None  # hasil flagged di H
+        # v3.11.2 — export Excel "sesuai tampilan" (permintaan user:
+        # "Tambahkan export Excel di tab laporan deviasi yang sudah ada
+        # pop up nya"): baris mentah terakhir yang dirender (post filter ⧩,
+        # urutan payload — kontrak export pivot v3.9.2).
+        self._export_rows: list = []
+        self._export_cols: list = []
         # v3.9.2: minus merah PER CELL (fallback Tk 8: tag per baris)
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []     # [(iid, "COM")] — com < 0
@@ -233,6 +240,11 @@ class LaporanDeviasiView(tk.Frame):
             head, text="Pemakaian (COM) — Minus / Di Atas Median (kolom H)",
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
+        # v3.11.2 — 💾 Export Excel SESUAI TAMPILAN (pola pivot v3.9.2:
+        # filter ⧩ + H aktif ikut; urutan = payload render terakhir).
+        btn_export = GhostButton(head, text="💾 Export Excel",
+                                 command=self._on_export_excel)
+        btn_export.pack(side="right", padx=(0, 6))
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
         btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
@@ -893,6 +905,13 @@ class LaporanDeviasiView(tk.Frame):
                    ("Nama Barang", "Resto", "Satuan", "COM", "Median",
                     "Selisih", "Status")}
         items = []
+        # v3.11.2 — baris mentah utk export Excel "sesuai tampilan"
+        # (post filter ⧩, urutan render; kolom label dinamis ikut H —
+        # persis heading tabel via _update_headings).
+        export_rows = []
+        export_cols = ["Nama Barang", "Resto", "Satuan",
+                       f"COM (H={h})", f"Median (1..{h})",
+                       "Selisih vs Median", "Status"]
         fp_map = {}
         row_snaps = {}
         neg_cells = []       # v3.9.2 — minus merah PER CELL (kolom COM)
@@ -912,6 +931,11 @@ class LaporanDeviasiView(tk.Frame):
                 self._fmt_num(com_val), self._fmt_num(med_val),
                 self._fmt_num(sel_val), status,
             ]
+            # v3.11.2 — nilai MENTAH (bukan string format ID) supaya bisa
+            # dihitung di Excel; urutan = urutan items yang dirender.
+            export_rows.append(
+                [barang, resto, str(cols_np["Satuan"][i]),
+                 com_val, med_val, sel_val, status])
 
             # v3.2: fingerprint + snapshot (raw, tanpa format tampilan) —
             # dipetakan ke kolom Follow Up: SO=nilai COM, Sistem=median
@@ -969,7 +993,8 @@ class LaporanDeviasiView(tk.Frame):
         return {"gen": gen, "items": items, "status": status,
                 "fp_map": fp_map, "row_snaps": row_snaps,
                 "neg_cells": neg_cells, "st_minus_cells": st_minus_cells,
-                "st_above_cells": st_above_cells}
+                "st_above_cells": st_above_cells,
+                "export_rows": export_rows, "export_cols": export_cols}
 
     def _restore_view_state(self):
         """v3.9.42 — audit 61-c/61-d (F2 P2): pulihkan yview fraction +
@@ -1017,6 +1042,10 @@ class LaporanDeviasiView(tk.Frame):
         self._update_headings()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
+        # v3.11.2 — snapshot export "sesuai tampilan" (payload terakhir;
+        # jalur 0-baris / tanpa data → kosong → tombol export menjelaskan)
+        self._export_rows = payload.get("export_rows") or []
+        self._export_cols = payload.get("export_cols") or []
         self._neg_cells = payload.get("neg_cells", [])       # v3.9.2
         self._st_minus_cells = payload.get("st_minus_cells", [])
         self._st_above_cells = payload.get("st_above_cells", [])
@@ -1256,6 +1285,91 @@ class LaporanDeviasiView(tk.Frame):
             tanggal=int(self.tanggal_h),
             filters=active_filters,
         )
+
+    # =========================================================================
+    # 💾 EXPORT EXCEL (v3.11.2 — sesuai tampilan; pola pivot v3.9.2)
+    # =========================================================================
+    def _on_export_excel(self):
+        """v3.11.2 — Export daftar anomali COM SESUAI TAMPILAN (permintaan
+        user: "Tambahkan export Excel di tab laporan deviasi yang sudah
+        ada pop up nya"): filter ⧩ + TANGGAL H aktif ikut; urutan = payload
+        render terakhir (sort default Nama Barang → COM terbesar)."""
+        if not self._export_rows:
+            # FIX 6c-03 (pola pivot): bedakan 2 kasus 0-baris — data
+            # memang BELUM ADA (belum pipeline) vs data ADA tapi 0 anomali
+            # / filter ⧩ aktif meloloskan 0 baris.
+            if self.data is None or getattr(self.data, "empty", True):
+                messagebox.showwarning(
+                    "Export", "Belum ada data. Jalankan pipeline dulu.",
+                    parent=self.winfo_toplevel())
+            else:
+                messagebox.showwarning(
+                    "Export",
+                    "Tidak ada baris anomali COM yang lolos filter aktif "
+                    "(0 anomali / seleksi ⧩ kosong). Kendurkan atau reset "
+                    "filter dulu.", parent=self.winfo_toplevel())
+            return
+        stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
+        # v3.9.59 (pola 2f-10): nama file default ber-stempel — export
+        # berikutnya tidak menimpa export sebelumnya secara default.
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Anomali COM (sesuai tampilan)",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile=f"anomali_com_H{self.tanggal_h}_{stamp}.xlsx",
+            parent=self.winfo_toplevel(),
+        )
+        if not filepath:
+            return
+        self._do_export_excel(filepath)
+
+    def _do_export_excel(self, filepath: str):
+        """Inti export — dipisah dari _on_export_excel supaya bisa
+        dipanggil langsung oleh test tanpa dialog (pola pivot)."""
+        # lazy import — hindari circular import (export_sheets → pivot_view)
+        from .export_sheets import write_table_display_sheet
+        rows = [list(r) for r in (self._export_rows or [])]
+        cols = [str(c) for c in (self._export_cols or [])]
+        h = int(self.tanggal_h)
+
+        def work():
+            return write_table_display_sheet(
+                filepath, "Anomali COM", cols, rows,
+                meta_rows=[
+                    ("SUMBER", ("🚨 Anomali COM — pemakaian minus / "
+                                "di atas median (kolom H)")),
+                    ("TANGGAL H", str(h)),
+                ],
+                widths={"Nama Barang": 32, "Resto": 12, "Satuan": 10,
+                        f"COM (H={h})": 14, f"Median (1..{h})": 14,
+                        "Selisih vs Median": 16, "Status": 18},
+                note="Angka minus tampil MERAH dalam kurung · export sesuai "
+                     "tampilan (filter ⧩ + TANGGAL H aktif ikut) · median "
+                     "dihitung antar tanggal 1..H per pasangan",
+            )
+
+        def done(n):
+            if not n:
+                messagebox.showwarning(
+                    "Export", "Tidak ada baris anomali COM untuk diekspor.",
+                    parent=self.winfo_toplevel())
+                return
+            self.status_var_label.set(
+                f"Export {fmt_int_id(n)} baris anomali COM → {filepath}")
+            messagebox.showinfo(
+                "Export Berhasil",
+                f"Anomali COM (H={h}, {fmt_int_id(n)} baris)\n"
+                f"di-export ke:\n{filepath}",
+                parent=self.winfo_toplevel())
+
+        def on_error(e):
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}",
+                parent=self.winfo_toplevel())
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengekspor anomali COM…",
+                  on_error=on_error)
 
     # =========================================================================
     # HELPERS

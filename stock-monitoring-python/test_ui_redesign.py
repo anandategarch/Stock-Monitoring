@@ -912,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.1", APP_VERSION == "3.11.1",
+    check("Versi = 3.11.2", APP_VERSION == "3.11.2",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -21539,6 +21539,264 @@ def main():
           f"collapse_ok={_ok_collapse} t1={_t1_87.winfo_manager()!r} "
           f"t2={_t2_87.winfo_manager()!r}")
     _top87b.destroy()
+
+    # ==================================================================
+    print()
+    print("== §88. (v3.11.2) EXPORT EXCEL TAB 📋 LAPORAN DEVIASI — 3 MODE "
+          "(user: \"Tambahkan export Excel di tab laporan deviasi yang "
+          "sudah ada pop up nya\") ==")
+    from openpyxl import load_workbook as _lw88
+
+    def _row88(barang, resto, jenis, t, val, sat="GR"):
+        return {"Nama Barang": barang, "JENIS": jenis, "NAMA RESTO": resto,
+                "Tanggal": t, "NILAI": val, "SATUAN": sat,
+                "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                "SOURCE KIRIMAN": "GUDANG", "Nomor": None,
+                "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None}
+
+    _rows88 = []
+    # BRG MINUS: SA=100, SO konstan 100, SO(25)=200 tanpa IN → com(25)=-100
+    for _t88 in range(1, 26):
+        _rows88.append(_row88("BRG MINUS", "MLGPAR", "SALDO AWAL", _t88,
+                              100.0 if _t88 == 1 else 0.0))
+        _rows88.append(_row88("BRG MINUS", "MLGPAR", "1.SO", _t88,
+                              200.0 if _t88 == 25 else 100.0))
+        _rows88.append(_row88("BRG MINUS", "MLGPAR", "3.DEVIASI", _t88,
+                              -50.0 if _t88 == 25 else 0.0))
+    # BRG ABOVE: com(25)=300 > median · tanpa harga (Nominal kosong)
+    # BRG HARGA: deviasi 40 × harga 60,5 → nominal 2.420
+    for _t88 in range(1, 26):
+        for _b88 in ("BRG ABOVE", "BRG HARGA"):
+            _rows88.append(_row88(_b88, "MLGPAR", "SALDO AWAL", _t88,
+                                  100.0 if _t88 == 1 else 0.0))
+            _rows88.append(_row88(_b88, "MLGPAR", "1.SO", _t88, 100.0))
+        if _t88 == 25:
+            _rows88.append(_row88("BRG ABOVE", "MLGPAR", "4.IN", _t88, 300.0))
+            _rows88.append(_row88("BRG ABOVE", "MLGPAR", "3.DEVIASI",
+                                  _t88, 30.0))
+            _rows88.append(_row88("BRG HARGA", "MLGPAR", "3.DEVIASI",
+                                  _t88, 40.0))
+    _det88 = pd.DataFrame(_rows88)
+
+    # -- (a) Anomali COM (H): export sesuai tampilan + readback ----------
+    import src.ui.laporan_deviasi_view as _ldv88
+    _orig_info88 = _ldv88.messagebox.showinfo
+    _orig_warn88 = _ldv88.messagebox.showwarning
+    _ldv88.messagebox.showinfo = lambda *a, **k: None
+    _warn_calls88 = []
+    _ldv88.messagebox.showwarning = \
+        lambda *a, **k: _warn_calls88.append(a)
+    _lv88 = LaporanDeviasiView(root)
+    _lv88.pack(fill="both", expand=True)
+    root.update()
+    _lv88.load_data(_det88)
+    _lv88.ensure_refreshed()
+    wait_view(root, _lv88)
+    check("(v3.11.2) Anomali COM: render 2 baris anomali (MINUS + > "
+          "MEDIAN) + payload export terisi",
+          len(_lv88.tree.get_children("")) == 2
+          and len(_lv88._export_rows) == 2
+          and _lv88._export_cols[-1] == "Status",
+          f"rows={len(_lv88.tree.get_children(''))} "
+          f"export={len(_lv88._export_rows)}")
+    check("(v3.11.2) Anomali COM: handler 💾 export ada (pola §31 pivot)",
+          callable(_lv88._on_export_excel)
+          and callable(_lv88._do_export_excel))
+    _tmp88 = tempfile.mkdtemp()
+    _p88 = os.path.join(_tmp88, "anomali88.xlsx")
+    _lv88._do_export_excel(_p88)
+    _t088 = time.time()
+    while not os.path.exists(_p88) and time.time() - _t088 < 10:
+        root.update()
+        time.sleep(0.02)
+    time.sleep(0.2)
+    root.update()
+    _ws88 = _lw88(_p88).active
+    check("(v3.11.2) Anomali COM: file dibuat + sheet + meta SUMBER/"
+          "TANGGAL H + header DINAMIS COM (H=25) / Median (1..25) + "
+          "freeze + autofilter",
+          _ws88.title == "Anomali COM"
+          and _ws88["A1"].value == "SUMBER"
+          and _ws88["A2"].value == "TANGGAL H"
+          and str(_ws88["B2"].value) == "25"
+          and _ws88.cell(row=4, column=4).value == "COM (H=25)"
+          and _ws88.cell(row=4, column=5).value == "Median (1..25)"
+          and _ws88.freeze_panes == "A5"
+          and _ws88.auto_filter.ref is not None,
+          f"sheet={_ws88.title!r} B2={_ws88['B2'].value!r} "
+          f"hdr4={_ws88.cell(row=4, column=4).value!r}")
+    _vals88 = {(_ws88.cell(row=r, column=1).value,
+                _ws88.cell(row=r, column=4).value)
+               for r in (5, 6)}
+    check("(v3.11.2) Anomali COM: nilai MENTAH numerik (bukan string "
+          "format ID) + minus ber-format [Red] kurung",
+          _vals88 == {("BRG ABOVE", 300), ("BRG MINUS", -100)}
+          and "[Red]" in _ws88.cell(row=6, column=4).number_format,
+          f"got {_vals88}")
+    check("(v3.11.2) Anomali COM: tulis ATOMIK — tak ada .tmp tertinggal",
+          not os.path.exists(_p88 + ".tmp.xlsx"))
+
+    # -- (b) guard export: belum ada data vs filter 0 baris --------------
+    _lv88b = LaporanDeviasiView(root)
+    _lv88b.pack(fill="both", expand=True)
+    root.update()
+    _lv88b._on_export_excel()          # data None → warning 'pipeline'
+    _lv88b.load_data(_det88)
+    _lv88b.ensure_refreshed()
+    wait_view(root, _lv88b)
+    _lv88b._col_sel["Status"] = set()  # seleksi ⧩ kosong = 0 baris
+    _lv88b._refresh()
+    wait_view(root, _lv88b)
+    _n_warn_before = len(_warn_calls88)
+    _lv88b._on_export_excel()          # filter aktif 0 baris → warning lain
+    check("(v3.11.2) Anomali COM: guard export bedakan 'belum ada data' "
+          "vs 'filter aktif 0 baris' (pola FIX 6c-03 pivot) — dialog "
+          "BUKAN file dialog",
+          _n_warn_before >= 1 and len(_warn_calls88) >= 2
+          and "pipeline" in str(_warn_calls88[0])
+          and "filter" in str(_warn_calls88[-1]),
+          f"calls={len(_warn_calls88)} "
+          f"first={str(_warn_calls88[0])[:50]!r}")
+    _lv88b.destroy()
+    _lv88.destroy()
+
+    # -- (c) Komparasi File Deviasi: 13 kolom + persen + meta FILE -------
+    import src.ui.komparasi_deviasi_view as _kdv88
+    from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
+    _kdv88.messagebox.showinfo = lambda *a, **k: None
+    _kdv88.messagebox.showwarning = \
+        lambda *a, **k: _warn_calls88.append(a)
+    _kv88 = KomparasiDeviasiView(root)
+    _kv88.pack(fill="both", expand=True)
+    root.update()
+    _kv88.load_data(make_mock_komparasi_df())
+    root.update()
+    _kv88._load_paths([make_mock_deviasi_file()])
+    wait_view(root, _kv88)
+    wait_view(root, _kv88)
+    _n_kv88 = len(_kv88.tree.get_children(""))
+    _p88k = os.path.join(_tmp88, "komparasi88.xlsx")
+    _kv88._do_export_excel(_p88k)
+    _t088 = time.time()
+    while not os.path.exists(_p88k) and time.time() - _t088 < 10:
+        root.update()
+        time.sleep(0.02)
+    time.sleep(0.2)
+    root.update()
+    _ws88k = _lw88(_p88k).active
+    _hdr88k = [_ws88k.cell(row=5, column=j).value for j in range(1, 14)]
+    check("(v3.11.2) Komparasi: 13 kolom tabel utama (COLUMNS tanpa ✓) + "
+          "meta SUMBER/FILE/TANGGAL H",
+          _ws88k.title == "Komparasi Deviasi"
+          and _hdr88k == ["Resto", "Nama Barang", "Satuan", "BOM Lalu",
+                          "COM Lalu", "DEV Lalu", "%TO BOM Lalu",
+                          "BOM Saat Ini", "COM Saat Ini", "DEV Saat Ini",
+                          "GR Saat Ini", "Nominal", "Status"]
+          and _ws88k["A2"].value == "FILE"
+          and _ws88k["A3"].value == "TANGGAL H",
+          f"hdr={_hdr88k}")
+    check("(v3.11.2) Komparasi: baris export == baris tabel (filter "
+          "minggu aktif ikut) + kolom rasio ber-format PERSEN + Nominal "
+          "kosong tanpa harga_map",
+          _n_kv88 >= 1
+          and len(_kv88._export_rows) == _n_kv88
+          and "%" in _ws88k.cell(row=6, column=7).number_format
+          and "%" in _ws88k.cell(row=6, column=10).number_format
+          and _ws88k.cell(row=6, column=12).value is None,
+          f"rows={_n_kv88} "
+          f"pct7={_ws88k.cell(row=6, column=7).number_format!r}")
+    _kv88._close_file()
+    root.update()
+    _n_warn_kv = len(_warn_calls88)
+    _kv88._on_export_excel()
+    check("(v3.11.2) Komparasi: file ditutup → _export_rows direset "
+          "(v3.11.2 fix — _close_file kosongkan tree TANPA re-render) "
+          "+ export menjelaskan 'Belum ada file deviasi' (bukan diam / "
+          "file dialog / data basi)",
+          not _kv88._export_rows
+          and len(_warn_calls88) == _n_warn_kv + 1
+          and "file deviasi" in str(_warn_calls88[-1]),
+          f"export_rows={len(_kv88._export_rows)} "
+          f"got {str(_warn_calls88[-1])[:60]!r}")
+    _kv88.destroy()
+
+    # -- (d) Nominal (H): TOTAL ditebalkan + sel kosong tanpa harga ------
+    import src.ui.nominal_deviasi_view as _ndv88
+    from src.ui.nominal_deviasi_view import NominalDeviasiView
+    _ndv88.messagebox.showinfo = lambda *a, **k: None
+    _ndv88.messagebox.showwarning = \
+        lambda *a, **k: _warn_calls88.append(a)
+    _harga88 = {"BRG MINUS": (18250.0, "GR"), "BRG HARGA": (60.5, "GR")}
+    _konv88 = {"rasio": {("BRG MINUS", "GR"): 1.0,
+                         ("BRG HARGA", "GR"): 1.0},
+               "terkecil": {"BRG MINUS": "GR", "BRG HARGA": "GR"}}
+    _nv88 = NominalDeviasiView(root)
+    _nv88.pack(fill="both", expand=True)
+    root.update()
+    _nv88.load_data(_det88, harga_map=_harga88, konversi_map=_konv88)
+    _nv88.ensure_refreshed()
+    wait_view(root, _nv88)
+    _p88n = os.path.join(_tmp88, "nominal88.xlsx")
+    _nv88._do_export_excel(_p88n)
+    _t088 = time.time()
+    while not os.path.exists(_p88n) and time.time() - _t088 < 10:
+        root.update()
+        time.sleep(0.02)
+    time.sleep(0.2)
+    root.update()
+    _ws88n = _lw88(_p88n).active
+    _nom_map88 = {_ws88n.cell(row=r, column=1).value: r
+                  for r in range(5, _ws88n.max_row + 1)
+                  if _ws88n.cell(row=r, column=1).value}
+    _r_min88 = _nom_map88.get("BRG MINUS")
+    _r_above88 = _nom_map88.get("BRG ABOVE")
+    _r_tot88 = _nom_map88.get("TOTAL")
+    check("(v3.11.2) Nominal: header dinamis 'Qty Deviasi (H=25)' + nilai "
+          "mentah (harga 18.250 / 60,5 · nominal -912.500 / 2.420)",
+          _ws88n.title.startswith("Nominal Deviasi")
+          and _ws88n.cell(row=4, column=5).value == "Qty Deviasi (H=25)"
+          and _r_min88 is not None
+          and _ws88n.cell(row=_r_min88, column=4).value == 18250
+          and _ws88n.cell(row=_r_min88, column=6).value == -912500
+          and _r_above88 is not None
+          and _ws88n.cell(row=_r_above88, column=4).value is None
+          and _ws88n.cell(row=_r_above88, column=6).value is None,
+          f"hdr5={_ws88n.cell(row=4, column=5).value!r} "
+          f"min={_r_min88} above={_r_above88}")
+    check("(v3.11.2) Nominal: baris TOTAL di ekor DITEBALKAN (bold_last_"
+          "rows) + jumlah qty/nominal kolom yang tampil (transparan)",
+          _r_tot88 is not None and _r_tot88 == 8   # header r4 + 3 data + TOTAL
+          and _ws88n.cell(row=_r_tot88, column=1).font.bold
+          and _ws88n.cell(row=_r_tot88, column=5).value == 20
+          and _ws88n.cell(row=_r_tot88, column=6).value == -910080,
+          f"tot_row={_r_tot88} "
+          f"qty={_ws88n.cell(row=_r_tot88, column=5).value} "
+          f"nom={_ws88n.cell(row=_r_tot88, column=6).value}")
+    _nv88.destroy()
+
+    # -- (e) writer generik: NaN/pd.NA → blank · 0 baris → tanpa file ---
+    from src.ui.export_sheets import write_table_display_sheet as _wtds88
+    _p88w = os.path.join(_tmp88, "writer88.xlsx")
+    _n88w = _wtds88(
+        _p88w, "T", ["A", "B"], [["x", float("nan")], ["y", None]],
+        meta_rows=[("K", "V")], bold_last_rows=1)
+    _ws88w = _lw88(_p88w).active
+    # meta 1 baris (r1) + pemisah → header r3 · data r4 ("x", NaN→blank)
+    # · r5 ("y", bold baris-terakhir)
+    check("(v3.11.2) Writer: NaN/None → sel KOSONG + bold baris terakhir "
+          "+ return jumlah baris",
+          _n88w == 2 and _ws88w.cell(row=3, column=1).value == "A"
+          and _ws88w.cell(row=4, column=2).value is None
+          and _ws88w.cell(row=5, column=2).value is None
+          and _ws88w.cell(row=5, column=1).font.bold
+          and not os.path.exists(_p88w + ".tmp.xlsx"),
+          f"n={_n88w}")
+    _p88w2 = os.path.join(_tmp88, "writer88_kosong.xlsx")
+    check("(v3.11.2) Writer: rows kosong → return 0 + file TIDAK dibuat",
+          _wtds88(_p88w2, "T", ["A"], []) == 0
+          and not os.path.exists(_p88w2))
+    _ldv88.messagebox.showinfo = _orig_info88
+    _ldv88.messagebox.showwarning = _orig_warn88
 
     root.destroy()
 
