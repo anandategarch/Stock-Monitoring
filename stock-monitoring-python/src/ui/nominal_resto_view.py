@@ -86,6 +86,20 @@ buat anak tab baru di nominal deviasi yang menampilkan secara global"):
     Packaging)' → hanya menampilkan sesuai kategori itu — permintaan
     user). Menggantikan popup double-click kolom 'Tanpa Harga'.
 
+v3.11.3 (user: "tab nominal deviasi bisa export jga waktu pop up"):
+  - 💾 EXPORT EXCEL DI POPUP RINCIAN PER RESTO (double-click baris):
+    tombol di head popup — payload dibaca LATE-BINDING saat klik;
+    kolom = PERSIS heading popup (kolom dinamis bulan ≥2 ber-minggu
+    ikut); baris nilai MENTAH (bisa dihitung ulang di Excel; None/NaN
+    → sel kosong) + baris TOTAL di ekor DITEBALKAN (Σ qty + Σ nominal
+    skipna); meta SUMBER/RESTO/TANGGAL H/BULAN LALU/MINGGU PEMBANDING;
+    note-legend = footer popup; tulis atomik (writer generik
+    write_table_display_sheet v3.11.2 DIPAKAI ULANG); nama file
+    ber-stempel + resto disanitasi. Handler pola v3.11.2: guard
+    warning (bukan file dialog) + _do terpisah utk test; SINKRON
+    (baris per-resto terbatas — overlay utama tak terlihat di
+    belakang popup modal grab_set).
+
 TANGGAL H = state bersama (SharedTanggalH — chip read-only + auto-
 refresh dari tab 📦 Deviasi GR; pola mode Nominal). Minus merah
 per-cell; format angka Indonesia; filter header ⧩ + sort (TOTAL dipin
@@ -95,7 +109,8 @@ di ujung) + ⛶ Layar Penuh + ⤢ Perbesar Tabel + ◱ Kolom + ↔ Auto-Fit
 import contextlib
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import ttk
+from datetime import datetime
+from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
 
@@ -1990,6 +2005,14 @@ class NominalRestoView(tk.Frame):
         # v3.9.41 — tombol ⛶/↺ (user: "pop up ... kurang besar dan
         # lebar") — setelah tree dibuat (command men-reference tree).
         _popup_head_buttons(head, win, tree, _popup_cols)
+        # v3.11.3 — 💾 Export Excel di POPUP (user: "tab nominal deviasi
+        # bisa export jga waktu pop up") — LATE-BINDING: payload dibaca
+        # dari win._export_payload SAAT KLIK (dilekatkan SETELAH seluruh
+        # baris selesai dibangun di bawah — tombol tak membekukan
+        # snapshot saat konstruksi).
+        GhostButton(head, text="💾 Export Excel",
+                    command=lambda _w=win: self._on_popup_export_excel(_w)
+                    ).pack(side="right", padx=(6, 0))
         for col_name, width, anchor in _popup_cols:
             tree.column(col_name, width=width, minwidth=34,
                         anchor=anchor)
@@ -2008,6 +2031,8 @@ class NominalRestoView(tk.Frame):
         neg_cells = []
         total_cells = []
         items = []
+        # v3.11.3 — baris export MENTAH (paralel loop items — 💾 popup)
+        export_rows = []
         sub = sub.reset_index(drop=True)
         _nolalu = 0
         # v3.9.45 — Σ per bulan ≥2 (hanya pasangan yang TAMPIL — join
@@ -2081,6 +2106,13 @@ class NominalRestoView(tk.Frame):
                 tags.append("negative")
             items.append(("", f"row_{i}",
                           {"values": values, "tags": tuple(tags)}))
+            # v3.11.3 — baris export MENTAH paralel (bukan string format
+            # ID/'Rp' — angka bisa dihitung ulang di Excel; None/NaN →
+            # sel KOSONG oleh writer — paritas export v3.11.2).
+            export_rows.append(
+                [str(resto), str(row["Nama Barang"]),
+                 row.get("Qty Deviasi", 0), nom, nom_lalu]
+                + list(vals_extra))
 
         total_nom = float(sub["Nominal"].dropna().sum()) \
             if "Nominal" in sub.columns else 0.0
@@ -2107,6 +2139,17 @@ class NominalRestoView(tk.Frame):
             "tags": ("total",)}))
         for c in col_ids:
             total_cells.append(("row_total", c))
+        # v3.11.3 — baris TOTAL export (MENTAH): Σ qty + Σ nominal kolom
+        # yang tampil (skipna — pola TOTAL UI; tabel UI menampilkan kolom
+        # qty TOTAL kosong, export menyertakan Σ qty supaya bisa dihitung
+        # — transparan kontrak TOTAL mode 💰 v3.11.2).
+        try:
+            _tot_qty = float(pd.to_numeric(
+                sub["Qty Deviasi"], errors="coerce").fillna(0).sum())
+        except (KeyError, TypeError, ValueError):
+            _tot_qty = 0.0
+        export_rows.append(["TOTAL", None, _tot_qty, total_nom,
+                            total_lalu] + list(totals_extra))
 
         vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
         # v3.9.42 — audit 61-b P2: + SCROLLBAR HORIZONTAL — total lebar
@@ -2152,6 +2195,32 @@ class NominalRestoView(tk.Frame):
         GhostButton(foot, text="Tutup (Esc)", command=win.destroy).pack(
             side="right", padx=10, pady=4)
 
+        # v3.11.3 — payload EXPORT popup (dibaca tombol 💾 saat KLIK —
+        # late-binding): kolom PERSIS heading tree (kolom dinamis bulan
+        # ≥2 ber-minggu ikut — mirror tree.heading di atas), baris nilai
+        # MENTAH + TOTAL, meta 5 baris (SUMBER/RESTO/TANGGAL H/BULAN
+        # LALU/MINGGU PEMBANDING) + note = foot_txt (paritas footer).
+        _lalu_lab = (self._lalu_frames[0][0]
+                     if self._lalu_frames else None)
+        win._export_payload = {
+            "resto": str(resto),
+            "cols": ([c[0] for c in POPUP_COLUMNS]
+                     + [_cid + (f" ({_wk})" if _wk else "")
+                        for _cid, _lab, _wk in self._lalu_extra]),
+            "rows": export_rows,
+            "meta": [
+                ("SUMBER", ("🧮 Nominal Deviasi — popup Rincian per Resto "
+                            "(Harga 41.09 × Deviasi H)")),
+                ("RESTO", str(resto)),
+                ("TANGGAL H", str(self.tanggal_h)),
+                ("BULAN LALU", str(_lalu_lab) if _lalu_lab else "-"),
+                ("MINGGU PEMBANDING",
+                 (f"{self._lalu_week} (ter-cocok H)"
+                  if self._lalu_week else "-")),
+            ],
+            "note": foot_txt,
+        }
+
         # v3.9.41 — ukuran BESAR (±94%×88% layar; dulu maks 1000×560)
         # + kolom diskala memenuhi lebar jendela + re-scale saat resize
         # (user: "pop up tab nominal deviasi ada bug kurang besar dan
@@ -2163,6 +2232,103 @@ class NominalRestoView(tk.Frame):
         _bind_popup_rescale(win, tree, _popup_cols)
         win.minsize(min(900, _w41), min(420, _h41))
         win.focus_set()
+
+    # ---------------------------------------------------------------------
+    # v3.11.3 — 💾 EXPORT EXCEL POPUP RINCIAN (user: "tab nominal
+    # deviasi bisa export jga waktu pop up") — pola export v3.11.2
+    # "SESUAI TAMPILAN" diterapkan ke POPUP per resto: kolom dinamis
+    # bulan ≥2 ber-minggu ikut, angka mentah, minus merah kurung
+    # (number-format [Red] writer), baris TOTAL ditebalkan, atomik.
+    # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _popup_resto_filename(resto) -> str:
+        """Komponen nama file dari nama resto — disanitasi (karakter
+        selain alfanumerik/._- → '_' + strip '_' tepi) supaya aman
+        lintas OS; resto nyata '1001.MLGPAR' tetap terbaca."""
+        return ("".join(ch if (ch.isalnum() or ch in "._-") else "_"
+                       for ch in str(resto)).strip("_") or "resto")
+
+    def _on_popup_export_excel(self, win):
+        """v3.11.3 — Export POPUP RINCIAN per resto SESUAI TAMPILAN
+        (user: "tab nominal deviasi bisa export jga waktu pop up"):
+        kolom = heading popup (kolom dinamis bulan ≥2 ber-minggu ikut);
+        urutan + baris = persis popup; baris TOTAL di ekor (ditebalkan
+        writer + Σ qty). Guard pola FIX 6c-03: popup tanpa payload/baris
+        → WARNING (bukan file dialog diam-diam)."""
+        payload = getattr(win, "_export_payload", None) or {}
+        if not payload.get("rows"):
+            messagebox.showwarning(
+                "Export",
+                "Popup belum punya baris rincian untuk diekspor.",
+                parent=win)
+            return
+        resto = str(payload.get("resto") or "resto")
+        stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
+        # v3.9.59 (pola 2f-10): nama file default ber-stempel + resto
+        # disanitasi (karakter path → '_').
+        filepath = filedialog.asksaveasfilename(
+            title="Simpan Rincian Nominal Deviasi (sesuai tampilan)",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile=(f"nominal_deviasi_popup_"
+                         f"{self._popup_resto_filename(resto)}_"
+                         f"{stamp}.xlsx"),
+            parent=win,
+        )
+        if not filepath:
+            return
+        self._do_popup_export_excel(win, filepath)
+
+    def _do_popup_export_excel(self, win, filepath: str):
+        """Inti export popup — dipisah dari _on_popup_export_excel supaya
+        bisa dipanggil langsung oleh test TANPA dialog (pola §88 pivot).
+        SINKRON sadar (bukan run_async): baris per-resto TERBATAS (popup
+        = satu resto — export cepat) + overlay loading milik jendela
+        utama TIDAK TERLIHAT di belakang popup modal (grab_set v3.9.59)
+        — jadi pekerjaan dijalankan seketika + umpan balik messagebox
+        ber-parent popup."""
+        # lazy import — hindari circular import (pola §88 view lain).
+        from .export_sheets import write_table_display_sheet
+        payload = getattr(win, "_export_payload", None) or {}
+        rows = [list(r) for r in (payload.get("rows") or [])]
+        cols = [str(c) for c in (payload.get("cols") or [])]
+        if not rows or not cols:
+            messagebox.showwarning(
+                "Export", "Popup belum punya baris rincian untuk "
+                "diekspor.", parent=win)
+            return
+        resto = str(payload.get("resto") or "resto")
+        widths = {"Nama Resto": 14, "Nama Barang": 32,
+                  "Kuantiti Deviasi": 14,
+                  "Nominal Deviasi Sekarang": 18,
+                  "Nominal Deviasi Bulan Lalu": 18}
+        # kolom dinamis bulan ≥2 (heading ber-minggu — panjang).
+        for _h in cols[5:]:
+            widths[_h] = 18
+        try:
+            n = write_table_display_sheet(
+                filepath, "Rincian Nominal Deviasi", cols, rows,
+                meta_rows=(payload.get("meta") or []),
+                widths=widths,
+                # baris TOTAL (terakhir) ditebalkan + fill lembut.
+                bold_last_rows=1,
+                note=payload.get("note") or None)
+        except Exception as e:  # noqa: BLE001 — umpan balik apa adanya
+            messagebox.showerror(
+                "Export Gagal", f"Tidak bisa export:\n{e}", parent=win)
+            return
+        if not n:
+            messagebox.showwarning(
+                "Export", "Tidak ada baris rincian untuk diekspor.",
+                parent=win)
+            return
+        messagebox.showinfo(
+            "Export Berhasil",
+            (f"Rincian Nominal Deviasi — resto {resto} "
+             f"({fmt_int_id(n)} baris termasuk TOTAL)\n"
+             f"di-export ke:\n{filepath}"),
+            parent=win)
 
     # -------------------------------------------------------------------------
     # v3.9.63 — popup barang TANPA HARGA DIHAPUS (double-click sel kolom

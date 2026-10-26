@@ -912,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.2", APP_VERSION == "3.11.2",
+    check("Versi = 3.11.3", APP_VERSION == "3.11.3",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -21797,6 +21797,216 @@ def main():
           and not os.path.exists(_p88w2))
     _ldv88.messagebox.showinfo = _orig_info88
     _ldv88.messagebox.showwarning = _orig_warn88
+
+    # ==================================================================
+    # §89 — v3.11.3 EXPORT EXCEL POPUP RINCIAN TAB 🧮 NOMINAL DEVIASI
+    #      (user: "tab nominal deviasi bisa export jga waktu pop up")
+    # ==================================================================
+    print()
+    print("== §89. (v3.11.3) EXPORT EXCEL POPUP 🧮 NOMINAL DEVIASI — "
+          "RINCIAN PER RESTO (user: \"tab nominal deviasi bisa export jga "
+          "waktu pop up\") ==")
+    import src.ui.nominal_resto_view as _nrv89
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV89
+
+    # patch modul-view (pola §88 — showwarning/showerror tak ter-patch
+    # → hang modal; filedialog ditangkap utk cek nama file + cancel).
+    _orig_info89 = _nrv89.messagebox.showinfo
+    _orig_warn89 = _nrv89.messagebox.showwarning
+    _orig_err89 = _nrv89.messagebox.showerror
+    _orig_fdlg89 = _nrv89.filedialog.asksaveasfilename
+    _nrv89.messagebox.showinfo = lambda *a, **k: None
+    _warn89 = []
+    _nrv89.messagebox.showwarning = lambda *a, **k: _warn89.append(a)
+    _nrv89.messagebox.showerror = lambda *a, **k: _warn89.append(a)
+    _fdlg89 = []
+
+    def _fake_fdlg89(**k):
+        _fdlg89.append(k)
+        return ""                      # CANCEL — file tak dibuat
+
+    _nrv89.filedialog.asksaveasfilename = _fake_fdlg89
+
+    # fixture multi-bulan pola §56: MLGPAR 3 barang — AYAM (qty 20 ×
+    # harga 56,5 → nominal 1.130) · TEH (qty -8 × 1,0 → -8 · lalu -6 —
+    # minus utk [Red]) · KOPI (tanpa harga → sel kosong) · SEP = kolom
+    # dinamis TANPA pasangan MLGPAR (sel kosong; TOTAL SEP 0).
+    _fd89 = pd.DataFrame({
+        "Resto": ["1001.MLGPAR", "1001.MLGPAR", "1002.SBYKET"],
+        "Nama Barang": ["AYAM FILET", "TEH BOTOL", "AYAM FILET"],
+        "Satuan": ["GR", "GR", "GR"],
+        "Minggu": ["WEEK 4", "WEEK 4", "WEEK 2"],
+        "DEV Lalu": [20.0, -6.0, 74.0],
+        "BULAN": ["204.OKT 26", "204.OKT 26", "203.SEP 26"],
+        "_bulan_num": [10, 10, 9],
+        "_resto_norm": ["MLGPAR", "MLGPAR", "SBYKET"],
+        "_bahan_norm": ["AYAM FILET", "TEH BOTOL", "AYAM FILET"],
+        "_h": [25, 25, 14],
+    })
+    _top89 = tk.Toplevel(root)
+    _top89.geometry("1600x900+5+5")
+    _nv89 = _NRV89(_top89, lalu_provider=lambda: _fd89)
+    _nv89.pack(fill="both", expand=True)
+    _dn89 = pd.DataFrame([
+        {"Nama Barang": _b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+         "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": _v,
+         "KATEGORI": "DEVIASI"}
+        for _b, _v in (("AYAM FILET", 20.0), ("TEH BOTOL", -8.0),
+                       ("KOPI BUBUK 100G", 2.0))
+    ])
+    _nv89.load_data(_dn89, harga_map={
+        "AYAM FILET": (56.5, "GR"), "TEH BOTOL": (1.0, "GR")},
+        konversi_map={"rasio": {}, "terkecil": {}})
+    _nv89.ensure_refreshed()
+    wait_view(root, _nv89)
+    _nv89._show_resto_popup("MLGPAR")
+    root.update()
+    _win89 = _nv89._detail_wins[-1] if _nv89._detail_wins else None
+
+    def _findtr89(w):
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Treeview):
+                return c
+            t = _findtr89(c)
+            if t is not None:
+                return t
+        return None
+
+    def _btns89(w):
+        out = []
+        for c in w.winfo_children():
+            if isinstance(c, ttk.Button) and "💾" in str(c.cget("text")):
+                out.append(c)
+            out.extend(_btns89(c))
+        return out
+
+    _tr89 = _findtr89(_win89) if _win89 is not None else None
+    _pay89 = (getattr(_win89, "_export_payload", None)
+              if _win89 is not None else None)
+    check("(v3.11.3) 🧮 popup: tombol 💾 Export Excel ADA di head popup "
+          "+ handler _on/_do (pola §31/§88)",
+          _win89 is not None and _tr89 is not None
+          and len(_btns89(_win89)) == 1
+          and callable(_nv89._on_popup_export_excel)
+          and callable(_nv89._do_popup_export_excel),
+          f"btn={len(_btns89(_win89)) if _win89 else 'no-win'}")
+    _heads89 = ([_tr89.heading(c)["text"] for c in _tr89["columns"]]
+                if _tr89 is not None else None)
+    check("(v3.11.3) 🧮 popup: payload cols PERSIS heading tree (kolom "
+          "dinamis SEP BER-MINGGU ikut) + note = footer popup (paritas)",
+          _pay89 is not None and _heads89 is not None
+          and _pay89["cols"] == _heads89
+          and _pay89["cols"][-1] == "Lalu 203.SEP 26 (WEEK 2)"
+          and "TOTAL SEKARANG" in str(_pay89.get("note")),
+          f"cols={_pay89['cols'] if _pay89 else None}")
+
+    # -- guard: popup tanpa payload/baris → warning (BUKAN file dialog)
+    _guard89 = tk.Toplevel(root)
+    _n_warn89 = len(_warn89)
+    _nv89._on_popup_export_excel(_guard89)
+    check("(v3.11.3) 🧮 popup: guard export — tanpa payload/baris → "
+          "WARNING bukan file dialog (pola FIX 6c-03)",
+          len(_warn89) == _n_warn89 + 1 and not _fdlg89,
+          f"warn={str(_warn89[-1])[:60]!r}" if _warn89 else "no-warn")
+    _guard89.destroy()
+
+    # -- nama file default ber-stempel + resto disanitasi + CANCEL
+    _nv89._on_popup_export_excel(_win89)
+    _if89 = _fdlg89[0].get("initialfile", "") if _fdlg89 else ""
+    _pp89 = _if89[:-5].rsplit("_") if _if89.endswith(".xlsx") else []
+    check("(v3.11.3) 🧮 popup: nama file default ber-stempel "
+          "(YYYYmmdd_HHMM) + resto DISANITASI (karakter path → '_') + "
+          "CANCEL → tak ada file dibuat (pola 2f-10)",
+          len(_fdlg89) == 1
+          and _if89.startswith("nominal_deviasi_popup_MLGPAR_")
+          and len(_pp89) >= 2 and len(_pp89[-2]) == 8
+          and _pp89[-2].isdigit() and len(_pp89[-1]) == 4
+          and _pp89[-1].isdigit()
+          and _fdlg89[0].get("parent") is _win89
+          and _NRV89._popup_resto_filename("1001.MLGPAR") == "1001.MLGPAR"
+          and _NRV89._popup_resto_filename("A/B C:D") == "A_B_C_D"
+          and _NRV89._popup_resto_filename("///") == "resto",
+          f"init={_if89!r}")
+
+    # -- readback SINKRON (tanpa dialog — _do dipanggil langsung)
+    _tmp89 = tempfile.mkdtemp()
+    _p89 = os.path.join(_tmp89, "popup89.xlsx")
+    _nv89._do_popup_export_excel(_win89, _p89)
+    root.update()
+    _ws89 = _lw88(_p89).active
+    _c89 = _ws89.cell
+    check("(v3.11.3) 🧮 popup: readback SINKRON — sheet 'Rincian Nominal "
+          "Deviasi' + meta 5 baris (SUMBER/RESTO/TANGGAL H/BULAN LALU/"
+          "MINGGU PEMBANDING) + header r7 + freeze A8 + autofilter",
+          _ws89.title == "Rincian Nominal Deviasi"
+          and [_ws89.cell(row=r, column=1).value
+               for r in range(1, 6)] == [
+              "SUMBER", "RESTO", "TANGGAL H", "BULAN LALU",
+              "MINGGU PEMBANDING"]
+          and _ws89["B2"].value == "MLGPAR"
+          and str(_ws89["B3"].value) == "25"
+          and _ws89["B4"].value == "204.OKT 26"
+          and _c89(7, 1).value == "Nama Resto"
+          and _c89(7, 6).value == "Lalu 203.SEP 26 (WEEK 2)"
+          and _ws89.freeze_panes == "A8"
+          and _ws89.auto_filter.ref is not None,
+          f"sheet={_ws89.title!r} B4={_ws89['B4'].value!r} "
+          f"hdr7c6={_c89(7, 6).value!r}")
+    check("(v3.11.3) 🧮 popup: nilai MENTAH numerik (AYAM qty 20 · "
+          "nominal 1.130 · lalu 1.130; TEH qty -8 · nominal -8 · lalu "
+          "-6; KOPI qty 2) — urutan = urutan popup (|Nominal| turun)",
+          _c89(8, 1).value == "MLGPAR"
+          and _c89(8, 2).value == "AYAM FILET"
+          and _c89(8, 3).value == 20
+          and _c89(8, 4).value == 1130
+          and _c89(8, 5).value == 1130
+          and _c89(9, 2).value == "TEH BOTOL"
+          and _c89(9, 3).value == -8
+          and _c89(9, 4).value == -8
+          and _c89(9, 5).value == -6
+          and _c89(10, 2).value == "KOPI BUBUK 100G"
+          and _c89(10, 3).value == 2,
+          f"r8={(_c89(8, 3).value, _c89(8, 4).value)} "
+          f"r9={(_c89(9, 3).value, _c89(9, 4).value)}")
+    check("(v3.11.3) 🧮 popup: minus ber-format [Red] kurung (TEH "
+          "sekarang & lalu — number-format writer, murah tanpa Font "
+          "per sel)",
+          "[Red]" in _c89(9, 4).number_format
+          and "[Red]" in _c89(9, 5).number_format,
+          f"fmt9c4={_c89(9, 4).number_format!r}")
+    check("(v3.11.3) 🧮 popup: sel KOSONG — KOPI tanpa harga 41.09 "
+          "(Nominal Sekarang/Lalu) + kolom SEP tanpa pasangan MLGPAR "
+          "(semua baris kosong)",
+          _c89(10, 4).value is None and _c89(10, 5).value is None
+          and _c89(8, 6).value is None and _c89(9, 6).value is None
+          and _c89(10, 6).value is None,
+          f"r10c4={_c89(10, 4).value!r} r8c6={_c89(8, 6).value!r}")
+    check("(v3.11.3) 🧮 popup: baris TOTAL di ekor DITEBALKAN + Σ qty/"
+          "nominal kolom yang tampil (skipna — KOPI tanpa harga tak "
+          "mengganggu Σ) + kolom SEP dinamis tanpa pasangan → 0",
+          _c89(11, 1).value == "TOTAL"
+          and _c89(11, 1).font.bold
+          and _c89(11, 3).value == 14
+          and _c89(11, 4).value == 1122
+          and _c89(11, 5).value == 1124
+          and _c89(11, 6).value == 0,
+          f"tot={(_c89(11, 3).value, _c89(11, 4).value, _c89(11, 6).value)}")
+    check("(v3.11.3) 🧮 popup: tulis ATOMIK — tak ada .tmp tertinggal "
+          "+ note-legend footer popup ikut di sheet",
+          not os.path.exists(_p89 + ".tmp.xlsx")
+          and _c89(13, 1).value == _pay89.get("note"),
+          f"note={str(_c89(13, 1).value)[:50]!r}")
+
+    # cleanup §89 — pulihkan patch modul (tkinter.messagebox/filedialog
+    # GLOBAL — wajib di-restore utk section lain / run ulang).
+    _nrv89.messagebox.showinfo = _orig_info89
+    _nrv89.messagebox.showwarning = _orig_warn89
+    _nrv89.messagebox.showerror = _orig_err89
+    _nrv89.filedialog.asksaveasfilename = _orig_fdlg89
+    _nv89._close_detail_wins()
+    _nv89.destroy()
+    _top89.destroy()
+    root.update()
 
     root.destroy()
 
