@@ -1,14 +1,23 @@
 """
 in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
 
+v3.11.5 — KEMBALI KE RUMUS LAMA (user: "kembali ke rumus lama" —
+jawaban atas opsi laporan v3.11.4): SELISIH IN = BM REKAP − IN
+(rumus pra-v3.10 dipulihkan; fn_audit tanpa swap slot ΔSO). Kolom
+v3.10 lain TETAP: "COM" (kanan Hasil SO) + chip popup SO KEMARIN/COM
++ mode 📈 Analisa 6 seksi (ΔSO kini kolom analisa, bukan basis) +
+panjang bulan asli. Chip KPI "BASIS SELISIH" kembali "BM REKAP
+(BM−IN)" di semua format; catatan B3 kembali narasi IN vs BM; B4b
+"SO belum direkam" INERT lagi (selisih BM−IN tak menunggu SO).
+
 v3.10 — LOGIKA BARU "SELISIH DENGAN SO KEMARIN" + KOLOM COM + MODE
 📈 ANALISA + PANJANG BULAN ASLI (user: "ubah logika selisih in dengan
 selisih dengan so kemarin" · "tambahkan kolom COm di rekap selisih in"
 · "gali potensi analisa di tab rekap selisih in" · "Misal bulan ini
 hanya sampai tanggal 30 maka tidak perlu ada tanggal 31 begitu juga di
-bulan kemarin"):
+bulan kemarin") — basis ΔSO−IN ini BERLAKU v3.10..v3.11.4 saja:
 
-- SELISIH IN kini = (SO(t) − SO(t−1)) − IN — selisih kenaikan stok
+- SELISIH IN (v3.10..3.11.4) = (SO(t) − SO(t−1)) − IN — selisih kenaikan stok
   fisik vs penerimaan sistem (positif = fisik naik LEBIH banyak dari
   sistem catat → RI belum diinput; negatif = IN masuk sistem tapi stok
   tak bertambah). Kolom BARU "SO Kemarin" (basis) & "COM" di tabel;
@@ -249,14 +258,16 @@ COLUMNS = [
     ("Hasil SO", 90, "e"),         # ← kolom SO (v3.6)
     # v3.11 — kolom "SO Kemarin" (saldo kemarin) DIHAPUS dari tabel
     # (user: "di tab rekap selisin in hapus kolom saldo kemarin") —
-    # nilai TETAP dihitung engine (basis Selisih IN = ΔSO − IN) & tetap
+    # nilai TETAP dihitung engine (bahan kolom COM + chip popup) & tetap
     # tampil di chip popup Rincian IN; hanya kolom tabel yang hilang.
     ("COM", 92, "e"),              # v3.11 — pindah ke KANAN 'Hasil SO'
                                       # (user: "Kolom COM pindah disebelah
                                       # kanan Hasil SO")
-    ("Barang Masuk", 110, "e"),    # = BM rekap (input resto — display)
+    ("Barang Masuk", 110, "e"),    # = BM rekap (input resto — BASIS selisih
+                                      # sejak v3.11.5 kembali ke rumus lama)
     ("IN", 96, "e"),               # = Penerimaan Sistem (42.05+32.24+99.01)
-    ("Selisih IN", 100, "e"),      # v3.10 = (SO(t)−SO(t−1)) − IN
+    ("Selisih IN", 100, "e"),      # v3.11.5 = BM − IN (rumus lama;
+                                      # v3.10..3.11.4 sempat ΔSO − IN)
     ("Saldo", 100, "e"),           # saldo kumulatif audit (basis baru)
     ("PO Menunggu", 96, "e"),      # v3.9.30 — qty PO 32.43 'Menunggu diproses'
     ("Hasil Audit", 150, "w"),     # ← kolom hasil audit (v3.6)
@@ -1581,9 +1592,10 @@ class InSelisihView(tk.Frame):
         k = self.audit_kpi
         # FIX C-03: KPI chips ikut format Indonesia (1.234.567, bukan
         # 1,234,567) — konsisten dgn formatter tabel.
-        # v3.10 — chip BASIS SELISIH kedua: basis "SO kemarin" aktif iff
-        # audit_df membawa kolom v3.10 (pipeline baru); format lama/test
-        # → chip basis lama (jujur, bukan mengklaim basis baru).
+        # v3.11.5 — KEMBALI KE RUMUS LAMA: Selisih IN = BM − IN di SEMUA
+        # format (pipeline v3.11.5 maupun legacy pra-v3.10) — chip BASIS
+        # SELISIH tak lagi membedakan basis. _basis_v310 tetap dideteksi
+        # utk GATE chip COM MINUS (kolom v3.10 hadir → angka COM ada).
         _basis_v310 = bool(
             self.audit_df is not None
             and "Qty SO Kemarin" in getattr(self.audit_df, "columns", []))
@@ -1593,9 +1605,7 @@ class InSelisihView(tk.Frame):
             ("MODE HITUNG",
              "📅 BULAN INI" if not self._mode_bulan_lalu else "📆 LALU + INI",
              "#0e7490"),
-            ("BASIS SELISIH",
-             "SO KEMARIN (ΔSO−IN)" if _basis_v310 else "BM REKAP (BM−IN)",
-             "#0f766e" if _basis_v310 else "#64748b"),
+            ("BASIS SELISIH", "BM REKAP (BM−IN)", "#0f766e"),
             ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
             ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
             ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
@@ -1754,12 +1764,15 @@ class InSelisihView(tk.Frame):
             self._ensure_maps(data)
 
         # v3.10 — deteksi format audit: kolom basis "SO kemarin" hadir
-        # (pipeline v3.10) → "Barang Masuk" = BM rekap DISPLAY ("Qty BM
-        # Rekap"; slot "Qty SO Harian" sudah di-rename "Qty Delta SO" oleh
-        # fn_audit — TIDAK lagi dibaca di jalur ini). Format LAMA (test /
-        # pemanggil lama tanpa kolom v3.10) → fallback slot lama (BM rekap
+        # (pipeline v3.10) → "Barang Masuk" = BM rekap display ("Qty BM
+        # Rekap"; v3.11.5: slot "Qty SO Harian" = BM hadir kembali di
+        # output fn_audit — dua kolom itu kini identik isinya, "Qty BM
+        # Rekap" tetap dibaca duluan). Format LAMA (test / pemanggil
+        # lama tanpa kolom v3.10) → fallback slot lama (BM rekap
         # juga isinya — perilaku identik pra-v3.10).
-        _v310 = "Qty SO Kemarin" in df.columns
+        # v3.11.5 — flag basis v3.10 TIDAK lagi dipakai di jalur ini
+        # (Selisih IN = BM − IN di semua format — narasi catatan selalu
+        # jalur lama).
         # v3.10.1 — FIX P2 (bug hunt 1-b): kolom BM di-GUARD (frame v3.10
         # PARSIAL — punya "Qty SO Kemarin" tapi tanpa "Qty BM Rekap" —
         # dulu KeyError 'Qty BM Rekap' → seluruh tabel gagal via on_error;
@@ -1783,8 +1796,9 @@ class InSelisihView(tk.Frame):
             "Tanggal": pd.to_numeric(df["Tanggal"], errors="coerce"),
             "Nama Barang": df["Nama Item"].astype(str),
             "Hasil SO": pd.to_numeric(df["Hasil SO"], errors="coerce"),
-            # v3.10 — BM rekap = KOLOM DISPLAY (bukan lagi basis selisih);
-            # ΔSO-nya ditampilkan di kolom "SO Kemarin"/implisit Selisih IN.
+            # v3.11.5 — BM rekap kembali jadi BASIS selisih (rumus lama);
+            # ΔSO/SO Kemarin tetap sbg kolom bantu (COM + analisa + chip
+            # popup).
             # (FIX: else-branch WAJIB df["Qty SO Harian"] — literal string
             # di-pd.to_numeric = NaN kolom penuh, BM legacy lenyap.)
             "Barang Masuk": (pd.to_numeric(df[_bm_col], errors="coerce")
@@ -1794,8 +1808,8 @@ class InSelisihView(tk.Frame):
             "SO Kemarin": _num_or_na("Qty SO Kemarin"),
             "COM": _num_or_na("Qty COM"),
             "IN": pd.to_numeric(df["Penerimaan Sistem"], errors="coerce"),
-            # v3.10 — Selisih IN = Selisih Harian engine; di basis baru
-            # nilainya = ΔSO − IN (slot engine diisi ΔSO oleh fn_audit).
+            # v3.11.5 — Selisih IN = Selisih Harian engine; nilainya =
+            # BM − IN (rumus lama dipulihkan; slot engine = BM rekap).
             "Selisih IN": pd.to_numeric(df["Selisih Harian"],
                                          errors="coerce"),
             "Saldo": pd.to_numeric(df["Saldo Kumulatif"], errors="coerce"),
@@ -1845,10 +1859,13 @@ class InSelisihView(tk.Frame):
         # (RI Balancing · Nomor Dobel · Selisih IN · BM kosong)
         # di-APPEND ke catatan engine VBA (" | "); catatan VBA asli
         # tetap di posisi pertama — isi lama tidak berubah.
-        # v3.10.1 — flag basis diteruskan supaya narasi B3/B4b jujur utk
-        # format lama (BM−IN) vs v3.10 (ΔSO−IN).
+        # v3.11.5 — basis_v310 SELALU False: narasi B3 kembali ke bentuk
+        # lama "IN a > BM b" (BM kini basis selisih) & B4b "SO belum
+        # direkam" INERT lagi (selisih BM−IN tak menunggu input SO).
+        # Param tetap ada (kompatibel pemanggil lama; jalur ΔSO hanya
+        # relevan bila basis v3.10..3.11.4 dipakai lagi).
         _notes = self._build_audit_notes(out, in_detail,
-                                         basis_v310=_v310)
+                                         basis_v310=False)
         if _notes:
             out["Catatan Audit"] = [
                 _join_notes(vba, _notes.get((r, t, b)))
@@ -1881,11 +1898,12 @@ class InSelisihView(tk.Frame):
         B4 · BM kosong — BM 0 padahal IN sistem > 0 (input rekap
             belum diisi — data quality, mirror temuan audit 37-a
             R1): "BM 0 padahal IN 13 (input rekap belum diisi)".
-        B4b · SO belum direkam (v3.10 basis "SO kemarin") — baris
-            beraktivitas IN tapi Hasil SO kosong → ΔSO tak diketahui
-            → Selisih IN bulan baru tampak −IN penuh (gantung semu)
-            sampai SO diisi: "SO belum direkam (ΔSO tak diketahui —
-            selisih menunggu input SO)".
+        B4b · SO belum direkam (v3.10 basis "SO kemarin" — INERT sejak
+            v3.11.5: rumus lama BM−IN tidak bergantung SO; hanya relevan
+            bila basis v3.10..3.11.4 dipakai): baris beraktivitas IN tapi
+            Hasil SO kosong → ΔSO tak diketahui → Selisih IN bulan baru
+            tampak −IN penuh (gantung semu) sampai SO diisi: "SO belum
+            direkam (ΔSO tak diketahui — selisih menunggu input SO)".
         B5 · COM minus (v3.10) — pemakaian aktual COM = SO(t−1) + IN
             − BK − SO(t) < 0 (barang "muncul dari mana-mana" —
             sinyal kuat input SO salah/kurang): "COM −n (pemakaian
@@ -1930,8 +1948,8 @@ class InSelisihView(tk.Frame):
                     _add(r, t, b, f"Nomor dobel: {txt}")
 
         # --- B3 + B4: dari angka baris tabel itu sendiri (vektor) ---
-        # B4 DIDAHULUKAN dari B3 (format lama: Selisih = BM − IN identitas
-        # aljabar — bila BM 0 & IN > 0 maka selisih PASTI ≠ 0, dan diagnosis
+        # B4 DIDAHULUKAN dari B3 (Selisih = BM − IN identitas aljabar
+        # — bila BM 0 & IN > 0 maka selisih PASTI ≠ 0, dan diagnosis
         # yang benar bukan "selisih angka" melainkan "input rekap belum
         # diisi"; B3 umum hanya bila BM & IN sama-sama terisi).
         # v3.10.1 — FIX P1 (bug hunt 1-a/1-b): narasi v3.10 jujur ke basis
@@ -1939,6 +1957,10 @@ class InSelisihView(tk.Frame):
         # kolom display, bukan basis: probe "Selisih IN 20 (BM 10 > IN
         # 13)"). ΔSO diketahui → arah membandingkan ΔSO vs IN; ΔSO tak
         # diketahui → catatan basis (bukan pertidaksamaan ngawur).
+        # v3.11.5 — KEMBALI KE RUMUS LAMA: pemanggilan utama SELALU
+        # basis_v310=False → jalur narasi lama "IN a > BM b" (BM kembali
+        # jadi basis); cabang ΔSO hanya utk kompatibilitas basis
+        # v3.10..3.11.4 bila dipakai lagi.
         bm = pd.to_numeric(out["Barang Masuk"], errors="coerce") \
             .fillna(0).to_numpy(dtype="float64")
         ins = pd.to_numeric(out["IN"], errors="coerce") \
@@ -2654,9 +2676,10 @@ class InSelisihView(tk.Frame):
              f"{fmt_int_id(m['n_resto'])} × {fmt_int_id(m['n_barang'])}",
              "#0f766e"),
             ("BASIS SELISIH",
-             "SO KEMARIN (ΔSO−IN)" if m["basis_v310"]
-             else "BM REKAP (BM−IN)",
-             "#0f766e" if m["basis_v310"] else "#64748b"),
+             # v3.11.5 — rumus lama dipulihkan: chip selalu BM REKAP;
+             # m["basis_v310"] tetap dipakai utk gate seksi 5 ANOMALI ΔSO
+             # (kolom ΔSO terisi), BUKAN lagi utk teks basis selisih.
+             "BM REKAP (BM−IN)", "#0f766e"),
             ("COM MINUS",
              f"{fmt_int_id(m['n_com_minus'])} ({_fmt_num(m['sum_com_minus'])})",
              "#dc2626" if m["n_com_minus"] else "#16a34a"),

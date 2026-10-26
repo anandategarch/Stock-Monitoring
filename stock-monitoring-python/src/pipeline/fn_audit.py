@@ -1,9 +1,25 @@
 """
 fn_audit.py — Audit Rekonsiliasi: engine VBA + input dari DATA APP (v3.6).
 
+v3.11.5 — KEMBALI KE RUMUS LAMA "BM REKAP" (user: "kembali ke rumus lama"
+— jawaban atas laporan opsi v3.11.4 pasca-verifikasi identitas
+Selisih IN + COM + BK = 0 di basis ΔSO): slot engine "Qty SO Harian"
+kembali berisi BM REKAP persis pra-v3.10 →
+
+    Selisih Harian = BM Rekap − Penerimaan Sistem   (BM − IN)
+
+SWAP SLOT v3.10 DIHAPUS (engine kini menerima input build_audit_input
+apa adanya — tanpa rename output; "Qty SO Harian" = BM hadir kembali).
+Aturan VALID (SO Naik + BM=0 + IN>0 → "VALID (Sistem Masuk)") AKTIF
+LAGI (inert hanya di basis ΔSO). Fitur v3.10 LAIN TETAP UTUH (bukan
+bagian "rumus"): kolom "Qty SO Kemarin"/"Qty Delta SO" (display + bahan
+COM + analisa), kolom "Qty COM" = SO(t−1) + IN − BK − SO(t), kolom
+"Qty BM Rekap" (salinan display BM — kini identik isi "Qty SO Harian"),
+panjang bulan asli, KPI com_minus.
+
 v3.10 — BASIS SELISIH BARU: "SELISIH DENGAN SO KEMARIN" (user: "ubah
 logika selisih in dengan selisih dengan so kemarin" + "tambahkan kolom
-COm di rekap selisih in"). Input engine slot "Qty SO Harian" kini diisi
+COm di rekap selisih in"). Input engine slot "Qty SO Harian" diisi
 ΔSO = Hasil SO(t) − SO(t−1) (bukan lagi BM rekap manual) →
 
     Selisih Harian = (SO(t) − SO(t−1)) − Penerimaan Sistem
@@ -799,20 +815,25 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
 
-    v3.10 — BASIS "SELISIH DENGAN SO KEMARIN": slot engine "Qty SO
-    Harian" diisi ΔSO (keluaran _attach_so_kemarin via build_audit_input)
-    → Selisih Harian = (SO(t)−SO(t−1)) − Penerimaan Sistem. BM rekap
-    dibawa sebagai kolom display "Qty BM Rekap". Param baru:
+    v3.11.5 — KEMBALI KE RUMUS LAMA (user: "kembali ke rumus lama"):
+    slot engine "Qty SO Harian" = BM REKAP persis pra-v3.10 → Selisih
+    Harian = BM − Penerimaan Sistem; swap slot + rename output v3.10
+    DIHAPUS (engine menerima raw build_audit_input apa adanya).
+    Kolom v3.10 (Qty BM Rekap · Qty SO Kemarin · Qty Delta SO · Qty BK ·
+    Qty COM) + KPI com_minus TETAP dihitung (display / bahan COM /
+    analisa). Param ``saldo_awal_map`` (basis SO-kemarin t=1) &
+    ``bk_map`` (bahan COM) tetap berlaku:
     - ``saldo_awal_map``: {(resto, barang): SA 42.17} — basis t=1
       (None = tanpa SA, fallback SO terakhir/NaN — kompatibel pemanggil
       lama/test);
     - ``bk_map``: {(resto, barang, tgl): qty BK 42.15} — bahan kolom
       "Qty COM" (None = COM dihitung dgn BK 0 — masih valid utk data
       tanpa 42.15).
-    Kolom output baru: Qty BM Rekap · Qty SO Kemarin · Qty Delta SO ·
-    Qty BK · Qty COM; KPI baru 'com_minus'. Kolom "Qty SO Harian"
-    DI-RENAME jadi "Qty Delta SO" di output (nama slot engine tak
-    pernah muncul di audit_df baru — anti-keliru semantik BM vs delta).
+
+    v3.10 — BASIS "SELISIH DENGAN SO KEMARIN" (kini DIPULIHKAN ke BM
+    rekap oleh v3.11.5): slot engine "Qty SO Harian" diisi ΔSO → Selisih
+    Harian = (SO(t)−SO(t−1)) − Penerimaan Sistem — basis ini hanya
+    bertahan v3.10..v3.11.4.
 
     v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
     hanya hitung bulan ini. Tapi default hitung bulan ini aja") — param
@@ -892,23 +913,13 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
             kpi0["dev_murni_po"] = 0
         return raw, kpi0, "tidak ada data rekap SO / IN utk audit"
 
-    # v3.10 — SWAP SLOT ENGINE: "Qty SO Harian" ← ΔSO (basis selisih
-    # baru); BM rekap sudah disalin ke "Qty BM Rekap" oleh
-    # build_audit_input. "Qty Delta SO" ganda di-drop supaya output
-    # pasca-rename tidak dobel kolom.
-    engine_in = raw.drop(columns=["Qty Delta SO"], errors="ignore").copy()
-    engine_in["Qty SO Harian"] = pd.to_numeric(
-        raw["Qty Delta SO"], errors="coerce")
-    _pener = (pd.to_numeric(raw["Qty SJ"], errors="coerce").fillna(0)
-              + pd.to_numeric(raw["Qty RI"], errors="coerce").fillna(0)
-              + pd.to_numeric(raw["Qty Pembelian"], errors="coerce")
-              .fillna(0))
-    engine_in["Selisih Qty"] = \
-        engine_in["Qty SO Harian"].fillna(0) - _pener
-
-    audit, kpi = build_audit_rekap(engine_in, stop_event=stop_event)
-    # v3.10 — nama jujur di output: slot engine = ΔSO (bukan BM)
-    audit = audit.rename(columns={"Qty SO Harian": "Qty Delta SO"})
+    # v3.11.5 — KEMBALI KE RUMUS LAMA (user: "kembali ke rumus lama"):
+    # swap slot v3.10 ("Qty SO Harian" ← ΔSO) + rename output DIHAPUS —
+    # engine menerima raw APA ADANYA: slot "Qty SO Harian" = BM rekap
+    # (persis pra-v3.10) → Selisih Harian = BM − Penerimaan Sistem;
+    # aturan VALID (SO naik + BM=0 + IN>0) aktif lagi. Kolom basis v3.10
+    # (BM Rekap/SO Kemarin/Delta SO) tetap hadir sbg display/bahan COM.
+    audit, kpi = build_audit_rekap(raw, stop_event=stop_event)
     if po_pairs is not None:
         _apply_po_menunggu(audit, kpi, po_pairs, stop_event=stop_event)
 
@@ -951,7 +962,7 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
             f"{cakupan}) · "
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
             f"SO {n_so:,} · IN {n_in:,} · "
-            f"basis selisih: SO kemarin (ΔSO − IN)"
+            f"basis selisih: BM rekap (BM − IN)"
             f" · COM minus {kpi.get('com_minus', 0):,}")
     if po_pairs:
         _tot_po = sum(q for v in po_pairs.values()
