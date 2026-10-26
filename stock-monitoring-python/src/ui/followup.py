@@ -5,6 +5,24 @@ DEVIASI PCS / LAPORAN DEVIASI → baris terkumpul di tab "☑ Follow Up" sebagai
 SNAPSHOT baris (nilai apa adanya saat dicentang). Daftar menetap — TIDAK ikut
 filter/H aktif; tertutup aplikasi pun aman (followup.json).
 
+v3.11.4 (permintaan user: "di export tab deviasi gr dan pcs kolom 23 24
+25 26 27 Sistem Deviasi pakai separator , dan tanpa desimal. kolom Loss
+Surplus to BOM pakai persen. Setelah kolom keterangan kapus aja" — tab
+☑ Follow Up = kumpulan baris ✓ dari tab Deviasi GR/PCS):
+- EXPORT berhenti di kolom Keterangan: kolom kerja FU (SO · DEVIASI ·
+  Selisih · Selisih Deviasi · Cek FU · PIC) + pelacakan app (Asal ·
+  Status TL · Ditambahkan) DIHAPUS dari sheet export (tabel UI tetap
+  lengkap — pengerjaan FU tetap di app; _fmt_added ikut dihapus sbg
+  dead code).
+- Number-format Excel (nilai MENTAH tetap ditulis — bisa dihitung
+  ulang, pola export v3.11.2 "SESUAI TAMPILAN"): kolom tanggal (H-2..H+2,
+  heading angka) + Sistem + Deviasi = "#,##0;[Red](#,##0)" — pemisah
+  ribuan TANPA desimal, minus merah kurung (menggantikan Font merah
+  per-sel lama); Loss Surplus to BOM = "0.00%;[Red](0.00%)" — rasio
+  snapshot (1.0053) tampil "100.53%" (2 desimal — paritas presisi Dev
+  to BOM% tab Deviasi; UI kolom ini menampilkan rasio gaya sample
+  '1,01' — permintaan eksplisit user utk export pakai PERSEN).
+
 v3.9.6 (permintaan user: "format Follow UP seperti file sample"):
 - Format tabel + export mengikuti sheet Follow UP workbook asli user:
   Resto · Nama Barang · SO per tanggal (H-2..H+2 — heading angka tanggal,
@@ -25,9 +43,10 @@ Struktur (pola waste_anomaly/followup.py):
     korup kini TERLIHAT — flag ``last_recovery`` + [WARNING] log + dialog
     bila GUI hidup, FIX 2f-07)
   - gagal persist → flag ``last_save_error`` utk view (FIX 2f-08)
-  - export_xlsx(path) → sheet "FOLLOW UP" format file sample + kolom
-    kerja FU (diisi petugas; nilai tersimpan ikut terbawa); tulis ATOMIK
-    tmp+os.replace (FIX 2f-04 — file export lama tak tertimpa parsial)
+  - export_xlsx(path) → sheet "FOLLOW UP" format file sample — v3.11.4:
+    kolom BERHENTI di Keterangan + number-format ribuan/persen; tulis
+    ATOMIK tmp+os.replace (FIX 2f-04 — file export lama tak tertimpa
+    parsial)
   (v3.8: import_workbook DIHAPUS — fitur "Impor Hasil TL" tidak perlu
   lagi, permintaan user; resolved lama tetap dimuat agar status/PIC
   yang sudah tersimpan sebelumnya tetap tampil.)
@@ -69,23 +88,33 @@ SNAPSHOT_FIELDS = [
 # menampilkan angka tanggal, mis. H=25 → 23/24/25/26/27)
 DATE_COL_IDS = ["T-2", "T-1", "T", "T+1", "T+2"]
 
-# Kolom serah-terima di export (diisi petugas follow-up) — mengikuti
-# sheet Follow UP file sample: SO · DEVIASI · Selisih · Selisih
-# Deviasi · Cek FU (+ PIC utk pelacakan app).
+# Kolom serah-terima FU (diisi petugas follow-up di TABEL UI app) —
+# mengikuti sheet Follow UP file sample: SO · DEVIASI · Selisih ·
+# Selisih Deviasi · Cek FU (+ PIC utk pelacakan app).
+# v3.11.4 — TIDAK lagi ikut EXPORT (user: "Setelah kolom keterangan
+# kapus aja" — export berhenti di Keterangan); tetap dipakai UI tabel
+# (dokumentasi kolom kerja FU — nilai resolved tetap tersimpan).
 HANDOVER_COLS = ["SO", "DEVIASI", "Selisih", "Selisih Deviasi",
                   "Cek FU", "PIC"]
 
 # Nama kolom sheet FOLLOW UP (export) — urutan PERSIS sheet Follow UP
 # file sample user: Resto · Nama Barang · [SO tgl H-2..H+2] · Sistem ·
-# Deviasi · Loss Surplus to BOM · Keterangan · [kerja FU] (+ kolom
-# pelacakan app: Asal · Status TL · Ditambahkan).
+# Deviasi · Loss Surplus to BOM · Keterangan.
+# v3.11.4 — BERHENTI di Keterangan (user: "Setelah kolom keterangan
+# kapus aja"): kolom kerja FU + pelacakan app DIHAPUS dari export.
 EXPORT_COLS = [
     "Resto", "Nama Barang",
 ] + DATE_COL_IDS + [
     "Sistem", "Deviasi", "Loss Surplus to BOM", "Keterangan",
-] + HANDOVER_COLS + [
-    "Asal", "Status TL", "Ditambahkan",
 ]
+
+# v3.11.4 — number-format export (user: "kolom 23 24 25 26 27 Sistem
+# Deviasi pakai separator , dan tanpa desimal. kolom Loss Surplus to BOM
+# pakai persen"): nilai mentah ditulis apa adanya + format tampil — pola
+# export v3.11.2/3 (minus merah kurung via number-format Excel [Red],
+# bukan objek Font per sel).
+_INT_NUMFMT = "#,##0;[Red](#,##0)"
+_PCT_NUMFMT = "0.00%;[Red](0.00%)"
 
 # Pergeseran kolom tanggal relatif H (T-2 → h−2 … T+2 → h+2)
 DATE_COL_OFFSETS = dict(zip(DATE_COL_IDS, (-2, -1, 0, 1, 2)))
@@ -235,21 +264,6 @@ def _notify_recovery(store, p: Path, reason: str) -> None:
     except (tk.TclError, RuntimeError):
         _LOG.debug("dialog followup-rusak gagal (non-main thread?)",
                    exc_info=True)
-
-
-def _fmt_added(ts) -> str:
-    """v3.9.59 — FIX 2f-15 (audit 2-f): kolom 'Ditambahkan' export pakai
-    kanon timestamp pendek app '%d-%m-%Y %H:%M' (dulu ISO
-    '2025-11-12 08:30' — gaya ke-4 yang tak konsisten dgn permukaan
-    lain). Snapshot lama/non-ISO → fallback tampilan lama."""
-    s = str(ts or "").strip()
-    if not s:
-        return ""
-    try:
-        return datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").strftime(
-            "%d-%m-%Y %H:%M")
-    except ValueError:
-        return s[:16].replace("T", " ")
 
 
 def _atomic_save(path: Path, data: dict) -> bool:
@@ -486,19 +500,31 @@ class FollowUpStore:
 
     # -- export ------------------------------------------------------------------
     def export_xlsx(self, path: str) -> str:
-        """Tulis sheet 'FOLLOW UP' — FORMAT FILE SAMPLE (v3.9.6).
+        """Tulis sheet 'FOLLOW UP' — FORMAT FILE SAMPLE (v3.9.6 → v3.11.4).
 
-        Urutan kolom persis sheet Follow UP workbook asli user:
-        Resto · Nama Barang · [SO tgl H-2..H+2 — heading angka tanggal,
-        mis. H=25 → 23/24/25/26/27] · Sistem · Deviasi · Loss Surplus to
-        BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi ·
-        Cek FU · PIC (+ kolom pelacakan app: Asal · Status TL ·
-        Ditambahkan). Baris resolved membawa nilai kerja FU tersimpan;
-        Deviasi/SO per tanggal negatif diberi font merah. Freeze +
-        autofilter.
+        Urutan kolom v3.11.4 (user: "Setelah kolom keterangan kapus aja")
+        BERHENTI di Keterangan — kolom kerja FU (SO · DEVIASI · Selisih ·
+        Selisih Deviasi · Cek FU · PIC) + kolom pelacakan app (Asal ·
+        Status TL · Ditambahkan) DIHAPUS dari export (tabel UI tetap
+        lengkap — pengerjaan FU tetap di app): Resto · Nama Barang ·
+        [SO tgl H-2..H+2 — heading angka tanggal, mis. H=25 →
+        23/24/25/26/27] · Sistem · Deviasi · Loss Surplus to BOM ·
+        Keterangan.
+
+        Format angka v3.11.4 (user: "kolom 23 24 25 26 27 Sistem Deviasi
+        pakai separator , dan tanpa desimal. kolom Loss Surplus to BOM
+        pakai persen"): nilai MENTAH numerik tetap ditulis (bisa dihitung
+        ulang di Excel — pola export v3.11.2 "SESUAI TAMPILAN") +
+        number-format Excel per kolom: tanggal/Sistem/Deviasi
+        "#,##0;[Red](#,##0)" — pemisah ribuan TANPA desimal, minus
+        otomatis merah dalam kurung (menggantikan Font merah per-sel
+        lama); Loss Surplus to BOM "0.00%;[Red](0.00%)" — rasio snapshot
+        (1.0053) tampil "100.53%" (2 desimal — paritas presisi Dev to
+        BOM% tab Deviasi). Snapshot lama tanpa field tanggal → sel
+        string kosong (tak ter-format). Freeze + autofilter + ATOMIK.
         """
         from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.styles import Alignment, Font
         from openpyxl.utils import get_column_letter
 
         # heading kolom tanggal = angka tanggal (dari H snapshot terbaru)
@@ -522,23 +548,20 @@ class FollowUpStore:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center")
 
-        # posisi kolom (indeks 0-based) utk pewarnaan
-        idx = {c: header.index(c) for c in header if c in header}
-        dev_col = idx.get("Deviasi")
-        dev2_col = idx.get("DEVIASI")
-        date_cols = [j for j, c in enumerate(header)
-                     if c not in ("Resto", "Nama Barang", "Sistem",
-                                  "Deviasi", "Loss Surplus to BOM",
-                                  "Keterangan", "DEVIASI", "Selisih",
-                                  "Selisih Deviasi", "Cek FU", "PIC",
-                                  "Asal", "Status TL", "Ditambahkan")]
+        # v3.11.4 — posisi kolom (indeks 0-based) utk number-format:
+        # tanggal = posisi DATE_COL_IDS di EXPORT_COLS (stabil 1:1 dgn
+        # header) + Sistem + Deviasi → "#,##0" tanpa desimal; Loss
+        # Surplus to BOM → persen.
+        _date_pos = {i for i, c in enumerate(EXPORT_COLS)
+                     if c in DATE_COL_IDS}
+        _int_pos = _date_pos | {
+            header.index(c) for c in ("Sistem", "Deviasi") if c in header}
+        _pct_pos = {header.index(c) for c in ("Loss Surplus to BOM",)
+                    if c in header}
 
         order = list(self.rows.values())
-        n_handover = len(HANDOVER_COLS)
-        handover_start = len(header) - n_handover - 3  # 3 kolom pelacakan app
         for i, snap in enumerate(order):
             r = i + 2
-            info = self.resolved.get(snap.get("fp", ""), {})
             vals = [
                 snap.get("resto", ""), snap.get("barang", ""),
                 snap.get("so_m2", ""), snap.get("so_m1", ""),
@@ -546,35 +569,25 @@ class FollowUpStore:
                 snap.get("so_p2", ""),
                 snap.get("sistem", ""), snap.get("deviasi", ""),
                 snap.get("loss_bom", ""), snap.get("cek", ""),
-                snap.get("so", ""), snap.get("deviasi", ""),
-                info.get("Selisih", ""), info.get("Selisih Deviasi", ""),
-                info.get("Cek FU", ""), info.get("PIC", ""),
-                snap.get("asal", ""),
-                "Selesai" if info else "Menunggu",
-                _fmt_added(snap.get("added_at", "")),
             ]
             for j, v in enumerate(vals):
                 cell = ws.cell(row=r, column=j + 1, value=v)
-                neg = (j in date_cols or j in (dev_col, dev2_col)) \
-                    and isinstance(v, (int, float)) and v < 0
-                if neg:
-                    cell.font = Font(color="DC2626")
-            # resolved → fill hijau lembut di kolom kerja FU + PIC
-            if info:
-                fill = PatternFill("solid", start_color="ECFDF5")
-                for j in range(handover_start, handover_start + n_handover):
-                    ws.cell(row=r, column=j + 1).fill = fill
+                # number-format HANYA utk sel numerik sah — bool / NaN
+                # / string snapshot-lama tak tersentuh.
+                if (isinstance(v, (int, float))
+                        and not isinstance(v, bool) and pd.notna(v)):
+                    if j in _int_pos:
+                        cell.number_format = _INT_NUMFMT
+                    elif j in _pct_pos:
+                        cell.number_format = _PCT_NUMFMT
 
         ws.freeze_panes = "A2"
         if order:
             ws.auto_filter.ref = (
                 f"A1:{get_column_letter(len(header))}{len(order) + 1}")
         widths = {"Resto": 10, "Nama Barang": 30, "Sistem": 11,
-                  "Deviasi": 11, "DEVIASI": 11, "SO": 10,
-                  "Loss Surplus to BOM": 12, "Keterangan": 18,
-                  "Selisih": 9, "Selisih Deviasi": 12, "Cek FU": 8,
-                  "PIC": 14, "Asal": 12, "Status TL": 10,
-                  "Ditambahkan": 16}
+                  "Deviasi": 11, "Loss Surplus to BOM": 12,
+                  "Keterangan": 18}
         for j, c in enumerate(header, start=1):
             ws.column_dimensions[get_column_letter(j)].width = \
                 widths.get(c, 8 if c.isdigit() else 12)

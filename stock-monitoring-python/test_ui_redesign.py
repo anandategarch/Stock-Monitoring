@@ -912,7 +912,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.3", APP_VERSION == "3.11.3",
+    check("Versi = 3.11.4", APP_VERSION == "3.11.4",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1873,23 +1873,23 @@ def main():
         xlsx_path = tf.name
     store.export_xlsx(xlsx_path)
     check("Export FOLLOW UP xlsx", os.path.getsize(xlsx_path) > 0)
-    # (v3.9.6) FORMAT FILE SAMPLE: header = Resto · Nama Barang ·
-    # [tanggal H-2..H+2 sebagai ANGKA] · Sistem · Deviasi · Loss Surplus
-    # to BOM · Keterangan · SO · DEVIASI · Selisih · Selisih Deviasi ·
-    # Cek FU · PIC · Asal · Status TL · Ditambahkan
+    # (v3.11.4) user "Setelah kolom keterangan kapus aja": header =
+    # Resto · Nama Barang · [tanggal H-2..H+2 sebagai ANGKA] · Sistem ·
+    # Deviasi · Loss Surplus to BOM · Keterangan — BERHENTI di Keterangan
+    # (kolom kerja FU SO/DEVIASI/Selisih/Selisih Deviasi/Cek FU/PIC +
+    # pelacakan Asal/Status TL/Ditambahkan DIHAPUS dari export).
     import openpyxl as _oxl
     _wb = _oxl.load_workbook(xlsx_path)
     _ws = _wb["FOLLOW UP"]
     _hdr = [c.value for c in _ws[1]]
     _h_snap = snap_lap.get("h")
     _d0 = int(_h_snap) - 2 if isinstance(_h_snap, (int, float)) else None
-    check("(v3.9.6) Export header = format file sample",
+    check("(v3.11.4) Export header berhenti di Keterangan (11 kolom)",
           _hdr[:3] == ["Resto", "Nama Barang", str(_d0)] and
-          _hdr[7:12] == ["Sistem", "Deviasi", "Loss Surplus to BOM",
-                         "Keterangan", "SO"] and
-          _hdr[12:17] == ["DEVIASI", "Selisih", "Selisih Deviasi",
-                          "Cek FU", "PIC"] and
-          _hdr[17:20] == ["Asal", "Status TL", "Ditambahkan"],
+          _hdr[3:7] == [str(_d0 + 1), str(_d0 + 2), str(_d0 + 3),
+                        str(_d0 + 4)] and
+          _hdr[7:] == ["Sistem", "Deviasi", "Loss Surplus to BOM",
+                       "Keterangan"] and len(_hdr) == 11,
           f"got {_hdr}")
     _wb.close()
     os.unlink(xlsx_path)
@@ -22009,6 +22009,102 @@ def main():
     root.update()
 
     root.destroy()
+
+    # ==================================================================
+    print("== §90. (v3.11.4) EXPORT FOLLOW UP — separator ribuan tanpa "
+          "desimal · persen · berhenti di Keterangan ==")
+    # user: "di export tab deviasi gr dan pcs kolom: 23 24 25 26 27 "
+    # Sistem Deviasi pakai separator , dan tanpa desimal. kolom Loss "
+    # Surplus to BOM pakai persen. Setelah kolom keterangan kapus aja" —
+    # tab ☑ Follow Up = kumpulan baris ✓ dari tab Deviasi GR/PCS (satu-
+    # satunya export ber-kolom 23..27 · Sistem · Deviasi · Loss Surplus
+    # to BOM · Keterangan). Store-level (tanpa GUI — pola §69 2f-04).
+    import src.ui.followup as _fumod90
+    _tmp90 = tempfile.mkdtemp(prefix="v3114_s90_")
+    _orig_fp90, _orig_rp90 = _fumod90.followup_path, _fumod90.resolved_path
+    _fumod90.followup_path = lambda: Path(_tmp90) / "followup.json"
+    _fumod90.resolved_path = lambda: Path(_tmp90) / "resolved.json"
+    try:
+        _store90 = _fumod90.FollowUpStore()
+        _snap90 = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                   "barang": "BRG BESAR", "satuan": "GR",
+                   "aktif": "AKTIF", "h": 25, "so": 1234.5,
+                   "sistem": 2469.0, "deviasi": -1234.5,
+                   "cek": "Turun Drastis", "so_m2": 1234567.0,
+                   "so_m1": 6.25, "so_p1": 7.0, "so_p2": 8.0,
+                   "loss_bom": -1.0053}
+        _store90.toggle("fp90a", _snap90)
+        # snapshot LAMA (pre-v3.9.6) tanpa field tanggal → sel kosong
+        _snap90b = {"asal": "DEVIASI PCS", "resto": "SBYKET",
+                    "barang": "BARANG LAMA", "satuan": "PCS",
+                    "h": None, "so": 10.0, "sistem": 10.0,
+                    "deviasi": 0.0, "cek": ""}
+        _store90.toggle("fp90b", _snap90b)
+        _x90 = os.path.join(_tmp90, "fu90.xlsx")
+        _store90.export_xlsx(_x90)
+        import openpyxl as _oxl90
+        _wb90 = _oxl90.load_workbook(_x90)
+        _ws90 = _wb90["FOLLOW UP"]
+        _hdr90 = [c.value for c in _ws90[1]]
+        check("(v3.11.4) FU export: header 11 kolom BERHENTI di "
+              "Keterangan — heading tanggal angka H=25 → 23..27 (kolom "
+              "kerja FU SO/DEVIASI/Selisih/Selisih Deviasi/Cek FU/PIC + "
+              "pelacakan Asal/Status TL/Ditambahkan DIHAPUS)",
+              _hdr90 == ["Resto", "Nama Barang", "23", "24", "25",
+                         "26", "27", "Sistem", "Deviasi",
+                         "Loss Surplus to BOM", "Keterangan"],
+              f"got {_hdr90}")
+        check("(v3.11.4) FU export: nilai MENTAH numerik (1234567 · "
+              "1234.5 · -1234.5 · rasio -1.0053 — bisa dihitung ulang di "
+              "Excel)",
+              _ws90["C2"].value == 1234567
+              and _ws90["E2"].value == 1234.5
+              and _ws90["I2"].value == -1234.5
+              and _ws90["J2"].value == -1.0053,
+              f"C2={_ws90['C2'].value!r} I2={_ws90['I2'].value!r} "
+              f"J2={_ws90['J2'].value!r}")
+        check("(v3.11.4) FU export: kolom tanggal 23..27 + Sistem + "
+              "Deviasi ber-format '#,##0;[Red](#,##0)' (separator "
+              "ribuan TANPA desimal + minus merah kurung — number-format "
+              "Excel menggantikan Font merah per-sel lama)",
+              all(_ws90.cell(row=2, column=_c90).number_format
+                  == "#,##0;[Red](#,##0)" for _c90 in range(3, 10)),
+              f"C2={_ws90['C2'].number_format!r} "
+              f"H2={_ws90['H2'].number_format!r}")
+        check("(v3.11.4) FU export: kolom Loss Surplus to BOM "
+              "ber-format '0.00%;[Red](0.00%)' (PERSEN — rasio -1.0053 → "
+              "'(100.53%)' merah; UI kolom ini menampilkan rasio gaya "
+              "sample '1,01')",
+              _ws90["J2"].number_format == "0.00%;[Red](0.00%)",
+              f"got {_ws90['J2'].number_format!r}")
+        check("(v3.11.4) FU export: kolom teks tak ter-format (Resto/"
+              "Nama Barang/Keterangan General) + Keterangan = snapshot "
+              "cek",
+              _ws90["A2"].number_format == "General"
+              and _ws90["K2"].number_format == "General"
+              and _ws90["K2"].value == "Turun Drastis",
+              f"K2={_ws90['K2'].value!r}")
+        check("(v3.11.4) FU export: snapshot LAMA tanpa field tanggal → "
+              "sel kosong TANPA number-format (degrade anggun tanpa "
+              "crash); kolom yang ADA tetap numerik + ter-format",
+              _ws90["C3"].value is None
+              and _ws90["C3"].number_format == "General"
+              and _ws90["E3"].value == 10
+              and _ws90["H3"].value == 10
+              and _ws90["I3"].value == 0
+              and _ws90["I3"].number_format == "#,##0;[Red](#,##0)",
+              f"C3={_ws90['C3'].value!r} I3={_ws90['I3'].value!r}")
+        check("(v3.11.4) FU export: freeze A2 + autofilter 11 kolom + "
+              "tulis ATOMIK tanpa .tmp tertinggal",
+              _ws90.freeze_panes == "A2"
+              and _ws90.auto_filter.ref == "A1:K3"
+              and not os.path.exists(_x90 + ".tmp.xlsx"),
+              f"filter={_ws90.auto_filter.ref!r}")
+        _wb90.close()
+    finally:
+        _fumod90.followup_path = _orig_fp90
+        _fumod90.resolved_path = _orig_rp90
+        shutil.rmtree(_tmp90, ignore_errors=True)
 
     print()
     print(f"HASIL: {len(PASS)} PASS, {len(FAIL)} FAIL")
