@@ -1,6 +1,18 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.11.6 — ISSUE 1 keluarga bug "filter menawarkan nilai kosong" (user:
+"waktu aku klik filter muncul misal nama resto A terus aku klik resto
+tersebut ternyata data kosong. Harusnya jika data kosong gak perlu
+tampilkan resto A di list filter tersebut"): nilai combobox KATEGORI
+di-SCOPE per mode satuan tab ini (load_data — GR: SATUAN=='GR', PCS:
+!= 'GR' termasuk NaN, identik split _filtered_pivot; cek entry gabungan
+rekap ikut di-scope). Dulu dari data mentah PENUH → kategori yang
+barangnya semua PCS tetap muncul di tab GR → dipilih → tabel kosong.
+(Funnel ⧩ header kolom sudah benar sejak v3.9.19 — sumber _filtered_
+pivot.) Fix utama filter-resto-kosong ada di pivot_view (combo RESTO/
+SOURCE kascade per render).
+
 v3.9.53 (user: "Deviasi bulan lalu yang ditampilkan di tab deviasi gr dan
 pcs pakai nilai asli jangan pakai nilai absolute yang ditampilkan.
 Absolute untuk perhitungan saja" + "Week sudah menyesuaikan kolom H di
@@ -1760,8 +1772,24 @@ class DeviasiView(tk.Frame):
         # dari dropdown, user mencari opsi itu & tak menemukannya; bila
         # dipilih saat memang tak ada baris kosong, status menjelaskan
         # itu secara jujur — bukan tabel kosong misterius).
-        if data is not None and "KATEGORI" in getattr(data, "columns", []):
-            _kv = data["KATEGORI"].dropna().astype(str).str.strip()
+        # v3.11.6 — ISSUE 1 (keluarga bug "filter menawarkan nilai kosong"
+        # — user: "jika data kosong gak perlu tampilkan resto di list
+        # filter"): nilai KATEGORI di-SCOPE per mode satuan tab ini (GR /
+        # PCS — SATUAN per pasangan). Dulu dari DATA MENTAH PENUH: kategori
+        # yang barangnya SEMUA PCS tetap muncul di tab GR (dan sebaliknya)
+        # → dipilih → tabel kosong. Identik split _filtered_pivot
+        # (Satuan == 'GR' vs != 'GR' termasuk NaN) supaya daftar ≡ baris
+        # tabel. Cek entry gabungan rekap ikut di-scope (tanpa itu, entry
+        # default bisa memfilter 0 baris di tab yang tak punya barang
+        # rekap).
+        _kdf = data
+        if (data is not None and "SATUAN" in getattr(data, "columns", [])
+                and "KATEGORI" in getattr(data, "columns", [])):
+            _sat = data["SATUAN"].astype(str).str.strip().str.upper()
+            _kdf = data[_sat == "GR"] if self.satuan_mode == "GR" \
+                else data[_sat != "GR"]
+        if _kdf is not None and "KATEGORI" in getattr(_kdf, "columns", []):
+            _kv = _kdf["KATEGORI"].dropna().astype(str).str.strip()
             kategori_vals = sorted(v for v in _kv.unique() if v)
         else:
             kategori_vals = []
@@ -1770,7 +1798,7 @@ class DeviasiView(tk.Frame):
         # memfilter 0 baris di data lama yang tak ber-kategori rekap).
         _kv45 = ["Semua"]
         if kategori_has_default_values(
-                data.get("KATEGORI") if data is not None else None):
+                _kdf.get("KATEGORI") if _kdf is not None else None):
             _kv45.append(KATEGORI_DEFAULT_LABEL)
         _kv45.append(KATEGORI_BLANK_LABEL)
         _kv45 += kategori_vals

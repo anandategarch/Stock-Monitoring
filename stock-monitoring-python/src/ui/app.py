@@ -242,7 +242,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.5"  # v3.11.5 — KEMBALI KE RUMUS LAMA SELISIH IN = BM − IN (user: "kembali ke rumus lama" — jawaban atas laporan opsi v3.11.4 pasca-verifikasi identitas Selisih IN + COM + BK = 0 di basis ΔSO): slot engine "Qty SO Harian" kembali berisi BM REKAP persis pra-v3.10 (swap slot ΔSO v3.10 + rename output DIHAPUS — build_audit_from_app meneruskan raw build_audit_input APA ADANYA ke engine) → Selisih Harian = BM Rekap − Penerimaan Sistem; aturan VALID (SO naik + BM=0 + IN>0 → "VALID (Sistem Masuk)") AKTIF LAGI (inert hanya di basis ΔSO). Fitur v3.10 LAIN TETAP UTUH (bukan bagian "rumus"): kolom Qty SO Kemarin · Qty Delta SO · Qty BM Rekap (display + bahan COM + analisa — slot "Qty SO Harian" = BM hadir kembali di output tanpa rename) · kolom COM = SO(t−1)+IN−BK−SO(t) + KPI com_minus · mode 📈 Analisa 6 seksi (seksi Anomali ΔSO tetap aktif — kolom ΔSO tetap terisi) · panjang bulan asli · peta SA 42.17/BK 42.15. VIEW in_selisih: chip KPI "BASIS SELISIH" = "BM REKAP (BM−IN)" di SEMUA format (legacy maupun pipeline baru — _basis_v310 kini hanya gate chip COM MINUS, bukan teks basis) · narasi catatan B3 kembali "IN a > BM b" (basis_v310 selalu False) · B4b "SO belum direkam" INERT (selisih BM−IN tak menunggu input SO) · chip analisa BASIS SELISIH ikut BM REKAP (meta basis_v310 tetap menyala utk seksi 5). desc pipeline "basis selisih: BM rekap (BM − IN)". TES — fixture BM disinkron rumus lama (GULA +BM t5=1200 · KOPI BM t3→t5=200 · SUSU BM t2→t5=160 — SEMUA angka yang diperiksa tetap identik era v3.10..3.11.4: OK×8 · omit 0 · CUT-OFF×2 · DEVIASI MURNI "Sisa Gantung: +80" · Σ|selisih| 280 · 3 gantung · COM minus 2 · chip popup SO KEMARIN 900/COM 0 · skor leaderboard 28/6/6/6/2) + §13/§13b/§14/§42/§43/6d2-01/6d2-02 disinkron (baris DEVIASI MURNI = tanggal BM kembali; §42/§43 catatan PO Menunggu di baris BM; cek §14: slot "Qty SO Harian" hadir kembali di output + desc "BM rekap") + §0 versi 3.11.5. VERIFIKASI: test_ui_redesign 1685/1685 PASS (Xvfb 1920×1080) · test_mock ALL PASS · ruff 178/14 = baseline 0 baru · py_compile · config.json valid · smoke 2 entry tanpa crash.log.
+APP_VERSION = "3.11.6"  # v3.11.6 — 3 PERMINTAAN USER: (1) filter RESTO/SOURCE pivot tak lagi menawarkan nilai kosong (kascade per render + reset seleksi basi; KATEGORI deviasi di-scope mode satuan); (2) FOLLOW-UP AUTO-DONE pasca-revisi file source (baris DEVIASI GR/PCS menunggu yang deviasinya hilang di data baru → Status TL Selesai otomatis + log jujur); (3) LEBAR KOLOM pivot tak lagi ter-reset tiap render (nama barang "mepet") + auto-fit nama max_width 520 + cache lebar per mode.
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -4116,6 +4116,15 @@ class StockMonitorApp:
         # load_data barusan me-reset filter — restore menyusul di atasnya;
         # view yang gagal dimuat skip sendiri lewat guard data kosong).
         self._apply_saved_filters_once()
+        # v3.11.6 — AUTO-DONE FOLLOW-UP (user: "bisa gak misal aku udah
+        # klik data hingga masuk ke follow up kemudian file source nya
+        # aku revisi. Otomatis di follow nya udah status done"): baris
+        # follow-up DEVIASI GR/PCS berstatus menunggu yang deviasinya
+        # tidak ada lagi di data run INI ditandai SELESAI otomatis +
+        # dicatat jujur di log (sumber kebenaran: baris JENIS 3.DEVIASI
+        # append1 — pasangan hilang / Deviasi(H)=0). Gagal → [WARNING]
+        # log saja (bukan gagal pipeline — pola _load_view).
+        self._auto_resolve_followup(append1_df)
         # FIX 6a-01: enable via sync helper (kriteria ketersediaan data
         # = guard _export_excel) — jalur ERROR/STOP di atas kini sync juga.
         self._sync_export_buttons()
@@ -4341,6 +4350,48 @@ class StockMonitorApp:
                 except Exception as exc:  # noqa: BLE001 — best-effort
                     print(f"[PERINGATAN] Filter persist: gagal memulihkan "
                           f"mode tab 📋 (idx {_m}): {exc!r}")
+
+    # v3.11.6 — AUTO-DONE FOLLOW-UP PASCA-PIPELINE ---------------------------
+    def _auto_resolve_followup(self, append1_df) -> None:
+        """Baris follow-up DEVIASI GR/PCS berstatus menunggu yang
+        deviasinya TIDAK ADA LAGI di data run ini ditandai SELESAI
+        otomatis (user: "bisa gak misal aku udah klik data hingga masuk
+        ke follow up kemudian file source nya aku revisi. Otomatis di
+        follow nya udah status done").
+
+        Aturan verifikasi = FollowUpStore.auto_resolve_pending (baris
+        JENIS 3.DEVIASI append1: pasangan hilang / Deviasi(H)=0 /
+        seluruh deviasi 0; deviasi masih ≠ 0 → tetap menunggu). Log
+        jujur per baris (maks 10 baris detail + ringkasan) + ringkasan
+        chip status; kegagalan → [WARNING] log (bukan gagal pipeline —
+        pola _load_view: fitur pelengkap tidak boleh menjatuhkan run).
+        """
+        try:
+            store = getattr(self, "followup_store", None)
+            if store is None or not store.rows:
+                return
+            done = store.auto_resolve_pending(append1_df)
+            if not done:
+                return
+            n = len(done)
+            self._append_log_batched(
+                f"\n[FOLLOW-UP] {fmt_int_id(n)} baris otomatis SELESAI — "
+                "deviasi tidak ada lagi di data run ini:\n")
+            for fp, reason in done[:10]:
+                snap = store.rows.get(fp, {})
+                self._append_log_batched(
+                    f"  · {snap.get('resto', '?')} · "
+                    f"{snap.get('barang', '?')} — {reason}\n")
+            if n > 10:
+                self._append_log_batched(
+                    f"  … dan {fmt_int_id(n - 10)} baris lainnya\n")
+            with contextlib.suppress(Exception):
+                self.kpi_status.set_value(
+                    "SELESAI",
+                    f"follow-up: {fmt_int_id(n)} baris auto-done "
+                    "(deviasi sudah tidak ada)", C_GREEN)
+        except Exception as exc:  # noqa: BLE001 — pelengkap, bukan run
+            print(f"[WARNING] followup auto-done gagal: {exc!r}")
 
     def _capture_filter_state(self) -> dict:
         """v3.9.66 — snapshot SEMUA view → {view_key: dict} (+ '_app').

@@ -5,6 +5,20 @@ DEVIASI PCS / LAPORAN DEVIASI → baris terkumpul di tab "☑ Follow Up" sebagai
 SNAPSHOT baris (nilai apa adanya saat dicentang). Daftar menetap — TIDAK ikut
 filter/H aktif; tertutup aplikasi pun aman (followup.json).
 
+v3.11.6 (permintaan user: "bisa gak misal aku udah klik data hingga masuk
+ke follow up kemudian file source nya aku revisi. Otomatis di follow nya
+udah status done"):
+- FollowUpStore.auto_resolve_pending(append1_df) — pasca-pipeline (dipanggil
+  app._on_pipeline_done): baris DEVIASI GR/PCS berstatus MENUNGGU yang
+  deviasinya tidak ada lagi di data revisi (pasangan hilang / tanpa baris
+  3.DEVIASI / Deviasi(H) = 0 / seluruh deviasi 0) di-AUTO-DONE: entri
+  resolved {PIC "AUTO", Cek FU "AUTO-DONE (alasan)", Selisih, Selisih
+  Deviasi, ts, auto, auto_reason} → Status TL = "Selesai" (hijau) di tabel
+  Follow Up; persist followup_resolved.json + _notify (badge/view ikut
+  menyegarkan). Deviasi masih ≠ 0 → tetap MENUNGGU; entri resolved lain
+  tak disentuh; asal LAPORAN-COM/KOMPARASI tidak diproses (basisnya bukan
+  pasangan-tanggal append1).
+
 v3.11.4 (permintaan user: "di export tab deviasi gr dan pcs kolom 23 24
 25 26 27 Sistem Deviasi pakai separator , dan tanpa desimal. kolom Loss
 Surplus to BOM pakai persen. Setelah kolom keterangan kapus aja" — tab
@@ -450,6 +464,133 @@ class FollowUpStore:
         self._notify()
         if self.last_save_error:
             print(f"[WARNING] followup: {self.last_save_error}")
+
+    # -- v3.11.6 — AUTO-DONE saat file source direvisi ----------------------
+    def auto_resolve_pending(self, append1_df) -> list:
+        """Tandai SELESAI (auto-done) baris follow-up DEVIASI GR/PCS yang
+        deviasinya TIDAK ADA LAGI di data revisi (user: "bisa gak misal
+        aku udah klik data hingga masuk ke follow up kemudian file source
+        nya aku revisi. Otomatis di follow nya udah status done").
+
+        Sumber kebenaran = append1_df pipeline BARU (kolom Nama Barang /
+        NAMA RESTO / Tanggal / JENIS / NILAI — baris JENIS "3.DEVIASI"
+        adalah Deviasi = SO−SA per pasangan per tanggal, persis kolom
+        Deviasi tab 📦/🧩). Per baris follow-up BERSTATUS MENUNGGU dengan
+        asal DEVIASI GR/PCS:
+        1. pasangan (resto, barang) HILANG total dari data revisi
+           → SELESAI "pasangan tidak ada lagi di data";
+        2. pasangan ada tapi TANPA baris 3.DEVIASI → SELESAI "tanpa
+           baris deviasi";
+        3. H snapshot ADA di data: Deviasi(H) == 0 → SELESAI "deviasi
+           H kini 0"; ≠ 0 → TETAP MENUNGGU (anomali masih ada);
+        4. H tak tercakup data (rentang bergeser): SELESAI hanya bila
+           SEMUA deviasi pasangan itu 0; ada yang ≠ 0 → TETAP MENUNGGU
+           (konservatif — tak bisa diverifikasi, jangan salah tandai).
+
+        Entri resolved ber-PIC "AUTO" + Cek FU "AUTO-DONE (…)" + field
+        auto_reason/Selisih/Selisih Deviasi (kolom kerja FU tetap
+        terisi informatif; Status TL = Selesai). Entri yang SUDAH
+        resolved (manual/auto sebelumnya) TIDAK disentuh. Asal lain
+        (LAPORAN-COM / KOMPARASI — deviasi bukan basis pasangan-tanggal
+        append1) tidak diproses.
+
+        Return [(fp, reason)] baris yang baru di-auto-done (dipakai app
+        utk log transparan). Persist followup_resolved.json + _notify
+        (view/badge ikut menyegarkan)."""
+        if append1_df is None or getattr(append1_df, "empty", True):
+            return []
+        need = {"Nama Barang", "NAMA RESTO", "Tanggal", "JENIS", "NILAI"}
+        if not need <= set(getattr(append1_df, "columns", [])):
+            return []
+        pending = [
+            (fp, s) for fp, s in self.rows.items()
+            if fp not in self.resolved
+            and str(s.get("asal", "")).upper().startswith("DEVIASI")
+        ]
+        if not pending:
+            return []
+
+        def _pair(r, b) -> tuple:
+            return (str(r or "").strip(), str(b or "").strip())
+
+        df = append1_df
+        pairs_all = {
+            _pair(r, b) for r, b in zip(
+                df["NAMA RESTO"].astype(str).str.strip(),
+                df["Nama Barang"].astype(str).str.strip())}
+        dev = df[df["JENIS"].astype(str).str.strip() == "3.DEVIASI"]
+        dev_map: dict = {}
+        if not dev.empty:
+            # vektor: agregat Σ NILAI per (resto, barang, tanggal) —
+            # sum menutup duplikat baris (defensif; append1 normalnya
+            # unik per kunci).
+            tnum = pd.to_numeric(dev["Tanggal"], errors="coerce")
+            agg = (pd.to_numeric(dev["NILAI"], errors="coerce")
+                   .fillna(0).groupby(
+                       [dev["NAMA RESTO"].astype(str).str.strip(),
+                        dev["Nama Barang"].astype(str).str.strip(),
+                        tnum]).sum())
+            for (r, b, t), v in agg.items():
+                if pd.notna(t):
+                    dev_map.setdefault((r, b), {})[float(t)] = float(v)
+
+        done: list = []
+        now = datetime.now().isoformat(timespec="seconds")
+        for fp, snap in pending:
+            key = _pair(snap.get("resto"), snap.get("barang"))
+            if key not in pairs_all:
+                reason = "pasangan resto×barang tidak ada lagi di data revisi"
+                dev_now = None
+            else:
+                tmap = dev_map.get(key)
+                if not tmap:
+                    reason = "tanpa baris deviasi di data revisi"
+                    dev_now = None
+                else:
+                    try:
+                        h = int(float(snap.get("h")))
+                    except (TypeError, ValueError):
+                        h = None
+                    if h is not None and h in tmap:
+                        dev_now = tmap[h]
+                        if dev_now != 0:
+                            continue       # anomali MASIH ada di H → menunggu
+                        reason = f"deviasi H={h} kini 0 di data revisi"
+                    else:
+                        if any(v != 0 for v in tmap.values()):
+                            continue       # tak terverifikasi → menunggu
+                        reason = ("seluruh deviasi pasangan kini 0 di data "
+                                  "revisi (H tidak tercakup)")
+                        dev_now = 0.0
+            try:
+                old_dev = float(snap.get("deviasi", 0) or 0)
+            except (TypeError, ValueError):
+                old_dev = 0.0
+            info = {
+                "PIC": "AUTO",
+                "Cek FU": f"AUTO-DONE ({reason})",
+                "Selisih": dev_now,
+                "Selisih Deviasi": (
+                    round(dev_now - old_dev, 6)
+                    if dev_now is not None else None),
+                "ts": now,
+                "auto": True,
+                "auto_reason": reason,
+            }
+            self.resolved[fp] = info
+            done.append((fp, reason))
+        if done:
+            # persist status TL saja (rows tidak berubah); gagal → flag
+            # last_save_error (pola toggle v3.9.42/2f-08) — view men-
+            # surface flash status; entri tetap di memori (degrade soft).
+            ok = self.save_resolved()
+            self.last_save_error = None if ok else (
+                "gagal menyimpan status followup (file terkunci/disk?) "
+                "— perubahan hanya di memori")
+            if self.last_save_error:
+                print(f"[WARNING] followup: {self.last_save_error}")
+            self._notify()
+        return done
 
     # -- persistensi ---------------------------------------------------------------
     def save(self) -> bool:

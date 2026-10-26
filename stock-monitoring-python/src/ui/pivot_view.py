@@ -1,6 +1,40 @@
 """
 pivot_view.py — Pivot matrix view (v3.2).
 
+v3.11.6 — DUA PERMINTAAN USER (tab 📊 Pivot):
+(1) FILTER RESTO/SOURCE TAK LAGI MENAWARKAN NILAI KOSONG (user: "waktu
+    aku klik filter muncul misal nama resto A terus aku klik resto
+    tersebut ternyata data kosong. Harusnya jika data kosong gak perlu
+    tampilkan resto A di list filter tersebut"): daftar nilai combo
+    RESTO + SOURCE KIRIMAN di-refresh BERKASCADE setelah SETIAP render
+    (_repopulate_filter_combos ← _cascade_frame/_combo_offered_values)
+    — hanya nilai yang menghasilkan baris di kombinasi filter LAIN
+    (KATEGORI default COM Deviasi+Packaging / SOURCE / funnel ⧩ Nama
+    Barang / rentang Tanggal / ☑ hide-empty non-zero) yang ditawarkan
+    (perilaku AutoFilter Excel — mirror _name_values barang v3.9.19).
+    Dulu _populate_filters mengisi dari DATA MENTAH PENUH → resto tanpa
+    baris di kombinasi filter aktif tetap muncul → dipilih → tabel
+    kosong. Seleksi yang menjadi basi (ganti kategori/source lain)
+    di-reset ke "(All)" + SATU refresh ulang terjadwal (tabel ≡ state
+    combo; pola proteksi 48-d v3.9.33, kini per-render).
+(2) LEBAR KOLOM TIDAK LAGI TER-RESET TIAP RENDER + ANTI-MEPET (user:
+    "tampilkan pivot kolom terlalu mepet sehingga nama barang tidak
+    terlihat"): _render_payload dulu SELALU menulis width=280 (kolom beku
+    #0) + 90/70 (kolom matrix) sementara auto-fit hanya SEKALI per muat
+    data → tiap ganti filter/kategori/mode/hide-empty, hasil auto-fit &
+    resize manual user LENYAP → nama barang terpotong. Kini: lebar kolom
+    yang sudah ada DIPERTAHANKAN lintas render; kolom baru pakai
+    default; cache per col_kind (resto/tanggal) mengembalikan lebar saat
+    pindah mode pulang-pergi; width=280 hanya SEKALI per muat data;
+    auto-fit kolom nama max_width 520 (dulu 340 — nama panjang
+    terpotong). DITAMBAH: kolom matrix berjumlah BANYAK (> 6) kini
+    stretch=False — probe membuktikan Tk MEMERAS kolom stretch ke
+    minwidth 50px saat total requested > lebar tree (set width 222 →
+    update() → 50 — resize manual user tidak pernah menempel = "mepet"
+    di mode Tanggal ±30-38 kolom); lebar kini dihormati + scrollbar
+    horizontal menangani overflow (gaya Excel); ≤ 6 kolom tetap stretch
+    mengisi jendela.
+
 v3.9.71 — FREEZE KOLOM NAMA BARANG (user: "di tab pivot tabel gak
 bsia freeze kolom nama barang ya? sehingga jika aku scroll ke kanan
 bisa kefreze"): kolom #0 (nama barang + baris metric) kini TAMPIL DI
@@ -86,6 +120,7 @@ AUDIT 2c (fix 3-c):
 """
 
 import contextlib  # v3.9.66 — suppress senyap jalur restore filter
+import logging
 import tkinter as tk
 from collections.abc import Callable
 from datetime import datetime
@@ -140,6 +175,8 @@ from .widgets import (
 # export_sheets mengimpor PivotTableView (METRICS) → import modul-level
 # menciptakan circular import.
 
+_LOG = logging.getLogger("stock_monitoring.pivot")
+
 
 class PivotTableView(tk.Frame):
     """Pivot matrix view dengan tampilan card-based."""
@@ -181,6 +218,13 @@ class PivotTableView(tk.Frame):
         self._last_payload: dict = {}      # utk export sesuai tampilan
         self._red_cells: list = []         # [(iid, col)] — dipasang ulang
                                            # setelah insert/sort/clone
+        # v3.11.6 — ISSUE 3: preservasi lebar kolom lintas render —
+        # cache lebar per col_kind (resto/tanggal; kolom config hilang
+        # saat tree["columns"] diganti total saat pindah mode) + flag
+        # reset lebar kolom beku SEKALI per muat data (load_data).
+        self._col_w_cache: dict[str, dict[str, int]] = {}
+        self._last_col_kind: str | None = None
+        self._frozen_reset_pending = True
         self._build_ui()
         self._setup_tags()
         if data is not None and not data.empty:
@@ -430,9 +474,11 @@ class PivotTableView(tk.Frame):
         """v3.4 — auto-fit lebar semua kolom ke konten.
         v3.9.71 — dua sisi freeze-pane: kolom matrix di tree utama
         (#0 di-skip via _autofit_skip supaya tetap tersembunyi) +
-        kolom nama di tree beku."""
+        kolom nama di tree beku.
+        v3.11.6 — kolom nama #0 max_width 520 (nama barang panjang —
+        ISSUE 3 'mepet'; mirror _autofit_first_load)."""
         auto_fit_columns(self.tree)
-        auto_fit_columns(self.frozen.tree, columns=["#0"])
+        auto_fit_columns(self.frozen.tree, columns=["#0"], max_width=520)
 
     def _name_values(self) -> list:
         """Nilai popup filter Nama Barang.
@@ -629,6 +675,13 @@ class PivotTableView(tk.Frame):
         reset_autofit_once(self)
         # v3.9.71 — freeze-pane: flag auto-fit sisi beku ikut di-reset
         self._autofit_once_frozen = False
+        # v3.11.6 — ISSUE 3: data baru → cache lebar kolom dikosongkan +
+        # kolom beku #0 kembali ke default 280 SEKALI (auto-fit menyusul di
+        # render pertama — konten baru diukur ulang; lebar user-era-data-
+        # lama tidak dibawa lintas data).
+        self._col_w_cache = {}
+        self._last_col_kind = None
+        self._frozen_reset_pending = True
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
@@ -816,6 +869,123 @@ class PivotTableView(tk.Frame):
     def _reset_kategori(self):
         val = self._default_kategori_value()
         self.kategori_var.set(val)
+
+    # v3.11.6 — ISSUE 1 (user: "waktu aku klik filter muncul misal nama
+    # resto A terus aku klik resto tersebut ternyata data kosong. Harusnya
+    # jika data kosong gak perlu tampilkan resto A di list filter"):
+    # daftar nilai RESTO/SOURCE di-refresh BERKASCADE setelah setiap render
+    # — hanya nilai yang BENAR-BENAR menghasilkan baris di kombinasi filter
+    # LAIN yang ditawarkan (perilaku AutoFilter Excel — mirror _name_values
+    # barang v3.9.19). Dulu _populate_filters mengisi dari DATA MENTAH
+    # PENUH: dengan KATEGORI default (COM Deviasi + Packaging) / SOURCE /
+    # funnel Nama Barang / rentang Tanggal aktif, resto yang tak punya
+    # baris di kombinasi itu TETAP muncul di dropdown → dipilih → tabel
+    # kosong. Dua penyebab kosong ditutup: (a) resto tak ada di frame
+    # ter-kascade; (b) barisnya ada tapi SELURUH sel matriksnya 0 dan ☑
+    # sembunyikan-baris-kosong aktif → agregasi non-zero (mirror _name_
+    # values: sel = barang×JENIS×kolom-pivot) ikut menyaring.
+    def _cascade_frame(self, exclude: str | None = None) -> pd.DataFrame:
+        """Frame data setelah SEMUA filter aktif kecuali dimensi
+        ``exclude`` ("resto"/"source") — sumber daftar nilai combo.
+        Identik urutan filter _compute_payload (name → resto [mode
+        tanggal] → source → kategori) + rentang tanggal."""
+        df = self.data
+        if df is None or df.empty:
+            return df
+        ns = self._name_selected
+        if ns is not None and "Nama Barang" in df.columns:
+            df = df[df["Nama Barang"].astype(str).isin(ns)]
+        resto = self.resto_var.get()
+        if (exclude != "resto" and self.pivot_mode == "tanggal"
+                and resto and resto != "(All)"
+                and "NAMA RESTO" in df.columns):
+            df = df[df["NAMA RESTO"].astype(str) == resto]
+        source = self.source_var.get()
+        if (exclude != "source" and source and source != "(All)"
+                and "SOURCE KIRIMAN" in df.columns):
+            df = df[df["SOURCE KIRIMAN"].astype(str) == source]
+        kategori = self.kategori_var.get()
+        if kategori and kategori != "(All)" and "KATEGORI" in df.columns:
+            if kategori == KATEGORI_BLANK_LABEL:
+                df = df[kategori_blank_mask(df["KATEGORI"])]
+            elif kategori_filter_mask(df["KATEGORI"], kategori) is not None:
+                df = df[kategori_filter_mask(df["KATEGORI"], kategori)]
+            elif kategori_passthrough(kategori):
+                _blank = kategori_blank_mask(df["KATEGORI"])
+                df = df[(df["KATEGORI"].astype(str) == kategori) | _blank]
+            else:
+                df = df[df["KATEGORI"].astype(str) == kategori]
+        if "Tanggal" in df.columns and not df.empty:
+            try:
+                t1 = int(float(self.tgl_start_var.get()))
+                t2 = int(float(self.tgl_end_var.get()))
+            except (TypeError, ValueError):
+                t1 = t2 = None
+            if t1 is not None and t2 is not None:
+                if t1 > t2:
+                    t1, t2 = t2, t1
+                tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+                df = df[tnum.between(t1, t2)]
+        return df
+
+    def _combo_offered_values(self, dim: str) -> list:
+        """Daftar nilai combo RESTO/SOURCE yang layak ditawarkan: nilai
+        di frame kascade (dimensi itu sendiri dikecualikan) + bila ☑
+        sembunyikan baris kosong aktif, hanya nilai dgn ≥1 sel matriks
+        ≠ 0 (mirror agregasi _name_values v3.9.69 — sel dilihat pada
+        granularity barang×JENIS×kolom-pivot supaya resto yang seluruh
+        selnya 0 — pasti tersembunyi — tak ditawarkan)."""
+        df = self._cascade_frame(exclude=dim)
+        col = ("NAMA RESTO" if dim == "resto" else "SOURCE KIRIMAN")
+        if df is None or df.empty or col not in df.columns:
+            return []
+        if not (self.hide_empty_var.get()
+                and {"JENIS", "NILAI", "Nama Barang"} <= set(df.columns)):
+            return sorted(v for v in df[col].dropna().astype(str)
+                          .str.strip().unique() if v)
+        metrics = [m for m in self.METRICS
+                   if m != "6.PEMAKAIAN (COM)"
+                   or self.pivot_mode == "tanggal"]
+        f = df[df["Nama Barang"].notna()
+               & df["JENIS"].astype(str).isin(metrics)]
+        if f.empty:
+            return []
+        vals = pd.to_numeric(f["NILAI"], errors="coerce").fillna(0)
+        grp_cols = [f[col].astype(str), f["Nama Barang"].astype(str),
+                    f["JENIS"].astype(str)]
+        _key = ("NAMA RESTO" if self.pivot_mode == "resto" else "Tanggal")
+        if _key in f.columns:
+            grp_cols.append(f[_key].astype(str))
+        nz = vals.groupby(grp_cols).sum()
+        nz = nz[nz != 0]
+        if nz.empty:
+            return []
+        return sorted({str(ix[0]).strip() for ix in nz.index if str(ix[0]).strip()})
+
+    def _repopulate_filter_combos(self) -> bool:
+        """v3.11.6 — refresh daftar nilai RESTO/SOURCE berkascade + reset
+        seleksi basi ke "(All)" (pola proteksi 48-d v3.9.33, kini per
+        render). Return True bila ada seleksi yang di-reset (pemanggil
+        menjadwalkan SATU refresh ulang supaya tabel ≡ state combo)."""
+        if self.data is None or self.data.empty:
+            return False
+        reset = False
+        for dim, combo, var in (
+                ("resto", self.resto_combo, self.resto_var),
+                ("source", self.source_combo, self.source_var)):
+            col = ("NAMA RESTO" if dim == "resto" else "SOURCE KIRIMAN")
+            if col not in self.data.columns:
+                continue
+            values = ["(All)"] + self._combo_offered_values(dim)
+            combo["values"] = values
+            cur = var.get()
+            if cur != "(All)" and cur not in values:
+                var.set("(All)")
+                reset = True
+                print(f"[Pivot] Filter {('RESTO' if dim == 'resto' else 'SOURCE KIRIMAN')} "
+                      f"'{cur}' di-reset ke (All) — tidak ada baris di "
+                      f"kombinasi filter lain.")
+        return reset
 
     # =========================================================================
     # FILTER STATE + COMPUTE (pure — berjalan di thread)
@@ -1164,20 +1334,63 @@ class PivotTableView(tk.Frame):
             self.tree.configure(displaycolumns="#all")
         except tk.TclError:
             pass
+        # v3.11.6 — ISSUE 3 (user: "tampilkan pivot kolom terlalu mepet
+        # sehingga nama barang tidak terlihat"): lebar kolom TIDAK lagi
+        # di-stomp balik ke default tiap render. Dulu _render_payload
+        # SELALU menulis width=280 (kolom beku #0) dan 90/70 (kolom
+        # matrix) sementara auto-fit hanya berjalan SEKALI per muat data
+        # → setiap ganti filter/kategori/mode/hide-empty, lebar hasil
+        # auto-fit (dan resize manual user) LENYAP diganti default sempit
+        # — nama barang terpotong ("mepet"). Kini: lebar kolom yang sudah
+        # ada DIPERTAHANKAN; kolom baru memakai default; cache per
+        # col_kind mengembalikan lebar saat pindah mode pulang-pergi
+        # (kolom config hilang saat tree["columns"] diganti total).
+        kind = payload.get("col_kind") or "resto"
+        try:
+            old_cols = [str(c) for c in self.tree["columns"]]
+        except tk.TclError:
+            old_cols = []
+        if old_cols and self._last_col_kind:
+            cache = self._col_w_cache.setdefault(self._last_col_kind, {})
+            for c in old_cols:
+                with contextlib.suppress(tk.TclError):
+                    w_cur = int(self.tree.column(c, "width") or 0)
+                    if w_cur > 0:
+                        cache[c] = w_cur
         self.tree["columns"] = cols
-        width = 90 if payload.get("col_kind") == "resto" else 70
+        width = 90 if kind == "resto" else 70
+        w_cache = self._col_w_cache.get(kind) or {}
         # v3.9.71 — #0 di tree utama DISEMBUNYIKAN (freeze kolom nama:
         # nama tampil di TREE BEKU; heading tetap diset supaya teks/
         # clone konsisten — tidak terlihat karena width 0).
         self.tree.column("#0", width=0, minwidth=0, stretch=False)
         self.tree.heading("#0", text="Nama Barang")
-        # tree beku: kolom nama + funnel (HeaderFilter menempel di sini)
-        self.frozen.tree.column("#0", width=280, minwidth=180,
-                                stretch=False)
+        # tree beku: kolom nama + funnel (HeaderFilter menempel di sini).
+        # v3.11.6 — width=280 hanya SEKALI per muat data (flag dari
+        # load_data); render berikutnya MEMBIARKAN lebar saat ini (hasil
+        # auto-fit / resize manual user bertahan lintas ganti filter).
+        if self._frozen_reset_pending:
+            self._frozen_reset_pending = False
+            self.frozen.tree.column("#0", width=280, minwidth=180,
+                                    stretch=False)
         self.frozen.tree.heading("#0", text="Nama Barang")
         for c in cols:
-            self.tree.column(c, width=width, minwidth=50, anchor="e",
-                             stretch=True)
+            # v3.11.6 — kolom yang pernah diatur (render sebelumnya /
+            # cache kind sama) memakai lebar tersimpan; kolom baru →
+            # default; cache invalid (<= minwidth) diabaikan.
+            w_prev = w_cache.get(str(c))
+            w = w_prev if (w_prev and w_prev > 50) else width
+            # v3.11.6 — ISSUE 3 (lanjutan): BANYAK kolom (mode Tanggal
+            # ~30-38 kolom / mode Resto ber-resto banyak) → stretch=False
+            # — Tk tidak lagi MEMERAS kolom ke minwidth 50px saat total
+            # requested melebihi lebar tree (probe: set width 222 →
+            # root.update() → 50! resize manual user TIDAK PERNAH menempel
+            # — inilah "kolom terlalu mepet"); lebar dihormati apa adanya
+            # + scrollbar horizontal (sudah ada) menangani overflow, gaya
+            # Excel. Sedikit kolom (≤ 6 — resto mode tipikal) tetap
+            # stretch=True supaya mengisi lebar jendela.
+            self.tree.column(c, width=w, minwidth=50, anchor="e",
+                             stretch=len(cols) <= 6)
             # v3.6: kolom tanggal bulan lalu diberi label '25•' (bukan
             # '-25') — legend '• = bulan lalu'
             try:
@@ -1186,6 +1399,7 @@ class PivotTableView(tk.Frame):
             except (TypeError, ValueError):
                 htxt = str(c)
             self.tree.heading(c, text=htxt)
+        self._last_col_kind = kind
         # re-pasang state kolom tersembunyian (reconfigure columns me-reset
         # displaycolumns ke #all)
         self._colmgr.apply()
@@ -1213,6 +1427,15 @@ class PivotTableView(tk.Frame):
             # kanan selesai SINKRON sebelum insert kiri jalan).
             self._autofit_first_load("main")
             self._busy = False
+            # v3.11.6 — ISSUE 1: daftar nilai combo RESTO/SOURCE di-refresh
+            # BERKASCADE (seleksi basi di-reset; tabel ≡ state combo).
+            # Dilakukan SETELAH _busy lepas: bila ada seleksi yang di-reset
+            # dijadwalkan SATU refresh ulang (guard _pending/_busy aman).
+            try:
+                if self._repopulate_filter_combos():
+                    self.after(60, self._refresh_pivot)
+            except Exception:  # noqa: BLE001 — combo ≠ tabel
+                _LOG.debug("pivot: refresh combo kascade gagal", exc_info=True)
             if self._pending:
                 self._pending = False
                 self._refresh_pivot()
@@ -1235,7 +1458,11 @@ class PivotTableView(tk.Frame):
         - side="frozen": kolom #0 nama tree beku — dipanggil on_done
           batch kiri (utk tabel kecil batch kanan selesai SINKRON
           sebelum insert kiri jalan — mengukur di render_done akan
-          melihat tree beku MASIH KOSONG)."""
+          melihat tree beku MASIH KOSONG).
+        v3.11.6 — ISSUE 3: kolom nama (#0) di-auto-fit dgn max_width
+        520 (default 340 memotong nama barang panjang — 'mepet'/tak
+        terlihat; 520 ≈ 65+ karakter font tabel, cukup utk nama
+        bahan F&B terpanjang tanpa membuat pane beku melahap layar)."""
         if side == "main":
             if getattr(self, "_autofit_once", False):
                 return
@@ -1247,7 +1474,8 @@ class PivotTableView(tk.Frame):
                 return
             self._autofit_once_frozen = True
             with contextlib.suppress(Exception):
-                auto_fit_columns(self.frozen.tree, columns=["#0"])
+                auto_fit_columns(self.frozen.tree, columns=["#0"],
+                                 max_width=520)
 
     def _compute_row_tags(self, metric: str, item: str, row_data: pd.Series,
                           tanggals: list) -> tuple:

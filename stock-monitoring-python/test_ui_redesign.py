@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.5", APP_VERSION == "3.11.5",
+    check("Versi = 3.11.6", APP_VERSION == "3.11.6",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -22039,7 +22039,9 @@ def main():
     _top89.destroy()
     root.update()
 
-    root.destroy()
+    # (v3.11.6 — root.destroy() DITUNDA ke setelah §91: section itu masih
+    # membutuhkan app + views hidup (pivot kascade / lebar kolom / wiring
+    # follow-up); §90 store-level tak butuh GUI — urutan tetap sah.)
 
     # ==================================================================
     print("== §90. (v3.11.4) EXPORT FOLLOW UP — separator ribuan tanpa "
@@ -22136,6 +22138,341 @@ def main():
         _fumod90.followup_path = _orig_fp90
         _fumod90.resolved_path = _orig_rp90
         shutil.rmtree(_tmp90, ignore_errors=True)
+
+    # ==================================================================
+    print("== §91. (v3.11.6) FILTER RESTO KASCADE + FOLLOW-UP AUTO-DONE + "
+          "LEBAR KOLOM PIVOT ==")
+    # 3 permintaan user: (1) "waktu aku klik filter muncul misal nama resto
+    # A terus aku klik resto tersebut ternyata data kosong. Harusnya jika
+    # data kosong gak perlu tampilkan resto A di list filter tersebut";
+    # (2) "bisa gak misal aku udah klik data hingga masuk ke follow up
+    # kemudian file source nya aku revisi. Otomatis di follow nya udah
+    # status done"; (3) "tampilkan pivot kolom terlalu mepet sehingga nama
+    # barang tidak terlihat".
+
+    # -- mock kascade: resto JKT01 HANYA ber-kategori LAIN (BAHAN = resto
+    # lain) — dipilih resto JKT01 di kombinasi kategori BAHAN dulu =
+    # tabel kosong (bug); kini JKT tidak lagi ditawarkan.
+    def _jkt91_rows():
+        rows91 = []
+        for jenis in ("SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
+                      "4.IN"):
+            for tgl in (1, 25):
+                val = {"SALDO AWAL": 5.0 if tgl == 1 else 0.0,
+                       "1.SO": 12.0, "2.SALDO AKHIR": 9.0,
+                       "3.DEVIASI": 3.0, "4.IN": 0.0}[jenis]
+                rows91.append({
+                    "Nama Barang": "KOPI BUBUK 100G", "JENIS": jenis,
+                    "NAMA RESTO": "JKT01", "Tanggal": tgl, "NILAI": val,
+                    "SATUAN": "PCS", "AKTIF/NON": "AKTIF",
+                    "KATEGORI": "LAIN", "SOURCE KIRIMAN": "GUDANG",
+                    "Nomor": "RI-1", "Nomor PO": "PO-1",
+                    "#Tgl/Jam Pembuatan IT": None,
+                })
+        return rows91
+
+    _df91 = pd.concat(
+        [make_mock_append1(), pd.DataFrame(_jkt91_rows())],
+        ignore_index=True)
+
+    # ---- (A) PIVOT: daftar RESTO/SOURCE berkascade -------------------
+    pv91 = app.pivot_view
+    pv91.load_data(_df91)
+    select_and_wait(root, app, app.tab_pivot, pv91)
+    _rv91 = list(pv91.resto_combo["values"])
+    check("(v3.11.6) §91-A1 pivot: kategori (All) → resto JKT01 "
+          "DITAWARKAN (ada baris LAIN — bukan data mentah penuh lagi, "
+          "tapi kascade; MLGPAR/SBYKET tetap)",
+          _rv91 == ["(All)", "JKT01", "MLGPAR", "SBYKET"],
+          f"got {_rv91}")
+    check("(v3.11.6) §91-A2 pivot: SOURCE kascade tetap terisi (GUDANG)",
+          list(pv91.source_combo["values"]) == ["(All)", "GUDANG"],
+          f"got {list(pv91.source_combo['values'])}")
+    pv91.kategori_var.set("BAHAN")
+    pv91._refresh_pivot()
+    check("(v3.11.6) §91-A3 pivot: render kategori=BAHAN selesai "
+          "dgn baris", wait_view(root, pv91))
+    _rv91b = list(pv91.resto_combo["values"])
+    check("(v3.11.6) §91-A4 pivot: kategori=BAHAN → JKT01 TIDAK lagi "
+          "ditawarkan (tak ada baris BAHAN utk resto itu — dulu tetap "
+          "muncul dari data mentah → dipilih → tabel kosong; user: "
+          "'jika data kosong gak perlu tampilkan resto A di list')",
+          _rv91b == ["(All)", "MLGPAR", "SBYKET"], f"got {_rv91b}")
+
+    # ---- (B) PIVOT: seleksi basi di-reset + SATU refresh terjadwal ----
+    pv91.kategori_var.set("(All)")
+    pv91.resto_var.set("JKT01")
+    pv91._refresh_pivot()
+    check("(v3.11.6) §91-B1 pivot: resto JKT01 valid saat kategori "
+          "(All) — seleksi bertahan", wait_view(root, pv91)
+          and pv91.resto_var.get() == "JKT01")
+    pv91.kategori_var.set("BAHAN")          # JKT01 kini basi di BAHAN
+    pv91._refresh_pivot()
+    wait_view(root, pv91)
+    _t0_91 = time.time()                    # tunggu refresh terjadwal 60ms
+    while time.time() - _t0_91 < 3.0:
+        root.update()
+        time.sleep(0.02)
+        if pv91.resto_var.get() == "(All)" and not pv91._busy \
+                and pv91.tree.get_children(""):
+            break
+    wait_view(root, pv91)
+    check("(v3.11.6) §91-B2 pivot: seleksi RESTO basi (JKT01 di bawah "
+          "kategori BAHAN) di-reset ke (All) + SATU refresh terjadwal "
+          "otomatis (tabel ≡ state combo — bukan tabel kosong senyap)",
+          pv91.resto_var.get() == "(All)"
+          and len(pv91.tree.get_children("")) == 6,
+          f"resto={pv91.resto_var.get()!r} n="
+          f"{len(pv91.tree.get_children(''))}")
+
+    # ---- (C) LEBAR KOLOM PIVOT tak ter-reset tiap render -------------
+    # mode TANGGAL (±30 kolom) → stretch=False sejak v3.11.6: Tk tidak
+    # lagi MEMERAS kolom ke minwidth 50px saat total requested > lebar
+    # tree (probe: set width 222 → root.update() → 50 — resize manual
+    # user tidak pernah menempel!) — lebar dihormati apa adanya + scrollbar
+    # horizontal menangani overflow; uji preservasi lebar jadi DETERMINISTIK.
+    # (rentang tanggal di-reset ke penuh dulu — section sebelumnya
+    # memakai rentang sempit 1..8 yang menetap di var entry.)
+    pv91.kategori_var.set("(All)")
+    pv91.tgl_start_var.set("-31")
+    pv91.tgl_end_var.set("31")
+    pv91._on_mode_change(1)
+    wait_view(root, pv91)
+    root.update()
+    _col25 = "25"
+    check("(v3.11.6) §91-C1 pivot: mode Tanggal aktif dgn kolom 25",
+          _col25 in [str(c) for c in pv91.tree["columns"]],
+          f"cols={[str(c) for c in pv91.tree['columns']][:8]}…")
+    pv91.tree.column(_col25, width=222)
+    pv91.frozen.tree.column("#0", width=333)
+    pv91.hide_empty_var.set(not pv91.hide_empty_var.get())  # re-render
+    pv91._refresh_pivot()
+    wait_view(root, pv91)
+    root.update()
+    check("(v3.11.6) §91-C2 pivot: lebar kolom matrix (222) + kolom beku "
+          "#0 (333) DIPERTAHANKAN pasca re-render filter (dulu di-stomp "
+          "ke default 70/280 tiap render — nama barang 'mepet' terpotong)",
+          int(pv91.tree.column(_col25, "width")) == 222
+          and int(pv91.frozen.tree.column("#0", "width")) == 333,
+          f"tgl25={pv91.tree.column(_col25, 'width')} "
+          f"frozen={pv91.frozen.tree.column('#0', 'width')}")
+    # pindah mode pulang-pergi: kolom config hilang → cache mengembalikan
+    pv91._on_mode_change(0)
+    wait_view(root, pv91)
+    root.update()
+    pv91._on_mode_change(1)
+    wait_view(root, pv91)
+    root.update()
+    check("(v3.11.6) §91-C3 pivot: pindah mode Resto⇄Tanggal pulang — "
+          "lebar 222 dipulihkan dari cache per col_kind (kolom config "
+          "hilang saat tree columns diganti total)",
+          int(pv91.tree.column(_col25, "width")) == 222,
+          f"got {pv91.tree.column(_col25, 'width')}")
+    # load_data BARU → reset (auto-fit konten baru menyusul)
+    pv91.load_data(_df91)
+    wait_view(root, pv91)
+    root.update()
+    _w91d = int(pv91.tree.column(_col25, "width"))
+    check("(v3.11.6) §91-C4 pivot: load_data baru → lebar di-reset + "
+          "auto-fit konten (bukan 222 tertinggal; kolom beku #0 kembali "
+          "auto-fit ≤ 520 — nama panjang tak terpotong di 340)",
+          _w91d != 222
+          and 0 < int(pv91.frozen.tree.column("#0", "width")) <= 520,
+          f"tgl25={_w91d} "
+          f"frozen={pv91.frozen.tree.column('#0', 'width')}")
+
+    # ---- (D) FOLLOW-UP AUTO-DONE (store-level — pola §90) ------------
+    import src.ui.followup as _fumod91
+    _tmp91 = tempfile.mkdtemp(prefix="v3116_s91_")
+    _orig_fp91, _orig_rp91 = _fumod91.followup_path, _fumod91.resolved_path
+    _fumod91.followup_path = lambda: Path(_tmp91) / "followup.json"
+    _fumod91.resolved_path = lambda: Path(_tmp91) / "resolved.json"
+    try:
+        # v3.11.6 — mock make_mock_append1 memuat baris 3.DEVIASI dgn
+        # NILAI 0 (pipeline NYATA menulis Deviasi = SO − SA per pasangan
+        # per tanggal — append1.py "3.DEVIASI"); auto-resolve membaca
+        # baris itu → fixture WAJIB setia pada kontrak: hitung ulang
+        # NILAI 3.DEVIASI = SO − SA (peta per pasangan-tanggal).
+        def _fixdev91(dfx):
+            _so91m = dfx[dfx["JENIS"] == "1.SO"]
+            _sa91m = dfx[dfx["JENIS"] == "2.SALDO AKHIR"]
+            _so91d = {(b, r, int(t)): float(v) for b, r, t, v in zip(
+                _so91m["Nama Barang"], _so91m["NAMA RESTO"],
+                pd.to_numeric(_so91m["Tanggal"], errors="coerce"),
+                _so91m["NILAI"])}
+            _sa91d = {(b, r, int(t)): float(v) for b, r, t, v in zip(
+                _sa91m["Nama Barang"], _sa91m["NAMA RESTO"],
+                pd.to_numeric(_sa91m["Tanggal"], errors="coerce"),
+                _sa91m["NILAI"])}
+            _di91 = dfx.index[dfx["JENIS"] == "3.DEVIASI"]
+
+            def _dev91(row):
+                _k = (row["Nama Barang"], row["NAMA RESTO"],
+                      int(row["Tanggal"]))
+                return _so91d.get(_k, 0.0) - _sa91d.get(_k, 0.0)
+
+            dfx.loc[_di91, "NILAI"] = dfx.loc[_di91].apply(_dev91, axis=1)
+            return dfx
+
+        # revisi data: AYAM FILET MLGPAR SO t25 80→10 (deviasi 25 → 0)
+        # + KOPI SBYKET semua SA = SO (deviasi 0 semua tanggal)
+        _rev91 = _fixdev91(make_mock_append1().copy())
+        _m91 = ((_rev91["Nama Barang"] == "AYAM FILET")
+                & (_rev91["NAMA RESTO"] == "MLGPAR")
+                & (_rev91["JENIS"] == "1.SO")
+                & (pd.to_numeric(_rev91["Tanggal"], errors="coerce") == 25))
+        _rev91.loc[_m91, "NILAI"] = 10.0
+        _rev91 = _fixdev91(_rev91)          # dev t25 AYAM kini 10−10 = 0
+        _m91b = ((_rev91["Nama Barang"] == "KOPI BUBUK 100G")
+                 & (_rev91["NAMA RESTO"] == "SBYKET")
+                 & (_rev91["JENIS"] == "2.SALDO AKHIR"))
+        _kopi_so = _rev91[(_rev91["Nama Barang"] == "KOPI BUBUK 100G")
+                          & (_rev91["NAMA RESTO"] == "SBYKET")
+                          & (_rev91["JENIS"] == "1.SO")][["Tanggal", "NILAI"]]
+        _sa_map = dict(zip(_kopi_so["Tanggal"], _kopi_so["NILAI"]))
+        _rev91.loc[_m91b, "NILAI"] = [
+            _sa_map.get(t, 0.0) for t in _rev91.loc[_m91b, "Tanggal"]]
+        _rev91 = _fixdev91(_rev91)          # KOPI SBYKET semua dev = 0
+        _store91 = _fumod91.FollowUpStore()
+        _snap91a = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                    "barang": "AYAM FILET", "satuan": "GR",
+                    "aktif": "AKTIF", "h": 25, "so": 80.0,
+                    "sistem": 10.0, "deviasi": 70.0, "cek": "Turun Drastis"}
+        _store91.toggle("fp91a", _snap91a)          # → auto-done (dev H=0)
+        _snap91b = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                    "barang": "BARANG HILANG", "satuan": "GR",
+                    "aktif": "AKTIF", "h": 25, "so": 5.0,
+                    "sistem": 1.0, "deviasi": 4.0, "cek": ""}
+        _store91.toggle("fp91b", _snap91b)          # → pasangan hilang
+        _snap91c = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                    "barang": "GULA PASIR", "satuan": "GR",
+                    "aktif": "AKTIF", "h": 25, "so": 15.0,
+                    "sistem": 10.0, "deviasi": 5.0, "cek": ""}
+        _store91.toggle("fp91c", _snap91c)          # → TETAP menunggu
+        _snap91d = {"asal": "DEVIASI PCS", "resto": "SBYKET",
+                    "barang": "KOPI BUBUK 100G", "satuan": "PCS",
+                    "aktif": "AKTIF", "h": 99, "so": 12.0,
+                    "sistem": 9.0, "deviasi": 3.0, "cek": ""}
+        _store91.toggle("fp91d", _snap91d)          # → h tak tercakup,
+        #   semua dev 0 → auto-done (aturan konservatif lulus)
+        _snap91e = {"asal": "DEVIASI PCS", "resto": "SBYKET",
+                    "barang": "SUSU UHT 1L", "satuan": "PCS",
+                    "aktif": "AKTIF", "h": 99, "so": 12.0,
+                    "sistem": 9.0, "deviasi": 3.0, "cek": ""}
+        _store91.toggle("fp91e", _snap91e)          # → h tak tercakup,
+        #   ada dev ≠ 0 → TETAP menunggu (konservatif)
+        _snap91f = {"asal": "LAPORAN-COM", "resto": "MLGPAR",
+                    "barang": "AYAM FILET", "satuan": "GR",
+                    "aktif": "AKTIF", "h": 25, "so": 1.0,
+                    "sistem": 2.0, "deviasi": -1.0, "cek": "MINUS"}
+        _store91.toggle("fp91f", _snap91f)          # → asal lain: tak
+        #   disentuh
+        _done91 = _store91.auto_resolve_pending(_rev91)
+        _done_fps91 = {fp for fp, _r in _done91}
+        check("(v3.11.6) §91-D1 auto-done: TEPAT 3 baris diresolusi "
+              "(AYAM dev H=0 · BARANG HILANG pasangan hilang · KOPI "
+              "semua dev 0 dgn H=99) — GULA (dev masih ≠ 0), SUSU "
+              "(h tak tercakup + ada dev ≠ 0) & LAPORAN-COM tetap "
+              "menunggu",
+              _done_fps91 == {"fp91a", "fp91b", "fp91d"},
+              f"got {sorted(_done_fps91)}")
+        _info91a = _store91.resolved.get("fp91a", {})
+        check("(v3.11.6) §91-D2 auto-done: entri resolved PIC=AUTO + "
+              "Cek FU 'AUTO-DONE (…)' + flag auto + Selisih dev baru 0 "
+              "+ Selisih Deviasi = 0 − 70 = −70 (kolom kerja FU tetap "
+              "informatif)",
+              _info91a.get("PIC") == "AUTO"
+              and str(_info91a.get("Cek FU", "")).startswith("AUTO-DONE")
+              and _info91a.get("auto") is True
+              and _info91a.get("Selisih") == 0.0
+              and _info91a.get("Selisih Deviasi") == -70.0,
+              f"info={_info91a}")
+        _info91b = _store91.resolved.get("fp91b", {})
+        check("(v3.11.6) §91-D3 auto-done: pasangan hilang → alasan "
+              "'tidak ada lagi di data revisi' + Selisih Deviasi None "
+              "(tak terverifikasi)",
+              "tidak ada lagi" in str(_info91b.get("Cek FU", ""))
+              and _info91b.get("Selisih Deviasi") is None,
+              f"info={_info91b}")
+        check("(v3.11.6) §91-D4 auto-done: GULA/SUSU/LAPORAN-COM TIDAK "
+              "berubah (menunggu — deviasi masih ada / tak terverifikasi "
+              "/ asal lain)",
+              not {"fp91c", "fp91e", "fp91f"} & set(_store91.resolved)
+              and _store91.resolved_count() == 3,
+              f"resolved={sorted(_store91.resolved)}")
+        _rerun91 = _store91.auto_resolve_pending(_rev91)
+        check("(v3.11.6) §91-D5 auto-done: idempoten — run ulang atas "
+              "data sama = 0 baris baru (entri resolved tak diproses "
+              "ulang)",
+              _rerun91 == [], f"got {_rerun91}")
+        _store92 = _fumod91.FollowUpStore()   # reload dari disk
+        check("(v3.11.6) §91-D6 auto-done: persist followup_resolved.json "
+              "— store baru memuat 3 status Selesai",
+              _store92.resolved_count() == 3
+              and "fp91a" in _store92.resolved,
+              f"n={_store92.resolved_count()}")
+    finally:
+        _fumod91.followup_path = _orig_fp91
+        _fumod91.resolved_path = _orig_rp91
+        shutil.rmtree(_tmp91, ignore_errors=True)
+
+    # ---- (E) FOLLOW-UP AUTO-DONE — wiring app pasca-pipeline ---------
+    for _p91e in (_fumod91.followup_path(), _fumod91.resolved_path()):
+        if _p91e.exists():
+            _p91e.unlink()
+    _store91e = app.followup_store
+    _store91e.clear()
+    _snap91e2 = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                 "barang": "AYAM FILET", "satuan": "GR",
+                 "aktif": "AKTIF", "h": 25, "so": 80.0,
+                 "sistem": 10.0, "deviasi": 70.0, "cek": "Turun Drastis"}
+    _store91e.toggle("fp91e2", _snap91e2)
+    _rev91e = _fixdev91(make_mock_append1().copy())
+    _m91e = ((_rev91e["Nama Barang"] == "AYAM FILET")
+             & (_rev91e["NAMA RESTO"] == "MLGPAR")
+             & (_rev91e["JENIS"] == "1.SO")
+             & (pd.to_numeric(_rev91e["Tanggal"], errors="coerce") == 25))
+    _rev91e.loc[_m91e, "NILAI"] = 10.0
+    _rev91e = _fixdev91(_rev91e)     # dev AYAM t25 kini 0 → auto-done
+    app._auto_resolve_followup(_rev91e)
+    check("(v3.11.6) §91-E1 app._auto_resolve_followup: baris menunggu "
+          "dgn deviasi hilang di data revisi → Status TL Selesai "
+          "(resolved_count 1) — dipanggil jalur _on_pipeline_done",
+          _store91e.resolved_count() == 1
+          and "fp91e2" in _store91e.resolved,
+          f"n={_store91e.resolved_count()}")
+    app._auto_resolve_followup(None)   # guard data kosong tanpa crash
+    check("(v3.11.6) §91-E2 app._auto_resolve_followup: data kosong "
+          "(None) = no-op aman (guard — bukan exception)",
+          True)
+    _store91e.clear()
+    for _p91e in (_fumod91.followup_path(), _fumod91.resolved_path()):
+        if _p91e.exists():
+            _p91e.unlink()
+
+    # ---- (F) KATEGORI deviasi GR/PCS di-scope mode satuan -------------
+    app.deviasi_gr_view.load_data(_df91)
+    app.deviasi_pcs_view.load_data(_df91)
+    _kv91gr = [v for v in app.deviasi_gr_view._kategori_combo["values"]
+               if v not in ("Semua", "(Tanpa Kategori)")]
+    _kv91pcs = [v for v in app.deviasi_pcs_view._kategori_combo["values"]
+                if v not in ("Semua", "(Tanpa Kategori)")]
+    check("(v3.11.6) §91-F1 deviasi GR: daftar KATEGORI di-scope satuan "
+          "GR — 'LAIN' (hanya barang PCS JKT01) TIDAK ditawarkan (dulu "
+          "dari data mentah penuh → dipilih → tabel GR kosong)",
+          "LAIN" not in _kv91gr and "BAHAN" in _kv91gr,
+          f"GR={_kv91gr}")
+    check("(v3.11.6) §91-F2 deviasi PCS: daftar KATEGORI memuat BAHAN + "
+          "LAIN (KOPI JKT01 PCS — keduanya sah di tab PCS)",
+          _kv91pcs == ["BAHAN", "LAIN"], f"PCS={_kv91pcs}")
+    # pulihkan state view utk kebersihan akhir suite
+    app.deviasi_gr_view.load_data(make_mock_append1())
+    app.deviasi_pcs_view.load_data(make_mock_append1())
+    pv91._on_mode_change(0)
+    wait_view(root, pv91)
+    root.update()
+
+    root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()
     print(f"HASIL: {len(PASS)} PASS, {len(FAIL)} FAIL")
