@@ -624,10 +624,12 @@ class DeviasiView(tk.Frame):
     # v3.11.7 — +2 label baru (Hilang dari Pencatatan di atas Turun
     # Drastis; Naik Drastis mirror Turun) → 9 label; footer 'CEK n'
     # menghitung BARIS ber-label utama kanonik (semantik tak berubah).
+    # v3.11.9 — +1 label "BOM 0" (Total ACR sebulan 0 & SO(H) > 0 —
+    # pemakaian sistem nihil tapi stok tercatat) → 10 label.
     _CEK_CHECK_LABELS = (
         "Promix 04", "RI Balancing", "Kosong/Non Aktif", "Beda Tanggal",
         "Hitung Manual", "Hilang dari Pencatatan", "Turun Drastis",
-        "Naik Drastis", "ACR to BOM")
+        "Naik Drastis", "ACR to BOM", "BOM 0")
 
     # FIX 6d1-02 — counter load_data aktif (CLASS-level, dibagi antar
     # instance GR & PCS yang sama-sama berlangganan SharedTanggalH).
@@ -1018,11 +1020,16 @@ class DeviasiView(tk.Frame):
             ("Naik Drastis", "#059669"),
             ("Turun Drastis", "#dc2626"),
             ("ACR to BOM", "#7c3aed"),   # v3.9.6 — kondisi ke-5
+            # v3.11.9 — label ke-10 BOM 0 (Total ACR 0 & SO(H) > 0).
+            ("BOM 0", "#475569"),
             # v3.11.7 — segmen COM Tinggi (pemakaian aktual > sistem).
             ("COM Tinggi · segmen CEK (COM vs ACR)", "#be123c"),
             # v3.11.8 — segmen COM Rendah (sistem mencatat pemakaian
             # lebih besar dari fisik — arah bawah median).
             ("COM Rendah · segmen CEK (COM vs ACR)", "#0f766e"),
+            # v3.11.9 — segmen Beda dari Resto Lain (searah dua periode,
+            # resto lain berlawanan — butuh file ⚖).
+            ("Beda dari Resto Lain · segmen CEK (file ⚖)", "#a21caf"),
             ("negatif (merah)", "#dc2626"),
             # v3.9.18 — highlight kolom Deviasi & SO_H
             ("kolom Deviasi/SO_H", self.HIGHLIGHT_BG),
@@ -1666,6 +1673,9 @@ class DeviasiView(tk.Frame):
         # (keluarga warna sama dgn popup Rincian IN v3.9.19 #b45309,
         # dgn nuansa lebih tua supaya terbedakan dari Kosong/Non Aktif)
         tree.tag_configure("cek_ri_bal", foreground="#92400e")
+        # v3.11.9 — kondisi ke-10 "BOM 0" (Total ACR 0 & SO(H) > 0):
+        # slate — anomali data (nir-pemakaian) ≠ anomali pola angka.
+        tree.tag_configure("cek_bom0", foreground="#475569")
 
     # =========================================================================
     # LOGIKA (identik versi lama)
@@ -2399,6 +2409,17 @@ class DeviasiView(tk.Frame):
         _acr_cut = float(self.acr_threshold) / 100.0
         cond_acr = (total_acr > 0) & (np.abs(deviasi) > _acr_cut * total_acr)
 
+        # v3.11.9 — kondisi ke-10 "BOM 0" (user: "analisa BOM 0 di kolom
+        # CEK bila ACR = 0 dan ada Saldo SO"): Total ACR sebulan (Σ 9.ACR
+        # 1..H) NOL PERSIS — sistem tidak mencatat pemakaian apa pun —
+        # namun SO(H) tercatat POSITIF → stok mengendap tanpa perputaran
+        # sistem: BOM (Bill of Material) nihil, selisih tak bisa
+        # diverifikasi lewat penjualan. so_h > 0 otomatis berarti baris
+        # SO tercatat (fill-0 pivot: tak direkam → 0 → tak lolos guard).
+        # Prioritas PALING BAWAH (di bawah ACR to BOM): kasus khusus
+        # tanpa pemakaian — label lain yang juga terpicu lebih actionable.
+        cond_bom0 = (total_acr == 0) & (so_h > 0)
+
         # v3.9.19 — kondisi ke-0 "Promix 04" (PRIORITAS PERTAMA):
         # SO pasangan ini bersumber BUKAN "input so harian" (mis. promix
         # 04 dine in / take away — SO turunan sistem penjualan) → pola
@@ -2447,6 +2468,7 @@ class DeviasiView(tk.Frame):
             (cond_drastis, "Turun Drastis"),
             (cond_naik, "Naik Drastis"),
             (cond_acr, "ACR to BOM"),
+            (cond_bom0, "BOM 0"),
         )
         cek = np.array(
             [" \u00b7 ".join(lbl for c, lbl in _CEK_COND_LABELS
@@ -2557,12 +2579,63 @@ class DeviasiView(tk.Frame):
                         _com_txt[_i] = (f"{COM_RENDAH_LABEL} "
                                         f"({_fmt_selisih_gap(-_gap)})")
 
-        if any(ana) or _po_seg.any() or any(_com_txt):
+        # v3.11.9 — SEGME "Beda dari Resto Lain" (user: "deviasi yang beda
+        # dari resto lain (mis. surplus sendiri dan bulanan juga surplus)"):
+        # pasangan ini searah DUA-DUANYA — deviasi(H) DAN deviasi bulan lalu
+        # sama-sama surplus / sama-sama defisit (dua-duanya non-zero non-NaN)
+        # — sementara ≥2 resto lain utk barang+SATUAN yang sama BERLAWANAN
+        # arah (deviasi mereka berlawanan tanda) DAN TIDAK ADA satu pun
+        # resto lain yang searah → perilaku resto ini menyendiri (bukan
+        # pola barang lintas-resto — mis. master harga/satuan salah).
+        # Perlu FILE deviasi bulan lalu (⚖) — tanpa file (lalu_map kosong)
+        # syarat "bulanan juga searah" tak terverifikasi → segmen MATI
+        # SOPAN (mirror analisa lalu→kini). Hanya bila len(idxs) ≥ 3 (self
+        # + ≥2 resto lain pembanding). Resto lain ber-deviasi 0/NaN dianggap
+        # NETRAL (bukan searah, bukan berlawanan — tak memveto).
+        _br_txt = np.full(n, "", dtype=object)
+        if lalu_map:
+            _grp_br: dict = {}
+            for _i, (_b, _s) in enumerate(zip(
+                    barang_s.to_numpy(),
+                    pivot["SATUAN"].astype(str).to_numpy())):
+                _grp_br.setdefault((_b, _s), []).append(_i)
+            for _idxs in _grp_br.values():
+                if len(_idxs) < 3:
+                    continue
+                for _i in _idxs:
+                    _d0 = float(deviasi[_i])
+                    _l0 = float(dev_lalu[_i])
+                    if (np.isnan(_d0) or np.isnan(_l0)
+                            or _d0 == 0.0 or _l0 == 0.0):
+                        continue
+                    if (_d0 > 0.0) != (_l0 > 0.0):
+                        continue     # self harus searah dua-duanya
+                    _same = 0
+                    _opp = 0
+                    for _j in _idxs:
+                        if _j == _i:
+                            continue
+                        _dj = float(deviasi[_j])
+                        if np.isnan(_dj) or _dj == 0.0:
+                            continue
+                        if (_dj > 0.0) == (_d0 > 0.0):
+                            _same += 1
+                        else:
+                            _opp += 1
+                    if _same == 0 and _opp >= 2:
+                        _side = "Surplus" if _d0 > 0.0 else "Defisit"
+                        _oside = "Defisit" if _d0 > 0.0 else "Surplus"
+                        _br_txt[_i] = (
+                            f"Beda dari Resto Lain ({_side} \u00b7 "
+                            f"{_opp} resto lain {_oside})")
+
+        if any(ana) or _po_seg.any() or any(_com_txt) or any(_br_txt):
             cek = np.array(
                 [" \u00b7 ".join(p for p in (c,
                                              POTENSI_PO_LABEL if po else "",
-                                             ct, a) if p)
-                 for c, po, ct, a in zip(cek, _po_seg, _com_txt, ana)],
+                                             ct, br, a) if p)
+                 for c, po, ct, br, a in zip(cek, _po_seg, _com_txt,
+                                             _br_txt, ana)],
                 dtype=object)
 
         result = pd.DataFrame({
@@ -3099,6 +3172,8 @@ class DeviasiView(tk.Frame):
                 tags.append("cek_naik")
             elif cek_val == "ACR to BOM":
                 tags.append("cek_acr")
+            elif cek_val == "BOM 0":                     # v3.11.9
+                tags.append("cek_bom0")
             # v3.9.61 — tanpa tag band kelompok (sekat warna dihapus —
             # user: "hilangkan warna untuk sekat visual tiap grup nama
             # barang"); tag tersisa hanya pewarnaan afektif (minus/nol/

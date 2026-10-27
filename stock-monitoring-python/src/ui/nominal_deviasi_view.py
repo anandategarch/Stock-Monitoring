@@ -135,6 +135,9 @@ class NominalDeviasiView(tk.Frame):
         # pairs; user: "di tab nominal deviasi ini kok beda ya kuantiti
         # deviasi nya dngan yang di tab deviasi gr atau deviasi pcs").
         self.saldo_sistem_map: dict = {}
+        # v3.11.9 — jumlah pasangan non-deviasi yang dikecualikan oleh
+        # deviasi_only (hitung_nominal_pairs attrs) — dipakai status.
+        self._nondev_dropped: int | None = None
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
@@ -535,9 +538,18 @@ class NominalDeviasiView(tk.Frame):
         # v3.9.34 — logika inti di nominal_common (port persis v3.9.32/33)
         # v3.11.8 — + saldo_sistem_map (override 42.17 — konsistensi
         # kuantiti dgn tab Deviasi GR/PCS).
+        # v3.11.9 — deviasi_only=True (user: "Nominal Deviasi hanya
+        # kategori benar-benar deviasi ... intinya nama barang nya ada
+        # di file 22.05 itu kategori deviasi"): pasangan non-deviasi
+        # (barang tanpa baris 9.ACR & kategori ∉ rekap deviasi)
+        # dikecualikan; jumlahnya disimpan utk status (jujur, bukan
+        # lenyap senyap).
         grouped = hitung_nominal_pairs(df, h, self.harga_map,
                                        self.konversi_map,
-                                       self.saldo_sistem_map)
+                                       self.saldo_sistem_map,
+                                       deviasi_only=True)
+        self._nondev_dropped = (grouped.attrs.get("deviasi_only_dropped")
+                                if grouped is not None else None)
         if grouped is None or grouped.empty:
             # tanpa baris 3.DEVIASI tanggal H (perilaku lama)
             self._result_df = None
@@ -639,8 +651,17 @@ class NominalDeviasiView(tk.Frame):
         supaya jumlah pra-filter tak basi)."""
         col_sel = st["col_sel"]
         if result is None or result.empty:
+            # v3.11.9 — jalur kosong + pasangan non-deviasi dikecualikan →
+            # jumlah tetap dinyatakan (jujur; fixture tanpa 9.ACR sama
+            # sekali → semua pasangan terfilter → pesan menjelaskan).
+            _st0 = f"Tidak ada baris DEVIASI tanggal {h}."
+            _nd0 = getattr(self, "_nondev_dropped", None)
+            if _nd0:
+                _st0 += (f" · {fmt_int_id(int(_nd0))} pasangan non-deviasi "
+                         f"dikecualikan (kategori bukan deviasi & tak ada "
+                         f"di 22.05)")
             return {"items": [], "neg_cells": [], "total_cells": [],
-                    "status": f"Tidak ada baris DEVIASI tanggal {h}.",
+                    "status": _st0,
                     "total_chip": ""}
 
         # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
@@ -740,6 +761,14 @@ class NominalDeviasiView(tk.Frame):
                   f"{h}")
         if n_no_harga:
             status += f" · {fmt_int_id(n_no_harga)} tanpa harga"
+        # v3.11.9 — transparansi deviasi_only: pasangan non-deviasi
+        # (kategori bukan deviasi & tak ada di 22.05/9.ACR) dikecualikan
+        # dari tab ini — jumlahnya dinyatakan (jujur, bukan lenyap).
+        _nd = getattr(self, "_nondev_dropped", None)
+        if _nd:
+            status += (f" · {fmt_int_id(int(_nd))} pasangan non-deviasi "
+                       f"dikecualikan (kategori bukan deviasi & tak ada "
+                       f"di 22.05)")
         # v3.9.42 — audit 61-b P2: chip TOTAL memakai format tabel
         # (v3.9.51: nominal → Currency Rp; qty tetap fmt lama —
         # dulu fmt_int_id (dibulatkan) → chip ≠ baris TOTAL di

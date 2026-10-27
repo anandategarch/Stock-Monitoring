@@ -212,6 +212,7 @@ from .widgets import (
     CELL_TAGS_SUPPORTED,
     FLASH_MS,  # v3.9.59 — kanon durasi status flash (bonus, agent B)
     KATEGORI_REKAP_VALUES,  # v3.9.49 — default kategori Rekap Mentah
+    AccentButton,  # v3.11.9 — tombol Tutup popup ⛶ seksi analisa
     Card,
     ColumnManager,
     EmptyState,
@@ -1087,22 +1088,17 @@ class InSelisihView(tk.Frame):
         fbody = fcard.body()
 
         # v3.9.27 — MODE HITUNG: 📅 Bulan Ini (default) | 📆 Lalu + Ini.
-        # SegmentBar (bukan tk opsi lain) — pola mode PIVOT PER 🏪/📅;
-        # nama atribut sengaja `mode_bar` (BUKAN `mode_seg` — nama lama
-        # dihapus v3.6 dan ditegaskan tidak boleh ada lagi oleh test §13).
-        # v3.9.60 — SATU BARIS kontrol (MODE HITUNG + TANGGAL + opsi):
-        # dulu 2 baris terpisah (~+28px) — bagian penghematan tinggi
-        # konten tab rekap (lihat komentar _render_resto_scores); catatan
-        # '(default: bulan ini saja)' dilepas (segment sudah
-        # meng-ekspresikan mode aktif).
+        # v3.11.9 — SEGMENTBAR MODE HITUNG DIHAPUS DARI UI (user: "pada
+        # rekap selisih in ... Hapus semua aja yang lain juga biar clean"
+        # — kotak kontrol MODE HITUNG/BASIS SELISIH/BARIS KONTEKS & chips
+        # meta dibersihkan): _on_mode_change TETAP hidup sbg jalur
+        # PROGRAMATIK (pemulihan filter settings.json 'mode_lalu_ini' +
+        # test §37) — behavior identik, tanpa widget. Nama atribut lama
+        # `mode_bar` sengaja TIDAK dihidupkan (kontrak test §13); kedua
+        # pemakaian lama (load_data/restore_filter_state) sudah guarded
+        # getattr-None.
         r0 = tk.Frame(fbody, bg=C_CARD)
         r0.pack(fill="x")
-        tk.Label(r0, text="MODE HITUNG", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left")
-        self.mode_bar = SegmentBar(
-            r0, ["📅 Bulan Ini", "📆 Lalu + Ini"], bg=C_CARD,
-            command=self._on_mode_change)
-        self.mode_bar.pack(side="left", padx=(6, 14))
 
         # v3.10 — MODE TAMPILAN: 📋 Tabel (default) | 📈 Analisa (user:
         # "gali potensi analisa di tab rekap selisih in") — 6 seksi
@@ -1436,15 +1432,19 @@ class InSelisihView(tk.Frame):
         self._cached_base_audit = None
 
     def _on_mode_change(self, idx: int):
-        """v3.9.27 — toggle MODE HITUNG (SegmentBar). idx 0 = 📅 Bulan Ini
-        (default), 1 = 📆 Lalu + Ini. Ganti varian audit + rentang tanggal
-        + refresh (KPI chips ikut varian lewat _render_kpi_chips).
+        """v3.9.27 — toggle MODE HITUNG. idx 0 = 📅 Bulan Ini (default),
+        1 = 📆 Lalu + Ini. Ganti varian audit + rentang tanggal + refresh
+        (KPI chips ikut varian lewat _render_kpi_chips).
         v3.11.1 — default start = −25 (HARI PERTAMA blok rekap lalu —
         rekap lalu selalu 25•..akhir bulan). Semantik rentang KRONOLOGIS
         (audit 12-c2 B1): −25 = "mulai hari 25"; −31 = hari TERAKHIR
         bulan lalu (bukan lagi "semua" numerik-min lama — default lama
         −lalu_len justru menyembunyikan 25•..30• di bawah filter baru).
-        User: "tanggal tampilkan urut yaitu 25,26 sampai tanggal hari ini"."""
+        User: "tanggal tampilkan urut yaitu 25,26 sampai tanggal hari ini".
+        v3.11.9 — JALUR PROGRAMATIK (SegmentBar dihapus dari UI — user:
+        "biar clean"): dipanggil restore_filter_state (settings.json key
+        'mode_lalu_ini') & test §37; kedua cabang rentang tetap di-reset
+        ("1" / "−25") supaya konsisten dgn mode — behavior identik."""
         self._mode_bulan_lalu = (idx == 1)
         self._apply_audit_mode()
         self._render_kpi_chips()
@@ -1472,14 +1472,48 @@ class InSelisihView(tk.Frame):
                 self._refresh()
 
     def _apply_view_mode(self):
-        """v3.10 — pasang/lepas panel sesuai MODE TAMPILAN aktif."""
+        """v3.10 — pasang/lepas panel sesuai MODE TAMPILAN aktif.
+        v3.11.9 — mode 📈 Analisa kini MENYEMBUNYIKAN kartu ringkasan
+        (KPI chips + SKOR RESTO + strip barang — user: "Hapus semua aja
+        yang lain juga biar clean"): panel analisa memakai seluruh
+        tinggi konten. Mode 📋 memulihkan URUTAN AWAL (barang → skor →
+        kpi, masing-masing before anchor managed berikutnya — pola
+        before= renderer); zona tanpa konten tetap tersembunyi (mirror
+        renderer kosong); saat ⤢ expander aktif kartu milik expander
+        (skip — pola _render_resto_scores)."""
         if self._view_analisa:
             self._tcard.pack_forget()
+            self.kpi_card.pack_forget()
+            self._skor_zone.pack_forget()
+            self._barang_zone.pack_forget()
             self._analisa_card.pack(fill="both", expand=True,
                                     padx=12, pady=(10, 0))
         else:
             self._analisa_card.pack_forget()
             self._tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+            if not getattr(self._expander, "expanded", False):
+                def _has_content(z):
+                    if z is self.kpi_card:
+                        return bool(self.kpi_inner.winfo_children())
+                    return bool(z.winfo_children())
+
+                for _zone, _cands in (
+                        (self._barang_zone, (self._tcard,)),
+                        (self._skor_zone, (self._barang_zone, self._tcard)),
+                        (self.kpi_card,
+                         (self._skor_zone, self._barang_zone, self._tcard))):
+                    if not _has_content(_zone):
+                        continue     # zona tanpa konten tetap tersembunyi
+                    _anchor = None
+                    for _c in _cands:
+                        if _c.winfo_manager() == "pack":
+                            _anchor = _c
+                            break
+                    if _anchor is not None:
+                        _zone.pack(fill="x", padx=12, pady=(10, 0),
+                                   before=_anchor)
+                    else:
+                        _zone.pack(fill="x", padx=12, pady=(10, 0))
 
     def _default_kategori_value(self) -> "str | None":
         """v3.9.22 — nilai KATEGORI 'Deviasi' persis seperti tertulis di
@@ -1611,16 +1645,14 @@ class InSelisihView(tk.Frame):
         # format (pipeline v3.11.5 maupun legacy pra-v3.10) — chip BASIS
         # SELISIH tak lagi membedakan basis. _basis_v310 tetap dideteksi
         # utk GATE chip COM MINUS (kolom v3.10 hadir → angka COM ada).
+        # v3.11.9 — chip MODE HITUNG & BASIS SELISIH DIHAPUS (user:
+        # "Hapus semua aja yang lain juga biar clean" — kotak informasi
+        # redundan; mode tidak lagi bisa diganti dari UI — jalur
+        # programatik _on_mode_change).
         _basis_v310 = bool(
             self.audit_df is not None
             and "Qty SO Kemarin" in getattr(self.audit_df, "columns", []))
         chips = [
-            # v3.9.27 — chip mode di depan: varian audit yang menopang
-            # angka-angka di bawahnya (Bulan Ini = baris negatif dibuang).
-            ("MODE HITUNG",
-             "📅 BULAN INI" if not self._mode_bulan_lalu else "📆 LALU + INI",
-             "#0e7490"),
-            ("BASIS SELISIH", "BM REKAP (BM−IN)", "#0f766e"),
             ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
             ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
             ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
@@ -1676,6 +1708,12 @@ class InSelisihView(tk.Frame):
         # Analisa melepas tabel card (before=_tcard unmapped → TclError);
         # pilih kandidat pertama yang masih managed (_skor_zone → _tcard
         # → _analisa_card), tanpa before bila tak ada (empty state awal).
+        # v3.11.9 — mode 📈 Analisa: kartu KPI DISSEMBUNYIKAN (user:
+        # "biar clean" — konten tetap dibangun supaya segar saat toggle
+        # balik 📋).
+        if self._view_analisa:
+            self.kpi_card.pack_forget()
+            return
         _anchor = None
         for _cand in (self._skor_zone, self._tcard, self._analisa_card):
             if _cand.winfo_manager() == "pack":
@@ -2719,10 +2757,37 @@ class InSelisihView(tk.Frame):
         "memburuk ↘": "#b91c1c", "membaik ↗": "#15803d",
         "stabil →": "#64748b"}
 
+    # v3.11.9 — 6 seksi analisa: (key, nama builder, judul, subjudul).
+    # key = field payload worker (_compute_analisa); dipakai render utama
+    # + popup perbesar ⛶ (_open_analisa_section).
+    _ANALISA_SEC_META: ClassVar[tuple] = (
+        ("umur", "_as_umur", "⏳ 1 · UMUR GANTUNG (AGING)",
+         ("berapa lama selisih menunggu — sejak tanggal kejadian ke "
+          "tanggal data terakhir")),
+        ("resto", "_as_resto", "🏆 2 · LEADERBOARD RESTO — Σ|Selisih IN|",
+         "trend: paruh awal vs akhir periode (median tanggal)"),
+        ("sistemik", "_as_sistemik", "🧭 3 · SISTEMIK vs LOKAL",
+         "barang = ≥3 resto (master/sistemik) · <3 resto (ops lokal)"),
+        ("resolve", "_as_resolve", "♻️ 4 · RESOLVE-RATE",
+         ("pasangan pernah gantung yang baris TERAKHIR-nya sudah 0 = "
+          "teratasi")),
+        ("anomali", "_as_anomali", "🔎 5 · ANOMALI ΔSO",
+         "kenaikan/penurunan stok fisik yang tak menjelaskan diri"),
+        ("com_minus", "_as_comminus", "📉 6 · COM MINUS — pemakaian negatif",
+         ("COM = SO(t−1) + IN − BK − SO(t) < 0 → barang 'muncul dari "
+          "mana-mana' (sinyal input SO)")),
+    )
+
     def _render_analisa(self, payload: dict):
         """v3.10 — bangun ulang panel 📈 ANALISA dari payload worker
         (6 seksi — lihat _compute_analisa). Dipanggil _render_rows saat
-        mode aktif & _on_view_mode_change (payload cache)."""
+        mode aktif & _on_view_mode_change (payload cache).
+
+        v3.11.9 — BERSIH + PERBESAR (user: "Hapus semua aja yang lain
+        juga biar clean"): chips meta 7-kartu + label 'konteks:' DIHAPUS
+        — panel tinggal judul + 6 seksi ber-scroll; TIAP seksi punya
+        tombol ⛶ PERBESAR (popup 80%×80% layar, skala font/bar besar —
+        lihat _open_analisa_section)."""
         zone = self._analisa_card
         for w in zone.winfo_children():
             w.destroy()
@@ -2738,45 +2803,6 @@ class InSelisihView(tk.Frame):
         tk.Label(head, text="📈 ANALISA REKONSILIASI — Potensi Temuan",
                  bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
             side="left")
-        tk.Label(head, text=(
-            "konteks: rentang tanggal + ⧩ + MODE HITUNG aktif · "
-            "checkbox 'Hanya Selisih ≠ 0' diabaikan"),
-            bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(side="right")
-
-        # --- meta chips (mini) — 7 kartu grid 4-per-baris ---------------
-        chips = [
-            ("BARIS KONTEKS", fmt_int_id(m["n_konteks"]), "#0f766e"),
-            ("BARIS GANTUNG", fmt_int_id(m["n_gantung"]),
-             "#dc2626" if m["n_gantung"] else "#16a34a"),
-            ("Σ|SELISIH IN|", _fmt_num(m["sum_abs"]), "#c65911"),
-            ("RESTO × BARANG",
-             f"{fmt_int_id(m['n_resto'])} × {fmt_int_id(m['n_barang'])}",
-             "#0f766e"),
-            ("BASIS SELISIH",
-             # v3.11.5 — rumus lama dipulihkan: chip selalu BM REKAP;
-             # m["basis_v310"] tetap dipakai utk gate seksi 5 ANOMALI ΔSO
-             # (kolom ΔSO terisi), BUKAN lagi utk teks basis selisih.
-             "BM REKAP (BM−IN)", "#0f766e"),
-            ("COM MINUS",
-             f"{fmt_int_id(m['n_com_minus'])} ({_fmt_num(m['sum_com_minus'])})",
-             "#dc2626" if m["n_com_minus"] else "#16a34a"),
-            ("PANJANG BULAN", m.get("periode") or "—", "#64748b"),
-        ]
-        chipbox = tk.Frame(zone, bg=C_CARD)
-        chipbox.pack(fill="x", padx=14, pady=(4, 2))
-        _last = (len(chips) - 1) // 4
-        for _i, (_lab, _val, _col) in enumerate(chips):
-            b = tk.Frame(chipbox, bg="#f8fafc",
-                         highlightbackground="#e2e8f0",
-                         highlightthickness=1)
-            b.grid(row=_i // 4, column=_i % 4, padx=(0, 8),
-                   pady=(0, 4 if _i // 4 < _last else 0), sticky="w")
-            tk.Label(b, text=_lab, bg="#f8fafc", fg=C_TEXT_MUTED,
-                     font=font(7, "bold")).pack(anchor="w", padx=8,
-                                                pady=(2, 0))
-            tk.Label(b, text=_val, bg="#f8fafc", fg=_col,
-                     font=font(9, "bold")).pack(anchor="w", padx=8,
-                                                pady=(0, 2))
 
         # --- body scrollable (pola listwrap SKOR RESTO) -----------------
         bodywrap = tk.Frame(zone, bg=C_CARD)
@@ -2793,23 +2819,30 @@ class InSelisihView(tk.Frame):
         cv.bind("<Configure>",
                 lambda e: cv.itemconfigure(_winid, width=cv.winfo_width()))
 
-        def _sec(title, subtitle=""):
-            sec = tk.Frame(inner, bg=C_CARD,
-                           highlightbackground="#e2e8f0",
-                           highlightthickness=1)
-            sec.pack(fill="x", pady=(0, 8))
-            h = tk.Frame(sec, bg="#f8fafc")
-            h.pack(fill="x")
-            tk.Label(h, text=title, bg="#f8fafc", fg=C_HEADER,
-                     font=font(9, "bold")).pack(side="left", padx=10,
-                                                pady=4)
-            if subtitle:
-                tk.Label(h, text=subtitle, bg="#f8fafc",
-                         fg=C_TEXT_MUTED, font=font(8)).pack(
-                    side="right", padx=10)
-            body = tk.Frame(sec, bg=C_CARD)
-            body.pack(fill="x", padx=10, pady=(2, 8))
-            return body
+        _line, _muted = self._analisa_helpers(big=False)
+        for _key, _meth, _title, _sub in self._ANALISA_SEC_META:
+            _b = self._analisa_sec(
+                inner, _title, _sub, big=False,
+                on_enlarge=(lambda k=_key: self._open_analisa_section(
+                    payload, k)))
+            getattr(self, _meth)(_b, payload, _line, _muted, False)
+
+        # roda halus di canvas analisa (pola skor-zone: 1 notch = ±40px)
+        try:
+            cv.configure(yscrollincrement=40)
+            enable_smooth_wheel_list(cv)
+        except (tk.TclError, AttributeError):
+            pass
+
+    # ------------------------------------------------ ANALISA HELPERS (v3.11.9)
+    def _analisa_helpers(self, big: bool = False):
+        """v3.11.9 — closure (_line, _muted) utk seksi analisa; big=True
+        (popup ⛶ Perbesar): font 8/9 → 10/11, lebar kolom ×1,35, bar
+        proporsional 120 → 200, tinggi bar 6 → 8."""
+        _fs = 10 if big else 8
+        _fsb = 11 if big else 9
+        _wscale = 1.35 if big else 1.0
+        _bscale = 200.0 / 120.0 if big else 1.0
 
         def _line(parent, texts, widths, bold=False, fg=None, bg=C_CARD,
                   bar=None, bar_bg="#64748b"):
@@ -2817,51 +2850,150 @@ class InSelisihView(tk.Frame):
             row.pack(fill="x", pady=(0, 1))
             for txt, w in zip(texts, widths):
                 tk.Label(row, text=str(txt), bg=bg,
-                         fg=(fg or C_HEADER), width=w, anchor="w",
-                         padx=4, font=font(8, "bold" if bold else
-                                           "normal")).pack(side="left")
+                         fg=(fg or C_HEADER),
+                         width=max(1, int(w * _wscale)), anchor="w",
+                         padx=4, font=font(_fsb if bold else _fs)).pack(
+                    side="left")
             if bar is not None:
-                tk.Frame(row, bg=bar_bg, height=6,
-                         width=max(4, int(bar))).pack(
+                tk.Frame(row, bg=bar_bg, height=8 if big else 6,
+                         width=max(4, int(bar * _bscale))).pack(
                     side="left", padx=(8, 0), pady=(5, 0))
             return row
 
         def _muted(parent, txt):
             tk.Label(parent, text=txt, bg=C_CARD, fg=C_TEXT_MUTED,
-                     font=font(8)).pack(anchor="w", pady=(2, 0))
+                     font=font(_fs)).pack(anchor="w", pady=(2, 0))
 
-        # == 1. UMUR GANTUNG =============================================
-        b1 = _sec("⏳ 1 · UMUR GANTUNG (AGING)",
-                  "berapa lama selisih menunggu — sejak tanggal kejadian "
-                  "ke tanggal data terakhir")
+        return _line, _muted
+
+    def _analisa_sec(self, parent, title, subtitle, big, on_enlarge=None):
+        """v3.11.9 — bingkai SATU seksi analisa: header (judul + tombol
+        ⛶ Perbesar + subjudul) + body. on_enlarge None (popup besar /
+        tanpa perbesar) → tombol tak dibuat (popup tak menumpuk popup)."""
+        sec = tk.Frame(parent, bg=C_CARD,
+                       highlightbackground="#e2e8f0",
+                       highlightthickness=1)
+        sec.pack(fill="x", pady=(0, 8))
+        h = tk.Frame(sec, bg="#f8fafc")
+        h.pack(fill="x")
+        tk.Label(h, text=title, bg="#f8fafc", fg=C_HEADER,
+                 font=font(11 if big else 9, "bold")).pack(
+            side="left", padx=10, pady=4)
+        if on_enlarge is not None:
+            GhostButton(h, text="⛶ Perbesar",
+                        command=on_enlarge).pack(side="right", padx=8,
+                                                 pady=3)
+        if subtitle:
+            tk.Label(h, text=subtitle, bg="#f8fafc",
+                     fg=C_TEXT_MUTED,
+                     font=font(9 if big else 8)).pack(
+                side="right", padx=10)
+        body = tk.Frame(sec, bg=C_CARD)
+        body.pack(fill="x", padx=10, pady=(2, 8))
+        return body
+
+    def _open_analisa_section(self, payload: dict, key: str):
+        """v3.11.9 — popup PERBESAR satu seksi analisa (user: "tiap
+        section bisa diperbesar (⛶)"): Toplevel 80%×80% layar (cap
+        1600×900), band header gelap (pola DetailsPopup) + body
+        scrollable skala BESAR (font/bar ×1,35 — _analisa_helpers
+        big=True); Esc / tombol Tutup menutup. Payload = snapshot saat
+        popup dibuka (refresh berikutnya tak mengubah popup terbuka)."""
+        parent = self.winfo_toplevel()
+        _meta = next((x for x in self._ANALISA_SEC_META if x[0] == key),
+                     None)
+        _title = (_meta[2] if _meta else key)
+        win = tk.Toplevel(parent)
+        win.title(f"Analisa — {_title}")
+        win.configure(bg=C_BG)
+        try:
+            sw = max(int(win.winfo_screenwidth()), 1024)
+            sh = max(int(win.winfo_screenheight()), 640)
+            pw = min(1600, int(sw * 0.80))
+            ph = min(900, int(sh * 0.80))
+            px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
+            py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
+            px = max(0, min(px, sw - pw))
+            py = max(0, min(py, sh - ph))
+            win.geometry(f"{pw}x{ph}+{px}+{py}")
+        except tk.TclError:
+            win.geometry("1200x800")
+        win.transient(parent)
+        with contextlib.suppress(tk.TclError):
+            win.grab_set()
+
+        header = tk.Frame(win, bg=C_HEADER)
+        header.pack(fill="x")
+        head_in = tk.Frame(header, bg=C_HEADER)
+        head_in.pack(fill="x", padx=16, pady=12)
+        tk.Label(head_in, text="📈 Analisa (diperbesar)", bg=C_HEADER,
+                 fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
+        tk.Label(head_in, text=_title, bg=C_HEADER, fg="#f1f5f9",
+                 font=font(12, "bold"), wraplength=1100,
+                 justify="left").pack(anchor="w", pady=(2, 0))
+        AccentButton(head_in, text="Tutup (Esc)",
+                     command=win.destroy).pack(side="right", anchor="ne")
+
+        bodywrap = tk.Frame(win, bg=C_BG)
+        bodywrap.pack(fill="both", expand=True, padx=12, pady=12)
+        cv = tk.Canvas(bodywrap, bg=C_CARD, highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(bodywrap, orient="vertical", command=cv.yview)
+        inner = tk.Frame(cv, bg=C_CARD)
+        _winid = cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        inner.bind("<Configure>",
+                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>",
+                lambda e: cv.itemconfigure(_winid, width=cv.winfo_width()))
+
+        _line, _muted = self._analisa_helpers(big=True)
+        _sub = (_meta[3] if _meta else "")
+        _b = self._analisa_sec(inner, _title, _sub, big=True,
+                               on_enlarge=None)
+        if _meta is not None:
+            getattr(self, _meta[1])(_b, payload, _line, _muted, True)
+
+        try:
+            cv.configure(yscrollincrement=44)
+            enable_smooth_wheel_list(cv)
+        except (tk.TclError, AttributeError):
+            pass
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.focus_set()
+
+    # ------------------------------------- seksi builders (v3.11.9 port)
+    def _as_umur(self, body, payload, _line, _muted, big):
+        """Seksi 1 — UMUR GANTUNG (port konten v3.10; param _line/_muted/
+        big supaya dipakai render utama & popup ⛶)."""
         if payload.get("umur"):
-            _line(b1, ("RENTANG UMUR", "BARIS", "Σ|SELISIH|"),
+            _line(body, ("RENTANG UMUR", "BARIS", "Σ|SELISIH|"),
                   (22, 10, 16), bold=True, fg=C_TEXT_MUTED)
             _mx = max((n for _, n, _ in payload["umur"]), default=1) or 1
             for label, n, s in payload["umur"]:
-                _line(b1, (label, fmt_int_id(n), _fmt_num(s)),
+                _line(body, (label, fmt_int_id(n), _fmt_num(s)),
                       (22, 10, 16), bar=120 * n / _mx,
                       bar_bg="#c65911")
             um = payload.get("umur_max")
             if um:
-                _muted(b1, f"tertua: {fmt_int_id(um['umur'])} hari — "
-                           f"{um['barang']} @ {um['resto']} "
-                           f"tgl {um['tgl']} "
-                           f"(selisih {_fmt_num(um['selisih'])})")
+                _muted(body, f"tertua: {fmt_int_id(um['umur'])} hari — "
+                             f"{um['barang']} @ {um['resto']} "
+                             f"tgl {um['tgl']} "
+                             f"(selisih {_fmt_num(um['selisih'])})")
         else:
-            _muted(b1, "tidak ada baris gantung di konteks ini ✓")
+            _muted(body, "tidak ada baris gantung di konteks ini ✓")
 
-        # == 2. LEADERBOARD RESTO + TREND ================================
-        b2 = _sec("🏆 2 · LEADERBOARD RESTO — Σ|Selisih IN|",
-                  "trend: paruh awal vs akhir periode (median tanggal)")
+    def _as_resto(self, body, payload, _line, _muted, big):
+        """Seksi 2 — LEADERBOARD RESTO + TREND."""
         if payload.get("resto"):
-            _line(b2, ("RESTO", "ITEM", "TGL", "Σ|SELISIH|", "SHARE",
-                       "TREND"),
+            _line(body, ("RESTO", "ITEM", "TGL", "Σ|SELISIH|", "SHARE",
+                         "TREND"),
                   (26, 8, 7, 13, 9, 12), bold=True, fg=C_TEXT_MUTED)
             _mx2 = max((d["sum_abs"] for d in payload["resto"]),
                        default=1.0) or 1.0
             for i, d in enumerate(payload["resto"]):
-                _line(b2, (
+                _line(body, (
                     f"#{i + 1}  {d['resto']}",
                     fmt_int_id(d["n_items"]),
                     fmt_int_id(d["n_dates"]),
@@ -2875,17 +3007,15 @@ class InSelisihView(tk.Frame):
                     bar=120 * d["sum_abs"] / _mx2,
                     bar_bg="#b91c1c" if i == 0 else "#64748b")
         else:
-            _muted(b2, "tidak ada resto bermasalah di konteks ini ✓")
+            _muted(body, "tidak ada resto bermasalah di konteks ini ✓")
 
-        # == 3. SISTEMIK vs LOKAL ========================================
+    def _as_sistemik(self, body, payload, _line, _muted, big):
+        """Seksi 3 — SISTEMIK vs LOKAL."""
         s3 = payload.get("sistemik") or {}
-        b3 = _sec("🧭 3 · SISTEMIK vs LOKAL",
-                  "barang = ≥3 resto (master/sistemik) · <3 resto (ops "
-                  "lokal)")
         n_sis = s3.get("n_baris_sistemik", 0)
         n_lok = s3.get("n_baris_lokal", 0)
         _n_tot = (n_sis + n_lok) or 1
-        _line(b3, (
+        _line(body, (
             (f"SISTEMIK: {fmt_int_id(n_sis)} baris "
              f"({n_sis * 100 / _n_tot:.0f}%)"),
             (f"LOKAL: {fmt_int_id(n_lok)} baris "
@@ -2893,96 +3023,89 @@ class InSelisihView(tk.Frame):
             (34, 30), bold=True,
             fg="#b45309" if n_sis else "#15803d")
         if s3.get("items"):
-            _line(b3, ("BARANG", "RESTO", "BARIS", "Σ|SELISIH|"),
+            _line(body, ("BARANG", "RESTO", "BARIS", "Σ|SELISIH|"),
                   (30, 8, 8, 14), bold=True, fg=C_TEXT_MUTED)
             _mx3 = max((d["sum_abs"] for d in s3["items"]),
                        default=1.0) or 1.0
             for d in s3["items"]:
-                _line(b3, (d["barang"], fmt_int_id(d["n_resto"]),
-                           fmt_int_id(d["n_baris"]), _fmt_num(d["sum_abs"])),
+                _line(body, (d["barang"], fmt_int_id(d["n_resto"]),
+                             fmt_int_id(d["n_baris"]),
+                             _fmt_num(d["sum_abs"])),
                       (30, 8, 8, 14), bar=100 * d["sum_abs"] / _mx3,
                       bar_bg="#b45309")
         else:
-            _muted(b3, "tidak ada barang gantung lintas ≥3 resto ✓")
+            _muted(body, "tidak ada barang gantung lintas ≥3 resto ✓")
 
-        # == 4. RESOLVE-RATE =============================================
+    def _as_resolve(self, body, payload, _line, _muted, big):
+        """Seksi 4 — RESOLVE-RATE (bar dua-warna; popup besar _W 340)."""
         r4 = payload.get("resolve") or {}
-        b4 = _sec("♻️ 4 · RESOLVE-RATE",
-                  "pasangan pernah gantung yang baris TERAKHIR-nya sudah "
-                  "0 = teratasi")
         rate = r4.get("rate")
         if rate is not None:
             # bar progres dua-warna (hijau teratasi / merah masih)
-            barf = tk.Frame(b4, bg=C_CARD)
+            barf = tk.Frame(body, bg=C_CARD)
             barf.pack(anchor="w", pady=(2, 4))
-            _W = 240
+            _W = 340 if big else 240
             tk.Frame(barf, bg="#16a34a", height=10,
                      width=max(4, int(_W * rate))).pack(side="left")
             tk.Frame(barf, bg="#dc2626", height=10,
                      width=max(4, _W - int(_W * rate))).pack(side="left")
             tk.Label(barf, text=f"  {rate * 100:.0f}%",
                      bg=C_CARD, fg="#15803d",
-                     font=font(10, "bold")).pack(side="left")
-        _line(b4, (
+                     font=font(12 if big else 10, "bold")).pack(side="left")
+        _line(body, (
             f"PERNAH GANTUNG: {fmt_int_id(r4.get('pernah', 0))} pasangan",
             f"TERATASI: {fmt_int_id(r4.get('teratasi', 0))}",
             f"MASIH: {fmt_int_id(r4.get('masih', 0))}"),
             (30, 18, 16), bold=True)
-        _muted(b4, f"hari bersih (tanpa gantung): "
-                   f"{fmt_int_id(r4.get('hari_bersih', 0))} dari "
-                   f"{fmt_int_id(r4.get('n_tgl', 0))} tanggal teramati")
+        _muted(body, f"hari bersih (tanpa gantung): "
+                     f"{fmt_int_id(r4.get('hari_bersih', 0))} dari "
+                     f"{fmt_int_id(r4.get('n_tgl', 0))} tanggal teramati")
 
-        # == 5. ANOMALI ΔSO ==============================================
+    def _as_anomali(self, body, payload, _line, _muted, big):
+        """Seksi 5 — ANOMALI ΔSO."""
         a5 = payload.get("anomali") or {}
-        b5 = _sec("🔎 5 · ANOMALI ΔSO",
-                  "kenaikan/penurunan stok fisik yang tak menjelaskan diri")
-        if m["basis_v310"]:
-            _line(b5, (
-                (f"ΔSO naik TANPA IN: {fmt_int_id(a5.get('naik_tanpa_in', 0))}"),
+        m = (payload or {}).get("meta") or {}
+        if m.get("basis_v310"):
+            _line(body, (
+                (f"ΔSO naik TANPA IN: "
+                 f"{fmt_int_id(a5.get('naik_tanpa_in', 0))}"),
                 (f"ΔSO turun TANPA BK/IN: "
                  f"{fmt_int_id(a5.get('turun_tanpa_bk', 0))}"),
-                (f"ΔSO tak diketahui: {fmt_int_id(a5.get('dso_unknown', 0))}")),
+                (f"ΔSO tak diketahui: "
+                 f"{fmt_int_id(a5.get('dso_unknown', 0))}")),
                 (26, 26, 22), bold=True,
                 fg="#b45309" if (a5.get("naik_tanpa_in")
                                  or a5.get("turun_tanpa_bk")) else "#15803d")
             if a5.get("top"):
-                _line(b5, ("RESTO", "BARANG", "TGL", "ΔSO"),
+                _line(body, ("RESTO", "BARANG", "TGL", "ΔSO"),
                       (14, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
                 for d in a5["top"]:
-                    _line(b5, (d["resto"], d["barang"],
-                               fmt_int_id(d["tgl"]), _fmt_num(d["dso"])),
+                    _line(body, (d["resto"], d["barang"],
+                                 fmt_int_id(d["tgl"]), _fmt_num(d["dso"])),
                           (14, 30, 7, 12),
                           fg=("#b91c1c" if d["dso"] < 0 else "#0f766e"))
         else:
-            _muted(b5, "format data lama — kolom ΔSO tak tersedia "
-                       "(jalankan pipeline v3.10 utk analisis ΔSO)")
+            _muted(body, "format data lama — kolom ΔSO tak tersedia "
+                         "(jalankan pipeline v3.10 utk analisis ΔSO)")
 
-        # == 6. COM MINUS =================================================
+    def _as_comminus(self, body, payload, _line, _muted, big):
+        """Seksi 6 — COM MINUS (pemakaian negatif)."""
         c6 = payload.get("com_minus") or {}
-        b6 = _sec("📉 6 · COM MINUS — pemakaian negatif",
-                  "COM = SO(t−1) + IN − BK − SO(t) < 0 → barang "
-                  "'muncul dari mana-mana' (sinyal input SO)")
+        m = (payload or {}).get("meta") or {}
         if c6.get("n"):
-            _line(b6, (f"{fmt_int_id(c6['n'])} baris",
-                       f"Σ|COM| {_fmt_num(c6.get('sum', 0.0))}"),
+            _line(body, (f"{fmt_int_id(c6['n'])} baris",
+                         f"Σ|COM| {_fmt_num(c6.get('sum', 0.0))}"),
                   (16, 20), bold=True, fg="#dc2626")
-            _line(b6, ("RESTO", "BARANG", "TGL", "COM"),
+            _line(body, ("RESTO", "BARANG", "TGL", "COM"),
                   (14, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
             for d in c6.get("top") or []:
-                _line(b6, (d["resto"], d["barang"], fmt_int_id(d["tgl"]),
-                           _fmt_num(d["com"])),
+                _line(body, (d["resto"], d["barang"],
+                             fmt_int_id(d["tgl"]), _fmt_num(d["com"])),
                       (14, 30, 7, 12), fg="#b91c1c")
         else:
-            _muted(b6, "tidak ada COM negatif di konteks ini ✓"
-                       if m["basis_v310"] else
-                       "kolom COM tak tersedia (format data lama)")
-
-        # roda halus di canvas analisa (pola skor-zone: 1 notch = ±40px)
-        try:
-            cv.configure(yscrollincrement=40)
-            enable_smooth_wheel_list(cv)
-        except (tk.TclError, AttributeError):
-            pass
+            _muted(body, "tidak ada COM negatif di konteks ini ✓"
+                   if m.get("basis_v310") else
+                   "kolom COM tak tersedia (format data lama)")
 
     # --------------------------------------------------- SKOR RESTO (F3) --
     _SKOR_RANK_BG = ("#fef3c7", "#e2e8f0", "#fffbeb")   # emas/perak/perunggu lembut
@@ -3144,6 +3267,12 @@ class InSelisihView(tk.Frame):
             # MATI PERMANEN (semua _refresh berikut early-return) sampai
             # restart app. Pilih kandidat anchor pertama yang masih managed
             # (pola _render_kpi_chips v3.10); tanpa before bila tak ada.
+            # v3.11.9 — mode 📈 Analisa: papan disembunyikan TOTAL (user:
+            # "biar clean" — konten tetap dibangun supaya segar saat
+            # toggle balik 📋; _apply_view_mode yang re-pack).
+            if self._view_analisa:
+                zone.pack_forget()
+                return
             _anchor = None
             for _cand in (self._tcard, self._analisa_card):
                 if _cand.winfo_manager() == "pack":
@@ -3238,6 +3367,12 @@ class InSelisihView(tk.Frame):
         if not getattr(self._expander, "expanded", False):
             # saat ⤢ diperbesar (kartu disembunyikan), JANGAN di-pack
             # ulang — TableExpander yang mengelola restore (pola skor).
+            # v3.11.9 — mode 📈 Analisa: strip disembunyikan TOTAL (user:
+            # "biar clean"; konten tetap dibangun — mirror _render_resto_
+            # scores; _apply_view_mode yang re-pack saat balik 📋).
+            if self._view_analisa:
+                zone.pack_forget()
+                return
             for _cand in (self._tcard, self._analisa_card):
                 if _cand.winfo_manager() == "pack":
                     zone.pack(fill="x", padx=12, pady=(10, 0),

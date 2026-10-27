@@ -409,6 +409,9 @@ class NominalRestoView(tk.Frame):
         # kategori (dihitung _compute_resto; dipakai pesan status jujur
         # saat kategori menghabiskan semua baris).
         self._n_dev_h_unfiltered = 0
+        # v3.11.9 — jumlah pasangan non-deviasi yang dikecualikan
+        # deviasi_only (agregasi pairs attrs) — dipakai status.
+        self._nondev_dropped: int | None = None
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (pola v3.2)
@@ -1343,7 +1346,10 @@ class NominalRestoView(tk.Frame):
         # saat ganti anak tab / filter kategori anak tab).
         self._noharga_df = pasangan_tanpa_harga_global(
             df, h, self.harga_map, self.konversi_map,
-            self.saldo_sistem_map)
+            self.saldo_sistem_map,
+            deviasi_only=True)   # v3.11.9 — mirror tab utama (global utk
+                                 # kategori anak tab, tapi pasangan
+                                 # non-deviasi tetap dikecualikan)
         # v3.9.59 — FIX 2e-03: hitung PRA-kategori (baris 3.DEVIASI@H
         # di data mentah) — utk pesan status jujur di jalur render kosong.
         try:
@@ -1420,7 +1426,12 @@ class NominalRestoView(tk.Frame):
             self._lalu_extra.append((f"Lalu {_lab}", _lab, _wk))
         g, pairs = agregasi_nominal_per_resto(
             df, h, self.harga_map, self.konversi_map,
-            self.saldo_sistem_map)
+            self.saldo_sistem_map,
+            deviasi_only=True)   # v3.11.9 — user: "Nominal Deviasi hanya
+                                 # kategori benar-benar deviasi"
+        # jumlah pasangan non-deviasi dikecualikan (status jujur)
+        self._nondev_dropped = (pairs.attrs.get("deviasi_only_dropped")
+                                if pairs is not None else None)
         if g.empty:
             self._result_df = None
             self._pairs_df = None
@@ -1579,7 +1590,15 @@ class NominalRestoView(tk.Frame):
                     f"DEVIASI tanggal {h} lolos filter aktif "
                     f"(KATEGORI: {self._kategori_sel}).")
             else:
-                status = f"Tidak ada baris DEVIASI tanggal {h}."
+                # v3.11.9 — semua pasangan terfilter deviasi_only →
+                # jujur sebut jumlahnya (bukan menyalahkan tanggal H).
+                _nd0 = getattr(self, "_nondev_dropped", None)
+                if _nd0:
+                    status = (f"0 resto · {fmt_int_id(int(_nd0))} pasangan "
+                              "non-deviasi dikecualikan (kategori bukan "
+                              "deviasi & tak ada di 22.05).")
+                else:
+                    status = f"Tidak ada baris DEVIASI tanggal {h}."
             return {"items": [], "neg_cells": [], "total_cells": [],
                     "status": status, "total_chip": ""}
 
@@ -1710,6 +1729,13 @@ class NominalRestoView(tk.Frame):
             status += f" · KATEGORI {self._kategori_sel}"
         if n_neg:
             status += f" · {fmt_int_id(n_neg)} resto minus"
+        # v3.11.9 — transparansi deviasi_only (mirror tab 💰 mode Nominal):
+        # pasangan non-deviasi dikecualikan — jumlahnya dinyatakan.
+        _nd = getattr(self, "_nondev_dropped", None)
+        if _nd:
+            status += (f" · {fmt_int_id(int(_nd))} pasangan non-deviasi "
+                       "dikecualikan (kategori bukan deviasi & tak ada "
+                       "di 22.05)")
         # v3.9.63 — jumlah tanpa harga GLOBAL (anak tab — kolom 'Tanpa
         # Harga' dihapus dari tabel; user: "dan itu buat anak tab baru").
         if _nh_total:

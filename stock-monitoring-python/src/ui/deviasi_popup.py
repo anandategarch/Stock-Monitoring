@@ -103,12 +103,19 @@ from .widgets import (
 # PCS: Tanggal, SO, Saldo Akhir, Deviasi, COM, IN, Nomor, Nomor PO"):
 # Tanggal → SO → Saldo Akhir → Deviasi → COM → IN → Nomor → Nomor PO
 # (dulu Tanggal, Saldo Akhir, SO, IN, Nomor, Nomor PO, COM, Deviasi).
+# v3.11.9 — TIGA kolom baru (user: "popup ... baris key H ... ACR per
+# tanggal + Avg COM & Avg ACR (rata-rata 1..H−1) — hanya di baris H"):
+# ACR (pemakaian sistem 9.ACR per tanggal) + Avg COM / Avg ACR (diisi
+# CUMA di baris Tanggal H — baris lain kosong).
 COLUMNS = [
     ("Tanggal", 76, "e"),
     ("SO", 110, "e"),
     ("Saldo Akhir", 110, "e"),
     ("Deviasi", 110, "e"),
     ("COM", 100, "e"),
+    ("ACR", 90, "e"),
+    ("Avg COM", 92, "e"),
+    ("Avg ACR", 92, "e"),
     ("IN", 110, "e"),
     ("Nomor", 200, "w"),
     ("Nomor PO", 190, "w"),
@@ -126,6 +133,10 @@ _H_ROW_BG = "#fef3c7"   # sama dgn HIGHLIGHT_BG deviasi_view (v3.9.18)
 _JENIS_SALDO = "2.SALDO AKHIR"
 _JENIS_SO = "1.SO"
 _JENIS_IN = "4.IN"
+
+# v3.11.9 — JENIS pemakaian sistem (ACR) — kolom popup baru (mirror
+# deviasi_view "9.ACR" / com_analisa).
+_JENIS_ACR = "9.ACR"
 
 # v3.9.25 — JENIS input formula COM (persis jenis_needed
 # laporan_deviasi_view._compute_com_matrix / pivot 6.PEMAKAIAN).
@@ -425,8 +436,10 @@ class DeviasiPopup(tk.Toplevel):
             else:
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")
             has_neg = False
-            # v3.9.25 — COM ikut minus merah per-cell (kolom numerik)
-            for col in ("Saldo Akhir", "SO", "IN", "COM", "Deviasi"):
+            # v3.9.25 — COM ikut minus merah per-cell (kolom numerik);
+            # v3.11.9 — ACR + Avg COM / Avg ACR ikut (kolom numerik baru).
+            for col in ("Saldo Akhir", "SO", "IN", "COM", "ACR", "Avg COM",
+                        "Avg ACR", "Deviasi"):
                 if _is_neg_display(rec.get(col, "")):
                     has_neg = True
                     if self._cell_tags:
@@ -448,6 +461,17 @@ class DeviasiPopup(tk.Toplevel):
             status += " \u00b7 \u2022 = bulan lalu"
         if self._h_label:
             status += f" \u00b7 H={self._h_label}"
+        # v3.11.9 — info rata-rata COM/ACR jendela 1..H−1 (baris key H):
+        # jumlah hari valid (SO tercatat kedua ujung — mirror com_analisa).
+        _attrs = getattr(rows, "attrs", None) or {}
+        _avg_h = _attrs.get("avg_h")
+        _avg_days = _attrs.get("avg_days")
+        if _avg_h is not None and _avg_days is not None:
+            try:
+                status += (f" \u00b7 rata-rata tgl 1\u2013{int(_avg_h) - 1}: "
+                           f"{int(_avg_days)} hari valid")
+            except (TypeError, ValueError):
+                pass
         # v3.9.59 — 2d-03: simpan status dasar utk pemulihan flash copy
         self._base_status = status
         self.status_var.set(status)
@@ -800,9 +824,110 @@ def _compute_com_series(df: pd.DataFrame, nama_barang: str,
     return com
 
 
+def _acr_series(df: pd.DataFrame, nama_barang: str, nama_resto: str,
+                satuan: str | None = None) -> dict:
+    """v3.11.9 — ACR (pemakaian sistem, JENIS 9.ACR) per tanggal utk 1
+    pasangan: {tanggal(float) → Σ nilai} (baris dobel dijumlahkan;
+    satuan-scoped — pola FIX 35-b, konsisten dgn kolom COM popup)."""
+    if df is None or df.empty:
+        return {}
+    mask = (_col_code_mask(df, "Nama Barang", nama_barang)
+            & _col_code_mask(df, "NAMA RESTO", nama_resto)
+            & df["JENIS"].isin((_JENIS_ACR,)).to_numpy())
+    if satuan is not None:
+        mask &= _col_code_mask(df, "SATUAN", satuan)
+    sub = df[mask]
+    if sub.empty:
+        return {}
+    sub = sub.assign(
+        _t=pd.to_numeric(sub["Tanggal"], errors="coerce"),
+        _v=pd.to_numeric(sub["NILAI"], errors="coerce"),
+    ).dropna(subset=["_t", "_v"])
+    if sub.empty:
+        return {}
+    g = sub.groupby("_t")["_v"].sum()
+    return {float(t): float(v) for t, v in g.items()}
+
+
+def _pair_presence(df: pd.DataFrame, nama_barang: str, nama_resto: str,
+                   jenis: str, satuan: str | None = None) -> set:
+    """v3.11.9 — set tanggal(float) yang punya BARIS JENIS utk pasangan
+    (presence — membedakan 'baris ada bernilai 0' dari 'tidak direkam',
+    mirror com_analisa _mat(..., presence=True))."""
+    if df is None or df.empty:
+        return set()
+    mask = (_col_code_mask(df, "Nama Barang", nama_barang)
+            & _col_code_mask(df, "NAMA RESTO", nama_resto)
+            & df["JENIS"].isin((jenis,)).to_numpy())
+    if satuan is not None:
+        mask &= _col_code_mask(df, "SATUAN", satuan)
+    sub = df[mask]
+    if sub.empty:
+        return set()
+    tgl = pd.to_numeric(sub["Tanggal"], errors="coerce")
+    return {float(t) for t in tgl.dropna().tolist()}
+
+
+def _com_acr_avg(df: pd.DataFrame, nama_barang: str, nama_resto: str,
+                 satuan: str | None, h) -> tuple:
+    """v3.11.9 — rata-rata COM & ACR jendela 1..H−1 utk baris key H
+    (user: "kolom ACR per tanggal + Avg COM & Avg ACR (rata-rata
+    1..H−1) — hanya di baris H").
+
+    Hari VALID = hari yang COM-nya bermakna (mirror com_analisa):
+    baris 1.SO tercatat di KEDUA ujung (t−1 & t); t=1 → SALDO AWAL(1)
+    ada ATAU 1.SO penutupan bulan lalu (kolom negatif kronologis
+    terakhir ber-SO). ACR dirata-rata pada hari valid yang SAMA
+    (window tunggal apple-to-apple; tanggal tanpa baris 9.ACR
+    menyumbang 0 — pemakaian sistem nihil).
+
+    Return (avg_com, avg_acr, n_valid); n_valid == 0 → (nan, nan, 0)
+    — baris H tetap tampil TANPA angka rata-rata (jujur, statistik
+    tipis — pola degrade repo)."""
+    try:
+        h_i = int(h)
+    except (TypeError, ValueError):
+        return (float("nan"), float("nan"), 0)
+    if h_i < 2:
+        return (float("nan"), float("nan"), 0)
+
+    com = _compute_com_series(df, nama_barang, nama_resto, satuan)
+    if not com:
+        return (float("nan"), float("nan"), 0)
+    acr = _acr_series(df, nama_barang, nama_resto, satuan)
+    so_pres = _pair_presence(df, nama_barang, nama_resto, _JENIS_SO, satuan)
+    sa_pres = _pair_presence(df, nama_barang, nama_resto, _JENIS_SA, satuan)
+
+    # kolom negatif kronologis terakhir (penutupan bulan lalu) — basis
+    # sah alternatif com(1) (mirror com_analisa prev_neg).
+    col_keys = _com_col_keys(df)
+    neg = [t for t in col_keys if float(t) < 0]
+    prev_neg = float(neg[-1]) if neg else None
+
+    n, s_com, s_acr = 0, 0.0, 0.0
+    for t in range(1, h_i):
+        tf = float(t)
+        if tf not in so_pres:
+            continue
+        if t == 1:
+            ok_prev = ((tf in sa_pres)
+                       or (prev_neg is not None and prev_neg in so_pres))
+        else:
+            ok_prev = float(t - 1) in so_pres
+        if not ok_prev:
+            continue
+        n += 1
+        s_com += float(com.get(tf, 0.0))
+        s_acr += float(acr.get(tf, 0.0))
+    if n == 0:
+        return (float("nan"), float("nan"), 0)
+    return (s_com / n, s_acr / n, n)
+
+
 def build_popup_rows(data: pd.DataFrame, nama_barang: str,
                      nama_resto: str, satuan: str | None = None,
-                     in_detail: pd.DataFrame | None = None
+                     in_detail: pd.DataFrame | None = None,
+                     h: int | None = None
                      ) -> pd.DataFrame:
     """Pure pandas (thread-safe) — siapkan baris popup per Tanggal.
 
@@ -842,9 +967,18 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     pasangan eksternal/campuran/ada-di-32.24 — po_keterangan; level
     PASANGAN, tidak dibedakan per grup satuan — sama dgn segmen CEK
     tabel utama). in_detail None/pemanggil lama → kolom kosong semua.
+
+    v3.11.9 — kolom "ACR" + "Avg COM" / "Avg ACR" (h diberikan):
+    ACR = Σ 9.ACR per tanggal (pemakaian sistem); Avg COM / Avg ACR
+    = rata-rata COM / ACR jendela 1..H−1 hari-valid — DIISI CUMA di
+    baris Tanggal H (user: "hanya di baris H"; baris lain kosong);
+    n hari valid terekspos via out.attrs["avg_days"] / ["avg_h"] utk
+    footer status. h None/pemanggil lama → kolom ACR tetap (data-
+    driven), kolom Avg kosong semua.
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
-                                  "Nomor", "Nomor PO", "COM", "Deviasi",
+                                  "Nomor", "Nomor PO", "COM", "ACR",
+                                  "Avg COM", "Avg ACR", "Deviasi",
                                   "Keterangan PO"])
     if data is None or data.empty:
         return empty
@@ -929,6 +1063,25 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     # 4 JENIS → NaN (kolom kosong, bukan 0).
     out["COM"] = [_com_by_t.get(t, float("nan")) for t in out["_t"]]
 
+    # v3.11.9 — ACR per tanggal (pemakaian sistem 9.ACR); tanggal tanpa
+    # baris 9.ACR → NaN (kolom kosong — bedakan 'pemakaian 0' tak
+    # lazim dari 'tidak ada baris'; mirror COM).
+    _acr_by_t = _acr_series(df, nama_barang, nama_resto, satuan)
+    out["ACR"] = [_acr_by_t.get(t, float("nan")) for t in out["_t"]]
+
+    # v3.11.9 — Avg COM / Avg ACR: diisi CUMA di baris Tanggal H.
+    out["Avg COM"] = float("nan")
+    out["Avg ACR"] = float("nan")
+    _avg_days = None
+    if h is not None:
+        _avg_com, _avg_acr, _avg_days = _com_acr_avg(
+            df, nama_barang, nama_resto, satuan, h)
+        _h_mask = out["_t"].astype(float) == float(h)
+        if _h_mask.any():
+            _i = int(out.index[_h_mask][0])
+            out.at[_i, "Avg COM"] = _avg_com
+            out.at[_i, "Avg ACR"] = _avg_acr
+
     # v3.11 — KETERANGAN PO per tanggal (potensi PO belum dibuat —
     # logika & scope sama dgn segmen CEK tabel; level pasangan).
     # Perhitungan di-cache per identitas (data, in_detail) → popup
@@ -945,12 +1098,21 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         .sort_values("_k") \
         .drop(columns=["_k"]).reset_index(drop=True)
 
-    # format angka Indonesia (string — siap render)
-    for col in ("Saldo Akhir", "SO", "IN", "COM", "Deviasi"):
+    # format angka Indonesia (string — siap render); v3.11.9 — ACR +
+    # Avg COM / Avg ACR ikut (NaN → '').
+    for col in ("Saldo Akhir", "SO", "IN", "COM", "ACR", "Avg COM",
+                "Avg ACR", "Deviasi"):
         out[col] = out[col].map(DeviasiPopup._fmt_num)
 
-    return out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor",
-                "Nomor PO", "COM", "Deviasi", "Keterangan PO"]]
+    res = out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor",
+               "Nomor PO", "COM", "ACR", "Avg COM", "Avg ACR",
+               "Deviasi", "Keterangan PO"]]
+    # v3.11.9 — ekspos info rata-rata utk footer popup (set pada frame
+    # FINAL — pandas attrs tidak selalu propagasi lewat seleksi kolom).
+    if h is not None:
+        res.attrs["avg_days"] = _avg_days
+        res.attrs["avg_h"] = h
+    return res
 
 
 def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
@@ -971,7 +1133,7 @@ def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
         title += f"  ({satuan})"
 
     rows = build_popup_rows(data, nama_barang, nama_resto, satuan=satuan,
-                            in_detail=in_detail)
+                            in_detail=in_detail, h=h)
     h_label = _fmt_tanggal(h) if h is not None else ""
     popup = DeviasiPopup(parent, title, rows, h_label=h_label)
     return popup

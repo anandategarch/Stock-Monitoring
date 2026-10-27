@@ -242,7 +242,8 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.8"  # v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 (user: "indentifikasi manual sumber nya dari 42.17 dari folder itu ya C:\KERJA\1. RESTO\9.NEW QUERY\6. 42.17. ada filter juga biar aku enak cari nama barang nya dan ada kategori nya juga dari sumber 42.17. Terus hanya ambil yang ada saldo nya aja ya") — daftar kiri tab ⚙️ Config kini dari SALDO SISTEM 42.17 folder '6. 42.17' (append1 → audit_result['kategori_4217_df']; fn_4217 param keep_kategori → kolom KATEGORI ikut keluar): SEMUA barang bersaldo (agregat lintas resto, Σ saldo) + kolom Kategori 42.17 ('Kategori Barang' file) + Kategori app efektif (manual 5d > rekap 5c > master 5) + FILTER PENCARIAN live (nama barang + kedua kategori) + penanda BARU (barang pertama kali muncul di 42.17 — file kategori_seen.json sejajar config.json; run pertama menulis baseline tanpa penanda; jawaban user: "setelah mapping kategori manual apakah ada update terkait kategori barang baru?" — YA, tiap run daftar menyegarkan otomatis) + baris tanpa kategori app di-highlight amber + tombol 🎯 kini bisa juga MENIMPA barang ber-kategori (prioritas 5d). (2) COM RENDAH (user: "enggak hanya com tinggi ya com rendah juga masuk analisa") — com_analisa kini DUA ARAH: d(H) > median → "COM Tinggi (+x)", d(H) < median → "COM Rendah (−x)" (sistem mencatat pemakaian > fisik; satu pasangan satu arah, strict dua sisi; com_gap_map gabungan + com_tinggi_map/com_rendah_map turunan; legend + entri #0f766e). (3) REKAP SELISIH IN — PAPAN "🎯 SELISIH TERBANYAK — BARANG × RESTO" (user: "pada rekap selisih in bisa gak tampil selisih terbanyak nama barang + resto") — leaderboard pasangan per Σ|Selisih IN| (kolom TERBESAR baris-tunggal + tanggal, Σ Selisih bersih, Σ|selisih|, n tgl) konteks terlihat (rentang tanggal + ⧩ + Resto — klik papan resto menyempitkan papan barang ke item terburuk resto itu), TANPA filter Nama Barang supaya tak kolapse saat diklik (mirror 6d2-02), klik baris = toggle ⧩ Nama Barang, cap ±4 baris scrollable (pola v3.9.60), +N lainnya. (4) FIX KUANTITI NOMINAL ≠ TAB DEVIASI GR/PCS (user: "di tab nominal deviasi ini kok beda ya kuantiti deviasi nya dngan yang di tab deviasi gr atau deviasi pcs") — ROOT CAUSE: tab 🧮/mode 💰 memakai baris 3.DEVIASI (SO − running-stock rekap) TANPA override saldo sistem 42.17 yang sejak v3.11 menimpa kolom Sistem tab 📦/🧩 → beda tiap snapshot 42.17 ≠ running-stock; FIX: nominal_common.hitung_nominal_pairs + param saldo_sistem_map (pasangan di peta → Qty = SO_H − saldo 42.17, PERSIS kolom Deviasi GR/PCS; kunci ternormalisasi mirror deviasi_view v3.11.1; pasangan di luar peta → 3.DEVIASI apa adanya) diteruskan app → mode 💰 + tab 🧮 + popup rincian + anak tab Tanpa Harga.
+APP_VERSION = "3.11.9"  # v3.11.9 — TUJUH permintaan user: (1) POPUP DEVIASI GR/PCS KOLOM ACR + AVG COM/AVG ACR BARIS H (user: "average COM & average ACR di popup Deviasi GR/PCS pada baris key H") — popup kini 12 kolom: ACR (pemakaian sistem 9.ACR per tanggal, satuan-scoped) + Avg COM / Avg ACR (rata-rata COM/ACR jendela 1..H−1 HARI VALID — SO tercatat kedua ujung, mirror com_analisa; t=1 basis SALDO AWAL/penutupan lalu) DIISI CUMA DI BARIS Tanggal H (baris lain kosong — user: "hanya di baris H"); footer popup menyebut n hari valid; minus merah per-cell ikut kolom baru. (2) LABEL CEK "BOM 0" (user: "analisa BOM 0 di kolom CEK bila ACR = 0 dan ada Saldo SO") — label kanonik ke-10: Total ACR sebulan (Σ 9.ACR 1..H) = 0 & SO(H) > 0 → stok mengendap tanpa perputaran sistem; prioritas paling bawah (di bawah ACR to BOM); warna slate #475569 + legend; footer 'CEK n' ikut menghitung. (3) SEGME CEK "Beda dari Resto Lain" (user: "deviasi yang beda dari resto lain (mis. surplus sendiri dan bulanan juga surplus)") — pasangan searah DUA periode (deviasi H & deviasi bulan lalu sama surplus/defisit, dua-duanya non-zero non-NaN) sementara ≥2 resto lain (barang+SATUAN sama) berlawanan arah & TIDAK ADA searah → "Beda dari Resto Lain (Surplus · 2 resto lain Defisit)"; butuh file ⚖ (tanpa file → mati sopan); resto lain dev-0/NaN = netral tak memveto; legend #a21caf. (4) AUTO FILE DEVIASI BULAN LALU (user: "auto ambil file deviasi bulan lalu dari folder C:\KERJA\1. RESTO\99.TOOLS\DATA BASE DEVIASI\DEVIASI_BULANAN, format nama file seperti '20.AGUSTUS 2026'" + "aku bisa setting jumlah file") — kartu ⚙️ Config baru: folder (entry) + Jumlah File 1..12 (spinbox — berapa bulan mundur) + 💾 Simpan (config.json key DeviasiBulananFolder/DeviasiBulananJumlah, ATOMIK); pasca-pipeline tab ⚖ otomatis memuat '20.{BULAN} {TAHUN}' (bulan dari audit_result['period'], wrap tahun; case-insensitive; ext .xlsx prioritas) — PRIORITAS di atas last-used; folder ada tapi file belum ada → status jujur (tanpa fallback diam2); guard _auto_loaded di-reset load_data (sesi data baru → auto-load baru). (5) FILTER DROPDOWN KATEGORI 42.17 (user: "ada filter juga biar aku enak cari nama barang nya") — combobox readonly di section Identifikasi Kategori Manual: Semua / kategori unik 42.17 / (Tanpa Kategori 42.17); AND dgn pencarian nama; tombol ✕ mereset keduanya. (6) NOMINAL DEVIASI HANYA KATEGORI DEVIASI (user: "intinya nama barang nya ada di file 22.05 itu kategori deviasi") — hitung_nominal_pairs/pasangan_tanpa_harga_global/agregasi_nominal_per_resto + param deviasi_only: pasangan lolos bila barang ADA di 9.ACR (file 22.05 rekap) ATAU kategori ∈ KATEGORI_REKAP_VALUES; pasangan non-deviasi dikecualikan + jumlahnya tampil di status (jujur, bukan lenyap). (7) REKAP SELISIH IN SUB-TAB 📈 ANALISA BERSIH + PERBESAR (user: "Hapus semua aja yang lain juga biar clean") — SegmentBar MODE HITUNG dihapus dari UI (mode tetap programmable _on_mode_change); chips meta KPI tanpa MODE HITUNG/BASIS SELISIH; mode 📈 menyembunyikan KPI/skor/strip; 6 section analisa masing2 ada tombol ⛶ PERBESAR (popup 80% layar, font & bar skala 1,35/1,67, Esc tutup); chips meta & label konteks dihapus dari section (clean).
+# (riwayat v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 — daftar kiri tab ⚙️ Config dari SALDO SISTEM 42.17 folder '6. 42.17' (SEMUA barang bersaldo + Kategori 42.17 + Kategori app efektif + pencarian + penanda BARU via kategori_seen.json) + tombol 🎯 mengisi/menimpa (prioritas 5d). (2) COM RENDAH — com_analisa dua arah strict ("COM Rendah (−x)" d(H) < median). (3) STRIP "🎯 SELISIH TERBANYAK — BARANG × RESTO" tab 📤 Rekap Selisih IN (klik chip = toggle ⧩). (4) FIX KUANTITI NOMINAL = SO_H − saldo sistem 42.17 (konsisten tab Deviasi GR/PCS).)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -3210,6 +3211,20 @@ class StockMonitorApp:
             "<Return>", lambda _e: self._kategori_filter_apply())
         self.kat_search_var.trace_add(
             "write", lambda *_a: self._kategori_filter_apply())
+        # v3.11.9 — FILTER DROPDOWN KATEGORI 42.17 (user: "ada filter juga
+        # biar aku enak cari nama barang nya" — pelengkap pencarian):
+        # combobox READONLY 'Semua' / kategori unik 42.17 / '(Tanpa
+        # Kategori 42.17)' — AND dgn pencarian nama (keduanya bisa aktif
+        # bersamaan); nilai disegarkan tiap rows baru (lihat
+        # _kat_4217_refresh_filter_values); tombol ✕ mereset KEDUANYA.
+        self.kat_4217filter_var = tk.StringVar(value=self._KAT_4217_FILTER_ALL)
+        self.kat_4217_filter_combo = ttk.Combobox(
+            kat_search, textvariable=self.kat_4217filter_var,
+            state="readonly", width=26)
+        self.kat_4217_filter_combo.pack(side="left", padx=(6, 0))
+        self.kat_4217_filter_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._kategori_filter_apply())
         GhostButton(kat_search, text="✕",
                     command=self._kategori_search_clear).pack(
             side="left", padx=(6, 0))
@@ -3267,6 +3282,63 @@ class StockMonitorApp:
         tk.Label(kat_inner, textvariable=self.kat_status_var, bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8)).pack(anchor="w", pady=(8, 0))
         self._refresh_kategori_manual_card()
+
+        # --- Card: Auto File Deviasi Bulan Lalu (v3.11.9) -------------------
+        # user: "auto ambil file deviasi bulan lalu dari folder C:\KERJA\
+        # 1. RESTO\99.TOOLS\DATA BASE DEVIASI\DEVIASI_BULANAN, format nama
+        # file seperti '20.AGUSTUS 2026'" + "aku bisa setting jumlah file
+        # (1..12)": setelah pipeline selesai, tab ⚖ Komparasi otomatis
+        # memuat file '20.{BULAN} {TAHUN}' N bulan mundur dari bulan data
+        # berjalan. Tersimpan config.json key DeviasiBulananFolder /
+        # DeviasiBulananJumlah (dibaca Config; kartu ini editor-nya).
+        dbul_card = tk.Frame(wrap, bg=C_CARD,
+                             highlightbackground="#e2e8f0",
+                             highlightthickness=1)
+        dbul_card.pack(fill="x", pady=(12, 0))
+        dbul_inner = tk.Frame(dbul_card, bg=C_CARD)
+        dbul_inner.pack(fill="x", padx=16, pady=(14, 16))
+
+        tk.Label(dbul_inner, text="Auto File Deviasi Bulan Lalu",
+                 bg=C_CARD, fg=C_HEADER,
+                 font=font(12, "bold")).pack(anchor="w")
+        tk.Label(dbul_inner,
+                 text="Setelah pipeline selesai, tab ⚖ Komparasi otomatis "
+                      "memuat file deviasi '20.{BULAN} {TAHUN}' (mis. "
+                      "20.AGUSTUS 2026) dari folder ini — Jumlah File = "
+                      "berapa bulan mundur dari bulan data berjalan (1–12; "
+                      "1 = hanya bulan lalu). Prioritas di atas 'file "
+                      "terakhir dipakai'; folder ada tapi file bulan tsb "
+                      "belum ada → hanya status (tidak diam2 memakai file "
+                      "lama). Diterapkan mulai run pipeline BERIKUTNYA "
+                      "setelah disimpan.",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
+                 wraplength=860, justify="left").pack(anchor="w",
+                                                     pady=(2, 8))
+
+        dbul_row = tk.Frame(dbul_inner, bg=C_CARD)
+        dbul_row.pack(fill="x")
+        self.dev_bulanan_folder_var = tk.StringVar(value="")
+        self.dev_bulanan_folder_entry = ttk.Entry(
+            dbul_row, textvariable=self.dev_bulanan_folder_var)
+        self.dev_bulanan_folder_entry.pack(side="left", fill="x",
+                                           expand=True)
+        tk.Label(dbul_row, text="Jumlah File (bulan mundur):", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="left", padx=(10, 4))
+        self.dev_bulanan_jumlah_var = tk.StringVar(value="1")
+        self.dev_bulanan_jumlah_spin = ttk.Spinbox(
+            dbul_row, from_=1, to=12, increment=1, width=5,
+            textvariable=self.dev_bulanan_jumlah_var)
+        self.dev_bulanan_jumlah_spin.pack(side="left")
+        GhostButton(dbul_row, text="💾 Simpan",
+                    command=self._dev_bulanan_save).pack(
+            side="left", padx=(10, 0))
+        self.dev_bulanan_status_var = tk.StringVar(value="—")
+        self._devbul_flash_after = None
+        tk.Label(dbul_inner, textvariable=self.dev_bulanan_status_var,
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+            anchor="w", pady=(6, 0))
+        self._dev_bulanan_load_form()
 
         # --- Card: Info Config (read-only) ---
         info_card = tk.Frame(wrap, bg=C_CARD, highlightbackground="#e2e8f0",
@@ -3440,6 +3512,19 @@ class StockMonitorApp:
     # =====================================================================
     _KAT_BLANK_TOKENS = ("", "-", "\u2014")
 
+    # v3.11.9 — filter dropdown kategori 42.17 (Identifikasi Kategori
+    # Manual): entry pertama = tanpa filter; entry khusus = baris ber-
+    # kategori 42.17 kosong (sumber 42.17 — beda dari filter KATEGORI
+    # data run di tab 📦/🧩).
+    _KAT_4217_FILTER_ALL = "Semua"
+    _KAT_4217_FILTER_BLANK = "(Tanpa Kategori 42.17)"
+
+    # v3.11.9 — default folder auto file deviasi bulan lalu (config.json
+    # tanpa key DeviasiBulananFolder → default in-memory; mirror pola
+    # Folders.setdefault Config).
+    _DEV_BULANAN_DEF_FOLDER = ("C:\\KERJA\\1. RESTO\\99.TOOLS\\DATA BASE "
+                              "DEVIASI\\DEVIASI_BULANAN")
+
     def _kategori_has_data(self) -> bool:
         """v3.11.8 — ada data daftar 42.17 (kategori_4217_df terisi dari
         run pipeline — folder '6. 42.17')?"""
@@ -3607,9 +3692,11 @@ class StockMonitorApp:
 
     def _kat_populate_4217_tree(self, rows: list | None = None):
         """Isi tree daftar 42.17 dari rows (default cache self._kat_rows)
-        dengan FILTER PENCARIAN aktif (user: "ada filter juga biar aku
-        enak cari nama barang nya") — substring case-insensitive atas
-        nama barang + kategori 42.17 + kategori app."""
+        dengan FILTER aktif (user: "ada filter juga biar aku enak cari nama
+        barang nya"): PENCARIAN substring case-insensitive atas nama barang
+        + kategori 42.17 + kategori app — DAN DROPDOWN KATEGORI 42.17
+        (v3.11.9: Semua / kategori unik / (Tanpa Kategori 42.17); AND
+        dgn pencarian — keduanya bisa aktif bersamaan)."""
         if not hasattr(self, "kat_4217_tree"):
             return
         tree = self.kat_4217_tree
@@ -3618,10 +3705,20 @@ class StockMonitorApp:
             rows = self._kat_rows
         q = (getattr(self, "kat_search_var", None) and
              self.kat_search_var.get().strip().lower()) or ""
+        _f42 = (getattr(self, "kat_4217filter_var", None)
+                and self.kat_4217filter_var.get().strip()) \
+            or self._KAT_4217_FILTER_ALL
         shown = 0
         for r in rows:
             if q and q not in " ".join(
                     (r["barang"], r["kat4217"], r["katapp"])).lower():
+                continue
+            # v3.11.9 — filter dropdown kategori 42.17 (AND dgn pencarian)
+            if _f42 == self._KAT_4217_FILTER_BLANK:
+                if r["kat4217"]:
+                    continue
+            elif _f42 != self._KAT_4217_FILTER_ALL \
+                    and r["kat4217"] != _f42:
                 continue
             tags = []
             if r["baru"]:
@@ -3637,8 +3734,29 @@ class StockMonitorApp:
             shown += 1
         if rows and not shown:
             tree.insert("", "end", values=(
-                f"(tidak ada barang cocok pencarian '{q}')", "", "", "",
-                ""))
+                f"(tidak ada barang cocok filter '{q or _f42}')", "", "",
+                "", ""))
+
+    def _kat_4217_refresh_filter_values(self, rows: list):
+        """v3.11.9 — segarkan nilai combobox filter kategori 42.17 dari
+        rows: 'Semua' + kategori unik (sorted) + '(Tanpa Kategori
+        42.17)' bila ada baris kosong. Seleksi aktif DIPERTAHANKAN bila
+        masih valid di daftar baru (stale → kembali 'Semua')."""
+        combo = getattr(self, "kat_4217_filter_combo", None)
+        if combo is None:
+            return
+        vals = [self._KAT_4217_FILTER_ALL]
+        vals.extend(sorted({r["kat4217"] for r in rows if r["kat4217"]}))
+        if any(not r["kat4217"] for r in rows):
+            vals.append(self._KAT_4217_FILTER_BLANK)
+        try:
+            if list(combo["values"]) != vals:
+                combo["values"] = vals
+            cur = self.kat_4217filter_var.get()
+            if cur not in vals:
+                self.kat_4217filter_var.set(self._KAT_4217_FILTER_ALL)
+        except tk.TclError:
+            pass     # widget mati → skip senyap
 
     def _kategori_filter_apply(self, *_args):
         """Callback pencarian (trace + Enter) — repopulasi tanpa
@@ -3647,9 +3765,13 @@ class StockMonitorApp:
             self._kat_populate_4217_tree()
 
     def _kategori_search_clear(self):
-        """Tombol ✕ — kosongkan kriteria pencarian."""
+        """Tombol ✕ — kosongkan kriteria pencarian + filter kategori
+        42.17 (v3.11.9: mereset KEDUANYA — trace pencarian memanggil
+        _kategori_filter_apply sendiri; dropdown perlu reset eksplisit)."""
         if getattr(self, "kat_search_var", None) is not None:
             self.kat_search_var.set("")
+        if getattr(self, "kat_4217filter_var", None) is not None:
+            self.kat_4217filter_var.set(self._KAT_4217_FILTER_ALL)
         self._kategori_filter_apply()
 
     def _kategori_values(self) -> list:
@@ -3683,6 +3805,9 @@ class StockMonitorApp:
         seen = self._kategori_seen_load()
         rows = self._kategori_4217_rows(seen)
         self._kat_rows = rows
+        # v3.11.9 — nilai dropdown filter kategori 42.17 disegarkan dari
+        # rows baru (seleksi valid dipertahankan).
+        self._kat_4217_refresh_filter_values(rows)
         if rows:
             cur = {self._kat_norm(r["barang"]) for r in rows}
             if seen is None:
@@ -3764,6 +3889,164 @@ class StockMonitorApp:
             return False
         self._refresh_kategori_manual_card()
         return True
+
+    # =====================================================================
+    # v3.11.9 — AUTO FILE DEVIASI BULAN LALU (tab ⚙️ Config + wiring)
+    # =====================================================================
+    def _dev_bulanan_load_form(self):
+        """Isi form kartu (folder + jumlah) dari config.json — toleran
+        (file/rusak → default; mirror _kategori_manual_map)."""
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            data = {}
+        folder = (data.get("DeviasiBulananFolder",
+                           self._DEV_BULANAN_DEF_FOLDER)
+                  if isinstance(data, dict)
+                  else self._DEV_BULANAN_DEF_FOLDER)
+        if not isinstance(folder, str) or not folder.strip():
+            folder = self._DEV_BULANAN_DEF_FOLDER
+        jumlah = (data.get("DeviasiBulananJumlah", 1)
+                  if isinstance(data, dict) else 1)
+        if isinstance(jumlah, bool) or not isinstance(jumlah, int) \
+                or not (1 <= jumlah <= 12):
+            jumlah = 1
+        if getattr(self, "dev_bulanan_folder_var", None) is not None:
+            self.dev_bulanan_folder_var.set(folder)
+            self.dev_bulanan_jumlah_var.set(str(jumlah))
+        self._dev_bulanan_status_default()
+
+    def _dev_bulanan_status_default(self):
+        """Status kartu default (folder ada/belum + jumlah)."""
+        if getattr(self, "dev_bulanan_status_var", None) is None:
+            return
+        folder = (getattr(self, "dev_bulanan_folder_var", None)
+                  and self.dev_bulanan_folder_var.get().strip()) or ""
+        try:
+            jumlah = int(self.dev_bulanan_jumlah_var.get())
+        except (TypeError, ValueError):
+            jumlah = 1
+        _ada = os.path.isdir(folder)
+        self.dev_bulanan_status_var.set(
+            f"Folder: {'✓ ada' if _ada else '✗ belum ada di komputer ini'} "
+            f"· {jumlah} bulan mundur · aktif mulai run pipeline "
+            f"berikutnya.")
+
+    def _flash_devbulanan_status(self, msg: str):
+        """Flash status kartu 2,5 dtk lalu pulih ke status default
+        (pola _flash_status popup; FLASH_MS seragam repo)."""
+        if getattr(self, "dev_bulanan_status_var", None) is None:
+            return
+        self.dev_bulanan_status_var.set(msg)
+        if getattr(self, "_devbul_flash_after", None) is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._devbul_flash_after)
+        self._devbul_flash_after = self.root.after(
+            2500, lambda: contextlib.suppress(Exception)(
+                self._dev_bulanan_status_default()))
+
+    def _dev_bulanan_save(self):
+        """💾 Simpan — tulis folder + jumlah ke config.json key
+        DeviasiBulananFolder / DeviasiBulananJumlah (read-modify-write
+        ATOMIK .bak + tmp + os.replace — mirror _kategori_manual_save;
+        key lain tak tersentuh)."""
+        folder = (getattr(self, "dev_bulanan_folder_var", None)
+                  and self.dev_bulanan_folder_var.get().strip()) or ""
+        try:
+            jumlah = int(self.dev_bulanan_jumlah_var.get())
+        except (TypeError, ValueError):
+            jumlah = 0
+        if not folder:
+            self._flash_devbulanan_status(
+                "⚠ Folder tidak boleh kosong.")
+            return
+        if not (1 <= jumlah <= 12):
+            self._flash_devbulanan_status(
+                "⚠ Jumlah File harus angka bulat 1–12.")
+            return
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}
+        except json.JSONDecodeError as e:
+            messagebox.showerror(
+                "Config Rusak",
+                f"config.json tidak bisa dibaca (JSON invalid):\n{e}",
+                parent=self.root)
+            return
+        if not isinstance(data, dict):
+            messagebox.showerror(
+                "Config Rusak",
+                "config.json rusak (akar harus objek JSON {…}).",
+                parent=self.root)
+            return
+        data["DeviasiBulananFolder"] = folder
+        data["DeviasiBulananJumlah"] = jumlah
+        backup_path = CONFIG_PATH.with_suffix(".json.bak")
+        if CONFIG_PATH.exists():
+            with contextlib.suppress(OSError):
+                shutil.copy2(CONFIG_PATH, backup_path)
+        tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, CONFIG_PATH)
+        except Exception as e:  # noqa: BLE001 — gagal tulis → dialog (pola _save_config)
+            with contextlib.suppress(Exception):
+                tmp_path.unlink(missing_ok=True)
+            messagebox.showerror(
+                "Gagal Simpan", f"Tidak bisa menulis config.json:\n{e}",
+                parent=self.root)
+            return
+        self._flash_devbulanan_status(
+            f"✓ Tersimpan — {jumlah} bulan mundur, aktif mulai run "
+            f"pipeline berikutnya (🚀 MULAI PROSES).")
+        self._append_log_batched(
+            f"\n[DEV BULANAN] Auto file deviasi bulan lalu tersimpan: "
+            f"folder '{folder}' · {jumlah} bulan mundur.\n")
+
+    def _dev_bulanan_cfg(self, audit_result):
+        """v3.11.9 — cfg utk komparasi_view._auto_bulanan_paths:
+        (folder, (tahun, bulan), jumlah) atau None (fitur mati jujur —
+        folder config tak ada / config tak terbaca; perilaku last-used
+        lama tetap jalan).
+
+        Folder + jumlah dibaca dari config.json (tersimpan — BUKAN isi
+        form yang belum disimpan); periode dari audit_result['period']
+        (bulan data berjalan; fallback bulan sekarang — mirror main.py)."""
+        folder = None
+        jumlah = 1
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                folder = data.get("DeviasiBulananFolder",
+                                  self._DEV_BULANAN_DEF_FOLDER)
+                jumlah = data.get("DeviasiBulananJumlah", 1)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(folder, str) or not folder.strip():
+            return None
+        if not os.path.isdir(folder):
+            return None
+        if isinstance(jumlah, bool) or not isinstance(jumlah, int) \
+                or not (1 <= jumlah <= 12):
+            jumlah = 1
+        period = ((audit_result or {}).get("period")
+                  if audit_result else None)
+        if not (isinstance(period, (list, tuple)) and len(period) == 2):
+            import datetime as _dt
+            _now = _dt.datetime.now()
+            period = (_now.year, _now.month)
+        try:
+            tahun, bulan = int(period[0]), int(period[1])
+        except (TypeError, ValueError):
+            return None
+        if not (1 <= bulan <= 12):
+            return None
+        return (folder, (tahun, bulan), jumlah)
 
     def _kategori_dialog(self, title: str, items: list,
                          current: str = ""):
@@ -4690,6 +4973,13 @@ class StockMonitorApp:
         # menunggu tab 📋 dibuka): kolom 'Dev. Bulan Lalu' tab 📦/🧩 butuh
         # file aktif SEBELUM user membuka tab apa pun (parse di worker —
         # anti-beku; file hilang/error → status saja, tanpa dialog).
+        # v3.11.9 — AUTO FILE BULAN LALU lebih dulu: cfg (folder config,
+        # periode data run, jumlah) diteruskan ke komparasi_view —
+        # PRIORITAS di atas last-used (maybe_auto_load_last sendiri yang
+        # memilah; folder config tak ada → cfg None → perilaku lama).
+        with contextlib.suppress(Exception):
+            self.komparasi_view._auto_bulanan_cfg = self._dev_bulanan_cfg(
+                audit_result)
         with contextlib.suppress(Exception):
             self.komparasi_view.maybe_auto_load_last()
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta

@@ -183,6 +183,34 @@ class Config:
             _km = {}
         self.KategoriManual = _km
 
+        # v3.11.9 — AUTO FILE DEVIASI BULAN LALU (user: "auto ambil file
+        # deviasi bulan lalu dari folder C:\\KERJA\\1. RESTO\\99.TOOLS\\
+        # DATA BASE DEVIASI\\DEVIASI_BULANAN, format nama file seperti
+        # '20.AGUSTUS 2026'" + "user bisa setting jumlah file (1..12)"):
+        # setelah pipeline selesai, tab ⚖ Komparasi otomatis memuat file
+        # '20.{BULAN} {TAHUN}.xlsx' utk N bulan terakhir (mundur dari
+        # bulan berjalan data). Jumlah = berapa BULAN mundur (1 = cuma
+        # bulan lalu; 12 = setahun ke belakang). Tipe salah → PERINGATAN
+        # + default (pola KategoriManual/KategoriBarang4217 audit 61-a);
+        # key tak ada → default (config lama tetap jalan).
+        _dbf = data.get("DeviasiBulananFolder",
+                        "C:\\KERJA\\1. RESTO\\99.TOOLS\\DATA BASE DEVIASI\\"
+                        "DEVIASI_BULANAN")
+        if not isinstance(_dbf, str) or not _dbf.strip():
+            print("[PERINGATAN] config 'DeviasiBulananFolder' harus string "
+                  "path folder — memakai default bawaan")
+            _dbf = ("C:\\KERJA\\1. RESTO\\99.TOOLS\\DATA BASE DEVIASI\\"
+                    "DEVIASI_BULANAN")
+        self.DeviasiBulananFolder = _dbf
+        _dbj = data.get("DeviasiBulananJumlah", 1)
+        if isinstance(_dbj, bool) or not isinstance(_dbj, int) \
+                or not (1 <= _dbj <= 12):
+            print("[PERINGATAN] config 'DeviasiBulananJumlah' harus angka "
+                  "bulat 1–12 (berapa bulan mundur file deviasi di-auto-"
+                  "muat) — memakai default 1")
+            _dbj = 1
+        self.DeviasiBulananJumlah = _dbj
+
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:
         """Return full path untuk folder key (e.g., 'RekapBerjalan')."""

@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.8", APP_VERSION == "3.11.8",
+    check("Versi = 3.11.9", APP_VERSION == "3.11.9",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -2212,11 +2212,13 @@ def main():
             else:
                 _walk_labels2(_ch, acc)
     _walk_labels2(iv.kpi_card, _kpi_labels)
-    check("(v3.11.5) KPI chip BASIS SELISIH = 'BM REKAP (BM−IN)' "
-          "(rumus lama dipulihkan — semua format basis BM−IN)",
-          "BASIS SELISIH" in _kpi_labels
-          and _kpi_labels[_kpi_labels.index("BASIS SELISIH") + 1]
-          == "BM REKAP (BM−IN)",
+    check("(v3.11.9) KPI chip MODE HITUNG & BASIS SELISIH DIHAPUS "
+          "(user: 'Hapus semua aja yang lain juga biar clean') — chip "
+          "inti tetap (TOTAL BARIS/OK/…/COM MINUS)",
+          "BASIS SELISIH" not in _kpi_labels
+          and "MODE HITUNG" not in _kpi_labels
+          and "TOTAL BARIS" in _kpi_labels
+          and "COM MINUS" in _kpi_labels,
           f"got {_kpi_labels[:12]}")
     check("(v3.10) KPI chip COM MINUS = 2 (KOPI t5 −100 + SUSU t5 −80)",
           "COM MINUS" in _kpi_labels
@@ -2261,10 +2263,19 @@ def main():
           any("tertua" in t for t in _an_labels)
           and any("KOPI BUBUK 100G" in t for t in _an_labels),
           f"got {[t for t in _an_labels if 'tertua' in t][:2]}")
-    # KPI chips tetap ter-pack saat mode analisa (anchor pack adaptif)
-    check("(v3.10) KPI card tetap tampil saat mode 📈 (anchor pack adaptif)",
-          iv.kpi_card.winfo_manager() == "pack",
-          f"got {iv.kpi_card.winfo_manager()!r}")
+    # v3.11.9 — mode 📈 kini BERSIH (user: "biar clean"): kartu KPI +
+    # papan skor + strip barang disembunyikan TOTAL (panel analisa
+    # memakai seluruh tinggi konten).
+    check("(v3.11.9) Mode 📈 BERSIH: KPI card + skor + strip barang "
+          "disembunyikan (user: 'Hapus semua aja yang lain juga biar "
+          "clean')",
+          iv.kpi_card.winfo_manager() == ""
+          and iv._skor_zone.winfo_manager() == ""
+          and iv._barang_zone.winfo_manager() == ""
+          and iv._analisa_card.winfo_manager() == "pack",
+          f"kpi={iv.kpi_card.winfo_manager()!r} "
+          f"skor={iv._skor_zone.winfo_manager()!r} "
+          f"barang={iv._barang_zone.winfo_manager()!r}")
     # toggle balik ke 📋 Tabel — tanpa recompute (payload cache)
     iv._on_view_mode_change(0)
     root.update()
@@ -5408,11 +5419,11 @@ def main():
         _row18("BRG Z", "RESTO Y", "1.SO", 25, 77.0),
     ])
     pr18 = build_popup_rows(pop_df18, "BRG X", "RESTO Y")
-    check("(v3.9.18→v3.11) Popup rows: skema 9 kolom "
-          "(Tanggal/Saldo Akhir/SO/IN/Nomor/Nomor PO/COM/Deviasi/"
-          "Keterangan PO)",
+    check("(v3.9.18→v3.11.9) Popup rows: skema 12 kolom "
+          "(v3.11.9 +ACR/Avg COM/Avg ACR — hanya baris H ber-Avg)",
           list(pr18.columns) == ["Tanggal", "Saldo Akhir", "SO", "IN",
-                                 "Nomor", "Nomor PO", "COM", "Deviasi",
+                                 "Nomor", "Nomor PO", "COM", "ACR",
+                                 "Avg COM", "Avg ACR", "Deviasi",
                                  "Keterangan PO"],
           f"got {list(pr18.columns)}")
     check("(v3.9.18) Popup rows: 3 tanggal (pasangan lain terfilter)",
@@ -5440,11 +5451,14 @@ def main():
           isinstance(pop18, DeviasiPopup))
     check("(v3.9.18) Popup judul memuat Nama Barang — Nama Resto (satuan)",
           pop18._title == "BRG X — RESTO Y  (GR)", f"got {pop18._title!r}")
-    check("(v3.9.18→v3.9.25→v3.9.55→v3.11) Popup tabel: 9 kolom persis "
-          "(URUTAN v3.9.55: Tanggal, SO, Saldo Akhir, Deviasi, COM, IN, "
-          "Nomor, Nomor PO; v3.11: + Keterangan PO — user)",
+    check("(v3.9.18→v3.9.55→v3.11.9) Popup tabel: 12 kolom persis "
+          "(URUTAN v3.9.55 + v3.11.9: Tanggal, SO, Saldo Akhir, "
+          "Deviasi, COM, ACR, Avg COM, Avg ACR, IN, Nomor, Nomor PO, "
+          "Keterangan PO — user: 'ACR per tanggal + Avg COM & Avg ACR "
+          "hanya di baris H')",
           list(pop18.tree["columns"]) == ["Tanggal", "SO", "Saldo Akhir",
-                                          "Deviasi", "COM", "IN",
+                                          "Deviasi", "COM", "ACR",
+                                          "Avg COM", "Avg ACR", "IN",
                                           "Nomor", "Nomor PO",
                                           "Keterangan PO"],
           f"got {list(pop18.tree['columns'])}")
@@ -5613,19 +5627,22 @@ def main():
           "prioritas pertama) + v3.11.7 GABUNG-SEMUA-LABEL: kondisi lain "
           "yg ikut terpicu (Beda Tanggal cabang-2 + Naik Drastis — SO "
           "30→60 melonjak 100%) kini TAMPIL sebagai segmen ' · ' (dulu "
-          "np.select hanya label pertama)",
+          "np.select hanya label pertama) + v3.11.9 label BOM 0 "
+          "(tanpa baris 9.ACR → Total ACR 0 & SO_H 60 > 0)",
           _cek29.get("BRG PROMIX") ==
-          "Promix 04 · Beda Tanggal · Naik Drastis",
+          "Promix 04 · Beda Tanggal · Naik Drastis · BOM 0",
           f"got {_cek29.get('BRG PROMIX')!r}")
     check("(v3.11.7) CEK: SO 'input so harian' → 'Beda Tanggal · Naik "
           "Drastis' (v3.9.19-3.11.6: hanya 'Beda Tanggal' — label lain "
-          "tenggelam)",
-          _cek29.get("BRG HARIAN") == "Beda Tanggal · Naik Drastis",
+          "tenggelam) + v3.11.9 BOM 0 (ACR 0 & SO_H 60)",
+          _cek29.get("BRG HARIAN") ==
+          "Beda Tanggal · Naik Drastis · BOM 0",
           f"got {_cek29.get('BRG HARIAN')!r}")
     check("(v3.11.7) CEK 'Promix 04': varian 'take away' juga Promix 04 "
           "(· Hitung Manual ikut — gabung-semua; so_m1=0 → stok W=0 & "
-          "SO_H≠0)",
-          _cek29.get("BRG TAKEAWAY") == "Promix 04 · Hitung Manual",
+          "SO_H≠0) + v3.11.9 BOM 0",
+          _cek29.get("BRG TAKEAWAY") ==
+          "Promix 04 · Hitung Manual · BOM 0",
           f"got {_cek29.get('BRG TAKEAWAY')!r}")
     _legend29 = []
     for _chip29 in _dv29b._legend.winfo_children():
@@ -6274,7 +6291,8 @@ def main():
           _dv30v1._so_source_lookup.get(("V_DUP", "R")) ==
           "input promix 04 dine in" and
           _vv30v1 is not None and
-          _vv30v1["CEK"] == "Promix 04 · Beda Tanggal · Naik Drastis",
+          _vv30v1["CEK"] ==
+          "Promix 04 · Beda Tanggal · Naik Drastis · BOM 0",
           f"src={_dv30v1._so_source_lookup.get(('V_DUP', 'R'))!r} "
           f"cek={None if _vv30v1 is None else _vv30v1['CEK']!r}")
     _top30v1.destroy()
@@ -7176,9 +7194,11 @@ def main():
     _top31r, _dv31r = _make_dv30(pd.DataFrame(_rows31r))
     _, _vv31r = _row_vals30(_dv31r, "P-H")
     check("(v3.11.7) H=25: SO tgl-25 promix → CEK Promix 04 LABEL UTAMA "
-          "+ segmen (Beda Tanggal · Naik Drastis — SO 30→60)",
+          "+ segmen (Beda Tanggal · Naik Drastis — SO 30→60) + v3.11.9 "
+          "BOM 0 (ACR 0 & SO_H > 0)",
           _vv31r is not None and
-          _vv31r["CEK"] == "Promix 04 · Beda Tanggal · Naik Drastis",
+          _vv31r["CEK"] ==
+          "Promix 04 · Beda Tanggal · Naik Drastis · BOM 0",
           f"cek={None if _vv31r is None else _vv31r['CEK']!r}")
     _dv31r.tanggal_h_var.set("24")
     _dv31r._on_tanggal_h_change()
@@ -7252,8 +7272,9 @@ def main():
     # stok lama berbasis sistem)
     check("(v3.9.27) CEK pasangan FRESH (SO nonzero di H, tanpa SO H-1): "
           "W sheet = 0 & SO_H 10 ≠ 0 → 'Hitung Manual' (port persis "
-          "kondisi 3 sheet; dulu '')",
-          _fresh32 is not None and _fresh32["CEK"] == "Hitung Manual",
+          "kondisi 3 sheet; dulu '') + v3.11.9 BOM 0 (ACR 0 & SO_H 10)",
+          _fresh32 is not None and
+          _fresh32["CEK"] == "Hitung Manual · BOM 0",
           f"cek={None if _fresh32 is None else _fresh32['CEK']!r}")
     # prioritas Promix 04 tetap di atas Beda Tanggal
     _ROWS32B = [
@@ -7265,9 +7286,9 @@ def main():
     check("(v3.11.7) Prioritas label utama utuh: Promix 04 tetap "
           "MENGALAHKAN kondisi lain (SO promix → label Promix 04 di "
           "depan; Hitung Manual ikut sbg segmen — H dinamis 24: stok W=0 "
-          "& SO_H 5 ≠ 0)",
+          "& SO_H 5 ≠ 0) + v3.11.9 BOM 0",
           _pm32 is not None and
-          _pm32["CEK"] == "Promix 04 · Hitung Manual",
+          _pm32["CEK"] == "Promix 04 · Hitung Manual · BOM 0",
           f"cek={None if _pm32 is None else _pm32['CEK']!r}")
     _top32a.destroy()
     _top32b.destroy()
@@ -7707,15 +7728,17 @@ def main():
           "Hilang dari Pencatatan · Turun Drastis",
           f"cek={_cek33(_dv33a, 'STALE')!r}")
     check("(v3.9.23) Scope analisa: dokumen balancing bertanggal 27 > "
-          "H 25 TIDAK terflag (belum termasuk analisa)",
-          _cek33(_dv33a, "FUTR") == "",
+          "H 25 TIDAK terflag (belum termasuk analisa) — v3.11.9: "
+          "'BOM 0' murni (SO 24/25 = 10 → ACR 0 & SO_H > 0)",
+          _cek33(_dv33a, "FUTR") == "BOM 0",
           f"cek={_cek33(_dv33a, 'FUTR')!r}")
     check("(v3.11.7) Prioritas Promix 04 TETAP pertama (by design "
           "v3.9.19 — SO sistem-turunan) meski pasangan JUGA punya "
           "dokumen balancing — 'Promix 04 · RI Balancing · Hitung "
-          "Manual' (urutan prioritas penuh, gabung-semua v3.11.7)",
+          "Manual' (urutan prioritas penuh, gabung-semua v3.11.7) + "
+          "v3.11.9 BOM 0",
           _cek33(_dv33a, "PROMIXRB") ==
-          "Promix 04 · RI Balancing · Hitung Manual",
+          "Promix 04 · RI Balancing · Hitung Manual · BOM 0",
           f"cek={_cek33(_dv33a, 'PROMIXRB')!r}")
     check("(v3.9.23) Tag warna cek_ri_bal terpasang (amber gelap #92400e "
           "— keluarga popup Rincian IN, terbedakan dari Kosong/Non Aktif)",
@@ -8011,9 +8034,10 @@ def main():
     _top34, _dv34 = _make_dv33(pd.DataFrame(_ROWS34), _det34)
     check("(v3.9.24) CEK kolom utama: AGUPO (dok contoh user, tgl 1 ≤ "
           "H) TERFLAG 'RI Balancing' — SEPPO (dok PO Sep tgl 20 ≤ H) "
-          "TIDAK terflag (satu periode — dulu salah-flag)",
-          _cek33(_dv34, "AGUPO") == "RI Balancing" and
-          _cek33(_dv34, "SEPPO") == "",
+          "TIDAK terflag (satu periode — dulu salah-flag); v3.11.9: "
+          "keduanya + 'BOM 0' (tanpa 9.ACR & SO_H 10 > 0)",
+          _cek33(_dv34, "AGUPO") == "RI Balancing · BOM 0" and
+          _cek33(_dv34, "SEPPO") == "BOM 0",
           f"AGUPO={_cek33(_dv34, 'AGUPO')!r} "
           f"SEPPO={_cek33(_dv34, 'SEPPO')!r}")
     _vals34 = _dv34._col_values("CEK")
@@ -8426,13 +8450,14 @@ def main():
     def _rows37():
         return len(_iv37.tree.get_children(""))
 
-    check("(v3.9.27) MODE HITUNG ada: SegmentBar mode_bar (nama LAMA "
-          "'mode_seg' tetap TIDAK ada — dihapus v3.6)",
-          hasattr(_iv37, "mode_bar") and
+    check("(v3.11.9) MODE HITUNG SegmentBar DIHAPUS dari UI (user: "
+          "'Hapus semua aja yang lain juga biar clean') — mode_bar "
+          "& mode_seg TIDAK ada (jalur programatik _on_mode_change)",
+          not hasattr(_iv37, "mode_bar") and
           not hasattr(_iv37, "mode_seg"))
     check("(v3.9.27) DEFAULT = '📅 Bulan Ini' (user: default hitung "
           "bulan ini aja)",
-          _iv37.mode_bar.active == 0 and not _iv37._mode_bulan_lalu)
+          not _iv37._mode_bulan_lalu)
     check("(v3.9.27) Default rentang 1..31 (v3.8 utuh)",
           _iv37.tgl_start_var.get() == "1" and
           _iv37.tgl_end_var.get() == "31")
@@ -8444,8 +8469,9 @@ def main():
     check("(v3.9.27) Tabel default: 2 baris (baris -25 tak ada)",
           _rows37() == 2, f"rows={_rows37()}")
 
-    # ganti mode → Lalu + Ini
-    _iv37.mode_bar._select(1)
+    # ganti mode → Lalu + Ini (v3.11.9: jalur programatik — SegmentBar
+    # dihapus dari UI; _on_mode_change identik behavior)
+    _iv37._on_mode_change(1)
     wait_view(root, _iv37)
     root.update()
     check("(v3.9.27) Mode '📆 Lalu + Ini': varian penuh aktif (3 baris "
@@ -8469,7 +8495,7 @@ def main():
           "25•" in _tgl_vals37, f"tgl={sorted(_tgl_vals37)}")
 
     # kembali ke Bulan Ini
-    _iv37.mode_bar._select(0)
+    _iv37._on_mode_change(0)
     wait_view(root, _iv37)
     root.update()
     check("(v3.9.27) Kembali '📅 Bulan Ini': varian bulan-ini + rentang "
@@ -8485,7 +8511,7 @@ def main():
     root.update()
     check("(v3.9.27) AUTO-UPGRADE: rentang negatif (−25) di mode Bulan "
           "Ini → otomatis '📆 Lalu + Ini' (baris bulan lalu ada)",
-          _iv37._mode_bulan_lalu and _iv37.mode_bar.active == 1 and
+          _iv37._mode_bulan_lalu and
           _rows37() == 3, f"rows={_rows37()}")
 
     # reset → default
@@ -8494,13 +8520,13 @@ def main():
     root.update()
     check("(v3.9.27) ✕ Reset Filter: kembali default 'Bulan Ini' + "
           "rentang 1..31 + hanya-selisih ON",
-          _iv37.mode_bar.active == 0 and
+          not _iv37._mode_bulan_lalu and
           _iv37.tgl_start_var.get() == "1" and
           _iv37.only_selisih_var.get() and
           _iv37.audit_df is _bi37)
 
     # load_data ulang → mode reset (walau sebelumnya Lalu+Ini)
-    _iv37.mode_bar._select(1)
+    _iv37._on_mode_change(1)
     wait_view(root, _iv37)
     root.update()
     _iv37.load_data(_data37, None, _ar37)
@@ -8508,7 +8534,7 @@ def main():
     root.update()
     check("(v3.9.27) load_data ulang: mode reset ke default 'Bulan "
           "Ini' (varian bulan-ini aktif)",
-          _iv37.mode_bar.active == 0 and _iv37.audit_df is _bi37)
+          not _iv37._mode_bulan_lalu and _iv37.audit_df is _bi37)
 
     # kompatibel: audit_result TANPA kunci baru → jatuh ke varian penuh
     _iv37.load_data(_data37, None,
@@ -8517,17 +8543,18 @@ def main():
     root.update()
     check("(v3.9.27) Kompatibel: audit_result TANPA df_bulan_ini → "
           "mode Bulan Ini memakai varian penuh (pemanggil lama/test)",
-          _iv37.audit_df is _full37 and _iv37.mode_bar.active == 0)
+          _iv37.audit_df is _full37 and not _iv37._mode_bulan_lalu)
 
-    # KPI chip MODE HITUNG tampil (label mode varian aktif)
+    # v3.11.9 — chip MODE HITUNG DIHAPUS (bersih); chip inti tetap.
     _kpi_txt37 = []
     for _w37 in _iv37.kpi_inner.winfo_children():
         for _ww37 in _w37.winfo_children():
             if isinstance(_ww37, tk.Label):
                 _kpi_txt37.append(str(_ww37.cget("text")))
-    check("(v3.9.27) KPI chip 'MODE HITUNG' tampil (varian aktif "
-          "terlihat)",
-          any("MODE HITUNG" in t for t in _kpi_txt37),
+    check("(v3.11.9) KPI chip 'MODE HITUNG' DIHAPUS (user: 'biar "
+          "clean') — chip inti tetap (TOTAL BARIS dsb.)",
+          not any("MODE HITUNG" in t for t in _kpi_txt37)
+          and any("TOTAL BARIS" in t for t in _kpi_txt37),
           f"kpi={_kpi_txt37}")
     _top37.destroy()
     root.update()
@@ -8651,8 +8678,9 @@ def main():
           f"got {_ok38}")
     _mw38 = _vals38(_dv38b, "MANUAL-W0")
     check("(v3.9.27) W = 0 & SO_H ≠ 0 → 'Hitung Manual' (port persis "
-          "kondisi W=0 sheet)",
-          _mw38 is not None and _mw38["CEK"] == "Hitung Manual",
+          "kondisi W=0 sheet) + v3.11.9 BOM 0 (tanpa 9.ACR & SO_H>0)",
+          _mw38 is not None and
+          _mw38["CEK"] == "Hitung Manual · BOM 0",
           f"got {_mw38}")
     # v3.9.27: W sheet = 20 (SO(24)100+IN0−BK0−OUT80) — v3.9.51 kolom
     # TAMPILAN Stok Seharusnya diganti Dev. Bulan Lalu; nilai W tetap
@@ -9768,7 +9796,15 @@ def main():
     _dn44 = pd.DataFrame([{
         "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": t,
         "JENIS": "3.DEVIASI", "NILAI": v,
-    } for b, r, s, t, v in _dev44rows])
+    } for b, r, s, t, v in _dev44rows] + [
+        # v3.11.9 — deviasi_only: 9.ACR t2 utk 3 barang supaya pasangan
+        # lolos kategori-deviasi (22.05) — view 💰 tetap menampilkan
+        # pasangan fixture lama.
+        {"Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": s,
+         "Tanggal": 2, "JENIS": "9.ACR", "NILAI": 5.0}
+        for b, s in (("AYAM FILET", "GR"), ("GULA PASIR", "KG"),
+                     ("KOPI BUBUK 100G", "PCS"))
+    ])
     _nv44.load_data(_dn44, harga_map=_hmap44, konversi_map=_kmap44)
     _nv44.ensure_refreshed()
     wait_view(root, _nv44)
@@ -10087,6 +10123,12 @@ def main():
         for b, s, v in [("AYAM FILET", "GR", 2.0),
                         ("GULA PASIR", "KG", 12.0),
                         ("KOPI BUBUK 100G", "PCS", -5.0)]
+    ] + [
+        # v3.11.9 — deviasi_only: 9.ACR t2 utk 3 barang (mirror §44).
+        {"Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": s,
+         "Tanggal": 2, "JENIS": "9.ACR", "NILAI": 5.0}
+        for b, s in (("AYAM FILET", "GR"), ("GULA PASIR", "KG"),
+                     ("KOPI BUBUK 100G", "PCS"))
     ])
     _nv45.load_data(_dn45, harga_map=_hmap45n, konversi_map=_kmap45n)
     _nv45.ensure_refreshed()
@@ -10260,13 +10302,20 @@ def main():
     _hmap46 = {"AYAM FILET": (10.0, "GR"),
                "GULA PASIR": (15.0, "GR")}
     _dn46 = pd.DataFrame([{
-        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
-        "JENIS": "3.DEVIASI", "NILAI": v,
-    } for b, r, s, v in [
-        ("AYAM FILET", "MLGPAR", "GR", 2.0),
-        ("GULA PASIR", "MLGPAR", "KG", 12.0),
-        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0),
-        ("AYAM FILET", "BDGSET", "GR", 3.0),
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": t,
+        "JENIS": j, "NILAI": v,
+    } for b, r, s, t, j, v in [
+        ("AYAM FILET", "MLGPAR", "GR", 25, "3.DEVIASI", 2.0),
+        ("GULA PASIR", "MLGPAR", "KG", 25, "3.DEVIASI", 12.0),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", 25, "3.DEVIASI", -5.0),
+        ("AYAM FILET", "BDGSET", "GR", 25, "3.DEVIASI", 3.0),
+        # v3.11.9 — deviasi_only: 9.ACR per barang (AYAM MLGPAR t1;
+        # GULA BDGSET t1; KOPI MLGPAR t2) supaya pasangan lolos filter
+        # kategori-deviasi (user: "intinya nama barang nya ada di file
+        # 22.05 itu kategori deviasi").
+        ("AYAM FILET", "MLGPAR", "GR", 1, "9.ACR", 7.0),
+        ("GULA PASIR", "BDGSET", "KG", 1, "9.ACR", 11.0),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", 2, "9.ACR", 3.0),
     ]])
     _rv46.load_data(_dn46, harga_map=_hmap46, konversi_map=_kmap46)
     _rv46.ensure_refreshed()
@@ -10608,13 +10657,20 @@ def main():
     _rv48 = _NRV48(_top48, lalu_provider=lambda: _holder48["df"])
     _rv48.pack(fill="both", expand=True)
     _dn48 = pd.DataFrame([{
-        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
-        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
-    } for b, r, s, v, k in [
-        ("AYAM FILET", "MLGPAR", "GR", 2.0, "DEVIASI"),
-        ("GULA PASIR", "MLGPAR", "KG", 12.0, "TEPAT"),
-        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0, "DEVIASI"),
-        ("AYAM FILET", "BDGSET", "GR", 3.0, "DEVIASI"),
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": t,
+        "JENIS": j, "NILAI": v, "KATEGORI": k,
+    } for b, r, s, t, j, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", 25, "3.DEVIASI", 2.0, "DEVIASI"),
+        ("GULA PASIR", "MLGPAR", "KG", 25, "3.DEVIASI", 12.0, "TEPAT"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", 25, "3.DEVIASI", -5.0,
+         "DEVIASI"),
+        ("AYAM FILET", "BDGSET", "GR", 25, "3.DEVIASI", 3.0, "DEVIASI"),
+        # v3.11.9 — deviasi_only: 9.ACR supaya pasangan lolos (AYAM t1
+        # KOPI t2 GULA t3 — GULA TEPAT tetap lolos via 22.05: anak tab
+        # 'Tanpa Harga' GLOBAL tetap memuat GULA 'satuan tak terkonversi').
+        ("AYAM FILET", "MLGPAR", "GR", 1, "9.ACR", 7.0, "DEVIASI"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", 2, "9.ACR", 3.0, "DEVIASI"),
+        ("GULA PASIR", "MLGPAR", "KG", 3, "9.ACR", 9.0, "TEPAT"),
     ]])
     # TANPA peta rasio GULA → satuan KG tak terkonversi → 'Harga Tampil'
     # '15 GR*' + nominal None (jalur keterangan popup tanpa harga).
@@ -11274,12 +11330,16 @@ def main():
     _rv50 = _NRV50(_top50, lalu_provider=lambda: _holder50["df"])
     _rv50.pack(fill="both", expand=True)
     _dn50v = pd.DataFrame([{
-        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
-        "JENIS": "3.DEVIASI", "NILAI": v,
-    } for b, r, s, v in [
-        ("AYAM FILET", "MLGPAR", "GR", 2.0),
-        ("NOLDEV", "MLGPAR", "GR", 0.0),
-        ("AYAM FILET", "BDGSET", "GR", 3.0),
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": t,
+        "JENIS": j, "NILAI": v,
+    } for b, r, s, t, j, v in [
+        ("AYAM FILET", "MLGPAR", "GR", 25, "3.DEVIASI", 2.0),
+        ("NOLDEV", "MLGPAR", "GR", 25, "3.DEVIASI", 0.0),
+        ("AYAM FILET", "BDGSET", "GR", 25, "3.DEVIASI", 3.0),
+        # v3.11.9 — deviasi_only: 9.ACR supaya pasangan lolos.
+        ("AYAM FILET", "MLGPAR", "GR", 1, "9.ACR", 5.0),
+        ("NOLDEV", "MLGPAR", "GR", 1, "9.ACR", 2.0),
+        ("AYAM FILET", "BDGSET", "GR", 1, "9.ACR", 5.0),
     ]])
     _rv50.load_data(_dn50v, harga_map=_hmap50, konversi_map=_kmap50)
     _rv50.ensure_refreshed()
@@ -12350,11 +12410,16 @@ def main():
     _rv54j = _NRV48(_top54j, lalu_provider=lambda: _fdf54j)
     _rv54j.pack(fill="both", expand=True)
     _dn54j = pd.DataFrame([{
-        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
-        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
-    } for b, r, s, v, k in [
-        ("AYAM FILET", "MLGPAR", "GR", 2.0, "DEVIASI"),
-        ("GULA PASIR", "MLGPAR", "GR", 12.0, "TEPAT"),
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": t,
+        "JENIS": j, "NILAI": v, "KATEGORI": k,
+    } for b, r, s, t, j, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", 25, "3.DEVIASI", 2.0, "DEVIASI"),
+        ("GULA PASIR", "MLGPAR", "GR", 25, "3.DEVIASI", 12.0, "TEPAT"),
+        # v3.11.9 — deviasi_only: 9.ACR utk KEDUA barang (kategori
+        # TEPAT lolos via 22.05 — pasangan GULA tetap ada utk uji
+        # konsistensi Lalu 'Rp 150.000' kategori 'Semua').
+        ("AYAM FILET", "MLGPAR", "GR", 1, "9.ACR", 7.0, "DEVIASI"),
+        ("GULA PASIR", "MLGPAR", "GR", 2, "9.ACR", 9.0, "TEPAT"),
     ]])
     _rv54j.load_data(_dn54j, harga_map={"AYAM FILET": (10.0, "GR")},
                      konversi_map={"rasio": {}, "terkecil": {}})
@@ -12600,11 +12665,16 @@ def main():
     from src.ui.nominal_resto_view import NominalRestoView as _NRV55
     _dn55 = pd.DataFrame([{
         "Nama Barang": b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
-        "Tanggal": 25, "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
-    } for b, v, k in [
-        ("AYAM FILET", 10.0, "DEVIASI"),
-        ("GULA PASIR", 5.0, "TEPAT"),
-        ("BUMBU PASTA KUAH", -84.0, None),
+        "Tanggal": t, "JENIS": j, "NILAI": v, "KATEGORI": k,
+    } for b, t, j, v, k in [
+        ("AYAM FILET", 25, "3.DEVIASI", 10.0, "DEVIASI"),
+        ("GULA PASIR", 25, "3.DEVIASI", 5.0, "TEPAT"),
+        ("BUMBU PASTA KUAH", 25, "3.DEVIASI", -84.0, None),
+        # v3.11.9 — deviasi_only: 9.ACR utk 3 barang (kategori NaN/TEPAT
+        # lolos via 22.05 — BUMBU tetap tampil di popup default DEVIASI).
+        ("AYAM FILET", 1, "9.ACR", 5.0, "DEVIASI"),
+        ("GULA PASIR", 1, "9.ACR", 5.0, "TEPAT"),
+        ("BUMBU PASTA KUAH", 1, "9.ACR", 5.0, None),
     ]])
     _top55 = tk.Toplevel(root)
     _top55.geometry("1600x900+5+5")
@@ -12829,11 +12899,16 @@ def main():
     _top56.geometry("1600x900+5+5")
     _nv56 = _NRV55(_top56, lalu_provider=lambda: _fd56)
     _nv56.pack(fill="both", expand=True)
-    _dn56 = pd.DataFrame([{
-        "Nama Barang": "AYAM FILET", "NAMA RESTO": "MLGPAR",
-        "SATUAN": "GR", "Tanggal": 25, "JENIS": "3.DEVIASI",
-        "NILAI": 2.0, "KATEGORI": "DEVIASI",
-    }])
+    _dn56 = pd.DataFrame([
+        {"Nama Barang": "AYAM FILET", "NAMA RESTO": "MLGPAR",
+         "SATUAN": "GR", "Tanggal": 25, "JENIS": "3.DEVIASI",
+         "NILAI": 2.0, "KATEGORI": "DEVIASI"},
+        # v3.11.9 — deviasi_only: 9.ACR (kategori 'DEVIASI' bukan
+        # keluarga COM/Packaging — lolos via 22.05).
+        {"Nama Barang": "AYAM FILET", "NAMA RESTO": "MLGPAR",
+         "SATUAN": "GR", "Tanggal": 1, "JENIS": "9.ACR",
+         "NILAI": 7.0, "KATEGORI": "DEVIASI"},
+    ])
     _nv56.load_data(_dn56, harga_map={"AYAM FILET": (10.0, "GR")},
                     konversi_map={"rasio": {}, "terkecil": {}})
     _nv56.ensure_refreshed()
@@ -14073,26 +14148,30 @@ def main():
     _kcm61 = _find61("CABE", "MLGPAR")
     check("(v3.9.51) Analisa tanda BERLAWANAN → 'Berubah Arah' "
           "(CABE/MLGPAR dev -40 vs lalu +100 — absolut dulu, flip "
-          "menang)",
-          _kcm61 is not None and _val61(_kcm61, "CEK") == "Berubah Arah",
+          "menang) + v3.11.9 BOM 0 di depan (tanpa 9.ACR & SO_H 60)",
+          _kcm61 is not None
+          and _val61(_kcm61, "CEK") == "BOM 0 · Berubah Arah",
           f"got {None if _kcm61 is None else _val61(_kcm61, 'CEK')!r}")
     _kcp61 = _find61("CABE", "PWKTAM")
     check("(v3.9.51) Analisa PENURUNAN + persen: |25| vs |50| → "
-          "'Penurunan Tertinggi -50,0%' (basis |lalu|, 1 desimal koma)",
+          "'Penurunan Tertinggi -50,0%' (basis |lalu|, 1 desimal koma) "
+          "+ v3.11.9 BOM 0",
           _kcp61 is not None
-          and _val61(_kcp61, "CEK") == "Penurunan Tertinggi -50,0%",
+          and _val61(_kcp61, "CEK") ==
+          "BOM 0 · Penurunan Tertinggi -50,0%",
           f"got {None if _kcp61 is None else _val61(_kcp61, 'CEK')!r}")
     _kpp61 = _find61("PENTOL", "PWKTAM")
     check("(v3.9.51) Analisa PENINGKATAN + persen MENEMPEL pada label "
           "check lama ('Hitung Manual · Peningkatan Tertinggi +133,3%' "
-          "— |70| vs |30|)",
+          "— |70| vs |30|) + v3.11.9 BOM 0",
           _kpp61 is not None and _val61(_kpp61, "CEK") ==
-          "Hitung Manual · Peningkatan Tertinggi +133,3%",
+          "Hitung Manual · BOM 0 · Peningkatan Tertinggi +133,3%",
           f"got {None if _kpp61 is None else _val61(_kpp61, 'CEK')!r}")
     _kbm61 = _find61("BUMBU", "MLGPAR")
     check("(v3.9.53) Pasangan TANPA baris di FILE deviasi → tanpa analisa "
-          "(CEK kosong) + Dev. Bulan Lalu '-'",
-          _kbm61 is not None and _val61(_kbm61, "CEK") == ""
+          "(v3.11.9: 'BOM 0' murni — Total ACR 0 & SO_H 50) + Dev. Bulan "
+          "Lalu '-'",
+          _kbm61 is not None and _val61(_kbm61, "CEK") == "BOM 0"
           and _val61(_kbm61, "Dev. Bulan Lalu") == "-",
           f"got CEK={_val61(_kbm61, 'CEK')!r} "
           f"lalu={_val61(_kbm61, 'Dev. Bulan Lalu')!r}")
@@ -14120,8 +14199,9 @@ def main():
           f"got {_dv61.status_var.get()!r}")
     check("(v3.9.51) Stabil → tanpa label (toleransi mirror komparasi) "
           "& status footer CEK hanya menghitung label ANOMALI CHECK "
-          "(CEK 1 — 3 baris analisa-only tidak terhitung)",
-          "CEK 1" in _dv61.status_var.get(),
+          "(v3.11.9: CEK 5 — SEMUA baris kini ber-BOM 0 [tanpa 9.ACR & "
+          "SO_H>0]; 3 baris analisa-only tidak terhitung sbg analisa)",
+          "CEK 5" in _dv61.status_var.get(),
           f"got {_dv61.status_var.get()!r}")
     check("(v3.9.51) Snapshot follow-up CEK = LABEL UTAMA (fingerprint "
           "baris ✓ lama tetap cocok — analisa hanya display)",
@@ -17488,6 +17568,13 @@ def main():
         {"Nama Barang": "NOPRICE", "NAMA RESTO": "BDGUKU", "SATUAN": "GR",
          "JENIS": "3.DEVIASI", "Tanggal": 25, "NILAI": -5.0,
          "KATEGORI": "DEVIASI"},
+        # v3.11.9 — deviasi_only: 9.ACR supaya kedua pasangan lolos.
+        {"Nama Barang": "B0", "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+         "JENIS": "9.ACR", "Tanggal": 1, "NILAI": 2.0,
+         "KATEGORI": "DEVIASI"},
+        {"Nama Barang": "NOPRICE", "NAMA RESTO": "BDGUKU", "SATUAN": "GR",
+         "JENIS": "9.ACR", "Tanggal": 2, "NILAI": 1.0,
+         "KATEGORI": "DEVIASI"},
     ])
     _nrv68.load_data(_vdata68, harga_map={"B0": (500.0, "GR")})
     wait_view(root, _nrv68)
@@ -18168,6 +18255,13 @@ def main():
                 "Nama Barang": f"B{_i69}", "NAMA RESTO": _resto69,
                 "SATUAN": "GR", "JENIS": "3.DEVIASI", "Tanggal": 25,
                 "NILAI": -5.0 if _i69 else 5.0, "KATEGORI": "DEVIASI",
+            })
+            # v3.11.9 — deviasi_only: 9.ACR t2 per barang (kedua resto
+            # lolos via nama barang di 22.05).
+            _nrows69.append({
+                "Nama Barang": f"B{_i69}", "NAMA RESTO": _resto69,
+                "SATUAN": "GR", "JENIS": "9.ACR", "Tanggal": 2,
+                "NILAI": 3.0, "KATEGORI": "DEVIASI",
             })
     _nrv69 = _nrv69.NominalRestoView(
         _win69, go_to_proses=None, h_state=None,
@@ -18964,17 +19058,25 @@ def main():
         pasangan_tanpa_harga_global as _pth75,
     )
     _dn75 = pd.DataFrame([{
-        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
-        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
-    } for b, r, s, v, k in [
-        ("AYAM FILET", "MLGPAR", "GR", 2.0, "COM DEVIASI - RESTO"),
-        ("GULA PASIR", "MLGPAR", "KG", 12.0, "Biaya Packaging - RESTO"),
-        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0,
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s,
+        "Tanggal": (25 if j == "3.DEVIASI" else 2),
+        "JENIS": j, "NILAI": v, "KATEGORI": k,
+    } for b, r, s, j, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", "3.DEVIASI", 2.0,
+         "COM DEVIASI - RESTO"),
+        ("GULA PASIR", "MLGPAR", "KG", "3.DEVIASI", 12.0,
+         "Biaya Packaging - RESTO"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", "3.DEVIASI", -5.0,
          "COM DEVIASI - CATERING"),
-        ("SUMPIT KAYU", "MLGPAR", "PCS", -8.0, None),
-        ("AYAM FILET", "BDGSET", "GR", 3.0, "COM DEVIASI - RESTO"),
-        ("SENDOK PLASTIK", "BDGSET", "PCS", 4.0,
+        ("SUMPIT KAYU", "MLGPAR", "PCS", "3.DEVIASI", -8.0, None),
+        ("AYAM FILET", "BDGSET", "GR", "3.DEVIASI", 3.0,
+         "COM DEVIASI - RESTO"),
+        ("SENDOK PLASTIK", "BDGSET", "PCS", "3.DEVIASI", 4.0,
          "Biaya Packaging - CATERING"),
+        # v3.11.9 — deviasi_only: 9.ACR t2 utk SUMPIT (tanpa kategori —
+        # lolos via 22.05; ekspektasi 'Semua'/anak tab tetap memuat
+        # SUMPIT '(Tanpa Kategori)').
+        ("SUMPIT KAYU", "MLGPAR", "PCS", "9.ACR", 3.0, None),
     ]])
     _hmap75 = {"AYAM FILET": (10.0, "GR"),
                "SENDOK PLASTIK": (2.0, "PCS")}
@@ -19405,14 +19507,20 @@ def main():
     # --- (i) E2E view: _compute_resto() default + anak-tab minus + clear --
     from src.ui.nominal_resto_view import NominalRestoView as _NRV76
     _dn76v = pd.DataFrame([{
-        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s, "Tanggal": 25,
-        "JENIS": "3.DEVIASI", "NILAI": v, "KATEGORI": k,
-    } for b, r, s, v, k in [
-        ("AYAM FILET", "MLGPAR", "GR", 2.0, "COM DEVIASI - RESTO"),
-        ("GULA PASIR", "MLGPAR", "KG", 12.0, "Biaya Packaging - RESTO"),
-        ("KOPI BUBUK 100G", "MLGPAR", "PCS", -5.0,
+        "Nama Barang": b, "NAMA RESTO": r, "SATUAN": s,
+        "Tanggal": (25 if j == "3.DEVIASI" else 2),
+        "JENIS": j, "NILAI": v, "KATEGORI": k,
+    } for b, r, s, j, v, k in [
+        ("AYAM FILET", "MLGPAR", "GR", "3.DEVIASI", 2.0,
+         "COM DEVIASI - RESTO"),
+        ("GULA PASIR", "MLGPAR", "KG", "3.DEVIASI", 12.0,
+         "Biaya Packaging - RESTO"),
+        ("KOPI BUBUK 100G", "MLGPAR", "PCS", "3.DEVIASI", -5.0,
          "COM DEVIASI - CATERING"),
-        ("SUMPIT KAYU", "MLGPAR", "PCS", -8.0, None),
+        ("SUMPIT KAYU", "MLGPAR", "PCS", "3.DEVIASI", -8.0, None),
+        # v3.11.9 — deviasi_only: 9.ACR t2 utk SUMPIT (tanpa kategori —
+        # lolos via 22.05; anak tab minus '(8)' tetap teruji).
+        ("SUMPIT KAYU", "MLGPAR", "PCS", "9.ACR", 3.0, None),
     ]])
     _hmap76v = {"AYAM FILET": (10.0, "GR")}
     _kmap76v = {"rasio": {}, "terkecil": {}}
@@ -21646,6 +21754,10 @@ def main():
                                   _t88, 30.0))
             _rows88.append(_row88("BRG HARGA", "MLGPAR", "3.DEVIASI",
                                   _t88, 40.0))
+    # v3.11.9 — deviasi_only (nominal export/tab 💰): 9.ACR t2 utk 3
+    # barang supaya pasangan lolos kategori-deviasi (22.05).
+    for _b88 in ("BRG MINUS", "BRG ABOVE", "BRG HARGA"):
+        _rows88.append(_row88(_b88, "MLGPAR", "9.ACR", 2, 5.0))
     _det88 = pd.DataFrame(_rows88)
 
     # -- (a) Anomali COM (H): export sesuai tampilan + readback ----------
@@ -21923,6 +22035,13 @@ def main():
          "KATEGORI": "DEVIASI"}
         for _b, _v in (("AYAM FILET", 20.0), ("TEH BOTOL", -8.0),
                        ("KOPI BUBUK 100G", 2.0))
+    ] + [
+        # v3.11.9 — deviasi_only: 9.ACR t1 utk 3 barang (pasangan lolos
+        # kategori-deviasi 22.05).
+        {"Nama Barang": _b, "NAMA RESTO": "MLGPAR", "SATUAN": "GR",
+         "Tanggal": 1, "JENIS": "9.ACR", "NILAI": 5.0,
+         "KATEGORI": "DEVIASI"}
+        for _b in ("AYAM FILET", "TEH BOTOL", "KOPI BUBUK 100G")
     ])
     _nv89.load_data(_dn89, harga_map={
         "AYAM FILET": (56.5, "GR"), "TEH BOTOL": (1.0, "GR")},
@@ -22567,6 +22686,15 @@ def main():
                                10.0 if _t <= 6 else 0.0))
     _rows92a.append(_row92("BRG ACRGAP", "R92", "SALDO AWAL", 1, 100.0))
     _rows92a.append(_row92("BRG ACRGAP", "R92", "2.SALDO AKHIR", 7, 100.0))
+    # v3.11.9 — 9.ACR t1 = 200 utk pasangan TANPA ACR (COMTINGGI/NOCOM/
+    # SPARSE): Total ACR > 0 → bebas dari label BOM 0 (fixture ini
+    # menguji segmen COM secara steril). 200 dipilih karena saat H
+    # berganti 7→6 (§92-B5) sistem=0 (2.SA cuma t7) → dev 100 — perlu
+    # ACR ≥ 125 supaya 'ACR to BOM' tak ikut terpicu; nilai tunggal t1
+    # tak menggeser median d(t) (d(1)=−200, sisanya 0 → median 0).
+    _rows92a.append(_row92("BRG COMTINGGI", "R92", "9.ACR", 1, 200.0))
+    _rows92a.append(_row92("BRG NOCOM", "R92", "9.ACR", 1, 200.0))
+    _rows92a.append(_row92("BRG SPARSE", "R92", "9.ACR", 1, 200.0))
     _df92a = pd.DataFrame(_rows92a)
     _m92 = _ctm92(_df92a, 7)
     check("(v3.11.7) §92-A1 COM Tinggi: d(7)=100 > median d(1..6)=0 → "
@@ -22663,6 +22791,15 @@ def main():
         _row38("HILANG-BERIN", "1.SO", 25, 0.0),
         _row38("HILANG-BERIN", "4.IN", 25, 50.0),
         _row38("HILANG-BERIN", "2.SALDO AKHIR", 25, 100.0),
+        # v3.11.9 — 9.ACR t24: bebas dari label 'BOM 0' (fixture ini
+        # menguji Naik/Hilang/Turun murni). Nilai per pasangan dipilih
+        # supaya ACR to BOM tak ikut terpicu: NAIK-MURNI dev 0 (60
+        # cukup); HILANG/TAK-DIREKAM/BERIN dev −100 (butuh ACR ≥ 125
+        # → 200).
+        _row38("NAIK-MURNI", "9.ACR", 24, 60.0),
+        _row38("HILANG-MURNI", "9.ACR", 24, 200.0),
+        _row38("TAK-DIREKAM", "9.ACR", 24, 200.0),
+        _row38("HILANG-BERIN", "9.ACR", 24, 200.0),
     ]
     _top92c, _dv92c = _make_dv33(pd.DataFrame(_rows92c), None)
     check("(v3.11.7) §92-C1 'Naik Drastis' murni: SO 100→200 (+100%) dgn "
@@ -22994,6 +23131,13 @@ def main():
         _rows93a.append(_row92("BRG SAMPAI93", "R93", "2.SALDO AKHIR", _t,
                                100.0))
     _rows93a.append(_row92("BRG SAMPAI93", "R93", "SALDO AWAL", 1, 100.0))
+    # v3.11.9 — 9.ACR t1 = 200 utk pasangan TANPA ACR (COMTINGGI93/
+    # SAMPAI93): Total ACR > 0 → bebas dari label BOM 0 (fixture
+    # menguji segmen COM dua arah steril); nilai tunggal t1 tak
+    # menggeser median (d(1)=−200, sisanya 0 → median 0) & dev 0 di
+    # H=7 → ACR to BOM tak terpicu.
+    _rows93a.append(_row92("BRG COMTINGGI93", "R93", "9.ACR", 1, 200.0))
+    _rows93a.append(_row92("BRG SAMPAI93", "R93", "9.ACR", 1, 200.0))
     _df93a = pd.DataFrame(_rows93a)
     _gap93 = _cgm93(_df93a, 7)
     check("(v3.11.8) §93-A1 com_gap_map DUA ARAH: COMRENDAH d(7)=−20 < "
@@ -23307,6 +23451,673 @@ def main():
           f"all={_n_all93}")
     _isv93.destroy()
     _top93f.destroy()
+    root.update()
+
+    # =====================================================================
+    print("\n== 94. (v3.11.9) Popup ACR+Avg baris H · CEK BOM 0 · Beda dari "
+          "Resto Lain · auto file bulan lalu · filter 42.17 · nominal "
+          "deviasi-only · analisa bersih+⛶ ==")
+
+    import tempfile as _tf94
+
+    from src.ui.deviasi_popup import _acr_series as _acr94
+    from src.ui.deviasi_popup import _com_acr_avg as _avg94
+    from src.ui.deviasi_popup import build_popup_rows as _bpr94
+    from src.ui.deviasi_popup import show_deviasi_popup as _sdp94
+    from src.ui.komparasi_deviasi_view import KomparasiDeviasiView as _KDV94
+    from src.ui.nominal_common import agregasi_nominal_per_resto as _anr94
+    from src.ui.nominal_common import hitung_nominal_pairs as _hnp94
+    from src.ui.nominal_common import pasangan_tanpa_harga_global as _pth94
+
+    def _row94(barang, resto, jenis, tgl, nilai):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": nilai,
+                "SATUAN": "GR", "KATEGORI": "BAHAN"}
+
+    # ---- (A) popup helpers PURE: _acr_series + _com_acr_avg --------------
+    # GULA/RA: SA 50 t1; SO 10..4 (t1..t7); ACR 1,2,3,4,5,4,3 →
+    # com(1)=40, com(t>1)=1 → valid 1..6: avg_com=(40+1·5)/6=7,5;
+    # avg_acr=19/6; n=6.
+    _rows94a = []
+    _SO94 = [10, 9, 8, 7, 6, 5, 4]
+    _ACR94 = [1, 2, 3, 4, 5, 4, 3]
+    for _t in range(1, 8):
+        if _t == 1:
+            _rows94a.append(_row94("GULA", "RA", "SALDO AWAL", _t, 50.0))
+        _rows94a.append(_row94("GULA", "RA", "1.SO", _t,
+                               float(_SO94[_t - 1])))
+        _rows94a.append(_row94("GULA", "RA", "2.SALDO AKHIR", _t,
+                               float(_SO94[_t - 1] - 1)))
+        _rows94a.append(_row94("GULA", "RA", "9.ACR", _t,
+                               float(_ACR94[_t - 1])))
+    _df94a = pd.DataFrame(_rows94a)
+    _acr_m94 = _acr94(_df94a, "GULA", "RA", "GR")
+    check("(v3.11.9) §94-A1 _acr_series: Σ 9.ACR per tanggal (satuan-"
+          "scoped; baris dobel dijumlah) — t1..t7 = 1,2,3,4,5,4,3",
+          [_acr_m94.get(float(t)) for t in range(1, 8)] ==
+          [1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0],
+          f"got {_acr_m94}")
+    _av94c, _av94a, _av94n = _avg94(_df94a, "GULA", "RA", "GR", 7)
+    check("(v3.11.9) §94-A2 _com_acr_avg jendela 1..H−1 HARI VALID (SO "
+          "tercatat kedua ujung; t=1 basis SALDO AWAL): avg_com=7,5 "
+          "(40+1·5)/6 · avg_acr=19/6 · n=6",
+          abs(_av94c - 7.5) < 1e-9 and abs(_av94a - 19.0 / 6) < 1e-9
+          and _av94n == 6,
+          f"got ({_av94c}, {_av94a}, {_av94n})")
+    # SO sparse: tgl 4 tanpa baris SO → t4 & t5 (butuh SO(4)) invalid
+    _df94s = pd.DataFrame([r for r in _rows94a
+                           if not (r["JENIS"] == "1.SO" and r["Tanggal"] == 4)])
+    _s94c, _s94a, _s94n = _avg94(_df94s, "GULA", "RA", "GR", 7)
+    check("(v3.11.9) §94-A3 SO sparse: tanggal tanpa SO membatalkan hari "
+          "itu + hari berikutnya (valid = {1,2,3,6} → n=4 — mirror "
+          "com_analisa)",
+          _s94n == 4, f"got n={_s94n}")
+    check("(v3.11.9) §94-A4 degrade: h<2 / data kosong / pasangan tak "
+          "ada → (nan, nan, 0) jujur",
+          _avg94(_df94a, "GULA", "RA", "GR", 1)[2] == 0
+          and _avg94(pd.DataFrame(), "X", "R", None, 7)[2] == 0
+          and _avg94(_df94a, "TAKADA", "RA", "GR", 7)[2] == 0)
+
+    # ---- (B) popup rows: kolom ACR + Avg COM/Avg ACR HANYA baris H -------
+    _pr94 = _bpr94(_df94a, "GULA", "RA", satuan="GR", h=7)
+    _h94 = _pr94[_pr94["Tanggal"] == "7"].iloc[0]
+    check("(v3.11.9) §94-B1 baris H: ACR tampil per tanggal (t7=3) + "
+          "Avg COM 7,5 + Avg ACR 3,2 (rata-rata 1..6 — format ID 1 "
+          "desimal)",
+          _h94["ACR"] == "3" and _h94["Avg COM"] == "7,5"
+          and _h94["Avg ACR"] == "3,2",
+          f"got {_h94[['ACR', 'Avg COM', 'Avg ACR']].to_dict()}")
+    _nonh94 = _pr94[_pr94["Tanggal"] != "7"]
+    check("(v3.11.9) §94-B2 baris NON-H: Avg COM/Avg ACR KOSONG semua "
+          "(user: 'hanya di baris H') + ACR terisi per tanggalnya",
+          (_nonh94["Avg COM"] == "").all() and
+          (_nonh94["Avg ACR"] == "").all()
+          and _pr94[_pr94["Tanggal"] == "1"].iloc[0]["ACR"] == "1",
+          f"got {_pr94[['Tanggal', 'ACR', 'Avg COM']].to_dict('list')}")
+    check("(v3.11.9) §94-B3 attrs avg_days/avg_h utk footer status popup",
+          _pr94.attrs.get("avg_days") == 6
+          and _pr94.attrs.get("avg_h") == 7,
+          f"got {dict(_pr94.attrs)}")
+    _pr94b = _bpr94(_df94a, "GULA", "RA", satuan="GR")
+    check("(v3.11.9) §94-B4 tanpa h (pemanggil lama): Avg kosong semua + "
+          "tanpa attrs + ACR tetap data-driven",
+          (_pr94b["Avg COM"] == "").all() and "avg_days" not in
+          _pr94b.attrs and _pr94b.iloc[0]["ACR"] == "1")
+    _pop94 = _sdp94(root, _df94a, "GULA", "RA", satuan="GR", h=7)
+    root.update()
+    check("(v3.11.9) §94-B5 footer popup menyebut hari valid rata-rata: "
+          "'rata-rata tgl 1–6: 6 hari valid'",
+          "rata-rata tgl 1–6: 6 hari valid" in _pop94.status_var.get(),
+          f"got {_pop94.status_var.get()!r}")
+    _pop94.destroy()
+    root.update()
+
+    # ---- (C) CEK label 'BOM 0' (kanonik ke-10) ----------------------------
+    _rows94c = [
+        # BOM0X: Total ACR 0 & SO_H 50 > 0 → 'BOM 0' SENDIRIAN (dev 0,
+        # rasio manual 0 — steril dari label lain).
+        _row94("BOM0X", "R94", "1.SO", 13, 50.0),
+        _row94("BOM0X", "R94", "1.SO", 14, 50.0),
+        _row94("BOM0X", "R94", "2.SALDO AKHIR", 14, 50.0),
+        # ACRADA: ada 9.ACR (Total ACR 40) → TANPA BOM 0.
+        _row94("ACRADA", "R94", "1.SO", 13, 50.0),
+        _row94("ACRADA", "R94", "1.SO", 14, 50.0),
+        _row94("ACRADA", "R94", "2.SALDO AKHIR", 14, 50.0),
+        _row94("ACRADA", "R94", "9.ACR", 12, 40.0),
+        # NOSO: SO_H = 0 (tak direkam di H; fill 0) → BOM 0 TAK
+        # terpicu (guard so_h>0) — Turun Drastis (SO 50→0).
+        _row94("NOSO", "R94", "1.SO", 13, 50.0),
+        _row94("NOSO", "R94", "2.SALDO AKHIR", 14, 10.0),
+    ]
+    _top94c, _dv94c = _make_dv33(pd.DataFrame(_rows94c), None)
+    check("(v3.11.9) §94-C1 label 'BOM 0': Total ACR sebulan 0 & SO(H) > 0 "
+          "→ 'BOM 0' SENDIRIAN (user: 'analisa BOM 0 di kolom CEK bila "
+          "ACR = 0 dan ada Saldo SO'); pasangan ber-9.ACR → TANPA BOM 0; "
+          "SO_H=0 (tak direkam) → BOM 0 TAK terpicu, cukup Turun "
+          "Drastis (guard so_h>0)",
+          _cek33(_dv94c, "BOM0X") == "BOM 0"
+          and _cek33(_dv94c, "ACRADA") == ""
+          and _cek33(_dv94c, "NOSO") == "Turun Drastis",
+          f"bom0x={_cek33(_dv94c, 'BOM0X')!r} "
+          f"acrada={_cek33(_dv94c, 'ACRADA')!r} "
+          f"noso={_cek33(_dv94c, 'NOSO')!r}")
+    check("(v3.11.9) §94-C2 footer 'CEK n' menghitung BOM 0 sbg label "
+          "kanonik (BOM0X 1 + NOSO Turun Drastis = 2 baris) + tag baris "
+          "cek_bom0 (#475569)",
+          "CEK 2 ·" in _dv94c.status_var.get()
+          and str(_dv94c.tree.tag_configure("cek_bom0", "foreground"))
+          .lower() == "#475569",
+          f"status={_dv94c.status_var.get()!r}")
+    _legend94c = []
+    for _chip94 in _dv94c._legend.winfo_children():
+        for _sub94 in _chip94.winfo_children():
+            if isinstance(_sub94, tk.Label):
+                _legend94c.append(str(_sub94.cget("text")))
+    check("(v3.11.9) §94-C3 legend + label-utama tag render: 'BOM 0' di "
+          "legend (slate #475569) + 'Beda dari Resto Lain · segmen CEK' "
+          "(#a21caf)",
+          any(t == "BOM 0" for t in _legend94c)
+          and any("Beda dari Resto Lain" in t for t in _legend94c),
+          f"got {[t for t in _legend94c if 'BOM' in t or 'Resto' in t]}")
+    _top94c.destroy()
+    root.update()
+
+    # ---- (D) segmen 'Beda dari Resto Lain' (butuh file ⚖) ----------------
+    _file94 = pd.DataFrame({
+        "_bulan_num": [9, 9, 9],
+        "_h": [14, 14, 14],
+        "_resto_norm": ["RA", "RB", "RC"],
+        "_bahan_norm": ["X94", "X94", "X94"],
+        "DEV Lalu": [20.0, -10.0, -15.0],
+        "Minggu": ["WEEK 2", "WEEK 2", "WEEK 2"],
+    })
+
+    def _file94_get():
+        return _file94
+
+    _top94d = tk.Toplevel(root)
+    _top94d.geometry("1400x900+5+5")
+    from src.ui.deviasi_view import DeviasiView as _DV94
+
+    _dv94d = _DV94(_top94d, satuan_mode="GR",
+                   lalu_provider=_file94_get)
+    _dv94d.pack(fill="both", expand=True)
+    root.update()
+    _rows94d = []
+    for _rs94, _so94 in (("RA", 70.0), ("RB", 40.0), ("RC", 35.0)):
+        _rows94d.append(_row94("X94", _rs94, "1.SO", 13, 50.0))
+        _rows94d.append(_row94("X94", _rs94, "1.SO", 14, _so94))
+        _rows94d.append(_row94("X94", _rs94, "2.SALDO AKHIR", 14, 50.0))
+    _rows94d.append(_row94("Y94", "RA", "1.SO", 13, 50.0))
+    _rows94d.append(_row94("Y94", "RA", "1.SO", 14, 50.0))
+    _rows94d.append(_row94("Y94", "RA", "2.SALDO AKHIR", 14, 50.0))
+    _dv94d.load_data(pd.DataFrame(_rows94d))
+    wait_view(root, _dv94d)
+    root.update()
+
+    def _cek94d(resto, barang="X94"):
+        for _k94 in _dv94d.tree.get_children(""):
+            _sn94 = _dv94d._row_snaps.get(str(_k94), {})
+            if (str(_sn94.get("barang", "")) == barang
+                    and str(_dv94d.tree.set(_k94, "Resto")) == resto):
+                return str(_dv94d.tree.set(_k94, "CEK"))
+        return "<missing>"
+
+    check("(v3.11.9) §94-D1 segmen 'Beda dari Resto Lain': RA searah DUA "
+          "periode (dev +20 & lalu +20 — surplus dua-duanya) sementara "
+          "RB/RC berlawanan (−10/−15) & tak ada searah → RA bersegmen; "
+          "RB/RC TIDAK (ada resto lain searah satu sama lain)",
+          _cek94d("RA") == "BOM 0 · Beda dari Resto Lain "
+                           "(Surplus · 2 resto lain Defisit)"
+          and "Beda dari Resto Lain" not in _cek94d("RB")
+          and "Beda dari Resto Lain" not in _cek94d("RC"),
+          f"ra={_cek94d('RA')!r} rb={_cek94d('RB')!r}")
+    check("(v3.11.9) §94-D2 footer CEK TIDAK menghitung segmen (BOM 0 "
+          "label utama dihitung — 4 baris; segmen non-kanonik tak "
+          "menggelembungkan)",
+          "CEK 4 ·" in _dv94d.status_var.get(),
+          f"status={_dv94d.status_var.get()!r}")
+    _top94d.destroy()
+    root.update()
+    # tanpa file ⚖ → segmen MATI SOPAN (syarat 'bulanan searah' tak
+    # terverifikasi) — fixture sama TANPA lalu_provider.
+    _top94d2 = tk.Toplevel(root)
+    _dv94d2 = _DV94(_top94d2, satuan_mode="GR")
+    _dv94d2.pack(fill="both", expand=True)
+    root.update()
+    _dv94d2.load_data(pd.DataFrame(_rows94d))
+    wait_view(root, _dv94d2)
+    root.update()
+
+    def _cek94d2(resto, barang="X94"):
+        for _k94 in _dv94d2.tree.get_children(""):
+            _sn94 = _dv94d2._row_snaps.get(str(_k94), {})
+            if (str(_sn94.get("barang", "")) == barang
+                    and str(_dv94d2.tree.set(_k94, "Resto")) == resto):
+                return str(_dv94d2.tree.set(_k94, "CEK"))
+        return "<missing>"
+
+    check("(v3.11.9) §94-D3 tanpa file deviasi bulan lalu → segmen TIDAK "
+          "muncul (mati sopan — mirror analisa lalu→kini v3.9.53)",
+          "Beda dari Resto Lain" not in _cek94d2("RA")
+          and _cek94d2("RA") == "BOM 0",
+          f"ra={_cek94d2('RA')!r}")
+    _top94d2.destroy()
+    root.update()
+
+    # ---- (E) auto file deviasi bulan lalu ---------------------------------
+    _tmp94e = _tf94.mkdtemp(prefix="t94_devbulan_")
+    for _nm94 in ("20.AGUSTUS 2026.xlsx", "20.JULI 2026.xlsx",
+                  "20.agustus 2026.xlsb", "readme.txt"):
+        (Path(_tmp94e) / _nm94).write_text("x", encoding="utf-8")
+    _top94e = tk.Toplevel(root)
+    _kv94 = _KDV94(_top94e)
+    _kv94.pack(fill="both", expand=True)
+    root.update()
+    _paths94 = _kv94._auto_bulanan_paths((_tmp94e, (2026, 9), 2))
+    check("(v3.11.9) §94-E1 _auto_bulanan_paths: period Sep-2026 + jumlah "
+          "2 → AGU & JUL 2026 urut KRONOLOGIS + .xlsx MENANG atas .xlsb "
+          "(case-insensitive uppercase) + non-Excel diabaikan",
+          [Path(p).name for p in _paths94] ==
+          ["20.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
+          f"got {[Path(p).name for p in _paths94]}")
+    check("(v3.11.9) §94-E2 wrap tahun (period Jan-2027 jumlah 2 → Des "
+          "2026 + Nov 2026 — tak ada di folder) → [] + cfg invalid → [] "
+          "(folder tak ada / None / bulan 99)",
+          _kv94._auto_bulanan_paths((_tmp94e, (2027, 1), 2)) == []
+          and _kv94._auto_bulanan_paths(
+              (str(Path(_tmp94e) / "nope"), (2026, 9), 1)) == []
+          and _kv94._auto_bulanan_paths(None) == []
+          and _kv94._auto_bulanan_paths((_tmp94e, (2026, 99), 1)) == [])
+    _loaded94 = {"n": 0}
+
+    def _fake_load94(paths, interactive=True):
+        _loaded94["n"] += 1
+        _loaded94["paths"] = list(paths)
+        _loaded94["interactive"] = interactive
+
+    _kv94._load_paths = _fake_load94
+    _kv94.load_data(pd.DataFrame({
+        "JENIS": ["1.SO"], "Tanggal": [1], "NILAI": [5.0],
+        "Nama Barang": ["X"], "NAMA RESTO": ["RA"], "SATUAN": ["GR"]}))
+    check("(v3.11.9) §94-E3 load_data RESET guard _auto_loaded (sesi data "
+          "baru → auto-load boleh dicoba lagi)",
+          _kv94._auto_loaded is False)
+    _kv94._auto_bulanan_cfg = (_tmp94e, (2026, 9), 2)
+    _kv94.maybe_auto_load_last()
+    check("(v3.11.9) §94-E4 maybe_auto_load_last cfg aktif → _load_paths "
+          "NON-INTERAKTIF dgn path bulan lalu (prioritas di atas "
+          "last-used) + guard sekali per sesi",
+          _loaded94["n"] == 1 and _loaded94["interactive"] is False
+          and [Path(p).name for p in _loaded94["paths"]] ==
+          ["20.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
+          f"got {_loaded94}")
+    _kv94.maybe_auto_load_last()
+    check("(v3.11.9) §94-E5 guard: panggilan kedua no-op",
+          _loaded94["n"] == 1)
+    _kosong94 = _tf94.mkdtemp(prefix="t94_kosong_")
+    _kv94._auto_loaded = False
+    _kv94._file_paths = []
+    _kv94._auto_bulanan_cfg = (_kosong94, (2026, 9), 1)
+    _kv94.maybe_auto_load_last()
+    check("(v3.11.9) §94-E6 folder ADA tapi file bulan cocok BELUM ADA → "
+          "no-op jujur + status (TANPA fallback diam2 ke file lama — "
+          "bulan salah lebih berbahaya)",
+          _loaded94["n"] == 1
+          and "belum ada file" in str(_kv94.status_var_label.get()),
+          f"n={_loaded94['n']} "
+          f"status={_kv94.status_var_label.get()!r}")
+    _top94e.destroy()
+    root.update()
+    # Config parse: DeviasiBulananFolder / DeviasiBulananJumlah
+    _cfg94p = Path(_tf94.mkdtemp(prefix="t94_cfg_")) / "config.json"
+    _cfg94base = _json92.loads(
+        Path(_appmod92.CONFIG_PATH).read_text(encoding="utf-8"))
+    _cfg94base["DeviasiBulananFolder"] = "D:\\DEV BULANAN"
+    _cfg94base["DeviasiBulananJumlah"] = 3
+    _cfg94p.write_text(_json92.dumps(_cfg94base, ensure_ascii=False),
+                       encoding="utf-8")
+    _c94 = _Cfg92(str(_cfg94p))
+    check("(v3.11.9) §94-E7 Config: key DeviasiBulananFolder / "
+          "DeviasiBulananJumlah terbaca (folder string + jumlah int)",
+          _c94.DeviasiBulananFolder == "D:\\DEV BULANAN"
+          and _c94.DeviasiBulananJumlah == 3)
+    _cfg94base["DeviasiBulananJumlah"] = 99        # di luar 1..12
+    _cfg94base["DeviasiBulananFolder"] = 123       # bukan string
+    _cfg94p.write_text(_json92.dumps(_cfg94base, ensure_ascii=False),
+                       encoding="utf-8")
+    _c94b = _Cfg92(str(_cfg94p))
+    _DEF94 = _appmod92.StockMonitorApp._DEV_BULANAN_DEF_FOLDER
+    check("(v3.11.9) §94-E8 Config: tipe salah / jumlah di luar 1..12 → "
+          "PERINGATAN + default (folder bawaan + jumlah 1 — pola "
+          "KategoriManual 61-a F1)",
+          _c94b.DeviasiBulananJumlah == 1
+          and _c94b.DeviasiBulananFolder == _DEF94)
+    _cfg94base.pop("DeviasiBulananFolder")
+    _cfg94base.pop("DeviasiBulananJumlah")
+    _cfg94p.write_text(_json92.dumps(_cfg94base, ensure_ascii=False),
+                       encoding="utf-8")
+    _c94c = _Cfg92(str(_cfg94p))
+    check("(v3.11.9) §94-E9 Config: tanpa key → default in-memory "
+          "(config lama tetap jalan — mirror Folders.setdefault)",
+          _c94c.DeviasiBulananJumlah == 1
+          and _c94c.DeviasiBulananFolder == _DEF94)
+
+    # ---- (F) app: kartu Auto File Deviasi Bulan Lalu + filter 42.17 ------
+    _orig_cfg94f = _appmod92.CONFIG_PATH
+    _tmp94f = _tf94.mkdtemp(prefix="t94_app_")
+    _cfg94f = Path(_tmp94f) / "config.json"
+    _cfg94f.write_text(_json92.dumps(_cfg94base, ensure_ascii=False),
+                       encoding="utf-8")
+    _appmod92.CONFIG_PATH = _cfg94f
+    try:
+        # kartu auto bulan lalu: form terisi dari config (default —
+        # folder tak ada di sandbox) + simpan → config.json tertulis.
+        check("(v3.11.9) §94-F1 kartu ⚙️ Config 'Auto File Deviasi Bulan "
+              "Lalu' ada: entry folder + spinbox jumlah + status",
+              hasattr(app, "dev_bulanan_folder_var")
+              and hasattr(app, "dev_bulanan_jumlah_var")
+              and app.dev_bulanan_folder_var.get() == _DEF94
+              and app.dev_bulanan_jumlah_var.get() == "1")
+        _fld94 = str(Path(_tmp94e))       # folder fixture E (ada file)
+        app.dev_bulanan_folder_var.set(_fld94)
+        app.dev_bulanan_jumlah_var.set("2")
+        app._dev_bulanan_save()
+        _saved94 = _json92.loads(_cfg94f.read_text(encoding="utf-8"))
+        check("(v3.11.9) §94-F2 💾 Simpan → config.json key "
+              "DeviasiBulananFolder/Jumlah tertulis (read-modify-write) "
+              "+ status flash ✓ Tersimpan",
+              _saved94.get("DeviasiBulananFolder") == _fld94
+              and _saved94.get("DeviasiBulananJumlah") == 2
+              and "Tersimpan" in app.dev_bulanan_status_var.get(),
+              f"got {_saved94.get('DeviasiBulananFolder')!r} "
+              f"status={app.dev_bulanan_status_var.get()!r}")
+        check("(v3.11.9) §94-F3 _dev_bulanan_cfg: folder ADA (fixture) → "
+              "cfg aktif (folder, period dari audit_result, jumlah); "
+              "period invalid/None → fallback bulan sekarang",
+              app._dev_bulanan_cfg({"period": [2026, 9]}) ==
+              (_fld94, (2026, 9), 2),
+              f"got {app._dev_bulanan_cfg({'period': [2026, 9]})!r}")
+        # filter dropdown 42.17 (Identifikasi Kategori Manual)
+        _k4217_94 = pd.DataFrame({
+            "Nama Barang": ["AYAM 94", "KOPI 94", "GULA 94"],
+            "KATEGORI": ["10.FOOD [RM] - COM V.2",
+                         ("01.COST - PACKAGING "
+                          "V.2"), ""],
+            "NAMA RESTO": ["R", "R", "R"],
+            "Value": [12.0, 5.0, 7.0],
+        })
+        _df94f = pd.DataFrame({
+            "Nama Barang": ["AYAM 94", "KOPI 94", "GULA 94"],
+            "NAMA RESTO": ["R", "R", "R"],
+            "JENIS": ["1.SO", "1.SO", "1.SO"],
+            "Tanggal": [1, 1, 1],
+            "NILAI": [1.0, 1.0, 1.0],
+            "KATEGORI": ["BAHAN", None, None],
+        })
+        _seen94p = Path(_tmp94f) / "kategori_seen.json"
+        with _cl92.suppress(FileNotFoundError):
+            _seen94p.unlink()
+        app.append1_df = _df94f
+        app.kategori_4217_df = _k4217_94
+        app._refresh_kategori_manual_card()
+
+        def _kat_brgs94():
+            return [app.kat_4217_tree.set(k, "barang")
+                    for k in app.kat_4217_tree.get_children("")]
+
+        _vals94f = list(app.kat_4217_filter_combo["values"])
+        check("(v3.11.9) §94-F4 dropdown Kategori 42.17: nilai = 'Semua' "
+              "+ kategori unik sorted + '(Tanpa Kategori 42.17)' (ada "
+              "baris kosong)",
+              _vals94f == ["Semua", "01.COST - PACKAGING V.2",
+                           "10.FOOD [RM] - COM V.2",
+                           "(Tanpa Kategori 42.17)"],
+              f"got {_vals94f}")
+        app.kat_4217filter_var.set("10.FOOD [RM] - COM V.2")
+        app._kategori_filter_apply()
+        root.update()
+        check("(v3.11.9) §94-F5 filter kategori 42.17 exact-match → hanya "
+              "AYAM 94 (COM V.2)",
+              _kat_brgs94() == ["AYAM 94"], f"got {_kat_brgs94()}")
+        app.kat_search_var.set("KOPI")
+        app._kategori_filter_apply()
+        root.update()
+        check("(v3.11.9) §94-F6 pencarian nama AND filter kategori → "
+              "KOPI 94 ∉ COM V.2 → KOSONG + pesan jujur filter",
+              _kat_brgs94() and "tidak ada barang cocok" in
+              _kat_brgs94()[0], f"got {_kat_brgs94()}")
+        app.kat_4217filter_var.set("Semua")
+        app._kategori_filter_apply()
+        root.update()
+        check("(v3.11.9) §94-F7 pencarian nama saja (Semua) → KOPI 94",
+              _kat_brgs94() == ["KOPI 94"], f"got {_kat_brgs94()}")
+        app.kat_4217filter_var.set("(Tanpa Kategori 42.17)")
+        app.kat_search_var.set("")
+        app._kategori_filter_apply()
+        root.update()
+        check("(v3.11.9) §94-F8 '(Tanpa Kategori 42.17)' → hanya GULA 94 "
+              "(kat4217 kosong)",
+              _kat_brgs94() == ["GULA 94"], f"got {_kat_brgs94()}")
+        app._kategori_search_clear()
+        root.update()
+        check("(v3.11.9) §94-F9 ✕ mereset KEDUANYA (pencarian + "
+              "dropdown → Semua) — semua barang kembali (urut alfabetis)",
+              app.kat_4217filter_var.get() == "Semua"
+              and app.kat_search_var.get() == ""
+              and _kat_brgs94() == ["AYAM 94", "GULA 94", "KOPI 94"],
+              f"got {_kat_brgs94()}")
+    finally:
+        _appmod92.CONFIG_PATH = _orig_cfg94f
+        with _cl92.suppress(Exception):
+            app.dev_bulanan_folder_var.set("")
+        app._dev_bulanan_load_form()
+
+    # ---- (G) nominal deviasi_only -----------------------------------------
+    _rows94g = [
+        # AYAM: ada 9.ACR → lolos walau kategori LAIN
+        _row94("AYAM94G", "RA", "3.DEVIASI", 2, 10.0),
+        _row94("AYAM94G", "RA", "9.ACR", 1, 7.0),
+        # KOPI: kategori rekap deviasi (COM DEVIASI) → lolos TANPA 9.ACR
+        {**_row94("KOPI94G", "RA", "3.DEVIASI", 2, 10.0),
+         "KATEGORI": "COM DEVIASI - RESTO"},
+        # GULA: kategori TEPAT tanpa 9.ACR → dikecualikan
+        {**_row94("GULA94G", "RA", "3.DEVIASI", 2, 10.0),
+         "KATEGORI": "TEPAT"},
+        # TEPUNG: tanpa kategori tanpa 9.ACR → dikecualikan
+        _row94("TEPUNG94G", "RB", "3.DEVIASI", 2, 10.0),
+    ]
+    _df94g = pd.DataFrame(_rows94g)
+    _p94g = _hnp94(_df94g, 2, {}, None, deviasi_only=True)
+    check("(v3.11.9) §94-G1 deviasi_only: pasangan lolos bila barang ADA "
+          "di 9.ACR (AYAM — walau kategori 'BAHAN') ATAU kategori "
+          "ber-kata COM/PACKAGING word-boundary (KOPI); non-deviasi "
+          "dikecualikan + jumlahnya di attrs",
+          set(_p94g["Nama Barang"]) == {"AYAM94G", "KOPI94G"}
+          and _p94g.attrs["deviasi_only_dropped"] == 2,
+          f"got {list(_p94g['Nama Barang'])} "
+          f"attrs={dict(_p94g.attrs)}")
+    _p94g2 = _hnp94(_df94g, 2, {}, None)
+    check("(v3.11.9) §94-G2 default False = perilaku lama (semua "
+          "pasangan, tanpa attrs)",
+          set(_p94g2["Nama Barang"]) ==
+          {"AYAM94G", "KOPI94G", "GULA94G", "TEPUNG94G"}
+          and "deviasi_only_dropped" not in _p94g2.attrs)
+    _g94g, _pr94g = _anr94(_df94g, 2, {}, None, deviasi_only=True)
+    check("(v3.11.9) §94-G3 agregasi: attrs di frame_pasangan + resto RB "
+          "hilang (pasangannya non-deviasi semua)",
+          _pr94g.attrs.get("deviasi_only_dropped") == 2
+          and set(_g94g["Resto"]) == {"RA"},
+          f"resto={list(_g94g['Resto'])}")
+    _nh94g = _pth94(_df94g, 2, {}, None, deviasi_only=True)
+    check("(v3.11.9) §94-G4 pasangan_tanpa_harga_global mirror "
+          "deviasi_only (attrs ikut)",
+          set(_nh94g["Nama Barang"]) == {"AYAM94G", "KOPI94G"}
+          and _nh94g.attrs.get("deviasi_only_dropped") == 2,
+          f"got {list(_nh94g['Nama Barang'])}")
+    _d94g_all = pd.DataFrame([r for r in _rows94g
+                              if r["Nama Barang"] in ("GULA94G",
+                                                      "TEPUNG94G")])
+    _p94g3 = _hnp94(_d94g_all, 2, {}, None, deviasi_only=True)
+    _g94g3, _pr94g3 = _anr94(_d94g_all, 2, {}, None, deviasi_only=True)
+    _nh94g3 = _pth94(_d94g_all, 2, {}, None, deviasi_only=True)
+    check("(v3.11.9) §94-G5 semua pasangan terfilter → frame KOSONG + "
+          "attrs tetap terbawa (early-return jujur — 3 fungsi)",
+          _p94g3.empty and
+          _p94g3.attrs.get("deviasi_only_dropped") == 2
+          and _g94g3.empty and
+          _pr94g3.attrs.get("deviasi_only_dropped") == 2
+          and _nh94g3.empty and
+          _nh94g3.attrs.get("deviasi_only_dropped") == 2)
+    # view status jujur (tab 💰 Nominal + 🧮 per resto)
+    _top94g = tk.Toplevel(root)
+    _top94g.geometry("1400x800+5+5")
+    from src.ui.nominal_deviasi_view import NominalDeviasiView as _NDV94
+
+    _ndv94 = _NDV94(_top94g)
+    _ndv94.pack(fill="both", expand=True)
+    root.update()
+    _ndv94.tanggal_h = 2   # v3.11.9 — fixture 3.DEVIASI@t2 (default 25
+                            # → early-return TANPA filter deviasi_only)
+    _ndv94.load_data(_df94g, harga_map={}, konversi_map=None)
+    wait_view(root, _ndv94)
+    root.update()
+    check("(v3.11.9) §94-G6 tab 💰 status menyebut pasangan non-deviasi "
+          "dikecualikan (jujur, bukan lenyap)",
+          "pasangan non-deviasi dikecualikan" in
+          _ndv94.status_var_label.get(),
+          f"got {_ndv94.status_var_label.get()!r}")
+    _top94g.destroy()
+    root.update()
+    _top94g2 = tk.Toplevel(root)
+    _top94g2.geometry("1400x800+5+5")
+    from src.ui.nominal_resto_view import NominalRestoView as _NRV94
+
+    _nrv94 = _NRV94(_top94g2)
+    _nrv94.pack(fill="both", expand=True)
+    root.update()
+    _nrv94.tanggal_h = 2   # mirror §94-G6 (fixture @t2)
+    _nrv94.load_data(_df94g, harga_map={}, konversi_map=None)
+    _nrv94.ensure_refreshed()
+    wait_view(root, _nrv94)
+    # default kategori ('COM DEVIASI - RESTO' — KOPI satu-satunya) akan
+    # menyaring AYAM (BAHAN) pra-deviasi_only → lepas dulu supaya
+    # pasangan non-deviasi dihitung dari data PENUH.
+    _nrv94._kategori_var.set("Semua")
+    _nrv94._on_kategori_changed()
+    wait_view(root, _nrv94)
+    root.update()
+    check("(v3.11.9) §94-G7 tab 🧮 status mirror (pasangan non-deviasi "
+          "dikecualikan) + tabel hanya resto RA",
+          "pasangan non-deviasi dikecualikan" in
+          _nrv94.status_var_label.get()
+          and {str(_nrv94.tree.set(_k94g, "Resto"))
+               for _k94g in _nrv94.tree.get_children("")
+               if str(_nrv94.tree.set(_k94g, "Resto")) != "TOTAL"}
+          == {"RA"},
+          f"got {_nrv94.status_var_label.get()!r}")
+    _top94g2.destroy()
+    root.update()
+
+    # ---- (H) analisa bersih + ⛶ perbesar ----------------------------------
+    _AUD94 = ["Resto", "Nama Item", "UoM", "Tanggal", "Hasil SO",
+              "Qty SO Harian", "Qty SJ", "Qty RI", "Qty Pembelian",
+              "Selisih Qty", "Penerimaan Sistem", "Selisih Harian",
+              "Saldo Kumulatif", "Status Analisis Audit",
+              "Detail & Catatan Audit"]
+    _full94h = pd.DataFrame([
+        ("R1", "BRG", "GR", -25, 10.0, 6.0, 6.0, 0, 0, 0.0, 6.0, 0.0,
+         0.0, "OK (Matching)", "-"),
+        ("R1", "BRG", "GR", 1, 12.0, 8.0, 8.0, 0, 0, 0.0, 8.0, 0.0,
+         0.0, "OK (Matching)", "-"),
+        ("R1", "BRG", "GR", 5, 9.0, 4.0, 3.0, 0, 0, 1.0, 3.0, 1.0,
+         1.0, "DEVIASI MURNI", "Sisa Gantung: +1 (Sejak Tgl 5)"),
+    ], columns=_AUD94)
+    _ar94h = {"df": _full94h,
+              "kpi": {"rows": 3, "ok": 2, "omit": 0, "cutoff": 0,
+                      "deviasi_murni": 1, "deviasi_qty": 1.0,
+                      "com_minus": 0},
+              "desc": "full"}
+    _data94h = pd.DataFrame({
+        "Nama Barang": ["BRG"], "NAMA RESTO": "R1", "SATUAN": "GR",
+        "JENIS": "1.SO", "Tanggal": [1], "NILAI": [12.0]})
+    _top94h = tk.Toplevel(root)
+    _top94h.geometry("1500x900+10+10")
+    from src.ui.in_selisih_view import InSelisihView as _ISV94
+
+    _isv94 = _ISV94(_top94h)
+    _isv94.pack(fill="both", expand=True)
+    root.update()
+    _isv94.load_data(_data94h, None, _ar94h)
+    wait_view(root, _isv94)
+    root.update()
+    _isv94.only_selisih_var.set(False)
+    _isv94._refresh()
+    wait_view(root, _isv94)
+    root.update()
+    _isv94._on_view_mode_change(1)
+    root.update()
+    check("(v3.11.9) §94-H1 mode 📈 BERSIH: kpi/skor/strip/tabel semua "
+          "tersembunyi + analisa ter-pack penuh",
+          _isv94.kpi_card.winfo_manager() == ""
+          and _isv94._skor_zone.winfo_manager() == ""
+          and _isv94._barang_zone.winfo_manager() == ""
+          and _isv94._tcard.winfo_manager() == ""
+          and _isv94._analisa_card.winfo_manager() == "pack")
+
+    def _sec_btn_texts94(w):
+        out94 = []
+        for ch94 in w.winfo_children():
+            if isinstance(ch94, (tk.Button, ttk.Button)):
+                out94.append(str(ch94.cget("text")))
+            out94.extend(_sec_btn_texts94(ch94))
+        return out94
+
+    _an_texts94 = []
+
+    def _walk94(w, acc):
+        for ch94 in w.winfo_children():
+            try:
+                acc.append(str(ch94.cget("text")))
+            except tk.TclError:
+                pass
+            _walk94(ch94, acc)
+
+    _walk94(_isv94._analisa_card, _an_texts94)
+    check("(v3.11.9) §94-H2 panel analisa BERSIH: chips meta (BARIS "
+          "KONTEKS/BARIS GANTUNG/Σ|SELISIH IN|/PANJANG BULAN) + label "
+          "'konteks:' DIHAPUS — judul + 6 seksi saja",
+          not any(t in _an_texts94 for t in
+                  ("BARIS KONTEKS", "BARIS GANTUNG", "PANJANG BULAN"))
+          and not any("konteks:" in t for t in _an_texts94)
+          and any("ANALISA REKONSILIASI" in t for t in _an_texts94),
+          f"got {[t for t in _an_texts94 if t.isupper()][:8]}")
+    check("(v3.11.9) §94-H3 TIAP seksi ber-tombol '⛶ Perbesar' (6 — "
+          "GhostButton ttk)",
+          sum(1 for t in _sec_btn_texts94(_isv94._analisa_card)
+              if t == "⛶ Perbesar") == 6,
+          f"got {[t for t in _sec_btn_texts94(_isv94._analisa_card) if 'Perbesar' in t]}")
+
+    def _find_btn94(w):
+        for ch94 in w.winfo_children():
+            if isinstance(ch94, (tk.Button, ttk.Button)) and \
+                    str(ch94.cget("text")) == "⛶ Perbesar":
+                return ch94
+            _r94 = _find_btn94(ch94)
+            if _r94 is not None:
+                return _r94
+        return None
+
+    _btn94 = _find_btn94(_isv94._analisa_card)
+    _btn94.invoke()
+    root.update()
+    _pop94h = [w for w in _top94h.winfo_children()
+               if isinstance(w, tk.Toplevel)]
+    check("(v3.11.9) §94-H4 klik ⛶ → popup Toplevel perbesar muncul "
+          "(judul seksi + header gelap + Tutup Esc)",
+          len(_pop94h) == 1)
+    if _pop94h:
+        _pop_texts94 = []
+        _walk94(_pop94h[0], _pop_texts94)
+        check("(v3.11.9) §94-H5 popup berisi konten seksi (judul UMUR "
+              "GANTUNG + baris RENTANG UMUR — skala besar font 10/11)",
+              any("UMUR GANTUNG" in t for t in _pop_texts94)
+              and any("RENTANG UMUR" in t for t in _pop_texts94),
+              f"got {[t for t in _pop_texts94 if 'UMUR' in t][:4]}")
+        _pop94h[0].event_generate("<Escape>")
+        root.update()
+        _pop94h = [w for w in _top94h.winfo_children()
+                   if isinstance(w, tk.Toplevel)]
+        check("(v3.11.9) §94-H6 Esc menutup popup",
+              len(_pop94h) == 0, f"got {len(_pop94h)}")
+    _isv94._on_view_mode_change(0)
+    root.update()
+    check("(v3.11.9) §94-H7 toggle balik 📋: kpi card + tabel kembali "
+          "ter-pack (urutan awal pulih — konten tak dibangun ulang)",
+          _isv94.kpi_card.winfo_manager() == "pack"
+          and _isv94._tcard.winfo_manager() == "pack"
+          and _isv94._analisa_card.winfo_manager() == "")
+    _top94h.destroy()
     root.update()
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

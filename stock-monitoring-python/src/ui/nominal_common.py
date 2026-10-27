@@ -310,7 +310,8 @@ def _norm_name_lalu(v) -> str:
 def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
                          harga_map: dict | None,
                          konversi_map: dict | None,
-                         saldo_sistem_map: dict | None = None) -> pd.DataFrame:
+                         saldo_sistem_map: dict | None = None,
+                         deviasi_only: bool = False) -> pd.DataFrame:
     """Frame per pasangan tanggal H:
     [Nama Barang, Resto, Satuan, Harga, Harga Tampil, Qty Deviasi,
      Nominal] — urut |Nominal| MENURUN (pasangan tanpa nominal paling
@@ -329,6 +330,15 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     Dtype float64 EKSPLISIT utk Harga/Nominal (semua-None → kolom
     object → .abs() TypeError di worker — bug v3.9.32, dijaga di sini).
     DataFrame kosong bila tak ada baris DEVIASI tanggal H.
+
+    v3.11.9 — DEVIASI ONLY (user: "Nominal Deviasi hanya kategori
+    benar-benar deviasi ... intinya nama barang nya ada di file 22.05
+    itu kategori deviasi"): deviasi_only=True → pasangan dikecualikan
+    bila barang TIDAK ada di baris 9.ACR (rekap 22.05 — pemakaian
+    sistem) DAN kategorinya bukan keluarga COM/Packaging (word-
+    boundary). Jumlah pasangan yang dibuang terekspos via
+    out.attrs["deviasi_only_dropped"] (dipakai status view — jujur,
+    bukan lenyap senyap). False = perilaku lama (semua pasangan).
     """
     if data is None or data.empty:
         return pd.DataFrame()
@@ -369,6 +379,45 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
         return pd.DataFrame()
     dev = dev.copy()
     dev["NILAI"] = pd.to_numeric(dev["NILAI"], errors="coerce").fillna(0)
+
+    # v3.11.9 — DEVIASI ONLY (user: "intinya nama barang nya ada di file
+    # 22.05 itu kategori deviasi"): pasangan lolos bila barang ADA di
+    # baris 9.ACR (rekap 22.05 — pemakaian sistem) ATAU kategori nya
+    # mengandung kata COM / PACKAGING (keluarga kategori rekap deviasi
+    # — word-boundary mirror klas kolom 'COM Deviasi'/'Biaya Packaging'
+    # _KAT_COM_RE/_KAT_PKG_RE: varian '- CATERING'/'- RESTO' semua
+    # cocok; 'COMMERCIAL'/'REPACKAGING' tidak). Pasangan non-deviasi
+    # dikecualikan; jumlahnya terekspos via attrs utk status view.
+    _n_nondev = 0
+    if deviasi_only:
+        try:
+            _acr_names = set(
+                data.loc[_jenis == "9.ACR", "Nama Barang"]
+                .astype(str).str.strip().str.upper())
+        except (KeyError, TypeError):
+            _acr_names = set()
+        _kat_map: dict = {}
+        if "KATEGORI" in data.columns:
+            _dkn = data.dropna(subset=["KATEGORI"])
+            if not _dkn.empty:
+                _kat_map = (
+                    _dkn.groupby(
+                        _dkn["Nama Barang"].astype(str).str.strip()
+                        .str.upper())["KATEGORI"].first()
+                    .astype(str).str.strip().str.upper().to_dict())
+        _nb = dev["Nama Barang"].astype(str).str.strip().str.upper()
+        _keep = _nb.isin(_acr_names) | _nb.map(
+            lambda n: bool(re.search(_KAT_COM_RE, _kat_map.get(n, ""),
+                                     re.IGNORECASE))
+            or bool(re.search(_KAT_PKG_RE, _kat_map.get(n, ""),
+                              re.IGNORECASE)))
+        _n_nondev = int((~_keep).sum())
+        if _n_nondev:
+            dev = dev[_keep.to_numpy()]
+            if dev.empty:
+                _e = pd.DataFrame()
+                _e.attrs["deviasi_only_dropped"] = _n_nondev
+                return _e
 
     # v3.9.42 — audit 61-a P3: SATUAN dinormalkan SEBELUM groupby —
     # 'GR' vs 'GR ' dulu membuat 2 grup → 2 baris pasangan KEMBAR di
@@ -466,8 +515,13 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
         ["_absnom", "_absqty"], ascending=[False, False],
         kind="mergesort").drop(columns=["_absnom", "_absqty"]))
     grouped = grouped.reset_index(drop=True)
-    return grouped[["Nama Barang", "Resto", "Satuan", "Harga",
-                    "Harga Tampil", "Qty Deviasi", "Nominal"]]
+    res = grouped[["Nama Barang", "Resto", "Satuan", "Harga",
+                   "Harga Tampil", "Qty Deviasi", "Nominal"]]
+    # v3.11.9 — ekspos jumlah pasangan non-deviasi yang dikecualikan
+    # (set pada frame FINAL — seleksi kolom tak selalu propagasi attrs).
+    if deviasi_only:
+        res.attrs["deviasi_only_dropped"] = _n_nondev
+    return res
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +569,8 @@ def _attach_kategori_pairs(pairs: pd.DataFrame,
 def pasangan_tanpa_harga_global(
         data: pd.DataFrame | None, h: int, harga_map: dict | None,
         konversi_map: dict | None,
-        saldo_sistem_map: dict | None = None) -> pd.DataFrame:
+        saldo_sistem_map: dict | None = None,
+        deviasi_only: bool = False) -> pd.DataFrame:
     """v3.9.63 — frame barang TANPA HARGA GLOBAL (ANAK TAB 'Tanpa Harga'
     tab 🧮 Nominal Deviasi; user: "barang yang tidak ada harga nya
     sesuai kategori yang difilter ... dan itu buat anak tab baru di
@@ -526,24 +581,38 @@ def pasangan_tanpa_harga_global(
     kategori tab utama (GLOBAL: semua kategori & resto; filter kategori
     anak tab diterapkan di view saat render). Kolom: [Resto, KATEGORI,
     Nama Barang, Satuan, Qty Deviasi, Harga Tampil, Nominal] urut
-    |Qty Deviasi| menurun (warisan urutan hitung_nominal_pairs)."""
+    |Qty Deviasi| menurun (warisan urutan hitung_nominal_pairs).
+    v3.11.9 — deviasi_only diteruskan (mirror tab utama: pasangan
+    non-deviasi dikecualikan — jumlahnya di attrs hasil)."""
     pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map,
-                                  saldo_sistem_map)
+                                  saldo_sistem_map,
+                                  deviasi_only=deviasi_only)
+    _nd = pairs.attrs.get("deviasi_only_dropped") if pairs is not None \
+        else None
     if pairs is None or pairs.empty or "Nominal" not in pairs.columns:
-        return pd.DataFrame()
+        out = pd.DataFrame()
+        if _nd is not None:
+            out.attrs["deviasi_only_dropped"] = _nd
+        return out
     out = pairs[pairs["Nominal"].isna()].copy()
     if out.empty:
+        if _nd is not None:
+            out.attrs["deviasi_only_dropped"] = _nd
         return out
     out = _attach_kategori_pairs(out, data)
-    return out[["Resto", "KATEGORI", "Nama Barang", "Satuan",
-                "Qty Deviasi", "Harga Tampil", "Nominal"]] \
+    res = out[["Resto", "KATEGORI", "Nama Barang", "Satuan",
+               "Qty Deviasi", "Harga Tampil", "Nominal"]] \
         .reset_index(drop=True)
+    if _nd is not None:
+        res.attrs["deviasi_only_dropped"] = _nd
+    return res
 
 
 def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
                                harga_map: dict | None,
                                konversi_map: dict | None,
-                               saldo_sistem_map: dict | None = None) -> tuple:
+                               saldo_sistem_map: dict | None = None,
+                               deviasi_only: bool = False) -> tuple:
     """→ (frame_per_resto, frame_pasangan).
 
     frame_per_resto: [Resto, N Barang, Tanpa Harga, Nominal Deviasi,
@@ -554,13 +623,24 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
     tanpa pasangan klas itu → 0.0 (tampil '-' via fmt_rp_cell).
     frame_pasangan = output hitung_nominal_pairs + kolom KATEGORI
     (utk popup rincian + anak tab Tanpa Harga).
+    v3.11.9 — deviasi_only diteruskan (user: "Nominal Deviasi hanya
+    kategori benar-benar deviasi"); jumlah pasangan non-deviasi
+    dikecualikan terekspos via frame_pasangan.attrs
+    ["deviasi_only_dropped"] (dipakai status view).
     """
     pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map,
-                                  saldo_sistem_map)
+                                  saldo_sistem_map,
+                                  deviasi_only=deviasi_only)
+    _nd = pairs.attrs.get("deviasi_only_dropped") \
+        if pairs is not None else None
     if pairs.empty:
-        return pd.DataFrame(columns=["Resto", "N Barang", "Tanpa Harga",
-                                     "Nominal Deviasi", "COM Deviasi",
-                                     "Biaya Packaging"]), pairs
+        _g0 = pd.DataFrame(columns=["Resto", "N Barang", "Tanpa Harga",
+                                    "Nominal Deviasi", "COM Deviasi",
+                                    "Biaya Packaging"])
+        if _nd is not None:
+            _g0.attrs["deviasi_only_dropped"] = _nd
+            pairs.attrs["deviasi_only_dropped"] = _nd
+        return _g0, pairs
     # v3.9.63 — kategori per pasangan (klas COM/Packaging + anak tab)
     pairs = _attach_kategori_pairs(pairs, data)
     g = (pairs.groupby("Resto", as_index=False)
@@ -590,6 +670,8 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
     g = g.reset_index(drop=True)
     g["N Barang"] = g["N Barang"].astype(int)
     g["Tanpa Harga"] = g["Tanpa Harga"].astype(int)
+    if _nd is not None:
+        pairs.attrs["deviasi_only_dropped"] = _nd
     return g, pairs
 
 

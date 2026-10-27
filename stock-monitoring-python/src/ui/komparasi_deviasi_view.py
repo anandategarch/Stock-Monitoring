@@ -771,6 +771,10 @@ class KomparasiDeviasiView(tk.Frame):
         self._pending_ana_sort: dict = {}
         # v3.9.13: file terakhir di-auto-load SEKALI saat tab terlihat
         self._auto_loaded = False
+        # v3.11.9 — AUTO FILE DEVIASI BULAN LALU (folder + period + jumlah
+        # dari app; None = fitur mati → fallback last-used lama). Lihat
+        # _auto_bulanan_paths / maybe_auto_load_last.
+        self._auto_bulanan_cfg = None
         # cache matriks app — per objek data + file
         self._cached_mats = None
         self._cached_signature = None
@@ -1243,14 +1247,105 @@ class KomparasiDeviasiView(tk.Frame):
         (startup) ATAU ensure_refreshed (tab 📋 pertama terlihat —
         perilaku lama v3.9.13). Parse di worker (anti-beku); file
         hilang → status saja tanpa dialog; sudah ada file / sudah
-        pernah dicoba → no-op (guard _auto_loaded)."""
+        pernah dicoba → no-op (guard _auto_loaded).
+
+        v3.11.9 — PRIORITAS BARU: AUTO FILE BULAN LALU dari folder
+        config (user: "auto ambil file deviasi bulan lalu dari folder
+        ...DEVIASI_BULANAN, format nama file seperti '20.AGUSTUS
+        2026'"). _auto_bulanan_cfg aktif (folder valid + period data)
+        → file '20.{BULAN} {TAHUN}' N bulan mundur dimuat OTOMATIS
+        (menggantikan last-used); folder ada tapi file bulan tsb belum
+        ada → no-op jujur + status (TIDAK diam-diam fallback ke file
+        lama — bulan salah lebih berbahaya dari tanpa file); fitur
+        mati (cfg None) → perilaku lama last-used."""
         if (not self._auto_loaded and self.data is not None
                 and not self.data.empty and not self._file_paths):
             self._auto_loaded = True
+            _cfg = self._auto_bulanan_cfg
+            if _cfg is not None:
+                _auto_paths = self._auto_bulanan_paths(_cfg)
+                if _auto_paths:
+                    if set(_auto_paths) <= set(self._file_paths):
+                        return          # sudah termuat — no-op
+                    self._load_paths(_auto_paths, interactive=False)
+                    return
+                # folder valid tapi file cocok belum ada → jujur di
+                # status (bukan diam-diam pakai file lama — bulan salah
+                # lebih berbahaya dari tanpa file; user lihat & bisa
+                # muat manual via 📂).
+                try:
+                    _fld = str(_cfg[0]) if _cfg else ""
+                except (TypeError, ValueError, IndexError):
+                    _fld = ""
+                self.status_var_label.set(
+                    "Auto file deviasi bulan lalu: belum ada file "
+                    "'20.{BULAN} {TAHUN}' cocok di "
+                    f"{_fld or 'folder config'} — muat manual via 📂 "
+                    "bila perlu.")
+                return
             paths = [p for p in self._read_last_paths()
                      if os.path.isfile(p)]
             if paths:
                 self._load_paths(paths, interactive=False)
+
+    def _auto_bulanan_paths(self, cfg) -> list:
+        """v3.11.9 — daftar path file deviasi bulan lalu utk N bulan
+        mundur dari periode data (urut KRONOLOGIS lama→baru).
+
+        cfg = (folder, (tahun, bulan), jumlah):
+          - folder    : path absolut folder DEVIASI_BULANAN (config key
+                        DeviasiBulananFolder; kartu ⚙️ Config);
+          - (t, b)    : periode data BERJALAN (audit_result['period'] —
+                        bulan lalu = b−1, wrap tahun);
+          - jumlah    : 1..12 — berapa bulan mundur (user: "aku bisa
+                        setting jumlah file").
+
+        Nama file = '20.{BULAN} {TAHUN}' (mis. '20.AGUSTUS 2026') —
+        case-insensitive (uppercase), ext .xlsx (prioritas) / .xlsm /
+        .xls / .xlsb. Folder tak ada / cfg invalid / 0 file → []
+        (degrade jujur)."""
+        try:
+            folder = str(cfg[0])
+            _period = cfg[1]
+            tahun = int(_period[0])
+            bulan = int(_period[1])
+            jumlah = int(cfg[2])
+        except (TypeError, ValueError, IndexError):
+            return []
+        if not folder or not os.path.isdir(folder):
+            return []
+        if not (1 <= bulan <= 12):
+            return []
+        if not (1 <= jumlah <= 12):
+            jumlah = 1
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            return []
+        # base (tanpa ext) → path; ext favorit .xlsx dulu (setdefault
+        # menyimpan yang PERTAMA dijumpai — urut prioritas ext).
+        _ext_rank = {".xlsx": 0, ".xlsm": 1, ".xls": 2, ".xlsb": 3}
+        names = sorted(
+            (n for n in names
+             if os.path.splitext(n)[1].lower() in _ext_rank),
+            key=lambda n: (_ext_rank[os.path.splitext(n)[1].lower()], n))
+        by_base: dict = {}
+        for nm in names:
+            base = os.path.splitext(nm)[0].strip().upper()
+            by_base.setdefault(base, os.path.join(folder, nm))
+        out = []
+        m, y = bulan, tahun
+        for _ in range(jumlah):
+            m -= 1
+            if m < 1:
+                m = 12
+                y -= 1
+            want = f"20.{_BULAN_NAME[m]} {y}".upper()
+            p = by_base.get(want)
+            if p:
+                out.append(p)
+        out.reverse()   # kronologis lama → baru
+        return out
 
     def _col_values(self, col: str) -> list:
         result = self._result_df
@@ -1433,6 +1528,10 @@ class KomparasiDeviasiView(tk.Frame):
                   harga_map: dict | None = None,
                   konversi_map: dict | None = None):
         self.data = data
+        # v3.11.9 — sesi data BARU → auto-load boleh dicoba lagi (guard
+        # _auto_loaded di-reset; file aktif lama diganti pipeline baru —
+        # file bulan lalu periode baru harus ikut dimuat ulang).
+        self._auto_loaded = False
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
         # v3.9.34 — kolom Nominal (Harga 41.09 × GR Saat Ini): peta harga

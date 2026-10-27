@@ -28,3 +28,4 @@ desktop.ini
 # v3.9.62 — artefak build PyInstaller (build_exe.py)
 build/
 dist/
+runx.sh
