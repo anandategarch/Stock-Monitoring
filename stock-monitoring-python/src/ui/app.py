@@ -242,7 +242,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.6"  # v3.11.6 — 3 PERMINTAAN USER: (1) filter RESTO/SOURCE pivot tak lagi menawarkan nilai kosong (kascade per render + reset seleksi basi; KATEGORI deviasi di-scope mode satuan); (2) FOLLOW-UP AUTO-DONE pasca-revisi file source (baris DEVIASI GR/PCS menunggu yang deviasinya hilang di data baru → Status TL Selesai otomatis + log jujur); (3) LEBAR KOLOM pivot tak lagi ter-reset tiap render (nama barang "mepet") + auto-fit nama max_width 520 + cache lebar per mode.
+APP_VERSION = "3.11.7"  # v3.11.7 — KOLOM CEK Deviasi GR/PCS: SEMUA label anomali terpicu kini TAMPIL BERGABUNG ' · ' (dulu hanya label prioritas pertama — yang lain tenggelam) + 2 LABEL BARU: "Naik Drastis" (SO(H) > 150%·SO(H−1) — mirror Turun Drastis) & "Hilang dari Pencatatan" (kemarin bersaldo, hari ini SO tercatat NOL persis tanpa mutasi IN/OUT/BK — kasus ekstrem, prioritas di atas Turun Drastis) + SEGME "COM Tinggi (+x)" (d(t) = COM(t) − ACR(t) = pemakaian aktual resto vs pemakaian sistem; d(H) > median d(t) t=1..H−1 dgn ≥3 hari valid SO-tercatat-kedua-ujung — modul com_analisa) + IDENTIFIKASI KATEGORI MANUAL barang tanpa kategori (user: "untuk nama barang tanpa kategori aku bisa identifikasi manual ... tersimpan di config dan aku bisa hapus juga atau edit") — section baru tab ⚙️ Config: daftar barang tanpa kategori data run + tombol 🎯 Identifikasi (combobox: COM Deviasi / Biaya Packaging / Beban Gas / dll — editable) + mapping tersimpan ber-Edit/Hapus; config.json key "KategoriManual" (prioritas TERTINGGI di atas kategori rekap 5c & master DBS — append1 LANGKAH 5d).
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -3138,6 +3138,83 @@ class StockMonitorApp:
                     command=self._load_config_to_form).pack(
             side="left", padx=(8, 0))
 
+        # --- Card: Identifikasi Kategori Manual (v3.11.7) -----------------
+        # user: "untuk nama barang tanpa kategori aku bisa identifikasi
+        # manual. Tambah section baru terserah di mana yang isi nya
+        # tampilan semua nama barang tanpa kategori dan ada tombol
+        # identifikasi nah tombol itu aku bisa pilih itu barangnya akan
+        # masuk com deviasi atau packaing atau beban gas dan lain lain
+        # dan tesimpan di config dan aku bisa hapus juga atau edit".
+        # Mapping tersimpan config.json key "KategoriManual" — pipeline
+        # membacanya di append1 LANGKAH 5d (prioritas TERTINGGI di atas
+        # kategori rekap mentah 5c & master DBS 5).
+        kat_card = tk.Frame(wrap, bg=C_CARD, highlightbackground="#e2e8f0",
+                            highlightthickness=1)
+        kat_card.pack(fill="x", pady=(12, 0))
+        kat_inner = tk.Frame(kat_card, bg=C_CARD)
+        kat_inner.pack(fill="x", padx=16, pady=(14, 16))
+
+        tk.Label(kat_inner, text="Identifikasi Kategori Manual", bg=C_CARD,
+                 fg=C_HEADER, font=font(12, "bold")).pack(anchor="w")
+        tk.Label(kat_inner,
+                 text="Barang tanpa kategori dari data run ini diberi "
+                      "kategori manual — tersimpan di config.json (key "
+                      "KategoriManual, prioritas tertinggi di atas kategori "
+                      "rekap & master DBS) dan diterapkan mulai run "
+                      "pipeline berikutnya. Mapping bisa diedit / dihapus "
+                      "kapan saja (barang kembali ke kategori otomatis).",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
+                 wraplength=860, justify="left").pack(anchor="w", pady=(2, 8))
+
+        kat_grid = tk.Frame(kat_inner, bg=C_CARD)
+        kat_grid.pack(fill="x")
+        # KIRI — barang tanpa kategori (data run ini)
+        kat_left = tk.Frame(kat_grid, bg=C_CARD)
+        kat_left.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        tk.Label(kat_left, text="Barang tanpa kategori (data run ini)",
+                 bg=C_CARD, fg=C_HEADER,
+                 font=font(9, "bold")).pack(anchor="w")
+        self.kat_blank_tree = make_tree(kat_left, ["barang", "kategori"])
+        self.kat_blank_tree.column("barang", width=300, minwidth=180,
+                                   anchor="w")
+        self.kat_blank_tree.heading("barang", text="Nama Barang")
+        self.kat_blank_tree.column("kategori", width=140, minwidth=90,
+                                   anchor="w")
+        self.kat_blank_tree.heading("kategori", text="Kategori (data)")
+        self.kat_blank_tree.configure(height=7)
+        kat_lbtn = tk.Frame(kat_left, bg=C_CARD)
+        kat_lbtn.pack(fill="x", pady=(6, 0))
+        AccentButton(kat_lbtn, text="🎯 Identifikasi…",
+                     command=self._kategori_identify).pack(side="left")
+        # KANAN — mapping manual tersimpan (config.json)
+        kat_right = tk.Frame(kat_grid, bg=C_CARD)
+        kat_right.grid(row=0, column=1, sticky="ew")
+        tk.Label(kat_right, text="Mapping manual tersimpan (config.json)",
+                 bg=C_CARD, fg=C_HEADER,
+                 font=font(9, "bold")).pack(anchor="w")
+        self.kat_map_tree = make_tree(kat_right, ["barang", "kategori"])
+        self.kat_map_tree.column("barang", width=300, minwidth=180,
+                                 anchor="w")
+        self.kat_map_tree.heading("barang", text="Nama Barang")
+        self.kat_map_tree.column("kategori", width=140, minwidth=90,
+                                 anchor="w")
+        self.kat_map_tree.heading("kategori", text="Kategori manual")
+        self.kat_map_tree.configure(height=7)
+        kat_rbtn = tk.Frame(kat_right, bg=C_CARD)
+        kat_rbtn.pack(fill="x", pady=(6, 0))
+        GhostButton(kat_rbtn, text="✏️ Edit…",
+                    command=self._kategori_edit).pack(side="left")
+        GhostButton(kat_rbtn, text="🗑 Hapus",
+                    command=self._kategori_delete).pack(
+            side="left", padx=(8, 0))
+        kat_grid.columnconfigure(0, weight=1, uniform="kat")
+        kat_grid.columnconfigure(1, weight=1, uniform="kat")
+
+        self.kat_status_var = tk.StringVar(value="—")
+        tk.Label(kat_inner, textvariable=self.kat_status_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8)).pack(anchor="w", pady=(8, 0))
+        self._refresh_kategori_manual_card()
+
         # --- Card: Info Config (read-only) ---
         info_card = tk.Frame(wrap, bg=C_CARD, highlightbackground="#e2e8f0",
                              highlightthickness=1)
@@ -3304,6 +3381,272 @@ class StockMonitorApp:
             "(klik 🚀 MULAI PROSES untuk membaca folder baru).",
             parent=self.root)
         self._load_config_to_form()
+
+    # =====================================================================
+    # v3.11.7 — IDENTIFIKASI KATEGORI MANUAL (tab ⚙️ Config)
+    # =====================================================================
+    _KAT_BLANK_TOKENS = ("", "-", "\u2014")
+
+    def _kategori_has_data(self) -> bool:
+        """Ada data run (append1_df terisi)?"""
+        df = getattr(self, "append1_df", None)
+        return df is not None and not getattr(df, "empty", True)
+
+    def _kategori_manual_map(self) -> dict:
+        """Baca key 'KategoriManual' dari config.json (toleran — file
+        hilang/rusak/struktur salah → kosong; UI tak boleh crash gara-
+        gara config rusak — pola defensif _load_config_to_form)."""
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return {}
+        km = data.get("KategoriManual", {}) if isinstance(data, dict) else {}
+        if not isinstance(km, dict):
+            return {}
+        return {str(k): str(v) for k, v in km.items()
+                if isinstance(k, str) and isinstance(v, str)}
+
+    def _kategori_blank_items(self) -> list:
+        """Nama barang TANPA kategori di data run ini: tidak punya
+        baris ber-KATEGORI non-blank mana pun. Barang yang SUDAH
+        ter-identifikasi manual (mapping config — dibandingkan pada key
+        ter-normalisasi strip+upper, konvensi append1 LANGKAH 5d) TIDAK
+        dimasukkan → menghilang dari daftar begitu teridentifikasi
+        (umpan balik langsung; kategorinya masuk data mulai run
+        berikutnya)."""
+        df = getattr(self, "append1_df", None)
+        if df is None or getattr(df, "empty", True) \
+                or "Nama Barang" not in df.columns:
+            return []
+        if "KATEGORI" not in df.columns:
+            s_blank = pd.Series(True, index=df.index)
+        else:
+            kat = df["KATEGORI"].astype(str).str.strip()
+            s_blank = (kat.isin(self._KAT_BLANK_TOKENS)
+                       | kat.str.lower().isin(("nan", "none")))
+        has_kat = set(df.loc[~s_blank, "Nama Barang"].astype(str))
+        blanks = set(df.loc[s_blank, "Nama Barang"].astype(str)) - has_kat
+
+        def _norm(s) -> str:
+            return str(s).strip().upper()
+
+        mapped = {_norm(k) for k in self._kategori_manual_map()}
+        return sorted(b for b in blanks if _norm(b) not in mapped)
+
+    def _kategori_values(self) -> list:
+        """Daftar nilai kategori utk combobox dialog: nilai unik non-blank
+        dari data run ini + nilai mapping manual (sorted) — user boleh
+        mengetik nilai baru (combobox editable: 'BEBAN GAS - RESTO'
+        dll)."""
+        vals = set()
+        df = getattr(self, "append1_df", None)
+        if df is not None and not getattr(df, "empty", True) \
+                and "KATEGORI" in df.columns:
+            s = df["KATEGORI"].astype(str).str.strip()
+            s = s[~s.isin(self._KAT_BLANK_TOKENS)]
+            s = s[~s.str.lower().isin(("nan", "none"))]
+            vals.update(v for v in s.unique() if v)
+        vals.update(str(v).strip() for v in
+                    self._kategori_manual_map().values() if str(v).strip())
+        return sorted(vals)
+
+    def _refresh_kategori_manual_card(self):
+        """Isi ulang daftar barang tanpa kategori + mapping manual +
+        status. Dipanggil: build tab Config, tiap selesai pipeline
+        (_on_pipeline_done), dan tiap simpan/edit/hapus mapping."""
+        if not hasattr(self, "kat_blank_tree"):
+            return
+        self.kat_blank_tree.delete(
+            *self.kat_blank_tree.get_children(""))
+        self.kat_map_tree.delete(*self.kat_map_tree.get_children(""))
+        blanks = self._kategori_blank_items()
+        if not self._kategori_has_data():
+            self.kat_blank_tree.insert(
+                "", "end",
+                values=("(belum ada data — jalankan 🚀 MULAI PROSES)", ""))
+        else:
+            for b in blanks:
+                self.kat_blank_tree.insert("", "end", values=(b, "-"))
+        km = self._kategori_manual_map()
+        for k in sorted(km):
+            self.kat_map_tree.insert("", "end", values=(k, km[k]))
+        self.kat_status_var.set(
+            f"{len(blanks)} barang tanpa kategori · {len(km)} mapping "
+            "manual tersimpan — diterapkan mulai run pipeline berikutnya "
+            "(F5 / 🚀 MULAI PROSES).")
+
+    def _kategori_manual_save(self, updates: dict, removes=()) -> bool:
+        """Tulis mapping manual ke config.json (read-modify-write ATOMIK —
+        mirror _save_config: .bak cadangan + tmp + os.replace; key lain
+        tak tersentuh). updates = {nama: kategori}; removes = nama yang
+        dihapus (barang kembali ke kategori otomatis). Return True bila
+        sukses."""
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}
+        except json.JSONDecodeError as e:
+            messagebox.showerror(
+                "Config Rusak",
+                f"config.json tidak bisa dibaca (JSON invalid):\n{e}",
+                parent=self.root)
+            return False
+        if not isinstance(data, dict):
+            messagebox.showerror(
+                "Config Rusak",
+                "config.json rusak (akar harus objek JSON {…}).",
+                parent=self.root)
+            return False
+        km = data.get("KategoriManual", {})
+        if not isinstance(km, dict):
+            km = {}
+        for k, v in updates.items():
+            km[str(k)] = str(v).strip()
+        for k in removes:
+            km.pop(str(k), None)
+        km = {k: v for k, v in km.items() if str(v).strip()}
+        if km:
+            data["KategoriManual"] = km
+        else:
+            data.pop("KategoriManual", None)
+        backup_path = CONFIG_PATH.with_suffix(".json.bak")
+        if CONFIG_PATH.exists():
+            try:
+                shutil.copy2(CONFIG_PATH, backup_path)
+            except OSError as e:
+                print(f"[WARNING] Gagal membuat backup config "
+                      f"({backup_path.name}): {e}")
+        tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, CONFIG_PATH)
+        except Exception as e:  # noqa: BLE001 — gagal tulis → dialog (pola _save_config)
+            with contextlib.suppress(Exception):
+                tmp_path.unlink(missing_ok=True)
+            messagebox.showerror(
+                "Gagal Simpan", f"Tidak bisa menulis config.json:\n{e}",
+                parent=self.root)
+            return False
+        self._refresh_kategori_manual_card()
+        return True
+
+    def _kategori_dialog(self, title: str, items: list,
+                         current: str = ""):
+        """Dialog pilih kategori utk items (list nama barang). Return
+        kategori terpilih (string non-kosong) atau None bila dibatalkan.
+        Combobox EDITABLE — nilai dari data + mapping manual; user boleh
+        mengetik kategori baru (mis. 'BEBAN GAS - RESTO')."""
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+        body = tk.Frame(win, bg=C_CARD)
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+        tk.Label(body, text="Barang:", bg=C_CARD, fg=C_HEADER,
+                 font=font(9, "bold")).pack(anchor="w")
+        preview = items[0] if len(items) == 1 \
+            else f"{len(items)} barang dipilih"
+        tk.Label(body, text=preview, bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(9), wraplength=420,
+                 justify="left").pack(anchor="w", pady=(0, 8))
+        tk.Label(body, text="Kategori:", bg=C_CARD, fg=C_HEADER,
+                 font=font(9, "bold")).pack(anchor="w")
+        var = tk.StringVar(value=current)
+        combo = ttk.Combobox(body, textvariable=var,
+                             values=self._kategori_values(), width=48)
+        combo.pack(fill="x", pady=(2, 12))
+        combo.focus_set()
+        result = {"v": None}
+
+        def _ok():
+            v = var.get().strip()
+            if not v:
+                messagebox.showwarning(
+                    "Validasi", "Kategori tidak boleh kosong.", parent=win)
+                return
+            result["v"] = v
+            win.destroy()
+
+        btns = tk.Frame(body, bg=C_CARD)
+        btns.pack(fill="x")
+        AccentButton(btns, text="💾 Simpan", command=_ok).pack(side="left")
+        GhostButton(btns, text="Batal",
+                    command=win.destroy).pack(side="left", padx=(8, 0))
+        win.bind("<Return>", lambda _e: _ok())
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.wait_window()
+        return result["v"]
+
+    def _kategori_identify(self):
+        """Tombol 🎯 Identifikasi — pasangan terpilih di daftar barang
+        tanpa kategori diberi kategori via dialog (multi-select didukung:
+        semua yang terpilih dapat kategori yang sama)."""
+        sel = self.kat_blank_tree.selection()
+        if not sel:
+            messagebox.showwarning(
+                "Identifikasi Kategori",
+                "Pilih dulu barang (bisa lebih dari satu) di daftar "
+                "'Barang tanpa kategori'.", parent=self.root)
+            return
+        items = [self.kat_blank_tree.set(k, "barang") for k in sel]
+        kat = self._kategori_dialog("Identifikasi Kategori", items)
+        if not kat:
+            return
+        if self._kategori_manual_save({b: kat for b in items}):
+            self._append_log_batched(
+                f"[KATEGORI MANUAL] {len(items)} barang → '{kat}' "
+                "(config.json — diterapkan mulai run pipeline "
+                "berikutnya)\n")
+
+    def _kategori_edit(self):
+        """Tombol ✏️ Edit — ubah kategori mapping tersimpan (dialog
+        ter-prefill nilai lama)."""
+        sel = self.kat_map_tree.selection()
+        if not sel:
+            messagebox.showwarning(
+                "Edit Kategori Manual",
+                "Pilih mapping yang mau diedit di daftar 'Mapping manual "
+                "tersimpan'.", parent=self.root)
+            return
+        updates = {}
+        for k in sel:
+            name = self.kat_map_tree.set(k, "barang")
+            kat = self._kategori_dialog(
+                "Edit Kategori Manual", [name],
+                current=self.kat_map_tree.set(k, "kategori"))
+            if not kat:
+                return   # batal → stop (mapping sebelumnya tak tersentuh)
+            updates[name] = kat
+        if updates and self._kategori_manual_save(updates):
+            self._append_log_batched(
+                f"[KATEGORI MANUAL] {len(updates)} mapping diubah "
+                "(config.json)\n")
+
+    def _kategori_delete(self):
+        """Tombol 🗑 Hapus — buang mapping manual (barang kembali ke
+        kategori otomatis rekap/master di run berikutnya)."""
+        sel = self.kat_map_tree.selection()
+        if not sel:
+            messagebox.showwarning(
+                "Hapus Kategori Manual",
+                "Pilih mapping yang mau dihapus di daftar 'Mapping manual "
+                "tersimpan'.", parent=self.root)
+            return
+        names = [self.kat_map_tree.set(k, "barang") for k in sel]
+        msg = (f"Hapus identifikasi manual utk:\n\n{names[0]}?"
+               if len(names) == 1
+               else f"Hapus {len(names)} identifikasi manual?")
+        if not messagebox.askyesno("Hapus Kategori Manual", msg,
+                                   parent=self.root):
+            return
+        if self._kategori_manual_save({}, removes=names):
+            self._append_log_batched(
+                f"[KATEGORI MANUAL] {len(names)} mapping dihapus "
+                "(barang kembali ke kategori otomatis rekap/master)\n")
 
     # =====================================================================
     # TAB: PROSES
@@ -3947,6 +4290,11 @@ class StockMonitorApp:
         self.append1_df = append1_df
         self.rincian_po_df = rincian_po_df
         self.in_detail_df = in_detail_df
+        # v3.11.7 — refresh daftar barang tanpa kategori (tab ⚙️ Config —
+        # fitur pelengkap: kegagalan refresh tak boleh menjatuhkan run,
+        # pola _load_view).
+        with contextlib.suppress(Exception):
+            self._refresh_kategori_manual_card()
         self.audit_result = audit_result
         audit_df = audit_result.get("df") if audit_result else None
         audit_kpi = audit_result.get("kpi") if audit_result else None

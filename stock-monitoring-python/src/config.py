@@ -164,6 +164,25 @@ class Config:
             _wl = list(DEFAULT_KATEGORI_WHITELIST)
         self.KategoriBarang4217 = _wl
 
+        # v3.11.7 — KATEGORI MANUAL (identifikasi barang tanpa kategori,
+        # tab ⚙️ Config): {"Nama Barang": "KATEGORI"} — PRIORITAS
+        # TERTINGGI di atas kategori rekap mentah (5c) & master DBS
+        # (LANGKAH 5 append1). Tipe salah (bukan objek string→string) →
+        # peringatan + kosong (pola KategoriBarang4217 audit 61-a F1);
+        # key tak ada → kosong (fitur mati sopan — config lama tetap
+        # jalan).
+        _km = data.get("KategoriManual", {})
+        if not isinstance(_km, dict) or not all(
+                isinstance(k, str) and isinstance(v, str)
+                for k, v in _km.items()):
+            if _km:
+                print("[PERINGATAN] config 'KategoriManual' harus objek "
+                      "{\"nama barang\": \"kategori\"} (string → string) — "
+                      "diabaikan (identifikasi manual via tab ⚙️ Config "
+                      "menulis format ini)")
+            _km = {}
+        self.KategoriManual = _km
+
     # --- Helper: gabungkan RootPath + subfolder ---
     def folder(self, key: str) -> str:
         """Return full path untuk folder key (e.g., 'RekapBerjalan')."""

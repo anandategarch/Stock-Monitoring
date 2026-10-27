@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.6", APP_VERSION == "3.11.6",
+    check("Versi = 3.11.7", APP_VERSION == "3.11.7",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -5605,17 +5605,24 @@ def main():
     wait_view(root, _dv29b)
     _cek29 = {_dv29b.tree.set(k, "Nama Barang"): _dv29b.tree.set(k, "CEK")
               for k in _dv29b.tree.get_children("")}
-    check("(v3.9.19) CEK 'Promix 04': SO 'input promix 04 dine in' → "
-          "Promix 04 (mengalahkan kondisi Beda Tanggal — prioritas "
-          "pertama)",
-          _cek29.get("BRG PROMIX") == "Promix 04",
+    check("(v3.11.7) CEK 'Promix 04': SO 'input promix 04 dine in' → "
+          "Promix 04 TETAP LABEL UTAMA (mengalahkan Beda Tanggal — "
+          "prioritas pertama) + v3.11.7 GABUNG-SEMUA-LABEL: kondisi lain "
+          "yg ikut terpicu (Beda Tanggal cabang-2 + Naik Drastis — SO "
+          "30→60 melonjak 100%) kini TAMPIL sebagai segmen ' · ' (dulu "
+          "np.select hanya label pertama)",
+          _cek29.get("BRG PROMIX") ==
+          "Promix 04 · Beda Tanggal · Naik Drastis",
           f"got {_cek29.get('BRG PROMIX')!r}")
-    check("(v3.9.19) CEK 'Promix 04': SO 'input so harian' → CEK normal "
-          "(Beda Tanggal tetap hidup utk input manual)",
-          _cek29.get("BRG HARIAN") == "Beda Tanggal",
+    check("(v3.11.7) CEK: SO 'input so harian' → 'Beda Tanggal · Naik "
+          "Drastis' (v3.9.19-3.11.6: hanya 'Beda Tanggal' — label lain "
+          "tenggelam)",
+          _cek29.get("BRG HARIAN") == "Beda Tanggal · Naik Drastis",
           f"got {_cek29.get('BRG HARIAN')!r}")
-    check("(v3.9.19) CEK 'Promix 04': varian 'take away' juga Promix 04",
-          _cek29.get("BRG TAKEAWAY") == "Promix 04",
+    check("(v3.11.7) CEK 'Promix 04': varian 'take away' juga Promix 04 "
+          "(· Hitung Manual ikut — gabung-semua; so_m1=0 → stok W=0 & "
+          "SO_H≠0)",
+          _cek29.get("BRG TAKEAWAY") == "Promix 04 · Hitung Manual",
           f"got {_cek29.get('BRG TAKEAWAY')!r}")
     _legend29 = []
     for _chip29 in _dv29b._legend.winfo_children():
@@ -6257,11 +6264,14 @@ def main():
     ]
     _top30v1, _dv30v1 = _make_dv30(pd.DataFrame(_rows30v))
     _, _vv30v1 = _row_vals30(_dv30v1, "V_DUP")
-    check("(v3.9.21) _so_source_lookup PER-TANGGAL H (sumber tgl-25 promix "
-          "dipakai; tgl-24 so-harian tak menimpa) → CEK Promix 04",
+    check("(v3.11.7) _so_source_lookup PER-TANGGAL H (sumber tgl-25 "
+          "promix dipakai; tgl-24 so-harian tak menimpa) → CEK Promix 04 "
+          "LABEL UTAMA (+ segmen Beda Tanggal · Naik Drastis — SO "
+          "30→60)",
           _dv30v1._so_source_lookup.get(("V_DUP", "R")) ==
           "input promix 04 dine in" and
-          _vv30v1 is not None and _vv30v1["CEK"] == "Promix 04",
+          _vv30v1 is not None and
+          _vv30v1["CEK"] == "Promix 04 · Beda Tanggal · Naik Drastis",
           f"src={_dv30v1._so_source_lookup.get(('V_DUP', 'R'))!r} "
           f"cek={None if _vv30v1 is None else _vv30v1['CEK']!r}")
     _top30v1.destroy()
@@ -7133,11 +7143,16 @@ def main():
           f"cek={None if _vv31q is None else _vv31q['CEK']!r}")
 
     # konsistensi filter CEK: nilai popup == nilai baris yang dirender
+    # (tanpa phantom). v3.11.7: CEK kini multi-label ' · ' — popup ⧩
+    # _format_col_series CEK = LABEL UTAMA split(' · ')[0] (design
+    # v3.9.51: filter mengelompokkan per JENIS anomali, bukan per
+    # kombinasi teks penuh) → pembanding rendered pun LABEL UTAMA.
     _vals31 = _dv31p._col_values("CEK")
-    _rendered31 = {_dv31p.tree.set(k, "CEK")
+    _rendered31 = {_dv31p.tree.set(k, "CEK").split(" \u00b7 ")[0]
                    for k in _dv31p.tree.get_children("")} - {""}
-    check("(v3.9.21) Konsistensi filter CEK: nilai popup == nilai baris "
-          "yang dirender (tanpa phantom)",
+    check("(v3.11.7) Konsistensi filter CEK: nilai popup (label utama) == "
+          "label utama baris yang dirender (tanpa phantom — grouping "
+          "per jenis anomali tetap v3.9.51)",
           set(_vals31) == _rendered31,
           f"popup={_vals31} rendered={sorted(_rendered31)}")
     _top31p.destroy()
@@ -7157,8 +7172,10 @@ def main():
     ]
     _top31r, _dv31r = _make_dv30(pd.DataFrame(_rows31r))
     _, _vv31r = _row_vals30(_dv31r, "P-H")
-    check("(v3.9.21) H=25: SO tgl-25 promix → CEK Promix 04",
-          _vv31r is not None and _vv31r["CEK"] == "Promix 04",
+    check("(v3.11.7) H=25: SO tgl-25 promix → CEK Promix 04 LABEL UTAMA "
+          "+ segmen (Beda Tanggal · Naik Drastis — SO 30→60)",
+          _vv31r is not None and
+          _vv31r["CEK"] == "Promix 04 · Beda Tanggal · Naik Drastis",
           f"cek={None if _vv31r is None else _vv31r['CEK']!r}")
     _dv31r.tanggal_h_var.set("24")
     _dv31r._on_tanggal_h_change()
@@ -7208,12 +7225,17 @@ def main():
     _, _noso32 = _row_vals30(_dv32a, "NOSO")
     # v3.9.27: aturan SO-stale (v3.9.22) DIHAPUS — CEK = port persis
     # formula LET sheet 'Data Base Cek Deviasi' kolom Y. STALE (SO 24=10
-    # → SO 25=0): kondisi 4 Turun Drastis sheet = F>0 & H/F<50% →
-    # 10/0 < 50% TERFLAG 'Turun Drastis' (bukan lagi 'Beda Tanggal').
-    check("(v3.9.22→v3.9.27) CEK pasangan SO stale (SO terakhir 24 < H "
-          "25, SO_H=0): aturan stale DIHAPUS → 'Turun Drastis' (kondisi "
-          "4 sheet: F 10 > 0 & H/F 0 < 50%) — v3.9.22-26 'Beda Tanggal'",
-          _stale32 is not None and _stale32["CEK"] == "Turun Drastis",
+    # → SO 25=0 TERCATAT NOL): v3.11.7 — baris 1.SO ADA di H dgn nilai 0
+    # + tanpa mutasi IN/OUT/BK → label BARU 'Hilang dari Pencatatan'
+    # (kasus ekstrem, prioritas DI ATAS Turun Drastis) + 'Turun Drastis'
+    # ikut sebagai segmen (kondisi 4 sheet: F 10 > 0 & H/F 0 < 50%).
+    check("(v3.11.7) CEK pasangan SO stale (SO terakhir 24 < H 25, baris "
+          "1.SO t25 ADA bernilai 0): 'Hilang dari Pencatatan · Turun "
+          "Drastis' (label baru v3.11.7 — SO tercatat NOL persis tanpa "
+          "mutasi penutup; v3.9.27: 'Turun Drastis' saja; v3.9.22-26: "
+          "'Beda Tanggal')",
+          _stale32 is not None and
+          _stale32["CEK"] == "Hilang dari Pencatatan · Turun Drastis",
           f"cek={None if _stale32 is None else _stale32['CEK']!r}")
     # NOSO: tanpa baris SO sama sekali → SO_H=0 & so_m1=0 → tak ada
     # kondisi sheet yang terpicu → '' (dulu stale men-flag 'Beda Tanggal')
@@ -7237,9 +7259,12 @@ def main():
     ]
     _top32b, _dv32b = _make_dv30(pd.DataFrame(_ROWS32B))
     _, _pm32 = _row_vals30(_dv32b, "PROMIX")
-    check("(v3.9.22) Prioritas np.select utuh: Promix 04 tetap MENGALAHKAN "
-          "Beda Tanggal (SO stale promix → label Promix 04)",
-          _pm32 is not None and _pm32["CEK"] == "Promix 04",
+    check("(v3.11.7) Prioritas label utama utuh: Promix 04 tetap "
+          "MENGALAHKAN kondisi lain (SO promix → label Promix 04 di "
+          "depan; Hitung Manual ikut sbg segmen — H dinamis 24: stok W=0 "
+          "& SO_H 5 ≠ 0)",
+          _pm32 is not None and
+          _pm32["CEK"] == "Promix 04 · Hitung Manual",
           f"cek={None if _pm32 is None else _pm32['CEK']!r}")
     _top32a.destroy()
     _top32b.destroy()
@@ -7661,28 +7686,33 @@ def main():
         return "<missing>"
 
     _top33a, _dv33a = _make_dv33(pd.DataFrame(_ROWS33), _det33)
-    check("(v3.9.23) CEK RI Balancing: pasangan ber-dokumen balancing "
-          "(tgl dok 20 ≤ H 25) TERFLAG 'RI Balancing' di kolom utama — "
-          "dulu hanya terlihat di popup Rincian IN",
-          _cek33(_dv33a, "RBAL") == "RI Balancing",
+    check("(v3.11.7) CEK RI Balancing: pasangan ber-dokumen balancing "
+          "(tgl dok 20 ≤ H 25) TERFLAG 'RI Balancing' LABEL UTAMA (+ "
+          "'Turun Drastis' sbg segmen — SO 24=10, tanpa baris SO 25 → "
+          "drop 100%) — dulu hanya terlihat di popup Rincian IN",
+          _cek33(_dv33a, "RBAL") == "RI Balancing · Turun Drastis",
           f"cek={_cek33(_dv33a, 'RBAL')!r}")
     # v3.9.27: stale dihapus → STALE jatuh ke 'Turun Drastis' (kondisi
     # 4 sheet, F 10 > 0 & H/F 0 < 50%); prioritas RI Balancing di atas
     # kondisi numerik tetap terbukti lewat RBAL.
-    check("(v3.9.23→v3.9.27) Prioritas: RI Balancing MENGALAHKAN kondisi "
-          "numerik (RBAL='RI Balancing' meski SO 24→25 turun drastis); "
-          "stale tanpa dokumen = 'Turun Drastis' (v3.9.22-26: 'Beda "
-          "Tanggal')",
-          _cek33(_dv33a, "STALE") == "Turun Drastis",
+    check("(v3.11.7) Prioritas: RI Balancing MENGALAHKAN kondisi numerik "
+          "(RBAL='RI Balancing' label utama meski SO 24→25 turun "
+          "drastis); stale TANPA dokumen ber-baris-SO-0 → 'Hilang dari "
+          "Pencatatan · Turun Drastis' (v3.9.27: 'Turun Drastis'; "
+          "v3.9.22-26: 'Beda Tanggal')",
+          _cek33(_dv33a, "STALE") ==
+          "Hilang dari Pencatatan · Turun Drastis",
           f"cek={_cek33(_dv33a, 'STALE')!r}")
     check("(v3.9.23) Scope analisa: dokumen balancing bertanggal 27 > "
           "H 25 TIDAK terflag (belum termasuk analisa)",
           _cek33(_dv33a, "FUTR") == "",
           f"cek={_cek33(_dv33a, 'FUTR')!r}")
-    check("(v3.9.23) Prioritas Promix 04 TETAP pertama (by design "
+    check("(v3.11.7) Prioritas Promix 04 TETAP pertama (by design "
           "v3.9.19 — SO sistem-turunan) meski pasangan JUGA punya "
-          "dokumen balancing (kedua kondisi aktif)",
-          _cek33(_dv33a, "PROMIXRB") == "Promix 04",
+          "dokumen balancing — 'Promix 04 · RI Balancing · Hitung "
+          "Manual' (urutan prioritas penuh, gabung-semua v3.11.7)",
+          _cek33(_dv33a, "PROMIXRB") ==
+          "Promix 04 · RI Balancing · Hitung Manual",
           f"cek={_cek33(_dv33a, 'PROMIXRB')!r}")
     check("(v3.9.23) Tag warna cek_ri_bal terpasang (amber gelap #92400e "
           "— keluarga popup Rincian IN, terbedakan dari Kosong/Non Aktif)",
@@ -8549,14 +8579,20 @@ def main():
           "8.BARANG KELUAR; v3.9.6-26 pakai 9.ACR → tak pernah terpicu)",
           _cek33(_dv38a, "BEDA-TGL-ACR") == "Beda Tanggal",
           f"cek={_cek33(_dv38a, 'BEDA-TGL-ACR')!r}")
-    check("(v3.9.27) Kondisi 2 cabang-2: SO naik >50% + IN 0 + KIRIMAN "
-          "KELUAR 0 → TERFLAG meski PENJUALAN ≠ 0",
-          _cek33(_dv38a, "BEDA-TGL-BK") == "Beda Tanggal",
+    check("(v3.11.7) Kondisi 2 cabang-2: SO naik >50% + IN 0 + KIRIMAN "
+          "KELUAR 0 → TERFLAG meski PENJUALAN ≠ 0 — 'Beda Tanggal · "
+          "Hitung Manual · Naik Drastis · ACR to BOM' (4 kondisi "
+          "TERPICU BERSAMAAN — bukti gabung-semua-label: dulu hanya "
+          "'Beda Tanggal' yg tampil)",
+          _cek33(_dv38a, "BEDA-TGL-BK") ==
+          "Beda Tanggal · Hitung Manual · Naik Drastis · ACR to BOM",
           f"cek={_cek33(_dv38a, 'BEDA-TGL-BK')!r}")
-    check("(v3.9.27) KIRIMAN KELUAR ≠ 0 mematikan kedua cabang (J "
-          "sheet = KIRIMAN KELUAR, bukan PENJUALAN) → NO-CEK tak "
-          "terflag",
-          _cek33(_dv38a, "NO-CEK") == "",
+    check("(v3.11.7) KIRIMAN KELUAR ≠ 0 mematikan kedua cabang Beda "
+          "Tanggal (J sheet = KIRIMAN KELUAR, bukan PENJUALAN) → tanpa "
+          "'Beda Tanggal'; label BARU 'Naik Drastis' tetap terpicu (SO "
+          "200→310 = +55% > ambang 50% — mirror Turun Drastis, tak "
+          "peduli IN/BK)",
+          _cek33(_dv38a, "NO-CEK") == "Naik Drastis",
           f"cek={_cek33(_dv38a, 'NO-CEK')!r}")
     _top38a.destroy()
     root.update()
@@ -22470,6 +22506,350 @@ def main():
     app.deviasi_pcs_view.load_data(make_mock_append1())
     pv91._on_mode_change(0)
     wait_view(root, pv91)
+    root.update()
+
+    # =====================================================================
+    # §92 v3.11.7 — CEK GABUNG-SEMUA-LABEL + LABEL BARU (Naik Drastis ·
+    #      Hilang dari Pencatatan) + SEGME "COM Tinggi" (COM vs ACR) +
+    #      IDENTIFIKASI KATEGORI MANUAL (tab ⚙️ Config + append1 LANGKAH 5d)
+    # =====================================================================
+    print("\n== 92. (v3.11.7) CEK gabung-semua + Naik/Hilang + COM Tinggi "
+          "+ kategori manual ==")
+
+    import contextlib as _cl92
+    import json as _json92
+    import tempfile as _tf92
+
+    import src.ui.app as _appmod92
+    from src.config import Config as _Cfg92
+    from src.pipeline.append1 import apply_kategori_manual as _akm92
+    from src.ui.com_analisa import COM_TINGGI_LABEL as _CTL92
+    from src.ui.com_analisa import com_tinggi_map as _ctm92
+
+    def _row92(barang, resto, jenis, tgl, nilai):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": resto, "Tanggal": tgl, "NILAI": nilai,
+                "SATUAN": "GR", "AKTIF/NON": "AKTIF",
+                "KATEGORI": "BAHAN", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None, "SOURCE DATA": None}
+
+    # ---- (A) COM TINGGI — modul pure (com_analisa) ----------------------
+    _rows92a = []
+    # COMTINGGI: SO flat 100 harian t1..t7 + SA 100 + IN 100 di t7 →
+    # com(t)=0 & d(t)=COM−ACR=0 t1..t6 (median 0); com(7)=100 → d(7)=100
+    # > 0 → trigger excess +100 (pemakaian aktual melampaui sistem).
+    for _t in range(1, 8):
+        _rows92a.append(_row92("BRG COMTINGGI", "R92", "1.SO", _t, 100.0))
+    _rows92a.append(_row92("BRG COMTINGGI", "R92", "SALDO AWAL", 1, 100.0))
+    _rows92a.append(_row92("BRG COMTINGGI", "R92", "4.IN", 7, 100.0))
+    _rows92a.append(_row92("BRG COMTINGGI", "R92", "2.SALDO AKHIR", 7,
+                           100.0))
+    # NOCOM: tanpa IN di t7 → d(7)=0 == median 0 → strict > tak terpicu.
+    for _t in range(1, 8):
+        _rows92a.append(_row92("BRG NOCOM", "R92", "1.SO", _t, 100.0))
+    _rows92a.append(_row92("BRG NOCOM", "R92", "SALDO AWAL", 1, 100.0))
+    _rows92a.append(_row92("BRG NOCOM", "R92", "2.SALDO AKHIR", 7, 100.0))
+    # SPARSE: SO hanya t6,t7 → window median < 3 hari valid → tak
+    # berlabel (anti label palsu data sparse — bukti v3.9.27).
+    _rows92a.append(_row92("BRG SPARSE", "R92", "1.SO", 6, 100.0))
+    _rows92a.append(_row92("BRG SPARSE", "R92", "1.SO", 7, 100.0))
+    _rows92a.append(_row92("BRG SPARSE", "R92", "4.IN", 7, 100.0))
+    _rows92a.append(_row92("BRG SPARSE", "R92", "2.SALDO AKHIR", 7, 100.0))
+    # ACRGAP: median historis NON-ZERO — d(t)=−10 t1..t6 (ACR 10 harian),
+    # d(7)=0 (ACR t7 = 0) → 0 > −10 → trigger excess +10.
+    for _t in range(1, 8):
+        _rows92a.append(_row92("BRG ACRGAP", "R92", "1.SO", _t, 100.0))
+        _rows92a.append(_row92("BRG ACRGAP", "R92", "9.ACR", _t,
+                               10.0 if _t <= 6 else 0.0))
+    _rows92a.append(_row92("BRG ACRGAP", "R92", "SALDO AWAL", 1, 100.0))
+    _rows92a.append(_row92("BRG ACRGAP", "R92", "2.SALDO AKHIR", 7, 100.0))
+    _df92a = pd.DataFrame(_rows92a)
+    _m92 = _ctm92(_df92a, 7)
+    check("(v3.11.7) §92-A1 COM Tinggi: d(7)=100 > median d(1..6)=0 → "
+          "excess +100 (SO flat + IN 100 di H — COM pemakaian aktual "
+          "melampaui ACR pemakaian sistem)",
+          _m92.get(("BRG COMTINGGI", "R92")) == 100.0,
+          f"got {_m92.get(('BRG COMTINGGI', 'R92'))!r}")
+    check("(v3.11.7) §92-A2 COM Tinggi: d(H) == median → strict > tak "
+          "terpicu (BRG NOCOM tak berlabel)",
+          ("BRG NOCOM", "R92") not in _m92, f"got {_m92}")
+    check("(v3.11.7) §92-A3 COM Tinggi: SO sparse (hanya 2 hari valid) → "
+          "median < 3 hari → tak berlabel (anti label palsu)",
+          ("BRG SPARSE", "R92") not in _m92, f"got {_m92}")
+    check("(v3.11.7) §92-A4 COM Tinggi: median historis non-zero — "
+          "d(t)=−10 (ACR 10 harian), d(7)=0 > −10 → excess +10",
+          _m92.get(("BRG ACRGAP", "R92")) == 10.0,
+          f"got {_m92.get(('BRG ACRGAP', 'R92'))!r}")
+    check("(v3.11.7) §92-A5 COM Tinggi: h < 4 / data kosong / None → "
+          "peta kosong (degrade jujur, mirror po_keterangan)",
+          _ctm92(_df92a, 3) == {} and _ctm92(pd.DataFrame(), 7) == {}
+          and _ctm92(None, 7) == {})
+    check("(v3.11.7) §92-A6 COM Tinggi: label modul konstan + H tak ada "
+          "di kolom data → kosong",
+          _CTL92 == "COM Tinggi" and _ctm92(_df92a, 99) == {})
+
+    # ---- (B) integrasi view — segmen CEK + footer -----------------------
+    _top92a, _dv92a = _make_dv33(_df92a, None)
+    check("(v3.11.7) §92-B1 segmen CEK: 'COM Tinggi (+100,0)' TAMPIL "
+          "SENDIRIAN (tanpa label anomali lain — format bertanda, ribuan "
+          "'.' desimal ',')",
+          _cek33(_dv92a, "BRG COMTINGGI") == "COM Tinggi (+100,0)",
+          f"cek={_cek33(_dv92a, 'BRG COMTINGGI')!r}")
+    check("(v3.11.7) §92-B2 pasangan kontrol tanpa segmen: CEK '' "
+          "(BRG NOCOM — d(H) == median)",
+          _cek33(_dv92a, "BRG NOCOM") == "",
+          f"cek={_cek33(_dv92a, 'BRG NOCOM')!r}")
+    check("(v3.11.7) §92-B3 footer 'CEK n' menghitung BARIS ber-label "
+          "anomali kanonik — segmen COM Tinggi BUKAN label check → "
+          "counter 0 (tak menggelembung)",
+          "CEK 0 · " in _dv92a.status_var.get(),
+          f"status={_dv92a.status_var.get()!r}")
+    # gabung label + footer count = BARIS (bukan jumlah label)
+    _rows92b = [
+        _row38("BEDA4", "1.SO", 24, 100.0),
+        _row38("BEDA4", "1.SO", 25, 200.0),
+        _row38("BEDA4", "9.ACR", 25, 15.0),
+        _row38("BEDA4", "2.SALDO AKHIR", 25, 60.0),
+    ]
+    _top92b, _dv92b = _make_dv33(pd.DataFrame(_rows92b), None)
+    check("(v3.11.7) §92-B4 footer 'CEK n' = BARIS (1) bukan jumlah "
+          "label (4) — baris 'Beda Tanggal · Hitung Manual · Naik "
+          "Drastis · ACR to BOM' dihitung SEKALI (semantik footer tak "
+          "berubah pasca gabung-semua)",
+          _cek33(_dv92b, "BEDA4") ==
+          "Beda Tanggal · Hitung Manual · Naik Drastis · ACR to BOM"
+          and "CEK 1 · " in _dv92b.status_var.get(),
+          f"cek={_cek33(_dv92b, 'BEDA4')!r} "
+          f"status={_dv92b.status_var.get()!r}")
+    # H berganti → SharedPivotCache miss → COM Tinggi mengikuti H baru
+    _dv92a.tanggal_h_var.set("6")
+    _dv92a._on_tanggal_h_change()
+    wait_view(root, _dv92a)
+    root.update()
+    check("(v3.11.7) §92-B5 H berganti → pivot cache miss (key data,h) → "
+          "segmen COM Tinggi mengikuti H baru: H=6 → d(6)=0 == median → "
+          "CEK '' (bukan +100 basi)",
+          _cek33(_dv92a, "BRG COMTINGGI") == "",
+          f"cek={_cek33(_dv92a, 'BRG COMTINGGI')!r}")
+    _top92a.destroy()
+    _top92b.destroy()
+    root.update()
+
+    # ---- (C) label baru murni — Naik Drastis & Hilang dari Pencatatan ---
+    _rows92c = [
+        # NAIK-MURNI: SO 100→200 (+100%) DGN kiriman IN di H → cabang-2
+        # Beda Tanggal mati (IN≠0) → HANYA Naik Drastis (stok W=200,
+        # rasio 0 — dulu TANPA label apa pun sebelum v3.11.7).
+        _row38("NAIK-MURNI", "1.SO", 24, 100.0),
+        _row38("NAIK-MURNI", "1.SO", 25, 200.0),
+        _row38("NAIK-MURNI", "4.IN", 25, 100.0),
+        _row38("NAIK-MURNI", "2.SALDO AKHIR", 25, 200.0),
+        # HILANG-MURNI: SO 100→0 TERCATAT NOL PERSIS tanpa mutasi →
+        # Hilang dari Pencatatan (label utama) + Turun Drastis (segmen).
+        _row38("HILANG-MURNI", "1.SO", 24, 100.0),
+        _row38("HILANG-MURNI", "1.SO", 25, 0.0),
+        _row38("HILANG-MURNI", "2.SALDO AKHIR", 25, 100.0),
+        # TAK-DIREKAM: SO 100 kemarin, TANPA baris SO di H (tampil '-') →
+        # BUKAN Hilang dari Pencatatan → cukup Turun Drastis.
+        _row38("TAK-DIREKAM", "1.SO", 24, 100.0),
+        _row38("TAK-DIREKAM", "2.SALDO AKHIR", 25, 100.0),
+        # HILANG-BERIN: SO 0 tercatat TAPI ada IN → guard mutasi → BUKAN
+        # Hilang; Beda Tanggal cabang-1 (IN>0 & SO turun & BK=0) + Turun.
+        _row38("HILANG-BERIN", "1.SO", 24, 100.0),
+        _row38("HILANG-BERIN", "1.SO", 25, 0.0),
+        _row38("HILANG-BERIN", "4.IN", 25, 50.0),
+        _row38("HILANG-BERIN", "2.SALDO AKHIR", 25, 100.0),
+    ]
+    _top92c, _dv92c = _make_dv33(pd.DataFrame(_rows92c), None)
+    check("(v3.11.7) §92-C1 'Naik Drastis' murni: SO 100→200 (+100%) dgn "
+          "kiriman → hanya label Naik Drastis (cabang-2 Beda Tanggal "
+          "mati krn IN≠0; dulu baris ini TANPA label)",
+          _cek33(_dv92c, "NAIK-MURNI") == "Naik Drastis",
+          f"cek={_cek33(_dv92c, 'NAIK-MURNI')!r}")
+    check("(v3.11.7) §92-C2 'Hilang dari Pencatatan': SO tercatat NOL "
+          "persis tanpa mutasi penutup → 'Hilang dari Pencatatan · Turun "
+          "Drastis' (label utama kasus ekstrem)",
+          _cek33(_dv92c, "HILANG-MURNI") ==
+          "Hilang dari Pencatatan · Turun Drastis",
+          f"cek={_cek33(_dv92c, 'HILANG-MURNI')!r}")
+    check("(v3.11.7) §92-C3 guard 'Hilang': TANPA baris SO di H (tak "
+          "direkam → tampil '-') → BUKAN Hilang dari Pencatatan → "
+          "'Turun Drastis' saja",
+          _cek33(_dv92c, "TAK-DIREKAM") == "Turun Drastis",
+          f"cek={_cek33(_dv92c, 'TAK-DIREKAM')!r}")
+    check("(v3.11.7) §92-C4 guard mutasi: SO 0 tercatat TAPI ada IN → "
+          "BUKAN Hilang → 'Beda Tanggal · Turun Drastis' (cabang-1)",
+          _cek33(_dv92c, "HILANG-BERIN") ==
+          "Beda Tanggal · Turun Drastis",
+          f"cek={_cek33(_dv92c, 'HILANG-BERIN')!r}")
+    # snapshot follow-up 'cek' = LABEL UTAMA (split ' · ')[0]
+    _snap92c = None
+    for _k92 in _dv92c.tree.get_children(""):
+        if _dv92c.tree.set(_k92, "Nama Barang") == "HILANG-MURNI":
+            _snap92c = _dv92c._row_snaps.get(str(_k92))
+            break
+    check("(v3.11.7) §92-C5 snapshot follow-up 'cek' = LABEL UTAMA "
+          "('Hilang dari Pencatatan' — segmen lain tak ikut; fp STABIL "
+          "FIX 6d1-01 tetap menetralkan bagian cek)",
+          _snap92c is not None
+          and _snap92c.get("cek") == "Hilang dari Pencatatan",
+          f"snap={_snap92c}")
+    _top92c.destroy()
+    root.update()
+
+    # ---- (D) KATEGORI MANUAL — append1 LANGKAH 5d (pure) ---------------
+    _df92d = pd.DataFrame({
+        "Nama Barang": ["BRG KOSONG A", "BRG KOSONG A", "BRG ADA B",
+                        "BRG ADA B"],
+        "KATEGORI": [None, None, "BAHAN", "BAHAN"],
+    })
+    _n92b, _n92r = _akm92(_df92d, {"brg kosong a": "BEBAN GAS - RESTO"})
+    check("(v3.11.7) §92-D1 LANGKAH 5d: kategori manual MENGISI barang "
+          "tanpa kategori (key ter-normalisasi strip+upper — 'brg kosong "
+          "a' cocok 'BRG KOSONG A')",
+          _n92b == 1 and _n92r == 2
+          and _df92d["KATEGORI"].tolist() ==
+          ["BEBAN GAS - RESTO", "BEBAN GAS - RESTO", "BAHAN", "BAHAN"],
+          f"n=({_n92b},{_n92r}) kat={_df92d['KATEGORI'].tolist()}")
+    _n92b2, _n92r2 = _akm92(_df92d, {"BRG ADA B": "PACKAGING V.2"})
+    check("(v3.11.7) §92-D2 LANGKAH 5d: prioritas TERTINGGI — menimpa "
+          "kategori existing (semantik EDIT; kategori rekap 5c & master "
+          "DBS 5 kalah)",
+          _n92b2 == 1 and _n92r2 == 2
+          and set(_df92d.loc[_df92d["Nama Barang"] == "BRG ADA B",
+                             "KATEGORI"]) == {"PACKAGING V.2"},
+          f"n=({_n92b2},{_n92r2})")
+    check("(v3.11.7) §92-D3 LANGKAH 5d: nilai blank/'nan'/'-' dibuang + "
+          "mapping None/bukan-dict + df tanpa kolom → no-op aman",
+          _akm92(_df92d, {"X": "  "}) == (0, 0)
+          and _akm92(_df92d, {"X": "nan", "Y": "-"}) == (0, 0)
+          and _akm92(_df92d, None) == (0, 0)
+          and _akm92(_df92d, "salah-tipe") == (0, 0)
+          and _akm92(pd.DataFrame({"A": [1]}), {"X": "KAT"}) == (0, 0))
+
+    # ---- (E) Config: key KategoriManual ---------------------------------
+    _tmp92 = _tf92.mkdtemp(prefix="t92_")
+    _cfg92p = Path(_tmp92) / "config.json"
+    _cfg92base = _json92.loads(
+        Path(_appmod92.CONFIG_PATH).read_text(encoding="utf-8"))
+    _cfg92base["KategoriManual"] = {"BRG X": "BEBAN GAS - RESTO"}
+    _cfg92p.write_text(_json92.dumps(_cfg92base, ensure_ascii=False),
+                       encoding="utf-8")
+    check("(v3.11.7) §92-E1 Config: key 'KategoriManual' terbaca "
+          "(string→string)",
+          _Cfg92(str(_cfg92p)).KategoriManual ==
+          {"BRG X": "BEBAN GAS - RESTO"})
+    _cfg92base["KategoriManual"] = {"BRG X": 123}   # nilai bukan string
+    _cfg92p.write_text(_json92.dumps(_cfg92base, ensure_ascii=False),
+                       encoding="utf-8")
+    check("(v3.11.7) §92-E2 Config: tipe salah (nilai number) → {} + "
+          "tanpa crash (pola KategoriBarang4217 audit 61-a F1)",
+          _Cfg92(str(_cfg92p)).KategoriManual == {})
+    _cfg92base.pop("KategoriManual")                # key tak ada
+    _cfg92p.write_text(_json92.dumps(_cfg92base, ensure_ascii=False),
+                       encoding="utf-8")
+    check("(v3.11.7) §92-E3 Config: tanpa key → {} (config lama tetap "
+          "jalan — fitur mati sopan)",
+          _Cfg92(str(_cfg92p)).KategoriManual == {})
+
+    # ---- (F) app: section Identifikasi Kategori Manual (tab ⚙️ Config) --
+    _orig_cfg92 = _appmod92.CONFIG_PATH
+    _appmod92.CONFIG_PATH = _cfg92p      # tanpa KategoriManual (§E3)
+    try:
+        # data run: 1 barang ber-kategori + 2 barang tanpa kategori
+        _df92f = pd.DataFrame({
+            "Nama Barang": ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2"],
+            "NAMA RESTO": ["R", "R", "R"],
+            "JENIS": ["1.SO", "1.SO", "1.SO"],
+            "Tanggal": [1, 1, 1],
+            "NILAI": [1.0, 1.0, 1.0],
+            "KATEGORI": ["BAHAN", None, "-"],
+        })
+        app.append1_df = _df92f
+        app._refresh_kategori_manual_card()
+        _blank92 = [app.kat_blank_tree.set(k, "barang")
+                    for k in app.kat_blank_tree.get_children("")]
+        check("(v3.11.7) §92-F1 daftar barang tanpa kategori: hanya "
+              "barang ber-KATEGORI blank (None/'-') yang tampil — "
+              "barang ber-kategori tidak (user: 'tampilan semua nama "
+              "barang tanpa kategori')",
+              _blank92 == ["BRG KOSONG 1", "BRG KOSONG 2"],
+              f"got {_blank92}")
+        check("(v3.11.7) §92-F2 mapping manual tersimpan: tree kosong "
+              "saat config tanpa KategoriManual",
+              len(app.kat_map_tree.get_children("")) == 0)
+        check("(v3.11.7) §92-F3 simpan mapping (tombol 🎯 → "
+              "_kategori_manual_save): 2 barang tertulis ke config.json "
+              "(read-modify-write — key LAIN tak tersentuh) + barang "
+              "HILANG dari daftar blank (umpan balik langsung; kategori "
+              "masuk data mulai run berikutnya)",
+              app._kategori_manual_save(
+                  {"BRG KOSONG 1": "BEBAN GAS - RESTO",
+                   "BRG KOSONG 2": "Biaya Packaging - RESTO"})
+              and _json92.loads(
+                  _cfg92p.read_text(encoding="utf-8"))["KategoriManual"]
+              == {"BRG KOSONG 1": "BEBAN GAS - RESTO",
+                  "BRG KOSONG 2": "Biaya Packaging - RESTO"}
+              and [app.kat_blank_tree.set(k, "barang")
+                   for k in app.kat_blank_tree.get_children("")] == []
+              and [app.kat_map_tree.set(k, "barang")
+                   for k in app.kat_map_tree.get_children("")] ==
+              ["BRG KOSONG 1", "BRG KOSONG 2"],
+              "save/refresh gagal")
+        check("(v3.11.7) §92-F4 nilai combobox dialog: kategori dari "
+              "data + mapping manual (sorted — user bisa pilih COM "
+              "Deviasi / Packaging / Beban Gas / ketik baru)",
+              app._kategori_values() ==
+              ["BAHAN", "BEBAN GAS - RESTO", "Biaya Packaging - RESTO"],
+              f"got {app._kategori_values()}")
+        check("(v3.11.7) §92-F5 hapus mapping (tombol 🗑 → removes): key "
+              "dibuang dari config → barang KEMBALI ke daftar tanpa "
+              "kategori (user: 'aku bisa hapus juga atau edit')",
+              app._kategori_manual_save({}, removes=["BRG KOSONG 1"])
+              and _json92.loads(
+                  _cfg92p.read_text(encoding="utf-8")).get(
+                  "KategoriManual") ==
+              {"BRG KOSONG 2": "Biaya Packaging - RESTO"}
+              and [app.kat_blank_tree.set(k, "barang")
+                   for k in app.kat_blank_tree.get_children("")] ==
+              ["BRG KOSONG 1"],
+              "hapus/refresh gagal")
+        check("(v3.11.7) §92-F6 edit mapping: nilai BERUBAH untuk key "
+              "sama (menimpa — bukan entri ganda)",
+              app._kategori_manual_save(
+                  {"BRG KOSONG 2": "COM DEVIASI - RESTO"})
+              and _json92.loads(
+                  _cfg92p.read_text(encoding="utf-8"))["KategoriManual"]
+              == {"BRG KOSONG 2": "COM DEVIASI - RESTO"})
+        # guard: data kosong → placeholder jujur
+        app.append1_df = None
+        app._refresh_kategori_manual_card()
+        _blank92g = [app.kat_blank_tree.set(k, "barang")
+                     for k in app.kat_blank_tree.get_children("")]
+        check("(v3.11.7) §92-F7 guard data kosong: placeholder 'belum "
+              "ada data' (bukan crash / daftar basi)",
+              len(_blank92g) == 1 and "belum ada data" in _blank92g[0],
+              f"got {_blank92g}")
+        # wiring _on_pipeline_done: refresh pasca-run
+        app.append1_df = _df92f
+        with _cl92.suppress(Exception):
+            app._refresh_kategori_manual_card()
+        check("(v3.11.7) §92-F8 wiring _on_pipeline_done: append1_df "
+              "terisi → daftar barang tanpa kategori menyegarkan (fitur "
+              "pelengkap — kegagalan refresh tak menjatuhkan run)",
+              [app.kat_blank_tree.set(k, "barang")
+               for k in app.kat_blank_tree.get_children("")] ==
+              ["BRG KOSONG 1"],
+              "refresh pasca-run gagal")
+    finally:
+        _appmod92.CONFIG_PATH = _orig_cfg92
+        app.append1_df = make_mock_append1()
+        shutil.rmtree(_tmp92, ignore_errors=True)
+
+    # pulihkan app.append1_df & state utk kebersihan akhir
+    app.deviasi_gr_view.load_data(make_mock_append1())
+    wait_view(root, app.deviasi_gr_view)
     root.update()
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

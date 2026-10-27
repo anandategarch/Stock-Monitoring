@@ -1,6 +1,35 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.11.7 — KOLOM CEK: SEMUA LABEL TERPICU + 2 LABEL BARU + SEGME
+"COM TINGGI" (user: "aku tertarik naik drastis dan Hilang dari
+pencatatan dan Semua yang terpicu" + "coba eksplore terkait COM yang
+ditambahkan di kolom CEK ... selisih COM di tanggal 7 dengan acr > dari
+selisih median nya ... tambahkan analisa COM Tinggi"):
+- SEMUA LABEL TERPICU TAMPIL BERGABUNG ' · ' — dulu np.select hanya
+  mengembalikan label prioritas PERTAMA (mis. In>0 & SO turun 50%+
+  memicu Beda Tanggal DAN Turun Drastis, tapi hanya Beda Tanggal
+  tampil — label lain tenggelam). Urutan segmen = urutan prioritas;
+  label PERTAMA tetap menentukan warna baris + footer 'CEK n' +
+  snapshot follow-up 'cek' (konsumen split(' · ')[0] tak berubah
+  makna; fp follow-up menetralkan 'cek' sejak FIX 6d1-01).
+- LABEL BARU "Naik Drastis" (mirror Turun Drastis): SO(H) melonjak
+  > 150%·SO(H−1) (threshold sama dgn cabang-2 Beda Tanggal); so_m1=0
+  tak berlabel (rekam pertama ≠ anomali).
+- LABEL BARU "Hilang dari Pencatatan": kemarin bersaldo >0, hari ini
+  SO tercatat NOL PERSIS (baris 1.SO ADA di H — bukan sekadar tak
+  direkam) TANPA mutasi penutup (IN/OUT/BK=0) — kasus ekstrem Turun
+  Drastis, beda kelas kecurigaan (stok lenyap tanpa jejak);
+  prioritas DI ATAS Turun Drastis.
+- SEGME "COM Tinggi (+x)": d(t) = COM(t) − ACR(t) (pemakaian aktual
+  resto vs pemakaian sistem) per pasangan; bila d(H) > median d(t)
+  t=1..H−1 (≥3 hari valid, SO tercatat kedua ujung — anti label palsu
+  data sparse) → pemakaian fisik melampaui sistem → pemicu deviasi
+  stok. x = selisih di atas median. Modul com_analisa (matriks
+  H-independen di-cache per identitas data + hasil per H — SharedPivot
+  Cache ber-key (data, h) menjamin tak basi). Bertanda, satu arah,
+  tanpa margin (spesifikasi user).
+
 v3.11.6 — ISSUE 1 keluarga bug "filter menawarkan nilai kosong" (user:
 "waktu aku klik filter muncul misal nama resto A terus aku klik resto
 tersebut ternyata data kosong. Harusnya jika data kosong gak perlu
@@ -248,6 +277,10 @@ import pandas as pd
 from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
 from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
+from .com_analisa import (  # v3.11.7 — segmen CEK "COM Tinggi" (COM
+    COM_TINGGI_LABEL,     # = pemakaian aktual vs ACR = pemakaian sistem)
+    com_tinggi_map,
+)
 from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 — lalu file
     _norm_name_lalu,  # v3.9.53 — kunci pasangan file deviasi (mirror komparasi)
     _norm_resto_lalu,  # v3.9.53 — idem (sisi resto)
@@ -312,6 +345,15 @@ from .widgets import (
 # senyap (kelas pola berulang #5) — penyebab di-log sebelum re-raise ke
 # jalur on_error run_async.
 _LOG = logging.getLogger("stock_monitoring.deviasi")
+
+
+def _fmt_selisih_gap(v: float) -> str:
+    """v3.11.7 — format selisih di atas median utk segmen "COM Tinggi":
+    bertanda, ribuan '.', desimal ',' (gaya format analisa lalu→kini —
+    3-replace konsisten formatter app)."""
+    return (f"{float(v):+,.1f}"
+            .replace(",", "\u00a0").replace(".", ",")
+            .replace("\u00a0", "."))
 
 
 class SharedPivotCache:
@@ -534,7 +576,9 @@ class DeviasiView(tk.Frame):
         # rekap lalu -25..-31 — cakupan terbatas, tak sebanding angka resmi).
         ("Dev. Bulan Lalu", 95, "e"),
         # v3.9.51 — CEK 120 → 210: label anomali + segmen analisa deviasi
-        # lalu→kini (dipisah ' · ').
+        # lalu→kini (dipisah ' · '). v3.11.7 — SEMUA label anomali
+        # terpicu kini ikut bergabung ' · ' (urutan prioritas) + segmen
+        # "COM Tinggi" (COM vs ACR — lihat com_analisa).
         ("CEK", 210, "w"),
     ]
 
@@ -575,9 +619,13 @@ class DeviasiView(tk.Frame):
 
     # v3.9.51 — 7 label anomali check kanonik (urutan np.select CEK):
     # pembanding hitungan 'CEK n' footer & pembeda dari segmen analisa.
+    # v3.11.7 — +2 label baru (Hilang dari Pencatatan di atas Turun
+    # Drastis; Naik Drastis mirror Turun) → 9 label; footer 'CEK n'
+    # menghitung BARIS ber-label utama kanonik (semantik tak berubah).
     _CEK_CHECK_LABELS = (
         "Promix 04", "RI Balancing", "Kosong/Non Aktif", "Beda Tanggal",
-        "Hitung Manual", "Turun Drastis", "ACR to BOM")
+        "Hitung Manual", "Hilang dari Pencatatan", "Turun Drastis",
+        "Naik Drastis", "ACR to BOM")
 
     # FIX 6d1-02 — counter load_data aktif (CLASS-level, dibagi antar
     # instance GR & PCS yang sama-sama berlangganan SharedTanggalH).
@@ -963,8 +1011,13 @@ class DeviasiView(tk.Frame):
             # render tag cek_manual #c2410c (fix kontras v3.9.50 — dulu
             # legend masih #ea580c → pemetaan warna legenda ≠ warna sel).
             ("Hitung Manual", "#c2410c"),
+            # v3.11.7 — 2 label anomali baru (gabung-semua-label).
+            ("Hilang dari Pencatatan", "#991b1b"),
+            ("Naik Drastis", "#059669"),
             ("Turun Drastis", "#dc2626"),
             ("ACR to BOM", "#7c3aed"),   # v3.9.6 — kondisi ke-5
+            # v3.11.7 — segmen COM Tinggi (pemakaian aktual > sistem).
+            ("COM Tinggi · segmen CEK (COM vs ACR)", "#be123c"),
             ("negatif (merah)", "#dc2626"),
             # v3.9.18 — highlight kolom Deviasi & SO_H
             ("kolom Deviasi/SO_H", self.HIGHLIGHT_BG),
@@ -1598,6 +1651,9 @@ class DeviasiView(tk.Frame):
         tree.tag_configure("cek_manual", foreground="#c2410c")   # orange-700 (v3.9.50: kontras 2,89→3,9:1 di atas bg grp_head — audit 3-c)
         tree.tag_configure("cek_drastis", foreground="#dc2626")  # red
         tree.tag_configure("cek_acr", foreground="#7c3aed")      # purple
+        # v3.11.7 — 2 label anomali baru (gabung-semua-label CEK).
+        tree.tag_configure("cek_hilang", foreground="#991b1b")  # red-800
+        tree.tag_configure("cek_naik", foreground="#059669")    # emerald
         # v3.9.19 — kondisi ke-0 "Promix 04" (SO bersumber non input so
         # harian): teal
         tree.tag_configure("cek_promix", foreground="#0e7490")
@@ -2119,6 +2175,13 @@ class DeviasiView(tk.Frame):
             (df["JENIS"] == "2.SALDO AKHIR") & (tnum == h)].unique())
         _pk_pivot = (pivot["Nama Barang"].astype(str) + "\x1f"
                      + pivot["NAMA RESTO"].astype(str))
+        # v3.11.7 — pasangan dgn BARIS 1.SO di tanggal H (baris ADA ≠
+        # nilai 0 — arr() fill 0 tak membedakan): dasar kondisi CEK
+        # "Hilang dari Pencatatan" (SO tercatat NOL persis, bukan
+        # sekadar tak direkam → tampil '-' di tabel).
+        _so_h_pairs = pd.Index(_pair_key[
+            (df["JENIS"] == "1.SO") & (tnum == h)].unique())
+        _so_h_rec = _pk_pivot.isin(_so_h_pairs).to_numpy()
         _saldo_only_rows = ~(_pk_pivot.isin(_window_pairs)
                              & _pk_pivot.isin(_saldo_h_pairs)).to_numpy()
         if _saldo_only_rows.any():
@@ -2299,6 +2362,26 @@ class DeviasiView(tk.Frame):
                 so_h, so_m1, out=np.full(n, np.inf), where=so_m1 > 0)
         cond_drastis = (so_m1 > 0) & (drop_ratio < 0.5)
 
+        # v3.11.7 — kondisi "Naik Drastis" (user: "aku tertarik naik
+        # drastis"; mirror Turun Drastis): SO(H) melonjak > 150% dari
+        # SO(H−1) — threshold sama dgn cabang-2 Beda Tanggal (SO(H−1) +
+        # 50%·SO(H−1)); melonjak TANPA kiriman tetap tertangkap Beda
+        # Tanggal cabang-2, dgn kiriman/BK hanya label ini. so_m1 = 0
+        # tak berlabel (barang baru / rekaman pertama ≠ anomali — mirror
+        # guard so_m1 > 0 Turun Drastis).
+        cond_naik = (so_m1 > 0) & (so_h > so_m1 + 0.5 * so_m1)
+
+        # v3.11.7 — kondisi "Hilang dari Pencatatan" (user: "aku
+        # tertarik ... Hilang dari pencatatan"): kemarin bersaldo (>0),
+        # hari ini SO tercatat NOL PERSIS — baris 1.SO ADA di H
+        # (_so_h_rec; baris TAK ada = tak direkam = tampil '-' → cukup
+        # Turun Drastis, bukan label ini) — TANPA mutasi penutup apa
+        # pun (IN/OUT/BK = 0) → stok lenyap tanpa jejak sistem: kasus
+        # ekstrem Turun Drastis, beda kelas kecurigaan. Prioritas DI
+        # ATAS Turun Drastis (label utama saat keduanya terpicu).
+        cond_hilang = ((so_m1 > 0) & (so_h == 0) & (in_h == 0)
+                       & (bk_h == 0) & (out_h == 0) & _so_h_rec)
+
         # v3.9.6: kondisi ke-5 "ACR to BOM" — |Deviasi| melebihi ambang%
         # × Total ACR (BOM/penjualan 1..H): selisih stok lebih besar dari
         # pemakaian teoretis sebulan → pasti salah. Melengkapi port
@@ -2341,14 +2424,29 @@ class DeviasiView(tk.Frame):
             dtype=bool,
         )
 
-        cek = np.select(
-            [cond_promix, cond_ri_bal, cond_kosong, cond_tanggal,
-             cond_manual, cond_drastis, cond_acr],
-            ["Promix 04", "RI Balancing", "Kosong/Non Aktif",
-             "Beda Tanggal", "Hitung Manual", "Turun Drastis",
-             "ACR to BOM"],
-            default="",
+        # v3.11.7 — SEMUA LABEL TERPICU TAMPIL BERGABUNG ' · ' (user:
+        # "Semua yang terpicu"): dulu np.select mengembalikan HANYA
+        # label prioritas pertama — kondisi lain yang juga terpenuhi
+        # tenggelam (mis. In>0 & SO turun ≥50% memicu Beda Tanggal DAN
+        # Turun Drastis, hanya Beda Tanggal yang tampil). Urutan segmen
+        # = URUTAN PRIORITAS; label PERTAMA tetap menentukan warna
+        # baris + footer 'CEK n' + snapshot follow-up 'cek' (konsumen
+        # split(' · ')[0] tak berubah makna; fp menetralkan 'cek').
+        _CEK_COND_LABELS = (
+            (cond_promix.to_numpy(dtype=bool), "Promix 04"),
+            (cond_ri_bal, "RI Balancing"),
+            (cond_kosong, "Kosong/Non Aktif"),
+            (cond_tanggal, "Beda Tanggal"),
+            (cond_manual, "Hitung Manual"),
+            (cond_hilang, "Hilang dari Pencatatan"),
+            (cond_drastis, "Turun Drastis"),
+            (cond_naik, "Naik Drastis"),
+            (cond_acr, "ACR to BOM"),
         )
+        cek = np.array(
+            [" \u00b7 ".join(lbl for c, lbl in _CEK_COND_LABELS
+                              if bool(c[i]))
+             for i in range(n)], dtype=object)
 
         # v3.9.51 — ANALISA DEVIASI LALU→KINI di teks CEK (user: "kolom
         # Cek tambahkan analisa Penurunan tertinggi, peningkatan tertinggi
@@ -2416,12 +2514,39 @@ class DeviasiView(tk.Frame):
                 dtype=bool,
             )
 
-        if any(ana) or _po_seg.any():
+        # v3.11.7 — SEGME "COM Tinggi (+x)" (user: "coba eksplore terkait
+        # COM yang ditambahkan di kolom CEK ... selisih COM di tanggal 7
+        # dengan acr > dari selisih median nya nah tambahkan analisa COM
+        # Tinggi"): d(t) = COM(t) − ACR(t) per pasangan — COM = pemakaian
+        # aktual resto, ACR = pemakaian sistem; d(H) > median d(t)
+        # t=1..H−1 (≥3 hari valid, SO tercatat kedua ujung — anti label
+        # palsu data sparse v3.9.27) → pemakaian fisik melampaui sistem
+        # → pemicu deviasi stok. x = selisih di atas median. Modul
+        # com_analisa: matriks H-independen per identitas data + hasil
+        # per H — SharedPivotCache ber-key (data, h) menjamin tak basi;
+        # kegagalan → segmen kosong (fitur pelengkap ≠ tabel gagal —
+        # pola po_keterangan).
+        try:
+            _com_tmap = com_tinggi_map(data, int(h))
+        except Exception:  # noqa: BLE001 — segmen analisa ≠ tabel gagal
+            _LOG.debug("deviasi: peta COM Tinggi gagal dibangun",
+                       exc_info=True)
+            _com_tmap = {}
+        _com_txt = np.full(n, "", dtype=object)
+        if _com_tmap:
+            for _i, (_b, _r) in enumerate(zip(
+                    barang_s.to_numpy(),
+                    pivot["NAMA RESTO"].astype(str).to_numpy())):
+                _ex = _com_tmap.get((_b, _r))
+                if _ex is not None:
+                    _com_txt[_i] = f"{COM_TINGGI_LABEL} ({_fmt_selisih_gap(_ex)})"
+
+        if any(ana) or _po_seg.any() or any(_com_txt):
             cek = np.array(
                 [" \u00b7 ".join(p for p in (c,
                                              POTENSI_PO_LABEL if po else "",
-                                             a) if p)
-                 for c, po, a in zip(cek, _po_seg, ana)],
+                                             ct, a) if p)
+                 for c, po, ct, a in zip(cek, _po_seg, _com_txt, ana)],
                 dtype=object)
 
         result = pd.DataFrame({
@@ -2950,8 +3075,12 @@ class DeviasiView(tk.Frame):
                 tags.append("cek_tanggal")
             elif cek_val == "Hitung Manual":
                 tags.append("cek_manual")
+            elif cek_val == "Hilang dari Pencatatan":   # v3.11.7
+                tags.append("cek_hilang")
             elif cek_val == "Turun Drastis":
                 tags.append("cek_drastis")
+            elif cek_val == "Naik Drastis":               # v3.11.7
+                tags.append("cek_naik")
             elif cek_val == "ACR to BOM":
                 tags.append("cek_acr")
             # v3.9.61 — tanpa tag band kelompok (sekat warna dihapus —

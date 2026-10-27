@@ -262,6 +262,46 @@ def _collect_protected_barangs(dfs: list) -> set:
     return prot
 
 
+def apply_kategori_manual(expanded_kategori: "pd.DataFrame",
+                           mapping: dict) -> tuple[int, int]:
+    """v3.11.7 — LANGKAH 5d: KATEGORI MANUAL dari config (prioritas
+    TERTINGGI — menimpa kategori rekap mentah 5c & master DBS LANGKAH 5).
+
+    User: "untuk nama barang tanpa kategori aku bisa identifikasi
+    manual ... tombol itu aku bisa pilih itu barangnya akan masuk com
+    deviasi atau packaging atau beban gas dan lain lain dan tersimpan
+    di config dan aku bisa hapus juga atau edit" — mapping ditulis UI
+    tab ⚙️ Config (key config.json "KategoriManual": {nama: kategori});
+    EDIT = ganti nilai mapping; HAPUS = kembali ke sumber otomatis.
+
+    Lookup pada key TER-NORMALISASI (strip + upper — konvensi _KEY
+    LANGKAH 5 / 5c); nilai kosong/token blank dibuang (mirror filter
+    rekap 5c). Return (n_barang_mapping, n_baris_tertimpa) utk log."""
+    if (not isinstance(mapping, dict) or not mapping
+            or "Nama Barang" not in getattr(expanded_kategori, "columns", [])
+            or "KATEGORI" not in getattr(expanded_kategori, "columns", [])):
+        return 0, 0
+    km = {}
+    for k, v in mapping.items():
+        if v is None:
+            continue
+        kk = str(k).strip().upper()
+        vv = str(v).strip()
+        if (kk and vv and vv.lower() not in ("nan", "none")
+                and vv not in ("-", "\u2014")):
+            km[kk] = vv
+    if not km:
+        return 0, 0
+    kk_series = expanded_kategori["Nama Barang"].astype(str).str.strip() \
+        .str.upper()
+    val = kk_series.map(km)
+    has = val.notna()
+    if not bool(has.any()):
+        return len(km), 0
+    expanded_kategori["KATEGORI"] = val.where(has, expanded_kategori["KATEGORI"])
+    return len(km), int(has.sum())
+
+
 def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                  rekap_so_out: dict | None = None,
                  konversi_out: dict | None = None,
@@ -704,6 +744,20 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         print(f"    KATEGORI Rekap Mentah (prioritas atas master): "
               f"{_n_rk_barang} barang ({_n_rk_rows:,} baris) ber-kategori "
               f"rekap ({_n_rk_changed:,} baris berubah dari master)")
+
+    # =========================================================================
+    # 5d. KATEGORI MANUAL — PRIORITAS TERTINGGI (v3.11.7)
+    # =========================================================================
+    # Identifikasi manual barang tanpa kategori (tab ⚙️ Config — UI
+    # menulis config.json key "KategoriManual"; pipeline membacanya di
+    # sini). Menimpa rekap (5c) & master (5) utk barang terdaftar —
+    # EDIT = ganti nilai, HAPUS = kembali ke sumber otomatis.
+    _n_km_barang, _n_km_rows = apply_kategori_manual(
+        expanded_kategori, getattr(config, "KategoriManual", None) or {})
+    if _n_km_barang:
+        print(f"    KATEGORI Manual (config, prioritas tertinggi): "
+              f"{_n_km_barang} barang ({_n_km_rows:,} baris) teridentifikasi "
+              f"manual")
 
     # =========================================================================
     # 5b. SOURCE KIRIMAN PER PASANGAN (v3.9.29 — MENGGANTI nilai master)
