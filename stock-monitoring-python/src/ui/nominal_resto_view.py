@@ -370,6 +370,10 @@ class NominalRestoView(tk.Frame):
         self.tanggal_h = int(h_state.h) if h_state is not None else 25
         self.harga_map: dict = {}
         self.konversi_map: dict | None = None
+        # v3.11.8 — peta saldo sistem 42.17 (folder '6. 42.17') utk
+        # konsistensi Qty Deviasi dgn tab 📦/🧩 (SO_H − saldo 42.17 saat
+        # pasangan ada di peta — nominal_common.hitung_nominal_pairs).
+        self.saldo_sistem_map: dict = {}
         # v3.9.36 — provider FILE DEVIASI (tab ⚖ Komparasi): () → df
         # parse_deviasi_file atau None. App memasang lambda pembaca
         # komparasi_view._file_df (referensi diganti — bukan dimutasi —
@@ -1204,10 +1208,14 @@ class NominalRestoView(tk.Frame):
     # DATA LOADING
     # =========================================================================
     def load_data(self, data: pd.DataFrame, harga_map: dict | None = None,
-                  konversi_map: dict | None = None):
+                  konversi_map: dict | None = None,
+                  saldo_sistem_map: dict | None = None):
         self.data = data
         self.harga_map = harga_map or {}
         self.konversi_map = konversi_map
+        # v3.11.8 — peta saldo sistem 42.17 (opsional; None/{} = Qty
+        # Deviasi = 3.DEVIASI apa adanya — perilaku lama).
+        self.saldo_sistem_map = saldo_sistem_map or {}
         self._render_gen += 1
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
@@ -1334,7 +1342,8 @@ class NominalRestoView(tk.Frame):
         # Dihitung di worker yang sama (sekali jalan, tak ada recompute
         # saat ganti anak tab / filter kategori anak tab).
         self._noharga_df = pasangan_tanpa_harga_global(
-            df, h, self.harga_map, self.konversi_map)
+            df, h, self.harga_map, self.konversi_map,
+            self.saldo_sistem_map)
         # v3.9.59 — FIX 2e-03: hitung PRA-kategori (baris 3.DEVIASI@H
         # di data mentah) — utk pesan status jujur di jalur render kosong.
         try:
@@ -1410,7 +1419,8 @@ class NominalRestoView(tk.Frame):
                    and "_minggu" in _fr.columns else None)
             self._lalu_extra.append((f"Lalu {_lab}", _lab, _wk))
         g, pairs = agregasi_nominal_per_resto(
-            df, h, self.harga_map, self.konversi_map)
+            df, h, self.harga_map, self.konversi_map,
+            self.saldo_sistem_map)
         if g.empty:
             self._result_df = None
             self._pairs_df = None

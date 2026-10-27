@@ -89,7 +89,8 @@ def query_4217(config, protected_barangs: list | set | None = None,
 
 
 def query_4217_saldo_sistem(config, protected_barangs: list | set | None = None,
-                            stop_event=None) -> pd.DataFrame:
+                            stop_event=None,
+                            keep_kategori: bool = False) -> pd.DataFrame:
     """v3.11 — SALDO SISTEM 42.17 dari folder TERPISAH 'SaldoSistem4217'
     (config Folders, default '6. 42.17'; user: "khusus saldo sistem di
     tab deviasi gr dan deviasi pcs ambil dari folder ...\\6. 42.17.
@@ -108,6 +109,12 @@ def query_4217_saldo_sistem(config, protected_barangs: list | set | None = None,
     selalu lolos whitelist kategori (saldo sistem tidak boleh hilang
     hanya karena kategorinya di luar whitelist).
 
+    keep_kategori: v3.11.8 — output + kolom 'KATEGORI' (Kategori Barang
+    file 42.17 — user: "indentifikasi manual sumber nya dari 42.17 ...
+    ada kategori nya juga dari sumber 42.17"). Dipakai append1 utk daftar
+    barang bersaldo + kategorinya (section Identifikasi Kategori Manual
+    tab ⚙️ Config). Default False = 6 kolom (pemanggil lama tak berubah).
+
     Folder kosong/tanpa file → frame kosong (peta kosong → tab Deviasi
     GR/PCS jatuh kembali ke nilai running-stock — perilaku lama)."""
     return fn_4217(config.folder("SaldoSistem4217"),
@@ -117,7 +124,8 @@ def query_4217_saldo_sistem(config, protected_barangs: list | set | None = None,
                                          SHEET_4217),
                    protected_barangs=protected_barangs,
                    stop_event=stop_event,
-                   keep_zero=True)
+                   keep_zero=True,
+                   keep_kategori=keep_kategori)
 
 
 # =============================================================================

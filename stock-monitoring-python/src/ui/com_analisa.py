@@ -1,12 +1,14 @@
 """
-com_analisa.py — analisa "COM Tinggi" di kolom CEK tab Deviasi GR/PCS (v3.11.7).
+com_analisa.py — analisa "COM Tinggi"/"COM Rendah" di kolom CEK tab
+Deviasi GR/PCS (v3.11.7; v3.11.8 + arah RENDAH).
 
 User: "coba eksplore terkait COM yang ditambahkan di kolom CEK. Misal H=7
 maka coba hitung selisih antara COM tanggal 1 dan ACR tgl 1, hitung
 tanggal 2, 3 sampai 6. Misal ternyata selisih COM di tanggal 7 dengan
 ACR > dari selisih median nya nah tambahkan analisa COM Tinggi. COM itu
 maksudnya pemakaian aktual di resto sedangkan ACR itu pemakaian di
-sistem."
+sistem." (v3.11.8: "enggak hanya com tinggi ya com rendah juga masuk
+analisa" — d(H) < median → pemakaian tercatat sistem melampaui fisik.)
 
 Semantik per pasangan (Nama Barang × NAMA RESTO) pada tanggal analisa H:
 
@@ -22,7 +24,11 @@ COM dan ACR seharusnya hampir sama; selisihnya stabil kecil per pasangan.
 Bila d(H) MELAMPAUI median historis pasangan itu sendiri (median d(t)
 utk t = 1..H−1) → pemakaian fisik melampaui pemakaian tercatat sistem →
 pemicu deviasi stok → segmen "COM Tinggi (+x)" di teks CEK (x = selisih
-di atas median).
+di atas median). Bila d(H) JAUH DI BAWAH median (v3.11.8) → sistem
+mencatat pemakaian LEBIH BESAR dari fisik → segmen "COM Rendah (−x)"
+(x = selisih di bawah median). Satu pasangan hanya bisa memicu SATU
+arah (d(H) > median XOR d(H) < median; sama persis dgn median → normal,
+tak berlabel).
 
 VALIDITAS (anti label palsu di data sparse — bukti v3.9.27: SO resto tak
 selalu direkam tiap hari; tanpa SO tercatat di KEDUA ujung, com(t) tak
@@ -40,10 +46,11 @@ bisa dihitung bermakna):
   - median     : minimal 3 hari sampel valid di 1..H−1 — kurang dari itu
                  tak berlabel (statistik tipis, pola degrade repo).
 
-Perbandingan BERTANDA (bukan absolut): hanya d(H) > median yang
-memicu "COM Tinggi" (pemakaian aktual di atas sistem); d(H) jauh di
-bawah median (sistem mencatat pemakaian lebih besar dari fisik) TIDAK
-diberi label versi ini. Tanpa margin/ambang tambahan (spesifikasi user).
+Perbandingan BERTANDA (bukan absolut): d(H) > median memicu "COM
+Tinggi" (pemakaian aktual di atas sistem); d(H) < median memicu
+"COM Rendah" (v3.11.8 — sistem mencatat pemakaian lebih besar dari
+fisik; selisih di bawah median). Tanpa margin/ambang tambahan
+(spesifikasi user).
 
 Konsumsi: deviasi_view._compute_pivot — segmen CEK tanggal analisa H.
 Pure pandas (thread-safe — dipakai worker view GR & PCS). Cache DUA
@@ -56,6 +63,7 @@ import numpy as np
 import pandas as pd
 
 COM_TINGGI_LABEL = "COM Tinggi"
+COM_RENDAH_LABEL = "COM Rendah"   # v3.11.8 — arah bawah median
 
 # Median dipercaya bila ≥3 hari sampel valid (rekomendasi desain v3.11.7
 # — di bawah itu statistik terlalu tipis utk membedakan blip vs anomali).
@@ -153,12 +161,15 @@ def _build_matrices(data: pd.DataFrame):
     }
 
 
-def com_tinggi_map(data: pd.DataFrame, h) -> dict:
-    """Peta segmen COM Tinggi: {(Nama Barang, NAMA RESTO): selisih di
-    atas median (float)} — HANYA pasangan terpicu (d(H) valid & lebih
-    besar dari median d(t) t=1..H−1 dgn ≥3 hari valid). Frame kosong /
-    kolom kurang / h < 4 → peta kosong (degrade jujur, mirror
-    po_keterangan). Hasil di-cache per (identitas data, h)."""
+def com_gap_map(data: pd.DataFrame, h) -> dict:
+    """v3.11.8 — peta segmen COM BERSAMA dua arah:
+    {(Nama Barang, NAMA RESTO): (sisi, selisih_dari_median)} — sisi
+    "tinggi" (d(H) > median; selisih = d(H) − median, positif) atau
+    "rendah" (d(H) < median; selisih = median − d(H), positif).
+    HANYA pasangan terpicu (d(H) valid; ≥3 hari sampel valid di
+    1..H−1). Frame kosong / kolom kurang / h < 4 → peta kosong
+    (degrade jujur, mirror po_keterangan). Hasil di-cache per
+    (identitas data, h)."""
     if data is None or getattr(data, "empty", True):
         return {}
     try:
@@ -234,18 +245,43 @@ def com_tinggi_map(data: pd.DataFrame, h) -> dict:
             continue
         med = float(np.median(win))
         d_h = float(d_all[idx_h])
+        # v3.11.8 — DUA ARAH (user: "enggak hanya com tinggi ya com
+        # rendah juga masuk analisa"): d(H) > median → pemakaian fisik
+        # melampaui sistem ("tinggi", excess positif); d(H) < median →
+        # sistem mencatat pemakaian lebih besar dari fisik ("rendah",
+        # gap di bawah median dilaporkan positif). Sama persis dgn
+        # median → normal, tak berlabel (strict dua sisi — mirror
+        # strict > v3.11.7).
         if d_h > med:
-            out[(str(pair[0]), str(pair[1]))] = d_h - med
+            out[(str(pair[0]), str(pair[1]))] = ("tinggi", d_h - med)
+        elif d_h < med:
+            out[(str(pair[0]), str(pair[1]))] = ("rendah", med - d_h)
 
     _RES.update(data=data, h=h, map=out)
     return out
 
 
+def com_tinggi_map(data: pd.DataFrame, h) -> dict:
+    """Peta segmen COM Tinggi: {(Nama Barang, NAMA RESTO): selisih di
+    atas median (float)} — HANYA pasangan arah TINGGI (back-compat
+    v3.11.7; turunan tipis com_gap_map — tanpa hitung ulang)."""
+    return {p: d for p, (s, d) in com_gap_map(data, h).items()
+            if s == "tinggi"}
+
+
+def com_rendah_map(data: pd.DataFrame, h) -> dict:
+    """v3.11.8 — peta segmen COM Rendah: {(Nama Barang, NAMA RESTO):
+    selisih di bawah median (float positif)} — HANYA pasangan arah
+    RENDAH (turunan tipis com_gap_map)."""
+    return {p: d for p, (s, d) in com_gap_map(data, h).items()
+            if s == "rendah"}
+
+
 def com_tinggi_segment(data: pd.DataFrame, h, nama_barang: str,
                        nama_resto: str) -> str:
     """Label segmen utk SATU (pasangan, H) — dipakai popup/debug:
-    'COM Tinggi' bila terpicu, '' lainnya (lookup tipis di atas
-    com_tinggi_map — tidak menghitung ulang)."""
+    'COM Tinggi' bila terpicu arah tinggi, '' lainnya (lookup tipis di
+    atas com_tinggi_map — tidak menghitung ulang)."""
     m = com_tinggi_map(data, h)
     if (str(nama_barang), str(nama_resto)) in m:
         return COM_TINGGI_LABEL

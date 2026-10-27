@@ -279,7 +279,8 @@ from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 from .com_analisa import (  # v3.11.7 — segmen CEK "COM Tinggi" (COM
     COM_TINGGI_LABEL,     # = pemakaian aktual vs ACR = pemakaian sistem)
-    com_tinggi_map,
+    COM_RENDAH_LABEL,     # v3.11.8 — arah bawah median (sistem > fisik)
+    com_gap_map,          # v3.11.8 — peta gabungan dua arah (tinggi/rendah)
 )
 from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 — lalu file
     _norm_name_lalu,  # v3.9.53 — kunci pasangan file deviasi (mirror komparasi)
@@ -350,7 +351,8 @@ _LOG = logging.getLogger("stock_monitoring.deviasi")
 def _fmt_selisih_gap(v: float) -> str:
     """v3.11.7 — format selisih di atas median utk segmen "COM Tinggi":
     bertanda, ribuan '.', desimal ',' (gaya format analisa lalu→kini —
-    3-replace konsisten formatter app)."""
+    3-replace konsisten formatter app). v3.11.8 — dipakai juga arah
+    "COM Rendah" (nilai dilaporkan NEGATIF: selisih di bawah median)."""
     return (f"{float(v):+,.1f}"
             .replace(",", "\u00a0").replace(".", ",")
             .replace("\u00a0", "."))
@@ -1018,6 +1020,9 @@ class DeviasiView(tk.Frame):
             ("ACR to BOM", "#7c3aed"),   # v3.9.6 — kondisi ke-5
             # v3.11.7 — segmen COM Tinggi (pemakaian aktual > sistem).
             ("COM Tinggi · segmen CEK (COM vs ACR)", "#be123c"),
+            # v3.11.8 — segmen COM Rendah (sistem mencatat pemakaian
+            # lebih besar dari fisik — arah bawah median).
+            ("COM Rendah · segmen CEK (COM vs ACR)", "#0f766e"),
             ("negatif (merah)", "#dc2626"),
             # v3.9.18 — highlight kolom Deviasi & SO_H
             ("kolom Deviasi/SO_H", self.HIGHLIGHT_BG),
@@ -2526,10 +2531,15 @@ class DeviasiView(tk.Frame):
         # per H — SharedPivotCache ber-key (data, h) menjamin tak basi;
         # kegagalan → segmen kosong (fitur pelengkap ≠ tabel gagal —
         # pola po_keterangan).
+        # v3.11.8 — DUA ARAH (user: "enggak hanya com tinggi ya com rendah
+        # juga masuk analisa"): d(H) < median → sistem mencatat pemakaian
+        # LEBIH BESAR dari fisik → segmen "COM Rendah (−x)" (x = selisih
+        # di bawah median; satu pasangan hanya satu arah — strict dua
+        # sisi di com_gap_map).
         try:
-            _com_tmap = com_tinggi_map(data, int(h))
+            _com_tmap = com_gap_map(data, int(h))
         except Exception:  # noqa: BLE001 — segmen analisa ≠ tabel gagal
-            _LOG.debug("deviasi: peta COM Tinggi gagal dibangun",
+            _LOG.debug("deviasi: peta COM Tinggi/Rendah gagal dibangun",
                        exc_info=True)
             _com_tmap = {}
         _com_txt = np.full(n, "", dtype=object)
@@ -2539,7 +2549,13 @@ class DeviasiView(tk.Frame):
                     pivot["NAMA RESTO"].astype(str).to_numpy())):
                 _ex = _com_tmap.get((_b, _r))
                 if _ex is not None:
-                    _com_txt[_i] = f"{COM_TINGGI_LABEL} ({_fmt_selisih_gap(_ex)})"
+                    _side, _gap = _ex
+                    if _side == "tinggi":
+                        _com_txt[_i] = (f"{COM_TINGGI_LABEL} "
+                                        f"({_fmt_selisih_gap(_gap)})")
+                    else:
+                        _com_txt[_i] = (f"{COM_RENDAH_LABEL} "
+                                        f"({_fmt_selisih_gap(-_gap)})")
 
         if any(ana) or _po_seg.any() or any(_com_txt):
             cek = np.array(

@@ -29,3 +29,7 @@ settings.json.tmp
 # v3.9.62 — artefak build PyInstaller (build_exe.py / GHA release-windows)
 stock-monitoring-python/build/
 stock-monitoring-python/dist/
+
+# v3.11.8 — baseline 'barang pernah tampil di 42.17' (penanda BARU
+# section Identifikasi Kategori Manual — file state runtime, re-derivable)
+kategori_seen.json

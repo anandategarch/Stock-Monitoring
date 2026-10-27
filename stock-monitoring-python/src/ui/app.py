@@ -242,7 +242,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.7"  # v3.11.7 — KOLOM CEK Deviasi GR/PCS: SEMUA label anomali terpicu kini TAMPIL BERGABUNG ' · ' (dulu hanya label prioritas pertama — yang lain tenggelam) + 2 LABEL BARU: "Naik Drastis" (SO(H) > 150%·SO(H−1) — mirror Turun Drastis) & "Hilang dari Pencatatan" (kemarin bersaldo, hari ini SO tercatat NOL persis tanpa mutasi IN/OUT/BK — kasus ekstrem, prioritas di atas Turun Drastis) + SEGME "COM Tinggi (+x)" (d(t) = COM(t) − ACR(t) = pemakaian aktual resto vs pemakaian sistem; d(H) > median d(t) t=1..H−1 dgn ≥3 hari valid SO-tercatat-kedua-ujung — modul com_analisa) + IDENTIFIKASI KATEGORI MANUAL barang tanpa kategori (user: "untuk nama barang tanpa kategori aku bisa identifikasi manual ... tersimpan di config dan aku bisa hapus juga atau edit") — section baru tab ⚙️ Config: daftar barang tanpa kategori data run + tombol 🎯 Identifikasi (combobox: COM Deviasi / Biaya Packaging / Beban Gas / dll — editable) + mapping tersimpan ber-Edit/Hapus; config.json key "KategoriManual" (prioritas TERTINGGI di atas kategori rekap 5c & master DBS — append1 LANGKAH 5d).
+APP_VERSION = "3.11.8"  # v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 (user: "indentifikasi manual sumber nya dari 42.17 dari folder itu ya C:\KERJA\1. RESTO\9.NEW QUERY\6. 42.17. ada filter juga biar aku enak cari nama barang nya dan ada kategori nya juga dari sumber 42.17. Terus hanya ambil yang ada saldo nya aja ya") — daftar kiri tab ⚙️ Config kini dari SALDO SISTEM 42.17 folder '6. 42.17' (append1 → audit_result['kategori_4217_df']; fn_4217 param keep_kategori → kolom KATEGORI ikut keluar): SEMUA barang bersaldo (agregat lintas resto, Σ saldo) + kolom Kategori 42.17 ('Kategori Barang' file) + Kategori app efektif (manual 5d > rekap 5c > master 5) + FILTER PENCARIAN live (nama barang + kedua kategori) + penanda BARU (barang pertama kali muncul di 42.17 — file kategori_seen.json sejajar config.json; run pertama menulis baseline tanpa penanda; jawaban user: "setelah mapping kategori manual apakah ada update terkait kategori barang baru?" — YA, tiap run daftar menyegarkan otomatis) + baris tanpa kategori app di-highlight amber + tombol 🎯 kini bisa juga MENIMPA barang ber-kategori (prioritas 5d). (2) COM RENDAH (user: "enggak hanya com tinggi ya com rendah juga masuk analisa") — com_analisa kini DUA ARAH: d(H) > median → "COM Tinggi (+x)", d(H) < median → "COM Rendah (−x)" (sistem mencatat pemakaian > fisik; satu pasangan satu arah, strict dua sisi; com_gap_map gabungan + com_tinggi_map/com_rendah_map turunan; legend + entri #0f766e). (3) REKAP SELISIH IN — PAPAN "🎯 SELISIH TERBANYAK — BARANG × RESTO" (user: "pada rekap selisih in bisa gak tampil selisih terbanyak nama barang + resto") — leaderboard pasangan per Σ|Selisih IN| (kolom TERBESAR baris-tunggal + tanggal, Σ Selisih bersih, Σ|selisih|, n tgl) konteks terlihat (rentang tanggal + ⧩ + Resto — klik papan resto menyempitkan papan barang ke item terburuk resto itu), TANPA filter Nama Barang supaya tak kolapse saat diklik (mirror 6d2-02), klik baris = toggle ⧩ Nama Barang, cap ±4 baris scrollable (pola v3.9.60), +N lainnya. (4) FIX KUANTITI NOMINAL ≠ TAB DEVIASI GR/PCS (user: "di tab nominal deviasi ini kok beda ya kuantiti deviasi nya dngan yang di tab deviasi gr atau deviasi pcs") — ROOT CAUSE: tab 🧮/mode 💰 memakai baris 3.DEVIASI (SO − running-stock rekap) TANPA override saldo sistem 42.17 yang sejak v3.11 menimpa kolom Sistem tab 📦/🧩 → beda tiap snapshot 42.17 ≠ running-stock; FIX: nominal_common.hitung_nominal_pairs + param saldo_sistem_map (pasangan di peta → Qty = SO_H − saldo 42.17, PERSIS kolom Deviasi GR/PCS; kunci ternormalisasi mirror deviasi_view v3.11.1; pasangan di luar peta → 3.DEVIASI apa adanya) diteruskan app → mode 💰 + tab 🧮 + popup rincian + anak tab Tanpa Harga.
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
 # import — dulu literal "v3.9.22" basi 35 rilis (titlebar/statusbar
@@ -2241,6 +2241,11 @@ class StockMonitorApp:
         self.rincian_po_df = None
         self.in_detail_df = None
         self.audit_result = None      # v3.5: {"df", "kpi", "desc"} audit rekonsiliasi
+        # v3.11.8 — daftar barang 42.17 bersaldo + kategori sumbernya
+        # (folder '6. 42.17' — bahan section Identifikasi Kategori Manual
+        # tab ⚙️ Config; diisi _on_pipeline_done dari audit_result).
+        self.kategori_4217_df = None
+        self._kat_rows: list = []      # cache baris utk filter pencarian
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
@@ -3138,50 +3143,98 @@ class StockMonitorApp:
                     command=self._load_config_to_form).pack(
             side="left", padx=(8, 0))
 
-        # --- Card: Identifikasi Kategori Manual (v3.11.7) -----------------
+        # --- Card: Identifikasi Kategori Manual (v3.11.7; v3.11.8 sumber
+        #     42.17) -------------------------------------------------------
         # user: "untuk nama barang tanpa kategori aku bisa identifikasi
         # manual. Tambah section baru terserah di mana yang isi nya
         # tampilan semua nama barang tanpa kategori dan ada tombol
         # identifikasi nah tombol itu aku bisa pilih itu barangnya akan
         # masuk com deviasi atau packaing atau beban gas dan lain lain
         # dan tesimpan di config dan aku bisa hapus juga atau edit".
-        # Mapping tersimpan config.json key "KategoriManual" — pipeline
-        # membacanya di append1 LANGKAH 5d (prioritas TERTINGGI di atas
-        # kategori rekap mentah 5c & master DBS 5).
+        # v3.11.8 (user: "indentifikasi manual sumber nya dari 42.17 dari
+        # folder itu ya C:\KERJA\1. RESTO\9.NEW QUERY\6. 42.17. ada filter
+        # juga biar aku enak cari nama barang nya dan ada kategori nya
+        # juga dari sumber 42.17. Terus hanya ambil yang ada saldo nya aja
+        # ya"): daftar KIRI kini bersumber SALDO SISTEM 42.17 (folder
+        # '6. 42.17' — snapshot yang user tarik saat analisa) — SEMUA
+        # barang bersaldo (bukan hanya yang tanpa kategori) + kolom
+        # Kategori 42.17 (kolom 'Kategori Barang' file) + Kategori app
+        # (pipeline: rekap mentah/master DBS/mapping manual) + Saldo +
+        # pencarian nama barang. Mapping tersimpan config.json key
+        # "KategoriManual" — pipeline membacanya di append1 LANGKAH 5d
+        # (prioritas TERTINGGI) — diterapkan mulai run pipeline
+        # BERIKUTNYA (F5): run pipeline dulu → mapping → run berikutnya.
         kat_card = tk.Frame(wrap, bg=C_CARD, highlightbackground="#e2e8f0",
                             highlightthickness=1)
         kat_card.pack(fill="x", pady=(12, 0))
         kat_inner = tk.Frame(kat_card, bg=C_CARD)
         kat_inner.pack(fill="x", padx=16, pady=(14, 16))
 
-        tk.Label(kat_inner, text="Identifikasi Kategori Manual", bg=C_CARD,
+        tk.Label(kat_inner, text="Identifikasi Kategori Manual "
+                 "(sumber: 42.17 — folder '6. 42.17')", bg=C_CARD,
                  fg=C_HEADER, font=font(12, "bold")).pack(anchor="w")
         tk.Label(kat_inner,
-                 text="Barang tanpa kategori dari data run ini diberi "
+                 text="Daftar barang bersaldo dari file 42.17 yang "
+                      "ditarik saat analisa (hanya yang ada saldo) — "
+                      "kategori 42.17 = kolom 'Kategori Barang' file; "
+                      "kategori app = pipeline (rekap/master) + mapping "
+                      "manual. Barang tanpa kategori app (amber) diberi "
                       "kategori manual — tersimpan di config.json (key "
-                      "KategoriManual, prioritas tertinggi di atas kategori "
-                      "rekap & master DBS) dan diterapkan mulai run "
-                      "pipeline berikutnya. Mapping bisa diedit / dihapus "
-                      "kapan saja (barang kembali ke kategori otomatis).",
+                      "KategoriManual, prioritas tertinggi) dan diterapkan "
+                      "mulai run pipeline BERIKUTNYA (F5). Barang yang "
+                      "pertama kali muncul di 42.17 ditandai BARU. Mapping "
+                      "bisa diedit / dihapus kapan saja (barang kembali ke "
+                      "kategori otomatis).",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
                  wraplength=860, justify="left").pack(anchor="w", pady=(2, 8))
 
         kat_grid = tk.Frame(kat_inner, bg=C_CARD)
         kat_grid.pack(fill="x")
-        # KIRI — barang tanpa kategori (data run ini)
+        # KIRI — barang bersaldo 42.17 (folder '6. 42.17')
         kat_left = tk.Frame(kat_grid, bg=C_CARD)
         kat_left.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        tk.Label(kat_left, text="Barang tanpa kategori (data run ini)",
+        tk.Label(kat_left, text="Barang bersaldo 42.17 (folder '6. 42.17')",
                  bg=C_CARD, fg=C_HEADER,
                  font=font(9, "bold")).pack(anchor="w")
-        self.kat_blank_tree = make_tree(kat_left, ["barang", "kategori"])
-        self.kat_blank_tree.column("barang", width=300, minwidth=180,
-                                   anchor="w")
-        self.kat_blank_tree.heading("barang", text="Nama Barang")
-        self.kat_blank_tree.column("kategori", width=140, minwidth=90,
-                                   anchor="w")
-        self.kat_blank_tree.heading("kategori", text="Kategori (data)")
-        self.kat_blank_tree.configure(height=7)
+        # v3.11.8 — FILTER PENCARIAN (user: "ada filter juga biar aku enak
+        # cari nama barang nya"): substring case-insensitive atas nama
+        # barang + kategori 42.17 + kategori app; live per ketikan
+        # (tanpa recompute rows — cache self._kat_rows).
+        kat_search = tk.Frame(kat_left, bg=C_CARD)
+        kat_search.pack(fill="x", pady=(4, 0))
+        self.kat_search_var = tk.StringVar(value="")
+        self.kat_search_entry = ttk.Entry(
+            kat_search, textvariable=self.kat_search_var)
+        self.kat_search_entry.pack(side="left", fill="x", expand=True)
+        self.kat_search_entry.bind(
+            "<Return>", lambda _e: self._kategori_filter_apply())
+        self.kat_search_var.trace_add(
+            "write", lambda *_a: self._kategori_filter_apply())
+        GhostButton(kat_search, text="✕",
+                    command=self._kategori_search_clear).pack(
+            side="left", padx=(6, 0))
+        self.kat_4217_tree = make_tree(
+            kat_left, ["barang", "kat4217", "katapp", "saldo", "status"])
+        self.kat_4217_tree.column("barang", width=250, minwidth=160,
+                                  anchor="w")
+        self.kat_4217_tree.heading("barang", text="Nama Barang")
+        self.kat_4217_tree.column("kat4217", width=165, minwidth=100,
+                                  anchor="w")
+        self.kat_4217_tree.heading("kat4217", text="Kategori 42.17")
+        self.kat_4217_tree.column("katapp", width=130, minwidth=80,
+                                  anchor="w")
+        self.kat_4217_tree.heading("katapp", text="Kategori (app)")
+        self.kat_4217_tree.column("saldo", width=70, minwidth=50,
+                                  anchor="e")
+        self.kat_4217_tree.heading("saldo", text="Saldo")
+        self.kat_4217_tree.column("status", width=64, minwidth=48,
+                                  anchor="center")
+        self.kat_4217_tree.heading("status", text="Status")
+        self.kat_4217_tree.configure(height=10)
+        # v3.11.8 — pewarnaan baris: blank (tanpa kategori app — perlu
+        # identifikasi, amber) & BARU (pertama kali muncul, merah).
+        self.kat_4217_tree.tag_configure("kat_baru", foreground="#b91c1c")
+        self.kat_4217_tree.tag_configure("kat_blank", foreground="#b45309")
         kat_lbtn = tk.Frame(kat_left, bg=C_CARD)
         kat_lbtn.pack(fill="x", pady=(6, 0))
         AccentButton(kat_lbtn, text="🎯 Identifikasi…",
@@ -3199,7 +3252,7 @@ class StockMonitorApp:
         self.kat_map_tree.column("kategori", width=140, minwidth=90,
                                  anchor="w")
         self.kat_map_tree.heading("kategori", text="Kategori manual")
-        self.kat_map_tree.configure(height=7)
+        self.kat_map_tree.configure(height=10)
         kat_rbtn = tk.Frame(kat_right, bg=C_CARD)
         kat_rbtn.pack(fill="x", pady=(6, 0))
         GhostButton(kat_rbtn, text="✏️ Edit…",
@@ -3207,8 +3260,8 @@ class StockMonitorApp:
         GhostButton(kat_rbtn, text="🗑 Hapus",
                     command=self._kategori_delete).pack(
             side="left", padx=(8, 0))
-        kat_grid.columnconfigure(0, weight=1, uniform="kat")
-        kat_grid.columnconfigure(1, weight=1, uniform="kat")
+        kat_grid.columnconfigure(0, weight=3, uniform="kat")
+        kat_grid.columnconfigure(1, weight=2, uniform="kat")
 
         self.kat_status_var = tk.StringVar(value="—")
         tk.Label(kat_inner, textvariable=self.kat_status_var, bg=C_CARD,
@@ -3388,9 +3441,11 @@ class StockMonitorApp:
     _KAT_BLANK_TOKENS = ("", "-", "\u2014")
 
     def _kategori_has_data(self) -> bool:
-        """Ada data run (append1_df terisi)?"""
-        df = getattr(self, "append1_df", None)
-        return df is not None and not getattr(df, "empty", True)
+        """v3.11.8 — ada data daftar 42.17 (kategori_4217_df terisi dari
+        run pipeline — folder '6. 42.17')?"""
+        df = getattr(self, "kategori_4217_df", None)
+        return (df is not None and not getattr(df, "empty", True)
+                and "Nama Barang" in getattr(df, "columns", []))
 
     def _kategori_manual_map(self) -> dict:
         """Baca key 'KategoriManual' dari config.json (toleran — file
@@ -3407,32 +3462,195 @@ class StockMonitorApp:
         return {str(k): str(v) for k, v in km.items()
                 if isinstance(k, str) and isinstance(v, str)}
 
-    def _kategori_blank_items(self) -> list:
-        """Nama barang TANPA kategori di data run ini: tidak punya
-        baris ber-KATEGORI non-blank mana pun. Barang yang SUDAH
-        ter-identifikasi manual (mapping config — dibandingkan pada key
-        ter-normalisasi strip+upper, konvensi append1 LANGKAH 5d) TIDAK
-        dimasukkan → menghilang dari daftar begitu teridentifikasi
-        (umpan balik langsung; kategorinya masuk data mulai run
-        berikutnya)."""
-        df = getattr(self, "append1_df", None)
+    # v3.11.8 — file 'kategori_seen.json' (SEJAJAR config.json): nama
+    # barang (ter-normalisasi strip+upper) yang PERNAH tampil di daftar
+    # 42.17 — pembanding penanda 'BARU' (user: "setelah mapping kategori
+    # manual apakah ada update terkait kategori barang baru?" — barang
+    # yang pertama kali muncul di 42.17 otomatis ditandai tiap run).
+    _KAT_SEEN_FILE = "kategori_seen.json"
+
+    def _kategori_seen_path(self):
+        return Path(CONFIG_PATH).parent / self._KAT_SEEN_FILE
+
+    def _kategori_seen_load(self):
+        """→ None bila file BELUM ADA (run pertama — tak ada penanda BARU,
+        file baseline ditulis oleh refresh) · set nama ter-normalisasi
+        bila terbaca · set() bila rusak (semua dianggap BARU sekali —
+        file ditulis ulang benar = self-healing)."""
+        try:
+            with open(self._kategori_seen_path(), "r",
+                      encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError, ValueError):
+            return set()
+        names = data.get("seen", []) if isinstance(data, dict) else None
+        if not isinstance(names, list):
+            return set()
+        return {str(n) for n in names if str(n).strip()}
+
+    def _kategori_seen_save(self, seen: set) -> bool:
+        """Tulis seen-set ATOMIK (tmp + os.replace — pola
+        _kategori_manual_save tanpa .bak: file ini re-derivable penuh
+        dari satu run). Kegagalan → WARNING log saja (penanda BARU bukan
+        fitur kritis)."""
+        p = self._kategori_seen_path()
+        tmp = p.with_suffix(".json.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"seen": sorted(seen)}, f, indent=0,
+                          ensure_ascii=False)
+            os.replace(tmp, p)
+            return True
+        except OSError as e:
+            print(f"[WARNING] Gagal menulis {p.name}: {e}")
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            return False
+
+    @staticmethod
+    def _kat_norm(s) -> str:
+        """Kunci nama barang (strip + upper — konvensi append1 LANGKAH
+        5d / _kategori_blank_items lama)."""
+        return str(s).strip().upper()
+
+    def _kategori_4217_rows(self, seen) -> list:
+        """v3.11.8 — baris daftar barang bersaldo 42.17 (folder
+        '6. 42.17'; user: "sumber nya dari 42.17 ... hanya ambil yang ada
+        saldo nya aja ya").
+
+        Per barang (agregat lintas resto): saldo = Σ Value (hanya
+        barang ber-≥1 resto Value ≠ 0), kategori 42.17 = nilai
+        'Kategori Barang' file (first non-blank), kategori app EFEKTIF =
+        mapping manual (prioritas tertinggi — LANGKAH 5d) atau kategori
+        data run (rekap mentah 5c / master DBS 5), baru = nama belum
+        pernah tampil (seen). Return list dict utk tree + status."""
+        df = getattr(self, "kategori_4217_df", None)
         if df is None or getattr(df, "empty", True) \
-                or "Nama Barang" not in df.columns:
+                or not {"Nama Barang", "Value"} <= set(
+                    getattr(df, "columns", [])):
             return []
-        if "KATEGORI" not in df.columns:
-            s_blank = pd.Series(True, index=df.index)
-        else:
-            kat = df["KATEGORI"].astype(str).str.strip()
-            s_blank = (kat.isin(self._KAT_BLANK_TOKENS)
-                       | kat.str.lower().isin(("nan", "none")))
-        has_kat = set(df.loc[~s_blank, "Nama Barang"].astype(str))
-        blanks = set(df.loc[s_blank, "Nama Barang"].astype(str)) - has_kat
+        d = df.copy()
+        d["Nama Barang"] = d["Nama Barang"].astype(str).str.strip()
+        d["Value"] = pd.to_numeric(d["Value"], errors="coerce").fillna(0.0)
 
-        def _norm(s) -> str:
-            return str(s).strip().upper()
+        # kategori 42.17 per barang (first non-blank — kolom 'KATEGORI'
+        # hasil keep_kategori pipeline)
+        kat4217_map: dict = {}
+        if "KATEGORI" in d.columns:
+            _k = d["KATEGORI"].astype(str).str.strip()
+            _ok = (_k.ne("") & ~_k.str.lower().isin(("nan", "none"))
+                   & ~_k.isin(self._KAT_BLANK_TOKENS))
+            _kk = d.assign(_kv=_k)[_ok]
+            if not _kk.empty:
+                _kk = _kk.drop_duplicates(subset=["Nama Barang"],
+                                          keep="first")
+                kat4217_map = dict(zip(_kk["Nama Barang"], _kk["_kv"]))
 
-        mapped = {_norm(k) for k in self._kategori_manual_map()}
-        return sorted(b for b in blanks if _norm(b) not in mapped)
+        # kategori app dari data run (first non-blank per nama — key
+        # ter-normalisasi)
+        app_map: dict = {}
+        dfa = getattr(self, "append1_df", None)
+        if dfa is not None and not getattr(dfa, "empty", True) \
+                and {"Nama Barang", "KATEGORI"} <= set(
+                    getattr(dfa, "columns", [])):
+            _a = pd.DataFrame({
+                "n": dfa["Nama Barang"].astype(str).str.strip()
+                     .str.upper(),
+                "k": dfa["KATEGORI"].astype(str).str.strip(),
+            })
+            _ok = (_a["k"].ne("") & ~_a["k"].str.lower().isin(("nan",
+                                                               "none"))
+                   & ~_a["k"].isin(self._KAT_BLANK_TOKENS))
+            _aa = _a[_ok].drop_duplicates(subset=["n"], keep="first")
+            app_map = dict(zip(_aa["n"], _aa["k"]))
+
+        # mapping manual — prioritas TERTINGGI (LANGKAH 5d; umpan balik
+        # langsung: nilai tampil seketika, masuk data mulai run berikutnya)
+        km_norm = {self._kat_norm(k): v for k, v in
+                   self._kategori_manual_map().items()}
+
+        _grp = d.groupby("Nama Barang")["Value"]
+        _saldo = _grp.sum()
+        _has = _grp.agg(lambda s: bool((s != 0).any()))
+        rows = []
+        for nama in sorted(_saldo.index):
+            if not bool(_has.loc[nama]):
+                continue   # hanya yang ada saldo (user)
+            efektif = km_norm.get(self._kat_norm(nama)) \
+                or app_map.get(self._kat_norm(nama)) or ""
+            rows.append({
+                "barang": str(nama),
+                "kat4217": kat4217_map.get(nama, ""),
+                "katapp": efektif,
+                "saldo": float(_saldo.loc[nama]),
+                "baru": bool(seen is not None
+                             and self._kat_norm(nama) not in seen),
+                "blank": not efektif,
+            })
+        return rows
+
+    @staticmethod
+    def _kat_fmt_saldo(v: float) -> str:
+        """Saldo 42.17 gaya Indonesia (ribuan '.'; desimal ','; 0 → '-')."""
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return str(v)
+        if v == 0:
+            return "-"
+        if v == int(v):
+            return fmt_int_id(int(v))
+        return (f"{v:,.1f}".replace(",", "\u00a0").replace(".", ",")
+                .replace("\u00a0", "."))
+
+    def _kat_populate_4217_tree(self, rows: list | None = None):
+        """Isi tree daftar 42.17 dari rows (default cache self._kat_rows)
+        dengan FILTER PENCARIAN aktif (user: "ada filter juga biar aku
+        enak cari nama barang nya") — substring case-insensitive atas
+        nama barang + kategori 42.17 + kategori app."""
+        if not hasattr(self, "kat_4217_tree"):
+            return
+        tree = self.kat_4217_tree
+        tree.delete(*tree.get_children(""))
+        if rows is None:
+            rows = self._kat_rows
+        q = (getattr(self, "kat_search_var", None) and
+             self.kat_search_var.get().strip().lower()) or ""
+        shown = 0
+        for r in rows:
+            if q and q not in " ".join(
+                    (r["barang"], r["kat4217"], r["katapp"])).lower():
+                continue
+            tags = []
+            if r["baru"]:
+                tags.append("kat_baru")
+            elif r["blank"]:
+                tags.append("kat_blank")
+            tree.insert(
+                "", "end",
+                values=(r["barang"], r["kat4217"] or "-",
+                        r["katapp"] or "-", self._kat_fmt_saldo(r["saldo"]),
+                        "BARU" if r["baru"] else ""),
+                tags=tuple(tags))
+            shown += 1
+        if rows and not shown:
+            tree.insert("", "end", values=(
+                f"(tidak ada barang cocok pencarian '{q}')", "", "", "",
+                ""))
+
+    def _kategori_filter_apply(self, *_args):
+        """Callback pencarian (trace + Enter) — repopulasi tanpa
+        recompute rows / tanpa menyentuh file seen."""
+        if getattr(self, "_kat_rows", None) or self._kategori_has_data():
+            self._kat_populate_4217_tree()
+
+    def _kategori_search_clear(self):
+        """Tombol ✕ — kosongkan kriteria pencarian."""
+        if getattr(self, "kat_search_var", None) is not None:
+            self.kat_search_var.set("")
+        self._kategori_filter_apply()
 
     def _kategori_values(self) -> list:
         """Daftar nilai kategori utk combobox dialog: nilai unik non-blank
@@ -3452,29 +3670,43 @@ class StockMonitorApp:
         return sorted(vals)
 
     def _refresh_kategori_manual_card(self):
-        """Isi ulang daftar barang tanpa kategori + mapping manual +
+        """Isi ulang daftar barang bersaldo 42.17 + mapping manual +
         status. Dipanggil: build tab Config, tiap selesai pipeline
-        (_on_pipeline_done), dan tiap simpan/edit/hapus mapping."""
-        if not hasattr(self, "kat_blank_tree"):
+        (_on_pipeline_done), dan tiap simpan/edit/hapus mapping.
+
+        v3.11.8 — juga menyegarkan BASELINE 'barang pernah tampil'
+        (kategori_seen.json): run pertama menulis baseline (tanpa
+        penanda BARU); run berikutnya menandai nama yang BELUM pernah
+        tampil lalu memperluas seen (nama tak berulang BARU)."""
+        if not hasattr(self, "kat_4217_tree"):
             return
-        self.kat_blank_tree.delete(
-            *self.kat_blank_tree.get_children(""))
+        seen = self._kategori_seen_load()
+        rows = self._kategori_4217_rows(seen)
+        self._kat_rows = rows
+        if rows:
+            cur = {self._kat_norm(r["barang"]) for r in rows}
+            if seen is None:
+                self._kategori_seen_save(cur)      # baseline run pertama
+            elif not cur <= seen:
+                self._kategori_seen_save(seen | cur)
+        self._kat_populate_4217_tree(rows)
         self.kat_map_tree.delete(*self.kat_map_tree.get_children(""))
-        blanks = self._kategori_blank_items()
-        if not self._kategori_has_data():
-            self.kat_blank_tree.insert(
-                "", "end",
-                values=("(belum ada data — jalankan 🚀 MULAI PROSES)", ""))
-        else:
-            for b in blanks:
-                self.kat_blank_tree.insert("", "end", values=(b, "-"))
         km = self._kategori_manual_map()
         for k in sorted(km):
             self.kat_map_tree.insert("", "end", values=(k, km[k]))
+        if not self._kategori_has_data():
+            self.kat_4217_tree.delete(*self.kat_4217_tree.get_children(""))
+            _ph92 = ("(belum ada data 42.17 — jalankan 🚀 MULAI PROSES)")
+            self.kat_4217_tree.insert(
+                "", "end",
+                values=(_ph92, "", "", "", ""))
+        n_blank = sum(1 for r in rows if r["blank"])
+        n_baru = sum(1 for r in rows if r["baru"])
         self.kat_status_var.set(
-            f"{len(blanks)} barang tanpa kategori · {len(km)} mapping "
-            "manual tersimpan — diterapkan mulai run pipeline berikutnya "
-            "(F5 / 🚀 MULAI PROSES).")
+            f"{len(rows)} barang bersaldo 42.17 · {n_blank} tanpa "
+            f"kategori (perlu identifikasi) · {n_baru} BARU · {len(km)} "
+            "mapping manual tersimpan — mapping diterapkan mulai run "
+            "pipeline berikutnya (F5 / 🚀 MULAI PROSES).")
 
     def _kategori_manual_save(self, updates: dict, removes=()) -> bool:
         """Tulis mapping manual ke config.json (read-modify-write ATOMIK —
@@ -3582,17 +3814,28 @@ class StockMonitorApp:
         return result["v"]
 
     def _kategori_identify(self):
-        """Tombol 🎯 Identifikasi — pasangan terpilih di daftar barang
-        tanpa kategori diberi kategori via dialog (multi-select didukung:
-        semua yang terpilih dapat kategori yang sama)."""
-        sel = self.kat_blank_tree.selection()
+        """Tombol 🎯 Identifikasi — barang terpilih di daftar 42.17
+        diberi kategori via dialog (multi-select didukung: semua yang
+        terpilih dapat kategori yang sama). v3.11.8: daftar = SEMUA
+        barang bersaldo 42.17 — identifikasi bisa utk barang TANPA
+        kategori app (mengisi) MAUPUN yang sudah ber-kategori (menimpa
+        — prioritas tertinggi LANGKAH 5d)."""
+        sel = self.kat_4217_tree.selection()
         if not sel:
             messagebox.showwarning(
                 "Identifikasi Kategori",
                 "Pilih dulu barang (bisa lebih dari satu) di daftar "
-                "'Barang tanpa kategori'.", parent=self.root)
+                "'Barang bersaldo 42.17'.", parent=self.root)
             return
-        items = [self.kat_blank_tree.set(k, "barang") for k in sel]
+        items = [self.kat_4217_tree.set(k, "barang") for k in sel
+                 if not str(self.kat_4217_tree.set(k, "barang")).startswith(
+                     "(")]
+        if not items:
+            messagebox.showwarning(
+                "Identifikasi Kategori",
+                "Baris placeholder tidak bisa diidentifikasi — jalankan "
+                "🚀 MULAI PROSES dulu.", parent=self.root)
+            return
         kat = self._kategori_dialog("Identifikasi Kategori", items)
         if not kat:
             return
@@ -4290,9 +4533,15 @@ class StockMonitorApp:
         self.append1_df = append1_df
         self.rincian_po_df = rincian_po_df
         self.in_detail_df = in_detail_df
+        # v3.11.8 — daftar barang 42.17 bersaldo + kategori sumbernya
+        # (folder '6. 42.17' — audit_result['kategori_4217_df']) utk
+        # section Identifikasi Kategori Manual; HARUS tersimpan SEBELUM
+        # refresh card di bawah.
+        self.kategori_4217_df = ((audit_result or {}).get("kategori_4217_df")
+                                 if audit_result else None)
         # v3.11.7 — refresh daftar barang tanpa kategori (tab ⚙️ Config —
         # fitur pelengkap: kegagalan refresh tak boleh menjatuhkan run,
-        # pola _load_view).
+        # pola _load_view). v3.11.8 — daftar bersumber 42.17.
         with contextlib.suppress(Exception):
             self._refresh_kategori_manual_card()
         self.audit_result = audit_result
@@ -4446,14 +4695,21 @@ class StockMonitorApp:
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
         # rasio konversi (dari audit_result — pipeline v3.9.32;
         # v3.9.34: sumber lokal _hm/_kv bersama semua view nominal)
+        # v3.11.8 — + peta saldo sistem 42.17 (konsistensi kuantiti
+        # dgn tab 📦/🧩 Deviasi GR/PCS — user: "di tab nominal deviasi ini
+        # kok beda ya kuantiti deviasi nya dngan yang di tab deviasi gr
+        # atau deviasi pcs").
         _load_view("💰 Nominal (H)",
                    lambda: self.nominal_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv),
+                       append1_df, harga_map=_hm, konversi_map=_kv,
+                       saldo_sistem_map=_ssm),
                    self.nominal_view)
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
+        # v3.11.8 — + peta saldo sistem 42.17 (alasan sama dgn atas).
         _load_view("🧮 Nominal Deviasi",
                    lambda: self.nominal_resto_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv),
+                       append1_df, harga_map=_hm, konversi_map=_kv,
+                       saldo_sistem_map=_ssm),
                    self.nominal_resto_view)
         _load_view("🛒 Rincian PO",
                    lambda: self.rincian_view.load_data(

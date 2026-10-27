@@ -129,6 +129,12 @@ class NominalDeviasiView(tk.Frame):
         # v3.9.31 (konversi satuan harga → satuan rekap)
         self.harga_map: dict = {}
         self.konversi_map: dict | None = None
+        # v3.11.8 — peta saldo sistem 42.17 (folder '6. 42.17') utk
+        # konsistensi Qty Deviasi dgn tab 📦/🧩 (SO_H − saldo 42.17 saat
+        # pasangan ada di peta — lihat nominal_common.hitung_nominal_
+        # pairs; user: "di tab nominal deviasi ini kok beda ya kuantiti
+        # deviasi nya dngan yang di tab deviasi gr atau deviasi pcs").
+        self.saldo_sistem_map: dict = {}
         self._busy = False
         self._pending = False
         self._dirty = False                # lazy refresh (v3.2)
@@ -455,10 +461,14 @@ class NominalDeviasiView(tk.Frame):
     # DATA LOADING
     # =========================================================================
     def load_data(self, data: pd.DataFrame, harga_map: dict | None = None,
-                  konversi_map: dict | None = None):
+                  konversi_map: dict | None = None,
+                  saldo_sistem_map: dict | None = None):
         self.data = data
         self.harga_map = harga_map or {}
         self.konversi_map = konversi_map
+        # v3.11.8 — peta saldo sistem 42.17 (opsional; None/{} = Qty
+        # Deviasi = 3.DEVIASI apa adanya — perilaku lama).
+        self.saldo_sistem_map = saldo_sistem_map or {}
         self._render_gen += 1
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
@@ -523,8 +533,11 @@ class NominalDeviasiView(tk.Frame):
         h = int(h)
 
         # v3.9.34 — logika inti di nominal_common (port persis v3.9.32/33)
+        # v3.11.8 — + saldo_sistem_map (override 42.17 — konsistensi
+        # kuantiti dgn tab Deviasi GR/PCS).
         grouped = hitung_nominal_pairs(df, h, self.harga_map,
-                                       self.konversi_map)
+                                       self.konversi_map,
+                                       self.saldo_sistem_map)
         if grouped is None or grouped.empty:
             # tanpa baris 3.DEVIASI tanggal H (perilaku lama)
             self._result_df = None

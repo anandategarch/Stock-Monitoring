@@ -309,13 +309,23 @@ def _norm_name_lalu(v) -> str:
 # ---------------------------------------------------------------------------
 def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
                          harga_map: dict | None,
-                         konversi_map: dict | None) -> pd.DataFrame:
+                         konversi_map: dict | None,
+                         saldo_sistem_map: dict | None = None) -> pd.DataFrame:
     """Frame per pasangan tanggal H:
     [Nama Barang, Resto, Satuan, Harga, Harga Tampil, Qty Deviasi,
      Nominal] — urut |Nominal| MENURUN (pasangan tanpa nominal paling
     bawah, urut |qty deviasi|).
 
     Qty deviasi = JENIS '3.DEVIASI' Tanggal H (jumlah per pasangan).
+    v3.11.8 — bila saldo_sistem_map terisi (peta SALDO SISTEM 42.17
+    folder '6. 42.17' dari pipeline): pasangan yang ADA di peta memakai
+    Qty = SO_H − saldo sistem 42.17 — PERSIS kolom Deviasi tab 📦
+    Deviasi GR / 🧩 Deviasi PCS (deviasi_view: Sistem ditimpa snapshot
+    42.17; user: "di tab nominal deviasi ini kok beda ya kuantiti
+    deviasi nya dngan yang di tab deviasi gr atau deviasi pcs").
+    Pasangan di luar peta → 3.DEVIASI apa adanya (fallback running-stock
+    — perilaku lama). Kunci dinormalisasi (upper + rapat spasi + segmen
+    resto setelah titik — mirror deviasi_view v3.11.1).
     Dtype float64 EKSPLISIT utk Harga/Nominal (semua-None → kolom
     object → .abs() TypeError di worker — bug v3.9.32, dijaga di sini).
     DataFrame kosong bila tak ada baris DEVIASI tanggal H.
@@ -376,6 +386,47 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     grouped["Resto"] = grouped["Resto"].astype(str)
     grouped["Satuan"] = grouped["Satuan"].map(
         lambda v: norm_sat(v) if norm_sat(v) else "-")
+
+    # v3.11.8 — OVERRIDE SALDO SISTEM 42.17 (folder '6. 42.17'):
+    # pasangan yang ADA di peta → Qty Deviasi = SO_H − saldo 42.17
+    # (PERSIS kolom Deviasi tab 📦/🧩 — Sistem ditimpa snapshot 42.17
+    # sejak v3.11; tanpa ini tab 🧮 memakai 3.DEVIASI = SO − running-
+    # stock rekap → kuantiti BEDA tiap snapshot 42.17 ≠ running-stock).
+    # SO_H per pasangan = Σ baris 1.SO Tanggal H (0 bila tak direkam —
+    # pasangan saldo-only: Deviasi = 0 − saldo 42.17, mirror deviasi_
+    # view cabang override). Pasangan di luar peta tak tersentuh.
+    if saldo_sistem_map:
+        try:
+            _so_h = data[(_jenis == "1.SO") & (tnum == h)]
+            _so_map: dict = {}
+            if not _so_h.empty:
+                _sv = pd.to_numeric(_so_h["NILAI"],
+                                    errors="coerce").fillna(0)
+                # kunci FLAT 'barang\x1fresto' ternormalisasi — IDENTIK
+                # format _ss_lookup/_keys di bawah (dulu tuple vs string
+                # → lookup SO_H tak pernah cocok → override salah 0).
+                _g = (_so_h.assign(
+                    _k=_so_h["Nama Barang"].astype(str).map(_norm_name_lalu)
+                    + "\x1f"
+                    + _so_h["NAMA RESTO"].astype(str).map(_norm_resto_lalu),
+                    _v=_sv).groupby("_k")["_v"].sum())
+                _so_map = {str(k): float(v) for k, v in _g.items()}
+            _ss_lookup = {
+                f"{_norm_name_lalu(b)}\x1f{_norm_resto_lalu(r)}": float(v)
+                for (b, r), v in saldo_sistem_map.items()}
+            _keys = (grouped["Nama Barang"].astype(str).map(_norm_name_lalu)
+                     + "\x1f"
+                     + grouped["Resto"].astype(str).map(_norm_resto_lalu))
+            _ss_v = _keys.map(_ss_lookup)
+            _mask = _ss_v.notna()
+            if bool(_mask.any()):
+                _so_v = _keys.map(_so_map).fillna(0.0)
+                grouped["Qty Deviasi"] = grouped["Qty Deviasi"].where(
+                    ~_mask, _so_v - _ss_v.fillna(0.0))
+                grouped["Qty Deviasi"] = pd.to_numeric(
+                    grouped["Qty Deviasi"], errors="coerce").fillna(0.0)
+        except (KeyError, TypeError, ValueError):
+            pass   # peta salah bentuk → 3.DEVIASI apa adanya (jujur, lama)
 
     harga_vals = []
     harga_disp = []
@@ -463,7 +514,8 @@ def _attach_kategori_pairs(pairs: pd.DataFrame,
 
 def pasangan_tanpa_harga_global(
         data: pd.DataFrame | None, h: int, harga_map: dict | None,
-        konversi_map: dict | None) -> pd.DataFrame:
+        konversi_map: dict | None,
+        saldo_sistem_map: dict | None = None) -> pd.DataFrame:
     """v3.9.63 — frame barang TANPA HARGA GLOBAL (ANAK TAB 'Tanpa Harga'
     tab 🧮 Nominal Deviasi; user: "barang yang tidak ada harga nya
     sesuai kategori yang difilter ... dan itu buat anak tab baru di
@@ -475,7 +527,8 @@ def pasangan_tanpa_harga_global(
     anak tab diterapkan di view saat render). Kolom: [Resto, KATEGORI,
     Nama Barang, Satuan, Qty Deviasi, Harga Tampil, Nominal] urut
     |Qty Deviasi| menurun (warisan urutan hitung_nominal_pairs)."""
-    pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map)
+    pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map,
+                                  saldo_sistem_map)
     if pairs is None or pairs.empty or "Nominal" not in pairs.columns:
         return pd.DataFrame()
     out = pairs[pairs["Nominal"].isna()].copy()
@@ -489,7 +542,8 @@ def pasangan_tanpa_harga_global(
 
 def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
                                harga_map: dict | None,
-                               konversi_map: dict | None) -> tuple:
+                               konversi_map: dict | None,
+                               saldo_sistem_map: dict | None = None) -> tuple:
     """→ (frame_per_resto, frame_pasangan).
 
     frame_per_resto: [Resto, N Barang, Tanpa Harga, Nominal Deviasi,
@@ -501,7 +555,8 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
     frame_pasangan = output hitung_nominal_pairs + kolom KATEGORI
     (utk popup rincian + anak tab Tanpa Harga).
     """
-    pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map)
+    pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map,
+                                  saldo_sistem_map)
     if pairs.empty:
         return pd.DataFrame(columns=["Resto", "N Barang", "Tanpa Harga",
                                      "Nominal Deviasi", "COM Deviasi",

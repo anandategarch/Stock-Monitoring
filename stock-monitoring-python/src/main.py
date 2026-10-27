@@ -255,7 +255,16 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
                     # utk kolom Sistem tab Deviasi GR/PCS (app meneruskan
                     # ke deviasi_gr_view/deviasi_pcs_view.load_data)
                     "saldo_sistem_map": (saldo_sistem_holder.get("map")
-                                         or {})}
+                                         or {}),
+                    # v3.11.8 — daftar barang 42.17 bersaldo + kategori
+                    # sumbernya (folder '6. 42.17') utk section
+                    # Identifikasi Kategori Manual tab ⚙️ Config (user:
+                    # "indentifikasi manual sumber nya dari 42.17 dari
+                    # folder itu ya"). .get(default) — BUKAN `or` (truth
+                    # value DataFrame ambigu; jalur PipelineStopped dini
+                    # → key belum ada → default kosong).
+                    "kategori_4217_df": (saldo_sistem_holder.get(
+                        "kategori_df", pd.DataFrame()))}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
     # Selisih IN (user: "pada rekap selisih in bisa mode hitung bulan lalu

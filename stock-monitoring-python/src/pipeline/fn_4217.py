@@ -71,6 +71,15 @@ v3.9.42 — AUDIT FIX (61-a):
   oleh prefix-match → 1 karakter cocok hampir semua kategori (kelas
   bug item 100383; config.py kini memvalidasi — ini jaring kedua utk
   pemanggil lain).
+
+v3.11.8 — keep_kategori: KATEGORI BARANG (sumber 42.17) ikut KELUAR
+sebagai kolom 'KATEGORI' (identifikasi kategori manual app — user:
+"indentifikasi manual sumber nya dari 42.17 dari folder itu ya ... ada
+kategori nya juga dari sumber 42.17"). Dipakai pembacaan SALDO SISTEM
+42.17 (folder '6. 42.17' — query_4217_saldo_sistem) utk daftar barang
+bersaldo + kategorinya di tab ⚙️ Config. Default False = output kolom
+TETAP 6 (pemanggil lama tak berubah); file tanpa kolom kategori →
+kolom 'KATEGORI' kosong ('' — jujur, bukan error).
 """
 import re
 
@@ -222,7 +231,8 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
             sheet_name: str = SHEET_4217,
             protected_barangs: list | set | None = None,
             stop_event=None,
-            keep_zero: bool = False) -> pd.DataFrame:
+            keep_zero: bool = False,
+            keep_kategori: bool = False) -> pd.DataFrame:
     """
     Mirror M: fn4217(folderPath).
 
@@ -250,8 +260,16 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     ada data"), jadi baris 0 harus tetap masuk peta; NaN/blank-resto
     tetap dibuang.
 
-    Output columns: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS, SATUAN
-    (SATUAN = 'Nama Satuan' file per barang; file tanpa kolom → '').
+    keep_kategori: v3.11.8 — kolom KATEGORI BARANG file ikut keluar
+    sebagai kolom 'KATEGORI' (default False — output tetap 6 kolom,
+    pemanggil lama tak berubah). File tanpa kolom kategori → 'KATEGORI'
+    '' (kosong). Dipakai query_4217_saldo_sistem → daftar barang
+    bersaldo + kategori 42.17 (section Identifikasi Kategori Manual
+    tab ⚙️ Config).
+
+    Output columns: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS,
+    SATUAN (SATUAN = 'Nama Satuan' file per barang; file tanpa kolom →
+    '') — + 'KATEGORI' bila keep_kategori=True.
     """
     # v3.9.39 — sheet resolve defensive (nama export beda ≠ 0 baris senyap)
     sheet_resolved = _resolve_sheet_4217(folder_path, sheet_name)
@@ -412,6 +430,16 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     id_vars = ["Nama Barang"]
     if sat_col is not None and sat_col in prom.columns:
         id_vars.append(sat_col)
+    # v3.11.8 — keep_kategori: KATEGORI BARANG ikut melt sebagai id-var
+    # (kategori melekat per barang — konstan lintas resto). File tanpa
+    # kolom kategori → kolom placeholder '' (output ber-kolom KATEGORI
+    # konsisten utk pemanggil keep_kategori=True).
+    if keep_kategori:
+        if kat_col is not None and kat_col in prom.columns:
+            id_vars.append(kat_col)
+        else:
+            prom = prom.assign(**{"KATEGORI BARANG": ""})
+            id_vars.append("KATEGORI BARANG")
 
     # FIX 6f-01 (audit 6-f): buang kolom RINGKASAN sebelum melt. Export
     # Accurate bisa menambah kolom total ber-kurung (mis. 'TOTAL (SEMUA
@@ -449,6 +477,18 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     up["SATUAN"] = (up["SATUAN"].astype(str).str.strip()
                     .replace({"nan": "", "None": "", "NaN": ""}))
 
+    # v3.11.8 — KATEGORI → string bersih ('' bila tak ada — keep_kategori
+    # saja yang menambah kolom ini; pemanggil default tak tersentuh).
+    if keep_kategori:
+        _kcol = "KATEGORI BARANG"
+        if _kcol in up.columns:
+            up = up.rename(columns={_kcol: "KATEGORI"})
+        else:
+            up["KATEGORI"] = ""
+        up["KATEGORI"] = (up["KATEGORI"].astype(str).str.strip()
+                          .replace({"nan": "", "None": "", "NaN": "",
+                                    "none": ""}))
+
     # ext = NAMA RESTO → BetweenDelimiters(_, "(", ")") — vectorized
     # (pseudo-baris non-resto — mis. 'Kode Barang' bila masih ada —
     # menghasilkan '' dan terbuang oleh mask bawah)
@@ -476,4 +516,8 @@ def fn_4217(folder_path: str, kategori_whitelist: list | None = None,
     )
     fil = up[mask].reset_index(drop=True)
 
+    # v3.11.8 — keep_kategori → + kolom KATEGORI (pemanggil default tetap
+    # 6 kolom OUTPUT_COLUMNS — kontrak lama tak berubah).
+    if keep_kategori:
+        return fil[OUTPUT_COLUMNS + ["KATEGORI"]]
     return fil[OUTPUT_COLUMNS]

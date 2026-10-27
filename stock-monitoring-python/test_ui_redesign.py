@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.7", APP_VERSION == "3.11.7",
+    check("Versi = 3.11.8", APP_VERSION == "3.11.8",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1297,9 +1297,12 @@ def main():
               "tetap internal via CEK)",
               v[gr_idx["Dev. Bulan Lalu"]] == "-",
               f"got {v[gr_idx['Dev. Bulan Lalu']]!r}")
-        check("(v3.9.6) CEK = 'ACR to BOM' (kondisi ke-5, |100| > 24 — "
-              "kolom terhapus, hitungan internal v3.9.18 tetap)",
-              v[gr_idx["CEK"]] == "ACR to BOM",
+        check("(v3.9.6/v3.11.8) CEK = 'ACR to BOM' (kondisi ke-5, |100| > "
+              "24 — kolom terhapus, hitungan internal v3.9.18 tetap) · "
+              "v3.11.8 disinkron: segmen 'COM Rendah (−3,0)' kini ikut "
+              "menempel (d(H) < median historis pasangan — arah rendah "
+              "BARU v3.11.8; label utama tetap ACR to BOM)",
+              v[gr_idx["CEK"]] == "ACR to BOM · COM Rendah (-3,0)",
               f"got {v[gr_idx['CEK']]!r}")
     # tag cek_acr di baris BARANG ACR
     acr_tags = None
@@ -22754,10 +22757,27 @@ def main():
           _Cfg92(str(_cfg92p)).KategoriManual == {})
 
     # ---- (F) app: section Identifikasi Kategori Manual (tab ⚙️ Config) --
+    # v3.11.8 — REWORK sumber 42.17 (user: "indentifikasi manual sumber
+    # nya dari 42.17 dari folder itu ya ... ada filter juga biar aku enak
+    # cari nama barang nya dan ada kategori nya juga dari sumber 42.17.
+    # Terus hanya ambil yang ada saldo nya aja ya"): daftar kiri =
+    # barang bersaldo SALDO SISTEM 42.17 (kategori_4217_df dari pipeline)
+    # — bukan lagi 'barang tanpa kategori data run'.
     _orig_cfg92 = _appmod92.CONFIG_PATH
     _appmod92.CONFIG_PATH = _cfg92p      # tanpa KategoriManual (§E3)
     try:
-        # data run: 1 barang ber-kategori + 2 barang tanpa kategori
+        # data 42.17 (folder '6. 42.17'): 4 barang — 3 bersaldo + 1
+        # bersaldo-0 (disaring: "hanya ambil yang ada saldo nya aja");
+        # kategori 42.17 campuran (filled / blank).
+        _k4217_92 = pd.DataFrame({
+            "Nama Barang": ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2",
+                            "BRG NOL"],
+            "KATEGORI": ["10.FOOD [RM] - COM V.2",
+                         "01.COST - PACKAGING V.2", "", ""],
+            "NAMA RESTO": ["R", "R", "R", "R"],
+            "Value": [12.0, 5.0, 7.0, 0.0],
+        })
+        # data run: kategori app utk BRG ADA saja (lainnya blank).
         _df92f = pd.DataFrame({
             "Nama Barang": ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2"],
             "NAMA RESTO": ["R", "R", "R"],
@@ -22766,24 +22786,52 @@ def main():
             "NILAI": [1.0, 1.0, 1.0],
             "KATEGORI": ["BAHAN", None, "-"],
         })
+        # file seen TIDAK ADA → run pertama = baseline tanpa penanda BARU
+        _seen92p = Path(_tmp92) / "kategori_seen.json"
+        with _cl92.suppress(FileNotFoundError):
+            _seen92p.unlink()
         app.append1_df = _df92f
+        app.kategori_4217_df = _k4217_92
         app._refresh_kategori_manual_card()
-        _blank92 = [app.kat_blank_tree.set(k, "barang")
-                    for k in app.kat_blank_tree.get_children("")]
-        check("(v3.11.7) §92-F1 daftar barang tanpa kategori: hanya "
-              "barang ber-KATEGORI blank (None/'-') yang tampil — "
-              "barang ber-kategori tidak (user: 'tampilan semua nama "
-              "barang tanpa kategori')",
-              _blank92 == ["BRG KOSONG 1", "BRG KOSONG 2"],
-              f"got {_blank92}")
-        check("(v3.11.7) §92-F2 mapping manual tersimpan: tree kosong "
-              "saat config tanpa KategoriManual",
-              len(app.kat_map_tree.get_children("")) == 0)
-        check("(v3.11.7) §92-F3 simpan mapping (tombol 🎯 → "
+
+        def _kat_rows92():
+            return [tuple(app.kat_4217_tree.set(k, c)
+                          for c in ("barang", "kat4217", "katapp", "saldo",
+                                    "status"))
+                    for k in app.kat_4217_tree.get_children("")]
+
+        _rows92 = _kat_rows92()
+        check("(v3.11.8) §92-F1 daftar = SEMUA barang BERSALDO 42.17 "
+              "(BRG NOL disaring — 'hanya ambil yang ada saldo nya aja') + "
+              "kolom Kategori 42.17 dari file + Kategori (app) efektif + "
+              "saldo (wiring: kategori_4217_df terisi dari run → daftar "
+              "menyegarkan)",
+              [r[0] for r in _rows92] ==
+              ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2"]
+              and _rows92[0][1] == "10.FOOD [RM] - COM V.2"
+              and _rows92[1][1] == "01.COST - PACKAGING V.2"
+              and _rows92[2][1] == "-"
+              and _rows92[0][2] == "BAHAN"
+              and _rows92[1][2] == "-" and _rows92[2][2] == "-"
+              and [_rows92[i][3] for i in range(3)] == ["12", "5", "7"],
+              f"got {_rows92}")
+        check("(v3.11.8) §92-F2 mapping manual tersimpan: tree kanan "
+              "kosong saat config tanpa KategoriManual + status menyebut "
+              "jumlah barang bersaldo & tanpa kategori + run pertama "
+              "TANPA penanda BARU (baseline kategori_seen.json ditulis)",
+              len(app.kat_map_tree.get_children("")) == 0
+              and "3 barang bersaldo 42.17" in app.kat_status_var.get()
+              and "2 tanpa kategori" in app.kat_status_var.get()
+              and "0 BARU" in app.kat_status_var.get()
+              and _seen92p.exists()
+              and all(r[4] == "" for r in _rows92),
+              f"status={app.kat_status_var.get()!r} seen={_seen92p.exists()}")
+        check("(v3.11.8) §92-F3 simpan mapping (tombol 🎯 → "
               "_kategori_manual_save): 2 barang tertulis ke config.json "
-              "(read-modify-write — key LAIN tak tersentuh) + barang "
-              "HILANG dari daftar blank (umpan balik langsung; kategori "
-              "masuk data mulai run berikutnya)",
+              "(key lain tak tersentuh) + umpan balik INSTAN — kolom "
+              "Kategori (app) berubah seketika & hitungan 'tanpa "
+              "kategori' turun (kategori masuk data mulai run "
+              "berikutnya — LANGKAH 5d)",
               app._kategori_manual_save(
                   {"BRG KOSONG 1": "BEBAN GAS - RESTO",
                    "BRG KOSONG 2": "Biaya Packaging - RESTO"})
@@ -22791,65 +22839,474 @@ def main():
                   _cfg92p.read_text(encoding="utf-8"))["KategoriManual"]
               == {"BRG KOSONG 1": "BEBAN GAS - RESTO",
                   "BRG KOSONG 2": "Biaya Packaging - RESTO"}
-              and [app.kat_blank_tree.set(k, "barang")
-                   for k in app.kat_blank_tree.get_children("")] == []
+              and [(r[0], r[2]) for r in _kat_rows92()]
+              == [("BRG ADA", "BAHAN"),
+                  ("BRG KOSONG 1", "BEBAN GAS - RESTO"),
+                  ("BRG KOSONG 2", "Biaya Packaging - RESTO")]
+              and "0 tanpa kategori" in app.kat_status_var.get()
               and [app.kat_map_tree.set(k, "barang")
                    for k in app.kat_map_tree.get_children("")] ==
               ["BRG KOSONG 1", "BRG KOSONG 2"],
               "save/refresh gagal")
-        check("(v3.11.7) §92-F4 nilai combobox dialog: kategori dari "
+        check("(v3.11.8) §92-F4 nilai combobox dialog: kategori dari "
               "data + mapping manual (sorted — user bisa pilih COM "
               "Deviasi / Packaging / Beban Gas / ketik baru)",
               app._kategori_values() ==
               ["BAHAN", "BEBAN GAS - RESTO", "Biaya Packaging - RESTO"],
               f"got {app._kategori_values()}")
-        check("(v3.11.7) §92-F5 hapus mapping (tombol 🗑 → removes): key "
-              "dibuang dari config → barang KEMBALI ke daftar tanpa "
-              "kategori (user: 'aku bisa hapus juga atau edit')",
+        # pencarian live (user: "ada filter juga biar aku enak cari nama
+        # barang nya") — trace var → repopulasi tanpa recompute rows
+        app.kat_search_var.set("kosong")
+        root.update()
+        _cari92 = [r[0] for r in _kat_rows92()]
+        app.kat_search_var.set("")
+        root.update()
+        check("(v3.11.8) §92-F5 FILTER PENCARIAN: substring case-"
+              "insensitive 'kosong' → hanya 2 barang KOSONG (+ cocok "
+              "kategori app); dikosongkan → semua barang kembali",
+              _cari92 == ["BRG KOSONG 1", "BRG KOSONG 2"]
+              and len(_kat_rows92()) == 3,
+              f"cari={_cari92} all={len(_kat_rows92())}")
+        check("(v3.11.8) §92-F6 hapus mapping (tombol 🗑 → removes): key "
+              "dibuang dari config → barang KEMBALI tanpa kategori app "
+              "(user: 'aku bisa hapus juga atau edit')",
               app._kategori_manual_save({}, removes=["BRG KOSONG 1"])
               and _json92.loads(
                   _cfg92p.read_text(encoding="utf-8")).get(
                   "KategoriManual") ==
               {"BRG KOSONG 2": "Biaya Packaging - RESTO"}
-              and [app.kat_blank_tree.set(k, "barang")
-                   for k in app.kat_blank_tree.get_children("")] ==
-              ["BRG KOSONG 1"],
+              and [(r[0], r[2]) for r in _kat_rows92()]
+              == [("BRG ADA", "BAHAN"), ("BRG KOSONG 1", "-"),
+                  ("BRG KOSONG 2", "Biaya Packaging - RESTO")],
               "hapus/refresh gagal")
-        check("(v3.11.7) §92-F6 edit mapping: nilai BERUBAH untuk key "
+        check("(v3.11.8) §92-F7 edit mapping: nilai BERUBAH untuk key "
               "sama (menimpa — bukan entri ganda)",
               app._kategori_manual_save(
                   {"BRG KOSONG 2": "COM DEVIASI - RESTO"})
               and _json92.loads(
                   _cfg92p.read_text(encoding="utf-8"))["KategoriManual"]
               == {"BRG KOSONG 2": "COM DEVIASI - RESTO"})
-        # guard: data kosong → placeholder jujur
-        app.append1_df = None
+        # penanda BARU (user: "setelah mapping kategori manual apakah ada
+        # update terkait kategori barang baru?") — barang pertama kali
+        # muncul di 42.17 → BARU; refresh lagi → tak berulang (seen ∪)
+        _k4217_92b = pd.concat([
+            _k4217_92,
+            pd.DataFrame({"Nama Barang": ["BRG BARU 99"],
+                          "KATEGORI": ["10.FOOD [WIP] - COM V.2"],
+                          "NAMA RESTO": ["R"], "Value": [3.0]})],
+            ignore_index=True)
+        app.kategori_4217_df = _k4217_92b
         app._refresh_kategori_manual_card()
-        _blank92g = [app.kat_blank_tree.set(k, "barang")
-                     for k in app.kat_blank_tree.get_children("")]
-        check("(v3.11.7) §92-F7 guard data kosong: placeholder 'belum "
-              "ada data' (bukan crash / daftar basi)",
-              len(_blank92g) == 1 and "belum ada data" in _blank92g[0],
+        _baru92 = {r[0]: r[4] for r in _kat_rows92()}
+        _status92_baru1 = app.kat_status_var.get()
+        app._refresh_kategori_manual_card()
+        _baru92b = {r[0]: r[4] for r in _kat_rows92()}
+        check("(v3.11.8) §92-F8 penanda BARU: barang pertama kali muncul "
+              "di 42.17 ditandai 'BARU' + status menghitung; refresh "
+              "berikutnya TIDAK berulang (kategori_seen.json union — "
+              "jawaban 'update terkait kategori barang baru': tiap run "
+              "daftar menyegarkan + barang baru otomatis ditandai)",
+              _baru92.get("BRG BARU 99") == "BARU"
+              and "1 BARU" in _status92_baru1
+              and _baru92b.get("BRG BARU 99") == ""
+              and "0 BARU" in app.kat_status_var.get(),
+              f"baru={_baru92} lagi={_baru92b} "
+              f"status1={_status92_baru1!r} "
+              f"status2={app.kat_status_var.get()!r}")
+        # guard: data 42.17 kosong → placeholder jujur
+        app.kategori_4217_df = None
+        app._refresh_kategori_manual_card()
+        _blank92g = [app.kat_4217_tree.set(k, "barang")
+                     for k in app.kat_4217_tree.get_children("")]
+        check("(v3.11.8) §92-F9 guard data 42.17 kosong: placeholder "
+              "'belum ada data 42.17' (bukan crash / daftar basi) — "
+              "mapping manual tetap tampil di tree kanan",
+              len(_blank92g) == 1 and "belum ada data 42.17" in _blank92g[0]
+              and len(app.kat_map_tree.get_children("")) == 1,
               f"got {_blank92g}")
-        # wiring _on_pipeline_done: refresh pasca-run
+        # wiring _on_pipeline_done: sumber daftar = audit_result[
+        # 'kategori_4217_df'] (set sebelum refresh — kontrak plumbing)
         app.append1_df = _df92f
+        app.kategori_4217_df = (({"kategori_4217_df": _k4217_92})
+                                .get("kategori_4217_df"))
         with _cl92.suppress(Exception):
             app._refresh_kategori_manual_card()
-        check("(v3.11.7) §92-F8 wiring _on_pipeline_done: append1_df "
-              "terisi → daftar barang tanpa kategori menyegarkan (fitur "
-              "pelengkap — kegagalan refresh tak menjatuhkan run)",
-              [app.kat_blank_tree.set(k, "barang")
-               for k in app.kat_blank_tree.get_children("")] ==
-              ["BRG KOSONG 1"],
+        check("(v3.11.8) §92-F10 wiring pasca-run: kategori_4217_df "
+              "terisi → daftar 42.17 menyegarkan (fitur pelengkap — "
+              "kegagalan refresh tak menjatuhkan run)",
+              [r[0] for r in _kat_rows92()] ==
+              ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2"],
               "refresh pasca-run gagal")
     finally:
         _appmod92.CONFIG_PATH = _orig_cfg92
         app.append1_df = make_mock_append1()
+        app.kategori_4217_df = None
         shutil.rmtree(_tmp92, ignore_errors=True)
 
     # pulihkan app.append1_df & state utk kebersihan akhir
     app.deviasi_gr_view.load_data(make_mock_append1())
     wait_view(root, app.deviasi_gr_view)
+    root.update()
+
+    # =====================================================================
+    # §93 v3.11.8 — COM RENDAH (dua arah com_analisa) + fn_4217
+    #      keep_kategori + NOMINAL override saldo sistem 42.17 + PAPAN
+    #      SELISIH TERBANYAK BARANG × RESTO (Rekap Selisih IN)
+    # =====================================================================
+    print("\n== 93. (v3.11.8) COM Rendah + 42.17 keep_kategori + nominal "
+          "override 42.17 + papan selisih barang×resto ==")
+
+    import tempfile as _tf93
+
+    from src.ui.com_analisa import COM_RENDAH_LABEL as _CRL93
+    from src.ui.com_analisa import com_gap_map as _cgm93
+    from src.ui.com_analisa import com_rendah_map as _crm93
+    from src.ui.com_analisa import com_tinggi_map as _ctm93
+
+    # ---- (A) COM RENDAH — modul pure (com_analisa dua arah) ------------
+    _rows93a = []
+    # COMRENDAH: SO flat 100 t1..t7 + SA 100 harian (running-stock) →
+    # com(t)=0; ACR 10 harian t1..t6 → d(t)=−10 (median −10); ACR 20 di
+    # t7 → d(7)=−20 < median → RENDAH gap = −10−(−20) = 10 (sistem
+    # mencatat pemakaian LEBIH BESAR dari fisik — user: "enggak hanya
+    # com tinggi ya com rendah juga masuk analisa"). ACR 20 dipilih
+    # kecil supaya TIDAK memicu label lain (stok W = 100−20 = 80 →
+    # ratio Hitung Manual 0,25; Deviasi = 0 → ACR to BOM mati).
+    for _t in range(1, 8):
+        _rows93a.append(_row92("BRG COMRENDAH", "R93", "1.SO", _t, 100.0))
+        _rows93a.append(_row92("BRG COMRENDAH", "R93", "9.ACR", _t,
+                               10.0 if _t <= 6 else 20.0))
+        _rows93a.append(_row92("BRG COMRENDAH", "R93", "2.SALDO AKHIR",
+                               _t, 100.0))
+    _rows93a.append(_row92("BRG COMRENDAH", "R93", "SALDO AWAL", 1, 100.0))
+    # COMTINGGI93: SO flat + IN 100 di t7 → com(7)=100 → d(7)=100 >
+    # median 0 → TINGGI gap 100 (dua arah di frame YANG SAMA).
+    for _t in range(1, 8):
+        _rows93a.append(_row92("BRG COMTINGGI93", "R93", "1.SO", _t, 100.0))
+        _rows93a.append(_row92("BRG COMTINGGI93", "R93", "2.SALDO AKHIR",
+                               _t, 100.0))
+    _rows93a.append(_row92("BRG COMTINGGI93", "R93", "SALDO AWAL", 1, 100.0))
+    _rows93a.append(_row92("BRG COMTINGGI93", "R93", "4.IN", 7, 100.0))
+    # SAMPAI93: d(t)=0 ∀t → d(7) == median → tak berlabel (strict dua
+    # sisi: > memicu tinggi, < memicu rendah, == normal).
+    for _t in range(1, 8):
+        _rows93a.append(_row92("BRG SAMPAI93", "R93", "1.SO", _t, 100.0))
+        _rows93a.append(_row92("BRG SAMPAI93", "R93", "2.SALDO AKHIR", _t,
+                               100.0))
+    _rows93a.append(_row92("BRG SAMPAI93", "R93", "SALDO AWAL", 1, 100.0))
+    _df93a = pd.DataFrame(_rows93a)
+    _gap93 = _cgm93(_df93a, 7)
+    check("(v3.11.8) §93-A1 com_gap_map DUA ARAH: COMRENDAH d(7)=−20 < "
+          "median −10 → ('rendah', 10.0); COMTINGGI93 d(7)=100 > median "
+          "0 → ('tinggi', 100.0) — satu frame, dua arah",
+          _gap93.get(("BRG COMRENDAH", "R93")) == ("rendah", 10.0)
+          and _gap93.get(("BRG COMTINGGI93", "R93")) == ("tinggi", 100.0),
+          f"got {_gap93}")
+    check("(v3.11.8) §93-A2 turunan back-compat: com_tinggi_map HANYA "
+          "pasangan arah tinggi (rendah TIDAK ikut — perilaku §92-A tak "
+          "berubah) + com_rendah_map hanya arah rendah",
+          _ctm93(_df93a, 7) == {("BRG COMTINGGI93", "R93"): 100.0}
+          and _crm93(_df93a, 7) == {("BRG COMRENDAH", "R93"): 10.0},
+          f"tinggi={_ctm93(_df93a, 7)} rendah={_crm93(_df93a, 7)}")
+    _t93a = set(_ctm93(_df93a, 7))
+    _r93a = set(_crm93(_df93a, 7))
+    check("(v3.11.8) §93-A3 mutual-exklusi: satu pasangan hanya SATU arah "
+          "(tinggi ∩ rendah = ∅) + d(H) == median → NIRlabel (BRG "
+          "SAMPAI93 tak muncul di arah mana pun — strict dua sisi)",
+          not (_t93a & _r93a)
+          and ("BRG SAMPAI93", "R93") not in _t93a
+          and ("BRG SAMPAI93", "R93") not in _r93a,
+          f"tinggi={_t93a} rendah={_r93a}")
+    check("(v3.11.8) §93-A4 label konstan + degrade jujur (h<4 / None → "
+          "peta kosong — mirror §92-A5 utk arah rendah)",
+          _CRL93 == "COM Rendah"
+          and _crm93(_df93a, 3) == {} and _crm93(None, 7) == {},
+          f"label={_CRL93!r}")
+
+    # ---- (B) integrasi view — segmen CEK "COM Rendah (−x)" ------------
+    _top93a, _dv93a = _make_dv33(_df93a, None)
+    check("(v3.11.8) §93-B1 segmen CEK DUA ARAH di satu view: 'COM Rendah "
+          "(-10,0)' SENDIRIAN (sistem > fisik; format bertanda minus, "
+          "ribuan '.' desimal ',' — fixture bersih tanpa label lain) + "
+          "'COM Tinggi (+100,0)' pasangan lain",
+          _cek33(_dv93a, "BRG COMRENDAH") == "COM Rendah (-10,0)"
+          and _cek33(_dv93a, "BRG COMTINGGI93") == "COM Tinggi (+100,0)",
+          f"rendah={_cek33(_dv93a, 'BRG COMRENDAH')!r} "
+          f"tinggi={_cek33(_dv93a, 'BRG COMTINGGI93')!r}")
+    check("(v3.11.8) §93-B2 footer 'CEK n': segmen COM Rendah BUKAN label "
+          "check → counter 0 (tak menggelembung — mirror §92-B3)",
+          "CEK 0 · " in _dv93a.status_var.get(),
+          f"status={_dv93a.status_var.get()!r}")
+    _dv93a.tanggal_h_var.set("6")
+    _dv93a._on_tanggal_h_change()
+    wait_view(root, _dv93a)
+    root.update()
+    check("(v3.11.8) §93-B3 H berganti → cache miss → segmen mengikuti H "
+          "baru: H=6 → d(6)=−10 == median → CEK '' (bukan −10 basi; SA "
+          "harian membuat sistem jujur di H mana pun)",
+          _cek33(_dv93a, "BRG COMRENDAH") == "",
+          f"cek={_cek33(_dv93a, 'BRG COMRENDAH')!r}")
+    _top93a.destroy()
+    root.update()
+
+    # ---- (C) fn_4217 keep_kategori (mock xlsx — pola §44-c) ------------
+    import openpyxl as _oxl93
+
+    from src.pipeline.fn_4217 import OUTPUT_COLUMNS as _OC93
+    from src.pipeline.fn_4217 import fn_4217 as _fn93
+
+    _tmp93c = _tf93.mkdtemp(prefix="t93c_")
+    _f93c = os.path.join(_tmp93c, "saldo.xlsx")
+    _wb93c = _oxl93.Workbook()
+    _ws93c = _wb93c.active
+    _ws93c.title = "#42.17. Kuantitas Barang per Gu"
+    for _i93 in range(4):
+        _ws93c.cell(row=_i93 + 1, column=1, value=f"MD {_i93}")
+    _ws93c.cell(row=5, column=1, value="Nama Barang")
+    _ws93c.cell(row=5, column=2, value="Kode Barang")
+    _ws93c.cell(row=5, column=3, value="Kategori Barang")
+    _ws93c.cell(row=5, column=4, value="Nama Satuan")
+    _ws93c.cell(row=5, column=5, value="RESTO MALANG (MLGPAR)")
+    for _r93, _row93 in enumerate([
+            ["ITEM R", 201, "00.COST", "GR", 100],
+            ["ITEM S", 202, None, "PCS", 50],      # ffill 00.COST
+            ["ITEM X", 203, "SUPPLIES [OTHERS]", "UNIT", 999]], 6):
+        for _c93, _v93 in enumerate(_row93, 1):
+            _ws93c.cell(row=_r93, column=_c93, value=_v93)
+    _wb93c.save(_f93c)
+    _wb93c.close()
+    _q93c = _fn93(_tmp93c, keep_kategori=True)
+    _kat93c = dict(zip(_q93c["Nama Barang"].astype(str),
+                       _q93c["KATEGORI"].astype(str)))
+    check("(v3.11.8) §93-C1 fn_4217 keep_kategori=True → output 7 kolom "
+          "(OUTPUT_COLUMNS + KATEGORI — kontrak kolom baru)",
+          list(_q93c.columns) == _OC93 + ["KATEGORI"],
+          f"got {list(_q93c.columns)}")
+    check("(v3.11.8) §93-C2 KATEGORI terbawa per barang (header-grup "
+          "ffill: ITEM S mewarisi 00.COST; tanpa whitelist semua lolos)",
+          _kat93c == {"ITEM R": "00.COST", "ITEM S": "00.COST",
+                      "ITEM X": "SUPPLIES [OTHERS]"},
+          f"got {_kat93c}")
+    check("(v3.11.8) §93-C3 default keep_kategori=False → 6 kolom TANPA "
+          "KATEGORI (kontrak lama tak berubah — pemanggil lama aman)",
+          list(_fn93(_tmp93c).columns) == _OC93,
+          f"got {list(_fn93(_tmp93c).columns)}")
+    # file TANPA kolom kategori → KATEGORI '' (jujur, bukan error)
+    _tmp93d = _tf93.mkdtemp(prefix="t93d_")
+    _f93d = os.path.join(_tmp93d, "saldo.xlsx")
+    _wb93d = _oxl93.Workbook()
+    _ws93d = _wb93d.active
+    _ws93d.title = "#42.17. Kuantitas Barang per Gu"
+    for _i93 in range(4):
+        _ws93d.cell(row=_i93 + 1, column=1, value=f"MD {_i93}")
+    _ws93d.cell(row=5, column=1, value="Nama Barang")
+    _ws93d.cell(row=5, column=3, value="Nama Satuan")
+    _ws93d.cell(row=5, column=4, value="RESTO MALANG (MLGPAR)")
+    _ws93d.cell(row=6, column=1, value="ITEM TANPAKAT")
+    _ws93d.cell(row=6, column=3, value="GR")
+    _ws93d.cell(row=6, column=4, value=77)
+    _wb93d.save(_f93d)
+    _wb93d.close()
+    _q93d = _fn93(_tmp93d, keep_kategori=True)
+    check("(v3.11.8) §93-C4 file TANPA kolom kategori → keep_kategori "
+          "tetap keluarkan kolom KATEGORI '' semua baris (bukan KeyError "
+          "/ kolom hilang)",
+          list(_q93d.columns) == _OC93 + ["KATEGORI"]
+          and set(_q93d["KATEGORI"].astype(str)) == {""},
+          f"got {list(_q93d.columns)} kat={set(_q93d['KATEGORI'])}")
+    shutil.rmtree(_tmp93c, ignore_errors=True)
+    shutil.rmtree(_tmp93d, ignore_errors=True)
+
+    # ---- (E) NOMINAL — override saldo sistem 42.17 (konsistensi GR/PCS)
+    from src.ui.nominal_common import hitung_nominal_pairs as _hnp93
+
+    _rows93e = []
+
+    def _row93e(b, r, jenis, t, v):
+        _rows93e.append({"Nama Barang": b, "NAMA RESTO": r, "JENIS": jenis,
+                         "Tanggal": t, "NILAI": v, "SATUAN": "GR"})
+
+    # pasangan A: SO_H=120, SA_H=100 → 3.DEVIASI@25 = +20 (running-stock);
+    # pasangan B: SO_H=80, SA_H=60 → dev +20.
+    _row93e("BRG A", "R1", "1.SO", 25, 120.0)
+    _row93e("BRG A", "R1", "2.SALDO AKHIR", 25, 100.0)
+    _row93e("BRG A", "R1", "3.DEVIASI", 25, 20.0)
+    _row93e("BRG B", "R2", "1.SO", 25, 80.0)
+    _row93e("BRG B", "R2", "2.SALDO AKHIR", 25, 60.0)
+    _row93e("BRG B", "R2", "3.DEVIASI", 25, 20.0)
+    _df93e = pd.DataFrame(_rows93e)
+    _hm93 = {"BRG A": (1000.0, "GR"), "BRG B": (500.0, "GR")}
+
+    def _qty93(df, b):
+        _s = df.loc[df["Nama Barang"] == b]
+        return (float(_s["Qty Deviasi"].iloc[0]),
+                _s["Nominal"].iloc[0], _s["Harga Tampil"].iloc[0])
+
+    _p93e0 = _hnp93(_df93e, 25, _hm93, None)
+    check("(v3.11.8) §93-E1 tanpa peta saldo sistem (folder '6. 42.17' "
+          "kosong / pemanggil lama) → Qty Deviasi = 3.DEVIASI apa adanya "
+          "(perilaku lama — regresi nol)",
+          _qty93(_p93e0, "BRG A")[0] == 20.0
+          and _qty93(_p93e0, "BRG B")[0] == 20.0,
+          f"A={_qty93(_p93e0, 'BRG A')} B={_qty93(_p93e0, 'BRG B')}")
+    _p93e1 = _hnp93(_df93e, 25, _hm93, None,
+                    {("BRG A", "R1"): 90.0})
+    check("(v3.11.8) §93-E2 pasangan DI PETA 42.17 → Qty = SO_H − saldo "
+          "42.17 PERSIS kolom Deviasi tab 📦/🧩 (A: 120−90=30, nominal "
+          "30.000) + pasangan DI LUAR peta tetap 3.DEVIASI (B: 20) — "
+          "FIX 'kuantiti nominal beda dgn tab deviasi gr/pcs'",
+          _qty93(_p93e1, "BRG A")[0] == 30.0
+          and _qty93(_p93e1, "BRG A")[1] == 30000.0
+          and _qty93(_p93e1, "BRG B")[0] == 20.0,
+          f"A={_qty93(_p93e1, 'BRG A')} B={_qty93(_p93e1, 'BRG B')}")
+    _p93e2 = _hnp93(_df93e, 25, _hm93, None,
+                    {("BRG A", "R1"): 120.0})
+    check("(v3.11.8) §93-E3 override → qty PERSIS 0 (saldo 42.17 == "
+          "SO_H) → Nominal 0.0 TANPA lookup harga (Harga '-' — v3.9.38 "
+          "qty-0 berlaku utk nilai override juga)",
+          _qty93(_p93e2, "BRG A")[0] == 0.0
+          and _qty93(_p93e2, "BRG A")[1] == 0.0
+          and _qty93(_p93e2, "BRG A")[2] == "-",
+          f"A={_qty93(_p93e2, 'BRG A')}")
+    _p93e3 = _hnp93(_df93e, 25, _hm93, None,
+                    {("brg  a", "X.R1"): 90.0})
+    check("(v3.11.8) §93-E4 kunci peta ternormalisasi (upper + rapat "
+          "spasi + segmen resto setelah titik — mirror deviasi_view "
+          "v3.11.1): 'brg  a'/'X.R1' tetap menimpa pasangan BRG A/R1",
+          _qty93(_p93e3, "BRG A")[0] == 30.0,
+          f"A={_qty93(_p93e3, 'BRG A')}")
+
+    # ---- (F) PAPAN SELISIH TERBANYAK BARANG × RESTO (in_selisih) -------
+    from src.pipeline.fn_audit import build_audit_from_app as _bafa93
+    from src.ui.in_selisih_view import InSelisihView as _ISV93
+
+    _rows93f = []
+    _det93f = []
+
+    def _so93f(r, b, t, v):
+        _rows93f.append({"NAMA RESTO": r, "Nama Barang": b, "JENIS": "SO",
+                         "Tanggal": t, "Value": v})
+
+    def _bm93f(r, b, t, v):
+        _rows93f.append({"NAMA RESTO": r, "Nama Barang": b,
+                         "JENIS": "BARANG MASUK", "Tanggal": t, "Value": v})
+
+    def _in93f(r, b, t, v):
+        _det93f.append({"NAMA RESTO": r, "Nama Barang": b, "Tanggal": t,
+                        "Value": v, "Nomor": "IT.2026.11.001",
+                        "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+                        "SOURCE IN": "42.05", "JENIS": "IN"})
+
+    # KOPI93 @MLGPAR: BM t5 200 (IN 0) → +200; t8 BM 0 + IN 100 → −100
+    # → Σ|300| · Σ +100 · TERBESAR +200@5 · 2 tgl.
+    for _t93 in range(1, 11):
+        _so93f("MLGPAR", "KOPI93", _t93, 100.0)
+    _bm93f("MLGPAR", "KOPI93", 5, 200.0)
+    _in93f("MLGPAR", "KOPI93", 8, 100.0)
+    # SUSU93 @MLGPAR: BM t5 160 − IN t5 80 → +80 → Σ|80|.
+    for _t93 in range(1, 11):
+        _so93f("MLGPAR", "SUSU93", _t93, 100.0)
+    _bm93f("MLGPAR", "SUSU93", 5, 160.0)
+    _in93f("MLGPAR", "SUSU93", 5, 80.0)
+    # OK93 @JKT01: BM 50 == IN 50 → selisih 0 → TIDAK masuk papan.
+    for _t93 in range(1, 11):
+        _so93f("JKT01", "OK93", _t93, 100.0)
+    _bm93f("JKT01", "OK93", 5, 50.0)
+    _in93f("JKT01", "OK93", 5, 50.0)
+    _sdf93, _skpi93, _sdesc93 = _bafa93(pd.DataFrame(_rows93f),
+                                         pd.DataFrame(_det93f))
+    _items93 = [("KOPI93", "MLGPAR"), ("SUSU93", "MLGPAR"),
+                ("OK93", "JKT01")]
+    _sdata93 = pd.DataFrame({
+        "Nama Barang": [b for b, _ in _items93],
+        "NAMA RESTO": [r for _, r in _items93],
+        "SATUAN": ["GR"] * len(_items93),
+        "KATEGORI": ["DEVIASI"] * len(_items93),
+        "JENIS": ["3.DEVIASI"] * len(_items93),
+        "Tanggal": [1] * len(_items93),
+        "NILAI": [0.0] * len(_items93),
+    })
+    _top93f = tk.Toplevel(root)
+    _top93f.geometry("1400x900+5+5")
+    _isv93 = _ISV93(_top93f)
+    _isv93.pack(fill="both", expand=True)
+    root.update()
+    _isv93.load_data(_sdata93, pd.DataFrame(_det93f),
+                     audit_result={"df": _sdf93, "kpi": _skpi93,
+                                   "desc": _sdesc93})
+    wait_view(root, _isv93)
+
+    def _walk93(w):
+        for _ch93 in w.winfo_children():
+            yield _ch93
+            yield from _walk93(_ch93)
+
+    def _bzone_texts93(view):
+        # v3.11.8 — strip SATU BARIS: kumpulkan teks SEMUA label di zona
+        # (judul + chip pasangan + penanda '+N lainnya').
+        _out93 = []
+        for _w93 in _walk93(view._barang_zone):
+            if isinstance(_w93, tk.Label):
+                _out93.append(str(_w93["text"]))
+        return _out93
+
+    def _bchip_hi93(view, barang):
+        # ketebalan border chip utk pasangan (highlight is_active)
+        for _w93 in _walk93(view._barang_zone):
+            if isinstance(_w93, tk.Frame):
+                _labs93 = [c for c in _w93.winfo_children()
+                           if isinstance(c, tk.Label)]
+                if _labs93 and barang in str(_labs93[0]["text"]):
+                    try:
+                        return int(str(_w93.cget("highlightthickness")))
+                    except (TypeError, ValueError, tk.TclError):
+                        return -1
+        return -1
+
+    _texts93 = _bzone_texts93(_isv93)
+    _joined93 = " | ".join(_texts93)
+    check("(v3.11.8) §93-F1 strip SELISIH TERBANYAK BARANG×RESTO tampil "
+          "(user: 'pada rekap selisih in bisa gak tampil selisih "
+          "terbanyak nama barang + resto'): chip #1 KOPI93@MLGPAR urut "
+          "Σ|selisih| 300 · terbesar 200@5; #2 SUSU93 (Σ|80| · terbesar "
+          "80@5); OK93 selisih 0 TIDAK masuk strip",
+          any("KOPI93" in t and "MLGPAR" in t and "Σ|300|" in t
+              and "terbesar 200@5" in t for t in _texts93)
+          and any("SUSU93" in t and "Σ|80|" in t
+                  and "terbesar 80@5" in t for t in _texts93)
+          and "OK93" not in _joined93,
+          f"got {_texts93}")
+    _isv93._on_barang_row_click("KOPI93")
+    wait_view(root, _isv93)
+    _texts93b = _bzone_texts93(_isv93)
+    _n_kopi93 = sum(1 for _i93 in _isv93.tree.get_children("")
+                    if _isv93.tree.set(_i93, "Nama Barang") == "KOPI93")
+    _n_susu93 = sum(1 for _i93 in _isv93.tree.get_children("")
+                    if _isv93.tree.set(_i93, "Nama Barang") == "SUSU93")
+    check("(v3.11.8) §93-F2 klik chip → TOGGLE filter ⧩ Nama Barang "
+          "(tabel TERFILTER ke KOPI93) + strip TETAP UTUH 2 pasangan "
+          "(dihitung PRA-filter-Nama-Barang — mirror 6d2-02, bukan "
+          "kolapse jadi 1 chip) + chip terseleksi di-highlight amber",
+          _n_kopi93 > 0 and _n_susu93 == 0
+          and any("KOPI93" in t for t in _texts93b)
+          and any("SUSU93" in t for t in _texts93b)
+          and _isv93._barang_zone_active == "KOPI93"
+          and _bchip_hi93(_isv93, "KOPI93") == 1
+          and _bchip_hi93(_isv93, "SUSU93") == 0,
+          f"kopi={_n_kopi93} susu={_n_susu93} texts={_texts93b} "
+          f"hi={_bchip_hi93(_isv93, 'KOPI93')}")
+    _isv93._on_barang_row_click("KOPI93")     # klik lagi = lepas filter
+    wait_view(root, _isv93)
+    _n_all93 = len(_isv93.tree.get_children(""))
+    check("(v3.11.8) §93-F3 klik LAGI = lepas filter (tabel kembali "
+          "ber-SUSU93; state aktif strip bersih)",
+          sum(1 for _i93 in _isv93.tree.get_children("")
+              if _isv93.tree.set(_i93, "Nama Barang") == "SUSU93") > 0
+          and _n_all93 > _n_kopi93
+          and _isv93._barang_zone_active is None,
+          f"all={_n_all93}")
+    _isv93.destroy()
+    _top93f.destroy()
     root.update()
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

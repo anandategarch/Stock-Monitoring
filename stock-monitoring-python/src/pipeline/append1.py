@@ -409,10 +409,17 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         # meng-import append1 → import modul-level = circular)
         from src.main import PipelineStopped
         saldo_sistem_out["map"] = {}
+        # v3.11.8 — daftar barang 42.17 bersaldo + kategori sumbernya
+        # (section Identifikasi Kategori Manual tab ⚙️ Config; user:
+        # "indentifikasi manual sumber nya dari 42.17 dari folder itu
+        # ya ... ada kategori nya juga dari sumber 42.17").
+        saldo_sistem_out["kategori_df"] = pd.DataFrame()
         try:
+            # v3.11.8 — keep_kategori=True: kolom KATEGORI (Kategori
+            # Barang file 42.17) ikut keluar bersama peta saldo sistem.
             _ss_df = query_4217_saldo_sistem(
                 config, protected_barangs=_protected_barangs,
-                stop_event=stop_event)
+                stop_event=stop_event, keep_kategori=True)
         except PipelineStopped:
             raise
         except Exception as e:  # noqa: BLE001 — degradasi anggun by design
@@ -422,7 +429,10 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         if _ss_df is not None and not _ss_df.empty \
                 and {"Nama Barang", "NAMA RESTO", "Value"} <= set(
                     _ss_df.columns):
-            _ss = _ss_df[["Nama Barang", "NAMA RESTO", "Value"]].copy()
+            _ss_cols = ["Nama Barang", "NAMA RESTO", "Value"]
+            if "KATEGORI" in _ss_df.columns:
+                _ss_cols.append("KATEGORI")
+            _ss = _ss_df[_ss_cols].copy()
             _ss["Nama Barang"] = _ss["Nama Barang"].astype(str)
             _ss["NAMA RESTO"] = _ss["NAMA RESTO"].astype(str)
             _ss["Value"] = pd.to_numeric(_ss["Value"], errors="coerce")
@@ -431,9 +441,20 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             saldo_sistem_out["map"] = {
                 (b, r): float(v) for b, r, v in zip(
                     _ss["Nama Barang"], _ss["NAMA RESTO"], _ss["Value"])}
+            # v3.11.8 — baris kategori utk daftar identifikasi (baris
+            # saldo-0 TETAP utuh di sini — peta saldo sistem butuh
+            # informasi 0; penyaringan 'hanya yang ada saldo' dilakukan
+            # di sisi app saat membangun daftar).
+            if "KATEGORI" in _ss.columns:
+                saldo_sistem_out["kategori_df"] = _ss[
+                    ["Nama Barang", "KATEGORI", "NAMA RESTO", "Value"]
+                ].reset_index(drop=True)
         _n_ss = len(saldo_sistem_out["map"])
+        _n_kat = len(saldo_sistem_out["kategori_df"])
         print(f"    42.17 Saldo Sistem (v3.11): {_n_ss:,} pasangan "
-              "(folder '6. 42.17') — menimpa kolom Sistem Deviasi GR/PCS")
+              "(folder '6. 42.17') — menimpa kolom Sistem Deviasi GR/PCS"
+              + (f" · {_n_kat:,} baris kategori 42.17 (v3.11.8)"
+                 if _n_kat else ""))
 
     # FIX: Stop checkpoint after 4217 load
     if stop_event is not None and stop_event.is_set():
