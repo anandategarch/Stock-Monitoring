@@ -172,11 +172,11 @@ class FollowUpView(tk.Frame):
         # cara mengisi daftar. Dulu CTA sendirian menyesatkan: user yang
         # SUDAH menjalankan pipeline mengkliknya dan daftar tetap kosong.
         self.empty = EmptyState(
-            self, icon="📌", title="Daftar Follow Up masih kosong",
-            subtitle="Baris masuk daftar lewat centang ✓ di tab 📦 Deviasi "
-                     "GR / 🧩 Deviasi PCS / 📋 Laporan Deviasi — jalankan "
+            self, title="Daftar Follow Up masih kosong",
+            subtitle="Baris masuk daftar lewat centang ✓ di tab Deviasi "
+                     "GR / Deviasi PCS / Laporan Deviasi — jalankan "
                      "pipeline dulu bila data belum ada.",
-            cta_text="🚀 Jalankan Pipeline",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -190,13 +190,13 @@ class FollowUpView(tk.Frame):
 
         r0 = tk.Frame(cbody, bg=C_CARD)
         r0.pack(fill="x")
-        self.btn_export = AccentButton(r0, text="💾 Export Excel",
+        self.btn_export = AccentButton(r0, text="Export Excel",
                                        command=self._on_export)
         self.btn_export.pack(side="left")
 
         self.btn_import = None  # v3.8: Impor Hasil TL DIHAPUS (user)
 
-        self.btn_clear = DangerButton(r0, text="✕ Kosongkan",
+        self.btn_clear = DangerButton(r0, text="Kosongkan",
                                       command=self._on_clear)
         self.btn_clear.pack(side="left", padx=(8, 0))
 
@@ -215,16 +215,16 @@ class FollowUpView(tk.Frame):
                                bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in COLUMNS]
@@ -662,7 +662,7 @@ class FollowUpView(tk.Frame):
         self._status_text = (_hint
                              or (f"{n} baris · {selesai} selesai · "
                                  f"{n - selesai} menunggu"
-                                 + (f" · {n_shown} tampil (filter ⧩)"
+                                 + (f" · {n_shown} tampil (filter)"
                                     if n_shown != n else "")))
         self._apply_status()
         self._consume_store_notes()
@@ -851,7 +851,7 @@ class FollowUpView(tk.Frame):
         self._status_text = (_hint
                              or (f"{n} baris · {selesai} selesai · "
                                  f"{n - selesai} menunggu"
-                                 + (f" · {n_shown} tampil (filter ⧩)"
+                                 + (f" · {n_shown} tampil (filter)"
                                     if n_shown != n else "")))
         self._apply_status()
         self._consume_store_notes()

@@ -74,7 +74,7 @@ class RefreshSourcesDialog(tk.Toplevel):
                  on_refresh: Callable[[list | None], None] | None = None,
                  can_refresh: Callable[[], bool] | None = None):
         super().__init__(parent)
-        self.title("↻ Refresh File Sumber")   # v3.9.59 — FIX 2f-13: satu glyph ↻
+        self.title("Refresh File Sumber")   # v3.9.59 — FIX 2f-13: satu glyph ↻
         self.configure(bg=C_BG)
         self.minsize(880, 560)
         try:
@@ -179,7 +179,7 @@ class RefreshSourcesDialog(tk.Toplevel):
     def _build_ui(self):
         head = tk.Frame(self, bg=C_BG)
         head.pack(fill="x", padx=16, pady=(14, 4))
-        tk.Label(head, text="↻ Refresh File Sumber",   # 2f-13: satu glyph ↻
+        tk.Label(head, text="Refresh File Sumber",   # 2f-13: satu glyph ↻
                  bg=C_BG, fg=C_HEADER, font=font(13, "bold")).pack(anchor="w")
         tk.Label(head,
                  text="Centang file yang mau dibaca ulang — file lain pakai "
@@ -199,7 +199,7 @@ class RefreshSourcesDialog(tk.Toplevel):
                     command=lambda: self._check_all(True)).pack(side="left")
         # v3.9.59 — FIX 2f-13: glyph ✕ (aksi melepas centang) — ✓ utk
         # 'Kosongkan' terbaca ambigu (centang-man? kosongkan?).
-        GhostButton(tools, text="✕ Kosongkan",
+        GhostButton(tools, text="Kosongkan",
                     command=lambda: self._check_all(False)).pack(
                         side="left", padx=(6, 0))
         GhostButton(tools, text="✓ Berubah",
@@ -241,11 +241,11 @@ class RefreshSourcesDialog(tk.Toplevel):
         tk.Label(foot, textvariable=self.info_var, bg=C_BG,
                  fg=C_TEXT_MUTED, font=font(9, "bold")).pack(side="left")
 
-        self.btn_semua = GhostButton(foot, text="↻ Refresh Semua",
+        self.btn_semua = GhostButton(foot, text="Refresh Semua",
                                      command=lambda: self._do_refresh(None))
         self.btn_semua.pack(side="right")
         self.btn_terpilih = AccentButton(
-            foot, text="↻ Refresh Terpilih (0)",
+            foot, text="Refresh Terpilih (0)",
             command=self._do_selected)
         self.btn_terpilih.pack(side="right", padx=(0, 6))
         # v3.9.59 — FIX 2f-13: 'Tutup (Esc)' (dialog mem-bind Escape).
@@ -387,7 +387,7 @@ class RefreshSourcesDialog(tk.Toplevel):
             info += f" · ⚠ {n_missing} folder hilang"
         self.info_var.set(info)
         k = len(self._checked)
-        self.btn_terpilih.configure(text=f"↻ Refresh Terpilih ({k})")
+        self.btn_terpilih.configure(text=f"Refresh Terpilih ({k})")
         self.btn_terpilih.set_enabled(k > 0)
         self.btn_semua.set_enabled(n > 0)
 

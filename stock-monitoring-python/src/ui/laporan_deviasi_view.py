@@ -215,8 +215,8 @@ class LaporanDeviasiView(tk.Frame):
     def _build_ui(self):
         # --- Empty state ---
         self.empty = EmptyState(
-            self, icon="📋", title="Belum ada daftar Pemakaian (COM)",
-            cta_text="🚀 Jalankan Pipeline",
+            self, title="Belum ada daftar Pemakaian (COM)",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -234,7 +234,7 @@ class LaporanDeviasiView(tk.Frame):
         # v3.9.33 — AUDIT FIX (48-f MEDIUM UX): chip H read-only diberi
         # petunjuk singkat di mana H bisa diatur (kata kunci 'TANGGAL H'
         # dipertahankan supaya assertion lama tetap lolos).
-        tk.Label(r1, text="TANGGAL H · atur di 📦 Deviasi GR", bg=C_CARD,
+        tk.Label(r1, text="TANGGAL H · atur di Deviasi GR", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         # v3.9.3: chip read-only — H dibagikan dari tab 📦 Deviasi GR
         # (pola tab 🧩 Deviasi PCS; tanpa double input)
@@ -246,7 +246,7 @@ class LaporanDeviasiView(tk.Frame):
                  fg=C_ACCENT, font=font(11, "bold")).pack(
             padx=10, pady=(2, 3))
 
-        GhostButton(r1, text="✕ Reset Filter",
+        GhostButton(r1, text="Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
         # --- Tabel card ---
@@ -263,20 +263,20 @@ class LaporanDeviasiView(tk.Frame):
         title_label.pack(side="left")
         # v3.11.2 — 💾 Export Excel SESUAI TAMPILAN (pola pivot v3.9.2:
         # filter ⧩ + H aktif ikut; urutan = payload render terakhir).
-        btn_export = GhostButton(head, text="💾 Export Excel",
+        btn_export = GhostButton(head, text="Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in self.COLUMNS]
@@ -507,14 +507,14 @@ class LaporanDeviasiView(tk.Frame):
             pass
         if with_cta:
             self.empty = EmptyState(
-                self, icon="📋", title="Belum ada daftar Pemakaian (COM)",
+                self, title="Belum ada daftar Pemakaian (COM)",
                 subtitle=subtitle,
-                cta_text="🚀 Jalankan Pipeline",
+                cta_text="Jalankan Pipeline",
                 on_cta=(lambda: self.go_to_proses()
                         if self.go_to_proses else None))
         else:
             self.empty = EmptyState(
-                self, icon="📋", title="Belum ada daftar Pemakaian (COM)",
+                self, title="Belum ada daftar Pemakaian (COM)",
                 subtitle=subtitle)
 
     def _show_content(self):
@@ -584,7 +584,7 @@ class LaporanDeviasiView(tk.Frame):
         if _data_empty:
             self._set_empty_state(
                 "0 baris terbaca dari pipeline — cek folder data / "
-                "RootPath di tab ⚙️ Config")
+                "RootPath di tab Config")
             self._show_empty()
         else:
             self._show_content()
@@ -624,7 +624,7 @@ class LaporanDeviasiView(tk.Frame):
             self.status_var_label.set(
                 "Belum ada data. Jalankan pipeline di tab Proses — 0 baris "
                 "terbaca dari pipeline (cek folder data / RootPath di tab "
-                "⚙️ Config).")
+                "Config).")
 
     # =========================================================================
     # COMPUTATION — matriks COM (H-independen, cache per data)
@@ -634,23 +634,23 @@ class LaporanDeviasiView(tk.Frame):
         pra-capture worker) — default membaca self.data (kompatibel test)."""
         """Matriks PEMAKAIAN (COM) per (Nama Barang × Nama Resto) × tanggal.
 
-        Formula identik dgn baris "6.PEMAKAIAN (COM)" tab 📊 Pivot mode
-        Tanggal (port M code; lihat PivotTableView._compute_com):
-            com(t=1)  = SALDO AWAL + IN(1) - BK(1) - SO(1)   (SA pair bila ada)
-            com(t>1)  = SO(t-1) + IN(t) - BK(t) - SO(t)
-        Kolom diurut kronologis (-25..-31 lalu 1..31). Matrix TIDAK
-        bergantung H → dipakai lintas perubahan H (kolom H dipilih saat
-        render). Juga mengisi self._satuan_lookup.
+ Formula identik dgn baris "6.PEMAKAIAN (COM)" tab Pivot mode
+ Tanggal (port M code; lihat PivotTableView._compute_com):
+ com(t=1) = SALDO AWAL + IN(1) - BK(1) - SO(1) (SA pair bila ada)
+ com(t>1) = SO(t-1) + IN(t) - BK(t) - SO(t)
+ Kolom diurut kronologis (-25..-31 lalu 1..31). Matrix TIDAK
+ bergantung H → dipakai lintas perubahan H (kolom H dipilih saat
+ render). Juga mengisi self._satuan_lookup.
 
-        v3.9.5 FIX (audit 19-b #2 — P2, bareng pivot & komparasi): SALDO
-        AWAL dulu ditempel ke kolom kronologis PERTAMA GLOBAL — saat data
-        memuat tanggal negatif (pipeline default FULL), kolom pertama =
-        −25 padahal baris SA ber-Tanggal=1 (fn_4217) → SA tidak pernah
-        terpakai: com(1) memakai SO(−31), dan pair TANPA data bulan lalu
-        mendapat com(1) = IN−BK−SO ≈ −SO(1) = MINUS PALSU di H=1 (431 dari
-        654 anomali H=1 pada data real). Kini base com(1) = SA milik pair
-        (fallback SO(t-1), fallback 0).
-        """
+ v3.9.5 FIX (audit 19-b #2 — P2, bareng pivot & komparasi): SALDO
+ AWAL dulu ditempel ke kolom kronologis PERTAMA GLOBAL — saat data
+ memuat tanggal negatif (pipeline default FULL), kolom pertama =
+ −25 padahal baris SA ber-Tanggal=1 (fn_4217) → SA tidak pernah
+ terpakai: com(1) memakai SO(−31), dan pair TANPA data bulan lalu
+ mendapat com(1) = IN−BK−SO ≈ −SO(1) = MINUS PALSU di H=1 (431 dari
+ 654 anomali H=1 pada data real). Kini base com(1) = SA milik pair
+ (fallback SO(t-1), fallback 0).
+ """
         df = self.data if data is None else data
         if df is None or df.empty:
             return pd.DataFrame()
@@ -872,7 +872,7 @@ class LaporanDeviasiView(tk.Frame):
             self._result_df = None
             return {"gen": gen, "items": [], "status":
                     f"Kolom H={h} tidak ada di data — tanggal tersedia "
-                    f"{lo} s/d {hi}. Atur H di tab 📦 Deviasi GR."}
+                    f"{lo} s/d {hi}. Atur H di tab Deviasi GR."}
 
         # v3.9.7 (koreksi user): MEDIAN ANTAR TANGGAL per pasangan —
         # median com(t) utk t = 1..H (window bulan berjalan s/d cut-off;
@@ -1351,7 +1351,7 @@ class LaporanDeviasiView(tk.Frame):
                 messagebox.showwarning(
                     "Export",
                     "Tidak ada baris anomali COM yang lolos filter aktif "
-                    "(0 anomali / seleksi ⧩ kosong). Kendurkan atau reset "
+                    "(0 anomali / seleksi kosong). Kendurkan atau reset "
                     "filter dulu.", parent=self.winfo_toplevel())
             return
         stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
@@ -1381,7 +1381,7 @@ class LaporanDeviasiView(tk.Frame):
             return write_table_display_sheet(
                 filepath, "Anomali COM", cols, rows,
                 meta_rows=[
-                    ("SUMBER", ("🚨 Anomali COM — pemakaian minus / "
+                    ("SUMBER", ("Anomali COM — pemakaian minus / "
                                 "di atas median (kolom H)")),
                     ("TANGGAL H", str(h)),
                 ],
@@ -1389,7 +1389,7 @@ class LaporanDeviasiView(tk.Frame):
                         f"COM (H={h})": 14, f"Median (1..{h})": 14,
                         "Selisih vs Median": 16, "Status": 18},
                 note="Angka minus tampil MERAH dalam kurung · export sesuai "
-                     "tampilan (filter ⧩ + TANGGAL H aktif ikut) · median "
+                     "tampilan (filter + TANGGAL H aktif ikut) · median "
                      "dihitung antar tanggal 1..H per pasangan",
             )
 

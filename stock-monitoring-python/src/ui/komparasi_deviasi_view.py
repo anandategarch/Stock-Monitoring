@@ -849,8 +849,8 @@ class KomparasiDeviasiView(tk.Frame):
     def _build_ui(self):
         # --- Empty state ---
         self.empty = EmptyState(
-            self, icon="⚖", title="Belum ada data komparasi",
-            cta_text="🚀 Jalankan Pipeline",
+            self, title="Belum ada data komparasi",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -859,7 +859,7 @@ class KomparasiDeviasiView(tk.Frame):
 
         # --- Filter card: pemilih file + opsi ---
         fcard = Card(self.content,
-                     title="⚖ Komparasi Deviasi — Lalu vs Saat Ini")
+                     title="Komparasi Deviasi — Lalu vs Saat Ini")
         fcard.pack(fill="x", padx=12, pady=(12, 0))
         self._fcard = fcard
         fbody = fcard.body()
@@ -871,7 +871,7 @@ class KomparasiDeviasiView(tk.Frame):
         # saat tab pertama terlihat).
         r1 = tk.Frame(fbody, bg=C_CARD)
         r1.pack(fill="x")
-        btn_pick = GhostButton(r1, text="📂 Pilih File Deviasi…",
+        btn_pick = GhostButton(r1, text="Pilih File Deviasi…",
                                command=self._pick_file)
         btn_pick.pack(side="left")
         self._path_var = tk.StringVar(value="")
@@ -879,10 +879,10 @@ class KomparasiDeviasiView(tk.Frame):
         self._path_entry.pack(side="left", padx=(8, 6), fill="x",
                               expand=True)
         self._path_entry.bind("<Return>", lambda e: self._reload_file())
-        self._btn_reload = GhostButton(r1, text="↻ Muat Ulang File",
+        self._btn_reload = GhostButton(r1, text="Muat Ulang File",
                                        command=self._reload_file)
         self._btn_reload.pack(side="right")
-        self._btn_close = GhostButton(r1, text="✕ Tutup File",
+        self._btn_close = GhostButton(r1, text="Tutup File",
                                       command=self._close_file)
         self._btn_close.pack(side="right", padx=(0, 6))
         self._btn_close.configure(state="disabled")
@@ -916,7 +916,7 @@ class KomparasiDeviasiView(tk.Frame):
             side="left", padx=(10, 0), pady=(2, 3))
         # v3.9.33 — AUDIT FIX (48-f UX): chip H read-only kini ber-petunjuk
         # di mana mengubahnya (dulu angka H tanpa penjelasan).
-        tk.Label(hchip, text="· atur di 📦 Deviasi GR", bg="#f1f5f9",
+        tk.Label(hchip, text="· atur di Deviasi GR", bg="#f1f5f9",
                  fg=C_TEXT_MUTED, font=font(8)).pack(
             side="left", padx=(4, 10), pady=(2, 3))
         # label minggu aktif (dinamis — file & H)
@@ -947,7 +947,7 @@ class KomparasiDeviasiView(tk.Frame):
             activeforeground=C_HEADER, command=self._on_option_changed)
         self._chk_all.pack(side="left", padx=(16, 0))
 
-        GhostButton(r2, text="✕ Reset Filter",
+        GhostButton(r2, text="Reset Filter",
                     command=self._reset_filter).pack(side="right",
                                                      padx=(0, 6))
 
@@ -986,7 +986,7 @@ class KomparasiDeviasiView(tk.Frame):
         tk.Label(r4, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self._mode_segment = SegmentBar(
-            r4, ["Tabel", "📈 Analisa"],
+            r4, ["Tabel", "Analisa"],
             command=lambda idx: self._on_mode_change(idx))
         self._mode_segment.pack(side="left", padx=(6, 0))
 
@@ -1006,18 +1006,18 @@ class KomparasiDeviasiView(tk.Frame):
         # filter ⧩ + minggu/bulan + H aktif ikut; urutan = payload render
         # terakhir; sub-mode 📈 Analisa punya tabel sendiri — tombol ini
         # hanya tampil di sub-mode Tabel bersama kartu tabelnya).
-        btn_export = GhostButton(head, text="💾 Export Excel",
+        btn_export = GhostButton(head, text="Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in self.COLUMNS]
@@ -1307,8 +1307,8 @@ class KomparasiDeviasiView(tk.Frame):
                 self.status_var_label.set(
                     "Auto file deviasi bulan lalu: belum ada file "
                     "'20.{BULAN} {TAHUN}' cocok di "
-                    f"{_fld or 'folder config'} — muat manual via 📂 "
-                    "bila perlu.")
+                    f"{_fld or 'folder config'} — muat manual via "
+                    "tombol pilih file bila perlu.")
                 return
             paths = [p for p in self._read_last_paths()
                      if os.path.isfile(p)]
@@ -1509,9 +1509,9 @@ class KomparasiDeviasiView(tk.Frame):
         except tk.TclError:
             pass
         self.empty = EmptyState(
-            self, icon="⚖", title="Belum ada data komparasi",
+            self, title="Belum ada data komparasi",
             subtitle=subtitle,
-            cta_text="🚀 Jalankan Pipeline",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses
             else None)
 
@@ -1614,11 +1614,11 @@ class KomparasiDeviasiView(tk.Frame):
             # (dulu '⚙ Pengaturan' — tab itu tidak ada di app).
             self._set_empty_subtitle(
                 "0 baris terbaca dari pipeline — cek folder data / "
-                "RootPath di tab ⚙️ Config")
+                "RootPath di tab Config")
             self._show_empty()
             self.status_var_label.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙️ Config).")
+                "(cek folder data / RootPath di tab Config).")
             return
         # lazy refresh — compute hanya bila pane terlihat
         if self.winfo_ismapped():
@@ -1648,7 +1648,7 @@ class KomparasiDeviasiView(tk.Frame):
         if self.data is None or self.data.empty:
             messagebox.showinfo(
                 "Belum ada data saat ini",
-                "Jalankan pipeline dulu (tab 🚀 Proses) supaya ada data "
+                "Jalankan pipeline dulu (tab Proses) supaya ada data "
                 "saat ini untuk dibandingkan dengan file deviasi.",
                 parent=self.winfo_toplevel())
             return
@@ -1681,13 +1681,13 @@ class KomparasiDeviasiView(tk.Frame):
             if interactive:
                 messagebox.showinfo(
                     "Belum ada data saat ini",
-                    "Jalankan pipeline dulu (tab 🚀 Proses) supaya ada data "
+                    "Jalankan pipeline dulu (tab Proses) supaya ada data "
                     "saat ini untuk dibandingkan dengan file deviasi.",
                     parent=self.winfo_toplevel())
             else:
                 self.status_var_label.set(
                     "Belum ada data saat ini — jalankan pipeline "
-                    "(tab 🚀 Proses).")
+                    "(tab Proses).")
             return
         paths = [str(p).strip() for p in paths if str(p).strip()]
         if not paths:
@@ -2444,7 +2444,7 @@ class KomparasiDeviasiView(tk.Frame):
                             f"0 baris — file tidak punya minggu cut-off "
                             f"H {wt} (minggu di file: "
                             f"{', '.join(weeks_in_file)}). Input H di "
-                            f"tab 📦 Deviasi GR (H sekarang "
+                            f"tab Deviasi GR (H sekarang "
                             f"{st.get('h_label', wt)} → minggu cut-off "
                             f"{wt}) atau centang 'Tampilkan semua "
                             f"minggu'.")}
@@ -2770,7 +2770,7 @@ class KomparasiDeviasiView(tk.Frame):
 
         # --- Bagian 0 — Kartu 1: Top Selisih ---
         tc = Card(self._anasec_frames[0],
-                  title="📈 Top Selisih — |Selisih| Tertinggi")
+                  title="Top Selisih — |Selisih| Tertinggi")
         tc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
         tb = tc.body()
         head = tk.Frame(tb, bg=C_CARD)
@@ -2789,9 +2789,9 @@ class KomparasiDeviasiView(tk.Frame):
         topn_entry = ttk.Entry(head, textvariable=self._topn_var, width=6)
         topn_entry.pack(side="left", padx=(4, 4))
         topn_entry.bind("<Return>", lambda e: self._render_top_selisih())
-        GhostButton(head, text="↻ Terapkan",
+        GhostButton(head, text="Terapkan",
                     command=self._render_top_selisih).pack(side="left")
-        GhostButton(head, text="⛶ Layar Penuh",
+        GhostButton(head, text="Layar Penuh",
                     command=self._maximize_top).pack(side="right")
 
         cols = [c[0] for c in self.TOP_COLS]
@@ -2826,7 +2826,7 @@ class KomparasiDeviasiView(tk.Frame):
 
         # --- Bagian 0 — Kartu 2: Perubahan Arah (flip) ---
         fc = Card(self._anasec_frames[0],
-                  title="📈 Perubahan Arah — Bulan Lalu vs Bulan Saat Ini")
+                  title="Perubahan Arah — Bulan Lalu vs Bulan Saat Ini")
         fc.pack(fill="both", expand=True, padx=0, pady=(10, 0))
         fb = fc.body()
         fhead = tk.Frame(fb, bg=C_CARD)
@@ -2840,7 +2840,7 @@ class KomparasiDeviasiView(tk.Frame):
         tk.Label(fhead, textvariable=self._flip_status_var, bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(
             side="left", padx=(10, 0))
-        GhostButton(fhead, text="⛶ Layar Penuh",
+        GhostButton(fhead, text="Layar Penuh",
                     command=self._maximize_flip).pack(side="right")
 
         cols = [c[0] for c in self.FLIP_COLS]
@@ -3720,7 +3720,7 @@ class KomparasiDeviasiView(tk.Frame):
             if self._file_df is None:
                 messagebox.showwarning(
                     "Export", "Belum ada file deviasi. Muat file dulu "
-                    "(kartu Filter — alamat file / 📂 pilih file).",
+                    "(kartu Filter — alamat file / tombol pilih file).",
                     parent=self.winfo_toplevel())
             elif self.data is None or getattr(self.data, "empty", True):
                 messagebox.showwarning(
@@ -3730,7 +3730,7 @@ class KomparasiDeviasiView(tk.Frame):
                 messagebox.showwarning(
                     "Export",
                     "Tidak ada baris komparasi yang lolos filter aktif "
-                    "(minggu / bulan / seleksi ⧩ kosong). Kendurkan atau "
+                    "(minggu / bulan / seleksi kosong). Kendurkan atau "
                     "reset filter dulu.", parent=self.winfo_toplevel())
             return
         stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M")
@@ -3765,7 +3765,7 @@ class KomparasiDeviasiView(tk.Frame):
             return write_table_display_sheet(
                 filepath, "Komparasi Deviasi", cols, rows,
                 meta_rows=[
-                    ("SUMBER", ("⚖ Komparasi File Deviasi — Lalu vs "
+                    ("SUMBER", ("Komparasi File Deviasi — Lalu vs "
                                 "Saat Ini")),
                     ("FILE", _fname or "(tanpa nama file)"),
                     ("TANGGAL H", str(h)),
@@ -3779,7 +3779,7 @@ class KomparasiDeviasiView(tk.Frame):
                 note="%TO BOM Lalu & DEV Saat Ini = rasio % TO BOM · "
                      "Nominal = Harga 41.09 × GR Saat Ini · sel kosong = "
                      "tanpa nilai · export sesuai tampilan (filter minggu/"
-                     "bulan/⧩ + H aktif ikut)",
+                     "bulan/+ H aktif ikut)",
             )
 
         def done(n):

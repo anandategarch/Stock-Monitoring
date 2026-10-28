@@ -238,8 +238,8 @@ class PivotTableView(tk.Frame):
     def _build_ui(self):
         # --- Empty state ---
         self.empty = EmptyState(
-            self, icon="📊", title="Belum ada data pivot",
-            cta_text="🚀 Jalankan Pipeline",
+            self, title="Belum ada data pivot",
+            cta_text="Jalankan Pipeline",
             on_cta=self._cta_proses)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -327,7 +327,7 @@ class PivotTableView(tk.Frame):
             command=self._refresh_pivot)
         self.chk_hide_empty.pack(side="left", padx=(0, 18))
 
-        GhostButton(r1, text="✕ Reset Filter",
+        GhostButton(r1, text="Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
         # --- Tabel card ---
@@ -342,24 +342,24 @@ class PivotTableView(tk.Frame):
                                fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
         self.mode_seg = SegmentBar(
-            head, ["🏪 Resto", "📅 Tanggal"], bg=C_CARD,
+            head, ["Resto", "Tanggal"], bg=C_CARD,
             command=self._on_mode_change)
         self.mode_seg.pack(side="left", padx=(14, 0))
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         # v3.9.2: 💾 Export Excel — matrix pivot SESUAI TAMPILAN (filter +
         # mode aktif); nilai minus ditandai font merah per cell (mirror UI)
-        btn_export = GhostButton(head, text="💾 Export Excel",
+        btn_export = GhostButton(head, text="Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
 
@@ -466,7 +466,7 @@ class PivotTableView(tk.Frame):
         tabel. Sebelumnya: klik menu di kolom lain TIDAK melakukan apa-apa."""
         if col != "#0":
             self.status_var.set(
-                "ℹ Kolom matrix difilter lewat RESTO / TANGGAL di atas tabel "
+                "Kolom matrix difilter lewat RESTO / TANGGAL di atas tabel "
                 "— filter teks hanya untuk kolom 'Nama Barang'.")
         return self.header_filter.open_popup()
 
@@ -619,9 +619,9 @@ class PivotTableView(tk.Frame):
         except tk.TclError:
             pass
         self.empty = EmptyState(
-            self, icon="📊", title="Belum ada data pivot",
+            self, title="Belum ada data pivot",
             subtitle=subtitle,
-            cta_text="🚀 Jalankan Pipeline",
+            cta_text="Jalankan Pipeline",
             on_cta=self._cta_proses)
 
     def _show_content(self):
@@ -695,7 +695,7 @@ class PivotTableView(tk.Frame):
             # balik EmptyState); 2c-01 — nama tab dibetulkan '⚙️ Config'.
             self._set_empty_subtitle(
                 "0 baris terbaca dari pipeline — cek folder data / "
-                "RootPath di tab ⚙️ Config")
+                "RootPath di tab Config")
             self._show_empty()
             self._name_selected = None
             self.header_filter.clear()
@@ -706,7 +706,7 @@ class PivotTableView(tk.Frame):
                 var.set("(All)")
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙️ Config).")
+                "(cek folder data / RootPath di tab Config).")
             return
         self._show_content()
         self._populate_filters()
@@ -1563,7 +1563,7 @@ class PivotTableView(tk.Frame):
                     "Export",
                     "Tidak ada baris pivot yang lolos filter aktif "
                     "(kategori / seleksi nama / rentang tanggal / "
-                    "☑ sembunyikan baris kosong). Kendurkan atau reset "
+                    "sembunyikan baris kosong). Kendurkan atau reset "
                     "filter dulu.",
                     parent=self.winfo_toplevel())
             return

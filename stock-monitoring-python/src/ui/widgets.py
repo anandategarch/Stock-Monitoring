@@ -727,13 +727,14 @@ class StatusBar(tk.Frame):
 
 
 class EmptyState(tk.Frame):
-    """Placeholder besar saat belum ada data: ikon + judul + sub + tombol CTA.
+    """Placeholder besar saat belum ada data: judul + sub + tombol CTA
+    (ikon opsional — v3.11.13: default TANPA ikon, UI bersih tanpa emoji).
 
     on_cta: callback tombol (biasanya: pindah ke tab Proses).
     """
 
-    def __init__(self, parent, icon: str = "📭", title: str = "Belum ada data",
-                 subtitle: str = "", cta_text: str = "🚀 Jalankan Pipeline",
+    def __init__(self, parent, icon: str = "", title: str = "Belum ada data",
+                 subtitle: str = "", cta_text: str = "Jalankan Pipeline",
                  on_cta=None, **kw):
         super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
                          highlightthickness=1, **kw)
@@ -748,10 +749,12 @@ class EmptyState(tk.Frame):
         self._center = center
         self._subtitle_lbl = None
 
-        tk.Label(center, text=icon, bg=C_CARD, font=font(40)).pack(
-            pady=(28, 0))
+        if icon:
+            tk.Label(center, text=icon, bg=C_CARD, font=font(40)).pack(
+                pady=(28, 0))
         tk.Label(center, text=title, bg=C_CARD, fg=C_HEADER,
-                 font=font(13, "bold")).pack(pady=(6, 2))
+                 font=font(13, "bold")).pack(pady=(28, 2) if not icon
+                                               else (6, 2))
         if subtitle:
             self._subtitle_lbl = tk.Label(
                 center, text=subtitle, bg=C_CARD, fg=C_TEXT_MUTED,
@@ -1462,12 +1465,12 @@ class LoadingOverlay(tk.Frame):
             return
         if self._cancel_btn is None:
             self._cancel_btn = tk.Button(
-                self._inner, text="⏹ Batal", font=font(9, "bold"),
+                self._inner, text="Batal", font=font(9, "bold"),
                 bg="#dc2626", fg="white", activebackground="#b91c1c",
                 activeforeground="white", bd=0, relief="flat",
                 cursor="hand2", padx=10, pady=2,
                 command=self._on_cancel_click)
-        self._cancel_btn.configure(state="normal", text="⏹ Batal")
+        self._cancel_btn.configure(state="normal", text="Batal")
         self._cancel_btn.pack(side="left", padx=(10, 0))
 
     def _on_cancel_click(self):
@@ -1477,7 +1480,7 @@ class LoadingOverlay(tk.Frame):
         if self._cancel_btn is not None:
             with contextlib.suppress(tk.TclError):
                 self._cancel_btn.configure(state="disabled",
-                                           text="⏹ Membatalkan…")
+                                           text="Membatalkan…")
         # (contextlib.suppress — bukan except-pass — menjaga gerbang ruff
         # S110/BLE001; cmd = Event.set milik app, realistis tak melempar)
         with contextlib.suppress(Exception):
@@ -1630,8 +1633,8 @@ class TableExpander:
       restore cukup grid().
     """
 
-    def __init__(self, button, targets, text_expand="⤢ Perbesar Tabel",
-                 text_restore="⤡ Tampilkan Filter & KPI", on_toggle=None):
+    def __init__(self, button, targets, text_expand="Perbesar Tabel",
+                 text_restore="Tampilkan Filter & KPI", on_toggle=None):
         self._button = button
         self._targets = list(targets)
         self._text_expand = text_expand
@@ -2157,9 +2160,8 @@ class HeaderFilter:
         # pencarian nilai (menyaring daftar; Enter = jadikan seleksi)
         srow = tk.Frame(body, bg=C_CARD)
         srow.pack(fill="x")
-        tk.Label(srow, text="🔍", bg=C_CARD, fg=C_TEXT_MUTED).pack(side="left")
         entry = ttk.Entry(srow, textvariable=self._search_var)
-        entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        entry.pack(side="left", fill="x", expand=True)
         # v3.9.72 — PERF (audit 1-a FIX 7): DEBOUNCE 120ms — _filter_list
         # dulu jalan per keystroke (pack/forget O(#checkbox) 8.6-42.6ms ×
         # 3000 nilai); burst ketik kini coalesce jadi SATU penyaringan saat
@@ -2251,7 +2253,7 @@ class HeaderFilter:
             # bukan hanya jumlah yang tersembunyi.
             self._more_label = tk.Label(
                 inner, text=f"… menampilkan {self.MAX_CHECKS} dari "
-                            f"{len(values)} nilai — gunakan 🔍 di atas "
+                            f"{len(values)} nilai — gunakan di atas "
                             "untuk mencari & mencentang nilai lain",
                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(9))
             self._more_label.pack(fill="x", padx=8, pady=4)
@@ -2259,19 +2261,19 @@ class HeaderFilter:
         # tombol aksi
         brow = tk.Frame(body, bg=C_CARD)
         brow.pack(fill="x")
-        GhostButton(brow, text="↺ Reset", command=self._reset).pack(side="left")
+        GhostButton(brow, text="Reset", command=self._reset).pack(side="left")
         # v3.9.13: kebalikan seleksi (invert — filter advanced)
-        GhostButton(brow, text="↔ Balik",
+        GhostButton(brow, text="Balik",
                     command=self._invert_selection).pack(side="left",
                                                          padx=(6, 0))
         if self.on_sort is not None:
-            GhostButton(brow, text="↕ Sort A→Z",
+            GhostButton(brow, text="Sort A→Z",
                         command=lambda: self._do_sort(False)).pack(
                 side="left", padx=(6, 0))
-            GhostButton(brow, text="↕ Sort Z→A",
+            GhostButton(brow, text="Sort Z→A",
                         command=lambda: self._do_sort(True)).pack(
                 side="left", padx=(6, 0))
-        GhostButton(brow, text="✕ Tutup (Esc)", command=self._close).pack(
+        GhostButton(brow, text="Tutup (Esc)", command=self._close).pack(
             side="right")
 
         self._update_count()
@@ -2871,9 +2873,9 @@ def zero_row_filter_message(col_sel: dict) -> str | None:
     cols = col_sel_empty_columns(col_sel)
     if not cols:
         return None
-    return ("0 baris — semua nilai tidak dipilih pada filter ⧩ "
+    return ("0 baris — semua nilai tidak dipilih pada filter "
             + ", ".join(f"'{c}'" for c in cols)
-            + " (klik corong ⧩ di header kolom lalu centang "
+            + " (klik corong di header kolom lalu centang "
               "'Pilih semua' / pilih kembali nilainya)")
 
 
@@ -3027,23 +3029,23 @@ class ColumnManager:
         if col != "#0":
             if self.open_filter is not None:
                 menu.add_command(
-                    label=f"⧩ Filter kolom '{label}'",
+                    label=f"Filter kolom '{label}'",
                     command=lambda c=col: self._safe_open_filter(c))
             menu.add_command(
-                label="↔ Auto-fit kolom ini",
+                label="Auto-fit kolom ini",
                 command=lambda c=col: auto_fit_columns(self.tree,
                                                        columns=[c]))
             can_hide = len(self.visible()) > 1
             menu.add_command(
-                label=f"◱ Sembunyikan kolom '{label}'",
+                label=f"Sembunyikan kolom '{label}'",
                 command=lambda c=col: self.hide(c),
                 state="normal" if can_hide else "disabled")
-        menu.add_command(label="▦ Tampilkan Semua Kolom",
+        menu.add_command(label="Tampilkan Semua Kolom",
                          command=self.show_all,
                          state="normal" if self.hidden else "disabled")
         menu.add_separator()
-        menu.add_command(label="◫ Panel Kolom…", command=self.open_panel)
-        menu.add_command(label="↔ Auto-fit Semua Kolom",
+        menu.add_command(label="Panel Kolom…", command=self.open_panel)
+        menu.add_command(label="Auto-fit Semua Kolom",
                          command=lambda: auto_fit_columns(self.tree))
         try:
             menu.tk_popup(event.x_root, event.y_root)
@@ -3097,7 +3099,7 @@ class ColumnManager:
 
         head = tk.Frame(body, bg=C_CARD)
         head.pack(fill="x")
-        tk.Label(head, text="◫ Kolom yang ditampilkan", bg=C_CARD,
+        tk.Label(head, text="Kolom yang ditampilkan", bg=C_CARD,
                  fg=C_HEADER, font=font(10, "bold")).pack(side="left")
         n_vis = tk.StringVar(value=f"{len(self.visible())}/{len(cols)} tampil")
         tk.Label(head, textvariable=n_vis, bg=C_CARD, fg=C_TEXT_MUTED,
@@ -3119,9 +3121,9 @@ class ColumnManager:
         # GhostButton terang — sama dengan popup ⧩ Filter (dulu tombol
         # gelap #1e293b di panel terang: dua popup kembar beda gaya; cursor
         # hand2 ikut otomatis dari GhostButton — fix 2a-07/2b-10).
-        GhostButton(btnrow, text="▦ Tampilkan Semua",
+        GhostButton(btnrow, text="Tampilkan Semua",
                     command=_show_all).pack(side="left")
-        GhostButton(btnrow, text="✕ Tutup (Esc)",
+        GhostButton(btnrow, text="Tutup (Esc)",
                     command=_close_panel).pack(side="right")
 
         # checklist scrollable (pivot matrix bisa punya 30+ kolom tanggal)
@@ -6355,12 +6357,10 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     head.pack(fill="x")
     hi = tk.Frame(head, bg=C_HEADER)
     hi.pack(fill="x", padx=16, pady=10)
-    tk.Label(hi, text="⛶", bg=C_HEADER, fg="#5eead4",
-             font=font(12, "bold")).pack(side="left")
     tk.Label(hi, text=title, bg=C_HEADER, fg="#f1f5f9",
-             font=font(12, "bold")).pack(side="left", padx=(8, 0))
+             font=font(12, "bold")).pack(side="left")
     tk.Button(
-        hi, text="↔ Auto-Fit",
+        hi, text="Auto-Fit",
         command=lambda: (
             auto_fit_columns(new_tree),
             # v3.9.71 — clone freeze-pane: kolom nama (tree beku) ikut
@@ -6372,7 +6372,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         padx=12, pady=5,
     ).pack(side="right", padx=(0, 6))
     tk.Button(
-        hi, text="✕ Tutup (Esc)", command=win.destroy,
+        hi, text="Tutup (Esc)", command=win.destroy,
         bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
         activeforeground="#ffffff", bd=0, relief="flat",
         highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -6471,7 +6471,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     # — mirror ke tabel sumber supaya state konsisten setelah window tutup
     clone_colmgr = ColumnManager(new_tree, mirror=source_tree)
     tk.Button(
-        hi, text="◱ Kolom", command=clone_colmgr.open_panel,
+        hi, text="Kolom", command=clone_colmgr.open_panel,
         bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
         activeforeground="#ffffff", bd=0, relief="flat",
         highlightthickness=0, cursor="hand2", font=font(9, "bold"),

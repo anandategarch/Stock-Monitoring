@@ -167,8 +167,8 @@ class NominalDeviasiView(tk.Frame):
     # =========================================================================
     def _build_ui(self):
         self.empty = EmptyState(
-            self, icon="💰", title="Belum ada data Nominal (Harga × Deviasi)",
-            cta_text="🚀 Jalankan Pipeline",
+            self, title="Belum ada data Nominal (Harga × Deviasi)",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -185,7 +185,7 @@ class NominalDeviasiView(tk.Frame):
         # v3.9.33 — AUDIT FIX (48-f MEDIUM UX): chip H read-only diberi
         # petunjuk singkat di mana H bisa diatur (pola kata chip lama
         # dipertahankan supaya assertion 'TANGGAL H' tetap lolos).
-        tk.Label(r1, text="TANGGAL H · atur di 📦 Deviasi GR", bg=C_CARD,
+        tk.Label(r1, text="TANGGAL H · atur di Deviasi GR", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         self._h_chip_var = tk.StringVar(value=str(self.tanggal_h))
         chip = tk.Frame(r1, bg="#f1f5f9", highlightbackground="#e2e8f0",
@@ -198,7 +198,7 @@ class NominalDeviasiView(tk.Frame):
         tk.Label(r1, textvariable=self._total_var, bg=C_CARD,
                  fg=C_HEADER, font=font(9, "bold")).pack(
             side="left", padx=(8, 0))
-        GhostButton(r1, text="✕ Reset Filter",
+        GhostButton(r1, text="Reset Filter",
                     command=self._reset_filter).pack(side="left", padx=(18, 0))
 
         # --- Tabel card ---
@@ -215,18 +215,18 @@ class NominalDeviasiView(tk.Frame):
         # v3.11.2 — 💾 Export Excel SESUAI TAMPILAN (pola pivot v3.9.2:
         # filter ⧩ + H aktif ikut; urutan = payload render terakhir;
         # baris TOTAL ikut di ekor — ditebalkan writer).
-        btn_export = GhostButton(head, text="💾 Export Excel",
+        btn_export = GhostButton(head, text="Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in self.COLUMNS]
@@ -497,7 +497,7 @@ class NominalDeviasiView(tk.Frame):
         if data is None or len(data) == 0:
             self.status_var_label.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙️ Config).")
+                "(cek folder data / RootPath di tab Config).")
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""
@@ -877,7 +877,7 @@ class NominalDeviasiView(tk.Frame):
                 messagebox.showwarning(
                     "Export",
                     "Tidak ada baris nominal yang lolos filter aktif "
-                    "(0 baris DEVIASI di TANGGAL H / seleksi ⧩ kosong). "
+                    "(0 baris DEVIASI di TANGGAL H / seleksi kosong). "
                     "Kendurkan atau reset filter dulu.",
                     parent=self.winfo_toplevel())
             return
@@ -907,7 +907,7 @@ class NominalDeviasiView(tk.Frame):
             return write_table_display_sheet(
                 filepath, "Nominal Deviasi (H)", cols, rows,
                 meta_rows=[
-                    ("SUMBER", ("💰 Nominal (H) — Harga 41.09 × Qty "
+                    ("SUMBER", ("Nominal (H) — Harga 41.09 × Qty "
                                 "Deviasi")),
                     ("TANGGAL H", str(h)),
                 ],
@@ -920,7 +920,7 @@ class NominalDeviasiView(tk.Frame):
                      "(Harga/Nominal) = tanpa harga 41.09 / satuan tak "
                      "terkonversi ('*' di UI) · baris TOTAL = jumlah "
                      "kolom yang tampil · export sesuai tampilan (filter "
-                     "⧩ + TANGGAL H aktif ikut)",
+                     "+ TANGGAL H aktif ikut)",
             )
 
         def done(n):

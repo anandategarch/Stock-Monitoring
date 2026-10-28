@@ -248,7 +248,8 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.12"  # v3.11.12 — TIGA PERMINTAAN USER: AMBANG COM ±% + TRANSPARANSI BULAN AUTO FILE + SCROLL TAB CONFIG: (1) AMBANG COM TINGGI/RENDAH (user: "Di tab deviasi Gr dan PCS kolom Cek kan ada analisa COM nah itu bisa gak set 50% > atau < COM rendah atau COM tinggi nya?"): segmen CEK "COM Tinggi (+x)"/"COM Rendah (−x)" kini hanya terpicu bila selisih d(H) dari median historis MELAMPAUI ambang% × |median| — com_gap_map param BARU min_pct (default 0 = semua selisih, back-compat pemanggil lama; cache _RES +key pct); SharedComAmbang (mirror SharedACRThreshold: subscribe/set, persist settings.json key com_ambang_pct default 50 — clamp 0..500) + spinbox "AMBANG COM ± % dr median" di kartu Filter KEDUA tab GR & PCS (ubah → invalidasi pivot cache + recompute live); median 0 → semua gap nonzero tetap memicu; strict > — gap TEPAT di ambang tak memicu; legenda chip COM + "> ambang% dr median"; _fp_stable tetap netral (label CEK volatil). (2) TRANSPARANSI BULAN AUTO FILE DEVIASI BULAN LALU (user: "gimana cara tau misal sekarang bulan september apakah program otomatis ambil yang agustus?"): program TIDAK pakai bulan kalender mentah — periode = audit_result['period'] (timestamp dokumen IN terbaru, fallback kode Nomor, fallback bulan komputer); helper murni bulan_mundur_list(period, jumlah) (wrap tahun, urut kronologis) dipakai _auto_bulanan_paths (refactor, perilaku identik) + status kartu ⚙️ Config baris kedua "Periode data: SEPTEMBER 2026 (data run terakhir) → file dicari: 20.AGUSTUS 2026 ✓ · 20.JULI 2026 ✗" (keberadaan file dicek live; label status wraplength 860). (3) SCROLL VERTIKAL TAB ⚙️ CONFIG (user: "tampilan di config tidak bisa scroll aku harus perkecil dulu unutk bisa lihat tombol proses bandingkan file manual"): 4 kartu bertumpuk melebihi layar kecil → tombol 📂 tak terlihat; konten kini di CANVAS ber-scrollbar (pola analisa rekap — scrollregion via <Configure>, lebar inner = lebar canvas, yscrollincrement 40 = 1 notch ±40px); roda mouse dicover ROUTER RODA app (install_wheel_router walk-up — Treeview dalam kartu tetap menggulir sendiri); scrollbar TIPIS auto-hide _cfg_scroll_fit saat konten muat. TES: §0 versi + §96 BARU (ambang COM pure/integrasi/persist + scroll config + bulan_mundur_list + status transparansi).
+APP_VERSION = "3.11.13"  # v3.11.13 — HILANGKAN AI SLOP DARI UI (user: "Hilangkan semua AI Slop pada UI biar lebih clean dan gak kebanyak motif, shapes dan teks gak pelru"): SEMUA emoji dekoratif + glif ikon dibuang dari string UI RUNTIME via transform AST-presisi (probes/v31113/strip_ai_slop.py — 554 edit sinkron src+test; docstring/komentar TIDAK disentuh = riwayat versi). Tab jadi teks polos (Config/Proses/Pivot Table/Deviasi GR/Deviasi PCS/Rekap Selisih IN/Laporan Deviasi/Nominal Deviasi/Follow Up/Rincian PO — 3 daftar tab disinkron); tombol tanpa glif (Export Excel/Refresh Sumber/Bersihkan Log/Salin Log/MULAI PROSES/Stop/Batal/Simpan/Browse…/Pilih File Deviasi…/Muat ke Komparasi Sekarang/Layar Penuh/Kolom/Auto-Fit/Reset Filter/Perbesar/Terapkan/Muat Lebar/Muat Ulang File/Tutup File/Identifikasi…/Edit…/Hapus); header seksi analisa polos ("1 · UMUR GANTUNG (AGING)" dst); EmptyState TANPA ikon raksasa (param icon default "" + guard — judul+sub+CTA saja); label 🔍 search popup & ⛶ header clone DIHAPUS; toolbar cukup judul+versi; pesan log/status tanpa emoji. DIPERTAHANKAN (fungsional): ✓ ✗ ⚠ ● • → ↗ ↘ ↑ ↓ ↳ ▸ ▲ ▼ ☑ ☐ ✕(close) ‹ › ␣ — glif data/status, bukan dekorasi. TES: §0 versi + deskripsi cek disinkron (246 edit test_ui_redesign).
+# (riwayat v3.11.12 — TIGA permintaan user: AMBANG COM ±% dr median (spinbox GR/PCS sinkron, persist com_ambang_pct default 50) + transparansi periode→file target auto bulan lalu (bulan_mundur_list) + scroll vertikal tab Config (canvas + router roda).)
 # (riwayat v3.11.10 — AUDIT 5-AGEN: 23 BUG TERVERIFIKASI DIPERBAIKI + FIX CRASH LIVE TypeError 'suppress' object is not callable; fondasi presence append1 _SO_REKAM/_SA_REKAM, fn_9901 dedup lintas-sheet, kunci ternormalisasi __k_barang/__k_resto, GR/PCS strip+upper, widgets clone/sort/auto-fit, ⧉ filter (Kosong)/kronologis/GR␣/TSV/pd.NA, app lifecycle x/y+generation-token+export-guard+F5-silent; 1802/1802 PASS.)
 # (riwayat v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 — daftar kiri tab ⚙️ Config dari SALDO SISTEM 42.17 folder '6. 42.17' (SEMUA barang bersaldo + Kategori 42.17 + Kategori app efektif + pencarian + penanda BARU via kategori_seen.json) + tombol 🎯 mengisi/menimpa (prioritas 5d). (2) COM RENDAH — com_analisa dua arah strict ("COM Rendah (−x)" d(H) < median). (3) STRIP "🎯 SELISIH TERBANYAK — BARANG × RESTO" tab 📤 Rekap Selisih IN (klik chip = toggle ⧩). (4) FIX KUANTITI NOMINAL = SO_H − saldo sistem 42.17 (konsisten tab Deviasi GR/PCS).)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
@@ -2077,16 +2078,16 @@ _ST_ERR = ("ERROR — lihat log", C_RED)
 # panjang dipendekkan; badge jumlah '☑ Follow Up (N)' tetap membawa
 # (N) — lihat _compact_tab_label / _apply_tab_label_fit.
 _TAB_COMPACT_LABELS = {
-    "⚙️ Config": "Config",
-    "🚀 Proses": "Proses",
-    "📊 Pivot Table": "Pivot",
-    "📦 Deviasi GR": "Deviasi GR",
-    "🧩 Deviasi PCS": "Deviasi PCS",
-    "📤 Rekap Selisih IN": "Selisih IN",
-    "📋 Laporan Deviasi": "Laporan",
-    "🧮 Nominal Deviasi": "Nominal",
-    "☑ Follow Up": "Follow Up",
-    "🛒 Rincian PO": "Rincian PO",
+    "Config": "Config",
+    "Proses": "Proses",
+    "Pivot Table": "Pivot",
+    "Deviasi GR": "Deviasi GR",
+    "Deviasi PCS": "Deviasi PCS",
+    "Rekap Selisih IN": "Selisih IN",
+    "Laporan Deviasi": "Laporan",
+    "Nominal Deviasi": "Nominal",
+    "Follow Up": "Follow Up",
+    "Rincian PO": "Rincian PO",
 }
 # Estimasi padding per tab: style TNotebook.Tab padding (12, 9) → 2×12
 # + tabmargins (6, 8, 6, 0) → 2×6 ≈ 36 px per tab.
@@ -2378,7 +2379,7 @@ class StockMonitorApp:
     # SHELL: TOOLBAR + STATUSBAR + NOTEBOOK
     # =====================================================================
     def _build_toolbar(self):
-        self.toolbar = Toolbar(self.root, f"📊 {APP_TITLE}", APP_VERSION)
+        self.toolbar = Toolbar(self.root, APP_TITLE, APP_VERSION)
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
 
         # v3.9.37 — ↻ Refresh Sumber: dialog pilih file sumber yang mau
@@ -2387,9 +2388,9 @@ class StockMonitorApp:
         # (tombol tab Proses dulu '🔄 Refresh File Sumber…' — dua label
         # untuk dialog yang sama membuat user ragu itu fitur berbeda).
         self.btn_refresh_tb = self.toolbar.add_action(
-            "↻ Refresh Sumber", command=self._open_refresh_dialog)
+            "Refresh Sumber", command=self._open_refresh_dialog)
         self.btn_export_tb = self.toolbar.add_action(
-            "💾 Export Excel", command=self._export_excel, accent=True)
+            "Export Excel", command=self._export_excel, accent=True)
         # FIX A-02 (audit 2-a): set_enabled → tombol disabled TAMPAK dim
         # (abu) — bukan configure(state) yang meninggalkan warna teal.
         self.btn_export_tb.set_enabled(False)
@@ -2895,32 +2896,32 @@ class StockMonitorApp:
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
 
-        self.notebook.add(self.tab_config, text="⚙️ Config")
-        self.notebook.add(self.tab_proses, text="🚀 Proses")
-        self.notebook.add(self.tab_pivot, text="📊 Pivot Table")
-        self.notebook.add(self.tab_deviasi_gr, text="📦 Deviasi GR")
-        self.notebook.add(self.tab_deviasi_pcs, text="🧩 Deviasi PCS")
-        self.notebook.add(self.tab_in_selisih, text="📤 Rekap Selisih IN")
-        self.notebook.add(self.tab_laporan, text="📋 Laporan Deviasi")
+        self.notebook.add(self.tab_config, text="Config")
+        self.notebook.add(self.tab_proses, text="Proses")
+        self.notebook.add(self.tab_pivot, text="Pivot Table")
+        self.notebook.add(self.tab_deviasi_gr, text="Deviasi GR")
+        self.notebook.add(self.tab_deviasi_pcs, text="Deviasi PCS")
+        self.notebook.add(self.tab_in_selisih, text="Rekap Selisih IN")
+        self.notebook.add(self.tab_laporan, text="Laporan Deviasi")
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ harga×qty deviasi per resto
         self.notebook.add(self.tab_nominal_resto,
-                          text="🧮 Nominal Deviasi")
-        self.notebook.add(self.tab_followup, text="☑ Follow Up")
-        self.notebook.add(self.tab_rincian, text="🛒 Rincian PO")
+                          text="Nominal Deviasi")
+        self.notebook.add(self.tab_followup, text="Follow Up")
+        self.notebook.add(self.tab_rincian, text="Rincian PO")
         # v3.9.59 — FIX 2a-05: register label FULL per tab + pantau
         # lebar baris tab (fallback label compact saat meluap — badge
         # '☑ Follow Up (N)' ikut lewat _set_tab_label supaya konsisten).
         self._tab_full_labels = {
-            str(self.tab_config): "⚙️ Config",
-            str(self.tab_proses): "🚀 Proses",
-            str(self.tab_pivot): "📊 Pivot Table",
-            str(self.tab_deviasi_gr): "📦 Deviasi GR",
-            str(self.tab_deviasi_pcs): "🧩 Deviasi PCS",
-            str(self.tab_in_selisih): "📤 Rekap Selisih IN",
-            str(self.tab_laporan): "📋 Laporan Deviasi",
-            str(self.tab_nominal_resto): "🧮 Nominal Deviasi",
-            str(self.tab_followup): "☑ Follow Up",
-            str(self.tab_rincian): "🛒 Rincian PO",
+            str(self.tab_config): "Config",
+            str(self.tab_proses): "Proses",
+            str(self.tab_pivot): "Pivot Table",
+            str(self.tab_deviasi_gr): "Deviasi GR",
+            str(self.tab_deviasi_pcs): "Deviasi PCS",
+            str(self.tab_in_selisih): "Rekap Selisih IN",
+            str(self.tab_laporan): "Laporan Deviasi",
+            str(self.tab_nominal_resto): "Nominal Deviasi",
+            str(self.tab_followup): "Follow Up",
+            str(self.tab_rincian): "Rincian PO",
         }
         self._tab_compact_mode = False
         self._tab_fit_after_id = None
@@ -3093,7 +3094,7 @@ class StockMonitorApp:
             # compact (baris tab sempit) tetap konsisten dgn badge (N).
             self._set_tab_label(
                 self.tab_followup,
-                f"☑ Follow Up{' (' + str(n) + ')' if n else ''}")
+                f"Follow Up{' (' + str(n) + ')' if n else ''}")
 
     # =====================================================================
     # v3.9.59 — FIX 2a-05 (audit 2-a): BARIS TAB ADAPTIF (label compact)
@@ -3234,15 +3235,15 @@ class StockMonitorApp:
         self.rootpath_var = tk.StringVar()
         self.entry_rootpath = ttk.Entry(form, textvariable=self.rootpath_var)
         self.entry_rootpath.grid(row=0, column=1, sticky="ew", padx=(10, 8), pady=6)
-        btn_browse = GhostButton(form, text="📂 Browse…", command=self._browse_folder)
+        btn_browse = GhostButton(form, text="Browse…", command=self._browse_folder)
         btn_browse.grid(row=0, column=2, pady=6)
         form.columnconfigure(1, weight=1)
 
         btn_row = tk.Frame(inner, bg=C_CARD)
         btn_row.pack(fill="x")
-        AccentButton(btn_row, text="💾 Simpan Config",
+        AccentButton(btn_row, text="Simpan Config",
                      command=self._save_config).pack(side="left")
-        GhostButton(btn_row, text="↻ Reload Config",
+        GhostButton(btn_row, text="Reload Config",
                     command=self._load_config_to_form).pack(
             side="left", padx=(8, 0))
 
@@ -3354,7 +3355,7 @@ class StockMonitorApp:
         self.kat_4217_tree.tag_configure("kat_blank", foreground="#b45309")
         kat_lbtn = tk.Frame(kat_left, bg=C_CARD)
         kat_lbtn.pack(fill="x", pady=(6, 0))
-        AccentButton(kat_lbtn, text="🎯 Identifikasi…",
+        AccentButton(kat_lbtn, text="Identifikasi…",
                      command=self._kategori_identify).pack(side="left")
         # KANAN — mapping manual tersimpan (config.json)
         kat_right = tk.Frame(kat_grid, bg=C_CARD)
@@ -3372,9 +3373,9 @@ class StockMonitorApp:
         self.kat_map_tree.configure(height=10)
         kat_rbtn = tk.Frame(kat_right, bg=C_CARD)
         kat_rbtn.pack(fill="x", pady=(6, 0))
-        GhostButton(kat_rbtn, text="✏️ Edit…",
+        GhostButton(kat_rbtn, text="Edit…",
                     command=self._kategori_edit).pack(side="left")
-        GhostButton(kat_rbtn, text="🗑 Hapus",
+        GhostButton(kat_rbtn, text="Hapus",
                     command=self._kategori_delete).pack(
             side="left", padx=(8, 0))
         kat_grid.columnconfigure(0, weight=3, uniform="kat")
@@ -3407,10 +3408,10 @@ class StockMonitorApp:
                  text="Folder file deviasi bulan lalu (format nama file "
                       "mis. 20.AGUSTUS 2026) + Jumlah File = berapa bulan "
                       "mundur dari bulan data berjalan (1–12). v3.11.11: "
-                      "MUAT FILE 🫵 Manual (default — user: \"aku bisa "
+                      "MUAT FILE Manual (default — user: \"aku bisa "
                       "proses pipeline sendiri tidak jadi 1 lagi\") = file "
                       "TIDAK otomatis dimuat setelah pipeline; muat sendiri "
-                      "kapan pun via tombol 📂. ⚡ Otomatis = dimuat "
+                      "kapan pun via tombol. Otomatis = dimuat "
                       "otomatis setelah pipeline selesai (perilaku lama). "
                       "Prioritas di atas 'file terakhir dipakai'; folder "
                       "ada tapi file bulan tsb belum ada → hanya status.",
@@ -3433,7 +3434,7 @@ class StockMonitorApp:
             dbul_row, from_=1, to=12, increment=1, width=5,
             textvariable=self.dev_bulanan_jumlah_var)
         self.dev_bulanan_jumlah_spin.pack(side="left")
-        GhostButton(dbul_row, text="💾 Simpan",
+        GhostButton(dbul_row, text="Simpan",
                     command=self._dev_bulanan_save).pack(
             side="left", padx=(10, 0))
 
@@ -3450,10 +3451,10 @@ class StockMonitorApp:
         tk.Label(dbul_mode_row, text="MUAT FILE:", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         self.dev_bulanan_mode_bar = SegmentBar(
-            dbul_mode_row, ["🫵 Manual (tombol)",
-                            "⚡ Otomatis pasca-pipeline"])
+            dbul_mode_row, ["Manual (tombol)",
+                            "Otomatis pasca-pipeline"])
         self.dev_bulanan_mode_bar.pack(side="left", padx=(6, 0))
-        GhostButton(dbul_mode_row, text="📂 Muat ke ⚖ Komparasi Sekarang",
+        GhostButton(dbul_mode_row, text="Muat ke Komparasi Sekarang",
                     command=self._dev_bulanan_load_now).pack(
             side="left", padx=(12, 0))
 
@@ -3651,7 +3652,7 @@ class StockMonitorApp:
             # sampai pipeline dijalankan ulang — tanpa kalimat ini user
             # yakin data sudah berganti lalu melihat data lokasi lama.
             "Data lama tetap tampil sampai pipeline dijalankan ulang "
-            "(klik 🚀 MULAI PROSES untuk membaca folder baru).",
+            "(klik MULAI PROSES untuk membaca folder baru).",
             parent=self.root)
         self._load_config_to_form()
 
@@ -3969,7 +3970,7 @@ class StockMonitorApp:
             self.kat_map_tree.insert("", "end", values=(k, km[k]))
         if not self._kategori_has_data():
             self.kat_4217_tree.delete(*self.kat_4217_tree.get_children(""))
-            _ph92 = ("(belum ada data 42.17 — jalankan 🚀 MULAI PROSES)")
+            _ph92 = ("(belum ada data 42.17 — jalankan MULAI PROSES)")
             self.kat_4217_tree.insert(
                 "", "end",
                 values=(_ph92, "", "", "", ""))
@@ -3979,7 +3980,7 @@ class StockMonitorApp:
             f"{len(rows)} barang bersaldo 42.17 · {n_blank} tanpa "
             f"kategori (perlu identifikasi) · {n_baru} BARU · {len(km)} "
             "mapping manual tersimpan — mapping diterapkan mulai run "
-            "pipeline berikutnya (F5 / 🚀 MULAI PROSES).")
+            "pipeline berikutnya (F5 / MULAI PROSES).")
 
     def _kategori_manual_save(self, updates: dict, removes=()) -> bool:
         """Tulis mapping manual ke config.json (read-modify-write ATOMIK —
@@ -4099,9 +4100,9 @@ class StockMonitorApp:
         baris1 = (
             f"Folder: {'✓ ada' if _ada else '✗ belum ada di komputer ini'} "
             f"· {jumlah} bulan mundur · "
-            + ("⚡ otomatis dimuat setelah pipeline."
+            + ("otomatis dimuat setelah pipeline."
                if _mode_auto else
-               "🫵 manual — muat via tombol 📂 (pipeline tidak "
+               "manual — muat via tombol (pipeline tidak "
                "otomatis memuat)."))
         # v3.11.12 — baris transparansi: periode data → file target
         # N bulan mundur (+ ✓/✗ keberadaan file — folder ada).
@@ -4231,9 +4232,9 @@ class StockMonitorApp:
             return
         self._flash_devbulanan_status(
             f"✓ Tersimpan — {jumlah} bulan mundur · "
-            + ("⚡ otomatis dimuat setelah pipeline."
+            + ("otomatis dimuat setelah pipeline."
                if data["DeviasiBulananMode"] == "auto" else
-               "🫵 manual — muat via tombol 📂."))
+               "manual — muat via tombol."))
         self._append_log_batched(
             f"\n[DEV BULANAN] Auto file deviasi bulan lalu tersimpan: "
             f"folder '{folder}' · {jumlah} bulan mundur · mode "
@@ -4286,7 +4287,7 @@ class StockMonitorApp:
         if _kv is None or _kv.data is None or getattr(_kv.data, "empty",
                                                      True):
             self._flash_devbulanan_status(
-                "⚠ Jalankan pipeline (🚀 Proses) dulu — komparasi butuh "
+                "⚠ Jalankan pipeline (Proses) dulu — komparasi butuh "
                 "data saat ini untuk dibandingkan.")
             return
         # periode: data run terakhir → fallback bulan sekarang
@@ -4319,11 +4320,11 @@ class StockMonitorApp:
         with contextlib.suppress(Exception):
             _kv._load_paths(paths, interactive=True)
         self._flash_devbulanan_status(
-            f"📂 {len(paths)} file deviasi bulan lalu dimuat ke "
-            f"⚖ Komparasi.")
+            f"{len(paths)} file deviasi bulan lalu dimuat ke "
+            f"Komparasi.")
         self._append_log_batched(
             f"\n[DEV BULANAN] Muat manual: {len(paths)} file → "
-            f"⚖ Komparasi ("
+            f"Komparasi ("
             + "; ".join(os.path.basename(p) for p in paths) + ").\n")
 
     def _dev_bulanan_cfg(self, audit_result):
@@ -4407,7 +4408,7 @@ class StockMonitorApp:
 
         btns = tk.Frame(body, bg=C_CARD)
         btns.pack(fill="x")
-        AccentButton(btns, text="💾 Simpan", command=_ok).pack(side="left")
+        AccentButton(btns, text="Simpan", command=_ok).pack(side="left")
         GhostButton(btns, text="Batal",
                     command=win.destroy).pack(side="left", padx=(8, 0))
         win.bind("<Return>", lambda _e: _ok())
@@ -4436,7 +4437,7 @@ class StockMonitorApp:
             messagebox.showwarning(
                 "Identifikasi Kategori",
                 "Baris placeholder tidak bisa diidentifikasi — jalankan "
-                "🚀 MULAI PROSES dulu.", parent=self.root)
+                "MULAI PROSES dulu.", parent=self.root)
             return
         kat = self._kategori_dialog("Identifikasi Kategori", items)
         if not kat:
@@ -4513,24 +4514,24 @@ class StockMonitorApp:
 
         btns = tk.Frame(ctrl_inner, bg=C_CARD)
         btns.pack(fill="x", pady=(0, 10))
-        self.btn_mulai = AccentButton(btns, text="🚀 MULAI PROSES",
+        self.btn_mulai = AccentButton(btns, text="MULAI PROSES",
                                       command=self._start_pipeline)
         self.btn_mulai.pack(side="left")
 
-        self.btn_stop = DangerButton(btns, text="⏹ Stop", state="disabled",
+        self.btn_stop = DangerButton(btns, text="Stop", state="disabled",
                                      command=self._stop_pipeline)
         self.btn_stop.pack(side="left", padx=(8, 0))
         # FIX A-02: state disabled dari constructor tidak memakai styling
         # dim → panggil set_enabled sekali supaya konsisten visual.
         self.btn_stop.set_enabled(False)
 
-        self.btn_bersih = GhostButton(btns, text="🧹 Bersihkan Log",
+        self.btn_bersih = GhostButton(btns, text="Bersihkan Log",
                                       command=self._clear_log)
         self.btn_bersih.pack(side="left", padx=(8, 0))
 
         # v3.9.33 — AUDIT FIX (48-f MEDIUM): log konsol (state disabled) tidak
         # bisa di-copy — tombol salin SELURUH isi log ke clipboard.
-        self.btn_salin_log = GhostButton(btns, text="📋 Salin Log",
+        self.btn_salin_log = GhostButton(btns, text="Salin Log",
                                          command=self._copy_log)
         self.btn_salin_log.pack(side="left", padx=(8, 0))
 
@@ -4540,13 +4541,13 @@ class StockMonitorApp:
         # v3.9.59 — FIX 2a-09/2f-13: label disamakan dgn toolbar (dulu
         # '🔄 Refresh File Sumber…' — dua label utk aksi yang sama).
         self.btn_refresh_src = GhostButton(
-            btns, text="↻ Refresh Sumber",
+            btns, text="Refresh Sumber",
             command=self._open_refresh_dialog)
         self.btn_refresh_src.pack(side="left", padx=(8, 0))
 
         # v3.9.59 — FIX 2a-09/2f-13: label disamakan dgn toolbar (dulu
         # '💾 Export ke Excel' — dua label utk aksi yang sama).
-        self.btn_export = GhostButton(btns, text="💾 Export Excel",
+        self.btn_export = GhostButton(btns, text="Export Excel",
                                       state="disabled",
                                       command=self._export_excel)
         self.btn_export.pack(side="left", padx=(8, 0))
@@ -4634,7 +4635,7 @@ class StockMonitorApp:
             self._log_flash_prev = self.status_var.get()
         self._log_flash_active = True
         self.status_var.set(
-            f"📋 Log TERSALIN ke clipboard ({fmt_int_id(n_baris)} baris).")
+            f"Log TERSALIN ke clipboard ({fmt_int_id(n_baris)} baris).")
         if getattr(self, "_log_flash_after", None):
             with contextlib.suppress(Exception):
                 self.root.after_cancel(self._log_flash_after)
@@ -4654,7 +4655,7 @@ class StockMonitorApp:
         if not self.root.winfo_exists():
             return
         cur = self.status_var.get()
-        if cur.startswith("📋 Log TERSALIN"):
+        if cur.startswith("Log TERSALIN"):
             self.status_var.set(getattr(self, "_log_flash_prev", ""))
 
     # =====================================================================
@@ -4828,7 +4829,7 @@ class StockMonitorApp:
                      else f"{fmt_int_id(n_sel)} file sumber terpilih")
             self.status_var.set(f"Status: menyegarkan {label}…")
             self.statusbar.set_status(
-                f"🔄 Refresh — {label} (file lain dari cache bacaan)…",
+                f"Refresh — {label} (file lain dari cache bacaan)…",
                 C_ORANGE)
         else:
             self.status_var.set("Status: menjalankan pipeline…")
@@ -4850,7 +4851,7 @@ class StockMonitorApp:
         if is_refresh:
             n_sel = 0 if refresh_files is None else len(refresh_files)
             self._append_log_batched(
-                "  🔄 REFRESH FILE SUMBER — "
+                " REFRESH FILE SUMBER — "
                 f"{'SEMUA' if refresh_files is None else fmt_int_id(n_sel)} "
                 "file dibaca ulang dari disk;\n"
                 "  file lain memakai bacaan cache (tak berubah — "
@@ -5050,10 +5051,10 @@ class StockMonitorApp:
                     "Folder data tidak ditemukan",
                     "Folder data berikut TIDAK DITEMUKAN:\n\n" + daftar +
                     "\n\nPipeline tetap dijalankan (data bisa parsial/kosong).\n"
-                    # v3.9.59 — FIX 2a-04: tab yang dimaksud adalah '⚙️
-                    # Config' (dulu '⚙ Pengaturan' — tab itu tidak pernah
+                    # v3.9.59 — FIX 2a-04: tab yang dimaksud adalah '
+                    # Config' (dulu 'Pengaturan' — tab itu tidak pernah
                     # tampil, panduan jadi dead-end).
-                    "Perbaiki RootPath / Folders di tab ⚙️ Config.",
+                    "Perbaiki RootPath / Folders di tab Config.",
                     parent=self.root)
                 # v3.9.33 — status AMBER selama run: kegagalan folder jangan
                 # tertutup status "berjalan" polos (48-f: kegagalan senyap).
@@ -5237,9 +5238,9 @@ class StockMonitorApp:
         # tampil sebagai sukses penuh. Ditulis dua fase agar chip KPI
         # & log tidak menunggu render view (lambat di data besar).
         self.kpi_append.set_value(fmt_int_id(len(append1_df)),
-                                  "baris pivot siap di tab 📊")
+                                  "baris siap di tab Pivot Table")
         self.kpi_rincian.set_value(fmt_int_id(len(rincian_po_df)),
-                                   "baris PO siap di tab 🛒")
+                                   "baris siap di tab Rincian PO")
         # FIX 6a-05: log penutup ikut fmt_int_id + "baris"
         self._append_log_batched(
             f"\n  Append1: {fmt_int_id(len(append1_df))} baris\n")
@@ -5270,7 +5271,7 @@ class StockMonitorApp:
         if _n_harga:
             self._append_log_batched(
                 f"  Harga 41.09: {fmt_int_id(_n_harga)} barang — mode "
-                f"💰 Nominal (H) tab 📋 Laporan Deviasi siap\n")
+                f"Nominal (H) tab Laporan Deviasi siap\n")
         # v3.9.34 — peta harga 41.09 + peta rasio konversi (dari
         # audit_result pipeline) diteruskan ke SEMUA view nominal:
         # kolom Nominal Deviasi GR/PCS, kolom Nominal mode Komparasi,
@@ -5320,34 +5321,34 @@ class StockMonitorApp:
                             "⚠ Data tampilan BELUM DIPERBARUI — gagal "
                             "memuat run ini (lihat log tab Proses)")
 
-        _load_view("📊 Pivot Table",
+        _load_view("Pivot Table",
                    lambda: self.pivot_view.load_data(append1_df,
                                                      in_detail_df),
                    self.pivot_view)
         # v3.9.23 (poin 6): detail dokumen IN ikut diteruskan ke tab
         # Deviasi GR & PCS — sumber CEK "RI Balancing" kolom utama
         # (bulan Nomor RI ≠ bulan Nomor PO, tanggal dok ≤ H).
-        _load_view("📦 Deviasi GR",
+        _load_view("Deviasi GR",
                    lambda: self.deviasi_gr_view.load_data(
                        append1_df, in_detail_df,
                        harga_map=_hm, konversi_map=_kv,
                        saldo_sistem_map=_ssm),
                    self.deviasi_gr_view)
-        _load_view("🧩 Deviasi PCS",
+        _load_view("Deviasi PCS",
                    lambda: self.deviasi_pcs_view.load_data(
                        append1_df, in_detail_df,
                        harga_map=_hm, konversi_map=_kv,
                        saldo_sistem_map=_ssm),
                    self.deviasi_pcs_view)
-        _load_view("📤 Rekap Selisih IN",
+        _load_view("Rekap Selisih IN",
                    lambda: self.in_selisih_view.load_data(
                        append1_df, in_detail_df, audit_result=audit_result),
                    self.in_selisih_view)
-        _load_view("🚨 Anomali COM",
+        _load_view("Anomali COM",
                    lambda: self.laporan_view.load_data(
                        append1_df, preserve=_keep_state),
                    self.laporan_view)
-        _load_view("⚖ Komparasi File Deviasi",
+        _load_view("Komparasi File Deviasi",
                    lambda: self.komparasi_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv),
                    self.komparasi_view)
@@ -5383,19 +5384,19 @@ class StockMonitorApp:
         # dgn tab 📦/🧩 Deviasi GR/PCS — user: "di tab nominal deviasi ini
         # kok beda ya kuantiti deviasi nya dngan yang di tab deviasi gr
         # atau deviasi pcs").
-        _load_view("💰 Nominal (H)",
+        _load_view("Nominal (H)",
                    lambda: self.nominal_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv,
                        saldo_sistem_map=_ssm),
                    self.nominal_view)
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
         # v3.11.8 — + peta saldo sistem 42.17 (alasan sama dgn atas).
-        _load_view("🧮 Nominal Deviasi",
+        _load_view("Nominal Deviasi",
                    lambda: self.nominal_resto_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv,
                        saldo_sistem_map=_ssm),
                    self.nominal_resto_view)
-        _load_view("🛒 Rincian PO",
+        _load_view("Rincian PO",
                    lambda: self.rincian_view.load_data(
                        rincian_po_df, preserve=_keep_state),
                    self.rincian_view)
@@ -5441,7 +5442,7 @@ class StockMonitorApp:
         # selesai, tapi user tidak lagi diberi status HIJAU padahal sumber
         # datanya berpotensi lenyap/nyasar (peringatan hanya di log).
         _warn_ct = int(getattr(self, "_schema_warnings", 0) or 0)
-        _refresh_sfx = (" — 🔄 file sumber disegarkan"
+        _refresh_sfx = (" — file sumber disegarkan"
                         if refresh_files is not False else "")
         if failed_views:
             # v3.9.59 — FIX 2a-09: istilah dev 'view' → 'tampilan' pada
@@ -5487,7 +5488,7 @@ class StockMonitorApp:
             # bersih + mode refresh (v3.9.37): TETAP di tab aktif; judul
             # menyebut REFRESH supaya jelas asal datanya.
             self.statusbar.set_status(
-                "SELESAI — 🔄 file sumber disegarkan"
+                "SELESAI — file sumber disegarkan"
                 f"{self._data_time_suffix()}", C_GREEN)
         # bersih + run normal: status hijau provisori (baris atas) sudah
         # tepat — tidak ditimpa.
@@ -5519,13 +5520,13 @@ class StockMonitorApp:
             # (dulu messagebox "Selesai" mem-blok alur tiap kali pipeline usai)
             self._append_log_batched(
                 "\n[SELESAI] Pipeline selesai — data siap dianalisis.\n"
-                "Lanjut ke tab 📊 Pivot / 📦 Deviasi GR / 🧩 Deviasi PCS /\n"
-                "📤 Rekap Selisih IN / 📋 Laporan / 🧮 Nominal Deviasi /\n"
-                "☑ Follow Up / 🛒 Rincian PO.\n")
+                "Lanjut ke tab Pivot / Deviasi GR / Deviasi PCS /\n"
+                "Rekap Selisih IN / Laporan / Nominal Deviasi /\n"
+                "Follow Up / Rincian PO.\n")
         else:
             n_sel = 0 if refresh_files is None else len(refresh_files)
             self._append_log_batched(
-                f"\n[SELESAI] 🔄 Refresh file sumber selesai — "
+                f"\n[SELESAI] Refresh file sumber selesai — "
                 f"{'SEMUA' if refresh_files is None else fmt_int_id(n_sel)} "
                 "file dibaca ulang, data diperbarui.\n")
 
@@ -5626,7 +5627,7 @@ class StockMonitorApp:
             with contextlib.suppress(Exception):
                 self.status_var.set(
                     f"⚠ Filter {len(failed)} tab gagal dipulihkan — "
-                    "detail di log tab 🚀 Proses")
+                    "detail di log tab Proses")
         # mode tab 📋 (state APP — bukan view): key khusus '_app'
         _appst = st.get("_app")
         if isinstance(_appst, dict):
@@ -5637,7 +5638,7 @@ class StockMonitorApp:
                     self.show_laporan_mode(_m)
                 except Exception as exc:  # noqa: BLE001 — best-effort
                     print(f"[PERINGATAN] Filter persist: gagal memulihkan "
-                          f"mode tab 📋 (idx {_m}): {exc!r}")
+                          f"mode tab (idx {_m}): {exc!r}")
 
     # v3.11.6 — AUTO-DONE FOLLOW-UP PASCA-PIPELINE ---------------------------
     def _auto_resolve_followup(self, append1_df) -> None:
@@ -5851,7 +5852,7 @@ class StockMonitorApp:
                 "Sedang Berjalan",
                 "Pipeline sedang berjalan — cache bacaan TIDAK dibuang dan "
                 "refresh DIBATALKAN.\n\nTunggu hingga selesai atau klik "
-                "Stop, lalu buka ↻ Refresh Sumber lagi.",
+                "Stop, lalu buka Refresh Sumber lagi.",
                 parent=self.root)
             return
         worker = getattr(self, "worker_thread", None)
@@ -5860,7 +5861,7 @@ class StockMonitorApp:
                 "Masih Menghentikan",
                 "Pipeline sebelumnya masih berhenti di checkpoint — cache "
                 "bacaan TIDAK dibuang.\n\nTunggu sampai status berubah, "
-                "lalu buka ↻ Refresh Sumber lagi.",
+                "lalu buka Refresh Sumber lagi.",
                 parent=self.root)
             return
         n = read_cache_invalidate(paths)
@@ -6160,8 +6161,8 @@ class StockMonitorApp:
         tk.Label(bar, text="MODE", bg=C_BG, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left", padx=(0, 6))
         self.laporan_segment = SegmentBar(
-            bar, ["⚖ Komparasi File Deviasi", "🚨 Anomali COM (H)",
-                  "💰 Nominal (H)"],
+            bar, ["Komparasi File Deviasi", "Anomali COM (H)",
+                  "Nominal (H)"],
             command=lambda idx: self.show_laporan_mode(idx))
         self.laporan_segment.pack(side="left")
 

@@ -295,7 +295,7 @@ class DeviasiPopup(tk.Toplevel):
         head_in = tk.Frame(header, bg=C_HEADER)
         head_in.pack(fill="x", padx=16, pady=12)
 
-        tk.Label(head_in, text="🔍 Detail Deviasi", bg=C_HEADER,
+        tk.Label(head_in, text="Detail Deviasi", bg=C_HEADER,
                  fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
         # judul = NAMA BARANG — NAMA RESTO (dua-duanya, permintaan user)
         title_lbl = tk.Label(head_in, text=title, bg=C_HEADER,
@@ -321,7 +321,7 @@ class DeviasiPopup(tk.Toplevel):
         self.bind("<Configure>", _on_title_cfg, add="+")
 
         btn_fit = tk.Button(
-            head_in, text="↔ Auto-Fit", command=self._auto_fit,
+            head_in, text="Auto-Fit", command=self._auto_fit,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -390,11 +390,11 @@ class DeviasiPopup(tk.Toplevel):
         # v3.9.59 — 2d-03: tombol footer copy SEMUA nilai unik (pola
         # DetailsPopup; label & istilah identik).
         btn_copy_nomor = GhostButton(
-            foot, text="📋 Semua Nomor",
+            foot, text="Semua Nomor",
             command=lambda: self._copy_all_unique("Nomor"))
         btn_copy_nomor.pack(side="right", padx=(6, 0))
         btn_copy_po = GhostButton(
-            foot, text="📋 Semua Nomor PO",
+            foot, text="Semua Nomor PO",
             command=lambda: self._copy_all_unique("Nomor PO"))
         btn_copy_po.pack(side="right", padx=(6, 0))
         AccentButton(foot, text="Tutup (Esc)",
@@ -493,7 +493,7 @@ class DeviasiPopup(tk.Toplevel):
         self.clipboard_clear()
         self.clipboard_append(text)
         shown = text if len(text) <= 60 else text[:60] + "…"
-        self._flash_status(f"📋 {label} TERSALIN ke clipboard: {shown}")
+        self._flash_status(f"{label} TERSALIN ke clipboard: {shown}")
 
     def _flash_status(self, msg: str):
         if self._flash_after:
@@ -559,27 +559,27 @@ class DeviasiPopup(tk.Toplevel):
                        activeforeground=C_ACCENT_DARK,
                        font=font(9), bd=0, relief="flat")
         menu.add_command(
-            label=f"📋 Copy Nomor — {_lbl(nomor)}",
+            label=f"Copy Nomor — {_lbl(nomor)}",
             command=lambda: self._copy_to_clipboard(nomor, "Nomor"))
         menu.add_command(
-            label=f"📋 Copy Nomor PO — {_lbl(nomor_po)}",
+            label=f"Copy Nomor PO — {_lbl(nomor_po)}",
             command=lambda: self._copy_to_clipboard(nomor_po, "Nomor PO"))
         # pasangan kedua nomor dokumen baris tanggal itu (tab-separated —
         # paste Excel: 2 sel)
         pair = "\t".join(p for p in (nomor, nomor_po) if p)
         menu.add_command(
-            label=f"📋 Copy Nomor + Nomor PO — {_lbl(nomor or nomor_po)}",
+            label=f"Copy Nomor + Nomor PO — {_lbl(nomor or nomor_po)}",
             command=lambda: self._copy_to_clipboard(
                 pair, "Nomor + Nomor PO"))
         menu.add_separator()
         menu.add_command(
-            label="📋 Copy seluruh baris (tab-separated)",
+            label="Copy seluruh baris (tab-separated)",
             command=lambda: self._copy_row(iid, tree))
         menu.add_command(
-            label="📋 Copy SEMUA Nomor (unik)",
+            label="Copy SEMUA Nomor (unik)",
             command=lambda: self._copy_all_unique("Nomor"))
         menu.add_command(
-            label="📋 Copy SEMUA Nomor PO (unik)",
+            label="Copy SEMUA Nomor PO (unik)",
             command=lambda: self._copy_all_unique("Nomor PO"))
         return menu
 
@@ -636,7 +636,7 @@ class DeviasiPopup(tk.Toplevel):
             n = copy_cell_region_tsv(tree)
             if n:
                 self._flash_status(
-                    f"📋 {n} baris region TERSALIN (tab-separated) "
+                    f"{n} baris region TERSALIN (tab-separated) "
                     f"ke clipboard.")
                 return
         sel = tree.selection()
@@ -646,7 +646,7 @@ class DeviasiPopup(tk.Toplevel):
             n = copy_tree_selection_tsv(tree)
             if n:
                 self._flash_status(
-                    f"📋 {n} baris TERSALIN (tab-separated) ke clipboard.")
+                    f"{n} baris TERSALIN (tab-separated) ke clipboard.")
             return
         values = tree.item(sel[0], "values")
         if not values:

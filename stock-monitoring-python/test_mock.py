@@ -1537,7 +1537,7 @@ def run_test():
     assert _hit37 >= _nf0 - 1, (
         "v3.9.37: file lain harus disajikan dari cache (gak harus "
         f"refresh semua) — hit={_hit37} dari {_nf0} file")
-    print(f"    ✓ v3.9.37 🔄 Refresh File Sumber: barang baru masuk via "
+    print(f"    ✓ v3.9.37 Refresh File Sumber: barang baru masuk via "
           f"refresh selektif 1 file; file lain dari cache "
           f"(dibaca ulang: {_miss37} · cache: {_hit37})")
 
@@ -1795,7 +1795,7 @@ def run_test():
         f"v3.9.63: baris TOTAL Σ (Rp 1.919.058) — got {_rt}")
     assert "H=1" in str(rv.tree.heading("Nominal Deviasi")["text"]), (
         "v3.9.34: heading dinamis 'Nominal Deviasi (H=1)'")
-    print("    ✓ v3.9.63: 🧮 Nominal Deviasi E2E — MLGPAR Σ (Rp 1.919.058) "
+    print("    ✓ v3.9.63: Nominal Deviasi E2E — MLGPAR Σ (Rp 1.919.058) "
           "+ COM/Packaging '-' + TOTAL + heading H dinamis")
 
     # v3.9.34 — (6c) KOLOM Nominal tab Deviasi GR (harga × Deviasi)

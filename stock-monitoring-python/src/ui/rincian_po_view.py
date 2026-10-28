@@ -164,8 +164,8 @@ class RincianPoView(tk.Frame):
     def _build_ui(self):
         # --- Empty state ---
         self.empty = EmptyState(
-            self, icon="🛒", title="Belum ada data Rincian PO",
-            cta_text="🚀 Jalankan Pipeline",
+            self, title="Belum ada data Rincian PO",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -201,7 +201,7 @@ class RincianPoView(tk.Frame):
         self.status_combo.bind("<<ComboboxSelected>>",
                                lambda e: self._on_combo_filter())
 
-        GhostButton(r0, text="✕ Reset Filter",
+        GhostButton(r0, text="Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
         # --- Tabel card ---
@@ -218,16 +218,16 @@ class RincianPoView(tk.Frame):
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         # v3.9: expander ⤢ — ciutkan kartu filter + judul
@@ -563,7 +563,7 @@ class RincianPoView(tk.Frame):
         if data is None or len(data) == 0:
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙️ Config).")
+                "(cek folder data / RootPath di tab Config).")
 
     def ensure_refreshed(self):
         """Lazy refresh (v3.2): compute hanya saat tab ini terlihat."""

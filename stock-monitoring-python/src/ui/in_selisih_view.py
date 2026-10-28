@@ -621,7 +621,7 @@ class InDetailPopup(tk.Toplevel):
         header.pack(fill="x")
         head_in = tk.Frame(header, bg=C_HEADER)
         head_in.pack(fill="x", padx=16, pady=12)
-        tk.Label(head_in, text="📥 Rincian IN — dokumen pendukung",
+        tk.Label(head_in, text="Rincian IN — dokumen pendukung",
                  bg=C_HEADER, fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
         tk.Label(head_in,
                  text=f"{barang} · {resto} · Tanggal {tgl_txt}",
@@ -629,14 +629,14 @@ class InDetailPopup(tk.Toplevel):
                  wraplength=700, justify="left").pack(anchor="w", pady=(2, 0))
 
         btn_fit = tk.Button(
-            head_in, text="↔ Auto-Fit", command=lambda: auto_fit_columns(self.tree),
+            head_in, text="Auto-Fit", command=lambda: auto_fit_columns(self.tree),
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_fit.pack(side="right", anchor="ne", padx=(0, 6))
         btn_max = tk.Button(
-            head_in, text="⛶ Layar Penuh", command=self._maximize,
+            head_in, text="Layar Penuh", command=self._maximize,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -737,7 +737,7 @@ class InDetailPopup(tk.Toplevel):
         self.status_label = tk.Label(foot, textvariable=self.status_var,
                                      bg=C_BG, fg=C_TEXT_MUTED, font=font(9))
         self.status_label.pack(side="left")
-        btn_copy = GhostButton(foot, text="📋 Semua Nomor",
+        btn_copy = GhostButton(foot, text="Semua Nomor",
                                command=lambda: self._copy_all_unique())
         btn_copy.pack(side="right", padx=(6, 0))
         from .widgets import AccentButton
@@ -874,7 +874,7 @@ class InDetailPopup(tk.Toplevel):
         self.clipboard_clear()
         self.clipboard_append(text)
         shown = text if len(text) <= 60 else text[:60] + "…"
-        self._flash_status(f"📋 {label} TERSALIN: {shown}")
+        self._flash_status(f"{label} TERSALIN: {shown}")
 
     def _flash_status(self, msg: str):
         if self._flash_after:
@@ -915,14 +915,14 @@ class InDetailPopup(tk.Toplevel):
         nomor = str(row.get("Nomor", "") or "")
         menu = tk.Menu(tree, tearoff=0)
         if nomor:
-            menu.add_command(label=f"📋 Copy Nomor: {nomor[:40]}",
+            menu.add_command(label=f"Copy Nomor: {nomor[:40]}",
                              command=lambda: self._copy_to_clipboard(nomor))
         po = str(row.get("Nomor PO", "") or "")
         if po:
-            menu.add_command(label=f"📋 Copy Nomor PO: {po[:40]}",
+            menu.add_command(label=f"Copy Nomor PO: {po[:40]}",
                              command=lambda: self._copy_to_clipboard(po, "Nomor PO"))
         menu.add_separator()
-        menu.add_command(label="📋 Copy baris (tab-separated)",
+        menu.add_command(label="Copy baris (tab-separated)",
                          command=lambda: self._copy_row(values))
         if nomor or po:
             menu.add_separator()
@@ -1071,9 +1071,8 @@ class InSelisihView(tk.Frame):
     def _build_ui(self):
         # --- Empty state ---
         self.empty = EmptyState(
-            self, icon="📤",
-            title="Belum ada data Rekap Selisih IN",
-            cta_text="🚀 Jalankan Pipeline",
+            self, title="Belum ada data Rekap Selisih IN",
+            cta_text="Jalankan Pipeline",
             on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -1109,7 +1108,7 @@ class InSelisihView(tk.Frame):
         tk.Label(r0, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self.view_bar = SegmentBar(
-            r0, ["📋 Tabel", "📈 Analisa"], bg=C_CARD,
+            r0, ["Tabel", "Analisa"], bg=C_CARD,
             command=self._on_view_mode_change)
         self.view_bar.pack(side="left", padx=(6, 14))
 
@@ -1139,7 +1138,7 @@ class InSelisihView(tk.Frame):
             command=self._refresh)
         chk.pack(side="left")
 
-        GhostButton(r0, text="✕ Reset Filter",
+        GhostButton(r0, text="Reset Filter",
                     command=self._reset_filter).pack(side="right")
 
         # --- KPI chips (mode Audit — mirror "EXECUTIVE RECONCILIATION
@@ -1196,20 +1195,20 @@ class InSelisihView(tk.Frame):
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         self.title_label.pack(side="left")
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="⛶ Layar Penuh",
+        btn_max = GhostButton(head, text="Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
+        btn_expand = GhostButton(head, text="Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
         # v3.8: export rekap Selisih IN per resto (permintaan user)
-        btn_export = GhostButton(head, text="💾 Export Excel",
+        btn_export = GhostButton(head, text="Export Excel",
                                  command=self._on_export)
         btn_export.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="◱ Kolom",
+        btn_cols = GhostButton(head, text="Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         self.tree = ttk.Treeview(tbody, columns=[c[0] for c in COLUMNS],
@@ -1401,7 +1400,7 @@ class InSelisihView(tk.Frame):
                 (self.audit_df is None or self.audit_df.empty):
             self.status_var.set(
                 "Belum ada data — 0 baris terbaca dari pipeline "
-                "(cek folder data / RootPath di tab ⚙️ Config).")
+                "(cek folder data / RootPath di tab Config).")
 
     # ------------------------------------------------ MODE HITUNG (v3.9.27) --
     def _apply_audit_mode(self):
@@ -2834,19 +2833,19 @@ class InSelisihView(tk.Frame):
     # key = field payload worker (_compute_analisa); dipakai render utama
     # + popup perbesar ⛶ (_open_analisa_section).
     _ANALISA_SEC_META: ClassVar[tuple] = (
-        ("umur", "_as_umur", "⏳ 1 · UMUR GANTUNG (AGING)",
+        ("umur", "_as_umur", "1 · UMUR GANTUNG (AGING)",
          ("berapa lama selisih menunggu — sejak tanggal kejadian ke "
           "tanggal data terakhir")),
-        ("resto", "_as_resto", "🏆 2 · LEADERBOARD RESTO — Σ|Selisih IN|",
+        ("resto", "_as_resto", "2 · LEADERBOARD RESTO — Σ|Selisih IN|",
          "trend: paruh awal vs akhir periode (median tanggal)"),
-        ("sistemik", "_as_sistemik", "🧭 3 · SISTEMIK vs LOKAL",
+        ("sistemik", "_as_sistemik", "3 · SISTEMIK vs LOKAL",
          "barang = ≥3 resto (master/sistemik) · <3 resto (ops lokal)"),
-        ("resolve", "_as_resolve", "♻️ 4 · RESOLVE-RATE",
+        ("resolve", "_as_resolve", "4 · RESOLVE-RATE",
          ("pasangan pernah gantung yang baris TERAKHIR-nya sudah 0 = "
           "teratasi")),
-        ("anomali", "_as_anomali", "🔎 5 · ANOMALI ΔSO",
+        ("anomali", "_as_anomali", "5 · ANOMALI ΔSO",
          "kenaikan/penurunan stok fisik yang tak menjelaskan diri"),
-        ("com_minus", "_as_comminus", "📉 6 · COM MINUS — pemakaian negatif",
+        ("com_minus", "_as_comminus", "6 · COM MINUS — pemakaian negatif",
          ("COM = SO(t−1) + IN − BK − SO(t) < 0 → barang 'muncul dari "
           "mana-mana' (sinyal input SO)")),
     )
@@ -2873,7 +2872,7 @@ class InSelisihView(tk.Frame):
 
         head = tk.Frame(zone, bg=C_CARD)
         head.pack(fill="x", padx=14, pady=(10, 2))
-        tk.Label(head, text="📈 ANALISA REKONSILIASI — Potensi Temuan",
+        tk.Label(head, text="ANALISA REKONSILIASI — Potensi Temuan",
                  bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
             side="left")
 
@@ -2953,7 +2952,7 @@ class InSelisihView(tk.Frame):
                  font=font(11 if big else 9, "bold")).pack(
             side="left", padx=10, pady=4)
         if on_enlarge is not None:
-            GhostButton(h, text="⛶ Perbesar",
+            GhostButton(h, text="Perbesar",
                         command=on_enlarge).pack(side="right", padx=8,
                                                  pady=3)
         if subtitle:
@@ -2999,7 +2998,7 @@ class InSelisihView(tk.Frame):
         header.pack(fill="x")
         head_in = tk.Frame(header, bg=C_HEADER)
         head_in.pack(fill="x", padx=16, pady=12)
-        tk.Label(head_in, text="📈 Analisa (diperbesar)", bg=C_HEADER,
+        tk.Label(head_in, text="Analisa (diperbesar)", bg=C_HEADER,
                  fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
         tk.Label(head_in, text=_title, bg=C_HEADER, fg="#f1f5f9",
                  font=font(12, "bold"), wraplength=1100,
@@ -3295,7 +3294,7 @@ class InSelisihView(tk.Frame):
 
         head = tk.Frame(zone, bg=C_CARD)
         head.pack(fill="x", padx=12, pady=(8, 2))
-        tk.Label(head, text="🏆 SKOR RESTO — Prioritas Perhatian",
+        tk.Label(head, text="SKOR RESTO — Prioritas Perhatian",
                  bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
             side="left")
         tk.Label(head, text=(
@@ -3409,7 +3408,7 @@ class InSelisihView(tk.Frame):
                 more,
                 text=f"+{fmt_int_id(len(scores) - 12)} resto lainnya "
                      f"(dari {fmt_int_id(len(scores))} resto berskor) — "
-                     "buka filter ⧩ kolom Resto utk daftar lengkap "
+                     "buka filter kolom Resto utk daftar lengkap "
                      "(gulir papan skor utk peringkat 6-12)",
                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)
             ).pack(side="left")
@@ -3483,7 +3482,7 @@ class InSelisihView(tk.Frame):
 
         row = tk.Frame(zone, bg=C_CARD)
         row.pack(fill="x", padx=12, pady=(6, 8))
-        tk.Label(row, text="🎯 SELISIH TERBANYAK — BARANG × RESTO:",
+        tk.Label(row, text="SELISIH TERBANYAK — BARANG × RESTO:",
                  bg=C_CARD, fg=C_HEADER, font=font(9, "bold")).pack(
             side="left")
         for i, r in enumerate(scores[:3]):
@@ -3589,7 +3588,7 @@ class InSelisihView(tk.Frame):
         body = tk.Frame(win, bg=C_CARD)
         body.pack(fill="both", expand=True, padx=16, pady=14)
 
-        tk.Label(body, text="💾 Export Rekap Selisih IN per Resto",
+        tk.Label(body, text="Export Rekap Selisih IN per Resto",
                  bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
             anchor="w")
 
@@ -3612,13 +3611,13 @@ class InSelisihView(tk.Frame):
         from .widgets import AccentButton
         # v3.9.59 — FIX 2f-13: label kanon '💾 Export Excel' (dulu '💾
         # Export Sekarang' — varian ke-4 label export di 5 permukaan).
-        AccentButton(btns, text="💾 Export Excel", command=_ok).pack(
+        AccentButton(btns, text="Export Excel", command=_ok).pack(
             side="right")
         GhostButton(btns, text="Tanpa Kolom Audit",
                     command=lambda: (result.update(cols=[]),
                                      win.destroy())).pack(
             side="right", padx=(0, 8))
-        GhostButton(btns, text="✕ Batal",
+        GhostButton(btns, text="Batal",
                     command=win.destroy).pack(side="left")
 
         win.bind("<Escape>", lambda e: win.destroy())
