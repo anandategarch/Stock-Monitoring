@@ -593,6 +593,23 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     replace_columns = ["SALDO AWAL", "SO", "BARANG MASUK", "OUT", "IN", "BARANG KELUAR"]
     available_replace = [c for c in replace_columns if c in pivoted.columns]
 
+    # v3.11.10 — FIX PRESENCE (audit 3-0 / bug #1-#4): TANDAI sel SO /
+    # SALDO AWAL yang NYATA teramati di sumber SEBELUM null→0. Setelah
+    # fillna(0) + melt, baris long TIDAK bisa lagi membedakan "SO
+    # direkam bernilai 0" dari "tanggal yang tidak pernah direkam SO"
+    # (filler 0 hasil pivot kombinasi teramati) — padahal semantic itu
+    # dipakai konsumen downstream: popup Deviasi GR/PCS hari-valid
+    # "SO tercatat kedua ujung" (Avg COM/Avg ACR), com_analisa median
+    # COM Tinggi/Rendah, basis com(1) penutupan bulan lalu, dan kunci
+    # penutupan SO_H-1 deviasi_view. Tanpa penanda: baris filler 0
+    # lolos cek presence → angka COM sampah ikut dirata-rata (probe:
+    # n=5 vs 3 hari valid; com(1) −30 vs 10; SO_H-1 0 vs 40).
+    # Kolom flag ikut mengalir sebagai id_vars melt lalu dibuang dari
+    # output final (tak ada di final_columns) — skema output tetap.
+    for _col, _flag in (("SO", "_SO_REKAM"), ("SALDO AWAL", "_SA_REKAM")):
+        if _col in pivoted.columns:
+            pivoted[_flag] = pivoted[_col].notna()
+
     # replaced = Table.ReplaceValue(pivoted, null, 0, ..., AvailableReplaceColumns)
     for col in available_replace:
         pivoted[col] = pivoted[col].fillna(0)
@@ -833,6 +850,21 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     # Drop rows where NILAI is null (M's Table.Unpivot doesn't create rows for nulls)
     # After ReplaceValue null→0, metrics are 0 not null. But SALDO AWAL might have nulls.
     unpivoted = unpivoted.dropna(subset=["NILAI"]).reset_index(drop=True)
+
+    # v3.11.10 — FIX PRESENCE (audit 3-0 / bug #1-#4): BUANG baris
+    # FILLER '1.SO' / 'SALDO AWAL' — sel yang NaN pra-fillna (tanggal
+    # tanpa pencatatan SO/SA di sumber, hanya punya metrik lain) dan
+    # kini bernilai 0. Baris '1.SO' di output long kini = tanggal yang
+    # BENAR-BENAR direkam (SO terekam bernilai 0 tetap keluar — sel
+    # pivotnya 0 asli, bukan NaN). Metrik penggerak lain (BM/IN/OUT/
+    # BK/ACR) TETAP ter-fillna 0 sesuai M-mirror — 0 = tanpa gerakan
+    # memang semantic yang benar untuk penjumlahan.
+    for _jenis, _flag in (("1.SO", "_SO_REKAM"), ("SALDO AWAL", "_SA_REKAM")):
+        if _flag in unpivoted.columns:
+            _filler = ((unpivoted["JENIS"] == _jenis)
+                       & ~unpivoted[_flag].fillna(False).astype(bool))
+            if _filler.any():
+                unpivoted = unpivoted[~_filler].reset_index(drop=True)
 
     # =========================================================================
     # 7. RESTORE URUTAN KOLOM FINAL

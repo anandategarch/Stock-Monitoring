@@ -3942,9 +3942,21 @@ class StockMonitorApp:
         if getattr(self, "_devbul_flash_after", None) is not None:
             with contextlib.suppress(Exception):
                 self.root.after_cancel(self._devbul_flash_after)
+        # v3.11.10 — FIX crash live (laporan user): 'suppress' adalah
+        # context manager, BUKAN callable — contextlib.suppress(...)(fn)
+        # melempar TypeError "'suppress' object is not callable" di
+        # callback after(2500) tiap kali kartu DEV BULANAN di-flash
+        # (status tersangkut di pesan flash selamanya). Pola benar:
+        # bungkus pemanggilan dalam blok `with` via method kecil.
         self._devbul_flash_after = self.root.after(
-            2500, lambda: contextlib.suppress(Exception)(
-                self._dev_bulanan_status_default()))
+            2500, self._devbul_flash_restore)
+
+    def _devbul_flash_restore(self):
+        """v3.11.10 — pemulih status kartu DEV BULANAN pasca-flash
+        (dipanggil after(2500); widget mungkin sudah hancur saat
+        callback jalan → suppress)."""
+        with contextlib.suppress(Exception):
+            self._dev_bulanan_status_default()
 
     def _dev_bulanan_save(self):
         """💾 Simpan — tulis folder + jumlah ke config.json key
