@@ -1,6 +1,22 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG (user: "kolom
+Cek bisa gak merger vertical dengan nama barang? di tab deviasi gr dan
+deviasi pcs? Rank juga merger vertical"): tampilan ala rowspan Excel —
+nilai ditulis HANYA di baris head tiap run baris ber-nilai-sama (Nama
+Barang: kelompok barang; CEK: label utuh identik berurutan dalam
+kelompok; Rank: ikat rank method="min" — 13,13,13 → satu sel). Nilai
+mentah PER-BARIS tetap utuh (_row_snaps/_rank_map/_cek_map) — sort ·
+filter ⧩ · auto-fit · double-click popup · follow-up tak tersentuh.
+STICKY STATELESS menggantikan mesin era v3.9.55-59 yang dibongkar
+v3.9.60: nilai run SELALU terlihat (head bila tampak, selain itu baris
+pertama run yang tampak) — tiap event scroll membaca ulang sel yang
+terlihat lalu menulis DIFF saja (self-healing; tanpa state display yang
+bisa basi/bocor). Sort kini memasang ulang dekorasi lewat on_done —
+jalur insert batched ≥1500 baris dulu memasangnya di tree parsial (bug
+laten tag cell tertutup sekalian).
+
 v3.11.7 — KOLOM CEK: SEMUA LABEL TERPICU + 2 LABEL BARU + SEGME
 "COM TINGGI" (user: "aku tertarik naik drastis dan Hilang dari
 pencatatan dan Semua yang terpicu" + "coba eksplore terkait COM yang
@@ -260,6 +276,7 @@ Fitur v3.1 (dipertahankan):
 - Filter Nama Barang menempel di header kolom (corong, Excel-like)
 - Loading overlay + compute/render async (UI tidak membeku)
 """
+import bisect
 import contextlib
 import json
 import logging
@@ -717,6 +734,32 @@ class DeviasiView(tk.Frame):
 
     CEK_THRESHOLD = 1.3
 
+    # v3.11.15 — MERGE-VERTIKAL ala Excel (user: "kolom Cek bisa gak
+    # merger vertical dengan nama barang? di tab deviasi gr dan deviasi
+    # pcs? Rank juga merger vertical"). TIGA kolom ditampilkan sekali per
+    # RUN BARIS BER NILAI SAMA (rowspan):
+    # · "Nama Barang" — run = baris-baris kelompok barang yang sama
+    #   (kontigu pasca sort default Nama Barang asc);
+    # · "CEK"  — run = baris kelompok barang sama DENGAN teks CEK utuh
+    #   identik berurutan (label panjang tak berulang; run teks kosong
+    #   tetap kosong — mayoritas baris bersih, nol biaya tulis);
+    # · "Rank" — run = ikat rank (method="min" sheet asli: 13,13,13 →
+    #   SATU sel "13" — v3.9.65 nilai per-baris tetap; BUKAN rank
+    #   konstanta per grup yang pernah dilaporkan bug oleh user).
+    # Baris lanjutan run → sel KOSONG (payload); nilai mentah tetap utuh
+    # di _row_snaps/_rank_map/_cek_map (sort · filter ⧩ · auto-fit ·
+    # double-click · follow-up membaca RAW — kontrak v3.9.56 value_get).
+    # STICKY STATELESS (pelajaran era v3.9.55-59 yang bocor lalu
+    # dibongkar v3.9.60): nilai run SELALU tampak — head bila terlihat,
+    # selain itu BARIS PERTAMA run yang terlihat (ala merged-cell Excel).
+    # Tanpa state display yang bisa basi: tiap event scroll membaca ulang
+    # nilai sel yang terlihat lalu menulis diff (self-healing) — baris di
+    # luar viewport boleh basi (tak terlihat) dan terbenarkan sendiri
+    # saat masuk viewport. Jalur pasca sort/filter clone ≥1500 baris
+    # (insert batched) kini memasang ulang dekorasi lewat on_done (dulu
+    # dipasang saat tree masih parsial — bug laten tag cell ikut tertutup).
+    MERGE_COLS = ("Nama Barang", "CEK", "Rank")
+
     # v3.9.51 — kolom In (kiriman — BUKAN kolom Stock/SO): header diberi
     # strip warna (user: "Header In_13 atau In 15 (Jika H = 14 contoh
     # nya) diberi warna beda biar aku tau itu bukan kolom Stock") —
@@ -824,6 +867,10 @@ class DeviasiView(tk.Frame):
         # PER-BARIS rank dalam kelompok (semantik sheet asli — bukan
         # lagi konstanta per barang); dipakai sort/auto-fit/clone.
         self._rank_map: dict[str, str] = {}
+        # v3.11.15 — iid → teks CEK utuh (RAW — label gabung ' · '):
+        # sumber kanonik sort kolom CEK · filter clone ⛶ · auto-fit ·
+        # mesin merge-vertikal (baris lanjutan run CEK kosong di tree).
+        self._cek_map: dict[str, str] = {}
         # v3.9.2: minus merah PER CELL (Tk 9 `tag cell`) — fallback Tk 8:
         # tag per baris (perilaku lama)
         self._cell_tags = CELL_TAGS_SUPPORTED
@@ -1140,6 +1187,7 @@ class DeviasiView(tk.Frame):
         # v3.9.56 — getter jadi METHOD bersama (_merge_value_get): dipakai
         # juga filter clone ⛶ (value_get attach_clone_filters — nilai RAW
         # supaya kelompok utuh lolos filter by Nama Barang/Rank).
+        # v3.11.15 — kini juga kolom CEK (_cek_map) — display merge head-only.
         self.tree._autofit_value_get = self._merge_value_get
 
         # v3.9.51 — strip warna header kolom In (kiriman — BUKAN Stock):
@@ -1155,6 +1203,12 @@ class DeviasiView(tk.Frame):
         # komentar _prepare_rows). v3.9.65 — nilai Rank kini PER-BARIS
         # (rank |Deviasi| dalam kelompok — semantik sheet asli).
         # v3.9.61 — sekat warna kelompok dihapus (baris seragam putih).
+        # v3.11.15 — MERGE-VERTIKAL BARU (user minta lagi, kini stateless):
+        # Nama Barang/CEK/Rank head-only run + sticky — bind hook scroll
+        # di sini (yscrollcommand sudah terpasang baris atas); clone ⛶
+        # di-bind lewat on_render_done (open_tree_maximized mengatur
+        # yscrollcommand SEBELUM filter_setup/on_render_done dipanggil).
+        self._vmerge_bind(self.tree)
 
         # Legend CEK
         legend = LegendRow(self.content, [
@@ -1668,7 +1722,9 @@ class DeviasiView(tk.Frame):
         pengukuran lebar (tree._autofit_value_get), (b) filter clone ⛶
         (attach_clone_filters value_get — kelompok utuh lolos filter),
         (c) sort value_get jalurnya terpisah (closure di _sort_by).
-        Kolom lain → nilai display tree (cur)."""
+        Kolom lain → nilai display tree (cur).
+        v3.11.15 — + kolom CEK: teks utuh dari _cek_map (baris lanjutan
+        run CEK kosong di tree — filter/sort by label tak boleh buta)."""
         if col == "Nama Barang":
             snap = self._row_snaps.get(str(iid))
             if snap:
@@ -1677,6 +1733,10 @@ class DeviasiView(tk.Frame):
             rk = self._rank_map.get(str(iid))
             if rk is not None:
                 return str(rk)
+        elif col == "CEK":
+            ck = self._cek_map.get(str(iid))
+            if ck is not None:
+                return str(ck)
         return cur
 
     def _col_values(self, col: str) -> list:
@@ -3259,6 +3319,33 @@ class DeviasiView(tk.Frame):
             filtered["Dev. Bulan Lalu"], errors="coerce").to_numpy(
             dtype="float64")
         cols_np["Rank"] = filtered["Rank"].to_numpy()
+        # v3.11.15 — MERGE-VERTIKAL (user: "kolom Cek bisa gak merger
+        # vertical dengan nama barang? … Rank juga merger vertical"):
+        # payload menulis nilai hanya di BARIS HEAD tiap run — baris
+        # lanjutan run bernilai sama diberi sel KOSONG (ala rowspan
+        # Excel). Run dihitung atas URUTAN RENDER (filtered sudah di-sort
+        # Nama Barang asc, |Dev| desc — kelompok kontigu):
+        # · Nama Barang: pergantian barang;
+        # · CEK: pergantian (barang, teks CEK) — label identik berurutan
+        #   dalam SATU kelompok digabung (label beda tetap per-baris);
+        # · Rank: pergantian (barang, rank) — ikat rank (13,13,13 → satu
+        #   sel) — nilai mentah PER-BARIS tetap di _rank_map (v3.9.65).
+        # Sticky display (baris pertama run yang terlihat memuat nilai
+        # saat head ter-scroll keluar) dipasang _vmerge_setup — lihat
+        # MERGE_COLS. RAW tetap satu-sumber kebenaran: snapshot/
+        # _rank_map/_cek_map utk sort·filter ⧩·auto-fit·popup·follow-up.
+        _brg_np = cols_np["Nama Barang"]
+        _cek_disp = [self._fmt_num(cols_np["CEK"][i]) for i in range(n)]
+        _rank_disp = [self._fmt_int(cols_np["Rank"][i]) for i in range(n)]
+        _show_b = [True] * n   # head run Nama Barang
+        _show_c = [True] * n   # head run CEK
+        _show_r = [True] * n   # head run Rank
+        for i in range(1, n):
+            _b, _pb = str(_brg_np[i]), str(_brg_np[i - 1])
+            _show_b[i] = _b != _pb
+            _show_c[i] = (_b, _cek_disp[i]) != (_pb, _cek_disp[i - 1])
+            _show_r[i] = (_b, _rank_disp[i]) != (_pb, _rank_disp[i - 1])
+        cek_map = {}   # v3.11.15 — iid → teks CEK utuh (RAW display)
         for i in range(n):
             barang = str(cols_np["Nama Barang"][i])
             resto = str(cols_np["Resto"][i])
@@ -3268,25 +3355,21 @@ class DeviasiView(tk.Frame):
                     continue
                 val = cols_np[col_id][i] if col_id in cols_np else 0
                 if col_id == "Rank":
-                    # v3.9.60 — PER-BARIS (user: "nama barang tidak
-                    # muncul dan hanya muncul sekali di tiap grup nama
-                    # barangnya? kenapa"): era merge-vertikal v3.9.55-59
-                    # menyimpan nilai HANYA di baris head + memindahkan
-                    # nilai display mengikuti viewport saat scroll
-                    # (sticky). Mekanik pemindah itu yang terus bocor di
-                    # pemakaian nyata (baris lanjutan kelihatan kosong).
-                    # Kini SETIAP baris membawa nilainya sendiri
-                    # (v3.9.65: rank |Deviasi| PER-BARIS dalam kelompok —
-                    # semantik sheet asli; dev 0/NaN → kosong) — nama/rank
-                    # tak mungkin tak muncul di viewport mana pun,
-                    # sort/clone/scroll mana pun (v3.9.61: tanpa band —
-                    # baris seragam putih).
-                    values[j] = self._fmt_int(val)
+                    # v3.11.15 — MERGE: head run ikat-rank saja (nilai
+                    # mentah per-baris v3.9.65 tetap di _rank_map; era
+                    # v3.9.55-59 sticky-statefull dibongkar v3.9.60 —
+                    # kini sticky STATELESS, lihat _vmerge_sticky).
+                    values[j] = _rank_disp[i] if _show_r[i] else ""
                 elif col_id == "Nama Barang":
-                    # v3.9.60 — idem: nama barang di SEMUA baris
-                    # kelompoknya (lihat komentar kolom Rank). Nilai mentah
-                    # tetap di snapshot utk double-click/TSV/follow-up.
-                    values[j] = barang
+                    # v3.11.15 — MERGE: head run kelompok barang saja;
+                    # nilai mentah tetap di snapshot utk
+                    # double-click/follow-up/sort/filter.
+                    values[j] = barang if _show_b[i] else ""
+                elif col_id == "CEK":
+                    # v3.11.15 — MERGE: label CEK identik berurutan dalam
+                    # kelompok tampil SEKALI (teks utuh tetap di _cek_map
+                    # + snap['cek'] label utama utk follow-up).
+                    values[j] = _cek_disp[i] if _show_c[i] else ""
                 elif col_id == "Dev. Bulan Lalu":
                     values[j] = self._fmt_dev_lalu(val)
                 elif col_id == "Dev to BOM%":
@@ -3330,7 +3413,10 @@ class DeviasiView(tk.Frame):
             row_snaps[f"row_{i}"] = snap
             # v3.9.51 — rank mentah per iid; v3.9.65 — nilai PER-BARIS
             # (rank |Deviasi| dalam kelompok — sort/auto-fit/clone-filter).
-            rank_map[f"row_{i}"] = self._fmt_int(cols_np["Rank"][i])
+            rank_map[f"row_{i}"] = _rank_disp[i]
+            # v3.11.15 — teks CEK utuh per iid (sort kolom CEK · filter
+            # clone ⧩ · auto-fit · run merge — display tree head-only).
+            cek_map[f"row_{i}"] = _cek_disp[i]
 
             tags = []
             deviasi = cols_np["Deviasi"][i]
@@ -3461,7 +3547,7 @@ class DeviasiView(tk.Frame):
                        "Komparasi)")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
-                "rank_map": rank_map,
+                "rank_map": rank_map, "cek_map": cek_map,
                 "neg_cells": neg_cells, "zero_cells": zero_cells,
                 "hl_cells": hl_cells}
 
@@ -3511,6 +3597,9 @@ class DeviasiView(tk.Frame):
         self._render_gen += 1
         self._close_stale_clones()
         self.tree.delete(*self.tree.get_children())
+        # v3.11.15 — invalidasi run merge: baris sedang di-insert batch —
+        # sticky no-op sampai _reapply_render_decorations (render_done).
+        self.tree._vmerge = None
         self._update_headings()
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
@@ -3518,6 +3607,9 @@ class DeviasiView(tk.Frame):
         # v3.9.51 — rank per iid (v3.9.65: nilai per-baris rank dalam
         # kelompok — dipakai _merge_value_get utk auto-fit/clone-filter)
         self._rank_map = payload.get("rank_map", {})
+        # v3.11.15 — teks CEK utuh per iid (sort CEK · filter clone ⧩ ·
+        # auto-fit · mesin merge-vertikal — display tree head-only run).
+        self._cek_map = payload.get("cek_map", {})
         # v3.9.2 — cell minus per-cell (dipasang ulang juga setelah sort/clone)
         self._neg_cells = payload.get("neg_cells", [])
         self._zero_cells = payload.get("zero_cells", [])
@@ -3560,12 +3652,189 @@ class DeviasiView(tk.Frame):
         v3.9.55-59 — + merge-vertikal nilai nama/rank (era sticky).
         v3.9.60 — nilai PER-BARIS dari payload (bukan bagian dekorasi).
         v3.9.61 — band kelompok DIHAPUS (sekat warna dilepas user);
-        dekorasi tinggal tag per-cell + tint header."""
+        dekorasi tinggal tag per-cell + tint header.
+        v3.11.15 — + MERGE-VERTIKAL Nama Barang/CEK/Rank: rebuild run
+        atas urutan visual tree INI + sticky (payload kini head-only —
+        lihat _vmerge_setup/_vmerge_sticky)."""
         self._reapply_cell_tags(tree)
+        self._vmerge_setup(tree)
         _tint = getattr(tree, "_heading_tint", None)
         if _tint is not None and getattr(_tint, "_alive", False):
             with contextlib.suppress(tk.TclError):
                 _tint.refresh()
+
+    # =====================================================================
+    # v3.11.15 — MESIN MERGE-VERTIKAL (stateless sticky) --------------------
+    # =====================================================================
+    def _vmerge_setup(self, tree):
+        """Bangun RUN merge per kolom atas URUTAN VISUAL tree + terapkan
+        sticky SEKARANG. Dipanggil dari _reapply_render_decorations —
+        semua titik perubahan urutan/baris (render · sort · filter clone
+        ⛶ · salin clone) bermuara ke sana.
+
+        Run = baris-baris KONTIGU bernilai sama (Nama Barang: kelompok
+        barang; CEK: (barang, teks CEK); Rank: (barang, rank) — ikat).
+        State disimpan per-tree (utama + tiap clone): ``tree._vmerge`` =
+        {n, runs per kolom, starts per kolom}. Sticky guard: jumlah
+        children ≠ n (batch insert masih berjalan) → no-op sampai setup
+        dipanggil ulang di on_done."""
+        try:
+            kids = list(tree.get_children(""))
+        except tk.TclError:
+            return
+        n = len(kids)
+        snaps = self._row_snaps
+        if not n or not snaps:
+            tree._vmerge = None
+            return
+        rk = self._rank_map
+        ck = self._cek_map
+        runs = {c: [] for c in self.MERGE_COLS}
+        cur = {}
+        for i, k in enumerate(kids):
+            ks = str(k)
+            snap = snaps.get(ks) or {}
+            b = str(snap.get("barang", ""))
+            c_txt = str(ck.get(ks, ""))
+            r_txt = str(rk.get(ks, ""))
+            for col, key, text in (("Nama Barang", b, b),
+                                   ("CEK", (b, c_txt), c_txt),
+                                   ("Rank", (b, r_txt), r_txt)):
+                run = cur.get(col)
+                if run is None or run[3] != key:
+                    run = [i, [k], text, key]
+                    runs[col].append(run)
+                    cur[col] = run
+                else:
+                    run[1].append(k)
+        tree._vmerge = {
+            "n": n, "runs": runs,
+            "starts": {c: [r[0] for r in runs[c]]
+                       for c in self.MERGE_COLS},
+        }
+        self._vmerge_bind(tree)
+        self._vmerge_sticky(tree)
+
+    def _vmerge_bind(self, tree):
+        """Pasang hook sticky SEKALI per tree: (1) ``tree._sticky_merge_cb``
+        — slot yang MASIH HIDUP di widgets._redraw_overlay_now (dipanggil
+        SINKRON oleh handler roda/drag-scrollbar/keyboard — anti 1-frame
+        tertunda); (2) wrap yscrollcommand — sumber scroll programatik
+        (yview_moveto/see) yang callback-nya baru jalan di idle; (3)
+        <Configure> — tinggi viewport berubah (resize/zoom)."""
+        if getattr(tree, "_vmerge_bound", False):
+            return
+        tree._vmerge_bound = True
+
+        def cb():
+            self._vmerge_sticky(tree)
+
+        tree._sticky_merge_cb = cb
+        try:
+            orig = str(tree.cget("yscrollcommand"))
+        except tk.TclError:
+            orig = ""
+        if orig and orig not in ("", "{}"):
+            def _cmd(*args, _orig=orig, _cb=cb):
+                with contextlib.suppress(tk.TclError):
+                    tree.tk.call(_orig, *args)
+                _cb()
+            with contextlib.suppress(tk.TclError):
+                tree.configure(yscrollcommand=_cmd)
+        with contextlib.suppress(tk.TclError):
+            tree.bind("<Configure>", lambda e: cb(), add="+")
+
+    @staticmethod
+    def _vmerge_vis(tree, iid, vh: int) -> bool:
+        """Baris BENAR-BENAR terlihat: bbox non-kosong DAN 0 ≤ y < tinggi
+        tree (predikat visibilitas §66 — baris terpotong penuh di tepi
+        viewport punya bbox='' di Tk)."""
+        try:
+            bb = tree.bbox(iid)
+        except tk.TclError:
+            return False
+        return bool(bb) and 0 <= bb[1] < vh
+
+    def _vmerge_first_vis(self, tree, iids, idx: int, vh: int,
+                          cap: int = 12):
+        """Baris pertama run mulai indeks `idx` yang BENAR terlihat
+        (maju — truncation float ``int(first*n)`` bisa memilih baris
+        terpotong penuh di atas viewport; pelajaran audit 2d-01 era
+        v3.9.59). Cap maju 12 langkah (defensif — viewport belum
+        di-layout); None = tidak ketemu."""
+        n = len(iids)
+        if not n:
+            return None
+        idx = max(0, min(idx, n - 1))
+        for j in range(idx, min(n, idx + cap)):
+            if self._vmerge_vis(tree, iids[j], vh):
+                return iids[j]
+        return None
+
+    def _vmerge_sticky(self, tree):
+        """Terapkan display merge utk run yang MENYENTUH viewport —
+        STATELESS & self-healing: baca nilai sel terlihat, tulis diff
+        saja. Baris display run = head bila terlihat, selain itu BARIS
+        PERTAMA run yang terlihat (ala merged-cell Excel — nilai selalu
+        tampak; kelompok produksi ratusan baris tak pernah blank).
+
+        Baris DI LUAR viewport boleh menyimpan nilai basi (tak terlihat)
+        — terbenarkan otomatis saat masuk viewport (event scroll berikut
+        menulis diff). Tanpa state display yang bisa bocor (era
+        v3.9.55-59 menyimpan & MEMINDAHKAN state — sumber bug berulang;
+        v3.9.60 membongkarnya)."""
+        vm = getattr(tree, "_vmerge", None)
+        if not vm or vm.get("n", 0) < 2:
+            return
+        try:
+            kids = tree.get_children("")
+            if len(kids) != vm["n"]:
+                return   # batch insert/sort masih berjalan — tunggu setup
+            first, last = tree.yview()
+            vh = tree.winfo_height()
+        except (tk.TclError, ValueError):
+            return
+        if vh <= 1:
+            return
+        n = vm["n"]
+        # rentang indeks STRICT (penentuan baris display) + rentang CLEAN
+        # longgar ±1-2 baris (pembersihan sel basi tepi viewport — float
+        # fraction bisa meleset 1 baris; kelebihan membersihkan baris tak
+        # terlihat tak berdampak visual).
+        i0 = max(0, int(first * n))
+        i1 = min(n, int(last * n) + 1)
+        if i1 <= i0:
+            i1 = min(n, i0 + 1)
+        i0c = max(0, i0 - 1)
+        i1c = min(n, i1 + 2)
+        for col in self.MERGE_COLS:
+            runs = vm["runs"].get(col) or []
+            if not runs:
+                continue
+            starts = vm["starts"][col]
+            j = max(bisect.bisect_right(starts, i0c) - 1, 0)
+            for run in runs[j:]:
+                start, iids, text = run[0], run[1], run[2]
+                if start >= i1c:
+                    break
+                n_run = len(iids)
+                head = iids[0]
+                if i0 <= start < i1 and self._vmerge_vis(tree, head, vh):
+                    desired = head
+                else:
+                    desired = self._vmerge_first_vis(
+                        tree, iids, max(0, i0 - start), vh)
+                    if desired is None:
+                        desired = head
+                lo = max(0, i0c - start)
+                hi = min(n_run, i1c - start)
+                for m in iids[lo:hi]:
+                    want = text if m == desired else ""
+                    try:
+                        if str(tree.set(m, col)) != want:
+                            tree.set(m, col, want)
+                    except tk.TclError:
+                        continue
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
@@ -3794,7 +4063,13 @@ class DeviasiView(tk.Frame):
         dipakai sebagai sumber kanonik). v3.9.65 — Rank kini per-baris
         (rank |Deviasi| dalam kelompok): sort Rank = urut numerik antar
         baris (grup boleh ter-interleave — baris rank-1 tiap grup
-        teratas)."""
+        teratas).
+        v3.11.15 — (a) + kolom CEK memakai value_get _cek_map (display
+        tree kini head-only run — sort by label membaca RAW); (b) dekorasi
+        (tag cell + merge-vertikal) dipasang lewat on_done sort — jalur
+        insert BATCHED (≥1500 baris) dulu memasangnya saat tree masih
+        PARSIAL (baris sisanya tanpa tag cell/layout merge — bug laten
+        era v3.9.72; sinkron tetap dipanggil sebelum return)."""
         if self._busy and tree is None:
             # FIX B-08 (audit 2-b): sort saat render batch → ANTRE, bukan
             # dibuang senyap (fix v3.9.5 19-b #6 dulu hanya sampai komparasi
@@ -3824,11 +4099,28 @@ class DeviasiView(tk.Frame):
             def _vg_rank(iid, _r=_rmap):
                 return str(_r.get(str(iid), ""))
             value_get = _vg_rank
-        sort_tree_by_column(tree, col, reverse=reverse, parse=parse,
-                            value_get=value_get)
-        # v3.9.49 — banding kelompok ikut dipasang ulang (urutan visual
-        # berubah → band dihitung ulang; nilai per-baris tak berubah).
-        self._reapply_render_decorations(tree)
+        elif col == "CEK":
+            # v3.11.15 — display CEK kini head-only run merge; kunci sort
+            # = teks utuh RAW per baris (_cek_map) — sort analisa ▲/▼
+            # (parse tuple) juga kompatibel (value_get memberi makan parse).
+            _cmap = self._cek_map
+
+            def _vg_cek(iid, _c=_cmap):
+                return str(_c.get(str(iid), ""))
+            value_get = _vg_cek
+        # v3.11.15 — invalidasi run merge SEBELUM sort (delete+reinsert
+        # mengubah urutan — run lama tak berlaku; sticky no-op sampai
+        # on_done memasang ulang _reapply_render_decorations).
+        with contextlib.suppress(tk.TclError):
+            tree._vmerge = None
+        # v3.11.15 — dekorasi via on_done: jalur sinkron memanggilnya
+        # SEBELUM sort_tree_by_column return (perilaku lama terjaga);
+        # jalur insert batched (≥1500 baris) kini menunggu batch SELESAI
+        # — dulu tag cell + layout merge dipasang di tree parsial.
+        sort_tree_by_column(
+            tree, col, reverse=reverse, parse=parse,
+            value_get=value_get,
+            on_done=lambda t=tree: self._reapply_render_decorations(t))
 
     # v3.9.55 — SORT ANALISA CEK (tombol ▲ Kenaikan / ▼ Penurunan) --------
     _ANALISA_PCT_RE = re.compile(r"([+-])([\d.,]+)%")
