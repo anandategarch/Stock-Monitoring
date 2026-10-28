@@ -242,7 +242,8 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.10"  # v3.11.10 — AUDIT 5-AGEN + PERBAIKAN TOTAL 23 BUG TERVERIFIKASI (user: "audit repo ... sebar agent full, jangan hanya berusaha menemukan temuan tapi tes juga apa benar itu beneran bug. deep audit ui dan ux nya dan perhitungan nya" + "ya perbaiki semua" + laporan crash live "TypeError: 'suppress' object is not callable"): (0) FIX CRASH LIVE app.py _flash_devbulanan_status — contextlib.suppress(Exception)(fn) adalah context manager BUKAN callable → TypeError di callback after(2500) tiap flash kartu DEV BULANAN + status tersangkut di pesan flash selamanya; kini _devbul_flash_restore dgn blok `with`. (1) FONDASI PRESENCE append1 — tandai sel SO/SALDO AWAL nyata SEBELUM fillna(0) (_SO_REKAM/_SA_REKAM id_vars melt) lalu BUANG baris filler '1.SO'/'SALDO AWAL' di output long: baris 1.SO kini = tanggal BENAR-BENAR direkam (SO terekam 0 tetap keluar; metrik penggerak BM/IN/OUT/BK tetap fillna-0 M-mirror) → menutup 4 bug perhitungan: hari-valid Avg COM/Avg ACR popup (filler lolos cek "SO tercatat kedua ujung" → com sampah ikut rata-rata; kini n=3 vs 5, Avg COM 6,67 vs 0,00), basis com(1) penutupan bulan lalu (filler SA=0 mengalahkan fallback; kini 10 vs −30 — konsisten popup/com_analisa/laporan), kunci penutupan SO_H-1 H≤2 (0→40; label 'Hitung Manual' palsu hilang), parity fn_audit 'Qty COM' (klaim "PERSIS formula pivot" palsu — rumus keempat ffill dimatikan; com(t) undefined bila SO(t)/SO(t−1) tak tercatat, undefined ≠ 0 tak memicu B5). (2) fn_9901 dedup LINTAS SHEET/FILE saja — baris PO multi-line identik DALAM sheet yang sama selamat (dulu undercount IN senyap: Σ14→7). (3) append1 pivot KUNCI TERNORMALISASI __k_barang/__k_resto (ejaan RAW rekap dipertahankan utk display; satuan lookup + information merge ikut) — drift whitespace/case/dtype 42.17 vs rekap tak lagi memecah 1 pasangan jadi 2 (deviasi [+100,−80] kini [20]). (4) GR/PCS tab satuan strip+upper ('GR ' masuk tab GR, dulu nyasar tab PCS). (5) _value_to_text_series whole-float '0.0'→'0' (lolos filter invalid); _list_excel_files case-insensitive (FS case-sensitive); saldo-sistem keep=last NATURAL sort ('2'>'10' dulu — snapshot lama menang). (6) WIDGETS: clone ⛶ FLUSH batch in-flight source tree (dulu clone parsial permanen 500/3000); sort-vs-clone-copy flush terpadu via registry per-tree (dulu urutan campuran permanen); auto_fit_columns mengukur baris ANAK (kolom matrix pivot 46→78px — keluhan 'mepet' tuntas). (7) ⧩ HEADER FILTER: nilai kosong terwakili '(Kosong)' (centang-semua tak lagi membuang baris sel-kosong senyap; kolom all-blank bisa dibuka); daftar nilai Tanggal KRONOLOGIS ('25•' duluan — grup −1; numerik TETAP grup 0 kontrak assertion lama); 'GR ' tampil 'GR ␣' (distinguishable); Ctrl+C TSV pivot baris anak bawa NAMA BARANG + kolom 'Metrik' (dulu nama metric nyasar di kolom 'Nama Barang'); pd.NA ≡ NaN di SEMUA formatter + followup._fu_num tak raise TypeError. (8) APP LIFECYCLE: posisi jendela x/y DIPULIHKAN (dead wiring v3.9.72 — _load_window_state kini return x/y; validasi bounds tetap di caller); generation-token _on_pipeline_done (race F5 re-start pasca worker-death — run baru tak lagi unstoppable/⏹ mati); EXPORT RE-ENTRY guard _export_busy (tombol tetap disabled mid-export; dulu 2 penulis .tmp sama → 'Export Gagal' palsu); F5 stopping-phase SILENT (anti dialog-spam, konsisten fase running). TES DISINKRON (fixture konvensi repo): §35 pair-Q COM semantik TERCATAT ('' bukan basis-0 '(10)'/'(8)'), parity count 6→3 (hari tanpa-SO keduanya absen), PERF 6e referensi kanonik v3.11.10. VERIFIKASI: test_ui_redesign 1802/1802 PASS · test_mock ALL PASS · ruff 198 ≤ 201 · py_compile · 60+ probe audit (EXPECTED vs ACTUAL) semua NOT-BUG.
+APP_VERSION = "3.11.11"  # v3.11.11 — TIGA PERMINTAAN USER: (1) DETAIL SEMUA ANALISA tab 📤 Rekap Selisih IN mode 📈 (user: "rekap selisih in itu bagian tab analisa detailkan lagi, resto mana dan tanggal mana dan selisih berapa di semua analisa"): seksi 1 UMUR +tabel top-8 baris gantung TERTUA (resto·barang·tgl·umur·selisih); seksi 2 LEADERBOARD RESTO +baris "↳ tgl X: selisih (n item)" per resto (top-4 tanggal |Σ|); seksi 3 SISTEMIK +"↳ resto: Σselisih (tgl …)" per barang (top-4 resto); seksi 4 RESOLVE +tabel MASIH GANTUNG top-8 (resto·barang·tgl·selisih); seksi 5 ANOMALI & 6 COM MINUS top 5→8 + kolom SELISIH IN; tanggal bulan-lalu tampil "25•" (_tgl_short). (2) MODE MUAT AUTO FILE DEVIASI BULAN LALU (user: "autofile deviasi bulan lalu aku bisa proses pipie line sendiri tidak jadi 1 lagi"): 🫵 Manual = DEFAULT BARU — file TIDAK lagi otomatis dimuat pasca-pipeline (komparasi kembali ke last-used v3.9.53); tombol 📂 "Muat ke ⚖ Komparasi Sekarang" di kartu ⚙️ Config memuat N bulan mundur SEKARANG dari nilai form (tanpa 💾 dulu; pindah tab 📋 mode ⚖ otomatis); ⚡ Otomatis = perilaku v3.11.9 utuh; mode tersimpan config.json key DeviasiBulananMode via 💾 Simpan. (3) DEFAULT H = HARI SO STANDAR TERDEKAT {7,14,25} (user: "nilai H bisa gak detect tanggal terdekat? misal sekarang kan tanggal 28 oh berarti H terdekat nya ke 25 berarti default 25. misal Sekarang tanggal 20 maka h = 14. H itu umum nya hanya 7, 14, dan 25 aja"): SharedTanggalH.detect_standard_h (hari standar TERAKHIR yang terlewat; day<7 → 25); _default_h_from_data di-SNAP (SO terakhir 26/27/28→25, 15..24→14, 8..13→7 — SUPERSEDES v3.9.22 "tanggal 26"; deteksi tetap berbasis data supaya file lama pun disnap relatif datanya); nilai awal app = deteksi hari-INI; fallback tanpa-SO kembali konstan 25; hint "default: hari SO standar terdekat (7/14/25)" di samping input H. TES DISINKRON (konvensi fixture repo): §6 Dev to BOM% kembali "416,67%" (H 30→snap 25), §32-b H dinamis 26→25, + seksi §95 baru (detect_standard_h / snap / detail analisa / mode muat). VERIFIKASI: probe v31111 ALL PASS (analisa detail + mode muat + H snap).
+# (riwayat v3.11.10 — AUDIT 5-AGEN: 23 BUG TERVERIFIKASI DIPERBAIKI + FIX CRASH LIVE TypeError 'suppress' object is not callable; fondasi presence append1 _SO_REKAM/_SA_REKAM, fn_9901 dedup lintas-sheet, kunci ternormalisasi __k_barang/__k_resto, GR/PCS strip+upper, widgets clone/sort/auto-fit, ⧉ filter (Kosong)/kronologis/GR␣/TSV/pd.NA, app lifecycle x/y+generation-token+export-guard+F5-silent; 1802/1802 PASS.)
 # (riwayat v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 — daftar kiri tab ⚙️ Config dari SALDO SISTEM 42.17 folder '6. 42.17' (SEMUA barang bersaldo + Kategori 42.17 + Kategori app efektif + pencarian + penanda BARU via kategori_seen.json) + tombol 🎯 mengisi/menimpa (prioritas 5d). (2) COM RENDAH — com_analisa dua arah strict ("COM Rendah (−x)" d(H) < median). (3) STRIP "🎯 SELISIH TERBANYAK — BARANG × RESTO" tab 📤 Rekap Selisih IN (klik chip = toggle ⧩). (4) FIX KUANTITI NOMINAL = SO_H − saldo sistem 42.17 (konsisten tab Deviasi GR/PCS).)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
@@ -2304,7 +2305,14 @@ class StockMonitorApp:
         # v3.9.22: fallback awal 26 (user: "Tanggal harusnya tanggal 26
         # bukan dari tanggal 25"); setelah data dimuat DeviasiView mengatur
         # H DINAMIS ke tanggal SO nonzero terakhir (data user sampai 26).
-        self._shared_h = SharedTanggalH(26)
+        # v3.11.11 — nilai awal kini DETEKSI HARI INI: hari SO standar
+        # {7,14,25} terdekat ke belakang dari tanggal kalender (user:
+        # "nilai H bisa gak detect tanggal terdekat? misal sekarang kan
+        # tanggal 28 oh berarti H terdekat nya ke 25 ... misal Sekarang
+        # tanggal 20 maka h = 14"); setelah data dimuat, load_data tetap
+        # men-snap relatif ke tanggal SO terakhir data.
+        self._shared_h = SharedTanggalH(
+            SharedTanggalH.detect_standard_h())
         # v3.9.21: AMBANG ACR to BOM dibagi GR & PCS (user: "threshold
         # > 80% absolute dan aku bisa atur") — spinbox kedua tab sinkron;
         # nilai bertahan lintas sesi (settings.json), default 80.
@@ -3351,15 +3359,16 @@ class StockMonitorApp:
                  bg=C_CARD, fg=C_HEADER,
                  font=font(12, "bold")).pack(anchor="w")
         tk.Label(dbul_inner,
-                 text="Setelah pipeline selesai, tab ⚖ Komparasi otomatis "
-                      "memuat file deviasi '20.{BULAN} {TAHUN}' (mis. "
-                      "20.AGUSTUS 2026) dari folder ini — Jumlah File = "
-                      "berapa bulan mundur dari bulan data berjalan (1–12; "
-                      "1 = hanya bulan lalu). Prioritas di atas 'file "
-                      "terakhir dipakai'; folder ada tapi file bulan tsb "
-                      "belum ada → hanya status (tidak diam2 memakai file "
-                      "lama). Diterapkan mulai run pipeline BERIKUTNYA "
-                      "setelah disimpan.",
+                 text="Folder file deviasi bulan lalu (format nama file "
+                      "mis. 20.AGUSTUS 2026) + Jumlah File = berapa bulan "
+                      "mundur dari bulan data berjalan (1–12). v3.11.11: "
+                      "MUAT FILE 🫵 Manual (default — user: \"aku bisa "
+                      "proses pipeline sendiri tidak jadi 1 lagi\") = file "
+                      "TIDAK otomatis dimuat setelah pipeline; muat sendiri "
+                      "kapan pun via tombol 📂. ⚡ Otomatis = dimuat "
+                      "otomatis setelah pipeline selesai (perilaku lama). "
+                      "Prioritas di atas 'file terakhir dipakai'; folder "
+                      "ada tapi file bulan tsb belum ada → hanya status.",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
                  wraplength=860, justify="left").pack(anchor="w",
                                                      pady=(2, 8))
@@ -3382,8 +3391,32 @@ class StockMonitorApp:
         GhostButton(dbul_row, text="💾 Simpan",
                     command=self._dev_bulanan_save).pack(
             side="left", padx=(10, 0))
+
+        # v3.11.11 — MODE MUAT + tombol muat manual (user: "autofile
+        # deviasi bulan lalu aku bisa proses pipie line sendiri tidak jadi
+        # 1 lagi"): 🫵 Manual (DEFAULT) = file bulan lalu TIDAK lagi
+        # otomatis dimuat pasca-pipeline — pipeline & komparasi tak
+        # "jadi 1"; user memuat sendiri kapan pun lewat tombol 📂 (baca
+        # nilai form saat itu, tak perlu 💾 Simpan dulu). ⚡ Otomatis =
+        # perilaku v3.11.9 (auto-dimuat setelah pipeline selesai). Mode
+        # tersimpan config.json key DeviasiBulananMode via 💾 Simpan.
+        dbul_mode_row = tk.Frame(dbul_inner, bg=C_CARD)
+        dbul_mode_row.pack(fill="x", pady=(8, 0))
+        tk.Label(dbul_mode_row, text="MUAT FILE:", bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
+        self.dev_bulanan_mode_bar = SegmentBar(
+            dbul_mode_row, ["🫵 Manual (tombol)",
+                            "⚡ Otomatis pasca-pipeline"])
+        self.dev_bulanan_mode_bar.pack(side="left", padx=(6, 0))
+        GhostButton(dbul_mode_row, text="📂 Muat ke ⚖ Komparasi Sekarang",
+                    command=self._dev_bulanan_load_now).pack(
+            side="left", padx=(12, 0))
+
         self.dev_bulanan_status_var = tk.StringVar(value="—")
         self._devbul_flash_after = None
+        # v3.11.11 — cfg terakhir utk tombol 📂 (diisi _on_pipeline_done;
+        # tombol juga bisa membangun ulang dari form + audit_result)
+        self._dev_bulanan_last_cfg = None
         tk.Label(dbul_inner, textvariable=self.dev_bulanan_status_var,
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             anchor="w", pady=(6, 0))
@@ -3943,8 +3976,9 @@ class StockMonitorApp:
     # v3.11.9 — AUTO FILE DEVIASI BULAN LALU (tab ⚙️ Config + wiring)
     # =====================================================================
     def _dev_bulanan_load_form(self):
-        """Isi form kartu (folder + jumlah) dari config.json — toleran
-        (file/rusak → default; mirror _kategori_manual_map)."""
+        """Isi form kartu (folder + jumlah + mode) dari config.json —
+        toleran (file/rusak → default; mirror _kategori_manual_map).
+        v3.11.11 — + DeviasiBulananMode 'manual' (default) | 'auto'."""
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -3961,13 +3995,20 @@ class StockMonitorApp:
         if isinstance(jumlah, bool) or not isinstance(jumlah, int) \
                 or not (1 <= jumlah <= 12):
             jumlah = 1
+        mode = (data.get("DeviasiBulananMode", "manual")
+                if isinstance(data, dict) else "manual")
+        if mode not in ("manual", "auto"):
+            mode = "manual"
         if getattr(self, "dev_bulanan_folder_var", None) is not None:
             self.dev_bulanan_folder_var.set(folder)
             self.dev_bulanan_jumlah_var.set(str(jumlah))
+            if getattr(self, "dev_bulanan_mode_bar", None) is not None:
+                self.dev_bulanan_mode_bar.set_active_silent(
+                    0 if mode == "manual" else 1)
         self._dev_bulanan_status_default()
 
     def _dev_bulanan_status_default(self):
-        """Status kartu default (folder ada/belum + jumlah)."""
+        """Status kartu default (folder ada/belum + jumlah + mode)."""
         if getattr(self, "dev_bulanan_status_var", None) is None:
             return
         folder = (getattr(self, "dev_bulanan_folder_var", None)
@@ -3977,10 +4018,16 @@ class StockMonitorApp:
         except (TypeError, ValueError):
             jumlah = 1
         _ada = os.path.isdir(folder)
+        _mode_auto = (getattr(self, "dev_bulanan_mode_bar", None)
+                      is not None
+                      and self.dev_bulanan_mode_bar.active == 1)
         self.dev_bulanan_status_var.set(
             f"Folder: {'✓ ada' if _ada else '✗ belum ada di komputer ini'} "
-            f"· {jumlah} bulan mundur · aktif mulai run pipeline "
-            f"berikutnya.")
+            f"· {jumlah} bulan mundur · "
+            + ("⚡ otomatis dimuat setelah pipeline."
+               if _mode_auto else
+               "🫵 manual — muat via tombol 📂 (pipeline tidak "
+               "otomatis memuat)."))
 
     def _flash_devbulanan_status(self, msg: str):
         """Flash status kartu 2,5 dtk lalu pulih ke status default
@@ -4045,6 +4092,12 @@ class StockMonitorApp:
             return
         data["DeviasiBulananFolder"] = folder
         data["DeviasiBulananJumlah"] = jumlah
+        # v3.11.11 — mode muat (🫵 Manual default | ⚡ Otomatis)
+        data["DeviasiBulananMode"] = (
+            "auto" if (getattr(self, "dev_bulanan_mode_bar", None)
+                       is not None
+                       and self.dev_bulanan_mode_bar.active == 1)
+            else "manual")
         backup_path = CONFIG_PATH.with_suffix(".json.bak")
         if CONFIG_PATH.exists():
             with contextlib.suppress(OSError):
@@ -4062,11 +4115,101 @@ class StockMonitorApp:
                 parent=self.root)
             return
         self._flash_devbulanan_status(
-            f"✓ Tersimpan — {jumlah} bulan mundur, aktif mulai run "
-            f"pipeline berikutnya (🚀 MULAI PROSES).")
+            f"✓ Tersimpan — {jumlah} bulan mundur · "
+            + ("⚡ otomatis dimuat setelah pipeline."
+               if data["DeviasiBulananMode"] == "auto" else
+               "🫵 manual — muat via tombol 📂."))
         self._append_log_batched(
             f"\n[DEV BULANAN] Auto file deviasi bulan lalu tersimpan: "
-            f"folder '{folder}' · {jumlah} bulan mundur.\n")
+            f"folder '{folder}' · {jumlah} bulan mundur · mode "
+            f"{data['DeviasiBulananMode']}.\n")
+
+    def _dev_bulanan_mode(self) -> str:
+        """v3.11.11 — mode muat file deviasi bulan lalu dari config.json
+        (TERSIMPAN — bukan isi form): 'manual' (DEFAULT baru; user:
+        "autofile deviasi bulan lalu aku bisa proses pipie line sendiri
+        tidak jadi 1 lagi" — file TIDAK auto-dimuat pasca-pipeline,
+        user memuat sendiri via tombol 📂) atau 'auto' (perilaku v3.11.9:
+        auto-dimuat setelah pipeline selesai)."""
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) \
+                    and data.get("DeviasiBulananMode") == "auto":
+                return "auto"
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+        return "manual"
+
+    def _dev_bulanan_load_now(self):
+        """v3.11.11 — tombol 📂 Muat ke ⚖ Komparasi Sekarang (user:
+        "autofile deviasi bulan lalu aku bisa proses pipie line sendiri
+        tidak jadi 1 lagi"): muat file deviasi '20.{BULAN} {TAHUN}' N
+        bulan mundur ke tab ⚖ Komparasi SEKARANG — tanpa menunggu/
+        mengulang run pipeline. Folder + jumlah dibaca dari FORM saat
+        tombol ditekan (belum perlu 💾 Simpan); periode = data run
+        terakhir (fallback bulan kalender sekarang)."""
+        folder = (getattr(self, "dev_bulanan_folder_var", None)
+                  and self.dev_bulanan_folder_var.get().strip()) or ""
+        try:
+            jumlah = int(self.dev_bulanan_jumlah_var.get())
+        except (TypeError, ValueError):
+            jumlah = 0
+        if not folder:
+            self._flash_devbulanan_status(
+                "⚠ Folder kosong — isi folder deviasi bulanan dulu.")
+            return
+        if not (1 <= jumlah <= 12):
+            self._flash_devbulanan_status(
+                "⚠ Jumlah File harus angka bulat 1–12.")
+            return
+        if not os.path.isdir(folder):
+            self._flash_devbulanan_status(
+                f"✗ Folder belum ada di komputer ini: {folder}")
+            return
+        _kv = getattr(self, "komparasi_view", None)
+        if _kv is None or _kv.data is None or getattr(_kv.data, "empty",
+                                                     True):
+            self._flash_devbulanan_status(
+                "⚠ Jalankan pipeline (🚀 Proses) dulu — komparasi butuh "
+                "data saat ini untuk dibandingkan.")
+            return
+        # periode: data run terakhir → fallback bulan sekarang
+        period = ((getattr(self, "audit_result", None) or {})
+                  .get("period"))
+        if not (isinstance(period, (list, tuple)) and len(period) == 2):
+            import datetime as _dt
+            _now = _dt.datetime.now()
+            period = (_now.year, _now.month)
+        try:
+            cfg = (folder, (int(period[0]), int(period[1])), jumlah)
+        except (TypeError, ValueError):
+            self._flash_devbulanan_status(
+                "⚠ Periode data tidak valid — jalankan pipeline ulang.")
+            return
+        paths = []
+        with contextlib.suppress(Exception):
+            paths = _kv._auto_bulanan_paths(cfg)
+        if not paths:
+            self._flash_devbulanan_status(
+                "✗ Belum ada file '20.{BULAN} {TAHUN}' cocok di folder itu "
+                "untuk periode data — cek nama file / jumlah bulan "
+                "mundur.")
+            return
+        # pindah ke tab 📋 Laporan mode ⚖ Komparasi File Deviasi lalu muat
+        with contextlib.suppress(Exception):
+            self.notebook.select(self.tab_laporan)
+        with contextlib.suppress(Exception):
+            self.show_laporan_mode(0)
+        with contextlib.suppress(Exception):
+            _kv._load_paths(paths, interactive=True)
+        self._flash_devbulanan_status(
+            f"📂 {len(paths)} file deviasi bulan lalu dimuat ke "
+            f"⚖ Komparasi.")
+        self._append_log_batched(
+            f"\n[DEV BULANAN] Muat manual: {len(paths)} file → "
+            f"⚖ Komparasi ("
+            + "; ".join(os.path.basename(p) for p in paths) + ").\n")
 
     def _dev_bulanan_cfg(self, audit_result):
         """v3.11.9 — cfg utk komparasi_view._auto_bulanan_paths:
@@ -5101,9 +5244,21 @@ class StockMonitorApp:
         # periode data run, jumlah) diteruskan ke komparasi_view —
         # PRIORITAS di atas last-used (maybe_auto_load_last sendiri yang
         # memilah; folder config tak ada → cfg None → perilaku lama).
+        # v3.11.11 — MODE MUAT (user: "autofile deviasi bulan lalu aku
+        # bisa proses pipie line sendiri tidak jadi 1 lagi"): 🫵 Manual
+        # (DEFAULT) → cfg TIDAK diteruskan ke maybe_auto_load_last —
+        # komparasi kembali ke perilaku last-used v3.9.53 dan file bulan
+        # lalu dimuat USER SENDIRI via tombol 📂 di kartu DEV BULANAN
+        # (pipeline & komparasi tak lagi "jadi 1"); ⚡ Otomatis → perilaku
+        # v3.11.9 utuh. cfg tetap disimpan (tombol 📂 pakai form sendiri).
+        _dbul_cfg = None
         with contextlib.suppress(Exception):
-            self.komparasi_view._auto_bulanan_cfg = self._dev_bulanan_cfg(
-                audit_result)
+            _dbul_cfg = self._dev_bulanan_cfg(audit_result)
+        self._dev_bulanan_last_cfg = _dbul_cfg
+        with contextlib.suppress(Exception):
+            self.komparasi_view._auto_bulanan_cfg = (
+                _dbul_cfg if self._dev_bulanan_mode() == "auto"
+                else None)
         with contextlib.suppress(Exception):
             self.komparasi_view.maybe_auto_load_last()
         # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta

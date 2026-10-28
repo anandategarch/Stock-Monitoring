@@ -268,6 +268,7 @@ import re
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from typing import ClassVar
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -406,13 +407,47 @@ class SharedTanggalH:
       diperbarui + view di-refresh (pivot cache dibagi, jadi hitung 1×).
     """
 
+    # v3.11.11 — hari SO STANDAR (user: "H itu umum nya hanya 7, 14, dan
+    # 25 aja"): default H di-snap ke nilai terdekat ke BELAKANG dari
+    # himpunan ini (contoh user: sekarang tgl 28 → H 25; sekarang tgl 20
+    # → H 14). Dipakai _default_h_from_data (load_data/✕ Reset Filter)
+    # dan nilai awal SharedTanggalH di app (sebelum ada data).
+    STANDARD_H_DAYS: ClassVar[tuple] = (7, 14, 25)
+
     def __init__(self, initial: int = 26):
         """v3.9.22: fallback awal 26 (user: "Tanggal harusnya tanggal 26
         bukan dari tanggal 25" — data rekap user kini sampai tanggal 26;
-        setelah data dimuat nilai di-reset DINAMIS ke tanggal SO nonzero
-        terakhir oleh DeviasiView.load_data)."""
+        setelah data dimuat nilai di-reset DINAMIS oleh DeviasiView.
+        load_data). v3.11.11: reset dinamis kini di-SNAP ke hari SO standar
+        {7,14,25} (permintaan user terbaru — lihat detect_standard_h);
+        app meng-inject nilai awal hasil deteksi hari-ini."""
         self._h = int(initial)
         self._listeners: list[Callable] = []
+
+    @staticmethod
+    def detect_standard_h(day=None) -> int:
+        """v3.11.11 — hari SO STANDAR terdekat ke BELAKANG dari {7,14,25}
+        (user: "nilai H bisa gak detect tanggal terdekat? misal sekarang
+        kan tanggal 28 oh berarti H terdekat nya ke 25 berarti default 25.
+        misal Sekarang tanggal 20 maka h = 14. H itu umum nya hanya 7,
+        14, dan 25 aja").
+
+        Aturan = hari standar TERAKHIR yang sudah TERLEWAT (≤ day):
+        day 28 → 25 · day 20 → 14 · day 8 → 7 · day 25 → 25.
+        day < 7 (awal bulan) → 25 (periode berjalan masih berangkat dari
+        tanggal 25 bulan lalu). day None → hari ini (kalender komputer).
+        """
+        if day is None:
+            import datetime as _dt
+            day = _dt.datetime.now().day
+        try:
+            day = int(day)
+        except (TypeError, ValueError):
+            return 25
+        for c in reversed(SharedTanggalH.STANDARD_H_DAYS):  # 25,14,7
+            if day >= c:
+                return c
+        return 25
 
     @property
     def h(self) -> int:
@@ -784,6 +819,12 @@ class DeviasiView(tk.Frame):
                                  lambda e: self._on_tanggal_h_change())
             GhostButton(r0, text="Apply H",
                         command=self._on_tanggal_h_change).pack(
+                side="left", padx=(0, 8))
+            # v3.11.11 — petunjuk default otomatis (user: "nilai H bisa gak
+            # detect tanggal terdekat?"): default = hari SO standar terdekat
+            # {7,14,25} dari tanggal SO terakhir data (28→25, 20→14).
+            tk.Label(r0, text="default: hari SO standar terdekat (7/14/25)",
+                     bg=C_CARD, fg=C_TEXT_MUTED, font=font(7)).pack(
                 side="left", padx=(0, 18))
         else:
             # v3.9: tab PCS tidak punya input H — chip read-only yang ikut
@@ -1729,12 +1770,18 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     def _default_h_from_data(self, data) -> "int | None":
         """v3.9.22 — tanggal SO NONZERO terakhir (positif) dari data:
-        default TANGGAL H saat data dimuat (permintaan user: "Tanggal
-        harusnya tanggal 26 bukan dari tanggal 25" — rekap mingguan
-        mereka kini berdata sampai 26). Baris template 0 tidak dihitung
+        default TANGGAL H saat data dimuat. Baris template 0 tidak dihitung
         (kalau dihitung, kolom template 27..31 akan melompatkan H ke 31).
         Return None bila tidak ada baris SO → pemanggil memakai nilai
-        state/fallback 26."""
+        state/fallback.
+
+        v3.11.11 — SNAP ke hari SO STANDAR {7,14,25} terdekat ke belakang
+        (user: "nilai H bisa gak detect tanggal terdekat? ... H itu umum
+        nya hanya 7, 14, dan 25 aja" — SUPERSEDES permintaan lama v3.9.22
+        "tanggal 26 bukan 25"): tanggal SO terakhir 26/27/28 (koreksi
+        terlambat dsb.) kini di-snap ke 25; 15..24 → 14; 8..13 → 7.
+        Deteksi TETAP berbasis data (bukan kalender hari ini) supaya file
+        bulan lama pun disnap relatif ke datanya sendiri."""
         if data is None or getattr(data, "empty", True):
             return None
         if "JENIS" not in getattr(data, "columns", []):
@@ -1748,7 +1795,9 @@ class DeviasiView(tk.Frame):
         if not bool(m.any()):
             return None
         h = int(t[m].max())
-        return max(1, min(h, 31))
+        h = max(1, min(h, 31))
+        # v3.11.11 — snap ke hari standar (contoh: 26→25, 20→14, 30→25)
+        return SharedTanggalH.detect_standard_h(h)
 
     def load_data(self, data: pd.DataFrame,
                   in_detail: pd.DataFrame | None = None,
@@ -1797,11 +1846,13 @@ class DeviasiView(tk.Frame):
         # layout baru — jangan terjebak setengah-collapse)
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
-        # v3.9.22 — DEFAULT H DINAMIS (user: "Tanggal harusnya tanggal 26
-        # bukan dari tanggal 25"): data baru → H di-reset ke tanggal SO
-        # NONZERO terakhir (rekap user kini mencakup 1..26 → H=26; pola
-        # reset kategori default DEVIASI). set() men-trigger listener tab
-        # lain (chip PCS/Laporan/Komparasi ikut); nilai sama → no-op.
+        # v3.9.22 — DEFAULT H DINAMIS: data baru → H di-reset ke tanggal SO
+        # NONZERO terakhir, lalu v3.11.11 di-SNAP ke hari SO STANDAR
+        # {7,14,25} terdekat ke belakang (user: "nilai H bisa gak detect
+        # tanggal terdekat? ... H itu umum nya hanya 7, 14, dan 25 aja" —
+        # supersede permintaan v3.9.22 "tanggal 26"). set() men-trigger
+        # listener tab lain (chip PCS/Laporan/Komparasi ikut); nilai sama
+        # → no-op. Pola reset kategori default DEVIASI tetap.
         # FIX 6d1-02 — counter _load_depth (class-level) menahan SEMUA
         # listener _on_shared_h_changed selama blok ini (instance ini +
         # saudara GR/PCS): dulu set() me-render DI TENGAH load dengan
@@ -3513,10 +3564,14 @@ class DeviasiView(tk.Frame):
         # v3.9.22: default = tanggal SO nonzero terakhir (dulu konstan 25;
         # user: "Tanggal harusnya tanggal 26 bukan dari tanggal 25") —
         # fallback 26 bila data tak ber-SO.
+        # v3.11.11: _default_h_from_data kini di-SNAP ke hari SO standar
+        # {7,14,25}; fallback tanpa-SO kembali KONSTAN 25 (deterministik —
+        # konstanta pra-v3.9.22; deteksi kalender hanya dipakai app saat
+        # STARTUP sebelum ada data).
         # v3.9.5 FIX (audit 19-c #2): H berubah → listener GR sendiri sudah
         # me-render; refresh eksplisit hanya bila H TIDAK berubah (dulu:
         # dobel render tiap reset).
-        _default_h = self._default_h_from_data(self.data) or 26
+        _default_h = self._default_h_from_data(self.data) or 25
         h_changed = self.tanggal_h != _default_h
         if h_changed:
             self.tanggal_h = _default_h

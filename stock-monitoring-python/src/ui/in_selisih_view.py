@@ -2116,11 +2116,13 @@ class InSelisihView(tk.Frame):
                 "basis_v310": False, "periode": "",
                 "n_com_minus": 0, "sum_com_minus": 0.0}
         empty = {"meta": meta, "umur": [], "umur_max": None,
+                 "umur_top": [],
                  "resto": [], "sistemik": {"items": [],
                  "n_baris_sistemik": 0, "n_baris_lokal": 0,
                  "n_item_sistemik": 0},
                  "resolve": {"pernah": 0, "teratasi": 0, "masih": 0,
-                             "rate": None, "n_tgl": 0, "hari_bersih": 0},
+                             "rate": None, "n_tgl": 0, "hari_bersih": 0,
+                             "masih_top": []},
                  "anomali": {"naik_tanpa_in": 0, "turun_tanpa_bk": 0,
                              "dso_unknown": 0, "top": []},
                  "com_minus": {"n": 0, "sum": 0.0, "top": []}}
@@ -2213,6 +2215,20 @@ class InSelisihView(tk.Frame):
                     "resto": str(resto_s[_gi]), "barang": str(barang_s[_gi]),
                     "tgl": (None if np.isnan(tgl[_gi]) else int(tgl[_gi])),
                     "selisih": float(sel[_gi])}
+                # v3.11.11 — DETAIL per baris gantung TERTUA (user:
+                # "rekap selisih in itu bagian tab analisa detailkan
+                # lagi, resto mana dan tanggal mana dan selisih berapa
+                # di semua analisa"): top-8 umur terbesar.
+                _gi_all = np.flatnonzero(gantung)
+                _order = np.argsort(-umur)[:8]
+                out["umur_top"] = [
+                    {"resto": str(resto_s[_gi_all[j]]),
+                     "barang": str(barang_s[_gi_all[j]]),
+                     "tgl": (None if np.isnan(tgl[_gi_all[j]])
+                             else int(tgl[_gi_all[j]])),
+                     "umur": float(umur[j]),
+                     "selisih": float(sel[_gi_all[j]])}
+                    for j in _order]
         except (KeyError, TypeError, ValueError, IndexError):
             pass
 
@@ -2221,7 +2237,8 @@ class InSelisihView(tk.Frame):
             if n_g:
                 rows_g = pd.DataFrame({
                     "r": resto_s[gantung], "t": ordn[gantung],
-                    "abs": np.abs(sel[gantung])})
+                    "tg": tgl[gantung],
+                    "abs": np.abs(sel[gantung]), "s": sel[gantung]})
                 med = float(rows_g["t"].median()) if len(rows_g) else 0.0
                 lb = []
                 for resto, g in rows_g.groupby("r", sort=False):
@@ -2230,11 +2247,23 @@ class InSelisihView(tk.Frame):
                     trend = ("memburuk ↘" if akhir > awal * 1.05 else
                              ("membaik ↗" if akhir * 1.05 < awal
                               else "stabil →"))
+                    # v3.11.11 — DETAIL per tanggal (user: "resto mana dan
+                    # tanggal mana dan selisih berapa"): Σ selisih bersih
+                    # per tanggal, top-4 terbesar |Σ|.
+                    det = []
+                    for _t, gg in g.groupby("t", sort=False):
+                        _tg = gg["tg"].dropna()
+                        det.append({
+                            "tgl": (int(_tg.iloc[0]) if len(_tg) else None),
+                            "net": float(gg["s"].sum()),
+                            "n": int(len(gg))})
+                    det.sort(key=lambda x: -abs(x["net"]))
                     lb.append({
                         "resto": str(resto), "n_items": len(g),
                         "n_dates": int(g["t"].nunique()),
                         "sum_abs": float(g["abs"].sum()),
-                        "awal": awal, "akhir": akhir, "trend": trend})
+                        "awal": awal, "akhir": akhir, "trend": trend,
+                        "detail": det[:4]})
                 lb.sort(key=lambda d: (-d["sum_abs"], -d["n_items"],
                                        d["resto"]))
                 _tot = sum(d["sum_abs"] for d in lb) or 1.0
@@ -2249,15 +2278,33 @@ class InSelisihView(tk.Frame):
             if n_g:
                 rows_g = pd.DataFrame({
                     "b": barang_s[gantung], "r": resto_s[gantung],
-                    "abs": np.abs(sel[gantung])})
+                    "tg": tgl[gantung],
+                    "abs": np.abs(sel[gantung]), "s": sel[gantung]})
                 per_item = rows_g.groupby("b", sort=False).agg(
                     n_resto=("r", "nunique"), n_baris=("abs", "size"),
                     sum_abs=("abs", "sum"))
                 sis = per_item[per_item["n_resto"] >= 3] \
                     .sort_values("sum_abs", ascending=False)
+                # v3.11.11 — DETAIL per resto utk tiap barang sistemik
+                # (user: "resto mana dan tanggal mana dan selisih berapa"):
+                # Σ selisih bersih per resto + daftar tanggal, top-4 resto
+                # terbesar |Σ|.
+                _details = {}
+                for b in sis.head(8).index:
+                    g = rows_g[rows_g["b"] == b]
+                    dl = []
+                    for r, gg in g.groupby("r", sort=False):
+                        tgls = sorted(int(x) for x in gg["tg"].dropna()
+                                      .tolist())
+                        dl.append({"resto": str(r),
+                                   "net": float(gg["s"].sum()),
+                                   "n": int(len(gg)), "tgls": tgls})
+                    dl.sort(key=lambda x: -abs(x["net"]))
+                    _details[b] = dl[:4]
                 items = [{"barang": str(b), "n_resto": int(r["n_resto"]),
                           "n_baris": int(r["n_baris"]),
-                          "sum_abs": float(r["sum_abs"])}
+                          "sum_abs": float(r["sum_abs"]),
+                          "detail": _details.get(b, [])}
                          for b, r in sis.head(8).iterrows()]
                 sistemik_set = set(sis.index)
                 is_sistemik = rows_g["b"].isin(sistemik_set)
@@ -2274,23 +2321,42 @@ class InSelisihView(tk.Frame):
         try:
             keys = list(zip(resto_s, barang_s))
             dfk = pd.DataFrame({"k": keys, "o": ordn,
-                                "neq": (sel != 0.0).astype(int)})
+                                "neq": (sel != 0.0).astype(int),
+                                "r": resto_s, "b": barang_s,
+                                "tg": tgl, "s": sel})
             dfk = dfk.sort_values(["k", "o"], kind="mergesort",
                                   na_position="last")
             grp = dfk.groupby("k", sort=False)
             pernah = grp["neq"].max()
-            last_neq = grp.tail(1).set_index("k")["neq"]
+            last_rows = grp.tail(1).set_index("k")
+            last_neq = last_rows["neq"]
             pernah = pernah[pernah > 0]
             teratasi = int((last_neq.reindex(pernah.index) == 0).sum())
             n_pernah = len(pernah)
             rate = (teratasi / n_pernah) if n_pernah else None
             tgl_unik = dfk["o"].dropna().unique()
             tgl_gantung = dfk[dfk["neq"] > 0]["o"].dropna().unique()
+            # v3.11.11 — DETIL pasangan MASIH GANTUNG (user: "resto mana
+            # dan tanggal mana dan selisih berapa di semua analisa"):
+            # baris TERAKHIR tiap pasangan yang belum teratasi, top-8
+            # |selisih| terbesar.
+            masih_idx = pernah.index[last_neq.reindex(pernah.index) > 0]
+            masih_top = []
+            if len(masih_idx):
+                _mr = last_rows.loc[masih_idx]
+                _mr = _mr.reindex(
+                    _mr["s"].abs().sort_values(ascending=False).index)[:8]
+                masih_top = [
+                    {"resto": str(rr["r"]), "barang": str(rr["b"]),
+                     "tgl": (None if np.isnan(rr["tg"]) else int(rr["tg"])),
+                     "selisih": float(rr["s"])}
+                    for _, rr in _mr.iterrows()]
             out["resolve"] = {
                 "pernah": n_pernah, "teratasi": teratasi,
                 "masih": n_pernah - teratasi, "rate": rate,
                 "n_tgl": len(tgl_unik),
                 "hari_bersih": int(len(tgl_unik) - len(tgl_gantung)),
+                "masih_top": masih_top,
             }
         except (KeyError, TypeError, ValueError, IndexError):
             pass
@@ -2307,13 +2373,17 @@ class InSelisihView(tk.Frame):
                         (turun & (ins == 0) & bk_zero).sum()),
                     "dso_unknown": int(
                         (~np.isfinite(dso) & (ins != 0)).sum()),
+                    # v3.11.11 — top 5→8 + kolom Selisih IN (user: "resto
+                    # mana dan tanggal mana dan selisih berapa di semua
+                    # analisa").
                     "top": [
                         {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
                          "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
-                         "dso": float(dso[i])}
+                         "dso": float(dso[i]),
+                         "selisih": float(sel[i])}
                         for i in np.argsort(
                             np.where(np.isfinite(dso), np.abs(dso),
-                                     -1.0))[-5:][::-1]
+                                     -1.0))[-8:][::-1]
                         if np.isfinite(dso[i])],
                 }
         except (KeyError, TypeError, ValueError, IndexError):
@@ -2327,15 +2397,18 @@ class InSelisihView(tk.Frame):
                 # chip meta "COM MINUS n (Σ)" yang menjumlahkan semua,
                 # dua angka beda utk metrik sama dalam satu panel); top-5
                 # tetap hanya utk DAFTAR tampilan.
+                # v3.11.11 — top 5→8 + kolom Selisih IN (user: "resto mana
+                # dan tanggal mana dan selisih berapa di semua analisa").
                 _all_minus = np.flatnonzero(_com_ok & (com < 0))
-                idx = _all_minus[np.argsort(com[_all_minus])][:5]
+                idx = _all_minus[np.argsort(com[_all_minus])][:8]
                 out["com_minus"] = {
                     "n": n_com_minus,
                     "sum": float(-com[_all_minus].sum()),
                     "top": [
                         {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
                          "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
-                         "com": float(com[i])}
+                         "com": float(com[i]),
+                         "selisih": float(sel[i])}
                         for i in idx],
                 }
         except (KeyError, TypeError, ValueError, IndexError):
@@ -2964,9 +3037,27 @@ class InSelisihView(tk.Frame):
         win.focus_set()
 
     # ------------------------------------- seksi builders (v3.11.9 port)
+    @staticmethod
+    def _tgl_short(t):
+        """v3.11.11 — tanggal singkat utk baris detail analisa: negatif
+        = hari bulan lalu ('25•' — konvensi label tabel utama),
+        None/NaN = '—'."""
+        if t is None:
+            return "—"
+        try:
+            if isinstance(t, float) and np.isnan(t):
+                return "—"
+            t = int(t)
+        except (TypeError, ValueError):
+            return "—"
+        return f"{-t}•" if t < 0 else str(t)
+
     def _as_umur(self, body, payload, _line, _muted, big):
         """Seksi 1 — UMUR GANTUNG (port konten v3.10; param _line/_muted/
-        big supaya dipakai render utama & popup ⛶)."""
+        big supaya dipakai render utama & popup ⛶).
+        v3.11.11 — + tabel DETAIL baris tertua: resto · barang · tanggal
+        · umur · selisih (user: "detailkan lagi, resto mana dan tanggal
+        mana dan selisih berapa di semua analisa")."""
         if payload.get("umur"):
             _line(body, ("RENTANG UMUR", "BARIS", "Σ|SELISIH|"),
                   (22, 10, 16), bold=True, fg=C_TEXT_MUTED)
@@ -2981,11 +3072,28 @@ class InSelisihView(tk.Frame):
                              f"{um['barang']} @ {um['resto']} "
                              f"tgl {um['tgl']} "
                              f"(selisih {_fmt_num(um['selisih'])})")
+            # v3.11.11 — detail baris gantung TERTUA (top-8)
+            ut = payload.get("umur_top") or []
+            if ut:
+                _line(body, ("RESTO", "BARANG", "TGL", "UMUR (hari)",
+                             "SELISIH"),
+                      (16, 30, 7, 12, 12), bold=True, fg=C_TEXT_MUTED)
+                for d in ut:
+                    _line(body, (d["resto"], d["barang"],
+                                 self._tgl_short(d["tgl"]),
+                                 fmt_int_id(d["umur"]),
+                                 _fmt_num(d["selisih"])),
+                          (16, 30, 7, 12, 12),
+                          fg=("#b91c1c" if d["selisih"] < 0
+                              else "#0f766e"))
         else:
             _muted(body, "tidak ada baris gantung di konteks ini ✓")
 
     def _as_resto(self, body, payload, _line, _muted, big):
-        """Seksi 2 — LEADERBOARD RESTO + TREND."""
+        """Seksi 2 — LEADERBOARD RESTO + TREND.
+        v3.11.11 — + baris DETAIL per resto: tanggal mana · selisih
+        bersih berapa · berapa item (top-4 tanggal terbesar |Σ|) — user:
+        "resto mana dan tanggal mana dan selisih berapa"."""
         if payload.get("resto"):
             _line(body, ("RESTO", "ITEM", "TGL", "Σ|SELISIH|", "SHARE",
                          "TREND"),
@@ -3006,11 +3114,22 @@ class InSelisihView(tk.Frame):
                         else None),
                     bar=120 * d["sum_abs"] / _mx2,
                     bar_bg="#b91c1c" if i == 0 else "#64748b")
+                det = d.get("detail") or []
+                if det:
+                    _line(body,
+                          ("↳ " + " · ".join(
+                              f"tgl {self._tgl_short(x['tgl'])}: "
+                              f"{_fmt_num(x['net'])} ({x['n']} item)"
+                              for x in det),),
+                          (110,), fg=C_TEXT_MUTED)
         else:
             _muted(body, "tidak ada resto bermasalah di konteks ini ✓")
 
     def _as_sistemik(self, body, payload, _line, _muted, big):
-        """Seksi 3 — SISTEMIK vs LOKAL."""
+        """Seksi 3 — SISTEMIK vs LOKAL.
+        v3.11.11 — + baris DETAIL per barang sistemik: resto mana ·
+        Σ selisih bersih · tanggal kejadian (top-4 resto terbesar |Σ|) —
+        user: "resto mana dan tanggal mana dan selisih berapa"."""
         s3 = payload.get("sistemik") or {}
         n_sis = s3.get("n_baris_sistemik", 0)
         n_lok = s3.get("n_baris_lokal", 0)
@@ -3033,11 +3152,26 @@ class InSelisihView(tk.Frame):
                              _fmt_num(d["sum_abs"])),
                       (30, 8, 8, 14), bar=100 * d["sum_abs"] / _mx3,
                       bar_bg="#b45309")
+                det = d.get("detail") or []
+                if det:
+                    _line(body,
+                          ("↳ " + " · ".join(
+                              f"{x['resto']}: {_fmt_num(x['net'])} (tgl "
+                              + ", ".join(self._tgl_short(t)
+                                          for t in x["tgls"][:6])
+                              + (f" +{len(x['tgls']) - 6} lain"
+                                 if len(x["tgls"]) > 6 else "")
+                              + ")"
+                              for x in det),),
+                          (110,), fg=C_TEXT_MUTED)
         else:
             _muted(body, "tidak ada barang gantung lintas ≥3 resto ✓")
 
     def _as_resolve(self, body, payload, _line, _muted, big):
-        """Seksi 4 — RESOLVE-RATE (bar dua-warna; popup besar _W 340)."""
+        """Seksi 4 — RESOLVE-RATE (bar dua-warna; popup besar _W 340).
+        v3.11.11 — + tabel DETIL pasangan MASIH GANTUNG terbesar: resto ·
+        barang · tanggal terakhir · selisih (user: "resto mana dan tanggal
+        mana dan selisih berapa di semua analisa")."""
         r4 = payload.get("resolve") or {}
         rate = r4.get("rate")
         if rate is not None:
@@ -3060,9 +3194,22 @@ class InSelisihView(tk.Frame):
         _muted(body, f"hari bersih (tanpa gantung): "
                      f"{fmt_int_id(r4.get('hari_bersih', 0))} dari "
                      f"{fmt_int_id(r4.get('n_tgl', 0))} tanggal teramati")
+        mt = r4.get("masih_top") or []
+        if mt:
+            _muted(body, "MASIH GANTUNG — selisih terbesar:")
+            _line(body, ("RESTO", "BARANG", "TGL", "SELISIH"),
+                  (16, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
+            for d in mt:
+                _line(body, (d["resto"], d["barang"],
+                             self._tgl_short(d["tgl"]),
+                             _fmt_num(d["selisih"])),
+                      (16, 30, 7, 12),
+                      fg=("#b91c1c" if d["selisih"] < 0 else "#0f766e"))
 
     def _as_anomali(self, body, payload, _line, _muted, big):
-        """Seksi 5 — ANOMALI ΔSO."""
+        """Seksi 5 — ANOMALI ΔSO.
+        v3.11.11 — top 5→8 baris + kolom Selisih IN (user: "resto mana
+        dan tanggal mana dan selisih berapa di semua analisa")."""
         a5 = payload.get("anomali") or {}
         m = (payload or {}).get("meta") or {}
         if m.get("basis_v310"):
@@ -3077,31 +3224,39 @@ class InSelisihView(tk.Frame):
                 fg="#b45309" if (a5.get("naik_tanpa_in")
                                  or a5.get("turun_tanpa_bk")) else "#15803d")
             if a5.get("top"):
-                _line(body, ("RESTO", "BARANG", "TGL", "ΔSO"),
-                      (14, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
+                _line(body, ("RESTO", "BARANG", "TGL", "ΔSO",
+                             "SELISIH IN"),
+                      (14, 30, 7, 10, 12), bold=True, fg=C_TEXT_MUTED)
                 for d in a5["top"]:
                     _line(body, (d["resto"], d["barang"],
-                                 fmt_int_id(d["tgl"]), _fmt_num(d["dso"])),
-                          (14, 30, 7, 12),
+                                 self._tgl_short(d["tgl"]),
+                                 _fmt_num(d["dso"]),
+                                 _fmt_num(d.get("selisih", 0.0))),
+                          (14, 30, 7, 10, 12),
                           fg=("#b91c1c" if d["dso"] < 0 else "#0f766e"))
         else:
             _muted(body, "format data lama — kolom ΔSO tak tersedia "
                          "(jalankan pipeline v3.10 utk analisis ΔSO)")
 
     def _as_comminus(self, body, payload, _line, _muted, big):
-        """Seksi 6 — COM MINUS (pemakaian negatif)."""
+        """Seksi 6 — COM MINUS (pemakaian negatif).
+        v3.11.11 — top 5→8 baris + kolom Selisih IN (user: "resto mana
+        dan tanggal mana dan selisih berapa di semua analisa")."""
         c6 = payload.get("com_minus") or {}
         m = (payload or {}).get("meta") or {}
         if c6.get("n"):
             _line(body, (f"{fmt_int_id(c6['n'])} baris",
                          f"Σ|COM| {_fmt_num(c6.get('sum', 0.0))}"),
                   (16, 20), bold=True, fg="#dc2626")
-            _line(body, ("RESTO", "BARANG", "TGL", "COM"),
-                  (14, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
+            _line(body, ("RESTO", "BARANG", "TGL", "COM",
+                         "SELISIH IN"),
+                  (14, 30, 7, 10, 12), bold=True, fg=C_TEXT_MUTED)
             for d in c6.get("top") or []:
                 _line(body, (d["resto"], d["barang"],
-                             fmt_int_id(d["tgl"]), _fmt_num(d["com"])),
-                      (14, 30, 7, 12), fg="#b91c1c")
+                             self._tgl_short(d["tgl"]),
+                             _fmt_num(d["com"]),
+                             _fmt_num(d.get("selisih", 0.0))),
+                      (14, 30, 7, 10, 12), fg="#b91c1c")
         else:
             _muted(body, "tidak ada COM negatif di konteks ini ✓"
                    if m.get("basis_v310") else

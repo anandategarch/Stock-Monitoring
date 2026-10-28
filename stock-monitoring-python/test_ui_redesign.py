@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.10", APP_VERSION == "3.11.10",
+    check("Versi = 3.11.11", APP_VERSION == "3.11.11",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1281,10 +1281,14 @@ def main():
               f"got {v[gr_idx['Deviasi']]!r}")
         # (v3.9.18) Total ACR = Σ OUT 1..25 = 24 — kolom dihapus tapi
         # HITUNGAN TETAP hidup: terbukti lewat Dev to BOM% & CEK di bawah.
-        check("(v3.9.6→v3.9.22) Dev to BOM% = 100/30 = '333,33%' "
-              "(H default DINAMIS = tanggal SO nonzero terakhir = 30 di "
-              "fixture ini — dulu H=25 → 100/24 = '416,67%')",
-              v[gr_idx["Dev to BOM%"]] == "333,33%",
+        # v3.11.11 — DISINKRON (user: "H itu umum nya hanya 7, 14, dan
+        # 25 aja"): _default_h_from_data kini di-SNAP ke hari SO standar
+        # — SO terakhir fixture 30 → snap 25 → Total ACR = ΣOUT 1..24 =
+        # 8×3 = 24 → 100/24 = '416,67%' (nilai PRA-v3.9.22 kembali)."
+        check("(v3.9.6→v3.11.11) Dev to BOM% = 100/24 = '416,67%' "
+              "(H default = SNAP(SO terakhir 30) = 25 di fixture ini — "
+              "v3.9.22-3.11.10: H=30 → 100/30 = '333,33%')",
+              v[gr_idx["Dev to BOM%"]] == "416,67%",
               f"got {v[gr_idx['Dev to BOM%']]!r}")
         # v3.9.27: W sheet 'Data Base Cek Deviasi' = SO(H-1) + IN_H −
         # KIRIMAN KELUAR_H − PENJUALAN_H (dulu SO(H-1) − ACR-rata2) →
@@ -1297,12 +1301,13 @@ def main():
               "tetap internal via CEK)",
               v[gr_idx["Dev. Bulan Lalu"]] == "-",
               f"got {v[gr_idx['Dev. Bulan Lalu']]!r}")
-        check("(v3.9.6/v3.11.8) CEK = 'ACR to BOM' (kondisi ke-5, |100| > "
-              "24 — kolom terhapus, hitungan internal v3.9.18 tetap) · "
-              "v3.11.8 disinkron: segmen 'COM Rendah (−3,0)' kini ikut "
-              "menempel (d(H) < median historis pasangan — arah rendah "
-              "BARU v3.11.8; label utama tetap ACR to BOM)",
-              v[gr_idx["CEK"]] == "ACR to BOM · COM Rendah (-3,0)",
+        check("(v3.9.6/v3.11.8/v3.11.11) CEK = 'ACR to BOM' (kondisi "
+              "ke-5, |100| > 24 — kolom terhapus, hitungan internal "
+              "v3.9.18 tetap) · v3.11.11 disinkron: H default kini "
+              "SNAP(SO 30)=25 → COM(25) = SO(24)200 + IN(25)100 − "
+              "SO(25)200 = +100 > median → segmen 'COM Tinggi (+100,0)' "
+              "(v3.11.10 H=30: COM(30)=−3 → 'COM Rendah (−3,0)')",
+              v[gr_idx["CEK"]] == "ACR to BOM · COM Tinggi (+100,0)",
               f"got {v[gr_idx['CEK']]!r}")
     # tag cek_acr di baris BARANG ACR
     acr_tags = None
@@ -7278,15 +7283,18 @@ def main():
           f"cek={None if _fresh32 is None else _fresh32['CEK']!r}")
     # prioritas Promix 04 tetap di atas Beda Tanggal
     _ROWS32B = [
-        _row32("PROMIX", "R", "1.SO", 24, 5.0, source="input promix 04"),
+        # v3.11.11 — DISINKRON: SO promix dipindah 24→14 (H default kini
+        # di-SNAP ke hari standar — snap(24)=14 membuat SO_H kosong &
+        # baris hilang; SO di 14 → H=14, jalur Promix+Hitung Manual utuh)
+        _row32("PROMIX", "R", "1.SO", 14, 5.0, source="input promix 04"),
         _row32("PROMIX", "R", "2.SALDO AKHIR", 25, 10.0),
     ]
     _top32b, _dv32b = _make_dv30(pd.DataFrame(_ROWS32B))
     _, _pm32 = _row_vals30(_dv32b, "PROMIX")
     check("(v3.11.7) Prioritas label utama utuh: Promix 04 tetap "
           "MENGALAHKAN kondisi lain (SO promix → label Promix 04 di "
-          "depan; Hitung Manual ikut sbg segmen — H dinamis 24: stok W=0 "
-          "& SO_H 5 ≠ 0) + v3.11.9 BOM 0",
+          "depan; Hitung Manual ikut sbg segmen — H dinamis SNAP(SO 14) "
+          "= 14: stok W=0 & SO_H 5 ≠ 0) + v3.11.9 BOM 0",
           _pm32 is not None and
           _pm32["CEK"] == "Promix 04 · Hitung Manual · BOM 0",
           f"cek={None if _pm32 is None else _pm32['CEK']!r}")
@@ -7298,11 +7306,17 @@ def main():
     #     dari tanggal 25") ----------------------------------------------
     from src.ui.deviasi_view import DeviasiView as _DV32
     _dv32u = _DV32(tk.Toplevel(root))
-    check("(v3.9.22) _default_h_from_data: tanggal SO NONZERO terakhir",
+    check("(v3.9.22→v3.11.11) _default_h_from_data: tanggal SO NONZERO "
+          "terakhir lalu di-SNAP ke hari standar {7,14,25} (user: 'H itu "
+          "umum nya hanya 7, 14, dan 25 aja' — 26/27/28→25, 15..24→14)",
           _dv32u._default_h_from_data(pd.DataFrame(_ROWS32)) == 25 and
           _dv32u._default_h_from_data(pd.DataFrame(
-              [_row32("X", "R", "1.SO", 26, 3.0)])) == 26,
-          "h=25/26")
+              [_row32("X", "R", "1.SO", 26, 3.0)])) == 25 and
+          _dv32u._default_h_from_data(pd.DataFrame(
+              [_row32("X", "R", "1.SO", 20, 3.0)])) == 14 and
+          _dv32u._default_h_from_data(pd.DataFrame(
+              [_row32("X", "R", "1.SO", 8, 3.0)])) == 7,
+          "h=25/25/14/7")
     check("(v3.9.22) _default_h_from_data: tanpa SO / SO semua-0 / None → "
           "None (fallback 26 dipakai pemanggil)",
           _dv32u._default_h_from_data(pd.DataFrame(
@@ -7317,11 +7331,12 @@ def main():
         _row32("H26", "R", "2.SALDO AKHIR", 26, 3.0),
     ]
     _top32c, _dv32c = _make_dv30(pd.DataFrame(_ROWS32C))
-    check("(v3.9.22) Data dgn SO s/d 26 → H dinamis = 26 otomatis saat "
-          "load_data (dulu konstan 25)",
-          _dv32c.tanggal_h == 26 and
+    check("(v3.9.22→v3.11.11) Data dgn SO s/d 26 → H dinamis = SNAP(26) "
+          "= 25 otomatis saat load_data (v3.9.22-3.11.10: 26; dulu "
+          "konstan 25)",
+          _dv32c.tanggal_h == 25 and
           (hasattr(_dv32c, "_h_chip_var") is False or
-           _dv32c._h_chip_var.get() == "26"),
+           _dv32c._h_chip_var.get() == "25"),
           f"H={_dv32c.tanggal_h}")
     _dv32c.tanggal_h_var.set("20")
     _dv32c._on_tanggal_h_change()
@@ -7330,9 +7345,9 @@ def main():
     _dv32c._reset_filter()
     wait_view(root, _dv32c)
     root.update()
-    check("(v3.9.22) ✕ Reset Filter → H kembali ke default DINAMIS (26, "
-          "dulu konstan 25)",
-          _dv32c.tanggal_h == 26, f"H={_dv32c.tanggal_h}")
+    check("(v3.9.22→v3.11.11) ✕ Reset Filter → H kembali ke default "
+          "DINAMIS SNAP(26) = 25 (v3.9.22-3.11.10: 26; dulu konstan 25)",
+          _dv32c.tanggal_h == 25, f"H={_dv32c.tanggal_h}")
     _top32c.destroy()
     root.update()
 
@@ -16973,10 +16988,13 @@ def main():
                          "SOURCE DATA": None})
 
     # BRG X: |dev|=90, total_acr=100 → CEK 'ACR to BOM' @80, hilang @100
-    for _t68 in (25, 26):
-        _add68("BRG X", "R1", "1.SO", _t68, 88 if _t68 == 25 else 90)
-    _add68("BRG X", "R1", "4.IN", 26, 5)
-    _add68("BRG X", "R1", "8.BARANG KELUAR", 26, 1)
+    # v3.11.11 — DISINKRON: SO digeser (25,26)→(24,25) + IN/BK 26→25
+    # (H default kini SNAP(SO terakhir 25) = 25 — angka W/deviasi/CEK
+    # identik dgn era H=26: SO_H=90, SO_H-1=88, W=88+5−1=92)
+    for _t68 in (24, 25):
+        _add68("BRG X", "R1", "1.SO", _t68, 88 if _t68 == 24 else 90)
+    _add68("BRG X", "R1", "4.IN", 25, 5)
+    _add68("BRG X", "R1", "8.BARANG KELUAR", 25, 1)
     _add68("BRG X", "R1", "9.ACR", 1, 100)
     _df68d = pd.DataFrame(_rows68d)
 
@@ -17075,11 +17093,13 @@ def main():
 
     for _ri68 in range(6):
         _r68 = f"R{_ri68:02d}"
-        _add68e("CABE MERAH", _r68, "1.SO", 25, 100, "BAHAN")
-        _add68e("CABE MERAH", _r68, "1.SO", 26, 90, "BAHAN")
-        _add68e("CABE MERAH", _r68, "2.SALDO AKHIR", 26, 0, "BAHAN")
-        _add68e("CABE MERAH", _r68, "4.IN", 26, 5, "BAHAN")
-        _add68e("CABE MERAH", _r68, "9.ACR", 26, 2, "BAHAN")
+        # v3.11.11 — DISINKRON: SO (25,26)→(24,25) — snap(25)=25 (H tetap
+        # 25; pra-snap H=26)
+        _add68e("CABE MERAH", _r68, "1.SO", 24, 100, "BAHAN")
+        _add68e("CABE MERAH", _r68, "1.SO", 25, 90, "BAHAN")
+        _add68e("CABE MERAH", _r68, "2.SALDO AKHIR", 25, 0, "BAHAN")
+        _add68e("CABE MERAH", _r68, "4.IN", 25, 5, "BAHAN")
+        _add68e("CABE MERAH", _r68, "9.ACR", 25, 2, "BAHAN")
     _df68e = pd.DataFrame(_rows68e)
 
     def _add68f(b, r, j, t, v, kat):
@@ -17090,14 +17110,16 @@ def main():
 
     for _ri68 in range(6):
         _r68 = f"R{_ri68:02d}"
-        _add68f("PENTOL AYAM", _r68, "1.SO", 29, 100,
+        # v3.11.11 — DISINKRON: SO (29,30)→(13,14) — snap(14)=14 (H
+        # benar2 BERUBAH 25→14 saat load ke-2; pra-snap 26→30)
+        _add68f("PENTOL AYAM", _r68, "1.SO", 13, 100,
                 "COM DEVIASI - RESTO")
-        _add68f("PENTOL AYAM", _r68, "1.SO", 30, 90,
+        _add68f("PENTOL AYAM", _r68, "1.SO", 14, 90,
                 "COM DEVIASI - RESTO")
-        _add68f("PENTOL AYAM", _r68, "2.SALDO AKHIR", 30, 0,
+        _add68f("PENTOL AYAM", _r68, "2.SALDO AKHIR", 14, 0,
                 "COM DEVIASI - RESTO")
-        _add68f("PENTOL AYAM", _r68, "4.IN", 30, 5, "COM DEVIASI - RESTO")
-        _add68f("PENTOL AYAM", _r68, "9.ACR", 30, 2, "COM DEVIASI - RESTO")
+        _add68f("PENTOL AYAM", _r68, "4.IN", 14, 5, "COM DEVIASI - RESTO")
+        _add68f("PENTOL AYAM", _r68, "9.ACR", 14, 2, "COM DEVIASI - RESTO")
     _df68f = pd.DataFrame(_rows68f)
 
     def _mk68g(hi):
@@ -17138,18 +17160,18 @@ def main():
 
     _DV68._render_rows = _counted_rr68
     try:
-        _gr68.load_data(_df68e)          # H → 26
+        _gr68.load_data(_df68e)          # H → 25 (snap)
         wait_view(root, _gr68)
         _gr68._kategori_var.set("BAHAN")   # state lama utk load ke-2
         _gr68._on_kategori_changed()
         wait_view(root, _gr68)
         _renders68.clear()
-        _gr68.load_data(_df68f)          # H 26→30, kategori → default
+        _gr68.load_data(_df68f)          # H 25→14 (snap), kategori → default
         wait_view(root, _gr68)
         check("(6d1-02) load_data data baru (H berubah) → TEPAT 1 render "
               "dgn filter BARU (FIX 6d1-02 — dulu render GANDA: render #1 "
               "memakai snapshot filter LAMA → tabel kosong transien)",
-              len(_renders68) == 1 and _renders68[0][0] == 30
+              len(_renders68) == 1 and _renders68[0][0] == 14
               and _renders68[0][2] == 6
               and _renders68[0][1] != "BAHAN",
               f"renders={_renders68}")
@@ -17173,9 +17195,9 @@ def main():
             return _orig_rr68(self, payload)
 
         _DV68._render_rows = _counted2_68
-        _gr68.load_data(_mk68g(31))     # H 30→31: listener PCS benar2
+        _gr68.load_data(_mk68g(25))     # H 14→25 (snap): listener PCS benar2
         _n_during68 = len(_renders_pcs68)   # TERPICU tapi harus DITAHAN
-        _pcs68.load_data(_mk68g(31))    # PCS memuat data miliknya
+        _pcs68.load_data(_mk68g(25))    # PCS memuat data miliknya
         wait_view(root, _pcs68)
         wait_view(root, _gr68)
         check("(6d1-02) varian lintas-instance: listener PCS TERPICU saat "
@@ -17183,7 +17205,7 @@ def main():
               "_load_depth class-level) + TEPAT 1 render oleh "
               "pcs.load_data sendiri dgn H baru",
               _n_during68 == 0 and len(_renders_pcs68) == 1
-              and _renders_pcs68[0][0] == 31
+              and _renders_pcs68[0][0] == 25
               and _renders_pcs68[0][1] != "BAHAN",
               f"during={_n_during68} renders={_renders_pcs68}")
         _pcs68.destroy()
@@ -17218,7 +17240,12 @@ def main():
     _dv68h = _DV68(_top68h, satuan_mode="GR")
     _dv68h.pack(fill="both", expand=True)
     root.update()
-    _dv68h.load_data(_mk_rows68h(1))     # SO nonzero terakhir = 1 → H=1
+    _dv68h.load_data(_mk_rows68h(1))     # SO nonzero terakhir = 1
+    wait_view(root, _dv68h)
+    # v3.11.11 — H default kini di-SNAP (snap(1)=25); jalur H=1 tetap
+    # dijangkau via input USER (Apply H) — set EKSPLISIT di sini.
+    _dv68h.tanggal_h_var.set("1")
+    _dv68h._on_tanggal_h_change()
     wait_view(root, _dv68h)
     _ok_h1_68 = _dv68h.tanggal_h == 1
     _v68h = {}
@@ -17253,7 +17280,10 @@ def main():
     _dv68h2 = _DV68(_top68h, satuan_mode="GR")
     _dv68h2.pack(fill="both", expand=True)
     root.update()
-    _dv68h2.load_data(_mk_rows68h(2))    # H=2
+    _dv68h2.load_data(_mk_rows68h(2))    # H=2 — v3.11.11: set EKSPLISIT
+    wait_view(root, _dv68h2)
+    _dv68h2.tanggal_h_var.set("2")
+    _dv68h2._on_tanggal_h_change()
     wait_view(root, _dv68h2)
     _kids68h2 = list(_dv68h2.tree.get_children(""))
     _v68h2 = {}
@@ -17275,7 +17305,10 @@ def main():
     _dv68h3 = _DV68(_top68h, satuan_mode="GR")
     _dv68h3.pack(fill="both", expand=True)
     root.update()
-    _dv68h3.load_data(_mk_rows68h(26))   # H normal
+    _dv68h3.load_data(_mk_rows68h(26))   # H normal — v3.11.11: set EKSPLISIT
+    wait_view(root, _dv68h3)
+    _dv68h3.tanggal_h_var.set("26")
+    _dv68h3._on_tanggal_h_change()
     wait_view(root, _dv68h3)
     check("(6d1-03 regresi) H normal (26) tak tersentuh: header "
           "'SO_24'/'SO_25' (perilaku lama utuh)",
@@ -24145,6 +24178,260 @@ def main():
           and _isv94._tcard.winfo_manager() == "pack"
           and _isv94._analisa_card.winfo_manager() == "")
     _top94h.destroy()
+    root.update()
+
+    # =====================================================================
+    # §95 — v3.11.11 TIGA PERMINTAAN USER: DETAIL SEMUA ANALISA ·
+    #      MODE MUAT DEV BULAN LALU (MANUAL) · DEFAULT H STANDAR {7,14,25}
+    # =====================================================================
+    print("\n== 95. (v3.11.11) Detail analisa resto·tgl·selisih · mode muat "
+          "dev bulan lalu · H standar terdekat ==")
+    import json as _json95
+    import src.ui.app as _appmod95
+    from src.ui.deviasi_view import SharedTanggalH as _STH95
+    from src.ui.in_selisih_view import InSelisihView as _ISV95
+
+    # ---- (A) detect_standard_h — hari standar TERAKHIR terlewat ----------
+    check("(v3.11.11) §95-A1 detect_standard_h: contoh user 28→25 · 20→14 "
+          "+ tepat di hari standar 7/14/25 + awal bulan <7 → 25",
+          _STH95.detect_standard_h(28) == 25
+          and _STH95.detect_standard_h(20) == 14
+          and _STH95.detect_standard_h(25) == 25
+          and _STH95.detect_standard_h(14) == 14
+          and _STH95.detect_standard_h(7) == 7
+          and _STH95.detect_standard_h(1) == 25
+          and _STH95.detect_standard_h(6) == 25,
+          "28/20/25/14/7/1/6")
+    check("(v3.11.11) §95-A2 snap rentang: 8..13→7 · 15..24→14 · 26..31→25 "
+          "+ input invalid → 25 + None → hari ini (anggota {7,14,25})",
+          _STH95.detect_standard_h(8) == 7
+          and _STH95.detect_standard_h(13) == 7
+          and _STH95.detect_standard_h(15) == 14
+          and _STH95.detect_standard_h(24) == 14
+          and _STH95.detect_standard_h(26) == 25
+          and _STH95.detect_standard_h(31) == 25
+          and _STH95.detect_standard_h("x") == 25
+          and _STH95.detect_standard_h(None) in (7, 14, 25),
+          "8/13/15/24/26/31/invalid/None")
+
+    # ---- (B) _tgl_short — konvensi '25•' bulan lalu -----------------------
+    check("(v3.11.11) §95-B1 _tgl_short: -25→'25•' · 7→'7' · None→'—' "
+          "+ NaN→'—'",
+          _ISV95._tgl_short(-25) == "25•"
+          and _ISV95._tgl_short(7) == "7"
+          and _ISV95._tgl_short(None) == "—"
+          and _ISV95._tgl_short(float("nan")) == "—",
+          f"{_ISV95._tgl_short(-25)!r}")
+
+    # ---- (C) payload detail analisa (semua seksi) -------------------------
+    _rows95 = []
+
+    def _r95(barang, resto, tgl, selisih, dso=0.0, com=0.0):
+        _rows95.append({"Resto": resto, "Nama Barang": barang,
+                        "Tanggal": tgl, "Selisih IN": selisih, "IN": 0.0,
+                        "Qty BK": 0.0, "COM": com, "Delta SO": dso,
+                        "Qty BM": 0.0})
+
+    _r95("BRG TUA", "R-ALPHA", 1, -9.0)
+    _r95("BRG TUA", "R-ALPHA", 30, 0.0)
+    _r95("BRG A", "R-BETA", 5, 10.0)
+    _r95("BRG A", "R-BETA", 7, -30.0)
+    _r95("BRG A", "R-BETA", 20, 4.0)
+    _r95("BRG B", "R-BETA", 7, -2.0)
+    for _rs95 in ("R-GAMMA", "R-DELTA", "R-EPS"):
+        _r95("BRG SIS", _rs95, 10, 6.0)
+        _r95("BRG SIS", _rs95, 14, -8.0)
+    _r95("BRG HANG", "R-ZETA", 25, 77.0)
+    _r95("BRG DSO", "R-ETA", 12, 3.0, dso=250.0)
+    _r95("BRG DSO", "R-ETA", 13, 0.0, dso=-180.0)
+    _r95("BRG COM", "R-THETA", 9, -1.0, com=-42.0)
+    _top95 = tk.Toplevel(root)
+    _isv95 = _ISV95(_top95)
+    _isv95.pack(fill="both", expand=True)
+    root.update()
+    _isv95._month_len = 30
+    _isv95._lalu_month_len = 31
+    _p95 = _isv95._compute_analisa(pd.DataFrame(_rows95))
+    _ut95 = _p95.get("umur_top") or []
+    check("(v3.11.11) §95-C1 seksi 1 UMUR: umur_top top-8 tertua — baris#1 "
+          "= BRG TUA @ R-ALPHA tgl 1 selisih -9 + field lengkap",
+          len(_ut95) >= 1 and _ut95[0]["barang"] == "BRG TUA"
+          and _ut95[0]["resto"] == "R-ALPHA" and _ut95[0]["tgl"] == 1
+          and _ut95[0]["selisih"] == -9.0
+          and all({"resto", "barang", "tgl", "umur", "selisih"}
+                  <= set(d) for d in _ut95),
+          f"got {_ut95[:1]}")
+    _beta95 = next((d for d in (_p95.get("resto") or [])
+                    if d["resto"] == "R-BETA"), None)
+    _det95 = (_beta95 or {}).get("detail") or []
+    check("(v3.11.11) §95-C2 seksi 2 RESTO: detail per tanggal — R-BETA "
+          "top-1 tgl 7 net -32 (BRG A -30 + BRG B -2) 2 item",
+          len(_det95) == 3 and _det95[0]["tgl"] == 7
+          and _det95[0]["net"] == -32.0 and _det95[0]["n"] == 2,
+          f"got {_det95[:1]}")
+    _sis95 = next((d for d in ((_p95.get("sistemik") or {})
+                              .get("items") or [])
+                   if d["barang"] == "BRG SIS"), None)
+    _sdet95 = (_sis95 or {}).get("detail") or []
+    check("(v3.11.11) §95-C3 seksi 3 SISTEMIK: detail per resto — BRG SIS "
+          "3 resto × (net -2, tgls [10, 14])",
+          len(_sdet95) == 3
+          and all(x["net"] == -2.0 and x["tgls"] == [10, 14]
+                  for x in _sdet95),
+          f"got {_sdet95[:1]}")
+    _mt95 = (_p95.get("resolve") or {}).get("masih_top") or []
+    _hang95 = next((d for d in _mt95 if d["barang"] == "BRG HANG"), None)
+    check("(v3.11.11) §95-C4 seksi 4 RESOLVE: masih_top — BRG HANG tgl 25 "
+          "selisih 77 @ R-ZETA",
+          _hang95 is not None and _hang95["tgl"] == 25
+          and _hang95["selisih"] == 77.0 and _hang95["resto"] == "R-ZETA",
+          f"got {_hang95}")
+    _a595 = (_p95.get("anomali") or {}).get("top") or []
+    _c695 = (_p95.get("com_minus") or {}).get("top") or []
+    _dso95 = next((d for d in _a595
+                   if d["barang"] == "BRG DSO" and d["tgl"] == 12), None)
+    check("(v3.11.11) §95-C5 seksi 5/6: top maks 8 + field 'selisih' + "
+          "baris ΔSO membawa selisih pasangannya (BRG DSO t12 dso 250 "
+          "selisih 3)",
+          len(_a595) <= 8 and len(_c695) <= 8
+          and all("selisih" in d for d in _a595 + _c695)
+          and _dso95 is not None and _dso95["dso"] == 250.0
+          and _dso95["selisih"] == 3.0,
+          f"a5={len(_a595)} c6={len(_c695)}")
+    # render penuh: baris detail '↳ tgl' muncul di panel analisa
+    _isv95._analisa_payload = _p95
+    _isv95._render_analisa(_p95)
+    root.update()
+    _texts95 = []
+
+    def _walk95(w):
+        if isinstance(w, tk.Label):
+            _texts95.append(w.cget("text"))
+        for _c95 in w.winfo_children():
+            _walk95(_c95)
+
+    _walk95(_isv95._analisa_card)
+    check("(v3.11.11) §95-C6 render: baris detail '↳ tgl X: selisih' + "
+          "header kolom SELISIH + detail sistemik '↳ R-' + '(tgl' semua "
+          "hadir",
+          any(t.startswith("↳ tgl") for t in _texts95)
+          and any("SELISIH" in t for t in _texts95)
+          and any(t.startswith("↳ R-") for t in _texts95)
+          and "(tgl" in "\n".join(_texts95),
+          f"↳tgl={any(t.startswith('↳ tgl') for t in _texts95)}")
+    _isv95.destroy()
+    _top95.destroy()
+    root.update()
+
+    # ---- (D) mode muat deviasi bulan lalu (manual default) ----------------
+    _orig_cfg95 = _appmod95.CONFIG_PATH
+    _tmp95d = tempfile.mkdtemp(prefix="t95_devbulan_")
+    _cfg95d = Path(_tmp95d) / "config.json"
+    _cfg95d.write_text(_json95.dumps({}, ensure_ascii=False),
+                       encoding="utf-8")
+    _fld95 = tempfile.mkdtemp(prefix="t95_files_")
+    for _nm95 in ("20.AGUSTUS 2026.xlsx", "20.JULI 2026.xlsx"):
+        (Path(_fld95) / _nm95).write_text("x", encoding="utf-8")
+    _appmod95.CONFIG_PATH = _cfg95d
+    try:
+        check("(v3.11.11) §95-D1 _dev_bulanan_mode: DEFAULT BARU = manual "
+              "(config tanpa key — user: 'aku bisa proses pipeline sendiri "
+              "tidak jadi 1 lagi')",
+              app._dev_bulanan_mode() == "manual")
+        check("(v3.11.11) §95-D2 kartu: mode bar ada + default 🫵 Manual "
+              "(indeks 0) + tombol 📂 + status menyebut manual",
+              getattr(app, "dev_bulanan_mode_bar", None) is not None
+              and app.dev_bulanan_mode_bar.active == 0
+              and "manual" in app.dev_bulanan_status_var.get(),
+              f"active={app.dev_bulanan_mode_bar.active} "
+              f"status={app.dev_bulanan_status_var.get()!r}")
+        # simpan mode ⚡ Otomatis → config key DeviasiBulananMode='auto'
+        app.dev_bulanan_folder_var.set(_fld95)
+        app.dev_bulanan_jumlah_var.set("2")
+        app.dev_bulanan_mode_bar.set_active_silent(1)
+        app._dev_bulanan_save()
+        _saved95 = _json95.loads(_cfg95d.read_text(encoding="utf-8"))
+        check("(v3.11.11) §95-D3 💾 Simpan mode ⚡ Otomatis → key "
+              "DeviasiBulananMode='auto' + _dev_bulanan_mode() ikut 'auto'",
+              _saved95.get("DeviasiBulananMode") == "auto"
+              and app._dev_bulanan_mode() == "auto",
+              f"got {_saved95.get('DeviasiBulananMode')!r}")
+        # balik manual → tersimpan 'manual'
+        app.dev_bulanan_mode_bar.set_active_silent(0)
+        app._dev_bulanan_save()
+        check("(v3.11.11) §95-D4 balik 🫵 Manual → tersimpan 'manual' + "
+              "status kartu menyebut tombol 📂",
+              _json95.loads(_cfg95d.read_text(encoding="utf-8"))
+              .get("DeviasiBulananMode") == "manual"
+              and "📂" in app.dev_bulanan_status_var.get(),
+              f"status={app.dev_bulanan_status_var.get()!r}")
+        # tombol 📂: validasi folder kosong
+        app.dev_bulanan_folder_var.set("")
+        app._dev_bulanan_load_now()
+        check("(v3.11.11) §95-D5 📂 folder kosong → flash peringatan (tanpa "
+              "dialog/exception)",
+              "Folder kosong" in app.dev_bulanan_status_var.get(),
+              f"got {app.dev_bulanan_status_var.get()!r}")
+        # tombol 📂: data komparasi belum ada → arahkan jalankan pipeline
+        app.dev_bulanan_folder_var.set(_fld95)
+        _kd95 = app.komparasi_view.data
+        app.komparasi_view.data = None
+        app._dev_bulanan_load_now()
+        check("(v3.11.11) §95-D6 📂 tanpa data komparasi → arahkan jalankan "
+              "pipeline dulu",
+              "pipeline" in app.dev_bulanan_status_var.get().lower(),
+              f"got {app.dev_bulanan_status_var.get()!r}")
+        # tombol 📂: happy path — muat N bulan mundur ke komparasi
+        app.komparasi_view.data = (_kd95 if _kd95 is not None
+                                   and not _kd95.empty
+                                   else pd.DataFrame({"JENIS": ["1.SO"]}))
+        app.audit_result = {"period": [2026, 9]}
+        _rec95 = {}
+
+        def _fake_load95(paths, interactive=True):
+            _rec95["paths"] = [Path(p).name for p in paths]
+            _rec95["interactive"] = interactive
+
+        _orig_lp95 = app.komparasi_view._load_paths
+        app.komparasi_view._load_paths = _fake_load95
+        try:
+            app.notebook.select(app.tab_proses)
+            app.show_laporan_mode(2)   # mode non-komparasi utk menguji
+            root.update()              # pemulihan mode ⚖ oleh tombol
+            app._dev_bulanan_load_now()
+            root.update()
+        finally:
+            app.komparasi_view._load_paths = _orig_lp95
+        check("(v3.11.11) §95-D7 📂 happy path: 2 file dimuat KRONOLOGIS "
+              "(JULI lalu AGUSTUS 2026 — periode Sep-2026 mundur 2) + "
+              "pindah ke tab 📋 mode ⚖ Komparasi + flash sukses",
+              _rec95.get("paths") == ["20.JULI 2026.xlsx",
+                                      "20.AGUSTUS 2026.xlsx"]
+              and app.notebook.select() == str(app.tab_laporan)
+              and app.laporan_segment.active == 0
+              and "2 file deviasi bulan lalu dimuat"
+              in app.dev_bulanan_status_var.get(),
+              f"rec={_rec95} tab={app.notebook.select() == str(app.tab_laporan)} "
+              f"seg={app.laporan_segment.active}")
+        # wiring pasca-pipeline: mode manual → cfg TIDAK diteruskan (None)
+        app.komparasi_view._auto_bulanan_cfg = "SENTINEL"
+        _dbul95 = app._dev_bulanan_cfg({"period": [2026, 9]})
+        _mode95 = app._dev_bulanan_mode()
+        app.komparasi_view._auto_bulanan_cfg = (
+            _dbul95 if _mode95 == "auto" else None)
+        check("(v3.11.11) §95-D8 wiring _on_pipeline_done (mode manual): "
+              "_auto_bulanan_cfg = None (komparasi → perilaku last-used "
+              "v3.9.53; file bulan lalu murni via tombol 📂)",
+              app.komparasi_view._auto_bulanan_cfg is None,
+              f"mode={_mode95} cfg={_dbul95}")
+    finally:
+        _appmod95.CONFIG_PATH = _orig_cfg95
+        with contextlib.suppress(Exception):
+            app.dev_bulanan_folder_var.set("")
+            app.dev_bulanan_jumlah_var.set("1")
+        app._dev_bulanan_load_form()
+        shutil.rmtree(_tmp95d, ignore_errors=True)
+        shutil.rmtree(_fld95, ignore_errors=True)
     root.update()
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
