@@ -242,7 +242,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.9"  # v3.11.9 — TUJUH permintaan user: (1) POPUP DEVIASI GR/PCS KOLOM ACR + AVG COM/AVG ACR BARIS H (user: "average COM & average ACR di popup Deviasi GR/PCS pada baris key H") — popup kini 12 kolom: ACR (pemakaian sistem 9.ACR per tanggal, satuan-scoped) + Avg COM / Avg ACR (rata-rata COM/ACR jendela 1..H−1 HARI VALID — SO tercatat kedua ujung, mirror com_analisa; t=1 basis SALDO AWAL/penutupan lalu) DIISI CUMA DI BARIS Tanggal H (baris lain kosong — user: "hanya di baris H"); footer popup menyebut n hari valid; minus merah per-cell ikut kolom baru. (2) LABEL CEK "BOM 0" (user: "analisa BOM 0 di kolom CEK bila ACR = 0 dan ada Saldo SO") — label kanonik ke-10: Total ACR sebulan (Σ 9.ACR 1..H) = 0 & SO(H) > 0 → stok mengendap tanpa perputaran sistem; prioritas paling bawah (di bawah ACR to BOM); warna slate #475569 + legend; footer 'CEK n' ikut menghitung. (3) SEGME CEK "Beda dari Resto Lain" (user: "deviasi yang beda dari resto lain (mis. surplus sendiri dan bulanan juga surplus)") — pasangan searah DUA periode (deviasi H & deviasi bulan lalu sama surplus/defisit, dua-duanya non-zero non-NaN) sementara ≥2 resto lain (barang+SATUAN sama) berlawanan arah & TIDAK ADA searah → "Beda dari Resto Lain (Surplus · 2 resto lain Defisit)"; butuh file ⚖ (tanpa file → mati sopan); resto lain dev-0/NaN = netral tak memveto; legend #a21caf. (4) AUTO FILE DEVIASI BULAN LALU (user: "auto ambil file deviasi bulan lalu dari folder C:\KERJA\1. RESTO\99.TOOLS\DATA BASE DEVIASI\DEVIASI_BULANAN, format nama file seperti '20.AGUSTUS 2026'" + "aku bisa setting jumlah file") — kartu ⚙️ Config baru: folder (entry) + Jumlah File 1..12 (spinbox — berapa bulan mundur) + 💾 Simpan (config.json key DeviasiBulananFolder/DeviasiBulananJumlah, ATOMIK); pasca-pipeline tab ⚖ otomatis memuat '20.{BULAN} {TAHUN}' (bulan dari audit_result['period'], wrap tahun; case-insensitive; ext .xlsx prioritas) — PRIORITAS di atas last-used; folder ada tapi file belum ada → status jujur (tanpa fallback diam2); guard _auto_loaded di-reset load_data (sesi data baru → auto-load baru). (5) FILTER DROPDOWN KATEGORI 42.17 (user: "ada filter juga biar aku enak cari nama barang nya") — combobox readonly di section Identifikasi Kategori Manual: Semua / kategori unik 42.17 / (Tanpa Kategori 42.17); AND dgn pencarian nama; tombol ✕ mereset keduanya. (6) NOMINAL DEVIASI HANYA KATEGORI DEVIASI (user: "intinya nama barang nya ada di file 22.05 itu kategori deviasi") — hitung_nominal_pairs/pasangan_tanpa_harga_global/agregasi_nominal_per_resto + param deviasi_only: pasangan lolos bila barang ADA di 9.ACR (file 22.05 rekap) ATAU kategori ∈ KATEGORI_REKAP_VALUES; pasangan non-deviasi dikecualikan + jumlahnya tampil di status (jujur, bukan lenyap). (7) REKAP SELISIH IN SUB-TAB 📈 ANALISA BERSIH + PERBESAR (user: "Hapus semua aja yang lain juga biar clean") — SegmentBar MODE HITUNG dihapus dari UI (mode tetap programmable _on_mode_change); chips meta KPI tanpa MODE HITUNG/BASIS SELISIH; mode 📈 menyembunyikan KPI/skor/strip; 6 section analisa masing2 ada tombol ⛶ PERBESAR (popup 80% layar, font & bar skala 1,35/1,67, Esc tutup); chips meta & label konteks dihapus dari section (clean).
+APP_VERSION = "3.11.10"  # v3.11.10 — AUDIT 5-AGEN + PERBAIKAN TOTAL 23 BUG TERVERIFIKASI (user: "audit repo ... sebar agent full, jangan hanya berusaha menemukan temuan tapi tes juga apa benar itu beneran bug. deep audit ui dan ux nya dan perhitungan nya" + "ya perbaiki semua" + laporan crash live "TypeError: 'suppress' object is not callable"): (0) FIX CRASH LIVE app.py _flash_devbulanan_status — contextlib.suppress(Exception)(fn) adalah context manager BUKAN callable → TypeError di callback after(2500) tiap flash kartu DEV BULANAN + status tersangkut di pesan flash selamanya; kini _devbul_flash_restore dgn blok `with`. (1) FONDASI PRESENCE append1 — tandai sel SO/SALDO AWAL nyata SEBELUM fillna(0) (_SO_REKAM/_SA_REKAM id_vars melt) lalu BUANG baris filler '1.SO'/'SALDO AWAL' di output long: baris 1.SO kini = tanggal BENAR-BENAR direkam (SO terekam 0 tetap keluar; metrik penggerak BM/IN/OUT/BK tetap fillna-0 M-mirror) → menutup 4 bug perhitungan: hari-valid Avg COM/Avg ACR popup (filler lolos cek "SO tercatat kedua ujung" → com sampah ikut rata-rata; kini n=3 vs 5, Avg COM 6,67 vs 0,00), basis com(1) penutupan bulan lalu (filler SA=0 mengalahkan fallback; kini 10 vs −30 — konsisten popup/com_analisa/laporan), kunci penutupan SO_H-1 H≤2 (0→40; label 'Hitung Manual' palsu hilang), parity fn_audit 'Qty COM' (klaim "PERSIS formula pivot" palsu — rumus keempat ffill dimatikan; com(t) undefined bila SO(t)/SO(t−1) tak tercatat, undefined ≠ 0 tak memicu B5). (2) fn_9901 dedup LINTAS SHEET/FILE saja — baris PO multi-line identik DALAM sheet yang sama selamat (dulu undercount IN senyap: Σ14→7). (3) append1 pivot KUNCI TERNORMALISASI __k_barang/__k_resto (ejaan RAW rekap dipertahankan utk display; satuan lookup + information merge ikut) — drift whitespace/case/dtype 42.17 vs rekap tak lagi memecah 1 pasangan jadi 2 (deviasi [+100,−80] kini [20]). (4) GR/PCS tab satuan strip+upper ('GR ' masuk tab GR, dulu nyasar tab PCS). (5) _value_to_text_series whole-float '0.0'→'0' (lolos filter invalid); _list_excel_files case-insensitive (FS case-sensitive); saldo-sistem keep=last NATURAL sort ('2'>'10' dulu — snapshot lama menang). (6) WIDGETS: clone ⛶ FLUSH batch in-flight source tree (dulu clone parsial permanen 500/3000); sort-vs-clone-copy flush terpadu via registry per-tree (dulu urutan campuran permanen); auto_fit_columns mengukur baris ANAK (kolom matrix pivot 46→78px — keluhan 'mepet' tuntas). (7) ⧩ HEADER FILTER: nilai kosong terwakili '(Kosong)' (centang-semua tak lagi membuang baris sel-kosong senyap; kolom all-blank bisa dibuka); daftar nilai Tanggal KRONOLOGIS ('25•' duluan — grup −1; numerik TETAP grup 0 kontrak assertion lama); 'GR ' tampil 'GR ␣' (distinguishable); Ctrl+C TSV pivot baris anak bawa NAMA BARANG + kolom 'Metrik' (dulu nama metric nyasar di kolom 'Nama Barang'); pd.NA ≡ NaN di SEMUA formatter + followup._fu_num tak raise TypeError. (8) APP LIFECYCLE: posisi jendela x/y DIPULIHKAN (dead wiring v3.9.72 — _load_window_state kini return x/y; validasi bounds tetap di caller); generation-token _on_pipeline_done (race F5 re-start pasca worker-death — run baru tak lagi unstoppable/⏹ mati); EXPORT RE-ENTRY guard _export_busy (tombol tetap disabled mid-export; dulu 2 penulis .tmp sama → 'Export Gagal' palsu); F5 stopping-phase SILENT (anti dialog-spam, konsisten fase running). TES DISINKRON (fixture konvensi repo): §35 pair-Q COM semantik TERCATAT ('' bukan basis-0 '(10)'/'(8)'), parity count 6→3 (hari tanpa-SO keduanya absen), PERF 6e referensi kanonik v3.11.10. VERIFIKASI: test_ui_redesign 1802/1802 PASS · test_mock ALL PASS · ruff 198 ≤ 201 · py_compile · 60+ probe audit (EXPECTED vs ACTUAL) semua NOT-BUG.
 # (riwayat v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 — daftar kiri tab ⚙️ Config dari SALDO SISTEM 42.17 folder '6. 42.17' (SEMUA barang bersaldo + Kategori 42.17 + Kategori app efektif + pencarian + penanda BARU via kategori_seen.json) + tombol 🎯 mengisi/menimpa (prioritas 5d). (2) COM RENDAH — com_analisa dua arah strict ("COM Rendah (−x)" d(H) < median). (3) STRIP "🎯 SELISIH TERBANYAK — BARANG × RESTO" tab 📤 Rekap Selisih IN (klik chip = toggle ⧩). (4) FIX KUANTITI NOMINAL = SO_H − saldo sistem 42.17 (konsisten tab Deviasi GR/PCS).)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
 # memakai placeholder "vX.Y.Z" yang disubstitusi ke versi AKTUAL saat
@@ -1810,8 +1810,13 @@ _SETTINGS_PATH = _app_base_dir() / "settings.json"
 
 
 def _load_window_state():
-    """{w, h, maximized, ui_zoom} tersimpan; None bila tak ada/korup
-    (first open). ui_zoom = float 0.5–2.0 (None bila tak ada/rusak)."""
+    """{w, h, maximized, ui_zoom, x, y} tersimpan; None bila tak ada/korup
+    (first open). ui_zoom = float 0.5–2.0 (None bila tak ada/rusak).
+    v3.11.10 — FIX (audit 3-d #13 / probe9 kasus 2): POSISI x/y kini ikut
+    dikembalikan (int asli; bool DITOLAK — bool subclass int). Key x/y
+    HANYA disertakan bila keduanya int valid (settings lama tanpa x/y →
+    dict tanpa key itu — kontrak round-trip test tetap). Validasi batas
+    layar (anti jendela hilang) TETAP di pemanggil (restore __init__)."""
     try:
         with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -1828,9 +1833,24 @@ def _load_window_state():
                 _z = float(_z)
                 if not (UI_ZOOM_MIN <= _z <= UI_ZOOM_MAX):
                     _z = None
-            return {"w": st["w"], "h": st["h"],
+            # v3.11.10 — FIX (audit 3-d #13): pulihkan posisi yang
+            # ditulis _save_window_state v3.9.72 (dulu loader membuang
+            # x/y → fitur posisi jendela dead wiring — posisi tak pernah
+            # diterapkan walau tersimpan tiap close). bool = int subclass
+            # → ditolak eksplisit (pola validasi ui_zoom di atas).
+            _x = st.get("x")
+            _y = st.get("y")
+            if isinstance(_x, bool) or not isinstance(_x, int):
+                _x = None
+            if isinstance(_y, bool) or not isinstance(_y, int):
+                _y = None
+            _out = {"w": st["w"], "h": st["h"],
                     "maximized": bool(st.get("maximized")),
                     "ui_zoom": _z}
+            if _x is not None and _y is not None:
+                _out["x"] = _x
+                _out["y"] = _y
+            return _out
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return None
@@ -2250,6 +2270,18 @@ class StockMonitorApp:
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
+        # v3.11.10 — FIX (audit 3-d #14 / probe3): token GENERASI run —
+        # dinaikkan tiap _start_pipeline; callback per-run yang dijadwalkan
+        # utk generasi lama (done-handler/elapsed/preflight via after(0))
+        # no-op supaya stale done run LAMA tak membunuh state run BARU
+        # (is_running bohong False, ⏹ mati, elapsed mati — run baru tak
+        # bisa dihentikan).
+        self._run_generation = 0
+        # v3.11.10 — FIX (audit 3-d #15 / probe13): guard re-entri export
+        # — job handle run_async memang dibuang (app tidak menyimpannya),
+        # jadi app sendiri yang menandai sibuk; _sync_export_buttons ikut
+        # membaca flag ini (tombol 💾 tetap disabled selama export jalan).
+        self._export_busy = False
         # FIX D-04: penghitung file Excel yang di-skip reader (terkunci/
         # hilang/rusak) — dihitung dari log pipeline, ditampilkan saat
         # pipeline selesai supaya data parsial tidak disembunyikan.
@@ -2440,8 +2472,25 @@ class StockMonitorApp:
 
     def _on_run_shortcut(self, event=None):
         """v3.9.72 — FIX 4: F5/Ctrl+R jalankan pipeline (no-op senyap
-        saat sedang berjalan — anti dialog spam dari keyboard repeat)."""
+        saat sedang berjalan — anti dialog spam dari keyboard repeat).
+        v3.11.10 — FIX (audit 3-d #16 / probe4): fase MENGHENTIKAN (⏹
+        diklik, worker masih berjalan ke checkpoint — bisa detik di file
+        besar) kini JUGA senyap: hint statusbar saja, TANPA dialog (dulu
+        tiap auto-repeat F5 memunculkan 1 dialog modal "Masih
+        Menghentikan" dari guard-2 _start_pipeline — 3 tekan = 3 dialog,
+        ±30/detik saat key ditekan terus — melanggar kontrak anti-spam
+        handler ini sendiri; dialog inform tetap utk jalur mouse/tombol
+        MULAI yang memang disabled di fase ini)."""
         if getattr(self, "is_running", False):
+            return "break"
+        worker = getattr(self, "worker_thread", None)
+        if worker is not None and worker.is_alive():
+            # v3.11.10 — FIX (audit 3-d #16): senyap konsisten fase
+            # running; hint statusbar idempoten utk auto-repeat (teks
+            # sama ditulis ulang — visualnya tetap satu baris).
+            self.statusbar.set_status(
+                "Pipeline masih berhenti di checkpoint — tunggu sebentar, "
+                "lalu tekan F5 lagi…", C_AMBER)
             return "break"
         self._start_pipeline(refresh_files=False)
         return "break"
@@ -4499,6 +4548,16 @@ class StockMonitorApp:
         # in-place; tab lain menyusul via lazy refresh saat dipilih —
         # "gak harus refresh semua" juga soal gangguan view).
         self.is_running = True
+        # v3.11.10 — FIX (audit 3-d #14 / probe3): token generasi run —
+        # dinaikkan SETIAP run start (setelah semua guard lolos). Worker
+        # membaca nilai ini saat mulai & menempelkannya di callback
+        # after(0) yang dijadwalkannya; callback generasi LAMA no-op di
+        # _on_pipeline_done/_show_preflight_result/_tick_elapsed (race
+        # F5: keypress sudah antre saat worker lama mati → run baru mulai
+        # → done-handler basi tetap menembak dan membunuh state run baru:
+        # is_running=False, ⏹ disabled, elapsed mati, stop_event tak
+        # pernah diset → run baru tak bisa dihentikan).
+        self._run_generation = getattr(self, "_run_generation", 0) + 1
         self.stop_event.clear()
         self.btn_mulai.set_enabled(False)
         self.btn_stop.set_enabled(True)
@@ -4548,9 +4607,16 @@ class StockMonitorApp:
             target=self._run_pipeline_worker, daemon=True)
         self.worker_thread.start()
 
-    def _tick_elapsed(self):
-        """Update KPI waktu berjalan tiap detik selama pipeline aktif."""
-        if self._run_start_time is None:
+    def _tick_elapsed(self, _generation: int | None = None):
+        """Update KPI waktu berjalan tiap detik selama pipeline aktif.
+        v3.11.10 — FIX (audit 3-d #14 / probe3): guard generasi — tick
+        yang dijadwalkan run LAMA (run baru sudah mulai lewat celah F5)
+        berhenti tanpa menjadwalkan ulang dirinya (dulu rantai timer lama
+        hidup berdampingan / dibunuh stale-done run baru)."""
+        _gen = (_generation if _generation is not None
+                else getattr(self, "_run_generation", 0))
+        if (self._run_start_time is None
+                or _gen != getattr(self, "_run_generation", 0)):
             return
         elapsed = time.time() - self._run_start_time
         if elapsed < 60:
@@ -4558,7 +4624,8 @@ class StockMonitorApp:
         else:
             txt = f"{int(elapsed // 60)} mnt {elapsed % 60:.0f} dtk"
         self.kpi_elapsed.set_value(txt)
-        self._elapsed_after_id = self.root.after(1000, self._tick_elapsed)
+        self._elapsed_after_id = self.root.after(
+            1000, lambda: self._tick_elapsed(_gen))
 
     def _stop_elapsed(self):
         if self._elapsed_after_id:
@@ -4607,6 +4674,15 @@ class StockMonitorApp:
         # v3.9.37 — flag refresh (False/None/list) dibaca saat SELESAI:
         # worker tak membaca state app lain saat berjalan (pola lama).
         _rf = getattr(self, "_refresh_flag", False)
+        # v3.11.10 — FIX (audit 3-d #14 / probe3): generasi run CAPTURED di
+        # sini (kepala worker — saat ini tak ada run baru yang bisa mulai:
+        # guard-2 _start_pipeline menolak selama thread ini hidup) dan
+        # ditempelkan di SEMUA callback after(0) yang dijadwalkan worker;
+        # _on_pipeline_done/_show_preflight_result menolak generasi basi.
+        # (Worker yang dipanggil langsung tanpa _start_pipeline — jalur
+        # test §6a-06 — membaca nilai apa adanya: generasi cocok, tetap
+        # jalan; kontrak lama utuh.)
+        _gen = getattr(self, "_run_generation", 0)
         # v3.9.72 — FIX 2: import pipeline lazy; kegagalan import (instal
         # rusak) → jalur ERROR _on_pipeline_done (dialog + log + state
         # reset di main thread) — dulu import seperti ini terjadi di
@@ -4617,27 +4693,27 @@ class StockMonitorApp:
             import traceback as _tb_imp
             _err = (_imp_exc, _tb_imp.format_exc())
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                None, None, None, None, _err, _rf))
+                None, None, None, None, _err, _rf, _gen))
             return
         # v3.9.72 — FIX 7: preflight folder di worker thread (beku-main-
         # thread fix). FIFO after(): hasilnya selalu sampai SEBELUM
         # _on_pipeline_done run ini.
-        self._preflight_from_worker()
+        self._preflight_from_worker(_gen)
         try:
             append1_df, rincian_po_df, in_detail_df, audit_result = run_pipeline(
                 verbose=True, stop_event=self.stop_event)
             self._schedule_to_main(lambda: self._on_pipeline_done(
                 append1_df, rincian_po_df, in_detail_df, audit_result, None,
-                _rf))
+                _rf, _gen))
         except _PS as exc:   # PipelineStopped — alias lokal (lazy-safe)
             err = (exc, None)
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                None, None, None, None, err, _rf))
+                None, None, None, None, err, _rf, _gen))
         except Exception as exc:
             import traceback
             err = (exc, traceback.format_exc())
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                None, None, None, None, err, _rf))
+                None, None, None, None, err, _rf, _gen))
         except BaseException as exc:
             # FIX 6a-06: BaseException (SystemExit/KeyboardInterrupt dari
             # kedalaman pipeline) dulu LOLOS kedua handler di atas →
@@ -4652,10 +4728,10 @@ class StockMonitorApp:
             import traceback
             err = (exc, traceback.format_exc())
             self._schedule_to_main(lambda: self._on_pipeline_done(
-                None, None, None, None, err, _rf))
+                None, None, None, None, err, _rf, _gen))
             raise
 
-    def _preflight_from_worker(self):
+    def _preflight_from_worker(self, _generation: int | None = None):
         """v3.9.72 — FIX 7 (audit UX 2-c): PRE-FLIGHT folder data di
         WORKER THREAD (dulu sinkron di _start_pipeline main thread:
         glob+stat 15 folder membekukan UI saat klik MULAI — RootPath di
@@ -4684,15 +4760,24 @@ class StockMonitorApp:
             log_lines.append(
                 f"\n[PERINGATAN] Pre-flight folder dilewati: {exc}\n")
         self._schedule_to_main(lambda: self._show_preflight_result(
-            missing, log_lines))
+            missing, log_lines, _generation))
 
-    def _show_preflight_result(self, missing: list, log_lines: list):
+    def _show_preflight_result(self, missing: list, log_lines: list,
+                               _generation: int | None = None):
         """v3.9.72 — FIX 7: sisi MAIN-THREAD hasil preflight (dipanggil
         via after(0) dari worker). MEREPLIKASI UX jalur lama persis:
         baris 'Pre-flight <key>: N file excel' → log; folder hilang →
         log + dialog peringatan + statusbar AMBER (bila pipeline masih
         berjalan) + self._pre_missing (dipakai status akhir jujur
-        v3.9.46 — 'SELESAI DENGAN PERINGATAN')."""
+        v3.9.46 — 'SELESAI DENGAN PERINGATAN').
+        v3.11.10 — FIX (audit 3-d #14 / probe3): guard generasi — hasil
+        preflight run LAMA (run baru sudah mulai lewat celah F5) tidak
+        lagi menimpa _pre_missing/dialog/status run baru."""
+        # v3.11.10 — FIX (audit 3-d #14): generasi basi → buang hasil
+        # (informasional; tanpa side-effect pada state run baru).
+        if (_generation is not None
+                and _generation != getattr(self, "_run_generation", 0)):
+            return
         try:
             for _ln in log_lines:
                 self._append_log_batched(_ln)
@@ -4753,17 +4838,44 @@ class StockMonitorApp:
                     or _ada_baris(self.rincian_po_df)
                     or _ada_baris(self.in_detail_df)
                     or _ada_baris(_audit_df))
-        self.btn_export.set_enabled(has_data)
-        self.btn_export_tb.set_enabled(has_data)
+        # v3.11.10 — FIX (audit 3-d #15 / probe13): tombol tetap DISABLED
+        # selama export masih berjalan — jalur ini dipanggil
+        # _on_pipeline_done yang TIDAK tahu export lama masih in-flight
+        # (dulu 💾 hidup kembali di tengah export → export kedua ke path
+        # sama = dua penulis file tmp sama → 'Export Gagal' palsu +
+        # data export kedua hilang).
+        _exporting = bool(getattr(self, "_export_busy", False))
+        self.btn_export.set_enabled(has_data and not _exporting)
+        self.btn_export_tb.set_enabled(has_data and not _exporting)
 
     def _on_pipeline_done(self, append1_df, rincian_po_df, in_detail_df,
-                          audit_result, error, refresh_files=False):
+                          audit_result, error, refresh_files=False,
+                          _generation: int | None = None):
         """Dijadwalkan ke main thread via after().
 
         v3.9.37 — refresh_files: False = run normal; None = refresh semua;
         list = refresh terpilih → penutup TIDAK melompat ke tab 📊 Pivot
         (tetap di tab aktif; view aktif refresh in-place oleh load_data,
-        tab lain menyusul via lazy refresh)."""
+        tab lain menyusul via lazy refresh).
+        v3.11.10 — FIX (audit 3-d #14 / probe3): _generation = token run
+        yang menjadwalkan callback ini (ditempel worker). Bila run BARU
+        sudah dimulai (F5 masuk di celah worker-mati → after(0) basi
+        menembak), callback generasi lama NO-OP — dulu ia membunuh state
+        run baru (is_running=False, ⏹ disabled, elapsed timer dibatalkan,
+        stop_event tak pernah diset → run baru tak bisa dihentikan).
+        Pemanggilan LANGSUNG tanpa _generation (jalur test) tetap jalan
+        penuh — kontrak lama utuh."""
+        # v3.11.10 — FIX (audit 3-d #14): stale-done guard — generasi tak
+        # cocok → jangan sentuh state run baru; TAPI shield GC run lama
+        # tetap harus dilepas (depth-counted — kalau tidak, gc.disable()
+        # menempel seumur sesi). self.worker_thread kini milik run baru
+        # (masih hidup) → dipakai sebagai target tunggu (konservatif:
+        # depth hanya berkurang setelah semua thread shielded mati).
+        if (_generation is not None
+                and _generation != getattr(self, "_run_generation", 0)):
+            gc_shield_release(getattr(self, "worker_thread", None),
+                              retry_widget=self.root)
+            return
         # v3.9: lepas GC shield SEBELUM UI work berat — bila thread pipeline
         # belum benar-benar mati, retry 15ms sampai mati (lihat widgets.py)
         gc_shield_release(self.worker_thread, retry_widget=self.root)
@@ -5498,7 +5610,19 @@ class StockMonitorApp:
         self._start_pipeline(refresh_files=paths)
 
     def _export_excel(self):
-        """Export data (Append1 + Rincian PO + Rincian IN) ke Excel — async + loading."""
+        """Export data (Append1 + Rincian PO + Rincian IN) ke Excel — async + loading.
+        v3.11.10 — FIX (audit 3-d #15 / probe13): guard re-entri — job
+        handle run_async memang dibuang app, jadi app menandai
+        _export_busy sendiri; entry no-op + hint statusbar saat sibuk
+        (semua jalur keluar — done/on_error/⏹ Batal — me-reset flag)."""
+        # v3.11.10 — FIX (audit 3-d #15): re-entri DITOLAK (dulu dua
+        # penulis openpyxl pada file tmp sama 'filepath + ".tmp.xlsx"'
+        # → os.replace pertama menghabiskan tmp, kedua gagal — dialog
+        # 'Export Gagal' palsu + data export kedua hilang).
+        if getattr(self, "_export_busy", False):
+            self.statusbar.set_status(
+                "Export sedang berjalan — tunggu sebentar…", C_AMBER)
+            return
         # FIX 6a-03: guard kini juga menolak df KOSONG (bukan hanya None),
         # untuk SEMUA dataset alur export (Append1 / Rincian PO / Rincian
         # IN / Audit). Pipeline "sukses" pada folder kosong menghasilkan
@@ -5536,6 +5660,13 @@ class StockMonitorApp:
         )
         if not filepath:
             return
+
+        # v3.11.10 — FIX (audit 3-d #15): tandai sibuk SEBELUM spawn —
+        # sumber kebenaran tunggal (handle run_async dibuang; tombol
+        # dinonaktifkan via _sync_export_buttons yang membaca flag ini).
+        # Dilepas di done()/on_error() — kedua jalur keluar run_async
+        # (termasuk ⏹ Batal → on_error(ExportCancelled)).
+        self._export_busy = True
 
         append1_df = self.append1_df
         rincian_po_df = self.rincian_po_df
@@ -5651,6 +5782,10 @@ class StockMonitorApp:
                         os.unlink(tmp_path)
 
         def done(path):
+            # v3.11.10 — FIX (audit 3-d #15): lepas guard re-entri DULU
+            # supaya _sync_export_buttons mengembalikan tombol (urutan
+            # sama di on_error — semua jalur keluar reset flag).
+            self._export_busy = False
             # FIX 6a-01: re-enable via sync (kriteria ketersediaan data
             # sama dgn guard export — dulu hanya cek append1_df: export
             # data rincian-PO-saja meninggalkan tombol mati selamanya).
@@ -5665,6 +5800,7 @@ class StockMonitorApp:
                     os.path.dirname(os.path.abspath(path)))
 
         def on_error(e):
+            self._export_busy = False   # v3.11.10 — FIX (audit 3-d #15)
             self._sync_export_buttons()   # FIX 6a-01 (lihat done())
             # v3.10.1 — kontrak v3.9.72 yang dulu tak terpasang: BATAL =
             # status ramah + log INFO, BUKAN dialog error (file tujuan tak

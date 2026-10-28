@@ -1402,12 +1402,16 @@ class DeviasiView(tk.Frame):
             return pivot_df
         filtered = pivot_df
         # mode Satuan (GR / non-GR) — baris tampil per tab
+        # v3.11.10 — FIX (audit 3-a) bug #7: normalisasi strip+upper —
+        # SATUAN 'GR ' (trailing space, 57 nilai di data user — README
+        # v3.9.42) kini masuk tab GR, konsisten dgn scoping dropdown
+        # KATEGORI (strip+upper, _update_kategori_values) & jalur
+        # norm_sat (probe p16: G2 'GR ' mendarat di tab GR, bukan PCS).
+        _sat_u = filtered["Satuan"].astype(str).str.strip().str.upper()
         if self.satuan_mode == "GR":
-            filtered = filtered[
-                filtered["Satuan"].astype(str).str.upper() == "GR"]
+            filtered = filtered[_sat_u == "GR"]
         else:
-            filtered = filtered[
-                filtered["Satuan"].astype(str).str.upper() != "GR"]
+            filtered = filtered[_sat_u != "GR"]
         # filter KATEGORI combobox
         if self._kategori_sel and "KATEGORI" in filtered.columns:
             # v3.9.45 — REKONSILIASI dua keluhan user: (v3.9.44) barang
@@ -2817,10 +2821,14 @@ class DeviasiView(tk.Frame):
                     "status": "Tidak ada data."}
 
         # Filter by Satuan mode
+        # v3.11.10 — FIX (audit 3-a) bug #7: strip+upper (mirror
+        # _filtered_pivot) — 'GR ' trailing-space masuk tab GR
+        # (probe p16; README v3.9.42: 57 nilai 'GR ' di data user).
+        _sat_u = pivot_df["Satuan"].astype(str).str.strip().str.upper()
         if self.satuan_mode == "GR":
-            filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() == "GR"]
+            filtered = pivot_df[_sat_u == "GR"]
         else:
-            filtered = pivot_df[pivot_df["Satuan"].astype(str).str.upper() != "GR"]
+            filtered = pivot_df[_sat_u != "GR"]
         # v3.9.72 — FIX 5 (audit UX 2-b): total baris TAB (pra filter
         # KATEGORI/AKTIF/⧩) — utk status "n dari N baris" (parity dgn
         # pivot "terfilter X/Y" — user tahu filter aktif menyaring
@@ -3740,8 +3748,16 @@ class DeviasiView(tk.Frame):
     # =========================================================================
     @staticmethod
     def _fmt_num(val) -> str:
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        # v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → "" (guard
+        # `isinstance(val, float)` meloloskan pd.NA → float(pd.NA)
+        # TypeError → str '<NA>' tampil; probe p01 agent1b).
+        if val is None:
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         try:
             v = float(val)
         except (TypeError, ValueError):

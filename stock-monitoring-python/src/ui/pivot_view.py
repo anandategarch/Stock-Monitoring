@@ -1757,9 +1757,18 @@ class PivotTableView(tk.Frame):
 
     @staticmethod
     def _format_num(val) -> str:
-        """Format angka: 1 desimal, separator ribuan, negatif dalam kurung."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        """Format angka: 1 desimal, separator ribuan, negatif dalam kurung.
+        v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → '' (jalur yang
+        sama). Guard lama `isinstance(val, float)` meloloskan pd.NA →
+        float(pd.NA) TypeError → str(val) '<NA>' tampil di matrix
+        (kolom fallback fn_9901 / Int64 nullable; probe p01 agent1b)."""
+        if val is None:
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         try:
             val = float(val)
         except (TypeError, ValueError):

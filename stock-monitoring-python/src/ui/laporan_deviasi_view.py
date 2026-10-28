@@ -105,6 +105,27 @@ def _chrono(v):
         return (2, str(v))
 
 
+def _closing_so(so: pd.DataFrame, so_pres: pd.DataFrame,
+                col_keys) -> pd.Series:
+    """v3.11.10 — FIX (audit 3-a) bug #2: SO penutupan per pasangan =
+    nilai SO di kolom negatif kronologis TERAKHIR yang MEREKAM 1.SO
+    pasangan itu (NaN bila tak pernah merekam SO bulan lalu) — basis
+    sah com(1) tanpa baris SALDO AWAL. Kunci kalender terakhir bisa
+    hanya ber-BM/IN tanpa 1.SO (probe_com_analisa BEBEK: −30 ber-BM,
+    penutupan nyata −28 ber-SO 40 → com(1) = 10, dulu −30)."""
+    neg = [c for c in col_keys if int(float(c)) < 0]
+    out = pd.Series(np.nan, index=so.index)
+    if not neg:
+        return out
+    sv = so[neg].to_numpy(dtype="float64")
+    sp = so_pres[neg].to_numpy(dtype=bool)
+    has = sp.any(axis=1)
+    # kolom terakhir (dari kanan) yang True per baris = penutupan
+    idx = sp.shape[1] - 1 - np.argmax(sp[:, ::-1], axis=1)
+    out.loc[has] = sv[np.arange(sv.shape[0]), idx][has]
+    return out
+
+
 class LaporanDeviasiView(tk.Frame):
     """Tab 📋 Laporan Deviasi — (v3.9.3, sementara) daftar anomali
     pemakaian (COM): barang × resto dengan COM minus / > median di
@@ -652,6 +673,14 @@ class LaporanDeviasiView(tk.Frame):
                 columns="_tgl", values="NILAI",
                 aggfunc="sum", fill_value=0,
             )
+            # v3.11.10 — FIX (audit 3-a): presence pivot (jumlah baris
+            # asli per sel — 0 = fill, bukan baris; mirror com_analisa)
+            # utk kehadiran 1.SO — basis com bila SO tercatat.
+            pres = d.pivot_table(
+                index=["Nama Barang", "NAMA RESTO", "JENIS"],
+                columns="_tgl", values="NILAI",
+                aggfunc="size", fill_value=0,
+            )
         except Exception:
             self._build_satuan_lookup(df)
             return pd.DataFrame()
@@ -671,24 +700,40 @@ class LaporanDeviasiView(tk.Frame):
                    .astype("float64"))
             return out.fillna(0.0) if fill else out
 
+        def jenis_pres(jenis: str) -> pd.DataFrame:
+            """v3.11.10 — kehadiran baris asli (bool) per (pair, kolom)."""
+            try:
+                sub = pres.xs(jenis, level="JENIS")
+            except KeyError:
+                sub = pd.DataFrame()
+            return (sub.reindex(index=pairs, columns=col_keys)
+                    .fillna(0).astype(bool))
+
         so = jenis_df("1.SO")
         bm = jenis_df("4.IN")
         bk = jenis_df("8.BARANG KELUAR")
+        so_pres = jenis_pres("1.SO")
 
-        # v3.9.5 (audit 19-b #2): so_prev[t_i] = SO[t_{i-1}]; base com di
-        # TANGGAL 1 = SALDO AWAL milik pair (tanpa fillna — membedakan
-        # 'SA ada, nilainya 0' dari 'SA tidak ada') bila ada, fallback
-        # shift (SO tanggal negatif), kolom pertama tanpa data → 0.
-        so_prev = so.shift(1, axis=1).fillna(0.0)
-        if len(col_keys):
-            so_prev.iloc[:, 0] = 0.0
+        # v3.9.5 (audit 19-b #2) + v3.11.10 — FIX (audit 3-a) bug #1/#2
+        # (probe_com_analisa): so_prev[t] = nilai SO kolom kronologis
+        # sebelumnya HANYA bila 1.SO pair tercatat di kolom itu (dibaca
+        # TANPA fill — 'SO ada nilainya 0' ≠ 'SO tidak direkam'); base
+        # com di TANGGAL 1 = SALDO AWAL pair bila ada (tanpa fillna),
+        # fallback SO penutupan (kolom negatif kronologis TERAKHIR yang
+        # MEREKAM 1.SO pair — BEBEK: −28=40, bukan kunci kalender
+        # terakhir −30 yang hanya ber-BM → com(1)=10, dulu −30); sel
+        # tanpa SO tercatat → NaN (bukan garbage 0-based — hari tak
+        # bermakna tak ikut median/flag _prepare_rows).
+        so_prev = so.shift(1, axis=1) \
+            .where(so_pres.shift(1, axis=1, fill_value=False))
         pos1 = [c for c in col_keys if int(float(c)) == 1]
         if pos1:
             sa_raw = jenis_df("SALDO AWAL", fill=False)
             key1 = pos1[0]
-            so_prev[key1] = sa_raw[key1].fillna(so_prev[key1])
+            so_prev[key1] = sa_raw[key1].fillna(
+                _closing_so(so, so_pres, col_keys))
 
-        com = so_prev + bm - bk - so
+        com = (so_prev + bm - bk - so).where(so_pres)
         com.columns = [int(c) if float(c).is_integer() else c
                        for c in col_keys]
 
@@ -1378,8 +1423,16 @@ class LaporanDeviasiView(tk.Frame):
     def _fmt_num(val) -> str:
         """Format angka gaya Indonesia (FIX C-03): 1.234.567 / 1.234,5,
         negatif dalam kurung, 0 = '-' (identik pivot_view._format_num)."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        # v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → "" (guard
+        # `isinstance(val, float)` meloloskan pd.NA → float(pd.NA)
+        # TypeError → str '<NA>' tampil; probe p01 agent1b).
+        if val is None:
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         try:
             val = float(val)
         except (TypeError, ValueError):

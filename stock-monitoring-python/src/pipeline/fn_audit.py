@@ -50,6 +50,11 @@ KOLOM BARU pada audit_df:
   (PERSIS formula 6.PEMAKAIAN (COM) pivot / Laporan Deviasi / Komparasi
   — jangan bikin rumus keempat). KPI baru 'com_minus' = jumlah baris
   COM < 0 (barang "muncul dari mana-mana" — sinyal input SO).
+  v3.11.10 (audit 3-a bug #4): basis SO(t−1) = SO BARIS AKTIVITAS
+  sebelumnya bila tercatat di baris itu (raw shift — bukan ffill
+  observasi terakhir); Tanggal 1 → SA(1) / SO penutupan bulan lalu;
+  SO(t) tak direkam → NaN (undefined ≠ 0 — tak masuk com_minus /
+  tampil blank di export; parity popup deviasi dipulihkan).
 
 Aturan VALID engine (SO Naik + BM=0 + IN>0) menjadi INERT di basis baru:
 SO naik yang match IN kini otomatis selisih 0 → "OK (Matching)" (lebih
@@ -924,9 +929,20 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
         _apply_po_menunggu(audit, kpi, po_pairs, stop_event=stop_event)
 
     # v3.10 — KOLOM COM (formula kanonik pivot): COM = SO(t−1) + IN −
-    # BK − SO(t); NaN bila SO(t) atau basis SO-kemarin tak tersedia.
+    # BK − SO(t); NaN bila SO(t) atau basis tak tersedia.
     # Qty BK per baris dari bk_map {(resto, barang, tgl)} (loop Python
     # di worker — ≤86k baris, sekali per run).
+    # v3.11.10 — FIX (audit 3-a) bug #4: klaim "PERSIS formula pivot —
+    # jangan bikin rumus keempat" dipulihkan (probe_fn_audit_com: 2/6
+    # baris BEBEK beda, kini parity). Basis COM ≠ "Qty SO Kemarin"
+    # (kolom display/ΔSO TETAP ffill-last-observed — kontrak v3.10.1
+    # utuh): basis = SO BARIS AKTIVITAS SEBELUMNYA hanya bila tercatat
+    # DI BARIS ITU (raw shift per-pasangan, tanpa ffill — BEBEK t4:
+    # baris t3 ber-IN tanpa SO → NaN; dulu ffill SO(2) → 10 ≠ popup);
+    # Tanggal 1 → SA(1) / SO penutupan bulan lalu (nilai "Qty SO
+    # Kemarin" baris tgl-1 = anchor SA / ffill penutupan — persis
+    # basis kanonik). SO(t) tak direkam → NaN (undefined ≠ 0 — tak
+    # memicu KPI com_minus, tampil '-' / blank di export).
     _so = pd.to_numeric(audit["Hasil SO"], errors="coerce")
     _prev = pd.to_numeric(audit["Qty SO Kemarin"], errors="coerce")
     _in_sys = pd.to_numeric(audit["Penerimaan Sistem"],
@@ -934,7 +950,8 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     _bk_vals = []
     _r = audit["Resto"].astype(str)
     _b = audit["Nama Item"].astype(str)
-    _t = pd.to_numeric(audit["Tanggal"], errors="coerce")
+    _t = pd.to_numeric(audit["Tanggal"], errors="coerce") \
+        .astype("float64")
     if bk_map:
         for r, b, t in zip(_r, _b, _t):
             key = (r, b, int(t)) if pd.notna(t) else None
@@ -945,8 +962,16 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
         _bk_vals = [np.nan] * len(audit)
     _bk = pd.Series(_bk_vals, index=audit.index, dtype="float64")
     audit["Qty BK"] = _bk
-    _com = (_prev + _in_sys - _bk.fillna(0.0) - _so).astype("float64")
-    _com = _com.where(_so.notna() & _prev.notna(), np.nan)
+    _pid = np.cumsum(((_r != _r.shift(1)) | (_b != _b.shift(1)))
+                     .to_numpy(dtype="int64"))
+    _so_prev_row = _so.groupby(_pid).shift(1)
+    _t_prev = _t.groupby(_pid).shift(1)
+    # t>1: basis hanya dari baris positif (bulan berjalan) sebelumnya;
+    # t=1: SA(1) / penutupan ("Qty SO Kemarin" baris tgl-1).
+    _prev_com = _so_prev_row.where(_t_prev >= 1)
+    _prev_com = _prev_com.mask(_t == 1, _prev)
+    _com = (_prev_com + _in_sys - _bk.fillna(0.0) - _so).astype("float64")
+    _com = _com.where(_so.notna() & _prev_com.notna(), np.nan)
     audit["Qty COM"] = _com
     kpi["com_minus"] = int((_com < 0).sum())
 

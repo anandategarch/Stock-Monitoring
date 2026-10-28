@@ -25,7 +25,6 @@ v3.9.42 — AUDIT FIX (61-a):
   berisi export lama+baru/salinan menjumlah SALDO/IN/OUT 2× SENYAP
   sebelumnya).
 """
-import glob
 import os
 import re
 import threading
@@ -331,21 +330,48 @@ def kategori_passthrough(sel) -> bool:
 # COMBINE FOLDER (mirror fnCombineFolder + fnBukaSheet)
 # =============================================================================
 
+def _natural_sort_key(path: str) -> tuple:
+    """v3.11.10 — FIX (audit 3-b, bug #10): kunci urutan file NATURAL
+    (numeric-aware): path dipecah re.split(r"(\\d+)") dan segmen digit
+    dibandingkan sebagai INT — 'snapshot 2.xlsx' < 'snapshot 10.xlsx'
+    (lexikografis murni: '2' > '10' → snapshot LAMA yang menang di
+    keep='last' saldo sistem 42.17; probe p08: 20 → 99). Nama ISO-date /
+    zero-padded / tanpa digit urutannya IDENTIK dgn leksikografis, jadi
+    semua konsumen urutan lama (42.17 saldo awal 'keep=last urutan nama
+    file' by-design, harga 41.09 keep='last', log kontribusi per-file)
+    hanya BISA membaik, tidak pernah berbalik. Posisi segmen selalu
+    berselang str/int (genap=str, ganjil=int) → perbandingan tuple tak
+    pernah membandingkan int vs str."""
+    return tuple(int(seg) if seg.isdigit() else seg
+                 for seg in re.split(r"(\d+)", path))
+
+
 def _list_excel_files(folder_path: str) -> List[str]:
     """List semua file Excel di folder, exclude hidden & temp files.
     v3.3.1: sertakan *.xlsb — sumber SO user kini berupa workbook gabungan
     .xlsb ("01.1 CEK STOCK V2.xlsb") yang sebelumnya TIDAK terbaca sama
-    sekali (akibatnya Saldo SO kosong semua di tab Deviasi GR/PCS)."""
+    sekali (akibatnya Saldo SO kosong semua di tab Deviasi GR/PCS).
+    v3.11.10 — FIX (audit 3-b, bug #9): pencocokan ekstensi kini
+    CASE-INSENSITIVE (os.listdir + lower().endswith — dulu glob
+    lowercase-only: 'A2.XLSX'/'B2.XLSB'/'c1.XLS' tak terbaca SAMA SEKALI
+    di filesystem case-sensitive; perilaku Windows tak berubah — probe
+    p07: 3/7 → 7/7). Urutan tetap sorted (kini natural sort — lihat
+    _natural_sort_key)."""
     if not os.path.isdir(folder_path):
         return []
-    patterns = ["*.xlsx", "*.xls", "*.xlsm", "*.xlsb"]
-    files = []
-    for p in patterns:
-        files.extend(glob.glob(os.path.join(folder_path, p)))
-    # Filter: exclude hidden files (check basename, not full path) & temp lock files (~$...)
-    files = [f for f in files if not os.path.basename(f).startswith("~$")]
-    files = [f for f in files if not os.path.basename(f).startswith(".")]
-    return sorted(files)
+    # v3.11.10 — ekstensi case-insensitive (mirror perilaku glob Windows)
+    _exts = (".xlsx", ".xls", ".xlsm", ".xlsb")
+    try:
+        _names = os.listdir(folder_path)
+    except OSError:
+        return []
+    # Filter: exclude hidden files (check basename, not full path) & temp
+    # lock files (~$...)
+    files = [os.path.join(folder_path, n) for n in _names
+             if n.lower().endswith(_exts)
+             and not n.startswith("~$")
+             and not n.startswith(".")]
+    return sorted(files, key=_natural_sort_key)
 
 
 def _get_excel_engine() -> str:
@@ -914,3 +940,76 @@ def date_to_day(series: pd.Series) -> pd.Series:
     """
     dt = to_datetime_robust(series)
     return dt.dt.day.astype("Int64")
+
+
+# =============================================================================
+# v3.11.10 — FIX (audit 3-b, bug #6): NORMALISASI KUNCI PASANGAN
+# (Nama Barang × NAMA RESTO) untuk grouping/merge pivot append1.
+# Konvensi = PERSIS lookup saldo-sistem deviasi_view v3.11.1 ("upper +
+# rapat spasi" untuk barang; "upper + segmen resto setelah titik" untuk
+# resto — duplikat LOKAL _norm_name_lalu/_norm_resto_lalu nominal_common,
+# pipeline tidak boleh import ui; segmen-titik-terakhir resto juga mirror
+# resto_from_cabang_po) + float-utuh → string int (mirror _value_to_text
+# BUG-21 — sel numerik 100383 vs teks '100383' menjadi kunci sama).
+# =============================================================================
+_NA_KEY = "\x00NA"
+
+
+def _pair_key_base(v) -> str:
+    """Nilai mentah → basis kunci: NA/None → sentinel unik (grup NA tetap
+    SATU grup, persis groupby dropna=False; '' tetap '' — grup berbeda);
+    float utuh → string int; lainnya str(v)."""
+    if v is None:
+        return _NA_KEY
+    try:
+        if pd.isna(v):
+            return _NA_KEY
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, (float, np.floating)):
+        try:
+            if v == int(v):
+                return str(int(v))
+        except (OverflowError, ValueError):
+            pass
+        return str(v)
+    return str(v)
+
+
+def norm_nama_barang_key(v) -> str:
+    """Nama Barang → kunci pasangan: upper + rapat spasi ganda (mirror
+    _norm_name_lalu deviasi_view/nominal_common). Fungsi murni — dua
+    ejaan yang sama-sama dinormalisasi tak pernah berhenti cocok."""
+    return re.sub(r"\s+", " ", _pair_key_base(v).strip().upper())
+
+
+def norm_nama_resto_key(v) -> str:
+    """NAMA RESTO → kunci pasangan: upper + strip + segmen setelah titik
+    TERAKHIR (mirror _norm_resto_lalu / resto_from_cabang_po: '1041.BDGUKU'
+    / 'B.1001.MLGPAR' / 'BDGUKU' → 'BDGUKU')."""
+    s = _pair_key_base(v).strip().upper()
+    if "." in s:
+        s = s.split(".")[-1].strip()
+    return s
+
+
+def _norm_pair_key_series(series: pd.Series, norm_fn) -> pd.Series:
+    """Vektor norm kunci pasangan — paritas PER-ELEMEN identik dgn norm_fn
+    skalar (factorize C-level: normalisasi hanya nilai UNIK, kode baris
+    dipetakan balik via fancy-index; baris NA → sentinel). Dipakai append1
+    pada frame besar (source/final) supaya biaya O(nilai unik)."""
+    codes, uniques = series.factorize()  # NA → kode -1 (tak ikut uniques)
+    key_list = [norm_fn(u) for u in uniques.tolist()]
+    key_list.append(_NA_KEY)  # indeks -1 → sentinel
+    return pd.Series(np.asarray(key_list, dtype=object)[codes],
+                     index=series.index, dtype=object)
+
+
+def norm_nama_barang_key_series(series: pd.Series) -> pd.Series:
+    """Vektor norm_nama_barang_key (lihat _norm_pair_key_series)."""
+    return _norm_pair_key_series(series, norm_nama_barang_key)
+
+
+def norm_nama_resto_key_series(series: pd.Series) -> pd.Series:
+    """Vektor norm_nama_resto_key (lihat _norm_pair_key_series)."""
+    return _norm_pair_key_series(series, norm_nama_resto_key)

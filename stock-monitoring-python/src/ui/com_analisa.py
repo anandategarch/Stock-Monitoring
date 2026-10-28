@@ -84,6 +84,27 @@ def _chrono(t) -> tuple:
     return (0, -t) if t < 0 else (1, t)
 
 
+def _closing_so(so: pd.DataFrame, so_pres: pd.DataFrame,
+                col_keys) -> pd.Series:
+    """v3.11.10 — FIX (audit 3-a) bug #2: SO penutupan per pasangan =
+    nilai SO di kolom negatif kronologis TERAKHIR yang MEREKAM 1.SO
+    pasangan itu (NaN bila pasangan tak pernah merekam SO bulan lalu) —
+    basis sah com(1) tanpa baris SALDO AWAL. Kunci kalender terakhir
+    bisa hanya ber-BM/IN tanpa 1.SO (probe_com_analisa BEBEK: −30
+    ber-BM, penutupan nyata −28 ber-SO 40 → com(1) = 10, bukan −30)."""
+    neg = [c for c in col_keys if int(c) < 0]
+    out = pd.Series(np.nan, index=so.index)
+    if not neg:
+        return out
+    sv = so[neg].to_numpy(dtype="float64")
+    sp = so_pres[neg].to_numpy(dtype=bool)
+    has = sp.any(axis=1)
+    # kolom terakhir (dari kanan) yang True per baris = penutupan
+    idx = sp.shape[1] - 1 - np.argmax(sp[:, ::-1], axis=1)
+    out.loc[has] = sv[np.arange(sv.shape[0]), idx][has]
+    return out
+
+
 def _build_matrices(data: pd.DataFrame):
     """Matriks per (Nama Barang × NAMA RESTO) × tanggal kronologis:
     so / in / bk / acr (nilai, fill 0) + so_pres / sa_pres (presence —
@@ -121,7 +142,8 @@ def _build_matrices(data: pd.DataFrame):
     col_keys = sorted(piv.columns.tolist(), key=_chrono)
     pairs = piv.index.droplevel("JENIS").unique()
 
-    def _mat(jenis: str, presence: bool = False) -> pd.DataFrame:
+    def _mat(jenis: str, presence: bool = False,
+             fill: bool = True) -> pd.DataFrame:
         try:
             sub = piv.xs(jenis, level="JENIS")
             sub_pres = pres.xs(jenis, level="JENIS")
@@ -134,7 +156,11 @@ def _build_matrices(data: pd.DataFrame):
                     .fillna(0).astype(bool))
         if presence:
             return out_pres
-        return out.fillna(0.0)
+        # v3.11.10 — fill=False: TANPA fillna (NaN = tanpa baris asli) —
+        # dipakai utk SALDO AWAL mentah (bedakan 'SA ada nilainya 0'
+        # dari 'SA tidak ada'; komentar lama menuliskan 'tanpa fillna'
+        # tapi _mat selalu fillna(0) → fallback mati — audit 3-a bug #2)
+        return out.fillna(0.0) if fill else out
 
     so = _mat("1.SO")
     in_m = _mat("4.IN")
@@ -143,17 +169,24 @@ def _build_matrices(data: pd.DataFrame):
     so_pres = _mat("1.SO", presence=True)
     sa_pres = _mat("SALDO AWAL", presence=True)
 
-    # com = so_prev + in − bk − so (so_prev[t] = SO kolom kronologis
-    # sebelumnya; basis com(1) = SALDO AWAL pair bila ada — audit 19-b #2).
-    so_prev = so.shift(1, axis=1).fillna(0.0)
-    if len(col_keys):
-        so_prev.iloc[:, 0] = 0.0
+    # com = so_prev + in − bk − so. v3.11.10 — FIX (audit 3-a) bug
+    # #1/#2 (probe_com_analisa): com(t) hanya bermakna bila SO tercatat
+    # di KEDUA ujung — basis = nilai SO kolom kronologis SEBELUMNYA bila
+    # 1.SO pasangan tercatat di kolom itu (bukan dibaca 0); com(1) =
+    # SALDO AWAL(1) bila ada, else SO penutupan (kolom negatif terakhir
+    # yang MEREKAM SO); sel tanpa SO tercatat → NaN (bukan 0-based
+    # garbage — com_gap_map memfilter hari valid via so_pres, dulu
+    # median tercemar nilai fill: BEBEK d={−30,2,35,−19,0} → kini
+    # {10,2,0}, gap 4 → 6).
+    sa_raw = _mat("SALDO AWAL", fill=False)
+    so_prev = so.shift(1, axis=1) \
+        .where(so_pres.shift(1, axis=1, fill_value=False))
     pos1 = [c for c in col_keys if int(c) == 1]
     if pos1:
-        sa_raw = _mat("SALDO AWAL")   # tanpa fillna — bedakan SA-0 vs tanpa SA
         key1 = pos1[0]
-        so_prev[key1] = sa_raw[key1].fillna(so_prev[key1])
-    com = so_prev + in_m - bk - so
+        so_prev[key1] = sa_raw[key1].fillna(
+            _closing_so(so, so_pres, col_keys))
+    com = (so_prev + in_m - bk - so).where(so_pres)
 
     return {
         "com": com, "acr": acr, "so_pres": so_pres, "sa_pres": sa_pres,
@@ -199,10 +232,15 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
         _RES.update(data=data, h=h, map={})
         return {}
 
-    # kolom kronologis terakhir SEBELUM tanggal 1 (penutupan bulan lalu —
-    # basis sah com(1) alternatif SALDO AWAL).
+    # kolom negatif: cukup ADA yang MEREKAM SO utk pasangan ini (basis
+    # com(1) = penutupan = kolom negatif kronologis TERAKHIR yang
+    # merekam). v3.11.10 — FIX (audit 3-a) bug #1: cek lalu terikat kunci
+    # kalender TERAKHIR (bisa hanya ber-BM/IN tanpa 1.SO → hari-1 salah
+    # invalid; mirror _com_acr_avg — probe_com_analisa BEBEK n 2 → 3,
+    # gap None → ('rendah', 6.0)).
     neg_cols = [c for c in col_keys if int(c) < 0]
-    prev_neg = neg_cols[-1] if neg_cols else None
+    neg_has_so = (so_pres[neg_cols].any(axis=1) if neg_cols
+                  else pd.Series(False, index=com.index))
 
     com_c = com[[c for c in pos_cols if int(c) <= h]]
     acr_c = acr[com_c.columns]
@@ -223,9 +261,7 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
         valid = np.zeros(len(days), dtype=bool)
         for j, t in enumerate(days):
             if t == 1:
-                ok_prev = bool(sa1.loc[pair]) or (
-                    prev_neg is not None
-                    and bool(so_pres.loc[pair, prev_neg]))
+                ok_prev = bool(sa1.loc[pair]) or bool(neg_has_so.loc[pair])
                 valid[j] = row_so[j] and ok_prev
             else:
                 valid[j] = (row_so[j]

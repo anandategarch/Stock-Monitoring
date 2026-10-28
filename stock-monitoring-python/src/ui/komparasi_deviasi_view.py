@@ -3789,8 +3789,16 @@ class KomparasiDeviasiView(tk.Frame):
     def _fmt_num(val) -> str:
         """Format angka gaya Indonesia: 1.234.567 / 1.234,5, negatif
         kurung, 0/NaN → '-' (identik view lain)."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        # v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → "—" (guard
+        # `isinstance(val, float)` meloloskan pd.NA → float(pd.NA)
+        # TypeError → str '<NA>' tampil; probe p01 agent1b).
+        if val is None:
             return "—"
+        try:
+            if pd.isna(val):
+                return "—"
+        except (TypeError, ValueError):
+            pass
         try:
             val = float(val)
         except (TypeError, ValueError):

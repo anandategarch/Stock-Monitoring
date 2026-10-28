@@ -42,8 +42,20 @@ def run(manual):
         else None
     final = build_append1(Config(make_config(root, extra=extra)))
 
+    # v3.11.10 (audit 3-b): with the bug-#6 fix the drift-split group is
+    # MERGED and its display name is ONE representative spelling — by
+    # design the REKAP spelling ('gula (v.20) ', source-priority), so the
+    # old exact lookup by 'GULA (V.20)' would find nothing (probe
+    # artifact, not a kategori-chain bug). Lookup is now by NORMALIZED
+    # name (upper + collapse whitespace) — robust to the representative
+    # choice; verifies the kategori VALUES on the merged group's real
+    # 1.SO rows (same inline-check approach Task 3-0 used).
+    def _norm(v):
+        return " ".join(str(v).strip().upper().split())
+
     def kat(b):
-        r = final[(final["Nama Barang"] == b) & (final["JENIS"] == "1.SO")]
+        r = final[(final["Nama Barang"].astype(str).map(_norm) == _norm(b))
+                  & (final["JENIS"] == "1.SO")]
         return r["KATEGORI"].iloc[0] if len(r) else None
 
     return kat("GULA (V.20)"), kat("E1")

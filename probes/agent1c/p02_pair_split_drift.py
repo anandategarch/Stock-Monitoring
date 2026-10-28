@@ -31,25 +31,31 @@ from src.pipeline.append1 import build_append1  # noqa: E402
 KAT = "10.FOOD [RM] - COM V.2"   # in DEFAULT_KATEGORI_WHITELIST
 
 
-def build(root, saldo_name):
+def build(root, saldo_name, rekap_name="GULA (V.20)"):
+    # v3.11.10 (audit 3-b): rekap_name parameterized — scenario B's own
+    # docstring says "42.17 numeric cell 100383 (int) vs rekap text '100383'"
+    # (dtype trap), but build() hardcoded rekap barang 'GULA (V.20)', making
+    # B compare two DIFFERENT items (100383 vs GULA) that must stay 2 pairs.
+    # Setup now matches the documented intent (all transaction sources use
+    # the text spelling; only 42.17 carries the numeric cell).
     b_rekap(root, "MLGPAR", [
-        ("GULA (V.20)", "KG", "SO", "input so harian", {1: 100}),
-        ("GULA (V.20)", "KG", "BARANG MASUK", "input so harian", {1: 50}),
+        (rekap_name, "KG", "SO", "input so harian", {1: 100}),
+        (rekap_name, "KG", "BARANG MASUK", "input so harian", {1: 50}),
     ])
     b_2205(root, [("ACR.2026.09.1", "2026-10-05", "RESTO MALANG (MLGPAR)",
-                   "GULA (V.20)", 5)])
+                   rekap_name, 5)])
     b_4205(root, [("IT.2026.10.1", "GUDANG HO (MLGPAR)", "2026-10-05",
-                   "GULA (V.20)", 30, "2026-10-05 08:00:00")])
+                   rekap_name, 30, "2026-10-05 08:00:00")])
     b_3224(root, [])
     b_4217(root, [(saldo_name, KAT, "KG",
                    {"RESTO MALANG (MLGPAR)": 80})])
-    b_dbs(root, [("GULA (V.20)", "COM DEVIASI - RESTO", "AKTIF")])
+    b_dbs(root, [(rekap_name, "COM DEVIASI - RESTO", "AKTIF")])
     return Config(make_config(root))
 
 
-def check(tag, saldo_name):
+def check(tag, saldo_name, rekap_name="GULA (V.20)"):
     root = make_root()
-    cfg = build(root, saldo_name)
+    cfg = build(root, saldo_name, rekap_name)
     final = build_append1(cfg)
 
     sa = long_subset(final, "SALDO AWAL")
@@ -80,5 +86,5 @@ def check(tag, saldo_name):
 
 if __name__ == "__main__":
     check("A: trailing-space drift", "GULA (V.20) ")
-    check("B: numeric-cell drift", 100383)
+    check("B: numeric-cell drift", 100383, rekap_name="100383")
     check("C: control (exact name)", "GULA (V.20)")

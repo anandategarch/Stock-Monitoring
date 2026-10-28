@@ -88,11 +88,13 @@ def main():
             names = sorted({it[1] for it in out["items"]}
                            if out["items"] else set())
             # items structure varies; safer: re-derive from the pivot filter
-            # exactly as _prepare_rows does:
-            filt = pivot[pivot["Satuan"].astype(str).str.upper()
-                         == ("GR" if v.satuan_mode == "GR" else "__none__")]
+            # exactly as _prepare_rows does (v3.11.10 audit 3-a: filter
+            # kini strip+upper — mirror persis kode fix):
+            _sat_u = pivot["Satuan"].astype(str).str.strip().str.upper()
+            filt = pivot[_sat_u == ("GR" if v.satuan_mode == "GR"
+                                    else "__none__")]
             if v.satuan_mode != "GR":
-                filt = pivot[pivot["Satuan"].astype(str).str.upper() != "GR"]
+                filt = pivot[_sat_u != "GR"]
             tab = sorted(filt["Nama Barang"].tolist())
             print(f"tab {v.satuan_mode}: baris tampil = {tab} "
                   f"(status={out['status']!r})")
@@ -103,10 +105,11 @@ def main():
         print(f"KATEGORI-dropdown scoping (strip+upper) counts as GR: "
               f"{scope_gr}")
 
-        gr_tab = sorted(pivot[pivot["Satuan"].astype(str).str.upper()
-                              == "GR"]["Nama Barang"].tolist())
-        pcs_tab = sorted(pivot[pivot["Satuan"].astype(str).str.upper()
-                               != "GR"]["Nama Barang"].tolist())
+        # v3.11.10 audit 3-a — replikasi filter TAB sesuai kode yang sudah
+        # difix (strip+upper, mirror _prepare_rows/_filtered_pivot):
+        _sat_p = pivot["Satuan"].astype(str).str.strip().str.upper()
+        gr_tab = sorted(pivot[_sat_p == "GR"]["Nama Barang"].tolist())
+        pcs_tab = sorted(pivot[_sat_p != "GR"]["Nama Barang"].tolist())
         print(f"GR tab  = {gr_tab}")
         print(f"PCS tab = {pcs_tab}")
         ok = ("G2" not in gr_tab) and ("G2" in pcs_tab) and ("G2" in scope_gr)

@@ -5,14 +5,19 @@ fn_audit docstring: "Qty COM — pemakaian aktual kanonik: COM(t) =
 SO(t-1) + IN(t) - BK(t) - SO(t) (PERSIS formula 6.PEMAKAIAN (COM) pivot /
 Laporan Deviasi / Komparasi — jangan bikin rumus keempat)".
 
-BUT fn_audit's "SO(t-1)" = ffill LAST OBSERVED SO (sparse gap -> prev
-recorded SO), while pivot/popup "SO(t-1)" = previous GLOBAL date column
-(0-filled when SO not recorded there).
+v3.11.10 (audit 3-a): canonical basis setelah fix —
+  * t=1   : SA(1) bila ada baris SA asli, else SO penutupan (kolom
+            negatif kronologis TERAKHIR yang merekam 1.SO);
+  * t>1   : SO BARIS AKTIVITAS sebelumnya HANYA bila tercatat di baris
+            itu (raw shift — bukan ffill observasi terakhir);
+  * SO(t) tak direkam -> NaN (undefined, BUKAN 0-based garbage).
 
-Fixture BEBEK: SO recorded 1,2,4,5,6; IN(42.05) day3=10 (day 3 has no SO).
-At t=4: fn_audit COM = SO(2)=25 + 0 - 0 - SO(4)=15 = 10.
-        popup COM  = so(3)=0 (fill) + 0 - 0 - 15  = -15.
-Same pair, same date, two different numbers shown to the user.
+Fixture BEBEK (SO 1,2,4,5,6; IN day3=10 tanpa SO; penutupan -28=40;
+no SA): EXPECTED com row = {1: 10, 2: 5, 3: undef, 4: undef, 5: 5,
+6: 2} — SAMA di fn_audit dan popup (parity; t3/t4 undefined, NaN-NaN
+dihitung sama). v3.11.10: probe disesuaikan — popup .get default NaN
+(dulu None membuat diff TypeError) + block EXPECTED eksplisit; verdict
+paritas tetap sama-rumus.
 """
 import sys
 sys.path.insert(0, "/home/z/stock-audit/stock-monitoring-python")
@@ -43,6 +48,11 @@ print(be.to_string(index=False))
 
 com_popup = dp._compute_com_series(final, "BEBEK (V.20)", "MLGPAR", "GR")
 
+# EXPECTED (audit 3-a, hand-derived): com(1)=penutupan 40-30=10;
+# com(2)=SO(1) 30-25=5; t3 & t4 undefined (SO(3) tak direkam);
+# com(5)=SO(4) 15-10=5; com(6)=SO(5) 10-8=2.
+EXPECTED_COM = {1: 10.0, 2: 5.0, 5: 5.0, 6: 2.0}
+
 rows = []
 for _, r in be.iterrows():
     t = int(r["Tanggal"])
@@ -51,17 +61,34 @@ for _, r in be.iterrows():
     rows.append({
         "t": t,
         "fn_audit_COM": r["Qty COM"],
-        "popup_COM": com_popup.get(float(t)),
+        "popup_COM": com_popup.get(float(t), float("nan")),
     })
 cmp_df = pd.DataFrame(rows)
 cmp_df["diff"] = cmp_df["fn_audit_COM"] - cmp_df["popup_COM"]
 print("\nCOM parity (fn_audit vs popup):")
 print(cmp_df.to_string(index=False))
 
+# NaN-NaN = sama-sama undefined (bukan beda rumus)
 n_diff = int((cmp_df["diff"].abs() > 1e-9).sum())
 print(f"\nbaris dgn COM beda: {n_diff} dari {len(cmp_df)}")
 print("VERDICT parity claim 'PERSIS formula pivot': "
       f"{'BUG (rumus keempat hidup)' if n_diff else 'NOT-BUG'}")
+
+ok_exp = True
+for t, exp in EXPECTED_COM.items():
+    fa = cmp_df.loc[cmp_df["t"] == t, "fn_audit_COM"].iloc[0]
+    po = cmp_df.loc[cmp_df["t"] == t, "popup_COM"].iloc[0]
+    if not (abs(fa - exp) < 1e-9 and abs(po - exp) < 1e-9):
+        ok_exp = False
+        print(f"  MISMATCH t={t}: fn_audit={fa} popup={po} EXPECTED={exp}")
+for t in (3, 4):
+    fa = cmp_df.loc[cmp_df["t"] == t, "fn_audit_COM"].iloc[0]
+    po = cmp_df.loc[cmp_df["t"] == t, "popup_COM"].iloc[0]
+    if not (pd.isna(fa) and pd.isna(po)):
+        ok_exp = False
+        print(f"  MISMATCH t={t}: fn_audit={fa} popup={po} EXPECTED=undefined")
+print("VERDICT BEBEK com row {1:10, 2:5, 3:undef, 4:undef, 5:5, 6:2}: "
+      f"{'NOT-BUG' if ok_exp else 'BUG'}")
 
 # sanity: v3.11.5 basis selisih = BM - IN (BEBEK t=3: BM 0 - IN 10 = -10)
 r3 = be[be["Tanggal"] == 3].iloc[0]

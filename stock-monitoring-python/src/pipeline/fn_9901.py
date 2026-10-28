@@ -62,6 +62,11 @@ from .helpers import (
     safe_to_str,
 )
 
+# v3.11.10 — FIX (audit 3-b, bug #5): kolom tag SUMBER sementara (file ×
+# sheet) untuk dedup LINTAS SUMBER — dibuang lagi sebelum pencarian kolom
+# supaya tak pernah bocor ke output/log kolom tersedia.
+_SRC_9901 = "__src_9901"
+
 
 def _find_column(df_cols, candidates, contains_any=None, exclude=None):
     """Find column by priority: exact match > substring > exact-short match.
@@ -149,6 +154,10 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
                     print(f"  [fn_9901] Skip sheet '{sn}' in {f}: {e}")
                     continue
             if df is not None and len(df) > 0:
+                # v3.11.10 — FIX (audit 3-b, bug #5): tag SUMBER per frame
+                # (file × sheet) — cache bacaan aman dimutasi (fn_buka_sheet
+                # menyajikan copy defensif; lihat helpers._read_cache_get).
+                df[_SRC_9901] = f"{os.path.basename(f)}::{sn}"
                 dfs.append(df)
                 # v3.9.33 — AUDIT FIX (48-a): kontribusi baris per sheet
                 # (file + sheet + jumlah baris) — sheet backup/salinan
@@ -164,13 +173,35 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
     # v3.9.33 — AUDIT FIX (48-a HIGH): concat SEMUA sheet × SEMUA file tanpa
     # dedup → baris identik masuk 2× (sheet backup / ringkasan / file
     # salinan di folder bulan) → qty IN terhitung DOBEL senyap di pivot
-    # append1. Buang baris duplikat PERSIS (semua kolom sama); jika ada
-    # yang terbuang → log KERAS supaya user cek foldernya.
+    # append1. Buang baris duplikat persis; jika ada yang terbuang → log
+    # KERAS supaya user cek foldernya.
+    # v3.11.10 — FIX (audit 3-b, bug #5): dedup global drop_duplicates()
+    # juga membuang baris transaksi LEGIT yang identik DALAM SATU sheet
+    # (PO multi-baris: item sama × qty sama × tanggal sama — export 9901
+    # tanpa kolom nomor baris; probe p01: 2 baris Σ14 terpotong jadi 1
+    # Σ7 → Selisih IN/deviasi salah). Kini dedup dibatasi LINTAS SUMBER:
+    # baris identik dari sheet/file LAIN tetap dibuang (kasus backup
+    # v3.9.33 — README: "dedup baris duplikat persis lintas sheet/file"),
+    # baris identik SE-SUMBER dipertahankan. Implementasi: sumber PERTAMA
+    # tiap grup nilai-baris menang utuh; sumber berikutnya dibuang.
     n_before = len(prom)
-    prom = prom.drop_duplicates()
-    if n_before > len(prom):
-        print(f"  [fn_9901] 9901 v3.9.33: {n_before - len(prom)} baris "
-              f"duplikat persis dibuang (sheet backup/salinan?)")
+    # Kunci grup = SEMUA kolom nilai POSISI-per-posisi (bukan label —
+    # sheet 9901 dgn header duplikat membuat groupby label raise
+    # "Grouper not 1-dimensional"; drop_duplicates lama kebal itu).
+    if _SRC_9901 in prom.columns:
+        _tag_pos = prom.columns.get_loc(_SRC_9901)
+        _key_series = [prom.iloc[:, i]
+                       for i in range(prom.columns.size) if i != _tag_pos]
+        _first_src = prom.groupby(
+            _key_series, dropna=False, sort=False)[_SRC_9901].transform("first")
+        _drop = prom[_SRC_9901] != _first_src
+        if _drop.any():
+            prom = prom[~_drop]
+            print(f"  [fn_9901] 9901 v3.9.33/v3.11.10: "
+                  f"{n_before - len(prom)} baris duplikat persis LINTAS "
+                  f"sheet/file dibuang (sheet backup/salinan? — baris "
+                  f"identik se-sheet dipertahankan, PO multi-baris legit)")
+    prom = prom.drop(columns=[_SRC_9901])
 
     if prom.empty:
         return pd.DataFrame(columns=["Tanggal", "NAMA RESTO", "Nama Barang", "Value"])

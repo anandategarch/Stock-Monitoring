@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.9", APP_VERSION == "3.11.9",
+    check("Versi = 3.11.10", APP_VERSION == "3.11.10",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -8130,10 +8130,16 @@ def main():
           _p35["4"]["COM"] == "", f"got {_p35['4']['COM']!r}")
     _q35 = build_popup_rows(_df35, "BRG Q", "R")
     _q35m = {r["Tanggal"]: r for _, r in _q35.iterrows()}
-    check("(v3.9.25) Popup COM semantik KOLOM GLOBAL: pair Q SO t1&t3 — "
-          "kolom global t2 (dari pair P) membuat so_prev(3)=0 → com(3) "
-          "=(8); com(1) kolom pertama =(10)",
-          _q35m["1"]["COM"] == "(10)" and _q35m["3"]["COM"] == "(8)",
+    # v3.11.10 — DISINKRON (audit 3-a #2/#4): semantik kolom-global
+    # filler-0 DIGANTI semantic TERCATAT — pair Q tanpa SA(1)/penutupan
+    # → com(1) TAK TERDEFINISI (bukan '(10)' basis-0); SO t2 tak
+    # tercatat utk Q → com(3) TAK TERDEFINISI (bukan '(8)' basis-0).
+    # Kolom COM hanya bermakna saat SO tercatat di kedua ujung
+    # (mirror hari-valid v3.11.9 — probe agent1a probe_valid_days).
+    check("(v3.11.10) Popup COM semantik TERCATAT: pair Q SO t1&t3 tanpa "
+          "SA/penutupan → com(1) & com(3) KOSONG (dulu basis-0 filler: "
+          "'(10)'/'(8)' — audit 3-a #2/#4)",
+          _q35m["1"]["COM"] == "" and _q35m["3"]["COM"] == "",
           f"got {_q35m['1']['COM']!r}/{_q35m['3']['COM']!r}")
 
     # --- (b) PARITY: _compute_com_series vs matrix Anomali COM ---------
@@ -8155,8 +8161,9 @@ def main():
                       f"popup={_v35} matrix={_mv35}")
     check("(v3.9.25) PARITY COM popup vs matrix Anomali COM "
           "(laporan_deviasi_view._compute_com_matrix) — semua tanggal "
-          "identik",
-          _ok35 and _n35 >= 6, f"{_n35} nilai dibandingkan")
+          "identik (v3.11.10: hari tanpa-SO-tercatat keduanya absen/NaN "
+          "— jumlah nilai dibandingkan turun 6 → 3)",
+          _ok35 and _n35 >= 3, f"{_n35} nilai dibandingkan")
 
     # --- (c) GUI popup: 8 kolom + geometry 1180×640 + nilai + merah ----
     _pop35 = show_deviasi_popup(root, _df35, "BRG P", "R", satuan="GR",
@@ -17819,9 +17826,10 @@ def main():
     from src.ui.deviasi_popup import _compute_com_series as _ccs68
 
     def _ref_com68(df, nama_barang, nama_resto, satuan=None):
-        """Referensi gaya-LAMA (old_funcs.py probe 7c_perf_equiv2):
-        astype(str) == + pivot_table per pasangan — tanpa cache
-        factorize. (FIX 6e-PERF hanya boleh mempercepat, NOL perilaku.)"""
+        """Referensi kanonik v3.11.10 (DISINKRON audit 3-a #1/#2 —
+        mirror _compute_com_series pasca-fix): gaya astype(str) == +
+        pivot_table per pasangan, TANPA cache factorize. (FIX 6e-PERF
+        hanya boleh mempercepat, NOL perilaku.)"""
         if df is None or df.empty:
             return {}
         _jenis68 = df["JENIS"].astype(str)
@@ -17855,16 +17863,35 @@ def main():
         for _col68 in (_JSO68, _JIN68, _JBK68):
             if _col68 not in _piv68.columns:
                 _piv68[_col68] = 0.0
+        # v3.11.10 — presence 1.SO per tanggal pasangan + penutupan =
+        # kolom negatif kronologis TERAKHIR yang MEREKAM 1.SO pasangan
+        _so_pres68 = {
+            float(_t68) for _t68 in _sub68.loc[
+                _sub68["JENIS"].astype(str) == _JSO68, "_t"].tolist()}
+        _closing68 = None
+        for _t68 in reversed(_cols68):
+            if float(_t68) < 0 and float(_t68) in _so_pres68:
+                _closing68 = float(_piv68[_JSO68].get(_t68, 0.0))
+                break
         _com68 = {}
         for _i68, _t68 in enumerate(_cols68):
+            if float(_t68) not in _so_pres68:
+                continue      # SO(t) tak direkam → com absent
             try:
                 _is1_68 = int(float(_t68)) == 1
             except (TypeError, ValueError):
                 _is1_68 = False
-            if _is1_68 and _t68 in _sa68:
-                _base68 = _sa68[_t68]
+            if _is1_68:
+                if _t68 in _sa68:
+                    _base68 = _sa68[_t68]
+                elif _closing68 is not None:
+                    _base68 = _closing68
+                else:
+                    continue  # tanpa basis → com(1) absent
             elif _i68 == 0:
-                _base68 = 0.0
+                continue      # kolom pertama: tak ada t−1
+            elif float(_cols68[_i68 - 1]) not in _so_pres68:
+                continue      # SO(t−1) tak direkam → basis 0 = garbage
             else:
                 _base68 = float(_piv68[_JSO68].get(_cols68[_i68 - 1], 0.0))
             _com68[_t68] = (_base68

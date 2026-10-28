@@ -87,7 +87,8 @@ run_pending()
 
 stop_state = str(app.btn_stop.cget("state"))
 elapsed_alive = app._elapsed_after_id is not None
-H.out(f"state during run #2 : is_running={app.is_running} "
+running_during = app.is_running   # v3.11.10: simpan SEBELUM ⏹ — _stop_pipeline memang menurunkan is_running
+H.out(f"state during run #2 : is_running={running_during} "
       f"btn_stop={stop_state} elapsed_after_id_set={elapsed_alive}")
 
 # can the user still stop run #2?
@@ -95,11 +96,11 @@ app._stop_pipeline()
 stoppable = app.stop_event.is_set()
 H.out("⏹ clicked during run #2 → stop_event set?", stoppable)
 
-ok_state = (app.is_running is True and stop_state == "normal"
+ok_state = (running_during is True and stop_state == "normal"
             and elapsed_alive and stoppable)
 H.out("EXPECTED : is_running=True, btn_stop=normal, elapsed timer alive, "
       "stop works")
-H.out(f"ACTUAL   : is_running={app.is_running}, btn_stop={stop_state}, "
+H.out(f"ACTUAL   : is_running={running_during}, btn_stop={stop_state}, "
       f"elapsed_after_id_set={elapsed_alive}, stop works={stoppable}")
 verdict = "NOT-BUG" if ok_state else "BUG"
 H.out("VERDICT  :", verdict)

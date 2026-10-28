@@ -431,6 +431,19 @@ class FollowUpView(tk.Frame):
             self._render()
 
     @staticmethod
+    def _fu_isblank(v) -> bool:
+        """v3.11.10 — FIX (audit 3-c #22): cek nilai kosong/NA TANPA raise.
+        `v in ("", None)` / `v not in ("", None)` melempar TypeError utk
+        pd.NA (bool pd.NA ambigu) — dipakai _fu_num/_fu_pct/_so/guard
+        info Selisih (probe p01 agent1b: _fu_num <RAISE TypeError>)."""
+        if v is None or (isinstance(v, str) and v == ""):
+            return True
+        try:
+            return bool(pd.isna(v))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
     def _fu_num(v):
         """v3.9.59 — FIX 2e-04/2f-14: format angka INDONESIA (pola
         _fmt_num in_selisih_view / fmt_nominal_cell nominal_common):
@@ -438,8 +451,10 @@ class FollowUpView(tk.Frame):
         '-'. Dulu koma ribuan EN + minus saran-tanda ('1,234.5' /
         '-1,234') — nilai snapshot sama tampil beda gaya antar tab
         (Deviasi GR '(1.234)' vs Follow Up '-1,234') → risiko salah
-        baca koma desimal/ribuan."""
-        if v in ("", None):
+        baca koma desimal/ribuan.
+        v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → '-' (dulu RAISE
+        TypeError di `v in ("", None)`)."""
+        if FollowUpView._fu_isblank(v):
             return "-"
         try:
             f = float(v)
@@ -461,8 +476,10 @@ class FollowUpView(tk.Frame):
         """Loss Surplus to BOM — rasio gaya file sample (1.0053 → '1,01';
         0.0524 → '0,05'; minus kurung).
         v3.9.59 — FIX 2f-14: desimal KOMA (dulu titik EN '1.01'); minus
-        tetap kurung; NaN → '-' (bukan 'nan')."""
-        if v in ("", None):
+        tetap kurung; NaN → '-' (bukan 'nan').
+        v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → '-' (pola guard
+        yang sama dgn _fu_num — dulu RAISE TypeError)."""
+        if FollowUpView._fu_isblank(v):
             return "-"
         try:
             f = float(v)
@@ -490,8 +507,12 @@ class FollowUpView(tk.Frame):
         dev_txt = self._fu_num(dev) if dev_f else "-"
 
         def _so(v):
+            # v3.11.10 — FIX (audit 3-c #22): guard pd.NA-safe — dulu
+            # `v not in ("", None)` melempar TypeError (bool pd.NA
+            # ambigu) sebelum mencapai _fu_num.
             try:
-                return self._fu_num(float(v)) if v not in ("", None) else "-"
+                return (self._fu_num(float(v))
+                        if v not in ("", None) else "-")
             except (TypeError, ValueError):
                 return "-"
 
@@ -513,10 +534,10 @@ class FollowUpView(tk.Frame):
             _cek_display_text(snap.get("cek", "")),
             _so(snap.get("so")),
             dev_txt,
-            self._fu_num(info.get("Selisih")) if info.get("Selisih")
-            not in ("", None) else "-",
+            self._fu_num(info.get("Selisih"))
+            if not self._fu_isblank(info.get("Selisih")) else "-",
             self._fu_num(info.get("Selisih Deviasi"))
-            if info.get("Selisih Deviasi") not in ("", None) else "-",
+            if not self._fu_isblank(info.get("Selisih Deviasi")) else "-",
             str(info.get("Cek FU", "") or "-"),
             snap.get("asal", ""),
             "Selesai" if resolved else "Menunggu",

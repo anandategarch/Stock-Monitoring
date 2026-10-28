@@ -667,8 +667,16 @@ class DeviasiPopup(tk.Toplevel):
     def _fmt_num(val) -> str:
         """Format angka Indonesia (pola DeviasiView._fmt_num): 0 → '-',
         minus dalam kurung, 1 desimal bila pecahan."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        # v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → "" (guard
+        # `isinstance(val, float)` meloloskan pd.NA → float(pd.NA)
+        # TypeError → str '<NA>' tampil; probe p01 agent1b).
+        if val is None:
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         try:
             v = float(val)
         except (TypeError, ValueError):
@@ -733,19 +741,30 @@ def _compute_com_series(df: pd.DataFrame, nama_barang: str,
     so_prev(t) = SO pasangan di tanggal kolom GLOBAL SEBELUM t — kolom
     global = union tanggal baris 4 JENIS (SALDO AWAL · 1.SO · 4.IN ·
     8.BARANG KELUAR) dari SEMUA pasangan di frame (persis col_keys
-    laporan). Pasangan TANPA baris SO di kolom global t−1 dibaca 0
-    (fillna — BUKAN SO tanggal pair-sebelumnya): pair dgn SO di t=1 &
-    t=3 mendapat com(3) = 0 − SO(3) bila kolom global t=2 ada (dari
-    pasangan lain), = SO(1) − SO(3) bila t=2 tidak ada di frame —
-    identik perilaku Anomali COM (dan M Table.Pivot atas kolom yang
-    sama). Tanggal pertama kolom → so_prev 0; tanggal 1 → SALDO AWAL
-    pasangan BILA ada (dibaca TANPA fill — 'SA ada nilainya 0' ≠
-    'SA tidak ada'), fallback so_prev (tanggal negatif bulan lalu).
+    laporan).
+
+    v3.11.10 — FIX (audit 3-a) bug #1/#2: HANYA hari yang SO-nya
+    tercatat di KEDUA ujung yang menghasilkan com —
+      • SO(t) tak direkam (tak ada baris 1.SO pasangan di tanggal itu)
+        → com(t) ABSENT (popup menampilkan kolom kosong, bukan angka
+        0-based garbage — probe_valid_days BEBEK t3 dulu menampilkan
+        35 = SO(2)+IN(3)−0);
+      • basis so_prev(t) = nilai SO kolom global sebelumnya HANYA bila
+        1.SO pasangan tercatat di kolom itu (t4 BEBEK: kolom t3 hanya
+        ber-IN → com(4) absent, dulu −15 = 0−SO(4));
+      • com(1) = SALDO AWAL(1) bila ada baris SA asli, else nilai SO
+        penutupan bulan lalu (kolom negatif kronologis TERAKHIR yang
+        MEREKAM 1.SO pasangan — BEBEK: penutupan −28=40, bukan kunci
+        kalender terakhir −30 yang hanya ber-BM → com(1)=10, dulu
+        −30); keduanya absen → com(1) absent.
+    (Baris filler 1.SO/SALDO AWAL NILAI=0 sudah dibuang di append1 —
+    fix fondasi audit 3-0; presence di sini = benar-benar direkam.)
 
     Dihitung DALAM grup satuan yang diklik (pola FIX 35-b — konsisten
     dgn angka popup GR/PCS; matriks Anomali COM level pasangan tanpa
     satuan → identik utk pasangan 1-satuan, seluruh data real).
-    Return: {tanggal(float) → nilai com} — kosong bila tak ada baris.
+    Return: {tanggal(float) → nilai com} — HANYA tanggal ber-com
+    bermakna; kosong bila tak ada baris.
     """
     if df is None or df.empty:
         return {}
@@ -807,16 +826,39 @@ def _compute_com_series(df: pd.DataFrame, nama_barang: str,
     in_s = piv[_JENIS_IN]
     bk_s = piv[_JENIS_BK]
 
+    # v3.11.10 — FIX (audit 3-a): kehadiran 1.SO pasangan per tanggal
+    # (baris ADA ≠ nilai 0) + SO penutupan = kolom negatif kronologis
+    # TERAKHIR yang MEREKAM 1.SO pasangan ini (kunci kalender terakhir
+    # bisa hanya ber-BM/IN tanpa SO — probe_valid_days BEBEK: −30 ber-BM,
+    # penutupan nyata −28 ber-SO 40).
+    so_pres: set = {
+        float(t) for t in sub.loc[
+            sub["JENIS"].astype(str) == _JENIS_SO, "_t"].tolist()}
+    closing = None
+    for t in reversed(col_keys):
+        if float(t) < 0 and float(t) in so_pres:
+            closing = _num(so_s.get(t, 0.0))
+            break
+
     com: dict = {}
     for i, t in enumerate(col_keys):
+        if float(t) not in so_pres:
+            continue          # SO(t) tak direkam → com(t) tak bermakna
         try:
             is_t1 = int(float(t)) == 1
         except (TypeError, ValueError):
             is_t1 = False
-        if is_t1 and t in sa_raw:
-            base = sa_raw[t]           # base com(1) = SA pair (audit fix)
+        if is_t1:
+            if t in sa_raw:
+                base = sa_raw[t]       # basis com(1) = SA pair (audit fix)
+            elif closing is not None:
+                base = closing         # else: SO penutupan bulan lalu
+            else:
+                continue               # tanpa basis → com(1) undefined
         elif i == 0:
-            base = 0.0
+            continue                   # kolom pertama: tak ada t−1
+        elif float(col_keys[i - 1]) not in so_pres:
+            continue          # SO(t−1) tak direkam → basis 0 = garbage
         else:
             base = _num(so_s.get(col_keys[i - 1], 0.0))
         com[t] = (base + _num(in_s.get(t, 0.0)) - _num(bk_s.get(t, 0.0))
@@ -877,7 +919,8 @@ def _com_acr_avg(df: pd.DataFrame, nama_barang: str, nama_resto: str,
     Hari VALID = hari yang COM-nya bermakna (mirror com_analisa):
     baris 1.SO tercatat di KEDUA ujung (t−1 & t); t=1 → SALDO AWAL(1)
     ada ATAU 1.SO penutupan bulan lalu (kolom negatif kronologis
-    terakhir ber-SO). ACR dirata-rata pada hari valid yang SAMA
+    TERAKHIR yang MEREKAM SO — v3.11.10 audit 3-a). ACR dirata-rata
+    pada hari valid yang SAMA
     (window tunggal apple-to-apple; tanggal tanpa baris 9.ACR
     menyumbang 0 — pemakaian sistem nihil).
 
@@ -898,11 +941,17 @@ def _com_acr_avg(df: pd.DataFrame, nama_barang: str, nama_resto: str,
     so_pres = _pair_presence(df, nama_barang, nama_resto, _JENIS_SO, satuan)
     sa_pres = _pair_presence(df, nama_barang, nama_resto, _JENIS_SA, satuan)
 
-    # kolom negatif kronologis terakhir (penutupan bulan lalu) — basis
-    # sah alternatif com(1) (mirror com_analisa prev_neg).
+    # kolom negatif kronologis TERAKHIR yang MEREKAM SO pasangan ini
+    # (penutupan bulan lalu — basis sah alternatif com(1); mirror
+    # com_analisa). v3.11.10 — FIX (audit 3-a) bug #1: kunci kalender
+    # terakhir bisa HANYA ber-BM/IN tanpa baris 1.SO (probe_valid_days
+    # BEBEK: −30 ber-BM, penutupan nyata −28 ber-SO) — tanpa filter ini
+    # hari-1 salah dinyatakan tak valid (n=2, harusnya 3; Avg COM 5 →
+    # 6,67 / Avg ACR 4 → 2,67).
     col_keys = _com_col_keys(df)
-    neg = [t for t in col_keys if float(t) < 0]
-    prev_neg = float(neg[-1]) if neg else None
+    neg_so = [t for t in col_keys
+              if float(t) < 0 and float(t) in so_pres]
+    prev_neg = float(neg_so[-1]) if neg_so else None
 
     n, s_com, s_acr = 0, 0.0, 0.0
     for t in range(1, h_i):
@@ -942,9 +991,12 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
       COM      = pemakaian harian, formula PERSIS
                  laporan_deviasi_view._compute_com_matrix
                  (_compute_com_series — kolom tanggal GLOBAL, parity
-                 48/48 nilai vs matrix Anomali COM). Tanggal tampil di
-                 luar kolom global (mis. hanya 2.SALDO AKHIR) → COM
-                 kosong (tab Anomali COM juga tak punya nilainya).
+                 vs matrix Anomali COM). Tanggal tampil di luar kolom
+                 global (mis. hanya 2.SALDO AKHIR) → COM kosong (tab
+                 Anomali COM juga tak punya nilainya). v3.11.10 —
+                 tanggal yang SO(t)/SO(t−1)-nya tak tercatat juga
+                 kosong (com undefined, bukan 0-based garbage — audit
+                 3-a bug #1/#2).
 
     satuan (FIX 35-b / audit 34-b RISK-2): tabel utama memivot per
     (Nama Barang × NAMA RESTO × SATUAN) — pasangan yang punya baris GR

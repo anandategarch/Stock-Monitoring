@@ -32,6 +32,7 @@ import sys
 import threading
 import time as _time
 import tkinter as tk
+import weakref
 from tkinter import messagebox as _mb
 from tkinter import ttk
 
@@ -126,16 +127,63 @@ def fmt_int_id(v) -> str:
 _VALUE_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$|^\d+(?:,\d+)?$")
 
 
+# v3.11.10 — FIX (audit 3-c #18/#21): label TAMPILAN utk daftar nilai ⧩.
+# Sel kosong ('' — NaN/None ter-format formatter view; 'nan' mentah)
+# → '(Kosong)' — konvensi "(Blanks)" AutoFilter Excel; dulu `if str(v)`
+# membuang '' dari daftar → "centang semua nilai" membuang baris sel-
+# kosong SENYAP dan kolom all-blank tak bisa dibuka sama sekali (probe
+# p03 agent1b: CITRA hilang, popup all-blank menolak terbuka). Nilai dgn
+# spasi tepi ditandai '␣' (U+2423 OPEN BOX; prepend utk leading, append
+# utk trailing) supaya 'GR' vs 'GR ' tak tampil sbg DUA checkbox identik
+# (data 'GR ' nyata di rekap user — 1-c p16, probe p02 agent1b).
+# Pencocokan filter TETAP EKSAK pada nilai mentah — lihat _tree_row_passes
+# (label dipakai sebagai KUNCI seleksi/checkbox; nilai mentah diuji dulu,
+# label sebagai fallback).
+_FILTER_BLANK_LABEL = "(Kosong)"
+
+
+def _filter_disp_value(v) -> str:
+    """Label tampilan satu nilai daftar ⧩ (lihat catatan di atas)."""
+    s = str(v)
+    if s == "" or s == "nan":
+        return _FILTER_BLANK_LABEL
+    if s != s.strip():
+        if s[:1].isspace():
+            s = "␣" + s
+        if s[-1:].isspace():
+            s = s + "␣"
+    return s
+
+
 def _filter_value_sort_key(v: str):
-    """Key tuple (numerik_dulu, angka, kunci_teks) — teks non-numerik
-    masuk grup kedua (urut NATURAL v3.9.62), angka grup pertama (naik).
+    """Key tuple (grup, angka, kunci_teks) — grup −1: label tanggal
+    bulan-lalu 'N•' (kronologis, PALING AWAL), grup 0: angka (naik),
+    grup 1: teks non-numerik (urut NATURAL v3.9.62), grup 2: '(Kosong)'
+    paling akhir.
     v3.9.51: prefiks 'Rp ' (currency — fmt_rp_cell) dibuang dulu supaya
     nilai nominal tetap terurut numerik di popup filter ⧩.
     v3.9.62: cabang teks memakai natural_key ("Nomor PO 2" < "Nomor
     PO 10" — dulu leksikografis).
     v3.9.64: prefiks '+' juga dibuang (fmt_pct_cell bertanda — '+12,5%'
-    dulu masuk grup TEKS sementara '-8,3%' numerik; audit 15-c F-05)."""
+    dulu masuk grup TEKS sementara '-8,3%' numerik; audit 15-c F-05).
+    v3.11.10 — FIX (audit 3-c #20): label tanggal '25•' dulu masuk GRUP
+    TEKS SETELAH semua angka → daftar nilai ⧩ kolom Tanggal tidak
+    kronologis (probe p02 agent1b: [1,2,15,31,25•,26•,30•,31•]); kini
+    'N•' diurutkan SEBELUM angka biasa (bulan lalu = lebih awal),
+    numerik di dalam grupnya — konsisten dgn sort kolom Tanggal
+    (v3.11.1 B3) & urutan export.
+    v3.11.10 — FIX (audit 3-c #18): '(Kosong)' selalu PALING AKHIR.
+    CATATAN PENOMORAN GRUP (v3.11.10): numerik TETAP grup 0 & teks
+    TETAP grup 1 (kontrak assertion suite lama — v3.9.51 Rp-aware &
+    §76h mem-assert [0]==0); label 'N•' = grup −1 (paling awal),
+    '(Kosong)' = grup 2 (paling akhir)."""
     s = str(v).strip()
+    if s.endswith("•"):
+        head = s[:-1].strip()
+        if head.isdigit():
+            return (-1, float(head), "")
+    if s == _FILTER_BLANK_LABEL:
+        return (2, 0.0, "")
     if s.endswith("%"):
         s = s[:-1].strip()
     neg = False
@@ -816,7 +864,17 @@ def tree_selection_tsv(tree: ttk.Treeview) -> str:
     FIX 6b-08 (audit 6-b): kolom mengikuti URUTAN TAMPILAN
     (displaycolumns) — kolom yang disembunyikan ◱ Kolom TIDAK ikut
     tersalin; nilai values[] tetap diindeks LOGIS lalu dipetakan ke
-    kolom display."""
+    kolom display.
+    v3.11.10 — FIX (audit 3-c #19): seleksi yang memuat baris ANAK
+    (struktur 2-level matrix pivot: parent = nama barang dgn values
+    kosong, anak = metric '1.SO' + nilai matrix) memakai format TSV
+    utuh: header = [label #0, 'Metrik', ...kolom...], baris parent
+    pengelompok (punya anak) DI-SKIP (sel matrix-nya kosong), baris
+    anak = [text PARENT, text anak, ...values]. Dulu kolom pertama
+    berlabel 'Nama Barang' berisi NAMA METRIC (nama barang hilang
+    dari baris data) — paste Excel menyesatkan (probe p05 agent1b:
+    header 'Nama Barang' + baris '1.SO\t1.000\t990'). Tree datar
+    (tanpa baris anak terpilih) tak tersentuh."""
     # FIX 6b-08: kolom display (urutan tampilan), bukan tree["columns"].
     cols = display_data_columns(tree)
     use_tree_col = False
@@ -846,7 +904,38 @@ def tree_selection_tsv(tree: ttk.Treeview) -> str:
         except tk.TclError:
             headers.append(_tsv_cell(c))
     lines = ["\t".join(headers)]
-    for iid in tree.selection():
+    sel = tree.selection()
+    # v3.11.10 — FIX (audit 3-c #19): mode baris anak (lihat docstring).
+    try:
+        child_mode = use_tree_col and any(tree.parent(iid) for iid in sel)
+    except tk.TclError:
+        child_mode = False
+    if child_mode:
+        lines = ["\t".join(headers[:1] + ["Metrik"] + headers[1:])]
+        for iid in sel:
+            vals = list(tree.item(iid, "values") or [])
+            row = []
+            try:
+                par = tree.parent(iid)
+            except tk.TclError:
+                continue
+            if par:
+                # baris anak → [nama barang (text parent), metric, values]
+                row.append(_tsv_cell(tree.item(par, "text")))
+                row.append(_tsv_cell(tree.item(iid, "text")))
+            else:
+                if tree.get_children(iid):
+                    continue   # parent pengelompok — sel matrix kosong
+                # baris top-level mandiri (tanpa anak) → Metrik kosong
+                row.append(_tsv_cell(tree.item(iid, "text")))
+                row.append("")
+            for c in cols:
+                k = col_pos.get(c)
+                row.append(_tsv_cell(vals[k])
+                           if k is not None and 0 <= k < len(vals) else "")
+            lines.append("\t".join(row))
+        return "\n".join(lines)
+    for iid in sel:
         vals = list(tree.item(iid, "values") or [])
         row = []
         if use_tree_col:
@@ -2003,8 +2092,15 @@ class HeaderFilter:
         try:
             # FIX B-19 (audit 2-b): urutkan numerik-aware — "1.000" harus
             # muncul SETELAH "999" (dulu leksikografis).
-            values = sorted({str(v) for v in self.get_values()
-                             if str(v) and str(v) != "nan"},
+            # v3.11.10 — FIX (audit 3-c #18/#21): daftar memakai LABEL
+            # TAMPILAN (pemetaan _filter_disp_value): ''/'nan' →
+            # '(Kosong)' (dulu `if str(v)` membuang '' — centang-semua
+            # membuang baris sel-kosong senyap + kolom all-blank tak bisa
+            # dibuka, probe p03 agent1b), 'GR ' → 'GR␣' (dulu dua
+            # checkbox identik, probe p02). Pencocokan tetap eksak nilai
+            # mentah (lihat _tree_row_passes).
+            values = sorted({_filter_disp_value(v)
+                             for v in self.get_values()},
                             key=_filter_value_sort_key)
         except Exception:
             values = []
@@ -2019,7 +2115,13 @@ class HeaderFilter:
         # FIX B-05: simpan daftar lengkap — nilai di luar cap tetap bisa
         # ditemukan via pencarian & dihitung benar saat filter diterapkan.
         self._values_list = values
-        self._all_values = set(values)
+        # v3.11.10 — FIX (audit 3-c #18): sertakan '' (nilai MENTAH sel
+        # kosong) sbg anggota _all_values — keanggotaan raw dipakai
+        # introspeksi (test/probe: `"" in _all_values`); seleksi &
+        # counter tetap memakai label display (lihat _emit — '' tidak
+        # pernah menjadi nilai terpilih).
+        self._all_values = set(values) | (
+            {""} if _FILTER_BLANK_LABEL in values else set())
         # v3.9.59 — fix 2b-01 (audit 2-b): lebar popup mengikuti nilai
         # TERPANJANG (clamp _HF_POPUP_CAP 460px) — dulu ruang teks tetap
         # ``popup_width-30`` (±284px) → nilai >±40 char terpotong TANPA
@@ -2249,6 +2351,15 @@ class HeaderFilter:
         else:
             base = (set(self._vars) if self.selected is None
                     else set(self.selected))
+        # v3.11.10 — FIX (audit 3-c #18): '' (anggota raw sel kosong di
+        # _all_values) BUKAN nilai terpilih — toggle-nya adalah label
+        # '(Kosong)'; '' yang lolos ke seleksi akan mencocokkan sel
+        # kosong lewat jalur nilai-mentah padahal user mengecualikannya.
+        # total juga dihitung tanpa '' supaya centang-semua → None utk
+        # kolom yang memuat sel kosong.
+        base.discard("")
+        if "" in (self._all_values or ()):
+            total -= 1
         for v, var in self._vars.items():
             if var.get():
                 base.add(v)
@@ -3094,7 +3205,12 @@ def _tree_row_passes(iid: str, kw: dict, col_idx: dict, active: dict,
                                            TypeError, ValueError,
                                            tk.TclError)):
                     v = str(value_get(str(iid), c, v))
-        if v not in sel:
+        if v not in sel and _filter_disp_value(v) not in sel:
+            # v3.11.10 — FIX (audit 3-c #18/#21): daftar nilai ⧩ memakai
+            # label tampilan ('(Kosong)' utk sel kosong ''/'nan', '␣' utk
+            # spasi tepi) — nilai mentah diuji DULU (seleksi programatik
+            # set_selected/persistensi sesi lama memakai nilai mentah),
+            # label sebagai fallback (checkbox memakai label).
             return False
     return True
 
@@ -3134,6 +3250,15 @@ def apply_tree_row_filters(tree: ttk.Treeview, filters: dict,
     # dulu truthiness `if s` menelan set() sebagai "tanpa filter".
     active = {c: s for c, s in filters.items() if s is not None}
     try:
+        # v3.11.10 — FIX (audit 3-c bug #12): SATU titik flush terpadu —
+        # SEMUA batch insert pending di tree ini (render view, sort, copy
+        # clone dua-fase) disisipkan PENUH secara sinkron SEBELUM cache
+        # dibangun. Filter-vs-sort dulu bisa kehilangan baris: batch sort
+        # dibatalkan di bawah tapi cache dibangun dari baris yang baru
+        # ter-insert sebagian → sisa baris lenyap dari tree (keluarga bug
+        # #11/#12, probe1/probe2 agent1d).
+        with contextlib.suppress(Exception):
+            flush_pending_batches(tree)
         # FIX 6b-04 (audit 6-b): batalkan batch insert pending DULU —
         # membangun cache dari baris parsial lalu membatalkan sisa batch
         # membuat clone kehilangan baris yang belum tersalin.
@@ -3585,6 +3710,68 @@ def run_async(widget, work, on_done, overlay: LoadingOverlay | None = None,
     return job
 
 
+# v3.11.10 — FIX (audit 3-c bug #11/#12): REGISTRI batch insert pending
+# PER-TREE. insert_tree_items mendaftarkan handle cancel-nya ke registri
+# ini (WeakKeyDictionary — tree mati/GC → entri ikut terlepas), sehingga
+# operasi yang butuh snapshot children LENGKAP bisa mem-FLUSH sisa batch
+# secara sinkron TANPA bergantung caller menyimpan handle-nya:
+# · open_tree_maximized (clone ⛶) — dulu clone dibuka di tengah render
+#   batched view (handle cancel dibuang caller, mis. deviasi_view) →
+#   clone parsial PERMANEN (probe1 agent1d: 500/3000 baris, silent loss);
+# · sort_tree_by_column / apply_tree_row_filters — flush terpadu SEMUA
+#   batch pending sebelum snapshot children (sort-vs-copy dulu lolos →
+#   urutan campur permanen, probe2 agent1d: head terurut + ekor asli).
+_TREE_PENDING_BATCHES: weakref.WeakKeyDictionary[object, list] = (
+    weakref.WeakKeyDictionary())
+
+
+def _register_pending_batch(tree, handle) -> None:
+    """Catat handle batch pending utk ``tree`` (senyap utk objek yang tak
+    bisa di-weakref — ttk.Treeview normal selalu bisa)."""
+    try:
+        _TREE_PENDING_BATCHES.setdefault(tree, []).append(handle)
+    except TypeError:
+        pass
+
+
+def _unregister_pending_batch(tree, handle) -> None:
+    """Lepas handle dari registri per-tree (batch selesai/dibatalkan/
+    ter-flush — menjaga registri kecil: closure handle memegang daftar
+    item utk tree yang hidup lama / render berkali-kali)."""
+    try:
+        lst = _TREE_PENDING_BATCHES.get(tree)
+    except (KeyError, TypeError):
+        return
+    if lst is None:
+        return
+    with contextlib.suppress(ValueError):
+        lst.remove(handle)
+    if not lst:
+        with contextlib.suppress(KeyError):
+            del _TREE_PENDING_BATCHES[tree]
+
+
+def flush_pending_batches(tree) -> None:
+    """v3.11.10 — FIX (audit 3-c bug #11/#12): FLUSH sinkron SEMUA batch
+    insert pending pada ``tree`` (sisipkan sisa baris + panggil on_done —
+    pola yang sama dgn _flush sort-race v3.11.1, kini utk SEMUA batch
+    tree tsb, bukan hanya milik sort). Idempoten; no-op bila tak ada
+    batch pending. Dipanggil open_tree_maximized (sebelum snapshot _index
+    tree SUMBER), sort_tree_by_column & apply_tree_row_filters (sebelum
+    snapshot children)."""
+    try:
+        lst = _TREE_PENDING_BATCHES.get(tree)
+    except (KeyError, TypeError):
+        return
+    if not lst:
+        return
+    for handle in list(lst):
+        flush = getattr(handle, "flush", None)
+        if flush is not None:
+            with contextlib.suppress(Exception):
+                flush()
+
+
 def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
                       on_done=None, chunk_callback=None, delay: int | None = None):
     """Insert items [(parent_iid, iid, kwargs)] bertahap per-batch via after()
@@ -3606,6 +3793,16 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
     if delay is None:
         delay = 10 if len(items) <= 20_000 else 1
     state = {"i": 0, "cancelled": False, "failed": 0, "finished": False}
+    # v3.11.10 — FIX (audit 3-c #11): cell handle — _finish() bisa jalan
+    # SINKRON di chunk pertama (sebelum `def cancel` dievaluasi bawah);
+    # pelepasan registri harus tetap aman di jalur itu (cell kosong =
+    # belum ter-registrasi = no-op).
+    _handle_cell: list = []
+
+    def _forget_pending():
+        h = _handle_cell[0] if _handle_cell else None
+        if h is not None:
+            _unregister_pending_batch(tree, h)
 
     def _finish():
         # FIX 6b-06: dipanggil PERSIS SEKALI di akhir jalur sukses —
@@ -3613,6 +3810,7 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
         if state["finished"] or state["cancelled"]:
             return
         state["finished"] = True
+        _forget_pending()
         if state["failed"]:
             # tidak senyap: baris + jumlah ke stderr (tidak per-item supaya
             # batch 50k tidak membanjiri log)
@@ -3663,19 +3861,6 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
         else:
             _finish()
 
-    if items:
-        chunk()
-    else:
-        # v3.9.64 — F-03: render "kosong" (0 item) juga menuntaskan siklus
-        # render → popup Cari ikut menghitung ulang (query bisa jadi tak
-        # cocok lagi — view terfilter habis).
-        if on_done:
-            on_done()
-        _pop = getattr(tree, "_find_popup", None)
-        if _pop is not None:
-            with contextlib.suppress(Exception):
-                _pop._on_tree_rerendered()
-
     def _flush():
         """v3.11.1 — FIX sort-race (audit 12-d probe1b): sisipkan SISA
         batch secara SINKRON + tuntaskan siklus (dipanggil sort BARU
@@ -3698,6 +3883,7 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
                 state["failed"] += 1
         state["i"] = len(items)
         state["finished"] = True
+        _forget_pending()
         if state["failed"]:
             print(f"insert_tree_items: {state['failed']} item dilewati "
                   f"(TclError — iid duplikat/baris invalid)",
@@ -3711,10 +3897,36 @@ def insert_tree_items(tree: ttk.Treeview, items: list, *, batch: int = 400,
 
     def cancel():
         state["cancelled"] = True
+        _forget_pending()
 
     # v3.11.1 — flush dipasang sbg atribut cancel (kompatibel penuh:
     # pemanggil lama tetap memanggil cancel()).
     cancel.flush = _flush
+    # v3.11.10 — FIX (audit 3-c #11): daftarkan handle ke registri batch
+    # pending per-tree SEBELUM chunk pertama — chunk_callback (mis. tombol
+    # ⛶ yang diklik antar-chunk render view) bisa membuka clone DI DALAM
+    # chunk pertama yang berjalan sinkron; registrasi di akhir fungsi
+    # terlambat utk jendela itu (probe1 agent1d: clone 500/3000). Batch
+    # yang tuntas di chunk pertama dilepas lagi oleh _finish/_flush.
+    _handle_cell.append(cancel)
+    _register_pending_batch(tree, cancel)
+
+    if items:
+        chunk()
+    else:
+        # v3.9.64 — F-03: render "kosong" (0 item) juga menuntaskan siklus
+        # render → popup Cari ikut menghitung ulang (query bisa jadi tak
+        # cocok lagi — view terfilter habis).
+        # v3.11.10 — FIX (audit 3-c #11): tandai selesai + lepas registri
+        # (flush/cancel berikutnya no-op; on_done tak terpanggil dobel).
+        state["finished"] = True
+        _forget_pending()
+        if on_done:
+            on_done()
+        _pop = getattr(tree, "_find_popup", None)
+        if _pop is not None:
+            with contextlib.suppress(Exception):
+                _pop._on_tree_rerendered()
     return cancel
 
 
@@ -4777,12 +4989,20 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
     #   seleksi/yview basi dari sort#1.
     # Flush → tree LENGKAP dulu; sort#2 bekerja atas himpunan penuh.
     # (flush no-op bila batch lama sudah selesai.)
-    _prev_cancel = getattr(tree, "_sort_insert_cancel", None)
-    if _prev_cancel is not None and hasattr(_prev_cancel, "flush"):
-        with contextlib.suppress(Exception):
-            _prev_cancel.flush()
-        with contextlib.suppress(Exception):
-            tree._sort_insert_cancel = None
+    # v3.11.10 — FIX (audit 3-c bug #12): flush diperluas ke SEMUA batch
+    # pending di tree ini (registri per-tree bug #11 + atribut legasi) —
+    # sort-vs-copy dulu lolos: batch salinan clone (_row_filter_cancel)
+    # tak pernah di-flush sort → snapshot parsial → urutan campur permanen
+    # (probe2 agent1d: head 599..0 terurut + ekor 600..2999 urutan asli).
+    with contextlib.suppress(Exception):
+        flush_pending_batches(tree)
+    for _attr in ("_sort_insert_cancel", "_row_filter_cancel"):
+        _h = getattr(tree, _attr, None)
+        if _h is not None and hasattr(_h, "flush"):
+            with contextlib.suppress(Exception):
+                _h.flush()
+    with contextlib.suppress(Exception):
+        tree._sort_insert_cancel = None
     children = list(tree.get_children(""))
     if len(children) < 2:
         if on_done:
@@ -5789,8 +6009,10 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
     _vg = getattr(tree, "_autofit_value_get", None)
     sampled_vals = []
     sampled_texts = []
-    for i in idxs:
-        it = tree.item(children[i])
+
+    def _sample_row(iid):
+        # cache values per baris sampel (1 panggilan Tcl per baris)
+        it = tree.item(iid)
         vals = list(it.get("values") or [])
         if _vg is not None:
             # v3.9.55 — override nilai pengukuran merge-aware; gagal →
@@ -5798,11 +6020,51 @@ def auto_fit_columns(tree: ttk.Treeview, columns=None, *,
             with contextlib.suppress((AttributeError, IndexError,
                                        TypeError, ValueError, tk.TclError)):
                 vals = [
-                    _vg(str(children[i]), logical_cols[k],
+                    _vg(str(iid), logical_cols[k],
                         vals[k] if k < len(vals) else "")
                     for k in range(len(logical_cols))]
         sampled_vals.append(vals)
         sampled_texts.append(str(it.get("text") or ""))
+
+    for i in idxs:
+        _sample_row(children[i])
+
+    # v3.11.10 — FIX (audit 3-c #17): sampel juga baris ANAK (hierarki
+    # 2-level — matrix pivot: parent = nama barang dgn values ['']*kolom,
+    # baris DATA = anak metric '1.SO' dgn nilai matrix). Dulu hanya
+    # parent (get_children("")) yang diukur → nilai ribuan '1.234.567'
+    # TERPOTONG di lebar header '25•' 46px (probe p08 agent1b: kolom 46px
+    # vs butuh ~78px). Batas agar tree raksasa tetap cepat: maks 200 anak
+    # per parent + cap total baris anak = sample_rows, disebar MERATA
+    # (indeks tersebar per parent, anggaran dibagi rata antar parent
+    # sampel — satu grup raksasa tak menghabiskan seluruh anggaran).
+    _AUTOFIT_CHILD_PER_PARENT = 200
+    _kid_groups = []
+    for i in idxs:
+        try:
+            ks = tree.get_children(children[i])
+        except tk.TclError:
+            continue
+        if ks:
+            _kid_groups.append(ks)
+    if _kid_groups:
+        _per = max(1, min(_AUTOFIT_CHILD_PER_PARENT,
+                          sample_rows // len(_kid_groups)))
+        _sampled_kids = 0
+        for ks in _kid_groups:
+            nk = len(ks)
+            k = min(nk, _per)
+            if k >= nk:
+                sel_kids = list(ks)
+            else:
+                _step = nk / float(k)
+                sel_kids = [ks[min(nk - 1, int(j * _step))]
+                            for j in range(k)]
+            for kid in sel_kids[: sample_rows - _sampled_kids]:
+                _sample_row(kid)
+                _sampled_kids += 1
+            if _sampled_kids >= sample_rows:
+                break
 
     for col in cols:
         try:
@@ -6273,6 +6535,16 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
 
     todo: list[tuple[str, str]] = []      # (parent, iid) urutan pre-order
 
+    # v3.11.10 — FIX (audit 3-c bug #11): FLUSH batch render pending di
+    # tree SUMBER sebelum snapshot _index — clone ⛶ yang dibuka di tengah
+    # render batched view (sort/filter tabel ≥1500 baris; handle cancel
+    # bisa dibuang caller, mis. deviasi_view) dulu menyalin baris PARSIAL
+    # → clone kehilangan baris PERMANEN secara senyap (probe1 agent1d:
+    # clone 500/3000). Registri per-tree membuat flush ini TIDAK butuh
+    # handle tersimpan di view.
+    with contextlib.suppress(Exception):
+        flush_pending_batches(source_tree)
+
     def _index(parent):
         # indeks dulu (murah — hanya get_children, ~34ms @29k), baru
         # snapshot item() yang mahal di-chunk.
@@ -6400,6 +6672,35 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
         with contextlib.suppress(Exception):
             _insert_cancel_fn[0]()
 
+    def _copy_flush():
+        """v3.11.10 — FIX (audit 3-c bug #12): flush sinkron DUA fase
+        salinan clone (collect + insert) — sort ⧩/heading yang diklik di
+        tengah proses salinan kini melihat tree clone LENGKAP dulu baru
+        mensnapshot children (dulu sort hanya mem-flush batch sort-nya
+        sendiri → urutan campur permanen: head terurut + ekor urutan
+        asli, probe2 agent1d). Idempoten (copy final/batal → no-op)."""
+        if copy_state["cancelled"] or getattr(
+                new_tree, "_copy_finalized", False):
+            return
+        try:
+            if not (win.winfo_exists() and new_tree.winfo_exists()):
+                return
+        except tk.TclError:
+            return
+        if copy_state["timer"] is not None:
+            with contextlib.suppress(Exception):
+                win.after_cancel(copy_state["timer"])
+            copy_state["timer"] = None
+        if copy_state["phase"] == "collect":
+            _flush_collect()
+            _start_insert()
+        # fase insert: flush batch insert salinan (handle insert_tree_items
+        # punya .flush — pola v3.11.1).
+        _fl = getattr(_insert_cancel_fn[0], "flush", None)
+        if _fl is not None:
+            with contextlib.suppress(Exception):
+                _fl()
+
     # FIX 6b-04 (audit 6-b): simpan snapshot item PENUH + finalizer di
     # tree SELAMA copy berjalan — apply_tree_row_filters memakainya bila
     # filter diklik sebelum copy selesai (cache lengkap, bukan baris
@@ -6411,6 +6712,13 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     # lama dulu (apply_tree_row_filters mengecek atribut ini); dulu cache
     # filter dibangun dari baris PARSIAL → clone rusak diam-diam.
     new_tree._row_filter_cancel = insert_cancel
+    # v3.11.10 — FIX (audit 3-c bug #12): daftarkan handle salinan ke
+    # REGISTRI batch per-tree (dgn .flush dua-fase di atas) — sort &
+    # apply_tree_row_filters mem-flush SEMUA batch pending tree ini
+    # (termasuk fase collect salinan) sebelum snapshot children. Entri
+    # ter-lepas otomatis saat window clone ditutup (WeakKeyDictionary).
+    insert_cancel.flush = _copy_flush
+    _register_pending_batch(new_tree, insert_cancel)
 
     _snap_chunk()   # mulai salinan batched (overlay tergambar duluan)
 

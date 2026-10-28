@@ -29,7 +29,11 @@ from .fn_running_stock import fn_running_stock_grouped
 
 # v3.9.44 — mask baris tanpa kategori master (jejak saldo-only; lihat
 # widgets.kategori_blank_mask utk konsumen view).
-from .helpers import kategori_blank_mask
+from .helpers import (
+    kategori_blank_mask,
+    norm_nama_barang_key_series,
+    norm_nama_resto_key_series,
+)
 from .konversi_satuan import build_konversi_map
 from .queries import (
     query_4217,
@@ -92,10 +96,42 @@ def _value_to_text_series(series: pd.Series) -> pd.Series:
         result[~is_nan & ~is_int] = float_vals
         return result
     # Object/mixed dtype: convert to str, preserve None
+    # v3.11.10 — FIX (audit 3-b, bug #8): path OBJECT kini mem-format
+    # whole-float PERSIS jalur skalar _value_to_text (0.0 → "0", 5.0 →
+    # "5" — mirror M Text.From / FIX BUG-21). Dulu astype(str) polos →
+    # "0.0" LOLOS filter != "0" LANGKAH 3 dan "123.0" bocor sebagai info
+    # dokumen (probe p06: parity skalar MISMATCH + filter LEAK; jalur
+    # numeric-dtype di atas sudah benar). Elemen non-float tetap lewat
+    # astype(str)+strip (perilaku lama — aman utk tipe eksotik); NaN/None
+    # tetap → None (dikembalikan TERAKHIR supaya .str.strip() tidak
+    # mengubahnya jadi NaN — paritas skalar per-elemen, probe p06).
     is_null = series.isna()
-    result = series.astype(str).where(~is_null, other=None)
-    # Strip whitespace
+    result = series.astype(str)
     result = result.str.strip() if hasattr(result, 'str') else result
+
+    def _whole_float_text(v):
+        # float utuh → string int; NaN dan non-float → None (tak diganti)
+        if isinstance(v, (float, np.floating)) and not pd.isna(v):
+            try:
+                if v == int(v):
+                    return str(int(v))
+            except (OverflowError, ValueError):
+                pass
+        return None
+
+    # nilai UNIK saja (factorize C-level) — biaya O(nilai unik) bukan
+    # O(baris); kolom Nomor real-data ratusan ribu baris tapi ribuan nilai.
+    _, _uniq = series.factorize()
+    _flt = {}
+    for _u in _uniq.tolist():
+        _t = _whole_float_text(_u)
+        if _t is not None:
+            _flt[_u] = _t
+    if _flt:
+        _sel = series.isin(_flt) & ~is_null
+        result = result.mask(_sel, series.map(_flt))
+    # null → None PALING AKHIR (setelah strip/mask)
+    result = result.where(~is_null, other=None)
     return result
 
 
@@ -199,7 +235,9 @@ def _group_info_columns(info_prep: pd.DataFrame, key_columns: list,
 _INTERNAL_IN_TAGS = ("42.05", "42.05 (Bulan Lalu)")
 
 
-def _source_kiriman_per_pair(in_df: "pd.DataFrame | None") -> pd.DataFrame:
+def _source_kiriman_per_pair(in_df: "pd.DataFrame | None",
+                             rep_barang: "dict | None" = None,
+                             rep_resto: "dict | None" = None) -> pd.DataFrame:
     """v3.9.29 — klasifikasi SOURCE KIRIMAN per pasangan (Nama Barang ×
     NAMA RESTO) dari SUMBER IN aktual (konfirmasi user):
       - hanya dokumen 42.05 / 42.05 (Bulan Lalu)      → "Internal"
@@ -219,6 +257,18 @@ def _source_kiriman_per_pair(in_df: "pd.DataFrame | None") -> pd.DataFrame:
     if in_df is None or in_df.empty or any(c not in in_df.columns for c in cols):
         return empty
     d = in_df[list(cols)].copy()
+    # v3.11.10 — FIX (audit 3-b, bug #6): kanonikalisasi nama pasangan
+    # SEBELUM groupby (peta kunci → ejaan perwakilan dari build_append1).
+    # Drift ejaan antar dokumen IN (32.24 'GULA' vs 99.01 'GULA ') dulu
+    # memecah SATU pasangan jadi 2 grup klasifikasi (Campuran bisa
+    # terbelah Internal/Eksternal) dan barisnya salah-cocok saat merge
+    # LANGKAH 5b. None (pemanggil lama) = perilaku lama tanpa kanonik.
+    if rep_barang is not None and "Nama Barang" in d.columns:
+        _kb = norm_nama_barang_key_series(d["Nama Barang"])
+        d["Nama Barang"] = _kb.map(rep_barang).fillna(d["Nama Barang"])
+    if rep_resto is not None and "NAMA RESTO" in d.columns:
+        _kr = norm_nama_resto_key_series(d["NAMA RESTO"])
+        d["NAMA RESTO"] = _kr.map(rep_resto).fillna(d["NAMA RESTO"])
     d["SOURCE IN"] = d["SOURCE IN"].fillna("").astype(str).str.strip()
     d["_int"] = d["SOURCE IN"].isin(_INTERNAL_IN_TAGS)
     g = d.groupby(["Nama Barang", "NAMA RESTO"], dropna=False, sort=False)["_int"] \
@@ -260,6 +310,32 @@ def _collect_protected_barangs(dfs: list) -> set:
             if v_norm:
                 prot.add(v_norm)
     return prot
+
+
+def _pair_key_reps(frames: list, col: str, norm_series_fn) -> dict:
+    """v3.11.10 — FIX (audit 3-b, bug #6): peta {kunci-norm → ejaan RAW
+    perwakilan} dari daftar frame berurutan PRIORITAS (frames[0] menang;
+    dipanggil build_append1 dgn [full_rekap_so, q4217, out_df, keluar_df,
+    in_df] → ejaan REKAP MENTAH diprioritaskan — file milik user, ejaan
+    yang user kenali; jatuh ke sumber lain bila pasangan tanpa baris
+    rekap). Ejaan perwakilan = nilai mentah PERTAMA per kunci
+    (drop_duplicates keep='first' level C). Satu pasangan fisik lalu
+    tampil KONSISTEN satu ejaan di seluruh output — ejaan yang masih
+    per-tanggal akan memecah lagi groupby downstream (running stock,
+    deviasi_view)."""
+    rep: dict = {}
+    for df in frames:
+        if df is None or getattr(df, "empty", True) \
+                or col not in getattr(df, "columns", []):
+            continue
+        keys = norm_series_fn(df[col])
+        kk = pd.DataFrame(
+            {"k": keys.to_numpy(), "raw": df[col].to_numpy()}
+        ).drop_duplicates(subset=["k"], keep="first")
+        # setdefault (BUKAN update — update menimpa prioritas frames[0])
+        for _k, _raw in zip(kk["k"].tolist(), kk["raw"].tolist()):
+            rep.setdefault(_k, _raw)
+    return rep
 
 
 def apply_kategori_manual(expanded_kategori: "pd.DataFrame",
@@ -475,9 +551,36 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             _km_log += (f" — {_km['n_conflict']:,} konflik rasio "
                         "(nilai pertama dipakai)")
         print(f"    {_km_log}")
+    # v3.11.10 — FIX (audit 3-b, bug #6): KUNCI PASANGAN TERNORMALISASI.
+    # groupby KeyColumns pada STRING MENTAH membuat drift whitespace/case/
+    # dtype antar file (42.17 'GULA (V.20) ' vs rekap 'GULA (V.20)'; sel
+    # numerik 100383 vs teks '100383') memecah SATU pasangan fisik jadi
+    # DUA grup pivot: saldo jatuh di satu grup, SO/IN di grup lain →
+    # SALDO AKHIR & DEVIASI salah utk KEDUA half-nya (probe p02: deviasi
+    # [+100, −80] padahal seharusnya [20]). Titik join lain SUDAH
+    # menormalkan (kategori v3.9.33, saldo-sistem view v3.11.1, whitelist
+    # 4217 v3.9.39) — pivot inti belum. Fix: ejaan tiap pasangan
+    # dikanonikalisasi IN-PLACE di frame source (kunci = konvensi PERSIS
+    # lookup saldo-sistem deviasi_view — lihat helpers.norm_nama_*_key)
+    # sehingga SEMUA groupby/merge downstream (information LANGKAH 3,
+    # pivot LANGKAH 4, running stock, merge information) bekerja pada SATU
+    # ejaan konsisten per pasangan; ejaan perwakilan prioritas REKAP
+    # MENTAH (lihat _pair_key_reps). Kolom kunci temp __k_barang/__k_resto
+    # dipasang di `final` utk merge SATUAN/SOURCE DATA (LANGKAH 8/9 —
+    # frame eksternal ber-ejaan mentah) lalu dibuang sebelum return.
+    _K_BAR = "__k_barang"
+    _K_RST = "__k_resto"
+    _parts_prio = [full_rekap_so, q4217, out_df, keluar_df, in_df]
+    _rep_barang = _pair_key_reps(_parts_prio, "Nama Barang",
+                                 norm_nama_barang_key_series)
+    _rep_resto = _pair_key_reps(_parts_prio, "NAMA RESTO",
+                                norm_nama_resto_key_series)
+
     # v3.9.29 — peta klasifikasi SOURCE KIRIMAN per pasangan (dipakai
-    # LANGKAH 5b; mengganti nilai master DBS Kategori)
-    _src_kiriman = _source_kiriman_per_pair(in_df)
+    # LANGKAH 5b; mengganti nilai master DBS Kategori) — nama pasangan
+    # dikanonikalisasi dulu (bug #6, lihat _source_kiriman_per_pair).
+    _src_kiriman = _source_kiriman_per_pair(
+        in_df, rep_barang=_rep_barang, rep_resto=_rep_resto)
     if not _src_kiriman.empty:
         _n_int = int((_src_kiriman["SOURCE KIRIMAN"] == "Internal").sum())
         _n_eks = int((_src_kiriman["SOURCE KIRIMAN"] == "Eksternal").sum())
@@ -505,6 +608,15 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
 
     # Table.Buffer equivalent — just use the DataFrame (already in memory)
     source = pd.concat(parts, ignore_index=True, sort=False)
+    # v3.11.10 — FIX (audit 3-b, bug #6): kanonikalisasi ejaan pasangan
+    # (kunci norm → ejaan perwakilan) LANGSUNG di frame source — semua
+    # groupby/merge di bawah otomatis bekerja pada ejaan konsisten.
+    if "Nama Barang" in source.columns and _rep_barang:
+        source["Nama Barang"] = norm_nama_barang_key_series(
+            source["Nama Barang"]).map(_rep_barang)
+    if "NAMA RESTO" in source.columns and _rep_resto:
+        source["NAMA RESTO"] = norm_nama_resto_key_series(
+            source["NAMA RESTO"]).map(_rep_resto)
     print(f"    Combined source: {len(source)} rows")
 
     # =========================================================================
@@ -880,29 +992,51 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
     if "NILAI" in final.columns:
         final["NILAI"] = pd.to_numeric(final["NILAI"], errors="coerce")
 
+    # v3.11.10 — FIX (audit 3-b, bug #6): kolom kunci temp di `final` untuk
+    # merge LANGKAH 8/9 (SATUAN rekap + fallback 42.17, SOURCE DATA) —
+    # frame eksternal itu ber-ejaan MENTAH sedangkan final ber-ejaan
+    # kanonik; merge nama mentah akan MISS senyap utk pasangan ber-drift
+    # (SATUAN hilang → pasangan dibuang pivot Deviasi GR/PCS; label
+    # sumber SO hilang). Dihitung SEKALI di sini (factorize — biaya O(nilai
+    # unik)); dibuang lagi sebelum return (skema output tetap).
+    if "Nama Barang" in final.columns:
+        final[_K_BAR] = norm_nama_barang_key_series(final["Nama Barang"])
+    if "NAMA RESTO" in final.columns:
+        final[_K_RST] = norm_nama_resto_key_series(final["NAMA RESTO"])
+    _k_merge = [c for c in (_K_BAR, _K_RST) if c in final.columns]
+
     # =========================================================================
     # 8. LOOKUP SATUAN (untuk DEVIASI GR/PCS split)
     # =========================================================================
     # SATUAN hanya ada di Full Rekap Mentah SO (dari fn_rekap_mentah).
     # Di pivot+unpivot, SATUAN hilang. Lookup dari full_rekap_so berdasarkan (Nama Barang, NAMA RESTO).
-    if full_rekap_so is not None and "SATUAN" in full_rekap_so.columns:
+    if full_rekap_so is not None and "SATUAN" in full_rekap_so.columns \
+            and len(_k_merge) == 2:
         # Build SATUAN mapping: (Nama Barang, NAMA RESTO) → SATUAN (first non-null)
+        # v3.11.10 — FIX (audit 3-b, bug #6): kunci merge = pasangan
+        # TERNORMALISASI (__k_barang/__k_resto — ejaan mentah rekap bisa
+        # ber-drift dari ejaan kanonik final) — mirror pola _KEY kategori
+        # LANGKAH 5.
+        _sm = full_rekap_so[["Nama Barang", "NAMA RESTO", "SATUAN"]].copy()
+        _sm[_K_BAR] = norm_nama_barang_key_series(_sm["Nama Barang"])
+        _sm[_K_RST] = norm_nama_resto_key_series(_sm["NAMA RESTO"])
         satuan_map = (
-            full_rekap_so[["Nama Barang", "NAMA RESTO", "SATUAN"]]
-            .dropna(subset=["SATUAN"])
-            .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"], keep="first")
+            _sm.dropna(subset=["SATUAN"])
+            .drop_duplicates(subset=[_K_BAR, _K_RST], keep="first")
         )
         if not satuan_map.empty:
             # Merge SATUAN to final (creates SATUAN column if not exists, fills if exists)
             if "SATUAN" in final.columns:
                 final = final.merge(
-                    satuan_map.rename(columns={"SATUAN": "_SATUAN_LOOKUP"}),
-                    on=["Nama Barang", "NAMA RESTO"], how="left"
+                    satuan_map[[*_k_merge, "SATUAN"]].rename(
+                        columns={"SATUAN": "_SATUAN_LOOKUP"}),
+                    on=_k_merge, how="left"
                 )
                 final["SATUAN"] = final["SATUAN"].fillna(final["_SATUAN_LOOKUP"])
                 final = final.drop(columns=["_SATUAN_LOOKUP"])
             else:
-                final = final.merge(satuan_map, on=["Nama Barang", "NAMA RESTO"], how="left")
+                final = final.merge(satuan_map[[*_k_merge, "SATUAN"]],
+                                    on=_k_merge, how="left")
 
     # v3.9.32 — FALLBACK SATUAN 42.17 ('Nama Satuan' file per barang):
     # pasangan TANPA rekap SO (barang 42.17-only — saldo tanpa SO, contoh
@@ -915,26 +1049,37 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             and "Nama Barang" in final.columns \
             and "NAMA RESTO" in final.columns:
         _sat4217 = q4217[["Nama Barang", "NAMA RESTO", "SATUAN"]].copy()
+        # v3.11.10 — FIX (audit 3-b, bug #6): kunci merge ternormalisasi
+        # (ejaan 42.17 mentah vs final kanonik — lihat LANGKAH 8 rekap di
+        # atas); tanpa ini pasangan ber-drift kehilangan fallback SATUAN
+        # → dibuang senyap oleh pivot Deviasi GR/PCS.
+        _sat4217[_K_BAR] = norm_nama_barang_key_series(
+            _sat4217["Nama Barang"])
+        _sat4217[_K_RST] = norm_nama_resto_key_series(
+            _sat4217["NAMA RESTO"])
         _sat4217["Nama Barang"] = _sat4217["Nama Barang"].astype(str)
         _sat4217["NAMA RESTO"] = _sat4217["NAMA RESTO"].astype(str)
         _sat4217["SATUAN"] = _sat4217["SATUAN"].astype(str).str.strip()
         _sat4217 = _sat4217[_sat4217["SATUAN"] != ""]
+        # baris nama NA dibuang SEBELUM kunci (sentinel __k tak boleh
+        # match final — perilaku lama: astype(str) 'nan' tak pernah match)
+        _sat4217 = _sat4217[_sat4217["Nama Barang"].notna()
+                            & _sat4217["NAMA RESTO"].notna()]
         _sat4217 = (
-            _sat4217.dropna(subset=["Nama Barang", "NAMA RESTO"])
-            .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
-                             keep="first")
+            _sat4217.drop_duplicates(subset=[_K_BAR, _K_RST],
+                                     keep="first")
         )
-        if not _sat4217.empty:
+        if not _sat4217.empty and len(_k_merge) == 2:
             if "SATUAN" in final.columns:
                 final = final.merge(
-                    _sat4217.rename(columns={"SATUAN": "_SAT4217"}),
-                    on=["Nama Barang", "NAMA RESTO"], how="left")
+                    _sat4217[[*_k_merge, "SATUAN"]].rename(
+                        columns={"SATUAN": "_SAT4217"}),
+                    on=_k_merge, how="left")
                 final["SATUAN"] = final["SATUAN"].fillna(final["_SAT4217"])
                 final = final.drop(columns=["_SAT4217"])
             else:
-                final = final.merge(_sat4217,
-                                    on=["Nama Barang", "NAMA RESTO"],
-                                    how="left")
+                final = final.merge(_sat4217[[*_k_merge, "SATUAN"]],
+                                    on=_k_merge, how="left")
 
     # v3.9.39 — JEJAK DUA ARAH (transparansi "barang 42.17 tidak muncul"):
     # pasangan SALDO-ONLY = ada baris 'SALDO AWAL' 42.17 tapi TANPA rekap
@@ -1058,15 +1203,25 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             _src = so_rows["SOURCE DATA"].map(
                 lambda v: v.strip() if isinstance(v, str) else v)
             _s = _src.astype(str)
+            # v3.11.10 — FIX (audit 3-b, bug #6): kunci merge pasangan
+            # TERNORMALISASI (__k_barang/__k_resto — rekap ber-ejaan mentah,
+            # final ber-ejaan kanonik; merge nama mentah MISS senyap utk
+            # pasangan ber-drift → label sumber SO hilang dari baris 1.SO
+            # tanggal itu; pola _KEY kategori LANGKAH 5).
             src_map = (
-                so_rows.assign(_src=_src, _s=_s,
-                               _harian=_s.str.strip().str.lower()
-                               == "input so harian")
+                so_rows.assign(
+                    _src=_src, _s=_s,
+                    _harian=_s.str.strip().str.lower()
+                    == "input so harian",
+                    **{_K_BAR: norm_nama_barang_key_series(
+                        so_rows["Nama Barang"]).to_numpy(),
+                       _K_RST: norm_nama_resto_key_series(
+                        so_rows["NAMA RESTO"]).to_numpy()})
                 .sort_values(["_harian", "_s"], kind="mergesort")
                 .drop_duplicates(
-                    subset=["Nama Barang", "NAMA RESTO", "Tanggal"],
+                    subset=[_K_BAR, _K_RST, "Tanggal"],
                     keep="last")
-                [["Nama Barang", "NAMA RESTO", "Tanggal", "_src"]]
+                [[_K_BAR, _K_RST, "Tanggal", "_src"]]
                 .rename(columns={"_src": "SOURCE DATA"})
             )
             # samakan tipe kunci Tanggal dgn final (Int64; NA tak match —
@@ -1074,7 +1229,8 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             src_map = src_map.assign(
                 Tanggal=pd.to_numeric(
                     src_map["Tanggal"], errors="coerce").astype("Int64"))
-            _merge_on = ["Nama Barang", "NAMA RESTO", "Tanggal"]
+            _merge_on = [c for c in (_K_BAR, _K_RST, "Tanggal")
+                         if c in final.columns]
             if "SOURCE DATA" in final.columns:
                 final = final.merge(
                     src_map.rename(columns={"SOURCE DATA": "_SRC_LOOKUP"}),
@@ -1083,11 +1239,19 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
                     final["_SRC_LOOKUP"])
                 final = final.drop(columns=["_SRC_LOOKUP"])
             else:
-                final = final.merge(src_map, on=_merge_on, how="left")
+                final = final.merge(src_map[_merge_on + ["SOURCE DATA"]],
+                                    on=_merge_on, how="left")
             print(f"    SOURCE DATA (rekap SO per tanggal): "
                   f"{len(src_map)} pasangan-tanggal")
         else:
             print("    SOURCE DATA (rekap SO): 0 baris ber-sumber non-nol")
+
+    # v3.11.10 — FIX (audit 3-b, bug #6): buang kolom kunci temp — tidak
+    # boleh bocor ke output (final_columns sudah memfilter, tapi kolom ini
+    # sengaja dipasang SETELAH seleksi itu; dibuang eksplisit di sini).
+    final = final.drop(
+        columns=[c for c in (_K_BAR, _K_RST) if c in final.columns],
+        errors="ignore")
 
     print(f"  [Append1] DONE: {len(final)} rows")
     return final

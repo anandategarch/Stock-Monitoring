@@ -960,8 +960,16 @@ class RincianPoView(tk.Frame):
         """FIX C-03 (audit 2-c): format angka INDONESIA (1.234,5 · negatif
         kurung · 0 = '-') — dulu gaya EN "1,234.5"; nilai yang sama kini
         tampil konsisten dgn tabel sumber drill-down-nya."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        # v3.11.10 — FIX (audit 3-c #22): pd.NA ≡ NaN → "" (guard
+        # `isinstance(val, float)` meloloskan pd.NA → float(pd.NA)
+        # TypeError → str '<NA>' tampil; probe p01 agent1b).
+        if val is None:
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         try:
             v = float(val)
         except (TypeError, ValueError):
