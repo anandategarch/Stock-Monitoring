@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.11", APP_VERSION == "3.11.11",
+    check("Versi = 3.11.12", APP_VERSION == "3.11.12",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -24432,6 +24432,300 @@ def main():
         app._dev_bulanan_load_form()
         shutil.rmtree(_tmp95d, ignore_errors=True)
         shutil.rmtree(_fld95, ignore_errors=True)
+    root.update()
+
+    # =====================================================================
+    print("\n== 96. (v3.11.12) Ambang COM ±% dr median · transparansi bulan "
+          "auto file · scroll tab ⚙️ Config ==")
+    # =====================================================================
+    # user: "Di tab deviasi Gr dan PCS kolom Cek kan ada analisa COM nah
+    # itu bisa gak set 50% > atau < COM rendah atau COM tinggi nya?" +
+    # "gimana cara tau misal sekarang bulan september apakah program
+    # otomatis ambil yang agustus?" + "tampilan di config tidak bisa
+    # scroll aku harus perkecil dulu unutk bisa lihat tombol proses
+    # bandingkan file manual".
+    from src.ui.com_analisa import com_gap_map as _cgm96
+    from src.ui.com_analisa import com_rendah_map as _crm96
+    from src.ui.com_analisa import com_tinggi_map as _ctm96
+    from src.ui.deviasi_view import SharedComAmbang as _SCA96
+    from src.ui.komparasi_deviasi_view import bulan_mundur_list as _bml96
+
+    # ---- (A) com_gap_map min_pct — modul pure ----------------------------
+    _rows96a = []
+    # Median −10 (ACR 10 harian t1..t6); d(7) bervariasi per pasangan:
+    # ATAS96 d(7)=0 → gap tinggi 10 (> 50%×10=5 → label); TEPAT96
+    # d(7)=−5 → gap 5 TEPAT di ambang → strict > TAK label; BAWAH96
+    # d(7)=−7 → gap 3 < 5 → TAK label; RENDAH96 d(7)=−16 → gap rendah
+    # 6 > 5 → label arah rendah. MEDNOL96 tanpa ACR (median 0) + IN 3
+    # di t7 → d(7)=3 → cut = 50%×0 = 0 → label (gap nonzero).
+    for _brg96, _acr7_96 in (("BRG ATAS96", 0.0), ("BRG TEPAT96", 5.0),
+                             ("BRG BAWAH96", 7.0), ("BRG RENDAH96", 16.0)):
+        for _t in range(1, 8):
+            _rows96a.append(_row92(_brg96, "R96", "1.SO", _t, 100.0))
+            _rows96a.append(_row92(_brg96, "R96", "9.ACR", _t,
+                                   10.0 if _t <= 6 else _acr7_96))
+            _rows96a.append(_row92(_brg96, "R96", "2.SALDO AKHIR",
+                                   _t, 100.0))
+        _rows96a.append(_row92(_brg96, "R96", "SALDO AWAL", 1, 100.0))
+    for _t in range(1, 8):
+        _rows96a.append(_row92("BRG MEDNOL96", "R96", "1.SO", _t, 100.0))
+        _rows96a.append(_row92("BRG MEDNOL96", "R96", "2.SALDO AKHIR",
+                               _t, 100.0))
+    _rows96a.append(_row92("BRG MEDNOL96", "R96", "SALDO AWAL", 1, 100.0))
+    _rows96a.append(_row92("BRG MEDNOL96", "R96", "4.IN", 7, 3.0))
+    _df96a = pd.DataFrame(_rows96a)
+
+    _m96 = _cgm96(_df96a, 7, 50.0)
+    check("(v3.11.12) §96-A1 ambang 50%: gap 10 > 5 → ('tinggi', 10.0); "
+          "gap rendah 6 > 5 → ('rendah', 6.0)",
+          _m96.get(("BRG ATAS96", "R96")) == ("tinggi", 10.0)
+          and _m96.get(("BRG RENDAH96", "R96")) == ("rendah", 6.0),
+          f"got {_m96}")
+    check("(v3.11.12) §96-A2 ambang 50% menahan selisih kecil: gap 5 "
+          "TEPAT di ambang → strict > tak label; gap 3 < 5 → tak label",
+          ("BRG TEPAT96", "R96") not in _m96
+          and ("BRG BAWAH96", "R96") not in _m96,
+          f"got {_m96}")
+    check("(v3.11.12) §96-A3 min_pct=0 DEFAULT = perilaku lama: TEPAT96 "
+          "('tinggi', 5.0) + BAWAH96 ('tinggi', 3.0) kembali berlabel "
+          "(semua selisih bertanda) + tanpa argumen == 0 eksplisit",
+          _cgm96(_df96a, 7).get(("BRG TEPAT96", "R96")) == ("tinggi", 5.0)
+          and _cgm96(_df96a, 7).get(("BRG BAWAH96", "R96")) == ("tinggi", 3.0)
+          and _cgm96(_df96a, 7) == _cgm96(_df96a, 7, 0.0),
+          "back-compat gagal")
+    check("(v3.11.12) §96-A4 median 0: cut = ambang%×0 = 0 → gap nonzero "
+          "3 tetap memicu walau ambang 500 (persen vs 0 tak terhingga)",
+          _cgm96(_df96a, 7, 50.0).get(("BRG MEDNOL96", "R96"))
+          == ("tinggi", 3.0)
+          and _cgm96(_df96a, 7, 500.0).get(("BRG MEDNOL96", "R96"))
+          == ("tinggi", 3.0),
+          f"50={_cgm96(_df96a, 7, 50.0).get(('BRG MEDNOL96', 'R96'))!r} "
+          f"500={_cgm96(_df96a, 7, 500.0).get(('BRG MEDNOL96', 'R96'))!r}")
+    check("(v3.11.12) §96-A5 cache _RES +key pct (ambang berganti tak "
+          "basi): 50 → 0 → 50 kembali menahan TEPAT96",
+          ("BRG TEPAT96", "R96") not in _cgm96(_df96a, 7, 50.0)
+          and ("BRG TEPAT96", "R96") in _cgm96(_df96a, 7, 0.0)
+          and ("BRG TEPAT96", "R96") not in _cgm96(_df96a, 7, 50.0),
+          "cache basi")
+    check("(v3.11.12) §96-A6 turunan meneruskan min_pct + invalid clamp 0: "
+          "negatif / >10000 → 0 (perilaku lama)",
+          _ctm96(_df96a, 7, 50.0).get(("BRG ATAS96", "R96")) == 10.0
+          and ("BRG RENDAH96", "R96") not in _ctm96(_df96a, 7, 50.0)
+          and _crm96(_df96a, 7, 50.0) == {("BRG RENDAH96", "R96"): 6.0}
+          and ("BRG TEPAT96", "R96") in _cgm96(_df96a, 7, -5.0)
+          and ("BRG TEPAT96", "R96") in _cgm96(_df96a, 7, 99999.0),
+          f"tinggi={_ctm96(_df96a, 7, 50.0)} rendah={_crm96(_df96a, 7, 50.0)}")
+
+    # ---- (B) integrasi view — spinbox + shared state + persist ----------
+    _rows96b = []
+    # AMB96: median −10, d(7)=−7 → gap tinggi 3 — di bawah 50%×10 →
+    # CEK kosong di default; ambang 0/25 → 'COM Tinggi (+3,0)'.
+    for _t in range(1, 8):
+        _rows96b.append(_row92("BRG AMB96", "R96", "1.SO", _t, 100.0))
+        _rows96b.append(_row92("BRG AMB96", "R96", "9.ACR", _t,
+                               10.0 if _t <= 6 else 7.0))
+        _rows96b.append(_row92("BRG AMB96", "R96", "2.SALDO AKHIR",
+                               _t, 100.0))
+    _rows96b.append(_row92("BRG AMB96", "R96", "SALDO AWAL", 1, 100.0))
+    _df96b = pd.DataFrame(_rows96b)
+    _top96b, _dv96b = _make_dv33(_df96b, None)
+    check("(v3.11.12) §96-B1 view standalone default ambang 50: gap 3 < "
+          "50%×|median 10| → segmen COM TERTAHAN (CEK kosong — dulu semua "
+          "selisih memicu)",
+          _cek33(_dv96b, "BRG AMB96") == "",
+          f"cek={_cek33(_dv96b, 'BRG AMB96')!r}")
+    _dv96b._com_var.set("0")
+    _dv96b._on_com_ambang_change()
+    wait_view(root, _dv96b)
+    root.update()
+    check("(v3.11.12) §96-B2 spinbox AMBANG COM → 0 (perilaku lama): "
+          "'COM Tinggi (+3,0)' muncul (standalone refresh tanpa persist)",
+          _cek33(_dv96b, "BRG AMB96") == "COM Tinggi (+3,0)"
+          and _dv96b.com_ambang == 0.0,
+          f"cek={_cek33(_dv96b, 'BRG AMB96')!r} amb={_dv96b.com_ambang}")
+    _top96b.destroy()
+    root.update()
+
+    # shared state: dua view sinkron (pola §31 ACR) + listener dipanggil
+    import src.ui.deviasi_view as _dvmod96
+
+    _st96 = _SCA96(50.0)
+    _top96c, _dv96c = _make_dv33(_df96b, None)
+    _top96d, _dv96d = _make_dv33(_df96b, None)
+    _dv96c._com_state = _st96
+    _dv96d._com_state = _st96
+    _st96.subscribe(_dv96c._on_shared_com_changed)
+    _st96.subscribe(_dv96d._on_shared_com_changed)
+    _rec96 = []
+    _st96.subscribe(_rec96.append)
+    # FIX §68 v3.9.58: simpan FUNGSI asli (bukan hasil panggilan) —
+    # restore menimpa fungsi dgn objek = TypeError di pemanggil berikut.
+    _origfn96 = _dvmod96.acr_settings_path
+    _tmp96 = tempfile.mkdtemp(prefix="t96_com_")
+    _dvmod96.acr_settings_path = lambda: __import__(
+        "pathlib").Path(_tmp96) / "settings.json"
+    try:
+        _dv96c._com_var.set("25")
+        _dv96c._on_com_ambang_change()
+        wait_view(root, _dv96c)
+        wait_view(root, _dv96d)
+        root.update()
+        check("(v3.11.12) §96-B3 shared state via spinbox: ambang 25 → "
+              "gap 3 > 25%×10=2,5 → 'COM Tinggi (+3,0)' + KEDUA view ikut "
+              "(sinkron GR↔PCS) + listener dipanggil",
+              _cek33(_dv96c, "BRG AMB96") == "COM Tinggi (+3,0)"
+              and _dv96d.com_ambang == 25.0
+              and _dv96d._com_var.get() == "25"
+              and _rec96 == [25.0],
+              f"c={_cek33(_dv96c, 'BRG AMB96')!r} d={_dv96d.com_ambang} "
+              f"rec={_rec96}")
+        _dvmod96.save_acr_threshold(90.0)
+        check("(v3.11.12) §96-B4 persist settings.json round-trip: "
+              "com_ambang_pct 25 tersimpan + key acr_threshold_pct tak "
+              "tersentuh + clamp di luar 0..500 → load default 50",
+              _dvmod96.load_com_ambang() == 25.0
+              and _dvmod96.load_acr_threshold() == 90.0
+              and _dvmod96.load_com_ambang() == 25.0
+              and (_dvmod96.save_com_ambang(9999.0),
+                   _dvmod96.load_com_ambang() == 50.0)[1],
+              f"got {_dvmod96.load_com_ambang()}")
+    finally:
+        _dvmod96.acr_settings_path = _origfn96
+        _st96.unsubscribe(_dv96c._on_shared_com_changed)
+        _st96.unsubscribe(_dv96d._on_shared_com_changed)
+        _top96c.destroy()
+        _top96d.destroy()
+        root.update()
+
+    # app wiring: kedua tab GR & PCS + legenda
+    check("(v3.11.12) §96-B5 wiring app: _shared_com dipakai KEDUA view "
+          "(GR & PCS) + nilai sinkron",
+          getattr(app, "_shared_com", None) is not None
+          and app.deviasi_gr_view._com_state is app._shared_com
+          and app.deviasi_pcs_view._com_state is app._shared_com
+          and app.deviasi_gr_view.com_ambang == app._shared_com.pct
+          and app.deviasi_pcs_view.com_ambang == app._shared_com.pct,
+          f"gr={app.deviasi_gr_view.com_ambang} "
+          f"pcs={app.deviasi_pcs_view.com_ambang}")
+    _leg96 = []
+    for _chip96 in app.deviasi_gr_view._legend.winfo_children():
+        for _w96 in _chip96.winfo_children():
+            if isinstance(_w96, tk.Label):
+                _leg96.append(_w96.cget("text"))
+    check("(v3.11.12) §96-B6 legenda CEK: chip COM Tinggi/Rendah kini "
+          "menyebut '> ambang% dr median' (penanda spinbox kartu Filter)",
+          any("COM Tinggi" in _t and "ambang% dr median" in _t
+              for _t in _leg96)
+          and any("COM Rendah" in _t and "ambang% dr median" in _t
+                  for _t in _leg96),
+          f"got {[t for t in _leg96 if 'COM' in t]}")
+
+    # ---- (C) scroll vertikal tab ⚙️ Config -------------------------------
+    check("(v3.11.12) §96-C1 struktur scroll: konten config di CANVAS "
+          "ber-yscrollcommand (scrollregion via <Configure>) + scrollbar "
+          "vertikal seinduk + wrap inner + yscrollincrement 40 (1 notch)",
+          isinstance(app._cfg_canvas, tk.Canvas)
+          and str(app._cfg_canvas.cget("yscrollcommand"))
+          and app._cfg_wrap in app._cfg_canvas.winfo_children()
+          and app._cfg_sb.master is app._cfg_canvas.master
+          and int(app._cfg_canvas.cget("yscrollincrement")) == 40,
+          f"cv={type(app._cfg_canvas).__name__} "
+          f"incr={app._cfg_canvas.cget('yscrollincrement')}")
+    _anc96 = app.dev_bulanan_folder_entry.master
+    _ketemu96 = False
+    while _anc96 is not None:
+        if _anc96 is app._cfg_wrap:
+            _ketemu96 = True
+            break
+        _anc96 = getattr(_anc96, "master", None)
+    check("(v3.11.12) §96-C2 semua kartu (tombol 📂 'Muat ke ⚖ "
+          "Komparasi Sekarang' dsb.) berada DALAM canvas — roda mouse "
+          "di mana pun tab config menggulir halaman (router roda app)",
+          _ketemu96,
+          "entry 📂 bukan turunan _cfg_wrap")
+    app.notebook.select(app.tab_config)
+    root.update()
+    app._cfg_scroll_fit()
+    root.update()
+    _over96 = (app._cfg_wrap.winfo_reqheight()
+               > app._cfg_canvas.winfo_height() + 2)
+    _y0_96 = app._cfg_canvas.yview()[0]
+    app._cfg_canvas.yview_scroll(3, "units")
+    root.update()
+    check("(v3.11.12) §96-C3 fungsional: scrollbar tampil ⟺ konten "
+          "meluap (auto-hide _cfg_scroll_fit) + yview_scroll menggulir "
+          "saat meluap (tombol 📂 di bawah lipatan kini terjangkau — "
+          "user tak perlu mengecilkan window)",
+          app._cfg_sb.winfo_ismapped() == _over96
+          and ((app._cfg_canvas.yview()[0] > _y0_96) if _over96
+               else app._cfg_canvas.yview()[0] == _y0_96),
+          f"over={_over96} mapped={app._cfg_sb.winfo_ismapped()} "
+          f"y0={_y0_96} y1={app._cfg_canvas.yview()[0]} "
+          f"req={app._cfg_wrap.winfo_reqheight()} "
+          f"cv={app._cfg_canvas.winfo_height()}")
+
+    # ---- (D) transparansi bulan auto file + bulan_mundur_list -----------
+    check("(v3.11.12) §96-D1 bulan_mundur_list: Sep-2026 mundur 2 → "
+          "[Jul, Agu] kronologis; Jan-2026 mundur 3 → [Okt, Nov, Des "
+          "2025] (wrap tahun)",
+          _bml96((2026, 9), 2) == [(2026, 7), (2026, 8)]
+          and _bml96((2026, 1), 3) == [(2025, 10), (2025, 11), (2025, 12)],
+          f"got {_bml96((2026, 9), 2)} / {_bml96((2026, 1), 3)}")
+    check("(v3.11.12) §96-D2 bulan_mundur_list degrade jujur: bulan 13 / "
+          "None / jumlah 0 → []",
+          _bml96((2026, 13), 1) == [] and _bml96(None, 1) == []
+          and _bml96((2026, 9), 0) == [],
+          "invalid tak kosong")
+    _fld96 = tempfile.mkdtemp(prefix="t96_files_")
+    (Path(_fld96) / "20.AGUSTUS 2026.xlsx").write_text(
+        "x", encoding="utf-8")
+    # D5 butuh folder dgn KEDUA file (utk uji kronologis multi-file);
+    # _fld96 utk D3 hanya ber-SATU file (tanda ✓ vs ✗).
+    _fld96b = tempfile.mkdtemp(prefix="t96_files_b_")
+    for _nm96 in ("20.AGUSTUS 2026.xlsx", "20.JULI 2026.xlsx"):
+        (Path(_fld96b) / _nm96).write_text("x", encoding="utf-8")
+    _ar96 = app.audit_result
+    try:
+        app.dev_bulanan_folder_var.set(_fld96)
+        app.dev_bulanan_jumlah_var.set("2")
+        app.audit_result = {"period": [2026, 9]}
+        app._dev_bulanan_status_default()
+        _st96d = app.dev_bulanan_status_var.get()
+        check("(v3.11.12) §96-D3 status transparansi (user: \"gimana cara "
+              "tau misal sekarang bulan september apakah program otomatis "
+              "ambil yang agustus?\"): baris 'Periode data: SEPTEMBER 2026 "
+              "(data run terakhir) → file dicari: 20.AGUSTUS 2026 ✓ · "
+              "20.JULI 2026 ✗' + baris lama utuh (manual + 📂)",
+              "Periode data: SEPTEMBER 2026" in _st96d
+              and "20.AGUSTUS 2026 ✓" in _st96d
+              and "20.JULI 2026 ✗" in _st96d
+              and "manual" in _st96d and "📂" in _st96d,
+              f"got {_st96d!r}")
+        app.audit_result = None
+        app._dev_bulanan_status_default()
+        _st96e = app.dev_bulanan_status_var.get()
+        check("(v3.11.12) §96-D4 tanpa run pipeline → fallback bulan "
+              "komputer DIUMUMKAN jujur (bukan diam-diam)",
+              "Periode data:" in _st96e
+              and "bulan komputer" in _st96e,
+              f"got {_st96e!r}")
+        check("(v3.11.12) §96-D5 _auto_bulanan_paths refactor via "
+              "bulan_mundur_list: perilaku identik (Sep-2026 mundur 2 → "
+              "JULI lalu AGUSTUS kronologis — mirror §94-E4)",
+              [Path(_p96).name for _p96 in
+               app.komparasi_view._auto_bulanan_paths(
+                   (_fld96b, (2026, 9), 2))]
+              == ["20.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
+              "parity gagal")
+    finally:
+        app.audit_result = _ar96
+        with contextlib.suppress(Exception):
+            app.dev_bulanan_folder_var.set("")
+            app.dev_bulanan_jumlah_var.set("1")
+        app._dev_bulanan_load_form()
+        shutil.rmtree(_fld96, ignore_errors=True)
+        shutil.rmtree(_fld96b, ignore_errors=True)
+        shutil.rmtree(_tmp96, ignore_errors=True)
     root.update()
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

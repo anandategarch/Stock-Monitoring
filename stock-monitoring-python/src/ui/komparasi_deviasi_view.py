@@ -309,6 +309,33 @@ _BULAN_NAME = {
 }
 
 
+def bulan_mundur_list(period, jumlah) -> list:
+    """v3.11.12 — daftar (tahun, bulan) N bulan MUNDUR dari period
+    (urut KRONOLOGIS lama→baru; wrap tahun otomatis — Januari mundur
+    1 = Desember tahun sebelumnya). Dipakai _auto_bulanan_paths +
+    status kartu 'Auto File Deviasi Bulan Lalu' tab ⚙️ Config
+    (transparansi "sekarang September → file Agustus" — user: "gimana
+    cara tau misal sekarang bulan september apakah program otomatis
+    ambil yang agustus?"). Invalid (period bukan (y, m) dgn m 1..12 /
+    jumlah < 1) → [] (degrade jujur)."""
+    try:
+        y, m = int(period[0]), int(period[1])
+        n = int(jumlah)
+    except (TypeError, ValueError, IndexError):
+        return []
+    if not (1 <= m <= 12) or n < 1:
+        return []
+    out = []
+    for _ in range(min(n, 12)):
+        m -= 1
+        if m < 1:
+            m = 12
+            y -= 1
+        out.append((y, m))
+    out.reverse()   # kronologis lama → baru
+    return out
+
+
 def _bulan_num(v) -> int:
     """Nomor bulan dari nilai kolom BULAN — TOKEN-SCAN karena file
     asli memakai kode periode: '201.OKT 26' → 10 (OKT), '8.OKTOBER' → 8,
@@ -1333,19 +1360,15 @@ class KomparasiDeviasiView(tk.Frame):
         for nm in names:
             base = os.path.splitext(nm)[0].strip().upper()
             by_base.setdefault(base, os.path.join(folder, nm))
+        # v3.11.12 — daftar bulan via helper bersama bulan_mundur_list
+        # (dipakai juga status kartu ⚙️ Config — transparansi bulan).
         out = []
-        m, y = bulan, tahun
-        for _ in range(jumlah):
-            m -= 1
-            if m < 1:
-                m = 12
-                y -= 1
+        for y, m in bulan_mundur_list((tahun, bulan), jumlah):
             want = f"20.{_BULAN_NAME[m]} {y}".upper()
             p = by_base.get(want)
             if p:
                 out.append(p)
-        out.reverse()   # kronologis lama → baru
-        return out
+        return out   # kronologis lama → baru
 
     def _col_values(self, col: str) -> list:
         result = self._result_df

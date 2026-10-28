@@ -49,8 +49,22 @@ bisa dihitung bermakna):
 Perbandingan BERTANDA (bukan absolut): d(H) > median memicu "COM
 Tinggi" (pemakaian aktual di atas sistem); d(H) < median memicu
 "COM Rendah" (v3.11.8 — sistem mencatat pemakaian lebih besar dari
-fisik; selisih di bawah median). Tanpa margin/ambang tambahan
-(spesifikasi user).
+fisik; selisih di bawah median).
+
+v3.11.12 — AMBANG (persen) dari median (user: "bisa gak set 50% > atau
+< COM rendah atau COM tinggi nya?"): selisih dari median baru dianggap
+signifikan bila MELAMPAUI ambang% × |median| —
+
+    tinggi: d(H) − median > (min_pct/100) × |median|
+    rendah: median − d(H) > (min_pct/100) × |median|
+
+min_pct = 0 → perilaku lama (semua selisih bertanda memicu label —
+back-compat penuh pemanggil lama). median 0 → ruas kanan 0 → semua
+gap NONZERO tetap memicu (median 0 vs gap berapapun = tak terhingga
+persentase-nya — masuk akal + identik perilaku lama pada kasus ini).
+KETAT (strict >): gap yang TEPAT sama dengan ambang tidak memicu
+(mirror strict > v3.11.7). Nilai ambang dioper view lewat param;
+default modul 0.0.
 
 Konsumsi: deviasi_view._compute_pivot — segmen CEK tanggal analisa H.
 Pure pandas (thread-safe — dipakai worker view GR & PCS). Cache DUA
@@ -73,8 +87,8 @@ _JENIS = ("SALDO AWAL", "1.SO", "4.IN", "8.BARANG KELUAR", "9.ACR")
 
 # Cache matriks (H-independen) per identitas objek data.
 _CACHE: dict = {"data": None, "mat": None}
-# Cache hasil per (identitas data, h).
-_RES: dict = {"data": None, "h": None, "map": {}}
+# Cache hasil per (identitas data, h, min_pct).
+_RES: dict = {"data": None, "h": None, "pct": None, "map": {}}
 
 
 def _chrono(t) -> tuple:
@@ -194,7 +208,7 @@ def _build_matrices(data: pd.DataFrame):
     }
 
 
-def com_gap_map(data: pd.DataFrame, h) -> dict:
+def com_gap_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
     """v3.11.8 — peta segmen COM BERSAMA dua arah:
     {(Nama Barang, NAMA RESTO): (sisi, selisih_dari_median)} — sisi
     "tinggi" (d(H) > median; selisih = d(H) − median, positif) atau
@@ -202,7 +216,12 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
     HANYA pasangan terpicu (d(H) valid; ≥3 hari sampel valid di
     1..H−1). Frame kosong / kolom kurang / h < 4 → peta kosong
     (degrade jujur, mirror po_keterangan). Hasil di-cache per
-    (identitas data, h)."""
+    (identitas data, h, min_pct).
+
+    v3.11.12 — min_pct: AMBANG persen dari |median| (user: "set 50% >
+    atau <") — gap wajib MELAMPAUI (min_pct/100) × |median| sebelum
+    pasangan diberi label (0 = semua selisih = perilaku lama;
+    median 0 → semua gap nonzero; lihat header modul)."""
     if data is None or getattr(data, "empty", True):
         return {}
     try:
@@ -211,6 +230,12 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
         return {}
     if h < _MIN_VALID_DAYS + 1:
         return {}
+    try:
+        min_pct = float(min_pct)
+    except (TypeError, ValueError):
+        min_pct = 0.0
+    if not (0.0 <= min_pct <= 10000.0):
+        min_pct = 0.0
 
     if _CACHE["data"] is not data or _CACHE["mat"] is None:
         _CACHE["mat"] = _build_matrices(data)
@@ -218,7 +243,8 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
     mat = _CACHE["mat"]
     if not mat:
         return {}
-    if (_RES["data"] is data and _RES["h"] == h):
+    if (_RES["data"] is data and _RES["h"] == h
+            and _RES["pct"] == min_pct):
         return _RES["map"]
 
     com = mat["com"]
@@ -229,7 +255,7 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
 
     pos_cols = [c for c in col_keys if int(c) >= 1]
     if h not in pos_cols:
-        _RES.update(data=data, h=h, map={})
+        _RES.update(data=data, h=h, pct=min_pct, map={})
         return {}
 
     # kolom negatif: cukup ADA yang MEREKAM SO utk pasangan ini (basis
@@ -288,28 +314,36 @@ def com_gap_map(data: pd.DataFrame, h) -> dict:
         # gap di bawah median dilaporkan positif). Sama persis dgn
         # median → normal, tak berlabel (strict dua sisi — mirror
         # strict > v3.11.7).
-        if d_h > med:
+        # v3.11.12 — AMBANG (user: "bisa gak set 50% > atau < COM
+        # rendah atau COM tinggi nya?"): gap wajib MELAMPAUI ambang% ×
+        # |median| (min_pct=0 → perilaku lama semua-selisih; median 0
+        # → ruas kanan 0 → semua gap nonzero; strict > — gap TEPAT di
+        # ambang tak memicu).
+        _cut = (min_pct / 100.0) * abs(med)
+        if d_h > med and (d_h - med) > _cut:
             out[(str(pair[0]), str(pair[1]))] = ("tinggi", d_h - med)
-        elif d_h < med:
+        elif d_h < med and (med - d_h) > _cut:
             out[(str(pair[0]), str(pair[1]))] = ("rendah", med - d_h)
 
-    _RES.update(data=data, h=h, map=out)
+    _RES.update(data=data, h=h, pct=min_pct, map=out)
     return out
 
 
-def com_tinggi_map(data: pd.DataFrame, h) -> dict:
+def com_tinggi_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
     """Peta segmen COM Tinggi: {(Nama Barang, NAMA RESTO): selisih di
     atas median (float)} — HANYA pasangan arah TINGGI (back-compat
-    v3.11.7; turunan tipis com_gap_map — tanpa hitung ulang)."""
-    return {p: d for p, (s, d) in com_gap_map(data, h).items()
+    v3.11.7; turunan tipis com_gap_map — tanpa hitung ulang; min_pct
+    v3.11.12 diteruskan apa adanya)."""
+    return {p: d for p, (s, d) in com_gap_map(data, h, min_pct).items()
             if s == "tinggi"}
 
 
-def com_rendah_map(data: pd.DataFrame, h) -> dict:
+def com_rendah_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
     """v3.11.8 — peta segmen COM Rendah: {(Nama Barang, NAMA RESTO):
     selisih di bawah median (float positif)} — HANYA pasangan arah
-    RENDAH (turunan tipis com_gap_map)."""
-    return {p: d for p, (s, d) in com_gap_map(data, h).items()
+    RENDAH (turunan tipis com_gap_map; min_pct v3.11.12
+    diteruskan)."""
+    return {p: d for p, (s, d) in com_gap_map(data, h, min_pct).items()
             if s == "rendah"}
 
 

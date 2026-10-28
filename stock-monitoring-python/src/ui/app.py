@@ -157,15 +157,21 @@ from src.pipeline.helpers import (
 from src.ui.deviasi_view import (
     DeviasiView,
     SharedACRThreshold,
+    SharedComAmbang,
     SharedPivotCache,
     SharedTanggalH,
     load_acr_threshold,
+    load_com_ambang,
 )
 from src.ui.export_sheets import ExportCancelled, add_pivot_sheet, tgl_label
 from src.ui.followup import FollowUpStore
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
-from src.ui.komparasi_deviasi_view import KomparasiDeviasiView
+from src.ui.komparasi_deviasi_view import (
+    _BULAN_NAME,
+    KomparasiDeviasiView,
+    bulan_mundur_list,
+)
 from src.ui.laporan_deviasi_view import LaporanDeviasiView
 from src.ui.nominal_deviasi_view import NominalDeviasiView
 from src.ui.nominal_resto_view import NominalRestoView
@@ -242,7 +248,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.11"  # v3.11.11 — TIGA PERMINTAAN USER: (1) DETAIL SEMUA ANALISA tab 📤 Rekap Selisih IN mode 📈 (user: "rekap selisih in itu bagian tab analisa detailkan lagi, resto mana dan tanggal mana dan selisih berapa di semua analisa"): seksi 1 UMUR +tabel top-8 baris gantung TERTUA (resto·barang·tgl·umur·selisih); seksi 2 LEADERBOARD RESTO +baris "↳ tgl X: selisih (n item)" per resto (top-4 tanggal |Σ|); seksi 3 SISTEMIK +"↳ resto: Σselisih (tgl …)" per barang (top-4 resto); seksi 4 RESOLVE +tabel MASIH GANTUNG top-8 (resto·barang·tgl·selisih); seksi 5 ANOMALI & 6 COM MINUS top 5→8 + kolom SELISIH IN; tanggal bulan-lalu tampil "25•" (_tgl_short). (2) MODE MUAT AUTO FILE DEVIASI BULAN LALU (user: "autofile deviasi bulan lalu aku bisa proses pipie line sendiri tidak jadi 1 lagi"): 🫵 Manual = DEFAULT BARU — file TIDAK lagi otomatis dimuat pasca-pipeline (komparasi kembali ke last-used v3.9.53); tombol 📂 "Muat ke ⚖ Komparasi Sekarang" di kartu ⚙️ Config memuat N bulan mundur SEKARANG dari nilai form (tanpa 💾 dulu; pindah tab 📋 mode ⚖ otomatis); ⚡ Otomatis = perilaku v3.11.9 utuh; mode tersimpan config.json key DeviasiBulananMode via 💾 Simpan. (3) DEFAULT H = HARI SO STANDAR TERDEKAT {7,14,25} (user: "nilai H bisa gak detect tanggal terdekat? misal sekarang kan tanggal 28 oh berarti H terdekat nya ke 25 berarti default 25. misal Sekarang tanggal 20 maka h = 14. H itu umum nya hanya 7, 14, dan 25 aja"): SharedTanggalH.detect_standard_h (hari standar TERAKHIR yang terlewat; day<7 → 25); _default_h_from_data di-SNAP (SO terakhir 26/27/28→25, 15..24→14, 8..13→7 — SUPERSEDES v3.9.22 "tanggal 26"; deteksi tetap berbasis data supaya file lama pun disnap relatif datanya); nilai awal app = deteksi hari-INI; fallback tanpa-SO kembali konstan 25; hint "default: hari SO standar terdekat (7/14/25)" di samping input H. TES DISINKRON (konvensi fixture repo): §6 Dev to BOM% kembali "416,67%" (H 30→snap 25), §32-b H dinamis 26→25, + seksi §95 baru (detect_standard_h / snap / detail analisa / mode muat). VERIFIKASI: probe v31111 ALL PASS (analisa detail + mode muat + H snap).
+APP_VERSION = "3.11.12"  # v3.11.12 — TIGA PERMINTAAN USER: AMBANG COM ±% + TRANSPARANSI BULAN AUTO FILE + SCROLL TAB CONFIG: (1) AMBANG COM TINGGI/RENDAH (user: "Di tab deviasi Gr dan PCS kolom Cek kan ada analisa COM nah itu bisa gak set 50% > atau < COM rendah atau COM tinggi nya?"): segmen CEK "COM Tinggi (+x)"/"COM Rendah (−x)" kini hanya terpicu bila selisih d(H) dari median historis MELAMPAUI ambang% × |median| — com_gap_map param BARU min_pct (default 0 = semua selisih, back-compat pemanggil lama; cache _RES +key pct); SharedComAmbang (mirror SharedACRThreshold: subscribe/set, persist settings.json key com_ambang_pct default 50 — clamp 0..500) + spinbox "AMBANG COM ± % dr median" di kartu Filter KEDUA tab GR & PCS (ubah → invalidasi pivot cache + recompute live); median 0 → semua gap nonzero tetap memicu; strict > — gap TEPAT di ambang tak memicu; legenda chip COM + "> ambang% dr median"; _fp_stable tetap netral (label CEK volatil). (2) TRANSPARANSI BULAN AUTO FILE DEVIASI BULAN LALU (user: "gimana cara tau misal sekarang bulan september apakah program otomatis ambil yang agustus?"): program TIDAK pakai bulan kalender mentah — periode = audit_result['period'] (timestamp dokumen IN terbaru, fallback kode Nomor, fallback bulan komputer); helper murni bulan_mundur_list(period, jumlah) (wrap tahun, urut kronologis) dipakai _auto_bulanan_paths (refactor, perilaku identik) + status kartu ⚙️ Config baris kedua "Periode data: SEPTEMBER 2026 (data run terakhir) → file dicari: 20.AGUSTUS 2026 ✓ · 20.JULI 2026 ✗" (keberadaan file dicek live; label status wraplength 860). (3) SCROLL VERTIKAL TAB ⚙️ CONFIG (user: "tampilan di config tidak bisa scroll aku harus perkecil dulu unutk bisa lihat tombol proses bandingkan file manual"): 4 kartu bertumpuk melebihi layar kecil → tombol 📂 tak terlihat; konten kini di CANVAS ber-scrollbar (pola analisa rekap — scrollregion via <Configure>, lebar inner = lebar canvas, yscrollincrement 40 = 1 notch ±40px); roda mouse dicover ROUTER RODA app (install_wheel_router walk-up — Treeview dalam kartu tetap menggulir sendiri); scrollbar TIPIS auto-hide _cfg_scroll_fit saat konten muat. TES: §0 versi + §96 BARU (ambang COM pure/integrasi/persist + scroll config + bulan_mundur_list + status transparansi).
 # (riwayat v3.11.10 — AUDIT 5-AGEN: 23 BUG TERVERIFIKASI DIPERBAIKI + FIX CRASH LIVE TypeError 'suppress' object is not callable; fondasi presence append1 _SO_REKAM/_SA_REKAM, fn_9901 dedup lintas-sheet, kunci ternormalisasi __k_barang/__k_resto, GR/PCS strip+upper, widgets clone/sort/auto-fit, ⧉ filter (Kosong)/kronologis/GR␣/TSV/pd.NA, app lifecycle x/y+generation-token+export-guard+F5-silent; 1802/1802 PASS.)
 # (riwayat v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 — daftar kiri tab ⚙️ Config dari SALDO SISTEM 42.17 folder '6. 42.17' (SEMUA barang bersaldo + Kategori 42.17 + Kategori app efektif + pencarian + penanda BARU via kategori_seen.json) + tombol 🎯 mengisi/menimpa (prioritas 5d). (2) COM RENDAH — com_analisa dua arah strict ("COM Rendah (−x)" d(H) < median). (3) STRIP "🎯 SELISIH TERBANYAK — BARANG × RESTO" tab 📤 Rekap Selisih IN (klik chip = toggle ⧩). (4) FIX KUANTITI NOMINAL = SO_H − saldo sistem 42.17 (konsisten tab Deviasi GR/PCS).)
 # FIX 6a-07: header docstring (judul + sketsa ASCII toolbar di atas)
@@ -2317,6 +2323,10 @@ class StockMonitorApp:
         # > 80% absolute dan aku bisa atur") — spinbox kedua tab sinkron;
         # nilai bertahan lintas sesi (settings.json), default 80.
         self._shared_acr = SharedACRThreshold(load_acr_threshold())
+        # v3.11.12 — ambang COM Tinggi/Rendah dibagi GR & PCS (user:
+        # "bisa gak set 50% > atau <") — persist settings.json key
+        # com_ambang_pct (default 50).
+        self._shared_com = SharedComAmbang(load_com_ambang())
 
         # Style ttk (design system global)
         apply_theme(self.root)
@@ -3169,8 +3179,43 @@ class StockMonitorApp:
     # =====================================================================
     def _build_config_tab(self):
         tab = self.tab_config
-        wrap = tk.Frame(tab, bg=C_BG)
-        wrap.pack(fill="both", expand=True, padx=12, pady=12)
+        # v3.11.12 — SCROLL VERTIKAL TAB CONFIG (user: "tampilan di
+        # config tidak bisa scroll aku harus perkecil dulu unutk bisa
+        # lihat tombol proses bandingkan file manual"): 4 kartu
+        # bertumpuk (Lokasi Data + Identifikasi Kategori + Auto File
+        # Deviasi Bulan Lalu + Info) melebihi tinggi layar kecil →
+        # tombol 📂 'Muat ke ⚖ Komparasi Sekarang' tak terlihat tanpa
+        # mengecilkan window. Konten kini di CANVAS ber-scrollbar
+        # vertikal (pola analisa rekap): roda mouse dicover ROUTER RODA
+        # app (install_wheel_router — walk-up dari widget-bawah-pointer
+        # menemukan canvas ber-yscrollcommand; Treeview di dalam kartu
+        # tetap menggulir dirinya sendiri); scrollbar TIPIS hanya
+        # tampil saat konten meluap (pola leaderboard SKOR RESTO —
+        # layar besar tak terganggu garis gulir).
+        outer = tk.Frame(tab, bg=C_BG)
+        outer.pack(fill="both", expand=True, padx=12, pady=12)
+        self._cfg_canvas = tk.Canvas(outer, bg=C_BG,
+                                     highlightthickness=0, bd=0)
+        self._cfg_sb = ttk.Scrollbar(outer, orient="vertical",
+                                     command=self._cfg_canvas.yview)
+        wrap = tk.Frame(self._cfg_canvas, bg=C_BG)
+        self._cfg_wrap = wrap
+        self._cfg_winid = self._cfg_canvas.create_window(
+            (0, 0), window=wrap, anchor="nw")
+        self._cfg_canvas.configure(yscrollcommand=self._cfg_sb.set)
+        self._cfg_canvas.pack(side="left", fill="both", expand=True)
+        self._cfg_sb.pack(side="right", fill="y")
+        wrap.bind("<Configure>", lambda _e: self._cfg_canvas.configure(
+            scrollregion=self._cfg_canvas.bbox("all")))
+        self._cfg_canvas.bind(
+            "<Configure>", lambda _e: (
+                self._cfg_canvas.itemconfigure(
+                    self._cfg_winid,
+                    width=self._cfg_canvas.winfo_width()),
+                self._cfg_scroll_fit()))
+        # 1 notch roda = ±40px (unit canvas bawaan = 1/10 tinggi
+        # jendela — terlalu besar; pola analisa rekap)
+        self._cfg_canvas.configure(yscrollincrement=40)
 
         # --- Card: Lokasi Data ---
         card = tk.Frame(wrap, bg=C_CARD, highlightbackground="#e2e8f0",
@@ -3418,7 +3463,8 @@ class StockMonitorApp:
         # tombol juga bisa membangun ulang dari form + audit_result)
         self._dev_bulanan_last_cfg = None
         tk.Label(dbul_inner, textvariable=self.dev_bulanan_status_var,
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
+                 wraplength=860, justify="left").pack(
             anchor="w", pady=(6, 0))
         self._dev_bulanan_load_form()
 
@@ -3437,6 +3483,26 @@ class StockMonitorApp:
         self.info_tree.heading("item", text="Item")
         self.info_tree.column("value", width=420, minwidth=200, anchor="w")
         self.info_tree.heading("value", text="Nilai")
+
+    def _cfg_scroll_fit(self):
+        """v3.11.12 — scrollbar tipis tab ⚙️ Config hanya saat konten
+        meluap (pola leaderboard v3.9.60; dipanggil tiap <Configure>
+        canvas — ukuran window berubah / konten bertambah)."""
+        cv = getattr(self, "_cfg_canvas", None)
+        sb = getattr(self, "_cfg_sb", None)
+        wrap = getattr(self, "_cfg_wrap", None)
+        if cv is None or sb is None or wrap is None:
+            return
+        try:
+            if not cv.winfo_exists():
+                return
+            perlu = wrap.winfo_reqheight() > cv.winfo_height() + 2
+            if perlu and not sb.winfo_ismapped():
+                sb.pack(side="right", fill="y")
+            elif not perlu and sb.winfo_ismapped():
+                sb.pack_forget()
+        except tk.TclError:
+            pass
 
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="Pilih RootPath")
@@ -4008,7 +4074,16 @@ class StockMonitorApp:
         self._dev_bulanan_status_default()
 
     def _dev_bulanan_status_default(self):
-        """Status kartu default (folder ada/belum + jumlah + mode)."""
+        """Status kartu default (folder ada/belum + jumlah + mode).
+
+        v3.11.12 — + BARIS KEDUA transparansi bulan (user: "gimana cara
+        tau misal sekarang bulan september apakah program otomatis
+        ambil yang agustus?"): program TIDAK memakai bulan kalender
+        mentah — periode = data run terakhir (audit_result['period']
+        dari timestamp dokumen IN terbaru; fallback bulan komputer
+        bila belum ada run), lalu mundur N bulan → file target
+        '20.{BULAN} {TAHUN}' + tanda ✓/✗ keberadaan di folder (jadi
+        SEPT → tampil 'AGUSTUS ✓' sebelum tombol 📂 ditekan)."""
         if getattr(self, "dev_bulanan_status_var", None) is None:
             return
         folder = (getattr(self, "dev_bulanan_folder_var", None)
@@ -4021,13 +4096,53 @@ class StockMonitorApp:
         _mode_auto = (getattr(self, "dev_bulanan_mode_bar", None)
                       is not None
                       and self.dev_bulanan_mode_bar.active == 1)
-        self.dev_bulanan_status_var.set(
+        baris1 = (
             f"Folder: {'✓ ada' if _ada else '✗ belum ada di komputer ini'} "
             f"· {jumlah} bulan mundur · "
             + ("⚡ otomatis dimuat setelah pipeline."
                if _mode_auto else
                "🫵 manual — muat via tombol 📂 (pipeline tidak "
                "otomatis memuat)."))
+        # v3.11.12 — baris transparansi: periode data → file target
+        # N bulan mundur (+ ✓/✗ keberadaan file — folder ada).
+        period = ((getattr(self, "audit_result", None) or {})
+                  .get("period"))
+        if not (isinstance(period, (list, tuple)) and len(period) == 2):
+            import datetime as _dt
+            _now = _dt.datetime.now()
+            period = (_now.year, _now.month)
+            _sumber = "bulan komputer — belum ada run pipeline"
+        else:
+            _sumber = "data run terakhir"
+        baris2 = ""
+        try:
+            _per = (int(period[0]), int(period[1]))
+        except (TypeError, ValueError):
+            _per = None
+        if _per is not None and 1 <= _per[1] <= 12:
+            _targets = bulan_mundur_list(_per, jumlah)
+            _bases = None
+            if _ada:
+                try:
+                    _ext_ok = {".xlsx", ".xlsm", ".xls", ".xlsb"}
+                    _bases = {
+                        os.path.splitext(nm)[0].strip().upper()
+                        for nm in os.listdir(folder)
+                        if os.path.splitext(nm)[1].lower() in _ext_ok}
+                except OSError:
+                    _bases = None
+            _parts = []
+            for _y, _m in _targets:
+                _want = f"20.{_BULAN_NAME[_m]} {_y}".upper()
+                if _bases is not None:
+                    _want += (" ✓" if _want in _bases else " ✗")
+                _parts.append(_want)
+            if _parts:
+                baris2 = (f"Periode data: {_BULAN_NAME[_per[1]]} "
+                          f"{_per[0]} ({_sumber}) → file dicari: "
+                          + " · ".join(_parts))
+        self.dev_bulanan_status_var.set(
+            baris1 + (("\n" + baris2) if baris2 else ""))
 
     def _flash_devbulanan_status(self, msg: str):
         """Flash status kartu 2,5 dtk lalu pulih ke status default
@@ -5999,6 +6114,7 @@ class StockMonitorApp:
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=True,
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
+            com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
             # v3.9.53 — Dev. Bulan Lalu: file deviasi aktif (tab ⚖ Komparasi)
             # via lalu_provider (pola nominal_resto v3.9.36 — lambda selalu
             # membaca _file_df AKTIF; file berganti → _on_dev_file_loaded
@@ -6017,6 +6133,7 @@ class StockMonitorApp:
             shared_cache=self._deviasi_pivot_cache,
             h_state=self._shared_h, h_editable=False,
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
+            com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
             lalu_provider=lambda: getattr(
                 self.komparasi_view, "_file_df", None))   # v3.9.53
         self.deviasi_pcs_view.pack(fill="both", expand=True)

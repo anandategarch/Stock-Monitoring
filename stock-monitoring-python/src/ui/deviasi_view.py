@@ -520,6 +520,54 @@ class SharedACRThreshold:
         return True
 
 
+class SharedComAmbang:
+    """v3.11.12 — State AMBANG COM Tinggi/Rendah (%) yang DIBAGI antar
+    tab Deviasi GR & PCS (user: "Di tab deviasi Gr dan PCS kolom Cek
+    kan ada analisa COM nah itu bisa gak set 50% > atau < COM rendah
+    atau COM tinggi nya?").
+
+    Segmen CEK "COM Tinggi (+x)" / "COM Rendah (−x)" terpicu bila
+    selisih d(H) dari median historis MELAMPAUI (ambang/100) ×
+    |median| — dulu semua selisih bertanda memicu. Default 50 (user
+    minta "set 50%"); diatur 0..500 via spinbox di kartu Filter kedua
+    tab (sinkron seperti TANGGAL H & AMBANG ACR — pola
+    SharedACRThreshold). 0 = perilaku lama (semua selisih).
+
+    Nilai dibaca/ditulis ke settings.json folder aplikasi (key
+    com_ambang_pct — pola acr_threshold: atomic save; file
+    hilang/korup → default 50 senyap).
+    """
+
+    def __init__(self, initial: float = 50.0):
+        self._pct = float(initial)
+        self._listeners: list[Callable] = []
+
+    @property
+    def pct(self) -> float:
+        return self._pct
+
+    def subscribe(self, fn: Callable):
+        self._listeners.append(fn)
+
+    def unsubscribe(self, fn: Callable) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def set(self, new_pct) -> bool:
+        """Ubah ambang + panggil SEMUA listener. Return True bila berubah."""
+        try:
+            new_pct = float(new_pct)
+        except (TypeError, ValueError):
+            return False
+        if not (0.0 <= new_pct <= 500.0) or new_pct == self._pct:
+            return False
+        self._pct = new_pct
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):
+                fn(new_pct)
+        return True
+
+
 # --- persistensi ambang ACR (settings.json — pola followup.json) ----------
 # v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
 _SETTINGS_BASE = _app_base_dir()
@@ -554,6 +602,39 @@ def save_acr_threshold(pct: float) -> None:
         old = {}
     try:
         old["acr_threshold_pct"] = round(float(pct), 2)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def load_com_ambang() -> float:
+    """v3.11.12 — ambang COM Tinggi/Rendah tersimpan (default 50.0 bila
+    file hilang/korup/nilai di luar 0..500 — senyap; user: "set 50%")."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = float(json.load(f).get("com_ambang_pct", 50.0))
+        return val if 0.0 <= val <= 500.0 else 50.0
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 50.0
+
+
+def save_com_ambang(pct: float) -> None:
+    """v3.11.12 — simpan atomik key com_ambang_pct (mirror
+    save_acr_threshold: read-modify-write, key lain utuh)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["com_ambang_pct"] = round(float(pct), 2)
         tmp = p.with_suffix(p.suffix + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(old, f, indent=2, ensure_ascii=False)
@@ -684,6 +765,7 @@ class DeviasiView(tk.Frame):
                  h_state: SharedTanggalH | None = None,
                  h_editable: bool = True,
                  acr_state: SharedACRThreshold | None = None,
+                 com_state: "SharedComAmbang | None" = None,
                  lalu_provider: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
@@ -700,6 +782,12 @@ class DeviasiView(tk.Frame):
         # Total ACR); tanpa acr_state (standalone/test) → 80.0.
         self._acr_state = acr_state
         self.acr_threshold = acr_state.pct if acr_state is not None else 80.0
+        # v3.11.12 — ambang COM Tinggi/Rendah dibagi GR & PCS (persen
+        # selisih-dari-median — user: "set 50% > atau <"); tanpa
+        # com_state (standalone/test) → 50.0.
+        self._com_state = com_state
+        self.com_ambang = (com_state.pct if com_state is not None
+                           else 50.0)
         # v3.9.53 — Dev. Bulan Lalu: provider FILE deviasi resmi (app
         # meneruskan komparasi_view._file_df — pola lalu_provider
         # nominal_resto v3.9.36). None (standalone/test) → kolom '-' jujur.
@@ -905,6 +993,27 @@ class DeviasiView(tk.Frame):
         tk.Label(r0b, text="% ×BOM", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 0))
 
+        # v3.11.12 — AMBANG COM TINGGI/RENDAH (user: "Di tab deviasi Gr
+        # dan PCS kolom Cek kan ada analisa COM nah itu bisa gak set
+        # 50% > atau < COM rendah atau COM tinggi nya?"): segmen COM
+        # terpicu bila selisih d(H) dari median MELAMPAUI ambang% ×
+        # |median|. Spinbox kedua tab sinkron (SharedComAmbang — pola
+        # AMBANG ACR); ubah → pivot cache dibersihkan + refresh (segmen
+        # COM hidup di pivot ter-cache). 0 = semua selisih (perilaku
+        # lama); default 50 (permintaan user).
+        tk.Label(r0b, text="AMBANG COM ±", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._com_var = tk.StringVar(value=self._fmt_threshold(
+            float(self.com_ambang)))
+        com_spin = ttk.Spinbox(
+            r0b, textvariable=self._com_var, from_=0, to=500,
+            increment=5, width=5, font=font(9),
+            command=self._on_com_ambang_change)
+        com_spin.pack(side="left", padx=(6, 0))
+        com_spin.bind("<Return>", lambda e: self._on_com_ambang_change())
+        tk.Label(r0b, text="% dr median", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 0))
+
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
@@ -1064,10 +1173,13 @@ class DeviasiView(tk.Frame):
             # v3.11.9 — label ke-10 BOM 0 (Total ACR 0 & SO(H) > 0).
             ("BOM 0", "#475569"),
             # v3.11.7 — segmen COM Tinggi (pemakaian aktual > sistem).
-            ("COM Tinggi · segmen CEK (COM vs ACR)", "#be123c"),
+            # v3.11.12 — teks + ambang% dr median (spinbox kartu Filter).
+            ("COM Tinggi · segmen CEK (COM vs ACR · > ambang% dr median)",
+             "#be123c"),
             # v3.11.8 — segmen COM Rendah (sistem mencatat pemakaian
             # lebih besar dari fisik — arah bawah median).
-            ("COM Rendah · segmen CEK (COM vs ACR)", "#0f766e"),
+            ("COM Rendah · segmen CEK (COM vs ACR · > ambang% dr median)",
+             "#0f766e"),
             # v3.11.9 — segmen Beda dari Resto Lain (searah dua periode,
             # resto lain berlawanan — butuh file ⚖).
             ("Beda dari Resto Lain · segmen CEK (file ⚖)", "#a21caf"),
@@ -1108,11 +1220,15 @@ class DeviasiView(tk.Frame):
         # unsubscribe defensif pola H (lihat _on_view_destroy).
         if self._acr_state is not None:
             self._acr_state.subscribe(self._on_shared_acr_changed)
+        # v3.11.12 — ambang COM dibagi GR & PCS (pola ambang ACR).
+        if self._com_state is not None:
+            self._com_state.subscribe(self._on_shared_com_changed)
         # FIX 6d1-05 — binding Destroy juga dipasang saat view memegang
         # listener FollowUpStore (dulu hanya bila h_state/acr_state ada —
         # view ber-store tanpa state bersama tak pernah melepas listener
         # store di _on_view_destroy).
         if (self._h_state is not None or self._acr_state is not None
+                or self._com_state is not None
                 or self.store is not None):
             # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
             # (pola laporan/komparasi) — tanpa ini listener tetap
@@ -1152,6 +1268,8 @@ class DeviasiView(tk.Frame):
             self._h_state.unsubscribe(self._on_shared_h_changed)
         if self._acr_state is not None:
             self._acr_state.unsubscribe(self._on_shared_acr_changed)
+        if self._com_state is not None:
+            self._com_state.unsubscribe(self._on_shared_com_changed)
         # FIX 6d1-05 — lepas listener FollowUpStore (API remove_listener
         # v3.9.42 tersedia tapi tak pernah dipasang; _on_view_destroy dulu
         # hanya me-unsubscribe h_state/acr_state): tanpa ini listener zombie
@@ -1207,6 +1325,48 @@ class DeviasiView(tk.Frame):
         else:
             self._dirty = True
 
+    # v3.11.12 — handler spinbox AMBANG COM (dipanggil tombol spin /
+    # Enter; pola _on_acr_threshold_change).
+    def _on_com_ambang_change(self):
+        try:
+            val = float(str(self._com_var.get()).strip().replace(",", "."))
+        except ValueError:
+            self._com_var.set(self._fmt_threshold(self.com_ambang))
+            return
+        if not (0.0 <= val <= 500.0):
+            messagebox.showwarning(
+                "Ambang COM",
+                "Ambang harus angka 0–500 (persen dari |median| selisih "
+                "COM). 0 = semua selisih memicu label.",
+                parent=self.winfo_toplevel())
+            self._com_var.set(self._fmt_threshold(self.com_ambang))
+            return
+        if self._com_state is not None:
+            # jalur utama: state bersama → listener kedua tab + persist
+            self._com_state.set(val)
+            save_com_ambang(val)
+        else:
+            # standalone (tanpa shared state): refresh instance ini saja
+            self.com_ambang = val
+            self._cached_pivot = None
+            self._refresh()
+
+    # v3.11.12 — listener state bersama (dipanggil SharedComAmbang saat
+    # ambang COM diubah dari tab mana pun — termasuk tab ini sendiri;
+    # pola _on_shared_acr_changed).
+    def _on_shared_com_changed(self, new_pct):
+        self.com_ambang = float(new_pct)
+        if hasattr(self, "_com_var"):
+            self._com_var.set(self._fmt_threshold(self.com_ambang))
+        # segmen COM hidup di pivot ter-cache → invalidasi + recompute.
+        self._cached_pivot = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
     # =========================================================================
     # ✓ FOLLOW-UP (v3.2) — klik sel ✓ = daftarkan / keluarkan
     # =========================================================================
@@ -1216,8 +1376,10 @@ class DeviasiView(tk.Frame):
 
         row_fingerprint (followup.py) menggabung label CEK ke md5 — label
         itu VOLATIL: berubah oleh ambang ACR to BOM (kartu Filter — CEK
-        kondisi ke-5) / file deviasi bulan lalu (tab ⚖ — segmen analisa
-        jadi snap['cek']) TANPA baris data berubah → fp berubah → centang
+        kondisi ke-5) / ambang COM Tinggi-Rendah (v3.11.12 — spinbox
+        kartu Filter, segmen COM) / file deviasi bulan lalu (tab ⚖ —
+        segmen analisa lalu→kini jadi snap['cek']) TANPA baris data
+        berubah → fp berubah → centang
         ✓ hilang senyap + entri orphan menetap di followup.json. Identitas
         stabil = 8 field v3.2 (asal|resto|barang|satuan|h|so|sistem|
         deviasi); format/urutan field row_fingerprint dipertahankan,
@@ -2613,8 +2775,14 @@ class DeviasiView(tk.Frame):
         # LEBIH BESAR dari fisik → segmen "COM Rendah (−x)" (x = selisih
         # di bawah median; satu pasangan hanya satu arah — strict dua
         # sisi di com_gap_map).
+        # v3.11.12 — AMBANG (user: "bisa gak set 50% > atau <"): min_pct
+        # dari self.com_ambang (spinbox kartu Filter, dibagi GR & PCS via
+        # SharedComAmbang) — gap wajib melampaui ambang% × |median|
+        # sebelum pasangan diberi label (0 = semua selisih, perilaku
+        # lama; default 50).
         try:
-            _com_tmap = com_gap_map(data, int(h))
+            _com_tmap = com_gap_map(data, int(h),
+                                    min_pct=float(self.com_ambang))
         except Exception:  # noqa: BLE001 — segmen analisa ≠ tabel gagal
             _LOG.debug("deviasi: peta COM Tinggi/Rendah gagal dibangun",
                        exc_info=True)
