@@ -563,33 +563,33 @@ def find_trees(widget):
 
 
 # ============================================================================
-# (v3.11.15) HELPER KONTRAK MERGE-VERTIKAL — ground truth dari RAW maps
-# (snapshot/_rank_map/_cek_map), BUKAN dari display tree: nilai kolom merge
-# tampil di baris HEAD tiap run kontigu bernilai-sama (urutan visual);
-# sticky memindah nilai ke baris pertama run yang TERLIHAT bila head tak
-# terlihat (ala merged-cell Excel — nilai selalu tampak).
+# (v3.11.16) HELPER KONTRAK MERGE PER-KELOMPOK SEJAJAR — ground truth
+# dari RAW maps (snapshot/_grank_map/_gcek_map), BUKAN dari display tree:
+# KETIGA kolom merge (Nama Barang · CEK · Rank) atas SPAN KELOMPOK BARANG
+# yang sama — nilai di baris HEAD kelompok (sejajar satu baris); sticky
+# memindah nilai ke baris pertama kelompok yang TERLIHAT bila head tak
+# terlihat (ala merged-cell Excel). Per-baris RAW tetap di _rank_map/
+# _cek_map (paritas sheet v3.9.65).
 # ============================================================================
 def _merge_raw_runs(view, tree, col):
-    """[(iids, teks), ...] run kontigu bernilai-sama kolom merge, dari RAW."""
+    """[(iids, teks), ...] run KELOMPOK kolom merge, dari RAW."""
     snaps = getattr(view, "_row_snaps", {})
-    rk = getattr(view, "_rank_map", {})
-    ck = getattr(view, "_cek_map", {})
+    gk = getattr(view, "_grank_map", {})
+    gc = getattr(view, "_gcek_map", {})
     runs = []
     prev_key = None
     for k in tree.get_children(""):
         ks = str(k)
         b = str((snaps.get(ks) or {}).get("barang", ""))
         if col == "Nama Barang":
-            key, text = b, b
+            text = b
         elif col == "Rank":
-            t = str(rk.get(ks, ""))
-            key, text = (b, t), t
+            text = str(gk.get(ks, ""))
         else:   # CEK
-            t = str(ck.get(ks, ""))
-            key, text = (b, t), t
-        if key != prev_key:
+            text = str(gc.get(ks, ""))
+        if b != prev_key:
             runs.append(([k], text))
-            prev_key = key
+            prev_key = b
         else:
             runs[-1][0].append(k)
     return runs
@@ -986,7 +986,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.15", APP_VERSION == "3.11.15",
+    check("Versi = 3.11.16", APP_VERSION == "3.11.16",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -14245,28 +14245,31 @@ def main():
           "(CABE/MLGPAR dev -40 vs lalu +100 — absolut dulu, flip "
           "menang) + v3.11.9 BOM 0 di depan (tanpa 9.ACR & SO_H 60)",
           _kcm61 is not None
-          and _val61(_kcm61, "CEK") == "BOM 0 · Berubah Arah",
-          f"got {None if _kcm61 is None else _val61(_kcm61, 'CEK')!r}")
+          and _dv61._cek_map.get(str(_kcm61), "") ==
+          "BOM 0 · Berubah Arah",
+          f"got {None if _kcm61 is None else _dv61._cek_map.get(str(_kcm61))!r}")
     _kcp61 = _find61("CABE", "PWKTAM")
     check("(v3.9.51) Analisa PENURUNAN + persen: |25| vs |50| → "
           "'Penurunan Tertinggi -50,0%' (basis |lalu|, 1 desimal koma) "
           "+ v3.11.9 BOM 0",
           _kcp61 is not None
-          and _val61(_kcp61, "CEK") ==
+          and _dv61._cek_map.get(str(_kcp61), "") ==
           "BOM 0 · Penurunan Tertinggi -50,0%",
-          f"got {None if _kcp61 is None else _val61(_kcp61, 'CEK')!r}")
+          f"got {None if _kcp61 is None else _dv61._cek_map.get(str(_kcp61))!r}")
     _kpp61 = _find61("PENTOL", "PWKTAM")
     check("(v3.9.51) Analisa PENINGKATAN + persen MENEMPEL pada label "
           "check lama ('Hitung Manual · Peningkatan Tertinggi +133,3%' "
           "— |70| vs |30|) + v3.11.9 BOM 0",
-          _kpp61 is not None and _val61(_kpp61, "CEK") ==
+          _kpp61 is not None
+          and _dv61._cek_map.get(str(_kpp61), "") ==
           "Hitung Manual · BOM 0 · Peningkatan Tertinggi +133,3%",
-          f"got {None if _kpp61 is None else _val61(_kpp61, 'CEK')!r}")
+          f"got {None if _kpp61 is None else _dv61._cek_map.get(str(_kpp61))!r}")
     _kbm61 = _find61("BUMBU", "MLGPAR")
     check("(v3.9.53) Pasangan TANPA baris di FILE deviasi → tanpa analisa "
           "(v3.11.9: 'BOM 0' murni — Total ACR 0 & SO_H 50) + Dev. Bulan "
           "Lalu '-'",
-          _kbm61 is not None and _val61(_kbm61, "CEK") == "BOM 0"
+          _kbm61 is not None
+          and _dv61._cek_map.get(str(_kbm61), "") == "BOM 0"
           and _val61(_kbm61, "Dev. Bulan Lalu") == "-",
           f"got CEK={_val61(_kbm61, 'CEK')!r} "
           f"lalu={_val61(_kbm61, 'Dev. Bulan Lalu')!r}")
@@ -14324,38 +14327,38 @@ def main():
     _rk61 = [(str((_dv61._row_snaps.get(str(_k61)) or {})
                   .get("barang", "")), _val61(_k61, "Rank"))
              for _k61 in _dv61.tree.get_children("")]
-    check("(v3.9.65) Rank = PER-BARIS DALAM KELOMPOK (semantik sheet "
-          "asli — user: 'data rank sama semua untuk tiap grup barang' "
-          "DIFIKS): PENTOL PWKTAM(+70)=1 · MLGPAR(+25)=2; CABE "
-          "MLGPAR(−40)=1 · PWKTAM(+25)=2; BUMBU (1 resto)=1 — urutan "
-          "render (Nama Barang, |Dev| desc) = rank asc dalam grup",
-          _rk61 == [("BUMBU", "1"), ("CABE", "1"), ("CABE", "2"),
-                    ("PENTOL", "1"), ("PENTOL", "2")],
+    # v3.11.16 — DISPLAY rank = RANK KELOMPOK (Σ|Deviasi| barang di
+    # antara barang tampil, head-only sejajar nama barang): PENTOL Σ=95
+    # → 1 · CABE Σ=65 → 2 · BUMBU Σ=1 → 3; baris lanjutan kosong.
+    check("(v3.11.16) DISPLAY Rank = RANK KELOMPOK head-only sejajar "
+          "nama barang (PENTOL Σ|Dev|=95→'1' · CABE 65→'2' · BUMBU "
+          "1→'3'; user: 'Rank juga merger vertical')",
+          _rk61 == [("BUMBU", "3"), ("CABE", "2"), ("CABE", ""),
+                    ("PENTOL", "1"), ("PENTOL", "")],
           f"got {_rk61}")
-    check("(v3.9.60+v3.9.65) SETIAP baris membawa rank MILIKNYA "
-          "sendiri (nilai tree == _rank_map per iid — bukan konstanta "
-          "grup, bukan head-only)",
-          all(str(_val61(_k61, "Rank")).strip()
-              == str(_dv61._rank_map.get(str(_k61), "")).strip()
-              and str(_val61(_k61, "Rank")).strip() != ""
-              for _k61 in _dv61.tree.get_children("")),
-          "ada baris tanpa rank / rank != rank_map")
+    check("(v3.9.65+v3.11.16) RAW _rank_map = PER-BARIS DALAM KELOMPOK "
+          "utuh (semantik sheet asli — display merge TIDAK mengubah "
+          "nilai mentah: BUMBU 1 · CABE 1,2 · PENTOL 1,2)",
+          [_dv61._rank_map.get(str(_k61), "")
+           for _k61 in _dv61.tree.get_children("")]
+          == ["1", "1", "2", "1", "2"],
+          f"rank_map={_dv61._rank_map}")
     _dv61._sort_by("Deviasi", reverse=True, tree=_dv61.tree)
     root.update()
     _rk61b = [(str((_dv61._row_snaps.get(str(_k61)) or {})
                    .get("barang", "")), _val61(_k61, "Rank"))
               for _k61 in _dv61.tree.get_children("")]
-    # v3.9.65 — pasca-sort: rank menempel di BARISNYA (bukan posisi
-    # visual) — kelompok boleh ter-interleave tapi tiap baris tetap
-    # membawa rank grup-asalnya (PENTOL {1,2} · CABE {1,2} · BUMBU {1}).
+    # v3.11.16 — pasca-sort: rank KELOMPOK menempel di nilai barisnya
+    # (bukan renumber posisi visual); display head-run visual blok
+    # kontigu pasca interleave — baris lanjutan blok "" (kontrak merge).
     _byb61b = {}
     for _b61, _r61v in _rk61b:
-        _byb61b.setdefault(_b61, set()).add(_r61v)
-    check("(v3.9.65) Sort kolom lain → rank IKUT BARISNYA (tiap baris "
-          "membawa rank grup-asal — PENTOL {1,2} · CABE {1,2} · "
-          "BUMBU {1}; bukan renumber posisi visual)",
-          _byb61b == {"PENTOL": {"1", "2"}, "CABE": {"1", "2"},
-                      "BUMBU": {"1"}}
+        if _r61v.strip():
+            _byb61b.setdefault(_b61, set()).add(_r61v)
+    check("(v3.11.16) Sort kolom lain → rank KELOMPOK ikut nilai "
+          "barisnya (PENTOL {1} · CABE {2} · BUMBU {3} — bukan "
+          "renumber posisi visual; RAW per-baris tetap 1,2 dalam grup)",
+          _byb61b == {"PENTOL": {"1"}, "CABE": {"2"}, "BUMBU": {"3"}}
           and len(_rk61b) == 5,
           f"got {_byb61b} / {_rk61b}")
 
@@ -14543,13 +14546,13 @@ def main():
     # lanjutan kelompok KOSONG — rowspan Excel; user: "kolom Cek merger
     # vertical dengan nama barang … Rank juga") + Rank tampil utuh
     # (fixture tanpa ikat — tiap rank run sendiri) + TANPA tag band.
-    check("(v3.9.61+v3.11.15) Merge NATIVE → HEAD-RUN TANPA BAND: nama "
-          "barang di HEAD kelompok & baris lanjutan kosong; rank utuh "
-          "per-baris (CABE 1,2 · PENTOL 1,2 · BUMBU 1 — fixture tanpa "
-          "ikat) & tanpa tag grp",
-          _vals62 == [("BUMBU", "1", None),
-                      ("CABE", "1", None), ("", "2", None),
-                      ("PENTOL", "1", None), ("", "2", None)],
+    check("(v3.9.61+v3.11.16) Merge NATIVE → PER-KELOMPOK SEJAJAR "
+          "TANPA BAND: nama & rank di HEAD kelompok yang SAMA (BUMBU "
+          "Σ|Dev|=1→'3' · CABE 65→'2' · PENTOL 95→'1'), baris "
+          "lanjutan KOSONG di KEDUA kolom & tanpa tag grp",
+          _vals62 == [("BUMBU", "3", None),
+                      ("CABE", "2", None), ("", "", None),
+                      ("PENTOL", "1", None), ("", "", None)],
           f"got {_vals62}")
     _snaps62 = [_dv62._row_snaps.get(str(k), {}) for k in _kids62]
     check("(v3.9.55) Snapshot RAW tetap ber-nama barang & rank utk SETIAP "
@@ -14569,13 +14572,19 @@ def main():
     root.update()
     _dv62.tree.xview_moveto(0)
     root.update()
-    check("(v3.9.60) Scroll y/x: nilai per-baris TIDAK berubah pasca "
-          "scroll (tak ada state display; nama/rank utuh di baris "
-          "mana pun — 'bug nama barang tidak muncul' tuntas)",
-          [_dv62.tree.set(k, "Nama Barang") for k in
-           _dv62.tree.get_children("")][:2] == ["BUMBU", "CABE"]
-          and _dv62.tree.set(_kids62[2], "Rank") == "2",
-          "nilai berubah pasca scroll")
+    # v3.11.16 — kontrak merge per-kelompok: pasca scroll nilai tree
+    # menurut kontrak sticky (head bila terlihat); RAW per-baris utuh.
+    _exp62d = _merge_head_expected(_dv62, _dv62.tree, "Nama Barang")
+    check("(v3.9.60+v3.11.16) Scroll y/x: nilai = kontrak merge "
+          "(head-run; RAW snapshot/_rank_map per-baris UTUH pasca "
+          "scroll — 'nama barang tidak muncul' tuntas via sticky+poller)",
+          all(str(_dv62.tree.set(k, "Nama Barang")) == _exp62d[k]
+              for k in _dv62.tree.get_children(""))
+          and _dv62._rank_map.get(str(_kids62[2])) == "2"
+          and all(sn.get("barang")
+                  for sn in (_dv62._row_snaps.get(str(k)) or {}
+                             for k in _dv62.tree.get_children(""))),
+          "nilai menyimpang dari kontrak pasca scroll")
 
     # --- (e) sort interleave ↔ kelompok (merge ikut urutan visual) ------
     _dv62._sort_by("Resto", reverse=False, tree=_dv62.tree)
@@ -14593,14 +14602,14 @@ def main():
     _regroup62 = [(_dv62.tree.set(k, "Nama Barang"),
                    _dv62.tree.set(k, "Rank"))
                   for k in _dv62.tree.get_children("")]
-    check("(v3.9.60+v3.11.15) Sort balik via value_get Nama Barang "
+    check("(v3.9.60+v3.11.16) Sort balik via value_get Nama Barang "
           "(snapshot RAW) → kelompok KONTIGU kembali: layout merge "
-          "dipasang ulang otomatis (head-run; rank utuh per-baris — "
-          "v3.9.65; urutan dalam grup ikut urutan resto dari sort Resto "
+          "per-kelompok dipasang ulang otomatis (rank KELOMPOK di head; "
+          "urutan dalam grup ikut urutan resto dari sort Resto "
           "sebelumnya — stable sort)",
-          _regroup62 == [("BUMBU", "1"), ("CABE", "1"),
-                         ("", "2"), ("PENTOL", "2"),
-                         ("", "1")],
+          _regroup62 == [("BUMBU", "3"), ("CABE", "2"),
+                         ("", ""), ("PENTOL", "1"),
+                         ("", "")],
           f"got {_regroup62}")
 
     # --- (f) F6: sync overlay scroll — scrollbar wrap + bindtag keyboard --
@@ -14622,9 +14631,11 @@ def main():
     _dv62._colmgr.hidden = ["Rank"]
     _dv62._colmgr.apply()
     root.update()
-    check("(v3.9.52) Kolom Rank disembunyikan (Kolom) → tanpa crash; "
-          "nilai tetap terbaca via tree.set (native — tak ada label)",
-          _dv62.tree.set(_kids62[1], "Rank") == "1",
+    check("(v3.9.52+v3.11.16) Kolom Rank disembunyikan (Kolom) → "
+          "tanpa crash; nilai tetap terbaca via RAW map (native — "
+          "tak ada label; per-baris _rank_map + kelompok _grank_map)",
+          _dv62._rank_map.get(str(_kids62[1])) == "1"
+          and _dv62._grank_map.get(str(_kids62[1])) == "2",
           "nilai Rank hilang saat kolom disembunyikan")
     _dv62._colmgr.hidden = ["Satuan"]
     _dv62._colmgr.apply()
@@ -14633,13 +14644,16 @@ def main():
     # --- (h) clone ⛶: merge NATIVE ikut ke tree clone --------------------
     _win62, _ct62 = _dv62._maximize()
     _pump62(root, 0.5)
-    check("(v3.9.61) Clone: nilai per-baris diterapkan ke tree "
-          "clone TANPA band (SEMUA baris bernama/rank; TANPA overlay)",
-          [_ct62.set(k, "Nama Barang") for k in
-           _ct62.get_children("")][:2] == ["BUMBU", "CABE"]
-          and _ct62.set(list(_ct62.get_children(""))[2], "Rank") == "2"
+    _exp62h = _merge_head_expected(_dv62, _ct62, "Nama Barang")
+    _exp62hr = _merge_head_expected(_dv62, _ct62, "Rank")
+    check("(v3.9.61+v3.11.16) Clone: merge per-kelompok ikut ke tree "
+          "clone TANPA band (nama & rank KELOMPOK di head, baris "
+          "lanjutan kosong; TANPA overlay)",
+          all(str(_ct62.set(k, "Nama Barang")) == _exp62h[k]
+              and str(_ct62.set(k, "Rank")) == _exp62hr[k]
+              for k in _ct62.get_children(""))
           and getattr(_ct62, "_rank_merge", None) is None,
-          "clone tanpa nilai per-baris: "
+          "clone tanpa merge kelompok: "
           f"{[(_ct62.set(k, 'Nama Barang'), _ct62.set(k, 'Rank')) for k in _ct62.get_children('')]}")
     _win62.destroy()
     root.update()
@@ -14648,11 +14662,14 @@ def main():
     _dv62.tree.update_idletasks()
     app._refit_all_tree_columns()
     root.update()
-    check("(v3.9.60) app._refit_all_tree_columns (jalur zoom) aman "
-          "(nilai per-baris utuh pasca auto-fit ulang — rank per-baris "
-          "v3.9.65 tak rusak)",
-          _dv62.tree.set(_kids62[1], "Rank") == "1"
-          and _dv62.tree.set(_kids62[2], "Rank") == "2",
+    _exp62i = _merge_head_expected(_dv62, _dv62.tree, "Rank")
+    check("(v3.9.60+v3.11.16) app._refit_all_tree_columns (jalur zoom) "
+          "aman (layout merge kontrak pasca auto-fit ulang; RAW "
+          "per-baris _rank_map tak rusak)",
+          all(str(_dv62.tree.set(k, "Rank")) == _exp62i[k]
+              for k in _dv62.tree.get_children(""))
+          and _dv62._rank_map.get(str(_kids62[1])) == "1"
+          and _dv62._rank_map.get(str(_kids62[2])) == "2",
           "nilai rusak pasca zoom walk")
 
     _dv62.destroy()
@@ -15433,11 +15450,15 @@ def main():
     root.update()
     _ord65b = [str((_dv65b._row_snaps.get(str(k)) or {}).get("barang", ""))
                for k in _dv65b.tree.get_children("")]
-    check("(v3.9.55) F7 E2E: ▲ Kenaikan → baris Peningkatan +133,3% "
-          "(PENTOL/PWKTAM) TERATAS; baris Penurunan (tier 2naik = grup "
-          "ekor) di bawah",
-          _ord65b[0] == "PENTOL" and _ord65b[-1] == "CABE"
-          and _ord65b.count("PENTOL") == 2,
+    # v3.11.16 — kunci analisa = label PER-BARIS RAW (dulu display
+    # blank di baris lanjutan run → pct Penurunan CABE-PWKTAM tak
+    # terbaca; kini (2,+50) terbaca → setelah BUMBU (2,0) di ekor).
+    check("(v3.9.55+v3.11.16) F7 E2E: ▲ Kenaikan → Peningkatan "
+          "+133,3% (PENTOL/PWKTAM) TERATAS; diikuti tier-1 Berubah Arah "
+          "(CABE-MLGPAR · PENTOL-MLGPAR); ekor tier-0 BUMBU lalu "
+          "CABE-Penurunan (pct kini terbaca dari RAW per-baris — dulu "
+          "blank continuation run)",
+          _ord65b == ["PENTOL", "CABE", "PENTOL", "BUMBU", "CABE"],
           f"got {_ord65b}")
     _dv65b._sort_analisa("turun")
     root.update()
@@ -19882,16 +19903,18 @@ def main():
                  _dv77.tree.set(_k77, "Resto"),
                  _dv77.tree.set(_k77, "Rank"))
                 for _k77 in _dv77.tree.get_children("")]
-    check("(v3.9.65+v3.11.15) §77a: IKAT method=min — |dev| sama berbagi "
-          "rank SATU sel merge (TIE GRUP 3×|6| → SATU '1' di head, "
-          "lanjutan kosong) & rank berikut MELONCAT (LONCAT: 2×|9| → "
-          "'1' head + lanjutan kosong, |4,5| → '3' — pola 13,13,13,16 "
-          "sheet asli user; bukan 1,1,2 & bukan konstanta per grup)",
+    # v3.11.16 — DISPLAY rank = RANK KELOMPOK (Σ|Deviasi| barang):
+    # LONCAT Σ=22→'1' · TIE GRUP Σ=18→'2' · SATU Σ=6→'3' —
+    # di HEAD kelompok sejajar nama barang, baris lanjutan kosong.
+    check("(v3.11.16) §77a: DISPLAY Rank = RANK KELOMPOK head-only "
+          "sejajar nama barang (LONCAT Σ|Dev|=22→'1' · TIE GRUP "
+          "18→'2' · SATU 6→'3'; baris lanjutan kelompok kosong — "
+          "user: 'Rank juga merger vertical')",
           _ranks77 == [
               ("LONCAT", "RA", "1"), ("LONCAT", "RB", ""),
-              ("LONCAT", "RC", "3"), ("LONCAT", "RD", ""),
-              ("SATU", "RA", "1"),
-              ("TIE GRUP", "RA", "1"), ("TIE GRUP", "RB", ""),
+              ("LONCAT", "RC", ""), ("LONCAT", "RD", ""),
+              ("SATU", "RA", "3"),
+              ("TIE GRUP", "RA", "2"), ("TIE GRUP", "RB", ""),
               ("TIE GRUP", "RC", "")],
           f"got {_ranks77}")
     check("(v3.9.65) §77a RAW: _rank_map PER-BARIS utuh tanpa merge "
@@ -19925,18 +19948,23 @@ def main():
     _ranks77b = [(_dv77.tree.set(_k77, "Nama Barang"),
                   _dv77.tree.set(_k77, "Rank"))
                  for _k77 in _dv77.tree.get_children("")]
-    check("(v3.9.65+v3.11.15) §77a: sort kolom Rank = NUMERIK antar-baris "
-          "via value_get RAW (grup interleave — desc: '3' teratas, 6× "
-          "rank-1 berikut, baris nol ('' → 0) terakhir) + layout merge "
-          "dipasang ulang utk urutan baru (ikat & kelompok kontigu "
-          "menyusun run baru; bukan sort teks)",
+
+    def _vis77r(_k77r):
+        _bb77 = _dv77.tree.bbox(_k77r)
+        return bool(_bb77) and 0 <= _bb77[1] < _dv77.tree.winfo_height()
+
+    check("(v3.11.16) §77a: sort kolom Rank = NUMERIK RANK KELOMPOK "
+          "via value_get (desc: SATU '3' teratas → TIE GRUP '2' → "
+          "LONCAT '1' terakhir; kelompok KONTIGU utuh pasca sort) + "
+          "layout merge dipasang ulang utk urutan baru",
           [r for _, r in _ranks77b] ==
-          ["3", "1", "", "1", "1", "", "", ""]
-          and _ranks77b[0] == ("LONCAT", "3")
-          and _ranks77b[-1] == ("LONCAT", "")
+          ["3", "2", "", "", "1", "", "", ""]
+          and _ranks77b[0] == ("SATU", "3")
+          and _ranks77b[-1] == ("", "")
           and all(str(_dv77.tree.set(k, "Nama Barang")) == _exp77nb[k]
                   and str(_dv77.tree.set(k, "Rank")) == _exp77rb[k]
-                  for k in _dv77.tree.get_children("")),
+                  for k in _dv77.tree.get_children("")
+                  if _vis77r(k)),
           f"got {_ranks77b}")
     # --- (d) BONUS bug laten: popup ⧩ Rank TERISI + filter BERFUNGSI -----
     # v3.9.65 — Rank = kolom DERIVED (dihitung _prepare_rows; tak pernah
@@ -19945,22 +19973,23 @@ def main():
     # col_sel (kolom tak ada di frame). Kini: daftar nilai = rank yang
     # tampil + filter diterapkan pasca-assign.
     _cv77 = {str(x) for x in _dv77._col_values("Rank")}
-    check("(v3.9.65) §77d: popup Rank TERISI (dulu SELALU KOSONG di "
-          "semua versi — kolom derived tak pernah ada di pivot mentah): "
-          "nilai = {'1', '3', ''} persis rank yang tampil "
-          "(1 = 6 baris · 3 = loncat pasca ikat · '' = baris dev 0)",
-          _cv77 == {"1", "3", ""},
+    check("(v3.9.65+v3.11.16) §77d: popup Rank TERISI (dulu SELALU "
+          "KOSONG di semua versi — kolom derived tak pernah ada di pivot "
+          "mentah): nilai = {'1', '2', '3'} = RANK KELOMPOK yang tampil "
+          "(3 kelompok fixture; filter menyaring kelompok utuh)",
+          _cv77 == {"1", "2", "3"},
           f"got {_cv77}")
     _pl77b = _dv77._prepare_rows({"col_sel": {"Rank": {"3"}},
                                   "tanggal_h": 25, "kategori": None,
                                   "aktif": None})
     _rows77b = [(sn.get("barang"), sn.get("resto"))
                 for sn in _pl77b["row_snaps"].values()]
-    check("(v3.9.65) §77d: filter Rank = {'3'} BERFUNGSI (dulu "
-          "DITELAN SENYAP — loop col_sel tak melihat kolom derived): "
-          "hanya LONCAT/RC (baris rank-3) yang tampil",
+    check("(v3.9.65+v3.11.16) §77d: filter Rank = {'3'} BERFUNGSI "
+          "(dulu DITELAN SENYAP — loop col_sel tak melihat kolom "
+          "derived): kini menyaring RANK KELOMPOK → kelompok SATU "
+          "utuh (grank-3) yang tampil",
           len(_pl77b["items"]) == 1
-          and _rows77b == [("LONCAT", "RC")],
+          and _rows77b == [("SATU", "RA")],
           f"got n={len(_pl77b['items'])} rows={_rows77b}")
     _pl77c = _dv77._prepare_rows({"col_sel": {"Rank": {"1"}},
                                   "tanggal_h": 25, "kategori": None,
@@ -19969,13 +19998,14 @@ def main():
                                   "tanggal_h": 25, "kategori": None,
                                   "aktif": None})
     _rows77d = [(sn.get("barang"), sn.get("resto"))
-                for sn in _pl77d["row_snaps"].values()]
-    check("(v3.9.65) §77d: filter Rank = {'1'} → 6 baris rank-1 tiap "
-          "kelompok (LONCAT ×2 · SATU ×1 · TIE GRUP ×3) & = {''} → hanya "
-          "baris TANPA rank (LONCAT/RD dev 0)",
-          len(_pl77c["items"]) == 6
-          and len(_pl77d["items"]) == 1
-          and _rows77d == [("LONCAT", "RD")],
+                for sn in _pl77d.get("row_snaps", {}).values()]
+    # v3.11.16 — kunci filter = rank KELOMPOK: {'1'} = LONCAT utuh
+    # (grank-1); {''} tak lagi cocok (grank selalu terisi → 0 baris).
+    check("(v3.11.16) §77d: filter Rank = {'1'} → kelompok LONCAT "
+          "UTUH (4 baris — grank-1, kontrak merge sejajar) & = {''} "
+          "→ 0 baris (rank kelompok selalu terisi)",
+          len(_pl77c["items"]) == 4
+          and len(_pl77d["items"]) == 0,
           f"got n1={len(_pl77c['items'])} n0={len(_pl77d['items'])} "
           f"rows={_rows77d}")
     _dv77.destroy()
@@ -25103,25 +25133,28 @@ def main():
                   for k in _kids98)
               and _nonempty98 == len(_runs98),
               f"nonempty={_nonempty98} runs={len(_runs98)}")
-    check("(v3.11.15) §98-A3 label utuh TERLIHAT: tiap run CEK ber-teks "
-          "menampilkan TEKS PENUH (gabungan ' · ') di head — bukan "
-          "label utama saja",
+    # v3.11.16 — head CEK = GABUNGAN label unik KELOMPOK (' · '):
+    _gcek_raw98 = {str(k): str(_dv98._gcek_map.get(str(k), ""))
+                   for k in _kids98}
+    check("(v3.11.16) §98-A3 CEK GABUNGAN KELOMPOK di head: baris head "
+          "menampilkan TEKS GABUNGAN label unik kelompok (' · ' bila ≥2 "
+          "label — ringkasan satu sel sejajar nama barang)",
           all((" · " in _t98.set(k, "CEK"))
               for k in _kids98
               if str(_t98.set(k, "CEK")).strip()
-              and " · " in _cek_raw98[str(k)]),
-          "teks utuh tidak tampil di head run")
+              and " · " in _gcek_raw98[str(k)]),
+          "gabungan kelompok tidak tampil di head")
     _vg98 = _dv98._merge_value_get(
         next(k for k in _kids98
              if not str(_t98.set(k, "CEK")).strip()
-             and _cek_raw98[str(k)]), "CEK", "")
-    check("(v3.11.15) §98-A4 _merge_value_get CEK: baris lanjutan run "
-          "(display kosong) mengembalikan teks RAW utuh — filter clone ⛩ "
-          "& auto-fit & sort tak buta",
-          _vg98 == _cek_raw98.get(
+             and _gcek_raw98[str(k)]), "CEK", "")
+    check("(v3.11.16) §98-A4 _merge_value_get CEK: baris lanjutan "
+          "kelompok (display kosong) mengembalikan teks GABUNGAN "
+          "kelompok — filter clone ⛩ & auto-fit & sort tak buta",
+          _vg98 == _gcek_raw98.get(
               next(k for k in _kids98
                    if not str(_t98.set(k, "CEK")).strip()
-                   and _cek_raw98[str(k)]), None),
+                   and _gcek_raw98[str(k)]), None),
           f"vg={_vg98!r}")
 
     # ---- (B) sticky scroll ------------------------------------------------
@@ -25150,15 +25183,16 @@ def main():
     for _ in range(30):
         root.update()
         time.sleep(0.01)
-    _raw_seq98 = [_cek_raw98[str(k)] for k in _t98.get_children("")]
+    # v3.11.16 — kunci sort CEK = teks GABUNGAN kelompok (_gcek_map)
+    _raw_seq98 = [_gcek_raw98[str(k)] for k in _t98.get_children("")]
     _exp98c = _merge_sticky_expected(_dv98, _t98, "CEK")
     _vis98c = [k for k in _t98.get_children("")
                if _t98.bbox(k) and 0 <= _t98.bbox(k)[1]
                < _t98.winfo_height()]
-    check("(v3.11.15) §98-C1 sort kolom CEK membaca RAW (_cek_map — "
-          "bukan display kosong): urutan baris = urutan teks utuh naik "
-          "(natural-key — parser float gagal utk teks label) + layout "
-          "merge dipasang ulang",
+    check("(v3.11.16) §98-C1 sort kolom CEK membaca nilai KELOMPOK "
+          "(_gcek_map — bukan display kosong): urutan baris = urutan "
+          "teks gabungan naik (natural-key — parser float gagal utk "
+          "teks label) + layout merge dipasang ulang",
           _raw_seq98 == sorted(_raw_seq98, key=_nk98)
           and all(str(_t98.set(k, "CEK")) == _exp98c[k]
                   for k in _vis98c),
