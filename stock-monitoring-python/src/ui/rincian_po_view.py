@@ -240,15 +240,18 @@ class RincianPoView(tk.Frame):
         # v3.9.37 — #0 lebih lebar: memuat anotasi "↳ 02 Juni 2024 09:00"
         # (Tgl/Jam Pembuatan merge-vertical ke Nomor #).
         self.tree.column("#0", width=185, minwidth=150)
-        self.tree.heading("#0", text="Nomor #")
+        # v3.11.14 — heading #0 ikut anchor data tree (kiri — pola Excel)
+        self.tree.heading("#0", text="Nomor #", anchor="w")
         col_widths = {
             "Tanggal": 132, "Nama Resto": 90, "Pemasok": 200,
             "Nama Barang": 200, "Satuan": 64, "Kuantitas": 90,
         }
         for c in cols:
+            _anch = "e" if c == "Kuantitas" else "w"
             self.tree.column(c, width=col_widths.get(c, 100), minwidth=50,
-                             anchor="e" if c == "Kuantitas" else "w")
-            self.tree.heading(c, text=c)
+                             anchor=_anch)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(c, text=c, anchor=_anch)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)

@@ -343,7 +343,8 @@ class DeviasiPopup(tk.Toplevel):
         for col_name, width, anchor in COLUMNS:
             self.tree.column(col_name, width=width, minwidth=50,
                              anchor=anchor)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
 
         vsb = ttk.Scrollbar(card_in, orient="vertical",
                             command=self.tree.yview)

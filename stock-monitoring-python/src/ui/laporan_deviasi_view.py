@@ -287,7 +287,8 @@ class LaporanDeviasiView(tk.Frame):
             self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
             # v3.5: SEMUA kolom pakai filter header ⧩ (sort via popup);
             # ✓ tetap toggle follow-up via klik sel
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)

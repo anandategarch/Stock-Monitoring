@@ -280,7 +280,8 @@ class DetailsPopup(tk.Toplevel):
             self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
             # kolom Nomor / Nomor PO tanpa sort-click (heading dipakai filter
             # Nama Barang; copy via klik kanan / double-click)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
 
         vsb = ttk.Scrollbar(card_in, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(card_in, orient="horizontal", command=self.tree.xview)

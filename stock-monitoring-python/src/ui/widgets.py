@@ -6156,7 +6156,7 @@ class FrozenNamePane:
         # garis pemisah tipis ala freeze-pane Excel
         tk.Frame(self.pane, bg=C_BORDER, width=1).pack(
             side="left", fill="y")
-        self.tree.heading("#0", text=heading)
+        self.tree.heading("#0", text=heading, anchor="w")
         self.tree.column("#0", width=width, minwidth=minwidth,
                          stretch=False)
         if setup_tags is not None:
@@ -6409,6 +6409,12 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
                             stretch=cfg.get("stretch", True))
             h = source_tree.heading(cid)
             kw = {"text": h.get("text", "")}
+            # v3.11.14 — clone menyalin ANCHOR heading sumber (pola Excel
+            # heading-ikut-kolom; dulu clone kehilangan anchor → heading
+            # jender clone center default).
+            _h_anchor = h.get("anchor")
+            if _h_anchor:
+                kw["anchor"] = _h_anchor
             if h.get("image"):
                 kw["image"] = h["image"]
             new_tree.heading(cid, **kw)

@@ -1364,7 +1364,8 @@ class PivotTableView(tk.Frame):
         # nama tampil di TREE BEKU; heading tetap diset supaya teks/
         # clone konsisten — tidak terlihat karena width 0).
         self.tree.column("#0", width=0, minwidth=0, stretch=False)
-        self.tree.heading("#0", text="Nama Barang")
+        # v3.11.14 — heading #0 ikut anchor data tree (kiri — pola Excel)
+        self.tree.heading("#0", text="Nama Barang", anchor="w")
         # tree beku: kolom nama + funnel (HeaderFilter menempel di sini).
         # v3.11.6 — width=280 hanya SEKALI per muat data (flag dari
         # load_data); render berikutnya MEMBIARKAN lebar saat ini (hasil
@@ -1373,7 +1374,7 @@ class PivotTableView(tk.Frame):
             self._frozen_reset_pending = False
             self.frozen.tree.column("#0", width=280, minwidth=180,
                                     stretch=False)
-        self.frozen.tree.heading("#0", text="Nama Barang")
+        self.frozen.tree.heading("#0", text="Nama Barang", anchor="w")
         for c in cols:
             # v3.11.6 — kolom yang pernah diatur (render sebelumnya /
             # cache kind sama) memakai lebar tersimpan; kolom baru →
@@ -1398,7 +1399,9 @@ class PivotTableView(tk.Frame):
                 htxt = f"{abs(ci)}•" if ci < 0 else str(ci)
             except (TypeError, ValueError):
                 htxt = str(c)
-            self.tree.heading(c, text=htxt)
+            # v3.11.14 — heading matrix ikut anchor kolom angka (kanan —
+            # pola Excel; dulu center default → mismatch vs data e)
+            self.tree.heading(c, text=htxt, anchor="e")
         self._last_col_kind = kind
         # re-pasang state kolom tersembunyian (reconfigure columns me-reset
         # displaycolumns ke #all)

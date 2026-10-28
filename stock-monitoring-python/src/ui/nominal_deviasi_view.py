@@ -236,7 +236,8 @@ class NominalDeviasiView(tk.Frame):
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34,
                              anchor=anchor)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)

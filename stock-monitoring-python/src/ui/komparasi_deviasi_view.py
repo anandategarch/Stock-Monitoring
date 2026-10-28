@@ -1027,7 +1027,8 @@ class KomparasiDeviasiView(tk.Frame):
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34,
                              anchor=anchor)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
         # heading penjelas tiap sisi
         self._update_headings()
 
@@ -2800,7 +2801,8 @@ class KomparasiDeviasiView(tk.Frame):
         for name, width, anchor in self.TOP_COLS:
             self._top_tree.column(name, width=width, minwidth=34,
                                   anchor=anchor)
-            self._top_tree.heading(name, text=name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self._top_tree.heading(name, text=name, anchor=anchor)
         vsb = ttk.Scrollbar(tb, orient="vertical",
                             command=self._top_tree.yview)
         self._top_tree.configure(yscrollcommand=vsb.set)
@@ -2849,7 +2851,8 @@ class KomparasiDeviasiView(tk.Frame):
         for name, width, anchor in self.FLIP_COLS:
             self._flip_tree.column(name, width=width, minwidth=34,
                                    anchor=anchor)
-            self._flip_tree.heading(name, text=name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self._flip_tree.heading(name, text=name, anchor=anchor)
         fvsb = ttk.Scrollbar(fb, orient="vertical",
                              command=self._flip_tree.yview)
         self._flip_tree.configure(yscrollcommand=fvsb.set)

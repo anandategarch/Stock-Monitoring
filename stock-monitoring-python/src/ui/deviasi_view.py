@@ -1065,9 +1065,11 @@ class DeviasiView(tk.Frame):
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34, anchor=anchor)
             display = self._col_display_name(col_name)
-            # v3.5: SEMUA kolom pakai filter header ⧩ (sort via popup);
-            # ✓ tetap toggle follow-up via klik sel
-            self.tree.heading(col_name, text=display)
+            # v3.11.14 — polish tabel ala Excel (audit visual referensi
+            # Forest-ttk/tksheet): heading mengikuti ANCHOR kolomnya —
+            # angka rata kanan dgn header rata kanan, teks rata kiri
+            # (dulu semua heading center default → mismatch vs data).
+            self.tree.heading(col_name, text=display, anchor=anchor)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tbody, orient="horizontal", command=self.tree.xview)

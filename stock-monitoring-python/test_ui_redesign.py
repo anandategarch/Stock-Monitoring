@@ -916,7 +916,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.13", APP_VERSION == "3.11.13",
+    check("Versi = 3.11.14", APP_VERSION == "3.11.14",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -24727,6 +24727,125 @@ def main():
         shutil.rmtree(_fld96b, ignore_errors=True)
         shutil.rmtree(_tmp96, ignore_errors=True)
     root.update()
+
+    # =====================================================================
+    print("\n== 97. (v3.11.14) Polish tabel ala Excel: heading ikut anchor "
+          "kolom ==")
+    # =====================================================================
+    # Audit visual 3×VLM (screenshot Xvfb vs prinsip referensi GitHub
+    # Forest-ttk-theme/tksheet/ttkbootstrap) konvergen ke 1 gap struktural:
+    # heading Treeview CENTER-default sementara data rata kiri/kanan.
+    # v3.11.14 memasang anchor heading = anchor kolom di SEMUA tree +
+    # clone menyalin anchor. §97 memverifikasi lintas view + preserve
+    # saat update heading dinamis (teks-only).
+    def _hanch97(tree, col):
+        return str(tree.heading(col, "anchor") or "")
+
+    # ---- (A) view utama: angka e · teks w · ✓ center ---------------------
+    _dv97 = app.deviasi_gr_view
+    check("(v3.11.14) §97-A1 Deviasi GR: heading kolom ANGKA rata kanan "
+          "(Deviasi/Sistem/SO_H) = anchor kolom",
+          all(_hanch97(_dv97.tree, c) == "e"
+              for c in ("Deviasi", "Sistem", "SO_H")),
+          f"anch={[_hanch97(_dv97.tree, c) for c in ('Deviasi', 'Sistem', 'SO_H')]}")
+    check("(v3.11.14) §97-A2 Deviasi GR: heading kolom TEKS rata kiri "
+          "(Nama Barang/Resto) + ✓ center",
+          _hanch97(_dv97.tree, "Nama Barang") == "w"
+          and _hanch97(_dv97.tree, "Resto") == "w"
+          and _hanch97(_dv97.tree, "✓") == "center",
+          f"nb={_hanch97(_dv97.tree, 'Nama Barang')!r} "
+          f"cek={_hanch97(_dv97.tree, '✓')!r}")
+    check("(v3.11.14) §97-A3 Deviasi PCS parity: heading Deviasi rata kanan",
+          _hanch97(app.deviasi_pcs_view.tree, "Deviasi") == "e",
+          f"anch={_hanch97(app.deviasi_pcs_view.tree, 'Deviasi')!r}")
+    check("(v3.11.14) §97-A4 update heading DINAMIS (Apply H) mempertahankan "
+          "anchor: SO_H tetap 'e' pasca _update_headings",
+          (_dv97._update_headings(),
+           _hanch97(_dv97.tree, "SO_H"))[1] == "e",
+          "anchor hilang saat update teks")
+    check("(v3.11.14) §97-A5 Nominal per-Resto: heading 'Nominal Deviasi' "
+          "rata kanan + 'Resto' rata kiri",
+          _hanch97(app.nominal_resto_view.tree, "Nominal Deviasi") == "e"
+          and _hanch97(app.nominal_resto_view.tree, "Resto") == "w",
+          f"nom={_hanch97(app.nominal_resto_view.tree, 'Nominal Deviasi')!r}")
+    check("(v3.11.14) §97-A6 Nominal per-Resto anak tab Tanpa Harga: "
+          "'Kuantiti Deviasi' rata kanan",
+          _hanch97(app.nominal_resto_view.tree_noharga,
+                   "Kuantiti Deviasi") == "e",
+          f"anch={_hanch97(app.nominal_resto_view.tree_noharga, 'Kuantiti Deviasi')!r}")
+    check("(v3.11.14) §97-A7 Laporan Deviasi: heading COM/Median rata kanan",
+          _hanch97(app.laporan_view.tree, "COM") == "e"
+          and _hanch97(app.laporan_view.tree, "Median") == "e",
+          f"com={_hanch97(app.laporan_view.tree, 'COM')!r}")
+    check("(v3.11.14) §97-A8 Follow Up: heading Deviasi rata kanan + "
+          "Nama Barang rata kiri",
+          _hanch97(app.followup_view.tree, "Deviasi") == "e"
+          and _hanch97(app.followup_view.tree, "Nama Barang") == "w",
+          f"dev={_hanch97(app.followup_view.tree, 'Deviasi')!r}")
+    check("(v3.11.14) §97-A9 Rincian PO: heading #0 'Nomor #' rata kiri + "
+          "Kuantitas rata kanan",
+          _hanch97(app.rincian_view.tree, "#0") == "w"
+          and _hanch97(app.rincian_view.tree, "Kuantitas") == "e",
+          f"#0={_hanch97(app.rincian_view.tree, '#0')!r} "
+          f"kuant={_hanch97(app.rincian_view.tree, 'Kuantitas')!r}")
+
+    # ---- (B) pivot: matrix angka e + #0 beku w ---------------------------
+    _pv97 = app.pivot_view
+    _pv97.load_data(make_mock_append1())
+    wait_view(root, _pv97)
+    _cols97 = list(_pv97.tree["columns"])
+    check("(v3.11.14) §97-B1 Pivot matrix: SEMUA heading kolom angka rata "
+          "kanan (mode resto)",
+          bool(_cols97) and all(_hanch97(_pv97.tree, c) == "e"
+                                for c in _cols97),
+          f"anch={[_hanch97(_pv97.tree, c) for c in _cols97[:3]]}")
+    check("(v3.11.14) §97-B2 Pivot #0 (utama + TREE BEKU) 'Nama Barang' "
+          "rata kiri",
+          _hanch97(_pv97.tree, "#0") == "w"
+          and _hanch97(_pv97.frozen.tree, "#0") == "w",
+          f"main={_hanch97(_pv97.tree, '#0')!r} "
+          f"beku={_hanch97(_pv97.frozen.tree, '#0')!r}")
+
+    # ---- (C) komparasi + rekap IN ---------------------------------------
+    from src.ui.komparasi_deviasi_view import KomparasiDeviasiView as _KDV97
+    _kv97 = _KDV97(root)
+    root.update()
+    check("(v3.11.14) §97-C1 Komparasi: heading 'BOM Lalu'/'DEV Lalu' rata "
+          "kanan + 'Nama Barang' rata kiri",
+          _hanch97(_kv97.tree, "BOM Lalu") == "e"
+          and _hanch97(_kv97.tree, "DEV Lalu") == "e"
+          and _hanch97(_kv97.tree, "Nama Barang") == "w",
+          f"bom={_hanch97(_kv97.tree, 'BOM Lalu')!r}")
+    check("(v3.11.14) §97-C2 Komparasi top-selisih: heading kolom angka "
+          "(Peringkat/DEV Lalu/Selisih) rata kanan bila seksi analisa "
+          "sudah dibangun",
+          (not getattr(_kv97, "_top_tree", None))
+          or all(_hanch97(_kv97._top_tree, c) == "e"
+                 for c in ("Peringkat", "DEV Lalu", "Selisih")
+                 if c in list(_kv97._top_tree["columns"])),
+          "heading top-tree tanpa anchor rata kanan")
+    _kv97.destroy()
+    root.update()
+
+    # ---- (D) clone ⤢ menyalin anchor heading sumber ----------------------
+    from src.ui.widgets import open_tree_maximized as _otm97
+    _win97, _clone97 = _otm97(app.deviasi_gr_view.tree, "Uji Clone 97")
+    root.update()
+    check("(v3.11.14) §97-D1 CLONE ⤢ menyalin anchor heading sumber: "
+          "'Deviasi' e + 'Nama Barang' w di tree jender",
+          _hanch97(_clone97, "Deviasi") == "e"
+          and _hanch97(_clone97, "Nama Barang") == "w",
+          f"dev={_hanch97(_clone97, 'Deviasi')!r} "
+          f"nb={_hanch97(_clone97, 'Nama Barang')!r}")
+    _win97.destroy()
+    root.update()
+
+    # ---- (E) tab Config: saldo 42.17 rata kanan ---------------------------
+    check("(v3.11.14) §97-E1 tab Config: heading 'Saldo' (tree 42.17) rata "
+          "kanan + 'Nama Barang' rata kiri",
+          _hanch97(app.kat_4217_tree, "saldo") == "e"
+          and _hanch97(app.kat_4217_tree, "barang") == "w",
+          f"saldo={_hanch97(app.kat_4217_tree, 'saldo')!r}")
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 

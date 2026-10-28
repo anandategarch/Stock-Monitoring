@@ -221,9 +221,11 @@ class RefreshSourcesDialog(tk.Toplevel):
             # '● berubah dd-mm-yyyy hh:mm' tanpa terpotong).
             self.tree.column(col, width=w, minwidth=40, anchor=anch,
                              stretch=(col in ("folder", "file")))
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
             self.tree.heading(col, text={
                 "cek": "", "folder": "Folder Sumber", "file": "File",
-                "diubah": "Diubah", "ukuran": "Ukuran"}[col])
+                "diubah": "Diubah", "ukuran": "Ukuran"}[col],
+                anchor=anch)
         # tanda amber per-cell utk kolom Diubah file berubah
         self.tree.tag_configure("src_changed", foreground=C_AMBER)
         # v3.9.59 — FIX 2f-06: baris folder sumber HILANG (merah, info

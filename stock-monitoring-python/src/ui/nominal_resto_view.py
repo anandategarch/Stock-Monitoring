@@ -548,7 +548,8 @@ class NominalRestoView(tk.Frame):
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34,
                              anchor=anchor)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical",
                             command=self.tree.yview)
@@ -670,7 +671,9 @@ class NominalRestoView(tk.Frame):
         for col_name, width, anchor in NOHARGA_COLUMNS:
             self.tree_noharga.column(col_name, width=width, minwidth=34,
                                      anchor=anchor)
-            self.tree_noharga.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree_noharga.heading(col_name, text=col_name,
+                                      anchor=anchor)
 
         vsb = ttk.Scrollbar(tbody, orient="vertical",
                             command=self.tree_noharga.yview)
@@ -1103,10 +1106,12 @@ class NominalRestoView(tk.Frame):
         for col_name, width, anchor in self.COLUMNS:
             self.tree.column(col_name, width=width, minwidth=34,
                              anchor=anchor)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
         for _cid, _lab, _wk in self._lalu_extra:
             self.tree.column(_cid, width=130, minwidth=34, anchor="e")
-            self.tree.heading(_cid, text=_cid)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(_cid, text=_cid, anchor="e")
         # header filter/sort aktif juga di kolom baru (idempoten)
         self.header_filters.add_columns(
             [c for c in col_ids if c not in self.COLUMNS_IDS])
@@ -2051,9 +2056,12 @@ class NominalRestoView(tk.Frame):
         for col_name, width, anchor in _popup_cols:
             tree.column(col_name, width=width, minwidth=34,
                         anchor=anchor)
-            tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            tree.heading(col_name, text=col_name, anchor=anchor)
         for _cid, _lab, _wk in self._lalu_extra:
-            tree.heading(_cid, text=_cid + (f" ({_wk})" if _wk else ""))
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            tree.heading(_cid, text=_cid + (f" ({_wk})" if _wk else ""),
+                         anchor="e")
         tree.tag_configure("evenrow", background="#ffffff")
         tree.tag_configure("oddrow", background="#f8fafc")
         tree.tag_configure("negative", foreground="#dc2626")

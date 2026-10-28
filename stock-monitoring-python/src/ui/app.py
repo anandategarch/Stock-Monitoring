@@ -248,7 +248,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.13"  # v3.11.13 — HILANGKAN AI SLOP DARI UI (user: "Hilangkan semua AI Slop pada UI biar lebih clean dan gak kebanyak motif, shapes dan teks gak pelru"): SEMUA emoji dekoratif + glif ikon dibuang dari string UI RUNTIME via transform AST-presisi (probes/v31113/strip_ai_slop.py — 554 edit sinkron src+test; docstring/komentar TIDAK disentuh = riwayat versi). Tab jadi teks polos (Config/Proses/Pivot Table/Deviasi GR/Deviasi PCS/Rekap Selisih IN/Laporan Deviasi/Nominal Deviasi/Follow Up/Rincian PO — 3 daftar tab disinkron); tombol tanpa glif (Export Excel/Refresh Sumber/Bersihkan Log/Salin Log/MULAI PROSES/Stop/Batal/Simpan/Browse…/Pilih File Deviasi…/Muat ke Komparasi Sekarang/Layar Penuh/Kolom/Auto-Fit/Reset Filter/Perbesar/Terapkan/Muat Lebar/Muat Ulang File/Tutup File/Identifikasi…/Edit…/Hapus); header seksi analisa polos ("1 · UMUR GANTUNG (AGING)" dst); EmptyState TANPA ikon raksasa (param icon default "" + guard — judul+sub+CTA saja); label 🔍 search popup & ⛶ header clone DIHAPUS; toolbar cukup judul+versi; pesan log/status tanpa emoji. DIPERTAHANKAN (fungsional): ✓ ✗ ⚠ ● • → ↗ ↘ ↑ ↓ ↳ ▸ ▲ ▼ ☑ ☐ ✕(close) ‹ › ␣ — glif data/status, bukan dekorasi. TES: §0 versi + deskripsi cek disinkron (246 edit test_ui_redesign).
+APP_VERSION = "3.11.14"  # v3.11.14 — POLISH TABEL ALA EXCEL: HEADING IKUT ANCHOR KOLOM (audit visual 3×VLM vs referensi GitHub Forest-ttk-theme/tksheet/ttkbootstrap — konvergen 1 gap struktural: heading center-default vs data rata kiri/kanan). SEMUA tree kini memasang anchor heading = anchor kolomnya: angka (SO_*/In_*/Sistem/Deviasi/Nominal/COM/Nominal/Harga/Qty/Kuantitas/saldo/Ukuran/matrix pivot) → header RATA KANAN; teks (Nama Barang/Resto/Pemasok/#0 Nomor #/#0 Nama Barang tree beku) → header RATA KIRI; kolom ✓/status → CENTER. Cakupan 15 file: deviasi_view (GR+PCS), followup_view, nominal_deviasi_view, nominal_resto_view (tree utama + anak tab Tanpa Harga + kolom dinamis Lalu + popup rincian + clone maximize), in_selisih_view (tabel utama + popup dokumen), laporan_deviasi_view, komparasi_deviasi_view (tabel utama + Bagian 0 top-selisih + flip), deviasi_popup, details_popup, rincian_po_view (#0 + Kuantitas), pivot_view (#0 + matrix angka + tree beku), refresh_sources (Ukuran rata kanan), app.py (kat_4217 saldo, kat_map, info_tree), widgets.py (FrozenPane #0 + CLONE kini MENYALIN anchor heading sumber — dulu clone kehilangan anchor → center). Update heading DINAMIS (teks-only: SO_25 per H, label Lalu, dsb) mempertahankan anchor. KPI cards ala referensi DIEVALUASI & TIDAK DITAMBAH: semua view sudah punya ringkasan tepat (Proses KpiRow · Rekap KPI chips · Nominal baris TOTAL+chip · Deviasi/Pivot/Laporan/Followup/Rincian footer baris-pertama-KPI) + arah user "biar clean" (v3.11.9/v3.11.13) — 3 audit VLM tidak menemukan ringkasan hilang. TES: §97 BARU (heading anchor = kolom anchor lintas view + clone + dynamic-update preserve).
 # (riwayat v3.11.12 — TIGA permintaan user: AMBANG COM ±% dr median (spinbox GR/PCS sinkron, persist com_ambang_pct default 50) + transparansi periode→file target auto bulan lalu (bulan_mundur_list) + scroll vertikal tab Config (canvas + router roda).)
 # (riwayat v3.11.10 — AUDIT 5-AGEN: 23 BUG TERVERIFIKASI DIPERBAIKI + FIX CRASH LIVE TypeError 'suppress' object is not callable; fondasi presence append1 _SO_REKAM/_SA_REKAM, fn_9901 dedup lintas-sheet, kunci ternormalisasi __k_barang/__k_resto, GR/PCS strip+upper, widgets clone/sort/auto-fit, ⧉ filter (Kosong)/kronologis/GR␣/TSV/pd.NA, app lifecycle x/y+generation-token+export-guard+F5-silent; 1802/1802 PASS.)
 # (riwayat v3.11.8 — EMPAT permintaan user: (1) IDENTIFIKASI KATEGORI MANUAL BERSUMBER 42.17 — daftar kiri tab ⚙️ Config dari SALDO SISTEM 42.17 folder '6. 42.17' (SEMUA barang bersaldo + Kategori 42.17 + Kategori app efektif + pencarian + penanda BARU via kategori_seen.json) + tombol 🎯 mengisi/menimpa (prioritas 5d). (2) COM RENDAH — com_analisa dua arah strict ("COM Rendah (−x)" d(H) < median). (3) STRIP "🎯 SELISIH TERBANYAK — BARANG × RESTO" tab 📤 Rekap Selisih IN (klik chip = toggle ⧩). (4) FIX KUANTITI NOMINAL = SO_H − saldo sistem 42.17 (konsisten tab Deviasi GR/PCS).)
@@ -3335,19 +3335,23 @@ class StockMonitorApp:
             kat_left, ["barang", "kat4217", "katapp", "saldo", "status"])
         self.kat_4217_tree.column("barang", width=250, minwidth=160,
                                   anchor="w")
-        self.kat_4217_tree.heading("barang", text="Nama Barang")
+        self.kat_4217_tree.heading("barang", text="Nama Barang",
+                                   anchor="w")
         self.kat_4217_tree.column("kat4217", width=165, minwidth=100,
                                   anchor="w")
-        self.kat_4217_tree.heading("kat4217", text="Kategori 42.17")
+        self.kat_4217_tree.heading("kat4217", text="Kategori 42.17",
+                                   anchor="w")
         self.kat_4217_tree.column("katapp", width=130, minwidth=80,
                                   anchor="w")
-        self.kat_4217_tree.heading("katapp", text="Kategori (app)")
+        self.kat_4217_tree.heading("katapp", text="Kategori (app)",
+                                   anchor="w")
         self.kat_4217_tree.column("saldo", width=70, minwidth=50,
                                   anchor="e")
-        self.kat_4217_tree.heading("saldo", text="Saldo")
+        self.kat_4217_tree.heading("saldo", text="Saldo", anchor="e")
         self.kat_4217_tree.column("status", width=64, minwidth=48,
                                   anchor="center")
-        self.kat_4217_tree.heading("status", text="Status")
+        self.kat_4217_tree.heading("status", text="Status",
+                                   anchor="center")
         self.kat_4217_tree.configure(height=10)
         # v3.11.8 — pewarnaan baris: blank (tanpa kategori app — perlu
         # identifikasi, amber) & BARU (pertama kali muncul, merah).
@@ -3366,10 +3370,12 @@ class StockMonitorApp:
         self.kat_map_tree = make_tree(kat_right, ["barang", "kategori"])
         self.kat_map_tree.column("barang", width=300, minwidth=180,
                                  anchor="w")
-        self.kat_map_tree.heading("barang", text="Nama Barang")
+        self.kat_map_tree.heading("barang", text="Nama Barang",
+                                  anchor="w")
         self.kat_map_tree.column("kategori", width=140, minwidth=90,
                                  anchor="w")
-        self.kat_map_tree.heading("kategori", text="Kategori manual")
+        self.kat_map_tree.heading("kategori", text="Kategori manual",
+                                  anchor="w")
         self.kat_map_tree.configure(height=10)
         kat_rbtn = tk.Frame(kat_right, bg=C_CARD)
         kat_rbtn.pack(fill="x", pady=(6, 0))
@@ -3481,9 +3487,9 @@ class StockMonitorApp:
 
         self.info_tree = make_tree(info_inner, ["item", "value"], show="headings")
         self.info_tree.column("item", width=260, minwidth=160, anchor="w")
-        self.info_tree.heading("item", text="Item")
+        self.info_tree.heading("item", text="Item", anchor="w")
         self.info_tree.column("value", width=420, minwidth=200, anchor="w")
-        self.info_tree.heading("value", text="Nilai")
+        self.info_tree.heading("value", text="Nilai", anchor="w")
 
     def _cfg_scroll_fit(self):
         """v3.11.12 — scrollbar tipis tab ⚙️ Config hanya saat konten

@@ -705,7 +705,8 @@ class InDetailPopup(tk.Toplevel):
                                  selectmode="extended")
         for col_name, width, anchor in _POPUP_COLUMNS:
             self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
         vsb = ttk.Scrollbar(cin, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(cin, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -1270,7 +1271,8 @@ class InSelisihView(tk.Frame):
             self.tree.column(col_name, width=width, minwidth=40,
                              anchor=anchor)
             # sort via popup filter — klik heading membuka popup ⧩
-            self.tree.heading(col_name, text=col_name)
+            # v3.11.14 — heading ikut anchor kolom (pola Excel)
+            self.tree.heading(col_name, text=col_name, anchor=anchor)
 
         # buang state filter kolom yang tidak dikenal
         for c in list(self._col_sel.keys()):
