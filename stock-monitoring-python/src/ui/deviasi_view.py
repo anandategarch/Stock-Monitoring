@@ -1,6 +1,23 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.11.22 — AMBANG RASIO SEGME "Beda dari Resto Lain" (user meminta ULANG:
+"deviasi yang beda dari resto lain, misal surplus sendiri dan bulanan juga
+surplus — tambahkan di kolom cek" — label v3.11.9 nyaris TAK PERNAH
+terlihat di data produksi): syarat lama "TIDAK ADA satu pun resto lain
+searah" (_same == 0 & _opp >= 2) terbukti mustahil secara statistik —
+probe data asli user (probes/v31122): 698 kandidat searah-dua-periode di
+GR, median 13 resto lain searah → HANYA 3 baris kena; PCS 0/690. Barang
+yang sama cenderung seragam arah lintas resto (pola barang/master), resto
+yang benar-benar menyendiri tetap punya "teman" arah tak relevan → veto
+total membunuh segmen. SYARAT BARU: resto lain BERLAWANAN >= 3x resto
+lain searah (>=75% pembanding ber-deviasi-nonzero) DAN >=2 berlawanan —
+subsumsi perilaku lama utk grup kecil (same=0 & opp>=2 tetap kena).
+Label kini menyertakan rasio: "Beda dari Resto Lain (Surplus · 18/20
+resto lain Defisit)" — N berlawanan / M pembanding nonzero (0/NaN =
+netral, tak masuk rasio). Verifikasi data asli: GR 41 baris + PCS 9
+baris berlabel (dulu 3 / 0).
+
 v3.11.21 — MERGE-VERTIKAL STATIS ALA TAB RINCIAN PO (user: "coba
 cek tab rincian PO di situ ada merger vertical, itu yang aku maksud
 merger vertical Kolom Cek dan rank di nama barang pada tab deviasi
@@ -1307,7 +1324,8 @@ class DeviasiView(tk.Frame):
             ("COM Rendah · segmen CEK (COM vs ACR · > ambang% dr median)",
              "#0f766e"),
             # v3.11.9 — segmen Beda dari Resto Lain (searah dua periode,
-            # resto lain berlawanan — butuh file ⚖).
+            # resto lain mayoritas berlawanan — butuh file ⚖; ambang
+            # rasio v3.11.22, lihat blok komentar _br_txt).
             ("Beda dari Resto Lain · segmen CEK (file Komparasi)", "#a21caf"),
             ("negatif (merah)", "#dc2626"),
             # v3.9.18 — highlight kolom Deviasi & SO_H
@@ -2950,10 +2968,26 @@ class DeviasiView(tk.Frame):
         # dari resto lain (mis. surplus sendiri dan bulanan juga surplus)"):
         # pasangan ini searah DUA-DUANYA — deviasi(H) DAN deviasi bulan lalu
         # sama-sama surplus / sama-sama defisit (dua-duanya non-zero non-NaN)
-        # — sementara ≥2 resto lain utk barang+SATUAN yang sama BERLAWANAN
-        # arah (deviasi mereka berlawanan tanda) DAN TIDAK ADA satu pun
-        # resto lain yang searah → perilaku resto ini menyendiri (bukan
-        # pola barang lintas-resto — mis. master harga/satuan salah).
+        # — sementara resto lain utk barang+SATUAN yang sama DIDOMINASI arah
+        # BERLAWANAN → perilaku resto ini menyendiri (bukan pola barang
+        # lintas-resto — mis. master harga/satuan salah).
+        # v3.11.22 — AMBANG RASIO (user meminta ULANG: "deviasi yang beda
+        # dari resto lain, misal surplus sendiri dan bulanan juga surplus
+        # — tambahkan di kolom cek" — label nyaris TAK PERNAH terlihat):
+        # syarat lama "TIDAK ADA satu pun resto lain searah" (_same == 0)
+        # terbukti nyaris mustahil di data produksi (probe data asli user
+        # probes/v31122: 698 kandidat searah-dua-periode di GR — median 13
+        # resto lain searah → HANYA 3 baris kena; PCS 0/690): barang yang
+        # sama cenderung seragam arahnya lintas resto (pola barang), resto
+        # yang benar-benar menyendiri tetap punya beberapa "teman" arah
+        # yang tak relevan → veto total membunuh segmen. SYARAT BARU:
+        # resto lain BERLAWANAN ≥ 3× resto lain searah (≥75% pembanding
+        # berlawanan) DAN ≥2 berlawanan — subsumsi perilaku lama utk grup
+        # kecil (same=0 & opp>=2 tetap kena — grup 3 resto tak berubah).
+        # Label kini menyertakan rasio: "Beda dari Resto Lain (Surplus ·
+        # 18/20 resto lain Defisit)" — N = resto lain berlawanan, M =
+        # pembanding ber-deviasi-nonzero (resto lain ber-deviasi 0/NaN
+        # tetap NETRAL — tak masuk pembilang/penyebut, tak memveto).
         # Perlu FILE deviasi bulan lalu (⚖) — tanpa file (lalu_map kosong)
         # syarat "bulanan juga searah" tak terverifikasi → segmen MATI
         # SOPAN (mirror analisa lalu→kini). Hanya bila len(idxs) ≥ 3 (self
@@ -2989,12 +3023,15 @@ class DeviasiView(tk.Frame):
                             _same += 1
                         else:
                             _opp += 1
-                    if _same == 0 and _opp >= 2:
+                    # v3.11.22 — ambang RASIO pengganti veto-total:
+                    # berlawanan ≥ 3× searah (≥75% pembanding) & ≥2
+                    # berlawanan (lihat blok komentar v3.11.22 di atas).
+                    if _opp >= 3 * _same and _opp >= 2:
                         _side = "Surplus" if _d0 > 0.0 else "Defisit"
                         _oside = "Defisit" if _d0 > 0.0 else "Surplus"
                         _br_txt[_i] = (
                             f"Beda dari Resto Lain ({_side} \u00b7 "
-                            f"{_opp} resto lain {_oside})")
+                            f"{_opp}/{_opp + _same} resto lain {_oside})")
 
         if any(ana) or _po_seg.any() or any(_com_txt) or any(_br_txt):
             cek = np.array(

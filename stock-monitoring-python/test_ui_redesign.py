@@ -976,7 +976,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.21", APP_VERSION == "3.11.21",
+    check("Versi = 3.11.22", APP_VERSION == "3.11.22",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -23914,12 +23914,14 @@ def main():
                 return str(_dv94d.tree.set(_k94, "CEK"))
         return "<missing>"
 
-    check("(v3.11.9) §94-D1 segmen 'Beda dari Resto Lain': RA searah DUA "
-          "periode (dev +20 & lalu +20 — surplus dua-duanya) sementara "
-          "RB/RC berlawanan (−10/−15) & tak ada searah → RA bersegmen; "
-          "RB/RC TIDAK (ada resto lain searah satu sama lain)",
+    check("(v3.11.9/3.11.22) §94-D1 segmen 'Beda dari Resto Lain': RA "
+          "searah DUA periode (dev +20 & lalu +20 — surplus dua-duanya) "
+          "sementara RB/RC berlawanan (−10/−15) & tak ada searah → RA "
+          "bersegmen (grup kecil same=0 & opp>=2 — subsumsi aturan rasio "
+          "v3.11.22; label kini berrasio 2/2); RB/RC TIDAK (ada resto lain "
+          "searah satu sama lain)",
           _cek94d("RA") == "BOM 0 · Beda dari Resto Lain "
-                           "(Surplus · 2 resto lain Defisit)"
+                           "(Surplus · 2/2 resto lain Defisit)"
           and "Beda dari Resto Lain" not in _cek94d("RB")
           and "Beda dari Resto Lain" not in _cek94d("RC"),
           f"ra={_cek94d('RA')!r} rb={_cek94d('RB')!r}")
@@ -23954,6 +23956,106 @@ def main():
           and _cek94d2("RA") == "BOM 0",
           f"ra={_cek94d2('RA')!r}")
     _top94d2.destroy()
+    root.update()
+
+    # ---- (D4) v3.11.22 — AMBANG RASIO 'Beda dari Resto Lain' ---------------
+    # Syarat lama "_same == 0" nyaris tak pernah terpicu di data produksi
+    # (probe data asli probes/v31122: median 13 resto lain searah → 3/1408
+    # baris GR kena, PCS 0/690) — aturan baru: berlawanan >= 3x searah
+    # (>=75% pembanding ber-deviasi-nonzero) & >=2 berlawanan; label
+    # berrasio N/M (M = pembanding nonzero — resto ber-deviasi 0 netral,
+    # tak masuk pembilang/penyebut).
+    # Z94 (11 resto): RS surplus 2 periode (+25/+20) vs D1..D8 defisit;
+    # RW surplus kini (+5) tapi lalu −3 (bukan kandidat — tetap dihitung
+    # 'same' utk RS); RN dev 0 (NETRAL — tak masuk rasio) → RS berlabel
+    # "Surplus · 8/9". W94 (12 resto): T1 surplus 2 periode (+30/+20)
+    # tapi grup CAMPUR (5 surplus vs 6 defisit — rasio 6 < 3x5) → TIDAK
+    # ada baris berlabel (mayoritas lemah ≠ menyendiri).
+    _rows94d4 = []
+    for _rs94, _so94 in ([("RS", 75.0), ("RW", 55.0), ("RN", 50.0)]
+                         + [(f"D{_i}", 40.0) for _i in range(1, 9)]
+                         + [("T1", 80.0)]
+                         + [(f"W{_i}", 55.0) for _i in range(2, 7)]
+                         + [(f"W{_i}", 40.0) for _i in range(7, 13)]):
+        _brg94 = "Z94" if _rs94 in (
+            {"RS", "RW", "RN"} | {f"D{_i}" for _i in range(1, 9)}) else "W94"
+        _rows94d4.append(_row94(_brg94, _rs94, "1.SO", 13, 50.0))
+        _rows94d4.append(_row94(_brg94, _rs94, "1.SO", 14, _so94))
+        _rows94d4.append(_row94(_brg94, _rs94, "2.SALDO AKHIR", 14, 50.0))
+    _file94d4 = pd.DataFrame({
+        "_bulan_num": [9] * 22,
+        "_h": [14] * 22,
+        # Z94: RS +20 (kandidat); RW −3 (beda arah dgn kini — bukan
+        # kandidat); D1..D8 +5 (berlawanan dgn dev −10 — bukan kandidat).
+        # W94: T1 +20; W2..W6 +8; W7..W12 −5 (semuanya kandidat — tapi
+        # grup campur → rasio < 3x → tanpa label).
+        "_resto_norm": (["RS", "RW"] + [f"D{_i}" for _i in range(1, 9)]
+                        + ["T1"] + [f"W{_i}" for _i in range(2, 13)]),
+        "_bahan_norm": ["Z94"] * 10 + ["W94"] * 12,
+        "DEV Lalu": ([20.0, -3.0] + [5.0] * 8
+                     + [20.0] + [8.0] * 5 + [-5.0] * 6),
+        "Minggu": ["WEEK 2"] * 22,
+    })
+
+    def _file94d4_get():
+        return _file94d4
+
+    _top94d4 = tk.Toplevel(root)
+    _top94d4.geometry("1400x900+5+5")
+    _dv94d4 = _DV94(_top94d4, satuan_mode="GR",
+                    lalu_provider=_file94d4_get)
+    _dv94d4.pack(fill="both", expand=True)
+    root.update()
+    _dv94d4.load_data(pd.DataFrame(_rows94d4))
+    wait_view(root, _dv94d4)
+    root.update()
+
+    def _cek94d4(resto, barang):
+        for _k94 in _dv94d4.tree.get_children(""):
+            _sn94 = _dv94d4._row_snaps.get(str(_k94), {})
+            if (str(_sn94.get("barang", "")) == barang
+                    and str(_dv94d4.tree.set(_k94, "Resto")) == resto):
+                return str(_dv94d4.tree.set(_k94, "CEK"))
+        return "<missing>"
+
+    def _cek94d4_raw(resto, barang):
+        # v3.11.15+ — RAW per-baris (label utuh) dari _cek_map; kolom CEK
+        # tree menampilkan GABUNGAN KELOMPOK (v3.11.16 — union segmen
+        # seluruh baris kelompok di baris head) → raw utk asersi per-baris.
+        for _k94 in _dv94d4.tree.get_children(""):
+            _sn94 = _dv94d4._row_snaps.get(str(_k94), {})
+            if (str(_sn94.get("barang", "")) == barang
+                    and str(_dv94d4.tree.set(_k94, "Resto")) == resto):
+                return str(_dv94d4._cek_map.get(str(_k94), ""))
+        return "<missing>"
+
+    _others94d4 = (["RW", "RN"] + [f"D{_i}" for _i in range(1, 9)]
+                   + ["T1"] + [f"W{_i}" for _i in range(2, 13)])
+    check("(v3.11.22) §94-D4a ambang RASIO: RS searah 2 periode dgn 1 "
+          "resto lain searah (RW — veto lama) + 8 berlawanan → BERLABEL "
+          "berrasio '8/9' (RN dev-0 netral tak masuk penyebut — dulu "
+          "v3.11.9: _same==0 membunuh kasus ini); RAW per-baris utuh "
+          "'BOM 0 · Beda… · Peningkatan Tertinggi +25,0%' + sel CEK "
+          "grup (head RS) memuat segmen tsb (union kelompok)",
+          _cek94d4_raw("RS", "Z94") == "BOM 0 · Beda dari Resto Lain "
+                                        "(Surplus · 8/9 resto lain "
+                                        "Defisit) · Peningkatan Tertinggi "
+                                        "+25,0%"
+          and "Beda dari Resto Lain (Surplus · 8/9 resto lain Defisit)"
+          in _cek94d4("RS", "Z94"),
+          f"raw={_cek94d4_raw('RS', 'Z94')!r} "
+          f"cell={_cek94d4('RS', 'Z94')!r}")
+    check("(v3.11.22) §94-D4b resto lain TIDAK bersegmen (RAW per-baris: "
+          "RW/RN bukan kandidat — beda arah dgn lalu / dev 0; D1..D8 "
+          "berlawanan dgn lalu) + grup W94 campur (T1 surplus 2 periode "
+          "tapi 5 vs 6 — rasio 6 < 3x5) → NOL baris lain berlabel "
+          "(mayoritas lemah ≠ menyendiri)",
+          all("Beda dari Resto Lain" not in _cek94d4_raw(_r, _b)
+              for _r, _b in zip(_others94d4,
+                                ["Z94"] * 10 + ["W94"] * 12)),
+          f"t1={_cek94d4_raw('T1', 'W94')!r} w2={_cek94d4_raw('W2', 'W94')!r} "
+          f"w7={_cek94d4_raw('W7', 'W94')!r}")
+    _top94d4.destroy()
     root.update()
 
     # ---- (E) auto file deviasi bulan lalu ---------------------------------
