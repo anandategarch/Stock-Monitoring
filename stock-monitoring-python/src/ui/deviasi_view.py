@@ -1,6 +1,31 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.11.24 — AUDIT FIX "NAMA BARANG HILANG" DI SEL ANOTASI (user: "Deep
+audit dan fix"): era v3.11.23 menulis anotasi ↳ MURNI ("↳ Rank n" /
+"↳ CEK…") di baris ke-2/ke-3 kelompok — nama barang TIDAK terlihat di
+baris itu (probe audit + VLM: 3 baris SBYKET tampak hanya "Rank 1/2/3")
+— regresi kelas keluhan yang sama 3× (v3.9.55-59 · v3.11.16 · v3.11.18
+"nama barang hilang"). Kini sel anotasi = "NAMA · ↳ anotasi" (nama
+SELALU ada di tiap baris — Opsi A terjaga penuh):
+
+    AYAM FILET                          ← baris head kelompok
+    AYAM FILET · ↳ Rank 2              ← baris ke-2 (nama + anotasi)
+    AYAM FILET · ↳ Hitung Manual · …   ← baris ke-3 (nama + anotasi)
+    AYAM FILET                          ← baris lanjutan (Opsi A)
+    AYAM FILET
+
+Rincian distribusi anotasi = pola Rincian PO: anotasi ke-i di baris
+ke-(i+1) kelompok; sisa anotasi yang tak muat DIGABUNG ke baris
+TERAKHIR kelompok dgn pemisah ' · ' (kelompok 1 baris → "NAMA · ↳
+Rank n · ↳ CEK…"). Layout STATIS (payload + _static_merge_layout
+tulis-diff saat urutan berubah — render · sort · clone ⛶; TANPA
+sticky/poller/hook scroll). RAW per-baris tetap utuh di
+_row_snaps/_rank_map/_cek_map + nilai kelompok di _grank_map/_gcek_map
+(analisa ▲▼ · filter ⧩ Rank · double-click popup · follow-up · footer
+'CEK n'). Pewarnaan baris by label CEK TETAP (tag baris cek_* — kini
+komunikasi warna label karena teksnya pindah ke anotasi).
+
 v3.11.23 — MERGER-VERTIKAL CEK & RANK KE DALAM KOLOM NAMA BARANG (user,
 permintaan ke-3 dgn referensi eksplisit: "cek rincian PO, ada merger
 vertical, nah kolom cek dan rank harusnya juga merger vertical di kolom
@@ -8,27 +33,7 @@ nama barang pada tab deviasi gr dan deviasi pcs"): kolom CEK & Rank
 DIHAPUS dari COLUMNS — nilainya kini MERGER VERTIKAL ke DALAM kolom
 Nama Barang sebagai blok anotasi ↳ bertumpuk ala tab Rincian PO (pola
 "Keterangan PO merger Vertical dengan Pemasok" v3.9.37: nilai utama di
-atas, anotasi ↳ di baris-baris bawahnya DI KOLOM YANG SAMA):
-
-    AYAM FILET                              ← baris head kelompok
-    ↳ Rank 2                                ← anotasi baris ke-2
-    ↳ Hitung Manual · Naik Drastis · …      ← anotasi baris ke-3
-    AYAM FILET                              ← baris lanjutan (Opsi A)
-    AYAM FILET
-
-Rincian distribusi anotasi = pola Rincian PO: anotasi ke-i di baris
-ke-(i+1) kelompok; sisa anotasi yang tak muat DIGABUNG ke baris
-TERAKHIR kelompok dgn pemisah ' · ' (kelompok 1 baris → "NAMA · ↳
-Rank n · ↳ CEK…"). Nama barang TETAP DIULANG di baris-baris setelah
-blok anotasi (Opsi A v3.11.19 — nama selalu terlihat saat scroll
-kelompok besar; keluhan "nama hilang" 3× era v3.9.55-59/3.11.16/18).
-Layout STATIS (payload + _static_merge_layout tulis-diff saat urutan
-berubah — render · sort · clone ⛶; TANPA sticky/poller/hook scroll).
-RAW per-baris tetap utuh di _row_snaps/_rank_map/_cek_map + nilai
-kelompok di _grank_map/_gcek_map (analisa ▲▼ · filter ⧩ Rank ·
-double-click popup · follow-up · footer 'CEK n'). Pewarnaan baris by
-label CEK TETAP (tag baris cek_* — kini komunikasi warna label karena
-teksnya pindah ke anotasi).
+atas, anotasi ↳ di baris-baris bawahnya DI KOLOM YANG SAMA).
 
 v3.11.22 — AMBANG RASIO SEGME "Beda dari Resto Lain" (user meminta ULANG:
 "deviasi yang beda dari resto lain, misal surplus sendiri dan bulanan juga
@@ -815,7 +820,7 @@ class DeviasiView(tk.Frame):
 
     CEK_THRESHOLD = 1.3
 
-    # v3.11.23 — MERGER-VERTIKAL CEK & RANK KE DALAM KOLOM NAMA BARANG
+    # v3.11.24 — MERGER-VERTIKAL CEK & RANK KE DALAM KOLOM NAMA BARANG
     # (user, permintaan ke-3 — pesan identik v3.11.21 diulang: "cek
     # rincian PO, ada merger vertical, nah kolom cek dan rank harusnya
     # juga merger vertical di kolom nama barang pada tab deviasi gr dan
@@ -828,12 +833,15 @@ class DeviasiView(tk.Frame):
     # dari COLUMNS sesuai v3.11.20 "kalau udah merger 2 kolom tersebut
     # cek dan rank hapus aja"):
     # · baris HEAD kelompok  → nama barang;
-    # · baris ke-2           → "↳ Rank {rank kelompok Σ|Deviasi|}";
-    # · baris ke-3           → "↳ {CEK gabungan label unik kelompok}";
+    # · baris ke-2           → "NAMA · ↳ Rank {rank kelompok Σ|Deviasi|}";
+    # · baris ke-3           → "NAMA · ↳ {CEK gabungan label unik kelompok}";
     # · sisa anotasi tak muat → digabung ke baris TERAKHIR ' · ' (pola
     #   Rincian PO — kelompok 1 baris: "NAMA · ↳ Rank n · ↳ CEK…");
     # · baris setelah blok   → nama barang DIULANG (Opsi A v3.11.19 —
     #   nama selalu terlihat; keluhan "nama hilang" 3× TAK boleh kembali).
+    # v3.11.24 AUDIT FIX: sel anotasi kini "NAMA · ↳ anotasi" — nama
+    # barang TIDAK PERNAH diganti anotasi (era v3.11.23 baris ke-2/ke-3
+    # kelompok tampak TANPA nama — regresi kelas keluhan 3× user).
     # Layout STATIS ala v3.11.21: payload menulis blok awal +
     # _static_merge_layout (tulis-diff) memasang ulang saat URUTAN
     # berubah (render_done · on_done sort · on_render_done clone ⛶) —
@@ -1306,12 +1314,13 @@ class DeviasiView(tk.Frame):
 
         # Legend CEK
         legend = LegendRow(self.content, [
-            # v3.11.23 — entri pertama: penjelasan blok anotasi merger
+            # v3.11.24 — entri pertama: penjelasan blok anotasi merger
             # vertikal ↳ CEK & Rank di kolom Nama Barang (pola Rincian
             # PO — user: "kolom cek dan rank harusnya juga merger vertical
-            # di kolom nama barang pada tab deviasi gr dan deviasi pcs").
+            # di kolom nama barang pada tab deviasi gr dan deviasi pcs") —
+            # nama barang SELALU tampil, anotasi ↳ menyertainya.
             (("CEK & Rank ↳ merger vertikal di kolom Nama Barang "
-              "(ala Rincian PO)"), "#475569"),
+              "(ala Rincian PO · nama barang selalu tampil)"), "#475569"),
             ("Promix 04", "#0e7490"),     # v3.9.19 — kondisi ke-0
             ("RI Balancing", "#92400e"),  # v3.9.23 (poin 6) — kondisi ke-1
             ("Kosong/Non Aktif", "#b45309"),
@@ -3484,25 +3493,25 @@ class DeviasiView(tk.Frame):
         # nilainya tampil sbg BLOK ANOTASI ↳ bertumpuk DI DALAM kolom Nama
         # Barang (lihat _static_merge_layout & MERGE_COLS):
         # · baris HEAD kelompok → nama barang;
-        # · baris ke-2 → "↳ Rank {rank kelompok}" (peringkat Σ|Deviasi|
-        #   barang — method="min"; 1 = total terbesar — arah konvensi
-        #   sama dgn rank per-baris v3.9.65);
-        # · baris ke-3 → "↳ {CEK gabungan label unik kelompok}" (' · '
-        #   urut kemunculan);
+        # · baris ke-2 → "NAMA · ↳ Rank {rank kelompok}" (peringkat
+        #   Σ|Deviasi| barang — method="min"; 1 = total terbesar — arah
+        #   konvensi sama dgn rank per-baris v3.9.65);
+        # · baris ke-3 → "NAMA · ↳ {CEK gabungan label unik kelompok}"
+        #   (' · ' urut kemunculan);
         # · sisa anotasi tak muat → digabung ke baris TERAKHIR kelompok
         #   dgn ' · ' (pola Rincian PO — kelompok 1 baris: "NAMA · ↳
         #   Rank n · ↳ CEK…");
         # · baris SETELAH blok anotasi → nama barang DIULANG (Opsi A
         #   v3.11.19 — nama selalu terlihat di kelompok besar).
+        # v3.11.24 AUDIT FIX — sel anotasi "NAMA · ↳ …" (nama TETAP
+        # tampil di SEMUA baris; era v3.11.23 anotasi MURNI mengganti
+        # nama → baris ke-2/ke-3 kelompok tampak TANPA nama barang).
         # Per-baris RAW tetap utuh: _rank_map (paritas sheet v3.9.65) ·
         # _cek_map · snap. Urutan render default (Nama Barang, |Dev|
         # desc) menjaga kelompok KONTIGU — _static_merge_layout memasang
         # ulang blok atas URUTAN VISUAL pasca sort/filter/clone ⛶.
         _brg_np = cols_np["Nama Barang"]
         _cek_disp = [self._fmt_num(cols_np["CEK"][i]) for i in range(n)]
-        _show_b = [True] * n   # head KELOMPOK (batas blok anotasi ↳)
-        for i in range(1, n):
-            _show_b[i] = str(_brg_np[i]) != str(_brg_np[i - 1])
         # v3.11.16 — nilai KELOMPOK dibaca dari kolom derived yang
         # dihitung SEBELUM filter Rank (lihat atas): filter Rank
         # menyaring kelompok utuh → Σ|Deviasi| kelompok tak berubah
@@ -3512,10 +3521,14 @@ class DeviasiView(tk.Frame):
         _gcek_row = [("" if (v is None or (isinstance(v, float)
                                            and pd.isna(v))) else str(v))
                      for v in filtered["_gcek_disp"].to_numpy()]
-        # v3.11.23 — precompute SEL Nama Barang per baris: blok anotasi
+        # v3.11.24 — precompute SEL Nama Barang per baris: blok anotasi
         # ↳ merger-vertikal (pola distribusi Rincian PO — anotasi ke-i
-        # di baris ke-(i+1); sisa digabung baris terakhir ' · ';
-        # nama diulang setelah blok).
+        # di baris ke-(i+1); sisa digabung baris terakhir ' · '; nama
+        # diulang setelah blok). AUDIT FIX: anotasi kini DIGABUNG DENGAN
+        # NAMA BARANG ("NAMA · ↳ …"), TIDAK MENGHAPUSNYA — era v3.11.23
+        # menulis anotasi TANPA nama (baris ke-2/ke-3 kelompok tampak
+        # hanya "↳ Rank n" — regresi kelas "nama barang hilang" yang
+        # 3× dikeluhkan user v3.9.55-59/v3.11.16/v3.11.18).
         _nb_cells = [""] * n
         _i = 0
         while _i < n:
@@ -3535,7 +3548,9 @@ class DeviasiView(tk.Frame):
                 if _k == 0:
                     _nb_cells[_i + _k] = _name
                 elif _k <= len(_notes):
-                    _nb_cells[_i + _k] = _notes[_k - 1]
+                    # v3.11.24 — nama TETAP di tiap sel anotasi:
+                    # "NAMA · ↳ anotasi" (nama tak pernah hilang).
+                    _nb_cells[_i + _k] = f"{_name} \u00b7 {_notes[_k - 1]}"
                 else:
                     _nb_cells[_i + _k] = _name
             if len(_notes) > _rows - 1:
@@ -3871,12 +3886,12 @@ class DeviasiView(tk.Frame):
     # (evolusi v3.11.21 — lihat docstring header & MERGE_COLS)
     # =====================================================================
     def _static_merge_layout(self, tree):
-        """v3.11.23 — pasang ulang blok ANOTASI ↳ merger-vertikal CEK &
+        """v3.11.24 — pasang ulang blok ANOTASI ↳ merger-vertikal CEK &
         Rank DI DALAM kolom Nama Barang atas URUTAN VISUAL tree:
 
             AYAM FILET                          ← head kelompok
-            ↳ Rank 2                            ← baris ke-2
-            ↳ Hitung Manual · Naik Drastis · …  ← baris ke-3
+            AYAM FILET · ↳ Rank 2              ← baris ke-2 (nama+anotasi)
+            AYAM FILET · ↳ Hitung Manual · …   ← baris ke-3 (nama+anotasi)
             AYAM FILET                          ← baris lanjutan (Opsi A)
 
         POLA TAB RINCIAN PO (user, permintaan ke-3: "cek rincian PO, ada
@@ -3887,14 +3902,22 @@ class DeviasiView(tk.Frame):
         barang head kelompok — persis "Keterangan PO merger Vertical
         dengan Pemasok" (v3.9.37): nilai utama di atas, anotasi ↳ di
         baris-baris bawah, DI KOLOM YANG SAMA, dan TIDAK PERNAH
-        berpindah saat scroll. Distribusi = pola Rincian PO: anotasi
-        ke-i di baris ke-(i+1); sisa anotasi digabung ke baris TERAKHIR
-        kelompok ' · ' (singleton → "NAMA · ↳ Rank n · ↳ CEK…"). Nama
-        barang DIULANG di baris setelah blok anotasi (Opsi A v3.11.19
-        — nama selalu terlihat). Dipanggil HANYA saat urutan baris
-        berubah (render_done · on_done sort · on_render_done clone ⛶)
-        via _reapply_render_decorations; TANPA hook/poller/reaksi scroll
-        (era sticky v3.11.15-19 = 3× dilaporkan bug — dibongkar total).
+        berpindah saat scroll.
+
+        v3.11.24 AUDIT FIX — NAMA BARANG TIDAK PERNAH HILANG: sel
+        anotasi kini "NAMA · ↳ anotasi" (gabungan), bukan anotasi
+        MURNI pengganti nama — era v3.11.23 menulis "↳ Rank n" TANPA
+        nama sehingga baris ke-2/ke-3 kelompok tampak kehilangan nama
+        barang (regresi kelas keluhan 3× user: v3.9.55-59 · v3.11.16 ·
+        v3.11.18 "nama barang hilang"). Distribusi = pola Rincian PO:
+        anotasi ke-i di baris ke-(i+1); sisa anotasi digabung ke baris
+        TERAKHIR kelompok ' · ' (singleton → "NAMA · ↳ Rank n · ↳
+        CEK…"). Nama barang DIULANG di baris setelah blok anotasi
+        (Opsi A v3.11.19 — nama selalu terlihat). Dipanggil HANYA saat
+        urutan baris berubah (render_done · on_done sort ·
+        on_render_done clone ⛶) via _reapply_render_decorations;
+        TANPA hook/poller/reaksi scroll (era sticky v3.11.15-19 = 3×
+        dilaporkan bug — dibongkar total).
 
         Tulis-DIFF: sel hanya ditulis bila berbeda (payload render awal
         sudah benar atas urutan sort default → no-op murah; re-layout
@@ -3944,7 +3967,10 @@ class DeviasiView(tk.Frame):
                 if _k == 0:
                     cells.append(b)
                 elif _k <= len(notes):
-                    cells.append(notes[_k - 1])
+                    # v3.11.24 — nama TETAP di tiap sel anotasi
+                    # ("NAMA · ↳ anotasi") — nama tak pernah hilang
+                    # (regresi v3.11.23: sel anotasi TANPA nama).
+                    cells.append(f"{b} \u00b7 {notes[_k - 1]}")
                 else:
                     # Opsi A v3.11.19 — nama diulang setelah blok anotasi.
                     cells.append(b)

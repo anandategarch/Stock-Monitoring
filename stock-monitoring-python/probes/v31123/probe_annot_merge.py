@@ -5,12 +5,19 @@ User (permintaan ke-3, referensi eksplisit tab Rincian PO): "cek rincian
 PO, ada merger vertical, nah kolom cek dan rank harusnya juga merger
 vertical di kolom nama barang pada tab deviasi gr dan deviasi pcs".
 
+v3.11.24 SUPERSEDE: kontrak blok anotasi ↳ DIPERBAIKI — sel anotasi
+kini "NAMA · ↳ anotasi" (nama barang SELALU tampil di tiap baris;
+era v3.11.23 menulis anotasi MURNI tanpa nama → baris ke-2/ke-3
+kelompok tampak kehilangan nama barang — regresi kelas keluhan 3×
+user). Probe ini diport ke kontrak v3.11.24; probe invarian lengkap
+ada di probes/v31124/probe_name_invariant.py.
+
 Probe merender DeviasiView (jalur app penuh: load_data + select_and_wait)
 di Xvfb lalu memverifikasi kontrak blok anotasi ↳:
   1. Kolom CEK & Rank TIDAK ADA di tree (merger ke Nama Barang).
-  2. Blok anotasi ↳ per kelompok: head=nama · ke-2='↳ Rank n' ·
-     ke-3='↳ {CEK gabungan}' · sisa digabung baris terakhir ' · ' ·
-     nama DIULANG setelah blok (Opsi A).
+  2. Blok anotasi ↳ per kelompok: head=nama · ke-2='NAMA · ↳ Rank n' ·
+     ke-3='NAMA · ↳ {CEK gabungan}' · sisa digabung baris terakhir
+     ' · ' · nama DIULANG setelah blok (Opsi A).
   3. Kontrak = ground truth RAW (_row_snaps/_grank_map/_gcek_map).
   4. Pasca-sort (interleave) layout dipasang ulang atas urutan visual.
   5. Data ASLI user (bila ada): DEVIASI GR/PCS 01.1 CEK STOCK V2.xlsb —
@@ -44,6 +51,8 @@ def check(name, ok, detail=""):
 
 
 def annot_expected(view, tree):
+    # v3.11.24 — kontrak SUPERSEDE: sel anotasi "NAMA · ↳ anotasi"
+    # (nama barang selalu tampil — lihat probes/v31124).
     snaps = view._row_snaps
     gk = view._grank_map
     gc = view._gcek_map
@@ -72,7 +81,7 @@ def annot_expected(view, tree):
             if i == 0:
                 cells.append(b)
             elif i <= len(notes):
-                cells.append(notes[i - 1])
+                cells.append(f"{b} \u00b7 {notes[i - 1]}")
             else:
                 cells.append(b)
         if len(notes) > rows - 1:
@@ -145,7 +154,8 @@ def main():
     bad = [(str(k), t.set(k, "Nama Barang"), exp.get(k)) for k in kids
            if str(t.set(k, "Nama Barang")) != exp.get(k)]
     check("blok anotasi ↳ == kontrak RAW SEMUA baris (head=nama · "
-          "ke-2='↳ Rank n' · ke-3='↳ CEK…' · nama diulang setelah blok)",
+          "ke-2='NAMA · ↳ Rank n' · ke-3='NAMA · ↳ CEK…' · nama diulang "
+          "setelah blok — kontrak v3.11.24)",
           not bad, f"bad={bad[:4]}")
 
     # (3) struktur contoh: kelompok 3-baris GULA PASIR
@@ -155,14 +165,15 @@ def main():
     _gcek_gula = str(dv._gcek_map.get(str(gula[0]), "") or "") \
         if gula else ""
     _row3_ok = (
-        nb[str(gula[2])] == f"\u21b3 {_gcek_gula}" if _gcek_gula
-        else nb[str(gula[2])] == "GULA PASIR") if len(gula) == 3 else False
-    check("GULA PASIR (3 baris): head=nama · ke-2='↳ Rank n' · "
-          "ke-3='↳ CEK gabungan' (atau nama — bila kelompok tanpa label "
-          "CEK)",
+        nb[str(gula[2])] == f"GULA PASIR \u00b7 \u21b3 {_gcek_gula}"
+        if _gcek_gula else nb[str(gula[2])] == "GULA PASIR") \
+        if len(gula) == 3 else False
+    check("GULA PASIR (3 baris): head=nama · ke-2='GULA PASIR · ↳ Rank n' "
+          "· ke-3='GULA PASIR · ↳ CEK gabungan' (atau nama — bila kelompok "
+          "tanpa label CEK; nama SELALU tampil — kontrak v3.11.24)",
           len(gula) == 3
           and nb[str(gula[0])] == "GULA PASIR"
-          and nb[str(gula[1])].startswith("\u21b3 Rank ")
+          and nb[str(gula[1])].startswith("GULA PASIR \u00b7 \u21b3 Rank ")
           and _row3_ok
           and "\u00b7" not in nb[str(gula[0])],
           f"cells={[nb[str(k)] for k in gula]}")

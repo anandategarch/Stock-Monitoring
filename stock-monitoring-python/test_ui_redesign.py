@@ -622,14 +622,17 @@ def _nama_perrow_expected(view, tree):
             for k in tree.get_children("")}
 
 
-# (v3.11.23) HELPER KONTRAK MERGER-VERTIKAL ↳ KE DALAM KOLOM NAMA BARANG —
+# (v3.11.24) HELPER KONTRAK MERGER-VERTIKAL ↳ KE DALAM KOLOM NAMA BARANG —
 # kolom CEK & Rank DIHAPUS dari COLUMNS; nilainya tampil sbg BLOK ANOTASI
 # ↳ bertumpuk DI DALAM kolom Nama Barang (pola Rincian PO "Keterangan PO
 # merger Vertical dengan Pemasok"): baris HEAD = nama · baris ke-2 =
-# "↳ Rank n" · baris ke-3 = "↳ {CEK gabungan}" · sisa anotasi digabung ke
-# baris TERAKHIR ' · ' · baris setelah blok = nama DIULANG (Opsi A).
+# "NAMA · ↳ Rank n" · baris ke-3 = "NAMA · ↳ {CEK gabungan}" · sisa
+# anotasi digabung ke baris TERAKHIR ' · ' · baris setelah blok = nama
+# DIULANG (Opsi A). v3.11.24 AUDIT FIX: sel anotasi SELALU diawali nama
+# barang ("NAMA · ↳ …") — nama tak pernah hilang di baris mana pun
+# (era v3.11.23 anotasi murni mengganti nama).
 def _annot_expected(view, tree):
-    """{iid: sel Nama Barang} — ground truth kontrak v3.11.23 dari RAW
+    """{iid: sel Nama Barang} — ground truth kontrak v3.11.24 dari RAW
     maps (_row_snaps + _grank_map/_gcek_map) ATAS URUTAN VISUAL tree."""
     snaps = getattr(view, "_row_snaps", {})
     gk = getattr(view, "_grank_map", {})
@@ -659,7 +662,8 @@ def _annot_expected(view, tree):
             if _k == 0:
                 cells.append(b)
             elif _k <= len(notes):
-                cells.append(notes[_k - 1])
+                # v3.11.24 — nama SELALU mengawali sel anotasi.
+                cells.append(f"{b} \u00b7 {notes[_k - 1]}")
             else:
                 cells.append(b)
         if len(notes) > rows - 1:
@@ -1024,7 +1028,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.23", APP_VERSION == "3.11.23",
+    check("Versi = 3.11.24", APP_VERSION == "3.11.24",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -14434,10 +14438,11 @@ def main():
                   .get("barang", "")), _val61(_k61, "Nama Barang"))
              for _k61 in _dv61.tree.get_children("")]
     _exp61 = _annot_expected(_dv61, _dv61.tree)
-    check("(v3.11.23) DISPLAY Nama Barang = blok anotasi ↳ merger-"
+    check("(v3.11.24) DISPLAY Nama Barang = blok anotasi ↳ merger-"
           "vertikal CEK & Rank (ground truth RAW: BUMBU singleton → "
           "'BUMBU · ↳ Rank 3 · ↳ BOM 0' · CABE/PENTOL head = nama lalu "
-          "'↳ Rank n · ↳ CEK…' di baris ke-2; user: 'kolom cek dan rank "
+          "'NAMA · ↳ Rank n · ↳ CEK…' di baris ke-2 — nama SELALU "
+          "tampil, audit fix v3.11.24; user: 'kolom cek dan rank "
           "harusnya juga merger vertical di kolom nama barang')",
           all(_rk61[_i] == (_rk61[_i][0], _exp61[_dv61.tree.get_children("")[_i]])
               for _i in range(len(_rk61)))
@@ -14445,9 +14450,9 @@ def main():
                   for k in _dv61.tree.get_children(""))
           and _rk61[0] == ("BUMBU", "BUMBU · ↳ Rank 3 · ↳ BOM 0")
           and _rk61[1][0] == "CABE" and _rk61[1][1] == "CABE"
-          and _rk61[2][1].startswith("↳ Rank 2 · ↳ ")
+          and _rk61[2][1].startswith("CABE · ↳ Rank 2 · ↳ ")
           and _rk61[3][1] == "PENTOL"
-          and _rk61[4][1].startswith("↳ Rank 1 · ↳ "),
+          and _rk61[4][1].startswith("PENTOL · ↳ Rank 1 · ↳ "),
           f"got {_rk61}")
     check("(v3.9.65+v3.11.16) RAW _rank_map = PER-BARIS DALAM KELOMPOK "
           "utuh (semantik sheet asli — display merge TIDAK mengubah "
@@ -14662,12 +14667,13 @@ def main():
     _vals62 = [(_dv62.tree.set(k, "Nama Barang"),
                 _grptag59(_dv62, k)) for k in _kids62]
     _exp62c = _annot_expected(_dv62, _dv62.tree)
-    check("(v3.11.23) Merge NATIVE ↳ → CEK & Rank PER-KELOMPOK sbg blok "
+    check("(v3.11.24) Merge NATIVE ↳ → CEK & Rank PER-KELOMPOK sbg blok "
           "anotasi DI DALAM kolom Nama Barang (BUMBU singleton → "
-          "'BUMBU · ↳ Rank 3 · ↳ BOM 0' · CABE head=nama lalu '↳ Rank 2 "
-          "· ↳ CEK…' · PENTOL '↳ Rank 1 · ↳ CEK…'; user: 'kolom cek "
-          "dan rank harusnya juga merger vertical di kolom nama barang') "
-          "+ tanpa tag grp",
+          "'BUMBU · ↳ Rank 3 · ↳ BOM 0' · CABE head=nama lalu 'CABE · "
+          "↳ Rank 2 · ↳ CEK…' · PENTOL 'PENTOL · ↳ Rank 1 · ↳ CEK…' — "
+          "nama SELALU mengawali sel anotasi, audit fix v3.11.24; user: "
+          "'kolom cek dan rank harusnya juga merger vertical di kolom "
+          "nama barang') + tanpa tag grp",
           _vals62 == [("BUMBU · ↳ Rank 3 · ↳ BOM 0", None),
                       ("CABE", None),
                       (_exp62c[_kids62[2]], None),
@@ -14675,8 +14681,8 @@ def main():
                       (_exp62c[_kids62[4]], None)]
           and all(str(_dv62.tree.set(k, "Nama Barang")) == _exp62c[k]
                   for k in _kids62)
-          and _exp62c[_kids62[2]].startswith("↳ Rank 2 · ↳ ")
-          and _exp62c[_kids62[4]].startswith("↳ Rank 1 · ↳ "),
+          and _exp62c[_kids62[2]].startswith("CABE · ↳ Rank 2 · ↳ ")
+          and _exp62c[_kids62[4]].startswith("PENTOL · ↳ Rank 1 · ↳ "),
           f"got {_vals62}")
     _snaps62 = [_dv62._row_snaps.get(str(k), {}) for k in _kids62]
     check("(v3.9.55) Snapshot RAW tetap ber-nama barang & rank utk SETIAP "
@@ -15979,13 +15985,15 @@ def main():
     check("(v3.9.56) filter clone by Nama Barang: kelompok UTUH "
           "lolos (24 baris STICKY B — dulu 1 baris display saja)",
           _n66_1 == 24, f"got {_n66_1} (awal {_n66_0})")
-    check("(v3.11.19→v3.11.23) filter clone: blok anotasi ↳ + nama "
-          "DIULANG di clone — SEMUA sel = 'STICKY B' atau anotasi ↳ "
-          "(nilai RAW identik via _merge_value_get utk filter/sort; "
-          "kelompok utuh pasca filter → blok dikepalakan ulang)",
+    check("(v3.11.19→v3.11.24) filter clone: blok anotasi ↳ + nama "
+          "SELALU tampil di clone — SEMUA sel = 'STICKY B' ATAU "
+          "'STICKY B · ↳ …' (nama tak pernah hilang; nilai RAW identik "
+          "via _merge_value_get utk filter/sort; kelompok utuh pasca "
+          "filter → blok dikepalakan ulang)",
           all(str(_mt66.set(k, "Nama Barang")).strip()
               and (str(_mt66.set(k, "Nama Barang")) == "STICKY B"
-                   or str(_mt66.set(k, "Nama Barang")).startswith("\u21b3"))
+                   or str(_mt66.set(k, "Nama Barang"))
+                   .startswith("STICKY B \u00b7 \u21b3"))
               for k in _mt66.get_children("")),
           "layout clone salah: "
           f"{[_mt66.set(k, 'Nama Barang') for k in
@@ -15996,14 +16004,15 @@ def main():
         root.update()
     _vis_c66 = [k for k in _mt66.get_children("")
                 if _vis66k(_mt66, k)]
-    check("(v3.11.19→v3.11.23) di CLONE: scroll clone → SEMUA baris "
-          "TERLIHAT ber-isi nama 'STICKY B' atau anotasi ↳ (nama "
-          "diulang setelah blok — tak ada state display yang bisa basi)",
+    check("(v3.11.19→v3.11.24) di CLONE: scroll clone → SEMUA baris "
+          "TERLIHAT ber-isi nama 'STICKY B' ATAU 'STICKY B · ↳ …' "
+          "(nama SELALU tampil — tak ada baris tanpa nama; tanpa state "
+          "display yang bisa basi)",
           bool(_vis_c66)
           and all(str(_mt66.set(k, "Nama Barang")).strip()
                   and (str(_mt66.set(k, "Nama Barang")) == "STICKY B"
                        or str(_mt66.set(k, "Nama Barang"))
-                       .startswith("\u21b3"))
+                       .startswith("STICKY B \u00b7 \u21b3"))
                   for k in _vis_c66),
           f"vis={len(_vis_c66)}")
     _win66.destroy()
@@ -25465,26 +25474,26 @@ def main():
     _gcek_raw98 = {str(k): str(_dv98._gcek_map.get(str(k), ""))
                    for k in _kids98}
     _gcek_cells98 = [c for c in _nb_cells98.values()
-                     if "\u21b3 " in c
-                     and not c.startswith("MG")]
-    check("(v3.11.16→v3.11.23) §98-A3 CEK GABUNGAN KELOMPOK di blok "
-          "anotasi ↳: sel anotasi menampilkan TEKS GABUNGAN label unik "
-          "kelompok (' · ' bila ≥2 label — ringkasan satu sel di kolom "
-          "Nama Barang)",
+                     if "\u21b3 " in c]
+    check("(v3.11.16→v3.11.24) §98-A3 CEK GABUNGAN KELOMPOK di blok "
+          "anotasi ↳: sel anotasi (kini 'NAMA · ↳ …' — nama selalu "
+          "tampil, audit fix v3.11.24) menampilkan TEKS GABUNGAN label "
+          "unik kelompok (' · ' bila ≥2 label — ringkasan satu sel di "
+          "kolom Nama Barang)",
           all(any(c.endswith("\u21b3 " + g)
                   for c in _gcek_cells98)
               for g in set(_gcek_raw98.values()) if g)
           and any("\u00b7" in c for c in _gcek_cells98),
           f"cells={_gcek_cells98[:3]}")
     _ann_iid98 = next(k for k in _kids98
-                      if str(_t98.set(k, "Nama Barang")).startswith("\u21b3"))
+                      if "\u21b3 " in str(_t98.set(k, "Nama Barang")))
     _vg98 = _dv98._merge_value_get(
         _ann_iid98, "Nama Barang",
         str(_t98.set(_ann_iid98, "Nama Barang")))
-    check("(v3.11.16→v3.11.23) §98-A4 _merge_value_get Nama Barang: "
-          "baris ANOTASI ↳ (bukan nama polos) mengembalikan nama RAW "
-          "snapshot — filter clone ⛩ by nama menyaring kelompok UTUH "
-          "(baris anotasi ikut lolos)",
+    check("(v3.11.16→v3.11.24) §98-A4 _merge_value_get Nama Barang: "
+          "baris ANOTASI ↳ (sel 'NAMA · ↳ …' — bukan nama polos) "
+          "mengembalikan nama RAW snapshot — filter clone ⛶ by nama "
+          "menyaring kelompok UTUH (baris anotasi ikut lolos)",
           _vg98 == str((_dv98._row_snaps.get(str(_ann_iid98)) or {})
                        .get("barang", ""))
           and _vg98 in {"MG A", "MG B"},
