@@ -1,6 +1,20 @@
 """
 deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
 
+v3.11.19 — OPSI A "PARITAS EXCEL USER" (user: "cek merger vertical,
+saat ini progam menjadi bug yaitu yang tampil hanya 1 nama barang per
+group atau section" — keluhan ke-3 dgn akar sama; riset lengkap di
+REFERENSI_MERGE_VERTIKAL.md): kolom Nama Barang KELUAR dari
+merge-vertikal — nama DIULANG di SETIAP baris (paritas file kerja
+user: 0 merged cell, nama per baris — keluhan "nama hilang/1 per
+grup" tuntas permanen; ttk.Treeview memang tak punya cell-span
+sejati, simulasi blank-continuation terbaca user sebagai bug).
+Merge-vertikal TETAP utk CEK & Rank (kolom tak ada di Excel user —
+nilai memang milik KELOMPOK; head-only + sticky stateless + poller
+150ms + bind <Map> tetap). RAW per-baris utuh di
+_row_snaps/_rank_map/_cek_map — sort · filter ⧩ · auto-fit ·
+double-click popup · follow-up tak tersentuh.
+
 v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG (user: "kolom
 Cek bisa gak merger vertical dengan nama barang? di tab deviasi gr dan
 deviasi pcs? Rank juga merger vertical"): tampilan ala rowspan Excel —
@@ -763,7 +777,27 @@ class DeviasiView(tk.Frame):
     # 150ms stateless + bind <Map>: jaring pengaman anti-blank untuk
     # jalur scroll/OS yang tak memicu hook mana pun (laporan user
     # 'nama barang hilang' pasca v3.11.15 lolos di semua probe Linux).
-    MERGE_COLS = ("Nama Barang", "CEK", "Rank")
+    # v3.11.19 — OPSI A "PARITAS EXCEL USER" (user: "cek merger
+    # vertical, saat ini progam menjadi bug yaitu yang tampil hanya 1
+    # nama barang per group atau section" — keluhan KE-3 dgn akar sama:
+    # v3.9.55-59, v3.11.16, v3.11.18; riset lengkap:
+    # REFERENSI_MERGE_VERTIKAL.md): Nama Barang KELUAR dari merge —
+    # nama DIULANG di SETIAP baris (paritas file kerja user 20.AGUSTUS
+    # 2026.xlsx: 40.740 baris, NOL merged cell, nama tiap baris;
+    # kelompok terbesar 261 resto → merge membuat user scroll ratusan
+    # baris "tanpa nama"). Merge-vertikal TETAP untuk CEK & Rank —
+    # kolom ini TIDAK ada di Excel user, nilai = properti KELOMPOK
+    # (CEK gabungan label unik · Rank kelompok Σ|Deviasi|) → head-only
+    # + sticky justru menyampaikan "nilai milik kelompok" (referensi
+    # #7 AG Grid spanRows: merge baris berurutan bernilai sama).
+    # Supersede v3.11.15/16 (TIGA kolom merge): model data & mesin
+    # sticky stateless TIDAK berubah — hanya keanggotaan kolom.
+    # per-baris RAW tetap utuh di _row_snaps/_rank_map/_cek_map
+    # (paritas sheet v3.9.65 — double-click · follow-up) + nilai
+    # kelompok di _grank_map/_gcek_map (sort · filter ⧩ · auto-fit ·
+    # clone ⛶). POLLER 150ms stateless + bind <Map> tetap (jaring
+    # pengaman anti-blank utk CEK/Rank lintas OS).
+    MERGE_COLS = ("CEK", "Rank")
 
     # v3.9.51 — kolom In (kiriman — BUKAN kolom Stock/SO): header diberi
     # strip warna (user: "Header In_13 atau In 15 (Jika H = 14 contoh
@@ -1204,6 +1238,9 @@ class DeviasiView(tk.Frame):
         # juga filter clone ⛶ (value_get attach_clone_filters — nilai RAW
         # supaya kelompok utuh lolos filter by Nama Barang/Rank).
         # v3.11.15 — kini juga kolom CEK (_cek_map) — display merge head-only.
+        # v3.11.19 — OPSI A: Nama Barang kini PER-BARIS di payload (getter
+        # snapshot tetap — nilai identik dgn display; redundan-by-design
+        # supaya pengukuran/auto-fit tak peka state display kolom mana pun).
         self.tree._autofit_value_get = self._merge_value_get
 
         # v3.9.51 — strip warna header kolom In (kiriman — BUKAN Stock):
@@ -1220,10 +1257,12 @@ class DeviasiView(tk.Frame):
         # (rank |Deviasi| dalam kelompok — semantik sheet asli).
         # v3.9.61 — sekat warna kelompok dihapus (baris seragam putih).
         # v3.11.15 — MERGE-VERTIKAL BARU (user minta lagi, kini stateless):
-        # Nama Barang/CEK/Rank head-only run + sticky — bind hook scroll
+        # CEK/Rank head-only run + sticky — bind hook scroll
         # di sini (yscrollcommand sudah terpasang baris atas); clone ⛶
         # di-bind lewat on_render_done (open_tree_maximized mengatur
         # yscrollcommand SEBELUM filter_setup/on_render_done dipanggil).
+        # v3.11.19 — OPSI A: Nama Barang keluar dari merge (per-baris —
+        # paritas Excel user); hook sticky kini melayani CEK/Rank saja.
         self._vmerge_bind(self.tree)
 
         # Legend CEK
@@ -1741,7 +1780,11 @@ class DeviasiView(tk.Frame):
         Kolom lain → nilai display tree (cur).
         v3.11.16 — CEK/Rank kini nilai KELOMPOK (_gcek_map/_grank_map —
         display merge per-kelompok sejajar; per-baris RAW tetap di
-        _cek_map/_rank_map utk popup/follow-up)."""
+        _cek_map/_rank_map utk popup/follow-up).
+        v3.11.19 — OPSI A: Nama Barang kini PER-BARIS di payload —
+        cabang snapshot di bawah redundan-by-design (nilai identik dgn
+        display; tetap dipertahankan agar auto-fit/filter-clone tak
+        peka state display)."""
         if col == "Nama Barang":
             snap = self._row_snaps.get(str(iid))
             if snap:
@@ -3399,9 +3442,15 @@ class DeviasiView(tk.Frame):
         # Sticky stateless ( nilai run selalu terlihat) + POLLER 150ms
         # stateless (jaring pengaman anti-blank lintas OS — lihat
         # _vmerge_poller).
+        # v3.11.19 — OPSI A "PARITAS EXCEL USER" SUPERSEDE BLOK INI utk
+        # kolom Nama Barang (keluhan ke-3 "hanya 1 nama per grup"):
+        # nama barang KELUAR dari merge → DIULANG di SETIAP baris
+        # (paritas file kerja user — 0 merged cell). Merge TETAP utk
+        # CEK & Rank atas span kelompok yang sama (lihat MERGE_COLS);
+        # per-baris RAW tetap utuh di snapshot/_rank_map/_cek_map.
         _brg_np = cols_np["Nama Barang"]
         _cek_disp = [self._fmt_num(cols_np["CEK"][i]) for i in range(n)]
-        _show_b = [True] * n   # head KELOMPOK (batas merge 3 kolom)
+        _show_b = [True] * n   # head KELOMPOK (batas merge 2 kolom: CEK·Rank)
         for i in range(1, n):
             _show_b[i] = str(_brg_np[i]) != str(_brg_np[i - 1])
         # v3.11.16 — nilai KELOMPOK dibaca dari kolom derived yang
@@ -3431,10 +3480,15 @@ class DeviasiView(tk.Frame):
                     # v3.9.65) tetap di _rank_map.
                     values[j] = _grank_row[i] if _show_b[i] else ""
                 elif col_id == "Nama Barang":
-                    # v3.11.16 — MERGE: head kelompok (batas sama utk
-                    # 3 kolom); nilai mentah tetap di snapshot utk
+                    # v3.11.19 — OPSI A "PARITAS EXCEL USER": nama
+                    # barang DIULANG di SETIAP baris (file kerja user =
+                    # 0 merged cell — nama selalu tampak; keluhan
+                    # "hanya 1 nama per grup" berulang 3× sejak v3.9.55
+                    # tuntas permanen). Kolom ini KELUAR dari MERGE_COLS
+                    # — sticky/poller tak pernah menyentuhnya; nilai
+                    # mentah identik tetap di snapshot utk
                     # double-click/follow-up/sort/filter.
-                    values[j] = barang if _show_b[i] else ""
+                    values[j] = barang
                 elif col_id == "CEK":
                     # v3.11.16 — MERGE PER-KELOMPOK: GABUNGAN label
                     # unik kelompok di head (ringkasan satu sel —
@@ -3752,10 +3806,10 @@ class DeviasiView(tk.Frame):
         titik perubahan urutan/baris (render · sort · filter clone ⛶ ·
         salin clone) bermuara ke sana.
 
-        v3.11.16 — RUN = KELOMPOK BARANG (batas sama utk KETIGA kolom
-        merge — Nama Barang · CEK · Rank sejajar di baris head yang
-        sama, span identik). Teks per kolom: nama barang · CEK
-        gabungan kelompok (_gcek_map) · rank kelompok (_grank_map).
+        v3.11.19 — OPSI A: merge TIDAK mengubah Nama Barang (kolom =
+        per-baris di payload — paritas Excel user); run kini DUA kolom
+        atas SPAN KELOMPOK BARANG yang SAMA: CEK gabungan kelompok
+        (_gcek_map) · Rank kelompok (_grank_map) sejajar di baris head.
         State per-tree (utama + tiap clone): ``tree._vmerge`` =
         {n, runs per kolom, starts per kolom}. Sticky guard: jumlah
         children ≠ n (batch insert masih berjalan) → no-op sampai
@@ -3778,7 +3832,6 @@ class DeviasiView(tk.Frame):
             snap = snaps.get(ks) or {}
             b = str(snap.get("barang", ""))
             for col, key, text in (
-                    ("Nama Barang", b, b),
                     ("CEK", b, str(ck.get(ks, ""))),
                     ("Rank", b, str(rk.get(ks, "")))):
                 run = cur.get(col)
