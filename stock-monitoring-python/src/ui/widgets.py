@@ -6920,8 +6920,19 @@ class TreeFindPopup:
             self._set_status("Ketik untuk mencari — Enter = berikutnya · "
                              "Shift+Enter = sebelumnya · Esc = tutup")
             return
+        # v3.11.26 — HIERARKI-AWARE: enumerasi REKURSIF pre-order (view
+        # 2-level — deviasi induk-anak, pivot matrix): dulu hanya
+        # get_children("") → pencarian nama resto/anak tak pernah ketemu
+        # (hanya baris induk yang discan).
+        children = []
+
+        def _walk(parent):
+            for iid in self.tree.get_children(parent):
+                children.append(iid)
+                _walk(iid)
+
         try:
-            children = list(self.tree.get_children(""))
+            _walk("")
         except tk.TclError:
             return
         for iid in children:
@@ -7013,6 +7024,13 @@ class TreeFindPopup:
             self._apply_tag(iid, FIND_CUR_TAG)
             self._cur_iid = iid
         with contextlib.suppress(tk.TclError):
+            # v3.11.26 — hierarki: pastikan SEMUA induk terbuka sebelum
+            # see() (anak di induk terlipat tak terlihat — see() sendirian
+            # tak membuka induk).
+            _anc = self.tree.parent(iid)
+            while _anc:
+                self.tree.item(_anc, open=True)
+                _anc = self.tree.parent(_anc)
             self.tree.see(iid)
 
     def _nav(self, delta: int) -> None:
