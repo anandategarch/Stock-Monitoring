@@ -327,7 +327,7 @@ class PivotTableView(tk.Frame):
             command=self._refresh_pivot)
         self.chk_hide_empty.pack(side="left", padx=(0, 18))
 
-        GhostButton(r1, text="Reset Filter",
+        GhostButton(r1, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
         # --- Tabel card ---
@@ -346,20 +346,20 @@ class PivotTableView(tk.Frame):
             command=self._on_mode_change)
         self.mode_seg.pack(side="left", padx=(14, 0))
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="Perbesar Tabel")
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         # v3.9.2: 💾 Export Excel — matrix pivot SESUAI TAMPILAN (filter +
         # mode aktif); nilai minus ditandai font merah per cell (mirror UI)
-        btn_export = GhostButton(head, text="Export Excel",
+        btn_export = GhostButton(head, text="💾 Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
 

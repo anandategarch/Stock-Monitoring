@@ -316,10 +316,10 @@ def _popup_head_buttons(head, win, tree, col_spec) -> None:
     v3.9.59 — FIX 2e-07: '⛶ Perbesar' → '⛶ Layar Penuh' (kata
     'Perbesar' dipakai ⤢ in-place '⤢ Perbesar Tabel' — dua aksi beda
     tak boleh sebutan sama; ⛶ selalu = Layar Penuh)."""
-    GhostButton(head, text="Layar Penuh",
+    GhostButton(head, text="⛶ Layar Penuh",
                 command=lambda: _toggle_popup_max(win, tree, col_spec)
                 ).pack(side="right", padx=(6, 0))
-    GhostButton(head, text="Muat Lebar",
+    GhostButton(head, text="↺ Muat Lebar",
                 command=lambda: _scale_popup_columns(
                     tree, col_spec, win.winfo_width() - 36)
                 ).pack(side="right", padx=(6, 0))
@@ -469,7 +469,7 @@ class NominalRestoView(tk.Frame):
         r1 = tk.Frame(fbody, bg=C_CARD)
         r1.pack(fill="x")
         # chip H read-only + petunjuk (pola mode Nominal v3.9.33)
-        tk.Label(r1, text="TANGGAL H · atur di Deviasi GR", bg=C_CARD,
+        tk.Label(r1, text="TANGGAL H · atur di 📦 Deviasi GR", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         self._h_chip_var = tk.StringVar(value=str(self.tanggal_h))
         chip = tk.Frame(r1, bg="#f1f5f9", highlightbackground="#e2e8f0",
@@ -482,7 +482,7 @@ class NominalRestoView(tk.Frame):
         tk.Label(r1, textvariable=self._total_var, bg=C_CARD,
                  fg=C_HEADER, font=font(9, "bold")).pack(
             side="left", padx=(8, 0))
-        GhostButton(r1, text="Reset Filter",
+        GhostButton(r1, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left",
                                                      padx=(18, 0))
         tk.Label(r1, text="double-click resto → rincian per barang · "
@@ -528,16 +528,16 @@ class NominalRestoView(tk.Frame):
                        "Qty Deviasi) — H shared",
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         self._title_label.pack(side="left")
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        btn_expand = GhostButton(head, text="Perbesar Tabel",
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel",
                                  command=lambda: None)
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit",
+        btn_fit = GhostButton(head, text="↔ Auto-Fit",
                               command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
@@ -640,7 +640,7 @@ class NominalRestoView(tk.Frame):
         self._nh_kategori_combo.bind(
             "<<ComboboxSelected>>",
             lambda e: self._on_nh_kategori_changed())
-        GhostButton(r, text="Reset Filter",
+        GhostButton(r, text="✕ Reset Filter",
                     command=self._nh_reset_filter).pack(
             side="left", padx=(12, 0))
         tk.Label(r, text="GLOBAL — semua resto & kategori (tidak terikat "
@@ -660,7 +660,7 @@ class NominalRestoView(tk.Frame):
                             "kategori) — tidak ikut Σ Nominal Deviasi",
                  bg=C_CARD, fg=C_HEADER, font=font(10, "bold")).pack(
             side="left")
-        GhostButton(head, text="Auto-Fit",
+        GhostButton(head, text="↔ Auto-Fit",
                     command=lambda: auto_fit_columns(
                         self.tree_noharga)).pack(side="right")
 
@@ -2050,7 +2050,7 @@ class NominalRestoView(tk.Frame):
         # dari win._export_payload SAAT KLIK (dilekatkan SETELAH seluruh
         # baris selesai dibangun di bawah — tombol tak membekukan
         # snapshot saat konstruksi).
-        GhostButton(head, text="Export Excel",
+        GhostButton(head, text="💾 Export Excel",
                     command=lambda _w=win: self._on_popup_export_excel(_w)
                     ).pack(side="right", padx=(6, 0))
         for col_name, width, anchor in _popup_cols:

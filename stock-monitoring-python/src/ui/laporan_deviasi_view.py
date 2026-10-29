@@ -234,7 +234,7 @@ class LaporanDeviasiView(tk.Frame):
         # v3.9.33 — AUDIT FIX (48-f MEDIUM UX): chip H read-only diberi
         # petunjuk singkat di mana H bisa diatur (kata kunci 'TANGGAL H'
         # dipertahankan supaya assertion lama tetap lolos).
-        tk.Label(r1, text="TANGGAL H · atur di Deviasi GR", bg=C_CARD,
+        tk.Label(r1, text="TANGGAL H · atur di 📦 Deviasi GR", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         # v3.9.3: chip read-only — H dibagikan dari tab 📦 Deviasi GR
         # (pola tab 🧩 Deviasi PCS; tanpa double input)
@@ -246,7 +246,7 @@ class LaporanDeviasiView(tk.Frame):
                  fg=C_ACCENT, font=font(11, "bold")).pack(
             padx=10, pady=(2, 3))
 
-        GhostButton(r1, text="Reset Filter",
+        GhostButton(r1, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
         # --- Tabel card ---
@@ -263,20 +263,20 @@ class LaporanDeviasiView(tk.Frame):
         title_label.pack(side="left")
         # v3.11.2 — 💾 Export Excel SESUAI TAMPILAN (pola pivot v3.9.2:
         # filter ⧩ + H aktif ikut; urutan = payload render terakhir).
-        btn_export = GhostButton(head, text="Export Excel",
+        btn_export = GhostButton(head, text="💾 Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="Perbesar Tabel")
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in self.COLUMNS]

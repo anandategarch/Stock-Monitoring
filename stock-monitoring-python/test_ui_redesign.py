@@ -986,7 +986,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.16", APP_VERSION == "3.11.16",
+    check("Versi = 3.11.18", APP_VERSION == "3.11.18",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -1032,7 +1032,7 @@ def main():
     check("(v3.9.8 → v3.9.37) Toolbar: Export Excel + Refresh "
           "Sumber (v3.9.37 — tanpa Bantuan; v3.9.59 FIX 2a-09/2f-13: "
           "glyph kanonik)",
-          _tb_btns == ["Refresh Sumber", "Export Excel"],
+          _tb_btns == ["↻ Refresh Sumber", "💾 Export Excel"],
           f"got {_tb_btns}")
 
     def _view_static_labels(view):
@@ -10358,11 +10358,11 @@ def main():
     # --- (b) app wiring: tab baru + fanout harga_map ---------------
     _tab_labels46 = [str(app.notebook.tab(t, "text"))
                      for t in app.notebook.tabs()]
-    check("(v3.9.34) app: tab 'Nominal Deviasi' ada TEPAT SETELAH "
-          "Laporan Deviasi",
-          "Nominal Deviasi" in _tab_labels46
-          and _tab_labels46.index("Nominal Deviasi") ==
-          _tab_labels46.index("Laporan Deviasi") + 1,
+    check("(v3.9.34) app: tab '💰 Nominal Deviasi' ada TEPAT SETELAH "
+          "📋 Laporan Deviasi",
+          "💰 Nominal Deviasi" in _tab_labels46
+          and _tab_labels46.index("💰 Nominal Deviasi") ==
+          _tab_labels46.index("📋 Laporan Deviasi") + 1,
           f"got {_tab_labels46}")
     check("(v3.9.34) app: nominal_resto_view terbangun + terhubung "
           "shared-H + masuk dispatch _tab_views",
@@ -24333,16 +24333,16 @@ def main():
           and not any("konteks:" in t for t in _an_texts94)
           and any("ANALISA REKONSILIASI" in t for t in _an_texts94),
           f"got {[t for t in _an_texts94 if t.isupper()][:8]}")
-    check("(v3.11.9) §94-H3 TIAP seksi ber-tombol 'Perbesar' (6 — "
+    check("(v3.11.9) §94-H3 TIAP seksi ber-tombol '⤢ Perbesar' (6 — "
           "GhostButton ttk)",
           sum(1 for t in _sec_btn_texts94(_isv94._analisa_card)
-              if t == "Perbesar") == 6,
+              if t == "⤢ Perbesar") == 6,
           f"got {[t for t in _sec_btn_texts94(_isv94._analisa_card) if 'Perbesar' in t]}")
 
     def _find_btn94(w):
         for ch94 in w.winfo_children():
             if isinstance(ch94, (tk.Button, ttk.Button)) and \
-                    str(ch94.cget("text")) == "Perbesar":
+                    str(ch94.cget("text")) == "⤢ Perbesar":
                 return ch94
             _r94 = _find_btn94(ch94)
             if _r94 is not None:

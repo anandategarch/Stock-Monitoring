@@ -1,13 +1,13 @@
 """
-probe_merge_app.py — probe audit v3.11.15 MERGE-VERTIKAL di LEVEL APP
-(lengkap: jalur load_data + select_and_wait, BUKAN view standalone).
+probe_merge_app.py — probe audit MERGE-VERTIKAL di LEVEL APP (lengkap:
+jalur load_data + select_and_wait, BUKAN view standalone).
 
-Motivasi: probe_merge_vertikal.py menguji DeviasiView standalone
-(dv.data = ...; _refresh). Audit app-level diperlukan karena jalur
-load_data app bisa berbeda (kategori filter, shared state, urutan
-render). Ditambah setelah VLM salah-baca screenshot harness pertama
-(menyebut 'setiap baris bernama') — bukti programatik jalur yang SAMA
-dengan harness screenshot_ui.py inilah yang autoritatif.
+v3.11.15: kontrak per-kolom run (Rank ikat-tie, CEK label identik).
+v3.11.16: kontrak KELOMPOK — TIGA kolom (Nama Barang · CEK · Rank) merge
+atas SPAN KELOMPOK BARANG yang sama; teks kolom: nama barang · CEK
+GABUNGAN kelompok (_gcek_map) · RANK KELOMPOK (_grank_map). Port ini
+menyinkronkan probe ke kontrak kelompok (probe versi v3.11.15 permanen
+GAGAL di HEAD ≥ v3.11.16 — run lama tidak lagi valid).
 
 Jalankan di bawah Xvfb:
   DISPLAY=:99 python3 probes/v31115/probe_merge_app.py
@@ -20,11 +20,11 @@ Fixture make_mock_append1 (konvensi repo):
 
 Verifikasi per tab:
   (1) _vmerge aktif n = jumlah baris;
-  (2) layout 'Nama Barang' = kontrak head-run dari RAW snapshot
-      (baris lanjutan run kosong; singleton bernama sendiri);
-  (3) layout 'Rank' + 'CEK' = kontrak head-run dari _rank_map/_cek_map;
-  (4) RAW utuh per-baris (key ada di ketiga map — teks boleh kosong:
-      rank dev-0 → '' kontrak v3.9.65).
+  (2) layout 'Nama Barang' = kontrak KELOMPOK (span barang; baris
+      lanjutan kosong; singleton bernama sendiri);
+  (3) layout 'Rank' = _grank_map (rank kelompok) · 'CEK' = _gcek_map
+      (gabungan kelompok) — sejajar DI BARIS HEAD yang sama;
+  (4) RAW per-baris utuh (_row_snaps/_rank_map/_cek_map — paritas sheet).
 
 EXPECTED: 2 blok OK (GR + PCS). Exit code 0 bila semua lulus.
 """
@@ -54,24 +54,24 @@ def ok(nama, kondisi, detail=""):
 
 
 def head_expected(view, tree, col):
-    """{iid: teks} — layout head-run dari RAW (baris lanjutan '')."""
+    """{iid: teks} — kontrak KELOMPOK v3.11.16: nilai di baris HEAD
+    kelompok barang; baris lanjutan ''. Rank/CEK = nilai KELOMPOK
+    (_grank_map/_gcek_map — sejajar di head yang sama)."""
     snaps = view._row_snaps
-    rk = view._rank_map
-    ck = view._cek_map
+    grk = view._grank_map
+    gck = view._gcek_map
     out, prev = {}, None
     for k in tree.get_children(""):
         ks = str(k)
         b = str((snaps.get(ks) or {}).get("barang", ""))
         if col == "Nama Barang":
-            key, text = b, b
+            text = b
         elif col == "Rank":
-            t = str(rk.get(ks, ""))
-            key, text = (b, t), t
+            text = str(grk.get(ks, ""))
         else:
-            t = str(ck.get(ks, ""))
-            key, text = (b, t), t
-        out[k] = text if key != prev else ""
-        prev = key
+            text = str(gck.get(ks, ""))
+        out[k] = text if b != prev else ""
+        prev = b
     return out
 
 
@@ -81,8 +81,9 @@ def check_tab(root, app, tab, view, label, expect_n, expect_groups2):
     ok(f"{label}: jumlah baris {expect_n}",
        len(kids) == expect_n, f"n={len(kids)}")
     vm = getattr(view.tree, "_vmerge", None)
-    ok(f"{label}: _vmerge aktif n={expect_n}",
-       isinstance(vm, dict) and vm.get("n") == expect_n,
+    ok(f"{label}: _vmerge aktif n={expect_n} (3 kolom run)",
+       isinstance(vm, dict) and vm.get("n") == expect_n
+       and set(vm.get("runs", {})) == {"Nama Barang", "Rank", "CEK"},
        f"vm={type(vm).__name__}")
     # jumlah grup 2-baris (merge nyata terlihat)
     disp = [str(view.tree.set(k, "Nama Barang")) for k in kids]
@@ -90,9 +91,13 @@ def check_tab(root, app, tab, view, label, expect_n, expect_groups2):
     ok(f"{label}: grup 2-baris ter-merge ({expect_groups2} baris lanjutan "
        "kosong)",
        n_empty == expect_groups2, f"empty={n_empty}")
+    heads = [k for k in kids if str(view.tree.set(k, "Nama Barang")).strip()]
+    ok(f"{label}: jumlah head = jumlah kelompok",
+       len(heads) == expect_n - expect_groups2,
+       f"heads={len(heads)}")
     for col in ("Nama Barang", "Rank", "CEK"):
         exp = head_expected(view, view.tree, col)
-        ok(f"{label}: layout head-run kolom {col!r}",
+        ok(f"{label}: layout KELOMPOK kolom {col!r} (nilai sejajar di head)",
            all(str(view.tree.set(k, col)) == exp[k] for k in kids))
     ok(f"{label}: RAW snapshot/_rank_map/_cek_map lengkap (key ada)",
        all(str(k) in view._row_snaps
@@ -112,7 +117,7 @@ def main():
     append1 = make_mock_append1()
 
     # GR: 6 baris — ADONAN(1) · AYAM FILET(2) · BARANG ACR(1) ·
-    # GULA PASIR(2) → 2 baris lanjutan kosong.
+    # GULA PASIR(2) → 2 baris lanjutan kosong, 4 kelompok.
     app.deviasi_gr_view.load_data(append1)
     select_and_wait(root, app, app.tab_deviasi_gr, app.deviasi_gr_view)
     for _ in range(40):
@@ -122,7 +127,7 @@ def main():
               "GR", expect_n=6, expect_groups2=2)
 
     # PCS: 4 baris — KOPI BUBUK(2) · SUSU UHT(2) → 2 baris lanjutan
-    # kosong.
+    # kosong, 2 kelompok.
     app.deviasi_pcs_view.load_data(append1)
     select_and_wait(root, app, app.tab_deviasi_pcs, app.deviasi_pcs_view)
     for _ in range(40):
@@ -136,7 +141,8 @@ def main():
     if FAILED:
         print(f"PROBE GAGAL: {FAILED}")
         sys.exit(1)
-    print("PROBE v3.11.15 MERGE APP-LEVEL: SEMUA OK")
+    print("PROBE v3.11.15 MERGE APP-LEVEL (kontrak kelompok v3.11.16): "
+          "SEMUA OK")
 
 
 if __name__ == "__main__":

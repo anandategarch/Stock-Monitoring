@@ -989,10 +989,10 @@ class DeviasiView(tk.Frame):
             # v3.9.33 — AUDIT FIX (48-f UX): chip H read-only kini ber-
             # petunjuk di mana mengubahnya (dulu angka H berdiri sendiri
             # tanpa penjelasan — user tidak tahu harus ke tab GR).
-            tk.Label(chip, text="· atur di Deviasi GR", bg="#f1f5f9",
+            tk.Label(chip, text="· atur di 📦 Deviasi GR", bg="#f1f5f9",
                      fg=C_TEXT_MUTED, font=font(8)).pack(
                 side="left", padx=(4, 10), pady=(2, 3))
-        GhostButton(r0, text="Reset Filter",
+        GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="left")
 
         # v3.9.13 — filter KATEGORI (user: "tambah filter kategori di tab
@@ -1090,18 +1090,18 @@ class DeviasiView(tk.Frame):
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar (in-place — ciutkan baris kontrol
         # supaya tabel memakai seluruh tinggi tab; v3.9.59 fix 2f-13 label
         # kanonik ⤢='Perbesar' — dulu '⤢ Perbesar Tabel')
-        btn_expand = GhostButton(head, text="Perbesar")
+        btn_expand = GhostButton(head, text="⤢ Perbesar")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
         # v3.9.55 — TOMBOL SORT ANALISA CEK (user: "DI tab deviasi GR dan PCS
         # dan tombol buat sort kenaikan atau penurunan tertinggi berdasarkan

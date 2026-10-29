@@ -248,7 +248,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.16"  # v3.11.16 — MERGE PER-KELOMPOK SEJAJAR + POLLER ANTI-BLANK (user: "masih bug, belum merger vertikal antara kolom cek dan rank di kolom nama barang. Justru ini kembali ke masalah lama yaitu nama barang hilang untuk tiap grup nama barang. Deep audit dan fix"): audit dalam menemukan 2 akar — (AKAR-1 SEMANTIK) logika run v3.11.15 (CEK per-run label identik · Rank per-ikat-tie) di data produksi NYARIS TIDAK PERNAH menempel: label CEK & rank per-baris hampir semua unik (probe skala 28.548 baris: viewport tengah kelompok 33 baris → nilai nama=1 · rank=2 · cek=1 — TERSEBAR di baris sendiri, TIDAK sejajar dgn baris head nama barang) → yang dilihat user = "belum merger vertikal antara cek dan rank"; FIX = TIGA kolom (Nama Barang · CEK · Rank) merge atas SPAN KELOMPOK yang SAMA, nilai tampil BERSAMA di baris head kelompok: CEK = GABUNGAN label unik kelompok (' \u00b7 ' urut kemunculan — ringkasan satu sel), Rank = RANK KELOMPOK (peringkat \u03a3|Deviasi| barang di antara barang tampil, method=min, 1 = total terbesar — arah konvensi sama dgn rank per-baris v3.9.65; per-baris RAW tetap utuh di _rank_map utk paritas sheet). Sort kolom CEK/Rank kini pakai nilai kelompok (kelompok tetap kontigu saat diurutkan). (AKAR-2 ROBUSTNES) "nama barang hilang" = celah jalur scroll/OS yang tak memicu hook mana pun (semua probe Linux v3.11.15 PASS — termasuk skala produksi 28.548 baris wheel/moveto/PageDown/burst 0 pelanggaran; kecurigaan jalur Windows/trackpad); FIX = POLLER 150ms STATELESS per tree (baca ulang viewport → tulis diff; tanpa state display yang bisa basi — pelajaran era v3.9.55-59) + bind <Map> (kembali dari tab lain tanpa Configure). TES: §98 ditulis ulang ke kontrak kelompok + probe v31116 baru.  # v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG tab Deviasi GR/PCS (user: "kolom Cek bisa gak merger vertical dengan nama barang? di tab deviasi gr dan deviasi pcs? Rank juga merger vertical"): tampilan ala rowspan Excel — nilai hanya di baris HEAD tiap run bernilai-sama; Nama Barang = kelompok barang · CEK = label utuh identik berurutan dalam kelompok · Rank = ikat rank method="min" (13,13,13 → satu sel; nilai per-baris v3.9.65 tetap di _rank_map — BUKAN rank konstanta per grup). STICKY STATELESS (user pernah komplain era v3.9.55-59 "nama barang tidak muncul" saat mesin pemindah state bocor — v3.9.60 membongkarnya; kini nilai run SELALU terlihat: head bila tampak, selain itu baris pertama run yang tampak, dibenarkan per event scroll via tulis-diff self-healing — tanpa state display yang bisa basi; kelompok produksi ratusan baris tak pernah blank). RAW tetap kanonik: _row_snaps/_rank_map/_cek_map (BARU) — sort (CEK kini pakai value_get RAW) · filter ⧩/clone ⛶ · auto-fit · double-click popup · follow-up tak tersentuh. FIX SEKALIAN (laten): sort ≥1500 baris (insert batched) memasang dekorasi saat tree masih PARSIAL — kini via on_done (tag cell minus/highlight + layout merge dijamin di urutan final). TES: §98 BARU (merge CEK/Rank/Nama Barang + sticky scroll 72-baris 3-kelompok + sort interleave↔kelompok + clone filter + ikat rank + raw map) + kontrak §59/§61/§62/§66/§70/§77 diport ke semantik merge.
+APP_VERSION = "3.11.18"  # v3.11.18 (RESTORED) — IKON KEMBALI TERKURASI + BERSIH SLOP + FIX GLYPH 🫵: commit v3.11.17/v3.11.18 asli hilang bersama sandbox (tidak pernah ter-push — GitHub sempat tertinggal di v3.11.16; user: "kok gak ada icon nya? apa commit tidak masuk ke git hub?"), direkonstruksi di atas v3.11.16 lewat probes/v31117/restore_icons.py (148 pasangan validasi + 3 blok slop): (1) IKON — 10 tab (⚙️🚀🧮📦🧩📤📋💰☑🛒; 🧮 Pivot/💰 Nominal dikurasi dari 📊/🧮 v3.11.12) + badge ☑ Follow Up (N) + tombol aksi semua view (📂💾↻↺⤢⤡⛶◱▦◫↔↕✕📋🎯✏️🗑🧹⏹🚀) + mode SegmentBar (📋 Tabel|📈 Analisa · ⚖|🚨|💰 · 🫵|⚡) + hint label 📦; TETAP POLOS (slop): EmptyState · status/log/toast/dialog · header seksi analisa · legenda · judul popup · mode pivot [Resto|Tanggal] · [Bulan Ini|Lalu+Ini]. (2) SLOP: paragraf kategori manual dipadatkan (buang arkeologi versi + kutipan user dari UI) · hint dev-bulanan dipadatkan · judul kartu kategori tanpa pengulangan folder. (3) v3.11.18: label mode "MUAT FILE:" → "Mode muat:" · 🫵 U+1FAF5 pointing-at-viewer (typo v3.11.17 asli pernah memasang U+1FAC5 person-with-crown 🫅 — lolos cek VLM karena X11 tak merender emoji).   # v3.11.16 — MERGE PER-KELOMPOK SEJAJAR + POLLER ANTI-BLANK (user: "masih bug, belum merger vertikal antara kolom cek dan rank di kolom nama barang. Justru ini kembali ke masalah lama yaitu nama barang hilang untuk tiap grup nama barang. Deep audit dan fix"): audit dalam menemukan 2 akar — (AKAR-1 SEMANTIK) logika run v3.11.15 (CEK per-run label identik · Rank per-ikat-tie) di data produksi NYARIS TIDAK PERNAH menempel: label CEK & rank per-baris hampir semua unik (probe skala 28.548 baris: viewport tengah kelompok 33 baris → nilai nama=1 · rank=2 · cek=1 — TERSEBAR di baris sendiri, TIDAK sejajar dgn baris head nama barang) → yang dilihat user = "belum merger vertikal antara cek dan rank"; FIX = TIGA kolom (Nama Barang · CEK · Rank) merge atas SPAN KELOMPOK yang SAMA, nilai tampil BERSAMA di baris head kelompok: CEK = GABUNGAN label unik kelompok (' \u00b7 ' urut kemunculan — ringkasan satu sel), Rank = RANK KELOMPOK (peringkat \u03a3|Deviasi| barang di antara barang tampil, method=min, 1 = total terbesar — arah konvensi sama dgn rank per-baris v3.9.65; per-baris RAW tetap utuh di _rank_map utk paritas sheet). Sort kolom CEK/Rank kini pakai nilai kelompok (kelompok tetap kontigu saat diurutkan). (AKAR-2 ROBUSTNES) "nama barang hilang" = celah jalur scroll/OS yang tak memicu hook mana pun (semua probe Linux v3.11.15 PASS — termasuk skala produksi 28.548 baris wheel/moveto/PageDown/burst 0 pelanggaran; kecurigaan jalur Windows/trackpad); FIX = POLLER 150ms STATELESS per tree (baca ulang viewport → tulis diff; tanpa state display yang bisa basi — pelajaran era v3.9.55-59) + bind <Map> (kembali dari tab lain tanpa Configure). TES: §98 ditulis ulang ke kontrak kelompok + probe v31116 baru.  # v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG tab Deviasi GR/PCS (user: "kolom Cek bisa gak merger vertical dengan nama barang? di tab deviasi gr dan deviasi pcs? Rank juga merger vertical"): tampilan ala rowspan Excel — nilai hanya di baris HEAD tiap run bernilai-sama; Nama Barang = kelompok barang · CEK = label utuh identik berurutan dalam kelompok · Rank = ikat rank method="min" (13,13,13 → satu sel; nilai per-baris v3.9.65 tetap di _rank_map — BUKAN rank konstanta per grup). STICKY STATELESS (user pernah komplain era v3.9.55-59 "nama barang tidak muncul" saat mesin pemindah state bocor — v3.9.60 membongkarnya; kini nilai run SELALU terlihat: head bila tampak, selain itu baris pertama run yang tampak, dibenarkan per event scroll via tulis-diff self-healing — tanpa state display yang bisa basi; kelompok produksi ratusan baris tak pernah blank). RAW tetap kanonik: _row_snaps/_rank_map/_cek_map (BARU) — sort (CEK kini pakai value_get RAW) · filter ⧩/clone ⛶ · auto-fit · double-click popup · follow-up tak tersentuh. FIX SEKALIAN (laten): sort ≥1500 baris (insert batched) memasang dekorasi saat tree masih PARSIAL — kini via on_done (tag cell minus/highlight + layout merge dijamin di urutan final). TES: §98 BARU (merge CEK/Rank/Nama Barang + sticky scroll 72-baris 3-kelompok + sort interleave↔kelompok + clone filter + ikat rank + raw map) + kontrak §59/§61/§62/§66/§70/§77 diport ke semantik merge.
 # (riwayat v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG: head-run per kolom + sticky stateless + _cek_map; SUPERSEDE v3.11.16: run CEK/Rank diganti span kelompok sejajar — data produksi label/rank unik membuat run nyaris tak pernah menempel.)
 # (riwayat v3.11.14 — POLISH TABEL ALA EXCEL: HEADING IKUT ANCHOR KOLOM — audit visual 3×VLM vs referensi GitHub Forest-ttk-theme/tksheet/ttkbootstrap; SEMUA tree memasang anchor heading = anchor kolomnya (angka rata kanan, teks rata kiri, ✓ center) — 15 file/20+ tree + clone menyalin anchor sumber + heading dinamis preserve; KPI cards dievaluasi & tidak ditambahkan (arah user "biar clean"); TES §97.)
 # (riwayat v3.11.12 — TIGA permintaan user: AMBANG COM ±% dr median (spinbox GR/PCS sinkron, persist com_ambang_pct default 50) + transparansi periode→file target auto bulan lalu (bulan_mundur_list) + scroll vertikal tab Config (canvas + router roda).)
@@ -2080,16 +2080,16 @@ _ST_ERR = ("ERROR — lihat log", C_RED)
 # panjang dipendekkan; badge jumlah '☑ Follow Up (N)' tetap membawa
 # (N) — lihat _compact_tab_label / _apply_tab_label_fit.
 _TAB_COMPACT_LABELS = {
-    "Config": "Config",
-    "Proses": "Proses",
-    "Pivot Table": "Pivot",
-    "Deviasi GR": "Deviasi GR",
-    "Deviasi PCS": "Deviasi PCS",
-    "Rekap Selisih IN": "Selisih IN",
-    "Laporan Deviasi": "Laporan",
-    "Nominal Deviasi": "Nominal",
+    "⚙️ Config": "Config",
+    "🚀 Proses": "Proses",
+    "🧮 Pivot Table": "Pivot",
+    "📦 Deviasi GR": "Deviasi GR",
+    "🧩 Deviasi PCS": "Deviasi PCS",
+    "📤 Rekap Selisih IN": "Selisih IN",
+    "📋 Laporan Deviasi": "Laporan",
+    "💰 Nominal Deviasi": "Nominal",
     "Follow Up": "Follow Up",
-    "Rincian PO": "Rincian PO",
+    "🛒 Rincian PO": "Rincian PO",
 }
 # Estimasi padding per tab: style TNotebook.Tab padding (12, 9) → 2×12
 # + tabmargins (6, 8, 6, 0) → 2×6 ≈ 36 px per tab.
@@ -2390,9 +2390,9 @@ class StockMonitorApp:
         # (tombol tab Proses dulu '🔄 Refresh File Sumber…' — dua label
         # untuk dialog yang sama membuat user ragu itu fitur berbeda).
         self.btn_refresh_tb = self.toolbar.add_action(
-            "Refresh Sumber", command=self._open_refresh_dialog)
+            "↻ Refresh Sumber", command=self._open_refresh_dialog)
         self.btn_export_tb = self.toolbar.add_action(
-            "Export Excel", command=self._export_excel, accent=True)
+            "💾 Export Excel", command=self._export_excel, accent=True)
         # FIX A-02 (audit 2-a): set_enabled → tombol disabled TAMPAK dim
         # (abu) — bukan configure(state) yang meninggalkan warna teal.
         self.btn_export_tb.set_enabled(False)
@@ -2898,32 +2898,32 @@ class StockMonitorApp:
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
 
-        self.notebook.add(self.tab_config, text="Config")
-        self.notebook.add(self.tab_proses, text="Proses")
-        self.notebook.add(self.tab_pivot, text="Pivot Table")
-        self.notebook.add(self.tab_deviasi_gr, text="Deviasi GR")
-        self.notebook.add(self.tab_deviasi_pcs, text="Deviasi PCS")
-        self.notebook.add(self.tab_in_selisih, text="Rekap Selisih IN")
-        self.notebook.add(self.tab_laporan, text="Laporan Deviasi")
+        self.notebook.add(self.tab_config, text="⚙️ Config")
+        self.notebook.add(self.tab_proses, text="🚀 Proses")
+        self.notebook.add(self.tab_pivot, text="🧮 Pivot Table")
+        self.notebook.add(self.tab_deviasi_gr, text="📦 Deviasi GR")
+        self.notebook.add(self.tab_deviasi_pcs, text="🧩 Deviasi PCS")
+        self.notebook.add(self.tab_in_selisih, text="📤 Rekap Selisih IN")
+        self.notebook.add(self.tab_laporan, text="📋 Laporan Deviasi")
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ harga×qty deviasi per resto
         self.notebook.add(self.tab_nominal_resto,
-                          text="Nominal Deviasi")
-        self.notebook.add(self.tab_followup, text="Follow Up")
-        self.notebook.add(self.tab_rincian, text="Rincian PO")
+                          text="💰 Nominal Deviasi")
+        self.notebook.add(self.tab_followup, text="☑ Follow Up")
+        self.notebook.add(self.tab_rincian, text="🛒 Rincian PO")
         # v3.9.59 — FIX 2a-05: register label FULL per tab + pantau
         # lebar baris tab (fallback label compact saat meluap — badge
         # '☑ Follow Up (N)' ikut lewat _set_tab_label supaya konsisten).
         self._tab_full_labels = {
-            str(self.tab_config): "Config",
-            str(self.tab_proses): "Proses",
-            str(self.tab_pivot): "Pivot Table",
-            str(self.tab_deviasi_gr): "Deviasi GR",
-            str(self.tab_deviasi_pcs): "Deviasi PCS",
-            str(self.tab_in_selisih): "Rekap Selisih IN",
-            str(self.tab_laporan): "Laporan Deviasi",
-            str(self.tab_nominal_resto): "Nominal Deviasi",
-            str(self.tab_followup): "Follow Up",
-            str(self.tab_rincian): "Rincian PO",
+            str(self.tab_config): "⚙️ Config",
+            str(self.tab_proses): "🚀 Proses",
+            str(self.tab_pivot): "🧮 Pivot Table",
+            str(self.tab_deviasi_gr): "📦 Deviasi GR",
+            str(self.tab_deviasi_pcs): "🧩 Deviasi PCS",
+            str(self.tab_in_selisih): "📤 Rekap Selisih IN",
+            str(self.tab_laporan): "📋 Laporan Deviasi",
+            str(self.tab_nominal_resto): "💰 Nominal Deviasi",
+            str(self.tab_followup): "☑ Follow Up",
+            str(self.tab_rincian): "🛒 Rincian PO",
         }
         self._tab_compact_mode = False
         self._tab_fit_after_id = None
@@ -3096,7 +3096,7 @@ class StockMonitorApp:
             # compact (baris tab sempit) tetap konsisten dgn badge (N).
             self._set_tab_label(
                 self.tab_followup,
-                f"Follow Up{' (' + str(n) + ')' if n else ''}")
+                f"☑ Follow Up{' (' + str(n) + ')' if n else ''}")
 
     # =====================================================================
     # v3.9.59 — FIX 2a-05 (audit 2-a): BARIS TAB ADAPTIF (label compact)
@@ -3237,15 +3237,15 @@ class StockMonitorApp:
         self.rootpath_var = tk.StringVar()
         self.entry_rootpath = ttk.Entry(form, textvariable=self.rootpath_var)
         self.entry_rootpath.grid(row=0, column=1, sticky="ew", padx=(10, 8), pady=6)
-        btn_browse = GhostButton(form, text="Browse…", command=self._browse_folder)
+        btn_browse = GhostButton(form, text="📂 Browse…", command=self._browse_folder)
         btn_browse.grid(row=0, column=2, pady=6)
         form.columnconfigure(1, weight=1)
 
         btn_row = tk.Frame(inner, bg=C_CARD)
         btn_row.pack(fill="x")
-        AccentButton(btn_row, text="Simpan Config",
+        AccentButton(btn_row, text="💾 Simpan Config",
                      command=self._save_config).pack(side="left")
-        GhostButton(btn_row, text="Reload Config",
+        GhostButton(btn_row, text="↻ Reload Config",
                     command=self._load_config_to_form).pack(
             side="left", padx=(8, 0))
 
@@ -3276,21 +3276,16 @@ class StockMonitorApp:
         kat_inner = tk.Frame(kat_card, bg=C_CARD)
         kat_inner.pack(fill="x", padx=16, pady=(14, 16))
 
-        tk.Label(kat_inner, text="Identifikasi Kategori Manual "
-                 "(sumber: 42.17 — folder '6. 42.17')", bg=C_CARD,
+        tk.Label(kat_inner, text="Identifikasi Kategori Manual", bg=C_CARD,
                  fg=C_HEADER, font=font(12, "bold")).pack(anchor="w")
         tk.Label(kat_inner,
-                 text="Daftar barang bersaldo dari file 42.17 yang "
-                      "ditarik saat analisa (hanya yang ada saldo) — "
-                      "kategori 42.17 = kolom 'Kategori Barang' file; "
-                      "kategori app = pipeline (rekap/master) + mapping "
-                      "manual. Barang tanpa kategori app (amber) diberi "
-                      "kategori manual — tersimpan di config.json (key "
-                      "KategoriManual, prioritas tertinggi) dan diterapkan "
-                      "mulai run pipeline BERIKUTNYA (F5). Barang yang "
-                      "pertama kali muncul di 42.17 ditandai BARU. Mapping "
-                      "bisa diedit / dihapus kapan saja (barang kembali ke "
-                      "kategori otomatis).",
+                 text="Daftar barang bersaldo dari file 42.17 — "
+                      "kategori 42.17 dari kolom file, kategori app dari "
+                      "pipeline + mapping manual. Baris amber belum punya "
+                      "kategori app: klik 🎯 Identifikasi… untuk mengisi "
+                      "(prioritas tertinggi, diterapkan mulai run pipeline "
+                      "berikutnya). Barang yang baru muncul ditandai BARU; "
+                      "mapping bisa diedit / dihapus kapan saja.",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
                  wraplength=860, justify="left").pack(anchor="w", pady=(2, 8))
 
@@ -3361,7 +3356,7 @@ class StockMonitorApp:
         self.kat_4217_tree.tag_configure("kat_blank", foreground="#b45309")
         kat_lbtn = tk.Frame(kat_left, bg=C_CARD)
         kat_lbtn.pack(fill="x", pady=(6, 0))
-        AccentButton(kat_lbtn, text="Identifikasi…",
+        AccentButton(kat_lbtn, text="🎯 Identifikasi…",
                      command=self._kategori_identify).pack(side="left")
         # KANAN — mapping manual tersimpan (config.json)
         kat_right = tk.Frame(kat_grid, bg=C_CARD)
@@ -3381,9 +3376,9 @@ class StockMonitorApp:
         self.kat_map_tree.configure(height=10)
         kat_rbtn = tk.Frame(kat_right, bg=C_CARD)
         kat_rbtn.pack(fill="x", pady=(6, 0))
-        GhostButton(kat_rbtn, text="Edit…",
+        GhostButton(kat_rbtn, text="✏️ Edit…",
                     command=self._kategori_edit).pack(side="left")
-        GhostButton(kat_rbtn, text="Hapus",
+        GhostButton(kat_rbtn, text="🗑 Hapus",
                     command=self._kategori_delete).pack(
             side="left", padx=(8, 0))
         kat_grid.columnconfigure(0, weight=3, uniform="kat")
@@ -3413,16 +3408,11 @@ class StockMonitorApp:
                  bg=C_CARD, fg=C_HEADER,
                  font=font(12, "bold")).pack(anchor="w")
         tk.Label(dbul_inner,
-                 text="Folder file deviasi bulan lalu (format nama file "
-                      "mis. 20.AGUSTUS 2026) + Jumlah File = berapa bulan "
-                      "mundur dari bulan data berjalan (1–12). v3.11.11: "
-                      "MUAT FILE Manual (default — user: \"aku bisa "
-                      "proses pipeline sendiri tidak jadi 1 lagi\") = file "
-                      "TIDAK otomatis dimuat setelah pipeline; muat sendiri "
-                      "kapan pun via tombol. Otomatis = dimuat "
-                      "otomatis setelah pipeline selesai (perilaku lama). "
-                      "Prioritas di atas 'file terakhir dipakai'; folder "
-                      "ada tapi file bulan tsb belum ada → hanya status.",
+                                  text="Folder file deviasi bulan lalu (nama file mis. "
+                      "20.AGUSTUS 2026). Jumlah File = berapa bulan mundur "
+                      "dari bulan data (1–12). Manual (default): muat "
+                      "sendiri via tombol. Otomatis: dimuat setelah "
+                      "pipeline selesai.",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
                  wraplength=860, justify="left").pack(anchor="w",
                                                      pady=(2, 8))
@@ -3456,13 +3446,13 @@ class StockMonitorApp:
         # tersimpan config.json key DeviasiBulananMode via 💾 Simpan.
         dbul_mode_row = tk.Frame(dbul_inner, bg=C_CARD)
         dbul_mode_row.pack(fill="x", pady=(8, 0))
-        tk.Label(dbul_mode_row, text="MUAT FILE:", bg=C_CARD,
+        tk.Label(dbul_mode_row, text="Mode muat:", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
         self.dev_bulanan_mode_bar = SegmentBar(
-            dbul_mode_row, ["Manual (tombol)",
-                            "Otomatis pasca-pipeline"])
+            dbul_mode_row, ["🫵 Manual (tombol)",
+                            "⚡ Otomatis pasca-pipeline"])
         self.dev_bulanan_mode_bar.pack(side="left", padx=(6, 0))
-        GhostButton(dbul_mode_row, text="Muat ke Komparasi Sekarang",
+        GhostButton(dbul_mode_row, text="📂 Muat ke Komparasi Sekarang",
                     command=self._dev_bulanan_load_now).pack(
             side="left", padx=(12, 0))
 
@@ -4522,24 +4512,24 @@ class StockMonitorApp:
 
         btns = tk.Frame(ctrl_inner, bg=C_CARD)
         btns.pack(fill="x", pady=(0, 10))
-        self.btn_mulai = AccentButton(btns, text="MULAI PROSES",
+        self.btn_mulai = AccentButton(btns, text="🚀 MULAI PROSES",
                                       command=self._start_pipeline)
         self.btn_mulai.pack(side="left")
 
-        self.btn_stop = DangerButton(btns, text="Stop", state="disabled",
+        self.btn_stop = DangerButton(btns, text="⏹ Stop", state="disabled",
                                      command=self._stop_pipeline)
         self.btn_stop.pack(side="left", padx=(8, 0))
         # FIX A-02: state disabled dari constructor tidak memakai styling
         # dim → panggil set_enabled sekali supaya konsisten visual.
         self.btn_stop.set_enabled(False)
 
-        self.btn_bersih = GhostButton(btns, text="Bersihkan Log",
+        self.btn_bersih = GhostButton(btns, text="🧹 Bersihkan Log",
                                       command=self._clear_log)
         self.btn_bersih.pack(side="left", padx=(8, 0))
 
         # v3.9.33 — AUDIT FIX (48-f MEDIUM): log konsol (state disabled) tidak
         # bisa di-copy — tombol salin SELURUH isi log ke clipboard.
-        self.btn_salin_log = GhostButton(btns, text="Salin Log",
+        self.btn_salin_log = GhostButton(btns, text="📋 Salin Log",
                                          command=self._copy_log)
         self.btn_salin_log.pack(side="left", padx=(8, 0))
 
@@ -4549,13 +4539,13 @@ class StockMonitorApp:
         # v3.9.59 — FIX 2a-09/2f-13: label disamakan dgn toolbar (dulu
         # '🔄 Refresh File Sumber…' — dua label utk aksi yang sama).
         self.btn_refresh_src = GhostButton(
-            btns, text="Refresh Sumber",
+            btns, text="↻ Refresh Sumber",
             command=self._open_refresh_dialog)
         self.btn_refresh_src.pack(side="left", padx=(8, 0))
 
         # v3.9.59 — FIX 2a-09/2f-13: label disamakan dgn toolbar (dulu
         # '💾 Export ke Excel' — dua label utk aksi yang sama).
-        self.btn_export = GhostButton(btns, text="Export Excel",
+        self.btn_export = GhostButton(btns, text="💾 Export Excel",
                                       state="disabled",
                                       command=self._export_excel)
         self.btn_export.pack(side="left", padx=(8, 0))
@@ -6169,7 +6159,7 @@ class StockMonitorApp:
         tk.Label(bar, text="MODE", bg=C_BG, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left", padx=(0, 6))
         self.laporan_segment = SegmentBar(
-            bar, ["Komparasi File Deviasi", "Anomali COM (H)",
+            bar, ["⚖ Komparasi File Deviasi", "🚨 Anomali COM (H)",
                   "Nominal (H)"],
             command=lambda idx: self.show_laporan_mode(idx))
         self.laporan_segment.pack(side="left")

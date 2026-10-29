@@ -190,7 +190,7 @@ class FollowUpView(tk.Frame):
 
         r0 = tk.Frame(cbody, bg=C_CARD)
         r0.pack(fill="x")
-        self.btn_export = AccentButton(r0, text="Export Excel",
+        self.btn_export = AccentButton(r0, text="💾 Export Excel",
                                        command=self._on_export)
         self.btn_export.pack(side="left")
 
@@ -215,16 +215,16 @@ class FollowUpView(tk.Frame):
                                bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         title_label.pack(side="left")
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="Perbesar Tabel")
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in COLUMNS]

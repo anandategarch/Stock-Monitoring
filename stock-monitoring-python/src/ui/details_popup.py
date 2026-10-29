@@ -238,14 +238,14 @@ class DetailsPopup(tk.Toplevel):
         # user; v3.9.59 fix 2f-13: label kanonik ⛶='Layar Penuh') + ◱ Kolom
         # + ↔ Auto-Fit
         btn_fit = tk.Button(
-            head_in, text="Auto-Fit", command=self._auto_fit,
+            head_in, text="↔ Auto-Fit", command=self._auto_fit,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_fit.pack(side="right", anchor="ne", padx=(0, 6))
         btn_cols = tk.Button(
-            head_in, text="Kolom",
+            head_in, text="◱ Kolom",
             command=lambda: self._colmgr.open_panel(),
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
@@ -255,7 +255,7 @@ class DetailsPopup(tk.Toplevel):
         self._btn_max = None
         if self._show_maximize:
             btn_max = tk.Button(
-                head_in, text="Layar Penuh", command=self._maximize,
+                head_in, text="⛶ Layar Penuh", command=self._maximize,
                 bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
                 activeforeground="#ffffff", bd=0, relief="flat",
                 highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -335,11 +335,11 @@ class DetailsPopup(tk.Toplevel):
         self.status_label.pack(side="left")
 
         btn_copy_nomor = GhostButton(
-            foot, text="Semua Nomor",
+            foot, text="📋 Semua Nomor",
             command=lambda: self._copy_all_unique("Nomor"))
         btn_copy_nomor.pack(side="right", padx=(6, 0))
         btn_copy_po = GhostButton(
-            foot, text="Semua Nomor PO",
+            foot, text="📋 Semua Nomor PO",
             command=lambda: self._copy_all_unique("Nomor PO"))
         btn_copy_po.pack(side="right", padx=(6, 0))
 
@@ -591,17 +591,17 @@ class DetailsPopup(tk.Toplevel):
             command=lambda: self._copy_to_clipboard(nomor_po, "Nomor PO"))
         menu.add_separator()
         menu.add_command(
-            label="Copy seluruh baris (tab-separated)",
+            label="📋 Copy seluruh baris (tab-separated)",
             command=lambda: self._copy_row(iid, tree))
         menu.add_command(
-            label="Copy SEMUA Nomor (unik)",
+            label="📋 Copy SEMUA Nomor (unik)",
             command=lambda: self._copy_all_unique("Nomor"))
         menu.add_command(
-            label="Copy SEMUA Nomor PO (unik)",
+            label="📋 Copy SEMUA Nomor PO (unik)",
             command=lambda: self._copy_all_unique("Nomor PO"))
         menu.add_separator()
         if self._show_maximize:   # v3.9.32 — jalur pivot tanpa ⛶
-            menu.add_command(label="Layar Penuh",
+            menu.add_command(label="⛶ Layar Penuh",
                              command=self._maximize)
         try:
             menu.tk_popup(event.x_root, event.y_root)

@@ -871,7 +871,7 @@ class KomparasiDeviasiView(tk.Frame):
         # saat tab pertama terlihat).
         r1 = tk.Frame(fbody, bg=C_CARD)
         r1.pack(fill="x")
-        btn_pick = GhostButton(r1, text="Pilih File Deviasi…",
+        btn_pick = GhostButton(r1, text="📂 Pilih File Deviasi…",
                                command=self._pick_file)
         btn_pick.pack(side="left")
         self._path_var = tk.StringVar(value="")
@@ -879,10 +879,10 @@ class KomparasiDeviasiView(tk.Frame):
         self._path_entry.pack(side="left", padx=(8, 6), fill="x",
                               expand=True)
         self._path_entry.bind("<Return>", lambda e: self._reload_file())
-        self._btn_reload = GhostButton(r1, text="Muat Ulang File",
+        self._btn_reload = GhostButton(r1, text="↻ Muat Ulang File",
                                        command=self._reload_file)
         self._btn_reload.pack(side="right")
-        self._btn_close = GhostButton(r1, text="Tutup File",
+        self._btn_close = GhostButton(r1, text="✕ Tutup File",
                                       command=self._close_file)
         self._btn_close.pack(side="right", padx=(0, 6))
         self._btn_close.configure(state="disabled")
@@ -916,7 +916,7 @@ class KomparasiDeviasiView(tk.Frame):
             side="left", padx=(10, 0), pady=(2, 3))
         # v3.9.33 — AUDIT FIX (48-f UX): chip H read-only kini ber-petunjuk
         # di mana mengubahnya (dulu angka H tanpa penjelasan).
-        tk.Label(hchip, text="· atur di Deviasi GR", bg="#f1f5f9",
+        tk.Label(hchip, text="· atur di 📦 Deviasi GR", bg="#f1f5f9",
                  fg=C_TEXT_MUTED, font=font(8)).pack(
             side="left", padx=(4, 10), pady=(2, 3))
         # label minggu aktif (dinamis — file & H)
@@ -947,7 +947,7 @@ class KomparasiDeviasiView(tk.Frame):
             activeforeground=C_HEADER, command=self._on_option_changed)
         self._chk_all.pack(side="left", padx=(16, 0))
 
-        GhostButton(r2, text="Reset Filter",
+        GhostButton(r2, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="right",
                                                      padx=(0, 6))
 
@@ -986,7 +986,7 @@ class KomparasiDeviasiView(tk.Frame):
         tk.Label(r4, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self._mode_segment = SegmentBar(
-            r4, ["Tabel", "Analisa"],
+            r4, ["📋 Tabel", "📈 Analisa"],
             command=lambda idx: self._on_mode_change(idx))
         self._mode_segment.pack(side="left", padx=(6, 0))
 
@@ -1006,18 +1006,18 @@ class KomparasiDeviasiView(tk.Frame):
         # filter ⧩ + minggu/bulan + H aktif ikut; urutan = payload render
         # terakhir; sub-mode 📈 Analisa punya tabel sendiri — tombol ini
         # hanya tampil di sub-mode Tabel bersama kartu tabelnya).
-        btn_export = GhostButton(head, text="Export Excel",
+        btn_export = GhostButton(head, text="💾 Export Excel",
                                  command=self._on_export_excel)
         btn_export.pack(side="right", padx=(0, 6))
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
-        btn_expand = GhostButton(head, text="Perbesar Tabel")
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         col_ids = [c[0] for c in self.COLUMNS]
@@ -2790,9 +2790,9 @@ class KomparasiDeviasiView(tk.Frame):
         topn_entry = ttk.Entry(head, textvariable=self._topn_var, width=6)
         topn_entry.pack(side="left", padx=(4, 4))
         topn_entry.bind("<Return>", lambda e: self._render_top_selisih())
-        GhostButton(head, text="Terapkan",
+        GhostButton(head, text="↻ Terapkan",
                     command=self._render_top_selisih).pack(side="left")
-        GhostButton(head, text="Layar Penuh",
+        GhostButton(head, text="⛶ Layar Penuh",
                     command=self._maximize_top).pack(side="right")
 
         cols = [c[0] for c in self.TOP_COLS]
@@ -2842,7 +2842,7 @@ class KomparasiDeviasiView(tk.Frame):
         tk.Label(fhead, textvariable=self._flip_status_var, bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(
             side="left", padx=(10, 0))
-        GhostButton(fhead, text="Layar Penuh",
+        GhostButton(fhead, text="⛶ Layar Penuh",
                     command=self._maximize_flip).pack(side="right")
 
         cols = [c[0] for c in self.FLIP_COLS]

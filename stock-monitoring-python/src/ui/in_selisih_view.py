@@ -629,14 +629,14 @@ class InDetailPopup(tk.Toplevel):
                  wraplength=700, justify="left").pack(anchor="w", pady=(2, 0))
 
         btn_fit = tk.Button(
-            head_in, text="Auto-Fit", command=lambda: auto_fit_columns(self.tree),
+            head_in, text="↔ Auto-Fit", command=lambda: auto_fit_columns(self.tree),
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
             padx=12, pady=5)
         btn_fit.pack(side="right", anchor="ne", padx=(0, 6))
         btn_max = tk.Button(
-            head_in, text="Layar Penuh", command=self._maximize,
+            head_in, text="⛶ Layar Penuh", command=self._maximize,
             bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
             activeforeground="#ffffff", bd=0, relief="flat",
             highlightthickness=0, cursor="hand2", font=font(9, "bold"),
@@ -738,7 +738,7 @@ class InDetailPopup(tk.Toplevel):
         self.status_label = tk.Label(foot, textvariable=self.status_var,
                                      bg=C_BG, fg=C_TEXT_MUTED, font=font(9))
         self.status_label.pack(side="left")
-        btn_copy = GhostButton(foot, text="Semua Nomor",
+        btn_copy = GhostButton(foot, text="📋 Semua Nomor",
                                command=lambda: self._copy_all_unique())
         btn_copy.pack(side="right", padx=(6, 0))
         from .widgets import AccentButton
@@ -923,7 +923,7 @@ class InDetailPopup(tk.Toplevel):
             menu.add_command(label=f"Copy Nomor PO: {po[:40]}",
                              command=lambda: self._copy_to_clipboard(po, "Nomor PO"))
         menu.add_separator()
-        menu.add_command(label="Copy baris (tab-separated)",
+        menu.add_command(label="📋 Copy baris (tab-separated)",
                          command=lambda: self._copy_row(values))
         if nomor or po:
             menu.add_separator()
@@ -1109,7 +1109,7 @@ class InSelisihView(tk.Frame):
         tk.Label(r0, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
         self.view_bar = SegmentBar(
-            r0, ["Tabel", "Analisa"], bg=C_CARD,
+            r0, ["📋 Tabel", "📈 Analisa"], bg=C_CARD,
             command=self._on_view_mode_change)
         self.view_bar.pack(side="left", padx=(6, 14))
 
@@ -1139,7 +1139,7 @@ class InSelisihView(tk.Frame):
             command=self._refresh)
         chk.pack(side="left")
 
-        GhostButton(r0, text="Reset Filter",
+        GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="right")
 
         # --- KPI chips (mode Audit — mirror "EXECUTIVE RECONCILIATION
@@ -1196,20 +1196,20 @@ class InSelisihView(tk.Frame):
             bg=C_CARD, fg=C_HEADER, font=font(10, "bold"))
         self.title_label.pack(side="left")
         # v3.9 (ala Waste): ⛶ = Layar Penuh (window terpisah)
-        btn_max = GhostButton(head, text="Layar Penuh",
+        btn_max = GhostButton(head, text="⛶ Layar Penuh",
                               command=self._maximize)
         btn_max.pack(side="right")
         # v3.9 (ala Waste): ⤢ = Perbesar Tabel (in-place)
-        btn_expand = GhostButton(head, text="Perbesar Tabel")
+        btn_expand = GhostButton(head, text="⤢ Perbesar Tabel")
         btn_expand.pack(side="right", padx=(0, 6))
         # v3.8: export rekap Selisih IN per resto (permintaan user)
-        btn_export = GhostButton(head, text="Export Excel",
+        btn_export = GhostButton(head, text="💾 Export Excel",
                                  command=self._on_export)
         btn_export.pack(side="right", padx=(0, 6))
-        btn_cols = GhostButton(head, text="Kolom",
+        btn_cols = GhostButton(head, text="◱ Kolom",
                                command=lambda: self._colmgr.open_panel())
         btn_cols.pack(side="right", padx=(0, 6))
-        btn_fit = GhostButton(head, text="Auto-Fit", command=self._auto_fit)
+        btn_fit = GhostButton(head, text="↔ Auto-Fit", command=self._auto_fit)
         btn_fit.pack(side="right", padx=(0, 6))
 
         self.tree = ttk.Treeview(tbody, columns=[c[0] for c in COLUMNS],
@@ -2954,7 +2954,7 @@ class InSelisihView(tk.Frame):
                  font=font(11 if big else 9, "bold")).pack(
             side="left", padx=10, pady=4)
         if on_enlarge is not None:
-            GhostButton(h, text="Perbesar",
+            GhostButton(h, text="⤢ Perbesar",
                         command=on_enlarge).pack(side="right", padx=8,
                                                  pady=3)
         if subtitle:
@@ -3590,7 +3590,7 @@ class InSelisihView(tk.Frame):
         body = tk.Frame(win, bg=C_CARD)
         body.pack(fill="both", expand=True, padx=16, pady=14)
 
-        tk.Label(body, text="Export Rekap Selisih IN per Resto",
+        tk.Label(body, text="💾 Export Rekap Selisih IN per Resto",
                  bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
             anchor="w")
 
@@ -3613,7 +3613,7 @@ class InSelisihView(tk.Frame):
         from .widgets import AccentButton
         # v3.9.59 — FIX 2f-13: label kanon '💾 Export Excel' (dulu '💾
         # Export Sekarang' — varian ke-4 label export di 5 permukaan).
-        AccentButton(btns, text="Export Excel", command=_ok).pack(
+        AccentButton(btns, text="💾 Export Excel", command=_ok).pack(
             side="right")
         GhostButton(btns, text="Tanpa Kolom Audit",
                     command=lambda: (result.update(cols=[]),

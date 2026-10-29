@@ -1633,8 +1633,8 @@ class TableExpander:
       restore cukup grid().
     """
 
-    def __init__(self, button, targets, text_expand="Perbesar Tabel",
-                 text_restore="Tampilkan Filter & KPI", on_toggle=None):
+    def __init__(self, button, targets, text_expand="⤢ Perbesar Tabel",
+                 text_restore="⤡ Tampilkan Filter & KPI", on_toggle=None):
         self._button = button
         self._targets = list(targets)
         self._text_expand = text_expand
@@ -2261,16 +2261,16 @@ class HeaderFilter:
         # tombol aksi
         brow = tk.Frame(body, bg=C_CARD)
         brow.pack(fill="x")
-        GhostButton(brow, text="Reset", command=self._reset).pack(side="left")
+        GhostButton(brow, text="↺ Reset", command=self._reset).pack(side="left")
         # v3.9.13: kebalikan seleksi (invert — filter advanced)
-        GhostButton(brow, text="Balik",
+        GhostButton(brow, text="↔ Balik",
                     command=self._invert_selection).pack(side="left",
                                                          padx=(6, 0))
         if self.on_sort is not None:
-            GhostButton(brow, text="Sort A→Z",
+            GhostButton(brow, text="↕ Sort A→Z",
                         command=lambda: self._do_sort(False)).pack(
                 side="left", padx=(6, 0))
-            GhostButton(brow, text="Sort Z→A",
+            GhostButton(brow, text="↕ Sort Z→A",
                         command=lambda: self._do_sort(True)).pack(
                 side="left", padx=(6, 0))
         GhostButton(brow, text="Tutup (Esc)", command=self._close).pack(
@@ -3032,7 +3032,7 @@ class ColumnManager:
                     label=f"Filter kolom '{label}'",
                     command=lambda c=col: self._safe_open_filter(c))
             menu.add_command(
-                label="Auto-fit kolom ini",
+                label="↔ Auto-fit kolom ini",
                 command=lambda c=col: auto_fit_columns(self.tree,
                                                        columns=[c]))
             can_hide = len(self.visible()) > 1
@@ -3040,12 +3040,12 @@ class ColumnManager:
                 label=f"Sembunyikan kolom '{label}'",
                 command=lambda c=col: self.hide(c),
                 state="normal" if can_hide else "disabled")
-        menu.add_command(label="Tampilkan Semua Kolom",
+        menu.add_command(label="▦ Tampilkan Semua Kolom",
                          command=self.show_all,
                          state="normal" if self.hidden else "disabled")
         menu.add_separator()
-        menu.add_command(label="Panel Kolom…", command=self.open_panel)
-        menu.add_command(label="Auto-fit Semua Kolom",
+        menu.add_command(label="◫ Panel Kolom…", command=self.open_panel)
+        menu.add_command(label="↔ Auto-fit Semua Kolom",
                          command=lambda: auto_fit_columns(self.tree))
         try:
             menu.tk_popup(event.x_root, event.y_root)
@@ -3099,7 +3099,7 @@ class ColumnManager:
 
         head = tk.Frame(body, bg=C_CARD)
         head.pack(fill="x")
-        tk.Label(head, text="Kolom yang ditampilkan", bg=C_CARD,
+        tk.Label(head, text="◫ Kolom yang ditampilkan", bg=C_CARD,
                  fg=C_HEADER, font=font(10, "bold")).pack(side="left")
         n_vis = tk.StringVar(value=f"{len(self.visible())}/{len(cols)} tampil")
         tk.Label(head, textvariable=n_vis, bg=C_CARD, fg=C_TEXT_MUTED,
@@ -3121,7 +3121,7 @@ class ColumnManager:
         # GhostButton terang — sama dengan popup ⧩ Filter (dulu tombol
         # gelap #1e293b di panel terang: dua popup kembar beda gaya; cursor
         # hand2 ikut otomatis dari GhostButton — fix 2a-07/2b-10).
-        GhostButton(btnrow, text="Tampilkan Semua",
+        GhostButton(btnrow, text="▦ Tampilkan Semua",
                     command=_show_all).pack(side="left")
         GhostButton(btnrow, text="Tutup (Esc)",
                     command=_close_panel).pack(side="right")
@@ -6360,7 +6360,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     tk.Label(hi, text=title, bg=C_HEADER, fg="#f1f5f9",
              font=font(12, "bold")).pack(side="left")
     tk.Button(
-        hi, text="Auto-Fit",
+        hi, text="↔ Auto-Fit",
         command=lambda: (
             auto_fit_columns(new_tree),
             # v3.9.71 — clone freeze-pane: kolom nama (tree beku) ikut
@@ -6477,7 +6477,7 @@ def open_tree_maximized(source_tree: ttk.Treeview, title: str, *,
     # — mirror ke tabel sumber supaya state konsisten setelah window tutup
     clone_colmgr = ColumnManager(new_tree, mirror=source_tree)
     tk.Button(
-        hi, text="Kolom", command=clone_colmgr.open_panel,
+        hi, text="◱ Kolom", command=clone_colmgr.open_panel,
         bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
         activeforeground="#ffffff", bd=0, relief="flat",
         highlightthickness=0, cursor="hand2", font=font(9, "bold"),

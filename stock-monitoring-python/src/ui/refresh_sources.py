@@ -243,11 +243,11 @@ class RefreshSourcesDialog(tk.Toplevel):
         tk.Label(foot, textvariable=self.info_var, bg=C_BG,
                  fg=C_TEXT_MUTED, font=font(9, "bold")).pack(side="left")
 
-        self.btn_semua = GhostButton(foot, text="Refresh Semua",
+        self.btn_semua = GhostButton(foot, text="↻ Refresh Semua",
                                      command=lambda: self._do_refresh(None))
         self.btn_semua.pack(side="right")
         self.btn_terpilih = AccentButton(
-            foot, text="Refresh Terpilih (0)",
+            foot, text="↻ Refresh Terpilih (0)",
             command=self._do_selected)
         self.btn_terpilih.pack(side="right", padx=(0, 6))
         # v3.9.59 — FIX 2f-13: 'Tutup (Esc)' (dialog mem-bind Escape).
@@ -389,7 +389,7 @@ class RefreshSourcesDialog(tk.Toplevel):
             info += f" · ⚠ {n_missing} folder hilang"
         self.info_var.set(info)
         k = len(self._checked)
-        self.btn_terpilih.configure(text=f"Refresh Terpilih ({k})")
+        self.btn_terpilih.configure(text=f"↻ Refresh Terpilih ({k})")
         self.btn_terpilih.set_enabled(k > 0)
         self.btn_semua.set_enabled(n > 0)
 
