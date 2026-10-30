@@ -30,14 +30,16 @@ Struktur jendela (ala aplikasi Waste):
   6. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
                           kolom SO + kolom Hasil Audit (logika macro
                           VBA × data app) + drill-down
-  7. 📋 Laporan Deviasi : 3 MODE — ⚖ Komparasi File Deviasi (default;
-                          + kolom Nominal harga × GR Saat Ini) & 🚨
-                          Anomali COM & 💰 Nominal (H) + ✓
-  8. 💰 Nominal Deviasi : Σ (Harga 41.09 × Qty Deviasi) per resto +
-                          baris TOTAL + double-click resto → popup
-                          rincian per barang
-  9. ☑ Follow Up        : daftar baris tercentang + export
- 10. 🛒 Rincian PO      : rekap PO + item (baris teal/putih)
+  7. ☑ Follow Up        : daftar baris tercentang + export
+  8. 🛒 Rincian PO      : rekap PO + item (baris teal/putih)
+
+(v3.11.30 — tab 📋 Laporan Deviasi DIHAPUS total bersama 3 modenya
+— ⚖ Komparasi File Deviasi · 🚨 Anomali COM · 💰 Nominal (H) — user:
+"Hapus tab laporan deviasi dan dead code nya". Yang bertahan: file
+deviasi bulan lalu kini dimuat app-level (auto folder config / tombol
+📂 kartu DEV BULANAN) → kolom 'Dev. Bulan Lalu' + analisa lalu-kini
+tab 📦/🧩 + popup Nominal Deviasi tetap hidup; parser pindah ke
+src/ui/deviasi_file.py.)
 
 Pipeline dijalankan di thread terpisah; log stdout dipipakan lewat
 queue thread-safe; tombol Stop mengirim stop_event yang dicek pipeline
@@ -110,13 +112,12 @@ from src.ui.export_sheets import ExportCancelled, add_pivot_sheet, tgl_label
 from src.ui.followup import FollowUpStore
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
-from src.ui.komparasi_deviasi_view import (
-    _BULAN_NAME,
-    KomparasiDeviasiView,
+from src.ui.deviasi_file import (  # v3.11.30 — parser file deviasi (relokasi
+    _BULAN_NAME,                  # dari komparasi_deviasi_view — tab 📋
+    auto_bulanan_paths,           # Laporan Deviasi dihapus total)
     bulan_mundur_list,
+    parse_deviasi_file,
 )
-from src.ui.laporan_deviasi_view import LaporanDeviasiView
-from src.ui.nominal_deviasi_view import NominalDeviasiView
 from src.ui.nominal_resto_view import NominalRestoView
 from src.ui.pivot_view import PivotTableView
 from src.ui.refresh_sources import RefreshSourcesDialog
@@ -191,10 +192,12 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.29"  # v3.11.29 — RANK UNIK per grup (seri antar grup
-# dikikis — user: "rank masih sama, tidak berbeda beda di tiap grup")
-# + Identifikasi Manual: kategori 42.17 non-stok (SUPPLIES [OTHERS],
-# 00.COST, 21.COST.ASSET, 20.ASSET.ASSET- TIDAK BOLEH) dibuang di awal
+APP_VERSION = "3.11.30"  # v3.11.30 — 6 permintaan user: (1) rank DIHAPUS
+# dari kolom CEK; (2) filter ⧩ klik-kanan "only select this"; (3) tab 📋
+# Laporan Deviasi DIHAPUS + dead code (parser → deviasi_file.py, file
+# bulan-lalu app-level); (4) "Beda dari Resto Lain" kini data-saat-ini
+# tanpa file bulan lalu; (5) ambang COM default 90 + warna sel CEK;
+# (6) kartu KPI Rekap Selisih IN dihapus
 # (riwayat v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG: head-run per kolom + sticky stateless + _cek_map; SUPERSEDE v3.11.16: run CEK/Rank diganti span kelompok sejajar — data produksi label/rank unik membuat run nyaris tak pernah menempel.)
 # (riwayat v3.11.14 — POLISH TABEL ALA EXCEL: HEADING IKUT ANCHOR KOLOM — audit visual 3×VLM vs referensi GitHub Forest-ttk-theme/tksheet/ttkbootstrap; SEMUA tree memasang anchor heading = anchor kolomnya (angka rata kanan, teks rata kiri, ✓ center) — 15 file/20+ tree + clone menyalin anchor sumber + heading dinamis preserve; KPI cards dievaluasi & tidak ditambahkan (arah user "biar clean"); TES §97.)
 # (riwayat v3.11.12 — TIGA permintaan user: AMBANG COM ±% dr median (spinbox GR/PCS sinkron, persist com_ambang_pct default 50) + transparansi periode→file target auto bulan lalu (bulan_mundur_list) + scroll vertikal tab Config (canvas + router roda).)
@@ -1866,9 +1869,6 @@ _FILTER_VIEW_KEYS = (
     ("deviasi_gr", "deviasi_gr_view"),
     ("deviasi_pcs", "deviasi_pcs_view"),
     ("in_selisih", "in_selisih_view"),
-    ("komparasi", "komparasi_view"),
-    ("laporan", "laporan_view"),
-    ("nominal", "nominal_view"),
     ("nominal_resto", "nominal_resto_view"),
     ("followup", "followup_view"),
     ("rincian_po", "rincian_view"),
@@ -2280,8 +2280,13 @@ class StockMonitorApp:
         self._shared_acr = SharedACRThreshold(load_acr_threshold())
         # v3.11.12 — ambang COM Tinggi/Rendah dibagi GR & PCS (user:
         # "bisa gak set 50% > atau <") — persist settings.json key
-        # com_ambang_pct (default 50).
+        # com_ambang_pct (default 90 — v3.11.30 user: "Default 90% aja").
         self._shared_com = SharedComAmbang(load_com_ambang())
+        # v3.11.30 — FILE deviasi bulan lalu kini APP-LEVEL (tab 📋
+        # Laporan Deviasi dihapus): sumber lalu_provider tab 📦/🧩 +
+        # popup Nominal Deviasi. Diisi _auto_load_lalu (mode ⚡) atau
+        # tombol 📂 kartu DEV BULANAN (mode 🫵 Manual).
+        self._lalu_file_df = None
 
         # Style ttk (design system global)
         apply_theme(self.root)
@@ -2844,7 +2849,6 @@ class StockMonitorApp:
         self.tab_deviasi_gr = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_pcs = tk.Frame(self.notebook, bg=C_BG)
         self.tab_in_selisih = tk.Frame(self.notebook, bg=C_BG)
-        self.tab_laporan = tk.Frame(self.notebook, bg=C_BG)
         # v3.9.34 — tab 🧮 Nominal Deviasi (Σ nominal per resto)
         self.tab_nominal_resto = tk.Frame(self.notebook, bg=C_BG)
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
@@ -2856,7 +2860,10 @@ class StockMonitorApp:
         self.notebook.add(self.tab_deviasi_gr, text="📦 Deviasi GR")
         self.notebook.add(self.tab_deviasi_pcs, text="🧩 Deviasi PCS")
         self.notebook.add(self.tab_in_selisih, text="📤 Rekap Selisih IN")
-        self.notebook.add(self.tab_laporan, text="📋 Laporan Deviasi")
+        # v3.11.30 — tab 📋 Laporan Deviasi DIHAPUS (user: "Hapus tab
+        # laporan deviasi dan dead code nya") — 3 mode (Komparasi/Anomali
+        # COM/Nominal H) dibongkar; file deviasi bulan lalu kini
+        # app-level (_lalu_file_df — auto-load _auto_load_lalu).
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ harga×qty deviasi per resto
         self.notebook.add(self.tab_nominal_resto,
                           text="💰 Nominal Deviasi")
@@ -2872,7 +2879,6 @@ class StockMonitorApp:
             str(self.tab_deviasi_gr): "📦 Deviasi GR",
             str(self.tab_deviasi_pcs): "🧩 Deviasi PCS",
             str(self.tab_in_selisih): "📤 Rekap Selisih IN",
-            str(self.tab_laporan): "📋 Laporan Deviasi",
             str(self.tab_nominal_resto): "💰 Nominal Deviasi",
             str(self.tab_followup): "☑ Follow Up",
             str(self.tab_rincian): "🛒 Rincian PO",
@@ -2904,7 +2910,6 @@ class StockMonitorApp:
             str(self.tab_deviasi_gr): "Pemeriksaan & Rekonsiliasi",
             str(self.tab_deviasi_pcs): "Pemeriksaan & Rekonsiliasi",
             str(self.tab_in_selisih): "Pemeriksaan & Rekonsiliasi",
-            str(self.tab_laporan): "Analisis",
             str(self.tab_nominal_resto): "Analisis",
             str(self.tab_followup): "Tindak Lanjut",
             str(self.tab_rincian): "Tindak Lanjut",
@@ -2920,7 +2925,6 @@ class StockMonitorApp:
         self._build_deviasi_gr_tab()
         self._build_deviasi_pcs_tab()
         self._build_in_selisih_tab()
-        self._build_laporan_tab()
         self._build_nominal_resto_tab()   # v3.9.34 — tab 🧮
         self._build_followup_tab()
         self._build_rincian_tab()
@@ -2964,15 +2968,6 @@ class StockMonitorApp:
         if not views:
             return
         view = views.get(sel)
-        if view is self._laporan_tab_entry:
-            # v3.9.4: refresh pane SESUAI MODE aktif di tab Laporan
-            # v3.9.32: mode 2 = 💰 Nominal (H)
-            _active = (getattr(self, "laporan_segment", None).active
-                       if getattr(self, "laporan_segment", None) is not None
-                       else 0)
-            view = (self.komparasi_view if _active == 0
-                    else (self.nominal_view if _active == 2
-                          else self.laporan_view))
         if view is not None and hasattr(view, "ensure_refreshed"):
             view.ensure_refreshed()
 
@@ -2980,13 +2975,11 @@ class StockMonitorApp:
         """FIX A-11: peta nama-widget tab → view yang di-lazy-refresh.
         Follow Up sengaja tanpa entry (reaktif via store listener).
         """
-        self._laporan_tab_entry = object()  # marker dispatch khusus
         self._tab_views = {
             str(self.tab_pivot): self.pivot_view,
             str(self.tab_deviasi_gr): self.deviasi_gr_view,
             str(self.tab_deviasi_pcs): self.deviasi_pcs_view,
             str(self.tab_in_selisih): self.in_selisih_view,
-            str(self.tab_laporan): self._laporan_tab_entry,
             # v3.9.34 — dispatch _on_tab_changed → ensure_refreshed
             str(self.tab_nominal_resto): self.nominal_resto_view,
             str(self.tab_rincian): self.rincian_view,
@@ -2996,8 +2989,7 @@ class StockMonitorApp:
         """v3.9.61 — tabel utama TAB AKTIF (fallback router roda —
         install_wheel_router): dipakai saat roda berputar di area krom
         non-scrollable (kartu KPI/Filter/footer/legend) supaya konten
-        tab tetap bergulir (perilaku aplikasi modern). Tab 📋 Laporan
-        punya 3 mode pane — pilih view sesuai SegmentBar aktif. Tab
+        tab tetap bergulir (perilaku aplikasi modern). Tab
         ⚙️ Config/🚀 Proses tanpa tabel data → None (roda netral)."""
         views = getattr(self, "_tab_views", None)
         if not views:
@@ -3009,14 +3001,7 @@ class StockMonitorApp:
         if not sel:
             return None
         view = views.get(sel)
-        if view is self._laporan_tab_entry:
-            _active = (getattr(self, "laporan_segment", None).active
-                       if getattr(self, "laporan_segment", None) is not None
-                       else 0)
-            view = (self.komparasi_view if _active == 0
-                    else (self.nominal_view if _active == 2
-                          else self.laporan_view))
-        elif view is None and sel == str(self.tab_followup):
+        if view is None and sel == str(self.tab_followup):
             # Follow Up tak ada di _tab_views (reaktif store) — tapi
             # tetap punya tabel utk fallback roda.
             view = self.followup_view
@@ -3517,18 +3502,6 @@ class StockMonitorApp:
             rp = ""
         self.rootpath_var.set(rp)
         self._render_info_tree(data)
-        # v3.9.5 FIX (audit 19-c #6): RootPath dibaca SAAT notebook dibangun
-        # (SEBELUM config dimuat) → initialdir dialog 📂 Pilih File Deviasi
-        # selalu "" saat app baru dibuka. Sinkronkan setiap RootPath berubah.
-        self._sync_komparasi_initial_dir()
-
-    def _sync_komparasi_initial_dir(self):
-        """v3.9.5 (audit 19-c #6): initial dialog komparasi mengikuti
-        RootPath terkini (config dimuat SETELAH notebook dibangun)."""
-        rp = (self.rootpath_var.get().strip()
-              if getattr(self, "rootpath_var", None) is not None else "")
-        if rp and getattr(self, "komparasi_view", None) is not None:
-            self.komparasi_view._initial_dir = rp
 
     def _render_info_tree(self, data: dict):
         self.info_tree.delete(*self.info_tree.get_children())
@@ -4389,13 +4362,17 @@ class StockMonitorApp:
         return "manual"
 
     def _dev_bulanan_load_now(self):
-        """v3.11.11 — tombol 📂 Muat ke ⚖ Komparasi Sekarang (user:
-        "autofile deviasi bulan lalu aku bisa proses pipie line sendiri
-        tidak jadi 1 lagi"): muat file deviasi '20.{BULAN} {TAHUN}' N
-        bulan mundur ke tab ⚖ Komparasi SEKARANG — tanpa menunggu/
-        mengulang run pipeline. Folder + jumlah dibaca dari FORM saat
-        tombol ditekan (belum perlu 💾 Simpan); periode = data run
-        terakhir (fallback bulan kalender sekarang)."""
+        """v3.11.11 — tombol 📂 Muat Sekarang (user: "autofile deviasi
+        bulan lalu aku bisa proses pipie line sendiri tidak jadi 1
+        lagi"): muat file deviasi '20.{BULAN} {TAHUN}' N bulan mundur
+        SEKARANG — tanpa menunggu/mengulang run pipeline. Folder +
+        jumlah dibaca dari FORM saat tombol ditekan (belum perlu 💾
+        Simpan); periode = data run terakhir (fallback bulan kalender
+        sekarang).
+        v3.11.30 — TUJUAN KINI APP-LEVEL (tab 📋 Laporan/komparasi
+        dihapus): parse di worker → self._lalu_file_df → kolom Dev.
+        Bulan Lalu + analisa lalu-kini + popup Nominal aktif (tanpa
+        pindah tab)."""
         folder = (getattr(self, "dev_bulanan_folder_var", None)
                   and self.dev_bulanan_folder_var.get().strip()) or ""
         try:
@@ -4414,12 +4391,11 @@ class StockMonitorApp:
             self._flash_devbulanan_status(
                 f"✗ Folder belum ada di komputer ini: {folder}")
             return
-        _kv = getattr(self, "komparasi_view", None)
-        if _kv is None or _kv.data is None or getattr(_kv.data, "empty",
-                                                     True):
+        _adf = getattr(self, "append1_df", None)
+        if _adf is None or getattr(_adf, "empty", True):
             self._flash_devbulanan_status(
-                "⚠ Jalankan pipeline (Proses) dulu — komparasi butuh "
-                "data saat ini untuk dibandingkan.")
+                "⚠ Jalankan pipeline (Proses) dulu — kolom Dev. Bulan "
+                "Lalu butuh data saat ini.")
             return
         # periode: data run terakhir → fallback bulan sekarang
         period = ((getattr(self, "audit_result", None) or {})
@@ -4436,33 +4412,22 @@ class StockMonitorApp:
             return
         paths = []
         with contextlib.suppress(Exception):
-            paths = _kv._auto_bulanan_paths(cfg)
+            paths = auto_bulanan_paths(cfg)
         if not paths:
             self._flash_devbulanan_status(
                 "✗ Belum ada file '20.{BULAN} {TAHUN}' cocok di folder itu "
                 "untuk periode data — cek nama file / jumlah bulan "
                 "mundur.")
             return
-        # pindah ke tab 📋 Laporan mode ⚖ Komparasi File Deviasi lalu muat
-        with contextlib.suppress(Exception):
-            self.notebook.select(self.tab_laporan)
-        with contextlib.suppress(Exception):
-            self.show_laporan_mode(0)
-        with contextlib.suppress(Exception):
-            _kv._load_paths(paths, interactive=True)
+        self._load_lalu_paths(paths, note="Manual: ")
         self._flash_devbulanan_status(
-            f"{len(paths)} file deviasi bulan lalu dimuat ke "
-            f"Komparasi.")
-        self._append_log_batched(
-            f"\n[DEV BULANAN] Muat manual: {len(paths)} file → "
-            f"Komparasi ("
-            + "; ".join(os.path.basename(p) for p in paths) + ").\n")
+            f"{len(paths)} file deviasi bulan lalu dimuat — kolom Dev. "
+            "Bulan Lalu aktif.")
 
     def _dev_bulanan_cfg(self, audit_result):
-        """v3.11.9 — cfg utk komparasi_view._auto_bulanan_paths:
+        """v3.11.9 → v3.11.30 — cfg utk deviasi_file.auto_bulanan_paths:
         (folder, (tahun, bulan), jumlah) atau None (fitur mati jujur —
-        folder config tak ada / config tak terbaca; perilaku last-used
-        lama tetap jalan).
+        folder config tak ada / config tak terbaca).
 
         Folder + jumlah dibaca dari config.json (tersimpan — BUKAN isi
         form yang belum disimpan); periode dari audit_result['period']
@@ -5479,51 +5444,13 @@ class StockMonitorApp:
                    lambda: self.in_selisih_view.load_data(
                        append1_df, in_detail_df, audit_result=audit_result),
                    self.in_selisih_view)
-        _load_view("Anomali COM",
-                   lambda: self.laporan_view.load_data(
-                       append1_df, preserve=_keep_state),
-                   self.laporan_view)
-        _load_view("Komparasi File Deviasi",
-                   lambda: self.komparasi_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv),
-                   self.komparasi_view)
-        # v3.9.53 — AUTO-LOAD file deviasi terakhir SAAT STARTUP (bukan
-        # menunggu tab 📋 dibuka): kolom 'Dev. Bulan Lalu' tab 📦/🧩 butuh
-        # file aktif SEBELUM user membuka tab apa pun (parse di worker —
-        # anti-beku; file hilang/error → status saja, tanpa dialog).
-        # v3.11.9 — AUTO FILE BULAN LALU lebih dulu: cfg (folder config,
-        # periode data run, jumlah) diteruskan ke komparasi_view —
-        # PRIORITAS di atas last-used (maybe_auto_load_last sendiri yang
-        # memilah; folder config tak ada → cfg None → perilaku lama).
-        # v3.11.11 — MODE MUAT (user: "autofile deviasi bulan lalu aku
-        # bisa proses pipie line sendiri tidak jadi 1 lagi"): 🫵 Manual
-        # (DEFAULT) → cfg TIDAK diteruskan ke maybe_auto_load_last —
-        # komparasi kembali ke perilaku last-used v3.9.53 dan file bulan
-        # lalu dimuat USER SENDIRI via tombol 📂 di kartu DEV BULANAN
-        # (pipeline & komparasi tak lagi "jadi 1"); ⚡ Otomatis → perilaku
-        # v3.11.9 utuh. cfg tetap disimpan (tombol 📂 pakai form sendiri).
-        _dbul_cfg = None
+        # v3.11.30 — ⚡ AUTO file deviasi bulan lalu kini APP-LEVEL (tab
+        # 📋 Laporan/komparasi dihapus): mode config 'auto' → parse di
+        # worker → self._lalu_file_df → kolom Dev. Bulan Lalu + analisa
+        # lalu-kini + popup Nominal (mode Manual default — tombol 📂
+        # kartu DEV BULANAN ⚙️ Config).
         with contextlib.suppress(Exception):
-            _dbul_cfg = self._dev_bulanan_cfg(audit_result)
-        self._dev_bulanan_last_cfg = _dbul_cfg
-        with contextlib.suppress(Exception):
-            self.komparasi_view._auto_bulanan_cfg = (
-                _dbul_cfg if self._dev_bulanan_mode() == "auto"
-                else None)
-        with contextlib.suppress(Exception):
-            self.komparasi_view.maybe_auto_load_last()
-        # v3.9.32 — mode 💰 Nominal: append1 + peta harga 41.09 + peta
-        # rasio konversi (dari audit_result — pipeline v3.9.32;
-        # v3.9.34: sumber lokal _hm/_kv bersama semua view nominal)
-        # v3.11.8 — + peta saldo sistem 42.17 (konsistensi kuantiti
-        # dgn tab 📦/🧩 Deviasi GR/PCS — user: "di tab nominal deviasi ini
-        # kok beda ya kuantiti deviasi nya dngan yang di tab deviasi gr
-        # atau deviasi pcs").
-        _load_view("Nominal (H)",
-                   lambda: self.nominal_view.load_data(
-                       append1_df, harga_map=_hm, konversi_map=_kv,
-                       saldo_sistem_map=_ssm),
-                   self.nominal_view)
+            self._auto_load_lalu(audit_result)
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
         # v3.11.8 — + peta saldo sistem 42.17 (alasan sama dgn atas).
         _load_view("Nominal Deviasi",
@@ -5723,9 +5650,7 @@ class StockMonitorApp:
         restore ditunda ke run berikutnya — belum ada yang bisa
         difilter). Setelah dipakai → state dilepas (run BERIKUTNYA
         sesi ini kembali ke perilaku reset v3.9.33 — restore tidak
-        pernah menimpa kerja user di sesi berjalan). Mode tab 📋
-        (SegmentBar) ikut dipulihkan via show_laporan_mode (jalur
-        persis klik user).
+        pernah menimpa kerja user di sesi berjalan).
         v3.9.68 — OBSERVABILITAS (audit eksternal T2): kegagalan
         per-view TIDAK lagi senyap — nama view + penyebab DI-LOG ke
         console log + status bar ringkas; view LAIN tetap dipulihkan.
@@ -5763,17 +5688,6 @@ class StockMonitorApp:
                 self.status_var.set(
                     f"⚠ Filter {len(failed)} tab gagal dipulihkan — "
                     "detail di log tab Proses")
-        # mode tab 📋 (state APP — bukan view): key khusus '_app'
-        _appst = st.get("_app")
-        if isinstance(_appst, dict):
-            _m = _appst.get("laporan_mode")
-            if isinstance(_m, int) and not isinstance(_m, bool) \
-                    and _m in (0, 1, 2):
-                try:
-                    self.show_laporan_mode(_m)
-                except Exception as exc:  # noqa: BLE001 — best-effort
-                    print(f"[PERINGATAN] Filter persist: gagal memulihkan "
-                          f"mode tab (idx {_m}): {exc!r}")
 
     # v3.11.6 — AUTO-DONE FOLLOW-UP PASCA-PIPELINE ---------------------------
     def _auto_resolve_followup(self, append1_df) -> None:
@@ -5838,8 +5752,8 @@ class StockMonitorApp:
             except Exception as exc:  # noqa: BLE001 — close tak boleh gagal
                 print(f"[PERINGATAN] Filter persist: gagal mengambil "
                       f"snapshot filter tab '{key}': {exc!r}")
-        out["_app"] = {"laporan_mode":
-                       int(getattr(self, "_laporan_mode_idx", 0) or 0)}
+        # v3.11.30 — key '_app' (mode tab 📋 Laporan) dihapus bersama
+        # tab-nya; entry lama di settings.json diabaikan aman.
         return out
 
     def _on_close_window(self):
@@ -6255,8 +6169,7 @@ class StockMonitorApp:
             # via lalu_provider (pola nominal_resto v3.9.36 — lambda selalu
             # membaca _file_df AKTIF; file berganti → _on_dev_file_loaded
             # memanggil on_lalu_file_changed).
-            lalu_provider=lambda: getattr(
-                self.komparasi_view, "_file_df", None))
+            lalu_provider=lambda: self._lalu_file_df)
         self.deviasi_gr_view.pack(fill="both", expand=True)
 
     def _build_deviasi_pcs_tab(self):
@@ -6270,8 +6183,7 @@ class StockMonitorApp:
             h_state=self._shared_h, h_editable=False,
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
             com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
-            lalu_provider=lambda: getattr(
-                self.komparasi_view, "_file_df", None))   # v3.9.53
+            lalu_provider=lambda: self._lalu_file_df)  # v3.11.30 — app-level
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
     def _build_in_selisih_tab(self):
@@ -6281,99 +6193,107 @@ class StockMonitorApp:
             go_to_proses=self._go_to_proses_tab)
         self.in_selisih_view.pack(fill="both", expand=True)
 
-    def _build_laporan_tab(self):
-        # v3.9.4: tab 📋 Laporan Deviasi = 2 MODE via SegmentBar:
-        # ⚖ Komparasi File Deviasi (default — v3.9.4) & 🚨 Anomali COM
-        # (v3.9.3, H bersama chip read-only + auto-refresh dari tab GR).
-        # v3.9.32: mode ke-3 💰 Nominal (H) — Harga 41.09 × Qty Deviasi
-        # per pasangan + baris TOTAL (user: "tab baru Nominal = Harga ×
-        # kuantitas deviasi, per barang + total").
-        self._laporan_container = tk.Frame(self.tab_laporan, bg=C_BG)
-        self._laporan_container.pack(fill="both", expand=True)
-
-        bar = tk.Frame(self._laporan_container, bg=C_BG)
-        bar.pack(fill="x", padx=12, pady=(10, 0))
-        tk.Label(bar, text="MODE", bg=C_BG, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left", padx=(0, 6))
-        self.laporan_segment = SegmentBar(
-            bar, ["⚖ Komparasi File Deviasi", "🚨 Anomali COM (H)",
-                  "Nominal (H)"],
-            command=lambda idx: self.show_laporan_mode(idx))
-        self.laporan_segment.pack(side="left")
-
-        self.komparasi_view = KomparasiDeviasiView(
-            self._laporan_container,
-            go_to_proses=self._go_to_proses_tab,
-            followup_store=self.followup_store,
-            initial_dir=(self.rootpath_var.get().strip()
-                         if getattr(self, "rootpath_var", None) is not None
-                         else ""),
-            h_state=self._shared_h,   # v3.9.7: filter minggu file
-            # v3.9.36 — file deviasi berganti → segarkan kolom Bulan
-            # Lalu popup tab 🧮 Nominal Deviasi (pola listener H).
-            on_file_loaded=self._on_dev_file_loaded)
-        self.laporan_view = LaporanDeviasiView(
-            self._laporan_container,
-            go_to_proses=self._go_to_proses_tab,
-            followup_store=self.followup_store,
-            h_state=self._shared_h)
-        # v3.9.32 — mode Nominal: Harga × Qty Deviasi (+ baris TOTAL)
-        self.nominal_view = NominalDeviasiView(
-            self._laporan_container,
-            go_to_proses=self._go_to_proses_tab,
-            h_state=self._shared_h)
-        # default: mode 0 (Komparasi) — COM & Nominal tersembunyi
-        self.komparasi_view.pack(fill="both", expand=True)
-        self.laporan_view.pack_forget()
-        self.nominal_view.pack_forget()
-
-    def show_laporan_mode(self, idx: int):
-        """v3.9.4 — ganti mode tab 📋 Laporan Deviasi (dipakai SegmentBar
-        & test): 0 = ⚖ Komparasi File, 1 = 🚨 Anomali COM,
-        2 = 💰 Nominal (v3.9.32).
-        v3.9.5 FIX (audit 19-c #7): sinkronkan SegmentBar (set_active_silent)
-        — dulu pemanggilan programatik membuat segment.active basi →
-        _on_tab_changed me-refresh pane yang SALAH & tombol mode tetap
-        menyala di posisi lama."""
-        if idx not in (0, 1, 2):
-            idx = 0
-        self.laporan_segment.set_active_silent(idx)
-        # v3.9.66 — mode terakhir direkam utk filter persist (key
-        # '_app.laporan_mode' — dipulihkan _apply_saved_filters_once).
-        self._laporan_mode_idx = idx
-        # lepas semua pane lalu pack pane aktif (urutan pack konsisten)
-        self.laporan_view.pack_forget()
-        self.nominal_view.pack_forget()
-        self.komparasi_view.pack_forget()
-        if idx == 0:
-            self.komparasi_view.pack(fill="both", expand=True)
-            self.komparasi_view.ensure_refreshed()
-        elif idx == 2:
-            self.nominal_view.pack(fill="both", expand=True)
-            self.nominal_view.ensure_refreshed()
-        else:
-            self.laporan_view.pack(fill="both", expand=True)
-            self.laporan_view.ensure_refreshed()
-
-    def _on_dev_file_loaded(self):
-        """v3.9.36 — file deviasi (tab ⚖ Komparasi) berubah: load baru /
-        ditutup. Tab 🧮 Nominal Deviasi memakai file itu sebagai sumber
-        kolom 'Nominal Deviasi Bulan Lalu' popup rincian → snapshot-nya
-        basi → segarkan (pola listener SharedTanggalH; tab tersembunyi
-        cukup ditandai dirty — refreshed saat dibuka).
-
-        v3.9.53 — tab 📦 Deviasi GR & 🧩 PCS IKUT: kolom 'Dev. Bulan Lalu'
-        + analisa CEK lalu-kini bersumber file yang sama → on_lalu_file
-        _changed (clear cache pivot — identitas file bagian kunci — +
-        refresh/dirty; user: "Deviasi bulan lalu ... pakai nilai asli")."""
+    # =====================================================================
+    # v3.11.30 — FILE DEVIASI BULAN LALU (APP-LEVEL; tab 📋 Laporan
+    # Deviasi DIHAPUS — user: "Hapus tab laporan deviasi dan dead code
+    # nya"). Sumber kolom 'Dev. Bulan Lalu' + analisa lalu-kini tab
+    # 📦/🧩 + popup 'Nominal Deviasi Bulan Lalu' tab 🧮. Dimuat:
+    # (a) ⚡ Otomatis pasca-pipeline (mode config DeviasiBulananMode
+    #     ='auto' — perilaku v3.11.9) via _auto_load_lalu;
+    # (b) 🫵 Manual via tombol 📂 kartu DEV BULANAN ⚙️ Config
+    #     (_dev_bulanan_load_now) — tanpa tab tujuan, parse di worker.
+    # =====================================================================
+    def _notify_lalu_consumers(self):
+        """File deviasi bulan lalu berganti → segarkan konsumen: kolom
+        'Dev. Bulan Lalu' + analisa CEK lalu-kini tab 📦/🧩 (on_lalu_file
+        _changed — clear cache pivot + refresh/dirty) & popup 'Nominal
+        Deviasi Bulan Lalu' tab 🧮 (pola listener era komparasi
+        v3.9.36/53)."""
         nr = getattr(self, "nominal_resto_view", None)
         if nr is not None:
-            nr.on_lalu_file_changed()
+            with contextlib.suppress(Exception):
+                nr.on_lalu_file_changed()
         for dv in (getattr(self, "deviasi_gr_view", None),
                    getattr(self, "deviasi_pcs_view", None)):
             if dv is not None:
                 with contextlib.suppress(Exception):
                     dv.on_lalu_file_changed()
+
+    def _load_lalu_paths(self, paths, *, note=""):
+        """Parse daftar file deviasi (worker — anti-beku, pola v3.9.5)
+        → gabung + dedup lintas-file (key identik parse) → simpan
+        self._lalu_file_df + segarkan konsumen. File gagal DILEWATI
+        selama ≥1 berhasil (mirror _load_paths komparasi lama)."""
+        paths = [str(p).strip() for p in paths if str(p).strip()]
+        if not paths:
+            return
+
+        def work():
+            dfs = []
+            n_ok = 0
+            for p in paths:
+                res = parse_deviasi_file(p)
+                if res["ok"]:
+                    dfs.append(res["df"])
+                    n_ok += 1
+            if not dfs:
+                return None
+            combined = (dfs[0] if len(dfs) == 1
+                        else pd.concat(dfs, ignore_index=True))
+            combined = combined.drop_duplicates(
+                subset=["_bulan_num", "Minggu", "_resto_norm",
+                        "_bahan_norm"], keep="first")
+            return combined, n_ok, len(combined)
+
+        def done(payload):
+            if payload is None:
+                self._append_log_batched(
+                    "\n[DEV BULANAN] ⚠ Semua file gagal dibaca — kolom "
+                    "Dev. Bulan Lalu kosong run ini.\n")
+                return
+            combined, n_ok, n_rows = payload
+            self._lalu_file_df = combined
+            self._notify_lalu_consumers()
+            self._append_log_batched(
+                f"\n[DEV BULANAN] {note}{n_ok} file deviasi bulan lalu "
+                f"dimuat ({n_rows} baris) — kolom Dev. Bulan Lalu & "
+                "analisa lalu-kini aktif ("
+                + "; ".join(os.path.basename(p) for p in paths) + ").\n")
+
+        def on_error(err):
+            self._append_log_batched(
+                f"\n[DEV BULANAN] ⚠ Gagal memuat file deviasi bulan lalu: "
+                f"{err}\n")
+
+        run_async(self, work, done, on_error=on_error)
+
+    def _auto_load_lalu(self, audit_result):
+        """v3.11.30 — ⚡ AUTO-LOAD file deviasi bulan lalu pasca-pipeline
+        (menggantikan komparasi_view.maybe_auto_load_last era tab 📋).
+        Hanya jalan bila mode config 'auto' (DeviasiBulananMode — user:
+        "autofile deviasi bulan lalu aku bisa proses pipie line sendiri
+        tidak jadi 1 lagi", default Manual) & cfg valid (folder ada —
+        _dev_bulanan_cfg). Folder ada tapi file '20.{BULAN} {TAHUN}'
+        belum ada → no-op jujur di log (bulang salah lebih berbahaya
+        dari tanpa file — kontrak v3.11.9 dipertahankan)."""
+        if self._dev_bulanan_mode() != "auto":
+            return
+        cfg = None
+        with contextlib.suppress(Exception):
+            cfg = self._dev_bulanan_cfg(audit_result)
+        self._dev_bulanan_last_cfg = cfg
+        if cfg is None:
+            return
+        paths = []
+        with contextlib.suppress(Exception):
+            paths = auto_bulanan_paths(cfg)
+        if not paths:
+            self._append_log_batched(
+                "\n[DEV BULANAN] Auto: belum ada file '20.{BULAN} {TAHUN}' "
+                "cocok di folder config utk periode data — kolom Dev. "
+                "Bulan Lalu kosong run ini.\n")
+            return
+        self._load_lalu_paths(paths, note="Auto: ")
 
     def _build_nominal_resto_tab(self):
         """v3.9.34 — tab 🧮 Nominal Deviasi: Σ (Harga 41.09 × Qty
@@ -6383,17 +6303,14 @@ class StockMonitorApp:
         dapat dari harga × kuantitas deviasi, cuman ini disum per
         resto").
 
-        v3.9.36 — lalu_provider: sumber kolom 'Nominal Deviasi Bulan
-        Lalu' popup = file deviasi tab ⚖ Komparasi (komparasi_view.
-        _file_df — referensi DIGANTI tiap load, jadi lambda ini selalu
-        membaca file aktif; pembaruan dipicu on_file_loaded →
-        _on_dev_file_loaded)."""
+        v3.11.30 — lalu_provider: sumber kolom 'Nominal Deviasi Bulan
+        Lalu' popup = self._lalu_file_df (app-level — era tab ⚖
+        Komparasi dihapus; pembaruan dipicu _notify_lalu_consumers)."""
         self.nominal_resto_view = NominalRestoView(
             self.tab_nominal_resto,
             go_to_proses=self._go_to_proses_tab,
             h_state=self._shared_h,
-            lalu_provider=lambda: getattr(
-                self.komparasi_view, "_file_df", None))
+            lalu_provider=lambda: self._lalu_file_df)
         self.nominal_resto_view.pack(fill="both", expand=True)
 
     def _build_followup_tab(self):

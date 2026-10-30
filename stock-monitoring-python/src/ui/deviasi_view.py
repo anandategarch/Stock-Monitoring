@@ -4,13 +4,11 @@ Tanggal H (kolom SO/In H-2…H+2) + analisa anomali kolom CEK.
 
 TABEL DATAR PER-BARIS — TANPA merge-vertikal (paritas file Excel user: 0 merged
 cell): Nama Barang diulang tiap baris; kelompok barang tetap kontigu (sort
-default Nama Barang lalu |Deviasi| menurun). Kolom Rank tidak ada — peringkat
-tampil DI DALAM kolom CEK sebagai segmen analisa PERTAMA: "Rank 3 · Turun
-Drastis · Beda dari Resto Lain (Surplus · 18/20 resto lain Defisit)"; tanpa
-label cukup "Rank 3". Rank = peringkat Σ|Deviasi| kelompok barang di antara
-barang yang tampil (1 = total terbesar; method=min; per frame terfilter).
-Grup ber-Σ|Deviasi| = 0 TANPA rank (konvensi sheet asli: deviasi 0 → rank
-kosong) — hanya grup berdeviasi nyata yang diurutkan 1..N.
+default Nama Barang lalu |Deviasi| menurun). v3.11.30 — RANK DIHAPUS TOTAL
+dari kolom CEK (user: "hapus aja rank dari kolom cek di tab deviasi gr dan
+deviasi pcs"): sel CEK kini murni label anomali + segmen analisa (mis.
+"Turun Drastis · Beda dari Resto Lain (Surplus · 18/20 resto lain Defisit)").
+Era segmen "Rank N" (v3.11.27-29) ditutup.
 
 KOLOM CEK — SEMUA label anomali terpicu digabung ' · ' (urutan = prioritas):
   Promix 04 → RI Balancing → Kosong/Non Aktif → Beda Tanggal → Hitung Manual →
@@ -30,12 +28,17 @@ SEGMEN ANALISA TAMBAHAN di teks CEK (bergabung ' · '):
 - Lalu→kini: Peningkatan/Penurunan Tertinggi ±p% / Berubah Arah — pembanding
   |Deviasi(H)| vs |Dev bulan lalu| (selisih kecil = Stabil).
 - COM Tinggi (+x) / COM Rendah (−x): d(H)=COM−ACR melampaui median historis
-  ± ambang% × |median| (default 50 — SharedComAmbang; modul com_analisa).
-- Beda dari Resto Lain: resto searah DUA periode (deviasi H & bulan lalu
-  sama-sama surplus/defisit) sementara resto lain (barang+satuan sama)
-  didominasi berlawanan — berlawanan ≥ 3× searah DAN ≥2 berlawanan; label
-  "(Surplus · 18/20 resto lain Defisit)" (N/M = berlawanan/pembanding
-  deviasi-nonzero; 0/NaN netral; butuh file bulan lalu; grup ≥ 3).
+  ± ambang% × |median| (default 90 — v3.11.30 user: "Default 90% aja";
+  SharedComAmbang; modul com_analisa). Sel CEK baris ber-segmen COM DIWARNAI
+  (tinggi rose #be123c / rendah teal #0f766e — tag cell CEK, Tk 9; fallback
+  Tk 8: tag baris bila tanpa label utama) + ganti ambang = LANGSUNG apply
+  (spinbox → listener → invalidasi cache pivot → re-render).
+- Beda dari Resto Lain (v3.11.30 — DATA SAAT INI, TANPA file bulan lalu —
+  user: "deviasi yang beda sendiri misal nilainya negatif padahal dalam
+  1 grup nama barang dominan positif"): arah deviasi resto MINORITAS dalam
+  grup Nama Barang (≥3 baris) — berlawanan ≥ 3× searah DAN ≥2 berlawanan
+  di antara pembanding deviasi-nonzero (0/NaN netral); label "(Surplus ·
+  18/20 resto lain Defisit)".
 - Potensi PO belum dibuat: suplai rekap masuk tanpa penerimaan sistem (po_keterangan).
 
 LAIN-LAIN: Dev. Bulan Lalu = nilai ASLI bertanda dari file deviasi resmi (minggu
@@ -313,17 +316,19 @@ class SharedComAmbang:
 
     Segmen CEK "COM Tinggi (+x)" / "COM Rendah (−x)" terpicu bila
     selisih d(H) dari median historis MELAMPAUI (ambang/100) ×
-    |median| — dulu semua selisih bertanda memicu. Default 50 (user
-    minta "set 50%"); diatur 0..500 via spinbox di kartu Filter kedua
-    tab (sinkron seperti TANGGAL H & AMBANG ACR — pola
-    SharedACRThreshold). 0 = perilaku lama (semua selisih).
+    |median| — dulu semua selisih bertanda memicu. Default 90
+    (v3.11.30 — user: "Default 90% aja"; dulu 50); diatur 0..500 via
+    spinbox di kartu Filter kedua tab (sinkron seperti TANGGAL H &
+    AMBANG ACR — pola SharedACRThreshold). 0 = perilaku lama (semua
+    selisih). Ganti ambang = LANGSUNG apply (listener → clear cache
+    pivot → refresh kedua tab).
 
     Nilai dibaca/ditulis ke settings.json folder aplikasi (key
     com_ambang_pct — pola acr_threshold: atomic save; file
-    hilang/korup → default 50 senyap).
+    hilang/korup → default 90 senyap).
     """
 
-    def __init__(self, initial: float = 50.0):
+    def __init__(self, initial: float = 90.0):
         self._pct = float(initial)
         self._listeners: list[Callable] = []
 
@@ -396,14 +401,15 @@ def save_acr_threshold(pct: float) -> None:
 
 
 def load_com_ambang() -> float:
-    """v3.11.12 — ambang COM Tinggi/Rendah tersimpan (default 50.0 bila
-    file hilang/korup/nilai di luar 0..500 — senyap; user: "set 50%")."""
+    """v3.11.12 — ambang COM Tinggi/Rendah tersimpan (default 90.0 bila
+    file hilang/korup/nilai di luar 0..500 — senyap; v3.11.30 — user:
+    "Default 90% aja", dulu 50.0)."""
     try:
         with open(acr_settings_path(), "r", encoding="utf-8") as f:
-            val = float(json.load(f).get("com_ambang_pct", 50.0))
-        return val if 0.0 <= val <= 500.0 else 50.0
+            val = float(json.load(f).get("com_ambang_pct", 90.0))
+        return val if 0.0 <= val <= 500.0 else 90.0
     except (OSError, ValueError, TypeError, AttributeError):
-        return 50.0
+        return 90.0
 
 
 def save_com_ambang(pct: float) -> None:
@@ -463,10 +469,9 @@ class DeviasiView(tk.Frame):
         # dihapus dari tampilan (permintaan user; nilai internal TETAP
         # dihitung utk Stok Seharusnya W=SO(H-1)+IN−BK−OUT & CEK).
         ("Nominal", 100, "e"),
-        # v3.11.27 — KOLOM RANK DIHAPUS (user: "kolom rank dihapus dan
-        # dipindah ke kolom CEK sebagai analisa Rank 1 misal nya") —
-        # peringkat Σ|Deviasi| barang kini segmen PERTAMA teks CEK
-        # ("Rank 3 · Turun Drastis · …"); lihat blok komentar CEK bawah.
+        # v3.11.30 — RANK DIHAPUS TOTAL dari CEK (user: "hapus aja rank
+        # dari kolom cek di tab deviasi gr dan deviasi pcs") — era
+        # v3.11.27-29 (kolom Rank → segmen "Rank N" di teks CEK) ditutup.
         # v3.9.18 — kolom Max Deviasi / ACR / Total ACR DIHAPUS dari
         # tampilan (permintaan user); nilainya TETAP dihitung internal
         # (CEK "ACR to BOM" · Dev to BOM% · Stok Seharusnya ikut pakai).
@@ -485,11 +490,7 @@ class DeviasiView(tk.Frame):
         # lalu→kini (dipisah ' · '). v3.11.7 — SEMUA label anomali
         # terpicu kini ikut bergabung ' · ' (urutan prioritas) + segmen
         # "COM Tinggi" (COM vs ACR — lihat com_analisa).
-        # v3.11.27 — RANK MASUK CEK: kolom Rank dihapus (lihat komentar
-        # kolom Nominal atas) — segmen PERTAMA teks CEK kini analisa
-        # "Rank N" (peringkat Σ|Deviasi| barang di antara barang yang
-        # tampil, 1 = total terbesar — user: "kolom rank dihapus dan
-        # dipindah ke kolom CEK sebagai analisa Rank 1 misal nya").
+        # v3.11.30 — TANPA prefiks Rank (dihapus total — user).
         ("CEK", 210, "w"),
     ]
 
@@ -517,13 +518,12 @@ class DeviasiView(tk.Frame):
     # anotasi ↳ di sel Nama Barang · struktur induk-anak) dibongkar.
     # Tabel kembali DATAR PER-BARIS penuh (paritas Excel user — 0 merged
     # cell): Nama Barang per-baris (Opsi A v3.11.19 tetap), CEK per-baris
-    # (label barisnya sendiri + segmen analisa "Rank N"), kolom Rank
-    # DIHAPUS (peringkat pindah ke segmen pertama CEK). Konstanta
-    # MERGE_COLS dan mesin _static_merge_layout DIHAPUS; RAW tetap utuh
-    # di _row_snaps/_cek_map + _grank_map (rank kelompok per iid —
-    # sumber segmen "Rank N").
-    _CEK_RANK_PREFIX = "Rank "
-    _CEK_RANK_RE = re.compile(r"^Rank (\d+)")
+    # (label barisnya sendiri + segmen analisa). Konstanta MERGE_COLS dan
+    # mesin _static_merge_layout DIHAPUS; RAW tetap utuh di
+    # _row_snaps/_cek_map.
+    # v3.11.30 — segmen "Rank N" DIHAPUS TOTAL dari CEK (user: "hapus
+    # aja rank dari kolom cek") — _CEK_RANK_PREFIX/_CEK_RANK_RE dan
+    # _grank_map dibubarkan bersama seluruh jalur rank.
 
     # v3.9.51 — kolom In (kiriman — BUKAN kolom Stock/SO): header diberi
     # strip warna (user: "Header In_13 atau In 15 (Jika H = 14 contoh
@@ -592,10 +592,11 @@ class DeviasiView(tk.Frame):
         self.acr_threshold = acr_state.pct if acr_state is not None else 80.0
         # v3.11.12 — ambang COM Tinggi/Rendah dibagi GR & PCS (persen
         # selisih-dari-median — user: "set 50% > atau <"); tanpa
-        # com_state (standalone/test) → 50.0.
+        # v3.11.30 — standalone (tanpa com_state) → 90.0 (user:
+        # "Default 90% aja"; dulu 50.0).
         self._com_state = com_state
         self.com_ambang = (com_state.pct if com_state is not None
-                           else 50.0)
+                           else 90.0)
         # v3.9.53 — Dev. Bulan Lalu: provider FILE deviasi resmi (app
         # meneruskan komparasi_view._file_df — pola lalu_provider
         # nominal_resto v3.9.36). None (standalone/test) → kolom '-' jujur.
@@ -628,26 +629,22 @@ class DeviasiView(tk.Frame):
         self.store = followup_store       # shared FollowUpStore (v3.2)
         self._fp_map: dict[str, str] = {}     # iid → fingerprint
         self._row_snaps: dict[str, dict] = {}  # iid → snapshot raw (v3.2)
-        # v3.11.27 — kolom Rank dihapus & tabel kembali datar per-baris:
-        # _rank_map (per-baris rank |Deviasi| dalam kelompok — v3.9.65)
-        # & _gcek_map (gabungan label kelompok — era merge) DIHAPUS.
         # v3.11.15 — iid → teks CEK utuh (RAW — label gabung ' · '):
         # sumber kanonik sort kolom CEK · filter clone ⛶ · auto-fit.
-        # v3.11.27 — teks CEK kini ber-prefiks "Rank N · " (kolom Rank
-        # dihapus — user: "dipindah ke kolom CEK sebagai analisa").
+        # v3.11.30 — RANK DIHAPUS TOTAL dari CEK (user) — _grank_map
+        # (rank kelompok era v3.11.16-29) dibubarkan bersama segmennya.
         self._cek_map: dict[str, str] = {}
-        # v3.11.16 — iid → rank KELOMPOK (peringkat Σ|Deviasi| barang
-        # di antara barang yang tampil — konvensi arah sama dgn rank
-        # per-baris v3.9.65: 1 = terbesar). v3.11.27 — kolom Rank
-        # dihapus; nilai ini kini sumber segmen "Rank N" di teks CEK
-        # (RAW — display/sort/auto-fit).
-        self._grank_map: dict[str, str] = {}
         # v3.9.2: minus merah PER CELL (Tk 9 `tag cell`) — fallback Tk 8:
         # tag per baris (perilaku lama)
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []   # [(iid, 'Deviasi')] — dipasang ulang
                                      # setelah insert / sort / clone
         self._zero_cells: list = []  # [(iid, 'Deviasi')] deviasi == 0
+        # v3.11.30 — sel CEK baris ber-segmen COM Tinggi/Rendah diwarnai
+        # (user: "kasih warna com tinggi atau com rendah") — tag cell
+        # (Tk 9), dipasang ulang pasca sort/clone (pola _neg_cells).
+        self._com_tinggi_cells: list = []   # [(iid, 'CEK')]
+        self._com_rendah_cells: list = []   # [(iid, 'CEK')]
         # v3.9.18 — highlight kolom Deviasi & SO_H. FIX 35-b (audit 34-b
         # RISK-1): WAJIB diinisialisasi di __init__ — _sort_by /
         # _reapply_cell_tags bisa jalan SEBELUM render pertama (clone ⛶ /
@@ -972,7 +969,6 @@ class DeviasiView(tk.Frame):
         # tipis 6px di atas heading (teks & corong ⧩ tak tertutup).
         self._in_tint = HeadingTintOverlay(
             self.tree, list(self.IN_COLS), self.IN_HEADER_COLOR)
-
         # v3.9.60 — NILAI PER-BARIS: Nama Barang ditulis payload di
         # SETIAP baris kelompoknya, TANPA widget tambahan & TANPA state
         # display yang bisa basi (era sticky v3.9.55-59 dihapus — lihat
@@ -1002,16 +998,17 @@ class DeviasiView(tk.Frame):
             ("BOM 0", "#475569"),
             # v3.11.7 — segmen COM Tinggi (pemakaian aktual > sistem).
             # v3.11.12 — teks + ambang% dr median (spinbox kartu Filter).
-            ("COM Tinggi · segmen CEK (COM vs ACR · > ambang% dr median)",
+            # v3.11.30 — default ambang 90 (user: "Default 90% aja").
+            ("COM Tinggi · segmen CEK · sel berwarna (COM vs ACR · > ambang% dr median)",
              "#be123c"),
             # v3.11.8 — segmen COM Rendah (sistem mencatat pemakaian
             # lebih besar dari fisik — arah bawah median).
-            ("COM Rendah · segmen CEK (COM vs ACR · > ambang% dr median)",
+            ("COM Rendah · segmen CEK · sel berwarna (COM vs ACR · > ambang% dr median)",
              "#0f766e"),
-            # v3.11.9 — segmen Beda dari Resto Lain (searah dua periode,
-            # resto lain mayoritas berlawanan — butuh file ⚖; ambang
-            # rasio v3.11.22, lihat blok komentar _br_txt).
-            ("Beda dari Resto Lain · segmen CEK (file Komparasi)", "#a21caf"),
+            # v3.11.9 — segmen Beda dari Resto Lain (v3.11.30 — data
+            # saat ini tanpa file bulan lalu; resto minoritas arah
+            # dalam grup nama barang; ambang rasio v3.11.22).
+            ("Beda dari Resto Lain · segmen CEK", "#a21caf"),
             ("negatif (merah)", "#dc2626"),
             # v3.9.18 — highlight kolom Deviasi & SO_H
             ("kolom Deviasi/SO_H", self.HIGHLIGHT_BG),
@@ -1702,6 +1699,14 @@ class DeviasiView(tk.Frame):
         # v3.11.9 — kondisi ke-10 "BOM 0" (Total ACR 0 & SO(H) > 0):
         # slate — anomali data (nir-pemakaian) ≠ anomali pola angka.
         tree.tag_configure("cek_bom0", foreground="#475569")
+        # v3.11.30 — WARNA COM (user: "kasih warna com tinggi atau com
+        # rendah"): rose utk Tinggi · teal utk Rendah (sejalan legend).
+        # Tag CELL (Tk 9) mewarnai sel CEK saja; tag baris = fallback
+        # Tk 8 (dipakai _prepare_rows bila tanpa label utama).
+        tree.tag_configure("com_tinggi_cell", foreground="#be123c")
+        tree.tag_configure("com_rendah_cell", foreground="#0f766e")
+        tree.tag_configure("cek_com_tinggi", foreground="#be123c")
+        tree.tag_configure("cek_com_rendah", foreground="#0f766e")
 
     # =========================================================================
     # LOGIKA (identik versi lama)
@@ -2641,54 +2646,53 @@ class DeviasiView(tk.Frame):
         # resto lain BERLAWANAN ≥ 3× resto lain searah (≥75% pembanding
         # berlawanan) DAN ≥2 berlawanan — subsumsi perilaku lama utk grup
         # kecil (same=0 & opp>=2 tetap kena — grup 3 resto tak berubah).
-        # Label kini menyertakan rasio: "Beda dari Resto Lain (Surplus ·
+        # Label menyertakan rasio: "Beda dari Resto Lain (Surplus ·
         # 18/20 resto lain Defisit)" — N = resto lain berlawanan, M =
         # pembanding ber-deviasi-nonzero (resto lain ber-deviasi 0/NaN
         # tetap NETRAL — tak masuk pembilang/penyebut, tak memveto).
-        # Perlu FILE deviasi bulan lalu (⚖) — tanpa file (lalu_map kosong)
-        # syarat "bulanan juga searah" tak terverifikasi → segmen MATI
-        # SOPAN (mirror analisa lalu→kini). Hanya bila len(idxs) ≥ 3 (self
-        # + ≥2 resto lain pembanding). Resto lain ber-deviasi 0/NaN dianggap
-        # NETRAL (bukan searah, bukan berlawanan — tak memveto).
+        # v3.11.30 — DATA SAAT INI SAJA, TANPA file bulan lalu (user:
+        # "deviasi yang beda sendiri misal nilai nya negatif padahal dalam
+        # 1 grup nama barang dominan positif — udah bekerja kan? kok
+        # seperti nya belum"): syarat dua-periode (searah H & lalu) + gate
+        # `if lalu_map` membuat segmen MATI bila file ⚖ tak dimuat — padahal
+        # keluhan user murni arah DATA SAAT INI. Kini: grup = NAMA BARANG
+        # (tanpa satuan — persis kelompok yang terlihat di tabel), kandidat
+        # = baris ber-deviasi ≠ 0 (arah lalu TAK lagi disyaratkan), ambang
+        # rasio v3.11.22 tetap. Hanya bila len(idxs) ≥ 3 (self + ≥2 resto
+        # lain pembanding). Resto lain ber-deviasi 0/NaN dianggap NETRAL
+        # (bukan searah, bukan berlawanan — tak memveto).
         _br_txt = np.full(n, "", dtype=object)
-        if lalu_map:
-            _grp_br: dict = {}
-            for _i, (_b, _s) in enumerate(zip(
-                    barang_s.to_numpy(),
-                    pivot["SATUAN"].astype(str).to_numpy())):
-                _grp_br.setdefault((_b, _s), []).append(_i)
-            for _idxs in _grp_br.values():
-                if len(_idxs) < 3:
+        _grp_br: dict = {}
+        for _i, _b in enumerate(barang_s.to_numpy()):
+            _grp_br.setdefault(str(_b), []).append(_i)
+        for _idxs in _grp_br.values():
+            if len(_idxs) < 3:
+                continue
+            for _i in _idxs:
+                _d0 = float(deviasi[_i])
+                if _d0 == 0.0:
                     continue
-                for _i in _idxs:
-                    _d0 = float(deviasi[_i])
-                    _l0 = float(dev_lalu[_i])
-                    if (np.isnan(_d0) or np.isnan(_l0)
-                            or _d0 == 0.0 or _l0 == 0.0):
+                _same = 0
+                _opp = 0
+                for _j in _idxs:
+                    if _j == _i:
                         continue
-                    if (_d0 > 0.0) != (_l0 > 0.0):
-                        continue     # self harus searah dua-duanya
-                    _same = 0
-                    _opp = 0
-                    for _j in _idxs:
-                        if _j == _i:
-                            continue
-                        _dj = float(deviasi[_j])
-                        if np.isnan(_dj) or _dj == 0.0:
-                            continue
-                        if (_dj > 0.0) == (_d0 > 0.0):
-                            _same += 1
-                        else:
-                            _opp += 1
-                    # v3.11.22 — ambang RASIO pengganti veto-total:
-                    # berlawanan ≥ 3× searah (≥75% pembanding) & ≥2
-                    # berlawanan (lihat blok komentar v3.11.22 di atas).
-                    if _opp >= 3 * _same and _opp >= 2:
-                        _side = "Surplus" if _d0 > 0.0 else "Defisit"
-                        _oside = "Defisit" if _d0 > 0.0 else "Surplus"
-                        _br_txt[_i] = (
-                            f"Beda dari Resto Lain ({_side} \u00b7 "
-                            f"{_opp}/{_opp + _same} resto lain {_oside})")
+                    _dj = float(deviasi[_j])
+                    if _dj == 0.0:
+                        continue
+                    if (_dj > 0.0) == (_d0 > 0.0):
+                        _same += 1
+                    else:
+                        _opp += 1
+                # v3.11.22 — ambang RASIO pengganti veto-total:
+                # berlawanan ≥ 3× searah (≥75% pembanding) & ≥2
+                # berlawanan (lihat blok komentar v3.11.22 di atas).
+                if _opp >= 3 * _same and _opp >= 2:
+                    _side = "Surplus" if _d0 > 0.0 else "Defisit"
+                    _oside = "Defisit" if _d0 > 0.0 else "Surplus"
+                    _br_txt[_i] = (
+                        f"Beda dari Resto Lain ({_side} \u00b7 "
+                        f"{_opp}/{_opp + _same} resto lain {_oside})")
 
         if any(ana) or _po_seg.any() or any(_com_txt) or any(_br_txt):
             cek = np.array(
@@ -2992,46 +2996,6 @@ class DeviasiView(tk.Frame):
             .drop(columns=["_abs_dev"])
         )
 
-        # v3.11.27 — RANK KELOMPOK = sumber segmen "Rank N" di teks CEK
-        # (kolom Rank DIHAPUS — user: "kolom rank dihapus dan dipindah
-        # ke kolom CEK sebagai analisa Rank 1 misal nya"). Semantik =
-        # peringkat Σ|Deviasi| barang di antara barang yang tampil
-        # (method="min", 1 = total terbesar — konvensi rank kelompok
-        # v3.11.16 dipertahankan dari era merge; dihitung atas frame
-        # TERFILTER → renumber per tab GR/PCS + filter aktif). Rank
-        # PER-BARIS dalam kelompok (v3.9.65 — paritas sheet asli) ikut
-        # dibubarkan BERSAMA KOLOMNYA: tak ada lagi tampilan/sort/filter
-        # yang memakainya. Filter ⧩ Rank + cabang derived _col_values
-        # + _gcek_disp (gabungan label kelompok) juga dibongkar — CEK
-        # kini murni PER-BARIS (label baris + prefiks Rank N).
-        # v3.11.28 — FIX BUG "RANK SAMA TIAP GRUP NAMA BARANG" (user:
-        # "ada bug di rank di mana hasil nya sama tiap grup nama
-        # barang"): di data produksi mayoritas grup ber-Σ|Deviasi| = 0
-        # (972/972 baris nol di sheet asli) → method="min" membuat
-        # SEMUA grup nol berbagi satu nomor rank besar yang sama.
-        # Konvensi sheet asli (v3.9.65): deviasi 0 → rank KOSONG —
-        # kini diberlakukan di level kelompok: grup Σ|Deviasi| = 0
-        # TIDAK diberi prefiks "Rank N" sama sekali (CEK menampilkan
-        # label baris saja); rank dihitung 1..N hanya di antara grup
-        # yang benar-benar berdeviasi. Sort header CEK: baris tanpa
-        # rank otomatis terakhir (10**9).
-        # v3.11.29 — SERI ANTAR GRUP DIKIKIS TOTAL (user: "untuk rank
-        # masih sama, tidak berbeda beda di tiap grup nama barang di
-        # kolom cek tab deviasi pcs dan deviasi gr"): data produksi
-        # PCS penuh grup kecil ber-Σ|Deviasi| kecil yang SAMA (1, 2,
-        # 3 … satuan pecahan) → method="min" membuat banyak grup
-        # BERBEDA berbagi satu nomor rank (pola 13,13,13,16) — terlihat
-        # seperti "rank sama tiap grup". Kini method="first": tiap
-        # grup berdeviasi dapat nomor UNIK 1..N; tie-break = urutan
-        # index groupby (nama barang alfabetis — deterministik &
-        # sejalan urutan render tabel yang juga nama-asc).
-        _gdv = pd.to_numeric(filtered["Deviasi"],
-                             errors="coerce").fillna(0).abs()
-        _gtot_s = _gdv.groupby(filtered["Nama Barang"].astype(str)).sum()
-        _grank_s = (_gtot_s[_gtot_s > 0]
-                    .rank(method="first", ascending=False))
-        filtered = filtered.assign(
-            _grank_disp=filtered["Nama Barang"].astype(str).map(_grank_s))
         # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
         # load_data): guard supaya _prepare_rows tetap jalan.
         if "Dev. Bulan Lalu" not in filtered.columns:
@@ -3059,6 +3023,9 @@ class DeviasiView(tk.Frame):
         neg_cells = []    # v3.9.2 — per-cell minus (kolom Deviasi)
         zero_cells = []   # v3.9.2 — per-cell deviasi == 0
         hl_cells = []     # v3.9.18 — highlight kolom Deviasi & SO_H
+        # v3.11.30 — sel CEK COM Tinggi/Rendah (warna — user).
+        com_tinggi_cells = []
+        com_rendah_cells = []
         store = self.store
         asal = f"DEVIASI {self.satuan_mode}"
         # FIX 6d1-01 — index entri store lama (kunci fp era volatil 'cek'):
@@ -3089,30 +3056,14 @@ class DeviasiView(tk.Frame):
         cols_np["Dev. Bulan Lalu"] = pd.to_numeric(
             filtered["Dev. Bulan Lalu"], errors="coerce").to_numpy(
             dtype="float64")
-        # v3.11.27 — TABEL DATAR PER-BARIS PENUH (merge-vertikal
-        # dibubarkan — user: "sekarang gak perlu merger vertical
-        # kembali menjadi awal aja"): TANPA _show_b (batas kelompok
-        # head-only), TANPA _gcek_row (gabungan label kelompok).
-        # Yang tersisa: _cek_disp = label CEK PER-BARIS (raw) dan
-        # _grank_row = rank kelompok Σ|Deviasi| per-baris — keduanya
-        # digabung jadi teks display CEK "Rank N · <label>" (kolom Rank
-        # dihapus — user: "dipindah ke kolom CEK sebagai analisa Rank 1
-        # misal nya"). RAW: _cek_map (teks display utuh) + _grank_map
-        # (rank kelompok) + snapshot (label utama utk follow-up).
+        # v3.11.30 — RANK DIHAPUS TOTAL dari kolom CEK (user: "hapus aja
+        # rank dari kolom cek di tab deviasi gr dan deviasi pcs"): sel
+        # CEK = label PER-BARIS murni (label anomali + segmen analisa,
+        # raw _cek_disp). RAW: _cek_map (teks display utuh) + snapshot
+        # (label utama utk follow-up). Era prefiks "Rank N · "
+        # (v3.11.27-29) ditutup.
         _cek_disp = [self._fmt_num(cols_np["CEK"][i]) for i in range(n)]
-        _grank_row = [self._fmt_int(v)
-                      for v in filtered["_grank_disp"].to_numpy()]
-        # v3.11.27 — teks display CEK per-baris: "Rank N · <label…>"
-        # (baris tanpa label → cukup "Rank N"; tanpa rank (NaN —
-        # teoretis) → label saja). Rank = properti KELOMPOK barang —
-        # konstan utk semua baris satu kelompok (persis nama barang
-        # yang juga diulang per-baris — paritas Excel user).
-        _cek_disp_rank = [
-            " \u00b7 ".join(p for p in (
-                (f"{self._CEK_RANK_PREFIX}{r}" if r else ""), c) if p)
-            for r, c in zip(_grank_row, _cek_disp)]
-        cek_map = {}    # v3.11.15 — teks CEK per iid (v3.11.27: + Rank N)
-        grank_map = {}  # v3.11.16 — rank kelompok per iid (RAW)
+        cek_map = {}    # v3.11.15 — teks CEK per iid
         for i in range(n):
             barang = str(cols_np["Nama Barang"][i])
             resto = str(cols_np["Resto"][i])
@@ -3134,17 +3085,12 @@ class DeviasiView(tk.Frame):
                     # double-click/follow-up/sort/filter.
                     values[j] = barang
                 elif col_id == "CEK":
-                    # v3.11.27 — RANK MASUK CEK (user: "kolom rank
-                    # dihapus dan dipindah ke kolom CEK sebagai analisa
-                    # Rank 1 misal nya"): PER-BARIS datar — segmen
-                    # PERTAMA = analisa "Rank N" (rank kelompok
-                    # Σ|Deviasi| barang), diikuti label anomali baris
-                    # ini + segmen analisa lalu→kini (raw _cek_disp,
-                    # termasuk "Beda dari Resto Lain (…)" v3.11.22 —
-                    # tetap hidup utuh). Baris tanpa label → cukup
-                    # "Rank N". snap['cek'] (follow-up) TETAP label
-                    # utama RAW tanpa prefiks rank — tak tersentuh.
-                    values[j] = _cek_disp_rank[i]
+                    # v3.11.30 — TANPA prefiks Rank (dihapus total —
+                    # user): PER-BARIS datar — label anomali baris ini +
+                    # segmen analisa (raw _cek_disp, termasuk "Beda dari
+                    # Resto Lain (…)" v3.11.22). snap['cek'] (follow-up)
+                    # TETAP label utama RAW — tak tersentuh.
+                    values[j] = _cek_disp[i]
                 elif col_id == "Dev. Bulan Lalu":
                     values[j] = self._fmt_dev_lalu(val)
                 elif col_id == "Dev to BOM%":
@@ -3186,13 +3132,9 @@ class DeviasiView(tk.Frame):
             values[0] = CHECK_ON if checked else CHECK_OFF
             fp_map[f"row_{i}"] = fp
             row_snaps[f"row_{i}"] = snap
-            # v3.11.15 — teks CEK utuh per iid; v3.11.27 — + prefiks
-            # "Rank N · " (kolom Rank dihapus; sumber sort kolom CEK,
+            # v3.11.15 — teks CEK utuh per iid (sumber sort kolom CEK,
             # auto-fit, filter clone ⛶, tombol analisa ▲▼).
-            cek_map[f"row_{i}"] = _cek_disp_rank[i]
-            # v3.11.16 — rank kelompok per iid (v3.11.27: murni RAW —
-            # display lewat segmen "Rank N" di teks CEK).
-            grank_map[f"row_{i}"] = _grank_row[i]
+            cek_map[f"row_{i}"] = _cek_disp[i]
 
             tags = []
             deviasi = cols_np["Deviasi"][i]
@@ -3264,6 +3206,23 @@ class DeviasiView(tk.Frame):
                 tags.append("cek_acr")
             elif cek_val == "BOM 0":                     # v3.11.9
                 tags.append("cek_bom0")
+            # v3.11.30 — WARNA COM TINGGI/RENDAH (user: "kasih warna com
+            # tinggi atau com rendah"): sel CEK baris ber-segmen COM
+            # diwarnai via tag CELL (Tk 9 — menang atas tag baris utk sel
+            # itu saja; baris lain tetap warna label utamanya). Fallback
+            # Tk 8 (tanpa tag cell): tag BARIS hanya bila TANPA label
+            # utama (label utama tetap prioritas pewarna baris).
+            _cek_full30 = str(cek_series.iloc[i])
+            if COM_TINGGI_LABEL in _cek_full30:
+                if self._cell_tags:
+                    com_tinggi_cells.append((f"row_{i}", "CEK"))
+                elif not tags:
+                    tags.append("cek_com_tinggi")
+            elif COM_RENDAH_LABEL in _cek_full30:
+                if self._cell_tags:
+                    com_rendah_cells.append((f"row_{i}", "CEK"))
+                elif not tags:
+                    tags.append("cek_com_rendah")
             # v3.9.61 — tanpa tag band kelompok (sekat warna dihapus —
             # user: "hilangkan warna untuk sekat visual tiap grup nama
             # barang"); tag tersisa hanya pewarnaan afektif (minus/nol/
@@ -3319,14 +3278,15 @@ class DeviasiView(tk.Frame):
             status += f" · Dev. Bulan Lalu: file {_lalu_lab}"
         elif "Dev. Bulan Lalu" in filtered.columns \
                 and int(pd.isna(filtered["Dev. Bulan Lalu"]).sum()) > 0:
-            status += (" · Dev. Bulan Lalu: — (muat file deviasi di tab "
-                       "Komparasi)")
+            status += (" · Dev. Bulan Lalu: — (muat via tombol 📂 kartu "
+                       "DEV BULANAN tab ⚙️ Config)")
         return {"items": items, "kpi": (n, total_dev, cek_count),
                 "status": status, "fp_map": fp_map, "row_snaps": row_snaps,
                 "cek_map": cek_map,
-                "grank_map": grank_map,
                 "neg_cells": neg_cells, "zero_cells": zero_cells,
-                "hl_cells": hl_cells}
+                "hl_cells": hl_cells,
+                "com_tinggi_cells": com_tinggi_cells,
+                "com_rendah_cells": com_rendah_cells}
 
     def _diag_nominal_kosong(self, filtered) -> "tuple[int, int, int] | None":
         """v3.9.55 — (n_tanpa_nominal, n_tanpa_harga, n_satuan_tak_konversi)
@@ -3378,15 +3338,15 @@ class DeviasiView(tk.Frame):
         self.header_filters.refresh_icons()
         self._fp_map = payload.get("fp_map", {})
         self._row_snaps = payload.get("row_snaps", {})
-        # v3.11.15 — teks CEK utuh per iid; v3.11.27 — + prefiks "Rank N · "
-        # (kolom Rank dihapus — peringkat pindah ke segmen pertama CEK).
+        # v3.11.15 — teks CEK utuh per iid (sumber sort/auto-fit/clone).
         self._cek_map = payload.get("cek_map", {})
-        # v3.11.16 — rank kelompok per iid; v3.11.27 — murni RAW (display
-        # lewat segmen "Rank N" di teks CEK; _rank_map/_gcek_map dibubarkan).
-        self._grank_map = payload.get("grank_map", {})
         # v3.9.2 — cell minus per-cell (dipasang ulang juga setelah sort/clone)
         self._neg_cells = payload.get("neg_cells", [])
         self._zero_cells = payload.get("zero_cells", [])
+        # v3.11.30 — sel CEK COM Tinggi/Rendah (dipasang ulang pasca
+        # sort/clone — pola _neg_cells).
+        self._com_tinggi_cells = payload.get("com_tinggi_cells", [])
+        self._com_rendah_cells = payload.get("com_rendah_cells", [])
         # v3.9.18 — highlight kolom Deviasi & SO_H (dipasang ulang juga
         # setelah sort/clone — delete+reinsert me-reset tag cell)
         self._hl_cells = payload.get("hl_cells", [])
@@ -3451,6 +3411,10 @@ class DeviasiView(tk.Frame):
         apply_cell_tag(tree, "zero_cell", self._zero_cells)
         # v3.9.18 — highlight kolom Deviasi & SO_H (Tk 9; no-op Tk 8)
         apply_cell_tag(tree, "hl_cell", self._hl_cells)
+        # v3.11.30 — warna sel CEK COM Tinggi/Rendah (Tk 9; no-op Tk 8 —
+        # fallback tag baris sudah dibawa items payload render).
+        apply_cell_tag(tree, "com_tinggi_cell", self._com_tinggi_cells)
+        apply_cell_tag(tree, "com_rendah_cell", self._com_rendah_cells)
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
@@ -3696,23 +3660,15 @@ class DeviasiView(tk.Frame):
                     return str((_s.get(str(iid)) or {}).get("barang", ""))
                 value_get = _vg_barang
             elif col == "CEK":
-                # v3.11.27 — kunci sort = teks CEK PER-BARIS (_cek_map =
-                # "Rank N · <label>", nilai yang ditampilkan) + parser
-                # tuple (rank INT, sisa teks) — urutan rank numerik benar
-                # ('Rank 2' < 'Rank 10'), label jadi tiebreak; kelompok
-                # searisan rank otomatis berdekatan (rank konstan per
-                # kelompok). Baris tanpa prefiks rank (teoretis) →
-                # terakhir (10**9).
+                # v3.11.30 — kunci sort = teks CEK PER-BARIS murni
+                # (_cek_map — label anomali + segmen analisa; prefiks
+                # Rank dihapus total) — sort teks biasa (label utama
+                # mengelompokkan baris sejenis).
                 _cmap = self._cek_map
 
                 def _vg_cek(iid, _c=_cmap):
                     return str(_c.get(str(iid), ""))
                 value_get = _vg_cek
-
-                def _parse_cek_rank(s):
-                    m = self._CEK_RANK_RE.match(str(s))
-                    return (int(m.group(1)) if m else 10 ** 9, str(s))
-                parse = _parse_cek_rank
         sort_tree_by_column(
             tree, col, reverse=reverse, parse=parse,
             value_get=value_get,

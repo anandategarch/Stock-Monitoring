@@ -14,6 +14,14 @@ MASUK + IN per tanggal; sheet '29 Rekap Barang Masuk' tidak dibaca):
 - Saldo       = kumulatif per (Resto × Barang) urut tanggal
 - Hasil Audit = port macro VBA: VALID / OK (Matching) / CUT-OFF RESOLVED
                 / OK (Dalam Cut-off) / DEVIASI MURNI
+                (v3.11.30 — kartu KPI chips 'TOTAL BARIS / OK (MATCHING) /
+                dst.' DIHAPUS dari tampilan — user: "shapes kotak seperti
+                total baris. OK (matching) ini dan teman2 nya hapus aja";
+                kolom Hasil Audit di TABEL tetap utuh.)
+                (v3.11.30 — kartu KPI chips 'TOTAL BARIS / OK (MATCHING) /
+                dst.' DIHAPUS dari tampilan — user: "shapes kotak seperti
+                total baris. OK (matching) ini dan teman2 nya hapus aja";
+                kolom Hasil Audit di TABEL tetap utuh.)
 
 MODE HITUNG (kedua varian dihitung pipeline SEKALI; mode hanya memilih):
 - "📅 Bulan Ini" (DEFAULT) — varian bulan berjalan saja; rentang 1..31.
@@ -1001,15 +1009,13 @@ class InSelisihView(tk.Frame):
         GhostButton(r0, text="✕ Reset Filter",
                     command=self._reset_filter).pack(side="right")
 
-        # --- KPI chips (mode Audit — mirror "EXECUTIVE RECONCILIATION
-        #     SUMMARY" VBA) ---
-        self.kpi_card = tk.Frame(self.content, bg=C_CARD,
-                                 highlightbackground="#e2e8f0",
-                                 highlightthickness=1)
-        self.kpi_inner = tk.Frame(self.kpi_card, bg=C_CARD)
-        # v3.9.60 — padding kartu KPI dipadatkan (pady 8→4 — bagian
-        # penghematan tinggi konten; lihat komentar _render_kpi_chips).
-        self.kpi_inner.pack(fill="x", padx=12, pady=4)
+        # v3.11.30 — KARTU KPI CHIPS DIHAPUS (user: "Di rekap selisih IN
+        #     shapes kotak seperti total baris. OK (matching) ini semau
+        #     dan teman2 nya hapus aja") — panel 'EXECUTIVE
+        #     RECONCILIATION SUMMARY' (TOTAL BARIS · OK (MATCHING) ·
+        #     VALID · CUT-OFF RESOLVED · DEVIASI MURNI · DEV MURNI·PO ·
+        #     SISA GANTUNG · COM MINUS) tak lagi dibangun; data audit_kpi
+        #     tetap dihitung pipeline (kontrak tuple _apply_audit_mode).
 
         # v3.9.55 — F3: kartu SKOR RESTO (user: "Di tab rekap selisih IN.
         # Beri Skor per resto dengan selisih terbanyak supaya aku bisa
@@ -1044,7 +1050,7 @@ class InSelisihView(tk.Frame):
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
-        self._tcard = tcard          # anchor pack utk kpi_card (before=)
+        self._tcard = tcard          # anchor pack utk zona skor/barang
         tbody = tcard.body()
 
         head = tk.Frame(tbody, bg=C_CARD)
@@ -1103,11 +1109,11 @@ class InSelisihView(tk.Frame):
                                       highlightbackground="#e2e8f0",
                                       highlightthickness=1)
 
-        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter + KPI
-        # chips + kartu SKOR RESTO + judul; tombol toolbar tetap tampil
+        # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter +
+        # kartu SKOR RESTO + judul; tombol toolbar tetap tampil
         # utk mengembalikan.
         self._expander = TableExpander(
-            btn_expand, [fcard, self.kpi_card, self._skor_zone,
+            btn_expand, [fcard, self._skor_zone,
                          self._barang_zone, self.title_label])
 
         self._apply_columns()
@@ -1236,8 +1242,7 @@ class InSelisihView(tk.Frame):
         self._satuan_map = {}
         self._kategori_map = {}
         self._show_content()
-        # v3.9: pulihkan layout bila sedang di-perbesar ⤢ (kpi_card akan
-        # di-pack ulang oleh _render_kpi_chips di bawah)
+        # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
         self._apply_columns()
@@ -1248,7 +1253,6 @@ class InSelisihView(tk.Frame):
         # data dimuat — mirror default KATEGORI tab Deviasi GR/PCS
         # (v3.9.19). Nilai lain tetap bisa dipilih lewat popup ⧩.
         self._apply_default_kategori()
-        self._render_kpi_chips()
         # lazy refresh — hanya compute bila tab terlihat
         if self.winfo_ismapped():
             self._refresh()
@@ -1294,7 +1298,7 @@ class InSelisihView(tk.Frame):
     def _on_mode_change(self, idx: int):
         """v3.9.27 — toggle MODE HITUNG. idx 0 = 📅 Bulan Ini (default),
         1 = 📆 Lalu + Ini. Ganti varian audit + rentang tanggal + refresh
-        (KPI chips ikut varian lewat _render_kpi_chips).
+        (varian audit aktif dipakai tabel — kartu KPI dihapus v3.11.30).
         v3.11.1 — default start = −25 (HARI PERTAMA blok rekap lalu —
         rekap lalu selalu 25•..akhir bulan). Semantik rentang KRONOLOGIS
         (audit 12-c2 B1): −25 = "mulai hari 25"; −31 = hari TERAKHIR
@@ -1307,7 +1311,6 @@ class InSelisihView(tk.Frame):
         ("1" / "−25") supaya konsisten dgn mode — behavior identik."""
         self._mode_bulan_lalu = (idx == 1)
         self._apply_audit_mode()
-        self._render_kpi_chips()
         if self._mode_bulan_lalu:
             self.tgl_start_var.set("-25")
             self.tgl_end_var.set(str(self._month_len))
@@ -1334,16 +1337,15 @@ class InSelisihView(tk.Frame):
     def _apply_view_mode(self):
         """v3.10 — pasang/lepas panel sesuai MODE TAMPILAN aktif.
         v3.11.9 — mode 📈 Analisa kini MENYEMBUNYIKAN kartu ringkasan
-        (KPI chips + SKOR RESTO + strip barang — user: "Hapus semua aja
-        yang lain juga biar clean"): panel analisa memakai seluruh
-        tinggi konten. Mode 📋 memulihkan URUTAN AWAL (barang → skor →
-        kpi, masing-masing before anchor managed berikutnya — pola
-        before= renderer); zona tanpa konten tetap tersembunyi (mirror
-        renderer kosong); saat ⤢ expander aktif kartu milik expander
-        (skip — pola _render_resto_scores)."""
+        (SKOR RESTO + strip barang — user: "Hapus semua aja yang lain
+        juga biar clean"): panel analisa memakai seluruh tinggi konten.
+        Mode 📋 memulihkan URUTAN AWAL (barang → skor, masing-masing
+        before anchor managed berikutnya — pola before= renderer); zona
+        tanpa konten tetap tersembunyi (mirror renderer kosong); saat ⤢
+        expander aktif kartu milik expander (skip — pola
+        _render_resto_scores). v3.11.30 — kartu KPI dihapus total."""
         if self._view_analisa:
             self._tcard.pack_forget()
-            self.kpi_card.pack_forget()
             self._skor_zone.pack_forget()
             self._barang_zone.pack_forget()
             self._analisa_card.pack(fill="both", expand=True,
@@ -1352,17 +1354,10 @@ class InSelisihView(tk.Frame):
             self._analisa_card.pack_forget()
             self._tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
             if not getattr(self._expander, "expanded", False):
-                def _has_content(z):
-                    if z is self.kpi_card:
-                        return bool(self.kpi_inner.winfo_children())
-                    return bool(z.winfo_children())
-
                 for _zone, _cands in (
                         (self._barang_zone, (self._tcard,)),
-                        (self._skor_zone, (self._barang_zone, self._tcard)),
-                        (self.kpi_card,
-                         (self._skor_zone, self._barang_zone, self._tcard))):
-                    if not _has_content(_zone):
+                        (self._skor_zone, (self._barang_zone, self._tcard))):
+                    if not _zone.winfo_children():
                         continue     # zona tanpa konten tetap tersembunyi
                     _anchor = None
                     for _c in _cands:
@@ -1449,7 +1444,7 @@ class InSelisihView(tk.Frame):
         """v3.9.66 — pulihkan snapshot capture_filter_state.
 
         Switch mode lewat jalur yang sama dgn klik user (set_active_
-        silent + _apply_audit_mode + _render_kpi_chips — TANPA refresh
+        silent + _apply_audit_mode — TANPA refresh
         tambahan; rentang tgl di-override dari snapshot SETELAH switch
         karena switch mode me-reset rentang ke default mode). Rentang
         tgl tetap tervalidasi validated_tgl_entry saat refresh (nilai
@@ -1470,7 +1465,6 @@ class InSelisihView(tk.Frame):
             if getattr(self, "mode_bar", None) is not None:
                 self.mode_bar.set_active_silent(1 if _m else 0)
             self._apply_audit_mode()
-            self._render_kpi_chips()
             changed = True
         for key, var in (("tgl_start", self.tgl_start_var),
                          ("tgl_end", self.tgl_end_var)):
@@ -1486,104 +1480,6 @@ class InSelisihView(tk.Frame):
             changed = True
         if changed and self.winfo_ismapped():
             self._refresh()
-
-    # ------------------------------------------------------- KPI CHIPS ----
-    def _render_kpi_chips(self):
-        """KPI 'EXECUTIVE RECONCILIATION SUMMARY' — dihitung dari varian
-        audit AKTIF (v3.9.27: ikut MODE HITUNG — Bulan Ini = bulan
-        berjalan saja; Lalu + Ini = data penuh; tidak terpengaruh filter
-        tampilan)."""
-        for w in self.kpi_inner.winfo_children():
-            w.destroy()
-        if not self.audit_kpi:
-            self.kpi_card.pack_forget()
-            return
-        k = self.audit_kpi
-        # FIX C-03: KPI chips ikut format Indonesia (1.234.567, bukan
-        # 1,234,567) — konsisten dgn formatter tabel.
-        # v3.11.5 — KEMBALI KE RUMUS LAMA: Selisih IN = BM − IN di SEMUA
-        # format (pipeline v3.11.5 maupun legacy pra-v3.10) — chip BASIS
-        # SELISIH tak lagi membedakan basis. _basis_v310 tetap dideteksi
-        # utk GATE chip COM MINUS (kolom v3.10 hadir → angka COM ada).
-        # v3.11.9 — chip MODE HITUNG & BASIS SELISIH DIHAPUS (user:
-        # "Hapus semua aja yang lain juga biar clean" — kotak informasi
-        # redundan; mode tidak lagi bisa diganti dari UI — jalur
-        # programatik _on_mode_change).
-        _basis_v310 = bool(
-            self.audit_df is not None
-            and "Qty SO Kemarin" in getattr(self.audit_df, "columns", []))
-        chips = [
-            ("TOTAL BARIS", fmt_int_id(k.get('rows', 0)), "#0f766e"),
-            ("OK (MATCHING)", fmt_int_id(k.get('ok', 0)), "#16a34a"),
-            ("VALID (SISTEM MASUK)", fmt_int_id(k.get('omit', 0)), "#1f4e78"),
-            ("CUT-OFF RESOLVED", fmt_int_id(k.get('cutoff', 0)), "#806000"),
-            ("DEVIASI MURNI", fmt_int_id(k.get('deviasi_murni', 0)), "#c65911"),
-            # v3.9.30 — deviasi murni yang EXPLAINABLE (pasangannya ada
-            # PO 32.43 'Menunggu diproses' — akan resolve saat PO
-            # diproses jadi RI); sisanya perlu audit fisik.
-            ("DEV MURNI · PO MENUNGGU",
-             fmt_int_id(k.get('dev_murni_po', 0)), "#b45309"),
-            ("SISA GANTUNG (NET)",
-             fmt_int_id(k.get('deviasi_qty', 0.0)),
-             "#dc2626" if abs(k.get("deviasi_qty", 0.0)) > 0.0001 else "#16a34a"),
-        ]
-        # v3.10 — COM minus: baris pemakaian aktual < 0 (barang
-        # "muncul dari mana-mana" — sinyal input SO salah/kurang).
-        # v3.10.1 — FIX P3 (bug hunt 1-c): chip hanya utk data yang
-        # BENAR-BENAR punya angkanya — kpi format lama (tanpa kunci
-        # 'com_minus') dulu tampil hijau '0' (angka basis BM−IN tak
-        # punya COM; chip BASIS SELISIH di sebelahnya justru jujur
-        # menulis 'BM REKAP (BM−IN)').
-        if _basis_v310 or "com_minus" in k:
-            chips.append(("COM MINUS",
-                          fmt_int_id(k.get('com_minus', 0)),
-                          "#dc2626" if k.get('com_minus', 0)
-                          else "#16a34a"))
-        # v3.9.59 — FIX 2e-02: kartu KPI dibungkus GRID 4-per-baris
-        # (deterministik; v3.10: 10 kartu = 3 baris). Dulu pack
-        # side="left" SATU baris (~1014px lebar) → pada WINDOW_MIN app
-        # 1020px kartu terakhir TERPOTONG +44px tanpa wrap/scroll; font
-        # Windows lebih lebar dari bitmap Xvfb → borderline juga di
-        # jendela default 1280.
-        # v3.9.60 — KPI COMPACT (padat vertikal): kartu KPI + papan skor +
-        # kartu filter menghabiskan tinggi konten (probe: tabel rekap sisa
-        # 92px @1500×850, ≈0 @1020×700 minsize — gejala user "tidak bisa
-        # scrol"): pady chip 6→3, nilai font 11→10 — hemat ~30px tanpa
-        # mengubah informasi.
-        _last_row = (len(chips) - 1) // 4
-        for _i, (label, value, color) in enumerate(chips):
-            _row, _col = _i // 4, _i % 4
-            box = tk.Frame(self.kpi_inner, bg="#f8fafc",
-                           highlightbackground="#e2e8f0", highlightthickness=1)
-            box.grid(row=_row, column=_col, padx=(0, 8),
-                     pady=(0, 3 if _row < _last_row else 0),
-                     sticky="w")
-            tk.Label(box, text=label, bg="#f8fafc", fg=C_TEXT_MUTED,
-                     font=font(8, "bold")).pack(anchor="w", padx=10,
-                                                pady=(3, 0))
-            tk.Label(box, text=value, bg="#f8fafc", fg=color,
-                     font=font(10, "bold")).pack(anchor="w", padx=10,
-                                                 pady=(0, 3))
-        # v3.10 — anchor pack harus widget yang SEDANG di-pack: mode 📈
-        # Analisa melepas tabel card (before=_tcard unmapped → TclError);
-        # pilih kandidat pertama yang masih managed (_skor_zone → _tcard
-        # → _analisa_card), tanpa before bila tak ada (empty state awal).
-        # v3.11.9 — mode 📈 Analisa: kartu KPI DISSEMBUNYIKAN (user:
-        # "biar clean" — konten tetap dibangun supaya segar saat toggle
-        # balik 📋).
-        if self._view_analisa:
-            self.kpi_card.pack_forget()
-            return
-        _anchor = None
-        for _cand in (self._skor_zone, self._tcard, self._analisa_card):
-            if _cand.winfo_manager() == "pack":
-                _anchor = _cand
-                break
-        if _anchor is not None:
-            self.kpi_card.pack(fill="x", padx=12, pady=(10, 0),
-                               before=_anchor)
-        else:
-            self.kpi_card.pack(fill="x", padx=12, pady=(10, 0))
 
     # --------------------------------------------------- VALUES & FILTER ---
     def _col_values(self, col: str) -> list:
@@ -3281,7 +3177,7 @@ class InSelisihView(tk.Frame):
             # refresh → render_done tak jalan → _busy menggantung → view
             # MATI PERMANEN (semua _refresh berikut early-return) sampai
             # restart app. Pilih kandidat anchor pertama yang masih managed
-            # (pola _render_kpi_chips v3.10); tanpa before bila tak ada.
+            # (pola renderer lama v3.10); tanpa before bila tak ada.
             # v3.11.9 — mode 📈 Analisa: papan disembunyikan TOTAL (user:
             # "biar clean" — konten tetap dibangun supaya segar saat
             # toggle balik 📋; _apply_view_mode yang re-pack).
@@ -3623,7 +3519,6 @@ class InSelisihView(tk.Frame):
             if getattr(self, "mode_bar", None) is not None:
                 self.mode_bar.set_active_silent(1)
             self._apply_audit_mode()
-            self._render_kpi_chips()
         self._refresh()
 
     def _reset_filter(self):
@@ -3635,7 +3530,6 @@ class InSelisihView(tk.Frame):
         if getattr(self, "mode_bar", None) is not None:
             self.mode_bar.set_active_silent(0)
         self._apply_audit_mode()
-        self._render_kpi_chips()
         self.tgl_start_var.set("1")    # v3.8: bulan berjalan saja (v3.10: 1..panjang bulan)
         self.tgl_end_var.set(str(self._month_len))
         self.only_selisih_var.set(True)
@@ -3843,5 +3737,3 @@ class InSelisihView(tk.Frame):
     def _show_content(self):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
-        # posisi kpi_card dikelola penuh oleh _render_kpi_chips()
-        # (pack before tabel card / pack_forget)

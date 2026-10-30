@@ -6,7 +6,7 @@ tree insert.
 Tanpa display (Xvfb opsional) — compute-only + insert tree dummy.
 
 v3.9.42 — audit 61-a (F9): metode _compute_audit sudah TIDAK ADA
-(rename lama ke _compute_com_matrix — GREP laporan_deviasi_view)
+(v3.11.30 — view dihapus; COM matrix port di deviasi_popup)
 → benchmark laporan dulu langsung AttributeError.
 """
 import sys
@@ -61,19 +61,14 @@ def main():
     root.withdraw()
 
     from src.ui.deviasi_view import DeviasiView
-    from src.ui.laporan_deviasi_view import LaporanDeviasiView
     from src.ui.pivot_view import PivotTableView
 
     dv = DeviasiView(root, satuan_mode="GR")
     dv.data = df
     r, t_dev = bench("Deviasi GR  _compute_pivot (H=25)", dv._compute_pivot)
 
-    lv = LaporanDeviasiView(root)
-    lv.data = df
-    # v3.9.42 — audit 61-a (F9): _compute_audit sudah tidak ada →
-    # AttributeError; metode aktual = _compute_com_matrix (default
-    # membaca self.data — sesuai pemakaian bench ini).
-    r, t_lap = bench("Laporan     _compute_com_matrix", lv._compute_com_matrix)
+    # v3.11.30 — LaporanDeviasiView dihapus bersama tab 📋 Laporan
+    # Deviasi (COM matrix port ada di deviasi_popup._compute_com_series).
 
     pv = PivotTableView(root)
     pv.data = df

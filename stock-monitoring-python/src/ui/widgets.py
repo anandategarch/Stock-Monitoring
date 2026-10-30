@@ -1964,7 +1964,12 @@ class HeaderFilter:
     - Ikon corong dipasang di heading kolom; klik heading → popup filter.
     - Popup: pencarian nilai + operator teks (Mengandung / Diawali /
       Diakhiri / Tidak mengandung) + daftar checkbox nilai unik +
-      pilih-semua + sort A→Z / Z→A (opsional) + reset + ↔ Balik (invert).
+      pilih-semua + sort A→Z / Z→A (opsional) + reset + ↔ Balik (invert)
+      + KLIK-KANAN nilai = "only select this" (v3.11.30 — user: "di
+      filter misal aku buka filter ada opsi only select this. Soalnya
+      misal aku mau filter 1 barang aja aku harus uncek semua" —
+      klik-kanan sebuah nilai menjadikannya SATU-SATUNYA nilai terpilih
+      lalu popup ditutup; tanpa uncek satu-satu).
     - v3.9.13 (permintaan user: "habis search, hasil search-ku itulah
       yang jadi pilihan-nya"): tekan **Enter** di kolom pencarian →
       hasil pencarian MENJADI seleksi. Query kosong + Enter = reset.
@@ -2179,7 +2184,10 @@ class HeaderFilter:
         # v3.9.59 — fix 2b-03 (audit 2-b): hint semantik tombol — fitur
         # search-to-select (Enter = hasil pencarian jadi seleksi, §94)
         # tidak terdiscover: semantiknya hanya hidup di docstring.
-        tk.Label(body, text="Enter = pilih nilai terfilter · Esc = tutup",
+        # v3.11.30 — + hint klik-kanan (only select this — §… user:
+        # "mau filter 1 barang aja aku harus uncek semua").
+        tk.Label(body, text="Enter = pilih nilai terfilter · klik-kanan "
+                 "nilai = hanya itu saja · Esc = tutup",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
             fill="x", padx=(22, 0), pady=(2, 0))
 
@@ -2245,6 +2253,7 @@ class HeaderFilter:
             self._vars[v] = var
             cb = ttk.Checkbutton(inner, text=self._disp_text(v),
                                  variable=var, command=self._on_toggle)
+            self._bind_only_select(cb, v)   # v3.11.30 — klik-kanan
             cb.pack(fill="x", padx=8, pady=1)
             self._checks[v] = cb
         self._more_label = None
@@ -2321,6 +2330,23 @@ class HeaderFilter:
         return px, py
 
     # -- aksi popup ------------------------------------------------------------
+    def _bind_only_select(self, cb, value: str):
+        """v3.11.30 — pasang aksi KLIK-KANAN "only select this" pada
+        checkbox nilai (user: "misal aku mau filter 1 barang aja aku
+        harus uncek semua"): klik-kanan → nilai itu menjadi
+        SATU-SATUNYA seleksi + popup ditutup (aplikasi langsung)."""
+        cb.bind("<Button-3>",
+                lambda e, _v=value: self._only_select(_v), add="+")
+
+    def _only_select(self, value: str):
+        """v3.11.30 — terapkan seleksi HANYA nilai ini (pola
+        _apply_selection single-value) lalu tutup popup — jalur cepat
+        "filter 1 barang" tanpa uncek satu-satu."""
+        if self._values_list is None:
+            return
+        self._apply_selection({value})
+        self._close()
+
     def _on_toggle(self):
         # v3.9.13: _emit DULU — counter kini membaca state EKSAK hasil
         # emit (bukan hanya checkbox yang termaterialisasi).
@@ -2523,6 +2549,7 @@ class HeaderFilter:
                 cb = ttk.Checkbutton(self._list_inner,
                                      text=self._disp_text(v), variable=var,
                                      command=self._on_toggle)
+                self._bind_only_select(cb, v)   # v3.11.30 — klik-kanan
                 if self._more_label is not None \
                         and self._more_label.winfo_exists():
                     cb.pack(fill="x", padx=8, pady=1,

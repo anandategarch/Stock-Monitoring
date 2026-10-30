@@ -1730,42 +1730,9 @@ def run_test():
     print("    ✓ v3.9.32: BUMBU PASTA KUAH (42.17-only) tampil di GR — "
           "Sistem 84 · Deviasi (84) · Satuan GR")
 
-    # v3.9.32 — (6) MODE NOMINAL E2E: Harga 41.09 × Qty Deviasi +
-    # normalisasi satuan (GULA 18,25/GR → 18.250/KG utk rekap KG via
-    # peta rasio; CINCAU 15/KG langsung) + baris TOTAL + FRUCTOSE tanpa
-    # harga (Qty 0 → None → tak dihitung)
-    from src.ui.nominal_deviasi_view import NominalDeviasiView
-    nv = NominalDeviasiView(root)
-    nv.load_data(append1_result,
-                 harga_map=audit_result["harga_map"],
-                 konversi_map=audit_result["konversi_map"])
-    # H=1: mock SO(1)=100; saldo(1) = SA + IN-9901(1) → GULA 205 → DEV
-    # −105; FRUCTOSE 220 → DEV −120 (tanpa harga); CINCAU 220 → DEV −120
-    nv.tanggal_h = 1
-    nv._dirty = True
-    nv.ensure_refreshed()
-    wait_view(root, nv)
-    _nv_rows = {dv0: nv.tree.item(iid, "values")
-                for iid, dv0 in [(i, str(nv.tree.set(i, "Nama Barang")))
-                                 for i in nv.tree.get_children("")]}
-    _g = _nv_rows.get("GULA (V.20)")
-    assert _g is not None and _g[3] == "18.250 KG" and _g[5] == "(Rp 1.916.250)", (
-        f"v3.9.51: GULA nominal = 18.250/KG × DEV −105 = (Rp 1.916.250) "
-        f"— Currency Rp — got {_g}")
-    _c = _nv_rows.get("CINCAU (V.20)")
-    assert _c is not None and _c[3] == "15 KG" and _c[5] == "(Rp 1.800)", (
-        f"v3.9.51: CINCAU nominal = 15/KG × DEV −120 = (Rp 1.800) — got {_c}")
-    _f = _nv_rows.get("FRUCTOSE SYRUP (V.20)")
-    assert _f is not None and _f[5] == "-", (
-        f"v3.9.32: FRUCTOSE tanpa harga → nominal '-' — got {_f}")
-    _t = _nv_rows.get("TOTAL")
-    assert _t is not None and _t[5] == "(Rp 1.919.058)" and _t[4] == "(429)", (
-        f"v3.9.51: baris TOTAL = −1.919.050? qty −429 (GULA−105 + "
-        f"FRUCTOSE−120 + CINCAU−120 + BUMBU−84; nominal Rp tanpa "
-        f"FRUCTOSE) — got {_t}")
-    print("    ✓ v3.9.51: Nominal E2E Currency Rp — GULA "
-          "(Rp 1.916.250) + CINCAU (Rp 1.800) + BUMBU (Rp 1.008) + "
-          "TOTAL (Rp 1.919.058) · FRUCTOSE '-' tanpa harga")
+    # v3.11.30 — (6) MODE NOMINAL era tab 💰 DIHAPUS bersama tab 📋
+    # Laporan Deviasi (user: "Hapus tab laporan deviasi dan dead code
+    # nya") — padanan per-resto (6b) tetap diuji di bawah.
 
     # v3.9.34 — (6b) TAB 🧮 NOMINAL DEVIASI E2E (user: "isinya total
     # sum dari nama barang ... cuman ini disum per resto"): Σ nominal
