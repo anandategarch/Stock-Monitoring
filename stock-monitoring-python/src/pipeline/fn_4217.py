@@ -158,7 +158,12 @@ def _resolve_sheet_4217(folder_path: str, sheet_name: str) -> str:
 
 
 def _find_col(prom_columns, kandidat):
-    """Kolom pertama yang cocok (case-insensitive) dari kandidat nama."""
+    """Kolom pertama yang cocok (case-insensitive) dari kandidat nama.
+
+    v3.11.33 — FALLBACK prefix-match: bila exact gagal (export Accurate
+    baru menamai kolom satuan 'Satuan #' dgn suffix ' #', atau varian
+    'Satuan (GR)' / 'Satuan Utama'), cari kolom ber-AWALAN nama kandidat.
+    Exact tetap diutamakan (preserves perilaku file lama)."""
     if prom_columns is None:
         return None
     lookup = {str(c).strip().lower(): c for c in prom_columns}
@@ -166,6 +171,15 @@ def _find_col(prom_columns, kandidat):
         c = lookup.get(str(k).strip().lower())
         if c is not None:
             return c
+    # v3.11.33 — fallback prefix-match (exact gagal, mis. 'Satuan #' /
+    # 'Satuan (GR)'): kolom pertama ber-awalan nama kandidat.
+    for k in kandidat:
+        klow = str(k).strip().lower()
+        if not klow:
+            continue
+        for c in prom_columns:
+            if str(c).strip().lower().startswith(klow):
+                return c
     return None
 
 
