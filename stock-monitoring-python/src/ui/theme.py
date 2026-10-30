@@ -68,8 +68,11 @@ C_LOG_BG = "#0b1220"
 C_LOG_FG = "#cbd5e1"
 
 # Zebra rows tabel
+# v3.11.34 — ROW_ODD diperkuat (#f8fafc → #f1f5f9, slate-100): user
+# minta "warna Zebra di tab deviasi gr dan pcs agak perkuat lagi
+# warna nya dikit" — slate-50 nyaris tak terlihat di layar terang.
 ROW_EVEN = "#ffffff"
-ROW_ODD = "#f8fafc"
+ROW_ODD = "#f1f5f9"
 
 # --- Tag highlight CARI (Ctrl+F — v3.9.64) ----------------------------------
 # v3.9.64 — FIX (audit 15-c F-01, pixel-probe Xvfb Tk 9.0.4): prioritas tag

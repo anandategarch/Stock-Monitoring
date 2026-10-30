@@ -29,7 +29,12 @@ import re
 import numpy as np
 import pandas as pd
 
-from .helpers import resto_from_cabang_po, stop_check
+from .helpers import (
+    norm_nama_barang_key,
+    norm_nama_resto_key,
+    resto_from_cabang_po,
+    stop_check,
+)
 from .konversi_satuan import lookup_rasio
 
 # Kolom kanonik input audit (struktur identik input VBA / sheet 29)
@@ -573,8 +578,15 @@ def _po_menunggu_pairs(po_pending_df: "pd.DataFrame | None",
     for cab, brg, nomor, qty, sat in zip(po_pending_df["Cabang PO"],
                                          po_pending_df["Nama Barang"],
                                          nomors, qtys, satuans):
-        resto = resto_from_cabang_po(cab)
-        b = _po_nomor_str(brg)
+        # v3.11.34 — FIX PO Menunggu "tidak sesuai nama barang": kunci
+        # pasangan DINORMALISASI kanonik (UPPER + rapat-spasi utk barang;
+        # UPPER + segmen setelah titik utk resto) — sama dgn append1.py
+        # yg menormalkan sisi audit. Sebelumnya sisi PO cuma .strip()
+        # (case/whitespace mentah) → pasangan beda ejaan tak cocok →
+        # Qty PO Menunggu 0 padahal PO ada (user: "kok tidak sesuai
+        # nama barangnya ya").
+        resto = norm_nama_resto_key(resto_from_cabang_po(cab))
+        b = norm_nama_barang_key(_po_nomor_str(brg))
         if not resto or not b:
             continue
         qty = float(qty)
@@ -664,8 +676,13 @@ def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
     kpi["dev_murni_po"] = 0
     if not pairs or audit.empty:
         return
-    resto = audit["Resto"].astype(str).str.strip()
-    item = audit["Nama Item"].astype(str).str.strip()
+    # v3.11.34 — kunci sisi audit DINORMALISASI kanonik (UPPER + rapat-
+    # spasi utk Nama Item; UPPER + segmen setelah titik utk Resto) —
+    # paritas sisi PO (_po_menunggu_pairs) yg juga menormalkan. Sebelumnya
+    # cuma .str.strip() (case/whitespace mentah) → mismatch saat audit
+    # frame belum dinormalkan append1 (test/mock) atau drift ejaan.
+    resto = audit["Resto"].map(norm_nama_resto_key)
+    item = audit["Nama Item"].map(norm_nama_barang_key)
     status = audit["Status Analisis Audit"].astype(str)
     detail = audit["Detail & Catatan Audit"].astype(str).tolist()
     # pandas 3 (CoW): to_numpy() tanpa konversi dtype → view READ-ONLY →

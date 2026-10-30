@@ -71,6 +71,8 @@ from .theme import (
     C_CARD,
     C_HEADER,
     C_TEXT_MUTED,
+    ROW_EVEN,  # v3.11.34 — zebra paritas theme (sebelumnya hardcoded)
+    ROW_ODD,
     font,
     register_find_tags,
 )
@@ -521,14 +523,14 @@ class InDetailPopup(tk.Toplevel):
             g = df.groupby("SOURCE IN")["Value"].sum()
             totals = {k: float(v) for k, v in g.items()}
         total_in = sum(totals.values())
-        # v3.9.59 — FIX 2e-01: 8 chip ringkasan dibungkus GRID 4-per-baris
-        # (deterministik 2 baris). Dulu 8× pack side="left" SATU baris →
-        # di popup minsize 700 lebar total chip (~786px+) MELUAP: chip
-        # 'BARANG MASUK' terpotong sebagian & chip 'SELISIH IN' (angka
-        # inti drill-down) SELURUHNYA tak terlihat tanpa indikasi.
-        chip_specs = [(f"{src}", totals.get(src, 0.0), color, _fmt_num)
-                      for src, color in _SOURCES]
-        chip_specs.append(("IN TOTAL", total_in, C_ACCENT_DARK, _fmt_num))
+        # v3.11.34 — chip ringkasan per-SOURCE IN (42.05/32.24/99.01 +
+        # varian Bulan Lalu) DIHAPUS (user: "Pop up rekap selisih in
+        # shapes shapes kaya 4205. (Bulan lalu), 3224 dan kawan kawan nya
+        # hapus aja"). Tabel dokumen di bawah TETAP mengelompokkan per
+        # SOURCE IN (pola _SOURCES loop di _populate) — info grup tak
+        # hilang, hanya kotak ringkasan-nya. chip IN TOTAL dipertahankan
+        # (jumlah semua sumber, single angka ringkas).
+        chip_specs = [("IN TOTAL", total_in, C_ACCENT_DARK, _fmt_num)]
         if row_summary:
             chip_specs.append(
                 ("Barang Masuk", row_summary.get("bm", 0.0), "#006100",
@@ -630,8 +632,10 @@ class InDetailPopup(tk.Toplevel):
         # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
         # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
         register_find_tags(tree)
-        tree.tag_configure("evenrow", background="#ffffff")
-        tree.tag_configure("oddrow", background="#f8fafc")
+        # v3.11.34 — ROW_ODD ikut diperkuat (#f1f5f9) paritas theme.py
+        # (sebelumnya hardcoded #f8fafc — terlalu halus).
+        tree.tag_configure("evenrow", background=ROW_EVEN)
+        tree.tag_configure("oddrow", background=ROW_ODD)
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("neg_cell", foreground="#dc2626")  # v3.9.2
         # v3.9.19 — CEK "RI Balancing" (amber)
@@ -1167,8 +1171,9 @@ class InSelisihView(tk.Frame):
         # v3.9.64 — FIX (audit 15-c F-01): tag Cari (Ctrl+F) WAJIB
         # didaftarkan SEBELUM tag bg view (prioritas = urutan create).
         register_find_tags(tree)
-        tree.tag_configure("evenrow", background="#ffffff")
-        tree.tag_configure("oddrow", background="#f8fafc")
+        # v3.11.34 — ROW_ODD ikut diperkuat (#f1f5f9) paritas theme.py.
+        tree.tag_configure("evenrow", background=ROW_EVEN)
+        tree.tag_configure("oddrow", background=ROW_ODD)
         tree.tag_configure("negative", foreground="#dc2626")
         tree.tag_configure("zero", foreground="#64748b")
         # FIX C-04: tag per-cell (Tk 9 `tag cell`) minus merah — nama tag

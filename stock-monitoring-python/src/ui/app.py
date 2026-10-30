@@ -192,10 +192,12 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.33"  # v3.11.33 — FIX FORMAT FILE 4217 BARU: kolom satuan
-# 'Satuan #' (suffix ' #') tak kebaca → SATUAN kosong semua → pasangan
-# GR/PCS rusak & fallback append1.py useless. _find_col +prefix-match
-# fallback. User: "ada perubahan format dari yang sebelumnya."
+APP_VERSION = "3.11.34"  # v3.11.34 — 3 FIX: (1) PO Menunggu mismatch Nama
+# Barang — kunci pasangan dinormalisasi kanonik (UPPER+rapat-spasi) di
+# kedua sisi (fn_audit _po_menunggu_pairs + _apply_po_menunggu); (2) popup
+# Rekap Selisih IN — chip ringkasan per-SOURCE IN (42.05/3224/99.01 +
+# Bulan Lalu) dihapus; (3) zebra Deviasi GR/PCS diperkuat (#f8fafc →
+# #f1f5f9).
 # reconciliation (umur/leaderboard/sistemik/resolve/anomali/COM-minus) DIHAPUS
 # → tabel SELISIH (Resto · Tanggal · Nama Barang) urut |selisih|↓ + sort kolom;
 # dead code dibersihkan (_compute_analisa/_render_analisa 6-seksi/_as_*/_tgl_short
