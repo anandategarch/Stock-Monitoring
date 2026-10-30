@@ -486,13 +486,8 @@ from tkinter import ttk
 
 from src.ui.app import APP_VERSION, StockMonitorApp
 from src.ui.deviasi_file import (  # v3.11.30 — relokasi dari komparasi
-    _norm_name,
     auto_bulanan_paths,
-    bulan_mundur_list,
-    h_to_week_target,
-    parse_deviasi_file,
 )
-from src.ui.nominal_common import fmt_rp_cell  # v3.9.51 — cek Currency Rp
 from src.ui.widgets import (
     _GC_HOLD,
     CELL_TAGS_NATIVE,
@@ -3976,7 +3971,6 @@ def main():
     # ==================================================================
     print("== 26. (v3.9.13) SEARCH-TO-SELECT + KATEGORI + PATH + "
           "MULTI-FILE + ANALISA ==")
-    import json as _json13
     import tempfile as _tf13
 
     # (v3.11.30 — §26 intro komparasi DIHAPUS)

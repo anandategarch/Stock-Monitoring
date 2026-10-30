@@ -25,6 +25,8 @@ satuan) — nama satuan sama ≠ rasio sama antar barang; rasio pecahan ada.
 """
 import pandas as pd
 
+from .helpers import norm_nama_barang_key  # v3.11.35 — kunci kanonik paritas append1
+
 # Nama kolom BAKU pada frame hasil fn_4205/fn_3224 (schema konsisten
 # supaya concat query_in menyatukan kedua sumber; 99.01 tanpa kolom
 # ini → NaN oleh concat sort=False — aman, #Prime.Qty sudah satuan dasar)
@@ -113,8 +115,12 @@ def build_konversi_map(in_df: "pd.DataFrame | None") -> dict:
     terk = (in_df[KOL_TERKECIL].tolist() if KOL_TERKECIL in cols
             else [None] * n)
     for i in range(n):
-        b = str(barang[i]).strip() if barang[i] is not None else ""
-        if not b or b.lower() in ("nan", "none"):
+        # v3.11.35 — kunci barang DINORMALISASI kanonik (UPPER + rapat-
+        # spasi) paritas append1.py + fn_audit._po_menunggu_pairs (v3.11.34).
+        # Sebelumnya cuma .strip() → mismatch saat PO case/whitespace
+        # beda dari IN → lookup_rasio miss → PO Menunggu tak terkonversi.
+        b = norm_nama_barang_key(barang[i])
+        if not b:
             continue
         s = _norm_sat(sat[i])
         r = rasio[i]
@@ -147,7 +153,9 @@ def lookup_rasio(kmap: "dict | None", barang, satuan) -> tuple:
     """
     if not kmap or barang is None or satuan is None:
         return None, None
-    b = str(barang).strip()
+    # v3.11.35 — idempotent normalize (aman bila pemanggil sudah
+    # norm_nama_barang_key — fn_audit._po_menunggu_pairs demikian).
+    b = norm_nama_barang_key(barang)
     s = _norm_sat(satuan)
     if not b or not s:
         return None, None

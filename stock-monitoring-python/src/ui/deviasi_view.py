@@ -124,9 +124,7 @@ from .widgets import (
     kategori_passthrough,  # v3.9.45 — passthrough HANYA seleksi default
     open_tree_maximized,
     reset_autofit_once,  # v3.9.55 — F8
-    restore_tree_view,  # v3.9.72 — FIX 6: pulihkan scroll+seleksi pasca rebuild
     run_async,
-    snapshot_tree_view,  # v3.9.72 — FIX 6: snapshot sebelum delete+re-render
     sort_tree_by_column,
     zero_row_filter_message,  # v3.9.68 — pesan jujur 0-baris (⧩ kosong)
 )

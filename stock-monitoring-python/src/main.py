@@ -27,6 +27,7 @@ from src.pipeline.fn_audit import (
     extract_po_pending,
     month_lengths,
 )
+from src.pipeline.helpers import norm_nama_barang_key  # v3.11.35 — _rekap_barangs
 from src.pipeline.rincian_po import build_rincian_po
 
 
@@ -253,7 +254,7 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     # app bisa datang dari master DBS utk barang yang belum direkap).
     _rk = rekap_so_holder.get("df")
     _rekap_barangs = sorted({
-        str(b).strip().upper()
+        norm_nama_barang_key(b)   # v3.11.35 — kanonik paritas append1
         for b in (_rk["Nama Barang"].astype(str).tolist()
                   if _rk is not None and "Nama Barang" in
                   getattr(_rk, "columns", []) else [])

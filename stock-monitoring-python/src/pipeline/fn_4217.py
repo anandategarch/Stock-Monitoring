@@ -173,13 +173,22 @@ def _find_col(prom_columns, kandidat):
             return c
     # v3.11.33 — fallback prefix-match (exact gagal, mis. 'Satuan #' /
     # 'Satuan (GR)'): kolom pertama ber-awalan nama kandidat.
+    # v3.11.35 — ambil yg TERPENDEK (paling spesifik) bila beberapa kolom
+    # ber-awalan sama (mis. 'Satuan Harga' vs 'Satuan Default' — keduanya
+    # ber-awalan 'satuan'; pilih yg terpendek = paling dekat ke kandidat).
+    # Mirror pola fn_9901._find_column.
     for k in kandidat:
         klow = str(k).strip().lower()
         if not klow:
             continue
+        matches = []
         for c in prom_columns:
-            if str(c).strip().lower().startswith(klow):
-                return c
+            cl = str(c).strip().lower()
+            if cl.startswith(klow):
+                matches.append((len(cl), c))
+        if matches:
+            matches.sort(key=lambda x: x[0])   # shortest (most specific) first
+            return matches[0][1]
     return None
 
 

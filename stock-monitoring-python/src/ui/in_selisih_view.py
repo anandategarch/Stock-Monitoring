@@ -2665,10 +2665,10 @@ class InSelisihView(tk.Frame):
                     ("#0e7490" if is_active else C_HEADER)),
                 font=font(8, "bold" if i < 3 or is_active else "normal"),
             ).pack()
-            chip.bind("Button-1>", lambda e, b=_b:
+            chip.bind("<Button-1>", lambda e, b=_b:
                       self._on_barang_row_click(b))
             for ch in chip.winfo_children():
-                ch.bind("Button-1>", lambda e, b=_b:
+                ch.bind("<Button-1>", lambda e, b=_b:
                         self._on_barang_row_click(b))
         if len(scores) > 3:
             tk.Label(

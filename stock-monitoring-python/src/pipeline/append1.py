@@ -31,6 +31,7 @@ from .fn_running_stock import fn_running_stock_grouped
 # widgets.kategori_blank_mask utk konsumen view).
 from .helpers import (
     kategori_blank_mask,
+    norm_nama_barang_key,  # v3.11.35 — kategori manual (config key skalar)
     norm_nama_barang_key_series,
     norm_nama_resto_key_series,
 )
@@ -361,15 +362,16 @@ def apply_kategori_manual(expanded_kategori: "pd.DataFrame",
     for k, v in mapping.items():
         if v is None:
             continue
-        kk = str(k).strip().upper()
+        kk = norm_nama_barang_key(k)   # v3.11.35 — kanonik (rapat-spasi)
         vv = str(v).strip()
         if (kk and vv and vv.lower() not in ("nan", "none")
                 and vv not in ("-", "\u2014")):
             km[kk] = vv
     if not km:
         return 0, 0
-    kk_series = expanded_kategori["Nama Barang"].astype(str).str.strip() \
-        .str.upper()
+    # v3.11.35 — kunci kanonik paritas config key di atas.
+    kk_series = norm_nama_barang_key_series(
+        expanded_kategori["Nama Barang"])
     val = kk_series.map(km)
     has = val.notna()
     if not bool(has.any()):
@@ -822,10 +824,13 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         # duplikat key hasil normalisasi di master dibuang supaya
         # kardinalitas left-join tetap 1:1 (tanpa multiplikasi baris);
         # kolom key temp dibuang setelah merge (schema tak berubah).
+        # v3.11.35 — kunci merge pakai norm_nama_barang_key_series (UPPER +
+        # rapat-spasi) paritas kanonik; sebelumnya .str.strip().str.upper()
+        # tidak merapat-spasi → mismatch multi-space drift.
         _KEY = "__key_nama_barang__"
-        expanded_information[_KEY] = (
-            expanded_information["Nama Barang"].str.strip().str.upper())
-        kat[_KEY] = kat["Nama Barang"].str.strip().str.upper()
+        expanded_information[_KEY] = norm_nama_barang_key_series(
+            expanded_information["Nama Barang"])
+        kat[_KEY] = norm_nama_barang_key_series(kat["Nama Barang"])
         kat = kat.drop_duplicates(subset=[_KEY], keep="first")
         expanded_kategori = expanded_information.merge(
             kat.drop(columns=["Nama Barang"]), on=_KEY, how="left")
@@ -865,7 +870,8 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
             and "Nama Barang" in full_rekap_so.columns
             and "Nama Barang" in expanded_kategori.columns):
         _rk = full_rekap_so[["Nama Barang", "KATEGORI"]].copy()
-        _rk["Nama Barang"] = _rk["Nama Barang"].astype(str).str.strip().str.upper()
+        # v3.11.35 — kunci kanonik (UPPER + rapat-spasi) paritas append1.
+        _rk["Nama Barang"] = norm_nama_barang_key_series(_rk["Nama Barang"])
         _rk["KATEGORI"] = _rk["KATEGORI"].astype(str).str.strip()
         _rk = _rk[_rk["KATEGORI"].ne("")
                   & _rk["KATEGORI"].str.lower().ne("nan")
@@ -874,7 +880,8 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         _rk = _rk.drop_duplicates(subset=["Nama Barang"], keep="last")
         _rk_map = dict(zip(_rk["Nama Barang"], _rk["KATEGORI"]))
         if _rk_map:
-            _kk = expanded_kategori["Nama Barang"].astype(str).str.strip().str.upper()
+            _kk = norm_nama_barang_key_series(
+                expanded_kategori["Nama Barang"])
             _rk_val = _kk.map(_rk_map)
             _has_rk = _rk_val.notna()
             if bool(_has_rk.any()):

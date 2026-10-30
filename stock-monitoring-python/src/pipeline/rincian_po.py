@@ -21,6 +21,7 @@ import pandas as pd
 
 from .helpers import (
     fn_combine_folder,
+    norm_nama_barang_key_series,  # v3.11.35 — kategori merge kanonik
     safe_to_numeric,
     safe_to_str,
     stop_check,
@@ -115,8 +116,9 @@ def build_rincian_po(config, semua_out: dict | None = None,
         # 1:1 — mirror dedup fn_dbs_kategori, cegah multiplikasi baris);
         # kolom key temp dibuang setelah merge.
         _KEY = "__key_nama_barang__"
-        sel[_KEY] = sel["Nama Barang"].str.strip().str.upper()
-        kat[_KEY] = kat["Nama Barang"].str.strip().str.upper()
+        # v3.11.35 — kunci kanonik (UPPER + rapat-spasi) paritas append1.
+        sel[_KEY] = norm_nama_barang_key_series(sel["Nama Barang"])
+        kat[_KEY] = norm_nama_barang_key_series(kat["Nama Barang"])
         kat = kat.drop_duplicates(subset=[_KEY], keep="first")
         merged = sel.merge(
             kat.drop(columns=["Nama Barang"]), on=_KEY, how="left")

@@ -101,7 +101,8 @@ def main():
 
     root.destroy()
     print("\n== RANKING (compute) ==")
-    for label, t in sorted([("deviasi", t_dev), ("laporan", t_lap),
+    # v3.11.30 — LaporanDeviasiView dihapus; t_lap dihapus dari ranking.
+    for label, t in sorted([("deviasi", t_dev),
                             ("pivot-resto", t_pr), ("pivot-tanggal", t_pt)],
                            key=lambda x: -x[1]):
         print(f"  {label:<14} {t*1000:9.1f} ms")

@@ -3,6 +3,46 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.35 — Deep audit fix (5 agents): crash + dead feature + normalization consistency
+
+**Audit**: 5 agents paralel scan 41 file / 41k LOC. Temuan: 2 P0 crash, 1 P1 dead feature, 5 P0/P1 normalization bug (pola sama dgn v3.11.34 PO Menunggu tapi belum ter-fix di join lain), 1 P3 v3.11.33 regression, + P3 cleanup.
+
+**P0 crash**:
+- **bench_views.py:104** — `NameError: t_lap` (v3.11.30 hapus Laporan benchmark tapi ranking tuple masih reference `t_lap`). Fix: hapus entry dari sorted list.
+- **screenshot_ui.py:146-149** — `AttributeError: app.laporan_view` (v3.11.30 hapus tab tapi screenshot harness masih load). Fix: hapus 4-line Laporan block.
+
+**P1 dead feature**:
+- **in_selisih_view.py:2668,2671** — `"Button-1>"` (malformed bind, leading `<` hilang) → klik chip "SELISIH TERBANYAK BARANG×RESTO" dead (tidak toggle filter ⧩ Nama Barang). Fix: `"<Button-1>"`.
+
+**P0/P1 normalization consistency** (pola asymmetric v3.11.34 — sisi audit canonical, sisi lain RAW):
+- **konversi_satuan.py:116,150** — `build_konversi_map`/`lookup_rasio` kunci RAW `.strip()` vs caller (fn_audit v3.11.34) sudah `norm_nama_barang_key` → **rasio lookup miss → PO Menunggu tak terkonversi** (v3.11.34 incomplete). Fix: kedua sisi `norm_nama_barang_key`.
+- **fn_audit.py:144-145** (`_attach_so_kemarin` saldo_awal_map) — audit RAW × map canonical → **SO Kemarin salah**. Fix: `.map(norm_nama_*_key)`.
+- **fn_audit.py:869-870** (bk_map lookup) — audit RAW × map canonical → **Qty BK NaN → COM wrong**. Fix: sama.
+- **append1.py:827-828** (DBS Kategori merge) — `.str.strip().str.upper()` (no whitespace-collapse) vs canonical → **KATEGORI None** on multi-space drift. Fix: `norm_nama_barang_key_series`.
+- **append1.py:871,881** (Rekap Mentah KATEGORI) — same pattern. Fix: sama.
+- **append1.py:365,373** (KATEGORI Manual config) — `str(k).strip().upper()` (no collapse). Fix: `norm_nama_barang_key`.
+- **rincian_po.py:118-119** (DBS Kategori merge PO source) — same. Fix: `norm_nama_barang_key_series`.
+- **app.py:3720-3725** (`_kat_norm`) — `str(s).strip().upper()`. Fix: `norm_nama_barang_key`.
+- **main.py:256** (`_rekap_barangs`) — `str(b).strip().upper()`. Fix: `norm_nama_barang_key`.
+
+**P3 v3.11.33 regression**:
+- **fn_4217.py:174-192** (`_find_col` prefix-match) — bisa pick wrong column bila beberapa kolom ber-awalan sama (`Satuan Harga` vs `Satuan Default`). Fix: ambil **TERPENDEK** (paling spesifik) — mirror `fn_9901._find_column`.
+
+**P3 cleanup**:
+- 8 unused imports dihapus (`deviasi_view.py:127,129` restore_tree_view/snapshot_tree_view; `test_ui_redesign.py:489-495,3979` — residual v3.11.30 relokasi parser).
+- **README.md** — versi `v3.11.30` → `v3.11.35`; hapus baris `📋 Laporan Deviasi` + `⚖ Komparasi` (tab dihapus v3.11.30); tambah info mode 📈 Analisa di Rekap Selisih IN.
+
+**Verifikasi**: py_compile OK · ruff 66→57 (net improvement) · import app OK · 5 end-to-end test PASS (PO Menunggu konversi 2 KARTON→48 BOTOL dgn case/whitespace drift; saldo_awal_map; bk_map; konversi lookup; kategori multi-space drift).
+
+**Yang TIDAK di-fix** (low impact / high risk — documented for future):
+- `po_keterangan._build_map` CANONICAL×RAW in_detail (P1, lower frequency).
+- `deviasi_popup._col_code_mask` + `details_popup:844` legacy RAW snaps (P1, legacy data only).
+- `followup.py:467-489` legacy RAW snaps migration (P2, migration risk).
+- `write_selisih_sheet` + `Laporan Deviasi (Audit)` sheet number_format (P2 cosmetic).
+- `fn_4109._norm_barang_key` float-int barcode (P2 low probability).
+- `fn_audit:904-918` desc text mixed satuan (P2 log-only).
+- Orphan `LAPORAN-COM`/`KOMPARASI` snapshots in followup.json (P2 soft UX).
+
 ## v3.11.34 — 3 fix: PO Menunggu mismatch + popup chips dihapus + zebra diperkuat
 
 - **(1) PO Menunggu tidak sesuai Nama Barang — FIX akar** (user: *"PO Menunggu kok tidak sesuai nama barangnya ya?"*). Akar: kunci pasangan PO Menunggu dinormalisasi **asimetris** — sisi audit (append1.py) UPPER+rapat-spasi+segmen-setelah-titik, tapi sisi PO (`fn_audit._po_menunggu_pairs`) cuma `.strip()` (case/whitespace mentah). Pasangan beda ejaan (`"Air Mineral  600ML"` vs `"AIR MINERAL 600ML"`, `"1370.mlgpar"` vs `"MLGPAR"`) tak cocok → `Qty PO Menunggu = 0` padahal PO ada. **Fix**: kedua sisi kini pakai helper kanonik `norm_nama_barang_key` (UPPER + rapat-spasi) + `norm_nama_resto_key` (UPPER + segmen setelah titik) dari `helpers.py` — paritas append1. Verifikasi end-to-end: PO source `"Air Mineral  600ML"` @ `"1370.mlgpar"` (lowercase + double-space) cocok dengan audit `"AIR MINERAL 600ML"` @ `"MLGPAR"` → qty 150 terpasang benar (sebelumnya 0).

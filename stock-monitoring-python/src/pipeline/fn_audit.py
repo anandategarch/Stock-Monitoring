@@ -141,8 +141,14 @@ def _attach_so_kemarin(out: pd.DataFrame,
 
     so = pd.to_numeric(out["Hasil SO"], errors="coerce") \
         .astype("float64")
-    resto = out["Resto"].astype(str)
-    item = out["Nama Item"].astype(str)
+    # v3.11.35 — kunci pasangan DINORMALISASI kanonik (UPPER + rapat-spasi
+    # utk Nama Item; UPPER + segmen setelah titik utk Resto) paritas
+    # append1.py yg menormalkan append1_df (sumber saldo_awal_map /
+    # bk_map). Sebelumnya cuma .astype(str) (RAW) → mismatch saat rekap
+    # raw case/whitespace beda dari append1 canonical → saldo_awal_map
+    # .get() miss → SO Kemarin salah → ΔSO/COM/Selisih wrong.
+    resto = out["Resto"].map(norm_nama_resto_key)
+    item = out["Nama Item"].map(norm_nama_barang_key)
     new_pair = (resto != resto.shift(1)) | (item != item.shift(1))
 
     # ffill SO DALAM PASANGAN: nilai teramati TERAKHIR sebelum baris t.
@@ -860,8 +866,11 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     _in_sys = pd.to_numeric(audit["Penerimaan Sistem"],
                             errors="coerce").fillna(0.0)
     _bk_vals = []
-    _r = audit["Resto"].astype(str)
-    _b = audit["Nama Item"].astype(str)
+    # v3.11.35 — kunci bk_map DINORMALISASI kanonik paritas append1.py
+    # (sumber bk_map). Sebelumnya .astype(str) RAW → mismatch → Qty BK
+    # NaN → COM = SO_prev + IN − 0 − SO wrong.
+    _r = audit["Resto"].map(norm_nama_resto_key)
+    _b = audit["Nama Item"].map(norm_nama_barang_key)
     _t = pd.to_numeric(audit["Tanggal"], errors="coerce") \
         .astype("float64")
     if bk_map:

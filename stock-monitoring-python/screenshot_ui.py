@@ -143,10 +143,7 @@ def main():
     select_and_wait(root, app, app.tab_deviasi_pcs, app.deviasi_pcs_view)
     shot("9-deviasi-pcs")
 
-    # Laporan
-    app.laporan_view.load_data(append1)
-    select_and_wait(root, app, app.tab_laporan, app.laporan_view)
-    shot("10-laporan")
+    # v3.11.30 — tab 📋 Laporan Deviasi dihapus; skip screenshot.
 
     # v3.2: tab Follow Up (badge + snapshot rows)
     select_and_wait(root, app, app.tab_followup, app.followup_view)

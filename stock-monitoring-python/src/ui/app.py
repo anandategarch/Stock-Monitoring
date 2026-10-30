@@ -95,6 +95,7 @@ run_pipeline = None          # diikat _ensure_pipeline_symbols() (worker)
 PipelineStopped = None       # idem — dipakai except worker + isinstance
 from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST
 from src.pipeline.helpers import (
+    norm_nama_barang_key,  # v3.11.35 — _kat_norm kanonik (rapat-spasi)
     read_cache_invalidate,
     read_cache_reset_counters,
     read_cache_stats,
@@ -192,7 +193,11 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.34"  # v3.11.34 — 3 FIX: (1) PO Menunggu mismatch Nama
+APP_VERSION = "3.11.35"  # v3.11.35 — DEEP AUDIT FIX (5 agents): 2 P0 crash
+# (bench/screenshot), 1 P1 dead feature (Button-1> bind), 5 P0/P1
+# normalization consistency (saldo_awal_map, bk_map, konversi_satuan,
+# 4 kategori merges, _kat_norm, _rekap_barangs), 1 P3 v3.11.33 regression
+# (fn_4217 prefix-match shortest-first), unused imports + README cleanup.
 # Barang — kunci pasangan dinormalisasi kanonik (UPPER+rapat-spasi) di
 # kedua sisi (fn_audit _po_menunggu_pairs + _apply_po_menunggu); (2) popup
 # Rekap Selisih IN — chip ringkasan per-SOURCE IN (42.05/3224/99.01 +
@@ -3718,9 +3723,10 @@ class StockMonitorApp:
 
     @staticmethod
     def _kat_norm(s) -> str:
-        """Kunci nama barang (strip + upper — konvensi append1 LANGKAH
-        5d / _kategori_blank_items lama)."""
-        return str(s).strip().upper()
+        """Kunci nama barang kanonik (UPPER + rapat-spasi — paritas
+        append1.py / fn_4217 / fn_audit sejak v3.11.35). Sebelumnya cuma
+        strip+upper (tak rapat-spasi → mismatch multi-space drift)."""
+        return norm_nama_barang_key(s)
 
     # v3.11.28 — regex versi-toleran IDENTIK fn_4217._VERSI_UJUNG
     # (token versi ujung 'V.2'/'V.3 BARU' diabaikan saat match family).
