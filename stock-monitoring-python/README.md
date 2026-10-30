@@ -3,7 +3,7 @@
 Porting **Power Query M** (1.009 baris, 30 query) untuk monitoring stok resto ke Python.
 Pipeline membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI Tkinter — tanpa output Excel.
 
-> **Versi terkini: v3.11.28** — riwayat: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.11.29** — riwayat: [CHANGELOG.md](CHANGELOG.md)
 
 ## Persyaratan
 

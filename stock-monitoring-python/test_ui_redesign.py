@@ -983,7 +983,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.28", APP_VERSION == "3.11.28",
+    check("Versi = 3.11.29", APP_VERSION == "3.11.29",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -25487,9 +25487,17 @@ def main():
     #      berdasarkan nama barang yang tidak ada kategori nya. Inti nya
     #      mau cek mana nama barang baru di 42.17 yang belum ada di
     #      folder file deviasi weekly")
+    #      (v3.11.29) RANK UNIK PER GRUP (seri antar grup dikikis —
+    #      user: "untuk rank masih sama, tidak berbeda beda di tiap
+    #      grup nama barang di kolom cek tab deviasi pcs dan deviasi
+    #      gr") + KATEGORI 42.17 NON-STOK DIBUANG DI AWAL (user:
+    #      "kolom kategori 42.17 nya take out kategori: SUPPLIES
+    #      [OTHERS], 00.COST, 21.COST.ASSET, 20.ASSET.ASSET- TIDAK
+    #      BOLEH — buang aja langsung di awal")
     # ==================================================================
-    print("\n== 99. (v3.11.28) Fix rank grup-nol tanpa Rank N · "
-          "Identifikasi manual: default Whitelist + Di Deviasi Weekly ==")
+    print("\n== 99. (v3.11.28+v3.11.29) Fix rank (grup-nol tanpa Rank N · "
+          "seri unik) · Identifikasi manual: whitelist + weekly + buang "
+          "non-stok ==")
     from src.ui.deviasi_view import DeviasiView as _DV99
 
     # ---- (A) RANK: grup Σ|Deviasi| = 0 TANPA prefiks Rank N -------------
@@ -25498,12 +25506,18 @@ def main():
     # dulu method="min" memberi KEDUA grup nol nomor rank yang SAMA
     # (bug "hasil rank sama tiap grup"); kini: tanpa prefiks, hanya
     # ZAYA yang ber-rank (Rank 1).
+    # v3.11.29 — + grup "SERI M" / "SERI N" (SATU resto anomali
+    # PERCIS SAMA seperti RA1 → Σ|Deviasi| grup SAMA antar keduanya)
+    # untuk menguji SERI ANTAR GRUP: rank tetap BERBEDA (2 dan 3 —
+    # dulu method="min" memberi keduanya "2" sama persis).
     _so99 = {"RA1": [20, 20, 6, 20], "RA2": [20, 20, 8, 20],
              "RB1": [20, 20, 20, 20], "RB2": [20, 20, 20, 20],
-             "RC1": [20, 20, 20, 20]}
+             "RC1": [20, 20, 20, 20],
+             "SA1": [20, 20, 6, 20], "SB1": [20, 20, 6, 20]}
     _src99 = []
     for _b99, _rs99 in (("ZAYA", ("RA1", "RA2")), ("NOL A", ("RB1", "RB2")),
-                        ("NOL B", ("RC1",))):
+                        ("NOL B", ("RC1",)),
+                        ("SERI M", ("SA1",)), ("SERI N", ("SB1",))):
         for _r99 in _rs99:
             for _t99, _sv99 in zip((24, 25, 26, 27), _so99[_r99]):
                 for _j99, _v99 in (("1.SO", float(_sv99)),
@@ -25540,7 +25554,7 @@ def main():
           "'Rank N' (rank kosong di _grank_map; dulu method=min "
           "memberi kedua grup nol nomor SAMA) — hanya grup berdeviasi "
           "nyata yang diurutkan 1..N",
-          len(_kids99) == 5
+          len(_kids99) == 7
           and _rk99.get("ZAYA") == {"1"}
           and _rk99.get("NOL A") == {""} and _rk99.get("NOL B") == {""},
           f"rk={_rk99} n={len(_kids99)}")
@@ -25563,6 +25577,15 @@ def main():
           all(_t99.set(k, "CEK").startswith("Rank 1") for k in _z99)
           and all(_dv99._grank_map.get(str(k), "") == "1" for k in _z99),
           f"zaya={[(_t99.set(k, 'CEK')[:24]) for k in _z99]}")
+    check("(v3.11.29) §99-A4 SERI ANTAR GRUP → RANK UNIK 1..N: SERI M & "
+          "SERI N ber-Σ|Deviasi| SAMA persis (satu resto anomali pola "
+          "identik) tapi rank BERBEDA — M='2' · N='3' (tie-break nama "
+          "alfabetis via method=first; dulu method=min: keduanya '2' — "
+          "akar keluhan 'rank masih sama, tidak berbeda beda di tiap "
+          "grup nama barang') + jumlah grup berdeviasi = 3 (ZAYA, M, N)",
+          _rk99.get("SERI M") == {"2"} and _rk99.get("SERI N") == {"3"}
+          and len([b for b, s in _rk99.items() if s != {""}]) == 3,
+          f"rk={_rk99}")
     _dv99.destroy()
     _top99.destroy()
     root.update()
@@ -25573,14 +25596,23 @@ def main():
     # user), SIRUP (kategori 42.17 NON-whitelist — disembunyikan di
     # default), GARAM (kategori 42.17 KOSONG — disembunyikan di
     # default pipeline juga membuangnya).
+    # v3.11.29 — + 4 barang NON-STOK (kategori dibuang DI AWAL —
+    # SUPPLIES [OTHERS] / 00.COST / 21.COST.ASSET / 20.ASSET.ASSET-
+    # TIDAK BOLEH V.2 (drift versi — family match)): tidak tampil di
+    # mode filter APA PUN (termasuk 'Semua') + keluar dari dropdown.
     _k4217_99 = pd.DataFrame({
-        "Nama Barang": ["TEH 99", "KOPI BARU 99", "SIRUP 99", "GARAM 99"],
+        "Nama Barang": ["TEH 99", "KOPI BARU 99", "SIRUP 99", "GARAM 99",
+                        "PERKAKAS 99", "BEBAN 99", "ASET A 99", "ASET B 99"],
         "KATEGORI": ["10.FOOD [RM] - COM V.3 BARU",       # versi-toleran
                      "01.COST - PACKAGING V.2",
                      "02.COST - BAHAN PEMBANTU",           # non-whitelist
-                     ""],
-        "NAMA RESTO": ["R", "R", "R", "R"],
-        "Value": [12.0, 5.0, 7.0, 3.0],
+                     "",
+                     "SUPPLIES [OTHERS]",                    # v3.11.29 buang
+                     "00.COST",                              # v3.11.29 buang
+                     "21.COST.ASSET",                        # v3.11.29 buang
+                     "20.ASSET.ASSET- TIDAK BOLEH V.2"],    # family drift
+        "NAMA RESTO": ["R"] * 8,
+        "Value": [12.0, 5.0, 7.0, 3.0, 9.0, 4.0, 6.0, 8.0],
     })
     _app99rb = app.rekap_barangs
     _app99kdf = app.kategori_4217_df
@@ -25639,6 +25671,22 @@ def main():
               [b for b, _w in _kat99()] == ["GARAM 99", "KOPI BARU 99",
                                             "SIRUP 99", "TEH 99"],
               f"got={[b for b, _w in _kat99()]}")
+        check("(v3.11.29) §99-B5 KATEGORI NON-STOK DIBUANG DI AWAL: "
+              "PERKAKAS (SUPPLIES [OTHERS]) · BEBAN (00.COST) · ASET A "
+              "(21.COST.ASSET) · ASET B (20.ASSET.ASSET- TIDAK BOLEH "
+              "V.2 — family-drift tetap kena) TIDAK tampil di mode "
+              "'Semua' sekalipun + kategorinya keluar dari dropdown "
+              "+ status bar menyebut '4 non-stok dibuang'",
+              [b for b, _w in _kat99()] == ["GARAM 99", "KOPI BARU 99",
+                                            "SIRUP 99", "TEH 99"]
+              and all(x not in list(app.kat_4217_filter_combo["values"])
+                      for x in ("SUPPLIES [OTHERS]", "00.COST",
+                                "21.COST.ASSET",
+                                "20.ASSET.ASSET- TIDAK BOLEH V.2"))
+              and "4 non-stok dibuang" in app.kat_status_var.get(),
+              f"got={[b for b, _w in _kat99()]} "
+              f"vals={list(app.kat_4217_filter_combo['values'])} "
+              f"status={app.kat_status_var.get()!r}")
     finally:
         app.rekap_barangs = _app99rb
         app.kategori_4217_df = _app99kdf

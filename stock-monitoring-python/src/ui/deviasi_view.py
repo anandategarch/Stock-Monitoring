@@ -3013,14 +3013,23 @@ class DeviasiView(tk.Frame):
         # kini diberlakukan di level kelompok: grup Σ|Deviasi| = 0
         # TIDAK diberi prefiks "Rank N" sama sekali (CEK menampilkan
         # label baris saja); rank dihitung 1..N hanya di antara grup
-        # yang benar-benar berdeviasi. Seri antar grup berdeviasi tetap
-        # method="min" (pola 13,13,13,16 ala Excel tetap utuh). Sort
-        # header CEK: baris tanpa rank otomatis terakhir (10**9).
+        # yang benar-benar berdeviasi. Sort header CEK: baris tanpa
+        # rank otomatis terakhir (10**9).
+        # v3.11.29 — SERI ANTAR GRUP DIKIKIS TOTAL (user: "untuk rank
+        # masih sama, tidak berbeda beda di tiap grup nama barang di
+        # kolom cek tab deviasi pcs dan deviasi gr"): data produksi
+        # PCS penuh grup kecil ber-Σ|Deviasi| kecil yang SAMA (1, 2,
+        # 3 … satuan pecahan) → method="min" membuat banyak grup
+        # BERBEDA berbagi satu nomor rank (pola 13,13,13,16) — terlihat
+        # seperti "rank sama tiap grup". Kini method="first": tiap
+        # grup berdeviasi dapat nomor UNIK 1..N; tie-break = urutan
+        # index groupby (nama barang alfabetis — deterministik &
+        # sejalan urutan render tabel yang juga nama-asc).
         _gdv = pd.to_numeric(filtered["Deviasi"],
                              errors="coerce").fillna(0).abs()
         _gtot_s = _gdv.groupby(filtered["Nama Barang"].astype(str)).sum()
         _grank_s = (_gtot_s[_gtot_s > 0]
-                    .rank(method="min", ascending=False))
+                    .rank(method="first", ascending=False))
         filtered = filtered.assign(
             _grank_disp=filtered["Nama Barang"].astype(str).map(_grank_s))
         # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
