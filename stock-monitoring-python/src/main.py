@@ -246,6 +246,19 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         saldo_awal_map=saldo_awal_map,
         bk_map=bk_map,
         stop_event=stop_event)
+    # v3.11.28 — nama barang rekap mentah (deviasi weekly) ternormalisasi
+    # (strip + upper — konvensi _kat_norm app / append1 LANGKAH 5d),
+    # sumber kolom eksak "Di Deviasi Weekly" tab ⚙ Config: membedakan
+    # "belum ada di deviasi weekly" dari "tanpa kategori app" (kategori
+    # app bisa datang dari master DBS utk barang yang belum direkap).
+    _rk = rekap_so_holder.get("df")
+    _rekap_barangs = sorted({
+        str(b).strip().upper()
+        for b in (_rk["Nama Barang"].astype(str).tolist()
+                  if _rk is not None and "Nama Barang" in
+                  getattr(_rk, "columns", []) else [])
+        if b.strip() and b.strip().lower() not in ("nan", "none")
+    })
     audit_result = {"df": audit_df, "kpi": audit_kpi, "desc": audit_desc,
                     # v3.10 — panjang bulan asli utk rentang filter view
                     "period": [int(period[0]), int(period[1])],
@@ -264,7 +277,11 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
                     # value DataFrame ambigu; jalur PipelineStopped dini
                     # → key belum ada → default kosong).
                     "kategori_4217_df": (saldo_sistem_holder.get(
-                        "kategori_df", pd.DataFrame()))}
+                        "kategori_df", pd.DataFrame())),
+                    # v3.11.28 — set nama barang deviasi weekly (lihat
+                    # blok _rekap_barangs di atas). Jalur stop dini →
+                    # holder kosong → list kosong.
+                    "rekap_barangs": _rekap_barangs}
 
     # v3.9.27 — VARIAN KEDUA utk mode "HITUNG BULAN INI SAJA" tab Rekap
     # Selisih IN (user: "pada rekap selisih in bisa mode hitung bulan lalu

@@ -983,7 +983,7 @@ def main():
           len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.27", APP_VERSION == "3.11.27",
+    check("Versi = 3.11.28", APP_VERSION == "3.11.28",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -23231,6 +23231,13 @@ def main():
         app.append1_df = _df92f
         app.kategori_4217_df = _k4217_92
         app._refresh_kategori_manual_card()
+        # v3.11.28 — default filter kini 'Whitelist 42.17' (perilaku
+        # default diuji terpisah di §99-B2); blok §92-F menguji DATA
+        # baris → mode 'Semua' supaya BRG KOSONG 2 (kategori 42.17
+        # kosong — disembunyikan whitelist) tetap tampil.
+        app.kat_4217filter_var.set("Semua")
+        app._kategori_filter_apply()
+        root.update()
 
         def _kat_rows92():
             return [tuple(app.kat_4217_tree.set(k, c)
@@ -23243,15 +23250,16 @@ def main():
               "(BRG NOL disaring — 'hanya ambil yang ada saldo nya aja') + "
               "kolom Kategori 42.17 dari file + Kategori (app) efektif + "
               "saldo (wiring: kategori_4217_df terisi dari run → daftar "
-              "menyegarkan)",
+              "menyegarkan; v3.11.28 urutan prioritas: tanpa kategori "
+              "app dulu → BARU → nama)",
               [r[0] for r in _rows92] ==
-              ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2"]
-              and _rows92[0][1] == "10.FOOD [RM] - COM V.2"
-              and _rows92[1][1] == "01.COST - PACKAGING V.2"
-              and _rows92[2][1] == "-"
-              and _rows92[0][2] == "BAHAN"
-              and _rows92[1][2] == "-" and _rows92[2][2] == "-"
-              and [_rows92[i][3] for i in range(3)] == ["12", "5", "7"],
+              ["BRG KOSONG 1", "BRG KOSONG 2", "BRG ADA"]
+              and _rows92[0][1] == "01.COST - PACKAGING V.2"
+              and _rows92[1][1] == "-"
+              and _rows92[2][1] == "10.FOOD [RM] - COM V.2"
+              and _rows92[0][2] == "-" and _rows92[1][2] == "-"
+              and _rows92[2][2] == "BAHAN"
+              and [_rows92[i][3] for i in range(3)] == ["5", "7", "12"],
               f"got {_rows92}")
         check("(v3.11.8) §92-F2 mapping manual tersimpan: tree kanan "
               "kosong saat config tanpa KategoriManual + status menyebut "
@@ -23307,14 +23315,16 @@ def main():
               f"cari={_cari92} all={len(_kat_rows92())}")
         check("(v3.11.8) §92-F6 hapus mapping (tombol → removes): key "
               "dibuang dari config → barang KEMBALI tanpa kategori app "
-              "(user: 'aku bisa hapus juga atau edit')",
+              "(user: 'aku bisa hapus juga atau edit'; v3.11.28 urutan "
+              "prioritas — blank naik ke atas)",
               app._kategori_manual_save({}, removes=["BRG KOSONG 1"])
               and _json92.loads(
                   _cfg92p.read_text(encoding="utf-8")).get(
                   "KategoriManual") ==
               {"BRG KOSONG 2": "Biaya Packaging - RESTO"}
               and [(r[0], r[2]) for r in _kat_rows92()]
-              == [("BRG ADA", "BAHAN"), ("BRG KOSONG 1", "-"),
+              == [("BRG KOSONG 1", "-"),
+                  ("BRG ADA", "BAHAN"),
                   ("BRG KOSONG 2", "Biaya Packaging - RESTO")],
               "hapus/refresh gagal")
         check("(v3.11.8) §92-F7 edit mapping: nilai BERUBAH untuk key "
@@ -23371,9 +23381,10 @@ def main():
             app._refresh_kategori_manual_card()
         check("(v3.11.8) §92-F10 wiring pasca-run: kategori_4217_df "
               "terisi → daftar 42.17 menyegarkan (fitur pelengkap — "
-              "kegagalan refresh tak menjatuhkan run)",
+              "kegagalan refresh tak menjatuhkan run; v3.11.28 urutan "
+              "prioritas — BRG KOSONG 1 blank di atas)",
               [r[0] for r in _kat_rows92()] ==
-              ["BRG ADA", "BRG KOSONG 1", "BRG KOSONG 2"],
+              ["BRG KOSONG 1", "BRG ADA", "BRG KOSONG 2"],
               "refresh pasca-run gagal")
     finally:
         _appmod92.CONFIG_PATH = _orig_cfg92
@@ -24255,10 +24266,12 @@ def main():
                     for k in app.kat_4217_tree.get_children("")]
 
         _vals94f = list(app.kat_4217_filter_combo["values"])
-        check("(v3.11.9) §94-F4 dropdown Kategori 42.17: nilai = 'Semua' "
-              "+ kategori unik sorted + '(Tanpa Kategori 42.17)' (ada "
+        check("(v3.11.28) §94-F4 dropdown Kategori 42.17: nilai = "
+              "'Whitelist 42.17' (DEFAULT — v3.11.28) + 'Semua' + "
+              "kategori unik sorted + '(Tanpa Kategori 42.17)' (ada "
               "baris kosong)",
-              _vals94f == ["Semua", "01.COST - PACKAGING V.2",
+              _vals94f == ["Whitelist 42.17", "Semua",
+                           "01.COST - PACKAGING V.2",
                            "10.FOOD [RM] - COM V.2",
                            "(Tanpa Kategori 42.17)"],
               f"got {_vals94f}")
@@ -24289,12 +24302,17 @@ def main():
               _kat_brgs94() == ["GULA 94"], f"got {_kat_brgs94()}")
         app._kategori_search_clear()
         root.update()
-        check("(v3.11.9) §94-F9 mereset KEDUANYA (pencarian + "
-              "dropdown → Semua) — semua barang kembali (urut alfabetis)",
-              app.kat_4217filter_var.get() == "Semua"
+        check("(v3.11.28) §94-F9 mereset KEDUANYA (pencarian kosong + "
+              "dropdown → DEFAULT 'Whitelist 42.17') — barang non-"
+              "whitelist/kategori-42.17-kosong disembunyikan; urut "
+              "prioritas: belum-di-weekly → tanpa kategori app → BARU → "
+              "nama (fixture: semua belum weekly; KOPI blank dulu, AYAM "
+              "punya kategori app; GULA kat4217 kosong → tersembunyi)",
+              app.kat_4217filter_var.get() == "Whitelist 42.17"
               and app.kat_search_var.get() == ""
-              and _kat_brgs94() == ["AYAM 94", "GULA 94", "KOPI 94"],
-              f"got {_kat_brgs94()}")
+              and _kat_brgs94() == ["KOPI 94", "AYAM 94"],
+              f"filter={app.kat_4217filter_var.get()!r} "
+              f"got={_kat_brgs94()}")
     finally:
         _appmod92.CONFIG_PATH = _orig_cfg94f
         with _cl92.suppress(Exception):
@@ -25355,7 +25373,10 @@ def main():
     # v3.11.27 — kunci sort CEK = (rank INT, teks) parser prefiks:
     # urutan rank NUMERIK naik (Rank 1 → Rank 2; 'Rank 10' tetap
     # setelah 'Rank 2' — bukan leksikografis).
-    _rk_seq98 = [int(_dv98._grank_map.get(str(k), "0"))
+    # v3.11.28 — grup Σ|Deviasi|=0 (fixture: MG B — RB keduanya dev 0)
+    # TANPA rank → baris tanpa prefiks terakhir (parser 10**9 —
+    # kontrak baru fix "rank sama tiap grup").
+    _rk_seq98 = [int(_dv98._grank_map.get(str(k)) or 10 ** 9)
                  for k in _t98.get_children("")]
     _exp98c = _merge_head_expected(_dv98, _t98, "CEK")
     _vis98c = [k for k in _t98.get_children("")
@@ -25455,6 +25476,187 @@ def main():
     _dv98d.destroy()
     _top98d.destroy()
     root.update()
+
+    # ==================================================================
+    # §99 — (v3.11.28) FIX RANK "SAMA TIAP GRUP" + IDENTIFIKASI MANUAL:
+    #      DEFAULT WHITELIST 42.17 · KOLOM "Di Deviasi Weekly" · SORT
+    #      PRIORITAS (user: "ada bug di rank di mana hasil nya sama
+    #      tiap grup nama barang" + "tab identifikasi manual secara
+    #      default filter kategori nya sama dengan filter kategori
+    #      42.17 jadi waktu buka aku tidak perlu filter lagi. Dan sort
+    #      berdasarkan nama barang yang tidak ada kategori nya. Inti nya
+    #      mau cek mana nama barang baru di 42.17 yang belum ada di
+    #      folder file deviasi weekly")
+    # ==================================================================
+    print("\n== 99. (v3.11.28) Fix rank grup-nol tanpa Rank N · "
+          "Identifikasi manual: default Whitelist + Di Deviasi Weekly ==")
+    from src.ui.deviasi_view import DeviasiView as _DV99
+
+    # ---- (A) RANK: grup Σ|Deviasi| = 0 TANPA prefiks Rank N -------------
+    # fixture: grup "ZAYA" (deviasi nonzero × 2 resto), grup "NOL A" /
+    # "NOL B" (SEMUA baris deviasi 0 — pola produksi 972/972 nol) →
+    # dulu method="min" memberi KEDUA grup nol nomor rank yang SAMA
+    # (bug "hasil rank sama tiap grup"); kini: tanpa prefiks, hanya
+    # ZAYA yang ber-rank (Rank 1).
+    _so99 = {"RA1": [20, 20, 6, 20], "RA2": [20, 20, 8, 20],
+             "RB1": [20, 20, 20, 20], "RB2": [20, 20, 20, 20],
+             "RC1": [20, 20, 20, 20]}
+    _src99 = []
+    for _b99, _rs99 in (("ZAYA", ("RA1", "RA2")), ("NOL A", ("RB1", "RB2")),
+                        ("NOL B", ("RC1",))):
+        for _r99 in _rs99:
+            for _t99, _sv99 in zip((24, 25, 26, 27), _so99[_r99]):
+                for _j99, _v99 in (("1.SO", float(_sv99)),
+                                   ("2.SALDO AKHIR", 20.0),
+                                   ("SALDO AWAL", 20.0),
+                                   ("4.IN", 0.0)):
+                    _src99.append({
+                        "Nama Barang": _b99, "JENIS": _j99,
+                        "NAMA RESTO": _r99, "Tanggal": _t99,
+                        "NILAI": _v99, "SATUAN": "GR",
+                        "AKTIF/NON": "AKTIF",
+                        "KATEGORI": "COM DEVIASI - RESTO",
+                        "SOURCE KIRIMAN": "GUDANG"})
+    _top99 = tk.Toplevel(root)
+    _top99.geometry("1500x800+5+5")
+    _dv99 = _DV99(_top99, satuan_mode="GR")
+    _dv99.pack(fill="both", expand=True)
+    _dv99.data = pd.DataFrame(_src99)
+    _dv99._show_content()
+    _dv99._refresh(sync=True)
+    wait_view(root, _dv99)
+    for _ in range(40):
+        root.update()
+        time.sleep(0.01)
+    _t99 = _dv99.tree
+    _kids99 = list(_t99.get_children(""))
+    _rk99 = {}      # barang -> set rank prefiks
+    for _k99 in _kids99:
+        _b99 = str((_dv99._row_snaps.get(str(_k99)) or {}).get("barang", ""))
+        _rk99.setdefault(_b99, set()).add(
+            _dv99._grank_map.get(str(_k99), ""))
+    check("(v3.11.28) §99-A1 FIX BUG RANK: grup Σ|Deviasi|=0 (NOL A & "
+          "NOL B — pola produksi mayoritas baris nol) TANPA prefiks "
+          "'Rank N' (rank kosong di _grank_map; dulu method=min "
+          "memberi kedua grup nol nomor SAMA) — hanya grup berdeviasi "
+          "nyata yang diurutkan 1..N",
+          len(_kids99) == 5
+          and _rk99.get("ZAYA") == {"1"}
+          and _rk99.get("NOL A") == {""} and _rk99.get("NOL B") == {""},
+          f"rk={_rk99} n={len(_kids99)}")
+    _cek99 = {str(_t99.set(k, "CEK")) for k in _kids99
+              if str((_dv99._row_snaps.get(str(k)) or {})
+                     .get("barang", "")) in ("NOL A", "NOL B")}
+    check("(v3.11.28) §99-A2 kolom CEK baris grup-nol: TANPA segmen "
+          "'Rank N ·' (label baris saja — konvensi sheet asli: deviasi "
+          "0 → rank kosong; paritas v3.9.65 di level kelompok)",
+          _cek99 and all(not c.startswith("Rank ")
+                         and "Rank " not in c.split(" \u00b7 ")[0]
+                         for c in _cek99),
+          f"cek={_cek99}")
+    _z99 = [k for k in _kids99
+            if str((_dv99._row_snaps.get(str(k)) or {})
+                   .get("barang", "")) == "ZAYA"]
+    check("(v3.11.28) §99-A3 grup berdeviasi tetap ber-rank: ZAYA = "
+          "Rank 1 (Σ|Deviasi| terbesar di antara grup berdeviasi — "
+          "renumber hanya di antara mereka)",
+          all(_t99.set(k, "CEK").startswith("Rank 1") for k in _z99)
+          and all(_dv99._grank_map.get(str(k), "") == "1" for k in _z99),
+          f"zaya={[(_t99.set(k, 'CEK')[:24]) for k in _z99]}")
+    _dv99.destroy()
+    _top99.destroy()
+    root.update()
+
+    # ---- (B) IDENTIFIKASI MANUAL: kolom + default whitelist + sort -------
+    # fixture 42.17: 4 barang — TEH (whitelist COM, ADA di weekly),
+    # KOPI BARU (whitelist PACKAGING, BELUM di weekly — target utama
+    # user), SIRUP (kategori 42.17 NON-whitelist — disembunyikan di
+    # default), GARAM (kategori 42.17 KOSONG — disembunyikan di
+    # default pipeline juga membuangnya).
+    _k4217_99 = pd.DataFrame({
+        "Nama Barang": ["TEH 99", "KOPI BARU 99", "SIRUP 99", "GARAM 99"],
+        "KATEGORI": ["10.FOOD [RM] - COM V.3 BARU",       # versi-toleran
+                     "01.COST - PACKAGING V.2",
+                     "02.COST - BAHAN PEMBANTU",           # non-whitelist
+                     ""],
+        "NAMA RESTO": ["R", "R", "R", "R"],
+        "Value": [12.0, 5.0, 7.0, 3.0],
+    })
+    _app99rb = app.rekap_barangs
+    _app99kdf = app.kategori_4217_df
+    _app99adf = app.append1_df
+    _app99rows = app._kat_rows
+    _app99sel = app.kat_4217filter_var.get()
+    try:
+        app.rekap_barangs = {"TEH 99"}      # hanya TEH ada di weekly
+        app.kategori_4217_df = _k4217_99
+        app.append1_df = pd.DataFrame({
+            "Nama Barang": ["TEH 99"], "NAMA RESTO": ["R"],
+            "JENIS": ["1.SO"], "Tanggal": [1], "NILAI": [1.0],
+            "KATEGORI": ["COM DEVIASI - RESTO"],
+        })
+        app._refresh_kategori_manual_card()
+        root.update()
+
+        def _kat99():
+            return [(app.kat_4217_tree.set(k, "barang"),
+                     app.kat_4217_tree.set(k, "weekly"))
+                    for k in app.kat_4217_tree.get_children("")]
+
+        check("(v3.11.28) §99-B1 kolom eksak 'Di Deviasi Weekly': ✓ "
+              "untuk barang yang ada di folder rekap (TEH 99 — dari "
+              "rekap_barangs), ✗ untuk yang belum (KOPI BARU 99); "
+              "match whitelist VERSI-TOLERAN (COM V.3 BARU tetap "
+              "lolos entri V.2 — drift versi tidak menggugurkan)",
+              app.kat_4217_tree.set(
+                  next(iter(app.kat_4217_tree.get_children(""))), "weekly")
+              is not None
+              and dict(_kat99())["TEH 99"] == "✓"
+              and dict(_kat99())["KOPI BARU 99"] == "✗",
+              f"kat={_kat99()}")
+        check("(v3.11.28) §99-B2 DEFAULT filter 'Whitelist 42.17' saat "
+              "refresh (tanpa sentuhan user): SIRUP (non-whitelist) & "
+              "GARAM (kategori 42.17 kosong) DISEMBUNYIKAN — scope "
+              "persis filter pipeline 42.17",
+              app.kat_4217filter_var.get() == "Whitelist 42.17"
+              and [b for b, _w in _kat99()] == ["KOPI BARU 99", "TEH 99"],
+              f"filter={app.kat_4217filter_var.get()!r} "
+              f"got={[b for b, _w in _kat99()]}")
+        check("(v3.11.28) §99-B3 SORT PRIORITAS: BELUM di deviasi "
+              "weekly (✗) paling atas → tanpa kategori app → BARU → "
+              "nama (KOPI BARU 99 ✗-weekly di atas TEH 99 ✓-weekly; "
+              "status bar menyebut jumlah 'belum di deviasi weekly')",
+              [b for b, _w in _kat99()] == ["KOPI BARU 99", "TEH 99"]
+              and "belum di deviasi weekly" in app.kat_status_var.get(),
+              f"got={[b for b, _w in _kat99()]} "
+              f"status={app.kat_status_var.get()!r}")
+        app.kat_4217filter_var.set("Semua")
+        app._kategori_filter_apply()
+        root.update()
+        check("(v3.11.28) §99-B4 mode 'Semua': SEMUA barang tampil, "
+              "sort prioritas tetap (GARAM & SIRUP ✗-weekly dulu, "
+              "disusul TEH ✓; nama alfabetis dalam tiap tingkat)",
+              [b for b, _w in _kat99()] == ["GARAM 99", "KOPI BARU 99",
+                                            "SIRUP 99", "TEH 99"],
+              f"got={[b for b, _w in _kat99()]}")
+    finally:
+        app.rekap_barangs = _app99rb
+        app.kategori_4217_df = _app99kdf
+        app.append1_df = _app99adf
+        app._kat_rows = _app99rows
+        app.kat_4217filter_var.set(_app99sel)
+        app._kategori_filter_apply()
+        root.update()
+
+    # ---- (C) _rekap_barangs wiring: audit_result['rekap_barangs'] -------
+    check("(v3.11.28) §99-C1 pipeline main: audit_result membawa "
+          "'rekap_barangs' (set nama ternormalisasi dari folder "
+          "DEVIASI WEEKLY — full_rekap_so) — sumber kolom eksak, "
+          "BUKAN append1_df (barang 42.17-only juga masuk append1 — "
+          "bisa false-positive 'sudah direkap')",
+          hasattr(app, "rekap_barangs")
+          and isinstance(app.rekap_barangs, set),
+          f"type={type(app.rekap_barangs)}")
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 

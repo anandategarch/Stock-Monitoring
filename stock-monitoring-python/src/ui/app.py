@@ -13,7 +13,9 @@ Struktur jendela (ala aplikasi Waste):
     └────────────────────────────────────────────────────┘
 
 10 tab:
-  1. ⚙️ Config          : RootPath + info config
+  1. ⚙️ Config          : RootPath + info config + Identifikasi Kategori
+                          Manual (default filter Whitelist 42.17; kolom
+                          "Di Deviasi Weekly"; sort belum-direkap dulu)
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
   3. 🧮 Pivot Table     : pivot matrix Excel-like (per resto default;
                           rentang tanggal default tgl 25-31 bulan lalu
@@ -89,6 +91,7 @@ from src.config import app_base_dir as _app_base_dir
 # run_pipeline hanya dilakukan bila masih None.
 run_pipeline = None          # diikat _ensure_pipeline_symbols() (worker)
 PipelineStopped = None       # idem — dipakai except worker + isinstance
+from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST
 from src.pipeline.helpers import (
     read_cache_invalidate,
     read_cache_reset_counters,
@@ -188,7 +191,9 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.27"  # v3.11.27 — REVERT TOTAL MERGE-VERTIKAL + RANK MASUK KOLOM CEK (user: "ternyata jadi jelek ketika merger vertical, sekarang gak perlu merger vertical kembali menjadi awal aja. tapi kolom rank dihapus dan dipindah ke kolom CEK sebagai analisa Rank 1 misal nya"): seluruh era merge-vertikal deviasi GR/PCS (v3.11.15-26 — tiga kolom merge sejajar · statis head-only ala Rincian PO · anotasi ↳ di sel Nama Barang · struktur induk-anak tree #0) DIBONGKAR TOTAL atas penilaian estetika user; tabel kembali DATAR PER-BARIS penuh (paritas file Excel user — 0 merged cell). KOLOM RANK DIHAPUS dari COLUMNS; peringkatnya (rank kelompok Σ|Deviasi| barang, 1 = total terbesar — konvensi v3.11.16) pindah KE DALAM KOLOM CEK sebagai segmen analisa PERTAMA: "Rank 3 · Turun Drastis · Beda dari Resto Lain (Surplus · 18/20 resto lain Defisit)" — baris tanpa label cukup "Rank 3"; konstan per kelompok barang (persis nama barang yang diulang per-baris). Mesin dibubarkan: MERGE_COLS · _static_merge_layout · _show_b · _rank_map (per-baris) · _gcek_map · filter ⧩ Rank · sort kelompok-kontigu · cabang derived _col_values Rank. Sort header CEK kini per-baris kunci (rank INT via regex prefiks, sisa teks tiebreak — 'Rank 2' < 'Rank 10' benar numerik). Segme CEK v3.11.22 "Beda dari Resto Lain" TETAP UTUH (analisa per-baris surplus sendiri+bulanan vs resto lain berlawanan) — berdampingan dgn segmen Rank di satu sel. RAW utuh: _cek_map (teks display per-baris) · _grank_map (rank kelompok) · snapshot (label utama utk Follow Up).
+APP_VERSION = "3.11.28"  # v3.11.28 — FIX RANK (grup Σ|Deviasi|=0 tanpa Rank N) + Identifikasi
+# Manual: default filter Whitelist 42.17 · kolom "Di
+# Deviasi Weekly" · sort belum-direkap dulu
 # (riwayat v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG: head-run per kolom + sticky stateless + _cek_map; SUPERSEDE v3.11.16: run CEK/Rank diganti span kelompok sejajar — data produksi label/rank unik membuat run nyaris tak pernah menempel.)
 # (riwayat v3.11.14 — POLISH TABEL ALA EXCEL: HEADING IKUT ANCHOR KOLOM — audit visual 3×VLM vs referensi GitHub Forest-ttk-theme/tksheet/ttkbootstrap; SEMUA tree memasang anchor heading = anchor kolomnya (angka rata kanan, teks rata kiri, ✓ center) — 15 file/20+ tree + clone menyalin anchor sumber + heading dinamis preserve; KPI cards dievaluasi & tidak ditambahkan (arah user "biar clean"); TES §97.)
 # (riwayat v3.11.12 — TIGA permintaan user: AMBANG COM ±% dr median (spinbox GR/PCS sinkron, persist com_ambang_pct default 50) + transparansi periode→file target auto bulan lalu (bulan_mundur_list) + scroll vertikal tab Config (canvas + router roda).)
@@ -2216,6 +2221,12 @@ class StockMonitorApp:
         # (folder '6. 42.17' — bahan section Identifikasi Kategori Manual
         # tab ⚙️ Config; diisi _on_pipeline_done dari audit_result).
         self.kategori_4217_df = None
+        # v3.11.28 — set nama barang (ternormalisasi) yang terbaca dari
+        # folder DEVIASI WEEKLY (audit_result['rekap_barangs']) utk kolom
+        # eksak "Di Deviasi Weekly" section Identifikasi Kategori Manual
+        # (user: "mau cek mana nama barang baru di 42.17 yang belum ada
+        # di folder file deviasi weekly").
+        self.rekap_barangs: set = set()
         self._kat_rows: list = []      # cache baris utk filter pencarian
         self._log_line_count = 0
         self._run_start_time: float | None = None
@@ -3219,13 +3230,16 @@ class StockMonitorApp:
         tk.Label(kat_inner, text="Identifikasi Kategori Manual", bg=C_CARD,
                  fg=C_HEADER, font=font(12, "bold")).pack(anchor="w")
         tk.Label(kat_inner,
-                 text="Daftar barang bersaldo dari file 42.17 — "
-                      "kategori 42.17 dari kolom file, kategori app dari "
-                      "pipeline + mapping manual. Baris amber belum punya "
+                 text="Daftar barang bersaldo dari file 42.17 — kolom "
+                      "✓/✗ = nama ada/belum di folder deviasi weekly "
+                      "(✗ merah di urutan paling atas, disusul tanpa "
+                      "kategori → BARU → nama). Default filter = "
+                      "Whitelist 42.17 (scope pipeline — sama seperti "
+                      "filter kategori 42.17). Baris amber belum punya "
                       "kategori app: klik 🎯 Identifikasi… untuk mengisi "
-                      "(prioritas tertinggi, diterapkan mulai run pipeline "
-                      "berikutnya). Barang yang baru muncul ditandai BARU; "
-                      "mapping bisa diedit / dihapus kapan saja.",
+                      "(prioritas tertinggi, diterapkan mulai run "
+                      "pipeline berikutnya); mapping bisa diedit / "
+                      "dihapus kapan saja.",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
                  wraplength=860, justify="left").pack(anchor="w", pady=(2, 8))
 
@@ -3257,7 +3271,7 @@ class StockMonitorApp:
         # Kategori 42.17)' — AND dgn pencarian nama (keduanya bisa aktif
         # bersamaan); nilai disegarkan tiap rows baru (lihat
         # _kat_4217_refresh_filter_values); tombol ✕ mereset KEDUANYA.
-        self.kat_4217filter_var = tk.StringVar(value=self._KAT_4217_FILTER_ALL)
+        self.kat_4217filter_var = tk.StringVar(value=self._KAT_4217_FILTER_WL)
         self.kat_4217_filter_combo = ttk.Combobox(
             kat_search, textvariable=self.kat_4217filter_var,
             state="readonly", width=26)
@@ -3269,7 +3283,8 @@ class StockMonitorApp:
                     command=self._kategori_search_clear).pack(
             side="left", padx=(6, 0))
         self.kat_4217_tree = make_tree(
-            kat_left, ["barang", "kat4217", "katapp", "saldo", "status"])
+            kat_left, ["barang", "kat4217", "katapp", "weekly",
+                       "saldo", "status"])
         self.kat_4217_tree.column("barang", width=250, minwidth=160,
                                   anchor="w")
         self.kat_4217_tree.heading("barang", text="Nama Barang",
@@ -3282,6 +3297,14 @@ class StockMonitorApp:
                                   anchor="w")
         self.kat_4217_tree.heading("katapp", text="Kategori (app)",
                                    anchor="w")
+        # v3.11.28 — kolom eksak "Di Deviasi Weekly" (user: "inti nya
+        # mau cek mana nama barang baru di 42.17 yang belum ada di
+        # folder file deviasi weekly") — ✓ = nama terbaca di folder
+        # rekap (1. DEVIASI WEEKLY + bulan lalu); ✗ = belum direkap.
+        self.kat_4217_tree.column("weekly", width=84, minwidth=60,
+                                  anchor="center")
+        self.kat_4217_tree.heading("weekly", text="Di Deviasi Weekly",
+                                   anchor="center")
         self.kat_4217_tree.column("saldo", width=70, minwidth=50,
                                   anchor="e")
         self.kat_4217_tree.heading("saldo", text="Saldo", anchor="e")
@@ -3292,8 +3315,12 @@ class StockMonitorApp:
         self.kat_4217_tree.configure(height=10)
         # v3.11.8 — pewarnaan baris: blank (tanpa kategori app — perlu
         # identifikasi, amber) & BARU (pertama kali muncul, merah).
+        # v3.11.28 — belum-di-deviasi-weekly (✗) ikut merah (sinyal
+        # utama user, selevel BARU).
         self.kat_4217_tree.tag_configure("kat_baru", foreground="#b91c1c")
         self.kat_4217_tree.tag_configure("kat_blank", foreground="#b45309")
+        self.kat_4217_tree.tag_configure("kat_noweekly",
+                                        foreground="#b91c1c")
         kat_lbtn = tk.Frame(kat_left, bg=C_CARD)
         kat_lbtn.pack(fill="x", pady=(6, 0))
         AccentButton(kat_lbtn, text="🎯 Identifikasi…",
@@ -3604,6 +3631,15 @@ class StockMonitorApp:
     # kategori 42.17 kosong (sumber 42.17 — beda dari filter KATEGORI
     # data run di tab 📦/🧩).
     _KAT_4217_FILTER_ALL = "Semua"
+    # v3.11.28 — pseudo-filer DEFAULT "Whitelist 42.17" (user: "tab
+    # identifikasi manual secara default filter kategori nya sama
+    # dengan filter kategori 42.17 jadi waktu buka aku tidak perlu
+    # filter lagi"): tampil hanya barang ber-kategori 42.17 yang
+    # lolos whitelist pipeline (config "KategoriBarang4217" — match
+    # versi-toleran _kat_4217_whitelist_match). Barang ber-kategori
+    # 42.17 KOSONG disembunyikan di mode ini (pipeline juga membuang
+    # mereka — whitelist = scope filter).
+    _KAT_4217_FILTER_WL = "Whitelist 42.17"
     _KAT_4217_FILTER_BLANK = "(Tanpa Kategori 42.17)"
 
     # v3.11.9 — default folder auto file deviasi bulan lalu (config.json
@@ -3687,6 +3723,63 @@ class StockMonitorApp:
         5d / _kategori_blank_items lama)."""
         return str(s).strip().upper()
 
+    # v3.11.28 — regex versi-toleran IDENTIK fn_4217._VERSI_UJUNG
+    # (token versi ujung 'V.2'/'V.3 BARU' diabaikan saat match family).
+    _KAT_VERSI_UJUNG = re.compile(r"V\.?\d+(BARU)?$")
+
+    @classmethod
+    def _kat_4217_whitelist_match(cls, kat4217: str) -> bool:
+        """v3.11.28 — kategori 42.17 lolos whitelist pipeline? Mirror
+        fn_4217._kat_match (versi-toleran): (a) prefix persis ATAU
+        (b) prefix FAMILY (token versi ujung dibuang kedua sisi) —
+        whitelist config tidak "kedaluwarsa" saat Accurate menaikkan
+        versi kategori ('V.2' vs 'V.3 BARU' vs tanpa versi). Whitelist
+        dibaca dari config.json key "KategoriBarang4217" (fallback
+        default pipeline); kegagalan baca → match longgar = prefix
+        keluarga default (defensive, kartu tetap berfungsi)."""
+        wl = cls._kat_4217_whitelist()
+        if not kat4217 or not wl:
+            return False
+        k = re.sub(r"\s+", "", str(kat4217).upper())
+        for w in wl:
+            wn = re.sub(r"\s+", "", str(w).upper())
+            if k.startswith(wn):
+                return True
+            kf = cls._KAT_VERSI_UJUNG.sub("", k)
+            wf = cls._KAT_VERSI_UJUNG.sub("", wn)
+            if kf.startswith(wf):
+                return True
+        return False
+
+    @classmethod
+    def _kat_4217_whitelist(cls) -> list:
+        """v3.11.28 — daftar whitelist 42.17 dari config.json (key
+        "KategoriBarang4217"; type salah / key absen → default
+        pipeline DEFAULT_KATEGORI_WHITELIST — mirror validasi Config).
+        Cache per-file (mtime) supaya dropdown tidak membaca ulang
+        file tiap baris."""
+        try:
+            p = Path(CONFIG_PATH)
+            mtime = p.stat().st_mtime if p.exists() else -1.0
+            if (getattr(cls, "_KAT_WL_CACHE", None) is not None
+                    and cls._KAT_WL_CACHE[0] == mtime):
+                return cls._KAT_WL_CACHE[1]
+            wl = None
+            if p.exists():
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    raw = data.get("KategoriBarang4217")
+                    if isinstance(raw, list) and raw:
+                        wl = [str(x) for x in raw]
+                except (OSError, ValueError):
+                    wl = None       # JSON rusak / baca gagal → default
+            if wl is None:
+                wl = list(DEFAULT_KATEGORI_WHITELIST)
+            cls._KAT_WL_CACHE = (mtime, wl)
+            return wl
+        except (OSError, ValueError):
+            return []
+
     def _kategori_4217_rows(self, seen) -> list:
         """v3.11.8 — baris daftar barang bersaldo 42.17 (folder
         '6. 42.17'; user: "sumber nya dari 42.17 ... hanya ambil yang ada
@@ -3697,7 +3790,16 @@ class StockMonitorApp:
         'Kategori Barang' file (first non-blank), kategori app EFEKTIF =
         mapping manual (prioritas tertinggi — LANGKAH 5d) atau kategori
         data run (rekap mentah 5c / master DBS 5), baru = nama belum
-        pernah tampil (seen). Return list dict utk tree + status."""
+        pernah tampil (seen), inweekly = nama ADA di folder deviasi
+        weekly (rekap_barangs — v3.11.28). Return list dict utk tree +
+        status.
+
+        v3.11.28 — SORT PRIORITAS (user: "sort berdasarkan nama barang
+        yang tidak ada kategori nya. Inti nya mau cek mana nama barang
+        baru di 42.17 yang belum ada di folder file deviasi weekly"):
+        (1) BELUM ada di deviasi weekly (inweekly=False) paling atas
+        → (2) tanpa kategori app (blank) → (3) BARU → (4) nama
+        alfabetis."""
         df = getattr(self, "kategori_4217_df", None)
         if df is None or getattr(df, "empty", True) \
                 or not {"Nama Barang", "Value"} <= set(
@@ -3746,6 +3848,7 @@ class StockMonitorApp:
         _grp = d.groupby("Nama Barang")["Value"]
         _saldo = _grp.sum()
         _has = _grp.agg(lambda s: bool((s != 0).any()))
+        _rekap = getattr(self, "rekap_barangs", None) or set()
         rows = []
         for nama in sorted(_saldo.index):
             if not bool(_has.loc[nama]):
@@ -3760,7 +3863,13 @@ class StockMonitorApp:
                 "baru": bool(seen is not None
                              and self._kat_norm(nama) not in seen),
                 "blank": not efektif,
+                "inweekly": self._kat_norm(nama) in _rekap,
             })
+        # v3.11.28 — sort prioritas: ✗ belum di deviasi weekly → tanpa
+        # kategori app → BARU → nama alfabetis (baris paling atas =
+        # persis target user: barang baru 42.17 yang belum direkap).
+        rows.sort(key=lambda r: (r["inweekly"], not r["blank"],
+                                 not r["baru"], r["barang"]))
         return rows
 
     @staticmethod
@@ -3782,8 +3891,10 @@ class StockMonitorApp:
         dengan FILTER aktif (user: "ada filter juga biar aku enak cari nama
         barang nya"): PENCARIAN substring case-insensitive atas nama barang
         + kategori 42.17 + kategori app — DAN DROPDOWN KATEGORI 42.17
-        (v3.11.9: Semua / kategori unik / (Tanpa Kategori 42.17); AND
-        dgn pencarian — keduanya bisa aktif bersamaan)."""
+        (v3.11.9: Semua / kategori unik / (Tanpa Kategori 42.17);
+        v3.11.28: + 'Whitelist 42.17' DEFAULT — match versi-toleran,
+        kategori 42.17 kosong disembunyikan; AND dgn pencarian —
+        keduanya bisa aktif bersamaan)."""
         if not hasattr(self, "kat_4217_tree"):
             return
         tree = self.kat_4217_tree
@@ -3804,35 +3915,49 @@ class StockMonitorApp:
             if _f42 == self._KAT_4217_FILTER_BLANK:
                 if r["kat4217"]:
                     continue
+            elif _f42 == self._KAT_4217_FILTER_WL:
+                # v3.11.28 — DEFAULT whitelist: hanya barang ber-kategori
+                # 42.17 yang lolos whitelist pipeline (match versi-
+                # toleran); kategori 42.17 KOSONG disembunyikan (pipeline
+                # juga membuang mereka — scope whitelist).
+                if not r["kat4217"] \
+                        or not self._kat_4217_whitelist_match(r["kat4217"]):
+                    continue
             elif _f42 != self._KAT_4217_FILTER_ALL \
                     and r["kat4217"] != _f42:
                 continue
             tags = []
             if r["baru"]:
                 tags.append("kat_baru")
+            elif not r["inweekly"]:
+                tags.append("kat_noweekly")
             elif r["blank"]:
                 tags.append("kat_blank")
             tree.insert(
                 "", "end",
                 values=(r["barang"], r["kat4217"] or "-",
-                        r["katapp"] or "-", self._kat_fmt_saldo(r["saldo"]),
+                        r["katapp"] or "-",
+                        # v3.11.28 — kolom eksak deviasi weekly (✓/✗)
+                        ("✓" if r["inweekly"] else "✗"),
+                        self._kat_fmt_saldo(r["saldo"]),
                         "BARU" if r["baru"] else ""),
                 tags=tuple(tags))
             shown += 1
         if rows and not shown:
             tree.insert("", "end", values=(
                 f"(tidak ada barang cocok filter '{q or _f42}')", "", "",
-                "", ""))
+                "", "", ""))
 
     def _kat_4217_refresh_filter_values(self, rows: list):
         """v3.11.9 — segarkan nilai combobox filter kategori 42.17 dari
-        rows: 'Semua' + kategori unik (sorted) + '(Tanpa Kategori
-        42.17)' bila ada baris kosong. Seleksi aktif DIPERTAHANKAN bila
-        masih valid di daftar baru (stale → kembali 'Semua')."""
+        rows: 'Whitelist 42.17' (DEFAULT — v3.11.28) + 'Semua' +
+        kategori unik (sorted) + '(Tanpa Kategori 42.17)' bila ada
+        baris kosong. Seleksi aktif DIPERTAHANKAN bila masih valid di
+        daftar baru (stale → kembali default whitelist)."""
         combo = getattr(self, "kat_4217_filter_combo", None)
         if combo is None:
             return
-        vals = [self._KAT_4217_FILTER_ALL]
+        vals = [self._KAT_4217_FILTER_WL, self._KAT_4217_FILTER_ALL]
         vals.extend(sorted({r["kat4217"] for r in rows if r["kat4217"]}))
         if any(not r["kat4217"] for r in rows):
             vals.append(self._KAT_4217_FILTER_BLANK)
@@ -3841,7 +3966,7 @@ class StockMonitorApp:
                 combo["values"] = vals
             cur = self.kat_4217filter_var.get()
             if cur not in vals:
-                self.kat_4217filter_var.set(self._KAT_4217_FILTER_ALL)
+                self.kat_4217filter_var.set(self._KAT_4217_FILTER_WL)
         except tk.TclError:
             pass     # widget mati → skip senyap
 
@@ -3853,12 +3978,13 @@ class StockMonitorApp:
 
     def _kategori_search_clear(self):
         """Tombol ✕ — kosongkan kriteria pencarian + filter kategori
-        42.17 (v3.11.9: mereset KEDUANYA — trace pencarian memanggil
-        _kategori_filter_apply sendiri; dropdown perlu reset eksplisit)."""
+        42.17 kembali DEFAULT 'Whitelist 42.17' (v3.11.28 — dulu
+        'Semua'; trace pencarian memanggil _kategori_filter_apply
+        sendiri; dropdown perlu reset eksplisit)."""
         if getattr(self, "kat_search_var", None) is not None:
             self.kat_search_var.set("")
         if getattr(self, "kat_4217filter_var", None) is not None:
-            self.kat_4217filter_var.set(self._KAT_4217_FILTER_ALL)
+            self.kat_4217filter_var.set(self._KAT_4217_FILTER_WL)
         self._kategori_filter_apply()
 
     def _kategori_values(self) -> list:
@@ -3908,15 +4034,19 @@ class StockMonitorApp:
             self.kat_map_tree.insert("", "end", values=(k, km[k]))
         if not self._kategori_has_data():
             self.kat_4217_tree.delete(*self.kat_4217_tree.get_children(""))
-            _ph92 = ("(belum ada data 42.17 — jalankan MULAI PROSES)")
+            _ph92 = "(belum ada data 42.17 — jalankan MULAI PROSES)"
             self.kat_4217_tree.insert(
                 "", "end",
-                values=(_ph92, "", "", "", ""))
+                values=(_ph92, "", "", "", "", ""))
         n_blank = sum(1 for r in rows if r["blank"])
         n_baru = sum(1 for r in rows if r["baru"])
+        # v3.11.28 — jumlah BELUM ada di deviasi weekly (sinyal utama
+        # user: barang baru 42.17 yang belum direkap).
+        n_nowk = sum(1 for r in rows if not r["inweekly"])
         self.kat_status_var.set(
-            f"{len(rows)} barang bersaldo 42.17 · {n_blank} tanpa "
-            f"kategori (perlu identifikasi) · {n_baru} BARU · {len(km)} "
+            f"{len(rows)} barang bersaldo 42.17 · {n_nowk} belum di "
+            f"deviasi weekly · {n_blank} tanpa kategori (perlu "
+            f"identifikasi) · {n_baru} BARU · {len(km)} "
             "mapping manual tersimpan — mapping diterapkan mulai run "
             "pipeline berikutnya (F5 / MULAI PROSES).")
 
@@ -5143,6 +5273,10 @@ class StockMonitorApp:
         # refresh card di bawah.
         self.kategori_4217_df = ((audit_result or {}).get("kategori_4217_df")
                                  if audit_result else None)
+        # v3.11.28 — set nama barang deviasi weekly (kolom "Di Deviasi
+        # Weekly" — SEBELUM refresh card di bawah).
+        self.rekap_barangs = set(
+            (audit_result or {}).get("rekap_barangs") or [])
         # v3.11.7 — refresh daftar barang tanpa kategori (tab ⚙️ Config —
         # fitur pelengkap: kegagalan refresh tak boleh menjatuhkan run,
         # pola _load_view). v3.11.8 — daftar bersumber 42.17.

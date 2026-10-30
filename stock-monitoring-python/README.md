@@ -3,7 +3,7 @@
 Porting **Power Query M** (1.009 baris, 30 query) untuk monitoring stok resto ke Python.
 Pipeline membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI Tkinter — tanpa output Excel.
 
-> **Versi terkini: v3.11.27** — riwayat: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.11.28** — riwayat: [CHANGELOG.md](CHANGELOG.md)
 
 ## Persyaratan
 
@@ -29,7 +29,7 @@ Pipeline membaca export Accurate Online, menggabungkan, memutar (pivot), menghit
 | Tab | Isi |
 |---|---|
 | 🧮 Pivot Table | Matrix per Resto/Tanggal (rentang default 25•–31• bulan lalu s/d 31 berjalan; kategori default "Deviasi") |
-| 📦 Deviasi GR / 🧩 Deviasi PCS | Analisa deviasi per barang×resto — kolom **CEK** (analisa otomatis, termasuk Rank kelompok & "Beda dari Resto Lain"), minus merah per-cell, popup detail per tanggal, kolom Nominal (Harga 41.09 × Qty Deviasi) |
+| 📦 Deviasi GR / 🧩 Deviasi PCS | Analisa deviasi per barang×resto — kolom **CEK** (analisa otomatis: Rank kelompok *hanya untuk grup ber-deviasi* & "Beda dari Resto Lain"), minus merah per-cell, popup detail per tanggal, kolom Nominal (Harga 41.09 × Qty Deviasi) |
 | 📤 Rekap Selisih IN | IN (Accurate) vs Barang Masuk + kolom SO + Hasil Audit + PO Menunggu; mode hitung Bulan Ini / Lalu+Ini; export per resto |
 | 📋 Laporan Deviasi | 3 mode — Komparasi File Deviasi · Anomali COM (H) · Nominal (H) |
 | 💰 Nominal Deviasi | Σ Nominal Deviasi per resto + perbandingan bulan lalu + baris TOTAL |

@@ -9,6 +9,8 @@ tampil DI DALAM kolom CEK sebagai segmen analisa PERTAMA: "Rank 3 · Turun
 Drastis · Beda dari Resto Lain (Surplus · 18/20 resto lain Defisit)"; tanpa
 label cukup "Rank 3". Rank = peringkat Σ|Deviasi| kelompok barang di antara
 barang yang tampil (1 = total terbesar; method=min; per frame terfilter).
+Grup ber-Σ|Deviasi| = 0 TANPA rank (konvensi sheet asli: deviasi 0 → rank
+kosong) — hanya grup berdeviasi nyata yang diurutkan 1..N.
 
 KOLOM CEK — SEMUA label anomali terpicu digabung ' · ' (urutan = prioritas):
   Promix 04 → RI Balancing → Kosong/Non Aktif → Beda Tanggal → Hitung Manual →
@@ -3002,10 +3004,23 @@ class DeviasiView(tk.Frame):
         # yang memakainya. Filter ⧩ Rank + cabang derived _col_values
         # + _gcek_disp (gabungan label kelompok) juga dibongkar — CEK
         # kini murni PER-BARIS (label baris + prefiks Rank N).
+        # v3.11.28 — FIX BUG "RANK SAMA TIAP GRUP NAMA BARANG" (user:
+        # "ada bug di rank di mana hasil nya sama tiap grup nama
+        # barang"): di data produksi mayoritas grup ber-Σ|Deviasi| = 0
+        # (972/972 baris nol di sheet asli) → method="min" membuat
+        # SEMUA grup nol berbagi satu nomor rank besar yang sama.
+        # Konvensi sheet asli (v3.9.65): deviasi 0 → rank KOSONG —
+        # kini diberlakukan di level kelompok: grup Σ|Deviasi| = 0
+        # TIDAK diberi prefiks "Rank N" sama sekali (CEK menampilkan
+        # label baris saja); rank dihitung 1..N hanya di antara grup
+        # yang benar-benar berdeviasi. Seri antar grup berdeviasi tetap
+        # method="min" (pola 13,13,13,16 ala Excel tetap utuh). Sort
+        # header CEK: baris tanpa rank otomatis terakhir (10**9).
         _gdv = pd.to_numeric(filtered["Deviasi"],
                              errors="coerce").fillna(0).abs()
         _gtot_s = _gdv.groupby(filtered["Nama Barang"].astype(str)).sum()
-        _grank_s = _gtot_s.rank(method="min", ascending=False)
+        _grank_s = (_gtot_s[_gtot_s > 0]
+                    .rank(method="min", ascending=False))
         filtered = filtered.assign(
             _grank_disp=filtered["Nama Barang"].astype(str).map(_grank_s))
         # v3.9.51 — pivot basi tanpa kolom baru (teoretis — cache direset
