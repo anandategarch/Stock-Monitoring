@@ -1710,14 +1710,11 @@ def run_test():
     dv.ensure_refreshed()
     wait_view(root, dv)
     _bp_iid = None
-    # v3.11.26 — struktur induk-anak: nama barang = text INDUK kelompok
-    # (#0); baris data = anak.
-    for _g in dv.tree.get_children(""):
-        for _iid in dv.tree.get_children(_g):
-            if str(dv.tree.item(_g, "text") or "") == "BUMBU PASTA KUAH":
-                _bp_iid = _iid
-                break
-        if _bp_iid:
+    # v3.11.27 — tabel DATAR per-baris (merge-vertikal dibubarkan):
+    # nama barang = kolom per-baris (OPSI A v3.11.19 tetap).
+    for _iid in dv.tree.get_children(""):
+        if str(dv.tree.set(_iid, "Nama Barang")) == "BUMBU PASTA KUAH":
+            _bp_iid = _iid
             break
     assert _bp_iid is not None, (
         "v3.9.32: barang 42.17-only (BUMBU PASTA KUAH) harus tampil di "
@@ -1815,12 +1812,10 @@ def run_test():
     # BUMBU PASTA KUAH = satuan GR (tampil di tab GR — GULA satuan KG
     # hanya tampil di tab PCS); DEV (84) × harga 12/GR = (1.008)
     _nom34 = None
-    # v3.11.26 — nama barang = text induk kelompok (#0); baris = anak.
-    for _g34 in dv34.tree.get_children(""):
-        if str(dv34.tree.item(_g34, "text") or "") == "BUMBU PASTA KUAH":
-            for _i34 in dv34.tree.get_children(_g34):
-                _nom34 = str(dv34.tree.set(_i34, "Nominal"))
-                break
+    # v3.11.27 — tabel DATAR per-baris (merge-vertikal dibubarkan).
+    for _i34 in dv34.tree.get_children(""):
+        if str(dv34.tree.set(_i34, "Nama Barang")) == "BUMBU PASTA KUAH":
+            _nom34 = str(dv34.tree.set(_i34, "Nominal"))
             break
     assert _nom34 == "(Rp 1.008)", (
         f"v3.9.51: Deviasi GR kolom Nominal BUMBU = 12/GR × DEV (84) "
