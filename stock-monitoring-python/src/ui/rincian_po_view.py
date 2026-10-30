@@ -1,67 +1,23 @@
 """
-rincian_po_view.py — Pivot table view untuk Rincian PO (v3.2 → v3.9).
+rincian_po_view.py — Tab 🛒 Rincian PO: pivot table PO (induk Nomor #
+→ anak item), mirror pivotTable sample Excel.
 
-v3.9.37 (user: "Keterangan PO merger Vertical dengan Pemasok sama
-seperti Status Pesanan Juga dan kolom Keterangan PO hapus karna sudah
-termerger. Tanggal Jam pembuatan Merger vertical dengan Nomor #"):
-- KOLOM "Keterangan PO" DIHAPUS — nilai keterangan kini tampil di
-  KOLOM PEMASOK sebagai anotasi "↳ Keterangan" PERSIS pola Status
-  Pesanan v3.9.35: anotasi berjalan vertikal di baris anak (status
-  di anak pertama, keterangan di anak kedua; PO ber-anak lebih
-  sedikit dari anotasi → anotasi sisanya digabung ke sel anak
-  TERAKHIR dipisah " · "), sekali per PO, teks redup (tag per-cell
-  po_status_note).
-- KOLOM "Tgl/Jam Pembuatan" DIHAPUS — nilai tgl/jam kini tampil di
-  KOLOM NOMOR # (#0) pada baris anak PERTAMA tiap PO sebagai
-  "↳ 02 Juni 2024 09:00" (merge-vertical di bawah nomor PO; teks
-  redup tag per-cell yang sama).
-- Skema tabel 8 → 6 kolom nilai: Tanggal · Nama Resto · Pemasok ·
-  Nama Barang · Satuan · Kuantitas (info PO tetap lengkap — cuma
-  lebih ringkas lebar-nya).
-
-v3.9.35 (user: "kolom status pesanan bisa gak ditaruh di bawah kolom
-pemasok? seperti merge vertical gitu. Sama kaya kolom nama barang
-yang ditampilkan secara vertical. Format tanggal pakai 01 Oktober 2026
-aja format panjang"):
-- KOLOM "Status Pesanan" DIHAPUS dari tabel — nilai status kini tampil
-  di KOLOM PEMASOK pada baris anak PERTAMA tiap PO sebagai "↳ Status"
-  (merge-vertical look: tepat di bawah nama pemasok, nilai sekali per
-  PO, baris anak lain kosong — persis pola kolom Nama Barang yang
-  nilai-nya berjalan vertikal). Teks status dibuat redup via tag
-  per-cell (po_status_note) supaya terbaca sebagai anotasi PO, bukan
-  data pemasok. Filter status tetap tersedia di kartu Filter (combo
-  STATUS PESANAN).
-- TANGGAL format panjang Indonesia: "02 Juni 2024" (kolom Tanggal) dan
-  "02 Juni 2024 09:00" (anotasi ↳ kolom Nomor # sejak v3.9.37) — nama
-  bulan Indonesia.
-
-v3.9.20 (deep audit 34-c/fix 35-c1): _resto_name pd.NA/float-safe
-(1370.0 → '1370') + _fmt_date/_fmt_datetime NaT-safe (tab tidak mati) +
-load_data reset combo Cabang/Status (filter basi) + literal
-None/nan/NaT dibuang dari daftar nilai popup filter.
-
-v3.9 — LAYOUT DISEDERHANAKAN (permintaan user: "tampilan rincian PO
-apakah bisa lebih dipermudah lagi biar mudah dibaca?"):
-- Baris INDUK (teal) kini memuat SEMUA info PO SEKALI: Nomor #, Tanggal,
-  Pemasok, Status Pesanan, Keterangan PO, jumlah item & total kuantitas.
-- Baris ANAK (putih) hanya berisi ITEM: Nama Barang, Satuan, Kuantitas —
-  dulu setiap baris anak mengulang Tanggal/Pemasok/Tgl-Jam yang sama
-  (tabel terasa penuh & sulit dipindai).
-- Kolom "Tgl/Jam Pembuatan" (metadata PO, jarang dipakai) dipindah ke
-  baris induk dan DISSEMBUNYIKAN default — tampilkan lewat tombol
-  ◱ Kolom / klik kanan judul kolom.
-- Tombol ⤢ Perbesar Tabel + ⛶ Layar Penuh (ala Waste).
-
-Struktur mirror pivotTable di sample Excel (logika identik versi lama):
-- Page filters: Cabang PO, Status Pesanan Pembelian
-- Tree rows: Nomor# (parent) → detail children
-- Value: Sum of Kuantitas per row + grand total row
-
-v3.9.19 — KOLOM NAMA RESTO (permintaan user: "tambahkan kolom nama
-resto di rincian PO"): diambil dari kolom Cabang PO ("1370.MLGPAR" →
-"MLGPAR" — kode resto sesuai kolom Resto tab lain; tanpa titik →
-nilai apa adanya). Diisi pada BARIS INDUK (info level-PO — konsisten
-layout v3.9: anak hanya item); ikut filter header ⧩.
+- Page filters: Cabang PO · Status Pesanan Pembelian; value = Sum of
+  Kuantitas + baris grand total.
+- Baris INDUK (tebal) memuat info PO sekali: Nomor # · Tanggal ·
+  Pemasok · jumlah item & total kuantitas; baris ANAK hanya item
+  (Nama Barang · Satuan · Kuantitas).
+- Skema 6 kolom nilai: Tanggal · Nama Resto · Pemasok · Nama Barang ·
+  Satuan · Kuantitas.
+- Status Pesanan & Keterangan PO = ANOTASI redup "↳ …" di kolom
+  Pemasok — status di anak pertama, keterangan di anak kedua; anotasi
+  sisa digabung ke sel anak TERAKHIR dipisah " · " (sekali per PO, tag
+  per-cell po_status_note).
+- Tgl/Jam Pembuatan = anotasi "↳ 02 Juni 2024 09:00" di kolom Nomor #
+  baris anak pertama.
+- Tanggal format panjang Indonesia; nama resto dari Cabang PO
+  ("1370.MLGPAR" → "MLGPAR"), diisi baris induk, ikut filter ⧩.
+- ⤢ Perbesar Tabel + ⛶ Layar Penuh.
 """
 
 import tkinter as tk

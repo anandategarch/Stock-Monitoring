@@ -1,132 +1,27 @@
 """
-fn_audit.py — Audit Rekonsiliasi: engine VBA + input dari DATA APP (v3.6).
+fn_audit.py — Audit rekonsiliasi BM resto vs penerimaan sistem (port engine VBA).
 
-v3.11.5 — KEMBALI KE RUMUS LAMA "BM REKAP" (user: "kembali ke rumus lama"
-— jawaban atas laporan opsi v3.11.4 pasca-verifikasi identitas
-Selisih IN + COM + BK = 0 di basis ΔSO): slot engine "Qty SO Harian"
-kembali berisi BM REKAP persis pra-v3.10 →
+build_audit_input — 10 kolom kanonik dari data app: Hasil SO ← rekap 'SO';
+Qty SO Harian ← rekap 'BARANG MASUK' (BM); Qty SJ ← IN 42.05; Qty RI ← 32.24
+(keduanya + varian Bulan Lalu); Qty Pembelian ← IN 99.01. Baris = union
+tanggal ber-aktivitas, urut kronologis per (Resto, Item): bulan lalu 25•→31•
+dulu lalu 1..31 (pembanding SO tgl 1 = SO terakhir bulan lalu).
 
-    Selisih Harian = BM Rekap − Penerimaan Sistem   (BM − IN)
+build_audit_rekap — port 1:1 macro VBA BuatLaporanDeviasiSampel (grup kontigu
+Resto+Item): Penerimaan Sistem = SJ + RI + Pembelian; Selisih Harian = BM −
+Penerimaan (rumus "BM − IN"). Status: VALID (Sistem Masuk) = SO naik + BM=0 +
+IN>0 (input di-omit); OK (Matching) = selisih 0 & saldo 0; saldo kembali
+±0.0001 → CUT-OFF RESOLVED / OK (Dalam Cut-off); sisa gantung akhir grup → DEVIASI MURNI.
 
-SWAP SLOT v3.10 DIHAPUS (engine kini menerima input build_audit_input
-apa adanya — tanpa rename output; "Qty SO Harian" = BM hadir kembali).
-Aturan VALID (SO Naik + BM=0 + IN>0 → "VALID (Sistem Masuk)") AKTIF
-LAGI (inert hanya di basis ΔSO). Fitur v3.10 LAIN TETAP UTUH (bukan
-bagian "rumus"): kolom "Qty SO Kemarin"/"Qty Delta SO" (display + bahan
-COM + analisa), kolom "Qty COM" = SO(t−1) + IN − BK − SO(t), kolom
-"Qty BM Rekap" (salinan display BM — kini identik isi "Qty SO Harian"),
-panjang bulan asli, KPI com_minus.
-
-v3.10 — BASIS SELISIH BARU: "SELISIH DENGAN SO KEMARIN" (user: "ubah
-logika selisih in dengan selisih dengan so kemarin" + "tambahkan kolom
-COm di rekap selisih in"). Input engine slot "Qty SO Harian" diisi
-ΔSO = Hasil SO(t) − SO(t−1) (bukan lagi BM rekap manual) →
-
-    Selisih Harian = (SO(t) − SO(t−1)) − Penerimaan Sistem
-
-positif = stok fisik naik LEBIH BANYAK dari yang dicatat sistem (barang
-diterima tapi RI belum diinput); negatif = IN sistem masuk tapi stok
-fisik tidak bertambah. BM rekap (input resto — MASIH HIDUP, terverifikasi
-user; sebelumnya salah diklaim mati dari snapshot workbook saja) tetap
-dibawa sebagai kolom display "Qty BM Rekap" (TIDAK lagi jadi basis
-selisih/saldo/status).
-
-Basis "SO kemarin": pengamatan SO sebelumnya per pasangan (baris audit
-sudah kronologis; SO bolong → pakai SO terakhir yang TERAMATI — ffill):
-- Tanggal 1 → SALDO AWAL 42.17 prioritas (mirror pivot _compute_com
-  v3.9.5 — angka COM konsisten antar tab), fallback SO terakhir bulan
-  lalu, fallback NaN (ΔSO tak diketahui → engine melihat 0 → baris IN
-  jadi gantung sampai SO diisi — konvensi lama "deviasi sampai terisi").
-- Baris pertama bulan lalu (−25..−31) → NaN (tidak ada pengamatan lebih
-  awal di window data).
-
-KOLOM BARU pada audit_df:
-- "Qty SO Kemarin" — SO(t−1) basis delta (NaN → '-');
-- "Qty Delta SO" — ΔSO (nilai slot engine, eks-slot "Qty SO Harian");
-- "Qty BM Rekap" — BM rekap lama (display/data-quality);
-- "Qty BK" — Barang Keluar 42.15 per (pasangan, tanggal) — bahan COM;
-- "Qty COM" — pemakaian aktual kanonik:
-      COM(t) = SO(t−1) + IN(t) − BK(t) − SO(t)
-  (PERSIS formula 6.PEMAKAIAN (COM) pivot / Laporan Deviasi / Komparasi
-  — jangan bikin rumus keempat). KPI baru 'com_minus' = jumlah baris
-  COM < 0 (barang "muncul dari mana-mana" — sinyal input SO).
-  v3.11.10 (audit 3-a bug #4): basis SO(t−1) = SO BARIS AKTIVITAS
-  sebelumnya bila tercatat di baris itu (raw shift — bukan ffill
-  observasi terakhir); Tanggal 1 → SA(1) / SO penutupan bulan lalu;
-  SO(t) tak direkam → NaN (undefined ≠ 0 — tak masuk com_minus /
-  tampil blank di export; parity popup deviasi dipulihkan).
-
-Aturan VALID engine (SO Naik + BM=0 + IN>0) menjadi INERT di basis baru:
-SO naik yang match IN kini otomatis selisih 0 → "OK (Matching)" (lebih
-benar daripada flag VALID). Engine build_audit_rekap SENDIRI TIDAK
-diubah — hanya SUMBER slot input yang diganti (pola yang sama dgn
-v3.6 saat mengganti sheet 29 → data app).
-
-PANJANG BULAN (user: "Misal bulan ini hanya sampai tanggal 30 maka
-tidak perlu ada tanggal 31 begitu juga di bulan kemarin"): helper
-detect_data_period(in_detail) → (tahun, bulan) dari timestamp dokumen
-terbaru (#Tgl/Jam Pembuatan IT; fallback kode dokumen RI.YYYY.MM);
-pemanggil (main.py) menghitung month_len/lalu_len via calendar dan
-membawanya di audit_result utk view (rentang filter dinamis — bukan
-hardcode 31).
-
-v3.6 (permintaan user): sheet '29 Rekap Barang Masuk' TIDAK DIBACA LAGI.
-Logika macro VBA "BuatLaporanDeviasiSampel" diaplikasikan langsung ke data
-yang SUDAH dibaca pipeline, dengan tambahan kolom SO (Hasil SO) + kolom
-hasil audit — semuanya bisa difilter dari header tabel.
-
-DUA bagian:
-
-1. build_audit_input(rekap_so_df, in_detail_df)
-   Bangun input 10 kolom kanonik (persis struktur input VBA) dari:
-   - Hasil SO      ← rekap mentah JENIS='SO'
-                     (hari 1..31 berjalan + -25..-31 bulan lalu; baris
-                     HANYA ada di tanggal yang SO benar-benar direkam —
-                     kehadiran terjaga, bukan 0-fill)
-   - Qty SO Harian ← rekap mentah JENIS='BARANG MASUK' (input resto di
-                     rekap; kosong selama belum diinput — audit akan
-                     menandai baris IN sebagai deviasi sampai terisi)
-   - Qty SJ        ← in_detail SOURCE IN='42.05' + '42.05 (Bulan Lalu)'
-   - Qty RI        ← in_detail SOURCE IN='32.24' + '32.24 (Bulan Lalu)'
-   - Qty Pembelian ← in_detail SOURCE IN='99.01'
-   Baris = union tanggal dgn aktivitas (SO direkam / BM / IN ≠ 0),
-   diurutkan per (Resto, Nama Item, Tanggal).
-
-2. build_audit_rekap(df)
-   Port 1:1 algoritma rekonsiliasi VBA (grup kontigu Resto+Item, urut
-   tanggal; selisih & penerimaan dihitung ulang):
-   - Penerimaan Sistem = SJ + RI + Pembelian
-   - Selisih Harian    = Qty SO Harian − Penerimaan Sistem
-   - ATURAN VALID: SO naik (deltaSO>0) + SO Harian=0 + Penerimaan>0
-     → "VALID (Sistem Masuk)" (omit input harian)
-   - "OK (Matching)" saat selisih=0 & saldo kumulatif=0
-   - Saldo kumulatif per grup; kembali ±0.0001 → "CUT-OFF RESOLVED"
-     (baris selisih≠0) / "OK (Dalam Cut-off)" (baris selisih=0)
-   - Sisa gantung akhir grup → "DEVIASI MURNI" / "OK"
-   - KPI: rows/cutoff/omit/deviasi_murni/deviasi_qty/ok
-
-v3.9.6 (permintaan user: "tab selisih in jika tanggal 1 pembanding SO nya
-SO bulan lalu"): urutan baris per grup kini KRONOLOGIS — bulan lalu
-(Tanggal −25..−31) urut hari naik 25•→31•, lalu bulan berjalan 1..31.
-Sort numerik lama membalik urutan bulan lalu (−31 duluan) sehingga baris
-tepat sebelum tanggal 1 = Tanggal −25 (SO tgl 25•) — delta SO "SO Naik"
-di tanggal 1 salah membanding. Dengan urutan kronologis, pembanding SO
-tanggal 1 = SO TERAKHIR bulan lalu (31•) = "SO bulan lalu" yang benar.
-
-Riwayat validasi: engine tervalidasi 100% identik dgn sheet
-LAPORAN_DEVIASI user (output macro asli) pada input yang sama
-(86.738 baris; 25 baris beda terbukti snapshot data lama) — port dipakai
-apa adanya; v3.6 hanya mengganti SUMBER input.
-
-v3.9.30 — PO MENUNGGU DIPROSES (32.43) sebagai PENJELAS DEVIASI MURNI
-(hipotesis user: PO sudah dibuat tapi penerimaan belum di-update di
-sistem → Qty RI = 0 → selisih SO Harian − Penerimaan menumpuk jadi
-saldo gantung). Input opsional po_pending_df (Rincian PO mentah —
-difilter status 'Menunggu diproses' internal) → kolom 'Qty PO
-Menunggu' per pasangan + catatan 'PO Menunggu: PO.xxx (qty n)' di
-baris DEVIASI MURNI + KPI 'dev_murni_po' (deviasi murni explainable
-vs perlu audit fisik). Engine VBA TIDAK diubah — enrichment dipasang
-SETELAH build_audit_rekap; pemanggil lama (tanpa PO) tak tersentuh.
+build_audit_from_app — keduanya + perluasan:
+- bulan_lalu: True (default) semua data; False = engine bulan berjalan saja
+  (baris Tanggal negatif dibuang SETELAH basis SO-kemarin dihitung).
+- Kolom analisa: Qty BM Rekap; Qty SO Kemarin (ffill per pasangan; baris
+  pertama bulan berjalan → SALDO AWAL 42.17, fallback SO lalu); Qty Delta
+  SO; Qty BK (bk_map); Qty COM = SO(t−1) + IN − BK − SO(t); KPI com_minus = jumlah COM < 0.
+- PO menunggu (32.43 'Menunggu diproses') → kolom 'Qty PO Menunggu' + KPI
+  dev_murni_po + catatan di DEVIASI MURNI; qty satuan terkecil via konversi.
+- detect_data_period + month_lengths: panjang bulan sesuai kalender nyata (bukan hardcode 31).
 """
 import calendar
 import re

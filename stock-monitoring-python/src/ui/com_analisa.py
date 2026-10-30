@@ -1,77 +1,27 @@
 """
-com_analisa.py — analisa "COM Tinggi"/"COM Rendah" di kolom CEK tab
-Deviasi GR/PCS (v3.11.7; v3.11.8 + arah RENDAH).
+com_analisa.py — Analisa "COM Tinggi"/"COM Rendah" (segmen CEK tab Deviasi
+GR/PCS; dipakai deviasi_view).
 
-User: "coba eksplore terkait COM yang ditambahkan di kolom CEK. Misal H=7
-maka coba hitung selisih antara COM tanggal 1 dan ACR tgl 1, hitung
-tanggal 2, 3 sampai 6. Misal ternyata selisih COM di tanggal 7 dengan
-ACR > dari selisih median nya nah tambahkan analisa COM Tinggi. COM itu
-maksudnya pemakaian aktual di resto sedangkan ACR itu pemakaian di
-sistem." (v3.11.8: "enggak hanya com tinggi ya com rendah juga masuk
-analisa" — d(H) < median → pemakaian tercatat sistem melampaui fisik.)
-
-Semantik per pasangan (Nama Barang × NAMA RESTO) pada tanggal analisa H:
+Semantik per pasangan (Nama Barang × Nama Resto) di tanggal analisa H:
 
     d(t) = COM(t) − ACR(t)
-    COM(t) = pemakaian aktual resto   — formula identik baris
-              "6.PEMAKAIAN (COM)" tab 📋 Laporan Deviasi / pivot mode
-              Tanggal:
-              com(1)  = SALDO AWAL + IN(1) − BK(1) − SO(1)  (SA pair bila ada)
-              com(t)  = SO(t−1) + IN(t) − BK(t) − SO(t)
-    ACR(t) = pemakaian sistem (JENIS "9.ACR" — penjualan)
+    COM(t) = pemakaian aktual resto — com(1) = SALDO AWAL + IN(1) −
+              BK(1) − SO(1) (SA pasangan bila ada); com(t) = SO(t−1) +
+              IN(t) − BK(t) − SO(t) (formula identik 6.PEMAKAIAN).
+    ACR(t) = pemakaian sistem (JENIS "9.ACR").
 
-COM dan ACR seharusnya hampir sama; selisihnya stabil kecil per pasangan.
-Bila d(H) MELAMPAUI median historis pasangan itu sendiri (median d(t)
-utk t = 1..H−1) → pemakaian fisik melampaui pemakaian tercatat sistem →
-pemicu deviasi stok → segmen "COM Tinggi (+x)" di teks CEK (x = selisih
-di atas median). Bila d(H) JAUH DI BAWAH median (v3.11.8) → sistem
-mencatat pemakaian LEBIH BESAR dari fisik → segmen "COM Rendah (−x)"
-(x = selisih di bawah median). Satu pasangan hanya bisa memicu SATU
-arah (d(H) > median XOR d(H) < median; sama persis dgn median → normal,
-tak berlabel).
-
-VALIDITAS (anti label palsu di data sparse — bukti v3.9.27: SO resto tak
-selalu direkam tiap hari; tanpa SO tercatat di KEDUA ujung, com(t) tak
-bisa dihitung bermakna):
-  - t ≥ 2      : baris 1.SO ADA di t−1 DAN t (baris ADA ≠ nilai 0 —
-                 pivot fill 0 tidak membedakan keduanya, makanya presence
-                 dihitung terpisah);
-  - t = 1      : baris 1.SO ADA di 1 DAN (SALDO AWAL ada ATAU 1.SO ada
-                 di kolom kronologis terakhir bulan lalu — keduanya
-                 basis sah saldo awal hari-1; tanpa keduanya com(1) tak
-                 bermakna);
-  - tanggal    : H sendiri harus valid (SO kemarin & hari ini tercatat)
-                 — pasangan ber-SO(H) kosong (tampil '-') TIDAK diberi
-                 label (jujur, tak terverifikasi);
-  - median     : minimal 3 hari sampel valid di 1..H−1 — kurang dari itu
-                 tak berlabel (statistik tipis, pola degrade repo).
-
-Perbandingan BERTANDA (bukan absolut): d(H) > median memicu "COM
-Tinggi" (pemakaian aktual di atas sistem); d(H) < median memicu
-"COM Rendah" (v3.11.8 — sistem mencatat pemakaian lebih besar dari
-fisik; selisih di bawah median).
-
-v3.11.12 — AMBANG (persen) dari median (user: "bisa gak set 50% > atau
-< COM rendah atau COM tinggi nya?"): selisih dari median baru dianggap
-signifikan bila MELAMPAUI ambang% × |median| —
-
-    tinggi: d(H) − median > (min_pct/100) × |median|
-    rendah: median − d(H) > (min_pct/100) × |median|
-
-min_pct = 0 → perilaku lama (semua selisih bertanda memicu label —
-back-compat penuh pemanggil lama). median 0 → ruas kanan 0 → semua
-gap NONZERO tetap memicu (median 0 vs gap berapapun = tak terhingga
-persentase-nya — masuk akal + identik perilaku lama pada kasus ini).
-KETAT (strict >): gap yang TEPAT sama dengan ambang tidak memicu
-(mirror strict > v3.11.7). Nilai ambang dioper view lewat param;
-default modul 0.0.
-
-Konsumsi: deviasi_view._compute_pivot — segmen CEK tanggal analisa H.
-Pure pandas (thread-safe — dipakai worker view GR & PCS). Cache DUA
-lapis: matriks per IDENTITAS objek data (H-independen — ganti H tak
-menghitung ulang pivot; pola _CACHE po_keterangan) + hasil per
-(identitas data, h) — pemanggilan berulang (refresh filter, render
-GR+PCS bersamaan via SharedPivotCache) tinggal lookup.
+- d(H) > median d(t), t=1..H−1 → segmen "COM Tinggi (+x)" (pemakaian
+  fisik melampaui sistem; x = selisih di atas median); d(H) < median →
+  "COM Rendah (−x)". Satu pasangan maksimal SATU arah; tepat sama dgn
+  median → tanpa label.
+- Ambang persen (min_pct): selisih baru signifikan bila melampaui
+  min_pct% × |median| (strict >; default modul 0 = semua selisih; view
+  meneruskan nilai spinbox, default 50).
+- Validitas (anti label palsu data sparse): SO tercatat di KEDUA ujung
+  tiap hari sampel (t=1 boleh SALDO AWAL / SO penutupan bulan lalu); H
+  sendiri valid; median butuh ≥ 3 hari sampel valid.
+- Pure pandas (thread-safe). Cache dua lapis: matriks H-independen per
+  identitas objek data + hasil per (identitas, h, min_pct).
 """
 import numpy as np
 import pandas as pd

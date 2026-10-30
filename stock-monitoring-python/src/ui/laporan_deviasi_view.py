@@ -1,50 +1,24 @@
 """
-laporan_deviasi_view.py — v3.9.3: DAFTAR ANOMALI PEMAKAIAN (COM).
+laporan_deviasi_view.py — Tab 📋 Laporan Deviasi: daftar anomali
+pemakaian (COM) pada kolom H.
 
-AUDIT 2c (fix 3-c):
-- 2c-08: empty-state parity dgn Pivot/Komparasi — pipeline 0 baris
-  kini tampil EmptyState ber-subtitle panduan (dulu _show_content()
-  TANPA SYARAT → tabel kosong sunyi + kartu filter; user ragu tab
-  rusak atau memang tanpa data). Data ADA tapi 0 baris anomali →
-  EmptyState ber-subtitle status payload (BERMAKNA — bukan error).
-- 2c-01: pesan 0-baris menunjuk tab '⚙️ Config' (dulu '⚙ Pengaturan'
-  — tab itu tidak ada di app).
-- 2c-06: hint footer abu 'Dobel-klik baris = detail · ✓ = pantau
-  barang'.
-
-v3.9.21 (user: "nilai minus juga diberi warna merah pada cell aja di tab
-laporan deviasi"): minus merah PER CELL kini mencakup SEMUA kolom numerik
-(COM · Median · Selisih vs Median — dulu hanya COM).
-
-Permintaan user: "hapus isi data pada tab laporan deviasi dan sementara
-ganti dengan list nama barang dan resto yang pemakaian (com) nya minus
-atau lebih tinggi dari median pada pada kolom H".
-
-Isi tab 📋 Laporan Deviasi DIGANTI (sementara — tabel Audit Harian versi
-lama tersimpan di git history, commit e20141a / v3.9.2, siap dipulihkan
-bila dibutuhkan):
-- Baris = (Nama Barang × Nama Resto) yang nilai PEMAKAIAN (COM) pada
-  kolom H MINUS (< 0) atau LEBIH TINGGI dari MEDIAN COM pasangan tsb.
-  v3.9.7 (koreksi user): median dihitung ANTAR TANGGAL — median com(t)
-  tgl 1..H milik pasangan itu sendiri (COM = pemakaian aktual harian di
-  resto, BOM = pemakaian harian versi sistem → pembanding yang tepat =
-  pola pemakaian harian pasangan tsb, BUKAN antar resto).
-- COM dihitung dgn formula yang sama dgn baris "6.PEMAKAIAN (COM)" di
-  tab 📊 Pivot (mode Tanggal, port dari M code):
-      com(t) = SO(t-1) + IN(t) - BK(t) - SO(t)
-  tanggal PERTAMA dalam rentang memakai SALDO AWAL sebagai SO(t-1).
-- TANGGAL H = state bersama (SharedTanggalH, v3.9) — diatur di tab
-  📦 Deviasi GR; tab ini menampilkan chip read-only + auto-refresh saat
-  H berubah (tanpa double input).
+- Baris = (Nama Barang × Nama Resto) yang nilai COM tanggal H MINUS
+  (< 0) atau LEBIH TINGGI dari MEDIAN COM pasangan tsb. Median
+  dihitung ANTAR TANGGAL (com(t) tanggal 1..H milik pasangan itu
+  sendiri — pembanding pola pemakaian harian, bukan antar resto).
+- COM memakai formula baris "6.PEMAKAIAN (COM)" tab 📊 Pivot (mode
+  Tanggal): com(t) = SO(t−1) + IN(t) − BK(t) − SO(t); tanggal
+  PERTAMA dalam rentang memakai SALDO AWAL sebagai SO(t−1).
+- TANGGAL H = state bersama (SharedTanggalH) — ditetapkan di tab 📦
+  Deviasi GR; chip read-only + auto-refresh saat H berubah.
 - Kolom: ✓ follow-up · Nama Barang · Resto · Satuan · COM (heading
-  dinamis "COM (H=25)") · Median (heading dinamis "Median (1..25)" —
-  window antar tanggal) · Selisih vs Median · Status
-  (MINUS / > MEDIAN / MINUS + > MEDIAN).
-- Minus merah PER CELL (v3.9.2 — Tk 9 `tag cell`; fallback Tk 8 =
-  tag per baris); sel Status diberi warna per-cell (merah / amber).
+  dinamis "COM (H=25)") · Median (heading dinamis "Median (1..25)") ·
+  Selisih vs Median · Status (MINUS / > MEDIAN / MINUS + > MEDIAN).
+- Minus merah PER CELL semua kolom numerik (fallback Tk 8: per
+  baris); sel Status berwarna per-cell (merah / amber).
 - Filter header ⧩ semua kolom, sort engine linear, ⛶ Layar Penuh,
   ⤢ Perbesar Tabel, ◱ Kolom, ↔ Auto-Fit, loading overlay + compute
-  async (UI tidak membeku) — semua infrastruktur tabel dipertahankan.
+  async. Pipeline 0 baris / 0 anomali → EmptyState ber-subtitle.
 """
 
 import contextlib

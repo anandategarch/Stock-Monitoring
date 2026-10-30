@@ -1,37 +1,25 @@
 """
-doc_codes.py — Parsing & analisa kode dokumen IN (SHARED, v3.9.24).
+doc_codes.py — Parsing kode dokumen IN + aturan "RI Balancing" (shared).
 
-Dipakai bersama oleh in_selisih_view (popup Rincian IN + Catatan Audit)
-dan deviasi_view (CEK "RI Balancing" kolom utama tab Deviasi GR/PCS).
-Sebelumnya helper ini hidup di in_selisih_view.py; diangkat ke modul
-sendiri supaya logika bisnis RI Balancing TIDAK diduplikasi (audit
-34/37: duplikasi rumus = sumber bug senyap). in_selisih_view tetap
-me-re-export nama lama (_doc_code_str/_doc_period/_doc_month/
-_ri_balancing) — kompatibel test §29/§30 yang mengimpor dari sana.
+Struktur kode: PREFIKS.TAHUN.BULAN.NOMOR (mis. "PO.2026.08.00571",
+"RI.2026.10.10354") — bulan 1-2 digit dibandingkan NUMERIK ("8" ==
+"08"; di luar 1..12 → tidak cocok).
 
-Struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR
-  "PO.2026.08.00571" / "RI.2026.10.10354" / "IT.2026.09.00123"
-(segmen 2 = tahun, segmen 3 = bulan — bulan 1-2 digit, dibandingkan
-NUMERIK; "8" == "08").
+Dipakai bersama in_selisih_view (popup Rincian IN + Catatan Audit) dan
+deviasi_view (CEK "RI Balancing"); in_selisih_view me-re-export nama
+lama (_doc_code_str/_doc_period/_doc_month/_ri_balancing) demi
+kompatibilitas test.
 
-v3.9.24 (user: "jika saat ini bulan oktober maka 1 periode nya mulai
-dari 26 september - 25 oktober nah untuk cek RI balancing berarti
-dengan NO. PO yang bukan bulan september dan oktober … RI.2026.10.10354
-dengan PO PO.2026.08.00571") — DEFINISI RI BALANCING DIPERBAIKI dari
-"bulan RI ≠ bulan PO" (v3.9.19-23) menjadi PERIODE BISNIS 26→25:
-satu periode = tgl 26 bulan lalu s/d tgl 25 bulan ini, mencakup DUA
-bulan kalender. Dokumen RI tanggal 1-25 → bulan periodenya {bulan-1,
-bulan}; tanggal 26-31 → {bulan, bulan+1} (wrap tahun Des↔Jan).
-Balancing = Nomor PO dari periode DI LUAR dua bulan itu (contoh user:
-RI 1 Okt ↔ PO Agustus → balancing; RI 1 Okt ↔ PO September → BUKAN
-balancing — PO September masih satu periode dgn RI-nya). Tanpa tanggal
-dokumen (NaN/invalid) → fallback aturan lama bulan≠bulan (konservatif).
-
-v3.9.23 (user: "kerjakan poin 6 dan kerjakan semua poin B"):
-- CEK "RI Balancing" diangkat ke kolom CEK utama Deviasi GR/PCS
-  (dulu hanya di popup Rincian IN);
-- Catatan Audit tab Rekap Selisih IN diperkaya catatan otomatis
-  (RI Balancing / Nomor Dobel / Selisih IN / BM kosong).
+RI Balancing (periode bisnis 26→25, tanggal-aware):
+- Satu periode = tgl 26 bulan lalu s/d tgl 25 bulan RI (dua bulan
+  kalender). RI bertanggal 1-25 → periodenya {bulan-1, bulan}; tanggal
+  26-31 → {bulan, bulan+1} (wrap tahun Des↔Jan).
+- Balancing = Nomor PO dari periode DI LUAR dua bulan itu (contoh: RI
+  1 Okt ↔ PO Agustus → balancing; PO September → bukan, masih satu
+  periode dengan RI-nya).
+- Hanya dokumen ber-prefiks "RI."; tanpa tanggal dokumen valid
+  (NaN/invalid) → fallback aturan lama: periode RI ≠ periode PO
+  (konservatif — tetap dianggap mencurigakan).
 """
 import re
 

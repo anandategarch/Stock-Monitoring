@@ -1,72 +1,26 @@
-"""followup.py — Daftar follow-up baris anomali (v3.2.0) — ala repo Waste.
+"""
+followup.py — Store daftar follow-up baris anomali (centang ✓ di tab
+DEVIASI GR / PCS / LAPORAN DEVIASI): SNAPSHOT nilai saat dicentang,
+tidak ikut filter/TANGGAL H aktif; persist followup.json (+backup .bad
+utk file korup, flag last_recovery / last_save_error).
 
-Konsep: user mencentang baris mencurigakan (kolom ✓) di tabel DEVIASI GR /
-DEVIASI PCS / LAPORAN DEVIASI → baris terkumpul di tab "☑ Follow Up" sebagai
-SNAPSHOT baris (nilai apa adanya saat dicentang). Daftar menetap — TIDAK ikut
-filter/H aktif; tertutup aplikasi pun aman (followup.json).
-
-v3.11.6 (permintaan user: "bisa gak misal aku udah klik data hingga masuk
-ke follow up kemudian file source nya aku revisi. Otomatis di follow nya
-udah status done"):
-- FollowUpStore.auto_resolve_pending(append1_df) — pasca-pipeline (dipanggil
-  app._on_pipeline_done): baris DEVIASI GR/PCS berstatus MENUNGGU yang
-  deviasinya tidak ada lagi di data revisi (pasangan hilang / tanpa baris
-  3.DEVIASI / Deviasi(H) = 0 / seluruh deviasi 0) di-AUTO-DONE: entri
-  resolved {PIC "AUTO", Cek FU "AUTO-DONE (alasan)", Selisih, Selisih
-  Deviasi, ts, auto, auto_reason} → Status TL = "Selesai" (hijau) di tabel
-  Follow Up; persist followup_resolved.json + _notify (badge/view ikut
-  menyegarkan). Deviasi masih ≠ 0 → tetap MENUNGGU; entri resolved lain
-  tak disentuh; asal LAPORAN-COM/KOMPARASI tidak diproses (basisnya bukan
-  pasangan-tanggal append1).
-
-v3.11.4 (permintaan user: "di export tab deviasi gr dan pcs kolom 23 24
-25 26 27 Sistem Deviasi pakai separator , dan tanpa desimal. kolom Loss
-Surplus to BOM pakai persen. Setelah kolom keterangan kapus aja" — tab
-☑ Follow Up = kumpulan baris ✓ dari tab Deviasi GR/PCS):
-- EXPORT berhenti di kolom Keterangan: kolom kerja FU (SO · DEVIASI ·
-  Selisih · Selisih Deviasi · Cek FU · PIC) + pelacakan app (Asal ·
-  Status TL · Ditambahkan) DIHAPUS dari sheet export (tabel UI tetap
-  lengkap — pengerjaan FU tetap di app; _fmt_added ikut dihapus sbg
-  dead code).
-- Number-format Excel (nilai MENTAH tetap ditulis — bisa dihitung
-  ulang, pola export v3.11.2 "SESUAI TAMPILAN"): kolom tanggal (H-2..H+2,
-  heading angka) + Sistem + Deviasi = "#,##0;[Red](#,##0)" — pemisah
-  ribuan TANPA desimal, minus merah kurung (menggantikan Font merah
-  per-sel lama); Loss Surplus to BOM = "0.00%;[Red](0.00%)" — rasio
-  snapshot (1.0053) tampil "100.53%" (2 desimal — paritas presisi Dev
-  to BOM% tab Deviasi; UI kolom ini menampilkan rasio gaya sample
-  '1,01' — permintaan eksplisit user utk export pakai PERSEN).
-
-v3.9.6 (permintaan user: "format Follow UP seperti file sample"):
-- Format tabel + export mengikuti sheet Follow UP workbook asli user:
-  Resto · Nama Barang · SO per tanggal (H-2..H+2 — heading angka tanggal,
-  mis. H=25 → 23/24/25/26/27 persis sample "22..27") · Sistem · Deviasi ·
-  Loss Surplus to BOM · Keterangan · kolom kerja FU: SO · DEVIASI ·
-  Selisih · Selisih Deviasi · Cek FU · PIC (+ pelacakan app: Asal ·
-  Status TL · Ditambahkan).
-- SNAPSHOT_FIELDS diperluas: so_m2/so_m1/so_p1/so_p2 (SO per tanggal) +
-  loss_bom (Loss Surplus to BOM = Dev to BOM% tab Deviasi). Snapshot
-  LAMA (tanpa field baru) tetap dimuat — kolom terkait tampil kosong.
-
-Struktur (pola waste_anomaly/followup.py):
-- ``row_fingerprint(fields)`` — md5 identitas baris: Asal|Resto|Barang|Satuan|
-  H|SO|Sistem|Deviasi|CEK. Stabil lintas sesi (str(float) dinormalisasi).
-- ``FollowUpStore`` — dict {fp: snapshot} + status tindak lanjut (resolved):
-  - toggle(fp, row) → tambah/hapus, return status baru
-  - save/load (atomic write + backup .bad utk file korup; pulihan file
-    korup kini TERLIHAT — flag ``last_recovery`` + [WARNING] log + dialog
-    bila GUI hidup, FIX 2f-07)
-  - gagal persist → flag ``last_save_error`` utk view (FIX 2f-08)
-  - export_xlsx(path) → sheet "FOLLOW UP" format file sample — v3.11.4:
-    kolom BERHENTI di Keterangan + number-format ribuan/persen; tulis
-    ATOMIK tmp+os.replace (FIX 2f-04 — file export lama tak tertimpa
-    parsial)
-  (v3.8: import_workbook DIHAPUS — fitur "Impor Hasil TL" tidak perlu
-  lagi, permintaan user; resolved lama tetap dimuat agar status/PIC
-  yang sudah tersimpan sebelumnya tetap tampil.)
-- Modul murni — tanpa Tk di IMPORT-TIME (dipakai view + app + test
-  headless); dialog pemulihan 2f-07 meng-import tkinter LAZY dan hanya
-  tampil bila root Tk default hidup (mode GUI).
+- row_fingerprint(row) = md5 identitas baris — 9 field di-join "|":
+  Asal · Resto · Barang · Satuan · H · SO · Sistem · Deviasi · CEK
+  (tiap part di-escape; stabil lintas sesi).
+- SNAPSHOT_FIELDS = asal · resto · barang · satuan · aktif · h · so ·
+  sistem · deviasi · cek · so_m2/so_m1/so_p1/so_p2 (SO tanggal H±2) ·
+  loss_bom · barang_app/resto_app (nama versi APP baris KOMPARASI).
+- FollowUpStore: dict {fp: snapshot} + status resolved (PIC · Cek FU ·
+  Selisih · Selisih Deviasi · ts) — persist followup_resolved.json.
+- auto_resolve_pending(append1_df) — dipanggil app pasca-pipeline:
+  baris DEVIASI GR/PCS MENUNGGU yang deviasinya tidak ada lagi di
+  data revisi → AUTO-DONE (PIC "AUTO" + auto_reason); deviasi masih
+  ≠ 0 tetap MENUNGGU; entri resolved lain tak disentuh.
+- export_xlsx(path) → sheet "FOLLOW UP": kolom BERHENTI di Keterangan
+  (Resto · Nama Barang · SO tanggal H−2..H+2 · Sistem · Deviasi ·
+  Loss Surplus to BOM · Keterangan) + number-format "#,##0;[Red](#,##0)"
+  dan persen "0.00%;[Red](0.00%)"; tulis atomik.
+- Modul murni — tanpa Tk saat import (dialog pemulihan lazy, GUI saja).
 """
 from __future__ import annotations
 

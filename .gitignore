@@ -33,3 +33,6 @@ stock-monitoring-python/dist/
 # v3.11.8 — baseline 'barang pernah tampil di 42.17' (penanda BARU
 # section Identifikasi Kategori Manual — file state runtime, re-derivable)
 kategori_seen.json
+
+# v3.11.28 — log crash runtime (ditulis app saat pythonw crash, dibersihkan CI)
+crash.log

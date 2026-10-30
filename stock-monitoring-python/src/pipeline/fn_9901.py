@@ -1,55 +1,27 @@
 """
-fn_9901.py — Process 9901 file (mutasi barang tanpa nomor penerimaan).
-Sumber data IN tambahan (digabung dengan 3224, 4205 di query_in).
+fn_9901.py — Baca file 9901 (mutasi barang tanpa nomor penerimaan) sebagai sumber IN.
+
+Semua sheet dari semua file Excel di folder dibaca lalu di-concat (nama
+sheet 9901 bervariasi); hasilnya digabung 42.05/32.24 di query_in. Output:
+Tanggal, NAMA RESTO, Nama Barang, Value, Nomor, Nomor PO.
 
 Filter:
-  - "Nomor # Penerimaan Barang" = Blank (kosong)
-  - "Jenis Barang Barang & Jasa" = "Persediaan"
+- 'Nomor # Penerimaan Barang' = kosong — baris ber-penerimaan sudah
+  tercatat di 32.24, tidak boleh dobel hitung.
+- 'Jenis Barang Barang & Jasa' = 'Persediaan'.
+- Kolom filter hilang → filter di-skip + WARNING mencolok di log.
 
-Column mapping:
-  - #Prime.Qty     → Value
-  - Nama barang    → Nama Barang
-  - Nama cabang    → NAMA RESTO (extract after titik TERAKHIR, e.g.,
-                   "1137.CKGPAH" → "CKGPAH", "B.1001.MLGPAR" → "MLGPAR")
-                   CONSISTENT with fn_3224/fn_4215/fn_4217/fn_4205 which extract
-                   from between parentheses "(" and ")"
-  - Tanggal        → Tanggal (day-of-month)
-  - Nomor #        → Nomor (nomor faktur pembelian, mis. PI.2026.09.30973) — v3.4
-  - Nomor # Pesanan Pembelian → Nomor PO — v3.4
+Mapping kolom (fleksibel: exact match > substring terpendek; ikatan lewat
+fallback di-log WARNING):
+- #Prime.Qty → Value — kandidat fallback meng-exclude 'harga'/'nilai'
+  agar tak nyasar ke kolom uang; Nama barang → Nama Barang.
+- Nama cabang → NAMA RESTO = teks setelah titik TERAKHIR (helper
+  resto_from_cabang_po; 'B.1001.MLGPAR' → 'MLGPAR'); Tanggal → day-of-month.
+- Nomor # → Nomor; 'Nomor # Pesanan Pembelian' → Nomor PO.
 
-v3.4: kolom Nomor / Nomor PO ditambahkan untuk tab "Rekap Selisih IN"
-(rincian IN per dokumen 42.05 / 32.24 / 99.01 beserta nomornya).
-
-v3.9.33 — AUDIT FIX (48-a, deep audit):
-- SEMUA sheet × SEMUA file dibaca lalu di-concat TANPA dedup → sheet
-  backup/ringkasan/file salinan masuk IN DUA KALI (groupby-SUM append1
-  mendobel qty senyap). Sekarang: baris duplikat PERSIS dibuang + log
-  mencolok + kontribusi baris per sheet dicatat (double-read terlihat).
-- fallback kolom qty: "jumlah" dibuang dari kandidat + kandidat bernama
-  'harga'/'nilai' di-exclude (dulu bisa nyasar kolom uang "Jumlah Harga").
-- filter yang di-skip karena kolom hilang kini WAJIB teriak WARNING
-  lengkap dengan jumlah baris yang dianggap lolos (risiko dobel hitung
-  vs 32.24 jadi eksplisit, bukan senyap).
-
-v3.9.42 — AUDIT FIX (61-a, F3): NAMA RESTO kini lewat helper bersama
-resto_from_cabang_po (bagian setelah titik TERAKHIR, NA/float-safe).
-Dulu membelah di titik PERTAMA → cabang ber-format 'B.1001.MLGPAR'
-menjadi '1001.MLGPAR' (resto phantom — tidak cocok dgn sumber lain →
-IN 9901 resto itu lenyap dari pivot).
-
-v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan,
-user: "misal suatu saat format tarikan dari accurate berubah aman gak?").
-Eksperimen 6 varian mutasi format membuktikan: tambah kolom / hapus
-kolom tak terpakai / reorder = IDENTIK (seleksi kolom by-NAMA, bukan
-posisi). Dua celah SENYAP ditemukan & ditutup:
-- Rename header terpakai ('Nama barang' → nama lain) + ada kolom lain
-  ber-substring 'barang' terisi ('Kode Barang') → fallback _find_column
-  mengikat kolom yang SALAH tanpa jejak (uji nyata: Nama Barang nyasar
-  ke kode barang 'GL001'/'KP001', qty benar, nol warning). Kini SETIAP
-  pengikatan lewat fallback (bukan nama persis kandidat) DI-LOG
-  WARNING lengkap dgn kolom tujuan ikatannya.
-- (keluarga header_row=4: lihat fn_2205/3224/4205/4215 — kolom VALUE
-  hilang kini ikut di-WARNING, dulu NA senyap.)
+Dedup: baris duplikat persis dibuang hanya LINTAS sumber (file × sheet);
+baris identik SE-SUMBER dipertahankan (PO multi-baris legit). Baris dengan
+NAMA RESTO kosong dibuang.
 """
 import os
 

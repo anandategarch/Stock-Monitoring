@@ -1,85 +1,27 @@
 """
-fn_4217.py — Mirror persis fn4217 di M code.
-Kuantitas Barang per Gudang (modul 42.17) → SALDO AWAL.
-OPTIMIZED: vectorized text operations.
+fn_4217.py — Baca export 42.17 (Kuantitas Barang per Gudang) sebagai SALDO AWAL.
 
-v3.9.32 (user: "filter lebih awal data 42.17 pakai kolom kategori barang
-[whitelist 5 kategori]" + barang 42.17-only tak muncul di Deviasi GR):
-- KATEGORI BARANG dibaca sebagai KOLOM id SEBELUM melt (dulu kolom
-  kategori/satuan/kode ter-melt jadi pseudo-baris NAMA RESTO → kosong →
-  terbuang senyap). Kategori ber-pola header grup (nilai hanya di baris
-  pertama tiap grup — sisanya NaN) → forward-fill.
-- FILTER WHITELIST kategori DITERAPKAN SEBELUM melt (beban pipeline turun;
-  default 5+1 kategori produksi — daftar BISA DIUBAH di config.json key
-  "KategoriBarang4217"; file tanpa kolom kategori → tanpa filter +
-  peringatan log; hasil 0 baris → filter di-bypass otomatis + peringatan
-  [safety-net salah konfigurasi]).
-- NAMA SATUAN per barang ikut keluar sebagai kolom SATUAN (fallback utk
-  pasangan TANPA rekap — barang 42.17-only kini punya satuan di tabel
-  Deviasi GR/PCS; pasangan ber-rekap tetap memakai satuan rekap).
-- Matching kategori: normalisasi buang SEMUA whitespace + upper
-  ('01. COST - PACKAGING - TIDAK BOLEH' == '01.COST-PACKAGING-TIDAKBOLEH')
-  + PREFIX match supaya varian spasi/nama file user tetap cocok.
+Mirror fn4217 di M code: gabung file folder (header baris 4); kategori per
+barang dibaca SEBELUM melt (forward-fill per file); kolom gudang di-unpivot
+menjadi NAMA RESTO (teks di antara "(" dan ")"); Tanggal = 1; JENIS =
+"SALDO AWAL". Output: Nama Barang, NAMA RESTO, Value, Tanggal, JENIS,
+SATUAN (+ KATEGORI bila keep_kategori=True).
 
-v3.9.39 (user: "di tab deviasi GR kok tidak ada Bumbu Pasta Kuah? padahal
-  di file 42.17 ada. Dulu pernah aku bilang look up nama barang harus dua
-  arah tidak hanya nama barang yang ada di file atau sheet Rekap Mentah
-  tapi juga di file 42.17"):
-- LOOKUP DUA ARAH PENUH: whitelist kategori TIDAK BOLEH memutus pasangan
-  barang yang ber-transaksi — barang yang namanya terdaftar di sumber
-  lain (Rekap Mentah SO/BARANG MASUK, IN, OUT, BARANG KELUAR) selalu
-  lolos filter walau kategorinya di luar whitelist (saldo awal wajib
-  masuk pipeline — kalau tidak, Sistem/Deviasi pasangan itu salah).
-  Param protected_barangs diisi build_append1 dari gabungan sumber lain.
-- LOG TRANSPARAN: barang yang benar-benar terbuang whitelist (tanpa
-  pasangan) kini DISEBUT NAMANYA di log — tidak lenyap senyap lagi
-  (akar keluhan "barang ada di 42.17 tapi tidak muncul").
-- SHEET RESOLVE DEFENSIVE: nama sheet export Accurate bisa berbeda antar
-  versi ('#42.17. Kuantitas Barang per Gu' terpotong 31 karakter).
-  Bila nama persis tidak ada di file → fallback sheet berprefiks '#42.17'
-  + [INFO] log (pola _resolve_lalu_sheet queries) — bukan 0 baris senyap.
+Whitelist kategori — difilter SEBELUM melt; default 8 kategori produksi (5
+aktif + varian legacy '- TIDAK BOLEH'), ditimpa config.json "KategoriBarang4217":
+- Matching: normalisasi buang semua whitespace + upper, lalu prefix-match
+  versi-toleran (token versi ujung 'V.2'/'V.3 BARU' diabaikan kedua sisi).
+- Barang ber-transaksi di sumber lain (protected_barangs) SELALU lolos
+  walau kategorinya di luar whitelist; barang terbuang disebut di log.
+- Whitelist menyaring SEMUA baris → di-bypass + peringatan; whitelist
+  string dibungkus jadi daftar 1-elemen; tanpa kolom kategori → tanpa
+  filter.
 
-v3.9.41 (user: "100383 BUMBU PASTA KUAH masih belum ada di program ini
-  padahal pada gudang MLGPAR di file 42.17 ada saldo nya dan harusnya
-  masuk. Cek deep"):
-- AKAR (probe E2E data rekap nyata + snapshot 41.09 Accurate): pipeline
-  saldo-only SEHAT — pasangan TAMPIL ketika kategorinya lolos whitelist
-  (probe: kategori '10.FOOD [WIP] - COM V.2' → Sistem 84.000 tampil).
-  Yang GAGAL: kategori item lama tak cocok whitelist yang mem-pin versi:
-  (a) kategori legacy nyata '10.FOOD [RM] - COM- TIDAK BOLEH' &
-      '10.FOOD [WIP] - COM TIDAK BOLEH' (±200 item lama bersaldo;
-      v3.9.32 hanya menambahkan varian PACKAGING-TIDAK BOLEH —
-      varian FOOD-nya TERLEWAT → saldo terbuang senyap);
-  (b) drift versi ('10.FOOD [WIP] - COM V.3 BARU' ≠ prefix '…V.2').
-- MATCHING VERSI-TOLERAN (_fam_kat/_kat_match): token versi ujung
-  (V.1/V.2/V.3 BARU/V.20…) dibuang dari KEDUA sisi sebelum prefix-
-  match → drift versi & varian '- TIDAK BOLEH' family sama lolos;
-  family lain (SUPPLIES/ASSET/02.COST) tetap terbuang (whitelist tetap
-  filter scope, bukan free-pass). Config user yang mem-pin daftar lama
-  TETAP tertolong oleh family match.
-- DEFAULT WHITELIST + 2 kategori FOOD legacy (mirror niat v3.9.32
-  "item lama yang masih bersaldo tetap terpantau").
-
-v3.9.42 — AUDIT FIX (61-a):
-- F7: fallback kolom 'Nama Barang' (kolom PERTAMA) kini WAJIB teriak
-  WARNING (dulu senyap — nyasar ke 'Kode Barang' dsb. tanpa jejak);
-  rename 'KATEGORI BARANG'/'SATUAN AWAL'/'Nama Barang' diberi guard
-  tabrakan (dua kolom yang menormalkan ke nama sama → rename menghasilkan
-  kolom GANDA → prom[col] = DataFrame → crash).
-- F1 (defense-in-depth): kategori_whitelist berupa STRING dibungkus
-  jadi daftar 1-elemen sebelum dipakai — string diiterasi per-karakter
-  oleh prefix-match → 1 karakter cocok hampir semua kategori (kelas
-  bug item 100383; config.py kini memvalidasi — ini jaring kedua utk
-  pemanggil lain).
-
-v3.11.8 — keep_kategori: KATEGORI BARANG (sumber 42.17) ikut KELUAR
-sebagai kolom 'KATEGORI' (identifikasi kategori manual app — user:
-"indentifikasi manual sumber nya dari 42.17 dari folder itu ya ... ada
-kategori nya juga dari sumber 42.17"). Dipakai pembacaan SALDO SISTEM
-42.17 (folder '6. 42.17' — query_4217_saldo_sistem) utk daftar barang
-bersaldo + kategorinya di tab ⚙️ Config. Default False = output kolom
-TETAP 6 (pemanggil lama tak berubah); file tanpa kolom kategori →
-kolom 'KATEGORI' kosong ('' — jujur, bukan error).
+Lainnya: nama sheet resolve defensive (nama persis → fallback prefiks
+'#42.17'); kolom ringkasan TOTAL/JUMLAH/SUBTOTAL/GRAND/SEMUA dibuang
+sebelum melt (mencegah resto phantom + saldo dobel); keep_zero=True
+mempertahankan Value == 0 (default False); NaN Value & NAMA RESTO kosong
+selalu dibuang; 'Nama Barang' hilang → fallback kolom pertama + WARNING.
 """
 import re
 

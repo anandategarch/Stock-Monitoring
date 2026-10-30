@@ -1,46 +1,23 @@
 """
-nominal_deviasi_view.py — v3.9.32 MODE '💰 Nominal (H)' tab 📋 Laporan
-Deviasi (user: "tab baru 'Nominal' di Laporan Deviasi = Harga ×
-kuantitas deviasi, per barang + total").
+nominal_deviasi_view.py — Mode "💰 Nominal (H)" tab 📋 Laporan Deviasi:
+nominal deviasi per pasangan (harga × qty deviasi) + baris TOTAL.
 
-v3.9.34 — REFACTOR (zero behavior change): logika inti perhitungan
-Nominal dipindahkan ke helper BERSAMA src/ui/nominal_common.py
-(hitung_nominal_pairs / lookup_harga_pair / fmt_harga_id /
-fmt_nominal_cell — port persis; kini juga dipakai mode ⚖ Komparasi
-dan tab 🧮 Nominal Deviasi). _compute_nominal = wrapper;
-_fmt_harga/_fmt_cell_num = delegasi. Semua perilaku render/filter/TOTAL
-pin/busy lifecycle/listener H TIDAK berubah.
+Baris = pasangan (Nama Barang × Nama Resto × Satuan):
+- Qty Deviasi = JENIS '3.DEVIASI' baris Tanggal H (= SO − SALDO AKHIR
+  sistem — nilai kolom Deviasi tab 📦 Deviasi GR).
+- Harga dari file 41.09 'Nilai Persediaan' (folder 09.Harga; global
+  tanpa dimensi resto; Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo
+  Akhir) → NOMINAL = Harga × Qty Deviasi.
+- Normalisasi satuan harga via peta rasio (42.05+32.24):
+  harga_rekap = harga41 × rasio(satuanRekap) ÷ rasio(satuan41.09).
+  Tanpa harga/rasio → kolom harga berlabel satuan asli + penanda '*',
+  nominal '-' dan TIDAK ikut baris TOTAL.
 
-v3.9.33 — AUDIT FIX (48-e/48-f): (1) filter ⧩ kolom Harga kini benar
-(_col_values memetakan "Harga" → "Harga Tampil" + _result_df tetap
-snapshot display, pola laporan v3.9.5 — dulu apply filter Harga =
-tabel kosong); (2) jalur render kosong tidak membuang refresh pending;
-(3) _busy direset di render_done (bukan di awal done()) — sort saat
-insert diantrekan; (4) baris TOTAL dipin di ujung setelah sort;
-(5) guard dirty/ismapped pada listener H + _dirty di-clear saat
-refresh; (6) load_data 0 baris → footer informatif.
-
-Baris = pasangan (Nama Barang × Nama Resto × Satuan) dgn qty DEVIASI
-(= 3.DEVIASI = SO − SALDO AKHIR sistem, baris tanggal H — nilai yang
-sama dgn kolom Deviasi tab 📦 Deviasi GR) + HARGA per barang dari file
-41.09 'Nilai Persediaan' (folder 09.Harga; harga GLOBAL — file tanpa
-dimensi resto; Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo Akhir) →
-NOMINAL = Harga × Qty Deviasi. Baris TOTAL di ujung tabel (jumlah
-nominal + jumlah qty).
-
-NORMALISASI SATUAN HARGA (analisis data real: 176/187 barang rekap
-match satuan 41.09; 5 beda — LPG 12KG KG-vs-TABUNG, MUTIARA BOBA
-GR-vs-KG, dll): harga 41.09 per satuan-file → dinormalkan ke SATUAN
-REKAP via peta rasio v3.9.31 (dari 42.05+32.24):
-    harga_rekap = harga41 × rasio(satuanRekap) / rasio(satuan41.09)
-(mis. harga 18,25/GR utk pasangan rekap KG → 18.250/KG). Tanpa
-harga/rasio (pasangan tak ada di 41.09 / peta rasio tak men-cover) →
-kolom harga tampil berlabel satuan asli + penanda '*', nominal '-' dan
-TIDAK ikut baris TOTAL (transparan, bukan angka keliru).
-
-TANGGAL H = state bersama (SharedTanggalH — chip read-only + auto-refresh
-dari tab 📦 Deviasi GR, pola Anomali COM). Urutan default |Nominal|
-MENURUN (dampak terbesar dulu). Minus merah per-cell; format angka
+Perhitungan inti = nominal_common.py (satu sumber kebenaran dgn tab 📦
+Deviasi GR/🧩 Deviasi PCS, mode ⚖ Komparasi & tab 🧮 Nominal Deviasi);
+view ini hanya render. TANGGAL H = state bersama (chip read-only +
+auto-refresh dari tab 📦 Deviasi GR). Urutan default |Nominal| MENURUN;
+baris TOTAL dipin di ujung. Minus merah per-cell; format angka
 Indonesia; filter header ⧩ + sort + ⛶ Layar Penuh + ⤢ Perbesar Tabel +
 ◱ Kolom + ↔ Auto-Fit.
 """

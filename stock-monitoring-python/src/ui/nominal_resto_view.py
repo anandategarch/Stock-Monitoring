@@ -1,110 +1,27 @@
 """
-nominal_resto_view.py — v3.9.34 TAB BARU 🧮 Nominal Deviasi (user:
-"ada tab nominal Deviasi itu isinya Total sum dari nama barang kayak
-di laporan sampel kolom nominal deviasi yang dapat dari harga ×
-kuantitas deviasi cuman ini disum per resto").
+nominal_resto_view.py — Tab 🧮 Nominal Deviasi: Σ Nominal per resto
+(Harga 41.09 × Qty Deviasi tanggal H) + pembanding bulan lalu.
 
-Baris = SATU RESTO — Σ Nominal Deviasi seluruh barang pasangannya
-(Nominal = Harga 41.09 × Qty Deviasi tanggal H; pasangan tanpa harga
-TIDAK ikut Σ — kolom 'Tanpa Harga' transparan). Sesuai laporan sampel
-user ('20.AGUSTUS 2026.xlsx' — kolom NOMINAL DEVIASI per bahan per
-resto), diagregasi per resto. Baris TOTAL di ujung. Double-click baris
-resto → popup RINCIAN per barang resto itu. Urutan default |Σ Nominal|
-MENURUN.
+Anak tab: "Per Resto" (tabel utama) dan "Tanpa Harga" (barang tanpa
+harga GLOBAL — semua resto & kategori, tanpa filter kategori utama).
+Filter KATEGORI default "Deviasi" (case-insensitive; fallback "Semua").
 
-v3.9.36 (user: "di tab nominal deviasi bisa pop up per item dengan
-kolom: Nama resto, nama barang, Kuantiti deviasi, Nominal deviasi
-Sekarang, Nominal deviasi bulan lalu" + "tambah filter Kategori dengan
-default pilihan Kategori = Deviasi ... Yang tanpa harga juga bisa pop
-up untuk tampilkan tanpa harga item apa aja"):
-  - POPUP RINCIAN 5 KOLOM: Nama Resto · Nama Barang · Kuantiti Deviasi
-    · Nominal Deviasi Sekarang · Nominal Deviasi Bulan Lalu. 'Bulan
-    Lalu' = FILE DEVIASI tab ⚖ Komparasi (parse_deviasi_file — bulan
-    TERBARU di file + minggu TERAKHIR per pasangan; harga 41.09 × DEV
-    Lalu; perhitungan = nominal_common.hitung_nominal_lalu_pairs).
-    File berganti/ber-load → app memanggil on_lalu_file_changed()
-    (pola listener SharedTanggalH); tanpa file → kolom '-' + footer
-    petunjuk.
-  - FILTER KATEGORI (pola deviasi_view v3.9.19): combobox 'Semua' =
-    tanpa filter; DEFAULT 'Deviasi' (case-insensitive, fallback
-    'Semua'); diterapkan pra-compute di _compute_resto.
-  - DOUBLE-CLICK KOLOM 'Tanpa Harga' → popup daftar barang TANPA HARGA
-    resto itu (TOTAL row = semua resto) + alasan (tak ada di 41.09 /
-    satuan tak terkonversi).
+Kolom: Resto · COM Deviasi · Biaya Packaging (Σ nominal per klas
+substring "COM"/"PACKAGING" pada KATEGORI) · Nominal Deviasi (heading
+dinamis "(H=n)") · Nominal Deviasi Bulan Lalu (Σ "Nominal Lalu" file
+deviasi tab ⚖ per resto; multi-bulan) · Persen Kenaikan/Penurunan =
+(H − Lalu) ÷ |Lalu| × 100. Baris TOTAL di ujung; urutan default
+|Σ Nominal| MENURUN.
 
-v3.9.38 (user: "Nominal Deviasi total per resto juga tambahan di tab
-nominal deviasi ini buat versus bulan lalu"):
-  - KOLOM BARU 'Nominal Deviasi Bulan Lalu' per resto = Σ 'Nominal Lalu'
-    self._lalu_df (file deviasi ⚖ Komparasi) per resto-norm; resto tanpa
-    baris di file → '-' ; baris TOTAL menjumlah; minus merah per-cell;
-    filter header + sort numerik; footer/chip menyebut TOTAL LALU (atau
-    petunjuk bila file belum dimuat).
-  - QTY DEVIASI 0 tak dihitung 'tanpa harga' (aturan v3.9.38
-    nominal_common — Nominal 0.0 ≠ None).
-  - SUMBER 'Nominal Lalu' = KOLOM NOMINAL DEVIASI MILIK FILE (v3.9.38):
-    angka RESMI laporan bulan lalu — bukan hitung ulang harga 41.09
-    sekarang (temuan user: BUMBU PASTA KUAH (V.20) 41.09 sekarang
-    107,6386854/GR — sama dgn hitungan manual — vs harga snapshot file
-    ±113,048/GR → nominal beda; kini nominal lalu = angka file).
+Double-click baris resto → popup rincian per barang (Nama Resto · Nama
+Barang · Kuantiti Deviasi · Nominal Deviasi Sekarang · Nominal Deviasi
+Bulan Lalu; minggu pembanding TER-COCOK mengikuti H) — jendela besar
+responsif + 💾 Export Excel (nilai mentah, baris TOTAL tebal, meta
+sumber/H/bulan lalu/minggu pembanding).
 
-v3.9.41 (user: "pop up tab nominal deviasi ada bug kurang besar dan
-lebar coba cek juga" + "Nominal deviasi pembanding dari bulan llau
-sesuai kan week nya jika week 1 maka ambil data week 1 juga"):
-  - POPUP BESAR & RESPONSIF: jendela ±94%×88% layar (dulu maks
-    1000×560), lebar kolom DISKALA memenuhi lebar jendela (dulu fixed
-    660px → sisi kanan kosong), re-scale otomatis saat user resize
-    (<Configure>, idempoten dari basis), tombol ⛶ Perbesar + ↺ Muat
-    Lebar; minsize dinaikkan (900×420). Popup tanpa-harga ikut.
-  - MINGGU PEMBANDING TER-COCOK: h diteruskan ke
-    hitung_nominal_lalu_pairs → minggu file yang MEMUAT H analisa
-    (H 1-7 → WEEK 1; 8-14 → WEEK 2; 15-31 → WEEK 3/4) — dulu SELALU
-    minggu terakhir (penutupan bulan) → minggu-1 vs minggu-4 = apple-
-    to-oranges. Minggu terpilih DISEBUT di head + footer popup +
-    footer tabel; kolom internal '_minggu' di frame lalu.
-
-Perhitungan = src/ui/nominal_common.py (satu sumber kebenaran dgn
-mode 💰 Nominal (H) tab 📋 Laporan Deviasi, kolom Nominal tab 📦
-Deviasi GR/🧩 PCS & mode ⚖ Komparasi — v3.9.34).
-
-v3.9.63 — RESTRUKTURISASI KOLOM + ANAK TAB (user: "kolom N Barang
-dan Tanpa harga hapus aja diganti dengan nominal deviasi per kategori
-yaitu kolom COM Deviasi + kolom Biaya Packaging ... jadi format kolomnya
-Resto · Com deviasi · Biaya packaging · Nominal deviasi H · Nominal
-deviasi bulan lalu · Persen kenaikan/penurunan (bisa sort) ... dan itu
-buat anak tab baru di nominal deviasi yang menampilkan secara global"):
-  - KOLOM BARU 'COM Deviasi' + 'Biaya Packaging' = Σ nominal pasangan
-    per klas kategori (substring 'COM'/'PACKAGING' — nominal_common);
-    'N Barang' + 'Tanpa Harga' DIHAPUS dari tabel (Σ pasangan & jumlah
-    tanpa harga tetap dihitung agregasi — footer status + anak tab).
-  - KOLOM BARU 'Persen Kenaikan/Penurunan' = (H − Lalu) ÷ |Lalu| × 100
-    (hitung_persen_kenaikan; sort numerik + minus merah per-cell).
-  - ANAK TAB (sub-notebook): 'Per Resto' (tabel utama + filter KATEGORI
-    utama — perilaku lama) + 'Tanpa Harga' BARU — daftar barang tanpa
-    harga GLOBAL (semua resto & kategori, TANPA filter kategori tab
-    utama — pasangan_tanpa_harga_global) + kolom Kategori + filter
-    KATEGORI SENDIRI (default 'Semua' = global; memilih 'Deviasi (COM +
-    Packaging)' → hanya menampilkan sesuai kategori itu — permintaan
-    user). Menggantikan popup double-click kolom 'Tanpa Harga'.
-
-v3.11.3 (user: "tab nominal deviasi bisa export jga waktu pop up"):
-  - 💾 EXPORT EXCEL DI POPUP RINCIAN PER RESTO (double-click baris):
-    tombol di head popup — payload dibaca LATE-BINDING saat klik;
-    kolom = PERSIS heading popup (kolom dinamis bulan ≥2 ber-minggu
-    ikut); baris nilai MENTAH (bisa dihitung ulang di Excel; None/NaN
-    → sel kosong) + baris TOTAL di ekor DITEBALKAN (Σ qty + Σ nominal
-    skipna); meta SUMBER/RESTO/TANGGAL H/BULAN LALU/MINGGU PEMBANDING;
-    note-legend = footer popup; tulis atomik (writer generik
-    write_table_display_sheet v3.11.2 DIPAKAI ULANG); nama file
-    ber-stempel + resto disanitasi. Handler pola v3.11.2: guard
-    warning (bukan file dialog) + _do terpisah utk test; SINKRON
-    (baris per-resto terbatas — overlay utama tak terlihat di
-    belakang popup modal grab_set).
-
-TANGGAL H = state bersama (SharedTanggalH — chip read-only + auto-
-refresh dari tab 📦 Deviasi GR; pola mode Nominal). Minus merah
-per-cell; format angka Indonesia; filter header ⧩ + sort (TOTAL dipin
-di ujung) + ⛶ Layar Penuh + ⤢ Perbesar Tabel + ◱ Kolom + ↔ Auto-Fit
-+ Ctrl+C salin baris terpilih (multi-select).
+TANGGAL H = state bersama (chip read-only + auto-refresh dari tab 📦
+Deviasi GR). Minus merah per-cell; format angka Indonesia; filter ⧩ +
+sort (TOTAL dipin) + ⛶ + ⤢ + ◱ Kolom + ↔ Auto-Fit + Ctrl+C salin.
 """
 import contextlib
 import tkinter as tk

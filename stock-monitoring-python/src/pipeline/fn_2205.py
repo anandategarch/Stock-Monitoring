@@ -1,38 +1,22 @@
 """
-fn_2205.py — Mirror persis fn2205 di M code.
-Rincian Penjualan per Barang (modul 22.05) → sumber OUT.
-OPTIMIZED: vectorized text operations via .str accessor.
+fn_2205.py — Baca export 22.05 (Rincian Penjualan per Barang) sebagai sumber OUT.
 
-v3.9.71 — TANPA KODE SI (user: "22.05 tanpa kode SI ya maaf aku lupa
-bilang kemarin" — penyempurnaan permintaan v3.9.70 "semua kode masuk"):
-baris dengan Nomor # berawalan "SI" kini DIKECUALIKAN dari sumber OUT;
-SEMUA kode lain (ACR./RETUR./dll.) tetap masuk perhitungan. 'Nomor #'
-kembali dibaca sebagai kunci filter (tetap BUKAN kolom wajib identitas:
-hilang → baris diproses APA ADANYA + WARNING jujur, karena kode SI jadi
-tak teridentifikasi — status run "SELESAI DENGAN PERINGATAN"). Baris SI
-yang dikecualikan diberitahu di log ([fn_2205] INFO: N baris) — bukan
-peringatan, murni jejak observabilitas filter bisnis yang disengaja.
+Mirror fn2205 di M code: gabung semua file di folder (sheet 22.05, header
+baris 4), lalu keluarkan qty penjualan per (Tanggal, NAMA RESTO, Nama
+Barang). Output: Tanggal (day-of-month), NAMA RESTO (teks di antara "("
+dan ")" pada kolom Nama Pelanggan), Nama Barang, Value (dari Kuantitas).
 
-v3.9.70 — SEMUA KODE MASUK PERHITUNGAN (user: "pada file 2205 sekarang
-tidak perlu filter kode ACR lagi tapi semua kode masuk perhitungan"):
-filter M Table.SelectRows(...Text.StartsWith([#"Nomor #"], "ACR"))
-DIHAPUS — seluruh dokumen penjualan 22.05 masuk sumber OUT; 'Nomor #'
-TAK LAGI kolom wajib (identitas cukup Nama Pelanggan + Nama Barang).
-
-v3.9.33 — AUDIT FIX (48-a):
-- guard kolom — identitas ('Nomor #' = kunci filter ACR, 'Nama
-  Pelanggan' → NAMA RESTO, 'Nama Barang') hilang → WARNING keras +
-  baris dibuang (degradasi per-sumber, bukan KeyError total);
-  VALUE ('Kuantitas'/'Tanggal') hilang → NA (schema output tetap).
-- sheet_name param — queries.query_2205 me-resolve key config
-  Sheets['Penjualan2205'] (config lama tanpa key tetap dapat default).
-
-v3.9.67 — HARDENING KETAHANAN FORMAT EXPORT (audit ketahanan format,
-user: "misal suatu saat format tarikan dari accurate berubah aman gak?"):
-kolom VALUE ('Kuantitas') & 'Tanggal' yang hilang/di-rename kini
-DI-WARNING keras — dulu NA SENYAP (qty OUT 22.05 lenyap dari pivot
-tanpa jejak log apa pun; uji mutasi: rename 'Kuantitas'→'Qty' →
-2 baris masuk Value NA nol warning). Perilaku data TIDAK berubah.
+Aturan filter saat ini:
+- Baris dengan 'Nomor #' berawalan "SI" (case-sensitive) DIKECUALIKAN dari
+  sumber OUT; semua kode lain (ACR./RETUR./dll.) tetap masuk. Jumlah baris
+  SI yang dibuang dicatat di log sebagai INFO (bukan warning).
+- 'Nomor #' kosong/NA dianggap BUKAN SI (baris tetap masuk); kolom tersebut
+  bukan kolom wajib — hilang → baris diproses apa adanya + WARNING keras
+  (kode SI tak bisa dikecualikan).
+- Kolom identitas (Nama Pelanggan, Nama Barang) hilang → WARNING + baris
+  sumber ini dibuang (degradasi per-sumber, schema output tetap).
+- Kolom nilai (Kuantitas/Tanggal) hilang → NA + WARNING (bukan error).
+- Baris dengan NAMA RESTO kosong dibuang.
 """
 import pandas as pd
 

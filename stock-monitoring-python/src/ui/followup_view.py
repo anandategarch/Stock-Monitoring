@@ -1,36 +1,23 @@
-"""followup_view.py — Tab "☑ Follow Up" (v3.2.0) — ala repo Waste.
+"""
+followup_view.py — Tab "☑ Follow Up": shortlist investigasi baris anomali
+yang di-centang (✓) di tab DEVIASI GR / PCS / LAPORAN DEVIASI —
+tampilan SNAPSHOT (nilai saat baris dicentang; tidak ikut filter/H).
 
-v3.9.20 (deep audit 34-e/fix 35-c2): nilai popup kolom = baris yang
-TAMPIL (filter kolom lain dulu; kolom sendiri dikecualikan) + import
-C_TEXT_MUTED tidak-terpakai dibersihkan (F401).
+Kolom (format sheet Follow UP workbook asli user): Resto · Nama Barang ·
+SO per tanggal (heading ANGKA tanggal H−2..H+2) · Sistem · Deviasi ·
+Loss Surplus to BOM · Keterangan · kolom kerja FU: SO · DEVIASI ·
+Selisih · Selisih Deviasi · Cek FU · PIC · Status TL · Ditambahkan
+(snapshot lama tanpa field tanggal tetap dimuat, kolom tampil "-").
 
-v3.9.6 (permintaan user: "Format Follow UP Seperti File Sample"):
-format tabel mengikuti sheet Follow UP workbook asli user (01.1 CEK
-STOCK V2.xlsb): Resto · Nama Barang · SO per tanggal (heading ANGKA
-TANGGAL — H=25 → 23/24/25/26/27, persis kolom "22.0..27.0" sample) ·
-Sistem · Deviasi · Loss Surplus to BOM · Keterangan · kolom kerja FU:
-SO · DEVIASI · Selisih · Selisih Deviasi · Cek FU · PIC · Status TL ·
-Ditambahkan. Snapshot lama tanpa field tanggal tetap dimuat (kolom
-  tampil "-"). Export Excel mengikuti format yang sama.
-
-Daftar baris anomali yang di-CENTANG (kolom ✓) di tab DEVIASI GR /
-DEVIASI PCS / LAPORAN DEVIASI — shortlist investigasi berbentuk SNAPSHOT
-(nilai apa adanya saat baris dicentang; TIDAK ikut filter/H aktif).
-
-Perilaku:
-- Baris menetap: tertutup aplikasi pun aman (followup.json, atomic write).
+- Baris menetap: tertutup aplikasi pun aman (followup.json).
 - Klik sel ✓ di tabel ini = KELUARKAN baris dari daftar.
-- 💾 Export Excel: format file sample + kolom kerja FU (SO · DEVIASI ·
-  Selisih · Selisih Deviasi · Cek FU · PIC — diisi petugas).
-  (v3.8: fitur 📥 Impor Hasil TL DIHAPUS — permintaan user "gak terlalu
-  perlu".)
-- ✕ Kosongkan: hapus seluruh daftar (konfirmasi).
-- Double-click baris → pop-up detail source (bila data pipeline tersedia).
-- Sort kolom via klik judul (parse angka negatif kurung).
-- v3.9.17: minus merah PER CELL (semua kolom numerik — Tk 9 tag cell;
-  fallback Tk 8 = tag baris, konsisten view lain v3.9.2). Dulu SATU
-  nilai minus mewarnai seluruh baris + menimpa warna status
-  resolved/pending.
+- 💾 Export Excel mengikuti format file sample; kolom export
+  BERHENTI di Keterangan.
+- ✕ Kosongkan menghapus seluruh daftar (dgn konfirmasi).
+- Double-click baris → popup detail source (bila data pipeline
+  tersedia); nilai popup filter = baris yang tampil.
+- Sort kolom via klik judul (parse angka negatif kurung); minus
+  merah PER CELL semua kolom numerik (fallback Tk 8: per baris).
 """
 
 import contextlib

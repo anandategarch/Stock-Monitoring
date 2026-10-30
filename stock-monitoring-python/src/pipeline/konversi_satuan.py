@@ -1,42 +1,27 @@
 """
-konversi_satuan.py — v3.9.31 Peta konversi satuan per (Nama Barang × Satuan).
+konversi_satuan.py — Peta konversi satuan per (Nama Barang × Satuan).
 
-MASALAH (user): kolom Kuantitas Rincian PO (32.43) masih satuan besar
-(karton) sedangkan seluruh rantai IN/audit (42.05 '#Qty. Terkecil',
-32.24 'Kts (Unit#1)', 99.01 '#Prime.Qty', pivot 'Barang Masuk' =
-Sum of Kuantiti Terima, rekap '29' UoM) SATUAN TERKECIL (botol/GR/PCS)
-→ kolom 'Qty PO Menunggu' v3.9.30 tidak apple-to-apple dengan
-Selisih/Saldo (contoh: sisa -120 BOTOL vs PO menunggu 5 KARTON —
-padahal 5×24=120 = match tersembunyi).
+Mengubah qty PO (satuan besar, mis. karton) ke SATUAN TERKECIL agar
+apple-to-apple dengan Selisih/Saldo di rantai IN (42.05/32.24/99.01).
 
-SOLUSI (user): peta konversi dari data transaksi AKTUAL 2 file:
-- 32.24: kolom 'Rasio Satuan' + 'Satuan' (barang eksternal murni —
-  GULA/KARUNG, SUSU ULTRA/KARTON, JERUK NIPIS, CINCAU, KERTAS MINYAK,
-  SENDOK PLASTIK + satuan khusus RI: MIE/KANTONG, CABE RAWIT/KG,
-  MIKA-CUP/KARTON, NATA DE COCO/GR, SUMPIT/PCS — TIDAK ter-cover 42.05)
-- 42.05: kolom 'Rasio Satuan' + '#Sat. Kirim' + '#Sat. Terkecil'
-  (identitas Kuantiti Terima = #Qty Kirim × Rasio terverifikasi
-  4.591/4.591 baris data real; 0 konflik rasio per (barang, satuan);
-  0 konflik terkecil per barang; rasio konsisten LINTAS resto →
-  join key = NAMA BARANG saja, properti item)
+Peta dibangun DI MEMORI dari baris IN hasil query_in (tanpa file master
+excel — selalu segar mengikuti data transaksi). Sumber kolom: 42.05
+('#Sat. Kirim' + 'Rasio Satuan' + '#Sat. Terkecil') dan 32.24 ('Satuan' +
+'Rasio Satuan'), dibakukan ke kolom standar SATUAN DOK / RASIO SATUAN /
+SATUAN TERKECIL oleh resolve_konversi_kolom (first-match kandidat nama,
+beda versi export Accurate ditoleransi).
 
-Peta dibangun DI MEMORI dari baris IN hasil query_in (tanpa file
-master excel tambahan — selalu segar mengikuti data transaksi);
-kolom sumber dibaca oleh fn_4205/fn_3224 lalu dibakukan ke nama
-kolom standar (lihat resolve_konversi_kolom) — kolom ekstra TIDAK
-ikut pivot append1 (pola 'SOURCE IN' v3.9.29).
-
-ATURAN LOOKUP (lookup_rasio):
+Aturan lookup (lookup_rasio):
 1. exact (barang, satuan-PO) di peta → rasio;
-2. satuan-PO == satuan terkecil barang (implisit → rasio 1 — WAJIB:
-   70/152 barang real TIDAK punya baris satuan==terkecil di 42.05);
-3. tidak ketemu → None (pemanggil menampilkan qty PO as-is + penanda).
+2. satuan-PO == satuan terkecil barang → rasio implisit 1 (banyak barang
+   tanpa baris satuan==terkecil di 42.05);
+3. tidak ketemu → (None, terkecil) — pemanggil menampilkan qty as-is +
+   penanda.
 
-Catatan edge (dari analisis data real): rasio pecahan ada (SUN QUICK
-LEMON BOTOL 383.48 / KARTON 4601.76); nama satuan sama ≠ rasio sama
-antar barang (KARUNG: SUMPIT 3000 vs TEPUNG ROTI 10000) → peta
-key (barang, satuan) BUKAN satuan global; LPG 12KG = UoM rekap (KG)
-≠ terkecil 42.05 (TABUNG) — inkonsistensi data existing user.
+Kebijakan data: konflik (barang, satuan) → nilai PERTAMA menang + dihitung
+utk log; rasio <= 0 / NaN dibuang; terkecil dari '#Sat. Terkecil' (42.05
+menang), baris rasio == 1 menginferensi satuan dasar. Kunci = (barang,
+satuan) — nama satuan sama ≠ rasio sama antar barang; rasio pecahan ada.
 """
 import pandas as pd
 

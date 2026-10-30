@@ -1,178 +1,37 @@
 """
-in_selisih_view.py — Tab "📤 Rekap Selisih IN" (v3.4 → v3.6).
+in_selisih_view.py — Tab "📤 Rekap Selisih IN": rekap per (Resto ×
+Tanggal × Barang) dari data app + hasil audit rekonsiliasi.
 
-v3.11.5 — KEMBALI KE RUMUS LAMA (user: "kembali ke rumus lama" —
-jawaban atas opsi laporan v3.11.4): SELISIH IN = BM REKAP − IN
-(rumus pra-v3.10 dipulihkan; fn_audit tanpa swap slot ΔSO). Kolom
-v3.10 lain TETAP: "COM" (kanan Hasil SO) + chip popup SO KEMARIN/COM
-+ mode 📈 Analisa 6 seksi (ΔSO kini kolom analisa, bukan basis) +
-panjang bulan asli. Chip KPI "BASIS SELISIH" kembali "BM REKAP
-(BM−IN)" di semua format; catatan B3 kembali narasi IN vs BM; B4b
-"SO belum direkam" INERT lagi (selisih BM−IN tak menunggu SO).
+Satu tabel dihitung pipeline fn_audit dari data app (rekap SO + BARANG
+MASUK + IN per tanggal; sheet '29 Rekap Barang Masuk' tidak dibaca):
+- IN          = penerimaan sistem 42.05 + 32.24 + 99.01 (incl. bulan lalu)
+- BM REKAP    = qty SO harian (input rekap JENIS='BARANG MASUK')
+- SELISIH IN  = BM REKAP − IN
+- Hasil SO    = kolom SO rekap ('-' bila tanggal tanpa SO direkam)
+- COM         = pembanding, tepat di kanan Hasil SO
+- PO Menunggu = Σ qty PO 'Menunggu diproses' per pasangan, dikonversi
+                ke satuan terkecil (peta rasio 42.05+32.24; '*' bila gagal)
+- Saldo       = kumulatif per (Resto × Barang) urut tanggal
+- Hasil Audit = port macro VBA: VALID / OK (Matching) / CUT-OFF RESOLVED
+                / OK (Dalam Cut-off) / DEVIASI MURNI
 
-v3.10 — LOGIKA BARU "SELISIH DENGAN SO KEMARIN" + KOLOM COM + MODE
-📈 ANALISA + PANJANG BULAN ASLI (user: "ubah logika selisih in dengan
-selisih dengan so kemarin" · "tambahkan kolom COm di rekap selisih in"
-· "gali potensi analisa di tab rekap selisih in" · "Misal bulan ini
-hanya sampai tanggal 30 maka tidak perlu ada tanggal 31 begitu juga di
-bulan kemarin") — basis ΔSO−IN ini BERLAKU v3.10..v3.11.4 saja:
+MODE HITUNG (kedua varian dihitung pipeline SEKALI; mode hanya memilih):
+- "📅 Bulan Ini" (DEFAULT) — varian bulan berjalan saja; rentang 1..31.
+- "📆 Lalu + Ini" — varian penuh (saldo menyambung 25..31 bulan lalu),
+  rentang −25..N; ketik tanggal negatif di Bulan Ini → otomatis pindah.
+- Rentang tampil KRONOLOGIS dgn PANJANG BULAN ASLI data ('month_len' /
+  'lalu_month_len', fallback 31).
 
-- SELISIH IN (v3.10..3.11.4) = (SO(t) − SO(t−1)) − IN — selisih kenaikan stok
-  fisik vs penerimaan sistem (positif = fisik naik LEBIH banyak dari
-  sistem catat → RI belum diinput; negatif = IN masuk sistem tapi stok
-  tak bertambah). Kolom BARU "SO Kemarin" (basis) & "COM" di tabel;
-  pipeline menghitung (fn_audit v3.10 — slot engine diisi ΔSO; BM rekap
-  TETAP hidup sbg kolom display; SALDO/STATUS audit ikut basis baru).
-- MODE TAMPILAN "📋 Tabel | 📈 Analisa" — 6 seksi analisa: Umur Gantung
-  (aging) · Leaderboard Resto (gantung) · Sistemik vs Lokal ·
-  Resolve-Rate · Anomali ΔSO · COM Minus (lihat _compute_analisa).
-- RENTANG TANGGAL memakai PANJANG BULAN ASLI dari data (audit_result
-  'month_len'/'lalu_month_len' — September 30 hari → rentang 1..30,
-  tanpa tanggal 31; fallback 31 utk pemanggil lama/test tanpa kunci).
-  v3.11.1 — semantik rentang KRONOLOGIS (audit 12-c2 B1): entry −25 =
-  "mulai hari 25 bulan lalu"; default mode 📆 Lalu+Ini = −25..N (hari
-  pertama blok rekap lalu; dulu default numerik-min −lalu_len & filter
-  numerik mentah — start=−25 membuang 26•..31• senyap).
-- KPI chip "COM MINUS" + catatan audit B5 "COM −n" + B4b "SO belum
-  direkam"; popup Rincian IN dapat chip COM.
+Mode 📈 Analisa = 6 seksi: umur gantung · leaderboard resto · sistemik
+vs lokal · resolve-rate · anomali ΔSO · COM minus. Catatan audit
+otomatis: B1 RI Balancing · B2 nomor dobel · B3 selisih IN vs BM ·
+B4 BM 0 padahal IN · B5 COM −n · B4b SO belum direkam + "PO Menunggu:
+PO.xxx (qty n)" utk deviasi murni (KPI chip DEV MURNI · PO MENUNGGU).
+Export level app = varian penuh ("PO Menunggu" opsional di export).
 
-v3.9.31 (user: "kolom Kuantitas di Rincian PO masih satuan besar (karton)
-bukan satuan kecil (botol) seperti sheet barang masuk — tidak match waktu
-cari deviasi murni") — KONVERSI SATUAN PO MENUNGGU:
-- Kolom "PO Menunggu" kini menampilkan NILAI TERKONVERSI ke satuan
-  terkecil (disetujui user) — apple-to-apple dengan kolom Selisih/Saldo
-  (contoh: sisa -120 BOTOL vs PO menunggu 120 BOTOL = match kelihatan;
-  dulu 5 KARTON vs -120 BOTOL tersembunyi). Konversi = peta rasio dari
-  data transaksi aktual 42.05 ('Rasio Satuan' + '#Sat. Kirim' +
-  '#Sat. Terkecil') + 32.24 ('Rasio Satuan' + 'Satuan') — dibangun
-  pipeline di memori (konversi_satuan.build_konversi_map via append1
-  konversi_out), TANPA file master excel tambahan.
-- Catatan "PO Menunggu: PO.xxx (qty 120 BOTOL)" berlabel satuan
-  terkecil; pasangan (barang, satuan-PO) tak ada di peta → qty PO
-  as-is + penanda '*' (mis. "(qty 5 KARTON*)" — disetujui user).
-- Tab 🛒 Rincian PO TETAP menampilkan Kuantitas satuan PO asli (itu
-  memang satuan dokumen PO).
-
-v3.9.30 (user: "cek Rincian PO file 32.43 — ada nama resto+barang
-dgn status pesanan 'Menunggu diproses'; PO sudah ada tapi penerimaan
-belum di-update di sistem → bisa jadi penyebab deviasi murni") — PO
-MENUNGGU SEBAGAI PENJELAS DEVIASI MURNI:
-- KOLOM BARU "PO Menunggu" (setelah Saldo): total qty PO 32.43
-  ber-status 'Menunggu diproses' utk pasangan (resto, barang) baris
-  itu (nilai konstanta per pasangan; '-' bila tak ada). Sumber =
-  kolom 'Qty PO Menunggu' audit_df (fn_audit._apply_po_menunggu —
-  pipeline membaca Rincian PO TANPA filter KATEGORI supaya barang
-  non-DEVIASI-master pun PO-nya ikut; join resto = Cabang PO
-  '1370.MLGPAR' → 'MLGPAR'). Filterable/sortable seperti kolom lain
-  → pasangan ber-PO menunggu bisa diisolasi.
-- Catatan "PO Menunggu: PO.xxx (qty n) (+m)" otomatis di-append ke
-  Catatan Audit baris DEVIASI MURNI pasangan itu (di fn_audit —
-  urutan: catatan VBA | PO Menunggu | catatan app B1-B4) → deviasi
-  murni EXPLAINABLE (menunggu PO diproses → resolve saat RI masuk)
-  vs yang perlu audit fisik terbedakan SEKILAS PANDANG.
-- KPI chip baru "DEV MURNI · PO MENUNGGU" (amber) di antara DEVIASI
-  MURNI & SISA GANTUNG (kpi 'dev_murni_po' = jumlah baris DEVIASI
-  MURNI ber-PO menunggu varian aktif).
-- Kolom ikut ke 💾 Export (opsi "PO Menunggu" di dialog export).
-
-v3.9.27 (user: "pada rekap selisih in bisa mode hitung bulan lalu dan
-hanya hitung bulan ini. Tapi default hitung bulan ini aja") — MODE
-HITUNG (SegmentBar "MODE HITUNG", baris pertama kartu Filter):
-- "📅 Bulan Ini" (DEFAULT): audit = varian BULAN BERJALAN SAJA — baris
-  Tanggal negatif (rekap lalu 25..-31 + IN 42.05/32.24 bulan lalu)
-  DIBUANG sebelum engine VBA (fn_audit.build_audit_from_app
-  bulan_lalu=False) → perilaku identik sheet LAPORAN_DEVIASI workbook
-  user (tgl 1..31, tanpa tanggal negatif). Rentang tampil 1..31.
-- "📆 Lalu + Ini": audit = varian PENUH (incl. bulan lalu — saldo
-  kumulatif menyambung dari 25..31 bulan lalu; perilaku v3.6-v3.9.26).
-  Rentang tampil −25..N (kronologis — v3.11.1).
-Kedua varian dihitung SEKALI oleh pipeline (kunci audit_result
-"df"/"kpi"/"desc" + "df_bulan_ini"/"kpi_bulan_ini"/"desc_bulan_ini");
-mode hanya MEMILIH varian (tanpa recompute). KPI chips + Saldo + Hasil
-Audit ikut varian aktif. Ketik rentang tanggal negatif di mode Bulan
-Ini → otomatis pindah ke Lalu + Ini (baris bulan lalu memang tidak ada
-di varian bulan-ini — tanpa auto-switch tabel akan kosong senyap).
-✕ Reset Filter & data baru → kembali ke default "Bulan Ini".
-Keputusan: varian bulan-ini kehilangan pembanding "SO tanggal 1 = SO
-bulan lalu terakhir" (v3.9.6 — engine melihat baris pertama bulan
-berjalan sebagai awal grup) — inheren: pilih mode "📆 Lalu + Ini" bila
-perlu pembanding bulan lalu. Export "Laporan Deviasi (Audit)" level
-app TETAP varian penuh (kunci "df" tidak berubah).
-
-v3.9.24 (klarifikasi user: periode bisnis 26→25) — RI BALANCING kini
-TANGGAL-AWARE: satu periode = tgl 26 bulan lalu s/d tgl 25 bulan ini
-(dua bulan kalender); PO bulan SEBELUM bulan RI tetap satu periode →
-TIDAK dihitung balancing (dulu salah-flag). Logika = doc_codes.
-_ri_balancing(nomor, po, tanggal).
-
-v3.9.23 (user: "kerjakan semua poin B") — CATATAN AUDIT OTOMATIS:
-kolom Catatan Audit diperkaya catatan app per baris, di-APPEND ke
-catatan engine VBA (dipisah " | " — catatan VBA asli tetap PERTAMA,
-isi lama tidak berubah; baris tanpa temuan tetap sendirian):
-- B1 "RI Balancing: RI.2026.10.10354 (PO 2026-08)" — dokumen IN baris
-  itu ber-periode PO di luar periode bisnis RI-nya (logika sama popup
-  v3.9.19, kini modul bersama doc_codes.py);
-- B2 "Nomor dobel: IT.2026.09.00123 ×2" — nomor dokumen sama muncul
-  >1 baris utk pasangan yang sama (input ganda / sheet kembar);
-- B3 "Selisih IN −3 (IN 13 > BM 10)" — BM ≠ IN dgn arah perbedaan;
-- B4 "BM 0 padahal IN 13 (input rekap belum diisi)" — data quality
-  (mirror temuan audit 37-a R1: workbook gabungan user tanpa baris BM).
-Catatan ikut ke 💾 Export (kolom Catatan Audit sudah termasuk
-AUDIT_EXPORT_COLUMNS). Helper kode dokumen diangkat ke doc_codes.py
-(re-export nama lama — test §29/§30 tetap jalan).
-
-Permintaan user (v3.4): "Tambah 1 tab lagi untuk rekap Selisih IN dan kolom
-Resto, tanggal, nama barang, satuan, IN, Barang masuk dan selisih IN
-dan bisa drill down atau pop up muncul rincian IN yaitu 42.05, 3224,
-dan 9901 beserta nomor nya.
-v3.9.17: sumber IN tambahan "42.05 (Bulan Lalu)" — folder
-"4.1 4205 Bulan Lalu" (penambah IN periode ujung bulan lalu, mirror
-32.24 bulan lalu).
-v3.9.19: popup Rincian IN punya KOLOM CEK — "RI Balancing" bila
-Nomor PO di luar periode bisnis RI-nya (v3.9.24; dulu: bulan Nomor
-RI ≠ bulan Nomor PO) (struktur kode PO.2026.08.00571 /
-RI.2026.10.10354: segmen 2 = tahun, segmen 3 = bulan; permintaan user:
-RI dibuat beda bulan dari PO-nya = entries balancing).
-FIX 35-c1: periode dibandingkan PENUH (tahun, bulan) — bulan sama
-beda tahun = periode beda → tetap "RI Balancing"; bulan 1-2 digit
-dibandingkan numerik.
-v3.9.20 (deep audit 34-c+34-e/fix 35-c1): clone ⛶ reapply tag neg
-per-cell (on_render_done — dulu minus kehilangan warna di Layar
-Penuh) + buang literal None/nan/NaT dari daftar nilai popup filter.
-
-v3.6 (permintaan user: "audit rekonsiliasi tidak perlu ambil dari sheet
-29 — aplikasikan logika nya dengan tambah kolom SO dan kolom hasil audit
-nya, bisa difilter"):
-- SATU tabel (segment Ringkas|Audit dihapus) — baris per (Resto, Tanggal,
-  Barang) dihitung pipeline fn_audit dari DATA APP (rekap SO + BARANG
-  MASUK + IN per tanggal; sheet '29 Rekap Barang Masuk' TIDAK dibaca):
-    IN            = Penerimaan Sistem (Accurate: 42.05 + 32.24 + 99.01
-                    — incl. 42.05/32.24 bulan lalu, v3.9.17)
-    Barang Masuk  = Qty SO Harian (input rekap JENIS='BARANG MASUK')
-    Selisih IN    = Barang Masuk − IN
-    Hasil SO      = kolom SO (rekap JENIS='SO'; hadir hanya di tanggal
-                    yang SO benar-benar direkam — sel '-' = tidak ada SO)
-    Saldo         = saldo kumulatif per (Resto × Barang) urut tanggal
-    Hasil Audit   = port macro VBA BuatLaporanDeviasiSampel — VALID
-                    (Sistem Masuk) / OK (Matching) / CUT-OFF RESOLVED /
-                    OK (Dalam Cut-off) / DEVIASI MURNI
-- Semua kolom difilter via header ⧩ (display-only: saldo & status
-  dihitung dari data penuh, tidak terpotong rentang tanggal).
-- v3.6: klik kanan heading / tombol ◱ Kolom = sembunyikan/tampilkan
-  kolom; window ⛶ punya filter + sort sendiri.
-
-Drill-down (double-click baris) → popup RINCIAN IN per dokumen:
-  - ringkasan per sumber: 42.05 / 32.24 / 99.01 (+ 42.05 & 32.24 bulan lalu)
-  - tabel dokumen: Source | Nomor | Nomor PO | Qty | #Tgl/Jam
-  - copy Nomor (klik kanan / double-click cell / tombol Semua Nomor)
-  - ⛶ Perbesar + ↔ Auto-Fit + Esc
-
-Tanggal -25..-31 = data bulan lalu (selalu terbaca — LightMode dihapus v3.5).
-v3.8: Default rentang 1 s/d 31 = periode BULAN BERJALAN saja (tanpa
-bulan lalu — permintaan user "rekap selisih in hanya periode 1-31";
-v3.9.27: kini bagian dari MODE HITUNG "📅 Bulan Ini" — audit varian
-ikut, bukan sekadar filter tampilan).
-v3.6 (lama): default -26 s/d 31.
+Double-click baris → popup rincian IN per dokumen (42.05/32.24/99.01 +
+bulan lalu · cek RI Balancing · salin nomor). Filter header ⧩ semua
+kolom, sort numerik, ◱ Kolom, ⛶ Layar Penuh; minus merah per-cell.
 """
 import contextlib
 import os

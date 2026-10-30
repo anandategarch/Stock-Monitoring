@@ -1,42 +1,24 @@
 """
-fn_running_stock.py — Mirror SANGAT PERSIS fnRunningStock di M code.
-Algoritma running balance per (Nama Barang, NAMA RESTO).
+fn_running_stock.py — Running balance (SALDO AKHIR) per pasangan barang-resto.
 
-LOGIKA (dari M code List.Generate):
-- Tanggal < 1  (bulan lalu)  → SALDO AKHIR = 0
-- Tanggal >= 1 (bulan berjalan):
-  - Jika BELUM pernah started (first time tgl >= 1):
-      SALDO AKHIR = SaldoAwal + IN - OUT - BARANG_KELUAR
-  - Jika SUDAH started:
-      SALDO AKHIR = previous_saldo + IN - OUT - BARANG_KELUAR
-- Flag 'started' sekali True, tetap True.
+Mirror fnRunningStock di M code (List.Generate): saldo berjalan per grup
+(Nama Barang, NAMA RESTO) atas baris ter-sort Tanggal naik.
 
-FIX (post OUT/BK split): subtract BARANG KELUAR (42.15 Kirim) too.
-In OLD setup OUT = 22.05 sales + 42.15 Kirim (combined).
-In NEW setup OUT = 22.05 only, BARANG KELUAR = 42.15 Kirim (separate).
-To maintain same SALDO AKHIR behavior, must subtract both.
+Aturan akumulasi:
+- Tanggal < 1 (bulan lalu) → SALDO AKHIR = 0.
+- Mulai baris PERTAMA dengan Tanggal >= 1: SALDO AKHIR = saldo_awal +
+  Σ(IN − OUT − BARANG KELUAR) s.d. baris itu; baris bulan-lalu ber-net
+  ≠ 0 tidak ikut akumulasi.
+- Saldo awal grup = List.Max kolom SALDO AWAL (skip NaN; semua-NaN → 0).
+- BARANG KELUAR (42.15 Kirim) dikurangkan terpisah dari OUT (22.05) —
+  hasil split sumber; keduanya mengurangi stok resto.
+- Baris tanggal NaN ter-sort di ekor grup (na_position="last") dan tetap
+  diakumulasi bila berada setelah posisi start; grup tanpa tanggal >= 1 →
+  semua 0; key NaN dianggap satu grup (setara groupby dropna=False).
 
-v3.7 "ENGINE TURBO" — fn_running_stock_grouped sepenuhnya vektor
-(global segmented cumsum, tanpa loop per grup):
-- Benchmark real-data: 561.132 baris / 14.388 grup — 6,68s → 0,19s (36×).
-- Output DIVERIFIKASI IDENTIK vs implementasi lama: 10 edge-case
-  sintetis (bulan lalu, tanggal NaN, key NaN, saldo awal negatif/
-  all-NaN, single row, tanpa kolom, tanggal duplikat) + real-data
-  np.allclose (maxdiff 8,3e-08 = noise pembulatan float) + urutan
-  baris & kolom identik.
-- BUG benchmark awal tertangkap unit-test sintetis: akumulasi harus
-  mulai dari baris PERTAMA tanggal >= 1 (bukan awal grup) — baris
-  bulan-lalu dengan net ≠ 0 (mis. RI 32.24 Bulan Lalu) tidak boleh
-  ikut saldo. Real-data sandbox lolos benchmark lama hanya karena
-  baris bulan-lalunya ber-net 0.
-- Semantik yang dijaga persis: saldo awal = List.Max per grup
-  (skip NaN, all-NaN → 0); baris sebelum tanggal>=1 → 0; baris
-  setelah-nya (termasuk baris tanggal NaN di ekor grup hasil sort
-  na_position="last") ikut akumulasi — perilaku sama dgn loop lama;
-  grup tanpa tanggal >= 1 → semua 0; grup dengan key NaN tetap
-  digabung (setara groupby dropna=False via duplicated()).
-- fn_running_stock (per grup tunggal) dipertahankan untuk API lama
-  (unit test / pemanggilan eksternal).
+fn_running_stock (grup tunggal) dipertahankan untuk API lama;
+fn_running_stock_grouped menjalankan semua grup sekali jalan (sort +
+segmented cumsum vektor — output terverifikasi identik dengan loop lama).
 """
 import numpy as np
 import pandas as pd

@@ -1,352 +1,47 @@
 """
-deviasi_view.py — Wide matrix view DEVIASI GR/PCS (v3.2 → v3.9).
+deviasi_view.py — Wide matrix Deviasi GR/PCS: 1 baris per (Barang × Resto) sekitar
+Tanggal H (kolom SO/In H-2…H+2) + analisa anomali kolom CEK.
 
-v3.11.27 — REVERT TOTAL MERGE-VERTIKAL + RANK MASUK KOLOM CEK (user:
-"ternyata jadi jelek ketika merger vertical, sekarang gak perlu merger
-vertical kembali menjadi awal aja. tapi kolom rank dihapus dan dipindah
-ke kolom CEK sebagai analisa Rank 1 misal nya"): seluruh era merge
-(v3.11.15-26 — TIGA kolom merge · merge statis head-only · anotasi ↳ di
-sel Nama Barang · struktur induk-anak) DIBONGKAR TOTAL. Tabel kembali
-SEPENUHNYA DATAR PER-BARIS (paritas file Excel user — 0 merged cell):
-kolom Rank DIHAPUS dari COLUMNS; nilai peringkatnya dipindah KE DALAM
-KOLOM CEK sebagai segmen analisa pertama — teks "Rank N" (N = peringkat
-Σ|Deviasi| barang di antara barang yang tampil, 1 = total terbesar —
-konvensi rank kelompok v3.11.16) diikuti label anomali per-baris
-("Rank 3 · Turun Drastis · Beda dari Resto Lain (…)"; baris tanpa label
-→ cukup "Rank 3"). Segme CEK "Beda dari Resto Lain" (v3.11.22) TETAP —
-analisis per-baris: resto searah dua periode (surplus sendiri + surplus
-bulanan) sementara resto lain didominasi berlawanan. Mesin yang ikut
-dibubarkan: MERGE_COLS · _static_merge_layout · _gcek_map/_grank_map
-(tinggal _grank_map utk RAW) · _show_b head-only · filter ⧩ Rank ·
-sort khusus kelompok-kontigu. Sort header CEK kini = (rank numerik,
-teks) — kelompok barang searisan rank berdekatan; ⧩ popup CEK tetap
-mencantumkan LABEL UTAMA per-baris (tanpa prefiks rank). RAW utuh:
-_row_snaps/_cek_map (teks display per-baris) + _grank_map.
+TABEL DATAR PER-BARIS — TANPA merge-vertikal (paritas file Excel user: 0 merged
+cell): Nama Barang diulang tiap baris; kelompok barang tetap kontigu (sort
+default Nama Barang lalu |Deviasi| menurun). Kolom Rank tidak ada — peringkat
+tampil DI DALAM kolom CEK sebagai segmen analisa PERTAMA: "Rank 3 · Turun
+Drastis · Beda dari Resto Lain (Surplus · 18/20 resto lain Defisit)"; tanpa
+label cukup "Rank 3". Rank = peringkat Σ|Deviasi| kelompok barang di antara
+barang yang tampil (1 = total terbesar; method=min; per frame terfilter).
 
-v3.11.22 — AMBANG RASIO SEGME "Beda dari Resto Lain" (user meminta ULANG:
-"deviasi yang beda dari resto lain, misal surplus sendiri dan bulanan juga
-surplus — tambahkan di kolom cek" — label v3.11.9 nyaris TAK PERNAH
-terlihat di data produksi): syarat lama "TIDAK ADA satu pun resto lain
-searah" (_same == 0 & _opp >= 2) terbukti mustahil secara statistik —
-probe data asli user (probes/v31122): 698 kandidat searah-dua-periode di
-GR, median 13 resto lain searah → HANYA 3 baris kena; PCS 0/690. Barang
-yang sama cenderung seragam arah lintas resto (pola barang/master), resto
-yang benar-benar menyendiri tetap punya "teman" arah tak relevan → veto
-total membunuh segmen. SYARAT BARU: resto lain BERLAWANAN >= 3x resto
-lain searah (>=75% pembanding ber-deviasi-nonzero) DAN >=2 berlawanan —
-subsumsi perilaku lama utk grup kecil (same=0 & opp>=2 tetap kena).
-Label kini menyertakan rasio: "Beda dari Resto Lain (Surplus · 18/20
-resto lain Defisit)" — N berlawanan / M pembanding nonzero (0/NaN =
-netral, tak masuk rasio). Verifikasi data asli: GR 41 baris + PCS 9
-baris berlabel (dulu 3 / 0).
+KOLOM CEK — SEMUA label anomali terpicu digabung ' · ' (urutan = prioritas):
+  Promix 04 → RI Balancing → Kosong/Non Aktif → Beda Tanggal → Hitung Manual →
+  Hilang dari Pencatatan → Turun Drastis → Naik Drastis → ACR to BOM → BOM 0
+- Promix 04: SOURCE DATA rekap SO ≠ "input so harian" (SO turunan sistem).
+- RI Balancing: ada dokumen IN yang periode PO-nya di luar periode bisnis RI (doc_codes).
+- Kosong/Non Aktif: (AKTIF & SO(H)<0) atau (NON AKTIF & SO(H)>0).
+- Beda Tanggal: In_H>0 & SO_H<SO_H-1 & BK_H=0, atau SO_H>150%·SO_H-1 & In_H=0
+  & BK_H=0 (BK = 8.BARANG KELUAR; port formula LET sheet user).
+- Hitung Manual: W = SO(H-1)+In_H−BK_H−Out_H; |SO_H−W|/|W| > 1,3 (W=0 → SO_H≠0).
+- Hilang dari Pencatatan: SO(H-1)>0, SO(H) tercatat NOL persis, tanpa mutasi
+  IN/OUT/BK. Turun Drastis: SO_H<50%·SO_H-1. Naik Drastis: SO_H>150%·SO_H-1.
+- ACR to BOM: |Deviasi| > ambang% × Total ACR (default 80; spinbox GR & PCS
+  sinkron — SharedACRThreshold, settings.json). BOM 0: Total ACR=0 & SO(H)>0.
 
-v3.11.21 — MERGE-VERTIKAL STATIS ALA TAB RINCIAN PO (user: "coba
-cek tab rincian PO di situ ada merger vertical, itu yang aku maksud
-merger vertical Kolom Cek dan rank di nama barang pada tab deviasi
-gr dan deviasi pcs"): kolom CEK & Rank DIBALIKKAN (v3.11.20 sempat
-dihapus atas salah baca "kalau udah merger 2 kolom tersebut cek dan
-rank hapus aja") dan digabung-vertikal per KELOMPOK NAMA BARANG dgn
-POLA RINCIAN PO — nilai level-grup ditulis SEKALI di baris HEAD
-kelompok, baris lanjutan KOSONG, TANPA sticky/poller/hook scroll
-(nilai TIDAK pernah berpindah — persis Pemasok/Nomor #/Keterangan PO
-yang tampil sekali per grup PO). Layout dipasang ulang hanya saat
-urutan baris berubah (render · sort · clone ⛶) lewat
-_static_merge_layout (tulis-diff); mesin sticky era v3.11.15-19
-(_vmerge_setup/_vmerge_bind/_vmerge_sticky/poller 150ms) DIHAPUS
-TOTAL — nilai "melompat" per event scroll & blank-continuation
-adalah yang 3× dilaporkan bug (v3.9.55-59 · v3.11.16 · v3.11.18).
-Nama Barang TETAP PER-BARIS (Opsi A v3.11.19 — paritas Excel user).
-Nilai kolom = properti KELOMPOK (v3.11.16): CEK = GABUNGAN label
-unik kelompok ' · ' · Rank = rank kelompok Σ|Deviasi| method=min.
+SEGMEN ANALISA TAMBAHAN di teks CEK (bergabung ' · '):
+- Lalu→kini: Peningkatan/Penurunan Tertinggi ±p% / Berubah Arah — pembanding
+  |Deviasi(H)| vs |Dev bulan lalu| (selisih kecil = Stabil).
+- COM Tinggi (+x) / COM Rendah (−x): d(H)=COM−ACR melampaui median historis
+  ± ambang% × |median| (default 50 — SharedComAmbang; modul com_analisa).
+- Beda dari Resto Lain: resto searah DUA periode (deviasi H & bulan lalu
+  sama-sama surplus/defisit) sementara resto lain (barang+satuan sama)
+  didominasi berlawanan — berlawanan ≥ 3× searah DAN ≥2 berlawanan; label
+  "(Surplus · 18/20 resto lain Defisit)" (N/M = berlawanan/pembanding
+  deviasi-nonzero; 0/NaN netral; butuh file bulan lalu; grup ≥ 3).
+- Potensi PO belum dibuat: suplai rekap masuk tanpa penerimaan sistem (po_keterangan).
 
-v3.11.19 — OPSI A "PARITAS EXCEL USER" (user: "cek merger vertical,
-saat ini progam menjadi bug yaitu yang tampil hanya 1 nama barang per
-group atau section" — keluhan ke-3 dgn akar sama; riset lengkap di
-REFERENSI_MERGE_VERTIKAL.md): kolom Nama Barang KELUAR dari
-merge-vertikal — nama DIULANG di SETIAP baris (paritas file kerja
-user: 0 merged cell, nama per baris — keluhan "nama hilang/1 per
-grup" tuntas permanen; ttk.Treeview memang tak punya cell-span
-sejati, simulasi blank-continuation terbaca user sebagai bug).
-Merge-vertikal TETAP utk CEK & Rank (kolom tak ada di Excel user —
-nilai memang milik KELOMPOK; head-only + sticky stateless + poller
-150ms + bind <Map> tetap). RAW per-baris utuh di
-_row_snaps/_rank_map/_cek_map — sort · filter ⧩ · auto-fit ·
-double-click popup · follow-up tak tersentuh.
-
-v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG (user: "kolom
-Cek bisa gak merger vertical dengan nama barang? di tab deviasi gr dan
-deviasi pcs? Rank juga merger vertical"): tampilan ala rowspan Excel —
-nilai ditulis HANYA di baris head tiap run baris ber-nilai-sama (Nama
-Barang: kelompok barang; CEK: label utuh identik berurutan dalam
-kelompok; Rank: ikat rank method="min" — 13,13,13 → satu sel). Nilai
-mentah PER-BARIS tetap utuh (_row_snaps/_rank_map/_cek_map) — sort ·
-filter ⧩ · auto-fit · double-click popup · follow-up tak tersentuh.
-STICKY STATELESS menggantikan mesin era v3.9.55-59 yang dibongkar
-v3.9.60: nilai run SELALU terlihat (head bila tampak, selain itu baris
-pertama run yang tampak) — tiap event scroll membaca ulang sel yang
-terlihat lalu menulis DIFF saja (self-healing; tanpa state display yang
-bisa basi/bocor). Sort kini memasang ulang dekorasi lewat on_done —
-jalur insert batched ≥1500 baris dulu memasangnya di tree parsial (bug
-laten tag cell tertutup sekalian).
-
-v3.11.7 — KOLOM CEK: SEMUA LABEL TERPICU + 2 LABEL BARU + SEGME
-"COM TINGGI" (user: "aku tertarik naik drastis dan Hilang dari
-pencatatan dan Semua yang terpicu" + "coba eksplore terkait COM yang
-ditambahkan di kolom CEK ... selisih COM di tanggal 7 dengan acr > dari
-selisih median nya ... tambahkan analisa COM Tinggi"):
-- SEMUA LABEL TERPICU TAMPIL BERGABUNG ' · ' — dulu np.select hanya
-  mengembalikan label prioritas PERTAMA (mis. In>0 & SO turun 50%+
-  memicu Beda Tanggal DAN Turun Drastis, tapi hanya Beda Tanggal
-  tampil — label lain tenggelam). Urutan segmen = urutan prioritas;
-  label PERTAMA tetap menentukan warna baris + footer 'CEK n' +
-  snapshot follow-up 'cek' (konsumen split(' · ')[0] tak berubah
-  makna; fp follow-up menetralkan 'cek' sejak FIX 6d1-01).
-- LABEL BARU "Naik Drastis" (mirror Turun Drastis): SO(H) melonjak
-  > 150%·SO(H−1) (threshold sama dgn cabang-2 Beda Tanggal); so_m1=0
-  tak berlabel (rekam pertama ≠ anomali).
-- LABEL BARU "Hilang dari Pencatatan": kemarin bersaldo >0, hari ini
-  SO tercatat NOL PERSIS (baris 1.SO ADA di H — bukan sekadar tak
-  direkam) TANPA mutasi penutup (IN/OUT/BK=0) — kasus ekstrem Turun
-  Drastis, beda kelas kecurigaan (stok lenyap tanpa jejak);
-  prioritas DI ATAS Turun Drastis.
-- SEGME "COM Tinggi (+x)": d(t) = COM(t) − ACR(t) (pemakaian aktual
-  resto vs pemakaian sistem) per pasangan; bila d(H) > median d(t)
-  t=1..H−1 (≥3 hari valid, SO tercatat kedua ujung — anti label palsu
-  data sparse) → pemakaian fisik melampaui sistem → pemicu deviasi
-  stok. x = selisih di atas median. Modul com_analisa (matriks
-  H-independen di-cache per identitas data + hasil per H — SharedPivot
-  Cache ber-key (data, h) menjamin tak basi). Bertanda, satu arah,
-  tanpa margin (spesifikasi user).
-
-v3.11.6 — ISSUE 1 keluarga bug "filter menawarkan nilai kosong" (user:
-"waktu aku klik filter muncul misal nama resto A terus aku klik resto
-tersebut ternyata data kosong. Harusnya jika data kosong gak perlu
-tampilkan resto A di list filter tersebut"): nilai combobox KATEGORI
-di-SCOPE per mode satuan tab ini (load_data — GR: SATUAN=='GR', PCS:
-!= 'GR' termasuk NaN, identik split _filtered_pivot; cek entry gabungan
-rekap ikut di-scope). Dulu dari data mentah PENUH → kategori yang
-barangnya semua PCS tetap muncul di tab GR → dipilih → tabel kosong.
-(Funnel ⧩ header kolom sudah benar sejak v3.9.19 — sumber _filtered_
-pivot.) Fix utama filter-resto-kosong ada di pivot_view (combo RESTO/
-SOURCE kascade per render).
-
-v3.9.53 (user: "Deviasi bulan lalu yang ditampilkan di tab deviasi gr dan
-pcs pakai nilai asli jangan pakai nilai absolute yang ditampilkan.
-Absolute untuk perhitungan saja" + "Week sudah menyesuaikan kolom H di
-tab deviasi GR dan PCS untuk Deviasi bulan lalu" + "kok ada nama barang
-yang bukan kategori COM Deviasi + Packaging Deviasi misal BASKOM
-STAINLESS 18 CM ... coba cek apa ini bug?"):
-- KOLOM 'Dev. Bulan Lalu' GANTI SUMBER: DEV Lalu FILE deviasi resmi
-  (tab ⚖ Komparasi — parse_deviasi_file via lalu_provider app, pola
-  nominal_resto v3.9.36) — NILAI ASLI bertanda (minus = kekurangan,
-  kurung merah; PLUS = surplus — bukan absolut), minggu pembanding
-  MENYESUAIKAN H + bulan TERBARU file (parity hitung_nominal_lalu_pairs
-  → angka PERSIS sama dgn kolom 'DEV Lalu' tab 📋 Laporan Deviasi —
-  'sama seperti di tab laporan deviasi secara kuantiti'). Dulu
-  v3.9.51-52: Σ 3.DEVIASI tgl negatif rekap lalu (cakupan rekap lalu
-  hanya -25..-31 & nilai mentahnya tak sebanding angka resmi → tampak
-  'nilai absolute'). Tanpa file → '-' + petunjuk status; ABSOLUTE tetap
-  dipakai HANYA utk klasifikasi ANALISA CEK lalu→kini (|kini| vs |lalu|).
-  Identitas file = bagian KUNCI SharedPivotCache (file berganti → cache
-  miss otomatis) + on_lalu_file_changed (clear + refresh; dipanggil app
-  _on_dev_file_loaded) + label 'WEEK n · bulan' dinyatakan di status.
-- FILTER KATEGORI default GABUNGAN kini STRICT (hanya COM DEVIASI -
-  RESTO + Biaya Packaging - RESTO — passthrough barang TANPA kategori
-  dihapus; kelas 100383 tetap terlindungi kategori rekap v3.9.49 +
-  entry '(Tanpa Kategori)' + jumlah tersembunyi dinyatakan di status).
-
-v3.9.34 (user: "Nominal harusnya ada di Deviasi GR dan Deviasi PCS
-juga itu tambah kolom baru dan hapus kolom BK_7 dan OUT_7 misal H = 7"):
-- TAMBAH kolom "Nominal" tepat setelah Deviasi = Harga 41.09
-  (dinormalkan ke satuan pasangan — helper bersama
-  nominal_common.lookup_harga_pair) × Deviasi; barang tanpa harga /
-  satuan tak ter-cover rasio → NaN → tampil '-' (transparan).
-- HAPUS kolom display "Out_H" & "BK_H" (heading dinamis OUT_7/BK_7
-  saat H=7); nilai internal TETAP dihitung (dipakai rumus internal
-  Stok Seharusnya W = SO(H-1)+IN−BK−OUT & CEK — tidak tersentuh).
-
-v3.9.33 — AUDIT FIX (48-b/48-d/48-e/48-f, fix 49-a):
-- (P0) clone ⛶ basi: re-render/load_data MENUTUP semua clone hidup +
-  generasi render dicatat di tree clone (klik ✓/double-click clone
-  generasi lama diabaikan) — dulu klik ✓ clone basi men-toggle
-  pasangan SALAH (persist followup.json).
-- (P1) H=1/H=2: SO(H−1)/SO(H−2) kini membaca kunci −1 (saldo
-  penutupan bulan lalu) — dulu kunci 0 (tak pernah ada) → selalu 0.
-- (P1-LOW) saldo-only 42.17 saat H≤3: Sistem = saldo t=1 juga utk
-  pasangan TANPA baris ('2.SALDO AKHIR', H) — fix v3.9.32 tak lagi
-  inert (dulu Deviasi 0−0).
-- (MEDIUM) pasangan IN-only ber-SATUAN NaN tidak lagi lenyap dari
-  pivot_table (SATUAN NaN → "").
-- (P1) sinkron ✓ lintas tab: listener FollowUpStore memperbarui sel
-  ✓ tanpa re-render penuh.
-- (UX) chip H tab PCS diberi petunjuk "atur di 📦 Deviasi GR"; 0 baris
-  pasca-pipeline → empty state + status berpenjelasan aksi; panah sort
-  dipasang ulang setelah _update_headings.
-
-1 row per (Barang × Resto) di sekitar Tanggal H (H-2 … H+2) — logika
-komputasi 100% identik versi lama (pivot + CEK anomaly detection), kini
-VEKTORISASI numpy (tanpa iterrows — 5-10× lebih cepat).
-
-v3.9.27 (user: "Kondisi beda tanggal kok menghasilkan data kosong semua?
-cek file 01.1 CEK STOCK V2.xlsb bagian sheet Data Base Cek Deviasi
-KOLOM Y. Sheet tersebut terhide. Cek semua logika nya dan bandingkan
-dengan yang ada di program.") — CEK DI-PORT ULANG PERSIS formula LET
-sheet terhide tsb. (nama variabel LET terlihat dari defined names
-_xlpm.KondisiKosong/Naikturun/HitungManual/TurunDrastis/KondisiACR;
-simulasi Python 2.120 baris atas nilai sel workbook = label kolom Y
-cached 128/129 eksak — 1 beda = 1 baris gate, lihat bawah):
-- Kondisi 2 "Beda Tanggal": J = "Out H" = KIRIMAN KELUAR (8.BARANG
-  KELUAR app) — DARI 9.ACR/PENJUALAN (bug sejak port pertama; bukti
-  MLGPAR/ADONAN GORENG MEKAR: sheet 'Beda Tanggal', app lama kosong).
-- ATURAN SO-STALE v3.9.22 (tanggal SO nonzero terakhir < H) DIHAPUS —
-  tidak ada di sheet; di data real men-flag pasangan ber-SO_H=0
-  (baris 'data kosong') hingga mendominasi (H≥26: ~semua pasangan).
-- Kondisi 3 "Hitung Manual": stok = W sheet = SO(H-1)+IN_H−KIRIMAN
-  KELUAR_H−PENJUALAN_H (dulu sistem+IN−ACR−BK → 266 flag palsu).
-- Stok Seharusnya (tampil) = W sheet (dulu SO(H-1)−ACR-rata2 → 794/
-  1.405 baris beda dgn sheet; klaim verifikasi v3.9.6 keliru).
-- GATE sheet IF(V="","",…) TIDAK direplikasi (V = Dev to BOM%:
-  Total ACR=0 → V="" → sheet mengosongkan SELURUH CEK — 47% baris
-  workbook; + kaskade #N/A saat tanggal di luar cakupan pivot sumber
-  → 'data kosong semua' — persis gejala yang ditanyakan). App
-  mengevaluasi kondisi apa adanya (lebih informatif; deviasi
-  terdokumentasi di sini).
-- Prioritas & label tak berubah: Promix 04 → RI Balancing →
-  Kosong/Non Aktif → Beda Tanggal → Hitung Manual → Turun Drastis →
-  ACR to BOM (kondisi app-only tetap: dua struktur dokumen di atas
-  heuristik pola angka sheet).
-
-v3.9.24 (klarifikasi user: "jika saat ini bulan oktober maka 1 periode
-nya mulai dari 26 september - 25 oktober nah untuk cek RI balancing
-berarti dengan NO. PO yang bukan bulan september dan oktober") —
-definisi RI Balancing = PERIODE BISNIS 26→25 (dokumen tanggal-aware):
-PO di luar dua bulan periodenya → flag; PO bulan sebelum RI = satu
-periode → tidak (dulu salah-flag). Logika = doc_codes._ri_balancing
-(nomor, po, tanggal) — tanggal dokumen dipakai utk batas 25/26.
-
-v3.9.23 (user: "kerjakan poin 6") — CEK "RI Balancing" DI KOLOM UTAMA:
-pasangan barang×resto yang punya ≥1 dokumen IN dgn PERIODE Nomor PO di
-luar periode bisnis RI-nya (struktur PREFIKS.TAHUN.BULAN.NNNNN) dan tanggal
-dokumen ≤ H kini TERFLAG "RI Balancing" langsung di tabel — dulu hanya
-terlihat di popup Rincian IN (harus double-click baris per baris).
-Sumber = in_detail (query_in, per-dokumen — pemetaan Nomor↔Nomor PO
-bersih; frame final menggabungkan info kolom sehingga pemetaannya bisa
-ter-campur). Prioritas np.select: Promix 04 → RI Balancing →
-Kosong/Non Aktif → Beda Tanggal → Hitung Manual → Turun Drastis →
-ACR to BOM (anomali struktural dokumen di atas heuristik pola angka;
-"Beda Tanggal" stale mendominasi data real — di urutan terakhir RI
-Balancing nyaris tak pernah tampil). Helper periode = doc_codes.py
-(modul bersama, logika sama popup & Catatan Audit). Detail IN
-diteruskan app.load_data → view ini; None (test/pemanggil lama) →
-kondisi tidak berlaku (semua perilaku lama utuh).
-
-v3.9.21 (2 permintaan user):
-- AMBANG ACR to BOM yang BISA DIATUR (user: "di bagian ACR to BOM itu
-  harusnya ada threshold > 80% absolute dan aku bisa atur"): CEK
-  kondisi ke-5 kini |Deviasi| > (ambang/100) × Total ACR — dulu kaku
-  > 100% × Total ACR. Ambang default 80, spinbox di kartu Filter KEDUA
-  tab (GR & PCS) sinkron via SharedACRThreshold (pola SharedTanggalH),
-  tersimpan di settings.json (bertahan lintas sesi); ubah ambang →
-  pivot cache di-clear + refresh (CEK hidup di pivot ter-cache).
-- CEK "Promix 04" PER-TANGGAL (fix user: "ada muncul nilai Promix 04 di
-  filter tapi kenapa data nya tidak ada"): sumber SO kini dibaca dari
-  baris 1.SO TANGGAL ANALISA H (append1 LANGKAH 9 resolve sumber per
-  (pasangan × tanggal) atas baris rekap ber-NILAI non-nol — 'input so
-  harian' menang atas promix pada tanggal sama; baris 0 = template
-  kosong, tidak ikut menentukan). Label muncul HANYA bila SO tanggal H
-  BENAR bersumber promix — tidak lagi pair-level race tanggal-tertinggi
-  (dulu: v3.9.19 bisa melabel SEMUA pasangan campuran sbg Promix krn
-  tie urutan baris; v3.9.20 swing kebalikan: tak pernah Promix meski
-  SO tanggal H memang turunan promix).
-
-v3.9.20 (deep audit 34-b/fix 35-b): _hl_cells di-init di __init__ (sort/
-reapply tag sebelum render pertama tidak crash di Tk 9) +
-_so_source_lookup keep-LAST sort-Tanggal (preferensi append1 LANGKAH 9)
-+ _compute_cek (kode mati) dihapus.
-
-v3.9.18 (permintaan user: "resto yang dianalisa hanya berfokus pada resto
-yang ada di folder 1. DEVIASI WEEKLY aja jangan semua" + "look up nama
-barang ini pakai dua arah ... tapi juga sebaliknya" + popup ringkas +
-hapus 3 kolom + highlight 2 kolom):
-- FOKUS RESTO rekap: pivot kini hanya memuat pasangan (barang × resto)
-  yang RESTOnya punya data rekap berjalan (JENIS 1.SO / 5.BARANG MASUK
-  dengan Tanggal POSITIF — data sheet '1  DEVIASI WEEKLY' folder
-  "1. DEVIASI WEEKLY"/RekapBerjalan; rekap bulan lalu bernomor negatif
-  dan berasal dari folder lain). Resto yang hanya ada di sumber app
-  (32.24/42.05/9901/22.05/42.15) tanpa rekap → TIDAK dianalisa lagi
-  (barisnya dulu menampilkan Deviasi = 0 − Sistem = minus palsu).
-- LOOKUP BARANG DUA ARAH: barang TIDAK difilter — utk resto rekap,
-  barang ber-SO rekap MAUPUN barang yang hanya ada di data app
-  (IN/OUT/SALDO AKHIR saja, SO = 0) keduanya tetap tampil (arah
-  rekap→app dan arah app→rekap).
-- KOLOM DIHAPUS dari tampilan GR & PCS (permintaan user): Max Deviasi,
-  ACR, Total ACR. HITUNGAN INTERNAL TETAP dihitung persis v3.9.6 —
-  Total ACR & ACR tetap dipakai CEK kondisi ke-5 "ACR to BOM", Dev to
-  BOM% (= Deviasi/Total ACR) dan Stok Seharusnya (v3.9.27 = W sheet:
-  SO(H-1) + IN_H − KIRIMAN KELUAR_H − PENJUALAN_H)
-  tetap tampil + tetap masuk snapshot Follow Up (loss_bom).
-- HIGHLIGHT KOLOM Deviasi & SO_H (permintaan user: "highlight kolom
-  deviasi dan kolom SO H"): latar lembut #fef3c7 (amber-100) di SEMUA
-  sel kedua kolom via tag cell (Tk 9; terukur probe: bg cell-tag
-  MENANG atas bg item-tag evenrow/oddrow, fg merah minus tetap hidup
-  di atasnya). Fallback Tk 8: tanpa tint kolom (tag cell tak tersedia).
-- DOUBLE-CLICK → POPUP RINGKAS (bukan lagi popup source rows): hanya
-  Nama Barang · Nama Resto · Saldo Akhir · SO · IN · Deviasi per
-  Tanggal (lihat deviasi_popup.py).
-
-v3.9.19 (3 permintaan user utk tab GR/PCS):
-- DEFAULT KATEGORI = "Deviasi" (case-insensitive; fallback "Semua"
-  bila tidak ada) saat load data & ✕ Reset Filter.
-- CEK kondisi ke-0 "Promix 04" (PRIORITAS PERTAMA): SOURCE DATA rekap
-  JENIS SO (kolom SOURCE DATA sheet REKAP MENTAH — "input so harian" /
-  "input promix 04 dine in" / "input promix 04 take away"; dibawa
-  append1 merge per pasangan) BUKAN "input so harian" → CEK = Promix
-  04 (SO turunan sistem — pola CEK lain tidak bermakna); tanpa SOURCE
-  DATA → kondisi tidak berlaku.
-- ISI FILTER HEADER = data yang ADA saja (Excel-like): daftar nilai
-  dihitung dari baris yang tampil saat ini (mode Satuan + KATEGORI +
-  filter kolom LAIN — kolom sendiri dikecualikan), bukan pivot mentah
-  (dulu: PCS bisa menampilkan nilai CEK yang hanya ada di baris GR).
-
-v3.9.6 (permintaan user: "tambah kategori Deviasi pada tab Deviasi PCS
-dan GR" — mirror sheet DEVIASI GR/PCS workbook asli user):
-- 5 KOLOM BARU setelah Rank: Max Deviasi (max |Deviasi| per barang,
-  semua resto) · ACR (rata-rata penjualan harian = Σ 9.ACR tgl 1..H / H)
-  · Total ACR (BOM per barang×resto = Σ penjualan 1..H) · Dev to BOM%
-  (= Deviasi / Total ACR — "Loss Surplus to BOM" sheet Follow UP;
-  formula terverifikasi nilai-per-nilai dari sheet DEVIASI GR asli) ·
-  Stok Seharusnya (v3.9.27 = W sheet: SO(H-1)+IN_H−KIRIMAN KELUAR_H−
-  PENJUALAN_H — perkiraan stok hari H; dulu SO(H-1)−ACR).
-  (v3.9.18: 3 kolom pertama DIHAPUS dari tampilan — lihat atas.)
-- CEK kondisi ke-5 "ACR to BOM": |Deviasi| > Total ACR > 0 → selisih
-  stok melebihi pemakaian teoretis sebulan → pasti salah (melengkapi
-  port formula LET yang sebelumnya "4 dari 5 kondisi — ACR butuh BOM,
-  TODO"); string kategori sama persis sheet asli user.
-- Parser sort Indonesia (_parse_num_id) utk semua kolom numerik +
-  persen; minus merah per-cell di "Dev to BOM%" & "Stok Seharusnya".
-- Snapshot follow-up diperluas (so_m2/so_m1/so_p1/so_p2/loss_bom) —
-  bahannya format Follow Up "seperti file sample" (v3.9.6 followup_view).
-
-Fitur v3.9 (permintaan user: "kolom apply H atau input H cukup 1 tab aja
-dan berlaku di 2 tab yang berkaitan yaitu Deviasi Gr dan Deviasi PCS
-sehingga tidak double input"):
-- SharedTanggalH: TANGGAL H kini STATE BERSAMA antar tab Deviasi GR &
-  PCS. Input + tombol "Apply H" hanya ada di tab 📦 Deviasi GR (tab
-  pertama); tab 🧩 Deviasi PCS menampilkan nilai H (read-only chip) dan
-  OTOMATIS ikut refresh saat H diubah — tidak ada double input.
-- Tombol ⤢ "Perbesar" (ala Waste): ciutkan kartu Filter + judul +
-  legenda supaya tabel memakai tinggi penuh; ⛶ Layar Penuh = window
-  fullscreen.
-
-Fitur v3.2 (dipertahankan):
-- Kolom ✓ follow-up: klik sel ✓ = daftarkan/keluarkan baris ke tab
-  ☑ Follow Up (ala repo Waste; persist followup.json)
-- Lazy refresh: view hanya compute saat tab-nya terlihat (app memanggil
-  ensure_refreshed saat tab dipilih)
-
-Fitur v3.1 (dipertahankan):
-- Filter Nama Barang menempel di header kolom (corong, Excel-like)
-- Loading overlay + compute/render async (UI tidak membeku)
+LAIN-LAIN: Dev. Bulan Lalu = nilai ASLI bertanda dari file deviasi resmi (minggu
+menyesuaikan H) · Nominal = Harga 41.09 × Deviasi · satuan GR vs non-GR ·
+SharedTanggalH (input H hanya di tab GR, PCS ikut; default {7,14,25}) +
+SharedPivotCache · minus merah per-cell · highlight Deviasi & SO_H · filter
+KATEGORI/AKTIF/⧩ · ✓ follow-up · double-click → popup per tanggal
+(deviasi_popup.py; label CEK pertama → warna baris; async + lazy refresh).
 """
 import contextlib
 import json

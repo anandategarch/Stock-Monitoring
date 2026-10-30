@@ -1,227 +1,37 @@
 """
-komparasi_deviasi_view.py — v3.9.4: KOMPARASI FILE DEVIASI vs TAB DEVIASI GR.
+komparasi_deviasi_view.py — Komparasi FILE deviasi (laporan resmi per
+RESTO × BAHAN × MINGGU) vs sisi data app "Saat Ini" (= tab Deviasi GR).
 
-AUDIT 2c (fix 3-c):
-- 2c-03: baris ke-4 kartu Filter (sub-mode Tabel/Analisa) kini ber-
-  caption 'TAMPILAN' + opsi 'Tabel'/'📈 Analisa' (dulu 'MODE' + '⚖ Tabel'
-  — KEMBAR dgn bar MODE app di atas tab 📋 yang mengontrol ISI tab;
-  ⚖ dipakai dua makna). Tanpa perubahan logika (index-based).
-- 2c-01/2c-02: pesan 0-baris pipeline menunjuk tab yang BENAR
-  ('⚙️ Config' — dulu '⚙ Pengaturan' yang tak ada) DAN naik ke
-  SUBTITLE EmptyState (status footer tersembunyi di balik EmptyState).
-- 2c-05: Top-N bukan-angka ('abc') kini revert entry + ⚠ status
-  (pola clamp negatif; dulu jatuh senyap ke Top 100, entry tetap 'abc').
-- 2c-06: hint footer abu 'Dobel-klik baris = detail · ✓ = pantau
-  barang'.
+FILE (Lalu): QTY BOM = pemakaian teoretis (−) · QTY COM = aktual (−) ·
+QTY DEVIASI = COM − BOM (±) · %TO BOM = DEVIASI ÷ |BOM|; minggu file =
+CUT-OFF KUMULATIF dari tanggal 1 (WEEK 2 ≈ 2× WEEK 1).
 
-v3.9.34 (user: "begitu juga di Laporan Deviasi" — mode ⚖ Komparasi):
-KOLOM BARU "Nominal" = Harga 41.09 (dinormalkan ke satuan baris via peta
-rasio v3.9.31, helper bersama nominal_common.lookup_harga_pair) × "GR
-Saat Ini" — TEPAT SETELAH GR Saat Ini, SEBELUM Selisih. Baris tanpa nilai
-app / barang tanpa harga 41.09 / satuan tak terkonversi (penanda '*') →
-NaN → tampil '—' (konsisten GR Saat Ini). load_data menerima
-(harga_map, konversi_map) dari pipeline (default None → kompatibel
-pemanggil lama). Filter ⧩/sort numerik/minus-merah-per-cell ikut otomatis
-via NUMERIC_COLS; heading "Nominal — Harga 41.09 × GR Saat Ini". Tabel
-analisa (Top Selisih / Flip) TIDAK diubah.
+SAAT INI (data pipeline, tgl 1..H): BOM = −Σ 9.ACR (22.05); com(1) =
+SALDO AWAL + IN(1) − BK(1) − SO(1); com(t>1) = SO(t−1) + IN(t) − BK(t)
+− SO(t) (formula baris 6.PEMAKAIAN (COM)); DEV = COM − BOM; GR = SO_H −
+Sistem_H (kolom Deviasi tab 📦 Deviasi GR — GR == DEV secara aljabar).
 
-v3.9.33 — AUDIT FIX (48-d/48-e/48-f, fix 49-a):
-- (P0) clone ⛶ basi: re-render (tabel utama / Top / Flip) MENUTUP
-  clone milik tabel tsb + generasi render dicatat di tree clone —
-  klik ✓ / double-click clone generasi lama diabaikan (dulu
-  men-toggle pasangan SALAH / snapshot H salah).
-- (MEDIUM) _sort_top/_sort_flip saat batch insert tabel analisa masih
-  berjalan kini DIANTREKAN per tabel (pola _pending_sort) — dulu sort
-  di tengah batch = prefix terurut + ekor tak terurut.
-- (MEDIUM) label Periode 'Median n file' → 'Median n bulan' (n
-  menghitung BULAN — file History multi-bulan salah label) + status
-  'median antar-bulan'.
-- (LOW) Top-N negatif di-clamp ke 0 + peringatan status.
-- (P1) sinkron ✓ lintas tab: listener FollowUpStore memperbarui sel ✓
-  tanpa re-render penuh; 0 baris pasca-pipeline → empty state +
-  status berpenjelasan; chip H diberi petunjuk "atur di 📦 Deviasi GR".
+VERDIK: Selisih = GR Saat Ini − DEV Lalu → MATCH (|Selisih| ≤ 1.0 +
+0.01% × |DEV Lalu|) / SELISIH / TIDAK ADA DI DATA SAAT INI / H TIDAK ADA.
 
-v3.9.26 (permintaan user: "potensi flip flop itu harusnya yang
-    selisih nya dikit aja"): ARAH LABEL ANALISA 'Potensi Flip Flop'
-    DIBALIK (v3.9.19-3.9.25 salah arah — audit 41-a/41-b): pasangan
-    flip (tanda DEV berlawanan) dgn SELISIH MAGNITUDO KECIL kini
-    dilabel 'Potensi Flip Flop' — disparitas < FFLOP_DISP_MAX 40%
-    (Kategori Sempurna/Dominan; nilai bercermin ±, mis. −50 → +55:
-    deviasi sama besarnya cuma pindah sisi → rawan bolak-balik);
-    disparitas ≥ 40% (Parsial — sisi dominan jauh lebih besar, mis.
-    −100 → +10: deviasi nyaris hilang/membesar, arah benar-benar
-    berganti) = 'Berubah Arah'. Data real 41-b: 87,9% pasangan flip
-    = Parsial — aturan lama melabeli flip miring/noise (DEV 0,1 →
-    GR −780) sbg FFLOP sedang cermin sejati (−9.525 → +9.551) cuma
-    'Berubah Arah'. Satu konstanta FFLOP_DISP_MAX utk tabel Top
-    Selisih & Perubahan Arah (ambang sama Kategori flip).
-
-v3.9.22 (permintaan user: "hapus tab liga deviasi" + "hapus arah
-    minoritas" + "dead code nya juga hapus"): bagian 🧭 Arah Minoritas
-    dan 🏆 Liga Deviasi DIHAPUS PENUH dari mode 📈 Analisa — baris
-    pemilih BAGIAN (SegmentBar) dihapus (analisa kini TUNGGAL: 📊 Top &
-    Flip), semua metode render/filter/sort/build/drildown/state-nya
-    dihapus, MIN_COLS/LIGA_COLS + kolom format matinya (Rate, %
-    Minoritas, Σ|DEV| Minoritas, BOM, DEV, z) dibersihkan.
-
-v3.9.20 (deep audit 34-a/fix 35-a): reset filter tabel analisa di SEMUA
-    jalur reset tabel utama (dulu filter basi → 0 baris senyap) + nilai
-    popup filter tabel analisa = baris yang tampil (param fmt_fn) + 4
-    entri format kolom mati Risk/Bench dibersihkan.
-
-v3.9.19 — KOLOM ANALISA + HAPUS 2 BAGIAN (permintaan user):
-    (1) KOLOM ANALISA (1 kolom saja) di bagian 📊 Top & Flip — tabel
-        Top Selisih & Perubahan Arah kini punya keterangan analisa
-        per baris: Kenaikan Tertinggi (tanda sama, |saat ini| >
-        |lalu|) · Penurunan Tertinggi (tanda sama, |saat ini| <
-        |lalu|) · Stabil (Selisih dalam toleransi MATCH) · Berubah
-        Arah (tanda berlawanan, disparitas ≥ 40% — Parsial; v3.9.26)
-        · Potensi Flip Flop (tanda berlawanan, disparitas < 40% —
-        selisih magnitudo kecil, nilai bercermin ±; v3.9.26 MEMBALIK
-        arah label: v3.9.19-3.9.25 dulu ≥ 40% (pembalikan parsial)
-        yang dilabel FFLOP — kebalikan dari maksud user; ambang
-        tetap sama dgn Kategori flip Sempurna/Dominan vs Parsial).
-    (2) BAGIAN ⚡ Risiko Flip & 💰 Benchmark DIHAPUS (permintaan
-        user: "hapus tab resiko flip dan bencmark"); v3.9.22: 🧭 Arah
-        Minoritas & 🏆 Liga Deviasi ikut dihapus — tersisa Top & Flip.
-
-v3.9.16 — TOP SELISIH: ABSOLUT + MEDIAN MULTI-FILE (permintaan user,
-khusus mode 📈 Analisa di tab 📋 Laporan Deviasi; tabel utama ⛖ &
-bagian analisa lain TIDAK berubah):
-    (1) ABSOLUT: Selisih = |GR Saat Ini| − |DEV Lalu| — DEV Lalu &
-        GR Saat Ini DIABSOLUTKAN DULU saat menghitung Selisih
-        (pembalikan tanda mis. −50 → +30 tidak lagi menggembungkan
-        selisih: dulu 80, kini 20); kolom DEV Lalu / GR Saat Ini yang
-        DITAMPILKAN tetap NILAI ASLI (bukan absolut). Status
-        MATCH/SELISIH (hanya tabel Top Selisih) ikut toleransi Selisih
-        absolut; status TIDAK ADA DI DATA SAAT INI / H TIDAK ADA tetap.
-    (2) MEDIAN MULTI-FILE: file deviasi >1 → nilai Lalu per pasangan
-        (resto × bahan × minggu sama) = MEDIAN antar-file — SATU baris
-        per pasangan (bukan satu baris per file); yang ditampilkan
-        nilai median saja, bukan semua file. Kolom Periode kini kolom
-        NYATA: 'Median n bulan · Minggu' (≥2 nilai; v3.9.33 label
-        benar — n = jumlah BULAN) / 'BULAN · Minggu'
-        (1 nilai — format lama). Rumus bisnis lain 0 berubah.
-
-v3.9.15 — GELOMBANG 1 ANALISA (adopsi rumus repo Inventory-Control
-user; v3.9.22: Arah Minoritas & Liga Deviasi DIHAPUS — hanya Top &
-Flip yang tersisa; deskripsi historis di bawah utk jejak audit):
-    (1) ARAH MINORITAS PER BAHAN — [DIHAPUS v3.9.22]
-    (2) LIGA DEVIASI-RATE PER BAHAN — [DIHAPUS v3.9.22]
-
-v3.9.14 — PERF TAB ANALISA + MINGGU IKUT H + ISTILAH (permintaan user:
-"tab analisa kenapa lemot sekali" / "week di tab analisa harusnya
-menyesuaikan juga dengan kolom H — jika 7 berarti week 1" / "ganti
-istilah app menjadi Saat ini dan File menjadi Lalu"):
-    (1) PERF: tabel analisa hanya dirender saat mode 📈 Analisa AKTIF
-        (dulu dirender JUGA saat tersembunyi → ±4,8 dtk freeze UI PER
-        refresh di file 40rb baris); flip kini VEKTOR — sort sekali +
-        shift(-1) per grup (dulu groupby + sort_values PER GRUP + zip
-        per baris = 4,7 dtk → ±50ms, hasil identik); nilai app per
-        baris via MERGE vektor app_long (dulu loop Python + Series.get
-        = 2,9 dtk → ±60ms — terverifikasi identik baris-per-baris);
-        Top Selisih tanpa iterrows/copy penuh.
-    (2) MINGGU: Top Selisih & Perubahan Arah kini difilter MINGGU yang
-        MEMUAT H — konsisten tabel utama (H=7 → hanya WEEK 1; centang
-        "Tampilkan semua minggu" utk semua minggu).
-    (3) ISTILAH: kolom *File → *Lalu, *App → *Saat Ini (BOM Lalu, COM
-        Lalu, DEV Lalu, %TO BOM Lalu, BOM Saat Ini, COM Saat Ini, DEV
-        Saat Ini, GR Saat Ini); status "TIDAK ADA DI DATA APP" →
-        "TIDAK ADA DI DATA SAAT INI"; label/title ikut ("Tampilkan
-        resto di luar data saat ini", "Komparasi Deviasi — Lalu vs
-        Saat Ini").
-
-v3.9.13 — MULTI-FILE + ANALISA + KOLOM (permintaan user):
-    (1) MULTI-FILE: 📂 kini multi-select (askopenfilenames); semua file
-        diparse di worker & digabung (kolom BULAN ikut dedup-key sehingga
-        baris bulan lain TIDAK lagi dibuang). Default tabel difilter ke
-        BULAN TERBARU (checkbox "Tampilkan semua bulan" = perilaku lama).
-    (2) ALAMAT FILE tersimpan & bisa DIUBAH: entry path (editable, ";"
-        pemisah multi-file) + 📂 + ↻; path tersimpan di komparasi_last.json
-        {"paths": [...]} (tulis atomik; FIX BUG v3.9.10: .with_suffix pada
-        str → AttributeError ditelan → json TIDAK PERNAH tersimpan); file
-        terakhir AUTO-LOAD saat tab pertama kali terlihat.
-    (3) KOLOM (permintaan user "hapus kolom H di tab laporan deviasi,
-    minggu juga hapus. Dev to bom itu harusnya persen"): kolom Minggu & H
-        DIHAPUS dari tabel (data internal tetap — filter minggu, join,
-        popup, snapshot); "DEV App" kini %TO BOM — App = DEV·App / |BOM·App|
-        (persen, konsisten %TO BOM File — dulu kuantitas).
-    (4) MODE 📈 ANALISA (adopsi rumus repo Inventory-Control user):
-        - TOP SELISIH: peringkat |Selisih| (GR App − DEV File)
-          tertinggi (Top-N, default 100; 0 = semua).
-        - PERUBAHAN ARAH ("flip"): pasangan bulan berurutan MINGGU SAMA
-          (W4 vs W4 — minggu file kumulatif, perbandingan lintas bulan
-          jujur hanya minggu sama) dengan tanda DEV berlawanan (minus
-          bulan lalu → surplus sekarang); Disparitas = |P1+P2| /
-          max(|P1|,|P2|); kategori: Sempurna <10% (pembalikan penuh —
-          patut dicek manual), Dominan 10–40%, Parsial ≥40%.
-
-Permintaan user: "Di file sampel kan ada Dev to bom ini kok gak ada ya?
-Padahal data udah lengkap 2205 itu bom. Aku barusan upload file deviasi.
-Nah aku mau compare file deviasi itu dengan yang deviasi di Tab deviasi GR
-terus coba cek kolom status week 1 itu sama dengan 7 week 2 = 14 dan
-week = 25. Itu buat kolom h."
-
-KONSEP
-------
-File deviasi (contoh: "20.AGUSTUS 2026.xlsx" — "File Komparasi Deviasi
-History Sampel") berisi laporan resmi per (RESTO × NAMA BAHAN × MINGGU):
-    QTY BOM      = pemakaian teoretis dari penjualan  (minus)
-    QTY COM      = pemakaian aktual                   (minus)
-    QTY DEVIASI  = COM − BOM                          (±, plus = surplus)
-    % QTY DEVIASI TO BOM = DEVIASI / |BOM|
-Minggu = CUT-OFF KUMULATIF dari tanggal 1 (WEEK 2 ≈ 2× WEEK 1) — sama
-dengan semantik TANGGAL H di aplikasi:
-    STATUS BULAN  →  KOLOM H
-    WEEK 1        →  7      (permintaan user)
-    WEEK 2        →  14     (permintaan user)
-    WEEK 3 / WEEK 4 → 25    (permintaan user "week = 25"; file sampel
-                             memakai WEEK 4 — tidak ada WEEK 3)
-
-SISI SAAT INI (dari data pipeline / append1, tanpa file tambahan —
-"data udah lengkap, 2205 itu BOM"; dulu dilabel *App):
-    BOM·Saat Ini = −Σ 9.ACR (penjualan 22.05) tanggal 1..H — konvensi file
-    COM·Saat Ini = −Σ pemakaian com(t) tanggal 1..H, dengan
-                com(1) = SALDO AWAL + IN(1) − BK(1) − SO(1)  (SA pair,
-                          baris ber-Tanggal=1 — fn_4217; fallback
-                          SO(t-1) bila SA tidak ada)
-                com(t>1) = SO(t-1) + IN(t) − BK(t) − SO(t)  (formula
-                          identik baris 6.PEMAKAIAN (COM) pivot & tab
-                          🚨 Anomali COM)
-    DEV·Saat Ini = COM·Saat Ini − BOM·Saat Ini ("Dev to BOM" versi app)
-    GR·Saat Ini  = SO_H − Sistem_H (2.SALDO AKHIR) — PERSIS kolom Deviasi
-                di tab 📦 Deviasi GR pada H minggu tsb.
-
-    v3.9.5: karena Sistem (fn_running_stock) berbasis SALDO AWAL dan com(1)
-    kini juga berbasis SA → GR·Saat Ini == DEV·Saat Ini secara ALJABAR
-    PERSIS (dua jalur hitung saling cek internal; dulu menyimpang sebesar
-    SO(−31)−SA saat data memuat tanggal negatif bulan lalu).
-
-VERDIK: Selisih = GR·Saat Ini − DEV·Lalu → Status MATCH (dalam toleransi)
-/ SELISIH / TIDAK ADA DI DATA SAAT INI / H TIDAK ADA DI DATA.
-
-v3.9.7 — FILTER MINGGU MENGIKUTI H BERSAMA (permintaan user:
-"STATUS BULAN itu berguna buat filter. misal H aku input 7 maka
-hanya tampilkan week 1 aja"): view kini berlangganan SharedTanggalH
-(chip read-only, pola tab Anomali COM). Rentang minggu yang MEMUAT H
-(v3.9.54 — doc sync dgn kode v3.9.22 _h_to_week_target; dulu doc
-menulis cut-off 31/WEEK 5):
-    H 1–7 → WEEK 1 (cut-off 7)      H 8–14  → WEEK 2 (cut-off 14)
-    H 15–31 → WEEK 3/4 (cut-off 25 — file user hanya ber-WEEK 1–4)
-Default: hanya baris minggu tsb yang tampil (chip minggu aktif
-di-highlight). Centang "Tampilkan semua minggu" utk perilaku lama.
-File tanpa minggu tsb → 0 baris + pesan jujur (minggu di file
-didaftar).
-
-RESTO: file memakai kode bercabang ("1041.BDGUKU", "B.1001.MLGPAR") —
-dinormalkan ke segmen setelah titik terakhir ("BDGUKU") lalu dicocokkan
-ke NAMA RESTO data app (upper + strip).
-
-INFRASTRUKTUR (dipertahankan dari view lain): ✓ follow-up, filter header
-⧩ semua kolom, sort engine linear (parser angka Indonesia), ⛶ Layar Penuh,
-⤢ Perbesar Tabel, ◱ Kolom, ↔ Auto-Fit, loading overlay + compute async +
-on_error reset _busy (FIX B-01), minus merah PER CELL (v3.9.2 apply_cell_tag),
-sel Status berwarna per-cell (MATCH hijau / SELISIH amber / lainnya merah).
+- Filter MINGGU mengikuti TANGGAL H bersama (chip read-only): H 1–7 →
+  WEEK 1 · 8–14 → WEEK 2 · 15–31 → WEEK 3/4 (cut-off 25); centang
+  "Tampilkan semua minggu" utk semua minggu.
+- 📂 multi-select; file digabung (dedup-key termasuk BULAN), default
+  filter BULAN TERBARU; path tersimpan komparasi_last.json + auto-load.
+- Resto file berkode bercabang ("1041.BDGUKU") → segmen setelah titik
+  terakhir dicocokkan ke nama resto data (upper + strip).
+- Kolom "Nominal" = Harga 41.09 (dinormalkan satuan via helper
+  nominal_common.lookup_harga_pair) × GR Saat Ini; NaN → tampil '—'.
+- Mode 📈 Analisa: Top Selisih (Top-N default 100, 0 = semua; Selisih =
+  |GR Saat Ini| − |DEV Lalu|; multi-file → nilai Lalu = MEDIAN
+  antar-file, satu baris per pasangan) + Perubahan Arah (flip: bulan
+  berurutan MINGGU SAMA dgn tanda DEV berlawanan; disparitas =
+  |P1+P2| ÷ max(|P1|,|P2|) → Sempurna <10% · Dominan 10–40% · Parsial
+  ≥40%; label: Berubah Arah utk disparitas ≥ FFLOP_DISP_MAX 40%,
+  Potensi Flip Flop < 40% — nilai bercermin ±).
+- Infrastruktur: ✓ follow-up, filter ⧩ + sort, ⛶, ⤢, ◱ Kolom, ↔
+  Auto-Fit, minus merah per-cell, sel Status berwarna per-cell.
 """
 
 import contextlib

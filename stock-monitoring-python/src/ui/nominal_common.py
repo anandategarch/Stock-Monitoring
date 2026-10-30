@@ -1,87 +1,27 @@
 """
-nominal_common.py — v3.9.34 helper BERSAMA perhitungan Nominal Deviasi
-(Harga 41.09 × Qty Deviasi). Sebelum v3.9.34 logika ini hanya hidup di
-nominal_deviasi_view.py (mode 💰 Nominal (H)); kini dipakai 4 tempat:
+nominal_common.py — Helper bersama perhitungan Nominal Deviasi (Harga
+41.09 × Qty Deviasi): mode 💰 Nominal (H), kolom Nominal tab 📦/🧩
+Deviasi, mode ⚖ Komparasi, dan tab 🧮 Nominal Deviasi.
 
-  1. mode  💰 Nominal (H)        tab 📋 Laporan Deviasi (per pasangan)
-  2. kolom Nominal               tab 📦 Deviasi GR & 🧩 Deviasi PCS
-  3. kolom Nominal               mode ⚖ Komparasi (tab Laporan Deviasi —
-                                  harga × GR Saat Ini)
-  4. tab   🧮 Nominal Deviasi    (BARU — Σ per resto + popup rincian)
-
-v3.9.36 — TAMBAHAN: hitung_nominal_lalu_pairs — pasangan per-barang
-dari FILE deviasi (parse_deviasi_file tab ⚖ Komparasi, diteruskan app
-lewat lalu_provider): bulan TERBARU di file + minggu TERAKHIR per
-pasangan (penutupan bulan) → Nominal Lalu = harga × DEV Lalu. Dipakai
-popup rincian tab 🧮 (kolom 'Nominal Deviasi Bulan Lalu').
-
-v3.9.38 — ATURAN "QTY DEVIASI 0 TAK PERLU CARI HARGA" (user:
-"Kuantiti Deviasi 0 takperlu cari harga. Cek juga keseluruhan
-terkait ini"): pasangan ber-qty-deviasi PERSIS 0 → lookup harga
-DILEWATI (Harga None, Harga Tampil '-', tanpa label '*') dan
-Nominal = 0.0 (BUKAN None) → pasangan itu TIDAK dihitung sebagai
-'tanpa harga' (kolom Tanpa Harga / popup tanpa harga / footer mode
-💰) dan tetap netral di Σ — dulu baris qty-0 tanpa harga ikut
-terhitung 'tanpa harga' menyesatkan. Berlaku di hitung_nominal_pairs,
-hitung_nominal_lalu_pairs, kolom Nominal tab 📦 Deviasi GR/PCS
-dan mode ⚖ Komparasi.
-
-v3.9.38 — SUMBER UTAMA 'Nominal Lalu' = KOLOM NOMINAL DEVIASI MILIK
-FILE (angka resmi laporan bulan lalu; parse_deviasi_file → 'Nominal
-Deviasi Lalu'). Dulu v3.9.36 menghitung ulang harga 41.09 SEKARANG ×
-DEV Lalu → harga snapshot beda bulan → nominal menyimpang dari
-laporan resmi (temuan user BUMBU PASTA KUAH (V.20): 41.09 sekarang
-107,6386854/GR — SAMA dgn hitungan manual user — vs file
-20.AGUSTUS ±113,048/GR → selisih nominal ±2,34jt utk 1 baris MLGPAR
-W4). Kolom file kosong/NaN → fallback hitung ulang (perilaku lama).
-
-v3.9.41 — MINGGU TER-COCOK (user: "Nominal deviasi pembanding dari
-bulan lalu sesuaikan week nya jika week 1 maka ambil data week 1
-juga"): param h (tanggal analisa) → minggu file yang MEMUAT H
-(H 1-7 → WEEK 1 / cut-off 7; 8-14 → WEEK 2 / 14; 15-31 → WEEK 3-4 /
-25 — mirror _h_to_week_target komparasi v3.9.22). Baris minggu
-persis itu yang dipilih; minggu itu tidak ada di file → fallback
-minggu TERBESAR ≤ target (perbandingan periode terdekat), lalu
-TERKECIL > target (file hanya punya minggu setelahnya). h=None →
-perilaku lama (minggu terakhir = penutupan bulan — kompatibilitas
-pemanggil lama). Kolom internal '_minggu' = label minggu terpilih
-(dipakai label popup/footer supaya minggu pembanding JELIHAT).
-
-v3.9.63 — RESTRUKTURISASI TAB 🧮 NOMINAL DEVIASI (user: "kolom N
-Barang dan Tanpa harga hapus aja diganti dengan nominal deviasi per
-kategori ... dan itu buat anak tab baru di nominal deviasi yang
-menampilkan secara global"):
-  - agregasi_nominal_per_resto kini juga menghasilkan kolom 'COM
-    Deviasi' + 'Biaya Packaging' (Σ nominal pasangan per klas kategori:
-    substring case-insensitive 'COM' / 'PACKAGING' pada KATEGORI
-    pasangan — 'COM DEVIASI - RESTO'/'- CATERING' → COM,
-    'Biaya Packaging - RESTO' → PACKAGING; kategori lain hanya masuk
-    kolom total) DAN menempel kolom KATEGORI pada frame pasangan
-    (dipakai klasifikasi + anak tab Tanpa Harga).
-  - pasangan_tanpa_harga_global — BARU: pasangan tanpa harga dari data
-    MENTAH (TANPA filter kategori tab utama — global semua kategori &
-    resto) utk ANAK TAB 'Tanpa Harga' (menggantikan popup double-click
-    kolom 'Tanpa Harga' yang kolomnya dihapus).
-  - hitung_persen_kenaikan / fmt_pct_cell — BARU: kolom 'Persen
-    Kenaikan/Penurunan' tab 🧮 ((H − Lalu) ÷ |Lalu| × 100; NaN bila
-    lalu kosong/0 dgn H ≠ 0 — tak terdefinisi; 0 bila keduanya 0).
-
-ATURAN HARGA (identik sejak v3.9.32, kini satu sumber kebenaran):
-  - harga_map   : {barang: (harga|None, satuan41-upper)} — global dari
-                  file 41.09 (folder 09.Harga); Harga = Nilai Saldo
-                  Akhir ÷ Kuantitas Saldo Akhir.
-  - satuan sama (atau salah satu tak diketahui) → harga langsung.
-  - satuan beda → normalisasi via peta rasio v3.9.31 (42.05+32.24):
-        harga_rekap = harga41 × rasio(satuanRekap) / rasio(satuan41.09)
-  - rasio tak men-cover → harga AS-IS berlabel satuan asli + penanda
-    '*' dan nominal TIDAK dihitung (None) — transparan, bukan angka
-    keliru; tidak ikut TOTAL.
-  - barang tak ada di 41.09 / harga None → nominal None (tampil '-').
-  - Qty Deviasi PERSIS 0 → TANPA lookup harga; Nominal 0.0 (bukan
-    None — tak dihitung 'tanpa harga'; v3.9.38).
-
-Qty Deviasi untuk pasangan = JENIS '3.DEVIASI' baris Tanggal H
-(= SO − SALDO AKHIR sistem — nilai kolom Deviasi tab 📦 Deviasi GR).
+- harga_map = {barang: (harga|None, satuan41)} dari file 41.09 (folder
+  09.Harga); Harga = Nilai Saldo Akhir ÷ Kuantitas Saldo Akhir.
+- Satuan sama → harga langsung; beda → normalisasi peta rasio
+  (42.05+32.24): harga_rekap = harga41 × rasio(rekap) ÷ rasio(41.09).
+- Rasio tak men-cover → harga as-is + penanda '*'; Nominal None
+  (tampil '-', tidak ikut TOTAL). Barang tanpa harga → Nominal None.
+- Qty Deviasi PERSIS 0 → TANPA lookup; Nominal 0.0 (bukan None — tidak dihitung 'tanpa harga').
+- Qty Deviasi = '3.DEVIASI' baris Tanggal H (= SO − SALDO AKHIR sistem; kolom Deviasi tab 📦 GR).
+- Nominal Lalu (hitung_nominal_lalu_pairs, dari FILE deviasi ⚖): sumber
+  utama = kolom NOMINAL DEVIASI file (fallback hitung ulang bila
+  kosong); minggu pembanding mengikuti H (1–7→W1 · 8–14→W2 · 15–31→
+  W3/4; fallback terbesar ≤ target lalu terkecil > target; h=None →
+  minggu terakhir; label minggu terpilih di kolom '_minggu').
+- agregasi_nominal_per_resto → Σ per resto + kolom 'COM Deviasi' /
+  'Biaya Packaging' (substring 'COM'/'PACKAGING' pada KATEGORI) +
+  KATEGORI pasangan; pasangan_tanpa_harga_global (anak tab Tanpa
+  Harga, global); hitung_persen_kenaikan = (H − Lalu) ÷ |Lalu| × 100
+  (NaN bila lalu kosong/0 dgn H ≠ 0; 0 bila keduanya 0).
+- Format angka Indonesia: fmt_harga_id / fmt_nominal_cell / fmt_pct_cell.
 """
 
 from __future__ import annotations

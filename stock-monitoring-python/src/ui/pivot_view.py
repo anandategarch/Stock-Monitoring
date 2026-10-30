@@ -1,122 +1,27 @@
 """
-pivot_view.py — Pivot matrix view (v3.2).
+pivot_view.py — Tab 📊 Pivot: matrix Nama Barang × JENIS vs kolom
+resto/tanggal, nilai = total NILAI (mirror pivot "Mutasi Barang").
 
-v3.11.6 — DUA PERMINTAAN USER (tab 📊 Pivot):
-(1) FILTER RESTO/SOURCE TAK LAGI MENAWARKAN NILAI KOSONG (user: "waktu
-    aku klik filter muncul misal nama resto A terus aku klik resto
-    tersebut ternyata data kosong. Harusnya jika data kosong gak perlu
-    tampilkan resto A di list filter tersebut"): daftar nilai combo
-    RESTO + SOURCE KIRIMAN di-refresh BERKASCADE setelah SETIAP render
-    (_repopulate_filter_combos ← _cascade_frame/_combo_offered_values)
-    — hanya nilai yang menghasilkan baris di kombinasi filter LAIN
-    (KATEGORI default COM Deviasi+Packaging / SOURCE / funnel ⧩ Nama
-    Barang / rentang Tanggal / ☑ hide-empty non-zero) yang ditawarkan
-    (perilaku AutoFilter Excel — mirror _name_values barang v3.9.19).
-    Dulu _populate_filters mengisi dari DATA MENTAH PENUH → resto tanpa
-    baris di kombinasi filter aktif tetap muncul → dipilih → tabel
-    kosong. Seleksi yang menjadi basi (ganti kategori/source lain)
-    di-reset ke "(All)" + SATU refresh ulang terjadwal (tabel ≡ state
-    combo; pola proteksi 48-d v3.9.33, kini per-render).
-(2) LEBAR KOLOM TIDAK LAGI TER-RESET TIAP RENDER + ANTI-MEPET (user:
-    "tampilkan pivot kolom terlalu mepet sehingga nama barang tidak
-    terlihat"): _render_payload dulu SELALU menulis width=280 (kolom beku
-    #0) + 90/70 (kolom matrix) sementara auto-fit hanya SEKALI per muat
-    data → tiap ganti filter/kategori/mode/hide-empty, hasil auto-fit &
-    resize manual user LENYAP → nama barang terpotong. Kini: lebar kolom
-    yang sudah ada DIPERTAHANKAN lintas render; kolom baru pakai
-    default; cache per col_kind (resto/tanggal) mengembalikan lebar saat
-    pindah mode pulang-pergi; width=280 hanya SEKALI per muat data;
-    auto-fit kolom nama max_width 520 (dulu 340 — nama panjang
-    terpotong). DITAMBAH: kolom matrix berjumlah BANYAK (> 6) kini
-    stretch=False — probe membuktikan Tk MEMERAS kolom stretch ke
-    minwidth 50px saat total requested > lebar tree (set width 222 →
-    update() → 50 — resize manual user tidak pernah menempel = "mepet"
-    di mode Tanggal ±30-38 kolom); lebar kini dihormati + scrollbar
-    horizontal menangani overflow (gaya Excel); ≤ 6 kolom tetap stretch
-    mengisi jendela.
-
-v3.9.71 — FREEZE KOLOM NAMA BARANG (user: "di tab pivot tabel gak
-bsia freeze kolom nama barang ya? sehingga jika aku scroll ke kanan
-bisa kefreze"): kolom #0 (nama barang + baris metric) kini TAMPIL DI
-TREE BEKU KIRI (widgets.FrozenNamePane) dan DISEMBUNYIKAN di tree
-utama (width 0 + _autofit_skip) — menggulir ke KANAN tidak lagi
-menggeser nama barang (kontrak freeze ala Excel). Scroll vertikal +
-seleksi tersinkron dua arah; funnel ⧩ Nama Barang menempel di heading
-tree beku; clone ⛶ Layar Penuh ikut memakai freeze-pane (open_tree_
-maximized frozen_name=True — funnel clone di sisi beku, filter baris
-tetap dijalankan di tree utama clone, isi beku disalin ulang setelah
-filter/sort).
-
-v3.9.69 — P1.1 (audit eksternal ke-2): semantik ☑ "Sembunyikan baris
-kosong" = SEMUA sel baris 0/kosong (dulu "total ≤ 0" — baris deviasi
-negatif/cancel-out tersembunyinya juga; sinyal retur justru penting).
-Konsisten di DUA jalur: render _compute_payload + daftar ⧩ #0.
-
-v3.9.33 — AUDIT FIX (48-d/48-f, fix 49-a):
-- (LOW) fallback validasi TANGGAL AWAL kini -31 (dulu 1 — input
-  invalid SENYAP mempersempit rentang; kini revert ke batas kiri
-  default v3.8).
-- (MEDIUM) _populate_filters me-reset seleksi RESTO/SOURCE/KATEGORI
-  ke "(All)" saat reload data (dulu seleksi lama tetap terpasang
-  senyap — nilai tak ada lagi di data baru → 0 baris senyap) +
-  membersihkan daftar nilai bila kolom hilang di schema baru.
-- (HIGH sebagian / 48-f) 0 baris pasca-pipeline → EMPTY STATE +
-  status berpenjelasan aksi (dulu tabel kosong senyap di belakang
-  pipeline "SELESAI" hijau).
-
-v3.9.20 (deep audit 34-e/fix 35-c2): popup Nama Barang = barang yang
-TAMPIL (RESTO mode Tanggal + SOURCE + KATEGORI + rentang Tanggal +
-☑ hide-empty; filter sendiri dikecualikan) + merah negatif #dc2626
-(seragam 11 view — dulu #CC0000 satu-satunya yang beda).
-
-Dua mode pivot (segment "PIVOT PER" di atas tabel):
-- 🏪 RESTO (default): baris = Nama Barang × JENIS, kolom = NAMA RESTO,
-  nilai = total NILAI per resto dalam rentang Tanggal. Hanya baris dengan
-  SEMUA sel 0/kosong yang disembunyikan (☑ "Sembunyikan baris kosong",
-  default ON — semantik v3.9.69: baris dengan sel ≠ 0 TAMPIL, termasuk
-  sel negatif/cancel-out); kolom Total sengaja TIDAK ditampilkan.
-  Contoh: item yang hanya ada di resto MLGPAR tetap tampil (nilainya ada),
-  item tanpa nilai di semua resto disembunyikan.
-- 📅 TANGGAL: kolom = Tanggal (perilaku v3.0) + rentang tanggal.
-
-v3.9.2 (permintaan user: "minus harusnya cuman merah per cell bukan per
-baris dan pivot tabel nya bisa export excel"):
-- MINUS MERAH PER CELL (bukan per baris) — Tk 9 `treeview tag cell add`
-  (helper apply_cell_tag): hanya cell bernilai < 0 yang font-nya merah;
-  baris 3.DEVIASI tidak lagi selalu merah; 7.Selisih ≠ 0 tetap dapat fill
-  merah muda per baris, font merah per-cell pada nilai ≠ 0. Fallback Tk 8:
-  perilaku lama (tag per baris) via CELL_TAGS_SUPPORTED.
-- Tombol 💾 Export Excel: matrix pivot SESUAI TAMPILAN (filter RESTO/
-  SOURCE/KATEGORI + rentang Tanggal + mode + sembunyikan-baris-kosong +
-  kolom tampil ◱) → .xlsx via write_pivot_display_sheet — minus = font
-  merah per cell (mirror UI), 0 = font putih (trik file user).
-
-v3.8:
-- Default rentang tanggal -31 s/d 31 (dulu -26): data bulan lalu mencakup
-  tgl 25-31 (negatif -25 s/d -31) → kolom tanggal kini LENGKAP urut
-  kronologis 25•,26•,27•,28•,29•,30•,31• lalu 1,2,3,... (dulu -27..-31
-  terpotong filter sehingga kolomnya "25,26, lalu 1").
-
-v3.2:
-- KPI row di atas tabel DIHAPUS (tabel lebar & besar; ringkasan di footer)
-- Lazy refresh: compute hanya saat tab terlihat (app → ensure_refreshed)
-- Ekstraksi per-item via satu .loc (bukan item×metric) — lebih cepat
-
-v3.1 (dipertahankan): filter corong di header, ⛶ perbesar, loading overlay,
-compute/render async.
-
-AUDIT 2c (fix 3-c):
-- 2c-01/2c-02: pesan 0-baris pipeline menunjuk tab yang BENAR
-  ('⚙️ Config' — dulu '⚙ Pengaturan' yang tak ada) DAN naik ke
-  SUBTITLE EmptyState (status footer hidup di dalam content yang
-  tersembunyi di balik EmptyState → teksnya tak pernah terlihat).
-- 2c-04: rentang tanggal terbalik (awal > akhir) kini menukar ISI
-  entry + warning 'Rentang dibalik otomatis' (dulu swap senyap —
-  entry tetap '20 – 5' padahal filter memakai 5..20).
-- 2c-07: tombol tanggal 'Apply' (EN) → 'Terapkan' (parity komparasi).
-- 2c-06: hint footer abu 1 baris 'Dobel-klik baris = detail'.
-- 2f-11: pesan sukses export memakai fmt_int_id ('1.347' — dulu
-  '{n:,}' EN '1,347').
+Mode (segment "PIVOT PER"):
+- 🏪 RESTO (default): kolom = NAMA RESTO, nilai = Σ NILAI per resto
+  dalam rentang tanggal; kolom Total sengaja tidak ditampilkan.
+- 📅 TANGGAL: kolom = Tanggal; default rentang −31..31 KRONOLOGIS
+  (blok bulan lalu 25•..31• lalu 1..).
+- ☑ "Sembunyikan baris kosong" (default ON): sembunyikan baris yang
+  SEMUA sel 0/kosong; baris ber-sel ≠ 0 (termasuk negatif) tetap tampil.
+- KOLOM NAMA BARANG di-FREEZE di tree beku kiri — scroll horizontal
+  tidak menggeser nama; scroll vertikal + seleksi tersinkron dua
+  arah; clone ⛶ Layar Penuh ikut memakai freeze-pane.
+- Filter RESTO / SOURCE KIRIMAN / KATEGORI (default "(All)") / ⧩ Nama
+  Barang / rentang Tanggal: daftar nilai combo di-refresh BERKASCADE
+  per render — hanya nilai yang menghasilkan baris pada kombinasi
+  filter lain (perilaku AutoFilter Excel); seleksi basi di-reset.
+- Lebar kolom dipertahankan lintas render (cache per col_kind; auto-fit
+  nama maks 520); kolom matrix > 6 → stretch=False + scrollbar horizontal.
+- Minus merah PER CELL (fallback Tk 8: per baris); baris 7.Selisih
+  ≠ 0 fill merah muda. 💾 Export Excel sesuai tampilan (minus font
+  merah per cell, 0 font putih). Lazy refresh (compute saat tab
+  terlihat) + loading overlay + compute/render async.
 """
 
 import contextlib  # v3.9.66 — suppress senyap jalur restore filter

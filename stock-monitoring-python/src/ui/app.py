@@ -15,93 +15,33 @@ Struktur jendela (ala aplikasi Waste):
 10 tab:
   1. ⚙️ Config          : RootPath + info config
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
-  3. 📊 Pivot Table     : pivot matrix Excel-like (per resto default,
-                          rentang tanggal default 26 BULAN LALU s/d 31
-                          BULAN BERJALAN — v3.6)
-  4. 📦 DEVIASI GR      : wide matrix + CEK anomaly (satuan GR) + ✓
-                          (input TANGGAL H + Apply H — satu-satunya;
-                          spinbox AMBANG ACR to BOM — v3.9.21) + kolom
-                          Nominal (v3.9.34)
-  5. 🧩 DEVIASI PCS     : wide matrix + CEK anomaly (non-GR) + ✓
-                          (chip H read-only, ikut tab GR — v3.9;
-                          spinbox ambang ACR sinkron — v3.9.21) + kolom
-                          Nominal (v3.9.34)
+  3. 🧮 Pivot Table     : pivot matrix Excel-like (per resto default;
+                          rentang tanggal default tgl 25-31 bulan lalu
+                          s/d 31 bulan berjalan)
+  4. 📦 Deviasi GR      : wide matrix + CEK anomaly (satuan GR) + ✓;
+                          satu-satunya input TANGGAL H + Apply H
+                          (berlaku juga ke tab PCS) + spinbox AMBANG
+                          ACR to BOM + kolom Nominal
+  5. 🧩 Deviasi PCS     : wide matrix + CEK anomaly (non-GR) + ✓ (chip
+                          H read-only, ikut tab GR; spinbox ambang ACR
+                          sinkron) + kolom Nominal
   6. 📤 Rekap Selisih IN: SATU tabel IN (Accurate) vs Barang Masuk +
-                          kolom SO + kolom Hasil Audit (logika macro VBA ×
-                          data app — v3.6, tanpa sheet 29) + drill-down
-  7. 📋 Laporan Deviasi : 3 MODE — ⚖ Komparasi File Deviasi (default,
-                          v3.9.4; + kolom Nominal harga × GR Saat Ini —
-                          v3.9.34) & 🚨 Anomali COM (v3.9.3) & 💰 Nominal
-                          (H) (v3.9.32) + ✓
-  8. 🧮 NOMINAL DEVIASI : Σ (Harga 41.09 × Qty Deviasi) per resto +
+                          kolom SO + kolom Hasil Audit (logika macro
+                          VBA × data app) + drill-down
+  7. 📋 Laporan Deviasi : 3 MODE — ⚖ Komparasi File Deviasi (default;
+                          + kolom Nominal harga × GR Saat Ini) & 🚨
+                          Anomali COM & 💰 Nominal (H) + ✓
+  8. 💰 Nominal Deviasi : Σ (Harga 41.09 × Qty Deviasi) per resto +
                           baris TOTAL + double-click resto → popup
-                          rincian per barang (v3.9.34)
-  9. ☑ Follow Up        : daftar baris tercentang + export (v3.2)
- 10. 🛒 Rincian PO      : rekap PO + item (baris teal/putih, v3.9)
+                          rincian per barang
+  9. ☑ Follow Up        : daftar baris tercentang + export
+ 10. 🛒 Rincian PO      : rekap PO + item (baris teal/putih)
 
-v3.9.34 ringkas (kolom Nominal di mana-mana + tab Σ per resto):
-- Kolom Nominal (Harga 41.09 × Qty Deviasi) di tab 📦 Deviasi GR &
-  🧩 Deviasi PCS (kolom Out_H/BK_H dihapus dari tampilan) dan di mode
-  ⚖ Komparasi (harga × GR Saat Ini) — perhitungan = helper bersama
-  src/ui/nominal_common.py (satu sumber kebenaran dgn mode 💰 Nominal
-  (H)); app meneruskan harga_map/konversi_map audit_result ke view.
-- TAB BARU 🧮 Nominal Deviasi: Σ nominal per resto + baris TOTAL +
-  double-click resto → popup rincian per barang (user: "isinya total
-  sum ... yang dapat dari harga × kuantitas deviasi, cuman ini disum
-  per resto").
-
-v3.7 "ENGINE TURBO" + DEEP AUDIT FIXES ringkasan:
-- ENGINE 3,5-4× LEBIH CEPAT (output terverifikasi IDENTIK vs v3.6):
-  * fn_running_stock_grouped vektor (global segmented cumsum):
-    6,68s → 0,19s di real-data (36×); 6 edge-case sintetis ==
-    implementasi lama (termasuk kasus baris bulan-lalu ber-net ≠ 0
-    yang terlewat benchmark awal — tertangkap unit-test).
-  * InformationGrouped vektor (pre-dedupe + agg C-level):
-    6,7s → 0,05s (130×); 0/80.069 grup beda di real-data.
-  * Reader rekap single-parse (jalur calamine): peek+full = 2× parse
-    → 1× (peek nrows=8 di calamine mem-parse seluruh sheet juga).
-  Pipeline real-data: 20,6s → 4,9s. Gunakan python-calamine (sudah di
-  requirements.txt) supaya baca Excel pakai engine Rust.
-- FIX 9 BUG fitur v3.6 (akar: setelah kolom disembunyikan, posisi
-  display ≠ index logis values[] Treeview):
-  * filter clone ⛶ membaca nilai kolom yang salah (kini: index logis)
-  * auto-fit mengukur nilai kolom yang salah (kini: index logis)
-  * filter '#0' clone pivot memakai text anak (metric) → semua baris
-    hilang (kini: text parent = nama barang)
-  * drill-down pivot ke resto/tanggal keliru setelah hide (kini:
-    identify_to_column → nama kolom)
-  * double-click copy Nomor/Nomor PO popup ambil kolom salah (2 popup)
-  * toggle ✓ (Deviasi GR/PCS + Laporan + Follow Up) terpicu dari kolom
-    lain setelah ✓ disembunyikan (kini: cocok nama kolom)
-  * posisi popup filter melenceng (dulu ikut menghitung kolom
-    tersembunyi + #0 phantom)
-  * mirror hide/unhide clone↔sumber: state colmgr kini tersinkron
-    (panel Kolom sumber tidak lagi menampilkan checkbox basi)
-
-v3.6 ringkasan:
-- BUG FIX KRITIS: tombol filter ⧩ di header TIDAK BISA DIKLIK dengan
-  mouse (identify_column mengembalikan '#N' posisi-display sedangkan
-  filter memakai nama kolom simbolik — tidak pernah match). Kini klik
-  funnel membuka popup di SEMUA tabel, termasuk saat ada kolom
-  tersembunyi. Clone ⛶ Perbesar juga kini punya filter + sort sendiri
-  (sebelumnya ikon funnel tersalin tapi mati).
-- HIDE/UNHIDE KOLOM: klik kanan judul kolom (Sembunyikan kolom ini /
-  Tampilkan semua / auto-fit / filter) + tombol ◱ Kolom (panel
-  checklist) — di semua tabel & window ⛶.
-- AUDIT REKONSILASI DARI DATA APP: sheet '29 Rekap Barang Masuk' TIDAK
-  dibaca. Tabel Rekap Selisih IN jadi SATU (segment dihapus) dengan
-  kolom baru Hasil SO + Saldo + Hasil Audit + Catatan — semua bisa
-  difilter ⧩. Catatan: kolom Barang Masuk terisi saat rekap memiliki
-  input JENIS='BARANG MASUK'; selama belum diinput, baris ber-IN akan
-  ditandai deviasi (sesuai logika).
-- DEFAULT TANGGAL (v3.8): Pivot Table -31 s/d 31 = kolom tanggal
-  lengkap tgl 25-31 BULAN LALU (label 25• s/d 31•, urut kronologis)
-  lalu 1-31 bulan berjalan; Rekap Selisih IN 1 s/d 31 = bulan BERJALAN
-  saja (tanpa bulan lalu).
-
-Pipeline tetap dijalankan di thread terpisah; log stdout dipipakan lewat
-queue thread-safe; Stop button mengirim stop_event yang dicek pipeline di
-checkpoint major. Freeze-fix v2.1.1 (batch log + truncate) dipertahankan.
+Pipeline dijalankan di thread terpisah; log stdout dipipakan lewat
+queue thread-safe; tombol Stop mengirim stop_event yang dicek pipeline
+di checkpoint major. Placeholder "vX.Y.Z" pada docstring ini
+disubstitusi ke APP_VERSION saat import (judul/statusbar selalu
+menampilkan versi aktual).
 """
 import contextlib
 import json

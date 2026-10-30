@@ -1,67 +1,27 @@
 """
-export_sheets.py — Pembangun sheet export Excel (v3.8).
+export_sheets.py — Pembangun sheet export Excel (dipanggil UI di thread
+worker; pure pandas + openpyxl — import openpyxl LAZY per-fungsi).
 
-Empat bagian (dipanggil dari UI di thread worker — pure pandas + openpyxl):
-
-1. build_selisih_export_df(base, tgl_start, tgl_end, audit_cols=None)
-   Rekap Selisih IN PER RESTO (permintaan user v3.8): kolom
-   Resto, Tanggal, Nama Barang, Kategori, Satuan, Hasil SO, COM,
-   Sheet Barang Masuk (input rekap), Kiriman HO (42.05),
-   Kiriman Supplier (32.24), Pembelian by Resto (99.01), Selisih —
-   urut Resto → Tanggal (KRONOLOGIS: bulan lalu 25•,26•…31• lalu 1..)
-   → Nama Barang, hanya baris dalam rentang tanggal aktif (default
-   1–31 bulan berjalan).
-   v3.9 (permintaan user "waktu ekspor tambahin hasil auditnya aja
-   tapi ada opsi buat tambahin kolom tersebut atau tidak"):
-   audit_cols = daftar kolom audit opsional yang DITAMBAHKAN setelah
-   Selisih — pilihan valid: "Hasil Audit", "Saldo", "Catatan Audit"
-   (None/[] = tanpa kolom audit — perilaku v3.8).
-   v3.11 (user: "di tab rekap selisin in hapus kolom saldo kemarin.
-   Kolom COM pindah disebelah kanan Hasil SO ... terutama pada hasil
-   export file excel nya"): "SO Kemarin" DIHAPUS dari opsi export;
-   "COM" naik jadi kolom INTI tepat di kanan "Hasil SO" (paritas
-   tabel UI); urut Tanggal ekspor kini KRONOLOGIS — dulu sort numerik
-   menempatkan blok bulan-lalu TERBALIK (-31 dulu sebelum -25).
-
-2. add_pivot_sheet(writer, append1_df, should_cancel=None)
-   Sheet "PIVOT" — mirror tab pivot "Mutasi Barang - New" milik user
-   (dibaca langsung dari file-nya): layout identik —
-     baris 1-3 : NAMA RESTO / SOURCE KIRIMAN / KATEGORI = (All)
-     baris 5   : Sum of NILAI | Column Labels
-     baris 6   : Row Labels | kolom tanggal -25..-31 (bulan lalu) lalu
-                 1..31 — urut KRONOLOGIS
-     baris 7+  : kolom A = row label (nama barang BOLD + jenis),
-                 nilai = Sum of NILAI (semua resto = (All))
-   CONDITIONAL FORMATTING persis file user (dxf & priority dibaca dari
-   xl/styles.xml + xl/worksheets/sheet1.xml file user):
-     p7  AND($A8="1.SO",B8>A8)          → font bold hijau 00B050
-     p6  $A8="3.DEVIASI"                → border bawah tipis
-     p5  AND($A8="7.Selisih IN",B8<>0)  → font bold merah + fill FFC9C9
-     p4  cellIs = 0                     → font putih (nol "tak terlihat")
-     p3  kolom A containsText "5.BARANG MASUK" → font 006100 + fill C6EFCE
-     p2  kolom A containsText "4.IN"    → font 9C5700 + fill FFEB9C
-     p1  header tanggal < 0 (bulan lalu)→ bold + fill biru muda
-   Catatan: file lama user memakai "6.Selisih IN" (penomoran pra-v3.4);
-   penomoran JENIS sejak v3.4 = "7.Selisih IN" — rumus disesuaikan,
-   5 rumut lain identik karakter-per-karakter.
-
-v3.9.72 — (FIX 2 audit UX 2-c) import openpyxl kini LAZY per-fungsi:
-app.py mengimpor modul ini saat STARTUP (add_pivot_sheet utk tombol
-Export) — import openpyxl level-modul menyeret ±210ms rantai openpyxl
-ke startup app padahal export adalah aksi user yang jarang. Import di
-dalam fungsi = gratis setelah pemanggilan pertama (sys.modules cache).
-
-v3.9.72 — (FIX 8 audit UX 2-c) dukungan BATAL export: ExportCancelled
-+ param should_cancel pada add_pivot_sheet (dicek per-baris — sheet
-PIVOT ditulis sel per sel via openpyxl = bagian terpanjang yg bisa
-dipotong halus; sheet DataFrame lain dipotong ANTAR-sheet oleh
-app._export_excel work()).
-
-v3.11.2 — 5. write_table_display_sheet(filepath, sheet_name, columns,
-   rows, ...): writer tabel GENERIK "sesuai tampilan" utk tab 📋
-   Laporan Deviasi (permintaan user: "Tambahkan export Excel di tab
-   laporan deviasi yang sudah ada pop up nya") — dipakai 3 mode:
-   ⚖ Komparasi File Deviasi · 🚨 Anomali COM (H) · 💰 Nominal (H).
+1. build_selisih_export_df / write_selisih_sheet → sheet "Selisih IN
+   per Resto": Resto · Tanggal · Nama Barang · Kategori · Satuan ·
+   Hasil SO · COM (tepat kanan Hasil SO) · Sheet Barang Masuk ·
+   Kiriman HO (42.05) · Kiriman Supplier (32.24) · Pembelian by Resto
+   (99.01) · Selisih; urut Resto → Tanggal KRONOLOGIS (bulan lalu
+   25•..31• lalu 1..) → Nama Barang; audit_cols opsional ("Hasil
+   Audit" · "Saldo" · "Catatan Audit") setelah Selisih.
+2. add_pivot_sheet → sheet "PIVOT" mirror tab "Mutasi Barang - New"
+   milik user — page-filter (All), header tanggal −25..−31 lalu 1..31
+   kronologis, Sum of NILAI + conditional formatting persis file user
+   (p7 1.SO naik → bold hijau · p6 3.DEVIASI → border bawah · p5
+   7.Selisih IN ≠ 0 → bold merah + fill FFC9C9 · p4 sel 0 → font
+   putih · p3 5.BARANG MASUK → font hijau C6EFCE · p2 4.IN → font
+   kuning FFEB9C · p1 tanggal < 0 → bold + fill biru muda);
+   should_cancel dicek per-baris → ExportCancelled.
+3. write_pivot_display_sheet → matrix pivot SESUAI TAMPILAN (minus =
+   font merah per cell, 0 = font putih).
+4. write_table_display_sheet → writer generik "sesuai tampilan" utk
+   tab 📋 Laporan Deviasi (mode ⚖ Komparasi · 🚨 Anomali COM (H) ·
+   💰 Nominal (H)).
 """
 import os
 from collections.abc import Callable

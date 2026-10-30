@@ -1,54 +1,23 @@
 """
-deviasi_popup.py — Popup RINGKAS tab Deviasi GR/PCS (v3.9.18).
+deviasi_popup.py — Popup ringkas per tanggal utk tab Deviasi GR/PCS
+(dibuka dengan double-click baris; judul = Nama Barang + Nama Resto).
 
-v3.9.20 (deep audit 34-b/fix 35-b): popup memfilter SATUAN (angka =
-baris GR/PCS yang DIKLIK — dulu menjumlah lintas satuan) + _chrono_key
-float-safe (urutan 25•..31• benar utk Tanggal float64).
+Kolom: Tanggal · SO · Saldo Akhir · Deviasi (= SO − Saldo Akhir) ·
+COM · ACR · Avg COM · Avg ACR · IN · Nomor · Nomor PO · Keterangan PO.
 
-Permintaan user: "pop up di deviasi GR ataupun PCS hanya tampilkan:
-nama barang, nama resto, nilai saldo akhir, nilai SO, nilai IN,
-nilai deviasi."
-
-v3.9.22 (permintaan user: "Pop up di tab Deviasi GR dan PCS ada Nomor
-nya juga Misal IT...... atau RI......"): kolom NOMOR DOKUMEN IN per
-tanggal (IT. = pemindahan 42.05, RI. = penerimaan 32.24; >1 dokumen
-digabung koma, didedup + diurut).
-
-v3.9.25 (permintaan user: "POP UP DI tab deviasi gr dan deviasi pcs
-perbesar lagi dan tambah kolom nomor po dan COM"): jendela diperbesar
-880×480 → 1180×640 (judul wraplength ikut melebar) + DUA kolom baru:
-- "Nomor PO" — nomor pesanan pembelian (PO......) baris 4.IN per
-  tanggal, didedup + diurut (pola kolom Nomor v3.9.22);
-- "COM" — pemakaian harian per tanggal, FORMULA IDENTIK baris
-  6.PEMAKAIAN (COM) tab Pivot / 🚨 Anomali COM (port
-  laporan_deviasi_view._compute_com_matrix → _compute_com_series;
-  kolom tanggal GLOBAL union 4 JENIS — parity 48/48 nilai):
-      com(t) = so_prev(t) + IN(t) − BK(t) − SO(t)
-  so_prev(t) = SO pasangan di tanggal kolom global sebelumnya
-  (SALDO AWAL/1.SO/4.IN/8.BARANG KELUAR — kolom pertama 0), tanggal 1
-  memakai SALDO AWAL pasangan bila ada (audit fix v3.9.5), fallback
-  so_prev. Tanggal yang TIDAK ada di kolom global (mis. hanya baris
-  2.SALDO AKHIR) → COM kosong (tab lain juga tak punya nilainya).
-  Dihitung DALAM grup satuan yang diklik (pola FIX 35-b).
-
-Mengganti popup source rows (details_popup.DetailsPopup — JENIS/Nomor/
-Nomor PO/#Tgl-Jam/KATEGORI/SOURCE KIRIMAN) yang DULU terbuka dari tab
-Deviasi GR/PCS:
-
-- NAMA BARANG + NAMA RESTO tampil di judul popup (dua-duanya).
-- Tabel ringkas PER TANGGAL — 8 kolom (v3.9.25):
-    Tanggal · Saldo Akhir (2.SALDO AKHIR / sistem) · SO (1.SO) ·
-    IN (4.IN) · Nomor (dokumen IN — v3.9.22) · Nomor PO (pesanan
-    pembelian — v3.9.25) · COM (pemakaian harian — v3.9.25) ·
-    Deviasi (= SO − Saldo Akhir, identik kolom Deviasi tab Deviasi
-    GR/PCS & JENIS 3.DEVIASI pipeline).
-- Baris Tanggal H diberi latar lembut (#fef3c7 — sama dgn highlight
-  kolom Deviasi/SO_H di tabel utama v3.9.18) supaya mudah ditemukan.
-- Tanggal bulan lalu (negatif) diberi label '25•' (konvensi pivot_view
-  — '• = bulan lalu', urut kronologis 25•…31• lalu 1…31).
-- Minus merah PER CELL (tag cell Tk 9 — fallback Tk 8 tag baris,
-  pola v3.9.2). Popup source rows LAMA tetap dipakai tab lain
-  (Pivot/Laporan) — tidak tersentuh.
+- Semua angka difilter SATUAN baris yang diklik (GR atau non-GR).
+- COM = pemakaian harian aktual: com(t) = so_prev(t) + IN(t) − BK(t) −
+  SO(t); tanggal 1 memakai SALDO AWAL pasangan bila ada (formula
+  identik baris 6.PEMAKAIAN tab Pivot/Laporan).
+- ACR = pemakaian sistem (9.ACR) per tanggal; Avg COM / Avg ACR
+  (rata-rata t=1..H−1) hanya diisi di baris Tanggal H.
+- Nomor = dokumen IN per tanggal (IT. = pemindahan 42.05, RI. =
+  penerimaan 32.24; >1 digabung koma, didedup + diurut); Nomor PO =
+  pesanan pembelian baris 4.IN; Keterangan PO = potensi PO belum
+  dibuat (po_keterangan).
+- Baris Tanggal H diberi latar #fef3c7; tanggal bulan lalu berlabel
+  '25•' (urut kronologis 25•…31• lalu 1…31); minus merah per-cell.
+- Ctrl+C salin seleksi TSV · klik-kanan salin sel · Ctrl+F cari.
 """
 import tkinter as tk
 from tkinter import ttk

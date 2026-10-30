@@ -1,55 +1,26 @@
 """
-po_keterangan.py — keterangan PO "Potensi PO belum dibuat" (v3.11).
+po_keterangan.py — Keterangan "Potensi PO belum dibuat" per pasangan
+barang × resto.
 
-User: "khusus nama barang yang ada di file 32.24 atau eksternal atau
-campuran tambah logika misal BARANG MASUK ada SO naik tapi 3224 0 dan
-9901 0 maka tambah keterangan = Potensi PO belum dibuat"
-
-Semantik: pasangan barang×resto yang suplainya EKSTERNAL/CAMPURAN
-(penerimaan sistem via 32.24 RI / 9901 pembelian — bukan pemindahan
-internal 42.05) yang pada suatu tanggal:
-  - BARANG MASUK tercatat di rekap resto (JENIS '5.BARANG MASUK' > 0),
-    DAN
-  - SO NAIK dibanding SO TERAKHIR TERCATAT sebelum tanggal itu per
-    pasangan (v3.11.1 — dulu kunci literal t−1/t+1/−1: kunci −1
-    TIDAK PERNAH diproduksi pipeline (rekap lalu = −25..−31;
-    penutupan = hari TERAKHIR bulan lalu) → t=1 dibandingkan 0, bukan
-    penutupan → label palsu tiap awal bulan walau SO datar/turun;
-    −25 dibandingkan −24 yang tak pernah diimpor → label palsu 25•.
-    Kini: SO tercatat terakhir sebelum t; tANPA basis tercatat →
-    keterangan TIDAK menyala utk t=1 & blok bulan-lalu ("SO naik"
-    tak terverifikasi — pola degrade modul); t≥2 tengah bulan
-    berjalan tetap konvensi 0 (arr() deviasi, perilaku lama)), TAPI
-  - penerimaan sistem 32.24 = 0 DAN 9901 = 0 (tak ada dokumen RI/
-    mutasi Accurate utk pasangan itu pada tanggal itu — dan tanggal
-    itu TERVERIFIKABEL: file RI 32.24/42.05 bulan-lalu hanya membawa
-    5 hari terakhir, tanggal 25•/26• tak bisa diverifikasi → tidak
-    memicu (audit 12-b bug 3))
+Keterangan menyala bila SEMUA terpenuhi pada suatu tanggal:
+- Scope: SOURCE KIRIMAN pasangan ∈ {Eksternal, Campuran} ATAU nama
+  barang muncul di file 32.24 mana pun (internal-only 42.05 murni
+  tidak diberi — pemindahan internal tidak butuh PO).
+- BARANG MASUK tercatat di rekap resto (JENIS '5.BARANG MASUK' > 0).
+- SO NAIK vs SO tercatat TERAKHIR sebelum tanggal itu (t ≥ 2 di
+  tengah bulan berjalan berkonvensi basis 0; tanggal tanpa basis
+  tercatat — t=1 & blok bulan-lalu — tidak memicu).
+- Penerimaan sistem 32.24 = 0 DAN 9901 = 0, dan tanggal TERVERIFIKABEL
+  (file RI bulan-lalu hanya membawa 5 hari terakhir → 25•/26• aman).
 → fisik naik & rekap mencatat penerimaan, namun sistem tidak pernah
-  menerima → besar kemungkinan PO belum dibuat di Accurate (tanpa PO,
-  RI tidak bisa diinput) → keterangan "Potensi PO belum dibuat".
+menerima → besar kemungkinan PO belum dibuat di Accurate.
 
-Scope pasangan (siapa yang diberi keterangan):
-  - SOURCE KIRIMAN pasangan ∈ {"Eksternal", "Campuran"} (klasifikasi
-    append1 LANGKAH 5b dari tag SOURCE IN baris 42.05/32.24/9901 —
-    "eksternal atau campuran"), ATAU
-  - nama barang muncul di file 32.24 manapun (item-level lintas resto
-    — "nama barang yang ada di file 32.24"; termasuk 32.24 Bulan Lalu).
-    Internal-only (suplai 42.05 murni) TIDAK diberi keterangan —
-    pemindahan internal tidak butuh PO.
+Konsumsi: segmen CEK deviasi_view (tanggal analisa H) · kolom
+"Keterangan PO" deviasi_popup (tab Deviasi GR/PCS) · kolom
+"KETERANGAN PO" details_popup (tab Pivot).
 
-Konsumsi:
-  - deviasi_view._compute_pivot — segmen CEK pada Tanggal analisa H;
-  - deviasi_popup — kolom "Keterangan PO" per baris Tanggal (popup
-    tab Deviasi GR/PCS);
-  - details_popup (tab Pivot) — kolom "KETERANGAN PO" per baris sumber
-    (menggantikan kolom KATEGORI & SOURCE KIRIMAN yang dihapus).
-
-Pure pandas (thread-safe — dipakai worker view & main-thread popup).
-Cache: peta dibangun SEKALI per identitas objek (data, in_detail) —
-double-click popup berulang / refresh filter dgn data sama tidak
-menghitung ulang (pola _PERF_CACHE deviasi_popup; cache MEMEGANG
-referensi objek → identitas 'is' aman dari reuse alamat GC).
+Pure pandas (thread-safe utk worker & main-thread); cache dibangun
+SEKALI per identitas objek (data, in_detail).
 """
 import bisect
 

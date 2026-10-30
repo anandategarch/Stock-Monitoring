@@ -1,63 +1,27 @@
 """
-fn_rekap_mentah.py — Mirror persis fnRekapMentah di M code.
-Membaca folder Rekap Mentah (SO + BARANG MASUK), unpivot kolom tanggal.
+fn_rekap_mentah.py — Baca folder Rekap Mentah (SO + BARANG MASUK) ke format long.
 
-CRITICAL FIX: NAMA RESTO berasal dari FILE NAME (bukan sheet column).
-Mirror M: fnCombineFolder → Name column → PromoteHeaders → firstColumn = file1's name
-           → rename → "NAMA RESTO" → Text.BeforeDelimiter(_, ".")
+Mirror fnRekapMentah di M code: kolom hari di-unpivot menjadi (Attribute, Value).
 
-v3.3.1 — FALLBACK "combined workbook":
-Sumber SO user kini berupa SATU file gabungan (mis. "01.1 CEK STOCK V2.xlsb",
-sheet '1  DEVIASI WEEKLY') berisi SEMUA resto dalam satu sheet dengan kolom
-NAMA RESTO — bukan file per-resto dengan sheet "REKAP MENTAH". Format lama
-tidak cocok (sheet beda nama + .xlsb tidak ter-glob) → SO tidak pernah
- terbaca → "Saldo SO kosong semua" di tab Deviasi GR/PCS.
-Bila folder tidak punya file per-resto "REKAP MENTAH", reader otomatis:
-  1. scan semua file Excel (termasuk .xlsb) di folder tsb (+ folder induk
-     untuk mode "berjalan" — file gabungan kadang disimpan di RootPath)
-  2. deteksi sheet ber-schema rekap-mentah (kolom NAMA RESTO + JENIS +
-     NAMA BARANG + SATUAN + ≥3 kolom hari 1..31) pada ≤6 baris pertama
-  3. baca sheet tsb, NAMA RESTO diambil dari KOLOM (bukan nama file)
+Dua jalur baca:
+1. Per-resto: file ber-sheet "REKAP MENTAH"; NAMA RESTO dari NAMA FILE (sebelum titik).
+2. Fallback workbook gabungan (mis. .xlsb satu sheet semua resto): scan
+   folder itu + folder induk/RootPath; sheet dikenali dari schema rekap
+   mentah pada ≤6 baris pertama — wajib NAMA RESTO + JENIS + NAMA BARANG
+   (SATUAN opsional) + ≥3 kolom hari ber-header '1'..'31' atau 'Sum of
+   N'; NAMA RESTO dari KOLOM. Workbook cocok pertama dipakai; file lain
+   diabaikan + disebut di log [INFO].
 
-v3.4 — FIX "SO bulan lalu gak ke record meskipun LightMode OFF":
-Data bulan lalu user ada di sheet 'SO BULAN LALU' (workbook gabungan di
-RootPath) — schema: NAMA RESTO + NAMA BARANG + JENIS + kolom hari
-"Sum of 1".."Sum of 31", TANPA SATUAN. Sebelumnya:
-  - mode "lalu" tidak pernah scan folder induk/RootPath;
-  - sheet itu gagal deteksi (kolom hari "Sum of N" + tanpa SATUAN).
-Perbaikan:
-  - deteksi schema menerima header hari "Sum of N" & SATUAN opsional
-    (wajib: NAMA RESTO + JENIS + NAMA BARANG + ≥3 kolom hari);
-  - mode "lalu" ikut scan RootPath, TAPI hanya sheet ber-nama "LALU"
-    (jangan campur data bulan berjalan ke bulan lalu);
-  - mode "berjalan" kini SKIP sheet ber-nama "LALU" (defensive — sheet
-    '1  DEVIASI WEEKLY' tetap yang terbaca untuk bulan berjalan).
-
-OPTIMIZED: vectorized text operations.
-
-v3.9.42 — AUDIT FIX (61-a):
-- F5: sheet_filter (pemisah sheet 'LALU' vs berjalan) dibangun SEKALI
-  dan diteruskan ke KEDUA langkah scan — dulu hanya langkah-2 (folder
-  induk) yang memakai filter: workbook gabungan yang berada DI DALAM
-  folder RekapBerjalan/RekapLalu dibaca bebas-sheet → mode 'berjalan'
-  bisa menelan sheet 'SO BULAN LALU' (bulan tercampur senyap).
-- F6: filter JENIS jalur per-resto legacy kini case-insensitive
-  (strip+upper KEDUA sisi — mirror jalur combined; dulu exact-case
-  → 'so'/'So ' tertolak senyap); workbook gabungan lain di folder
-  yang sama yang diabaikan first-match-wins kini DISEBUT di [INFO].
-
-v3.9.49 — KOLOM KATEGORI REKAP MENTAH DIBAWA (user: "sebenernya sudah
-ada KATEGORI dari file Rekap Mentah folder Deviasi Weekly jadi bisa
-ambil kategori dari situ"): sheet '1  DEVIASI WEEKLY' user punya
-kolom KATEGORI (nilai 'COM DEVIASI - RESTO' / 'Biaya Packaging -
-RESTO') tepat setelah NAMA RESTO — sebelumnya kolom itu DIBUANG di
-_combined_to_long (hanya _BASE_COLS + hari yang diseleksi) sehingga
-lookup kategori app HANYA bergantung master '21. DBS Kategori'
-(item tak terdaftar master → kategori kosong → kelas bug 100383).
-Kini kolom KATEGORI dibawa di KEDUA jalur (combined + per-resto)
-BILA ADA di sheet (schema lama tanpa KATEGORI tetap didukung — kolom
-opsional, tidak mengubah bentuk output lama); konsumen:
-query_full_rekap_mentah_so → append1 override prioritas.
+Aturan saat ini:
+- mode "berjalan": hari 1..31; mode "lalu": hari 25..31 dinegasikan
+  (Attribute negatif).
+- Pemisah bulan via nama sheet (kedua langkah scan): mode berjalan SKIP
+  sheet ber-nama "LALU"; mode lalu HANYA sheet "LALU".
+- Filter JENIS case-insensitive (strip + upper kedua sisi) di kedua jalur.
+- Kolom KATEGORI (bila ada, whitespace-tolerant) ikut dibawa di kedua jalur.
+- Dua kolom ter-parse ke hari sama: satu agregat 'Sum of N' → dipakai; selain itu di-SUM.
+- Output: NAMA RESTO, SOURCE DATA, JENIS, STATUS, NAMA BARANG, SATUAN
+  (+ KATEGORI bila ada), Attribute, Value.
 """
 import os
 from typing import List, Optional
