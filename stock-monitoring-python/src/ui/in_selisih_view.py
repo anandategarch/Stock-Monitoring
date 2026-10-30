@@ -30,8 +30,8 @@ MODE HITUNG (kedua varian dihitung pipeline SEKALI; mode hanya memilih):
 - Rentang tampil KRONOLOGIS dgn PANJANG BULAN ASLI data ('month_len' /
   'lalu_month_len', fallback 31).
 
-Mode 📈 Analisa = 6 seksi: umur gantung · leaderboard resto · sistemik
-vs lokal · resolve-rate · anomali ΔSO · COM minus. Catatan audit
+Mode 📈 Analisa = tabel SELISIH (Resto · Tanggal · Nama Barang) urut
+|selisih| ↓ — klik judul kolom utk sort. Catatan audit
 otomatis: B1 RI Balancing · B2 nomor dobel · B3 selisih IN vs BM ·
 B4 BM 0 padahal IN · B5 COM −n · B4b SO belum direkam + "PO Menunggu:
 PO.xxx (qty n)" utk deviasi murni (KPI chip DEV MURNI · PO MENUNGGU).
@@ -46,9 +46,8 @@ import os
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
-from typing import ClassVar
 
-import numpy as np  # v3.10 — _compute_analisa (umur/ordnal/COM) + isnan
+import numpy as np  # _compute_base isnan + saldo/COM ops (v3.10)
 import pandas as pd
 
 from .doc_codes import (
@@ -79,7 +78,6 @@ from .widgets import (
     CELL_TAGS_SUPPORTED,
     FLASH_MS,  # v3.9.59 — kanon durasi status flash (bonus, agent B)
     KATEGORI_REKAP_VALUES,  # v3.9.49 — default kategori Rekap Mentah
-    AccentButton,  # v3.11.9 — tombol Tutup popup ⛶ seksi analisa
     Card,
     ColumnManager,
     EmptyState,
@@ -968,10 +966,11 @@ class InSelisihView(tk.Frame):
         r0.pack(fill="x")
 
         # v3.10 — MODE TAMPILAN: 📋 Tabel (default) | 📈 Analisa (user:
-        # "gali potensi analisa di tab rekap selisih in") — 6 seksi
-        # analisa atas frame TERFILTER (rentang tanggal + ⧩ + MODE HITUNG;
-        # checkbox 'Hanya Selisih ≠ 0' DIABAIKAN — analisa memang tentang
-        # baris bermasalah). Nama atribut `view_bar` (bukan mode_bar —
+        # "gali potensi analisa di tab rekap selisih in") — v3.11.31:
+        # analisa = tabel SELISIH (Resto·Tgl·Barang) atas frame TERFILTER
+        # (rentang tanggal + ⧩ + MODE HITUNG; checkbox 'Hanya Selisih ≠ 0'
+        # DIABAIKAN — analisa memang tentang baris bermasalah). Nama
+        # atribut `view_bar` (bukan mode_bar —
         # kontrak test §13 mode_seg lama tetap tidak dihidupkan).
         tk.Label(r0, text="TAMPILAN", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
@@ -1836,339 +1835,55 @@ class InSelisihView(tk.Frame):
         return notes
 
     # ---------------------------------------------- ANALISA MODE (v3.10)
-    def _compute_analisa(self, f: "pd.DataFrame | None") -> dict:
-        """v3.10 — MODE 📈 ANALISA: 6 seksi analisa atas frame konteks
-        (TERFILTER rentang tanggal + ⧩ kolom + filter Resto + varian MODE
-        HITUNG; checkbox 'Hanya Selisih ≠ 0' DIABAIKAN — analisa memang
-        tentang baris bermasalah). Dijalankan DI WORKER _refresh (pola
-        FIX D-01/D-08 — pandas di luar main thread), hasil masuk payload
-        _prepare_rows → _render_analisa.
+    def _compute_analisa_rows(self, f: "pd.DataFrame | None") -> dict:
+        """v3.11.31 — ANALISA SELISIH per (Resto, Barang, Tanggal).
 
-        Seksi (user: "gali potensi analisa di tab rekap selisih in"):
-        1. UMUR GANTUNG   — aging baris selisih (bucket 0-3/4-7/8-14/
-                            15-30/>30 hari sejak tanggal kejadian ke
-                            tanggal data TERAKHIR; tanggal bulan lalu
-                            dihitung kontinu lintas bulan via panjang
-                            bulan asli);
-        2. LEADERBOARD    — resto dgn Σ|Selisih| terbesar + TREND paruh
-                            awal vs akhir periode (membaik/memburuk);
-        3. SISTEMIK/LOKAL — barang gantung di ≥3 resto (masalah master/
-                            barang) vs lokal (ops resto) + share;
-        4. RESOLVE-RATE   — pasangan yang PERNAH gantung tapi baris
-                            TERAKHIR-nya sudah 0 (teratasi) vs masih
-                            gantung; + hari bersih (tanggal tanpa
-                            gantung);
-        5. ANOMALI ΔSO    — ΔSO naik tanpa IN (masuk tak tercatat) /
-                            turun tanpa BK & tanpa IN (COM tak tercatat
-                            / input SO salah) + top |ΔSO| outlier;
-        6. COM MINUS      — pemakaian aktual < 0 (barang 'muncul dari
-                            mana-mana' — sinyal input SO kurang/salah).
+        Menggantikan _compute_analisa 6-seksi (v3.10-v3.11.30) — user:
+        "aku pengen ditampilkan selisih resto dan nama barang dan tanggal.
+        hapus aja analisa analisa sebelum nya ganti dengan yang baru."
 
-        Semua seksi defensif (KeyError/TypeError → seksi kosong) —
-        analisa tidak pernah mematikan refresh tabel.
-        """
-        meta = {"n_konteks": 0, "n_gantung": 0, "sum_abs": 0.0,
-                "n_resto": 0, "n_barang": 0, "n_tgl": 0,
-                "basis_v310": False, "periode": "",
-                "n_com_minus": 0, "sum_com_minus": 0.0}
-        empty = {"meta": meta, "umur": [], "umur_max": None,
-                 "umur_top": [],
-                 "resto": [], "sistemik": {"items": [],
-                 "n_baris_sistemik": 0, "n_baris_lokal": 0,
-                 "n_item_sistemik": 0},
-                 "resolve": {"pernah": 0, "teratasi": 0, "masih": 0,
-                             "rate": None, "n_tgl": 0, "hari_bersih": 0,
-                             "masih_top": []},
-                 "anomali": {"naik_tanpa_in": 0, "turun_tanpa_bk": 0,
-                             "dso_unknown": 0, "top": []},
-                 "com_minus": {"n": 0, "sum": 0.0, "top": []}}
+        Sumber = frame TERFILTER rentang tanggal + \u23a9 + filter Resto
+        (PRA checkbox 'Hanya Selisih \u2260 0' — analisa tetap melihat
+        SEMUA baris bermasalah walau checkbox display menyaring tabel).
+        Return list baris {(resto, tgl_label, barang, selisih_float,
+        kategori)} urut |selisih| \u2193 + ringkasan (n_total, n_selisih,
+        sum_abs, n_resto, n_barang). tgl_label = _fmt_tgl_ui ('25\u2022'
+        / '5') — paritas tabel utama."""
+        out: dict = {"rows": [], "n_total": 0, "n_selisih": 0,
+                     "sum_abs": 0.0, "n_resto": 0, "n_barang": 0}
         if f is None or f.empty or "Selisih IN" not in f.columns:
-            return empty
+            return out
+        out["n_total"] = len(f)
+        sel = pd.to_numeric(f["Selisih IN"], errors="coerce").fillna(0.0)
+        mask = sel != 0.0
+        fa = f.loc[mask].copy()
+        if fa.empty:
+            return out
+        sela = sel.loc[mask]
+        fa = fa.assign(_sel=sela.to_numpy(),
+                       _abs=sela.abs().to_numpy())
+        fa = fa.sort_values("_abs", ascending=False).reset_index(drop=True)
+        _have = set(fa.columns)
 
-        sel = pd.to_numeric(f["Selisih IN"], errors="coerce") \
-            .fillna(0.0).to_numpy(dtype="float64")
-        ins = pd.to_numeric(f["IN"], errors="coerce") \
-            .fillna(0.0).to_numpy(dtype="float64")
-        tgl = pd.to_numeric(f["Tanggal"], errors="coerce") \
-            .to_numpy(dtype="float64")
-        resto_s = f["Resto"].astype(str).to_numpy()
-        barang_s = f["Nama Barang"].astype(str).to_numpy()
-        dso = (pd.to_numeric(f["Delta SO"], errors="coerce")
-               .to_numpy(dtype="float64")
-               if "Delta SO" in f.columns
-               else np.full(len(f), np.nan))
-        bk = (pd.to_numeric(f["Qty BK"], errors="coerce")
-              .to_numpy(dtype="float64")
-              if "Qty BK" in f.columns
-              else np.full(len(f), np.nan))
-        com = (pd.to_numeric(f["COM"], errors="coerce")
-               .to_numpy(dtype="float64")
-               if "COM" in f.columns
-               else np.full(len(f), np.nan))
+        def _col(name: str, default: str = "") -> list:
+            return (fa[name].astype(str).tolist() if name in _have
+                    else [default] * len(fa))
 
-        gantung = sel != 0.0
-        n_g = int(gantung.sum())
-        sum_abs = float(np.abs(sel[gantung]).sum()) if n_g else 0.0
-        _com_ok = np.isfinite(com)
-        n_com_minus = int(((_com_ok) & (com < 0)).sum())
-        meta.update({
-            "n_konteks": len(f), "n_gantung": n_g,
-            "sum_abs": sum_abs,
-            "n_resto": int(f["Resto"].nunique()),
-            "n_barang": int(f["Nama Barang"].nunique()),
-            "n_tgl": int(f["Tanggal"].nunique()),
-            # basis v3.10 aktif iff kolom ΔSO benar-benar terisi (format
-            # lama → semua NaN → seksi ΔSO tampil 'format lama')
-            "basis_v310": bool(np.isfinite(dso).any()),
-            "n_com_minus": n_com_minus,
-            "sum_com_minus": float(-com[(_com_ok) & (com < 0)].sum()),
-            "periode": (f"bulan ini {self._month_len} hari · "
-                        f"bulan kemarin {self._lalu_month_len} hari"),
-        })
-
-        # -- ordinal lintas bulan (tanggal -25..-31 lalu → 1..31 ini) --
-        # v3.10.1 — FIX P1 (bug hunt 1-a/1-b): semantik app = Tanggal
-        # negatif ADALAH hari bulan lalu (tgl=-25 → hari 25; -31 → hari
-        # 31 = hari TERAKHIR bulan lalu — dinegasikan fn_rekap_mentah,
-        # diurutkan kronologis _k2=-tgl oleh fn_audit). Ordinal kontigu
-        # yang benar: hari-lalu d → d (yaitu -tgl), hari-ini d → lalu+d.
-        # Rumus lama (tgl+lalu utk negatif) MEMBALIK urutan dalam blok
-        # bulan lalu (ordn(-31)=0 < ordn(-25)=6 padahal hari 25 < hari 31)
-        # + menggelembung umur lintas bulan 2×lalu — aging/trend paruh/
-        # resolve-rate "baris terakhir" seksi 1/2/4 salah di mode 📆
-        # Lalu + Ini (mode 📅 Bulan Ini tanpa negatif — tak tersentuh).
-        lalu = float(self._lalu_month_len)
-        with np.errstate(invalid="ignore"):
-            ordn = np.where(np.isnan(tgl), np.nan,
-                            np.where(tgl < 0, -tgl, lalu + tgl))
-        out = dict(empty)
-        out["meta"] = meta
-
-        # --- seksi 1: UMUR GANTUNG (aging) ------------------------------
-        try:
-            if n_g:
-                o = ordn[gantung]
-                max_o = float(np.nanmax(np.where(np.isnan(ordn),
-                                                 np.nan, ordn))) \
-                    if not np.all(np.isnan(ordn)) else lalu
-                umur = max_o - o
-                umur = np.where(np.isnan(umur), 0.0, umur)
-                edges = ((0, 3, "0–3 hari"), (4, 7, "4–7 hari"),
-                         (8, 14, "8–14 hari"), (15, 30, "15–30 hari"),
-                         (31, 10 ** 9, "> 30 hari"))
-                buckets = []
-                for lo, hi, label in edges:
-                    m = (umur >= lo) & (umur <= hi)
-                    if m.any():
-                        buckets.append((label, int(m.sum()),
-                                        float(np.abs(sel[gantung][m]).sum())))
-                out["umur"] = buckets
-                # baris tertua (umur maks) — resto/barang/tgl utk narasi
-                _i = int(np.argmax(umur))
-                _gi = int(np.flatnonzero(gantung)[_i])
-                out["umur_max"] = {
-                    "umur": float(umur[_i]),
-                    "resto": str(resto_s[_gi]), "barang": str(barang_s[_gi]),
-                    "tgl": (None if np.isnan(tgl[_gi]) else int(tgl[_gi])),
-                    "selisih": float(sel[_gi])}
-                # v3.11.11 — DETAIL per baris gantung TERTUA (user:
-                # "rekap selisih in itu bagian tab analisa detailkan
-                # lagi, resto mana dan tanggal mana dan selisih berapa
-                # di semua analisa"): top-8 umur terbesar.
-                _gi_all = np.flatnonzero(gantung)
-                _order = np.argsort(-umur)[:8]
-                out["umur_top"] = [
-                    {"resto": str(resto_s[_gi_all[j]]),
-                     "barang": str(barang_s[_gi_all[j]]),
-                     "tgl": (None if np.isnan(tgl[_gi_all[j]])
-                             else int(tgl[_gi_all[j]])),
-                     "umur": float(umur[j]),
-                     "selisih": float(sel[_gi_all[j]])}
-                    for j in _order]
-        except (KeyError, TypeError, ValueError, IndexError):
-            pass
-
-        # --- seksi 2: LEADERBOARD RESTO + TREND -------------------------
-        try:
-            if n_g:
-                rows_g = pd.DataFrame({
-                    "r": resto_s[gantung], "t": ordn[gantung],
-                    "tg": tgl[gantung],
-                    "abs": np.abs(sel[gantung]), "s": sel[gantung]})
-                med = float(rows_g["t"].median()) if len(rows_g) else 0.0
-                lb = []
-                for resto, g in rows_g.groupby("r", sort=False):
-                    awal = float(g[g["t"] < med]["abs"].sum())
-                    akhir = float(g[g["t"] >= med]["abs"].sum())
-                    trend = ("memburuk ↘" if akhir > awal * 1.05 else
-                             ("membaik ↗" if akhir * 1.05 < awal
-                              else "stabil →"))
-                    # v3.11.11 — DETAIL per tanggal (user: "resto mana dan
-                    # tanggal mana dan selisih berapa"): Σ selisih bersih
-                    # per tanggal, top-4 terbesar |Σ|.
-                    det = []
-                    for _t, gg in g.groupby("t", sort=False):
-                        _tg = gg["tg"].dropna()
-                        det.append({
-                            "tgl": (int(_tg.iloc[0]) if len(_tg) else None),
-                            "net": float(gg["s"].sum()),
-                            "n": int(len(gg))})
-                    det.sort(key=lambda x: -abs(x["net"]))
-                    lb.append({
-                        "resto": str(resto), "n_items": len(g),
-                        "n_dates": int(g["t"].nunique()),
-                        "sum_abs": float(g["abs"].sum()),
-                        "awal": awal, "akhir": akhir, "trend": trend,
-                        "detail": det[:4]})
-                lb.sort(key=lambda d: (-d["sum_abs"], -d["n_items"],
-                                       d["resto"]))
-                _tot = sum(d["sum_abs"] for d in lb) or 1.0
-                for d in lb:
-                    d["share"] = d["sum_abs"] / _tot
-                out["resto"] = lb[:8]
-        except (KeyError, TypeError, ValueError, IndexError):
-            pass
-
-        # --- seksi 3: SISTEMIK vs LOKAL ---------------------------------
-        try:
-            if n_g:
-                rows_g = pd.DataFrame({
-                    "b": barang_s[gantung], "r": resto_s[gantung],
-                    "tg": tgl[gantung],
-                    "abs": np.abs(sel[gantung]), "s": sel[gantung]})
-                per_item = rows_g.groupby("b", sort=False).agg(
-                    n_resto=("r", "nunique"), n_baris=("abs", "size"),
-                    sum_abs=("abs", "sum"))
-                sis = per_item[per_item["n_resto"] >= 3] \
-                    .sort_values("sum_abs", ascending=False)
-                # v3.11.11 — DETAIL per resto utk tiap barang sistemik
-                # (user: "resto mana dan tanggal mana dan selisih berapa"):
-                # Σ selisih bersih per resto + daftar tanggal, top-4 resto
-                # terbesar |Σ|.
-                _details = {}
-                for b in sis.head(8).index:
-                    g = rows_g[rows_g["b"] == b]
-                    dl = []
-                    for r, gg in g.groupby("r", sort=False):
-                        tgls = sorted(int(x) for x in gg["tg"].dropna()
-                                      .tolist())
-                        dl.append({"resto": str(r),
-                                   "net": float(gg["s"].sum()),
-                                   "n": int(len(gg)), "tgls": tgls})
-                    dl.sort(key=lambda x: -abs(x["net"]))
-                    _details[b] = dl[:4]
-                items = [{"barang": str(b), "n_resto": int(r["n_resto"]),
-                          "n_baris": int(r["n_baris"]),
-                          "sum_abs": float(r["sum_abs"]),
-                          "detail": _details.get(b, [])}
-                         for b, r in sis.head(8).iterrows()]
-                sistemik_set = set(sis.index)
-                is_sistemik = rows_g["b"].isin(sistemik_set)
-                out["sistemik"] = {
-                    "items": items,
-                    "n_item_sistemik": len(sis),
-                    "n_baris_sistemik": int(is_sistemik.sum()),
-                    "n_baris_lokal": int((~is_sistemik).sum()),
-                }
-        except (KeyError, TypeError, ValueError, IndexError):
-            pass
-
-        # --- seksi 4: RESOLVE-RATE --------------------------------------
-        try:
-            keys = list(zip(resto_s, barang_s))
-            dfk = pd.DataFrame({"k": keys, "o": ordn,
-                                "neq": (sel != 0.0).astype(int),
-                                "r": resto_s, "b": barang_s,
-                                "tg": tgl, "s": sel})
-            dfk = dfk.sort_values(["k", "o"], kind="mergesort",
-                                  na_position="last")
-            grp = dfk.groupby("k", sort=False)
-            pernah = grp["neq"].max()
-            last_rows = grp.tail(1).set_index("k")
-            last_neq = last_rows["neq"]
-            pernah = pernah[pernah > 0]
-            teratasi = int((last_neq.reindex(pernah.index) == 0).sum())
-            n_pernah = len(pernah)
-            rate = (teratasi / n_pernah) if n_pernah else None
-            tgl_unik = dfk["o"].dropna().unique()
-            tgl_gantung = dfk[dfk["neq"] > 0]["o"].dropna().unique()
-            # v3.11.11 — DETIL pasangan MASIH GANTUNG (user: "resto mana
-            # dan tanggal mana dan selisih berapa di semua analisa"):
-            # baris TERAKHIR tiap pasangan yang belum teratasi, top-8
-            # |selisih| terbesar.
-            masih_idx = pernah.index[last_neq.reindex(pernah.index) > 0]
-            masih_top = []
-            if len(masih_idx):
-                _mr = last_rows.loc[masih_idx]
-                _mr = _mr.reindex(
-                    _mr["s"].abs().sort_values(ascending=False).index)[:8]
-                masih_top = [
-                    {"resto": str(rr["r"]), "barang": str(rr["b"]),
-                     "tgl": (None if np.isnan(rr["tg"]) else int(rr["tg"])),
-                     "selisih": float(rr["s"])}
-                    for _, rr in _mr.iterrows()]
-            out["resolve"] = {
-                "pernah": n_pernah, "teratasi": teratasi,
-                "masih": n_pernah - teratasi, "rate": rate,
-                "n_tgl": len(tgl_unik),
-                "hari_bersih": int(len(tgl_unik) - len(tgl_gantung)),
-                "masih_top": masih_top,
-            }
-        except (KeyError, TypeError, ValueError, IndexError):
-            pass
-
-        # --- seksi 5: ANOMALI ΔSO ---------------------------------------
-        try:
-            if meta["basis_v310"]:
-                naik = np.isfinite(dso) & (dso > 0)
-                turun = np.isfinite(dso) & (dso < 0)
-                bk_zero = ~(np.isfinite(bk) & (bk != 0.0))
-                out["anomali"] = {
-                    "naik_tanpa_in": int((naik & (ins == 0)).sum()),
-                    "turun_tanpa_bk": int(
-                        (turun & (ins == 0) & bk_zero).sum()),
-                    "dso_unknown": int(
-                        (~np.isfinite(dso) & (ins != 0)).sum()),
-                    # v3.11.11 — top 5→8 + kolom Selisih IN (user: "resto
-                    # mana dan tanggal mana dan selisih berapa di semua
-                    # analisa").
-                    "top": [
-                        {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
-                         "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
-                         "dso": float(dso[i]),
-                         "selisih": float(sel[i])}
-                        for i in np.argsort(
-                            np.where(np.isfinite(dso), np.abs(dso),
-                                     -1.0))[-8:][::-1]
-                        if np.isfinite(dso[i])],
-                }
-        except (KeyError, TypeError, ValueError, IndexError):
-            pass
-
-        # --- seksi 6: COM MINUS -----------------------------------------
-        try:
-            if n_com_minus:
-                # v3.10.1 — FIX P1/P2 (bug hunt 1-b/1-c): "sum" = Σ|COM|
-                # SEMUA baris COM-minus (dulu hanya TOP-5 — kontradiksi dgn
-                # chip meta "COM MINUS n (Σ)" yang menjumlahkan semua,
-                # dua angka beda utk metrik sama dalam satu panel); top-5
-                # tetap hanya utk DAFTAR tampilan.
-                # v3.11.11 — top 5→8 + kolom Selisih IN (user: "resto mana
-                # dan tanggal mana dan selisih berapa di semua analisa").
-                _all_minus = np.flatnonzero(_com_ok & (com < 0))
-                idx = _all_minus[np.argsort(com[_all_minus])][:8]
-                out["com_minus"] = {
-                    "n": n_com_minus,
-                    "sum": float(-com[_all_minus].sum()),
-                    "top": [
-                        {"resto": str(resto_s[i]), "barang": str(barang_s[i]),
-                         "tgl": (None if np.isnan(tgl[i]) else int(tgl[i])),
-                         "com": float(com[i]),
-                         "selisih": float(sel[i])}
-                        for i in idx],
-                }
-        except (KeyError, TypeError, ValueError, IndexError):
-            pass
+        resto = _col("Resto")
+        barang = _col("Nama Barang")
+        kategori = _col("KATEGORI")
+        tgl_raw = (pd.to_numeric(fa["Tanggal"], errors="coerce")
+                   if "Tanggal" in _have
+                   else pd.Series([float("nan")] * len(fa)))
+        tgl_lab = [_fmt_tgl_ui(v) for v in tgl_raw.tolist()]
+        selisih = fa["_sel"].astype(float).tolist()
+        out["rows"] = list(zip(resto, tgl_lab, barang, selisih, kategori))
+        out["n_selisih"] = len(fa)
+        out["sum_abs"] = float(fa["_abs"].sum())
+        out["n_resto"] = (fa["Resto"].nunique()
+                          if "Resto" in _have else 0)
+        out["n_barang"] = (fa["Nama Barang"].nunique()
+                           if "Nama Barang" in _have else 0)
         return out
 
     def _ensure_maps(self, df):
@@ -2446,7 +2161,7 @@ class InSelisihView(tk.Frame):
                     # v3.10 — analisa tetap dihitung dari konteks pra-
                     # checkbox (mode 📈 tidak ikut kosong saat checkbox
                     # 'Hanya Selisih ≠ 0' menyaring tabel kosong).
-                    "analisa": self._compute_analisa(f_analisa)}
+                    "analisa": self._compute_analisa_rows(f_analisa)}
 
         col_ids = [c[0] for c in COLUMNS]
 
@@ -2534,7 +2249,7 @@ class InSelisihView(tk.Frame):
                 "barang_scores": barang_scores,
                 # v3.10 — payload analisa mode 📈 (dihitung worker ini;
                 # checkbox 'Hanya Selisih ≠ 0' diabaikan — lihat f_analisa)
-                "analisa": self._compute_analisa(f_analisa)}
+                "analisa": self._compute_analisa_rows(f_analisa)}
 
     def _render_rows(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -2581,442 +2296,125 @@ class InSelisihView(tk.Frame):
         if self._cell_tags:
             apply_cell_tag(tree, "neg_cell", self._neg_cells)
 
-    # ------------------------------------------------ ANALISA RENDER (v3.10)
-    _A_TREND_FG: ClassVar[dict[str, str]] = {
-        "memburuk ↘": "#b91c1c", "membaik ↗": "#15803d",
-        "stabil →": "#64748b"}
-
-    # v3.11.9 — 6 seksi analisa: (key, nama builder, judul, subjudul).
-    # key = field payload worker (_compute_analisa); dipakai render utama
-    # + popup perbesar ⛶ (_open_analisa_section).
-    _ANALISA_SEC_META: ClassVar[tuple] = (
-        ("umur", "_as_umur", "1 · UMUR GANTUNG (AGING)",
-         ("berapa lama selisih menunggu — sejak tanggal kejadian ke "
-          "tanggal data terakhir")),
-        ("resto", "_as_resto", "2 · LEADERBOARD RESTO — Σ|Selisih IN|",
-         "trend: paruh awal vs akhir periode (median tanggal)"),
-        ("sistemik", "_as_sistemik", "3 · SISTEMIK vs LOKAL",
-         "barang = ≥3 resto (master/sistemik) · <3 resto (ops lokal)"),
-        ("resolve", "_as_resolve", "4 · RESOLVE-RATE",
-         ("pasangan pernah gantung yang baris TERAKHIR-nya sudah 0 = "
-          "teratasi")),
-        ("anomali", "_as_anomali", "5 · ANOMALI ΔSO",
-         "kenaikan/penurunan stok fisik yang tak menjelaskan diri"),
-        ("com_minus", "_as_comminus", "6 · COM MINUS — pemakaian negatif",
-         ("COM = SO(t−1) + IN − BK − SO(t) < 0 → barang 'muncul dari "
-          "mana-mana' (sinyal input SO)")),
-    )
+    # ------------------------------------------------ ANALISA RENDER (v3.11.31)
+    # v3.11.31 — analisa SELISIH per (Resto, Barang, Tanggal) — menggantikan
+    # 6-seksi reconciliation analisa (v3.10-v3.11.30). User: "aku pengen
+    # ditampilkan selisih resto dan nama barang dan tanggal. hapus aja
+    # analisa analisa sebelum nya ganti dengan yang baru. Hapus juga dead
+    # code nya."
+    _ANALISA_COLS = ("no", "resto", "tanggal", "barang", "selisih",
+                     "kategori")
+    _ANALISA_MAX_ROWS = 2000   # cap render (performa tree besar)
 
     def _render_analisa(self, payload: dict):
-        """v3.10 — bangun ulang panel 📈 ANALISA dari payload worker
-        (6 seksi — lihat _compute_analisa). Dipanggil _render_rows saat
-        mode aktif & _on_view_mode_change (payload cache).
-
-        v3.11.9 — BERSIH + PERBESAR (user: "Hapus semua aja yang lain
-        juga biar clean"): chips meta 7-kartu + label 'konteks:' DIHAPUS
-        — panel tinggal judul + 6 seksi ber-scroll; TIAP seksi punya
-        tombol ⛶ PERBESAR (popup 80%×80% layar, skala font/bar besar —
-        lihat _open_analisa_section)."""
+        """v3.11.31 — bangun tabel SELISIH (Resto \u00b7 Tanggal \u00b7 Nama
+        Barang \u00b7 Selisih IN) dari payload worker _compute_analisa_rows.
+        Urut |selisih| \u2193 default; klik judul kolom = sort ulang (\u21c5
+        toggle asc/desc). Baris positif hijau \u00b7 negatif merah. Dipanggil
+        _render_rows saat mode \U0001f4c8 aktif & _on_view_mode_change
+        (payload cache)."""
         zone = self._analisa_card
         for w in zone.winfo_children():
             w.destroy()
-        m = (payload or {}).get("meta")
-        if not m:
+        rows = (payload or {}).get("rows") or []
+        n_total = (payload or {}).get("n_total", 0)
+        n_sel = (payload or {}).get("n_selisih", 0)
+        sum_abs = (payload or {}).get("sum_abs", 0.0)
+        n_resto = (payload or {}).get("n_resto", 0)
+        n_barang = (payload or {}).get("n_barang", 0)
+        if not rows:
             tk.Label(zone, text=(
-                "Belum ada data analisa — jalankan pipeline dulu."),
+                "Belum ada data selisih \u2014 jalankan pipeline dulu."),
                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(10)).pack(pady=24)
             return
 
+        # --- header: judul + ringkasan --------------------------------------
         head = tk.Frame(zone, bg=C_CARD)
         head.pack(fill="x", padx=14, pady=(10, 2))
-        tk.Label(head, text="ANALISA REKONSILIASI — Potensi Temuan",
-                 bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(
-            side="left")
+        tk.Label(head, text="ANALISA SELISIH \u2014 per Resto \u00b7 Barang \u00b7 Tanggal",
+                 bg=C_CARD, fg=C_HEADER, font=font(11, "bold")).pack(side="left")
+        tk.Label(head, text=(
+            f"{n_sel} baris selisih (\u22600)  \u00b7  \u03a3|selisih| = "
+            f"{_fmt_num(sum_abs)}  \u00b7  {n_resto} resto  \u00b7  "
+            f"{n_barang} barang  \u00b7  {n_total} baris total"),
+            bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
+            side="left", padx=(12, 0))
 
-        # --- body scrollable (pola listwrap SKOR RESTO) -----------------
-        bodywrap = tk.Frame(zone, bg=C_CARD)
-        bodywrap.pack(fill="both", expand=True, padx=14, pady=(4, 10))
-        cv = tk.Canvas(bodywrap, bg=C_CARD, highlightthickness=0, bd=0)
-        sb = ttk.Scrollbar(bodywrap, orient="vertical", command=cv.yview)
-        inner = tk.Frame(cv, bg=C_CARD)
-        _winid = cv.create_window((0, 0), window=inner, anchor="nw")
-        cv.configure(yscrollcommand=sb.set)
-        cv.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        inner.bind("<Configure>",
-                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind("<Configure>",
-                lambda e: cv.itemconfigure(_winid, width=cv.winfo_width()))
+        # --- body: ttk.Treeview --------------------------------------------
+        body = tk.Frame(zone, bg=C_CARD)
+        body.pack(fill="both", expand=True, padx=12, pady=(4, 10))
+        tree = ttk.Treeview(body, columns=self._ANALISA_COLS,
+                            show="headings", height=22)
+        _heads = {"no": "#", "resto": "Resto", "tanggal": "Tanggal",
+                  "barang": "Nama Barang", "selisih": "Selisih IN",
+                  "kategori": "KATEGORI"}
+        _width = {"no": 46, "resto": 120, "tanggal": 74,
+                  "barang": 260, "selisih": 130, "kategori": 140}
+        _anchor = {"no": "e", "resto": "w", "tanggal": "e",
+                   "barang": "w", "selisih": "e", "kategori": "w"}
+        for c in self._ANALISA_COLS:
+            tree.heading(c, text=_heads[c],
+                         command=lambda col=c: self._sort_analisa_tree(tree, col))
+            tree.column(c, width=_width[c], anchor=_anchor[c], stretch=False)
+        tree.tag_configure("pos", foreground="#15803d")
+        tree.tag_configure("neg", foreground="#b91c1c")
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        hsb = ttk.Scrollbar(body, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
 
-        _line, _muted = self._analisa_helpers(big=False)
-        for _key, _meth, _title, _sub in self._ANALISA_SEC_META:
-            _b = self._analisa_sec(
-                inner, _title, _sub, big=False,
-                on_enlarge=(lambda k=_key: self._open_analisa_section(
-                    payload, k)))
-            getattr(self, _meth)(_b, payload, _line, _muted, False)
-
-        # roda halus di canvas analisa (pola skor-zone: 1 notch = ±40px)
+        shown = rows[: self._ANALISA_MAX_ROWS]
+        for i, (resto, tgl, barang, sel, kat) in enumerate(shown, 1):
+            tree.insert("", "end", iid=str(i - 1),
+                        values=(i, resto, tgl, barang, _fmt_num(sel), kat),
+                        tags=("pos" if sel >= 0 else "neg",))
+        if len(rows) > self._ANALISA_MAX_ROWS:
+            tk.Label(
+                zone,
+                text=(f"Menampilkan {self._ANALISA_MAX_ROWS} dari "
+                      f"{len(rows)} baris (urut |selisih| \u2193)."),
+                bg=C_CARD, fg=C_TEXT_MUTED, font=font(9)).pack(
+                pady=(0, 8))
+        # roda halus di tree analisa (pola skor-zone)
         try:
-            cv.configure(yscrollincrement=40)
-            enable_smooth_wheel_list(cv)
+            enable_smooth_wheel_list(tree)
         except (tk.TclError, AttributeError):
             pass
 
-    # ------------------------------------------------ ANALISA HELPERS (v3.11.9)
-    def _analisa_helpers(self, big: bool = False):
-        """v3.11.9 — closure (_line, _muted) utk seksi analisa; big=True
-        (popup ⛶ Perbesar): font 8/9 → 10/11, lebar kolom ×1,35, bar
-        proporsional 120 → 200, tinggi bar 6 → 8."""
-        _fs = 10 if big else 8
-        _fsb = 11 if big else 9
-        _wscale = 1.35 if big else 1.0
-        _bscale = 200.0 / 120.0 if big else 1.0
+    def _sort_analisa_tree(self, tree, col: str):
+        """v3.11.31 — sort tree analisa berdasarkan kolom (toggle \u21c5
+        asc/desc). no & selisih = numerik; lainnya teks (case-insensitive)."""
+        items = list(tree.get_children(""))
+        if not items:
+            return
+        cur = getattr(tree, "_analisa_sort_col", None)
+        rev = (col != cur) or not getattr(tree, "_analisa_sort_rev", False)
+        tree._analisa_sort_col = col
+        tree._analisa_sort_rev = rev
 
-        def _line(parent, texts, widths, bold=False, fg=None, bg=C_CARD,
-                  bar=None, bar_bg="#64748b"):
-            row = tk.Frame(parent, bg=bg)
-            row.pack(fill="x", pady=(0, 1))
-            for txt, w in zip(texts, widths):
-                tk.Label(row, text=str(txt), bg=bg,
-                         fg=(fg or C_HEADER),
-                         width=max(1, int(w * _wscale)), anchor="w",
-                         padx=4, font=font(_fsb if bold else _fs)).pack(
-                    side="left")
-            if bar is not None:
-                tk.Frame(row, bg=bar_bg, height=8 if big else 6,
-                         width=max(4, int(bar * _bscale))).pack(
-                    side="left", padx=(8, 0), pady=(5, 0))
-            return row
+        def _key(iid):
+            vals = tree.set(iid)
+            raw = str(vals.get(col, ""))
+            if col == "no":
+                try:
+                    return (0, int(raw))
+                except ValueError:
+                    return (1, raw)
+            if col == "selisih":
+                _s = (raw.replace("(", "-").replace(")", "")
+                      .replace(".", "").replace(",", "."))
+                try:
+                    return (0, float(_s))
+                except ValueError:
+                    return (1, raw)
+            return (0, raw.lower())
 
-        def _muted(parent, txt):
-            tk.Label(parent, text=txt, bg=C_CARD, fg=C_TEXT_MUTED,
-                     font=font(_fs)).pack(anchor="w", pady=(2, 0))
-
-        return _line, _muted
-
-    def _analisa_sec(self, parent, title, subtitle, big, on_enlarge=None):
-        """v3.11.9 — bingkai SATU seksi analisa: header (judul + tombol
-        ⛶ Perbesar + subjudul) + body. on_enlarge None (popup besar /
-        tanpa perbesar) → tombol tak dibuat (popup tak menumpuk popup)."""
-        sec = tk.Frame(parent, bg=C_CARD,
-                       highlightbackground="#e2e8f0",
-                       highlightthickness=1)
-        sec.pack(fill="x", pady=(0, 8))
-        h = tk.Frame(sec, bg="#f8fafc")
-        h.pack(fill="x")
-        tk.Label(h, text=title, bg="#f8fafc", fg=C_HEADER,
-                 font=font(11 if big else 9, "bold")).pack(
-            side="left", padx=10, pady=4)
-        if on_enlarge is not None:
-            GhostButton(h, text="⤢ Perbesar",
-                        command=on_enlarge).pack(side="right", padx=8,
-                                                 pady=3)
-        if subtitle:
-            tk.Label(h, text=subtitle, bg="#f8fafc",
-                     fg=C_TEXT_MUTED,
-                     font=font(9 if big else 8)).pack(
-                side="right", padx=10)
-        body = tk.Frame(sec, bg=C_CARD)
-        body.pack(fill="x", padx=10, pady=(2, 8))
-        return body
-
-    def _open_analisa_section(self, payload: dict, key: str):
-        """v3.11.9 — popup PERBESAR satu seksi analisa (user: "tiap
-        section bisa diperbesar (⛶)"): Toplevel 80%×80% layar (cap
-        1600×900), band header gelap (pola DetailsPopup) + body
-        scrollable skala BESAR (font/bar ×1,35 — _analisa_helpers
-        big=True); Esc / tombol Tutup menutup. Payload = snapshot saat
-        popup dibuka (refresh berikutnya tak mengubah popup terbuka)."""
-        parent = self.winfo_toplevel()
-        _meta = next((x for x in self._ANALISA_SEC_META if x[0] == key),
-                     None)
-        _title = (_meta[2] if _meta else key)
-        win = tk.Toplevel(parent)
-        win.title(f"Analisa — {_title}")
-        win.configure(bg=C_BG)
-        try:
-            sw = max(int(win.winfo_screenwidth()), 1024)
-            sh = max(int(win.winfo_screenheight()), 640)
-            pw = min(1600, int(sw * 0.80))
-            ph = min(900, int(sh * 0.80))
-            px = parent.winfo_rootx() + (parent.winfo_width() - pw) // 2
-            py = parent.winfo_rooty() + (parent.winfo_height() - ph) // 2
-            px = max(0, min(px, sw - pw))
-            py = max(0, min(py, sh - ph))
-            win.geometry(f"{pw}x{ph}+{px}+{py}")
-        except tk.TclError:
-            win.geometry("1200x800")
-        win.transient(parent)
-        with contextlib.suppress(tk.TclError):
-            win.grab_set()
-
-        header = tk.Frame(win, bg=C_HEADER)
-        header.pack(fill="x")
-        head_in = tk.Frame(header, bg=C_HEADER)
-        head_in.pack(fill="x", padx=16, pady=12)
-        tk.Label(head_in, text="Analisa (diperbesar)", bg=C_HEADER,
-                 fg="#5eead4", font=font(8, "bold")).pack(anchor="w")
-        tk.Label(head_in, text=_title, bg=C_HEADER, fg="#f1f5f9",
-                 font=font(12, "bold"), wraplength=1100,
-                 justify="left").pack(anchor="w", pady=(2, 0))
-        AccentButton(head_in, text="Tutup (Esc)",
-                     command=win.destroy).pack(side="right", anchor="ne")
-
-        bodywrap = tk.Frame(win, bg=C_BG)
-        bodywrap.pack(fill="both", expand=True, padx=12, pady=12)
-        cv = tk.Canvas(bodywrap, bg=C_CARD, highlightthickness=0, bd=0)
-        sb = ttk.Scrollbar(bodywrap, orient="vertical", command=cv.yview)
-        inner = tk.Frame(cv, bg=C_CARD)
-        _winid = cv.create_window((0, 0), window=inner, anchor="nw")
-        cv.configure(yscrollcommand=sb.set)
-        cv.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        inner.bind("<Configure>",
-                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind("<Configure>",
-                lambda e: cv.itemconfigure(_winid, width=cv.winfo_width()))
-
-        _line, _muted = self._analisa_helpers(big=True)
-        _sub = (_meta[3] if _meta else "")
-        _b = self._analisa_sec(inner, _title, _sub, big=True,
-                               on_enlarge=None)
-        if _meta is not None:
-            getattr(self, _meta[1])(_b, payload, _line, _muted, True)
-
-        try:
-            cv.configure(yscrollincrement=44)
-            enable_smooth_wheel_list(cv)
-        except (tk.TclError, AttributeError):
-            pass
-        win.bind("<Escape>", lambda e: win.destroy())
-        win.focus_set()
-
-    # ------------------------------------- seksi builders (v3.11.9 port)
-    @staticmethod
-    def _tgl_short(t):
-        """v3.11.11 — tanggal singkat utk baris detail analisa: negatif
-        = hari bulan lalu ('25•' — konvensi label tabel utama),
-        None/NaN = '—'."""
-        if t is None:
-            return "—"
-        try:
-            if isinstance(t, float) and np.isnan(t):
-                return "—"
-            t = int(t)
-        except (TypeError, ValueError):
-            return "—"
-        return f"{-t}•" if t < 0 else str(t)
-
-    def _as_umur(self, body, payload, _line, _muted, big):
-        """Seksi 1 — UMUR GANTUNG (port konten v3.10; param _line/_muted/
-        big supaya dipakai render utama & popup ⛶).
-        v3.11.11 — + tabel DETAIL baris tertua: resto · barang · tanggal
-        · umur · selisih (user: "detailkan lagi, resto mana dan tanggal
-        mana dan selisih berapa di semua analisa")."""
-        if payload.get("umur"):
-            _line(body, ("RENTANG UMUR", "BARIS", "Σ|SELISIH|"),
-                  (22, 10, 16), bold=True, fg=C_TEXT_MUTED)
-            _mx = max((n for _, n, _ in payload["umur"]), default=1) or 1
-            for label, n, s in payload["umur"]:
-                _line(body, (label, fmt_int_id(n), _fmt_num(s)),
-                      (22, 10, 16), bar=120 * n / _mx,
-                      bar_bg="#c65911")
-            um = payload.get("umur_max")
-            if um:
-                _muted(body, f"tertua: {fmt_int_id(um['umur'])} hari — "
-                             f"{um['barang']} @ {um['resto']} "
-                             f"tgl {um['tgl']} "
-                             f"(selisih {_fmt_num(um['selisih'])})")
-            # v3.11.11 — detail baris gantung TERTUA (top-8)
-            ut = payload.get("umur_top") or []
-            if ut:
-                _line(body, ("RESTO", "BARANG", "TGL", "UMUR (hari)",
-                             "SELISIH"),
-                      (16, 30, 7, 12, 12), bold=True, fg=C_TEXT_MUTED)
-                for d in ut:
-                    _line(body, (d["resto"], d["barang"],
-                                 self._tgl_short(d["tgl"]),
-                                 fmt_int_id(d["umur"]),
-                                 _fmt_num(d["selisih"])),
-                          (16, 30, 7, 12, 12),
-                          fg=("#b91c1c" if d["selisih"] < 0
-                              else "#0f766e"))
-        else:
-            _muted(body, "tidak ada baris gantung di konteks ini ✓")
-
-    def _as_resto(self, body, payload, _line, _muted, big):
-        """Seksi 2 — LEADERBOARD RESTO + TREND.
-        v3.11.11 — + baris DETAIL per resto: tanggal mana · selisih
-        bersih berapa · berapa item (top-4 tanggal terbesar |Σ|) — user:
-        "resto mana dan tanggal mana dan selisih berapa"."""
-        if payload.get("resto"):
-            _line(body, ("RESTO", "ITEM", "TGL", "Σ|SELISIH|", "SHARE",
-                         "TREND"),
-                  (26, 8, 7, 13, 9, 12), bold=True, fg=C_TEXT_MUTED)
-            _mx2 = max((d["sum_abs"] for d in payload["resto"]),
-                       default=1.0) or 1.0
-            for i, d in enumerate(payload["resto"]):
-                _line(body, (
-                    f"#{i + 1}  {d['resto']}",
-                    fmt_int_id(d["n_items"]),
-                    fmt_int_id(d["n_dates"]),
-                    _fmt_num(d["sum_abs"]),
-                    f"{d['share'] * 100:.0f}%",
-                    d["trend"]),
-                    (26, 8, 7, 13, 9, 12),
-                    bold=(i < 3),
-                    fg=(self._A_TREND_FG.get(d["trend"]) if i < 3
-                        else None),
-                    bar=120 * d["sum_abs"] / _mx2,
-                    bar_bg="#b91c1c" if i == 0 else "#64748b")
-                det = d.get("detail") or []
-                if det:
-                    _line(body,
-                          ("↳ " + " · ".join(
-                              f"tgl {self._tgl_short(x['tgl'])}: "
-                              f"{_fmt_num(x['net'])} ({x['n']} item)"
-                              for x in det),),
-                          (110,), fg=C_TEXT_MUTED)
-        else:
-            _muted(body, "tidak ada resto bermasalah di konteks ini ✓")
-
-    def _as_sistemik(self, body, payload, _line, _muted, big):
-        """Seksi 3 — SISTEMIK vs LOKAL.
-        v3.11.11 — + baris DETAIL per barang sistemik: resto mana ·
-        Σ selisih bersih · tanggal kejadian (top-4 resto terbesar |Σ|) —
-        user: "resto mana dan tanggal mana dan selisih berapa"."""
-        s3 = payload.get("sistemik") or {}
-        n_sis = s3.get("n_baris_sistemik", 0)
-        n_lok = s3.get("n_baris_lokal", 0)
-        _n_tot = (n_sis + n_lok) or 1
-        _line(body, (
-            (f"SISTEMIK: {fmt_int_id(n_sis)} baris "
-             f"({n_sis * 100 / _n_tot:.0f}%)"),
-            (f"LOKAL: {fmt_int_id(n_lok)} baris "
-             f"({n_lok * 100 / _n_tot:.0f}%)")),
-            (34, 30), bold=True,
-            fg="#b45309" if n_sis else "#15803d")
-        if s3.get("items"):
-            _line(body, ("BARANG", "RESTO", "BARIS", "Σ|SELISIH|"),
-                  (30, 8, 8, 14), bold=True, fg=C_TEXT_MUTED)
-            _mx3 = max((d["sum_abs"] for d in s3["items"]),
-                       default=1.0) or 1.0
-            for d in s3["items"]:
-                _line(body, (d["barang"], fmt_int_id(d["n_resto"]),
-                             fmt_int_id(d["n_baris"]),
-                             _fmt_num(d["sum_abs"])),
-                      (30, 8, 8, 14), bar=100 * d["sum_abs"] / _mx3,
-                      bar_bg="#b45309")
-                det = d.get("detail") or []
-                if det:
-                    _line(body,
-                          ("↳ " + " · ".join(
-                              f"{x['resto']}: {_fmt_num(x['net'])} (tgl "
-                              + ", ".join(self._tgl_short(t)
-                                          for t in x["tgls"][:6])
-                              + (f" +{len(x['tgls']) - 6} lain"
-                                 if len(x["tgls"]) > 6 else "")
-                              + ")"
-                              for x in det),),
-                          (110,), fg=C_TEXT_MUTED)
-        else:
-            _muted(body, "tidak ada barang gantung lintas ≥3 resto ✓")
-
-    def _as_resolve(self, body, payload, _line, _muted, big):
-        """Seksi 4 — RESOLVE-RATE (bar dua-warna; popup besar _W 340).
-        v3.11.11 — + tabel DETIL pasangan MASIH GANTUNG terbesar: resto ·
-        barang · tanggal terakhir · selisih (user: "resto mana dan tanggal
-        mana dan selisih berapa di semua analisa")."""
-        r4 = payload.get("resolve") or {}
-        rate = r4.get("rate")
-        if rate is not None:
-            # bar progres dua-warna (hijau teratasi / merah masih)
-            barf = tk.Frame(body, bg=C_CARD)
-            barf.pack(anchor="w", pady=(2, 4))
-            _W = 340 if big else 240
-            tk.Frame(barf, bg="#16a34a", height=10,
-                     width=max(4, int(_W * rate))).pack(side="left")
-            tk.Frame(barf, bg="#dc2626", height=10,
-                     width=max(4, _W - int(_W * rate))).pack(side="left")
-            tk.Label(barf, text=f"  {rate * 100:.0f}%",
-                     bg=C_CARD, fg="#15803d",
-                     font=font(12 if big else 10, "bold")).pack(side="left")
-        _line(body, (
-            f"PERNAH GANTUNG: {fmt_int_id(r4.get('pernah', 0))} pasangan",
-            f"TERATASI: {fmt_int_id(r4.get('teratasi', 0))}",
-            f"MASIH: {fmt_int_id(r4.get('masih', 0))}"),
-            (30, 18, 16), bold=True)
-        _muted(body, f"hari bersih (tanpa gantung): "
-                     f"{fmt_int_id(r4.get('hari_bersih', 0))} dari "
-                     f"{fmt_int_id(r4.get('n_tgl', 0))} tanggal teramati")
-        mt = r4.get("masih_top") or []
-        if mt:
-            _muted(body, "MASIH GANTUNG — selisih terbesar:")
-            _line(body, ("RESTO", "BARANG", "TGL", "SELISIH"),
-                  (16, 30, 7, 12), bold=True, fg=C_TEXT_MUTED)
-            for d in mt:
-                _line(body, (d["resto"], d["barang"],
-                             self._tgl_short(d["tgl"]),
-                             _fmt_num(d["selisih"])),
-                      (16, 30, 7, 12),
-                      fg=("#b91c1c" if d["selisih"] < 0 else "#0f766e"))
-
-    def _as_anomali(self, body, payload, _line, _muted, big):
-        """Seksi 5 — ANOMALI ΔSO.
-        v3.11.11 — top 5→8 baris + kolom Selisih IN (user: "resto mana
-        dan tanggal mana dan selisih berapa di semua analisa")."""
-        a5 = payload.get("anomali") or {}
-        m = (payload or {}).get("meta") or {}
-        if m.get("basis_v310"):
-            _line(body, (
-                (f"ΔSO naik TANPA IN: "
-                 f"{fmt_int_id(a5.get('naik_tanpa_in', 0))}"),
-                (f"ΔSO turun TANPA BK/IN: "
-                 f"{fmt_int_id(a5.get('turun_tanpa_bk', 0))}"),
-                (f"ΔSO tak diketahui: "
-                 f"{fmt_int_id(a5.get('dso_unknown', 0))}")),
-                (26, 26, 22), bold=True,
-                fg="#b45309" if (a5.get("naik_tanpa_in")
-                                 or a5.get("turun_tanpa_bk")) else "#15803d")
-            if a5.get("top"):
-                _line(body, ("RESTO", "BARANG", "TGL", "ΔSO",
-                             "SELISIH IN"),
-                      (14, 30, 7, 10, 12), bold=True, fg=C_TEXT_MUTED)
-                for d in a5["top"]:
-                    _line(body, (d["resto"], d["barang"],
-                                 self._tgl_short(d["tgl"]),
-                                 _fmt_num(d["dso"]),
-                                 _fmt_num(d.get("selisih", 0.0))),
-                          (14, 30, 7, 10, 12),
-                          fg=("#b91c1c" if d["dso"] < 0 else "#0f766e"))
-        else:
-            _muted(body, "format data lama — kolom ΔSO tak tersedia "
-                         "(jalankan pipeline v3.10 utk analisis ΔSO)")
-
-    def _as_comminus(self, body, payload, _line, _muted, big):
-        """Seksi 6 — COM MINUS (pemakaian negatif).
-        v3.11.11 — top 5→8 baris + kolom Selisih IN (user: "resto mana
-        dan tanggal mana dan selisih berapa di semua analisa")."""
-        c6 = payload.get("com_minus") or {}
-        m = (payload or {}).get("meta") or {}
-        if c6.get("n"):
-            _line(body, (f"{fmt_int_id(c6['n'])} baris",
-                         f"Σ|COM| {_fmt_num(c6.get('sum', 0.0))}"),
-                  (16, 20), bold=True, fg="#dc2626")
-            _line(body, ("RESTO", "BARANG", "TGL", "COM",
-                         "SELISIH IN"),
-                  (14, 30, 7, 10, 12), bold=True, fg=C_TEXT_MUTED)
-            for d in c6.get("top") or []:
-                _line(body, (d["resto"], d["barang"],
-                             self._tgl_short(d["tgl"]),
-                             _fmt_num(d["com"]),
-                             _fmt_num(d.get("selisih", 0.0))),
-                      (14, 30, 7, 10, 12), fg="#b91c1c")
-        else:
-            _muted(body, "tidak ada COM negatif di konteks ini ✓"
-                   if m.get("basis_v310") else
-                   "kolom COM tak tersedia (format data lama)")
+        for idx, iid in enumerate(sorted(items, key=_key, reverse=rev)):
+            tree.move(iid, "", idx)
 
     # --------------------------------------------------- SKOR RESTO (F3) --
     _SKOR_RANK_BG = ("#fef3c7", "#e2e8f0", "#fffbeb")   # emas/perak/perunggu lembut

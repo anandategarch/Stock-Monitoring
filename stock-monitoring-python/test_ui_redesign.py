@@ -22098,16 +22098,10 @@ def main():
           and _STH95.detect_standard_h(None) in (7, 14, 25),
           "8/13/15/24/26/31/invalid/None")
 
-    # ---- (B) _tgl_short — konvensi '25•' bulan lalu -----------------------
-    check("(v3.11.11) §95-B1 _tgl_short: -25→'25•' · 7→'7' · None→'—' "
-          "+ NaN→'—'",
-          _ISV95._tgl_short(-25) == "25•"
-          and _ISV95._tgl_short(7) == "7"
-          and _ISV95._tgl_short(None) == "—"
-          and _ISV95._tgl_short(float("nan")) == "—",
-          f"{_ISV95._tgl_short(-25)!r}")
-
-    # ---- (C) payload detail analisa (semua seksi) -------------------------
+    # ---- (B/C) _compute_analisa_rows — analisa SELISIH baru (v3.11.31) -----
+    # v3.11.31 — _tgl_short + _compute_analisa 6-seksi + _render_analisa 6-
+    # seksi DIHAPUS; diganti _compute_analisa_rows (tabel selisih
+    # Resto·Tgl·Barang urut |selisih|↓) + _render_analisa (ttk.Treeview).
     _rows95 = []
 
     def _r95(barang, resto, tgl, selisih, dso=0.0, com=0.0):
@@ -22135,74 +22129,51 @@ def main():
     root.update()
     _isv95._month_len = 30
     _isv95._lalu_month_len = 31
-    _p95 = _isv95._compute_analisa(pd.DataFrame(_rows95))
-    _ut95 = _p95.get("umur_top") or []
-    check("(v3.11.11) §95-C1 seksi 1 UMUR: umur_top top-8 tertua — baris#1 "
-          "= BRG TUA @ R-ALPHA tgl 1 selisih -9 + field lengkap",
-          len(_ut95) >= 1 and _ut95[0]["barang"] == "BRG TUA"
-          and _ut95[0]["resto"] == "R-ALPHA" and _ut95[0]["tgl"] == 1
-          and _ut95[0]["selisih"] == -9.0
-          and all({"resto", "barang", "tgl", "umur", "selisih"}
-                  <= set(d) for d in _ut95),
-          f"got {_ut95[:1]}")
-    _beta95 = next((d for d in (_p95.get("resto") or [])
-                    if d["resto"] == "R-BETA"), None)
-    _det95 = (_beta95 or {}).get("detail") or []
-    check("(v3.11.11) §95-C2 seksi 2 RESTO: detail per tanggal — R-BETA "
-          "top-1 tgl 7 net -32 (BRG A -30 + BRG B -2) 2 item",
-          len(_det95) == 3 and _det95[0]["tgl"] == 7
-          and _det95[0]["net"] == -32.0 and _det95[0]["n"] == 2,
-          f"got {_det95[:1]}")
-    _sis95 = next((d for d in ((_p95.get("sistemik") or {})
-                              .get("items") or [])
-                   if d["barang"] == "BRG SIS"), None)
-    _sdet95 = (_sis95 or {}).get("detail") or []
-    check("(v3.11.11) §95-C3 seksi 3 SISTEMIK: detail per resto — BRG SIS "
-          "3 resto × (net -2, tgls [10, 14])",
-          len(_sdet95) == 3
-          and all(x["net"] == -2.0 and x["tgls"] == [10, 14]
-                  for x in _sdet95),
-          f"got {_sdet95[:1]}")
-    _mt95 = (_p95.get("resolve") or {}).get("masih_top") or []
-    _hang95 = next((d for d in _mt95 if d["barang"] == "BRG HANG"), None)
-    check("(v3.11.11) §95-C4 seksi 4 RESOLVE: masih_top — BRG HANG tgl 25 "
-          "selisih 77 @ R-ZETA",
-          _hang95 is not None and _hang95["tgl"] == 25
-          and _hang95["selisih"] == 77.0 and _hang95["resto"] == "R-ZETA",
-          f"got {_hang95}")
-    _a595 = (_p95.get("anomali") or {}).get("top") or []
-    _c695 = (_p95.get("com_minus") or {}).get("top") or []
-    _dso95 = next((d for d in _a595
-                   if d["barang"] == "BRG DSO" and d["tgl"] == 12), None)
-    check("(v3.11.11) §95-C5 seksi 5/6: top maks 8 + field 'selisih' + "
-          "baris ΔSO membawa selisih pasangannya (BRG DSO t12 dso 250 "
-          "selisih 3)",
-          len(_a595) <= 8 and len(_c695) <= 8
-          and all("selisih" in d for d in _a595 + _c695)
-          and _dso95 is not None and _dso95["dso"] == 250.0
-          and _dso95["selisih"] == 3.0,
-          f"a5={len(_a595)} c6={len(_c695)}")
-    # render penuh: baris detail '↳ tgl' muncul di panel analisa
+    _p95 = _isv95._compute_analisa_rows(pd.DataFrame(_rows95))
+    _rows_p95 = _p95.get("rows") or []
+    # baris selisih 0 (BRG TUA tgl30 · BRG DSO tgl13) DIBUANG; urut
+    # |selisih| ↓ → baris#1 = BRG HANG @ R-ZETA tgl 25 selisih 77.
+    check("(v3.11.31) \u00a795-B1 _compute_analisa_rows: rows urut |selisih|\u2193 "
+          "+ baris#1 = BRG HANG @ R-ZETA tgl 25 selisih 77 + baris selisih 0 "
+          "dibuang + n_total/n_selisih benar",
+          len(_rows_p95) == _p95["n_selisih"]
+          and _p95["n_total"] == 16
+          and _p95["n_selisih"] == 14
+          and _rows_p95[0][2] == "BRG HANG"
+          and _rows_p95[0][0] == "R-ZETA"
+          and _rows_p95[0][3] == 77.0
+          and all(r[3] != 0.0 for r in _rows_p95),
+          f"n_total={_p95.get('n_total')} n_selisih={_p95.get('n_selisih')} "
+          f"rows0={_rows_p95[:1]}")
+    check("(v3.11.31) \u00a795-B2 ringkasan: sum_abs + n_resto + n_barang "
+          "(grup = Nama Barang)",
+          abs(_p95["sum_abs"] - 178.0) < 0.01
+          and _p95["n_resto"] == 8
+          and _p95["n_barang"] == 7,
+          f"sum_abs={_p95.get('sum_abs')} n_resto={_p95.get('n_resto')} "
+          f"n_barang={_p95.get('n_barang')}")
+    # render: tree berisi baris + judul 'ANALISA SELISIH'
     _isv95._analisa_payload = _p95
+    _isv95._view_analisa = True
     _isv95._render_analisa(_p95)
     root.update()
-    _texts95 = []
-
-    def _walk95(w):
-        if isinstance(w, tk.Label):
-            _texts95.append(w.cget("text"))
-        for _c95 in w.winfo_children():
-            _walk95(_c95)
-
-    _walk95(_isv95._analisa_card)
-    check("(v3.11.11) §95-C6 render: baris detail '↳ tgl X: selisih' + "
-          "header kolom SELISIH + detail sistemik '↳ R-' + '(tgl' semua "
-          "hadir",
-          any(t.startswith("↳ tgl") for t in _texts95)
-          and any("SELISIH" in t for t in _texts95)
-          and any(t.startswith("↳ R-") for t in _texts95)
-          and "(tgl" in "\n".join(_texts95),
-          f"↳tgl={any(t.startswith('↳ tgl') for t in _texts95)}")
+    _tv95 = None
+    for _c95 in _isv95._analisa_card.winfo_children():
+        _tv95 = next((_w for _w in _c95.winfo_children()
+                      if isinstance(_w, ttk.Treeview)), None)
+        if _tv95 is not None:
+            break
+    _has_title = any(
+        isinstance(_w, tk.Label)
+        and "ANALISA SELISIH" in str(_w.cget("text"))
+        for _w in _isv95._analisa_card.winfo_children())
+    check("(v3.11.31) \u00a795-C render _render_analisa: tree ada + jumlah "
+          "baris = n_selisih + judul 'ANALISA SELISIH'",
+          _tv95 is not None
+          and len(_tv95.get_children()) == _p95["n_selisih"]
+          and _has_title,
+          f"tree={_tv95 is not None} n_rows="
+          f"{len(_tv95.get_children()) if _tv95 else 0} title={_has_title}")
     _isv95.destroy()
     _top95.destroy()
     root.update()

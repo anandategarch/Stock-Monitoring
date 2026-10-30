@@ -192,12 +192,14 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.30"  # v3.11.30 — 6 permintaan user: (1) rank DIHAPUS
-# dari kolom CEK; (2) filter ⧩ klik-kanan "only select this"; (3) tab 📋
-# Laporan Deviasi DIHAPUS + dead code (parser → deviasi_file.py, file
-# bulan-lalu app-level); (4) "Beda dari Resto Lain" kini data-saat-ini
-# tanpa file bulan lalu; (5) ambang COM default 90 + warna sel CEK;
-# (6) kartu KPI Rekap Selisih IN dihapus
+APP_VERSION = "3.11.31"  # v3.11.31 — ANALISA REKAP SELISIH IN diganti: 6-seksi
+# reconciliation (umur/leaderboard/sistemik/resolve/anomali/COM-minus) DIHAPUS
+# → tabel SELISIH (Resto · Tanggal · Nama Barang) urut |selisih|↓ + sort kolom;
+# dead code dibersihkan (_compute_analisa/_render_analisa 6-seksi/_as_*/_tgl_short
+# /_analisa_helpers/_analisa_sec/_open_analisa_section/_A_TREND_FG/_ANALISA_SEC_META).
+# User: "di tab rekap selisih IN bagian analisa, aku pengen ditampilkan selisih
+# resto dan nama barang dan tanggal. hapus aja analisa analisa sebelum nya
+# ganti dengan yang baru. Hapus juga dead code nya."
 # (riwayat v3.11.15 — MERGE-VERTIKAL KOLOM CEK + RANK + NAMA BARANG: head-run per kolom + sticky stateless + _cek_map; SUPERSEDE v3.11.16: run CEK/Rank diganti span kelompok sejajar — data produksi label/rank unik membuat run nyaris tak pernah menempel.)
 # (riwayat v3.11.14 — POLISH TABEL ALA EXCEL: HEADING IKUT ANCHOR KOLOM — audit visual 3×VLM vs referensi GitHub Forest-ttk-theme/tksheet/ttkbootstrap; SEMUA tree memasang anchor heading = anchor kolomnya (angka rata kanan, teks rata kiri, ✓ center) — 15 file/20+ tree + clone menyalin anchor sumber + heading dinamis preserve; KPI cards dievaluasi & tidak ditambahkan (arah user "biar clean"); TES §97.)
 # (riwayat v3.11.12 — TIGA permintaan user: AMBANG COM ±% dr median (spinbox GR/PCS sinkron, persist com_ambang_pct default 50) + transparansi periode→file target auto bulan lalu (bulan_mundur_list) + scroll vertikal tab Config (canvas + router roda).)
