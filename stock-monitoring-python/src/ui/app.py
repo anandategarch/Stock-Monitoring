@@ -192,7 +192,11 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.31"  # v3.11.31 — ANALISA REKAP SELISIH IN diganti: 6-seksi
+APP_VERSION = "3.11.32"  # v3.11.32 — ZEBRA PER-GRUP di tab Deviasi GR & PCS
+# (pita latar evenrow/oddrow bergantian tiap ganti Nama Barang — penanda
+# visual batas grup). User: "tampilan di tab deviasi gr dan deviasi pcs
+# untuk tiap nama barang yang beda ada semacam penanda visual oh ini
+# sudah grup barang lain."
 # reconciliation (umur/leaderboard/sistemik/resolve/anomali/COM-minus) DIHAPUS
 # → tabel SELISIH (Resto · Tanggal · Nama Barang) urut |selisih|↓ + sort kolom;
 # dead code dibersihkan (_compute_analisa/_render_analisa 6-seksi/_as_*/_tgl_short

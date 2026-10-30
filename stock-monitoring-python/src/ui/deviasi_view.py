@@ -3011,12 +3011,13 @@ class DeviasiView(tk.Frame):
         # anomali check — jangan menggelembungkan angka 'CEK n' footer.
         _cek_primary61 = cek_series.str.split(" \u00b7 ").str[0]
         cek_count = int(_cek_primary61.isin(self._CEK_CHECK_LABELS).sum())
-        # v3.9.61 — SEKAT WARNA KELOMPOK DIHAPUS (user): urutan render
-        # tetap di-sort by (Nama Barang, |Dev| desc) → kelompok barang
-        # KONTIGU (nama/rank per-baris tetap berdekatan satu kelompok),
-        # TAPI tanpa pita latar bergantian — baris seragam putih. Mesin
-        # band (grp_start/grp_id/grp_band → tag grp0/grp1 + reapply
-        # pasca-sort) dihapus total.
+        # v3.9.61 — SEKAT WARNA KELOMPOK dihapus (urutan render tetap di-
+        # sort by (Nama Barang, |Dev| desc) → kelompok barang KONTIGU).
+        # v3.11.32 — ZEBRA PER-GRUP DIKEMBALIKAN (user: 'penanda visual oh
+        # ini sudah grup barang lain'): pita latar evenrow/oddrow dipasang
+        # DINAMIS per-kelompok di _apply_group_zebra (bukan dibakar di
+        # payload — ikut urutan sort aktif); mesin band lama (grp0/grp1
+        # baked di items) TETAP dihapus.
         items = []
         fp_map = {}
         row_snaps = {}
@@ -3389,12 +3390,53 @@ class DeviasiView(tk.Frame):
         dekorasi tinggal tag per-cell + tint header.
         v3.11.27 — _static_merge_layout DIBUBARKAN (merge-vertikal
         dibongkar total — tabel datar per-baris; nilai CEK datang utuh
-        dari payload, TANPA re-layout pasca-sort)."""
+        dari payload, TANPA re-layout pasca-sort).
+        v3.11.32 — ZEBRA PER-GRUP dikembalikan (user: 'tiap nama barang
+        yang beda ada semacam penanda visual oh ini sudah grup barang
+        lain') — tag evenrow/oddrow dipasang dinamis per-kelompok Nama
+        Barang kontigu di urutan tampak saat ini (bukan dibakar di
+        payload — ikut urutan sort aktif)."""
         self._reapply_cell_tags(tree)
+        self._apply_group_zebra(tree)
         _tint = getattr(tree, "_heading_tint", None)
         if _tint is not None and getattr(_tint, "_alive", False):
             with contextlib.suppress(tk.TclError):
                 _tint.refresh()
+
+    def _apply_group_zebra(self, tree):
+        """v3.11.32 — zebra per-grup Nama Barang. Walk tree.get_children
+        di URUTAN TAMPAK SAAT INI, lookup Nama Barang per iid lewat
+        self._row_snaps; tiap kali Nama Barang berubah dari baris
+        sebelumnya → toggle paritas (evenrow/oddrow). Hasilnya: kelompok
+        barang kontigu mendapat pita latar sama; batas grup kelihatan
+        instan. Idempoten (strip zebra tag lama sebelum re-apply).
+
+        Berlaku utk tabel utama + clone ⛶ (tree dilewatkan param). Tag
+        evenrow/oddrow sudah di-configure di _setup_tags (slate halus
+        #ffffff / #f8fafc). Tag per-cell (com_tinggi_cell etc.) hanya
+        set foreground → bg zebra tembus (Tk precedence bg cell > bg row
+        HANYA bila cell tag set background — com_*_cell tidak)."""
+        try:
+            children = list(tree.get_children(""))
+        except (tk.TclError, AttributeError):
+            return
+        if not children:
+            return
+        snaps = self._row_snaps
+        prev_barang = None
+        grp_parity = 0          # 0 = evenrow, 1 = oddrow
+        for iid in children:
+            snap = snaps.get(str(iid)) or {}
+            barang = str(snap.get("barang", ""))
+            if barang != prev_barang:
+                grp_parity ^= 1
+                prev_barang = barang
+            zebra_tag = "evenrow" if grp_parity == 0 else "oddrow"
+            existing = list(tree.item(iid, "tags") or ())
+            # buang zebra tag sebelumnya (idempotent), pertahankan tag lain
+            cleaned = [t for t in existing if t not in ("evenrow", "oddrow")]
+            cleaned.append(zebra_tag)
+            tree.item(iid, tags=tuple(cleaned))
 
     def _reapply_cell_tags(self, tree):
         """v3.9.2 — pasang ulang tag per-cell minus di tree manapun
