@@ -996,7 +996,8 @@ _SRC_EKSTERNAL_MINUS = ("Eksternal", "Campuran")
 
 def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
                              saldo_sistem_map: dict | None = None,
-                             mode_4217: bool = True) -> pd.DataFrame:
+                             mode_4217: bool = True,
+                             stats_out: dict | None = None) -> pd.DataFrame:
     """v3.11.42 — Pasangan (barang, resto) dgn SALDO SISTEM minus di
     rentang 1..H (Opsi 2 — SEMUA pasangan yg pernah minus, bukan hanya
     snapshot H).
@@ -1026,7 +1027,19 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     Pasangan dgn saldo >= 0 sepanjang 1..H dikecualikan. DataFrame kosong
     bila tak ada pasangan minus / data None/kosong / kolom kurang.
     Urutan: |Qty Mulai Minus| MENURUN (paling minus di atas).
+
+    v3.11.45 — ``stats_out`` (dict opsional, diisi in-place): transparansi
+    KENAPA hasil kosong (user: "tab saldominus juga kosong dengan mode
+    pivot atau mode 42.17") — kunci: ``saldo_rows`` (baris 2.SALDO AKHIR
+    1..H), ``saldo_pairs`` (pasangan ber-saldo), ``minus_pairs`` (pernah
+    minus SEBELUM filter sumber), ``excluded_src`` (minus tapi bukan
+    Eksternal/Campuran), ``shown`` (baris hasil), ``schema_ok``. View
+    memakainya utk status ber-penjelasan + log 1 baris (pola 'pesan
+    kosong yang jujur' v3.9.46).
     """
+    if stats_out is not None:
+        stats_out.update(saldo_rows=0, saldo_pairs=0, minus_pairs=0,
+                         excluded_src=0, shown=0, schema_ok=False)
     if data is None or getattr(data, "empty", True):
         return pd.DataFrame()
     h = int(h)
@@ -1034,6 +1047,8 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     if not {"Nama Barang", "NAMA RESTO", "Tanggal", "JENIS",
             "NILAI"} <= cols:
         return pd.DataFrame()
+    if stats_out is not None:
+        stats_out["schema_ok"] = True
 
     tnum = pd.to_numeric(data["Tanggal"], errors="coerce")
     _jenis = data["JENIS"].astype(str)
@@ -1041,6 +1056,8 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     # 1. Saldo per (pasangan, tgl 1..H) dari 2.SALDO AKHIR
     saldo_mask = (_jenis == "2.SALDO AKHIR") & (tnum >= 1) & (tnum <= h)
     saldo_df = data.loc[saldo_mask].copy()
+    if stats_out is not None:
+        stats_out["saldo_rows"] = len(saldo_df)
     if saldo_df.empty:
         return pd.DataFrame()
     saldo_df = saldo_df.assign(
@@ -1058,6 +1075,8 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     pivot = saldo_df.pivot_table(
         index=["_b", "_r"], columns="_t", values="_v",
         aggfunc="sum", fill_value=0.0)
+    if stats_out is not None:
+        stats_out["saldo_pairs"] = len(pivot)
 
     # 2. Override tgl H dgn saldo_sistem_map (mode 4217)
     if mode_4217 and saldo_sistem_map:
@@ -1085,6 +1104,8 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
         return pd.DataFrame()
     min_per_row = pivot.min(axis=1)
     minus_mask = min_per_row < 0
+    if stats_out is not None:
+        stats_out["minus_pairs"] = int(minus_mask.sum())
     if not minus_mask.any():
         return pd.DataFrame()
     pivot_minus = pivot[minus_mask]
@@ -1169,9 +1190,14 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     # supplier). Filter ⧩ kolom Source Kiriman tetap bisa menyaring
     # spesifik Eksternal/Campuran bila user mau. Empty string diabaikan
     # utk filter default (tampil utk transparansi).
+    # v3.11.45 — stats_out['excluded_src']: minus tapi dibuang sumber
+    # (Internal) — transparansi 'kosong tapi KENAPA'.
+    _n_pre_src = len(out)
     out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)
               | (out["Source Kiriman"] == "")
               | out["Source Kiriman"].isna()]
+    if stats_out is not None:
+        stats_out["excluded_src"] = _n_pre_src - len(out)
     if out.empty:
         return pd.DataFrame()
 
@@ -1179,5 +1205,7 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     out = out.assign(_abs=out["Qty Mulai Minus"].abs())
     out = out.sort_values("_abs", ascending=False, kind="mergesort")
     out = out.drop(columns="_abs").reset_index(drop=True)
+    if stats_out is not None:
+        stats_out["shown"] = len(out)
     return out
 

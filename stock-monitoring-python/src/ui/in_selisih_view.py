@@ -79,7 +79,7 @@ from .theme import (
 from .widgets import (
     CELL_TAGS_SUPPORTED,
     FLASH_MS,  # v3.9.59 — kanon durasi status flash (bonus, agent B)
-    KATEGORI_REKAP_VALUES,  # v3.9.49 — default kategori Rekap Mentah
+    KATEGORI_GABUNGAN_VALUES,  # v3.11.45 — + stem (mapping manual pendek)
     Card,
     ColumnManager,
     EmptyState,
@@ -1382,7 +1382,10 @@ class InSelisihView(tk.Frame):
         semua tab kategori sudah pilih") bila ada di data; fallback
         legacy 'Deviasi'; None bila dua-duanya tak ada. Return nilai
         DATA persis (filter header ⧩ mencocokkan nilai terformat
-        eksak — bukan label virtual)."""
+        eksak — bukan label virtual).
+        v3.11.45 — STEM ikut discan (KATEGORI_GABUNGAN_VALUES): data
+        ber nilai pendek 'COM DEVIASI' (hasil mapping manual) pun masuk
+        seleksi default header KATEGORI tab ini."""
         for df in (self.audit_df, self.data):
             if df is None or getattr(df, "empty", True):
                 continue
@@ -1390,9 +1393,10 @@ class InSelisihView(tk.Frame):
                 continue
             vals = df["KATEGORI"].dropna().astype(str).str.strip()
             # v3.9.49 — kumpulkan SEMUA nilai rekap default yang hadir
-            # (case-insensitive, urutan tetap KATEGORI_REKAP_VALUES).
+            # (case-insensitive, urutan tetap KATEGORI_GABUNGAN_VALUES —
+            # v3.11.45: + stem bentuk pendek).
             found = []
-            for rv in KATEGORI_REKAP_VALUES:
+            for rv in KATEGORI_GABUNGAN_VALUES:
                 for v in vals.unique():
                     if v and v.upper() == rv.upper():
                         found.append(v)

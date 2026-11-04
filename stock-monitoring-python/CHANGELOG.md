@@ -3,6 +3,34 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.45 — fix AKAR "kategori manual tetap gak masuk" (stem 'COM DEVIASI' vs filter default) + status saldo minus JUJUR + versi di judul window
+
+User: "tetap gak masuk untuk mapping manual. nam item nya BAWANG PUTIH GORENG itu gak masuk ke tab devias gr padahal aku udah set jadi COM DEVIASI. tab saldominus juga kosong dengan mode pivot atau mode 42.17"
+
+**Bug #1 — ROOT CAUSE SEBENARNYA (kenapa v3.11.43 & v3.11.44 'tetap sama aja'): TAXONOMI NILAI, bukan mekanisme apply.**
+Reproduksi terkontrol (data realistis + Xvfb GUI test) membuktikan rantai lengkapnya:
+- mapping manual user disimpan dgn nilai **"COM DEVIASI"** (bentuk pendek — dipilih/diketik di dialog; instant-apply v3.11.44 & LANGKAH 5d BEKERJA — nilai KATEGORI baris barang benar-benar jadi "COM DEVIASI" — GUI test T4: barang MUNCUL saat seleksi eksplisit 'COM DEVIASI');
+- TAPI seleksi DEFAULT semua tab ber-filter kategori = entri gabungan **"Deviasi (COM + Packaging)"** yang hanya mencocokkan 2 nilai rekap ber-suffix: `"COM DEVIASI - RESTO"` & `"Biaya Packaging - RESTO"` (`kategori_multi_values` → `kategori_filter_mask`);
+- `"COM DEVIASI"` ≠ `"COM DEVIASI - RESTO"` → barang TER-APPLY tapi TERSEMBUNYI oleh filter default di Deviasi GR/PCS · Nominal · Pivot · Rekap Selisih IN → terlihat "gak masuk"/"tetap sama aja" di SEMUA versi sejak fitur mapping lahir (v3.11.7). GUI test T3 (pra-fix): BAWANG PUTIH GORENG TIDAK tampil dgn filter default.
+
+**Fix (satu titik — semua tab): `pipeline/helpers.py`**
+- `KATEGORI_REKAP_STEMS = ("COM DEVIASI", "Biaya Packaging")` + `KATEGORI_GABUNGAN_VALUES = KATEGORI_REKAP_VALUES + KATEGORI_REKAP_STEMS`;
+- `kategori_multi_values()` kini mengembalikan tuple extended → seleksi gabungan default **mencocokkan stem bentuk pendek juga** (case-insensitive — `kategori_filter_mask` sudah upper());
+- `kategori_has_default_values()` ikut extended → data yang hanya ber-nilai stem pun mendapat entry default yang cocok;
+- `in_selisih_view._default_kategori_value` scan `KATEGORI_GABUNGAN_VALUES` (default header ⧩ KATEGORI Rekap Selisih IN ikut menangkap stem);
+- `KATEGORI_REKAP_VALUES` asli TIDAK berubah (chips rekap in_selisih_view dkk. tetap nilai penuh);
+- `app._kategori_values()` (dialog Identifikasi/Edit): nilai rekap kanonik DI DEPAN daftar — arahkan mapping baru ke nilai penuh (lebih rapi), walau stem kini pun cocok.
+
+**Bug #2 — saldo minus: wiring v3.11.44 TERVERIFIKASI LAGI bekerja (GUI Xvfb: klik sub-tab → 2 baris; ganti mode pivot → 2 baris). Untuk kasus user yang masih kosong, kini app BILANG KENAPA:**
+- `hitung_saldo_minus_pairs(..., stats_out=...)` — breakdown in-place: `saldo_rows`/`saldo_pairs`/`minus_pairs`/`excluded_src`/`shown`/`schema_ok` (semua exit point terisi);
+- status kosong JUJUR (pola v3.9.46): "0 pasangan ber-saldo … pipeline belum dijalankan" vs "N pasangan dipindai — TIDAK ADA yang pernah minus (mode …)" vs "N pasangan minus tapi SEMUA ber-sumber Internal — filter tab ini hanya Eksternal/Campuran" (kemungkinan besar inilah jawaban kasus user: minus-nya Internal, atau build/exe belum v3.11.44+);
+- status non-kosong + " · N lain dibuang (Internal)" bila ada;
+- **log 1 baris `[SALDO MINUS] mode=… · H=… · … tampil`** tiap compute (cache rebuild) — stdout ter-redirect ke tab 🚀 Proses → laporan user berikutnya langsung menunjukkan angka scan.
+
+**Bonus — versi di judul window**: `APP_TITLE — Python Edition · v{APP_VERSION}` — menutup ambigu "user jalankan build lama?" (dua laporan 'tetap sama aja' berpotensi exe belum di-update; kini versi terlihat di title bar + screenshot).
+
+**Verifikasi**: repro pure-pandas (filter mask: 'COM DEVIASI' kini match — pra-fix False) + GUI Xvfb alur user penuh: T1 wiring sub-tab 2 baris PASS · T2 mode pivot 2 baris PASS · **T3 BAWANG PUTIH GORENG tampil dgn filter default PASS (pra-fix FAIL)** · T4 seleksi eksplisit 'COM DEVIASI' PASS · py_compile semua file OK · ruff = baseline per file.
+
 ## v3.11.44 — FIX WIRING saldo minus (root cause "tidak terjadi apa apa") + kategori manual INSTANT-APPLY
 
 User: "kok sama aja? tidak terjadi apa apa" — analisa mendalam menemukan **ROOT CAUSE sebenarnya** (v3.11.43 salah diagnosis arah):

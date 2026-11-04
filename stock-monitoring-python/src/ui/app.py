@@ -95,6 +95,7 @@ run_pipeline = None          # diikat _ensure_pipeline_symbols() (worker)
 PipelineStopped = None       # idem — dipakai except worker + isinstance
 from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST
 from src.pipeline.helpers import (
+    KATEGORI_REKAP_VALUES,  # v3.11.45 — dialog kategori: rekap dulu
     norm_nama_barang_key,  # v3.11.35 — _kat_norm kanonik (rapat-spasi)
     norm_nama_barang_key_series,  # v3.11.44 — instant-apply kategori manual
     read_cache_invalidate,
@@ -196,7 +197,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.44"  # v3.11.44 — FIX WIRING saldo minus (root cause) + kategori manual instant-apply + refresh_icons
+APP_VERSION = "3.11.45"  # v3.11.45 — fix AKAR kategori manual tak muncul (stem 'COM DEVIASI' vs filter default) + status saldo minus jujur + versi di judul
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -2114,7 +2115,11 @@ class StreamToQueue:
 class StockMonitorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"{APP_TITLE} — Python Edition")
+        # v3.11.45 — VERSI DI JUDUL WINDOW: user lapor 'tetap sama aja'
+        # dua kali — salah satu kemungkinan besar exe/build belum versi
+        # terbaru. Versi di judul membuat hal itu langsung terlihat di
+        # screenshot/laporan berikutnya (tanpa harus buka tab/tentang).
+        self.root.title(f"{APP_TITLE} — Python Edition · v{APP_VERSION}")
         # v3.9.48 — (1) KOMPENSASI GEOMETRI DPI (fix "tidak HD" tanpa
         # regresi ukuran v3.9.46): default "DpiAware" kini TRUE = piksel
         # 1:1 TAJAM (Windows tak lagi bitmap-stretch = sumber kabur);
@@ -4050,7 +4055,15 @@ class StockMonitorApp:
         """Daftar nilai kategori utk combobox dialog: nilai unik non-blank
         dari data run ini + nilai mapping manual (sorted) — user boleh
         mengetik nilai baru (combobox editable: 'BEBAN GAS - RESTO'
-        dll)."""
+        dll).
+
+        v3.11.45 — NILAI REKAP KANONIK DI DEPAN: 'COM DEVIASI - RESTO' &
+        'Biaya Packaging - RESTO' selalu tampil pertama (bila hadir di
+        data) — arah mapping manual ke nilai rekap penuh supaya barang
+        langsung cocok seleksi default gabungan 'Deviasi (COM +
+        Packaging)' semua tab (akar bug user: mapping ke bentuk pendek
+        'COM DEVIASI' tersembunyi oleh filter default — v3.11.45 kini
+        stem ikut dicocokkan, tapi nilai rekap penuh tetap lebih rapi)."""
         vals = set()
         df = getattr(self, "append1_df", None)
         if df is not None and not getattr(df, "empty", True) \
@@ -4061,7 +4074,9 @@ class StockMonitorApp:
             vals.update(v for v in s.unique() if v)
         vals.update(str(v).strip() for v in
                     self._kategori_manual_map().values() if str(v).strip())
-        return sorted(vals)
+        # v3.11.45 — kanonik rekap dulu (urutan tuple), sisanya sorted.
+        _head = [v for v in KATEGORI_REKAP_VALUES if v in vals]
+        return _head + sorted(vals - set(KATEGORI_REKAP_VALUES))
 
     def _refresh_kategori_manual_card(self):
         """Isi ulang daftar barang bersaldo 42.17 + mapping manual +

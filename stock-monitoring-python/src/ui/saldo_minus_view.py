@@ -181,6 +181,7 @@ class SaldoMinusView(tk.Frame):
         self._minus_data_id = None  # identitas data terakhir compute
         self._minus_h = None
         self._minus_mode = None
+        self._minus_stats: dict | None = None  # v3.11.45 — breakdown scan
         # render state
         self._neg_cells: list = []
         self._resto_khusus_cells: list = []
@@ -345,6 +346,7 @@ class SaldoMinusView(tk.Frame):
         # invalidate cache compute (data berubah)
         self._minus_df = None
         self._minus_data_id = None
+        self._minus_stats = None  # v3.11.45 — breakdown ikut di-reset
         if data is None or getattr(data, "empty", True):
             self._show_empty()
             self.status_var.set("Belum ada data — jalankan Pipeline.")
@@ -421,9 +423,24 @@ class SaldoMinusView(tk.Frame):
                 and self._minus_h == h
                 and self._minus_mode == st["saldo_sistem_mode"]):
             minus_df = self._minus_df
+            stats = getattr(self, "_minus_stats", None) or {}
         else:
+            # v3.11.45 — stats_out: transparansi KENAPA kosong (user:
+            # "tab saldominus juga kosong dengan mode pivot atau mode
+            # 42.17") — breakdown scan di status + log 1 baris.
+            stats = {}
             minus_df = hitung_saldo_minus_pairs(
-                data, h, self.saldo_sistem_map, mode_4217=mode_4217)
+                data, h, self.saldo_sistem_map, mode_4217=mode_4217,
+                stats_out=stats)
+            # log 1 baris (stdout app di-redirect → tab 🚀 Proses)
+            _mode_lbl = "42.17" if mode_4217 else "pivot"
+            print(f"[SALDO MINUS] mode={_mode_lbl} · H={h} · "
+                  f"{stats.get('saldo_rows', 0):,} baris saldo · "
+                  f"{stats.get('saldo_pairs', 0):,} pasangan ber-saldo · "
+                  f"{stats.get('minus_pairs', 0):,} pernah minus · "
+                  f"{stats.get('excluded_src', 0):,} dibuang sumber "
+                  f"(Internal) · {stats.get('shown', 0):,} tampil")
+            self._minus_stats = stats
             # merge PO info (3243)
             if not minus_df.empty and self.rincian_po_df is not None:
                 _nomor_m = po_nomor_map_3243(self.rincian_po_df)
@@ -446,7 +463,28 @@ class SaldoMinusView(tk.Frame):
             self._minus_mode = st["saldo_sistem_mode"]
 
         if minus_df is None or minus_df.empty:
-            return {"items": [], "status": "Tidak ada pasangan minus.",
+            # v3.11.45 — pesan KOSONG yang JUJUR (pola v3.9.46): bilang
+            # KENAPA kosong dari stats breakdown — bukan generik 'Tidak
+            # ada pasangan minus.' (user tak bisa membedakan bug vs data).
+            _sp = int(stats.get("saldo_pairs", 0) or 0)
+            _mp = int(stats.get("minus_pairs", 0) or 0)
+            _ex = int(stats.get("excluded_src", 0) or 0)
+            _mode_lbl45 = "42.17" if mode_4217 else "pivot"
+            if _sp == 0:
+                _why = (f"0 pasangan ber-saldo (2.SALDO AKHIR) di 1..{h} — "
+                        "data kosong atau pipeline belum dijalankan")
+            elif _mp == 0:
+                _why = (f"{_sp:,} pasangan ber-saldo dipindai 1..{h} — "
+                        f"TIDAK ADA yang pernah minus (mode {_mode_lbl45})")
+            elif _ex and _mp == _ex:
+                _why = (f"{_mp:,} pasangan minus ditemukan tapi SEMUA "
+                        f"ber-sumber Internal — filter tab ini hanya "
+                        "Eksternal/Campuran (permintaan awal fitur)")
+            else:
+                _why = (f"{_mp:,} pasangan minus · {_ex:,} dibuang sumber "
+                        f"· 0 lolos (mode {_mode_lbl45})")
+            return {"items": [],
+                    "status": f"Tidak ada pasangan minus — {_why}.",
                     "kpi": "Total pasangan minus: 0 · Total qty minus: - · "
                            "Resto minus terbanyak: -",
                     "neg_cells": [], "resto_khusus_cells": [],
@@ -537,10 +575,13 @@ class SaldoMinusView(tk.Frame):
         kpi = (f"Total pasangan minus: {fmt_int_id(n)} · "
                f"Total |qty mulai minus|: {fmt_int_id(int(total_qty))} · "
                f"Resto minus terbanyak: {resto_kpi}")
-        # mode + H di status
+        # mode + H di status (v3.11.45 — + jumlah dibuang sumber bila ada:
+        # transparansi pasangan Internal minus yang tak tampil by-design)
         mode_label = "42.17 (folder)" if mode_4217 else "Pivot (running-stock)"
+        _ex45 = int(stats.get("excluded_src", 0) or 0)
+        _ex_txt = (f" · {_ex45:,} lain dibuang (Internal)" if _ex45 else "")
         status = (f"{n} pasangan minus · H={h} · mode: {mode_label} · "
-                  f"scan 1..{h} · hanya Eksternal/Campuran")
+                  f"scan 1..{h} · hanya Eksternal/Campuran{_ex_txt}")
         return {"items": items, "status": status, "kpi": kpi,
                 "neg_cells": neg_cells,
                 "resto_khusus_cells": resto_khusus_cells,

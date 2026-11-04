@@ -189,6 +189,20 @@ KATEGORI_BLANK_LABEL = "(Tanpa Kategori)"
 # (tanpa passthrough blank) TIDAK berubah; label lama 49-char tetap
 # dikenali kategori_multi_values (kompatibilitas seleksi tersimpan).
 KATEGORI_REKAP_VALUES = ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO")
+# v3.11.45 — STEM bentuk pendek nilai rekap (tanpa suffix ' - RESTO').
+# AKAR BUG user "mapping manual 'COM DEVIASI' gak masuk ke tab deviasi
+# gr/pcs (padahal sudah diset + instant-apply v3.11.44 bekerja)": nilai
+# mapping manual/master bentuk PENDAT/ ('COM DEVIASI', 'Biaya
+# Packaging') TIDAK pernah cocok seleksi default gabungan yang hanya
+# memuat 2 nilai rekap ber-suffix → barang ter-apply kategori tapi tetap
+# TERSEMBUNYI oleh filter default di semua tab (Deviasi GR/PCS ·
+# Nominal · Pivot · Rekap Selisih IN) — terasa 'tetap sama aja' di
+# SEMUA versi. Fix: seleksi gabungan kini mencocokkan stem KEDUANYA
+# (case-insensitive — via kategori_filter_mask yang upper()-kan data).
+# KATEGORI_REKAP_VALUES ASLI tak berubah (konsumen lama — chips rekap
+# in_selisih_view — tetap memakai nilai rekap penuh).
+KATEGORI_REKAP_STEMS = ("COM DEVIASI", "Biaya Packaging")
+KATEGORI_GABUNGAN_VALUES = KATEGORI_REKAP_VALUES + KATEGORI_REKAP_STEMS
 KATEGORI_DEFAULT_LABEL = "Deviasi (COM + Packaging)"
 # v3.9.55 — label panjang v3.9.49-54 tetap cocok (seleksi tersimpan /
 # pemanggil programatik lama tak berubah perilakunya).
@@ -216,7 +230,9 @@ def kategori_multi_values(sel) -> "tuple[str, ...] | None":
     # dikenali → entri gabungan yang sama.
     if _s == KATEGORI_DEFAULT_LABEL.lower() \
             or _s == _KATEGORI_DEFAULT_LABEL_LEGACY.lower():
-        return KATEGORI_REKAP_VALUES
+        # v3.11.45 — + STEM bentuk pendek (fix mapping manual 'COM
+        # DEVIASI' tak muncul di filter default — lihat blok konstanta).
+        return KATEGORI_GABUNGAN_VALUES
     return None
 
 
@@ -275,14 +291,17 @@ def kategori_has_default_values(series) -> bool:
     """v3.9.49 — apakah kolom KATEGORI memuat salah satu nilai rekap
     default (dipakai view utk memasang entry gabungan + seleksi default
     hanya bila relevan dgn data — tanpa itu, entry default di data tanpa
-    kategori rekap akan memfilter 0 baris secara membingungkan)."""
+    kategori rekap akan memfilter 0 baris secara membingungkan).
+    v3.11.45 — STEM ikut dihitung: data yang hanya memuat nilai bentuk
+    pendek ('COM DEVIASI' — mis. hasil mapping manual) pun layak mendapat
+    entry default (seleksinya kini cocok — KATEGORI_GABUNGAN_VALUES)."""
     if series is None:
         return False
     try:
         s = series.dropna().astype(str).str.strip().str.upper()
     except (AttributeError, TypeError, ValueError):
         return False
-    return bool(s.isin([v.upper() for v in KATEGORI_REKAP_VALUES]).any())
+    return bool(s.isin([v.upper() for v in KATEGORI_GABUNGAN_VALUES]).any())
 
 
 def kategori_passthrough(sel) -> bool:

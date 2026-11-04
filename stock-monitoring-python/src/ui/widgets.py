@@ -54,6 +54,10 @@ from tkinter import ttk
 # kategori.
 from ..pipeline.helpers import KATEGORI_BLANK_LABEL as KATEGORI_BLANK_LABEL  # noqa: PLC0414
 from ..pipeline.helpers import KATEGORI_DEFAULT_LABEL as KATEGORI_DEFAULT_LABEL  # noqa: PLC0414
+
+# v3.11.45 — + stem bentuk pendek (fix mapping manual 'COM DEVIASI' tak
+# cocok filter default — lihat blok konstanta helpers.py)
+from ..pipeline.helpers import KATEGORI_GABUNGAN_VALUES as KATEGORI_GABUNGAN_VALUES  # noqa: PLC0414
 from ..pipeline.helpers import KATEGORI_REKAP_VALUES as KATEGORI_REKAP_VALUES  # noqa: PLC0414
 from ..pipeline.helpers import kategori_blank_mask as kategori_blank_mask  # noqa: PLC0414
 from ..pipeline.helpers import kategori_filter_mask as kategori_filter_mask  # noqa: PLC0414
