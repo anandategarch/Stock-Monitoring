@@ -1037,15 +1037,21 @@ class DeviasiView(tk.Frame):
         # sering terpotong: "Rank N · <label> · Beda dari Resto Lain (…) ·
         # ACR to BOM 12%"). Provider ambil dari _cek_map (RAW teks display
         # — pola _on_tree_motion cursor hand2 sudah ada di kolom ✓, bind
-        # add="+" tidak mengganggu). Tip muncul juga di kolom NAMA BARANG/
-        # KATEGORI bila panjang (≥ 30 char — anti-noise cell pendek).
+        # add="+" tidak mengganggu). Tip muncul juga di kolom Nama Barang
+        # bila panjang (≥ 30 char — anti-noise cell pendek).
+        # v3.11.48 — FIX audit: kolom NAMA BARANG (bukan UPPERCASE —
+        # sebelumnya "NAMA BARANG" tidak match column id "Nama Barang"
+        # → dead code). KATEGORI/NOMOR PO/#KET PO tidak ada di tree
+        # (dihapus v3.9.29 / tidak pernah ada) → dihapus dari tuple.
+        # _tip_provider tetap closure (pola _maximize punya _clone_tip_provider
+        # sendiri — ganda sedikit, TAPI avoids cross-method scope leak).
         def _tip_provider(iid: str, col: str) -> str | None:
             if col == "CEK":
                 txt = self._cek_map.get(str(iid)) if self._cek_map else None
                 if not txt:
                     return None
                 return txt if len(txt) >= 20 else None
-            if col in ("NAMA BARANG", "KATEGORI", "NOMOR PO", "#KET PO"):
+            if col == "Nama Barang":
                 try:
                     txt = self.tree.set(iid, col)
                 except tk.TclError:
@@ -1253,6 +1259,18 @@ class DeviasiView(tk.Frame):
     def _on_view_destroy(self, event):
         if event.widget is not self:
             return
+        # v3.11.48 — FIX audit #9: explicit CellTooltip destroy (sebelumnya
+        # rely on Tk destroy cascade — tidak deterministic). Hanya destroy
+        # bila ada (init bisa gagal sebelum _cell_tip dibuat).
+        _ct = getattr(self, "_cell_tip", None)
+        if _ct is not None:
+            with contextlib.suppress(Exception):
+                _ct.destroy()
+            self._cell_tip = None
+        # v3.11.48 — FIX audit #8: tutup SEMUA clone ⛶ (CellTooltip clone
+        # ikut di-destroy via _close_stale_clones cleanup hook).
+        with contextlib.suppress(Exception):
+            self._close_stale_clones()
         if self._h_state is not None:
             self._h_state.unsubscribe(self._on_shared_h_changed)
         if self._acr_state is not None:
@@ -3755,6 +3773,40 @@ class DeviasiView(tk.Frame):
         # nilai nama/rank sudah per-baris di salinan item clone.
         # v3.2: kolom ✓ aktif juga di window perbesar (iid identik)
         new_tree.bind("<Button-1>", self._on_tree_click, add="+")
+        # v3.11.48 — FIX audit #8: CellTooltip juga di clone ⛶ (sebelumnya
+        # tip tidak muncul di window maximize — padahal scenario utama user
+        # "cek CEK panjang" sering di maximize). Provider pakai instance
+        # method self._tip_provider (_cek_map keys konsisten krn clone
+        # preserve iid; baca dari self.tree asli — tree.set di clone juga
+        # valid krn iid sama, TAPI col Nama Barang pakai new_tree.set utk
+        # pastikan nilai clone tree yg dipakai).
+        def _clone_tip_provider(iid: str, col: str) -> str | None:
+            if col == "CEK":
+                txt = (self._cek_map.get(str(iid))
+                       if self._cek_map else None)
+                if not txt:
+                    return None
+                return txt if len(txt) >= 20 else None
+            if col == "Nama Barang":
+                try:
+                    txt = new_tree.set(iid, col)
+                except tk.TclError:
+                    return None
+                if not txt or txt == "-":
+                    return None
+                return txt if len(txt) >= 30 else None
+            return None
+
+        clone_tip = CellTooltip(
+            new_tree, provider=_clone_tip_provider,
+            delay_ms=500, max_width=540)
+        # simpan di win supaya tidak GC; destroy saat clone window ditutup.
+        win._cell_tip = clone_tip
+        # destroy saat window clone ditutup (pola _close_stale_clones).
+        def _on_clone_close():
+            with contextlib.suppress(Exception):
+                clone_tip.destroy()
+        win._cell_tip_cleanup = _on_clone_close
         return win, new_tree
 
     def _register_clone(self, win, new_tree):
@@ -3768,10 +3820,18 @@ class DeviasiView(tk.Frame):
         """v3.9.33 — AUDIT FIX (48-d HIGH / P0): tutup SEMUA clone ⛶ yang
         masih hidup — dipanggil saat data/re-render mengganti baris (iid
         dipetakan ulang; clone basi men-toggle pasangan SALAH). Window
-        yang sudah ditutup user cukup dibersihkan dari daftar."""
+        yang sudah ditutup user cukup dibersihkan dari daftar.
+
+        v3.11.48 — FIX audit #8: destroy CellTooltip clone SEBELUM window
+        di-destroy (pola _on_view_destroy — explicit cleanup)."""
         for w in self._clone_wins:
             try:
                 if w.winfo_exists():
+                    # v3.11.48 — cleanup CellTooltip clone dulu
+                    cleanup = getattr(w, "_cell_tip_cleanup", None)
+                    if cleanup is not None:
+                        with contextlib.suppress(Exception):
+                            cleanup()
                     w.destroy()
             except tk.TclError:
                 pass

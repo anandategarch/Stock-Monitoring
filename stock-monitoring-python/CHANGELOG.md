@@ -3,6 +3,54 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.48 — deep audit fix (5 agent paralel → 22 findings, 14 fixed)
+
+User: "Deep audit sebar agent dan fix" — 5 agent di-launch paralel audit v3.11.47 (cell_tooltip.py · saldo_minus_view + analisa_kronis_view · nominal_common · nominal_resto_view wiring · deviasi_view tooltip integration). 22 findings terkumpul (2 CRITICAL, 7 HIGH, 5 MEDIUM, 8 LOW). 14 paling impact-ful di-fix; sisanya LOW/dead-code/defensive — didokumentasikan di CHANGELOG.
+
+### CRITICAL fix
+- **#7 deviasi_view provider dead code** (`deviasi_view.py:1046-1060`): tuple `"NAMA BARANG", "KATEGORI", "NOMOR PO", "#KET PO"` TIDAK match column id tree (`"Nama Barang"` title-case; KATEGORI dihapus v3.9.29; NOMOR PO/#KET PO tidak pernah ada). Ganti ke `col == "Nama Barang"` saja — tip sekarang JALAN di kolom Nama Barang panjang (sebelumnya dead code, tip cuma muncul di CEK).
+- **#8 CellTooltip NOT bound to clone ⛶ maximize tree** (`deviasi_view.py:_maximize` +3779-3813): user klik ⛶ Perbesar → clone `new_tree` dibuat TANPA CellTooltip → tip tidak muncul di window maximize (padahal scenario utama user "cek CEK panjang" sering di maximize). FIX: instantiate `CellTooltip(new_tree, provider=_clone_tip_provider, ...)` di `_maximize`; simpan `win._cell_tip` + cleanup hook `_cell_tip_cleanup` (dipanggil `_close_stale_clones`).
+
+### HIGH fix
+- **#1 cell_tooltip.py destroy() wipe ALL bindings** (`cell_tooltip.py`): `unbind(seq, None)` calls `tk.call('bind', w, seq, '')` → CLEARS ALL bindings for that sequence (incl deviasi_view `_on_tree_motion` cursor hand2, `enable_multi_select` Button-1, `CellColorOverlay._on_destroy`, dll). FIX: capture funcid tiap `bind(..., add="+")` (motion/leave/button1/destroy), pass ke `unbind(seq, fid)` → hanya lepas binding CellTooltip sendiri.
+- **#2 CellColorOverlay blocks Motion** (`widgets.py:_FORWARD_SEQS`): overlay Labels (child of tree, untuk cell-tag warna di Tk 8.x) menelan Motion event → CellTooltip._on_motion TIDAK fires di cell ber-tag (CEK com_tinggi_cell/com_rendah_cell/resto_khusus_cell — paling penting!). FIX: tambah `"<Motion>", "<Leave>"` ke `_FORWARD_SEQS` → label forward event ke tree.
+- **#3 Tree `<Leave>` fires spuriously** (`cell_tooltip.py:_on_leave`): pointer masuk overlay Label (child tree) → tree `<Leave>` fires → tip flicker off. FIX: `_on_leave` cek `winfo_containing(x_root, y_root)`, bila pointer MASIH di tree atau descendant → skip cancel (pola winfo_parent walk).
+- **#4 zebra per-group BREAKS after manual sort** (`saldo_minus_view.py` + `analisa_kronis_view.py`): tags follow iid, sort reorders rows → zebra random. FIX: `_reapply_zebra_per_group()` method — walk `tree.get_children("")` in visible order, toggle parity saat Nama Barang berubah, re-apply tags via `tree.item(iid, tags=...)`. Pass sebagai `on_done` ke `sort_tree_by_column` + di `render_done` post-insert.
+- **#5 cell tags (neg_cell, resto_khusus_cell) LOST after sort** (sama): sort_tree_by_column delete+insert ulang, cell tag mapping tidak di-preserve. FIX: `_reapply_zebra_per_group()` juga re-apply `apply_cell_tag(tree, "neg_cell", ...)` + `"resto_khusus_cell"`.
+- **#6 filter ⧩ "Mulai Minus" silent skip** (`saldo_minus_view.py:_compute`): display col "Mulai Minus" ≠ df col "Tgl Mulai Minus" → filter guard `if col in filtered.columns` False → filter silently skipped. FIX: filter loop pakai `_col_to_df(col)` resolve display→df.
+- **#9 `_on_view_destroy` no explicit CellTooltip destroy** (`deviasi_view.py:_on_view_destroy`): relied on Tk destroy cascade (not deterministic). FIX: explicit `self._cell_tip.destroy()` + `self._close_stale_clones()` di awal `_on_view_destroy`.
+- **#10 filter ⧩ popup "Resto" EMPTY** (`saldo_minus_view._col_values` + `analisa_kronis_view._col_values`): display "Resto" ≠ df "NAMA RESTO". FIX: tambah `"Resto": "NAMA RESTO"` ke `_col_to_df` map; `_col_values` resolve via `_col_to_df`.
+
+### MEDIUM fix
+- **#11 manual sort lost on every `_refresh()`** (`saldo_minus_view` + `analisa_kronis_view`): _render rebuild dari df order (default sort), bukan user's last sort. FIX: di `render_done`, cek `getattr(tree, "_last_sort", None)` + re-apply via `sort_tree_by_column(..., on_done=self._reapply_zebra_per_group)`.
+- **#12 old tip lingers on cell change** (`cell_tooltip.py:_on_motion`): user move cell A→B → tip A tetap visible 500ms. FIX: `_hide_now()` di else-branch sebelum schedule tip baru.
+- **#13 `-topmost` unreliable on Linux X11** (`cell_tooltip.py:_render_tip`): FIX: `wm_transient(tree.winfo_toplevel())` + `self._tip.lift()` setelah `wm_geometry` — tip selalu di atas parent.
+- **#14 tip overflow when taller than screen** (`cell_tooltip.py:_render_tip`): tip 30+ baris di screen 768px → clipped. FIX: bila `h > sh - 8`, reduce `wraplength` proporsional → tip muat.
+
+### LOW fix
+- **#15 threshold Spinbox allows > H** (`analisa_kronis_view:_on_threshold_changed`): `min(31, v)` bisa > H → kronis always empty. FIX: `min(self.tanggal_h, v)`.
+- **#17 docstring column count mismatch** (`analisa_kronis_view.py:75`): comment "(10 — user spec)" tapi list 11 items. FIX: update ke "(11 — user spec)".
+- **#19 dead rename "Tgl Mulai Minus" → "Mulai Minus"** (`nominal_common.hitung_saldo_minus_kronis`): column produced tapi NEVER displayed/exported di KRONIS_COLUMNS. FIX: hapus rename; "Tgl Mulai Minus" tetap di df (tidak digunakan view, konsisten dgn minus_df asli).
+- **#20 stats_out["threshold"] set before clamp** (`nominal_common.hitung_saldo_minus_kronis`): init pakai pre-clamp value. FIX: move `threshold = max(1, int(threshold))` SEBELUM `stats_out.update(...)`, update `stats_out["threshold"]` konsisten.
+
+### LOW yang TIDAK di-fix (deferred — dead code / defensive / cosmetic)
+- `cell_tooltip.truncate_provider` + `set_provider` — dead code, tidak ada caller (tidak mengganggu).
+- `nominal_common.hitung_saldo_minus_pairs iterrows()` performance — pre-existing, acceptable.
+- CEK tip threshold `>= 20` arbitrary — would need `tkfont.Font().measure()` (over-engineering).
+- Absolute import `from src.ui.details_popup` — style inconsistency, tidak break.
+
+### Verifikasi — GUI test Xvfb SUNGGUHAN (7/7 PASS)
+- **T1** SaldoMinus `_col_values('Resto')` = `['BDGSEK', 'MLGPAR', 'TGRBIN']` (3 resto) — popup NOT empty (sebelumnya empty).
+- **T2** SaldoMinus `_col_values('Mulai Minus')` = `['3', '4', '5']` — popup NOT empty (sebelumnya empty).
+- **T3** Zebra per-group SETELAH sort: parity sequence `[0, 1, 0]` — alternating benar (sebelumnya random).
+- **T4** `smv._neg_cells` populated (6 cells) — `_reapply_zebra_per_group` called, neg_cell re-applied.
+- **T5** Threshold set 31 → clamped ke 7 (= H) — `assert kv.threshold == 7` PASS.
+- **T6** CellTooltip funcids properly captured: `motion=...140150004095936_on_m, leave=...140149982915584_on_l` (sebelumnya None).
+- **T7** CellTooltip.destroy() TIDAK wipe dummy Motion handler — `bound` contains `dummy_motion` (sebelumnya wiped).
+- Plus e2e pandas sintetis (3 pasangan, 1 eksklusif + 1 global): `hitung_saldo_minus_kronis` threshold=3 → 2 kronis, eksklusif_pairs=1, dead rename removed (`'Mulai Minus' not in k.columns`), stats threshold konsisten.
+- **compileall src/ OK** · ruff: cell_tooltip + analisa_kronis + saldo_minus = All checks passed; deviasi_view + nominal_common + nominal_resto_view = baseline (tidak ada temuan baru).
+- APP_VERSION → 3.11.48; README "Versi terkini: v3.11.48".
+
 ## v3.11.47 — zebra per-group Nama Barang (tab Saldo Minus) + tooltip hover cell CEK (Deviasi GR/PCS) + anak tab "Analisa Kronis" (pasangan kronis minus + eksklusif)
 
 User: "zebra grup di tab minus perbaiiki sehingga jadi per group nama barang. dan bisa gak untuk kolom cek di tab deviasi gr dan deviasi pcs kan kadang terlalu panjang ke kanan misal aku klik cell itu terus muncul pop up tampilan lengkap nya bisa gak? jagan buat kode dulu buat ide. tambahin analisa juga di saldo minus dengan nama barang yang sering minus dan hanya barang itu aja yang minus di resto itu."

@@ -197,7 +197,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.47"  # v3.11.47 — zebra per-group Nama Barang + tooltip hover cell CEK + anak tab Analisa Kronis
+APP_VERSION = "3.11.48"  # v3.11.48 — deep audit fix (cell_tooltip funcid capture, zebra+celltags reapply post-sort, filter popup Resto/Mulai Minus, clone ⛶ tooltip, threshold clamp H)
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru

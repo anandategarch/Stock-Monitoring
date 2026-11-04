@@ -4059,9 +4059,16 @@ class CellColorOverlay:
     """
 
     # <Button-1> ditangani handler `press` khusus (deteksi double manual)
+    # v3.11.48 — FIX audit #2: + <Motion> + <Leave> supaya CellTooltip hover
+    # tip MENJALAR ke cell ber-tag warna (yc CEK com_tinggi_cell / resto_khusus
+    # _cell). Sebelumnya, pointer masuk label overlay → Motion event ke Label
+    # (bukan tree) → tip tidak muncul + Leave tree spurious (tip flicker off).
+    # Forward Motion/Leave ke tree → CellTooltip._on_motion fires → tip muncul
+    # normal di cell ber-overlay.
     _FORWARD_SEQS = (
         "<Button-3>", "<ButtonRelease-1>",
         "<B1-Motion>", "<MouseWheel>", "<Button-4>", "<Button-5>",
+        "<Motion>", "<Leave>",
     )
 
     # v3.9.29 — LABEL POOL: label yang keluar dari viewport dikembalikan

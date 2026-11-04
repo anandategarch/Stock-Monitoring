@@ -77,56 +77,45 @@ class CellTooltip:
         self._cur_iid: str | None = None
         self._cur_col: str | None = None
         self._destroyed = False
-        # bind (add="+" — jangan override handler yang sudah ada, mis.
-        # deviasi_view _on_tree_motion cursor hand2 di kolom ✓)
-        tree.bind("<Motion>", self._on_motion, add="+")
-        tree.bind("<Leave>", self._on_leave, add="+")
-        tree.bind("<Button-1>", self._hide_now, add="+")
-        tree.bind("<Destroy>", self._on_tree_destroy, add="+")
-        # simpan funcid Motion utk unbind destroy (Tk bind add="+" return
-        # funcid; tapi tkinter Widget.bind(...) add path returns None pada
-        # beberapa versi — gunakan namanya saja untuk error-safe unbind).
-        self._motion_funcid: str | None = None
+        # v3.11.48 — FIX audit #1: capture funcid tiap bind (add="+") supaya
+        # destroy() hanya melepas binding CellTooltip sendiri, BUKAN semua
+        # binding sequence itu di tree (yc deviasi_view _on_tree_motion cursor
+        # hand2, enable_multi_select Button-1 handler, dll — wiped sebelumnya
+        # oleh unbind(seq, None) yg jalan tk.call('bind', w, seq, '')).
+        # Tkinter bind(add="+") return funcid str di Python 3.x (verifikasi
+        # CPython source _bind); bila None (teoretis Tk lama) → unbind di-skip.
+        self._motion_funcid = tree.bind(
+            "<Motion>", self._on_motion, add="+")
+        self._leave_funcid = tree.bind(
+            "<Leave>", self._on_leave, add="+")
+        self._button1_funcid = tree.bind(
+            "<Button-1>", self._hide_now, add="+")
+        self._destroy_funcid = tree.bind(
+            "<Destroy>", self._on_tree_destroy, add="+")
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def set_provider(self, provider: Callable[[str, str], str | None]) -> None:
-        """Ganti provider (mis. setelah data reload dgn cache baru)."""
-        self._provider = provider
-
     def destroy(self) -> None:
-        """Lepas binding + tutup tip (view host _on_view_destroy)."""
+        """Lepas binding + tutup tip (view host _on_view_destroy).
+
+        v3.11.48 — FIX audit: hanya unbind funcid CellTooltip sendiri
+        (bukan unbind(seq) tanpa funcid yg akan wipe SEMUA binding seq itu).
+        """
         if self._destroyed:
             return
         self._destroyed = True
         self._cancel_schedule()
         self._hide_now()
-        with contextlib.suppress(tk.TclError):
-            self._tree.unbind("<Motion>", self._motion_funcid)
-        with contextlib.suppress(tk.TclError):
-            self._tree.unbind("<Leave>")
-        with contextlib.suppress(tk.TclError):
-            self._tree.unbind("<Button-1>")
-        with contextlib.suppress(tk.TclError):
-            self._tree.unbind("<Destroy>")
-
-    @staticmethod
-    def truncate_provider(
-        get_text: Callable[[str, str], str | None],
-        *,
-        min_len: int = 30,
-    ) -> Callable[[str, str], str | None]:
-        """Wrapper provider: tip muncul hanya bila teks cell cukup panjang
-        (anti-noise — cell pendek sudah terbaca penuh di tabel)."""
-        def _wrapped(iid: str, col: str) -> str | None:
-            txt = get_text(iid, col)
-            if not txt:
-                return None
-            if len(str(txt)) < min_len:
-                return None
-            return str(txt)
-        return _wrapped
+        for seq, fid in (
+            ("<Motion>", self._motion_funcid),
+            ("<Leave>", self._leave_funcid),
+            ("<Button-1>", self._button1_funcid),
+            ("<Destroy>", self._destroy_funcid),
+        ):
+            if fid:
+                with contextlib.suppress(tk.TclError):
+                    self._tree.unbind(seq, fid)
 
     # ------------------------------------------------------------------
     # Internal
@@ -151,6 +140,10 @@ class CellTooltip:
         # sama cell? biarkan timer berjalan (jangan restart — flicker)
         if iid == self._cur_iid and col == self._cur_col:
             return
+        # v3.11.48 — FIX audit #4: cell berubah → sembunyikan tip LAMA
+        # segera (sebelum schedule tip baru) — standar tooltip UX, bukan
+        # tip stale cell A nempel 500ms saat user hover cell B.
+        self._hide_now()
         self._cur_iid = iid
         self._cur_col = col
         self._cancel_schedule()
@@ -158,6 +151,36 @@ class CellTooltip:
             self._delay_ms, lambda: self._show(iid, col))
 
     def _on_leave(self, event) -> None:
+        # v3.11.48 — FIX audit #3: <Leave> fires spuriously saat pointer
+        # masuk CHILD widget tree (yc label overlay CellColorOverlay utk
+        # cell ber-tag warna). Cek apakah pointer MASIH di dalam tree
+        # (atau child tree) — bila ya, jangan cancel timer / hide tip.
+        try:
+            x_root = event.x_root
+            y_root = event.y_root
+        except AttributeError:
+            x_root = y_root = None
+        if x_root is not None and y_root is not None:
+            try:
+                containing = self._tree.winfo_containing(x_root, y_root)
+            except tk.TclError:
+                containing = None
+            if containing is not None:
+                # pointer masih di tree atau child-nya → biarkan timer jalan
+                # (bukan benar-benar leave tree).
+                tree_self = self._tree
+                try:
+                    # cek containing == tree ATAU descendant tree
+                    w = containing
+                    while w is not None:
+                        if w is tree_self:
+                            return  # masih di dalam tree — skip cancel
+                        try:
+                            w = w.master
+                        except AttributeError:
+                            break
+                except tk.TclError:
+                    pass
         self._cancel_and_hide()
 
     def _on_tree_destroy(self, event) -> None:
@@ -195,7 +218,12 @@ class CellTooltip:
             return
         try:
             text = self._provider(iid, col)
-        except Exception:  # noqa: BLE001 — provider host gagal ≠ tooltip crash
+        except Exception as exc:  # noqa: BLE001 — provider host gagal ≠ tooltip crash
+            # v3.11.48 — FIX audit #7: log exception utk diagnostic (sebelumnya
+            # senyap). Pakai logging (bukan print) supaya tidak ke tab Proses.
+            import logging
+            logging.getLogger(__name__).debug(
+                "CellTooltip provider error: %r", exc)
             text = None
         if not text:
             return
@@ -209,6 +237,12 @@ class CellTooltip:
         if self._tip is None or not self._tip.winfo_exists():
             self._tip = tk.Toplevel(tree)
             self._tip.wm_overrideredirect(True)
+            # v3.11.48 — FIX audit #5: wm_transient supaya tip selalu di atas
+            # parent Toplevelnya (yc saat parent punya popup drilldown lain).
+            # -topmost saja tidak reliable di Linux X11. transient + lift()
+            # menjamin tip tetap visible di atas parent.
+            with contextlib.suppress(tk.TclError):
+                self._tip.wm_transient(tree.winfo_toplevel())
             self._tip.attributes("-topmost", True)
             self._tip.configure(bg=self._border)
             lbl = tk.Label(
@@ -239,12 +273,27 @@ class CellTooltip:
             h = self._tip.winfo_reqheight()
             sw = tree.winfo_screenwidth()
             sh = tree.winfo_screenheight()
+            # v3.11.48 — FIX audit #6: tip lebih tinggi dari layar →
+                       # kurangi wraplength proporsional supaya muat.
+            if h > sh - 8 and self._max_width > 200:
+                new_wl = max(200, int(self._max_width * (sh - 8) / h))
+                for child in self._tip.winfo_children():
+                    try:
+                        child.configure(wraplength=new_wl)
+                    except tk.TclError:
+                        pass
+                self._tip.update_idletasks()
+                w = self._tip.winfo_reqwidth()
+                h = self._tip.winfo_reqheight()
             if x + w > sw - 4:
                 x = max(4, sw - w - 4)
             if y + h > sh - 4:
                 # tampilkan di atas cursor bila tidak muat di bawah
                 y = max(py - h - 8, 4)
             self._tip.wm_geometry(f"+{x}+{y}")
+            # v3.11.48 — FIX audit #5: lift() memaksa tip ke atas stack window
+            # (redundant dgn -topmost tapi lebih reliable di X11).
+            self._tip.lift()
         except tk.TclError:
             pass
 

@@ -1276,8 +1276,12 @@ def hitung_saldo_minus_kronis(
     if stats_out is not None:
         stats_out["total_minus_pairs"] = len(minus_df)
 
-    # 2. Filter kronis: Frek Minus >= threshold
+    # 2. Filter kronis: Frek Minus >= threshold.
+    # v3.11.48 — FIX audit #20: clamp threshold SEBELUM dipakai + update
+    # stats_out['threshold'] konsisten (sebelumnya init pakai pre-clamp value).
     threshold = max(1, int(threshold))
+    if stats_out is not None:
+        stats_out["threshold"] = threshold
     kronis = minus_df[minus_df["Frek Minus"].fillna(0).astype(int)
                       >= threshold].copy()
     if kronis.empty:
@@ -1321,10 +1325,12 @@ def hitung_saldo_minus_kronis(
     kronis["Rekomendasi"] = kronis.apply(_rek, axis=1)
     kronis = kronis.drop(columns=["_resto_lain_n"])
 
-    # 5. Rename untuk tampilan: Tgl Mulai Minus → Mulai Minus (mirror
-    #    saldo_minus_view naming), Durasi → Total Durasi (klarifikasi).
+    # 5. Rename untuk tampilan: Durasi → Total Durasi (klarifikasi).
+    # v3.11.48 — FIX audit #19: remove dead rename "Tgl Mulai Minus" →
+    # "Mulai Minus" (sebelumnya column produced tapi NEVER displayed/exported
+    # di KRONIS_COLUMNS — wasted column). "Tgl Mulai Minus" tetap di df
+    # (tidak digunakan view, tapi konsisten dgn minus_df asli).
     kronis = kronis.rename(columns={
-        "Tgl Mulai Minus": "Mulai Minus",
         "Durasi": "Total Durasi",
     })
 

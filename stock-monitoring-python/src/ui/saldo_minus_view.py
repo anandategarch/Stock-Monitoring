@@ -520,11 +520,22 @@ class SaldoMinusView(tk.Frame):
                     "konsisten_cells": [], "fluktuatif_cells": []}
 
         # filter ⧩ (kecocokan nilai TERFORMAT — pola nominal_resto)
+        # v3.11.48 — FIX audit #6+#10: filter loop pakai _col_to_df utk
+        # resolve display col → df col (sebelumnya "Mulai Minus" display
+        # tidak match "Tgl Mulai Minus" df → filter silent skip; "Resto"
+        # display tidak match "NAMA RESTO" df → popup empty).
         filtered = minus_df
         for col, sel in st["col_sel"].items():
-            if col in filtered.columns and sel:
-                fmt = self._format_col_series(col, filtered[col])
-                filtered = filtered[fmt.isin(sel)]
+            df_col = self._col_to_df(col)
+            if not df_col:
+                # non-numeric display cols (Resto/Keterangan/Nama Barang/
+                # Satuan/Tipe/Nomor PO/Status PO) — map manual khusus.
+                df_col = ("NAMA RESTO" if col == "Resto"
+                          else col if col in filtered.columns else None)
+            if not df_col or df_col not in filtered.columns or not sel:
+                continue
+            fmt = self._format_col_series(col, filtered[df_col])
+            filtered = filtered[fmt.isin(sel)]
         if filtered.empty:
             _hint = zero_row_filter_message(st["col_sel"])
             return {"items": [],
@@ -637,7 +648,10 @@ class SaldoMinusView(tk.Frame):
              "Mulai Minus": "Tgl Mulai Minus",
              "Durasi": "Durasi",
              "Min Qty": "Min Qty",
-             "Max Qty": "Max Qty"}
+             "Max Qty": "Max Qty",
+             # v3.11.48 — FIX audit #10: + Resto mapping (display "Resto" →
+             # df "NAMA RESTO") supaya filter ⧩ popup tidak empty.
+             "Resto": "NAMA RESTO"}
         return m.get(col_id, "")
 
     def _format_col_series(self, col: str, series: pd.Series) -> pd.Series:
@@ -657,14 +671,19 @@ class SaldoMinusView(tk.Frame):
         if col == "Keterangan":
             # tidak terfilter (built per-row) — return empty (no popup)
             return []
-        if col in MINUS_NUMERIC_COLS:
-            df_col = self._col_to_df(col)
-            if df_col and df_col in self._minus_df.columns:
-                return sorted({_fmt_num(v) for v in
-                               self._minus_df[df_col]})
+        # v3.11.48 — FIX audit #10: resolve display col → df col via
+        # _col_to_df (sebelumnya "Resto" tdk match "NAMA RESTO" → popup
+        # empty; "Mulai Minus" tdk match "Tgl Mulai Minus" → popup empty).
+        df_col = self._col_to_df(col)
+        if not df_col or df_col not in self._minus_df.columns:
+            # fallback: col display == df col (e.g. "Nama Barang", "Tipe")
+            df_col = col if col in self._minus_df.columns else None
+        if not df_col:
             return []
-        return sorted({str(v) for v in self._minus_df[col]
-                       if str(v).strip()}) if col in self._minus_df.columns else []
+        if col in MINUS_NUMERIC_COLS:
+            return sorted({_fmt_num(v) for v in self._minus_df[df_col]})
+        return sorted({str(v) for v in self._minus_df[df_col]
+                       if str(v).strip()})
 
     def _render(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -681,6 +700,18 @@ class SaldoMinusView(tk.Frame):
                 apply_cell_tag(self.tree, "neg_cell", self._neg_cells)
                 apply_cell_tag(self.tree, "resto_khusus_cell",
                                self._resto_khusus_cells)
+            # v3.11.48 — FIX audit #5+#11: re-apply zebra per-group +
+            # cell tags SETELAH render (sort manual user dipreserve via
+            # tree._last_sort — pola deviasi_view._reapply_render_decorations).
+            self._reapply_zebra_per_group()
+            # v3.11.48 — FIX audit #5: re-apply user's last manual sort
+            # bila ada (sebelumnya sort lost on every _refresh).
+            last_sort = getattr(self.tree, "_last_sort", None)
+            if last_sort:
+                col, rev, parse, vg = last_sort
+                sort_tree_by_column(
+                    self.tree, col, reverse=rev, parse=parse,
+                    value_get=vg, on_done=self._reapply_zebra_per_group)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -688,6 +719,53 @@ class SaldoMinusView(tk.Frame):
 
         insert_tree_items(self.tree, payload["items"], batch=400,
                           on_done=render_done)
+
+    def _reapply_zebra_per_group(self) -> None:
+        """v3.11.48 — FIX audit #1+#4: re-apply zebra PER-GROUP Nama Barang
+        berdasarkan urutan VISUAL tree (post-sort / post-filter clone rebuild).
+
+        Sebelumnya zebra tags dibangun di _compute (default sort order).
+        Saat user klik header sort, sort_tree_by_column reorder iid TAPI
+        tags follow iid → zebra jadi random. Method ini walk tree.get_
+        children("") dalam urutan visible, lookup Nama Barang per iid,
+        toggle parity saat barang berubah → re-apply tags.
+
+        Juga re-apply cell tags (neg_cell, resto_khusus_cell) yang hilang
+        setelah sort (sort_tree_by_column delete+insert ulang, cell tag
+        mapping tidak di-preserve).
+        """
+        tree = self.tree
+        try:
+            children = list(tree.get_children(""))
+        except tk.TclError:
+            return
+        prev_barang = None
+        parity = 0
+        for iid in children:
+            try:
+                vals = tree.item(iid, "values")
+            except tk.TclError:
+                continue
+            # Nama Barang = kolom index 1 (Resto=0, Nama Barang=1)
+            barang = str(vals[1]) if len(vals) > 1 else ""
+            if prev_barang is not None and barang != prev_barang:
+                parity ^= 1
+            prev_barang = barang
+            existing = list(tree.item(iid, "tags") or ())
+            # bersihkan tag evenrow/oddrow LAMA, pertahankan tag lain
+            # (konsisten_row/fluktuatif_row/resto_khusus — cell tag terpisah).
+            cleaned = [t for t in existing
+                       if t not in ("evenrow", "oddrow")]
+            cleaned.append("evenrow" if parity == 0 else "oddrow")
+            try:
+                tree.item(iid, tags=tuple(cleaned))
+            except tk.TclError:
+                pass
+        # re-apply cell tags (hilang setelah sort)
+        if self._cell_tags:
+            apply_cell_tag(tree, "neg_cell", self._neg_cells)
+            apply_cell_tag(tree, "resto_khusus_cell",
+                           self._resto_khusus_cells)
 
     # =========================================================================
     # FILTER ⧩ + SORT
@@ -697,7 +775,12 @@ class SaldoMinusView(tk.Frame):
         self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True):
-        sort_tree_by_column(self.tree, col, reverse=reverse)
+        # v3.11.48 — FIX audit #1+#4+#5: pass on_done supaya zebra per-group
+        # + cell tags re-applied setelah sort (sebelumnya zebra jadi random
+        # + cell tag neg/resto_khusus hilang krn sort delete+insert ulang).
+        sort_tree_by_column(
+            self.tree, col, reverse=reverse,
+            on_done=self._reapply_zebra_per_group)
 
     def _reset_filter(self):
         self._col_sel = {c[0]: None for c in MINUS_COLUMNS}
