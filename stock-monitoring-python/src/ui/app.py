@@ -197,7 +197,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.50"  # v3.11.50 — fix Deviasi Bulan Lalu (log diagnostic mode manual/cfg None, clear stale _lalu_file_df, label Komparasi hapus, AGS bulan, filename whitespace, parse empty check)
+APP_VERSION = "3.11.51"  # v3.11.51 — FIX false-positive warning settings.json FileNotFoundError di first run
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -1931,12 +1931,24 @@ def _load_filter_state():
     v3.9.68 — kegagalan kini DI-LOG (audit eksternal T2: dulu korupsi
     file / entry rusak lenyap SENYAP — user tak pernah tahu
     preferensinya tidak dipulihkan; warning di-buffer ke
-    _FILTER_LOAD_WARNINGS karena fungsi ini berjalan PRA-redirect)."""
+    _FILTER_LOAD_WARNINGS karena fungsi ini berjalan PRA-redirect).
+    v3.11.51 — FIX false-positive: FileNotFoundError di first run
+    (file belum dibuat) adalah EXPECTED behavior, BUKAN error —
+    sebelumnya warning muncul tiap install baru / pindah folder,
+    padahal save_filter_state akan create file saat close app.
+    Silent return None khusus FileNotFoundError; OSError lain
+    (PermissionError, dll) + ValueError (JSON korup) tetap warning."""
     global _FILTER_LOAD_WARNINGS
     _FILTER_LOAD_WARNINGS = []
     try:
         with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
+    except FileNotFoundError:
+        # v3.11.51 — file belum ada = first run / install baru / pindah
+        # folder. EXPECTED — tidak ada yg dipulihkan krn belum pernah
+        # disimpan. Save_filter_state akan create file saat close app.
+        # Silent (no warning) — bukan error.
+        return None
     except (OSError, ValueError, TypeError) as _exc:
         _FILTER_LOAD_WARNINGS.append(
             f"[PERINGATAN] Filter persist: gagal membaca "

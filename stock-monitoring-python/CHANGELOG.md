@@ -3,6 +3,22 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.51 — FIX false-positive warning settings.json FileNotFoundError di first run
+
+User log v3.11.50: baris pertama log tab 🚀 Proses berbunyi `[PERINGATAN] Filter persist: gagal membaca settings.json (FileNotFoundError(2, 'No such file or directory')) — kombinasi filter tersimpan TIDAK dipulihkan sesi ini.`
+
+**Root cause:** `_load_filter_state` (app.py:1926) catch `OSError` (yg includes `FileNotFoundError`) dan treat sebagai ERROR — padahal `FileNotFoundError` di first run (file belum dibuat) adalah **expected behavior**. User install baru / pindah folder → selalu lihat warning ini meski tidak ada masalah. Save_filter_state akan create file saat close app pertama kali.
+
+**Fix:**
+- `app.py:_load_filter_state` — split `except FileNotFoundError` (silent return None, expected) dari `except (OSError, ValueError, TypeError)` (warning tetap muncul utk PermissionError / JSON korup / dll). Komentar jelas: "file belum ada = first run / install baru / pindah folder. EXPECTED — save_filter_state akan create file saat close app."
+
+**Verifikasi e2e (3/3 PASS):**
+- **T1** `FileNotFoundError` → return None, `_FILTER_LOAD_WARNINGS` tetap kosong (no warning) ✓
+- **T2** JSON korup → return None, warning muncul `[PERINGATAN] Filter persist: gagal membaca settings.json (JSONDecodeError(...))` ✓ (preserve behavior)
+- **T3** Valid settings.json → return dict `{'deviasi_gr': {'kategori': 'Deviasi'}}`, no warnings ✓ (preserve behavior)
+- compileall OK · ruff: 22 errors = baseline (no regression).
+- APP_VERSION → 3.11.51; README "Versi terkini: v3.11.51".
+
 ## v3.11.50 — fix Deviasi Bulan Lalu (13 findings dari audit deep cek)
 
 User: "auto file deviasi bulan lalu ini apakah ada bug? sehingga tidak muncul di tab mana pun? Deep cek dulu" → "fix semua".
