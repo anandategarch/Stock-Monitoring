@@ -634,6 +634,21 @@ class PivotTableView(tk.Frame):
             self._dirty = False
             self._refresh_pivot()
 
+    # v3.11.44 — kategori manual (config ⚙️) berubah: KATEGORI append1_df
+    # SUDAH di-mutasi in-place oleh app._apply_kategori_manual_live →
+    # repopulate nilai combo (resto/source/kategori — _populate_filters)
+    # + refresh matrix. Tanpa re-run pipeline (instant-apply — root cause
+    # fix user: "mapping kategori manual ... gak masuk di list ... dan
+    # mungkin di tab lainnya juga").
+    def on_kategori_manual_changed(self):
+        if self.data is None or self.data.empty:
+            return
+        self._populate_filters()
+        if self.winfo_ismapped():
+            self._refresh_pivot()
+        else:
+            self._dirty = True
+
     # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
     # Snapshot / pulihkan kombinasi filter Matrix Pivot (mode PIVOT PER,
     # RESTO/SOURCE/KATEGORI, rentang TANGGAL, checkbox baris kosong,

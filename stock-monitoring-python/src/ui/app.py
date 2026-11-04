@@ -96,6 +96,7 @@ PipelineStopped = None       # idem — dipakai except worker + isinstance
 from src.pipeline.fn_4217 import DEFAULT_KATEGORI_WHITELIST
 from src.pipeline.helpers import (
     norm_nama_barang_key,  # v3.11.35 — _kat_norm kanonik (rapat-spasi)
+    norm_nama_barang_key_series,  # v3.11.44 — instant-apply kategori manual
     read_cache_invalidate,
     read_cache_reset_counters,
     read_cache_stats,
@@ -195,7 +196,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.43"  # v3.11.43 — fix bug saldo minus kosong (SOURCE KIRIMAN None tetap tampil) + remove silent suppress
+APP_VERSION = "3.11.44"  # v3.11.44 — FIX WIRING saldo minus (root cause) + kategori manual instant-apply + refresh_icons
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -4170,6 +4171,52 @@ class StockMonitorApp:
         self._refresh_kategori_manual_card()
         return True
 
+    # v3.11.44 — INSTANT-APPLY KATEGORI MANUAL (root cause fix user:
+    # "mapping kategori manual di config misal aku udah mapping kok gak
+    # masuk di list deviasi gr dan deviasi pcs ya? dan mungkin di tab
+    # lainnya juga" + "kok sama aja? tidak terjadi apa apa"): kategori
+    # manual baru disimpan → terapkan LANGSUNG ke append1_df IN-MEMORY
+    # (mirror apply_kategori_manual append1 LANGKAH 5d — prioritas
+    # tertinggi, kunci kanonik norm_nama_barang_key) + refresh view
+    # ber-kategori. Dulu kategori manual hanya hidup saat pipeline RUN
+    # (log lama: "diterapkan mulai run pipeline berikutnya") — user tak
+    # sadar harus re-run → terasa "tidak terjadi apa apa".
+    # Dipanggil setelah _kategori_manual_save sukses (Identifikasi/Edit —
+    # HAPUS tidak instant: nilai kategori otomatis pra-manual tidak
+    # tersimpan di memori; kembali setelah run pipeline berikutnya).
+    def _apply_kategori_manual_live(self) -> int:
+        """Terapkan KategoriManual (config) ke self.append1_df in-place
+        + refresh view ber-kategori. Return jumlah baris ter-update."""
+        df = getattr(self, "append1_df", None)
+        if (df is None or getattr(df, "empty", True)
+                or "KATEGORI" not in getattr(df, "columns", [])
+                or "Nama Barang" not in getattr(df, "columns", [])):
+            return 0
+        km = {}
+        for k, v in (self._kategori_manual_map() or {}).items():
+            kk = norm_nama_barang_key(k)
+            vv = str(v).strip()
+            if (kk and vv and vv.lower() not in ("nan", "none")
+                    and vv not in ("-", "\u2014")):
+                km[kk] = vv
+        if not km:
+            return 0
+        keys = norm_nama_barang_key_series(df["Nama Barang"])
+        val = keys.map(km)
+        has = val.notna()
+        n = int(has.sum())
+        if n:
+            df.loc[has, "KATEGORI"] = val[has]   # in-place — shared views
+        # refresh view ber-kategori (deviasi GR/PCS + pivot + nominal)
+        for view in (getattr(self, "deviasi_gr_view", None),
+                     getattr(self, "deviasi_pcs_view", None),
+                     getattr(self, "pivot_view", None),
+                     getattr(self, "nominal_resto_view", None)):
+            if view is not None and hasattr(view, "on_kategori_manual_changed"):
+                with contextlib.suppress(Exception):
+                    view.on_kategori_manual_changed()
+        return n
+
     # =====================================================================
     # v3.11.9 — AUTO FILE DEVIASI BULAN LALU (tab ⚙️ Config + wiring)
     # =====================================================================
@@ -4566,10 +4613,14 @@ class StockMonitorApp:
         if not kat:
             return
         if self._kategori_manual_save({b: kat for b in items}):
+            # v3.11.44 — INSTANT-APPLY: mutasi append1_df + refresh view
+            # ber-kategori (tanpa re-run pipeline — root cause "gak masuk
+            # di list deviasi gr dan pcs").
+            _n = self._apply_kategori_manual_live()
             self._append_log_batched(
                 f"[KATEGORI MANUAL] {len(items)} barang → '{kat}' "
-                "(config.json — diterapkan mulai run pipeline "
-                "berikutnya)\n")
+                f"(config.json · {_n:,} baris langsung diterapkan ke "
+                "tampilan aktif)\n")
 
     def _kategori_edit(self):
         """Tombol ✏️ Edit — ubah kategori mapping tersimpan (dialog
@@ -4591,9 +4642,11 @@ class StockMonitorApp:
                 return   # batal → stop (mapping sebelumnya tak tersentuh)
             updates[name] = kat
         if updates and self._kategori_manual_save(updates):
+            # v3.11.44 — INSTANT-APPLY (pola _kategori_identify).
+            _n = self._apply_kategori_manual_live()
             self._append_log_batched(
                 f"[KATEGORI MANUAL] {len(updates)} mapping diubah "
-                "(config.json)\n")
+                f"(config.json · {_n:,} baris langsung diterapkan)\n")
 
     def _kategori_delete(self):
         """Tombol 🗑 Hapus — buang mapping manual (barang kembali ke
@@ -4615,7 +4668,8 @@ class StockMonitorApp:
         if self._kategori_manual_save({}, removes=names):
             self._append_log_batched(
                 f"[KATEGORI MANUAL] {len(names)} mapping dihapus "
-                "(barang kembali ke kategori otomatis rekap/master)\n")
+                "(barang kembali ke kategori otomatis rekap/master — "
+                "terlihat setelah run pipeline berikutnya)\n")
 
     # =====================================================================
     # TAB: PROSES

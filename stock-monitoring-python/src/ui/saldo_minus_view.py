@@ -591,7 +591,7 @@ class SaldoMinusView(tk.Frame):
         self._fluktuatif_cells = payload.get("fluktuatif_cells", [])
         self.status_var.set(payload["status"])
         self._kpi_var.set(payload["kpi"])
-        self._filters.refresh_icon()
+        self._filters.refresh_icons()
 
         def render_done():
             if self._cell_tags:

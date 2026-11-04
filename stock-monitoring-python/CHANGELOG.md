@@ -3,6 +3,33 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.44 — FIX WIRING saldo minus (root cause "tidak terjadi apa apa") + kategori manual INSTANT-APPLY
+
+User: "kok sama aja? tidak terjadi apa apa" — analisa mendalam menemukan **ROOT CAUSE sebenarnya** (v3.11.43 salah diagnosis arah):
+
+**Bug #2 — saldo minus kosong: ROOT CAUSE = WIRING, bukan filter SOURCE KIRIMAN.**
+`SaldoMinusView` punya siklus lazy refresh SENDIRI: `load_data` saat tab tersembunyi (pipeline run — user di tab Proses) hanya menandai `_dirty = True` (tabel tidak dirender). Sementara:
+- app `<<NotebookTabChanged>>` hanya memanggil `nominal_resto_view.ensure_refreshed()` — yang hanya refresh tabel UTAMA 'Per Resto', TIDAK pernah propagate ke `_saldo_minus_view`;
+- sub-notebook `_sub_nb` TIDAK punya binding `<<NotebookTabChanged>>` sama sekali.
+Akibatnya `_dirty` TIDAK PERNAH di-clear → tabel 'Saldo Sistem Minus' menampilkan "Belum ada data." SELAMANYA walau data ada — itulah "tidak terjadi apa apa". (Fix v3.11.43 filter SOURCE KIRIMAN benar tapi tidak mengubah gejala — wiring-nya yang putus.)
+
+**Fix (2 jalur)**:
+1. `nominal_resto_view.ensure_refreshed()` → **propagate** ke `_saldo_minus_view.ensure_refreshed()` (saat main tab dibuka).
+2. `nominal_resto_view._build_ui`: **bind** `_sub_nb <<NotebookTabChanged>>` → `_on_sub_tab_changed` → saat anak tab 'Saldo Sistem Minus' dipilih → `ensure_refreshed` (klik sub-tab belakangan).
+
+**Bug #1 — kategori manual: INSTANT-APPLY (tanpa re-run pipeline).**
+Root cause perilaku lama: kategori manual hanya di-apply `append1 LANGKAH 5d` saat pipeline RUN (log lama: "diterapkan mulai run pipeline berikutnya" — user tak sadar harus re-run → terasa "gak masuk"/"sama aja").
+
+**Fix**:
+- `app.py`: `_apply_kategori_manual_live()` — setelah `_kategori_manual_save` sukses (Identifikasi/Edit): terapkan mapping ke `self.append1_df` **in-place** (mirror `apply_kategori_manual` LANGKAH 5d — kunci kanonik `norm_nama_barang_key`) + refresh view ber-kategori. Hapus mapping tidak instant (nilai otomatis pra-manual tak tersimpan di memori — kembali setelah run pipeline berikutnya; log jujur).
+- `deviasi_view.py`: blok populasi combo kategori di-extract ke `_repopulate_kategori_combo()` + `on_kategori_manual_changed()` (invalidasi pivot cache + repopulate + refresh — GR & PCS keduanya).
+- `pivot_view.py`: `on_kategori_manual_changed()` (`_populate_filters` + refresh).
+- `nominal_resto_view.py`: blok populasi di-extract ke `_repopulate_kategori_values()` + `on_kategori_manual_changed()` (repopulate + refresh; klasifikasi COM/Packaging hidup di compute dari KATEGORI).
+
+**Bug #3 — runtime (ditemukan GUI test)**: `saldo_minus_view._render` panggil `HeaderFilterGroup.refresh_icon()` — method itu tidak ada (yang benar `refresh_icons`, plural). AttributeError saat render pertama → tabel kosong + traceback. py_compile/ruff/import tak mendeteksi (runtime attribute). FIXED.
+
+**Verifikasi — GUI TEST Xvfb SUNGGUHAN** (bukan cuma logic): `NominalRestoView` + `DeviasiView` di-instantiate di Tk + Xvfb :61, simulasi alur nyata (load_data saat tersembunyi → buka tab → ensure_refreshed → klik sub-tab): **9/9 PASS** — T1a dirty set saat tersembunyi · T1b tabel kosong saat tersembunyi · T1c dirty cleared · **T1d tabel TERISI 2 baris (dulu 0 selamanya)** · T1e sub-tab klik aman · T1f sort |qty| desc benar · T1g Keterangan benar · T2a kategori belum ada · **T2b 'BEBAN GAS' muncul instant di combo**. Plus `py_compile` OK + `ruff` semua = baseline (nominal_resto=1, deviasi=5, pivot=4, app=17, saldo_minus=0).
+
 ## v3.11.43 — Fix bug saldo minus kosong (SOURCE KIRIMAN None tetap tampil) + remove silent suppress
 
 **Bug #2 — saldo minus kosong** (user: "hasil dari fitur baru saldo minus juga kok gak ada isi nya? cek juga deept"):

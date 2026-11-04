@@ -1969,11 +1969,68 @@ class DeviasiView(tk.Frame):
         # v3.11.11 — snap ke hari standar (contoh: 26→25, 20→14, 30→25)
         return SharedTanggalH.detect_standard_h(h)
 
+    # v3.11.44 — populasi nilai combobox KATEGORI (di-SCOPE per mode
+    # satuan tab ini — GR/PCS; SATUAN per pasangan) dari self.data.
+    # Di-extract dari load_data supaya bisa dipanggil ulang oleh
+    # on_kategori_manual_changed (kategori manual instant-apply: app
+    # memutasi KATEGORI append1_df in-place — TANPA re-run pipeline).
+    # v3.11.6 ISSUE 1 (keluarga bug "filter menawarkan nilai kosong"):
+    # nilai KATEGORI di-SCOPE per mode satuan supaya daftar ≡ baris tabel
+    # (kategori yang barangnya SEMUA PCS tak muncul di tab GR dsb).
+    # v3.9.45/46/49 — entry '(Tanpa Kategori)' + GABUNGAN rekap + scope
+    # (lihat riwayat blok asli di load_data pra-extract).
+    def _repopulate_kategori_combo(self):
+        data = self.data
+        _kdf = data
+        if (data is not None and "SATUAN" in getattr(data, "columns", [])
+                and "KATEGORI" in getattr(data, "columns", [])):
+            _sat = data["SATUAN"].astype(str).str.strip().str.upper()
+            _kdf = data[_sat == "GR"] if self.satuan_mode == "GR" \
+                else data[_sat != "GR"]
+        if _kdf is not None and "KATEGORI" in getattr(_kdf, "columns", []):
+            _kv = _kdf["KATEGORI"].dropna().astype(str).str.strip()
+            kategori_vals = sorted(v for v in _kv.unique() if v)
+        else:
+            kategori_vals = []
+        _kv45 = ["Semua"]
+        if kategori_has_default_values(
+                _kdf.get("KATEGORI") if _kdf is not None else None):
+            _kv45.append(KATEGORI_DEFAULT_LABEL)
+        _kv45.append(KATEGORI_BLANK_LABEL)
+        _kv45 += kategori_vals
+        self._kategori_combo["values"] = _kv45
+
+    # v3.11.44 — kategori manual (config ⚙️) berubah: KATEGORI append1_df
+    # SUDAH di-mutasi in-place oleh app._apply_kategori_manual_live →
+    # invalidasi pivot cache (kategori lookup + filter POST-pivot membaca
+    # nilai KATEGORI baked di compute) + repopulate combo + refresh.
+    # ROOT CAUSE fix user: "mapping kategori manual udah mapping kok gak
+    # masuk di list deviasi gr dan deviasi pcs" — dulu kategori manual
+    # hanya di-apply append1 LANGKAH 5d saat pipeline RUN (log lama:
+    # "diterapkan mulai run pipeline berikutnya" — user tak sadar harus
+    # re-run). Kini INSTANT.
+    def on_kategori_manual_changed(self):
+        if self.data is None or self.data.empty:
+            return
+        self._cached_pivot = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        self._kategori_lookup = {}   # diisi ulang di _compute_pivot
+        self._repopulate_kategori_combo()
+        self._reset_kategori()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
     def load_data(self, data: pd.DataFrame,
                   in_detail: pd.DataFrame | None = None,
                   harga_map: dict | None = None,
                   konversi_map: dict | None = None,
                   saldo_sistem_map: dict | None = None):
+        """v3.11.44 — lihat _repopulate_kategori_combo /
+        on_kategori_manual_changed (blok populasi kategori di-extract utk
+        instant-apply kategori manual)."""
         self.data = data
         # v3.9.23 (poin 6) — detail dokumen IN per-dokumen (query_in):
         # sumber CEK "RI Balancing" kolom utama (bulan Nomor RI ≠ bulan
@@ -2060,45 +2117,10 @@ class DeviasiView(tk.Frame):
         self.header_filters.clear_all()
         # v3.9.13: isi combobox KATEGORI dari kolom data (merge "21. DBS
         # Kategori" di append1) + reset seleksi — "Semua" = tanpa filter.
-        # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa master
-        # (akses eksplisis kelas 100383 tanpa menonaktifkan filter).
-        # v3.9.46 — entry kini SELALU ADA (dulu kondisional _has_blank:
-        # user: "kategori tanpa kategori kok kosong" — master yang makin
-        # lengkap / data tanpa baris kosong membuat entry HILANG SENYAP
-        # dari dropdown, user mencari opsi itu & tak menemukannya; bila
-        # dipilih saat memang tak ada baris kosong, status menjelaskan
-        # itu secara jujur — bukan tabel kosong misterius).
-        # v3.11.6 — ISSUE 1 (keluarga bug "filter menawarkan nilai kosong"
-        # — user: "jika data kosong gak perlu tampilkan resto di list
-        # filter"): nilai KATEGORI di-SCOPE per mode satuan tab ini (GR /
-        # PCS — SATUAN per pasangan). Dulu dari DATA MENTAH PENUH: kategori
-        # yang barangnya SEMUA PCS tetap muncul di tab GR (dan sebaliknya)
-        # → dipilih → tabel kosong. Identik split _filtered_pivot
-        # (Satuan == 'GR' vs != 'GR' termasuk NaN) supaya daftar ≡ baris
-        # tabel. Cek entry gabungan rekap ikut di-scope (tanpa itu, entry
-        # default bisa memfilter 0 baris di tab yang tak punya barang
-        # rekap).
-        _kdf = data
-        if (data is not None and "SATUAN" in getattr(data, "columns", [])
-                and "KATEGORI" in getattr(data, "columns", [])):
-            _sat = data["SATUAN"].astype(str).str.strip().str.upper()
-            _kdf = data[_sat == "GR"] if self.satuan_mode == "GR" \
-                else data[_sat != "GR"]
-        if _kdf is not None and "KATEGORI" in getattr(_kdf, "columns", []):
-            _kv = _kdf["KATEGORI"].dropna().astype(str).str.strip()
-            kategori_vals = sorted(v for v in _kv.unique() if v)
-        else:
-            kategori_vals = []
-        # v3.9.49 — entry GABUNGAN default (kategori Rekap Mentah) hanya
-        # saat data memuat salah satu nilai rekap (tanpa itu, entry akan
-        # memfilter 0 baris di data lama yang tak ber-kategori rekap).
-        _kv45 = ["Semua"]
-        if kategori_has_default_values(
-                _kdf.get("KATEGORI") if _kdf is not None else None):
-            _kv45.append(KATEGORI_DEFAULT_LABEL)
-        _kv45.append(KATEGORI_BLANK_LABEL)
-        _kv45 += kategori_vals
-        self._kategori_combo["values"] = _kv45
+        # v3.11.44 — blok populasi di-extract ke _repopulate_kategori_combo
+        # (dipakai juga on_kategori_manual_changed — instant-apply kategori
+        # manual tanpa re-run pipeline).
+        self._repopulate_kategori_combo()
         self._reset_kategori()
         # v3.9.49 — filter AKTIF/NON direset ke 'Semua' tiap load data
         # (pola _reset_kategori; kolom pindahan dari tabel → filter).

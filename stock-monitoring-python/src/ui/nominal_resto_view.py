@@ -535,6 +535,16 @@ class NominalRestoView(tk.Frame):
             saldo_sistem_state=self._saldo_sistem_state,
             go_to_proses=self.go_to_proses)
         self._saldo_minus_view.pack(fill="both", expand=True)
+        # v3.11.44 — FIX WIRING (root cause "saldo minus tidak terjadi apa
+        # apa"): SaldoMinusView punya siklus refresh SENDIRI (lazy — load_data
+        # saat tab tersembunyi hanya menandai _dirty). Tanpa dua jalur ini
+        # _dirty TIDAK PERNAH di-clear → tabel menampilkan 'Belum ada data.'
+        # selamanya walau data ada:
+        # (1) klik anak tab 'Saldo Sistem Minus' → ensure_refreshed;
+        # (2) nominal_resto_view.ensure_refreshed (main tab dibuka) →
+        #     propagate ke anak tab (pola app-level notebook).
+        self._sub_nb.bind(
+            "<<NotebookTabChanged>>", self._on_sub_tab_changed, add="+")
 
     # =========================================================================
     # v3.9.63 — ANAK TAB 'TANPA HARGA' (GLOBAL)
@@ -928,6 +938,18 @@ class NominalRestoView(tk.Frame):
             with contextlib.suppress(Exception):
                 self._h_state.unsubscribe(self._on_shared_h_changed)
 
+    # v3.11.44 — FIX WIRING: klik sub-notebook anak tab → bila tab
+    # 'Saldo Sistem Minus' terpilih → pastikan view-nya di-refresh
+    # (clear _dirty tertinggal dari load_data saat tersembunyi).
+    def _on_sub_tab_changed(self, event):
+        try:
+            if str(self._sub_nb.select()) == str(self._tab_minus):
+                _smv = getattr(self, "_saldo_minus_view", None)
+                if _smv is not None:
+                    _smv.ensure_refreshed()
+        except tk.TclError:
+            pass
+
     def _on_shared_h_changed(self, h):
         """Listener H bersama (pola mode Nominal v3.9.33): pane
         tersembunyi cukup ditandai dirty + chip diperbarui; refresh
@@ -1187,33 +1209,11 @@ class NominalRestoView(tk.Frame):
         # v3.9.36 — isi combobox KATEGORI dari kolom data (merge '21.
         # DBS Kategori' di append1 — pola deviasi_view) + reset seleksi
         # ke DEFAULT 'Deviasi' (case-insensitive, fallback 'Semua').
-        # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa
-        # master (akses eksplisit kelas 100383).
-        # v3.9.46 — entry SELALU ADA (mirror deviasi_view: master yang
-        # makin lengkap membuat entry kondisional hilang senyap — user
-        # mencari opsi itu & tak menemukannya).
-        if data is not None and "KATEGORI" in getattr(data, "columns", []):
-            _kv = data["KATEGORI"].dropna().astype(str).str.strip()
-            kategori_vals = sorted(v for v in _kv.unique() if v)
-        else:
-            kategori_vals = []
-        # v3.9.49 — entry GABUNGAN default (kategori Rekap Mentah) hanya
-        # saat data memuat salah satu nilai rekap (pola deviasi_view).
-        _kv45 = ["Semua"]
-        if kategori_has_default_values(
-                data.get("KATEGORI") if data is not None else None):
-            _kv45.append(KATEGORI_DEFAULT_LABEL)
-        _kv45.append(KATEGORI_BLANK_LABEL)
-        _kv45 += kategori_vals
-        self._kategori_combo["values"] = _kv45
-        self._reset_kategori()
-        # v3.9.63 — combobox KATEGORI ANAK TAB 'Tanpa Harga': daftar
-        # nilai sama dgn tab utama; DEFAULT 'Semua' = GLOBAL (user:
-        # "menampilkan secara global") — memilih kategori/gabungan →
-        # hanya menampilkan sesuai kategori itu (user: "misal deviasi
-        # COM +packaging berarti hanya menampilkan sesuai kategori aja").
+        # v3.11.44 — blok populasi nilai di-extract ke
+        # _repopulate_kategori_values() (dipakai juga
+        # on_kategori_manual_changed — kategori manual instant-apply).
+        self._repopulate_kategori_values()
         # Filter ⧩ anak tab + frame global ikut di-reset.
-        self._nh_kategori_combo["values"] = _kv45
         self._nh_kategori_var.set("Semua")
         self._nh_kategori_sel = None
         for c in self._nh_col_sel:
@@ -1253,6 +1253,59 @@ class NominalRestoView(tk.Frame):
                 and not self.data.empty:
             self._dirty = False
             self._refresh()
+        # v3.11.44 — FIX WIRING (root cause "saldo minus tidak terjadi apa
+        # apa"): propagate ke anak tab 'Saldo Sistem Minus' — SaldoMinusView
+        # punya siklus lazy refresh SENDIRI; tanpa propagate ini _dirty
+        # tertinggal dari load_data (tab tersembunyi saat pipeline run)
+        # TIDAK PERNAH di-clear → tabel 'Saldo Sistem Minus' kosong selamanya.
+        _smv = getattr(self, "_saldo_minus_view", None)
+        if _smv is not None:
+            _smv.ensure_refreshed()
+
+    # v3.11.44 — populasi nilai combobox KATEGORI (tab utama + anak tab
+    # Tanpa Harga) dari self.data — di-extract dari load_data supaya bisa
+    # dipanggil ulang on_kategori_manual_changed (kategori manual
+    # instant-apply: app memutasi KATEGORI append1_df in-place lalu memanggil
+    # on_kategori_manual_changed — TANPA menunggu re-run pipeline).
+    def _repopulate_kategori_values(self):
+        data = self.data
+        # v3.9.45 — entry '(Tanpa Kategori)' saat ADA baris tanpa master
+        # (akses eksplisit kelas 100383); v3.9.46 — entry SELALU ADA
+        # (mirror deviasi_view).
+        if data is not None and "KATEGORI" in getattr(data, "columns", []):
+            _kv = data["KATEGORI"].dropna().astype(str).str.strip()
+            kategori_vals = sorted(v for v in _kv.unique() if v)
+        else:
+            kategori_vals = []
+        # v3.9.49 — entry GABUNGAN default (kategori Rekap Mentah) hanya
+        # saat data memuat salah satu nilai rekap (pola deviasi_view).
+        _kv45 = ["Semua"]
+        if kategori_has_default_values(
+                data.get("KATEGORI") if data is not None else None):
+            _kv45.append(KATEGORI_DEFAULT_LABEL)
+        _kv45.append(KATEGORI_BLANK_LABEL)
+        _kv45 += kategori_vals
+        self._kategori_combo["values"] = _kv45
+        self._reset_kategori()
+        # v3.9.63 — combobox KATEGORI ANAK TAB 'Tanpa Harga': daftar nilai
+        # sama dgn tab utama; DEFAULT 'Semua' = GLOBAL.
+        self._nh_kategori_combo["values"] = _kv45
+
+    # v3.11.44 — kategori manual (config ⚙️) berubah: KATEGORI append1_df
+    # SUDAH di-mutasi in-place oleh app._apply_kategori_manual_live →
+    # repopulate nilai combo + recompute (klasifikasi COM/Packaging hidup
+    # di _compute_resto dari data KATEGORI). Tanpa re-run pipeline.
+    def on_kategori_manual_changed(self):
+        if self.data is None or self.data.empty:
+            return
+        self._repopulate_kategori_values()
+        if self._busy:
+            self._pending = True
+            return
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
 
     def on_lalu_file_changed(self):
         """v3.9.36 — file deviasi (tab ⚖ Komparasi) berubah (load baru /
