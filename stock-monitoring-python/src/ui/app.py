@@ -197,7 +197,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.45"  # v3.11.45 — fix AKAR kategori manual tak muncul (stem 'COM DEVIASI' vs filter default) + status saldo minus jujur + versi di judul
+APP_VERSION = "3.11.46"  # v3.11.46 — versi build di baris pertama log pipeline (log yang di-copy user langsung teridentifikasi)
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -5040,6 +5040,11 @@ class StockMonitorApp:
         self._tick_elapsed()
 
         self._append_log_batched("\n" + "=" * 60 + "\n")
+        # v3.11.46 — identitas build di baris pertama log tiap run: log
+        # yang di-copy user langsung terlihat versinya (kasus "masih build
+        # lama padahal sudah download ulang" tak perlu ditebak lagi —
+        # judul window/statusbar ternyata kurang terlihat saat lapor bug).
+        self._append_log_batched(f"  BUILD v{APP_VERSION}\n")
         if is_refresh:
             n_sel = 0 if refresh_files is None else len(refresh_files)
             self._append_log_batched(

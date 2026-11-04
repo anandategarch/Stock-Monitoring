@@ -5,6 +5,7 @@ return DataFrames. Tidak ada Excel output — data ditampilkan langsung di UI.
 
 Bisa dipanggil langsung (CLI) atau dari UI Tkinter.
 """
+import contextlib
 import sys
 import time
 import warnings
@@ -148,8 +149,20 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
 
     # 1. Load config
     if verbose:
+        # v3.11.46 — versi build di banner RUNNER: log yang user copy-paste
+        # langsung teridentifikasi versinya. Import LAZY saat CALL (app.py
+        # hanya lazy-import modul ini di dalam fungsi — import balik di
+        # top-level akan membuat cycle saat module load; di sini aman
+        # karena run_pipeline hanya dipanggil setelah UI siap).
+        # contextlib.suppress(Exception) — banner kosmetik: kegagalan import
+        # APAPUN tak boleh menghentikan pipeline (pola app.py _copy_log).
+        _BUILD_V = None
+        with contextlib.suppress(Exception):
+            from src.ui.app import APP_VERSION as _BUILD_V
         print("=" * 60)
         print("  STOCK MONITORING - PIPELINE RUNNER")
+        if _BUILD_V:
+            print(f"  Build: v{_BUILD_V}")
         print("=" * 60)
 
     config = Config(config_path)

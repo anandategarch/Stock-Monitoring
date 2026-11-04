@@ -3,6 +3,19 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.46 — versi build di baris pertama log pipeline (log yang di-copy langsung teridentifikasi)
+
+User: "build nya masih 3.11.43. padahal sudah download dari git hub terbaru" — verifikasi langsung `git ls-remote origin`: **GitHub main sudah v3.11.45** (semua fix kategori manual + saldo minus TER-upload; README GitHub pun sudah bilang "Versi terkini: v3.11.45"). Jadi app yang dijalankan user masih kode lama — download-nya tidak benar-benar mengambil yang terbaru (zip GitHub kena cache browser / menjalankan exe lama / extract ke folder lama). Dua putaran debug "tetap sama aja" (v3.11.44/45) berpotensi akibat ambigu versi; judul window + statusbar (v3.11.45) ternyata **kurang terlihat saat user melapor pakai log**.
+
+**Fix — versi tampil DI LOG (media yang user copy-paste saat lapor):**
+- `app.py` `_run_pipeline`: baris `BUILD v{APP_VERSION}` tepat setelah separator `====` di awal **tiap run** (run baru maupun Refresh Sumber) — baris pertama log selalu menyebut versi;
+- `main.py` `run_pipeline` banner: `Build: v{APP_VERSION}` di bawah "STOCK MONITORING - PIPELINE RUNNER" — import `src.ui.app` **lazy saat call** (app.py hanya lazy-import modul ini di dalam fungsi; import balik di top-level akan membuat cycle saat module load; CLI/standalone tanpa UI → baris dilewati via try/except);
+- `APP_VERSION` → 3.11.46.
+
+**Verifikasi**: py_compile `app.py` + `main.py` OK · ruff kedua file = baseline (tanpa kategori temuan baru) · urutan log: `====` → `BUILD v3.11.46` → `Memulai pipeline…/REFRESH FILE SUMBER` → Pre-flight → banner RUNNER `Build: v3.11.46`.
+
+**Catatan untuk user (download yang benar):** zip GitHub (`main.zip`) sering disajikan browser dari **cache lama** — unduh lewat jendela incognito/private (atau Ctrl+F5 halaman repo dulu), extract ke **folder BARU**, lalu **copy `config.json` dari folder lama** (agar RootPath + mapping `KategoriManual` ikut) dan jalankan `MULAI.bat` dari folder baru. Bila selama ini memakai `.exe` hasil build: download source TIDAK mengubah exe — jalankan dari source atau rebuild exe (`build_exe.py`). Cek versi: judul window / statusbar kanan bawah / baris pertama log.
+
 ## v3.11.45 — fix AKAR "kategori manual tetap gak masuk" (stem 'COM DEVIASI' vs filter default) + status saldo minus JUJUR + versi di judul window
 
 User: "tetap gak masuk untuk mapping manual. nam item nya BAWANG PUTIH GORENG itu gak masuk ke tab devias gr padahal aku udah set jadi COM DEVIASI. tab saldominus juga kosong dengan mode pivot atau mode 42.17"
