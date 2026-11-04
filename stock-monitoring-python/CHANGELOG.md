@@ -3,6 +3,16 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.38 — Parity Waste (2/3): KpiCard flat ala Waste — angka berwarna, tanpa bar aksen
+
+**Restyle `widgets.py KpiCard`** (cermin `KpiCard` Waste v2.15.0):
+- **Bar aksen kiri DIHAPUS** — kartu kini FLAT putih (QFrame#kpiframe Waste: border + radius via Card SM).
+- **`accent` kini mewarnai TEKS ANGKA** (dulu bar kiri) — cermin Waste: TOTAL BARIS `#0f172a` · PRIORITAS `#dc2626` · POTENSI `#ea580c` · REVIEW `#b45309` · WASTE `#0f766e` · CABANG `#9333ea`. Default `accent` `C_ACCENT`→`C_HEADER` (kartu hitung ala TOTAL BARIS Waste).
+- **Label 9pt normal** muted (dulu bold — cermin 'hint' 12px Waste) · **nilai 15pt bold** (≈20px Waste; dulu 16pt) · margin (12,8) spacing 2 (dulu (12,10)).
+- **API tak berubah**: `KpiCard(parent, label, value, subtitle, accent)` + `set_value(value, subtitle, accent)` — 4 call-site app.py (kpi_status/elapsed/append/rincian) & test §69.C (lebar seragam KpiRow) tetap hijau tanpa perubahan. Status pipeline (SIAP hijau · ERROR merah · SELESAI PARSIAL oranye · DIHENTIKAN amber) kini terlihat di WARNANYA ANGKA — sama seperti KPI status di Waste.
+
+**Verifikasi**: FULL SUITE `DISPLAY=:61` HIJAU 1633 PASS / 0 FAIL + ruff + py_compile bersih.
+
 ## v3.11.37 — Parity Waste (1/3): token tema — tab WCAG AA + STATUS_COLORS
 
 **Analisa Waste**: repo Waste (PySide6, v2.15.0) sudah jadi rujukan design system Stock-Monitoring sejak v3.0 (slate+teal, card, toolbar gelap, konsol #0b1220). Audit GAP menemukan 3 token yang belum 100% paritas:

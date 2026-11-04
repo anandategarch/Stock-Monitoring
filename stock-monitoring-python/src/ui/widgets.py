@@ -421,39 +421,42 @@ class Card(tk.Frame):
 
 
 class KpiCard(tk.Frame):
-    """Kartu KPI: aksen warna kiri, label kecil uppercase, angka besar, sub-teks.
+    """Kartu KPI ala Waste: FLAT — label kecil muted · ANGKA BESAR BERWARNA · konteks.
 
-    set_value(value, subtitle, accent) untuk update cepat.
+    v3.11.38 — PARITY WASTE (widgets.py KpiCard v2.15.0): bar aksen kiri
+    DIHAPUS; parameter ``accent`` kini mewarnai TEKS ANGKA (bukan bar)
+    — cermin perilaku Waste (TOTAL BARIS #0f172a · PRIORITAS #dc2626 ·
+    POTENSI #ea580c · REVIEW #b45309 · WASTE #0f766e · CABANG #9333ea).
+    Label 9pt normal muted (hint 12px Waste, bukan bold); nilai 15pt
+    bold (≈20px Waste); margin (12,8) + spacing 2 (mirror QSS
+    QFrame#kpiframe margins di Waste).
+
+    set_value(value, subtitle, accent) — API tak berubah; ``accent``
+    mengganti warna teks angka.
     """
 
     def __init__(self, parent, label: str, value: str = "—",
-                 subtitle: str = "", accent: str = C_ACCENT, **kw):
+                 subtitle: str = "", accent: str = C_HEADER, **kw):
         super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
                          highlightthickness=1, **kw)
         self._accent = accent
-
-        row = tk.Frame(self, bg=C_CARD)
-        row.pack(fill="both", expand=True, padx=12, pady=10)
-        self._bar = tk.Frame(row, bg=accent, width=4)
-        self._bar.pack(side="left", fill="y", padx=(0, 10))
-        txt = tk.Frame(row, bg=C_CARD)
-        txt.pack(side="left", fill="both", expand=True)
+        # v3.11.38 — kartu FLAT ala Waste: tanpa bar aksen kiri.
+        txt = tk.Frame(self, bg=C_CARD)
+        txt.pack(fill="both", expand=True, padx=12, pady=8)
 
         self._label_var = tk.StringVar(value=label.upper())
-        tk.Label(txt, textvariable=self._label_var, bg=C_CARD, fg=C_TEXT_MUTED,
-                 # FIX A-08: label KPI 8→9pt — teks terkecil jangan untuk
-                 # label kartu KPI yang penting (nyaris tak terbaca 1080p).
-                 font=font(9, "bold"), anchor="w").pack(fill="x")
+        # FIX A-08 tetap dijaga: 9pt (bukan 8) — terkecil utk label KPI
+        # penting; weight normal cermin 'hint' Waste 12px.
+        tk.Label(txt, textvariable=self._label_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(9), anchor="w").pack(fill="x")
 
         self._value_var = tk.StringVar(value=value)
-        tk.Label(txt, textvariable=self._value_var, bg=C_CARD, fg=C_HEADER,
-                 font=font(16, "bold"), anchor="w").pack(fill="x", pady=(2, 0))
+        self._value_lbl = tk.Label(txt, textvariable=self._value_var,
+                                   bg=C_CARD, fg=accent,
+                                   font=font(15, "bold"), anchor="w")
+        self._value_lbl.pack(fill="x", pady=(2, 0))
 
         self._sub_var = tk.StringVar(value=subtitle)
-        # v3.9.59 fix 2a-01 (audit 2-a): C_TEXT_SOFT #94a3b8 = 2,56:1 di
-        # kartu putih (WCAG AA 4,5:1 gagal) — teks panduan status KPI
-        # (mis. 'lihat log untuk detail' saat ERROR) nyaris tak terbaca.
-        # C_TEXT_MUTED #64748b = 4,76:1 (lolos AA).
         self._sub = tk.Label(txt, textvariable=self._sub_var, bg=C_CARD,
                              fg=C_TEXT_MUTED, font=font(9), anchor="w")
         if subtitle:
@@ -468,7 +471,8 @@ class KpiCard(tk.Frame):
             self._sub_var.set(subtitle)
         if accent is not None and accent != self._accent:
             self._accent = accent
-            self._bar.configure(bg=accent)
+            # v3.11.38 — recolor TEKS angka (bar aksen kiri telah dihapus)
+            self._value_lbl.configure(fg=accent)
 
 
 class KpiRow(tk.Frame):
