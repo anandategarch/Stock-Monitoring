@@ -217,3 +217,63 @@ def potensi_po_label_for(data: pd.DataFrame, in_detail, nama_barang: str,
     if tgls and ti in tgls:
         return POTENSI_PO_LABEL
     return ""
+
+
+def po_nomor_map(in_detail) -> dict:
+    """v3.11.40 — peta Nomor PO dari file 32.24 per (barang, resto, tgl).
+
+    {(Nama Barang, NAMA RESTO, Tanggal): "PO-001, PO-002, ..."} — Nomor PO
+    unik (di-dedup + urut) dari baris in_detail ber-SOURCE IN '32.24'
+    (file 3224 — Rincian Penerimaan Barang; kolom 'Nomor PO' hasil rename
+    'Nomor # PO' fn_3224). in_detail None/kosong/tak ber-Nomor PO → {}.
+
+    Dipakai kolom 'KETERANGAN PO' popup details (tab Pivot) — user: "Pop up
+    keterangan PO di pivot tabel kok gak muncul? itu ambil dari file 3224
+    keterangan PO kalau gak salah". Label potensi PO belum dibuat sering
+    KOSONG karena kondisi ketat (BM>0 + SO naik + 3224=0 + 9901=0 + tanggal
+    terverifiable); Nomor PO 3224 SELALU tersedia bila ada penerimaan →
+    kolom kini informatif (menampilkan PO yg tercatat di Accurate).
+
+    Catatan: Nomor PO muncul ⇒ 3224 penerimaan > 0 ⇒ kondisi '3224=0' label
+    potensi TIDAK terpenuhi (kedua info saling eksklusif per tanggal — popup
+    menampilkan SALAH SATU: Nomor PO bila ada penerimaan 3224, label potensi
+    bila 3224=0 dan kondisi lain terpenuhi, kosong bila keduanya tidak)."""
+    if in_detail is None or getattr(in_detail, "empty", True):
+        return {}
+    cols = set(getattr(in_detail, "columns", []))
+    if not {"Nama Barang", "NAMA RESTO", "Tanggal", "SOURCE IN"} <= cols:
+        return {}
+    if "Nomor PO" not in cols:
+        return {}
+    det = pd.DataFrame({
+        "_b": in_detail["Nama Barang"].astype(str),
+        "_r": in_detail["NAMA RESTO"].astype(str),
+        "_t": pd.to_numeric(in_detail["Tanggal"], errors="coerce"),
+        "_s": in_detail["SOURCE IN"].astype(str).str.strip(),
+        "_p": in_detail["Nomor PO"].astype(str).str.strip(),
+    }).dropna(subset=["_t"])
+    mask = (det["_s"].str.startswith("32.24")
+            & (det["_p"] != "")
+            & (det["_p"].str.lower() != "nan"))
+    det = det[mask]
+    if det.empty:
+        return {}
+    det = det.assign(_t=lambda d: d["_t"].astype("int64"))
+    out: dict = {}
+    for (b, r, t), grp in det.groupby(["_b", "_r", "_t"])["_p"]:
+        pos = sorted(set(grp.tolist()))
+        out[(b, r, int(t))] = ", ".join(pos)
+    return out
+
+
+def po_nomor_for(in_detail, nama_barang: str, nama_resto: str,
+                 tanggal) -> str:
+    """Nomor PO 3224 utk SATU (pasangan, tanggal) — dipakai popup (lookup
+    tipis di atas po_nomor_map). '' bila tak ada penerimaan 3224 / Nomor PO
+    kosong / in_detail None."""
+    try:
+        ti = int(float(tanggal))
+    except (TypeError, ValueError):
+        return ""
+    return po_nomor_map(in_detail).get(
+        (str(nama_barang), str(nama_resto), ti), "")

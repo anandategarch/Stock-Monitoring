@@ -988,21 +988,36 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     # baris BM/SO penentu trigger) + di-cache per identitas → double-
     # click berulang gratis. Tanpa in_detail → kolom kosong (dipenuhi
     # "" otomatis oleh _prepare_rows — pemanggil lama tak berubah).
+    #
+    # v3.11.40 — (user: "Pop up keterangan PO di pivot tabel kok gak
+    # muncul? itu ambil dari file 3224 keterangan PO kalau gak salah"):
+    # label potensi sering KOSONG (kondisi ketat); kini kolom JUGA
+    # menampilkan Nomor PO dari file 3224 (in_detail SOURCE IN '32.24',
+    # kolom 'Nomor PO') bila ada penerimaan tercatat. Nomor PO muncul ⇒
+    # 3224>0 ⇒ label potensi tak terpenuhi (saling eksklusif — popup
+    # tampilkan SALAH SATU: "PO-001, PO-002" bila ada 3224, label potensi
+    # bila 3224=0 + kondisi lain, kosong bila keduanya tidak). Tanpa
+    # in_detail / Nomor PO → kolom kosong (perilaku lama).
     if in_detail is not None and df is not None and not df.empty:
-        from .po_keterangan import POTENSI_PO_LABEL, potensi_po_map
+        from .po_keterangan import POTENSI_PO_LABEL, po_nomor_map, potensi_po_map
         _po_m = potensi_po_map(data, in_detail)
-        if _po_m:
+        _nomor_m = po_nomor_map(in_detail)
+        if _po_m or _nomor_m:
             _b_s = df["Nama Barang"].astype(str)
             _r_s = df["NAMA RESTO"].astype(str)
             _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
             _ket = []
             for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
-                _lbl = ""
+                _parts: list = []
                 if _tt is not None and pd.notna(_tt):
+                    _ti = int(_tt)
+                    _nm = _nomor_m.get((_bb, _rr, _ti))
+                    if _nm:
+                        _parts.append(_nm)
                     _tg = _po_m.get((_bb, _rr))
-                    if _tg and int(_tt) in _tg:
-                        _lbl = POTENSI_PO_LABEL
-                _ket.append(_lbl)
+                    if _tg and _ti in _tg:
+                        _parts.append(POTENSI_PO_LABEL)
+                _ket.append(" · ".join(_parts) if _parts else "")
             df = df.assign(**{"KETERANGAN PO": _ket})
 
     popup = DetailsPopup(parent, title, df.reset_index(drop=True),
