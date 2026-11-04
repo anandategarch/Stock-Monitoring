@@ -193,7 +193,12 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.35"  # v3.11.35 — DEEP AUDIT FIX (5 agents): 2 P0 crash
+APP_VERSION = "3.11.36"  # v3.11.36 — VERIFIKASI JUJUR: test suite basi
+# (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
+# dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
+# test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
+# (Resto·Tgl·Barang·Selisih IN) + README root disinkronkan. Riwayat:
+# v3.11.35 — DEEP AUDIT FIX (5 agents): 2 P0 crash
 # (bench/screenshot), 1 P1 dead feature (Button-1> bind), 5 P0/P1
 # normalization consistency (saldo_awal_map, bk_map, konversi_satuan,
 # 4 kategori merges, _kat_norm, _rekap_barangs), 1 P3 v3.11.33 regression

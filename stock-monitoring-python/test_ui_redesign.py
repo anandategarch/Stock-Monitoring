@@ -964,7 +964,7 @@ def main():
           len(app.notebook.tabs()) == 9,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.30", APP_VERSION == "3.11.30",
+    check("Versi = 3.11.36", APP_VERSION == "3.11.36",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
@@ -2072,31 +2072,62 @@ def main():
           and iv._analisa_card.winfo_manager() == "pack",
           f"tcard={iv._tcard.winfo_manager()!r} "
           f"analisa={iv._analisa_card.winfo_manager()!r}")
-    _am = (iv._analisa_payload or {}).get("meta") or {}
-    check("(v3.10/v3.11.5) Payload analisa: 11 baris konteks · 3 gantung · "
-          "Σ|selisih| 280 · kolom ΔSO terisi (seksi Anomali aktif) · "
-          "COM minus 2",
-          _am.get("n_konteks") == 11 and _am.get("n_gantung") == 3
+    # v3.11.31 — analisa 6-seksi DIHAPUS TOTAL (user: "aku pengen
+    # ditampilkan selisih resto dan nama barang dan tanggal. hapus aja
+    # analisa analisa sebelum nya ganti dengan yang baru.") → tabel
+    # SELISIH per (Resto · Tanggal · Barang) urut |selisih| ↓.
+    _am = iv._analisa_payload or {}
+    check("(v3.11.31) Payload analisa: n_total 11 · n_selisih 3 · "
+          "Σ|selisih| 280 · 1 resto · 2 barang (baris selisih 0 dibuang)",
+          _am.get("n_total") == 11 and _am.get("n_selisih") == 3
           and abs((_am.get("sum_abs") or 0) - 280.0) < 0.001
-          and _am.get("basis_v310") is True
-          and _am.get("n_com_minus") == 2,
+          and _am.get("n_resto") == 1 and _am.get("n_barang") == 2
+          and len(_am.get("rows") or []) == 3,
           f"got {_am}")
+    _an_rows = _am.get("rows") or []
+    _rowset = {(r[0], r[1], r[2], round(float(r[3]), 3))
+               for r in _an_rows}
+    check("(v3.11.31) Analisa: baris = Resto·Tgl·Barang·Selisih — "
+          "KOPI tgl5 +100 · KOPI tgl8 −100 · SUSU tgl5 +80 · urut "
+          "|selisih| ↓ (top |100| · ekor 80)",
+          _rowset == {("MLGPAR", "5", "KOPI BUBUK 100G", 100.0),
+                      ("MLGPAR", "8", "KOPI BUBUK 100G", -100.0),
+                      ("MLGPAR", "5", "SUSU UHT 1L", 80.0)}
+          and abs(abs(_an_rows[0][3]) - 100.0) < 0.001
+          and abs(abs(_an_rows[-1][3]) - 80.0) < 0.001,
+          f"got {sorted(_rowset)}")
     _an_labels: list = []
     _walk_labels2(iv._analisa_card, _an_labels)
-    check("(v3.10) Panel analisa: 6 seksi dirender (Umur/Leaderboard/"
-          "Sistemik/Resolve/Anomali ΔSO/COM Minus)",
-          all(t in _an_labels for t in (
-              "1 · UMUR GANTUNG (AGING)",
-              "2 · LEADERBOARD RESTO — Σ|Selisih IN|",
-              "3 · SISTEMIK vs LOKAL",
-              "4 · RESOLVE-RATE",
-              "5 · ANOMALI ΔSO",
-              "6 · COM MINUS — pemakaian negatif")),
-          f"got {[t for t in _an_labels]}")
-    check("(v3.10) Analisa: teks tertua + COM minus top hadir",
-          any("tertua" in t for t in _an_labels)
-          and any("KOPI BUBUK 100G" in t for t in _an_labels),
-          f"got {[t for t in _an_labels if 'tertua' in t][:2]}")
+    check("(v3.11.31) Panel analisa: judul 'ANALISA SELISIH' + ringkasan "
+          "baris + TABEL selisih (6-seksi lama DIHAPUS)",
+          any("ANALISA SELISIH" in t for t in _an_labels)
+          and any("3 baris selisih" in t for t in _an_labels)
+          and not any("UMUR GANTUNG" in t or "LEADERBOARD" in t
+                      for t in _an_labels),
+          f"got {[t for t in _an_labels][:4]}")
+
+    def _find_tree2(w):
+        for _ch in w.winfo_children():
+            if isinstance(_ch, ttk.Treeview):
+                return _ch
+            _t = _find_tree2(_ch)
+            if _t is not None:
+                return _t
+        return None
+
+    _an_tree = _find_tree2(iv._analisa_card)
+    _an_kids = (list(_an_tree.get_children(""))
+                if _an_tree is not None else [])
+    _an_tags = ({(_an_tree.item(k, "values")[4],
+                  tuple(_an_tree.item(k, "tags") or ()))
+                 for k in _an_kids} if _an_tree is not None else set())
+    check("(v3.11.31) Tree analisa: 3 baris · selisih −100 '(100)' "
+          "ber-tag neg · +100/+80 ber-tag pos",
+          len(_an_kids) == 3
+          and ("(100)", ("neg",)) in _an_tags
+          and ("100", ("pos",)) in _an_tags
+          and ("80", ("pos",)) in _an_tags,
+          f"got {sorted(_an_tags)}")
     # v3.11.9 — mode 📈 kini BERSIH (user: "biar clean"): kartu KPI +
     # papan skor + strip barang disembunyikan TOTAL (panel analisa
     # memakai seluruh tinggi konten).
@@ -21982,14 +22013,6 @@ def main():
           and _isv94._tcard.winfo_manager() == ""
           and _isv94._analisa_card.winfo_manager() == "pack")
 
-    def _sec_btn_texts94(w):
-        out94 = []
-        for ch94 in w.winfo_children():
-            if isinstance(ch94, (tk.Button, ttk.Button)):
-                out94.append(str(ch94.cget("text")))
-            out94.extend(_sec_btn_texts94(ch94))
-        return out94
-
     _an_texts94 = []
 
     def _walk94(w, acc):
@@ -22001,52 +22024,64 @@ def main():
             _walk94(ch94, acc)
 
     _walk94(_isv94._analisa_card, _an_texts94)
-    check("(v3.11.9) §94-H2 panel analisa BERSIH: chips meta (BARIS "
-          "KONTEKS/BARIS GANTUNG/Σ|SELISIH IN|/PANJANG BULAN) + label "
-          "'konteks:' DIHAPUS — judul + 6 seksi saja",
-          not any(t in _an_texts94 for t in
-                  ("BARIS KONTEKS", "BARIS GANTUNG", "PANJANG BULAN"))
-          and not any("konteks:" in t for t in _an_texts94)
-          and any("ANALISA REKONSILIASI" in t for t in _an_texts94),
-          f"got {[t for t in _an_texts94 if t.isupper()][:8]}")
-    check("(v3.11.9) §94-H3 TIAP seksi ber-tombol '⤢ Perbesar' (6 — "
-          "GhostButton ttk)",
-          sum(1 for t in _sec_btn_texts94(_isv94._analisa_card)
-              if t == "⤢ Perbesar") == 6,
-          f"got {[t for t in _sec_btn_texts94(_isv94._analisa_card) if 'Perbesar' in t]}")
+    # v3.11.31 — analisa 6-seksi + tombol ⤢ Perbesar DIHAPUS (user:
+    # "aku pengen ditampilkan selisih resto dan nama barang dan
+    # tanggal. hapus aja analisa analisa sebelum nya ganti dengan yang
+    # baru.") → tabel SELISIH sederhana. Probe aktual fixture ini:
+    # n_total=2 (tgl −25 di luar rentang default 1..31) · n_selisih=1
+    # (BRG tgl5 +1, DEVIASI MURNI) · baris OK (selisih 0) dibuang.
+    _am94h = _isv94._analisa_payload or {}
+    check("(v3.11.31) §94-H2 payload analisa: n_total 2 · n_selisih 1 · "
+          "Σ|selisih| 1 · rows = R1/BRG/tgl5/+1 (6-seksi lama DIHAPUS)",
+          _am94h.get("n_total") == 2
+          and _am94h.get("n_selisih") == 1
+          and abs((_am94h.get("sum_abs") or 0) - 1.0) < 0.001
+          and _am94h.get("n_resto") == 1
+          and _am94h.get("n_barang") == 1
+          and list(_am94h.get("rows") or []) ==
+              [("R1", "5", "BRG", 1.0, "-")],
+          f"got {_am94h}")
+    _tv94h = None
 
-    def _find_btn94(w):
+    def _find_tv94(w):
         for ch94 in w.winfo_children():
-            if isinstance(ch94, (tk.Button, ttk.Button)) and \
-                    str(ch94.cget("text")) == "⤢ Perbesar":
+            if isinstance(ch94, ttk.Treeview):
                 return ch94
-            _r94 = _find_btn94(ch94)
+            _r94 = _find_tv94(ch94)
             if _r94 is not None:
                 return _r94
         return None
 
-    _btn94 = _find_btn94(_isv94._analisa_card)
-    _btn94.invoke()
-    root.update()
-    _pop94h = [w for w in _top94h.winfo_children()
-               if isinstance(w, tk.Toplevel)]
-    check("(v3.11.9) §94-H4 klik → popup Toplevel perbesar muncul "
-          "(judul seksi + header gelap + Tutup Esc)",
-          len(_pop94h) == 1)
-    if _pop94h:
-        _pop_texts94 = []
-        _walk94(_pop94h[0], _pop_texts94)
-        check("(v3.11.9) §94-H5 popup berisi konten seksi (judul UMUR "
-              "GANTUNG + baris RENTANG UMUR — skala besar font 10/11)",
-              any("UMUR GANTUNG" in t for t in _pop_texts94)
-              and any("RENTANG UMUR" in t for t in _pop_texts94),
-              f"got {[t for t in _pop_texts94 if 'UMUR' in t][:4]}")
-        _pop94h[0].event_generate("<Escape>")
-        root.update()
-        _pop94h = [w for w in _top94h.winfo_children()
-                   if isinstance(w, tk.Toplevel)]
-        check("(v3.11.9) §94-H6 Esc menutup popup",
-              len(_pop94h) == 0, f"got {len(_pop94h)}")
+    _tv94h = _find_tv94(_isv94._analisa_card)
+    _tv_kids94h = (list(_tv94h.get_children(""))
+                   if _tv94h is not None else [])
+    check("(v3.11.31) §94-H3 tree analisa: 6 kolom (#/Resto/Tanggal/Nama "
+          "Barang/Selisih IN/KATEGORI) · 1 baris R1·5·BRG·1 · tag pos "
+          "(selisih ≥ 0)",
+          _tv94h is not None
+          and list(_tv94h["columns"]) ==
+              ["no", "resto", "tanggal", "barang", "selisih", "kategori"]
+          and len(_tv_kids94h) == 1
+          and list(_tv94h.item(_tv_kids94h[0], "values")) ==
+              ["1", "R1", "5", "BRG", "1", "-"]
+          and tuple(_tv94h.item(_tv_kids94h[0], "tags") or ()) == ("pos",),
+          f"cols={_tv94h['columns'] if _tv94h is not None else None} "
+          f"vals={[ _tv94h.item(k, 'values') for k in _tv_kids94h ]}")
+    # v3.11.31 — sort klik judul kolom (toggle ⇅): invoke dua kali →
+    # _analisa_sort_col terpasang & arah toggle desc→asc (1 baris tetap).
+    if _tv94h is not None:
+        _isv94._sort_analisa_tree(_tv94h, "selisih")
+        _sort_col94 = getattr(_tv94h, "_analisa_sort_col", None)
+        _sort_rev94 = getattr(_tv94h, "_analisa_sort_rev", None)
+        _isv94._sort_analisa_tree(_tv94h, "selisih")
+        _sort_rev2_94 = getattr(_tv94h, "_analisa_sort_rev", None)
+        check("(v3.11.31) §94-H4 sort kolom analisa: klik judul 'Selisih "
+              "IN' → sort terpasang + toggle arah desc→asc (tanpa "
+              "exception)",
+              _sort_col94 == "selisih" and _sort_rev94 is True
+              and _sort_rev2_94 is False
+              and len(_tv94h.get_children("")) == 1,
+              f"col={_sort_col94!r} rev={_sort_rev94!r}→{_sort_rev2_94!r}")
     _isv94._on_view_mode_change(0)
     root.update()
     check("(v3.11.9+v3.11.30) §94-H7 toggle balik: tabel kembali "
@@ -22147,6 +22182,9 @@ def main():
           f"sum_abs={_p95.get('sum_abs')} n_resto={_p95.get('n_resto')} "
           f"n_barang={_p95.get('n_barang')}")
     # render: tree berisi baris + judul 'ANALISA SELISIH'
+    # (v3.11.36 FIX LATEN: cek judul kini REKURSIF — judul berada di frame
+    # 'head' (cucu _analisa_card), scan anak-langsung selalu False; test
+    # ini tak pernah tereksekusi pra-v3.11.36 karena suite crash di §94-H4)
     _isv95._analisa_payload = _p95
     _isv95._view_analisa = True
     _isv95._render_analisa(_p95)
@@ -22157,10 +22195,16 @@ def main():
                       if isinstance(_w, ttk.Treeview)), None)
         if _tv95 is not None:
             break
-    _has_title = any(
-        isinstance(_w, tk.Label)
-        and "ANALISA SELISIH" in str(_w.cget("text"))
-        for _w in _isv95._analisa_card.winfo_children())
+    _title_lbls95: list = []
+
+    def _walk95(w, acc):
+        for _ch in w.winfo_children():
+            if isinstance(_ch, tk.Label):
+                acc.append(str(_ch.cget("text")))
+            _walk95(_ch, acc)
+
+    _walk95(_isv95._analisa_card, _title_lbls95)
+    _has_title = any("ANALISA SELISIH" in t for t in _title_lbls95)
     check("(v3.11.31) \u00a795-C render _render_analisa: tree ada + jumlah "
           "baris = n_selisih + judul 'ANALISA SELISIH'",
           _tv95 is not None

@@ -3,6 +3,19 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.36 — Verifikasi jujur: test suite basi di-rewrite (pra-restyle UI Waste)
+
+**Temuan baseline**: suite `test_ui_redesign.py` MERAH sebelum perubahan UI apa pun — 1559 ✓ / 6 ✗ + crash `_btn94.invoke()` yang mematikan ±1100 baris test akhir. Semua akar sama: **test tidak di-update saat v3.11.31 mengganti analisa 6-seksi dengan tabel selisih** (permintaan user), plus pin versi tertinggal di 3.11.30 dan headline README root tidak disinkronkan sejak v3.11.30.
+
+**Fix (test-only, tanpa sentuhan kode produksi)**:
+- **Pin versi** (§1): `APP_VERSION == "3.11.30"` → `3.11.36`.
+- **§13b (3 test)**: payload `meta` 6-seksi (n_konteks/n_gantung/basis_v310/n_com_minus) → kontrak baru `_analisa_payload` (rows/n_total/n_selisih/sum_abs/n_resto/n_barang) + baris Resto·Tgl·Barang·Selisih (KOPI +100/−100, SUSU +80, urut |selisih|↓) + panel judul 'ANALISA SELISIH' + tree 3 baris ber-tag pos/neg.
+- **§94-H (5 test H2..H6 → 3 test H2..H4)**: tombol '⤢ Perbesar'/popup seksi DIHAPUS (tidak ada lagi) → payload fixture aktual (n_total 2 · n_selisih 1 · rows R1/BRG/tgl5/+1) + tree 6 kolom + tag pos + sort klik judul toggle desc→asc.
+- **§76l**: README root (`/README.md`) headline v3.11.30 → v3.11.36 (inner README ikut).
+- Helper `_sec_btn_texts94`/`_find_btn94` (menyasar widget yang sudah tak ada) dibersihkan.
+
+**Verifikasi**: FULL SUITE `DISPLAY=:61 python3 test_ui_redesign.py` HIJAU sampai akhir (bagian pasca-crash kini tereksekusi).
+
 ## v3.11.35 — Deep audit fix (5 agents): crash + dead feature + normalization consistency
 
 **Audit**: 5 agents paralel scan 41 file / 41k LOC. Temuan: 2 P0 crash, 1 P1 dead feature, 5 P0/P1 normalization bug (pola sama dgn v3.11.34 PO Menunggu tapi belum ter-fix di join lain), 1 P3 v3.11.33 regression, + P3 cleanup.
