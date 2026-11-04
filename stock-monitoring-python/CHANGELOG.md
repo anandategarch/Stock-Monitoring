@@ -3,6 +3,33 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.54 — rapikan repo: hapus dead code + README profesional
+
+User: "Rapikan repo, hapus dead code dan read me rapikan lebih professional dan sesuai kondisi aktual"
+
+### Dead code dihapus
+- **`app.py:_auto_load_lalu` method** (~80 baris) — dead code sejak v3.11.53 (call dihapus dari `_on_pipeline_done`, method tetap utk backward-compat). Sekarang dihapus sepenuhnya (gak ada caller lagi).
+- **`app.py:_dev_bulanan_mode` method** — SELALU return "manual" sejak v3.11.53, gak dipanggil mana pun. Dihapus.
+- **`app.py:_dev_bulanan_last_cfg` attribute** — defined `= None` di `_build_config_tab` tapi gak pernah dibaca. Dihapus.
+- **`bench_views.py` script** — referensi `_compute_audit` (sudah dihapus v3.11.30 saat tab 📋 Laporan Deviasi dibongkar). Script broken, tidak dipakai CI/test. Dihapus.
+- **Komentar basi** referensi `_auto_load_lalu`, `DeviasiBulananMode='auto'`, `20.{BULAN}` (pattern lama) — diupdate jadi kondisi aktual (`12+month.{BULAN}`, "diisi tombol 📂 di tab ⚙️ Config").
+
+### README dirapikan profesional
+- Struktur jelas: **Fitur Utama** · Persyaratan · Cara Pakai · Tab Data · Interaksi Tabel · Struktur Kode · Testing · Build EXE · Konfigurasi · Versi · Lisensi
+- **Fitur Utama** ditambah — highlight 9 fitur kunci (pipeline, 9 tab, analisa CEK, saldo minus, analisa kronis, file bulan lalu manual, tooltip, persistensi, DPI-aware)
+- **Tab Data** diupdate — 9 tab actual dgn emoji + deskripsi singkat per tab (termasuk sub-tab Saldo Sistem Minus + Analisa Kronis di Nominal Deviasi)
+- **Cara Pakai File Deviasi Bulan Lalu** — section baru dgn 5 langkah (pattern `12+month.{BULAN}` dijelaskan)
+- **Interaksi Tabel** — tambah tooltip hover cell panjang
+- **Struktur Kode** — tree lengkap `src/` dgn deskripsi per file (20+ file ui/ + 12+ file pipeline/)
+- **Konfigurasi** — tabel `config.json` + `settings.json` keys dgn deskripsi (RootPath, Folders, Sheets, KategoriBarang4217, DeviasiBulananFolder/Jumlah, DpiAware, acr_threshold, com_ambang_pct, saldo_sistem_mode, KategoriManual)
+- Hilangkan referensi `tab 📋 Laporan Deviasi` (dihapus v3.11.30)
+- Hilangkan mention "auto-load" (dihapus v3.11.53)
+
+### Verifikasi
+- compileall src/ OK · ruff: 18 errors = baseline (no regression)
+- Semua import OK (`from src.ui.app import APP_VERSION` = 3.11.54)
+- APP_VERSION → 3.11.54; README "Versi terkini: v3.11.54"
+
 ## v3.11.53 — HAPUS auto-load deviasi bulan lalu (user: "program jadi not responding waktu load deviasi. hapus auto file deviasi bulan lalu")
 
 User: "program jadi not responding waktu load deviasi. kalau gitu aku pakai pilih file manual aja. hapus auto file deviasi bulan lalu"

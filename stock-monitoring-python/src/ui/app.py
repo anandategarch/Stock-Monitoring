@@ -196,7 +196,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.53"  # v3.11.53 — HAPUS auto-load deviasi bulan lalu (user: "program jadi not responding waktu load deviasi. hapus auto file deviasi bulan lalu")
+APP_VERSION = "3.11.54"  # v3.11.54 — rapikan repo: hapus dead code (_auto_load_lalu, _dev_bulanan_mode, _dev_bulanan_last_cfg, bench_views.py) + README profesional
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -2327,8 +2327,8 @@ class StockMonitorApp:
             load_saldo_sistem_mode())
         # v3.11.30 — FILE deviasi bulan lalu kini APP-LEVEL (tab 📋
         # Laporan Deviasi dihapus): sumber lalu_provider tab 📦/🧩 +
-        # popup Nominal Deviasi. Diisi _auto_load_lalu (mode ⚡) atau
-        # tombol 📂 kartu DEV BULANAN (mode 🫵 Manual).
+        # popup Nominal Deviasi. Diisi tombol 📂 'Muat Sekarang' di
+        # tab ⚙️ Config (v3.11.53 — auto-load dihapus).
         self._lalu_file_df = None
 
         # Style ttk (design system global)
@@ -2906,7 +2906,7 @@ class StockMonitorApp:
         # v3.11.30 — tab 📋 Laporan Deviasi DIHAPUS (user: "Hapus tab
         # laporan deviasi dan dead code nya") — 3 mode (Komparasi/Anomali
         # COM/Nominal H) dibongkar; file deviasi bulan lalu kini
-        # app-level (_lalu_file_df — auto-load _auto_load_lalu).
+        # app-level (_lalu_file_df — diisi tombol 📂 di tab ⚙️ Config).
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ harga×qty deviasi per resto
         self.notebook.add(self.tab_nominal_resto,
                           text="💰 Nominal Deviasi")
@@ -3453,9 +3453,6 @@ class StockMonitorApp:
 
         self.dev_bulanan_status_var = tk.StringVar(value="—")
         self._devbul_flash_after = None
-        # v3.11.11 — cfg terakhir utk tombol 📂 (diisi _on_pipeline_done;
-        # tombol juga bisa membangun ulang dari form + audit_result)
-        self._dev_bulanan_last_cfg = None
         tk.Label(dbul_inner, textvariable=self.dev_bulanan_status_var,
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8),
                  wraplength=860, justify="left").pack(
@@ -4427,21 +4424,14 @@ class StockMonitorApp:
             f"✓ Tersimpan — {jumlah} bulan mundur · manual — muat via "
             "tombol 📂.")
         self._append_log_batched(
-            f"\n[DEV BULANAN] Auto file deviasi bulan lalu tersimpan: "
+            f"\n[DEV BULANAN] File deviasi bulan lalu tersimpan: "
             f"folder '{folder}' · {jumlah} bulan mundur · mode manual "
             "(v3.11.53 — auto-load dihapus, hanya manual).\n")
-
-    def _dev_bulanan_mode(self) -> str:
-        """v3.11.11 — mode muat file deviasi bulan lalu dari config.json.
-        v3.11.53 — SELALU return 'manual' (user: "hapus auto file deviasi
-        bulan lalu"). Method tetap ada utk backward-compat (kode lama mungkin
-        panggil), tapi auto-load tidak akan pernah jalan lagi."""
-        return "manual"
 
     def _dev_bulanan_load_now(self):
         """v3.11.11 — tombol 📂 Muat Sekarang (user: "autofile deviasi
         bulan lalu aku bisa proses pipie line sendiri tidak jadi 1
-        lagi"): muat file deviasi '20.{BULAN} {TAHUN}' N bulan mundur
+        lagi"): muat file deviasi '{12+month}.{BULAN} {TAHUN}' N bulan mundur
         SEKARANG — tanpa menunggu/mengulang run pipeline. Folder +
         jumlah dibaca dari FORM saat tombol ditekan (belum perlu 💾
         Simpan); periode = data run terakhir (fallback bulan kalender
@@ -6290,14 +6280,12 @@ class StockMonitorApp:
         self.in_selisih_view.pack(fill="both", expand=True)
 
     # =====================================================================
-    # v3.11.30 — FILE DEVIASI BULAN LALU (APP-LEVEL; tab 📋 Laporan
-    # Deviasi DIHAPUS — user: "Hapus tab laporan deviasi dan dead code
-    # nya"). Sumber kolom 'Dev. Bulan Lalu' + analisa lalu-kini tab
-    # 📦/🧩 + popup 'Nominal Deviasi Bulan Lalu' tab 🧮. Dimuat:
-    # (a) ⚡ Otomatis pasca-pipeline (mode config DeviasiBulananMode
-    #     ='auto' — perilaku v3.11.9) via _auto_load_lalu;
-    # (b) 🫵 Manual via tombol 📂 kartu DEV BULANAN ⚙️ Config
-    #     (_dev_bulanan_load_now) — tanpa tab tujuan, parse di worker.
+    # FILE DEVIASI BULAN LALU (app-level; tab 📋 Laporan Deviasi DIHAPUS
+    # v3.11.30). Sumber kolom 'Dev. Bulan Lalu' + analisa lalu-kini tab
+    # 📦/🧩 + popup 'Nominal Deviasi Bulan Lalu' tab 🧮.
+    # v3.11.53 — auto-load DIHAPUS; file dimuat HANYA via tombol 📂
+    # 'Muat Sekarang' di tab ⚙️ Config (parse di worker thread, refresh
+    # 3 view via _notify_lalu_consumers).
     # =====================================================================
     def _notify_lalu_consumers(self):
         """File deviasi bulan lalu berganti → segarkan konsumen: kolom
@@ -6399,86 +6387,6 @@ class StockMonitorApp:
                 f"{err}\n")
 
         run_async(self, work, done, on_error=on_error)
-
-    def _auto_load_lalu(self, audit_result):
-        """v3.11.30 — ⚡ AUTO-LOAD file deviasi bulan lalu pasca-pipeline
-        (menggantikan komparasi_view.maybe_auto_load_last era tab 📋).
-        Hanya jalan bila mode config 'auto' (DeviasiBulananMode — user:
-        "autofile deviasi bulan lalu aku bisa proses pipie line sendiri
-        tidak jadi 1 lagi", default Manual) & cfg valid (folder ada —
-        _dev_bulanan_cfg). Folder ada tapi file '20.{BULAN} {TAHUN}'
-        belum ada → no-op jujur di log (bulang salah lebih berbahaya
-        dari tanpa file — kontrak v3.11.9 dipertahankan).
-
-        v3.11.50 — FIX audit #1+#2: log diagnostic utk SEMUA exit path
-        sebelumnya senyap — user bisa self-diagnose kenapa kolom 'Dev.
-        Bulan Lalu' kosong (mode manual / folder hilang / config invalid).
-        """
-        # v3.11.50 — FIX audit #4: clear stale _lalu_file_df di AWAL run
-        # baru supaya data basi dari run sebelumnya tidak bocor (sebelumnya
-        # bila auto-load gagal, _lalu_file_df LAMA tetap dipakai consumer).
-        # Hanya clear bila akan reload (mode auto); manual biarkan (user
-        # klik tombol sendiri utk load eksplisit).
-        if self._dev_bulanan_mode() != "auto":
-            # v3.11.50 — FIX audit #1: log jelas bila mode manual — sebelumnya
-            # silent return tanpa log, user bingung kenapa kolom kosong.
-            self._append_log_batched(
-                "\n[DEV BULANAN] Mode Manual — auto-load dilewati. "
-                "Klik 📂 'Muat Sekarang' di tab ⚙️ Config, atau set "
-                "DeviasiBulananMode='auto' di config.json utk auto-load "
-                "pasca-pipeline. Kolom Dev. Bulan Lalu kosong run ini.\n")
-            return
-        cfg = None
-        with contextlib.suppress(Exception):
-            cfg = self._dev_bulanan_cfg(audit_result)
-        if cfg is None:
-            # v3.11.50 — FIX audit #2+#3+#13: log jelas KENAPA cfg None —
-            # folder tidak ada / config invalid / period invalid. Sebelumnya
-            # silent return tanpa feedback ke user.
-            folder = None
-            with contextlib.suppress(Exception):
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, dict):
-                    folder = data.get(
-                        "DeviasiBulananFolder",
-                        self._DEV_BULANAN_DEF_FOLDER)
-            if not folder or not os.path.isdir(folder):
-                self._append_log_batched(
-                    f"\n[DEV BULANAN] Auto: folder deviasi bulanan TIDAK "
-                    f"ADA / belum dikonfigurasi — '{folder}'. Atur folder "
-                    f"yg benar di tab ⚙️ Config (kartu DEV BULANAN). Kolom "
-                    f"Dev. Bulan Lalu kosong run ini.\n")
-            else:
-                # Folder ada tapi cfg None → period invalid (audit_result
-                # tanpa 'period' key dan datetime fallback gagal).
-                self._append_log_batched(
-                    f"\n[DEV BULANAN] Auto: folder '{folder}' ada tapi "
-                    f"periode data tidak valid (audit_result['period'] "
-                    f"None). Jalankan pipeline ulang / cek data IN. "
-                    f"Kolom Dev. Bulan Lalu kosong run ini.\n")
-            # v3.11.50 — FIX audit #4: clear stale data bila reload gagal
-            # (supaya consumer gak pakai data lalu_file_df basi dari
-            # run sebelumnya).
-            if getattr(self, "_lalu_file_df", None) is not None:
-                self._lalu_file_df = None
-                self._notify_lalu_consumers()
-            return
-        # v3.11.50 — FIX audit #4: clear stale sebelum load baru (data
-        # lama di-invalidate dulu supaya bila parse gagal, tidak bocor).
-        self._lalu_file_df = None
-        self._notify_lalu_consumers()
-        self._dev_bulanan_last_cfg = cfg
-        paths = []
-        with contextlib.suppress(Exception):
-            paths = auto_bulanan_paths(cfg)
-        if not paths:
-            self._append_log_batched(
-                "\n[DEV BULANAN] Auto: belum ada file '20.{BULAN} {TAHUN}' "
-                "cocok di folder config utk periode data — kolom Dev. "
-                "Bulan Lalu kosong run ini.\n")
-            return
-        self._load_lalu_paths(paths, note="Auto: ")
 
     def _build_nominal_resto_tab(self):
         """v3.9.34 — tab 🧮 Nominal Deviasi: Σ (Harga 41.09 × Qty

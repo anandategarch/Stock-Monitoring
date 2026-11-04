@@ -10,11 +10,13 @@ fungsi murni yang masih dipakai fitur lain:
                                 📦 Deviasi GR / 🧩 PCS + analisa CEK
                                 lalu-kini + popup 'Nominal Deviasi
                                 Bulan Lalu' tab 🧮 Nominal Deviasi
-                                (auto-load app-level: _auto_load_lalu
-                                + tombol 📂 kartu DEV BULANAN ⚙️ Config);
+                                (dimuat via tombol 📂 'Muat Sekarang'
+                                di tab ⚙️ Config — v3.11.53 auto-load
+                                dihapus, hanya manual);
   - bulan_mundur_list         → transparansi bulan kartu ⚙️ Config;
-  - auto_bulanan_paths        → resolusi path '20.{BULAN} {TAHUN}'
-                                N bulan mundur (auto-load).
+  - auto_bulanan_paths        → resolusi path '{12+month}.{BULAN}
+                                {TAHUN}' N bulan mundur (Jan=13,
+                                Okt=22, Agu=20 backward-compat).
 
 Membaca file = TANPA UI; pemanggil menjalankan fungsi ini di thread
 worker (pola anti-beku v3.9.5 — file 9,4MB ±8 detik).
