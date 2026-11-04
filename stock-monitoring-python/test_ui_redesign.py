@@ -964,7 +964,7 @@ def main():
           len(app.notebook.tabs()) == 9,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.36", APP_VERSION == "3.11.36",
+    check("Versi = 3.11.37", APP_VERSION == "3.11.37",
           f"got {APP_VERSION}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))

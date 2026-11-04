@@ -13,6 +13,12 @@ Palet:
     C_MUTED    #64748b  slate-500  — teks sekunder
     C_ACCENT   #0f766e  teal-700   — tombol aksi utama
 
+v3.11.37 — PARITY WASTE (repo Waste v2.15.0, PySide6): token tambahan
+    C_TAB_IDLE      #475569  slate-600 — teks tab non-aktif (WCAG AA,
+                                      mirror C_TAB_IDLE_FG Waste v2.13.15)
+    STATUS_COLORS   peta status (fg, bg tint) 1:1 dgn Waste
+    Heading tabel   padding (8,8) DIPERTAHANKAN — lihat catatan CHANGELOG
+
 Font: resolusi otomatis — Segoe UI (Windows) → Noto Sans → DejaVu Sans
 (Linux) supaya metrik teks jujur di semua platform.
 
@@ -43,6 +49,25 @@ C_ACCENT = "#0f766e"         # teal-700 — aksi utama
 C_ACCENT_HOVER = "#115e59"   # teal-800
 C_ACCENT_SOFT = "#ccfbf1"    # teal-100 — seleksi baris
 C_ACCENT_DARK = "#134e4a"    # teal-900 — teks di atas seleksi
+
+# v3.11.37 — PARITY WASTE (v2.13.15 gel-6 C21): teks TAB NON-AKTIF.
+# Waste memakai C_TAB_IDLE_FG #475569 (slate-600) — kontras ±6,1:1 di
+# atas latar tab #e2e8f0 (WCAG AA ≥ 4,5:1). Stock-Monitoring dulu
+# memakai C_TEXT_MUTED #64748b (slate-500) = 3,1:1 — GAGAL AA (label
+# tab kabur di layar kecil/low-vision). Konstanta bernama supaya
+# keputusan a11y terlihat eksplisit, bukan warna ajaib.
+C_TAB_IDLE = "#475569"       # slate-600 — teks tab non-aktif (WCAG AA)
+
+# v3.11.37 — PARITY WASTE: peta status (fg, bg tint) 1:1 dgn
+# STATUS_COLORS Waste (theme.py Waste v2.15.0). Sumber tunggal untuk
+# pewarnaan status di seluruh app — chip/legenda/tag baris memakai
+# fg utk teks & bg tint utk latar lembut.
+STATUS_COLORS = {
+    "Prioritas Tinggi": ("#dc2626", "#fef2f2"),
+    "Potensi Anomali":  ("#ea580c", "#fff7ed"),
+    "Perlu Review":     ("#b45309", "#fffbeb"),
+    "Normal":           ("#16a34a", "#f0fdf4"),
+}
 
 # Status colors — identik dengan STATUS_COLORS Waste
 # (v3.3: varian *_SOFT & C_BLUE/C_PURPLE/C_LOG_MUTED yang tak terpakai
@@ -368,7 +393,10 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
     # FIX H-1 (audit 2-a — terkonfirmasi Xvfb): padding (18,9)+label
     # spasi-ganda = ±1280px utk 10 tab > minsize 1020px → tab kanan
     # terpotong. Kini (12,9): ±912px — muat dgn margin; tinggi tab tetap.
-    style.configure("TNotebook.Tab", background="#e2e8f0", foreground=C_TEXT_MUTED,
+    # v3.11.37 — PARITY WASTE: teks idle #64748b → C_TAB_IDLE #475569
+    # (slate-600, WCAG AA ±6,1:1 di atas #e2e8f0 — Waste v2.13.15 C21).
+    style.configure("TNotebook.Tab", background="#e2e8f0",
+                    foreground=C_TAB_IDLE,
                     padding=(12, 9), font=font(10), borderwidth=0)
     style.map("TNotebook.Tab",
               background=[("selected", C_CARD), ("active", "#eef2f7")],

@@ -193,7 +193,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.36"  # v3.11.36 — VERIFIKASI JUJUR: test suite basi
+APP_VERSION = "3.11.37"  # v3.11.37 — PARITY WASTE: token tema
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru

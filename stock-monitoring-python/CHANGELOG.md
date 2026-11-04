@@ -3,6 +3,17 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.37 — Parity Waste (1/3): token tema — tab WCAG AA + STATUS_COLORS
+
+**Analisa Waste**: repo Waste (PySide6, v2.15.0) sudah jadi rujukan design system Stock-Monitoring sejak v3.0 (slate+teal, card, toolbar gelap, konsol #0b1220). Audit GAP menemukan 3 token yang belum 100% paritas:
+
+- **Tab non-aktif**: SM `#64748b` (slate-500) kontras 3,1:1 di latar `#e2e8f0` — **GAGAL WCAG AA**. Waste v2.13.15 (gel-6 C21) sudah fix ke `#475569` (slate-600, ±6,1:1). SM kini ikut: token baru `C_TAB_IDLE`.
+- **STATUS_COLORS**: Waste punya peta status terstruktur (fg + bg tint per status). SM hanya konstanta tersebar. Kini ada sumber tunggal 1:1 dgn Waste (additive — view lama tak tersentuh).
+
+**Skip jujur — heading padding**: Waste QSS `QHeaderView::section padding 6px 8px` sempat dicoba dipetakan ke `Treeview.Heading` (8,8)→(8,6). FULL SUITE GAGAL 1 test: `§41 LABEL POOL` (overlay) — header 4px lebih pendek membuat 1 baris tambahan tampak → jumlah label pool 12→13 melewati cap `max(12, before)` (before=12 after=13). Gain visual trivial vs risiko pergeseran geometri lintas 10 tabel + overlay → **(8,8) dipertahankan** (font SM 10pt > 13px Waste — (8,8) sudah proporsional).
+
+**Verifikasi**: FULL SUITE `DISPLAY=:61` HIJAU 1633 PASS / 0 FAIL + test_mock ALL PASSED + ruff bersih + py_compile.
+
 ## v3.11.36 — Verifikasi jujur: test suite basi di-rewrite (pra-restyle UI Waste)
 
 **Temuan baseline**: suite `test_ui_redesign.py` MERAH sebelum perubahan UI apa pun — 1559 ✓ / 6 ✗ + crash `_btn94.invoke()` yang mematikan ±1100 baris test akhir. Semua akar sama: **test tidak di-update saat v3.11.31 mengganti analisa 6-seksi dengan tabel selisih** (permintaan user), plus pin versi tertinggal di 3.11.30 dan headline README root tidak disinkronkan sejak v3.11.30.
