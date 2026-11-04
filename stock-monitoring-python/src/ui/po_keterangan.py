@@ -343,3 +343,42 @@ def po_nomor_3243_for(rincian_po_df, nama_barang: str,
     rincian_po_df None."""
     return po_nomor_map_3243(rincian_po_df).get(
         (str(nama_barang), str(nama_resto)), "")
+
+
+def po_status_map_3243(rincian_po_df) -> dict:
+    """v3.11.42 — peta Status Pesanan Pembelian dari file 32.43 per
+    pasangan (barang, resto).
+
+    {(Nama Barang, NAMA RESTO): "Menunggu diproses, Diproses"} — Status
+    unik (di-dedup + urut) dari kolom 'Status Pesanan Pembelian'
+    rincian_po_df. NAMA RESTO diturunkan dari 'Cabang PO' via
+    ``resto_from_cabang_po`` (mirror po_nomor_map_3243). rincian_po_df
+    None/kosong/tak ber-Status → {}.
+
+    Dipakai kolom 'Status PO' anak tab "Saldo Sistem Minus" tab 🧮
+    Nominal Deviasi (ide J — konteks "minus karena PO belum diterima /
+    Menunggu diproses")."""
+    if rincian_po_df is None or getattr(rincian_po_df, "empty", True):
+        return {}
+    cols = set(getattr(rincian_po_df, "columns", []))
+    if not {"Nama Barang", "Cabang PO", "Status Pesanan Pembelian"} <= cols:
+        return {}
+    from ..pipeline.helpers import resto_from_cabang_po
+    det = pd.DataFrame({
+        "_b": rincian_po_df["Nama Barang"].astype(str),
+        "_r": rincian_po_df["Cabang PO"].map(resto_from_cabang_po)
+                              .astype(str),
+        "_s": rincian_po_df["Status Pesanan Pembelian"]
+                .astype(str).str.strip(),
+    })
+    mask = ((det["_s"] != "")
+            & (det["_s"].str.lower() != "nan")
+            & (det["_r"] != ""))
+    det = det[mask]
+    if det.empty:
+        return {}
+    out: dict = {}
+    for (b, r), grp in det.groupby(["_b", "_r"])["_s"]:
+        statuses = sorted(set(grp.tolist()))
+        out[(b, r)] = ", ".join(statuses)
+    return out

@@ -3,6 +3,23 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.42 — Anak tab "Saldo Sistem Minus" di Nominal Deviasi (Opsi 2, mode pivot/4217, 12 kolom, ide A-K semua)
+
+**Fitur baru** (user: "tambah fitur baru lagi di tab nominal deviasi tambah 1 baru yaitu Saldo Sistem Minus Dengan ambil data dari Pivot ... isinya rekapan saldo akhir atau saldo sistem yang minus dan keterangan nya isi dengan mulai minus dari tanggal berapa"). Klarifikasi user: (1) sumber 2 mode pivot/4217, (2) Opsi 2 SEMUA pasangan pernah minus 1..H, (3) Kuantiti = qty mulai minus, (4) Eksternal termasuk Campuran, (5) semua ide tambahan A-K.
+
+**Implementasi**:
+- **`nominal_common.py`**: + `hitung_saldo_minus_pairs(data, h, saldo_sistem_map, mode_4217)` → DataFrame per pasangan minus. Scan `2.SALDO AKHIR` per (pasangan, tgl 1..H); override tgl H dgn saldo_sistem_map (file 42.17) bila mode `4217`. Filter `SOURCE KIRIMAN` ∈ {Eksternal, Campuran}. Output: Nama Barang · NAMA RESTO · Satuan · Source Kiriman · Tgl Mulai Minus · Qty Mulai Minus · Min Qty · Max Qty · Tipe (Konsisten=beruntun minus dari mulai sampai H / Fluktuatif) · Durasi (H−mulai+1).
+- **`po_keterangan.py`**: + `po_status_map_3243(rincian_po_df)` → Status Pesanan Pembelian per pasangan (ide J — konteks "minus karena PO belum diterima / Menunggu").
+- **`saldo_minus_view.py`** (file baru): class `SaldoMinusView(tk.Frame)` — self-contained anak tab. 12 kolom (Resto · Nama Barang · Satuan · Qty Mulai Minus · Mulai Minus · Durasi · Min Qty · Max Qty · Tipe · Nomor PO 3243 · Status PO 3243 · Keterangan narasi gabungan). KPI card (total pasangan minus · total |qty| · resto minus terbanyak — ide E). Filter ⧩ + sort (ide F). Double-click → drill-down `details_popup` (ide G). Highlight baris Konsisten (red-800) vs Fluktuatif (amber-700 — ide H). Export Excel 💾 (ide I). Resto khusus MLGPAR/BDGSEK warna cell amber (ide K — konsisten v3.11.40). Subscribe `SharedTanggalH` + `SharedSaldoSistemMode` (auto-refresh H/mode berubah — konsisten dgn tab 📦/🧩).
+- **`nominal_resto_view.py`**: + anak tab "Saldo Sistem Minus" (sub-notebook ke-3, sejajar "Per Resto" & "Tanpa Harga"). `__init__` terima `saldo_sistem_state` + `rincian_po_df`; `load_data` delegate ke `SaldoMinusView`.
+- **`app.py`**: pass `saldo_sistem_state=self._shared_saldo_sistem` + `rincian_po_df=rincian_po_df` ke `NominalRestoView` (instantiate + load_data) — wiring end-to-end.
+
+**Mode saldo sistem**: konsisten dgn tab 📦/🧩 Deviasi GR/PCS (`SharedSaldoSistemMode` v3.11.40). Mode `4217` (default) = peta file 42.17 folder '6. 42.17' override tgl H. Mode `pivot` = running-stock saldo akhir pivot (TANPA override). Combobox diatur di tab 📦 Deviasi GR; SaldoMinusView subscribe → auto-refresh.
+
+**Kolom Keterangan** (narasi gabungan): `"Mulai minus tgl 3 · durasi 3 hari · Konsisten · PO: PO-001, PO-003 (Diproses, Menunggu diproses)"` — menggabung mulai minus + durasi + tipe + PO info (3243) dlm 1 string utk copy ringkas.
+
+**Verifikasi** (headless — no `$DISPLAY`): `py_compile` OK semua file · `ruff` no-new-error (nominal_common=1, po_keterangan=0, saldo_minus_view=0 [new, clean], nominal_resto_view=1, app.py=17 — semua = baseline) · import OK (semua modul + signature benar) · `hitung_saldo_minus_pairs` pandas e2e test PASS (mode pivot + mode 4217 override + filter Internal skip + Tipe Konsisten/Fluktuatif + sort |qty| desc + edge-cases None/empty) · `po_status_map_3243` test PASS · Keterangan builder test PASS · full e2e (compute + PO merge 3243 + Keterangan) PASS. Known: verifikasi visual Tk (anak tab render, KPI, cell-tag warna, drill-down popup) belum diuji headless — user perlu konfirmasi di Windows.
+
 ## v3.11.41 — Opsi A: Nomor PO popup pivot prioritas dari file 3243 (Rincian Pesanan Pembelian)
 
 **Analisa mendalam** (user: "Nomor PO dan keterangan dari file 3243 harusnya coba cek mendalam barangkali aku juga sala. cek juga file 3224"): ditemukan **DUA file berbeda** — v3.11.40 keliru pakai 3224:

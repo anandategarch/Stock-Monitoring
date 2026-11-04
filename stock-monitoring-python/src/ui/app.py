@@ -195,7 +195,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.41"  # v3.11.41 — Opsi A: Nomor PO popup pivot prioritas dari file 3243 (Rincian Pesanan Pembelian)
+APP_VERSION = "3.11.42"  # v3.11.42 — anak tab "Saldo Sistem Minus" di Nominal Deviasi (Opsi 2, mode pivot/4217, 12 kolom, ide A-K semua)
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -5481,10 +5481,14 @@ class StockMonitorApp:
             self._auto_load_lalu(audit_result)
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
         # v3.11.8 — + peta saldo sistem 42.17 (alasan sama dgn atas).
+        # v3.11.42 — + rincian_po_df (3243) utk anak tab 'Saldo Sistem
+        # Minus' (kolom Nomor PO / Status PO). saldo_sistem_state sudah
+        # di-pass ke __init__ nominal_resto_view (mode dibagi tab 📦/🧩).
         _load_view("Nominal Deviasi",
                    lambda: self.nominal_resto_view.load_data(
                        append1_df, harga_map=_hm, konversi_map=_kv,
-                       saldo_sistem_map=_ssm),
+                       saldo_sistem_map=_ssm,
+                       rincian_po_df=rincian_po_df),
                    self.nominal_resto_view)
         _load_view("Rincian PO",
                    lambda: self.rincian_view.load_data(
@@ -6340,7 +6344,13 @@ class StockMonitorApp:
             self.tab_nominal_resto,
             go_to_proses=self._go_to_proses_tab,
             h_state=self._shared_h,
-            lalu_provider=lambda: self._lalu_file_df)
+            lalu_provider=lambda: self._lalu_file_df,
+            # v3.11.42 — mode saldo sistem dibagi dgn tab 📦/🧩 (utk
+            # anak tab 'Saldo Sistem Minus').
+            saldo_sistem_state=self._shared_saldo_sistem,
+            # rincian_po_df (3243) di-pass saat load_data (bisa None
+            # pra-pipeline; __init__ simpan placeholder None).
+            rincian_po_df=None)
         self.nominal_resto_view.pack(fill="both", expand=True)
 
     def _build_followup_tab(self):

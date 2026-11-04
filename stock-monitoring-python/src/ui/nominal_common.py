@@ -981,3 +981,193 @@ def dev_lalu_qty_map(file_df: pd.DataFrame | None,
         for _, r in out.iterrows()}
     label = f"{_wk_label} · {_bulan_label_multi(file_df, _target_bulan)}"
     return (qty_map, label)
+
+
+# ---------------------------------------------------------------------------
+# SALDO SISTEM MINUS (anak tab "Saldo Sistem Minus" tab 🧮 Nominal Deviasi)
+# v3.11.42 — user: "tambah fitur baru lagi di tab nominal deviasi tambah 1
+# baru yaitu Saldo Sistem Minus Dengan ambil data dari Pivot ... isinya
+# rekapan saldo akhir atau saldo sistem yang minus dan keterangan nya isi
+# dengan mulai minus dari tanggal berapa". Opsi 2: SEMUA pasangan yg pernah
+# minus di 1..H. Hanya SOURCE KIRIMAN Eksternal/Campuran.
+# ---------------------------------------------------------------------------
+_SRC_EKSTERNAL_MINUS = ("Eksternal", "Campuran")
+
+
+def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
+                             saldo_sistem_map: dict | None = None,
+                             mode_4217: bool = True) -> pd.DataFrame:
+    """v3.11.42 — Pasangan (barang, resto) dgn SALDO SISTEM minus di
+    rentang 1..H (Opsi 2 — SEMUA pasangan yg pernah minus, bukan hanya
+    snapshot H).
+
+    Scan ``2.SALDO AKHIR`` per (pasangan, tgl 1..H) di append1_df.
+    Override tgl H dgn ``saldo_sistem_map`` (file 42.17 folder '6. 42.17')
+    bila ``mode_4217=True`` & pasangan ada di peta (konsisten dgn tab
+    📦/🧩 Deviasi GR/PCS — SharedSaldoSistemMode). Mode ``pivot`` (mode_4217
+    =False) = pakai running-stock saldo akhir pivot TANPA override.
+
+    Filter: hanya pasangan dgn ``SOURCE KIRIMAN`` ∈ {Eksternal, Campuran}
+    (user: "Khusus yang sumber nya dari Eksternal aja" — Campuran
+    termasuk krn punya komponen eksternal). Lookup dari kolom
+    ``SOURCE KIRIMAN`` append1_df (klasifikasi per pasangan LANGKAH 5b).
+
+    Output per pasangan minus:
+    - ``Nama Barang``, ``NAMA RESTO``, ``Satuan``, ``Source Kiriman``
+    - ``Tgl Mulai Minus`` — tanggal pertama saldo < 0 di 1..H (sorted asc)
+    - ``Qty Mulai Minus`` — saldo pd tgl mulai minus (user: "mulai minus
+      aja" utk Kuantiti)
+    - ``Min Qty`` — saldo terendah 1..H (ide B)
+    - ``Max Qty`` — saldo tertinggi 1..H (ide B; bisa plus)
+    - ``Tipe`` — ``Konsisten`` (semua tgl dgn saldo ≠ 0 itu minus) /
+      ``Fluktuatif`` (sebagian tgl plus/0) — ide C
+    - ``Durasi`` — H − tgl_mulai + 1 (ide A; hari sejak mulai minus)
+
+    Pasangan dgn saldo >= 0 sepanjang 1..H dikecualikan. DataFrame kosong
+    bila tak ada pasangan minus / data None/kosong / kolom kurang.
+    Urutan: |Qty Mulai Minus| MENURUN (paling minus di atas).
+    """
+    if data is None or getattr(data, "empty", True):
+        return pd.DataFrame()
+    h = int(h)
+    cols = set(getattr(data, "columns", []))
+    if not {"Nama Barang", "NAMA RESTO", "Tanggal", "JENIS",
+            "NILAI"} <= cols:
+        return pd.DataFrame()
+
+    tnum = pd.to_numeric(data["Tanggal"], errors="coerce")
+    _jenis = data["JENIS"].astype(str)
+
+    # 1. Saldo per (pasangan, tgl 1..H) dari 2.SALDO AKHIR
+    saldo_mask = (_jenis == "2.SALDO AKHIR") & (tnum >= 1) & (tnum <= h)
+    saldo_df = data.loc[saldo_mask].copy()
+    if saldo_df.empty:
+        return pd.DataFrame()
+    saldo_df = saldo_df.assign(
+        _t=pd.to_numeric(saldo_df["Tanggal"], errors="coerce")
+          .astype("Int64"),
+        _v=pd.to_numeric(saldo_df["NILAI"], errors="coerce").fillna(0.0),
+        _b=saldo_df["Nama Barang"].astype(str),
+        _r=saldo_df["NAMA RESTO"].astype(str))
+    # Drop tgl NaN (defensive — tnum Int64 bisa NA)
+    saldo_df = saldo_df.dropna(subset=["_t"])
+    if saldo_df.empty:
+        return pd.DataFrame()
+
+    # Pivot: index (barang, resto), columns tgl, values saldo sum
+    pivot = saldo_df.pivot_table(
+        index=["_b", "_r"], columns="_t", values="_v",
+        aggfunc="sum", fill_value=0.0)
+
+    # 2. Override tgl H dgn saldo_sistem_map (mode 4217)
+    if mode_4217 and saldo_sistem_map:
+        try:
+            _ss_lookup = {
+                f"{_norm_name_lalu(b)}\x1f{_norm_resto_lalu(r)}": float(v)
+                for (b, r), v in saldo_sistem_map.items()}
+            if _ss_lookup and h in pivot.columns:
+                _idx_b = pivot.index.get_level_values("_b")
+                _idx_r = pivot.index.get_level_values("_r")
+                _keys = (_idx_b.to_series().map(_norm_name_lalu).values
+                         + "\x1f"
+                         + _idx_r.to_series().map(_norm_resto_lalu).values)
+                _ss_v = pd.Series(
+                    [_ss_lookup.get(k) for k in _keys], index=pivot.index)
+                _mask = _ss_v.notna()
+                if _mask.any():
+                    pivot.loc[_mask, h] = _ss_v[_mask].values.astype(
+                        pivot[h].dtype)
+        except (KeyError, TypeError, ValueError):
+            pass   # peta salah bentuk → running-stock apa adanya (jujur)
+
+    # 3. Filter pasangan dgn min saldo < 0 (pernah minus di 1..H)
+    if pivot.empty:
+        return pd.DataFrame()
+    min_per_row = pivot.min(axis=1)
+    minus_mask = min_per_row < 0
+    if not minus_mask.any():
+        return pd.DataFrame()
+    pivot_minus = pivot[minus_mask]
+
+    # 4. Lookup Source Kiriman per pasangan (dari kolom SOURCE KIRIMAN
+    # append1_df — klasifikasi LANGKAH 5b, 1 nilai per pasangan)
+    _sk_map: dict = {}
+    if "SOURCE KIRIMAN" in cols:
+        _sk = data.dropna(subset=["SOURCE KIRIMAN"])
+        if not _sk.empty:
+            _g = _sk.groupby(
+                [_sk["Nama Barang"].astype(str),
+                 _sk["NAMA RESTO"].astype(str)])["SOURCE KIRIMAN"].first()
+            _sk_map = {k: str(v).strip() for k, v in _g.items()
+                       if pd.notna(v) and str(v).strip()}
+
+    # 5. Lookup Satuan per pasangan (dari baris 2.SALDO AKHIR — konstan
+    # per pasangan; bila NA, fallback baris 1.SO)
+    _sat_map: dict = {}
+    if "SATUAN" in cols:
+        _sg = saldo_df.dropna(subset=["SATUAN"])
+        if not _sg.empty:
+            _sg = _sg.assign(
+                _sat=_sg["SATUAN"].map(
+                    lambda v: norm_sat(v) if norm_sat(v) else ""))
+            _g2 = _sg[_sg["_sat"] != ""].groupby(["_b", "_r"])["_sat"].first()
+            _sat_map = {k: v for k, v in _g2.items()}
+        # Fallback: baris 1.SO utk pasangan tanpa baris 2.SALDO AKHIR
+        # ber-SATUAN (teoretis — 2.SALDO AKHIR biasanya ber-SATUAN)
+        if not _sat_map:
+            _so = data.loc[_jenis == "1.SO"].dropna(subset=["SATUAN"])
+            if not _so.empty:
+                _so = _so.assign(
+                    _sat=_so["SATUAN"].map(
+                        lambda v: norm_sat(v) if norm_sat(v) else ""))
+                _g3 = _so[_so["_sat"] != ""].groupby([
+                    _so["Nama Barang"].astype(str),
+                    _so["NAMA RESTO"].astype(str)])["_sat"].first()
+                _sat_map = {k: v for k, v in _g3.items()}
+
+    # 6. Per pasangan minus: tgl mulai minus, qty, min/max, tipe, durasi
+    rows = []
+    for (b, r), row in pivot_minus.iterrows():
+        # tgl dgn saldo < 0 (sorted asc)
+        tgl_minus = sorted(int(t) for t in row.index
+                           if pd.notna(row[t]) and float(row[t]) < 0)
+        if not tgl_minus:
+            continue
+        tgl_mulai = tgl_minus[0]
+        qty_mulai = float(row[tgl_mulai])
+        min_qty = float(row.min())
+        max_qty = float(row.max())
+        # Tipe: Konsisten = beruntun minus dari tgl_mulai sampai H
+        # (semua tgl di range [tgl_mulai..H] minus); Fluktuatif = ada
+        # tgl non-minus (plus/0) di antara tgl_mulai dan H.
+        range_vals = [float(row[t]) for t in row.index
+                      if pd.notna(row[t]) and int(t) >= tgl_mulai]
+        all_minus_in_range = bool(range_vals) and all(v < 0 for v in range_vals)
+        tipe = "Konsisten" if all_minus_in_range else "Fluktuatif"
+        durasi = h - tgl_mulai + 1
+        src = _sk_map.get((b, r), "")
+        sat = _sat_map.get((b, r), "")
+        rows.append({
+            "Nama Barang": b, "NAMA RESTO": r, "Satuan": sat,
+            "Source Kiriman": src,
+            "Tgl Mulai Minus": tgl_mulai,
+            "Qty Mulai Minus": qty_mulai,
+            "Min Qty": min_qty, "Max Qty": max_qty,
+            "Tipe": tipe, "Durasi": durasi,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows)
+
+    # 7. Filter Source Kiriman ∈ {Eksternal, Campuran}
+    out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)]
+    if out.empty:
+        return pd.DataFrame()
+
+    # 8. Sort by |Qty Mulai Minus| MENURUN (paling minus di atas)
+    out = out.assign(_abs=out["Qty Mulai Minus"].abs())
+    out = out.sort_values("_abs", ascending=False, kind="mergesort")
+    out = out.drop(columns="_abs").reset_index(drop=True)
+    return out
+

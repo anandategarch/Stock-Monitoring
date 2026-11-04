@@ -279,7 +279,9 @@ class NominalRestoView(tk.Frame):
     COLUMNS_IDS = tuple(c[0] for c in COLUMNS)
 
     def __init__(self, parent, go_to_proses: Callable | None = None,
-                 h_state=None, lalu_provider: Callable | None = None):
+                 h_state=None, lalu_provider: Callable | None = None,
+                 saldo_sistem_state=None,
+                 rincian_po_df: pd.DataFrame | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
@@ -308,6 +310,11 @@ class NominalRestoView(tk.Frame):
         # kolom dinamis 'Lalu <label>' (self._lalu_extra).
         self._lalu_frames: list = []
         self._lalu_extra: list = []   # [(col_id, label, week)] bulan ≥2
+        # v3.11.42 — anak tab 'Saldo Sistem Minus' (saldo_minus_view):
+        # mode saldo sistem dibagi dgn tab 📦/🧩 (SharedSaldoSistemMode)
+        # + rincian_po_df (3243) utk kolom Nomor PO / Status PO.
+        self._saldo_sistem_state = saldo_sistem_state
+        self._rincian_po_df = rincian_po_df
         # v3.9.63 — ANAK TAB 'Tanpa Harga' (global): frame pasangan tanpa
         # harga dari data MENTAH (pasangan_tanpa_harga_global — dihitung
         # di _compute_resto bersama tabel utama) + filter kategori & ⧩
@@ -366,16 +373,20 @@ class NominalRestoView(tk.Frame):
         self.content = tk.Frame(self, bg=C_BG)
 
         # v3.9.63 — ANAK TAB (user: "dan itu buat anak tab baru di nominal
-        # deviasi yang menampilkan secara global"): sub-notebook 2 anak
-        # tab — 'Per Resto' (tabel utama + filter KATEGORI utama —
-        # perilaku lama utuh) + 'Tanpa Harga' (daftar barang tanpa harga
-        # GLOBAL semua resto & kategori + filter kategori SENDIRI).
+        # deviasi yang menampilkan secara global"): sub-notebook anak tab —
+        # 'Per Resto' (tabel utama + filter KATEGORI utama — perilaku lama
+        # utuh) + 'Tanpa Harga' (daftar barang tanpa harga GLOBAL semua
+        # resto & kategori + filter kategori SENDIRI).
+        # v3.11.42 — + anak tab 'Saldo Sistem Minus' (saldo sistem minus
+        # 1..H, hanya Eksternal/Campuran — saldo_minus_view).
         self._sub_nb = ttk.Notebook(self.content)
         self._sub_nb.pack(fill="both", expand=True)
         self._tab_main = tk.Frame(self._sub_nb, bg=C_BG)
         self._tab_noharga = tk.Frame(self._sub_nb, bg=C_BG)
+        self._tab_minus = tk.Frame(self._sub_nb, bg=C_BG)
         self._sub_nb.add(self._tab_main, text="Per Resto")
         self._sub_nb.add(self._tab_noharga, text="Tanpa Harga")
+        self._sub_nb.add(self._tab_minus, text="Saldo Sistem Minus")
 
         # --- Filter card: chip H bersama (read-only) + TOTAL chip ---
         fcard = Card(self._tab_main, title="Filter")
@@ -516,6 +527,14 @@ class NominalRestoView(tk.Frame):
         # v3.9.63 — anak tab 'Tanpa Harga' (global) — dibangun SETELAH
         # tree utama (header_filters/_colmgr utama tak terganggu).
         self._build_noharga_tab()
+        # v3.11.42 — anak tab 'Saldo Sistem Minus' (saldo_minus_view).
+        from .saldo_minus_view import SaldoMinusView
+        self._saldo_minus_view = SaldoMinusView(
+            self._tab_minus,
+            h_state=self._h_state,
+            saldo_sistem_state=self._saldo_sistem_state,
+            go_to_proses=self.go_to_proses)
+        self._saldo_minus_view.pack(fill="both", expand=True)
 
     # =========================================================================
     # v3.9.63 — ANAK TAB 'TANPA HARGA' (GLOBAL)
@@ -1133,13 +1152,18 @@ class NominalRestoView(tk.Frame):
     # =========================================================================
     def load_data(self, data: pd.DataFrame, harga_map: dict | None = None,
                   konversi_map: dict | None = None,
-                  saldo_sistem_map: dict | None = None):
+                  saldo_sistem_map: dict | None = None,
+                  rincian_po_df: pd.DataFrame | None = None):
         self.data = data
         self.harga_map = harga_map or {}
         self.konversi_map = konversi_map
         # v3.11.8 — peta saldo sistem 42.17 (opsional; None/{} = Qty
         # Deviasi = 3.DEVIASI apa adanya — perilaku lama).
         self.saldo_sistem_map = saldo_sistem_map or {}
+        # v3.11.42 — rincian_po_df (3243) utk anak tab 'Saldo Sistem Minus'
+        # (kolom Nomor PO / Status PO). Bisa None (jalur test/standalone).
+        if rincian_po_df is not None:
+            self._rincian_po_df = rincian_po_df
         self._render_gen += 1
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
@@ -1204,6 +1228,14 @@ class NominalRestoView(tk.Frame):
             self._refresh()
         else:
             self._dirty = True
+        # v3.11.42 — delegate ke anak tab 'Saldo Sistem Minus'
+        # (SaldoMinusView punya listener h_state & saldo_sistem_state
+        # sendiri utk auto-refresh mode/H; load_data di sini teruskan
+        # data + saldo_sistem_map + rincian_po_df).
+        if getattr(self, "_saldo_minus_view", None) is not None:
+            with contextlib.suppress(Exception):
+                self._saldo_minus_view.load_data(
+                    data, self.saldo_sistem_map, self._rincian_po_df)
         # footer informatif jalur 0-baris (pola v3.9.33)
         if data is None or len(data) == 0:
             self.status_var_label.set(
