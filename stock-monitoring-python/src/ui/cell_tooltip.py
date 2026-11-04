@@ -237,12 +237,13 @@ class CellTooltip:
         if self._tip is None or not self._tip.winfo_exists():
             self._tip = tk.Toplevel(tree)
             self._tip.wm_overrideredirect(True)
-            # v3.11.48 — FIX audit #5: wm_transient supaya tip selalu di atas
-            # parent Toplevelnya (yc saat parent punya popup drilldown lain).
-            # -topmost saja tidak reliable di Linux X11. transient + lift()
-            # menjamin tip tetap visible di atas parent.
-            with contextlib.suppress(tk.TclError):
-                self._tip.wm_transient(tree.winfo_toplevel())
+            # v3.11.49 — FIX regression v3.11.48: HAPUS wm_transient —
+            # konflik dgn overrideredirect(True) di Windows Tk: transient
+            # trigger WM interaction → posisi reset ke (0,0) → tip muncul
+            # di POJOK KIRI ATAS layar (user report: "tooltip berada di
+            # pojok kirii atas?"). Audit #5 concern (tip obscured by
+            # other Toplevels in X11) sudah diatasi oleh lift() saja
+            # (line bawah) — tidak butuh transient.
             self._tip.attributes("-topmost", True)
             self._tip.configure(bg=self._border)
             lbl = tk.Label(
@@ -274,7 +275,7 @@ class CellTooltip:
             sw = tree.winfo_screenwidth()
             sh = tree.winfo_screenheight()
             # v3.11.48 — FIX audit #6: tip lebih tinggi dari layar →
-                       # kurangi wraplength proporsional supaya muat.
+            # kurangi wraplength proporsional supaya muat.
             if h > sh - 8 and self._max_width > 200:
                 new_wl = max(200, int(self._max_width * (sh - 8) / h))
                 for child in self._tip.winfo_children():
@@ -290,9 +291,12 @@ class CellTooltip:
             if y + h > sh - 4:
                 # tampilkan di atas cursor bila tidak muat di bawah
                 y = max(py - h - 8, 4)
-            self._tip.wm_geometry(f"+{x}+{y}")
-            # v3.11.48 — FIX audit #5: lift() memaksa tip ke atas stack window
-            # (redundant dgn -topmost tapi lebih reliable di X11).
+            # v3.11.49 — set geometry PERSIS sebelum lift; gunakan
+            # format lengkap WxH+X+Y utk reliability cross-platform
+            # (hanya +X+Y kadang tidak stick di beberapa Tk version).
+            self._tip.wm_geometry(f"{w}x{h}+{x}+{y}")
+            # v3.11.48 — FIX audit #5: lift() memaksa tip ke atas stack
+            # window (redundant dgn -topmost tapi lebih reliable di X11).
             self._tip.lift()
         except tk.TclError:
             pass

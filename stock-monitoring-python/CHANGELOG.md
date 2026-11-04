@@ -3,6 +3,24 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.49 — FIX regression v3.11.48: tooltip muncul di pojok kiri atas (wm_transient konflik overrideredirect)
+
+User: "tooltip berada di pojok kirii atas?" — regression dari v3.11.48 audit fix #5 (cell_tooltip.py _render_tip).
+
+**Root cause:** v3.11.48 menambahkan `wm_transient(tree.winfo_toplevel())` untuk reliability Linux X11 (audit #5 concern: tip bisa tertutup Toplevel lain). TAPI `wm_transient` pada `wm_overrideredirect(True)` Toplevel **konflik di Windows Tk** — `wm_transient` trigger WM interaction yang reset posisi window ke default (0, 0) → tip muncul di **pojok kiri atas layar**, bukan dekat cursor.
+
+**Fix:**
+- `cell_tooltip.py:_render_tip` — HAPUS `wm_transient(tree.winfo_toplevel())` sepenuhnya. Audit #5 concern (tip obscured by other Toplevels in X11) sudah diatasi oleh `self._tip.lift()` saja (line bawah, ditambah v3.11.48) — tidak butuh `wm_transient`.
+- Bonus: `wm_geometry(f"+{x}+{y}")` (position-only) → `wm_geometry(f"{w}x{h}+{x}+{y}")` (full geometry format) untuk reliability cross-platform — beberapa Tk version tidak stick dengan position-only format.
+
+**Verifikasi — Xvfb test SUNGGUHAN:**
+- Hover cell CEK row_0 di Xvfb :99 → pointer warped ke (500, 129) → tip muncul di **(514, 147)** = pointer + offset (14, 18) — TEPAT dekat cursor, BUKAN (0, 0) pojok kiri atas.
+- `assert tip_x > 50` PASS (514 > 50) · `assert tip_y > 50` PASS (147 > 50) · `assert abs(tip_x - expected_x) < 200` PASS (0 < 200).
+- compileall OK · ruff: cell_tooltip All checks passed.
+- APP_VERSION → 3.11.49; README "Versi terkini: v3.11.49".
+
+**Catatan:** audit #5 v3.11.48 (tip obscured Toplevel lain in X11) adalah concern minor — `lift()` saja cukup. `wm_transient` over-engineering yang malah jadi regression. Pelajaran: jangan tambah `wm_transient` pada `overrideredirect(True)` window — keduanya konflik (overrideredirect = bypass WM; transient = minta WM manage).
+
 ## v3.11.48 — deep audit fix (5 agent paralel → 22 findings, 14 fixed)
 
 User: "Deep audit sebar agent dan fix" — 5 agent di-launch paralel audit v3.11.47 (cell_tooltip.py · saldo_minus_view + analisa_kronis_view · nominal_common · nominal_resto_view wiring · deviasi_view tooltip integration). 22 findings terkumpul (2 CRITICAL, 7 HIGH, 5 MEDIUM, 8 LOW). 14 paling impact-ful di-fix; sisanya LOW/dead-code/defensive — didokumentasikan di CHANGELOG.
