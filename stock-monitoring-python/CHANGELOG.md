@@ -3,6 +3,54 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.50 — fix Deviasi Bulan Lalu (13 findings dari audit deep cek)
+
+User: "auto file deviasi bulan lalu ini apakah ada bug? sehingga tidak muncul di tab mana pun? Deep cek dulu" → "fix semua".
+
+Deep audit 2 agent paralel audit end-to-end pipeline Deviasi Bulan Lalu → 17 findings. 13 paling impact-ful di-fix; 4 LOW/defensive skip (comment wording, dead param, race window, AGS typo redundan dgn singkatan lain). **Root cause utama "tidak muncul di tab mana pun": default `DeviasiBulananMode='manual'` + folder hilang → silent no-op tanpa log.**
+
+### CRITICAL fix
+- **#1 default mode `manual` silent no-op** (`app.py:_auto_load_lalu`): sebelumnya `if self._dev_bulanan_mode() != "auto": return` TANPA log → user gak tau kenapa kolom 'Dev. Bulan Lalu' kosong. FIX: log jelas "[DEV BULANAN] Mode Manual — auto-load dilewati. Klik 📂 'Muat Sekarang' di tab ⚙️ Config, atau set DeviasiBulananMode='auto' di config.json".
+- **#2 `_dev_bulanan_cfg` return None silent** (`app.py:_auto_load_lalu`): folder hilang / config invalid / period invalid → silent return. FIX: log jelas KENAPA cfg None — "folder deviasi bulanan TIDAK ADA / belum dikonfigurasi — '{folder}'" atau "folder '{folder}' ada tapi periode data tidak valid".
+- **#3 period fallback pakai jam sistem** (`main.py:detect_data_period`): bila timestamp & Nomor regex gagal, fallback `datetime.now()` → mismatch bila user proses data lama di bulan berbeda → auto_bulanan_paths cari file bulan SALAH. FIX: log WARNING jelas "[WARNING] detect_data_period gagal — fallback periode jam sistem: YYYY-MM. Bila data lama, auto-load file deviasi bulan lalu mungkin miss".
+- **#4 STALE `_lalu_file_df` lintas run** (`app.py:_auto_load_lalu` + `_load_lalu_paths`): Run 1 sukses load, Run 2 gagal → `_lalu_file_df` LAMA tetap dipakai consumer (data basi, kolom tetap nunjukkin data bulan lalu yg salah tanpa warning). FIX: clear `self._lalu_file_df = None` + `_notify_lalu_consumers()` di AWAL `_auto_load_lalu` (mode auto) + di `_load_lalu_paths.done` bila semua file gagal parse.
+
+### HIGH fix
+- **#5 label tombol "Muat ke Komparasi Sekarang"** (`app.py`): tab Komparasi sudah dihapus v3.11.30! User bingung. FIX: ganti ke "📂 Muat Sekarang".
+- **#6 footer popup "(Komparasi)"** (`nominal_resto_view.py:1801, 2275`): referensi tab yg sudah dihapus. FIX: ganti ke "(klik 📂 di tab ⚙️ Config)".
+- **#7 `_lalu_loaded = fdf is not None`** (`nominal_resto_view.py:1451`): empty df dianggap "loaded" → popup footer misleading "tanpa pasangan" padahal file kosong total. FIX: `fdf is not None and not getattr(fdf, "empty", True)`.
+- **#8 `parse_deviasi_file` empty df after bad_week** (`deviasi_file.py:306-308`): kalau SEMUA baris punya Minggu tak dikenal ("PERIODE 1", "AKHIR") → return `ok=True, df=<empty>` → log "1 file dimuat (0 baris)" menyesatkan. FIX: cek `if out.empty` setelah bad_week filter → return `ok=False` dgn error jelas.
+- **#9 `_BULAN_NUM` missing "AGS"** (`deviasi_file.py:43-51`): singkatan umum Agustus "AGS" tidak ada → semua baris August dgn label "AGS" jadi bulan_num=0 → parse rusak. FIX: tambah `"AGS": 8`.
+
+### MEDIUM fix
+- **#10 `_notify_lalu_consumers` contextlib.suppress** (`app.py:6322, 6327`): consumer exception senyap, debugging impossible. FIX: ganti ke try/except dgn `print("[WARNING] ...")`.
+- **#12 `_lalu_provider()` exception senyap** (`nominal_resto_view.py:1448-1451`): contextlib.suppress(Exception). FIX: try/except dgn log WARNING.
+
+### LOW fix
+- **#17 filename whitespace strict** (`deviasi_file.py:auto_bulanan_paths`): "20. AGUSTUS 2026.xlsx" (spasi setelah titik) gak match "20.AGUSTUS 2026" target. FIX: normalisasi `re.sub(r"\s+", " ", base)` + `re.sub(r"\.\s+", ".", base)` di by_base keys + want target — case-insensitive + whitespace-tolerant.
+
+### LOW yang TIDAK di-fix (deferred)
+- #11 async race window (table render ~7s sebelum auto-load selesai) — perlu loading chip UI, defer.
+- #13 default folder Windows path absolut — by-design (user set sendiri di ⚙️ Config).
+- #15 sub-tab "Nominal Deviasi Bulan Lalu" TIDAK ADA — itu KOLOM di tab "Per Resto" + popup drill-down (double-click baris), bukan sub-tab terpisah — by-design.
+- #16 dead `anchor` param di loop — false alarm, valid unpacked tuple usage.
+
+### Verifikasi — Xvfb GUI test + e2e pandas (4/4 PASS)
+- **T1** `_lalu_loaded = False` ketika provider returns None (sebelumnya True) — FIX #7 ✓
+- **T2** `_lalu_loaded = False` ketika provider returns empty DataFrame (sebelumnya True) — FIX #7 ✓
+- **T3** label "Muat ke Komparasi Sekarang" sudah dihapus dari app.py (grep = 0) — FIX #5 ✓
+- **T4** footer "belum dimuat (Komparasi)" sudah dihapus dari nominal_resto_view.py (grep = 0) — FIX #6 ✓
+- Plus e2e pandas: `_BULAN_NUM.get("AGS") == 8` ✓ (FIX #9) · `auto_bulanan_paths` whitespace normalization — 3 variants filename (`20.AGUSTUS 2026.xlsx`, `20. AGUSTUS 2026.xlsx`, `20.  AGUSTUS 2026.xlsx`) all match same target → 1 path returned ✓ (FIX #17).
+- compileall src/ OK · ruff: 22 errors = baseline (no regression).
+- APP_VERSION → 3.11.50; README "Versi terkini: v3.11.50".
+
+### Catatan ke user (penyebab utama "tidak muncul")
+1. **Mode default = `manual`** — kamu harus klik tombol 📂 "Muat Sekarang" di tab ⚙️ Config, ATAU set `DeviasiBulananMode: "auto"` di `config.json`.
+2. **Folder config salah / belum di-set** — default `C:\KERJA\1. RESTO\99.TOOLS\DATA BASE DEVIASI\DEVIASI_BULANAN` mungkin gak ada di komputer kamu.
+3. **File `20.{BULAN} {TAHUN}.xlsx` harus ada di folder yg dikonfigurasi** — nama PERSIS (sekarang whitespace-tolerant: "20. AGUSTUS 2026.xlsx" juga match).
+4. **Kalau file pakai singkatan "AGS" utk Agustus** — sekarang sudah didukung (FIX #9).
+5. **Sekarang setiap exit path auto-load kelog jelas** — kamu bisa self-diagnose di tab 🚀 Proses.
+
 ## v3.11.49 — FIX regression v3.11.48: tooltip muncul di pojok kiri atas (wm_transient konflik overrideredirect)
 
 User: "tooltip berada di pojok kirii atas?" — regression dari v3.11.48 audit fix #5 (cell_tooltip.py _render_tip).

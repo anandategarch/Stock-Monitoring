@@ -442,7 +442,7 @@ class NominalRestoView(tk.Frame):
             "<<ComboboxSelected>>", lambda e: self._on_kategori_changed())
         tk.Label(r1b, text="default: kategori Rekap Mentah (pola tab "
                             "Deviasi GR) · kolom Bulan Lalu = file "
-                            "deviasi (Komparasi)",
+                            "deviasi (atur di tab ⚙️ Config)",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="left", padx=(12, 0))
 
@@ -1446,9 +1446,17 @@ class NominalRestoView(tk.Frame):
         # lama utuh), bulan ≥2 = kolom dinamis 'Lalu <label>'.
         fdf = None
         if self._lalu_provider is not None:
-            with contextlib.suppress(Exception):
+            # v3.11.50 — FIX audit #12: ganti contextlib.suppress jadi
+            # try/except dgn log — sebelumnya provider exception senyap.
+            try:
                 fdf = self._lalu_provider()
-        self._lalu_loaded = fdf is not None
+            except Exception as exc:  # noqa: BLE001 — provider crash ≠ view crash
+                print(f"[WARNING] nominal_resto _lalu_provider gagal: {exc}")
+                fdf = None
+        # v3.11.50 — FIX audit #7: _lalu_loaded False bila fdf None ATAU
+        # empty (sebelumnya empty df dianggap "loaded" → popup footer
+        # misleading "tanpa pasangan" padahal file kosong total).
+        self._lalu_loaded = fdf is not None and not getattr(fdf, "empty", True)
         self._lalu_frames = hitung_nominal_lalu_multi(
             fdf, self.harga_map, self.konversi_map, h=h)
         # back-compat: frame kosong = DataFrame KOSONG (bukan None —
@@ -1798,7 +1806,7 @@ class NominalRestoView(tk.Frame):
                            f"{fmt_rp_cell(totals_extra.get(_cid, 0.0))}"
                            f"{_wkx}")
         else:
-            status += " · LALU: file deviasi belum dimuat (Komparasi)"
+            status += " · LALU: file deviasi belum dimuat (klik 📂 di tab ⚙️ Config)"
         if self._lalu_loaded:
             _wk2 = (f" · MINGGU {self._lalu_week}"
                     if self._lalu_week else "")
@@ -2264,7 +2272,7 @@ class NominalRestoView(tk.Frame):
             foot_txt += (f" · {_lab} "
                          f"{fmt_rp_cell(totals_extra[_mi])}")
         if not self._lalu_loaded:
-            foot_txt += " · file deviasi belum dimuat (Komparasi)"
+            foot_txt += " · file deviasi belum dimuat (klik 📂 di tab ⚙️ Config)"
         elif _nolalu:
             foot_txt += (f" · {fmt_int_id(_nolalu)} barang tanpa "
                          "pasangan di file")

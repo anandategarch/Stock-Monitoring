@@ -240,6 +240,18 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         import datetime as _dt
         _now = _dt.datetime.now()
         period = (_now.year, _now.month)
+        # v3.11.50 — FIX audit #3: log warning jelas bila period detection
+        # gagal (timestamp None + Nomor regex None) → fallback pakai jam
+        # sistem. Bisa mismatch bila user proses data lama di bulan berbeda
+        # → auto_bulanan_paths cari file bulan SALAH (current month, bukan
+        # data month). User bisa cek data IN / Nomor dokumen utk verifikasi.
+        if verbose:
+            print(f"  [WARNING] detect_data_period gagal (timestamp & Nomor "
+                  f"kode tak terparse) — fallback periode jam sistem: "
+                  f"{period[0]:04d}-{period[1]:02d}. Bila data lama, auto-"
+                  f"load file deviasi bulan lalu mungkin miss (cari bulan "
+                  f"sistem, bukan bulan data). Cek kolom '#Tgl/Jam Pembuatan "
+                  f"IT' atau Nomor 'RI.YYYY.MM.' di data IN.")
     month_len, lalu_month_len = month_lengths(period)
     if verbose:
         print(f"  Basis selisih v3.10: SO kemarin (ΔSO − IN) · "

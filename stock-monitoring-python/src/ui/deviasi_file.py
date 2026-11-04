@@ -44,7 +44,7 @@ _BULAN_NUM = {
     "JANUARI": 1, "JAN": 1, "FEBRUARI": 2, "FEB": 2, "PEBRUARI": 2,
     "PEB": 2, "MARET": 3, "MAR": 3, "APRIL": 4, "APR": 4, "MEI": 5,
     "JUNI": 6, "JUN": 6, "JULI": 7, "JUL": 7, "AGUSTUS": 8, "AGUST": 8,
-    "AGU": 8, "AGT": 8, "AGST": 8, "SEPTEMBER": 9, "SEP": 9,
+    "AGU": 8, "AGT": 8, "AGST": 8, "AGS": 8, "SEPTEMBER": 9, "SEP": 9,
     "OKTOBER": 10, "OKTEBER": 10, "OKTO": 10, "OKT": 10,
     "NOVEMBER": 11, "NOPEMBER": 11, "NOV": 11, "NOPE": 11,
     "DESEMBER": 12, "DESE": 12, "DES": 12,
@@ -307,6 +307,17 @@ def parse_deviasi_file(path: str) -> dict:
     n_bad = int(bad_week.sum())
     out = out[~bad_week].copy()
 
+    # v3.11.50 — FIX audit #8: cek df.empty SETELAH bad_week filter —
+    # sebelumnya parse_deviasi_file return ok=True, df=<empty> kalau
+    # SEMUA baris punya Minggu tak dikenal (yc "PERIODE 1", "AKHIR")
+    # → _load_lalu_paths log "1 file dimuat (0 baris)" menyesatkan.
+    # Sekarang return ok=False + error jelas → file dianggap gagal parse.
+    if out.empty:
+        return {"ok": False, "error": (
+            f"Semua {n_bad} baris punya label Minggu tak dikenal "
+            "(harus WEEK 1-5 / MINGGU / STATUS). File tidak dimuat."),
+            "df": None, "meta": meta}
+
     # duplikat (BULAN-num, minggu, resto, bahan) → keep first (file sampel
     # unik). v3.9.13: NOMOR BULAN masuk dedup-key — baris bulan lain TIDAK
     # lagi dibuang sebagai "duplikat" (dibutuhkan multi-file & analisa arah;
@@ -379,12 +390,26 @@ def auto_bulanan_paths(cfg) -> list:
     by_base: dict = {}
     for nm in names:
         base = os.path.splitext(nm)[0].strip().upper()
+        # v3.11.50 — FIX audit #17: normalisasi whitespace internal (collapse
+        # multi-spasi jadi 1 spasi) supaya "20.  AGUSTUS 2026" (spasi ganda
+        # setelah titik) match dgn "20.AGUSTUS 2026" target. Case-insensitive
+        # (sudah .upper() di atas).
+        base = re.sub(r"\s+", " ", base)
+        # v3.11.50 — FIX audit #17: hapus spasi SETELAH titik ("20. AGUSTUS"
+        # → "20.AGUSTUS") supaya match dgn pattern target "20.{BULAN}" tanpa
+        # spasi setelah titik (kebanyakan file user pakai "20.AGUSTUS 2026"
+        # tanpa spasi setelah titik; tapi ada juga "20. AGUSTUS 2026").
+        base = re.sub(r"\.\s+", ".", base)
         by_base.setdefault(base, os.path.join(folder, nm))
     # v3.11.12 — daftar bulan via helper bersama bulan_mundur_list
     # (dipakai juga status kartu ⚙️ Config — transparansi bulan).
     out = []
     for y, m in bulan_mundur_list((tahun, bulan), jumlah):
         want = f"20.{_BULAN_NAME[m]} {y}".upper()
+        # v3.11.50 — FIX audit #17: normalisasi whitespace pada target
+        # juga (konsisten dgn by_base keys).
+        want = re.sub(r"\s+", " ", want)
+        want = re.sub(r"\.\s+", ".", want)
         p = by_base.get(want)
         if p:
             out.append(p)

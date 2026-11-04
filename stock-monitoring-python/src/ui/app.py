@@ -197,7 +197,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.49"  # v3.11.49 — FIX regression v3.11.48: tooltip muncul di pojok kiri atas (wm_transient konflik overrideredirect)
+APP_VERSION = "3.11.50"  # v3.11.50 — fix Deviasi Bulan Lalu (log diagnostic mode manual/cfg None, clear stale _lalu_file_df, label Komparasi hapus, AGS bulan, filename whitespace, parse empty check)
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -3437,7 +3437,7 @@ class StockMonitorApp:
             dbul_mode_row, ["🫵 Manual (tombol)",
                             "⚡ Otomatis pasca-pipeline"])
         self.dev_bulanan_mode_bar.pack(side="left", padx=(6, 0))
-        GhostButton(dbul_mode_row, text="📂 Muat ke Komparasi Sekarang",
+        GhostButton(dbul_mode_row, text="📂 Muat Sekarang",
                     command=self._dev_bulanan_load_now).pack(
             side="left", padx=(12, 0))
 
@@ -6316,22 +6316,38 @@ class StockMonitorApp:
         'Dev. Bulan Lalu' + analisa CEK lalu-kini tab 📦/🧩 (on_lalu_file
         _changed — clear cache pivot + refresh/dirty) & popup 'Nominal
         Deviasi Bulan Lalu' tab 🧮 (pola listener era komparasi
-        v3.9.36/53)."""
+        v3.9.36/53).
+
+        v3.11.50 — FIX audit #10: ganti contextlib.suppress(Exception)
+        jadi try/except dgn log WARNING — sebelumnya consumer exception
+        senyap, debugging impossible.
+        """
         nr = getattr(self, "nominal_resto_view", None)
         if nr is not None:
-            with contextlib.suppress(Exception):
+            try:
                 nr.on_lalu_file_changed()
+            except Exception as exc:  # noqa: BLE001 — consumer crash ≠ app crash
+                print(f"[WARNING] nominal_resto.on_lalu_file_changed: {exc}")
         for dv in (getattr(self, "deviasi_gr_view", None),
                    getattr(self, "deviasi_pcs_view", None)):
             if dv is not None:
-                with contextlib.suppress(Exception):
+                try:
                     dv.on_lalu_file_changed()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[WARNING] deviasi_view.on_lalu_file_changed: {exc}")
 
     def _load_lalu_paths(self, paths, *, note=""):
         """Parse daftar file deviasi (worker — anti-beku, pola v3.9.5)
         → gabung + dedup lintas-file (key identik parse) → simpan
         self._lalu_file_df + segarkan konsumen. File gagal DILEWATI
-        selama ≥1 berhasil (mirror _load_paths komparasi lama)."""
+        selama ≥1 berhasil (mirror _load_paths komparasi lama).
+
+        v3.11.50 — FIX audit #4: bila SEMUA file gagal parse, clear
+        self._lalu_file_df + _notify_lalu_consumers (sebelumnya data
+        basi dari run sebelumnya tetap dipakai consumer tanpa clear).
+        v3.11.50 — FIX audit #8: log baris per file gagal (sebelumnya
+        cuma total "Semua file gagal" tanpa detail).
+        """
         paths = [str(p).strip() for p in paths if str(p).strip()]
         if not paths:
             return
@@ -6339,33 +6355,54 @@ class StockMonitorApp:
         def work():
             dfs = []
             n_ok = 0
+            fails = []  # v3.11.50 — detail file gagal utk log
             for p in paths:
                 res = parse_deviasi_file(p)
                 if res["ok"]:
                     dfs.append(res["df"])
                     n_ok += 1
+                else:
+                    fails.append((p, res.get("error", "unknown error")))
             if not dfs:
-                return None
+                return None, fails
             combined = (dfs[0] if len(dfs) == 1
                         else pd.concat(dfs, ignore_index=True))
             combined = combined.drop_duplicates(
                 subset=["_bulan_num", "Minggu", "_resto_norm",
                         "_bahan_norm"], keep="first")
-            return combined, n_ok, len(combined)
+            return combined, n_ok, len(combined), fails
 
         def done(payload):
-            if payload is None:
+            # v3.11.50 — FIX audit #4+#8: parse lengkap handling.
+            if payload is None or (isinstance(payload, tuple)
+                                    and payload[0] is None):
+                # Semua file gagal → clear stale + notify consumers
+                fails = (payload[1] if isinstance(payload, tuple)
+                         and len(payload) > 1 else [])
+                self._lalu_file_df = None
+                self._notify_lalu_consumers()
+                _detail = ""
+                if fails:
+                    _detail = " (" + "; ".join(
+                        f"{os.path.basename(p)}: {e[:60]}"
+                        for p, e in fails[:3]) + ")"
                 self._append_log_batched(
-                    "\n[DEV BULANAN] ⚠ Semua file gagal dibaca — kolom "
-                    "Dev. Bulan Lalu kosong run ini.\n")
+                    f"\n[DEV BULANAN] ⚠ Semua {len(fails)} file gagal "
+                    f"dibaca{_detail} — kolom Dev. Bulan Lalu kosong "
+                    f"run ini.\n")
                 return
-            combined, n_ok, n_rows = payload
+            combined, n_ok, n_rows, fails = payload
             self._lalu_file_df = combined
             self._notify_lalu_consumers()
+            _fail_txt = ""
+            if fails:
+                _fail_txt = (f" · {len(fails)} file gagal: "
+                             + ", ".join(os.path.basename(p)
+                                         for p, _ in fails[:3]))
             self._append_log_batched(
                 f"\n[DEV BULANAN] {note}{n_ok} file deviasi bulan lalu "
-                f"dimuat ({n_rows} baris) — kolom Dev. Bulan Lalu & "
-                "analisa lalu-kini aktif ("
+                f"dimuat ({n_rows} baris){_fail_txt} — kolom Dev. Bulan "
+                f"Lalu & analisa lalu-kini aktif ("
                 + "; ".join(os.path.basename(p) for p in paths) + ").\n")
 
         def on_error(err):
@@ -6383,15 +6420,67 @@ class StockMonitorApp:
         tidak jadi 1 lagi", default Manual) & cfg valid (folder ada —
         _dev_bulanan_cfg). Folder ada tapi file '20.{BULAN} {TAHUN}'
         belum ada → no-op jujur di log (bulang salah lebih berbahaya
-        dari tanpa file — kontrak v3.11.9 dipertahankan)."""
+        dari tanpa file — kontrak v3.11.9 dipertahankan).
+
+        v3.11.50 — FIX audit #1+#2: log diagnostic utk SEMUA exit path
+        sebelumnya senyap — user bisa self-diagnose kenapa kolom 'Dev.
+        Bulan Lalu' kosong (mode manual / folder hilang / config invalid).
+        """
+        # v3.11.50 — FIX audit #4: clear stale _lalu_file_df di AWAL run
+        # baru supaya data basi dari run sebelumnya tidak bocor (sebelumnya
+        # bila auto-load gagal, _lalu_file_df LAMA tetap dipakai consumer).
+        # Hanya clear bila akan reload (mode auto); manual biarkan (user
+        # klik tombol sendiri utk load eksplisit).
         if self._dev_bulanan_mode() != "auto":
+            # v3.11.50 — FIX audit #1: log jelas bila mode manual — sebelumnya
+            # silent return tanpa log, user bingung kenapa kolom kosong.
+            self._append_log_batched(
+                "\n[DEV BULANAN] Mode Manual — auto-load dilewati. "
+                "Klik 📂 'Muat Sekarang' di tab ⚙️ Config, atau set "
+                "DeviasiBulananMode='auto' di config.json utk auto-load "
+                "pasca-pipeline. Kolom Dev. Bulan Lalu kosong run ini.\n")
             return
         cfg = None
         with contextlib.suppress(Exception):
             cfg = self._dev_bulanan_cfg(audit_result)
-        self._dev_bulanan_last_cfg = cfg
         if cfg is None:
+            # v3.11.50 — FIX audit #2+#3+#13: log jelas KENAPA cfg None —
+            # folder tidak ada / config invalid / period invalid. Sebelumnya
+            # silent return tanpa feedback ke user.
+            folder = None
+            with contextlib.suppress(Exception):
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    folder = data.get(
+                        "DeviasiBulananFolder",
+                        self._DEV_BULANAN_DEF_FOLDER)
+            if not folder or not os.path.isdir(folder):
+                self._append_log_batched(
+                    f"\n[DEV BULANAN] Auto: folder deviasi bulanan TIDAK "
+                    f"ADA / belum dikonfigurasi — '{folder}'. Atur folder "
+                    f"yg benar di tab ⚙️ Config (kartu DEV BULANAN). Kolom "
+                    f"Dev. Bulan Lalu kosong run ini.\n")
+            else:
+                # Folder ada tapi cfg None → period invalid (audit_result
+                # tanpa 'period' key dan datetime fallback gagal).
+                self._append_log_batched(
+                    f"\n[DEV BULANAN] Auto: folder '{folder}' ada tapi "
+                    f"periode data tidak valid (audit_result['period'] "
+                    f"None). Jalankan pipeline ulang / cek data IN. "
+                    f"Kolom Dev. Bulan Lalu kosong run ini.\n")
+            # v3.11.50 — FIX audit #4: clear stale data bila reload gagal
+            # (supaya consumer gak pakai data lalu_file_df basi dari
+            # run sebelumnya).
+            if getattr(self, "_lalu_file_df", None) is not None:
+                self._lalu_file_df = None
+                self._notify_lalu_consumers()
             return
+        # v3.11.50 — FIX audit #4: clear stale sebelum load baru (data
+        # lama di-invalidate dulu supaya bila parse gagal, tidak bocor).
+        self._lalu_file_df = None
+        self._notify_lalu_consumers()
+        self._dev_bulanan_last_cfg = cfg
         paths = []
         with contextlib.suppress(Exception):
             paths = auto_bulanan_paths(cfg)
