@@ -3,6 +3,40 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.52 — FIX pattern nama file deviasi bulan lalu: prefix 12+month (Jan=13, Okt=22, Agu=20)
+
+User: "ternyata di nama file nya. Januari start dengan angka 13. Jadi 13.JANUARI 2026 dan Oktober menjadi 22.OKTOBER 2026. Perbaiki issue ini"
+
+**Root cause:** `auto_bulanan_paths` (deviasi_file.py) hardcode pattern `"20.{BULAN} {TAHUN}"` — padahal pola asli user pakai prefix nomor urut = `12 + month_number`. Kebetulan untuk Agustus (12+8=20) match dgn "20.", tapi untuk bulan lain (Januari=13, Oktober=22, dll) gak match → file gak ketemu → log "[DEV BULANAN] Auto: belum ada file cocok..." padahal file ada.
+
+**Pattern baru:**
+| Bulan | m | prefix = 12+m | Contoh nama file |
+|---|---|---|---|
+| JANUARI | 1 | 13 | `13.JANUARI 2026.xlsx` |
+| FEBRUARI | 2 | 14 | `14.FEBRUARI 2026.xlsx` |
+| MARET | 3 | 15 | `15.MARET 2026.xlsx` |
+| APRIL | 4 | 16 | `16.APRIL 2026.xlsx` |
+| MEI | 5 | 17 | `17.MEI 2026.xlsx` |
+| JUNI | 6 | 18 | `18.JUNI 2026.xlsx` |
+| JULI | 7 | 19 | `19.JULI 2026.xlsx` |
+| AGUSTUS | 8 | 20 | `20.AGUSTUS 2026.xlsx` ← backward-compat match "20." |
+| SEPTEMBER | 9 | 21 | `21.SEPTEMBER 2026.xlsx` |
+| OKTOBER | 10 | 22 | `22.OKTOBER 2026.xlsx` |
+| NOVEMBER | 11 | 23 | `23.NOVEMBER 2026.xlsx` |
+| DESEMBER | 12 | 24 | `24.DESEMBER 2026.xlsx` |
+
+**Fix:**
+- `deviasi_file.py:auto_bulanan_paths` line 417-418 — ganti `f"20.{_BULAN_NAME[m]} {y}"` → `f"{12+m}.{_BULAN_NAME[m]} {y}"`. Backward-compat: Agustus (12+8=20) tetap match file lama `20.AGUSTUS` tanpa rename. File lama bulan lain (mis. `20.JANUARI`) gak match lagi — user harus rename ke `13.JANUARI` (pola yg benar).
+
+**Verifikasi e2e (5/5 PASS):**
+- T1 period Feb 2026 → 1 month back → match `13.JANUARI 2026.xlsx` ✓
+- T2 period Nov 2026 → 1 month back → match `22.OKTOBER 2026.xlsx` ✓
+- T3 period Sept 2026 → 1 month back → match `20.AGUSTUS 2026.xlsx` ✓ (backward-compat, 12+8=20)
+- T4 period Nov 2026 → 2 months back → match `21.SEPTEMBER 2026.xlsx` + `22.OKTOBER 2026.xlsx` (kronologis lama→baru) ✓
+- T5 whitespace variant `22. OKTOBER 2026.xlsx` (spasi setelah titik) → match ✓ (FIX v3.11.50 #17 masih kerja)
+- compileall OK · ruff: baseline (no regression).
+- APP_VERSION → 3.11.52; README "Versi terkini: v3.11.52".
+
 ## v3.11.51 — FIX false-positive warning settings.json FileNotFoundError di first run
 
 User log v3.11.50: baris pertama log tab 🚀 Proses berbunyi `[PERINGATAN] Filter persist: gagal membaca settings.json (FileNotFoundError(2, 'No such file or directory')) — kombinasi filter tersimpan TIDAK dipulihkan sesi ini.`

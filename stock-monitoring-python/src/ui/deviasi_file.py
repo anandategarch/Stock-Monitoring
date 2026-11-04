@@ -358,10 +358,14 @@ def auto_bulanan_paths(cfg) -> list:
       - jumlah    : 1..12 — berapa bulan mundur (user: "aku bisa
                     setting jumlah file").
 
-    Nama file = '20.{BULAN} {TAHUN}' (mis. '20.AGUSTUS 2026') —
-    case-insensitive (uppercase), ext .xlsx (prioritas) / .xlsm /
-    .xls / .xlsb. Folder tak ada / cfg invalid / 0 file → []
-    (degrade jujur)."""
+    Nama file = '{12+month}.{BULAN} {TAHUN}' (v3.11.52 — user: "Januari
+    start dengan angka 13. Jadi 13.JANUARI 2026 dan Oktober menjadi
+    22.OKTOBER 2026"). Pattern prefix = 12 + nomor bulan:
+    JAN=13, FEB=14, MAR=15, APR=16, MEI=17, JUN=18, JUL=19, AGU=20,
+    SEP=21, OKT=22, NOV=23, DES=24. Agustus (12+8=20) kebetulan match
+    pattern lama "20." (backward-compat utk file lama). Case-insensitive
+    (uppercase), ext .xlsx (prioritas) / .xlsm / .xls / .xlsb. Folder
+    tak ada / cfg invalid / 0 file → [] (degrade jujur)."""
     try:
         folder = str(cfg[0])
         _period = cfg[1]
@@ -405,7 +409,13 @@ def auto_bulanan_paths(cfg) -> list:
     # (dipakai juga status kartu ⚙️ Config — transparansi bulan).
     out = []
     for y, m in bulan_mundur_list((tahun, bulan), jumlah):
-        want = f"20.{_BULAN_NAME[m]} {y}".upper()
+        # v3.11.52 — FIX: pattern prefix = 12 + month (user: "Januari start
+        # dengan angka 13. Jadi 13.JANUARI 2026 dan Oktober menjadi
+        # 22.OKTOBER 2026"). Jan=13, Feb=14, ..., Agu=20, ..., Des=24.
+        # Agustus (12+8=20) kebetulan match pattern lama "20." → backward-
+        # compat utk file lama 20.AGUSTUS tetap jalan tanpa rename.
+        prefix = 12 + m
+        want = f"{prefix}.{_BULAN_NAME[m]} {y}".upper()
         # v3.11.50 — FIX audit #17: normalisasi whitespace pada target
         # juga (konsisten dgn by_base keys).
         want = re.sub(r"\s+", " ", want)
