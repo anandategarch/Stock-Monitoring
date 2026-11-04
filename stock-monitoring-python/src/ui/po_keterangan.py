@@ -277,3 +277,69 @@ def po_nomor_for(in_detail, nama_barang: str, nama_resto: str,
         return ""
     return po_nomor_map(in_detail).get(
         (str(nama_barang), str(nama_resto), ti), "")
+
+
+def po_nomor_map_3243(rincian_po_df) -> dict:
+    """v3.11.41 — peta Nomor PO dari file 32.43 (Rincian Pesanan Pembelian)
+    per pasangan (barang, resto), TANPA filter tanggal (Opsi A — user:
+    "tampilkan SEMUA PO utk pasangan bulan ini" — semua Nomor # unik dari
+    3243 utk pasangan itu, tidak peduli Tanggal PO).
+
+    {(Nama Barang, NAMA RESTO): "PO-001, PO-002, ..."} — Nomor PO unik
+    (di-dedup + urut) dari baris rincian_po_df. NAMA RESTO diturunkan dari
+    kolom 'Cabang PO' via ``resto_from_cabang_po`` ("1370.MLGPAR" →
+    "MLGPAR" — logika bersama pipeline fn_audit PO Menunggu + UI
+    rincian_po_view). rincian_po_df None/kosong/tak ber-Nomor # → {}.
+
+    Dipakai kolom 'KETERANGAN PO' popup details (tab Pivot) — Opsi A:
+    prioritas NOMOR PO dari 3243 (PO itu sendiri — lebih lengkap: semua
+    PO termasuk yg belum diterima / "Menunggu diproses"); fallback ke
+    po_nomor_map (3224 — PO tautan saat penerimaan, bisa miss bila PO
+    belum ditautkan saat terima) bila 3243 tidak tersedia; lalu label
+    'Potensi PO belum dibuat' bila keduanya tidak ada.
+
+    3243 vs 3224 (analisa mendalam — user: "Nomor PO dan keterangan dari
+    file 3243 harusnya coba cek mendalam"):
+    - 3224 = Rincian Penerimaan Barang (RI diterima). Kolom 'Nomor # PO'
+      → Nomor PO. Hanya muncul bila penerimaan SUDAH terjadi DAN PO
+      ditautkan ke RI. Bisa KOSONG bila terima tanpa PO / PO belum
+      ditautkan saat terima.
+    - 3243 = Rincian Pesanan Pembelian (PO itu sendiri). Kolom 'Nomor #'
+      = Nomor PO. SELALU ada (semua PO yg pernah dibuat, termasuk yg
+      belum diterima / Menunggu). Punya juga 'Keterangan PO' + 'Status
+      Pesanan Pembelian'.
+    → 3243 lebih lengkap & relevan utk "Nomor PO" popup."""
+    if rincian_po_df is None or getattr(rincian_po_df, "empty", True):
+        return {}
+    cols = set(getattr(rincian_po_df, "columns", []))
+    if not {"Nama Barang", "Cabang PO", "Nomor #"} <= cols:
+        return {}
+    # lazy import utk hindari circular (po_keterangan dipakai details_popup
+    # & deviasi_popup; helpers import-free dari ui)
+    from ..pipeline.helpers import resto_from_cabang_po
+    det = pd.DataFrame({
+        "_b": rincian_po_df["Nama Barang"].astype(str),
+        "_r": rincian_po_df["Cabang PO"].map(resto_from_cabang_po)
+                              .astype(str),
+        "_p": rincian_po_df["Nomor #"].astype(str).str.strip(),
+    })
+    mask = ((det["_p"] != "")
+            & (det["_p"].str.lower() != "nan")
+            & (det["_r"] != ""))
+    det = det[mask]
+    if det.empty:
+        return {}
+    out: dict = {}
+    for (b, r), grp in det.groupby(["_b", "_r"])["_p"]:
+        pos = sorted(set(grp.tolist()))
+        out[(b, r)] = ", ".join(pos)
+    return out
+
+
+def po_nomor_3243_for(rincian_po_df, nama_barang: str,
+                      nama_resto: str) -> str:
+    """Nomor PO 3244 utk SATU pasangan (barang, resto) — dipakai popup
+    (lookup tipis di atas po_nomor_map_3243). '' bila tak ada PO 3243 /
+    rincian_po_df None."""
+    return po_nomor_map_3243(rincian_po_df).get(
+        (str(nama_barang), str(nama_resto)), "")

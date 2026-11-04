@@ -195,7 +195,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.40"  # v3.11.40 — 4 fitur: hide saldo awal pivot + resto khusus + toggle saldo sistem + popup keterangan PO 3224
+APP_VERSION = "3.11.41"  # v3.11.41 — Opsi A: Nomor PO popup pivot prioritas dari file 3243 (Rincian Pesanan Pembelian)
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -5450,7 +5450,8 @@ class StockMonitorApp:
 
         _load_view("Pivot Table",
                    lambda: self.pivot_view.load_data(append1_df,
-                                                     in_detail_df),
+                                                     in_detail_df,
+                                                     rincian_po_df),
                    self.pivot_view)
         # v3.9.23 (poin 6): detail dokumen IN ikut diteruskan ke tab
         # Deviasi GR & PCS — sumber CEK "RI Balancing" kolom utama

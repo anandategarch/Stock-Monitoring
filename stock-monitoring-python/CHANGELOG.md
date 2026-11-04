@@ -3,6 +3,25 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.41 — Opsi A: Nomor PO popup pivot prioritas dari file 3243 (Rincian Pesanan Pembelian)
+
+**Analisa mendalam** (user: "Nomor PO dan keterangan dari file 3243 harusnya coba cek mendalam barangkali aku juga sala. cek juga file 3224"): ditemukan **DUA file berbeda** — v3.11.40 keliru pakai 3224:
+
+| File | Nama sheet | Isi | Sumber Nomor PO |
+|------|-----------|-----|-----------------|
+| **3224** | `#32.24. Rincian Penerimaan Bara` | Penerimaan Barang (RI diterima) | `Nomor # PO` → `Nomor PO`. Hanya muncul bila penerimaan SUDAH terjadi DAN PO ditautkan ke RI. Bisa KOSONG bila terima tanpa PO / PO belum ditautkan saat terima. |
+| **3243** | `#32.43. Rincian Pesanan Pembeli` | Pesanan Pembelian (PO itu sendiri) | `Nomor #` = Nomor PO. SELALU ada (semua PO yg pernah dibuat, termasuk yg belum diterima / "Menunggu diproses"). Punya juga `Keterangan PO` + `Status Pesanan Pembelian`. |
+
+→ **3243 lebih lengkap & relevan** utk "Nomor PO" popup (Opsi A — user pilih "tampilkan SEMUA PO utk pasangan bulan ini").
+
+**Implementasi Opsi A**:
+- `po_keterangan.py`: + `po_nomor_map_3243(rincian_po_df)` → `{(Nama Barang, NAMA RESTO): "PO-001, PO-002, ..."}` — Nomor PO unik (di-dedup + urut) dari baris `rincian_po_df`. NAMA RESTO diturunkan dari kolom `Cabang PO` via `resto_from_cabang_po` (`"1370.MLGPAR"` → `"MLGPAR"` — logika bersama pipeline `fn_audit` PO Menunggu + UI `rincian_po_view`). TANPA filter tanggal (Opsi A — semua PO pasangan, tidak peduli Tanggal PO). `rincian_po_df` None/kosong/tak ber-Nomor # → `{}`. + `po_nomor_3243_for(...)` helper (lazy import `resto_from_cabang_po` utk hindari circular).
+- `details_popup.py`: kolom `KETERANGAN PO` kini **prioritas NOMOR PO dari 3243** (semua PO pasangan); **fallback Nomor PO dari 3224** (per tanggal — `po_nomor_map`) bila 3243 tidak tersedia utk pasangan itu; **lalu label 'Potensi PO belum dibuat'** bila keduanya tidak ada. 3243 ada ⇒ PO sudah dibuat ⇒ label potensi TIDAK relevan (skip — hindari kontradiksi "PO belum dibuat" padahal Nomor PO tampil). Param baru `rincian_po_df` (None/pemanggil lama → jalur 3224/label potensi v3.11.40, backward compat).
+- `pivot_view.py`: `load_data` terima param baru `rincian_po_df` (opsional); `_on_double_click` pass `rincian_po_df` ke `show_details_popup`.
+- `app.py`: pass `rincian_po_df` (sudah tersedia `self.rincian_po_df` sejak v3.9.30) ke `pivot_view.load_data` — wiring Opsi A end-to-end.
+
+**Verifikasi** (headless — no `$DISPLAY`): `py_compile` OK · `ruff` no-new-error (po_ket=0, details=13, pivot=4, app=17 — semua = baseline) · import OK · `po_nomor_map_3243` pandas e2e test PASS (dedup + sort + Cabang PO→resto + edge-cases None & missing-column). Known: verifikasi visual Tk (popup render, kolom KETERANGAN PO tampil) belum diuji headless — user perlu konfirmasi di Windows.
+
 ## v3.11.40 — 4 fitur: hide saldo awal pivot + resto khusus + toggle saldo sistem + popup keterangan PO 3224
 
 **Fitur 1 — filter "only select this" (NO-OP, sudah ada)**: konfirmasi bahwa filter search + klik-kanan "only select this" sudah ada di `widgets.py` (HeaderFilter popup sejak v3.11.30). User dapat: ketik di kotak pencarian untuk menyaring daftar checkbox → klik-kanan sebuah nilai → nilai itu menjadi SATU-SATUNYA seleksi (popup ditutup otomatis), tanpa uncek satu-satu. Hint tampil di popup: "Enter = pilih nilai terfilter · klik-kanan nilai = hanya itu saja · Esc = tutup". Tidak ada perubahan kode (verifikasi status implementasi).

@@ -569,13 +569,18 @@ class PivotTableView(tk.Frame):
     # DATA LOADING
     # =========================================================================
     def load_data(self, data: pd.DataFrame,
-                  in_detail: pd.DataFrame | None = None):
+                  in_detail: pd.DataFrame | None = None,
+                  rincian_po_df: pd.DataFrame | None = None):
         self.data = data
         # v3.11 — rincian IN per sumber (42.05/32.24/99.01) dari
         # pipeline: sumber kolom "KETERANGAN PO" popup double-click
         # (potensi PO belum dibuat — po_keterangan). None/pemanggil
         # lama/test → kolom keterangan popup kosong.
         self.in_detail = in_detail
+        # v3.11.41 — Rincian Pesanan Pembelian 32.43 dari app (Opsi A —
+        # Nomor PO popup prioritas dari 3243). None/pemanggil lama →
+        # popup fallback ke 3224/label potensi (perilaku v3.11.40).
+        self.rincian_po_df = rincian_po_df
         # v3.9.55 — F8: data baru → auto-fit SEKALI lagi saat render pertama
         reset_autofit_once(self)
         # v3.9.71 — freeze-pane: flag auto-fit sisi beku ikut di-reset
@@ -1661,6 +1666,10 @@ class PivotTableView(tk.Frame):
             # v3.11 — kolom KETERANGAN PO popup (menggantikan kolom
             # KATEGORI & SOURCE KIRIMAN yang dihapus)
             in_detail=getattr(self, "in_detail", None),
+            # v3.11.41 — Opsi A: Nomor PO popup prioritas dari 3243
+            # (Rincian Pesanan Pembelian). None bila app tak punya
+            # rincian_po_df (jalur test/standalone) → fallback 3224.
+            rincian_po_df=getattr(self, "rincian_po_df", None),
         )
 
     # =========================================================================

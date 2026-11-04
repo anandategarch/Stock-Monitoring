@@ -777,7 +777,8 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         jenis: str = None, tanggal=None,
                         filters: dict = None, show_maximize: bool = True,
                         tgl_range=None, scols_cache: "dict | None" = None,
-                        in_detail: pd.DataFrame | None = None):
+                        in_detail: pd.DataFrame | None = None,
+                        rincian_po_df: pd.DataFrame | None = None):
     """Filter data + show popup.
 
     v3.9.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
@@ -809,6 +810,14 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     peta dihitung atas FRAME PENUH ``data`` karena filter jenis/tanggal
     popup membuang baris BM/SO yang justru menentukan trigger). None /
     pemanggil lama (komparasi/laporan/followup) → kolom kosong.
+    v3.11.41 — param ``rincian_po_df`` (Rincian Pesanan Pembelian 32.43
+    dari app — Opsi A user: "Nomor PO dari file 3243"): kolom KETERANGAN
+    PO kini prioritas NOMOR PO dari 3243 (semua PO pasangan, TANPA filter
+    tanggal — po_nomor_map_3243; lebih lengkap: semua PO termasuk yg
+    belum diterima / Menunggu); fallback Nomor PO dari 3224 (per tanggal
+    — po_nomor_map) bila 3243 tidak tersedia; lalu label 'Potensi PO
+    belum dibuat' bila keduanya tidak ada. None / pemanggil lama →
+    jalur 3224/label potensi (perilaku v3.11.40).
     """
     if data is None or data.empty:
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame(),
@@ -993,30 +1002,56 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     # muncul? itu ambil dari file 3224 keterangan PO kalau gak salah"):
     # label potensi sering KOSONG (kondisi ketat); kini kolom JUGA
     # menampilkan Nomor PO dari file 3224 (in_detail SOURCE IN '32.24',
-    # kolom 'Nomor PO') bila ada penerimaan tercatat. Nomor PO muncul ⇒
-    # 3224>0 ⇒ label potensi tak terpenuhi (saling eksklusif — popup
-    # tampilkan SALAH SATU: "PO-001, PO-002" bila ada 3224, label potensi
-    # bila 3224=0 + kondisi lain, kosong bila keduanya tidak). Tanpa
-    # in_detail / Nomor PO → kolom kosong (perilaku lama).
+    # kolom 'Nomor PO') bila ada penerimaan tercatat.
+    #
+    # v3.11.41 — OPSI A (user: "Nomor PO dan keterangan dari file 3243
+    # ... coba cek mendalam" → pilih Opsi A "tampilkan SEMUA PO utk
+    # pasangan bulan ini"): kolom KETERANGAN PO kini prioritas NOMOR PO
+    # dari file 32.43 (Rincian Pesanan Pembelian — rincian_po_df; Nomor #
+    # = Nomor PO, resto dari Cabang PO via resto_from_cabang_po; SEMUA
+    # PO pasangan TANPA filter tanggal — lebih lengkap: semua PO
+    # termasuk yg belum diterima / "Menunggu diproses"). Fallback Nomor
+    # PO dari 3224 (per tanggal — po_nomor_map) bila 3243 tidak tersedia
+    # utk pasangan itu. Lalu label 'Potensi PO belum dibuat' bila keduanya
+    # tidak ada (pasangan tanpa PO 3243 + tanpa penerimaan 3224 + kondisi
+    # potensi terpenuhi). 3243 ada ⇒ PO sudah dibuat ⇒ label potensi
+    # TIDAK relevan (skip — hindari kontradiksi "PO belum dibuat" padahal
+    # Nomor PO tampil). Tanpa rincian_po_df & in_detail → kolom kosong.
     if in_detail is not None and df is not None and not df.empty:
-        from .po_keterangan import POTENSI_PO_LABEL, po_nomor_map, potensi_po_map
+        from .po_keterangan import (
+            POTENSI_PO_LABEL,
+            po_nomor_map,
+            po_nomor_map_3243,
+            potensi_po_map,
+        )
         _po_m = potensi_po_map(data, in_detail)
-        _nomor_m = po_nomor_map(in_detail)
-        if _po_m or _nomor_m:
+        _nomor_m_3224 = po_nomor_map(in_detail)
+        _nomor_m_3243 = (po_nomor_map_3243(rincian_po_df)
+                         if rincian_po_df is not None else {})
+        if _po_m or _nomor_m_3224 or _nomor_m_3243:
             _b_s = df["Nama Barang"].astype(str)
             _r_s = df["NAMA RESTO"].astype(str)
             _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
             _ket = []
             for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
                 _parts: list = []
-                if _tt is not None and pd.notna(_tt):
-                    _ti = int(_tt)
-                    _nm = _nomor_m.get((_bb, _rr, _ti))
-                    if _nm:
-                        _parts.append(_nm)
-                    _tg = _po_m.get((_bb, _rr))
-                    if _tg and _ti in _tg:
-                        _parts.append(POTENSI_PO_LABEL)
+                # 1. Prioritas: Nomor PO dari 3243 (semua PO pasangan)
+                _po_3243 = _nomor_m_3243.get((_bb, _rr))
+                if _po_3243:
+                    _parts.append(_po_3243)
+                else:
+                    # 2. Fallback: Nomor PO dari 3224 (per tanggal) bila
+                    #    3243 tidak ada utk pasangan ini
+                    if _tt is not None and pd.notna(_tt):
+                        _po_3224 = _nomor_m_3224.get((_bb, _rr, int(_tt)))
+                        if _po_3224:
+                            _parts.append(_po_3224)
+                        elif _po_m:
+                            # 3. Label potensi bila TIDAK ada Nomor PO
+                            #    sama sekali (3243 & 3224 kosong)
+                            _tg = _po_m.get((_bb, _rr))
+                            if _tg and int(_tt) in _tg:
+                                _parts.append(POTENSI_PO_LABEL)
                 _ket.append(" · ".join(_parts) if _parts else "")
             df = df.assign(**{"KETERANGAN PO": _ket})
 
