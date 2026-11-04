@@ -105,9 +105,11 @@ from src.ui.deviasi_view import (
     SharedACRThreshold,
     SharedComAmbang,
     SharedPivotCache,
+    SharedSaldoSistemMode,  # v3.11.40 — mode saldo sistem 42.17/pivot
     SharedTanggalH,
     load_acr_threshold,
     load_com_ambang,
+    load_saldo_sistem_mode,  # v3.11.40 — persist mode saldo sistem
 )
 from src.ui.export_sheets import ExportCancelled, add_pivot_sheet, tgl_label
 from src.ui.followup import FollowUpStore
@@ -2299,6 +2301,13 @@ class StockMonitorApp:
         # "bisa gak set 50% > atau <") — persist settings.json key
         # com_ambang_pct (default 90 — v3.11.30 user: "Default 90% aja").
         self._shared_com = SharedComAmbang(load_com_ambang())
+        # v3.11.40 — MODE SALDO SISTEM dibagi GR & PCS (user: "2 mode
+        # saldo sistem — default folder 42.17 / opsi pivot saldo akhir")
+        # — persist settings.json key saldo_sistem_mode (default "4217" —
+        # user: "saat ini sudah benar"). Combobox kartu Filter kedua tab
+        # sinkron; ganti = invalidasi SharedPivotCache + refresh.
+        self._shared_saldo_sistem = SharedSaldoSistemMode(
+            load_saldo_sistem_mode())
         # v3.11.30 — FILE deviasi bulan lalu kini APP-LEVEL (tab 📋
         # Laporan Deviasi dihapus): sumber lalu_provider tab 📦/🧩 +
         # popup Nominal Deviasi. Diisi _auto_load_lalu (mode ⚡) atau
@@ -6183,6 +6192,7 @@ class StockMonitorApp:
             h_state=self._shared_h, h_editable=True,
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
             com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
+            saldo_sistem_state=self._shared_saldo_sistem,  # v3.11.40 — mode saldo sistem
             # v3.9.53 — Dev. Bulan Lalu: file deviasi aktif (tab ⚖ Komparasi)
             # via lalu_provider (pola nominal_resto v3.9.36 — lambda selalu
             # membaca _file_df AKTIF; file berganti → _on_dev_file_loaded
@@ -6201,6 +6211,7 @@ class StockMonitorApp:
             h_state=self._shared_h, h_editable=False,
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
             com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
+            saldo_sistem_state=self._shared_saldo_sistem,  # v3.11.40 — mode saldo sistem
             lalu_provider=lambda: self._lalu_file_df)  # v3.11.30 — app-level
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 

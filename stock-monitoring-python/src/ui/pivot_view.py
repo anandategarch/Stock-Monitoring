@@ -1061,6 +1061,13 @@ class PivotTableView(tk.Frame):
             # COM adalah metric harian (urutan tanggal) — hanya relevan
             # di mode Tanggal
             metrics = [m for m in metrics if m != "6.PEMAKAIAN (COM)"]
+        # v3.11.40 — SALDO AWAL DIHIDDEN dari tampilan pivot (user: "Saldo
+        # awal di pivot tabel hide aja"). Baris tetap ADA di pivot DataFrame
+        # internal (dasar base COM tanggal 1 — _compute_com get_series
+        # "SALDO AWAL" tetap membacanya); hanya tidak ditampilkan sebagai
+        # baris metric di tree. Filter di sini (bukan di METRICS konstanta)
+        # supaya COM computation tak tersentuh + reversible.
+        metrics = [m for m in metrics if m != "SALDO AWAL"]
 
         # FIX 6c-01 — matrix COM PENUH (hanya bila rentang memotong sisi
         # KIRI data: tgl_start > tanggal minimum — rentang penuh dari

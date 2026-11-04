@@ -134,6 +134,14 @@ from .widgets import (
 # jalur on_error run_async.
 _LOG = logging.getLogger("stock_monitoring.deviasi")
 
+# v3.11.40 — RESTO KHUSUS (user: "ada fitur kasih warna khusus untuk
+# beberapa Nama resto yang aku mapping ... Saat ini hanya MLGPAR dan
+# BDGSEK"): set resto code yang di tandai khusus di kolom Resto tab
+# Deviasi GR/PCS. Frozenset — mudah diperluas (tambah code resto lain).
+# Match case-insensitive + strip (lihat _prepare_rows) supaya drift
+# whitespace/case data tetap tertangkap.
+RESTO_KHUSUS = frozenset({"MLGPAR", "BDGSEK"})
+
 
 def _fmt_selisih_gap(v: float) -> str:
     """v3.11.7 — format selisih di atas median utk segmen "COM Tinggi":
@@ -356,6 +364,60 @@ class SharedComAmbang:
         return True
 
 
+class SharedSaldoSistemMode:
+    """v3.11.40 — State MODE SALDO SISTEM yang DIBAGI antar tab Deviasi
+    GR & PCS (user: "Di tab deviasi gr dan pcs aku bisa pakai 2 mode saldo
+    sistem yaitu ambil dari saldo akhir pivot tabel atau dari folder
+    6. 42.17 ... Secara default pakai yang dari folder 4217 dulu terus
+    ada opsi pakai yang dari pivot tabel").
+
+    Mode:
+    - "4217" (DEFAULT) — kolom Sistem = peta SALDO SISTEM file 42.17
+      folder '6. 42.17' (snapshot user tarik saat analisa; pipeline
+      append1 → query_4217_saldo_sistem) MENIMPA running-stock. Pasangan
+      tak ada di peta → fallback running-stock (perilaku lama).
+    - "pivot" — kolom Sistem = SALDO AKHIR pivot (JENIS '2.SALDO AKHIR'
+      tanggal H di append1 — running-stock; TANPA override file 42.17).
+
+    Sinkron seperti TANGGAL H / AMBANG ACR / AMBANG COM (pola
+    SharedComAmbang): ubah di salah satu tab → listener bersihkan
+    SharedPivotCache + refresh KEDUA tab (override hidup di pivot
+    ter-cache — tanpa invalidasi, tabel basi menampilkan mode lama).
+
+    Nilai dibaca/ditulis ke settings.json (key saldo_sistem_mode —
+    pola com_ambang_pct: atomic save; file hilang/korup → default
+    "4217" senyap)."""
+
+    DEFAULT = "4217"
+    PIVOT = "pivot"
+    _VALID = frozenset({DEFAULT, PIVOT})
+
+    def __init__(self, initial: str = DEFAULT):
+        self._mode = initial if initial in self._VALID else self.DEFAULT
+        self._listeners: list[Callable] = []
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def subscribe(self, fn: Callable):
+        self._listeners.append(fn)
+
+    def unsubscribe(self, fn: Callable) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def set(self, new_mode) -> bool:
+        """Ubah mode + panggil SEMUA listener. Return True bila berubah."""
+        if new_mode not in self._VALID or new_mode == self._mode:
+            return False
+        self._mode = new_mode
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):
+                fn(new_mode)
+        return True
+
+
 # --- persistensi ambang ACR (settings.json — pola followup.json) ----------
 # v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
 _SETTINGS_BASE = _app_base_dir()
@@ -424,6 +486,39 @@ def save_com_ambang(pct: float) -> None:
         old = {}
     try:
         old["com_ambang_pct"] = round(float(pct), 2)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def load_saldo_sistem_mode() -> str:
+    """v3.11.40 — mode saldo sistem tersimpan (default "4217" bila file
+    hilang/korup/nilai tak valid — senyap)."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = str(json.load(f).get("saldo_sistem_mode", "4217"))
+        return val if val in ("4217", "pivot") else "4217"
+    except (OSError, ValueError, TypeError, AttributeError):
+        return "4217"
+
+
+def save_saldo_sistem_mode(mode: str) -> None:
+    """v3.11.40 — simpan atomik key saldo_sistem_mode (mirror
+    save_com_ambang: read-modify-write, key lain utuh)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["saldo_sistem_mode"] = str(mode)
         tmp = p.with_suffix(p.suffix + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(old, f, indent=2, ensure_ascii=False)
@@ -572,6 +667,7 @@ class DeviasiView(tk.Frame):
                  h_editable: bool = True,
                  acr_state: SharedACRThreshold | None = None,
                  com_state: "SharedComAmbang | None" = None,
+                 saldo_sistem_state: "SharedSaldoSistemMode | None" = None,
                  lalu_provider: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
@@ -595,6 +691,15 @@ class DeviasiView(tk.Frame):
         self._com_state = com_state
         self.com_ambang = (com_state.pct if com_state is not None
                            else 90.0)
+        # v3.11.40 — MODE SALDO SISTEM dibagi GR & PCS (user: "2 mode
+        # saldo sistem — default 42.17 folder / opsi pivot saldo akhir").
+        # Pola SharedComAmbang: state bersama → listener kedua tab +
+        # persist ke settings.json. Override file 42.17 hidup di pivot
+        # ter-cache → ganti mode = invalidasi cache + recompute.
+        self._saldo_sistem_state = saldo_sistem_state
+        self.saldo_sistem_mode = (saldo_sistem_state.mode
+                                  if saldo_sistem_state is not None
+                                  else "4217")
         # v3.9.53 — Dev. Bulan Lalu: provider FILE deviasi resmi (app
         # meneruskan komparasi_view._file_df — pola lalu_provider
         # nominal_resto v3.9.36). None (standalone/test) → kolom '-' jujur.
@@ -643,6 +748,10 @@ class DeviasiView(tk.Frame):
         # (Tk 9), dipasang ulang pasca sort/clone (pola _neg_cells).
         self._com_tinggi_cells: list = []   # [(iid, 'CEK')]
         self._com_rendah_cells: list = []   # [(iid, 'CEK')]
+        # v3.11.40 — RESTO KHUSUS (user): sel Resto resto yg di-map khusus
+        # (MLGPAR/BDGSEK) — tag CELL (Tk 9 — bg amber lembut menang atas
+        # zebra evenrow/oddrow utk sel Resto itu saja).
+        self._resto_khusus_cells: list = []  # [(iid, 'Resto')]
         # v3.9.18 — highlight kolom Deviasi & SO_H. FIX 35-b (audit 34-b
         # RISK-1): WAJIB diinisialisasi di __init__ — _sort_by /
         # _reapply_cell_tags bisa jalan SEBELUM render pertama (clone ⛶ /
@@ -825,6 +934,30 @@ class DeviasiView(tk.Frame):
         com_spin.bind("<Return>", lambda e: self._on_com_ambang_change())
         tk.Label(r0b, text="% dr median", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 0))
+
+        # v3.11.40 — MODE SALDO SISTEM (user: "Di tab deviasi gr dan pcs aku
+        # bisa pakai 2 mode saldo sistem yaitu ambil dari saldo akhir pivot
+        # tabel atau dari folder 6. 42.17 ... Secara default pakai yang dari
+        # folder 4217 dulu terus ada opsi pakai yang dari pivot tabel"):
+        # combobox sinkron kedua tab (pola AMBANG ACR/COM). "42.17" = peta
+        # SALDO SISTEM file 42.17 folder '6. 42.17' menimpa running-stock
+        # (DEFAULT — user: "saat ini sudah benar"); "Pivot" = saldo akhir
+        # pivot tabel (running-stock JENIS '2.SALDO AKHIR' tanggal H, TANPA
+        # override). Ganti = LANGSUNG apply (listener → invalidasi cache
+        # pivot → refresh kedua tab).
+        tk.Label(r0b, text="SALDO SISTEM", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._saldo_sistem_var = tk.StringVar(
+            value=("42.17" if self.saldo_sistem_mode == "4217"
+                   else "Pivot"))
+        self._saldo_sistem_combo = ttk.Combobox(
+            r0b, textvariable=self._saldo_sistem_var, state="readonly",
+            width=8, font=font(9))
+        self._saldo_sistem_combo["values"] = ["42.17", "Pivot"]
+        self._saldo_sistem_combo.pack(side="left", padx=(6, 0))
+        self._saldo_sistem_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self._on_saldo_sistem_mode_change())
 
         # --- Tabel card ---
         tcard = Card(self.content)
@@ -1047,12 +1180,17 @@ class DeviasiView(tk.Frame):
         # v3.11.12 — ambang COM dibagi GR & PCS (pola ambang ACR).
         if self._com_state is not None:
             self._com_state.subscribe(self._on_shared_com_changed)
+        # v3.11.40 — mode saldo sistem dibagi GR & PCS (pola ambang COM).
+        if self._saldo_sistem_state is not None:
+            self._saldo_sistem_state.subscribe(
+                self._on_shared_saldo_sistem_changed)
         # FIX 6d1-05 — binding Destroy juga dipasang saat view memegang
         # listener FollowUpStore (dulu hanya bila h_state/acr_state ada —
         # view ber-store tanpa state bersama tak pernah melepas listener
         # store di _on_view_destroy).
         if (self._h_state is not None or self._acr_state is not None
                 or self._com_state is not None
+                or self._saldo_sistem_state is not None
                 or self.store is not None):
             # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
             # (pola laporan/komparasi) — tanpa ini listener tetap
@@ -1094,6 +1232,10 @@ class DeviasiView(tk.Frame):
             self._acr_state.unsubscribe(self._on_shared_acr_changed)
         if self._com_state is not None:
             self._com_state.unsubscribe(self._on_shared_com_changed)
+        # v3.11.40 — lepas listener mode saldo sistem (pola ambang COM).
+        if self._saldo_sistem_state is not None:
+            self._saldo_sistem_state.unsubscribe(
+                self._on_shared_saldo_sistem_changed)
         # FIX 6d1-05 — lepas listener FollowUpStore (API remove_listener
         # v3.9.42 tersedia tapi tak pernah dipasang; _on_view_destroy dulu
         # hanya me-unsubscribe h_state/acr_state): tanpa ini listener zombie
@@ -1183,6 +1325,42 @@ class DeviasiView(tk.Frame):
         if hasattr(self, "_com_var"):
             self._com_var.set(self._fmt_threshold(self.com_ambang))
         # segmen COM hidup di pivot ter-cache → invalidasi + recompute.
+        self._cached_pivot = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
+    # v3.11.40 — handler combobox MODE SALDO SISTEM (pola
+    # _on_com_ambang_change). Dipanggil <<ComboboxSelected>>.
+    def _on_saldo_sistem_mode_change(self):
+        raw = str(self._saldo_sistem_var.get()).strip()
+        mode = ("pivot" if raw == "Pivot" else "4217")
+        if self._saldo_sistem_state is not None:
+            # jalur utama: state bersama → listener kedua tab + persist.
+            # set() no-op bila nilai sama (tak memicu refresh berlebih).
+            if self._saldo_sistem_state.set(mode):
+                save_saldo_sistem_mode(mode)
+        else:
+            # standalone (tanpa shared state): refresh instance ini saja.
+            self.saldo_sistem_mode = mode
+            self._cached_pivot = None
+            if self._shared_cache is not None:
+                self._shared_cache.clear()
+            self._refresh()
+
+    # v3.11.40 — listener state bersama (dipanggil SharedSaldoSistemMode
+    # saat mode diubah dari tab mana pun — termasuk tab ini sendiri;
+    # pola _on_shared_com_changed).
+    def _on_shared_saldo_sistem_changed(self, new_mode):
+        self.saldo_sistem_mode = str(new_mode)
+        if hasattr(self, "_saldo_sistem_var"):
+            self._saldo_sistem_var.set(
+                "42.17" if self.saldo_sistem_mode == "4217" else "Pivot")
+        # override saldo sistem hidup di pivot ter-cache → invalidasi +
+        # recompute (H tetap; mode "pivot" = TANPA override file 42.17).
         self._cached_pivot = None
         if self._shared_cache is not None:
             self._shared_cache.clear()
@@ -1705,6 +1883,14 @@ class DeviasiView(tk.Frame):
         tree.tag_configure("com_rendah_cell", foreground="#0f766e")
         tree.tag_configure("cek_com_tinggi", foreground="#be123c")
         tree.tag_configure("cek_com_rendah", foreground="#0f766e")
+        # v3.11.40 — RESTO KHUSUS (user: "kasih warna khusus untuk beberapa
+        # Nama resto yang aku mapping"): sel Resto resto yg di-map khusus
+        # (MLGPAR/BDGSEK — RESTO_KHUSUS) diwarnai bg amber lembut + fg
+        # amber-800 (tag CELL Tk 9 — menang atas zebra evenrow/oddrow utk
+        # sel Resto itu saja; baris lain tak tersentuh). Warna kontras
+        # dgn semua tag cek_* (red/amber/blue/orange/purple/teal/rose).
+        tree.tag_configure("resto_khusus_cell", background="#fef3c7",
+                           foreground="#92400e")
 
     # =========================================================================
     # LOGIKA (identik versi lama)
@@ -2253,7 +2439,12 @@ class DeviasiView(tk.Frame):
         # kosong / barang tak bersaldo di 42.17). Kolom lain (SO_H,
         # Deviasi = SO_H − Sistem, Nominal, Rank) mengikuti otomatis.
         _ss_map = getattr(self, "saldo_sistem_map", None) or {}
-        if _ss_map:
+        # v3.11.40 — MODE SALDO SISTEM (user: "2 mode saldo sistem — default
+        # 42.17 / opsi pivot"): mode "pivot" = TANPA override file 42.17
+        # (pakai running-stock saldo akhir pivot = arr('2.SALDO AKHIR', H)
+        # + cabang saldo-only di atas). Mode "4217" (default) = override
+        # file 42.17 diterapkan (perilaku lama — user: "sudah benar").
+        if _ss_map and self.saldo_sistem_mode == "4217":
             # v3.11.1 — kunci dinormalisasi (upper + rapat spasi + segmen
             # resto setelah titik — konvensi join file lalu/komparasi):
             # drift whitespace/case file 42.17 ('AYAM ', 'ayam') tak lagi
@@ -3025,6 +3216,8 @@ class DeviasiView(tk.Frame):
         # v3.11.30 — sel CEK COM Tinggi/Rendah (warna — user).
         com_tinggi_cells = []
         com_rendah_cells = []
+        # v3.11.40 — sel Resto resto khusus (MLGPAR/BDGSEK — user).
+        resto_khusus_cells = []
         store = self.store
         asal = f"DEVIASI {self.satuan_mode}"
         # FIX 6d1-01 — index entri store lama (kunci fp era volatil 'cek'):
@@ -3226,6 +3419,14 @@ class DeviasiView(tk.Frame):
             # user: "hilangkan warna untuk sekat visual tiap grup nama
             # barang"); tag tersisa hanya pewarnaan afektif (minus/nol/
             # label CEK).
+            # v3.11.40 — RESTO KHUSUS (user): sel Resto resto yg di-map
+            # khusus (MLGPAR/BDGSEK) diwarnai via tag CELL (Tk 9 — bg
+            # amber menang atas zebra utk sel Resto itu saja). Match
+            # case-insensitive + strip (drift whitespace/case data tetap
+            # tertangkap). Fallback Tk 8: tag baris tak dipakai (penanda
+            # via cell saja — konsisten dgn com_*/hl_* cell).
+            if resto.strip().upper() in RESTO_KHUSUS:
+                resto_khusus_cells.append((f"row_{i}", "Resto"))
 
             items.append(("", f"row_{i}", {"values": values,
                                             "tags": tuple(tags)}))
@@ -3285,7 +3486,8 @@ class DeviasiView(tk.Frame):
                 "neg_cells": neg_cells, "zero_cells": zero_cells,
                 "hl_cells": hl_cells,
                 "com_tinggi_cells": com_tinggi_cells,
-                "com_rendah_cells": com_rendah_cells}
+                "com_rendah_cells": com_rendah_cells,
+                "resto_khusus_cells": resto_khusus_cells}
 
     def _diag_nominal_kosong(self, filtered) -> "tuple[int, int, int] | None":
         """v3.9.55 — (n_tanpa_nominal, n_tanpa_harga, n_satuan_tak_konversi)
@@ -3346,6 +3548,8 @@ class DeviasiView(tk.Frame):
         # sort/clone — pola _neg_cells).
         self._com_tinggi_cells = payload.get("com_tinggi_cells", [])
         self._com_rendah_cells = payload.get("com_rendah_cells", [])
+        # v3.11.40 — sel Resto resto khusus (MLGPAR/BDGSEK — user).
+        self._resto_khusus_cells = payload.get("resto_khusus_cells", [])
         # v3.9.18 — highlight kolom Deviasi & SO_H (dipasang ulang juga
         # setelah sort/clone — delete+reinsert me-reset tag cell)
         self._hl_cells = payload.get("hl_cells", [])
@@ -3455,6 +3659,8 @@ class DeviasiView(tk.Frame):
         # fallback tag baris sudah dibawa items payload render).
         apply_cell_tag(tree, "com_tinggi_cell", self._com_tinggi_cells)
         apply_cell_tag(tree, "com_rendah_cell", self._com_rendah_cells)
+        # v3.11.40 — RESTO KHUSUS (user): warna sel Resto MLGPAR/BDGSEK.
+        apply_cell_tag(tree, "resto_khusus_cell", self._resto_khusus_cells)
 
     # =========================================================================
     # ⛶ PERBESAR (fullscreen)
