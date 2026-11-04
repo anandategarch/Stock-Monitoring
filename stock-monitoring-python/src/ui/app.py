@@ -195,7 +195,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.39"  # v3.11.39 — PARITY WASTE: tombol toolbar ala Waste
+APP_VERSION = "3.11.40"  # v3.11.40 — 4 fitur: hide saldo awal pivot + resto khusus + toggle saldo sistem + popup keterangan PO 3224
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru

@@ -3,6 +3,30 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.40 — 4 fitur: hide saldo awal pivot + resto khusus + toggle saldo sistem + popup keterangan PO 3224
+
+**Fitur 1 — filter "only select this" (NO-OP, sudah ada)**: konfirmasi bahwa filter search + klik-kanan "only select this" sudah ada di `widgets.py` (HeaderFilter popup sejak v3.11.30). User dapat: ketik di kotak pencarian untuk menyaring daftar checkbox → klik-kanan sebuah nilai → nilai itu menjadi SATU-SATUNYA seleksi (popup ditutup otomatis), tanpa uncek satu-satu. Hint tampil di popup: "Enter = pilih nilai terfilter · klik-kanan nilai = hanya itu saja · Esc = tutup". Tidak ada perubahan kode (verifikasi status implementasi).
+
+**Fitur 2 — toggle 2 mode saldo sistem (Deviasi GR/PCS)** (user: "Di tab deviasi gr dan pcs aku bisa pakai 2 mode saldo sistem yaitu ambil dari saldo akhir pivot tabel atau dari folder 6. 42.17 ... Secara default pakai yang dari folder 4217 dulu terus ada opsi pakai yang dari pivot tabel"):
+- Class baru `SharedSaldoSistemMode` (`deviasi_view.py`, pola `SharedComAmbang`) — state **dibagi GR & PCS** via listener + **persist** ke `settings.json` key `saldo_sistem_mode` (default `"4217"` — user: "saat ini sudah benar").
+- Combobox `SALDO SISTEM` `[42.17 | Pivot]` di kartu Filter kedua tab (sinkron — ubah di salah satu, kedua tab ikut + recompute).
+- Mode `"4217"` (default) = peta SALDO SISTEM file 42.17 folder `'6. 42.17'` (pipeline `append1 → query_4217_saldo_sistem`) **menimpa** running-stock (perilaku lama). Mode `"pivot"` = saldo akhir pivot tabel (`arr('2.SALDO AKHIR', H)` running-stock, **TANPA** override).
+- Override hidup di pivot ter-cache → ganti mode = **invalidasi `SharedPivotCache` + refresh kedua tab** (angka tak basi).
+- `app.py`: instantiate `self._shared_saldo_sistem` + teruskan ke `DeviasiView` GR & PCS via param `saldo_sistem_state`.
+
+**Fitur 3 — hide baris 'SALDO AWAL' di pivot table** (user: "Saldo awal di pivot tabel hide aja"):
+- `pivot_view.py _compute_payload`: filter `SALDO AWAL` dari daftar `metrics` tampilan (bukan dari konstanta `METRICS`). Baris tetap ADA di pivot DataFrame internal (dasar base COM tanggal 1 — `_compute_com get_series "SALDO AWAL"` tetap membacanya); hanya tidak ditampilkan sebagai baris metric di tree. Export Excel ikut (rows_data dibangun dari metrics terfilter). Reversible.
+
+**Fitur 4 — popup keterangan PO dari file 3224** (user: "Pop up keterangan PO di pivot tabel kok gak muncul? itu ambil dari file 3224 keterangan PO kalau gak salah"):
+- `po_keterangan.py`: + `po_nomor_map(in_detail)` → `{(barang, resto, tgl): "PO-001, PO-002, ..."}` (Nomor PO unik dedup+urut dari baris `in_detail` ber-`SOURCE IN` `'32.24'`, kolom `'Nomor PO'`); + `po_nomor_for(...)` helper. `in_detail` None/kosong/tak ber-Nomor PO → `{}`.
+- `details_popup.py`: kolom `KETERANGAN PO` kini = **Nomor PO 3224** (+ ` · Potensi PO belum dibuat` bila label potensi menyala). Label potensi sebelumnya sering KOSONG (kondisi ketat: BM>0 + SO naik + 3224=0 + 9901=0 + tanggal terverifiable); Nomor PO 3224 SELALU tersedia bila ada penerimaan → kolom kini informatif. Saling eksklusif per tanggal (Nomor PO muncul ⇒ 3224>0 ⇒ potensi tak terpenuhi): popup tampilkan SALAH SATU.
+
+**Fitur 5 — warna khusus resto MLGPAR & BDGSEK (Deviasi GR/PCS)** (user: "ada fitur kasih warna khusus untuk beberapa Nama resto yang aku mapping agar tau itu resto khusus. Saat ini hanya MLGPAR dan BDGSEK ... di tab deviasi gr dan deviasi pcs kolom Nama resto jika nilai nya MLGPAR DAN BDGSEK kasih warna khusus atau penanda"):
+- Konstanta `RESTO_KHUSUS = frozenset({"MLGPAR", "BDGSEK"})` (`deviasi_view.py`) — mudah diperluas (tambah code resto lain).
+- Tag cell `resto_khusus_cell` (bg amber lembut `#fef3c7` + fg amber-800 `#92400e` — Tk 9, **menang atas zebra evenrow/oddrow** untuk sel Resto itu saja; baris lain tak tersentuh). Match case-insensitive + strip (drift whitespace/case data tetap tertangkap). Dipasang dinamis per render + ulang pasca sort/clone (pola `_neg_cells`).
+
+**Verifikasi** (sandbox headless — no `$DISPLAY`, Tk test suite tak bisa run): `py_compile` OK semua file · `ruff` no-new-error (pivot_view 4=baseline · deviasi_view 5=baseline · details_popup 13=baseline · po_keterangan 0=baseline · app.py 17=baseline) · import OK (`deviasi_view`+`app` via `python -c`, tak butuh display) · `SharedSaldoSistemMode` logic test PASS (init/set/listener/no-op/invalid→default) · `RESTO_KHUSUS` matching test PASS (case-insensitive + strip) · `po_nomor_map` pandas e2e test PASS (dedup/sort/filter-32.24/edge-cases None & missing-column). Known: verifikasi visual Tk (combobox render, cell-tag warna) belum diuji headless — user perlu konfirmasi di Windows.
+
 ## v3.11.39 — Parity Waste (3/3): tombol toolbar ala Waste — idle menyatu, hover/pressed slate
 
 **Restyle `widgets.py Toolbar.add_action`** (cermin `QToolBar QToolButton` Waste v2.15.0):
