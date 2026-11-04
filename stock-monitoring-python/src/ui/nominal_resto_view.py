@@ -1232,10 +1232,15 @@ class NominalRestoView(tk.Frame):
         # (SaldoMinusView punya listener h_state & saldo_sistem_state
         # sendiri utk auto-refresh mode/H; load_data di sini teruskan
         # data + saldo_sistem_map + rincian_po_df).
+        # v3.11.43 — contextlib.suppress DIHAPUS (menelan error senyap —
+        # user kesulitan debug "saldo minus kosong"). Error ditangkap &
+        # di-log via status SaldoMinusView sendiri (pola _on_error run_async).
         if getattr(self, "_saldo_minus_view", None) is not None:
-            with contextlib.suppress(Exception):
+            try:
                 self._saldo_minus_view.load_data(
                     data, self.saldo_sistem_map, self._rincian_po_df)
+            except Exception as exc:  # noqa: BLE001 — view child gagal ≠ parent
+                print(f"[WARNING] SaldoMinusView load_data gagal: {exc}")
         # footer informatif jalur 0-baris (pola v3.9.33)
         if data is None or len(data) == 0:
             self.status_var_label.set(

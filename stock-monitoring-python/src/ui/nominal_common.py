@@ -1160,8 +1160,18 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
         return pd.DataFrame()
     out = pd.DataFrame(rows)
 
-    # 7. Filter Source Kiriman ∈ {Eksternal, Campuran}
-    out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)]
+    # 7. Filter Source Kiriman ∈ {Eksternal, Campuran}.
+    # v3.11.43 — FIX (user: "hasil saldo minus gak ada isinya"): pasangan
+    # dgn SOURCE KIRIMAN kosong (None/NA — barang 42.17-only tanpa dokumen
+    # IN, by-design append1 LANGKAH 5b line 247-249) TETAP ditampilkan
+    # (bukan dibuang) — saldo sistem minus pada barang tanpa kiriman
+    # kemungkinan besar adalah barang eksternal (saldo 42.17 = snapshot
+    # supplier). Filter ⧩ kolom Source Kiriman tetap bisa menyaring
+    # spesifik Eksternal/Campuran bila user mau. Empty string diabaikan
+    # utk filter default (tampil utk transparansi).
+    out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)
+              | (out["Source Kiriman"] == "")
+              | out["Source Kiriman"].isna()]
     if out.empty:
         return pd.DataFrame()
 

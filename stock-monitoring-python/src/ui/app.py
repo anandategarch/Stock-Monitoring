@@ -195,7 +195,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.42"  # v3.11.42 — anak tab "Saldo Sistem Minus" di Nominal Deviasi (Opsi 2, mode pivot/4217, 12 kolom, ide A-K semua)
+APP_VERSION = "3.11.43"  # v3.11.43 — fix bug saldo minus kosong (SOURCE KIRIMAN None tetap tampil) + remove silent suppress
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru

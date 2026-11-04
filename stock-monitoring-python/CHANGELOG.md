@@ -3,6 +3,24 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.43 — Fix bug saldo minus kosong (SOURCE KIRIMAN None tetap tampil) + remove silent suppress
+
+**Bug #2 — saldo minus kosong** (user: "hasil dari fitur baru saldo minus juga kok gak ada isi nya? cek juga deept"):
+
+**Analisa mendalam**: `hitung_saldo_minus_pairs` (v3.11.42) memfilter `SOURCE KIRIMAN ∈ {Eksternal, Campuran}`. Tapi pasangan 42.17-only (saldo sistem tanpa dokumen IN) punya `SOURCE KIRIMAN = None/kosong` (by-design append1 LANGKAH 5b line 247-249: "pasangan TANPA dokumen IN → tidak mengeluarkan baris (merge left → None = kosong)"). Filter `isin({Eksternal, Campuran})` membuang semua pasangan dgn SOURCE KIRIMAN kosong → hasil kosong.
+
+**Fix**: pasangan dgn SOURCE KIRIMAN kosong (None/NA/empty) **TETAP ditampilkan** (bukan dibuang) — saldo sistem minus pada barang tanpa kiriman kemungkinan besar adalah barang eksternal (saldo 42.17 = snapshot supplier). Filter ⧩ kolom Source Kiriman tetap bisa menyaring spesifik Eksternal/Campuran bila user mau. Internal tetap di-skip (bukan eksternal).
+
+**Fix #2**: `nominal_resto_view.load_data` delegation ke `SaldoMinusView` dulu pakai `contextlib.suppress(Exception)` — menelan error senyap (user kesulitan debug "saldo minus kosong"). Kini `try/except` dgn `print("[WARNING] SaldoMinusView load_data gagal: {exc}")` — error terlihat di log.
+
+**Bug #1 — kategori manual tidak masuk list filter deviasi** (user: "mapping kategori manual di config misal aku udah mapping kok gak masuk di list deviasi gr dan deviasi pcs ya?"):
+
+**Analisa mendalam**: cek config.json sandbox — key `KategoriManual` **TIDAK ADA** (0 entries). `apply_kategori_manual` (append1 LANGKAH 5d) test PASS — logic apply benar. `_kategori_manual_save` (app.py) test PASS — persist ke config.json benar. Flow: UI tombol 🎯 Identifikasi → `_kategori_dialog` → `_kategori_manual_save` → config.json → pipeline run → `apply_kategori_manual` → append1_df KATEGORI → filter deviasi.
+
+**Root cause**: BUKAN code bug. User kemungkinan: (a) belum re-run pipeline setelah mapping (kategori manual hanya di-apply saat pipeline run — log line 4571: "diterapkan mulai run pipeline berikutnya"), ATAU (b) config.json di Windows user berbeda lokasi (mode frozen PyInstaller → config.json di folder .exe). Tidak ada perubahan code (logic benar) — user perlu konfirmasi: (1) re-run pipeline setelah mapping, (2) cek config.json di folder .exe punya key `KategoriManual`.
+
+**Verifikasi**: `py_compile` OK · `ruff` no-new-error (nominal_common=1, nominal_resto_view=1 — baseline) · e2e test `hitung_saldo_minus_pairs` PASS (SOURCE KIRIMAN None tetap tampil, Internal skip, Eksternal/Campuran tampil).
+
 ## v3.11.42 — Anak tab "Saldo Sistem Minus" di Nominal Deviasi (Opsi 2, mode pivot/4217, 12 kolom, ide A-K semua)
 
 **Fitur baru** (user: "tambah fitur baru lagi di tab nominal deviasi tambah 1 baru yaitu Saldo Sistem Minus Dengan ambil data dari Pivot ... isinya rekapan saldo akhir atau saldo sistem yang minus dan keterangan nya isi dengan mulai minus dari tanggal berapa"). Klarifikasi user: (1) sumber 2 mode pivot/4217, (2) Opsi 2 SEMUA pasangan pernah minus 1..H, (3) Kuantiti = qty mulai minus, (4) Eksternal termasuk Campuran, (5) semua ide tambahan A-K.
