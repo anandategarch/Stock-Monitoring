@@ -44,6 +44,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
 
+from .cell_tooltip import CellTooltip
 from .nominal_common import (
     hitung_saldo_minus_pairs,
 )
@@ -304,6 +305,34 @@ class SaldoMinusView(tk.Frame):
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)
         self.tree.bind("<Double-1>", self._on_double_click, add="+")
+        # v3.11.47 — Fitur 2: tooltip hover untuk kolom panjang yang
+        # sering terpotong (Keterangan narasi gabungan, Nomor PO,
+        # Status PO). Provider mengambil nilai dari tree.set(iid, col)
+        # dan tip muncul hanya bila teks cukup panjang (≥ 30 char —
+        # cell pendek sudah terbaca penuh di tabel, anti-noise).
+        # Kolom lain (Resto, Nama Barang, Tipe, satuan) biasanya pendek
+        # → tip tidak muncul (truncate_provider min_len=30).
+        _LONG_COLS = ("Keterangan", "Nomor PO", "Status PO", "Resto",
+                      "Nama Barang")
+
+        def _tip_provider(iid: str, col: str) -> str | None:
+            if col not in _LONG_COLS:
+                return None
+            try:
+                txt = self.tree.set(iid, col)
+            except tk.TclError:
+                return None
+            if not txt or txt == "-":
+                return None
+            if len(txt) < 30:
+                return None
+            return txt
+
+        self._cell_tip = CellTooltip(
+            self.tree,
+            provider=_tip_provider,
+            delay_ms=500,
+            max_width=460)
 
         # Footer status
         foot = tk.Frame(tbody, bg=C_CARD)
@@ -513,6 +542,13 @@ class SaldoMinusView(tk.Frame):
         resto_khusus_cells = []
         konsisten_cells = []
         fluktuatif_cells = []
+        # v3.11.47 — Fitur 1: zebra PER-GROUP Nama Barang (bukan per index).
+        # Warna berganti SAAT nilai Nama Barang berubah → efek "blok" per
+        # barang; semua baris dgn barang sama → warna sama → mata gampang
+        # kelompokin. Sort default hitung_saldo_minus_pairs: Nama Barang
+        # ASC → |qty| DESC (baris barang sama berdekatan).
+        prev_barang_grp = None
+        group_parity = 0   # 0 = evenrow, 1 = oddrow; grup pertama = 0
         for i in range(n):
             row = filtered.iloc[i]
             values = []
@@ -547,8 +583,14 @@ class SaldoMinusView(tk.Frame):
                         pass
                 else:
                     values.append(str(row.get(col_id, "") or ""))
-            # tags
-            tags = ["evenrow" if i % 2 == 0 else "oddrow"]
+            # zebra per-group Nama Barang
+            barang_i = str(row.get("Nama Barang", ""))
+            if prev_barang_grp is None:
+                pass  # grup pertama, biarkan parity 0 (evenrow)
+            elif barang_i != prev_barang_grp:
+                group_parity ^= 1   # toggle 0↔1
+            prev_barang_grp = barang_i
+            tags = ["evenrow" if group_parity == 0 else "oddrow"]
             resto = str(row.get("NAMA RESTO", "")).strip().upper()
             if resto in RESTO_KHUSUS:
                 resto_khusus_cells.append((f"row_{i}", "Resto"))

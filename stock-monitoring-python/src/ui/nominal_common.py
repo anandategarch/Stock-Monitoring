@@ -1168,6 +1168,11 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
         durasi = h - tgl_mulai + 1
         src = _sk_map.get((b, r), "")
         sat = _sat_map.get((b, r), "")
+        # v3.11.47 — Frek Minus: jumlah TANGGAL minus di 1..H (untuk
+        # analisa kronis — pasangan kronis = frek >= threshold). Beda
+        # dgn Durasi (H - tgl_mulai + 1): durasi = rentang sejak mulai
+        # minus; frek = berapa kali minus terjadi (Fluktuatif bisa <
+        # durasi krn ada tgl plus di antara). Konsisten → frek = durasi.
         rows.append({
             "Nama Barang": b, "NAMA RESTO": r, "Satuan": sat,
             "Source Kiriman": src,
@@ -1175,6 +1180,7 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
             "Qty Mulai Minus": qty_mulai,
             "Min Qty": min_qty, "Max Qty": max_qty,
             "Tipe": tipe, "Durasi": durasi,
+            "Frek Minus": len(tgl_minus),
         })
 
     if not rows:
@@ -1201,11 +1207,138 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     if out.empty:
         return pd.DataFrame()
 
-    # 8. Sort by |Qty Mulai Minus| MENURUN (paling minus di atas)
+    # 8. Sort by |Qty Mulai Minus| MENURUN (paling minus di atas).
+    # v3.11.47 — Fitur 1 (zebra per-group Nama Barang): sort default diubah
+    # ke Nama Barang ASC → |Qty Mulai Minus| DESC — supaya baris dgn barang
+    # SAMA berdekatan (grup visual) DAN dalam grup, yg paling minus di atas.
+    # View saldo_minus_view memakai zebra per-group: warna berganti SAAT
+    # Nama Barang berubah → efek "blok" per barang (bukan per-baris acak).
     out = out.assign(_abs=out["Qty Mulai Minus"].abs())
-    out = out.sort_values("_abs", ascending=False, kind="mergesort")
+    out = out.sort_values(
+        ["Nama Barang", "_abs"],
+        ascending=[True, False], kind="mergesort")
     out = out.drop(columns="_abs").reset_index(drop=True)
     if stats_out is not None:
         stats_out["shown"] = len(out)
     return out
+
+
+# ---------------------------------------------------------------------------
+# v3.11.47 — ANALISA KRONIS (anak tab "Analisa Kronis" tab 🧮 Nominal Deviasi)
+# User: "tambahin analisa juga di saldo minus dengan nama barang yang sering
+# minus dan hanya barang itu aja yang minus di resto itu". Interpretasi C:
+# pasangan (Resto, Barang) kronis + eksklusif (barang TIDAK minus di resto
+# lain) → investigasi lapangan fokus ke pasangan ini.
+# ---------------------------------------------------------------------------
+def hitung_saldo_minus_kronis(
+        data: pd.DataFrame | None, h: int,
+        saldo_sistem_map: dict | None = None,
+        mode_4217: bool = True,
+        threshold: int = 3,
+        stats_out: dict | None = None) -> pd.DataFrame:
+    """v3.11.47 — Pasangan (Resto, Barang) kronis minus: ``Frek Minus``
+    >= ``threshold`` (jumlah tanggal minus di 1..H). Plus flag eksklusif
+    (barang hanya minus di 1 resto — bukan masalah global).
+
+    Sumber: ``hitung_saldo_minus_pairs`` (minus_df dgn kolom Frek Minus,
+    hasil scan 2.SALDO AKHIR per pasangan×tgl). Filter kronis diterapkan
+    SETELAH minus_df (sudah ter-filter Source Kiriman Eksternal/Campuran
+    — konsisten dgn tab Saldo Sistem Minus).
+
+    Output per pasangan kronis:
+    - ``Nama Barang``, ``NAMA RESTO``, ``Satuan``, ``Source Kiriman``
+    - ``Frek Minus`` — jumlah tgl minus 1..H (≥ threshold)
+    - ``Total Durasi`` — H − tgl_mulai + 1 (rentang sejak mulai minus)
+    - ``Tipe`` — Konsisten/Fluktuatif (mirror hitung_saldo_minus_pairs)
+    - ``Min Qty``, ``Max Qty`` — range saldo 1..H
+    - ``Eksklusif`` — "✅" bila barang hanya minus di 1 resto (resto ini)
+    - ``Resto Lain`` — jumlah resto lain yg juga minus (0 bila eksklusif)
+    - ``Rekomendasi`` — narasi investigasi (resto-spesifik vs global)
+
+    Sort: Frek Minus MENURUN → |Qty Mulai Minus| MENURUN (paling kronis
+    di atas). DataFrame kosong bila tak ada pasangan kronis / data None
+    / kolom kurang / threshold > max frek.
+    """
+    if stats_out is not None:
+        stats_out.update(total_minus_pairs=0, kronis_pairs=0, shown=0,
+                         threshold=threshold, eksklusif_pairs=0)
+    if data is None or getattr(data, "empty", True):
+        return pd.DataFrame()
+    # 1. Panggil hitung_saldo_minus_pairs (sudah ber-Frek Minus, sudah
+    #    ter-filter Source Kiriman Eksternal/Campuran — konsisten dgn
+    #    tab Saldo Sistem Minus).
+    minus_df = hitung_saldo_minus_pairs(
+        data, h, saldo_sistem_map, mode_4217=mode_4217)
+    if minus_df is None or minus_df.empty:
+        return pd.DataFrame()
+    if "Frek Minus" not in minus_df.columns:
+        return pd.DataFrame()
+    if stats_out is not None:
+        stats_out["total_minus_pairs"] = len(minus_df)
+
+    # 2. Filter kronis: Frek Minus >= threshold
+    threshold = max(1, int(threshold))
+    kronis = minus_df[minus_df["Frek Minus"].fillna(0).astype(int)
+                      >= threshold].copy()
+    if kronis.empty:
+        if stats_out is not None:
+            stats_out["kronis_pairs"] = 0
+            stats_out["shown"] = 0
+            stats_out["eksklusif_pairs"] = 0
+        return pd.DataFrame()
+
+    # 3. Eksklusif: barang hanya minus di 1 resto? Hitung berapa resto
+    #    per barang di minus_df (SEMUA pasangan minus — bukan hanya
+    #    kronis — supaya "barang ini minus global" tetap kehitung bila
+    #    non-kronis di resto lain). Contoh: barang A kronis di MLGPAR
+    #    (frek 5), dan minus 1 kali di BDGSEK (frek 1 < threshold 3) →
+    #    BDGSEK tidak masuk kronis tapi TETAP dihitung sbg "resto lain
+    #    juga minus" → Eksklusif = "✗".
+    resto_per_barang = (minus_df.groupby("Nama Barang")["NAMA RESTO"]
+                        .nunique())
+    kronis["_resto_lain_n"] = kronis["Nama Barang"].map(
+        lambda b: int(resto_per_barang.get(b, 1)))
+    kronis["Eksklusif"] = kronis["_resto_lain_n"].apply(
+        lambda n: "✅" if n <= 1 else "✗")
+    kronis["Resto Lain"] = (kronis["_resto_lain_n"] - 1).clip(lower=0)
+
+    # 4. Rekomendasi narasi (interpretasi C — resto-spesifik vs global)
+    def _rek(row) -> str:
+        b = str(row["Nama Barang"])
+        r = str(row["NAMA RESTO"])
+        frek = int(row["Frek Minus"])
+        tipe = str(row.get("Tipe", ""))
+        if row["Eksklusif"] == "✅":
+            return (f"Resto-spesifik: '{b}' HANYA minus di {r} "
+                    f"({frek} tgl) — tidak di resto lain. Investigasi "
+                    f"pencatatan/stok fisik di {r} (bukan masalah barang "
+                    f"secara global).")
+        n_lain = int(row["Resto Lain"])
+        return (f"Barang global: '{b}' juga minus di {n_lain} resto lain "
+                f"(di {r} frek {frek} tgl) — bukan masalah khusus {r}, "
+                f"cek pola supply/permintaan '{b}' secara umum "
+                f"(tipe {tipe}).")
+    kronis["Rekomendasi"] = kronis.apply(_rek, axis=1)
+    kronis = kronis.drop(columns=["_resto_lain_n"])
+
+    # 5. Rename untuk tampilan: Tgl Mulai Minus → Mulai Minus (mirror
+    #    saldo_minus_view naming), Durasi → Total Durasi (klarifikasi).
+    kronis = kronis.rename(columns={
+        "Tgl Mulai Minus": "Mulai Minus",
+        "Durasi": "Total Durasi",
+    })
+
+    # 6. Sort: Frek Minus MENURUN → |Qty Mulai Minus| MENURUN
+    kronis = kronis.assign(_abs=kronis["Qty Mulai Minus"].abs())
+    kronis = kronis.sort_values(
+        ["Frek Minus", "_abs"], ascending=[False, False], kind="mergesort")
+    kronis = kronis.drop(columns="_abs").reset_index(drop=True)
+
+    if stats_out is not None:
+        stats_out["kronis_pairs"] = len(kronis)
+        stats_out["shown"] = len(kronis)
+        stats_out["eksklusif_pairs"] = int(
+            (kronis["Eksklusif"] == "✅").sum())
+
+    return kronis
 

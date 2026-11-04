@@ -3,6 +3,46 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.47 — zebra per-group Nama Barang (tab Saldo Minus) + tooltip hover cell CEK (Deviasi GR/PCS) + anak tab "Analisa Kronis" (pasangan kronis minus + eksklusif)
+
+User: "zebra grup di tab minus perbaiiki sehingga jadi per group nama barang. dan bisa gak untuk kolom cek di tab deviasi gr dan deviasi pcs kan kadang terlalu panjang ke kanan misal aku klik cell itu terus muncul pop up tampilan lengkap nya bisa gak? jagan buat kode dulu buat ide. tambahin analisa juga di saldo minus dengan nama barang yang sering minus dan hanya barang itu aja yang minus di resto itu."
+
+Konfirmasi user via balasan ide: Fitur 1 = opsi 1A (sort Nama Barang asc → |qty| desc + zebra per-group); Fitur 2 = opsi 2A (tooltip hover saja); Fitur 3 = interpretasi C (pasangan kronis + eksklusif resto-spesifik) + threshold default 3 tanggal + sub-tab baru (3-i) + KPI.
+
+### Fitur 1 — Zebra per-group Nama Barang (tab Saldo Sistem Minus)
+**Sebelum:** zebra by index baris (`i % 2`) → 1 barang muncul di 5 resto → 5 baris warna acak, susah dilihat sebagai 1 grup.
+**Sekarang:**
+- `hitung_saldo_minus_pairs` LANGKAH 8 — sort default diubah: `Nama Barang ASC → |Qty Mulai Minus| DESC` (dulu `|qty| desc` saja) — baris dgn barang SAMA berdekatan (grup visual), dalam grup paling minus di atas;
+- `saldo_minus_view._compute` — zebra parity berganti SAAT nilai Nama Barang berubah (bukan tiap baris) → efek "blok" per barang; grup pertama = evenrow (putih), grup kedua = oddrow (abu), dst;
+- Sort klik header tetap bekerja (sort_tree_by_column) — zebra saat user sort manual akan ikut grup barang (selama sort default dipertahankan atau user sort by Nama Barang).
+
+### Fitur 2 — Tooltip hover cell CEK yang kepotong (Deviasi GR/PCS + Saldo Minus + Analisa Kronis)
+**Sebelum:** kolom CEK tampil teks `"Rank 3 · Turun Drastis · Beda dari Resto Lain (BBG TGR 5,2 kg · BJMHAS 3,1 kg) · ACR to BOM 12%"` (108+ char) → terpotong `…`, tidak ada cara lihat full-nya.
+**Sekarang:**
+- `cell_tooltip.py` (BARU, ~240 baris) — `CellTooltip` reusable: bind `<Motion>` `add="+"` (tidak mengganggu handler cursor hand2 deviasi_view), hover 500ms di cell target → Toplevel tip kecil dekat cursor (clamp ke layar, topmost, wrap 460-540px), mouse leave / klik / cell berubah → cancel + hide;
+- `deviasi_view` — tip untuk kolom **CEK** (dari `_cek_map` RAW, min 20 char) + kolom NAMA BARANG/KATEGORI/NOMOR PO/#KET PO (≥ 30 char anti-noise);
+- `saldo_minus_view` — tip untuk kolom Keterangan / Nomor PO / Status PO / Resto / Nama Barang (≥ 30 char);
+- `analisa_kronis_view` — tip untuk kolom Rekomendasi (narasi panjang 170+ char) + Resto + Nama Barang;
+- Tidak konflik dgn single-click ✓ (follow-up) atau double-click drill-down (tooltip cuma Toplevel pasif, no grab).
+
+### Fitur 3 — Anak tab "Analisa Kronis" (sub-tab ke-3 di 🧮 Nominal Deviasi)
+**User:** "tambahin analisa juga di saldo minus dengan nama barang yang sering minus dan hanya barang itu aja yang minus di resto itu" → interpretasi C: pasangan (Resto, Barang) kronis + eksklusif.
+
+**Baru:**
+- `nominal_common.hitung_saldo_minus_kronis(data, h, saldo_sistem_map, mode_4217, threshold=3, stats_out)` — re-use `hitung_saldo_minus_pairs` (minus_df dgn kolom baru `Frek Minus`), filter `frek >= threshold`, hitung "resto lain yg juga minus" per barang (groupby Nama Barang → nunique NAMA RESTO di SEMUA pasangan minus, bukan hanya kronis — supaya non-kronis di resto lain tetap dihitung sbg "resto lain juga minus"), flag Eksklusif ✅/✗, narasi Rekomendasi (resto-spesifik vs barang global);
+- `hitung_saldo_minus_pairs` extend: tambah kolom `Frek Minus` (jumlah tanggal minus di 1..H) — kolom BARU, tidak mengubah kontrak view existing (saldo_minus_view tidak menampilkannya);
+- `analisa_kronis_view.py` (BARU, ~700 baris) — `AnalisaKronisView(tk.Frame)` mirror SaldoMinusView: 11 kolom (Resto · Nama Barang · Satuan · Frek Minus · Total Durasi · Tipe · Min Qty · Max Qty · Eksklusif · Resto Lain · Rekomendasi); KPI (pasangan kronis · eksklusif · resto kronis terbanyak); filter ⧩ + sort; double-click drill-down details_popup; export Excel; tag eksklusif_row (hijau) / global_row (ungu); tooltip Rekomendasi; **Spinbox threshold 1..31** (default 3 — user bisa naikkan/turunkan "kronis" definition); zebra per-group Nama Barang (konsisten Fitur 1); subscribe h_state + saldo_sistem_state (konsisten dgn SaldoMinusView);
+- `nominal_resto_view._sub_nb` — sub-tab ke-4 "Analisa Kronis"; wiring `load_data` + `ensure_refreshed` + `_on_sub_tab_changed` propagate ke `_kronis_view` (pola v3.11.44 saldo minus);
+- Status kosong jujur (pola v3.9.46/v3.11.45): "0 pasangan minus (2.SALDO AKHIR) di 1..H — pipeline belum dijalankan" vs "N pasangan minus dipindai tapi TIDAK ADA yg Frek Minus ≥ threshold — coba turunkan threshold";
+- Log 1 baris `[ANALISA KRONIS] mode=… · H=… · thr=… · N total · N kronis · N eksklusif · N tampil` tiap compute (stdout → tab 🚀 Proses).
+
+### Verifikasi — GUI test Xvfb SUNGGUHAN (bukan cuma logic)
+- **CellTooltip standalone 5/5 PASS**: provider CEK panjang muncul (len 108) · provider cell pendek (< 30 char) return None (anti-noise) · Motion event ke cell CEK → tip Toplevel visible setelah delay · Leave → tip hidden;
+- **AnalisaKronisView + SaldoMinusView e2e 7/7 PASS**: T1 SaldoMinusView 3 baris (3 pasangan minus) · T2 AnalisaKronisView 2 baris (2 kronis, threshold 3) · T3 zebra per-group parity beda (BPG=evenrow, GULA=oddrow) · T4 Eksklusif ✅ untuk BPG (frek 5) + GULA (frek 3) · T5 CellTooltip attached ke kedua view · T6 threshold=5 → cache invalidate + recompute → 1 baris (BPG only) · T7 tooltip provider Rekomendasi return teks 172 char;
+- **E2E pandas sintetis** (3 pasangan, 1 eksklusif + 1 global): hitung_saldo_minus_kronis threshold=3 → 2 kronis, eksklusif_pairs=1, Resto Lain benar (BPG=1 krn BDGSEK juga minus, GULA=0 krn eksklusif);
+- **compileall src/ OK** · ruff: cell_tooltip + analisa_kronis_view + saldo_minus_view = All checks passed; deviasi_view baseline (4 errors pre-existing, I001 fixed via --fix); nominal_common + nominal_resto_view = baseline (1 error pre-existing each);
+- APP_VERSION → 3.11.47; README "Versi terkini: v3.11.47".
+
 ## v3.11.46 — versi build di baris pertama log pipeline (log yang di-copy langsung teridentifikasi)
 
 User: "build nya masih 3.11.43. padahal sudah download dari git hub terbaru" — verifikasi langsung `git ls-remote origin`: **GitHub main sudah v3.11.45** (semua fix kategori manual + saldo minus TER-upload; README GitHub pun sudah bilang "Versi terkini: v3.11.45"). Jadi app yang dijalankan user masih kode lama — download-nya tidak benar-benar mengambil yang terbaru (zip GitHub kena cache browser / menjalankan exe lama / extract ke folder lama). Dua putaran debug "tetap sama aja" (v3.11.44/45) berpotensi akibat ambigu versi; judul window + statusbar (v3.11.45) ternyata **kurang terlihat saat user melapor pakai log**.

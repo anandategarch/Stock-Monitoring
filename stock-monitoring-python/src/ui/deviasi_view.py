@@ -56,21 +56,22 @@ import re
 import threading
 import tkinter as tk
 from collections.abc import Callable
-from typing import ClassVar
 from pathlib import Path
 from tkinter import messagebox, ttk
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
 
 from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
+from .cell_tooltip import CellTooltip  # v3.11.47 — hover tooltip kolom CEK
+from .com_analisa import (  # v3.11.7 — segmen CEK "COM Tinggi" (COM
+    COM_RENDAH_LABEL,  # v3.11.8 — arah bawah median (sistem > fisik)
+    COM_TINGGI_LABEL,  # = pemakaian aktual vs ACR = pemakaian sistem)
+    com_gap_map,  # v3.11.8 — peta gabungan dua arah (tinggi/rendah)
+)
 from .doc_codes import ri_balancing_docs  # v3.9.23 (poin 6)
 from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
-from .com_analisa import (  # v3.11.7 — segmen CEK "COM Tinggi" (COM
-    COM_TINGGI_LABEL,     # = pemakaian aktual vs ACR = pemakaian sistem)
-    COM_RENDAH_LABEL,     # v3.11.8 — arah bawah median (sistem > fisik)
-    com_gap_map,          # v3.11.8 — peta gabungan dua arah (tinggi/rendah)
-)
 from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 — lalu file
     _norm_name_lalu,  # v3.9.53 — kunci pasangan file deviasi (mirror komparasi)
     _norm_resto_lalu,  # v3.9.53 — idem (sisi resto)
@@ -79,7 +80,7 @@ from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 �
     lookup_harga_pair,
 )
 from .po_keterangan import (  # v3.11 — keterangan PO "Potensi PO belum
-    POTENSI_PO_LABEL,     # dibuat" di CEK + popup (32.24/eksternal/campuran)
+    POTENSI_PO_LABEL,  # dibuat" di CEK + popup (32.24/eksternal/campuran)
     potensi_po_map,
 )
 from .theme import (
@@ -89,7 +90,7 @@ from .theme import (
     C_HEADER,
     C_TEXT_MUTED,
     ROW_EVEN,  # v3.9.72 — FIX 4: zebra dari konstanta tema (bukan hex)
-    ROW_ODD,   # v3.9.72 — FIX 4: idem
+    ROW_ODD,  # v3.9.72 — FIX 4: idem
     font,
     register_find_tags,
 )
@@ -1031,6 +1032,32 @@ class DeviasiView(tk.Frame):
         # auto-fit (dipasang SEBELUM HeaderFilter supaya "break" efektif)
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)  # v3.9.32
+
+        # v3.11.47 — Fitur 2: tooltip hover kolom CEK (narasi panjang
+        # sering terpotong: "Rank N · <label> · Beda dari Resto Lain (…) ·
+        # ACR to BOM 12%"). Provider ambil dari _cek_map (RAW teks display
+        # — pola _on_tree_motion cursor hand2 sudah ada di kolom ✓, bind
+        # add="+" tidak mengganggu). Tip muncul juga di kolom NAMA BARANG/
+        # KATEGORI bila panjang (≥ 30 char — anti-noise cell pendek).
+        def _tip_provider(iid: str, col: str) -> str | None:
+            if col == "CEK":
+                txt = self._cek_map.get(str(iid)) if self._cek_map else None
+                if not txt:
+                    return None
+                return txt if len(txt) >= 20 else None
+            if col in ("NAMA BARANG", "KATEGORI", "NOMOR PO", "#KET PO"):
+                try:
+                    txt = self.tree.set(iid, col)
+                except tk.TclError:
+                    return None
+                if not txt or txt == "-":
+                    return None
+                return txt if len(txt) >= 30 else None
+            return None
+
+        self._cell_tip = CellTooltip(
+            self.tree, provider=_tip_provider,
+            delay_ms=500, max_width=540)
 
         # Footer: status
         foot = tk.Frame(tbody, bg=C_CARD)

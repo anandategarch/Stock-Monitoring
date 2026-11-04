@@ -197,7 +197,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.46"  # v3.11.46 — versi build di baris pertama log pipeline (log yang di-copy user langsung teridentifikasi)
+APP_VERSION = "3.11.47"  # v3.11.47 — zebra per-group Nama Barang + tooltip hover cell CEK + anak tab Analisa Kronis
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru

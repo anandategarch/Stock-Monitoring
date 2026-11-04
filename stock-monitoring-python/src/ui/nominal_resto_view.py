@@ -384,9 +384,11 @@ class NominalRestoView(tk.Frame):
         self._tab_main = tk.Frame(self._sub_nb, bg=C_BG)
         self._tab_noharga = tk.Frame(self._sub_nb, bg=C_BG)
         self._tab_minus = tk.Frame(self._sub_nb, bg=C_BG)
+        self._tab_kronis = tk.Frame(self._sub_nb, bg=C_BG)  # v3.11.47
         self._sub_nb.add(self._tab_main, text="Per Resto")
         self._sub_nb.add(self._tab_noharga, text="Tanpa Harga")
         self._sub_nb.add(self._tab_minus, text="Saldo Sistem Minus")
+        self._sub_nb.add(self._tab_kronis, text="Analisa Kronis")  # v3.11.47
 
         # --- Filter card: chip H bersama (read-only) + TOTAL chip ---
         fcard = Card(self._tab_main, title="Filter")
@@ -535,6 +537,17 @@ class NominalRestoView(tk.Frame):
             saldo_sistem_state=self._saldo_sistem_state,
             go_to_proses=self.go_to_proses)
         self._saldo_minus_view.pack(fill="both", expand=True)
+        # v3.11.47 — anak tab 'Analisa Kronis' (analisa_kronis_view) —
+        # pasangan kronis minus + flag eksklusif (barang hanya minus di
+        # 1 resto). Mirror SaldoMinusView: subscribe h_state + saldo_
+        # sistem_state, lazy refresh, cache per (data_id, h, mode, thr).
+        from .analisa_kronis_view import AnalisaKronisView
+        self._kronis_view = AnalisaKronisView(
+            self._tab_kronis,
+            h_state=self._h_state,
+            saldo_sistem_state=self._saldo_sistem_state,
+            go_to_proses=self.go_to_proses)
+        self._kronis_view.pack(fill="both", expand=True)
         # v3.11.44 — FIX WIRING (root cause "saldo minus tidak terjadi apa
         # apa"): SaldoMinusView punya siklus refresh SENDIRI (lazy — load_data
         # saat tab tersembunyi hanya menandai _dirty). Tanpa dua jalur ini
@@ -543,6 +556,7 @@ class NominalRestoView(tk.Frame):
         # (1) klik anak tab 'Saldo Sistem Minus' → ensure_refreshed;
         # (2) nominal_resto_view.ensure_refreshed (main tab dibuka) →
         #     propagate ke anak tab (pola app-level notebook).
+        # v3.11.47 — propagate juga ke 'Analisa Kronis' (sama pola).
         self._sub_nb.bind(
             "<<NotebookTabChanged>>", self._on_sub_tab_changed, add="+")
 
@@ -941,12 +955,18 @@ class NominalRestoView(tk.Frame):
     # v3.11.44 — FIX WIRING: klik sub-notebook anak tab → bila tab
     # 'Saldo Sistem Minus' terpilih → pastikan view-nya di-refresh
     # (clear _dirty tertinggal dari load_data saat tersembunyi).
+    # v3.11.47 — + anak tab 'Analisa Kronis' (sama pola).
     def _on_sub_tab_changed(self, event):
         try:
-            if str(self._sub_nb.select()) == str(self._tab_minus):
+            sel = str(self._sub_nb.select())
+            if sel == str(self._tab_minus):
                 _smv = getattr(self, "_saldo_minus_view", None)
                 if _smv is not None:
                     _smv.ensure_refreshed()
+            elif sel == str(self._tab_kronis):
+                _kv = getattr(self, "_kronis_view", None)
+                if _kv is not None:
+                    _kv.ensure_refreshed()
         except tk.TclError:
             pass
 
@@ -1235,12 +1255,19 @@ class NominalRestoView(tk.Frame):
         # v3.11.43 — contextlib.suppress DIHAPUS (menelan error senyap —
         # user kesulitan debug "saldo minus kosong"). Error ditangkap &
         # di-log via status SaldoMinusView sendiri (pola _on_error run_async).
+        # v3.11.47 — delegate juga ke 'Analisa Kronis' (sama pola).
         if getattr(self, "_saldo_minus_view", None) is not None:
             try:
                 self._saldo_minus_view.load_data(
                     data, self.saldo_sistem_map, self._rincian_po_df)
             except Exception as exc:  # noqa: BLE001 — view child gagal ≠ parent
                 print(f"[WARNING] SaldoMinusView load_data gagal: {exc}")
+        if getattr(self, "_kronis_view", None) is not None:
+            try:
+                self._kronis_view.load_data(
+                    data, self.saldo_sistem_map, self._rincian_po_df)
+            except Exception as exc:  # noqa: BLE001 — view child gagal ≠ parent
+                print(f"[WARNING] AnalisaKronisView load_data gagal: {exc}")
         # footer informatif jalur 0-baris (pola v3.9.33)
         if data is None or len(data) == 0:
             self.status_var_label.set(
@@ -1258,9 +1285,13 @@ class NominalRestoView(tk.Frame):
         # punya siklus lazy refresh SENDIRI; tanpa propagate ini _dirty
         # tertinggal dari load_data (tab tersembunyi saat pipeline run)
         # TIDAK PERNAH di-clear → tabel 'Saldo Sistem Minus' kosong selamanya.
+        # v3.11.47 — propagate juga ke 'Analisa Kronis' (sama pola).
         _smv = getattr(self, "_saldo_minus_view", None)
         if _smv is not None:
             _smv.ensure_refreshed()
+        _kv = getattr(self, "_kronis_view", None)
+        if _kv is not None:
+            _kv.ensure_refreshed()
 
     # v3.11.44 — populasi nilai combobox KATEGORI (tab utama + anak tab
     # Tanpa Harga) dari self.data — di-extract dari load_data supaya bisa
