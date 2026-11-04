@@ -3,6 +3,44 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.53 — HAPUS auto-load deviasi bulan lalu (user: "program jadi not responding waktu load deviasi. hapus auto file deviasi bulan lalu")
+
+User: "program jadi not responding waktu load deviasi. kalau gitu aku pakai pilih file manual aja. hapus auto file deviasi bulan lalu"
+
+**Root cause not responding:** `_auto_load_lalu` dipanggil di `_on_pipeline_done` (line 5566-5567) → parse file deviasi bulan lalu di worker thread → `_notify_lalu_consumers` di main thread → refresh 3 view (Deviasi GR + PCS + Nominal) sync. Tabel besar (892k baris append1) + refresh 3 view bersamaan bisa bekui UI.
+
+**Fix — hapus auto-load sepenuhnya:**
+- `app.py:_on_pipeline_done` — hapus `with contextlib.suppress(Exception): self._auto_load_lalu(audit_result)` (line 5566-5567 lama). Pipeline selesai TIDAK otomatis load file deviasi bulan lalu lagi. File deviasi bulan lalu HANYA dimuat via tombol 📂 "Muat Sekarang" di tab ⚙️ Config (manual, saat user butuh saja — gak ada background processing yg bisa bekui UI).
+- `app.py:_build_config_tab` — hapus `SegmentBar` mode selector ("🫵 Manual (tombol)" / "⚡ Otomatis pasca-pipeline"). Sekarang HANYA ada tombol "📂 Muat Sekarang". Label ganti "Muat manual:".
+- `app.py:_dev_bulanan_load_form` — hapus load `DeviasiBulananMode` dari config (force manual).
+- `app.py:_dev_bulanan_save` — hapus simpan `data["DeviasiBulananMode"]` (gak ada mode lagi, key lama di config lama diabaikan).
+- `app.py:_dev_bulanan_status_default` — status selalu "manual — muat via tombol (pipeline tidak otomatis memuat)".
+- `app.py:_dev_bulanan_mode` — SELALU return "manual" (method tetap ada utk backward-compat kode lama).
+- `app.py:_dev_bulanan_save` flash message + log: "mode manual (v3.11.53 — auto-load dihapus, hanya manual)".
+- Hapus import `SegmentBar` dari `src.ui.widgets` (F401 unused setelah mode selector dihapus).
+- `_auto_load_lalu` method tetap ada di kode (gak dihapus) tapi TIDAK dipanggil lagi dari mana pun — keep utk backward-compat bila kode lain/test masih referensi.
+
+**Backward-compat:**
+- `config.json` lama punya `DeviasiBulananMode: "auto"` → diabaikan, gak otomatis load.
+- File `20.AGUSTUS` (pattern lama) tetap match (12+8=20).
+- Tombol 📂 "Muat Sekarang" tetap berfungsi normal — user klik kapan butuh.
+
+**Verifikasi e2e (5/5 PASS):**
+- T1 `_auto_load_lalu` call removed from `_on_pipeline_done` ✓ (grep = 0)
+- T2 SegmentBar mode selector removed ✓ (grep = 0)
+- T3 `data["DeviasiBulananMode"]` not saved anymore ✓ (grep = 0)
+- T4 `_dev_bulanan_mode()` always returns "manual" ✓
+- T5 Tombol "📂 Muat Sekarang" tetap ada (manual load still works) ✓
+- compileall OK · ruff: 17 errors = baseline (no regression — SegmentBar unused import removed, no new findings).
+- APP_VERSION → 3.11.53; README "Versi terkini: v3.11.53".
+
+**Cara pakai sekarang:**
+1. Tab ⚙️ Config → kartu "DEV BULANAN" → isi folder + jumlah bulan mundur
+2. Klik 💾 Simpan (optional — tombol 📂 baca form saat itu, gak perlu simpan dulu)
+3. Run pipeline (Proses) → selesai tanpa auto-load
+4. Klik tombol 📂 "Muat Sekarang" SAAT butuh file deviasi bulan lalu → parse async di worker thread → refresh 3 view
+5. Kalau gak butuh file bulan lalu, biarkan kosong — pipeline tetap jalan normal
+
 ## v3.11.52 — FIX pattern nama file deviasi bulan lalu: prefix 12+month (Jan=13, Okt=22, Agu=20)
 
 User: "ternyata di nama file nya. Januari start dengan angka 13. Jadi 13.JANUARI 2026 dan Oktober menjadi 22.OKTOBER 2026. Perbaiki issue ini"

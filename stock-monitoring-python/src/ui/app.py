@@ -151,7 +151,6 @@ from src.ui.widgets import (
     KpiRow,
     LoadingOverlay,
     NotebookTabTooltips,
-    SegmentBar,
     Spinner,
     StatusBar,
     Toolbar,
@@ -197,7 +196,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.52"  # v3.11.52 — FIX pattern nama file deviasi bulan lalu: prefix 12+month (Jan=13, Okt=22, Agu=20) bukan "20."
+APP_VERSION = "3.11.53"  # v3.11.53 — HAPUS auto-load deviasi bulan lalu (user: "program jadi not responding waktu load deviasi. hapus auto file deviasi bulan lalu")
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -3438,17 +3437,16 @@ class StockMonitorApp:
         # 1 lagi"): 🫵 Manual (DEFAULT) = file bulan lalu TIDAK lagi
         # otomatis dimuat pasca-pipeline — pipeline & komparasi tak
         # "jadi 1"; user memuat sendiri kapan pun lewat tombol 📂 (baca
-        # nilai form saat itu, tak perlu 💾 Simpan dulu). ⚡ Otomatis =
-        # perilaku v3.11.9 (auto-dimuat setelah pipeline selesai). Mode
+        # nilai form saat itu, tak perlu 💾 Simpan dulu). Mode
         # tersimpan config.json key DeviasiBulananMode via 💾 Simpan.
+        # v3.11.53 — MODE SELECTOR SegmentBar DIHAPUS (user: "hapus
+        # auto file deviasi bulan lalu"). Sekarang HANYA manual —
+        # tombol 📂 'Muat Sekarang' adalah satu-satunya cara load file
+        # deviasi bulan lalu (selalu manual, gak ada auto pasca-pipeline).
         dbul_mode_row = tk.Frame(dbul_inner, bg=C_CARD)
         dbul_mode_row.pack(fill="x", pady=(8, 0))
-        tk.Label(dbul_mode_row, text="Mode muat:", bg=C_CARD,
+        tk.Label(dbul_mode_row, text="Muat manual:", bg=C_CARD,
                  fg=C_TEXT_MUTED, font=font(8, "bold")).pack(side="left")
-        self.dev_bulanan_mode_bar = SegmentBar(
-            dbul_mode_row, ["🫵 Manual (tombol)",
-                            "⚡ Otomatis pasca-pipeline"])
-        self.dev_bulanan_mode_bar.pack(side="left", padx=(6, 0))
         GhostButton(dbul_mode_row, text="📂 Muat Sekarang",
                     command=self._dev_bulanan_load_now).pack(
             side="left", padx=(12, 0))
@@ -4267,20 +4265,17 @@ class StockMonitorApp:
         if isinstance(jumlah, bool) or not isinstance(jumlah, int) \
                 or not (1 <= jumlah <= 12):
             jumlah = 1
-        mode = (data.get("DeviasiBulananMode", "manual")
-                if isinstance(data, dict) else "manual")
-        if mode not in ("manual", "auto"):
-            mode = "manual"
+        # v3.11.53 — mode auto DIHAPUS (user: "hapus auto file deviasi
+        # bulan lalu"). Hanya manual via tombol 📂. DeviasiBulananMode
+        # diabaikan dari config (force manual).
         if getattr(self, "dev_bulanan_folder_var", None) is not None:
             self.dev_bulanan_folder_var.set(folder)
             self.dev_bulanan_jumlah_var.set(str(jumlah))
-            if getattr(self, "dev_bulanan_mode_bar", None) is not None:
-                self.dev_bulanan_mode_bar.set_active_silent(
-                    0 if mode == "manual" else 1)
+            # mode selector dihapus — SegmentBar tidak ada lagi.
         self._dev_bulanan_status_default()
 
     def _dev_bulanan_status_default(self):
-        """Status kartu default (folder ada/belum + jumlah + mode).
+        """Status kartu default (folder ada/belum + jumlah).
 
         v3.11.12 — + BARIS KEDUA transparansi bulan (user: "gimana cara
         tau misal sekarang bulan september apakah program otomatis
@@ -4288,8 +4283,8 @@ class StockMonitorApp:
         mentah — periode = data run terakhir (audit_result['period']
         dari timestamp dokumen IN terbaru; fallback bulan komputer
         bila belum ada run), lalu mundur N bulan → file target
-        '20.{BULAN} {TAHUN}' + tanda ✓/✗ keberadaan di folder (jadi
-        SEPT → tampil 'AGUSTUS ✓' sebelum tombol 📂 ditekan)."""
+        '{12+month}.{BULAN} {TAHUN}' + tanda ✓/✗ keberadaan di folder.
+        v3.11.53 — mode auto dihapus, status selalu "manual"."""
         if getattr(self, "dev_bulanan_status_var", None) is None:
             return
         folder = (getattr(self, "dev_bulanan_folder_var", None)
@@ -4299,16 +4294,10 @@ class StockMonitorApp:
         except (TypeError, ValueError):
             jumlah = 1
         _ada = os.path.isdir(folder)
-        _mode_auto = (getattr(self, "dev_bulanan_mode_bar", None)
-                      is not None
-                      and self.dev_bulanan_mode_bar.active == 1)
         baris1 = (
             f"Folder: {'✓ ada' if _ada else '✗ belum ada di komputer ini'} "
-            f"· {jumlah} bulan mundur · "
-            + ("otomatis dimuat setelah pipeline."
-               if _mode_auto else
-               "manual — muat via tombol (pipeline tidak "
-               "otomatis memuat)."))
+            f"· {jumlah} bulan mundur · manual — muat via tombol "
+            "(pipeline tidak otomatis memuat).")
         # v3.11.12 — baris transparansi: periode data → file target
         # N bulan mundur (+ ✓/✗ keberadaan file — folder ada).
         period = ((getattr(self, "audit_result", None) or {})
@@ -4339,7 +4328,9 @@ class StockMonitorApp:
                     _bases = None
             _parts = []
             for _y, _m in _targets:
-                _want = f"20.{_BULAN_NAME[_m]} {_y}".upper()
+                # v3.11.52 — pattern prefix 12+month (Jan=13, Okt=22, Agu=20)
+                _prefix = 12 + _m
+                _want = f"{_prefix}.{_BULAN_NAME[_m]} {_y}".upper()
                 if _bases is not None:
                     _want += (" ✓" if _want in _bases else " ✗")
                 _parts.append(_want)
@@ -4413,12 +4404,9 @@ class StockMonitorApp:
             return
         data["DeviasiBulananFolder"] = folder
         data["DeviasiBulananJumlah"] = jumlah
-        # v3.11.11 — mode muat (🫵 Manual default | ⚡ Otomatis)
-        data["DeviasiBulananMode"] = (
-            "auto" if (getattr(self, "dev_bulanan_mode_bar", None)
-                       is not None
-                       and self.dev_bulanan_mode_bar.active == 1)
-            else "manual")
+        # v3.11.53 — mode auto DIHAPUS (user: "hapus auto file deviasi
+        # bulan lalu"). Selalu manual — gak simpan DeviasiBulananMode lagi
+        # (key lama di config lama diabaikan, gak ditimpa).
         backup_path = CONFIG_PATH.with_suffix(".json.bak")
         if CONFIG_PATH.exists():
             with contextlib.suppress(OSError):
@@ -4436,30 +4424,18 @@ class StockMonitorApp:
                 parent=self.root)
             return
         self._flash_devbulanan_status(
-            f"✓ Tersimpan — {jumlah} bulan mundur · "
-            + ("otomatis dimuat setelah pipeline."
-               if data["DeviasiBulananMode"] == "auto" else
-               "manual — muat via tombol."))
+            f"✓ Tersimpan — {jumlah} bulan mundur · manual — muat via "
+            "tombol 📂.")
         self._append_log_batched(
             f"\n[DEV BULANAN] Auto file deviasi bulan lalu tersimpan: "
-            f"folder '{folder}' · {jumlah} bulan mundur · mode "
-            f"{data['DeviasiBulananMode']}.\n")
+            f"folder '{folder}' · {jumlah} bulan mundur · mode manual "
+            "(v3.11.53 — auto-load dihapus, hanya manual).\n")
 
     def _dev_bulanan_mode(self) -> str:
-        """v3.11.11 — mode muat file deviasi bulan lalu dari config.json
-        (TERSIMPAN — bukan isi form): 'manual' (DEFAULT baru; user:
-        "autofile deviasi bulan lalu aku bisa proses pipie line sendiri
-        tidak jadi 1 lagi" — file TIDAK auto-dimuat pasca-pipeline,
-        user memuat sendiri via tombol 📂) atau 'auto' (perilaku v3.11.9:
-        auto-dimuat setelah pipeline selesai)."""
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict) \
-                    and data.get("DeviasiBulananMode") == "auto":
-                return "auto"
-        except (OSError, json.JSONDecodeError, ValueError):
-            pass
+        """v3.11.11 — mode muat file deviasi bulan lalu dari config.json.
+        v3.11.53 — SELALU return 'manual' (user: "hapus auto file deviasi
+        bulan lalu"). Method tetap ada utk backward-compat (kode lama mungkin
+        panggil), tapi auto-load tidak akan pernah jalan lagi."""
         return "manual"
 
     def _dev_bulanan_load_now(self):
@@ -5558,13 +5534,13 @@ class StockMonitorApp:
                    lambda: self.in_selisih_view.load_data(
                        append1_df, in_detail_df, audit_result=audit_result),
                    self.in_selisih_view)
-        # v3.11.30 — ⚡ AUTO file deviasi bulan lalu kini APP-LEVEL (tab
-        # 📋 Laporan/komparasi dihapus): mode config 'auto' → parse di
-        # worker → self._lalu_file_df → kolom Dev. Bulan Lalu + analisa
-        # lalu-kini + popup Nominal (mode Manual default — tombol 📂
-        # kartu DEV BULANAN ⚙️ Config).
-        with contextlib.suppress(Exception):
-            self._auto_load_lalu(audit_result)
+        # v3.11.53 — FITUR AUTO-LOAD DEVIASI BULAN LALU DIHAPUS (user:
+        # "program jadi not responding waktu load deviasi. kalau gitu
+        # aku pakai pilih file manual aja. hapus auto file deviasi bulan
+        # lalu"). Sekarang file deviasi bulan lalu HANYA dimuat via tombol
+        # 📂 'Muat Sekarang' di tab ⚙️ Config (mode manual only). _auto_load_lalu
+        # call dihapus; method-nya tetap ada utk backward-compat kode lama
+        # tapi tidak dipanggil lagi dari pipeline-done.
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ nominal per resto
         # v3.11.8 — + peta saldo sistem 42.17 (alasan sama dgn atas).
         # v3.11.42 — + rincian_po_df (3243) utk anak tab 'Saldo Sistem
