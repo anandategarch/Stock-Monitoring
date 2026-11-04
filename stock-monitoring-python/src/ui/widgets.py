@@ -560,14 +560,26 @@ class Toolbar(tk.Frame):
 
     def add_action(self, text: str, command=None, accent: bool = False,
                    danger: bool = False) -> tk.Button:
-        bg = C_ACCENT if accent else "#1e293b"
-        fg = "#ffffff" if accent else "#e2e8f0"
-        hover = C_ACCENT_HOVER if accent else "#334155"
+        """v3.11.39 — PARITY WASTE (QToolBar QToolButton v2.15.0):
+        tombol biasa IDLE MENYATU dgn bar gelap (latar C_HEADER — look
+        'transparan' ala Waste), hover #1e293b, pressed #334155, teks
+        #f1f5f9 10pt normal (dulu: idle terisi #1e293b + 9pt bold).
+        Varian accent (💾 Export — padanan aksi utama) tetap teal solid
+        putih bold + disabled #94a3b8 (mirror QSS QPushButton#accent:disabled
+        — dikunci test A-02/B-10)."""
+        if accent:
+            bg = C_ACCENT
+            fg = "#ffffff"
+            hover = C_ACCENT_HOVER
+        else:
+            bg = C_HEADER            # Waste: transparent → menyatu dgn bar
+            fg = "#f1f5f9"
+            hover = "#1e293b"
         btn = tk.Button(
             self._actions, text=text, command=command,
             bg=bg, fg=fg, activebackground=hover, activeforeground="#ffffff",
             bd=0, relief="flat", highlightthickness=0, cursor="hand2",
-            font=font(9, "bold"), padx=12, pady=5,
+            font=font(10), padx=12, pady=6,
         )
         btn.pack(side="left", padx=(6, 0))
         btn.bind("<Enter>", lambda e: btn.configure(background=hover)
@@ -588,13 +600,15 @@ class Toolbar(tk.Frame):
             # FIX A-01/A-02: state disabled harus terlihat dim & konsisten —
             # sebelumnya tombol toolbar (mis. 💾 Export) tetap berwarna teal
             # saat disabled sehingga TAMPAK AKTIF padahal tidak bisa diklik.
+            # v3.11.39 — tombol biasa: bg tetap menyatu dgn bar (Waste
+            # auto-dim teksnya); pembeda = teks redup #64748b.
             if enabled:
                 btn.configure(state="normal", background=bg, fg=fg)
             elif accent:
                 btn.configure(state="disabled", background="#94a3b8",
-                              fg="#1e293b")
+                              fg="#e2e8f0")
             else:
-                btn.configure(state="disabled", background="#0f172a",
+                btn.configure(state="disabled", background=C_HEADER,
                               fg="#64748b")
 
         btn.set_enabled = _set_enabled  # type: ignore[attr-defined]

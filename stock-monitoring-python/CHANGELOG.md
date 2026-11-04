@@ -3,6 +3,16 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.39 — Parity Waste (3/3): tombol toolbar ala Waste — idle menyatu, hover/pressed slate
+
+**Restyle `widgets.py Toolbar.add_action`** (cermin `QToolBar QToolButton` Waste v2.15.0):
+- **Tombol biasa (↻ Refresh Sumber)**: idle kini MENYATU dgn bar gelap (bg `C_HEADER` #0f172a — look 'transparan' Waste; dulu terisi #1e293b), hover `#1e293b`, pressed `#334155`, teks `#f1f5f9` 10pt normal (dulu #e2e8f0 9pt bold), padding (12,6) (dulu (12,5)).
+- **Tombol accent (💾 Export Excel)**: tetap teal solid putih — padanan aksi utama (QSS `QPushButton#accent`); disabled `#94a3b8` (mirror `:disabled` Waste; dikunci test A-02/B-10).
+- **Disabled tombol biasa**: bg tetap menyatu dgn bar + teks redup `#64748b` (cermin auto-dim Qt; pembeda state = warna teks).
+- API `add_action(text, command, accent, danger)` + `set_enabled` tak berubah — call-site app.py (2 tombol) & test A-02/B-10/§69.B (tinggi bar 48/34) tetap hijau.
+
+**Verifikasi**: FULL SUITE `DISPLAY=:61` HIJAU 1633 PASS / 0 FAIL + test_mock ALL PASSED + ruff + py_compile + **VLM QA screenshot** (28 skenario): toolbar non-accent tampak flat menyatu dgn bar gelap, badge versi & statusbar utuh, tab config pixel-identik (2 'glitch' terdeteksi VLM = pre-existing: tombol config terpotong identik pra/pasca — artefact jendela sempit 80% zoom; label 💾 Export blank = font emoji Xvfb, di Windows Segoe UI render normal).
+
 ## v3.11.38 — Parity Waste (2/3): KpiCard flat ala Waste — angka berwarna, tanpa bar aksen
 
 **Restyle `widgets.py KpiCard`** (cermin `KpiCard` Waste v2.15.0):
