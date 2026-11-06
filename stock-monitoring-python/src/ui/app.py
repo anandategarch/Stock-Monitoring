@@ -209,7 +209,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.57"  # v3.11.57 — FIX pra-pipeline (user: "kolom H sebelum proses pipeline aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi tanggal terdekat"): nilai yang DIKETIK di spin kartu Pra-Pipeline kini di-commit saat <FocusOut> + di-flush tepat sebelum pipeline berjalan (_start_pipeline) — sebelumnya hanya panah spin/Enter yang meng-commit, alur 'ketik 5 → klik 🚀 MULAI PROSES' membuang nilai secara senyap. v3.11.56 — PRA-PIPELINE + U2 deep-link lintas tab + U3 Panel Ringkasan + U4 Ctrl+1..9 + U5 hint statusbar + U6 ambang Drastis/Manual configurable.
+APP_VERSION = "3.11.58"  # v3.11.58 — DEEP AUDIT "mapping manual di config" (KategoriManual) → 5 fix: (1) key app_map daftar 42.17 kini kanonik rapat-spasi (norm_nama_barang_key_series — dulu strip+upper → nama ber-spasi ganda miss senyap → "Kategori (app)" kosong palsu → barang salah ditandai perlu identifikasi); (2) tab Rekap Selisih IN ikut di-refresh instant-apply (on_kategori_manual_changed baru — dulu TERLEWAT v3.11.44: kolom KATEGORI + filter ⧩ default 'Deviasi' basi sampai re-run); (3) HAPUS mapping kini instant-revert via snapshot pra-manual per sesi (_kat_pra_manual — dulu kolom "Kategori (app)" menampilkan nilai manual yang sudah dihapus); (4) penanda BARU tidak lagi terserap setiap refresh card (guard identitas frame — seen hanya diperluas saat data 42.17 baru per-run); (5) teks status card jujur soal instant-apply (dulu menyuruh tunggu re-run padahal sudah langsung). v3.11.57 — FIX pra-pipeline (user: "kolom H sebelum proses pipeline aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi tanggal terdekat"): nilai yang DIKETIK di spin kartu Pra-Pipeline kini di-commit saat <FocusOut> + di-flush tepat sebelum pipeline berjalan (_start_pipeline) — sebelumnya hanya panah spin/Enter yang meng-commit, alur 'ketik 5 → klik 🚀 MULAI PROSES' membuang nilai secara senyap.
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -2281,6 +2281,18 @@ class StockMonitorApp:
         # di folder file deviasi weekly").
         self.rekap_barangs: set = set()
         self._kat_rows: list = []      # cache baris utk filter pencarian
+        # v3.11.58 — snapshot KATEGORI pra-manual per nama (key kanonik
+        # norm_nama_barang_key): diisi first-seen oleh
+        # _apply_kategori_manual_live; dipulihkan _kategori_revert_manual_live
+        # saat HAPUS mapping (instant-revert — lihat sana).
+        self._kat_pra_manual: dict = {}
+        # v3.11.58 — identitas frame kategori_4217_df yang terakhir dipakai
+        # menulis baseline kategori_seen.json + seen PRA-perluasan saat run
+        # (acuan penanda BARU utk semua refresh frame itu — guard per-RUN:
+        # penanda BARU tak lagi terserap/hilang oleh refresh card akibat
+        # aksi identify/edit/hapus mapping).
+        self._kat_seen_frame = None
+        self._kat_seen_at_run = None
         self._log_line_count = 0
         self._run_start_time: float | None = None
         self._elapsed_after_id = None
@@ -4043,9 +4055,17 @@ class StockMonitorApp:
         if dfa is not None and not getattr(dfa, "empty", True) \
                 and {"Nama Barang", "KATEGORI"} <= set(
                     getattr(dfa, "columns", [])):
+            # v3.11.58 — FIX (audit mapping manual): key dulu CUMA
+            # strip+upper (spasi ganda DIPERTAHANKAN) padahal lookup
+            # memakai _kat_norm (upper + rapat-spasi, konvensi kanonik
+            # v3.11.35) → nama ber-spasi ganda di append1 ("GULA  MERAH")
+            # miss senyap → kolom "Kategori (app)" kosong palsu → barang
+            # salah ditandai "tanpa kategori (perlu identifikasi)" → user
+            # terpancing buat mapping manual redundan. Kini key pakai
+            # norm_nama_barang_key_series — paritas penuh dgn lookup +
+            # LANGKAH 5d pipeline.
             _a = pd.DataFrame({
-                "n": dfa["Nama Barang"].astype(str).str.strip()
-                     .str.upper(),
+                "n": norm_nama_barang_key_series(dfa["Nama Barang"]),
                 "k": dfa["KATEGORI"].astype(str).str.strip(),
             })
             _ok = (_a["k"].ne("") & ~_a["k"].str.lower().isin(("nan",
@@ -4247,21 +4267,46 @@ class StockMonitorApp:
         v3.11.8 — juga menyegarkan BASELINE 'barang pernah tampil'
         (kategori_seen.json): run pertama menulis baseline (tanpa
         penanda BARU); run berikutnya menandai nama yang BELUM pernah
-        tampil lalu memperluas seen (nama tak berulang BARU)."""
+        tampil lalu memperluas seen (nama tak berulang BARU).
+        v3.11.58 — FIX (audit mapping manual): acuan penanda BARU =
+        seen PRA-perluasan di-cache per data run (_kat_seen_at_run);
+        perluasan file seen hanya saat data 42.17 berganti (run baru).
+        Dulu: (a) seen diserap di SETIAP refresh card — termasuk refresh
+        akibat aksi identify/edit/hapus — dan (b) rows dihitung ulang
+        dari file seen YANG SUDAH diperluas → penanda BARU barang run
+        ini hilang dini (kontras docstring "nama tak berulang BARU"
+        yang semantiknya per-RUN)."""
         if not hasattr(self, "kat_4217_tree"):
             return
         seen = self._kategori_seen_load()
-        rows = self._kategori_4217_rows(seen)
+        # v3.11.58 — data run baru (frame berganti = run pipeline baru)?
+        # Cache seen PRA-perluasan sbg acuan BARU utk SEMUA refresh
+        # frame ini (perluasan file terjadi SETELAH rows dihitung).
+        _frame = getattr(self, "kategori_4217_df", None)
+        _run_baru = (_frame is not None
+                     and _frame is not getattr(self, "_kat_seen_frame", None))
+        if _run_baru:
+            self._kat_seen_frame = _frame
+            self._kat_seen_at_run = seen   # None (run pertama) / set
+        # acuan BARU: seen saat RUN (cache) — fallback file (frame None /
+        # attr belum ada jalur lama) — supaya refresh akibat aksi mapping
+        # TIDAK mengubah penanda BARU (paritas tampilan per-run).
+        seen_ref = (self._kat_seen_at_run
+                    if hasattr(self, "_kat_seen_at_run") else seen)
+        rows = self._kategori_4217_rows(seen_ref)
         self._kat_rows = rows
-        # v3.11.9 — nilai dropdown filter kategori 42.17 disegarkan dari
-        # rows baru (seleksi valid dipertahankan).
-        self._kat_4217_refresh_filter_values(rows)
-        if rows:
+        if _run_baru and rows:
+            # perluas file seen SEKALI per run (baseline run pertama /
+            # nama baru run ini) — refresh berikut frame ini TIDAK menyentuh
+            # file (dulu: terserap tiap refresh → penanda BARU hilang dini).
             cur = {self._kat_norm(r["barang"]) for r in rows}
             if seen is None:
                 self._kategori_seen_save(cur)      # baseline run pertama
             elif not cur <= seen:
                 self._kategori_seen_save(seen | cur)
+        # v3.11.9 — nilai dropdown filter kategori 42.17 disegarkan dari
+        # rows baru (seleksi valid dipertahankan).
+        self._kat_4217_refresh_filter_values(rows)
         self._kat_populate_4217_tree(rows)
         self.kat_map_tree.delete(*self.kat_map_tree.get_children(""))
         km = self._kategori_manual_map()
@@ -4287,8 +4332,10 @@ class StockMonitorApp:
             f"{len(rows)} barang bersaldo 42.17 · {n_nowk} belum di "
             f"deviasi weekly · {n_blank} tanpa kategori (perlu "
             f"identifikasi) · {n_baru} BARU{_buang_seg} · {len(km)} "
-            "mapping manual tersimpan — mapping diterapkan mulai run "
-            "pipeline berikutnya (F5 / MULAI PROSES).")
+            "mapping manual tersimpan — mapping/edit/hapus LANGSUNG "
+            "diterapkan ke tab aktif (deviasi GR/PCS · pivot · nominal "
+            "· rekap selisih IN) dan permanen di run pipeline "
+            "berikutnya.")
 
     def _kategori_manual_save(self, updates: dict, removes=()) -> bool:
         """Tulis mapping manual ke config.json (read-modify-write ATOMIK —
@@ -4357,9 +4404,13 @@ class StockMonitorApp:
     # ber-kategori. Dulu kategori manual hanya hidup saat pipeline RUN
     # (log lama: "diterapkan mulai run pipeline berikutnya") — user tak
     # sadar harus re-run → terasa "tidak terjadi apa apa".
-    # Dipanggil setelah _kategori_manual_save sukses (Identifikasi/Edit —
-    # HAPUS tidak instant: nilai kategori otomatis pra-manual tidak
-    # tersimpan di memori; kembali setelah run pipeline berikutnya).
+    # Dipanggil setelah _kategori_manual_save sukses (Identifikasi/Edit).
+    # v3.11.58 — HAPUS kini JUGA instant: nilai PRA-manual per nama
+    # di-snapshot (first-seen per sesi, self._kat_pra_manual) saat
+    # live-apply; _kategori_revert_manual_live memulihkannya (lihat
+    # _kategori_delete). Kasus mapping yang dibakar pipeline di sesi
+    # SEBELUMnya (snapshot tak ada) → degrade ke perilaku lama (nilai
+    # tetap sampai run berikutnya — pesan log tetap jujur).
     def _apply_kategori_manual_live(self) -> int:
         """Terapkan KategoriManual (config) ke self.append1_df in-place
         + refresh view ber-kategori. Return jumlah baris ter-update."""
@@ -4382,12 +4433,72 @@ class StockMonitorApp:
         has = val.notna()
         n = int(has.sum())
         if n:
+            # v3.11.58 — snapshot nilai PRA-manual per nama (first-seen
+            # per sesi): hanya nama yang BELUM pernah di-snapshot —
+            # nilai pra-edit (manual lama) tidak menimpa nilai otomatis
+            # yang tersimpan saat identifikasi pertama.
+            _pra = getattr(self, "_kat_pra_manual", None)
+            if _pra is None:
+                _pra = self._kat_pra_manual = {}
+            _pre_kat = df.loc[has, "KATEGORI"]
+            for _nk, _pv in zip(keys[has].tolist(),
+                                _pre_kat.tolist()):
+                _pv_s = str(_pv).strip() if _pv is not None else ""
+                if _pv_s and _pv_s.lower() not in ("nan", "none"):
+                    _pra.setdefault(_nk, _pv_s)
             df.loc[has, "KATEGORI"] = val[has]   # in-place — shared views
-        # refresh view ber-kategori (deviasi GR/PCS + pivot + nominal)
+        # refresh view ber-kategori (deviasi GR/PCS + pivot + nominal
+        # + rekap selisih IN — v3.11.58: tab terakhir dulu TERLEWAT,
+        # kolom KATEGORI + filter ⧩ default-nya basi sampai re-run)
         for view in (getattr(self, "deviasi_gr_view", None),
                      getattr(self, "deviasi_pcs_view", None),
                      getattr(self, "pivot_view", None),
-                     getattr(self, "nominal_resto_view", None)):
+                     getattr(self, "nominal_resto_view", None),
+                     getattr(self, "in_selisih_view", None)):
+            if view is not None and hasattr(view, "on_kategori_manual_changed"):
+                with contextlib.suppress(Exception):
+                    view.on_kategori_manual_changed()
+        return n
+
+    # v3.11.58 — INSTANT-REVERT HAPUS MAPPING (audit mapping manual):
+    # dulu HAPUS tidak instant ("nilai kategori otomatis pra-manual
+    # tidak tersimpan di memori") → kolom "Kategori (app)" daftar 42.17
+    # menampilkan nilai manual yang SUDAH DIHAPUS seolah kategori
+    # efektif (menyesatkan — user kira hapus tidak bekerja). Kini nilai
+    # pra-manual dipulihkan dari snapshot sesi (_kat_pra_manual —
+    # diisi _apply_kategori_manual_live first-seen per nama) in-place
+    # + refresh view ber-kategori (paritas penuh dgn EDIT yang instant).
+    # Snapshot tak ada (mapping dibakar pipeline run sesi sebelumnya)
+    # → return 0, nilai tetap sampai run berikutnya (perilaku lama,
+    # pesan log _kategori_delete tetap jujur soal itu).
+    def _kategori_revert_manual_live(self, names) -> int:
+        """Pulihkan KATEGORI pra-manual utk `names` (iterable nama barang
+        mentah) di self.append1_df in-place + refresh view. Return
+        jumlah baris ter-update."""
+        df = getattr(self, "append1_df", None)
+        _pra = getattr(self, "_kat_pra_manual", None) or {}
+        if (df is None or getattr(df, "empty", True) or not _pra
+                or "KATEGORI" not in getattr(df, "columns", [])
+                or "Nama Barang" not in getattr(df, "columns", [])):
+            return 0
+        hapus = {}
+        for nm in names:
+            nk = norm_nama_barang_key(nm)
+            if nk in _pra:
+                hapus[nk] = _pra.pop(nk)
+        if not hapus:
+            return 0
+        keys = norm_nama_barang_key_series(df["Nama Barang"])
+        val = keys.map(hapus)
+        has = val.notna()
+        n = int(has.sum())
+        if n:
+            df.loc[has, "KATEGORI"] = val[has]   # in-place — shared views
+        for view in (getattr(self, "deviasi_gr_view", None),
+                     getattr(self, "deviasi_pcs_view", None),
+                     getattr(self, "pivot_view", None),
+                     getattr(self, "nominal_resto_view", None),
+                     getattr(self, "in_selisih_view", None)):
             if view is not None and hasattr(view, "on_kategori_manual_changed"):
                 with contextlib.suppress(Exception):
                     view.on_kategori_manual_changed()
@@ -4813,10 +4924,25 @@ class StockMonitorApp:
                                    parent=self.root):
             return
         if self._kategori_manual_save({}, removes=names):
+            # v3.11.58 — INSTANT-REVERT: pulihkan nilai pra-manual dari
+            # snapshot sesi (dulu: kolom "Kategori (app)" terus menampilkan
+            # nilai manual yang sudah dihapus sampai re-run — user kira
+            # hapus tidak bekerja). Snapshot tak ada (mapping lintas-sesi)
+            # → 0 baris dipulihkan, nilai tetap sampai run berikutnya.
+            # Card di-refresh LAGI setelah revert: refresh di dalam save
+            # terjadi SEBELUM revert (app_map masih memuat nilai manual
+            # basi — efektif km_norm sudah kosong karena config dihapus).
+            _n = self._kategori_revert_manual_live(names)
+            with contextlib.suppress(Exception):
+                self._refresh_kategori_manual_card()
             self._append_log_batched(
                 f"[KATEGORI MANUAL] {len(names)} mapping dihapus "
-                "(barang kembali ke kategori otomatis rekap/master — "
-                "terlihat setelah run pipeline berikutnya)\n")
+                f"(config.json · {_n:,} baris dipulihkan ke kategori "
+                "otomatis pra-manual"
+                + ("" if _n else
+                   " — nilai otomatis tidak tersimpan di sesi ini, "
+                   "sepenuhnya segar setelah run pipeline berikutnya")
+                + ")\n")
 
     # =====================================================================
     # TAB: PROSES

@@ -20966,20 +20966,37 @@ def main():
         app._refresh_kategori_manual_card()
         _baru92 = {r[0]: r[4] for r in _kat_rows92()}
         _status92_baru1 = app.kat_status_var.get()
+        # v3.11.58 — refresh ke-2 frame SAMA (aksi identify/edit/hapus
+        # mapping): penanda BARU BERTAHAN (dulu hilang dini — seen file
+        # sudah diperluas refresh #1 lalu rows dihitung ulang darinya;
+        # user kehilangan jejak barang baru run ini di tengah alur
+        # identifikasi). Acuan BARU = seen saat RUN (_kat_seen_at_run).
         app._refresh_kategori_manual_card()
         _baru92b = {r[0]: r[4] for r in _kat_rows92()}
+        _status92_baru2 = app.kat_status_var.get()
+        # v3.11.58 — run BERIKUTNYA (frame objek baru; seen file sudah
+        # memuat BRG BARU 99): TIDAK berulang BARU (semantik asli
+        # "nama tak berulang BARU" antar-run tetap utuh).
+        app.kategori_4217_df = _k4217_92b.copy()
+        app._refresh_kategori_manual_card()
+        _baru92c = {r[0]: r[4] for r in _kat_rows92()}
         check("(v3.11.8) §92-F8 penanda BARU: barang pertama kali muncul "
               "di 42.17 ditandai 'BARU' + status menghitung; refresh "
-              "berikutnya TIDAK berulang (kategori_seen.json union — "
-              "jawaban 'update terkait kategori barang baru': tiap run "
-              "daftar menyegarkan + barang baru otomatis ditandai)",
+              "akibat aksi mapping TIDAK menghilangkan tanda (v3.11.58 "
+              "— bertahan per data run); run BERIKUTNYA tidak berulang "
+              "BARU (kategori_seen.json union — jawaban 'update terkait "
+              "kategori barang baru': tiap run daftar menyegarkan + "
+              "barang baru otomatis ditandai)",
               _baru92.get("BRG BARU 99") == "BARU"
               and "1 BARU" in _status92_baru1
-              and _baru92b.get("BRG BARU 99") == ""
+              and _baru92b.get("BRG BARU 99") == "BARU"
+              and "1 BARU" in _status92_baru2
+              and _baru92c.get("BRG BARU 99") == ""
               and "0 BARU" in app.kat_status_var.get(),
-              f"baru={_baru92} lagi={_baru92b} "
+              f"baru={_baru92} lagi={_baru92b} run3={_baru92c} "
               f"status1={_status92_baru1!r} "
-              f"status2={app.kat_status_var.get()!r}")
+              f"status2={_status92_baru2!r} "
+              f"status3={app.kat_status_var.get()!r}")
         # guard: data 42.17 kosong → placeholder jujur
         app.kategori_4217_df = None
         app._refresh_kategori_manual_card()

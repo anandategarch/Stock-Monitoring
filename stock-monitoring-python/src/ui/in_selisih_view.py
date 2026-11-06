@@ -1433,6 +1433,34 @@ class InSelisihView(tk.Frame):
             self._dirty = False
             self._refresh()
 
+    # v3.11.58 — FIX (audit mapping manual): kategori manual (config ⚙️)
+    # berubah — KATEGORI append1_df SUDAH di-mutasi in-place oleh
+    # app._apply_kategori_manual_live, tapi tab ini TERLEWAT oleh
+    # instant-apply v3.11.44 (refresh loop app hanya memanggil deviasi
+    # GR/PCS · pivot · nominal — akibatnya kolom KATEGORI + filter ⧩
+    # default 'Deviasi' + baris analisa di tab ini tetap BASI sampai
+    # re-run pipeline penuh; kelas bug sama dgn keluhan user "mapping
+    # manual ... gak masuk di list deviasi gr dan deviasi pcs ... dan
+    # mungkin di tab lainnya juga"). Invalidasi SEMUA cache identitas:
+    # _kategori_map (dibangun sekali per data — `if not self._kategori_map`)
+    # + _cached_base* (worker mengunci identitas OBJEK `is not data` —
+    # mutasi in-place tidak memicu recompute) lalu re-apply seleksi
+    # default KATEGORI (mirror deviasi_view.on_kategori_manual_changed).
+    def on_kategori_manual_changed(self):
+        if ((self.data is None or self.data.empty)
+                and (self.audit_df is None or self.audit_df.empty)):
+            return
+        self._kategori_map = {}
+        self._cached_base = None
+        self._cached_base_data = None
+        self._cached_base_detail = None
+        self._cached_base_audit = None
+        self._apply_default_kategori()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
     def _reset_filter_states(self):
         for c in self._col_sel:
             self._col_sel[c] = None

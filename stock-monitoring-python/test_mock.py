@@ -1037,14 +1037,26 @@ def run_test_v3949_rekap_kategori():
 
     from src.pipeline.helpers import (
         KATEGORI_DEFAULT_LABEL,
+        KATEGORI_GABUNGAN_VALUES,
         kategori_filter_mask,
         kategori_has_default_values,
         kategori_multi_values,
         kategori_passthrough,
     )
-    check49("kategori_multi_values: label gabungan → 2 nilai rekap",
+    # v3.11.58 — REPAIR (pre-existing, terbukti via git stash pada tree
+    # v3.11.57 bersih): asersi lama masih mengunci return pra-v3.11.45
+    # (2 nilai rekap saja) padahal v3.11.45 menambah STEM bentuk pendek
+    # ('COM DEVIASI', 'Biaya Packaging') supaya mapping manual bentuk
+    # pendek lolos seleksi default — suite mock CRASH total di cek ini
+    # sejak commit v3.11.45 (asumsi kategori_multi_values tak pernah
+    # di-update). Kini mengunci kontrak v3.11.45+: label gabungan →
+    # KATEGORI_GABUNGAN_VALUES (2 rekap + 2 stem).
+    check49("kategori_multi_values: label gabungan → 2 nilai rekap "
+            "+ 2 stem pendek (v3.11.45+)",
             kategori_multi_values(KATEGORI_DEFAULT_LABEL) ==
-            ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO"))
+            KATEGORI_GABUNGAN_VALUES ==
+            ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO",
+             "COM DEVIASI", "Biaya Packaging"))
     check49("kategori_multi_values: seleksi biasa/None → None",
             kategori_multi_values("DEVIASI") is None
             and kategori_multi_values(None) is None)
@@ -1207,11 +1219,15 @@ def run_test_v3950_audit_fixes():
             f"cols={list(rk_ws.columns)}")
 
     # --- 3. helper case-insensitive (audit 3-b asimetri) ---------------
-    from src.pipeline.helpers import kategori_multi_values as _kmv
+    from src.pipeline.helpers import (kategori_multi_values as _kmv,
+                                      KATEGORI_GABUNGAN_VALUES as _KGV)
+    # v3.11.58 — REPAIR (pre-existing): asersi lama mengunci return
+    # pra-v3.11.45 (2 nilai) — kontrak kini 2 rekap + 2 stem (lihat
+    # blok 6c di atas); label legacy lowercase tetap dikenali.
     check50("kategori_multi_values: label gabungan LOWERCASE dikenali "
             "(case-insensitive — parity passthrough)",
             _kmv("com deviasi - resto + biaya packaging - resto")
-            == ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO"))
+            == _KGV)
     check50("kategori_multi_values: label lain tetap None (strict)",
             _kmv("DEVIASI") is None and _kmv(None) is None)
 

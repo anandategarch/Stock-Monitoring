@@ -3,6 +3,90 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.58 — DEEP AUDIT "mapping manual di config" (KategoriManual) → 5 fix
+
+User: *"mapping manual di config coba deep audit"*. Audit penuh alur
+KategoriManual (config.json → UI tab ⚙️ Config → pipeline append1 LANGKAH 5d
+→ semua view konsumen KATEGORI) menemukan 5 bug terbukti:
+
+### Fix 1 — Key `app_map` daftar 42.17 tidak kanonik → "Kategori (app)" kosong palsu (P1)
+`_kategori_4217_rows` membangun `app_map` dengan key **strip+upper**
+(spasi ganda dipertahankan) padahal lookup-nya `_kat_norm` = **upper +
+rapat-spasi** (konvensi kanonik sejak v3.11.35). Nama ber-spasi ganda di
+append1 (`"GULA  MERAH"`) → key `"GULA  MERAH"` ≠ lookup `"GULA MERAH"` →
+miss senyap → kolom **"Kategori (app)" kosong padahal barang ber-kategori**
+→ barang salah ditandai "tanpa kategori (perlu identifikasi)" (baris amber,
+urutan atas) → user terpancing membuat mapping manual redundan. Kelas bug
+sama persis dgn yang difix v3.11.35 untuk `_kat_norm` — tapi blok ini
+luput. Fix: key pakai `norm_nama_barang_key_series` (paritas lookup +
+LANGKAH 5d pipeline).
+
+### Fix 2 — Tab "Rekap Selisih IN" terlewat instant-apply v3.11.44 (P1)
+`_apply_kategori_manual_live` hanya me-refresh deviasi GR/PCS · pivot ·
+nominal — **in_selisih_view tidak dipanggil** (dan tidak punya
+`on_kategori_manual_changed`). Padahal tab ini punya kolom KATEGORI
+(dibangun dari `_kategori_map` sekali per data), filter ⧩ default
+"Deviasi (COM + Packaging)", dan `_cached_base` berbasis **identitas
+objek** (`is not data`) — mutasi in-place append1_df tidak pernah memicu
+recompute → kategori + filter + baris analisa tab ini **basi sampai re-run
+pipeline penuh**. Keluhan asli user v3.11.44 menyebut "*dan mungkin di tab
+lainnya juga*" — tab ini terlewat oleh fix tersebut. Fix: method
+`on_kategori_manual_changed` baru (invalidasi `_kategori_map` +
+`_cached_base*` + re-apply default KATEGORI + refresh/dirty — mirror pola
+deviasi_view) + view didaftarkan di loop refresh app.
+
+### Fix 3 — HAPUS mapping: kolom "Kategori (app)" menampilkan nilai manual yang sudah dihapus (P2)
+Live-apply memutasi `append1_df` in-place, tapi HAPUS tidak pernah revert
+("nilai kategori otomatis pra-manual tidak tersimpan di memori"). Setelah
+hapus, `efektif = km_norm.get(...) or app_map.get(...)` — km_norm kosong,
+app_map masih memuat **nilai manual stale** → UI menampilkan nilai yang
+sudah dihapus seolah kategori efektif (user kira hapus tidak bekerja).
+Fix: **snapshot pra-manual per sesi** (`_kat_pra_manual`, first-seen per
+nama, diisi `_apply_kategori_manual_live`) + `_kategori_revert_manual_live`
+memulihkannya saat HAPUS + refresh card/view. Alur identify→edit→hapus
+dalam satu sesi kini sepenuhnya instant dan benar; mapping yang dibakar
+pipeline di sesi sebelumnya (snapshot tak ada) → degrade ke perilaku lama
+dengan pesan log jujur.
+
+### Fix 4 — Penanda BARU hilang dini: diserap/dihitung ulang setiap refresh card (P3)
+`_refresh_kategori_manual_card` memperluas `kategori_seen.json` di SETIAP
+refresh — termasuk refresh akibat aksi identify/edit/hapus mapping — LALU
+menghitung ulang penanda BARU dari file yang sudah diperluas → penanda
+BARU barang run ini **hilang begitu user melakukan aksi mapping apa pun**
+(padahal alur naturalnya justru: lihat barang BARU → identifikasi satu
+per satu — di tengah alur itu penanda lenyap). Fix: acuan BARU = seen
+**saat run** di-cache per data run (`_kat_seen_at_run`); perluasan file
+seen hanya sekali per run (frame `kategori_4217_df` berganti). Semantik
+antar-run utuh: nama tak berulang BARU di run berikutnya.
+
+### Fix 5 — Teks status card basi: "diterapkan mulai run pipeline berikutnya" (P3)
+Sejak v3.11.44 mapping LANGSUNG diterapkan instant, tapi status card masih
+menyuruh user menunggu re-run — menghidupkan kembali kebingungan akar
+keluhan ("kok sama aja? tidak terjadi apa apa"). Fix: teks jujur —
+"mapping/edit/hapus LANGSUNG diterapkan ke tab aktif (deviasi GR/PCS ·
+pivot · nominal · rekap selisih IN) dan permanen di run pipeline
+berikutnya".
+
+### Repair test suite (pre-existing, terbukti via `git stash` pada tree v3.11.57 bersih)
+- **test_mock.py crash total sejak v3.11.45**: 2 asersi `kategori_multi_
+  values` masih mengunci return pra-v3.11.45 (2 nilai rekap) padahal
+  v3.11.45 menambah 2 STEM bentuk pendek ('COM DEVIASI', 'Biaya
+  Packaging') supaya mapping manual bentuk pendek lolos seleksi default —
+  asersi tak pernah di-update. Kini mengunci kontrak `KATEGORI_GABUNGAN_
+  VALUES` (2 rekap + 2 stem, label kanonis + lowercase legacy).
+- **§92-F8 kontrak penanda BARU di-update** mengikuti Fix 4: penanda
+  BERTAHAN sepanjang data run (refresh akibat aksi mapping tak
+  menghilangkan) + tetap TIDAK berulang antar-run (semantik asli utuh);
+  + asersi status ke-2 dibaca sebelum refresh run-ke-3.
+- **README root headline** → v3.11.58 (kontrak §76l).
+- 3 fail zoom/resize/toolbar yang tersisa = pre-existing lingkungan
+  (Xvfb tanpa window manager — identik di tree bersih v3.11.57:
+  1630 PASS / 3 FAIL; tree v3.11.58: 1630 PASS / 3 FAIL — regresi nol).
+- Smoke fungsional app asli (fixture §92): **14/14 PASS** — FIX1 katapp
+  spasi-ganda terisi · FIX2 cache in_selisih ter-invalidasi + refresh ·
+  FIX4 identify→live-apply→hapus→revert pra-manual utuh · FIX5 BARU
+  bertahan + seen tak diperluas refresh ke-2.
+
 ## v3.11.57 — FIX pra-pipeline: nilai KETIK tanpa Enter terbuang senyap
 
 User: *"cek juga kenapa kolom H sebelum proses pipeline aku isi 5 misalnya
