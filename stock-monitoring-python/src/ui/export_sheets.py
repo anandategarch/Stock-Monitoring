@@ -828,3 +828,217 @@ def write_table_display_sheet(filepath, sheet_name, columns, rows,
             except OSError:
                 pass
     return n
+
+
+# =============================================================================
+# 6. EXPORT LAPORAN VERSUS (v3.12.0 — tab ⚖ Laporan Versus)
+# =============================================================================
+def write_laporan_versus_book(filepath, payload: dict, mode: str) -> int:
+    """v3.12.0 — Export LAPORAN VERSUS (13 poin) ke .xlsx SATU sheet
+    (user: poin 1-12 laporan resmi format versus 2 mode + poin 13
+    komparasi dua resto, mis. 1084.BKSGOL vs 1137.CKGPAH).
+
+    payload = hasil compute_laporan_versus: frame display ber-kolom
+    '*_raw' nilai MENTAH numerik — angka asli ditulis ke sel supaya
+    bisa dihitung di Excel (bukan string format ID); format mirror
+    konvensi export pivot: bulat "#,##0;[Red](#,##0)" / pecahan
+    "#,##0.0;[Red](#,##0.0)" / rasio "(A−B)÷|B|" → "0.0%;[Red](0.0%)"
+    dgn nilai 0..1.
+
+    Layout: meta (bulan/minggu/mode/resto/penjualan) → Poin 1..12
+    (tiap poin: tabel per bahan + TOTAL utk ukuran Rp) → Poin 13
+    (skor ringkasan + rincian per bahan + TOTAL) → legend. Tulis
+    ATOMIK (tmp + os.replace — pola 2f-04/6a-02).
+    Return jumlah baris data yang ditulis."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    # lazy import (export_sheets dipakai banyak view — jangan ikat modul)
+    from .laporan_versus_view import (
+        MODE_VS_SATU,
+        POIN_MEASURES,
+        RAW_COL_MAP,
+        poin_table_spec,
+    )
+    from .nominal_common import fmt_rp_cell
+
+    if not payload or not payload.get("ok"):
+        return 0
+    meta = payload.get("meta") or {}
+    poin = payload.get("poin") or {}
+
+    fmt_int = "#,##0;[Red](#,##0)"
+    fmt_dec = "#,##0.0;[Red](#,##0.0)"
+    fmt_pct = "0.0%;[Red](0.0%)"
+    title_font = Font(bold=True, size=12, color="FF0F172A")
+    meta_key_font = Font(bold=True, color="FF475569")
+    head_font = Font(bold=True, color="FF1E293B")
+    head_fill = PatternFill("solid", start_color="FFE2E8F0",
+                            end_color="FFE2E8F0")
+    total_fill = PatternFill("solid", start_color="FFF1F5F9",
+                             end_color="FFF1F5F9")
+    note_font = Font(italic=True, color="FF64748B")
+
+    heads, show = poin_table_spec(meta, mode)
+    a_l, b_l = meta.get("a_label", "-"), meta.get("b_label", "-")
+    n_written = 0
+
+    def _num(v):
+        """(is_num, val) — sel numerik vs teks; None/NaN → (None, None)."""
+        if v is None:
+            return None, None
+        try:
+            if pd.isna(v):
+                return None, None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(v, (int, float, np.integer, np.floating)) \
+                and not isinstance(v, bool):
+            return True, float(v)
+        return False, str(v)
+
+    def _title(ws, r, text):
+        ws.cell(row=r, column=1, value=text).font = title_font
+        return r + 1
+
+    def _write_table(ws, r, keys, labels, rows, pct_keys=(), widths=()):
+        """Tabel: header (labels) + baris (nilai mentah via RAW_COL_MAP[
+        key]; fallback teks display) + baris _total tebal.
+        Return (baris berikutnya, jumlah baris data)."""
+        nonlocal n_written
+        hdr = r
+        for j, lab in enumerate(labels, start=1):
+            c = ws.cell(row=hdr, column=j, value=lab)
+            c.font = head_font
+            c.fill = head_fill
+        i = 0
+        for rec in rows:
+            rr = hdr + 1 + i
+            is_tot = bool(rec.get("_total", False))
+            for j, key in enumerate(keys, start=1):
+                # (1) nilai mentah *_raw numerik; (2) fallback teks display
+                raw_key = RAW_COL_MAP.get(key, key)
+                v = rec.get(raw_key)
+                is_num, val = _num(v)
+                if val is None and not is_num:
+                    is_num, val = _num(rec.get(key))
+                if val is None:
+                    continue
+                cell = ws.cell(row=rr, column=j)
+                if is_num:
+                    # pct: simpan RASIO 0..1 (number_format 0.0% kali-kan
+                    # 100 saat tampil — pct_raw payload dalam satuan %)
+                    cell.value = (val / 100.0) if key in pct_keys else val
+                    cell.number_format = (
+                        fmt_pct if key in pct_keys else
+                        (fmt_int if _is_int(val) else fmt_dec))
+                else:
+                    cell.value = val
+                if is_tot:
+                    cell.font = Font(bold=True)
+                    cell.fill = total_fill
+            i += 1
+            n_written += 1
+        for j, w in enumerate(widths, start=1):
+            letter = get_column_letter(j)
+            cur = ws.column_dimensions[letter].width or 0
+            ws.column_dimensions[letter].width = max(cur, w)
+        return hdr + 1 + i, i
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "LAPORAN VERSUS"
+
+    # --- meta ------------------------------------------------------------
+    r = 1
+    ws.cell(row=r, column=1,
+            value="LAPORAN VERSUS — 13 POIN LAPORAN RESMI").font = title_font
+    r += 1
+    mode_txt = ("Mode 2 — 1 resto vs 1 resto (1v1)"
+                if mode == MODE_VS_SATU else
+                "Mode 1 — vs Area / Banyak Resto")
+    for k, v in (
+        ("Bulan", f"{meta.get('bulan_raw', '-')} (terbaru)"),
+        ("Minggu",
+         f"{meta.get('minggu', '-')} (H={meta.get('minggu_h') or '-'})"),
+        ("Mode", mode_txt),
+        ("Resto Fokus (A)",
+         f"{a_l} ({meta.get('area_a') or '-'})"),
+        ("Pembanding",
+         (f"{b_l} ({meta.get('area_b') or '-'})"
+          if mode == MODE_VS_SATU else meta.get("group_label", "-"))),
+        ("Resto Komparasi Poin 13", f"{a_l} vs {b_l}"),
+        ("PENJUALAN s/d minggu",
+         (f"A {fmt_rp_cell(meta.get('penjualan_a'))} · "
+          f"B {fmt_rp_cell(meta.get('penjualan_b'))}")),
+    ):
+        ws.cell(row=r, column=1, value=k).font = meta_key_font
+        ws.cell(row=r, column=2, value=str(v))
+        r += 1
+    ws.column_dimensions["A"].width = 28
+    r += 1
+
+    # --- Poin 1-12 -------------------------------------------------------
+    for num, label, _col, kind in POIN_MEASURES:
+        dfp = poin.get(num)
+        if dfp is None or dfp.empty:
+            continue
+        r = _title(ws, r, f"POIN {num} · {label} — "
+                   f"{'NOMINAL (Rp)' if kind == 'rp' else 'QTY'}")
+        r, _n = _write_table(
+            ws, r,
+            keys=show,
+            labels=[heads.get(c, c) for c in show],
+            rows=dfp.to_dict("records"), pct_keys=("%",),
+            widths=[24, 30, 9, 18, 18, 18, 18, 16, 18, 12][:len(show)])
+        r += 1  # blank antar-poin
+
+    # --- Poin 13 ---------------------------------------------------------
+    r = _title(ws, r, f"POIN 13 · KOMPARASI DUA RESTO — {a_l} "
+               f"({meta.get('area_a') or '-'}) vs {b_l} "
+               f"({meta.get('area_b') or '-'})")
+    r = _title(ws, r, "Skor ringkasan (ukuran nominal Rp + penjualan)")
+    score = payload.get("poin13_score")
+    if score is not None and not score.empty:
+        r, _n = _write_table(
+            ws, r,
+            keys=["Ukuran", "A", "B", "Δ", "%"],
+            labels=["Ukuran", a_l, b_l, "Selisih (A−B)", "% (A−B)÷|B|"],
+            rows=score.to_dict("records"), pct_keys=("%",),
+            widths=[34, 20, 20, 20, 12])
+    r += 1
+    r = _title(ws, r, "Rincian per bahan (QTY & NOMINAL DEVIASI — urut "
+               "|Δ NOM| menurun)")
+    bahan = payload.get("poin13_bahan")
+    if bahan is not None and not bahan.empty:
+        r, _n = _write_table(
+            ws, r,
+            keys=["Akun", "Nama Bahan", "Satuan", "A QTY", "B QTY",
+                  "Δ QTY", "A NOM", "B NOM", "Δ NOM", "%"],
+            labels=["Akun", "Nama Bahan", "Satuan", f"{a_l} QTY",
+                    f"{b_l} QTY", "Δ QTY (A−B)", f"{a_l} NOM",
+                    f"{b_l} NOM", "Δ NOM (A−B)", "% (A NOM)÷|B NOM|"],
+            rows=bahan.to_dict("records"), pct_keys=("%",),
+            widths=[24, 30, 9, 16, 16, 16, 18, 18, 18, 12])
+    r += 1
+    ws.cell(row=r, column=1,
+            value="QTY antar-bahan tidak dijumlahkan (satuan campur "
+                  "GR/PCS/PACK/BOTOL) — baris TOTAL hanya ukuran nominal "
+                  "Rp.").font = note_font
+
+    # tulis ATOMIK (tmp + os.replace — pola 2f-04/6a-02)
+    tmp_path = str(filepath) + ".tmp.xlsx"
+    _ok = False
+    try:
+        wb.save(tmp_path)
+        os.replace(tmp_path, str(filepath))
+        _ok = True
+    finally:
+        if not _ok:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+    return n_written

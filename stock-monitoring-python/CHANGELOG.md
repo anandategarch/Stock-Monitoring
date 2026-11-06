@@ -3,6 +3,76 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.12.0 — TAB ⚖ LAPORAN VERSUS ("poin 1-12 jadi laporan versus, 2 mode")
+
+User: *"yang komparasi laporan yang dua Resto — misalnya BKS gold sama
+CGK Pak — itu kan ada di poin 13, dan poin 1 sampai poin 12 itu data
+Resto itu sendiri atau resto se-areanya. Nah aku mau sekarang dari
+poin 1 sampai poin 12 itu adalah laporan versus. Jadi ada dua mode:
+poin 1 sampai 12-nya resto itu sendiri versus area atau versus resto
+lain yang banyak, dan mode satunya lagi satu resto itu versus satu
+resto lainnya."*
+
+Struktur 13 poin MIRROR STRUKTUR KOLOM laporan resmi
+(`{12+bulan}.{BULAN} {TAHUN}.xlsx`) PERSIS — poin 1-7 = QTY (BOM ·
+COM · DEVIASI · WASTE · SUSUT · TRIAL · LOSS SURPLUS), poin 8-12 =
+NOMINAL (DEVIASI · WASTE · SUSUT · TRIAL · LOSS/SURPLUS), poin 13 =
+KOMPARASI DUA RESTO (pasangan bebas mode — contoh user: `1084.BKSGOL`
+"BKS gold" vs `1137.CKGPAH` "CGK Pak").
+
+### Parser — 11 kolom baru v3.12.0 (semua OPSIONAL)
+`parse_deviasi_file` kini membawa: `QTY WASTE/SUSUT/TRIAL/LOSS
+SURPLUS Lalu`, `NOMINAL WASTE/SUSUT/TRIAL/LOSS/SURPLUS Lalu` (BOM/COM/
+DEVIASI + Nominal DEVIASI sudah ada), `AREA` (grup wilayah laporan —
+`JAWA BARAT 1` dst), `PENJUALAN` (kumulatif resto s/d cut-off minggu),
+`Akun` (COM DEVIASI vs Biaya Packaging). Deteksi exact-match key
+ternormalisasi (`'QTY WASTE'` ≠ `'QTY WASTE + SUSUT'` ≠ `'QTY WASTE
+TO BOM'`); file lama tanpa kolom → NaN/'' (konsumen lama tak berubah).
+
+### 2 mode pembanding (poin 1-12)
+- **Mode 1 — 🏆 vs Area / Banyak Resto**: pembanding `se-Area`
+  (otomatis dari kolom AREA resto fokus) atau `Semua Resto Lain`;
+  per bahan ditampilkan Σ · rata-rata/resto · median + Δ (A −
+  rata-rata) + % ((A−rata-rata)÷|rata-rata|×100 — mirror rumus Persen
+  Kenaikan tab 🧮). Statistik grup dihitung atas resto PEMBAWA bahan
+  itu saja (mirror semantik 'Beda dari Resto Lain' v3.11.59 —
+  non-carrier tidak menyeret rata-rata).
+- **Mode 2 — 🆚 1v1**: nilai resto fokus vs resto pembanding per bahan
+  + selisih + %; sisi tanpa baris bahan = 0 (resto tidak membawa
+  bahan itu; tampil '-').
+
+Minggu = cut-off laporan (default TERAKHIR); bulan = TERBARU dari
+multi-file yang digabung app.
+
+### Kejujuran satuan (anti-nonsense)
+QTY antar-bahan TIDAK dijumlahkan (satuan campur GR/PCS/PACK/BOTOL) —
+baris TOTAL hanya ukuran NOMINAL Rp; sel TOTAL QTY = '-'. Poin 13
+skor: 5 ukuran nominal + PENJUALAN + % NOM DEVIASI ÷ PENJUALAN.
+
+### Export Excel (💾 — semua 13 poin satu sheet)
+Angka MENTAH (bisa dihitung di Excel; format `[Red](#,##0)` mirror
+konvensi export pivot); kolom % disimpan RASIO 0..1 dgn format
+`0.0%`; baris TOTAL tebal; tulis atomik (tmp + os.replace).
+
+### Integrasi
+Tab baru grup Analisis (setelah 💰 Nominal Deviasi); `_tab_views` 7
+entry; pelanggan baru `_notify_lalu_consumers` (ganti file laporan →
+`on_lalu_file_changed` → payload cache basi → refresh/dirty);
+`primary_tree()` utk router roda; label lengkap + grup + hint
+statusbar + Ctrl+1..9.
+
+### Verifikasi (bukti eksekusi, bukan klaim)
+- `test_ui_redesign.py` **§100** (14 cek): fixture 4 resto × 2 area ×
+  3 bahan × 2 minggu × 2 bulan — angka TANGAN (Σ/rata²/median/Δ/%),
+  sisi-tanpa-bahan=0, pengganggu minggu/bulan terlewat, urut |Δ NOM|,
+  TOTAL Rp-only, degrade (resto tak dikenal, df tanpa kolom baru);
+  **REAL 20.AGUSTUS 2026.xlsx**: `se-Area JAWA BARAT 2 · 51 resto`
+  TOTAL A=37.595.486,18 · Σ=965.866.635,25; `Semua Resto Lain · 339
+  resto` rata²=5.240.741,64; BKSGOL vs CKGPAH %NomDev÷Penj 2,04% vs
+  0,32% — semua diverifikasi INDEPENDEN via groupby terpisah.
+- View wiring: combo resto/minggu/mode/pembanding, render cache tanpa
+  recompute, heading dinamis (label resto mentah), minus merah
+  per-cell, export → openpyxl (13 section + TOTAL numerik + % rasio).
 ## v3.11.59 — AUDIT FORMULA SEMUA TAB ("cek formula atau rumus di semua tab sesuai gak?") → 13 fix terbukti
 
 Audit mendalam rumus SETIAP tab (Pivot · Deviasi GR/PCS · Rekap Selisih

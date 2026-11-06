@@ -295,6 +295,45 @@ def parse_deviasi_file(path: str) -> dict:
     out["BULAN"] = (df[col_bulan].fillna("").astype(str).str.strip()
                     if col_bulan is not None else "")
 
+    # v3.12.0 — LAPORAN VERSUS (user: poin 1-12 laporan resmi = 12 ukuran
+    # QTY/NOMINAL; poin 13 = komparasi dua resto, mis. 1084.BKSGOL vs
+    # 1137.CKGPAH). Kolom OPSIONAL — file lama tanpa kolom → NaN/''
+    # (konsumen lama tidak terpengaruh; deteksi exact-match key
+    # ternormalisasi, BUKAN substring — 'QTY WASTE' ≠ 'QTY WASTE + SUSUT'
+    # ≠ 'QTY WASTE TO BOM'):
+    #   QTY : WASTE · SUSUT · TRIAL · LOSS SURPLUS   (BOM/COM/DEVIASI
+    #         sudah ada di atas — 'BOM Lalu'/'COM Lalu'/'DEV Lalu')
+    #   NOM : DEVIASI (sudah — 'Nominal Deviasi Lalu') · WASTE · SUSUT
+    #         · TRIAL · LOSS/SURPLUS
+    #   + 'AREA' (grup wilayah laporan resmi — 'JAWA BARAT 1' dst),
+    #     'PENJUALAN' (penjualan kumulatif resto s/d cut-off minggu,
+    #     per resto × minggu), 'Akun' (klas 'COM DEVIASI - RESTO' vs
+    #     'Biaya Packaging - RESTO').
+    _VERSUS_QTY_NOM = (
+        ("QTY WASTE Lalu", ("QTYWASTE",)),
+        ("QTY SUSUT Lalu", ("QTYSUSUT",)),
+        ("QTY TRIAL Lalu", ("QTYTRIAL",)),
+        ("QTY LOSS SURPLUS Lalu", ("QTYLOSSSURPLUS", "QTYLOSS/SURPLUS")),
+        ("NOMINAL WASTE Lalu", ("NOMINALWASTE",)),
+        ("NOMINAL SUSUT Lalu", ("NOMINALSUSUT",)),
+        ("NOMINAL TRIAL Lalu", ("NOMINALTRIAL",)),
+        ("NOMINAL LOSS/SURPLUS Lalu",
+         ("NOMINALLOSS/SURPLUS", "NOMINALLOSSSURPLUS")),
+    )
+    for _label, _cands in _VERSUS_QTY_NOM:
+        _c = _find_col(cols, *_cands)
+        out[_label] = (pd.to_numeric(df[_c], errors="coerce")
+                        if _c is not None else np.nan)
+    _col_area = _find_col(cols, "AREA")
+    out["AREA"] = (df[_col_area].fillna("").astype(str).str.strip()
+                    if _col_area is not None else "")
+    _col_penj = _find_col(cols, "PENJUALAN")
+    out["PENJUALAN"] = (pd.to_numeric(df[_col_penj], errors="coerce")
+                         if _col_penj is not None else np.nan)
+    _col_akun = _find_col(cols, "AKUNPENYESUAIANPERSEDIAAN", "AKUN")
+    out["Akun"] = (df[_col_akun].fillna("").astype(str).str.strip()
+                    if _col_akun is not None else "")
+
     # v3.9.13: BULAN dinormalisasi (upper/strip) + nomor urut bulan —
     # dipakai filter bulan-terbaru & analisa perubahan arah.
     out["BULAN"] = out["BULAN"].astype(str).str.strip().str.upper()

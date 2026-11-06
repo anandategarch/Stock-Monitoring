@@ -2,16 +2,17 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.11.59** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.12.0** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 
 - **Pipeline end-to-end** dari 14 sumber Excel (Rekap Mentah, 22.05, 42.15, 32.24, 42.05, 9901, 42.17 Saldo Awal & Sistem, 41.09 Harga, 32.43 Rincian PO, DBS Kategori) → 892k+ baris append1 terstruktur
-- **9 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
+- **10 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
 - **Analisa deviasi otomatis** — kolom CEK dengan 12+ kategori anomali (Rank, Turun Drastis, Beda dari Resto Lain, ACR to BOM, COM Tinggi/Rendah, dll)
 - **Saldo sistem minus** — rekapan pasangan Eksternal/Campuran dengan saldo < 0 di rentang 1..H, dengan keterangan mulai minus dari tanggal berapa
 - **Analisa Kronis** — pasangan (Resto, Barang) kronis minus + flag eksklusif (barang hanya minus di 1 resto)
 - **File deviasi bulan lalu** — dimuat manual via tombol 📂 (parse async, gak bekui UI), pattern `{12+month}.{BULAN} {TAHUN}.xlsx`
+- **⚖ Laporan Versus** — 13 poin laporan resmi format versus (poin 1-12 = 12 ukuran QTY/NOMINAL mirror kolom laporan; poin 13 = komparasi dua resto, mis. BKSGOL vs CKGPAH). Dua mode: resto vs **se-Area**/vs **Semua Resto Lain** (Σ · rata-rata · median per bahan), atau **1v1** satu resto vs satu resto; + PENJUALAN & %NomDev÷Penj; export Excel 13 poin (angka mentah)
 - **Tooltip hover** untuk cell panjang (CEK narasi, Keterangan, Rekomendasi) — muncul dekat cursor
 - **Persistensi** — filter, ukuran window, zoom, threshold ACR/COM tersimpan lintas sesi (settings.json)
 - **DPI-aware** — tajam di layar scaling 125%/150%; zoom Ctrl+Scroll 50%–200%
