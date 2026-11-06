@@ -860,7 +860,8 @@ class InSelisihView(tk.Frame):
     app — tanpa sheet 29; SATU tabel dgn kolom SO & Hasil Audit yang bisa
     difilter lewat header ⧩)."""
 
-    def __init__(self, parent, go_to_proses: Callable | None = None):
+    def __init__(self, parent, go_to_proses: Callable | None = None,
+                 go_to_deviasi: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None
@@ -900,6 +901,9 @@ class InSelisihView(tk.Frame):
         self._audit_full: tuple | None = None      # (df, kpi, desc)
         self._audit_bulan_ini: tuple | None = None  # idem, tanpa bulan lalu
         self.go_to_proses = go_to_proses
+        # v3.11.56 — U2: deep-link ke tab 📦 Deviasi GR (context menu
+        # klik-kanan pasangan — dipasang app lewat _go_to_deviasi).
+        self.go_to_deviasi = go_to_deviasi
         self._col_sel: dict = {c: None for c in _ALL_COLS}   # header filter ⧩
         self._busy = False
         self._pending = False
@@ -1122,6 +1126,9 @@ class InSelisihView(tk.Frame):
         self._apply_columns()
 
         self.tree.bind("<Double-1>", self._on_double_click, add="+")  # FIX B-04
+        # v3.11.56 — U2: context menu deep-link (klik-kanan pasangan →
+        # filter pasangan itu di tab 📦 Deviasi GR).
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")
 
     def _apply_columns(self):
         """(Re)pasang kolom tree + heading + HeaderFilterGroup +
@@ -3035,6 +3042,47 @@ class InSelisihView(tk.Frame):
             # / InDetailPopup._maximize).
             on_render_done=self._reapply_cell_tags)
         return win, new_tree
+
+    # ------------------------------------------------- v3.11.56 — U2: MENU
+    def _on_context_menu(self, event):
+        """v3.11.56 — U2: klik-kanan baris pasangan → menu "Buka di 📦
+        Deviasi GR" (app._go_to_deviasi → DeviasiView.focus_pair memasang
+        filter Resto+Nama Barang + memilih barisnya). Kunci resto/barang
+        dibaca dari payload MENTAH _keys bila ada (parity _on_double_click
+        — display bisa terformat). Tanpa callback → no-op senyap."""
+        if self.go_to_deviasi is None:
+            return
+        tree = event.widget
+        row_iid = tree.identify_row(event.y)
+        if not row_iid:
+            return
+        try:
+            if row_iid not in tree.selection():
+                tree.selection_set(row_iid)
+            values = tree.item(row_iid, "values")
+        except tk.TclError:
+            return
+        if not values:
+            return
+        col_ids = list(tree["columns"])
+        row = dict(zip(col_ids, values))
+        raw = (self._keys.get(row_iid)
+               if isinstance(self._keys, dict) else None)
+        resto = str((raw.get("resto") if raw else None)
+                    or row.get("Resto") or "").strip()
+        barang = str((raw.get("barang") if raw else None)
+                     or row.get("Nama Barang") or "").strip()
+        if not resto and not barang:
+            return
+        menu = tk.Menu(tree, tearoff=0)
+        menu.add_command(
+            label=f"🔎 Buka {(barang or resto)[:40]} di 📦 Deviasi GR",
+            command=lambda: self.go_to_deviasi(resto or None,
+                                               barang or None))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     # ------------------------------------------------- DOUBLE-CLICK POPUP
     def _on_double_click(self, event):

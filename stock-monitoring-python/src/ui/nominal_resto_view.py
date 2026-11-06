@@ -281,10 +281,21 @@ class NominalRestoView(tk.Frame):
     def __init__(self, parent, go_to_proses: Callable | None = None,
                  h_state=None, lalu_provider: Callable | None = None,
                  saldo_sistem_state=None,
-                 rincian_po_df: pd.DataFrame | None = None):
+                 rincian_po_df: pd.DataFrame | None = None,
+                 go_to_deviasi: Callable | None = None,
+                 kronis_threshold: int | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
+        # v3.11.56 — U2: deep-link ke tab 📦 Deviasi GR (context menu
+        # klik-kanan baris resto tabel utama + diteruskan ke anak tab
+        # Saldo Minus / Analisa Kronis utk menu pasangan).
+        self._go_to_deviasi = go_to_deviasi
+        # v3.11.56 — pra-pipeline: nilai awal threshold anak tab 'Analisa
+        # Kronis' (kartu pra-pipeline tab 🚀 Proses — app.set_kronis_
+        # threshold meneruskan update runtime ke sini).
+        self._kronis_threshold_init = (int(kronis_threshold)
+                                       if kronis_threshold else None)
         self._h_state = h_state
         self.tanggal_h = int(h_state.h) if h_state is not None else 25
         self.harga_map: dict = {}
@@ -497,6 +508,9 @@ class NominalRestoView(tk.Frame):
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)
         self.tree.bind("<Double-1>", self._on_double_click)
+        # v3.11.56 — U2: context menu deep-link (klik-kanan baris resto →
+        # filter pasangan resto itu di tab 📦 Deviasi GR).
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")
 
         foot = tk.Frame(tbody, bg=C_CARD)
         foot.grid(row=3, column=0, columnspan=2, sticky="ew",
@@ -530,23 +544,29 @@ class NominalRestoView(tk.Frame):
         # tree utama (header_filters/_colmgr utama tak terganggu).
         self._build_noharga_tab()
         # v3.11.42 — anak tab 'Saldo Sistem Minus' (saldo_minus_view).
+        # v3.11.56 — U2: go_to_deviasi diteruskan (menu pasangan).
         from .saldo_minus_view import SaldoMinusView
         self._saldo_minus_view = SaldoMinusView(
             self._tab_minus,
             h_state=self._h_state,
             saldo_sistem_state=self._saldo_sistem_state,
-            go_to_proses=self.go_to_proses)
+            go_to_proses=self.go_to_proses,
+            go_to_deviasi=self._go_to_deviasi)
         self._saldo_minus_view.pack(fill="both", expand=True)
         # v3.11.47 — anak tab 'Analisa Kronis' (analisa_kronis_view) —
         # pasangan kronis minus + flag eksklusif (barang hanya minus di
         # 1 resto). Mirror SaldoMinusView: subscribe h_state + saldo_
         # sistem_state, lazy refresh, cache per (data_id, h, mode, thr).
+        # v3.11.56 — U2: go_to_deviasi + pra-pipeline initial_threshold
+        # (kartu pra-pipeline tab 🚀 Proses).
         from .analisa_kronis_view import AnalisaKronisView
         self._kronis_view = AnalisaKronisView(
             self._tab_kronis,
             h_state=self._h_state,
             saldo_sistem_state=self._saldo_sistem_state,
-            go_to_proses=self.go_to_proses)
+            go_to_proses=self.go_to_proses,
+            go_to_deviasi=self._go_to_deviasi,
+            initial_threshold=self._kronis_threshold_init)
         self._kronis_view.pack(fill="both", expand=True)
         # v3.11.44 — FIX WIRING (root cause "saldo minus tidak terjadi apa
         # apa"): SaldoMinusView punya siklus refresh SENDIRI (lazy — load_data
@@ -1938,6 +1958,52 @@ class NominalRestoView(tk.Frame):
             return
         apply_cell_tag(tree, "neg_cell", self._neg_cells)
         apply_cell_tag(tree, "total_cell", self._total_cells)
+
+    # =========================================================================
+    # v3.11.56 — U2: DEEP-LINK (context menu utama + pintu anak tab)
+    # =========================================================================
+    def _on_context_menu(self, event):
+        """v3.11.56 — U2: klik-kanan baris resto → menu deep-link "Buka
+        di 📦 Deviasi GR" (filter kolom Resto saja — barang=None; pola
+        menu popup InDetailPopup). Baris TOTAL dilewati."""
+        if self._go_to_deviasi is None:
+            return
+        tree = event.widget
+        iid = tree.identify_row(event.y)
+        if not iid or iid == "row_total":
+            return
+        try:
+            if iid not in tree.selection():
+                tree.selection_set(iid)
+            resto = str(tree.set(iid, "Resto")).strip()
+        except tk.TclError:
+            return
+        if not resto:
+            return
+        menu = tk.Menu(tree, tearoff=0)
+        menu.add_command(
+            label=f"🔎 Buka resto {resto[:32]} di 📦 Deviasi GR",
+            command=lambda: self._go_to_deviasi(resto, None))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def open_kronis_subtab(self):
+        """v3.11.56 — U2: pilih anak tab 'Analisa Kronis' (deep-link dari
+        Panel Ringkasan tab 🚀 Proses — app._open_kronis_subtab). Event
+        <<NotebookTabChanged>> sub-notebook men-trigger ensure_refreshed
+        anak tab (pola wiring v3.11.44)."""
+        with contextlib.suppress(tk.TclError):
+            self._sub_nb.select(self._tab_kronis)
+
+    def set_kronis_threshold(self, thr: int):
+        """v3.11.56 — pra-pipeline: teruskan threshold kronis baru (kartu
+        pra-pipeline tab 🚀 Proses) ke anak tab 'Analisa Kronis'."""
+        kv = getattr(self, "_kronis_view", None)
+        if kv is not None:
+            with contextlib.suppress(Exception):
+                kv.set_threshold(int(thr))
 
     # =========================================================================
     # DOUBLE-CLICK → POPUP (rincian per resto / tanpa harga)

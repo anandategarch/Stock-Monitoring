@@ -215,9 +215,26 @@ class SharedTanggalH:
         setelah data dimuat nilai di-reset DINAMIS oleh DeviasiView.
         load_data). v3.11.11: reset dinamis kini di-SNAP ke hari SO standar
         {7,14,25} (permintaan user terbaru — lihat detect_standard_h);
-        app meng-inject nilai awal hasil deteksi hari-ini."""
+        app meng-inject nilai awal hasil deteksi hari-ini.
+        v3.11.56 — PRE-SET: bila initial berasal dari h_preset settings
+        (user set SEBELUM pipeline), app juga memanggil lock_preset() →
+        load_data/✕-reset TIDAK men-snap H ke data (render pertama
+        langsung pakai H pilihan user — tanpa re-render kedua)."""
         self._h = int(initial)
         self._listeners: list[Callable] = []
+        # v3.11.56 — True = H dikunci nilai user (pra-pipeline); auto-snap
+        # data dilewati sampai clear_preset() dipanggil (tombol "Auto").
+        self.preset_locked = False
+
+    def lock_preset(self, h: int) -> None:
+        """v3.11.56 — kunci H ke nilai pilihan user (pra-pipeline): set
+        nilai + tandai locked (load_data/✕-reset tidak menimpa)."""
+        self.preset_locked = True
+        self.set(int(h))
+
+    def clear_preset(self) -> None:
+        """v3.11.56 — lepas kunci: kembali ke auto-deteksi (snap data)."""
+        self.preset_locked = False
 
     @staticmethod
     def detect_standard_h(day=None) -> int:
@@ -419,6 +436,80 @@ class SharedSaldoSistemMode:
         return True
 
 
+# v3.11.56 — U6: state AMBANG DRASTIS (%) yang DIBAGI antar tab Deviasi
+# GR & PCS (dulu HARDCODED 50 — kini paritas ACR/COM: spinbox + settings).
+# Satu ambang men-drive DUA label mirror:
+#   Turun Drastis: SO_H < (pct/100) × SO(H-1)          [50 → < 50%]
+#   Naik Drastis : SO_H > (1 + pct/100) × SO(H-1)      [50 → > 150%]
+# pct=50 = perilaku lama PERSIS (backward-compat). Label "Beda Tanggal"
+# TIDAK ikut (port formula VBA sheet user — kontrak tetap 150%).
+class SharedDrastisAmbang:
+
+    def __init__(self, initial: float = 50.0):
+        self._pct = float(initial)
+        self._listeners: list[Callable] = []
+
+    @property
+    def pct(self) -> float:
+        return self._pct
+
+    def subscribe(self, fn: Callable):
+        self._listeners.append(fn)
+
+    def unsubscribe(self, fn: Callable) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def set(self, new_pct) -> bool:
+        """Ubah ambang + panggil SEMUA listener. Return True bila berubah."""
+        try:
+            new_pct = float(new_pct)
+        except (TypeError, ValueError):
+            return False
+        if not (5.0 <= new_pct <= 95.0) or new_pct == self._pct:
+            return False
+        self._pct = new_pct
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):
+                fn(new_pct)
+        return True
+
+
+# v3.11.56 — U6: state AMBANG HITUNG MANUAL (rasio) yang DIBAGI antar
+# tab Deviasi GR & PCS (dulu HARDCODED 1.3 — ambang sel Y1 sheet user;
+# kini paritas ACR/COM: spinbox + settings). 1.3 = perilaku lama PERSIS.
+class SharedManualAmbang:
+
+    def __init__(self, initial: float = 1.3):
+        self._val = float(initial)
+        self._listeners: list[Callable] = []
+
+    @property
+    def val(self) -> float:
+        return self._val
+
+    def subscribe(self, fn: Callable):
+        self._listeners.append(fn)
+
+    def unsubscribe(self, fn: Callable) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def set(self, new_val) -> bool:
+        """Ubah ambang + panggil SEMUA listener. Return True bila berubah."""
+        try:
+            new_val = float(new_val)
+        except (TypeError, ValueError):
+            return False
+        if not (1.05 <= new_val <= 5.0) or new_val == self._val:
+            return False
+        self._val = new_val
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):
+                fn(new_val)
+        return True
+
+
 # --- persistensi ambang ACR (settings.json — pola followup.json) ----------
 # v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
 _SETTINGS_BASE = _app_base_dir()
@@ -528,6 +619,149 @@ def save_saldo_sistem_mode(mode: str) -> None:
         return
 
 
+# v3.11.56 — U6: persist ambang Drastis/Manual (mirror com_ambang_pct).
+def load_drastis_ambang() -> float:
+    """Ambang Drastis % tersimpan (default 50.0 bila file hilang/korup/
+    nilai di luar 5..95 — senyap; 50 = perilaku hardcoded lama)."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = float(json.load(f).get("drastis_ambang_pct", 50.0))
+        return val if 5.0 <= val <= 95.0 else 50.0
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 50.0
+
+
+def save_drastis_ambang(pct: float) -> None:
+    """Simpan atomik key drastis_ambang_pct (mirror save_com_ambang)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["drastis_ambang_pct"] = round(float(pct), 2)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def load_manual_ambang() -> float:
+    """Ambang Hitung Manual (rasio) tersimpan (default 1.3 bila file
+    hilang/korup/nilai di luar 1.05..5.0 — senyap; 1.3 = ambang sel Y1
+    sheet user, perilaku hardcoded lama)."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = float(json.load(f).get("manual_ambang_ratio", 1.3))
+        return val if 1.05 <= val <= 5.0 else 1.3
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 1.3
+
+
+def save_manual_ambang(val: float) -> None:
+    """Simpan atomik key manual_ambang_ratio (mirror save_com_ambang)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["manual_ambang_ratio"] = round(float(val), 2)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+# v3.11.56 — PRE-SET PRA-PIPELINE: Tanggal H yang di-set user SEBELUM
+# pipeline (supaya render pertama langsung pakai H itu — tanpa re-render
+# kedua). None = auto (deteksi hari-standar + snap data — perilaku lama).
+def load_h_preset():
+    """int 1..31 tersimpan, atau None (auto — default)."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = json.load(f).get("h_preset")
+        if val is None:
+            return None
+        if isinstance(val, bool) or not isinstance(val, int):
+            return None
+        return val if 1 <= val <= 31 else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def save_h_preset(h):
+    """Simpan key h_preset (int 1..31 atau None = auto — key DIHAPUS
+    supaya file settings bersih; mirror pola atomic)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        if h is None:
+            old.pop("h_preset", None)
+        else:
+            old["h_preset"] = int(h)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+# v3.11.56 — PRE-SET PRA-PIPELINE: threshold "kronis" (Frek Minus min)
+# dipakai kartu pra-set tab Proses + Panel Ringkasan + nilai awal anak
+# tab Analisa Kronis (spinbox view tetap bisa mengubah saat runtime).
+def load_kronis_threshold() -> int:
+    """Threshold kronis tersimpan (default 3 bila file hilang/korup/
+    nilai di luar 1..31 — senyap)."""
+    try:
+        with open(acr_settings_path(), "r", encoding="utf-8") as f:
+            val = int(json.load(f).get("kronis_threshold", 3))
+        return val if 1 <= val <= 31 else 3
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 3
+
+
+def save_kronis_threshold(thr: int) -> None:
+    """Simpan atomik key kronis_threshold (mirror save_com_ambang)."""
+    p = acr_settings_path()
+    old = {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            old = loaded
+    except (OSError, ValueError, TypeError):
+        old = {}
+    try:
+        old["kronis_threshold"] = int(thr)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(old, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        return
+
+
 class DeviasiView(tk.Frame):
     """Wide matrix view untuk DEVIASI GR/PCS.
 
@@ -603,6 +837,10 @@ class DeviasiView(tk.Frame):
     # merah/nol abu/label CEK) + highlight kolom Deviasi/SO_H. Konstanta
     # GRP_TAG_COLORS/_GRP_TAGS dan mesin _reapply_group_merge dihapus.
 
+    # v3.11.56 — nilai historis (dokumentasi): ambang Hitung Manual kini
+    # instance attr manual_ratio (SharedManualAmbang — spinbox kartu
+    # Filter + kartu pra-pipeline tab Proses; default 1.3 = ambang sel
+    # Y1 sheet user). Konstanta dipertahankan sbg penanda era pra-U6.
     CEK_THRESHOLD = 1.3
 
     # v3.11.27 — MERGE-VERTIKAL DIBUBARKAN TOTAL (user: "ternyata jadi
@@ -669,7 +907,9 @@ class DeviasiView(tk.Frame):
                  acr_state: SharedACRThreshold | None = None,
                  com_state: "SharedComAmbang | None" = None,
                  saldo_sistem_state: "SharedSaldoSistemMode | None" = None,
-                 lalu_provider: Callable | None = None):
+                 lalu_provider: Callable | None = None,
+                 drastis_state: "SharedDrastisAmbang | None" = None,
+                 manual_state: "SharedManualAmbang | None" = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None   # v3.9.23 (poin 6)
@@ -701,6 +941,26 @@ class DeviasiView(tk.Frame):
         self.saldo_sistem_mode = (saldo_sistem_state.mode
                                   if saldo_sistem_state is not None
                                   else "4217")
+        # v3.11.56 — U6: ambang Drastis/Manual dibagi GR & PCS (dulu
+        # hardcoded 50/1.3 di compute CEK — kini paritas ACR/COM:
+        # spinbox kartu Filter + kartu pra-pipeline tab Proses + persist
+        # settings.json; ganti = invalidasi cache + recompute kedua tab).
+        self._drastis_state = drastis_state
+        self.drastis_pct = (drastis_state.pct if drastis_state is not None
+                            else 50.0)
+        self._manual_state = manual_state
+        self.manual_ratio = (manual_state.val if manual_state is not None
+                             else 1.3)
+        # v3.11.56 — U2: permintaan fokus pasangan deep-link (context menu
+        # "Buka di Deviasi GR" dari tab lain — app._go_to_deviasi →
+        # focus_pair); dikonsumsi render_done SETELAH baris ter-insert.
+        # _pending_focus_st = snapshot filter ⧩ AKTIF saat request dibuat —
+        # GUARD: render dgn state filter LAMA (refresh yang mengantre
+        # sebelum focus_pair memasang filter) TIDAK boleh mengkonsumsi
+        # request (hasil test Xvfb: render #1 filter basi memakan request,
+        # render #2 (filter benar) tak lagi memilih baris).
+        self._pending_focus: tuple | None = None
+        self._pending_focus_st: dict | None = None
         # v3.9.53 — Dev. Bulan Lalu: provider FILE deviasi resmi (app
         # meneruskan komparasi_view._file_df — pola lalu_provider
         # nominal_resto v3.9.36). None (standalone/test) → kolom '-' jujur.
@@ -960,6 +1220,45 @@ class DeviasiView(tk.Frame):
             "<<ComboboxSelected>>",
             lambda e: self._on_saldo_sistem_mode_change())
 
+        # v3.11.56 — U6: AMBANG DRASTIS ± (dulu HARDCODED 50): Turun
+        # Drastis terpicu bila SO_H < (pct/100)·SO(H−1); Naik Drastis
+        # bila SO_H > (1+pct/100)·SO(H−1). Spinbox kedua tab sinkron
+        # (SharedDrastisAmbang — pola AMBANG ACR/COM); ganti → invalidasi
+        # pivot cache + refresh kedua tab. Label 'Beda Tanggal' TIDAK ikut
+        # (port formula VBA sheet user — kontrak tetap 150%). 50 =
+        # perilaku lama PERSIS (backward-compat).
+        tk.Label(r0b, text="AMBANG DRASTIS ±", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._drastis_var = tk.StringVar(value=self._fmt_threshold(
+            float(self.drastis_pct)))
+        drastis_spin = ttk.Spinbox(
+            r0b, textvariable=self._drastis_var, from_=5, to=95,
+            increment=5, width=5, font=font(9),
+            command=self._on_drastis_ambang_change)
+        drastis_spin.pack(side="left", padx=(6, 0))
+        drastis_spin.bind("<Return>",
+                          lambda e: self._on_drastis_ambang_change())
+        tk.Label(r0b, text="% drastis", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 0))
+
+        # v3.11.56 — U6: AMBANG HITUNG MANUAL × (dulu HARDCODED 1.3 —
+        # ambang sel Y1 sheet user): terpicu bila |SO_H−W|/|W| > rasio.
+        # Spinbox kedua tab sinkron (SharedManualAmbang); 1,3 = perilaku
+        # lama PERSIS.
+        tk.Label(r0b, text="AMBANG MANUAL", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._manual_var = tk.StringVar(value=self._fmt_threshold(
+            float(self.manual_ratio)))
+        manual_spin = ttk.Spinbox(
+            r0b, textvariable=self._manual_var, from_=1.05, to=5.0,
+            increment=0.05, width=5, font=font(9),
+            command=self._on_manual_ambang_change)
+        manual_spin.pack(side="left", padx=(6, 0))
+        manual_spin.bind("<Return>",
+                         lambda e: self._on_manual_ambang_change())
+        tk.Label(r0b, text="× rasio", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 0))
+
         # --- Tabel card ---
         tcard = Card(self.content)
         tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
@@ -1217,6 +1516,11 @@ class DeviasiView(tk.Frame):
         if self._saldo_sistem_state is not None:
             self._saldo_sistem_state.subscribe(
                 self._on_shared_saldo_sistem_changed)
+        # v3.11.56 — U6: ambang Drastis/Manual dibagi GR & PCS (pola COM).
+        if self._drastis_state is not None:
+            self._drastis_state.subscribe(self._on_shared_drastis_changed)
+        if self._manual_state is not None:
+            self._manual_state.subscribe(self._on_shared_manual_changed)
         # FIX 6d1-05 — binding Destroy juga dipasang saat view memegang
         # listener FollowUpStore (dulu hanya bila h_state/acr_state ada —
         # view ber-store tanpa state bersama tak pernah melepas listener
@@ -1224,6 +1528,8 @@ class DeviasiView(tk.Frame):
         if (self._h_state is not None or self._acr_state is not None
                 or self._com_state is not None
                 or self._saldo_sistem_state is not None
+                or self._drastis_state is not None
+                or self._manual_state is not None
                 or self.store is not None):
             # FIX C-07 (audit 2-c): unsubscribe defensif saat view destroy
             # (pola laporan/komparasi) — tanpa ini listener tetap
@@ -1281,6 +1587,11 @@ class DeviasiView(tk.Frame):
         if self._saldo_sistem_state is not None:
             self._saldo_sistem_state.unsubscribe(
                 self._on_shared_saldo_sistem_changed)
+        # v3.11.56 — U6: lepas listener ambang Drastis/Manual.
+        if self._drastis_state is not None:
+            self._drastis_state.unsubscribe(self._on_shared_drastis_changed)
+        if self._manual_state is not None:
+            self._manual_state.unsubscribe(self._on_shared_manual_changed)
         # FIX 6d1-05 — lepas listener FollowUpStore (API remove_listener
         # v3.9.42 tersedia tapi tak pernah dipasang; _on_view_destroy dulu
         # hanya me-unsubscribe h_state/acr_state): tanpa ini listener zombie
@@ -1396,7 +1707,7 @@ class DeviasiView(tk.Frame):
                 self._shared_cache.clear()
             self._refresh()
 
-    # v3.11.40 — listener state bersama (dipanggil SharedSaldoSistemMode
+    # v3.11.56 — U6: listener state bersama (dipanggil SharedSaldoSistemMode
     # saat mode diubah dari tab mana pun — termasuk tab ini sendiri;
     # pola _on_shared_com_changed).
     def _on_shared_saldo_sistem_changed(self, new_mode):
@@ -1406,6 +1717,87 @@ class DeviasiView(tk.Frame):
                 "42.17" if self.saldo_sistem_mode == "4217" else "Pivot")
         # override saldo sistem hidup di pivot ter-cache → invalidasi +
         # recompute (H tetap; mode "pivot" = TANPA override file 42.17).
+        self._cached_pivot = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
+    # v3.11.56 — U6: handler spinbox AMBANG DRASTIS (dipanggil tombol
+    # spin / Enter; pola _on_com_ambang_change).
+    def _on_drastis_ambang_change(self):
+        try:
+            val = float(str(self._drastis_var.get()).strip()
+                        .replace(",", "."))
+        except ValueError:
+            self._drastis_var.set(self._fmt_threshold(self.drastis_pct))
+            return
+        if not (5.0 <= val <= 95.0):
+            messagebox.showwarning(
+                "Ambang Drastis",
+                "Ambang harus angka 5–95 (persen perubahan SO vs kemarin). "
+                "50 = perilaku bawaan (Turun < 50% / Naik > 150%).",
+                parent=self.winfo_toplevel())
+            self._drastis_var.set(self._fmt_threshold(self.drastis_pct))
+            return
+        if self._drastis_state is not None:
+            # jalur utama: state bersama → listener kedua tab + persist
+            self._drastis_state.set(val)
+            save_drastis_ambang(val)
+        else:
+            # standalone (tanpa shared state): refresh instance ini saja
+            self.drastis_pct = val
+            self._cached_pivot = None
+            self._refresh()
+
+    # v3.11.56 — U6: listener state bersama (dipanggil SharedDrastisAmbang
+    # saat ambang diubah dari tab mana pun — termasuk kartu pra-pipeline
+    # tab Proses; pola _on_shared_com_changed).
+    def _on_shared_drastis_changed(self, new_pct):
+        self.drastis_pct = float(new_pct)
+        if hasattr(self, "_drastis_var"):
+            self._drastis_var.set(self._fmt_threshold(self.drastis_pct))
+        # label Drastis hidup di pivot ter-cache → invalidasi + recompute.
+        self._cached_pivot = None
+        if self._shared_cache is not None:
+            self._shared_cache.clear()
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
+
+    # v3.11.56 — U6: handler spinbox AMBANG HITUNG MANUAL (rasio W —
+    # pola _on_drastis_ambang_change).
+    def _on_manual_ambang_change(self):
+        try:
+            val = float(str(self._manual_var.get()).strip()
+                        .replace(",", "."))
+        except ValueError:
+            self._manual_var.set(self._fmt_threshold(self.manual_ratio))
+            return
+        if not (1.05 <= val <= 5.0):
+            messagebox.showwarning(
+                "Ambang Hitung Manual",
+                "Ambang harus angka 1,05–5,0 (rasio |SO−W|/|W|). "
+                "1,3 = ambang bawaan (sel Y1 sheet user).",
+                parent=self.winfo_toplevel())
+            self._manual_var.set(self._fmt_threshold(self.manual_ratio))
+            return
+        if self._manual_state is not None:
+            self._manual_state.set(val)
+            save_manual_ambang(val)
+        else:
+            self.manual_ratio = val
+            self._cached_pivot = None
+            self._refresh()
+
+    # v3.11.56 — U6: listener state bersama ambang Hitung Manual.
+    def _on_shared_manual_changed(self, new_val):
+        self.manual_ratio = float(new_val)
+        if hasattr(self, "_manual_var"):
+            self._manual_var.set(self._fmt_threshold(self.manual_ratio))
         self._cached_pivot = None
         if self._shared_cache is not None:
             self._shared_cache.clear()
@@ -1621,6 +2013,117 @@ class DeviasiView(tk.Frame):
         if self._dirty and self.data is not None and not self.data.empty:
             self._dirty = False
             self._refresh()
+
+    # =========================================================================
+    # v3.11.56 — U2: DEEP-LINK FOKUS PASANGAN (dipanggil app._go_to_deviasi
+    # dari context menu "🔎 Buka di 📦 Deviasi GR" tab Saldo Minus /
+    # Analisa Kronis / Rekap Selisih IN / Nominal Deviasi)
+    # =========================================================================
+    def focus_pair(self, resto: str | None = None,
+                   barang: str | None = None):
+        """Pindah fokus ke pasangan (resto, barang): reset filter tabel
+        (⧩ + KATEGORI + AKTIF — biar pasangan tak tersembunyi filter
+        lama; H BERSAMA tidak disentuh), pasang filter kolom Resto /
+        Nama Barang programatik (HeaderFilterGroup.set_selected — pola
+        restore filter persisten v3.9.66), render, lalu pilih + gulir
+        ke barisnya (render_done → _consume_pending_focus).
+
+        resto/barang None = filter kolom itu tidak diubah (dipakai
+        deep-link resto-saja dari tab Nominal Deviasi)."""
+        if self.data is None or self.data.empty:
+            return
+        # bersihkan filter lama (parity ✕ Reset Filter — TANPA reset H:
+        # deep-link tidak boleh mengubah jendela analisa tanggal).
+        for c in self._col_sel:
+            self._col_sel[c] = None
+        self.header_filters.clear_all()
+        # KATEGORI → "Semua" (BUKAN default gabungan 'Deviasi' — hasil
+        # test Xvfb: pasangan deep-link bisa ber-kategori lain; tujuan
+        # deep-link = pasangan TERLIHAT, apapun kategorinya).
+        self._kategori_var.set("Semua")
+        self._kategori_sel = None
+        if hasattr(self, "_aktif_var"):
+            self._reset_aktif()
+        for col, want in (("Resto", resto), ("Nama Barang", barang)):
+            if want is None:
+                continue
+            # cocokkan nilai DISPLAY (filter membandingkan nilai
+            # terformat — _col_values; pola restore v3.9.66),
+            # case-insensitive supaya nama mentah dari tab sumber tetap
+            # kena (mis. casing beda / spasi tepi).
+            _wn = str(want).strip().casefold()
+            match = next((v for v in self._col_values(col)
+                          if str(v).strip().casefold() == _wn), None)
+            if match is None:
+                continue   # nilai tak ada di tab ini (mode satuan beda?)
+            self._col_sel[col] = {match}
+            self.header_filters.set_selected(col, {match})
+        self._pending_focus = (resto, barang)
+        # snapshot STATE FILTER LENGKAP saat request dibuat (col_sel ⧩ +
+        # KATEGORI + AKTIF — hasil test Xvfb ke-2: guard col_sel saja tak
+        # cukup, render #1 dgn kategori default lama (0 baris) tetap
+        # memakan request). st render milik request dibandingkan penuh
+        # di _consume_pending_focus.
+        self._pending_focus_st = {
+            "col_sel": {c: s for c, s in self._col_sel.items()
+                        if s is not None},
+            "kategori": self._kategori_sel,
+            "aktif": self._aktif_sel,
+        }
+        self._refresh()
+
+    def _consume_pending_focus(self, payload: dict | None = None):
+        """v3.11.56 — U2: pilih + gulir ke baris pasangan deep-link.
+
+        Dipanggil render_done (baris sudah ter-insert). GUARD: payload
+        membawa snapshot filter (st.col_sel) yang dipakai job render ini —
+        bila BEDA dgn _pending_focus_st (render mengantre SEBELUM
+        focus_pair memasang filter → filter basi), request DILEWATI dan
+        menunggu render milik request itu sendiri (guard _busy/_pending
+        _refresh mengantrekan ulang dgn state filter baru). Pasangan tak
+        ketemu pada render yang BENAR (mode satuan beda — barang PCS di
+        tab GR dsb.) → pesan status jujur arahkan ke tab pasangan."""
+        pf = self._pending_focus
+        if pf is None:
+            return
+        if payload is not None:
+            _guard = payload.get("_focus_guard")
+            _want = self._pending_focus_st
+            if (_guard is not None and _want is not None
+                    and _guard != _want):
+                return   # render basi — bukan render milik request fokus
+        self._pending_focus = None
+        self._pending_focus_st = None
+        resto, barang = pf
+
+        def _norm(s) -> str:
+            return str(s).strip().casefold()
+
+        targets = []
+        for iid, snap in self._row_snaps.items():
+            if resto is not None and _norm(snap.get("resto")) != _norm(resto):
+                continue
+            if (barang is not None
+                    and _norm(snap.get("barang")) != _norm(barang)):
+                continue
+            targets.append(iid)
+            if len(targets) >= 200:
+                break
+        if not targets:
+            _lbl = []
+            if barang is not None:
+                _lbl.append(str(barang))
+            if resto is not None:
+                _lbl.append(f"({resto})")
+            self.status_var.set(
+                "Pasangan " + " ".join(_lbl)
+                + " tidak ada di tab ini (mode satuan GR — coba tab "
+                  "🧩 Deviasi PCS bila barang non-GR).")
+            return
+        with contextlib.suppress(tk.TclError):
+            self.tree.selection_set(targets)
+            self.tree.focus(targets[0])
+            self.tree.see(targets[0])
 
     def on_lalu_file_changed(self):
         """v3.9.53 — file deviasi (tab ⚖ Komparasi) berganti: load baru /
@@ -2109,6 +2612,10 @@ class DeviasiView(tk.Frame):
         self._kategori_lookup = {}   # v3.9.13 — diisi ulang di _compute_pivot
         self._so_source_lookup = {}  # v3.9.19 — diisi ulang di _compute_pivot
         self._tnum = None  # reset cache to_numeric(Tanggal)
+        # v3.11.56 — U2: data baru → permintaan fokus deep-link lama basi
+        # (row_snaps/iid segera berganti — lihat _render_rows).
+        self._pending_focus = None
+        self._pending_focus_st = None
         # v3.9.33 — AUDIT FIX (48-d HIGH / P0): data berganti → semua clone
         # ⛶ hidup menampilkan salinan baris LAMA (iid sama, pasangan beda)
         # → DITUTUP + generasi naik (guard handler ✓/double-click clone).
@@ -2134,8 +2641,17 @@ class DeviasiView(tk.Frame):
         # baru sudah diterapkan).
         type(self)._load_depth += 1
         try:
+            # v3.11.56 — PRE-SET PRA-PIPELINE: H dikunci user SEBELUM
+            # pipeline (h_preset settings.json — kartu pra-pipeline tab
+            # 🚀 Proses) → data baru TIDAK men-snap H ke tanggal SO
+            # terakhir; render pertama LANGSUNG memakai H pilihan user
+            # (permintaan user: "biar gak nunggu loading 2x"). Kunci
+            # dilepas clear_preset() (checkbox "Auto" kartu pra-pipeline).
+            _preset_locked = (bool(getattr(self._h_state, "preset_locked",
+                                           False))
+                              if self._h_state is not None else False)
             _new_h = self._default_h_from_data(data)
-            if _new_h is not None:
+            if _new_h is not None and not _preset_locked:
                 if self._h_state is not None:
                     self._h_state.set(_new_h)
                     self.tanggal_h = self._h_state.h
@@ -2667,21 +3183,31 @@ class DeviasiView(tk.Frame):
         stok = so_m1 + in_h - bk_h - out_h
         stok_safe = np.where(stok == 0, 1.0, stok)
         ratio = np.abs(so_h - stok) / np.abs(stok_safe)
-        cond_manual = np.where(stok == 0, so_h != 0, ratio > 1.3)
+        # v3.11.56 — U6: ambang HITUNG MANUAL kini configurable (dulu
+        # hardcoded 1.3 — ambang sel Y1 sheet user): SharedManualAmbang —
+        # spinbox kartu Filter + kartu pra-pipeline tab Proses + persist
+        # settings.json (default 1.3 = perilaku lama PERSIS).
+        cond_manual = np.where(stok == 0, so_h != 0,
+                               ratio > float(self.manual_ratio))
 
         with np.errstate(divide="ignore", invalid="ignore"):
             drop_ratio = np.divide(
                 so_h, so_m1, out=np.full(n, np.inf), where=so_m1 > 0)
-        cond_drastis = (so_m1 > 0) & (drop_ratio < 0.5)
+        # v3.11.56 — U6: ambang DRASTIS kini configurable (dulu hardcoded
+        # 50): SharedDrastisAmbang — Turun Drastis bila drop_ratio <
+        # pct/100; Naik Drastis bila SO_H > (1+pct/100)·SO(H−1) (mirror
+        # di bawah). 50 = perilaku lama PERSIS.
+        _drastis_cut = float(self.drastis_pct) / 100.0
+        cond_drastis = (so_m1 > 0) & (drop_ratio < _drastis_cut)
 
         # v3.11.7 — kondisi "Naik Drastis" (user: "aku tertarik naik
-        # drastis"; mirror Turun Drastis): SO(H) melonjak > 150% dari
-        # SO(H−1) — threshold sama dgn cabang-2 Beda Tanggal (SO(H−1) +
-        # 50%·SO(H−1)); melonjak TANPA kiriman tetap tertangkap Beda
-        # Tanggal cabang-2, dgn kiriman/BK hanya label ini. so_m1 = 0
-        # tak berlabel (barang baru / rekaman pertama ≠ anomali — mirror
-        # guard so_m1 > 0 Turun Drastis).
-        cond_naik = (so_m1 > 0) & (so_h > so_m1 + 0.5 * so_m1)
+        # drastis"; mirror Turun Drastis): SO(H) melonjak > (1+ambang)
+        # dari SO(H−1) — v3.11.56 kini ikut ambang Drastis configurable
+        # (_drastis_cut — dulu konstan 50%); melonjak TANPA kiriman tetap
+        # tertangkap Beda Tanggal cabang-2, dgn kiriman/BK hanya label
+        # ini. so_m1 = 0 tak berlabel (barang baru / rekaman pertama ≠
+        # anomali — mirror guard so_m1 > 0 Turun Drastis).
+        cond_naik = (so_m1 > 0) & (so_h > so_m1 + _drastis_cut * so_m1)
 
         # v3.11.7 — kondisi "Hilang dari Pencatatan" (user: "aku
         # tertarik ... Hilang dari pencatatan"): kemarin bersaldo (>0),
@@ -3113,7 +3639,15 @@ class DeviasiView(tk.Frame):
                 pivot = self._compute_pivot(data, h, lalu_map, lalu_label)
             self._cached_pivot = pivot
             self._cached_h = h
-            return self._prepare_rows(st)
+            out = self._prepare_rows(st)
+            # v3.11.56 — U2: echo snapshot STATE FILTER job ini (col_sel +
+            # kategori + aktif — guard konsumsi _pending_focus: render
+            # dgn state LAMA tak boleh memakan request deep-link; lihat
+            # _consume_pending_focus).
+            out["_focus_guard"] = {"col_sel": st["col_sel"],
+                                  "kategori": st["kategori"],
+                                  "aktif": st["aktif"]}
+            return out
 
         def done(payload):
             self._render_rows(payload)
@@ -3630,6 +4164,11 @@ class DeviasiView(tk.Frame):
             # v3.9.55 — F8: auto-fit kolom SEKALI per muat data (user:
             # "waktu pertama kali buka program sudah diset ke auto fit").
             autofit_tree_once(self, self.tree)
+            # v3.11.56 — U2: deep-link selesai render → pilih + gulir ke
+            # baris pasangan (filter sudah ter-apply pra-refresh oleh
+            # focus_pair; guard _focus_guard memastikan render ini milik
+            # request — render filter basi dilewati).
+            self._consume_pending_focus(payload)
             self._busy = False
             if self._pending:
                 self._pending = False
@@ -3928,7 +4467,15 @@ class DeviasiView(tk.Frame):
         # v3.9.5 FIX (audit 19-c #2): H berubah → listener GR sendiri sudah
         # me-render; refresh eksplisit hanya bila H TIDAK berubah (dulu:
         # dobel render tiap reset).
-        _default_h = self._default_h_from_data(self.data) or 25
+        # v3.11.56 — PRE-SET: H terkunci pra-pipeline (preset_locked) →
+        # ✕ Reset Filter TIDAK men-snap H ke default data (kunci tetap
+        # dipegang user; lepas kunci lewat checkbox "Auto" kartu
+        # pra-pipeline tab 🚀 Proses).
+        if (self._h_state is not None
+                and getattr(self._h_state, "preset_locked", False)):
+            _default_h = int(self._h_state.h)
+        else:
+            _default_h = self._default_h_from_data(self.data) or 25
         h_changed = self.tanggal_h != _default_h
         if h_changed:
             self.tanggal_h = _default_h

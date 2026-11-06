@@ -689,6 +689,15 @@ class StatusBar(tk.Frame):
         # — pady 8 menyisakan 16px < req 17px = badge ter-clip 1px di 100%
         # (audit 2a-03: "di 100% badge versi pun ter-clip 1-2px").
         self._right_lbl.pack(side="right", padx=12, pady=7)
+        # v3.11.56 — U5: SLOT HINT pintasan kontekstual (kiri badge versi):
+        # petunjuk singkat per tab aktif — app._on_tab_changed → set_hint
+        # (mis. "Ctrl+F cari · Ctrl+C salin · double-click rincian").
+        # Teks kosong = slot disembunyikan (pack_forget) supaya status
+        # kiri lega. Dibuat SETELAH _right_lbl dipack → selalu duduk di
+        # KIRI badge versi.
+        self._hint_var = tk.StringVar(value="")
+        self._hint_lbl = tk.Label(self, textvariable=self._hint_var,
+                                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8))
         self.bind("<Configure>", self._on_configure, add="+")
 
     @classmethod
@@ -724,6 +733,13 @@ class StatusBar(tk.Frame):
             self.update_idletasks()   # lebar badge terbaru (teks baru saja
                                       # di-set / font ter-rescale zoom)
             right_w = self._right_lbl.winfo_reqwidth() or 0
+            # v3.11.56 — U5: lebar slot hint (bila tampil) ikut dikurangi
+            # supaya status kiri terpotong SEBELUM menimpa hint.
+            try:
+                if self._hint_lbl.winfo_ismapped():
+                    right_w += (self._hint_lbl.winfo_reqwidth() or 0) + 10
+            except (tk.TclError, AttributeError):
+                pass
             avail = sb_w - self._FIXED_W - right_w
             if avail <= 0:
                 return
@@ -745,6 +761,21 @@ class StatusBar(tk.Frame):
         # 2a-03: set_right dipanggil _update_zoom_badge (app) tiap zoom
         # berubah → refresh tinggi + lebar badge di hitungan potongan.
         self._refresh_height()
+        self._truncate_status()
+
+    def set_hint(self, text: str):
+        """v3.11.56 — U5: petunjuk pintasan kontekstual (kiri badge versi).
+
+        Dipanggil app._on_tab_changed per tab aktif (discoverability
+        pintasan tanpa dokumentasi terpisah). Teks kosong menyembunyikan
+        slot (pack_forget); potongan status kiri menghitung lebar hint
+        supaya keduanya tak bertabrakan (lihat _truncate_status)."""
+        self._hint_var.set(str(text or ""))
+        with contextlib.suppress(tk.TclError):
+            if self._hint_var.get():
+                self._hint_lbl.pack(side="right", padx=(0, 10), pady=7)
+            else:
+                self._hint_lbl.pack_forget()
         self._truncate_status()
 
 

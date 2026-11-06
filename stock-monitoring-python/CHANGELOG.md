@@ -3,6 +3,68 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.56 — Pra-Pipeline "set sekali" + deep-link lintas tab + UX (U2–U6)
+
+User: *"kerjakan U2,U3,U4,U5,U6 dan sekarang aku bisa set kolom H atau key
+sebelum pipeline biar gak nunggu loading 2x. Pokok nya semua aku bisa set di
+awal dulu terus proses pipe line biar gak nunggu 2x"* (U1 — entry Follow-Up
+di tab Kronis/Saldo Minus/Audit — TIDAK diminta, di-skip sesuai konfirmasi).
+
+### 1. KARTU PRA-PIPELINE (tab 🚀 Proses) — fitur inti
+- Kartu baru **"Pra-Pipeline — set sekali, render pertama langsung pakai"**
+  berisi SEMUA parameter analisa yang dulu baru bisa diatur SETELAH pipeline:
+  **Tanggal H** (spin + checkbox *"Auto (deteksi dari data)"*), **Ambang ACR
+  to BOM**, **Ambang COM ±**, **Ambang Drastis ±**, **Ambang Manual ×**,
+  **Saldo Sistem** (42.17/Pivot), **Kronis ≥** (threshold Frek Minus anak
+  tab Analisa Kronis).
+- **Mekanisme H preset**: `SharedTanggalH.lock_preset(h)` / `clear_preset()`
+  (persist `settings.json` key `h_preset`) — `DeviasiView.load_data` TIDAK
+  lagi men-snap H ke tanggal SO terakhir data selama preset terkunci →
+  render pertama pipeline LANGSUNG memakai H pilihan user, tanpa
+  "load pipeline → set H → reload" 2×. Checkbox Auto = perilaku lama utuh.
+- Ambang/mode memakai shared state yang SAMA dengan spinbox kartu Filter
+  tab 📦/🧩 (sinkron 2 arah — listener) + persist settings.json
+  (`drastis_ambang_pct`, `manual_ambang_ratio`, `kronis_threshold`).
+
+### 2. U6 — ambang Drastis & Hitung Manual configurable
+- Dulu HARDCODED di compute CEK: Turun Drastis `< 50%`, Naik Drastis
+  `> 150%`, Hitung Manual `|SO−W|/|W| > 1.3`. Kini
+  `SharedDrastisAmbang` (5–95%) + `SharedManualAmbang` (1,05–5,0) — spinbox
+  kartu Filter kedua tab Deviasi + kartu pra-pipeline; ganti = invalidasi
+  `SharedPivotCache` + recompute kedua tab (pola ACR/COM v3.9.21/v3.11.12).
+  Default 50/1.3 = perilaku lama PERSIS. Label **Beda Tanggal TIDAK ikut**
+  (port formula VBA sheet user — kontrak tetap 150%).
+
+### 3. U2 — deep-link navigasi lintas tab
+- `DeviasiView.focus_pair(resto, barang)`: reset filter tabel → pasang
+  filter kolom Resto/Nama Barang programatik
+  (`HeaderFilterGroup.set_selected`) → render → pilih + gulir ke baris
+  pasangan (`render_done` → `_consume_pending_focus`; pesan jujur bila
+  pasangan tak ada di mode satuan GR).
+- Context menu **klik-kanan → "🔎 Buka … di 📦 Deviasi GR"** di tab
+  📤 Rekap Selisih IN + anak tab Saldo Sistem Minus & Analisa Kronis +
+  tabel per-resto 💰 Nominal Deviasi (resto-saja).
+- `app._go_to_deviasi` / `_open_kronis_subtab` (tab 💰 → anak tab Analisa
+  Kronis) + `_go_to_tab` (generalisasi `go_to_proses` v3.9.59).
+- `AnalisaKronisView.set_threshold()` + `initial_threshold` (pra-pipeline);
+  ✕ Reset kembali ke nilai AWAL (bukan konstan 3).
+
+### 4. U3 — Panel Ringkasan hasil pipeline (tab 🚀 Proses)
+- Muncul setelah run sukses: stats data (baris/resto/barang + badge H
+  preset/auto) · KPI audit (OK/CUT-OFF/DEVIASI MURNI/COM minus) · Follow Up
+  aktif · distribusi label CEK (lazy — terisi saat pivot 📦 sudah dihitung,
+  disegarkan tiap kembali ke tab Proses) · tombol deep-link ke 5 tab analisa.
+
+### 5. U4 — navigasi keyboard Ctrl+1..9
+- Lompat LANGSUNG ke tab ke-n (9 tab). Melengkapi Ctrl+Tab traversal;
+  Ctrl+0 tetap reset zoom — tanpa bentrok (Ctrl+F/R/± sudah terpakai).
+
+### 6. U5 — slot hint StatusBar
+- `StatusBar.set_hint(text)` (kiri badge versi, ikut dihitung potongan
+  status kiri): petunjuk pintasan kontekstual per tab aktif
+  (`_on_tab_changed` → `_update_status_hint`) — discoverability tanpa
+  dokumentasi terpisah.
+
 ## v3.11.55 — FIX AttributeError `'StockMonitorApp' object has no attribute 'after'`
 
 User: log `Exception in Tkinter callback` saat klik tombol 📂 "Pilih file deviasi bulan lalu" di tab Nominal Deviasi.

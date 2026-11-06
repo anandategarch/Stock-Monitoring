@@ -106,12 +106,25 @@ from src.ui.deviasi_view import (
     DeviasiView,
     SharedACRThreshold,
     SharedComAmbang,
+    SharedDrastisAmbang,  # v3.11.56 — U6: ambang Turun/Naik Drastis bersama
+    SharedManualAmbang,   # v3.11.56 — U6: ambang Hitung Manual bersama
     SharedPivotCache,
     SharedSaldoSistemMode,  # v3.11.40 — mode saldo sistem 42.17/pivot
     SharedTanggalH,
     load_acr_threshold,
     load_com_ambang,
-    load_saldo_sistem_mode,  # v3.11.40 — persist mode saldo sistem
+    load_drastis_ambang,    # v3.11.56 — U6: persist ambang Drastis
+    load_h_preset,          # v3.11.56 — pra-pipeline: H preset
+    load_kronis_threshold,  # v3.11.56 — pra-pipeline: threshold kronis
+    load_manual_ambang,     # v3.11.56 — U6: persist ambang Hitung Manual
+    load_saldo_sistem_mode,
+    save_acr_threshold,     # v3.11.56 — pra-pipeline: persist ambang
+    save_com_ambang,
+    save_drastis_ambang,    # v3.11.56 — U6
+    save_h_preset,          # v3.11.56 — pra-pipeline
+    save_kronis_threshold,  # v3.11.56 — pra-pipeline
+    save_manual_ambang,     # v3.11.56 — U6
+    save_saldo_sistem_mode,
 )
 from src.ui.export_sheets import ExportCancelled, add_pivot_sheet, tgl_label
 from src.ui.followup import FollowUpStore
@@ -196,7 +209,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.55"  # v3.11.55 — FIX AttributeError 'StockMonitorApp has no after' di jalur manual load deviasi bulan lalu (app.py:6389): run_async(self) → run_async(self.root). Bug lama tersembunyi sejak run_async ditulis, baru muncul setelah v3.11.52 pattern file diperbaiki + v3.11.53 hapus auto-load (jalur manual pertama kali dipakai end-to-end). Mirror precedent app.py:6231 (export Excel).
+APP_VERSION = "3.11.56"  # v3.11.56 — PRA-PIPELINE (user: "semua aku bisa set di awal dulu terus proses pipeline biar gak nunggu 2x") + U2 deep-link lintas tab + U3 Panel Ringkasan + U4 Ctrl+1..9 + U5 hint statusbar + U6 ambang Drastis/Manual configurable. Kartu Pra-Pipeline tab 🚀 Proses: Tanggal H preset terkunci (lock_preset — load_data tak men-snap), ambang ACR/COM/Drastis/Manual + Saldo Sistem + threshold Kronis; render pertama langsung pakai nilai user.
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -2308,8 +2321,20 @@ class StockMonitorApp:
         # tanggal 28 oh berarti H terdekat nya ke 25 ... misal Sekarang
         # tanggal 20 maka h = 14"); setelah data dimuat, load_data tetap
         # men-snap relatif ke tanggal SO terakhir data.
+        # v3.11.56 — PRE-SET PRA-PIPELINE (user: "sekarang aku bisa set
+        # kolom H ... sebelum pipeline biar gak nunggu loading 2x"):
+        # h_preset settings.json (kartu pra-pipeline tab 🚀 Proses) →
+        # nilai awal = preset + DIKUNCI (lock_preset): load_data TIDAK
+        # men-snap H ke tanggal SO terakhir data — render pertama
+        # pipeline LANGSUNG memakai H pilihan user. None (default /
+        # checkbox "Auto") = deteksi hari-standar + snap data (perilaku
+        # lama utuh).
+        self._h_preset = load_h_preset()
         self._shared_h = SharedTanggalH(
-            SharedTanggalH.detect_standard_h())
+            self._h_preset if self._h_preset is not None
+            else SharedTanggalH.detect_standard_h())
+        if self._h_preset is not None:
+            self._shared_h.lock_preset(self._h_preset)
         # v3.9.21: AMBANG ACR to BOM dibagi GR & PCS (user: "threshold
         # > 80% absolute dan aku bisa atur") — spinbox kedua tab sinkron;
         # nilai bertahan lintas sesi (settings.json), default 80.
@@ -2325,6 +2350,17 @@ class StockMonitorApp:
         # sinkron; ganti = invalidasi SharedPivotCache + refresh.
         self._shared_saldo_sistem = SharedSaldoSistemMode(
             load_saldo_sistem_mode())
+        # v3.11.56 — U6: ambang Drastis / Hitung Manual dibagi GR & PCS
+        # (dulu HARDCODED 50 / 1.3 di compute CEK) — spinbox kartu Filter
+        # kedua tab + kartu pra-pipeline tab Proses; persist settings.json
+        # (default 50 / 1.3 = perilaku lama PERSIS).
+        self._shared_drastis = SharedDrastisAmbang(load_drastis_ambang())
+        self._shared_manual = SharedManualAmbang(load_manual_ambang())
+        # v3.11.56 — pra-pipeline: threshold "kronis" (Frek Minus min —
+        # anak tab Analisa Kronis) — nilai awal dari settings (kartu
+        # pra-pipeline + Panel Ringkasan; spinbox view tetap bisa
+        # mengubah saat runtime).
+        self._kronis_threshold = load_kronis_threshold()
         # v3.11.30 — FILE deviasi bulan lalu kini APP-LEVEL (tab 📋
         # Laporan Deviasi dihapus): sumber lalu_provider tab 📦/🧩 +
         # popup Nominal Deviasi. Diisi tombol 📂 'Muat Sekarang' di
@@ -2882,6 +2918,57 @@ class StockMonitorApp:
         self.notebook.select(self.tab_proses)
         self.root.after_idle(self._focus_notebook_content)
 
+    def _go_to_tab(self, tab):
+        """v3.11.56 — U2: pilih tab programatik + fokus konten keyboard
+        (generalisasi _go_to_proses_tab — tombol Panel Ringkasan tab
+        🚀 Proses)."""
+        self.notebook.select(tab)
+        self.root.after_idle(self._focus_notebook_content)
+
+    def _go_to_deviasi(self, resto=None, barang=None):
+        """v3.11.56 — U2: DEEP-LINK ke tab 📦 Deviasi GR; bila resto/barang
+        diberikan (context menu "Buka di Deviasi GR" tab Saldo Minus /
+        Analisa Kronis / Rekap Selisih IN / Nominal Deviasi) →
+        focus_pair memasang filter kolom + memilih baris pasangan.
+        after_idle supaya focus_pair berjalan SETELAH event
+        <<NotebookTabChanged>> (ensure_refreshed) — sisa tabrakan refresh
+        ditangani guard _busy/_pending deviasi_view._refresh."""
+        self.notebook.select(self.tab_deviasi_gr)
+
+        def _after():
+            self._focus_notebook_content()
+            if resto is not None or barang is not None:
+                self.deviasi_gr_view.focus_pair(resto, barang)
+
+        self.root.after_idle(_after)
+
+    def _go_to_deviasi_pcs(self):
+        """v3.11.56 — U2: tombol Panel Ringkasan → tab 🧩 Deviasi PCS."""
+        self._go_to_tab(self.tab_deviasi_pcs)
+
+    def _open_kronis_subtab(self):
+        """v3.11.56 — U2: deep-link tab 💰 Nominal Deviasi → anak tab
+        'Analisa Kronis' (tombol Panel Ringkasan; sub-notebook anak tab
+        men-trigger ensure_refreshed sendiri via <<NotebookTabChanged>>)."""
+        self.notebook.select(self.tab_nominal_resto)
+
+        def _after():
+            self._focus_notebook_content()
+            self.nominal_resto_view.open_kronis_subtab()
+
+        self.root.after_idle(_after)
+
+    def _select_tab_index(self, idx: int):
+        """v3.11.56 — U4: Ctrl+1..9 → pilih tab ke-idx (urutan notebook)
+        + fokus konten (pola _go_to_proses_tab)."""
+        try:
+            tabs = self.notebook.tabs()
+        except tk.TclError:
+            return
+        if 0 <= idx < len(tabs):
+            self.notebook.select(idx)
+            self.root.after_idle(self._focus_notebook_content)
+
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(expand=True, fill="both", padx=10, pady=(2, 6))
@@ -2961,6 +3048,34 @@ class StockMonitorApp:
             self.notebook, full_labels=self._tab_full_labels,
             groups=self._tab_groups)
         self._update_followup_badge()
+        # v3.11.56 — U5: hint pintasan kontekstual per tab (StatusBar
+        # set_hint — kiri badge versi). Dipasang _on_tab_changed + awal
+        # (build) — discoverability pintasan tanpa dokumentasi terpisah.
+        self._tab_hints = {
+            str(self.tab_config):
+                "📂 Muat file deviasi bulan lalu · Ctrl+1..9 pindah tab",
+            str(self.tab_proses):
+                "Set pra-pipeline dulu → 🚀 MULAI PROSES · Ctrl+1..9 pindah tab",
+            str(self.tab_pivot):
+                "Ctrl+F cari · Ctrl+C salin · ⧩ klik judul kolom = filter "
+                "· Ctrl+1..9 pindah tab",
+            str(self.tab_deviasi_gr):
+                "Ctrl+F cari · ⧩ filter kolom · double-click = rincian "
+                "· klik-kanan = opsi · Ctrl+1..9 pindah tab",
+            str(self.tab_deviasi_pcs):
+                "Ctrl+F cari · ⧩ filter kolom · double-click = rincian "
+                "· H diatur di tab 📦 · Ctrl+1..9 pindah tab",
+            str(self.tab_in_selisih):
+                "Ctrl+F cari · double-click = rincian IN · klik-kanan baris "
+                "= Buka di Deviasi GR · Ctrl+1..9 pindah tab",
+            str(self.tab_nominal_resto):
+                "double-click resto = rincian · klik-kanan = opsi · anak tab: "
+                "Tanpa Harga / Saldo Minus / Kronis · Ctrl+1..9 pindah tab",
+            str(self.tab_followup):
+                "✓ = keluarkan entri · export Excel tersedia · Ctrl+1..9 pindah tab",
+            str(self.tab_rincian):
+                "Ctrl+F cari · Ctrl+C salin · Ctrl+1..9 pindah tab",
+        }
 
         self._build_config_tab()
         self._build_proses_tab()
@@ -2987,6 +3102,18 @@ class StockMonitorApp:
         # popup TreeFindPopup non-modal + highlight + Enter/Shift-Enter.
         for _seq in ("<Control-f>", "<Control-F>"):
             self.root.bind(_seq, self._on_find_shortcut)
+        # v3.11.56 — U4: NAVIGASI KEYBOARD Ctrl+1..9 = lompat LANGSUNG ke
+        # tab ke-n (app punya 9 tab — urutan notebook). Melengkapi
+        # Ctrl+Tab traversal (urutan berurutan); binding root (pola
+        # Ctrl+F) → hidup di semua konteks fokus. Ctrl+0 tetap = reset
+        # zoom (v3.9.48) — tidak bentrok.
+        for _i in range(1, 10):
+            self.root.bind(
+                f"<Control-Key-{_i}>",
+                lambda _e, _idx=_i - 1: self._select_tab_index(_idx))
+        # v3.11.56 — U5: hint awal utk tab aktif pertama (⚙️ Config —
+        # event <<NotebookTabChanged>> baru menembak saat user memilih).
+        self._update_status_hint()
 
     def _on_find_shortcut(self, _event=None):
         """v3.9.62 — Ctrl+F: buka/fokus popup Cari di tabel tab aktif
@@ -2994,6 +3121,20 @@ class StockMonitorApp:
         tree = self._primary_scrollable()
         if tree is not None:
             open_tree_find(tree)
+
+    def _update_status_hint(self, sel: str | None = None):
+        """v3.11.56 — U5: pasang hint pintasan statusbar utk tab aktif.
+
+        Dipanggil _on_tab_changed (tiap ganti tab) + akhir _build_notebook
+        (tab awal). Hint dekoratif — kegagalan apa pun di-swallow supaya
+        tak pernah mengganggu navigasi."""
+        with contextlib.suppress(Exception):
+            if sel is None:
+                sel = self.notebook.select()
+            hints = getattr(self, "_tab_hints", None)
+            sb = getattr(self, "statusbar", None)
+            if hints and sb is not None:
+                sb.set_hint(hints.get(str(sel), ""))
 
     def _on_tab_changed(self, _event=None):
         """Tab baru dipilih → pastikan view-nya sudah di-refresh.
@@ -3007,12 +3148,22 @@ class StockMonitorApp:
             sel = self.notebook.select()  # string nama widget Tk
         except Exception:
             return
+        # v3.11.56 — U5: hint pintasan kontekstual per tab aktif (di atas
+        # guard _tab_views supaya tab ⚙️/🚀 yang tanpa view data tetap
+        # dapat hint).
+        self._update_status_hint(sel)
         views = getattr(self, "_tab_views", None)
         if not views:
             return
         view = views.get(sel)
         if view is not None and hasattr(view, "ensure_refreshed"):
             view.ensure_refreshed()
+        # v3.11.56 — U3: kembali ke tab 🚀 Proses → segarkan baris CEK
+        # Panel Ringkasan (pivot 📦 dihitung lazy — angka menyusul
+        # setelah user membuka tab 📦; pola ensure_refreshed).
+        if sel == str(self.tab_proses):
+            with contextlib.suppress(Exception):
+                self._refresh_ringkasan_cek()
 
     def _build_tab_views(self):
         """FIX A-11: peta nama-widget tab → view yang di-lazy-refresh.
@@ -4734,6 +4885,12 @@ class StockMonitorApp:
                                         orient="horizontal")
         self.progress.pack(fill="x", pady=(6, 2))
 
+        # v3.11.56 — KARTU PRA-PIPELINE: set SEMUA parameter analisa
+        # SEBELUM proses (user: "sekarang aku bisa set kolom H atau key
+        # sebelum pipeline biar gak nunggu loading 2x. Pokok nya semua
+        # aku bisa set di awal dulu terus proses pipe line").
+        self._build_prepipeline_card(wrap)
+
         # --- KPI row ---
         kpi_row = KpiRow(wrap)
         self.kpi_status = KpiCard(kpi_row, "Status Pipeline", "SIAP",
@@ -4764,6 +4921,444 @@ class StockMonitorApp:
         log_wrap = tk.Frame(log_card, bg=C_CARD)
         log_wrap.pack(fill="both", expand=True, padx=16, pady=(8, 16))
         self.log_text, _ = make_log_console(log_wrap)
+        # v3.11.56 — U3: PANEL RINGKASAN hasil pipeline — dibangun SETELAH
+        # log_card (referensi disimpan utk repack 'before=') dan awalnya
+        # TERSEMBUNYI; di-pack ulang + diisi _on_pipeline_done.
+        self._log_card_ref = log_card
+        self._build_ringkasan_card(wrap)
+
+    # =====================================================================
+    # v3.11.56 — KARTU PRA-PIPELINE (tab 🚀 Proses)
+    # =====================================================================
+    def _build_prepipeline_card(self, parent):
+        """v3.11.56 — kartu "set sekali sebelum proses": SEMUA parameter
+        analisa (Tanggal H preset + ambang ACR/COM/Drastis/Manual + mode
+        Saldo Sistem + threshold Kronis) yang DULU baru bisa diatur
+        SETELAH pipeline (spinbox kartu Filter tab 📦/🧩 → recompute)
+        kini bisa diatur di AWAL — render pertama 🚀 MULAI PROSES
+        langsung memakai nilai itu (tanpa "load pipeline → set H →
+        reload" 2× — keluhan user).
+
+        Mekanisme: shared state yang SAMA dipakai kedua tab Deviasi
+        (listener — sinkron 2 arah dgn spinbox kartu Filter) + persist
+        settings.json. H di-kunci via SharedTanggalH.lock_preset →
+        load_data TIDAK men-snap H ke data (checkbox "Auto" = perilaku
+        lama: deteksi + snap dinamis)."""
+        card = tk.Frame(parent, bg=C_CARD, highlightbackground="#e2e8f0",
+                        highlightthickness=1)
+        card.pack(fill="x", pady=(12, 0))
+        inner = tk.Frame(card, bg=C_CARD)
+        inner.pack(fill="x", padx=16, pady=(12, 10))
+
+        tk.Label(inner, text="Pra-Pipeline — set sekali, render pertama "
+                             "langsung pakai",
+                 bg=C_CARD, fg=C_HEADER, font=font(12, "bold")).pack(
+            anchor="w")
+        tk.Label(inner,
+                 text="Atur semua parameter analisa sebelum mulai proses — "
+                      "tanpa tunggu render ulang 2×. Nilai sinkron 2 arah "
+                      "dengan kartu Filter tab 📦/🧩 dan bertahan lintas "
+                      "sesi (settings.json). Tanggal H ter-kunci (preset) "
+                      "sampai checkbox Auto dicentang.",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+            anchor="w", pady=(2, 8))
+
+        # --- r1: TANGGAL H (preset) + AMBANG ACR + AMBANG COM ---
+        r1 = tk.Frame(inner, bg=C_CARD)
+        r1.pack(fill="x")
+        tk.Label(r1, text="TANGGAL H", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._pre_h_var = tk.StringVar(value=str(self._shared_h.h))
+        self._pre_h_spin = ttk.Spinbox(
+            r1, textvariable=self._pre_h_var, from_=1, to=31, increment=1,
+            width=4, font=font(9), command=self._on_pre_h_change)
+        self._pre_h_spin.pack(side="left", padx=(6, 6))
+        self._pre_h_spin.bind("<Return>", lambda e: self._on_pre_h_change())
+        # Auto = perilaku lama (deteksi dinamis + snap data — no preset)
+        self._pre_auto_var = tk.BooleanVar(
+            value=not getattr(self._shared_h, "preset_locked", False))
+        ttk.Checkbutton(r1, text="Auto (deteksi dari data)",
+                        variable=self._pre_auto_var,
+                        command=self._on_pre_auto_toggle).pack(
+            side="left", padx=(0, 16))
+        if not getattr(self._shared_h, "preset_locked", False):
+            # mode Auto aktif → spin H non-aktif (nilai deteksi dinamis);
+            # uncheck Auto → aktif kembali (nilai jadi preset terkunci).
+            self._pre_h_spin.configure(state="disabled")
+
+        tk.Label(r1, text="AMBANG ACR to BOM", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._pre_acr_var = tk.StringVar(
+            value=self._fmt_pre_num(self._shared_acr.pct))
+        acr_spin = ttk.Spinbox(
+            r1, textvariable=self._pre_acr_var, from_=1, to=200,
+            increment=1, width=5, font=font(9),
+            command=self._on_pre_acr_change)
+        acr_spin.pack(side="left", padx=(6, 0))
+        acr_spin.bind("<Return>", lambda e: self._on_pre_acr_change())
+        tk.Label(r1, text="% ×BOM", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 16))
+
+        tk.Label(r1, text="AMBANG COM ±", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._pre_com_var = tk.StringVar(
+            value=self._fmt_pre_num(self._shared_com.pct))
+        com_spin = ttk.Spinbox(
+            r1, textvariable=self._pre_com_var, from_=0, to=500,
+            increment=5, width=5, font=font(9),
+            command=self._on_pre_com_change)
+        com_spin.pack(side="left", padx=(6, 0))
+        com_spin.bind("<Return>", lambda e: self._on_pre_com_change())
+        tk.Label(r1, text="% dr median", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 0))
+
+        # --- r2: AMBANG DRASTIS + AMBANG MANUAL + SALDO SISTEM + KRONIS ---
+        r2 = tk.Frame(inner, bg=C_CARD)
+        r2.pack(fill="x", pady=(6, 0))
+        tk.Label(r2, text="AMBANG DRASTIS ±", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._pre_drastis_var = tk.StringVar(
+            value=self._fmt_pre_num(self._shared_drastis.pct))
+        drastis_spin = ttk.Spinbox(
+            r2, textvariable=self._pre_drastis_var, from_=5, to=95,
+            increment=5, width=5, font=font(9),
+            command=self._on_pre_drastis_change)
+        drastis_spin.pack(side="left", padx=(6, 0))
+        drastis_spin.bind("<Return>", lambda e: self._on_pre_drastis_change())
+        tk.Label(r2, text="% drastis", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 16))
+
+        tk.Label(r2, text="AMBANG MANUAL", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._pre_manual_var = tk.StringVar(
+            value=self._fmt_pre_num(self._shared_manual.val))
+        manual_spin = ttk.Spinbox(
+            r2, textvariable=self._pre_manual_var, from_=1.05, to=5.0,
+            increment=0.05, width=5, font=font(9),
+            command=self._on_pre_manual_change)
+        manual_spin.pack(side="left", padx=(6, 0))
+        manual_spin.bind("<Return>", lambda e: self._on_pre_manual_change())
+        tk.Label(r2, text="× rasio", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8)).pack(side="left", padx=(3, 16))
+
+        tk.Label(r2, text="SALDO SISTEM", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._pre_saldo_var = tk.StringVar(
+            value=("42.17" if self._shared_saldo_sistem.mode == "4217"
+                   else "Pivot"))
+        saldo_combo = ttk.Combobox(
+            r2, textvariable=self._pre_saldo_var, state="readonly",
+            width=8, font=font(9))
+        saldo_combo["values"] = ["42.17", "Pivot"]
+        saldo_combo.pack(side="left", padx=(6, 0))
+        saldo_combo.bind("<<ComboboxSelected>>",
+                         lambda e: self._on_pre_saldo_change())
+
+        tk.Label(r2, text="KRONIS ≥", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(16, 0))
+        self._pre_kronis_var = tk.StringVar(value=str(self._kronis_threshold))
+        kronis_spin = ttk.Spinbox(
+            r2, textvariable=self._pre_kronis_var, from_=1, to=31,
+            increment=1, width=4, font=font(9),
+            command=self._on_pre_kronis_change)
+        kronis_spin.pack(side="left", padx=(6, 0))
+        kronis_spin.bind("<Return>", lambda e: self._on_pre_kronis_change())
+        tk.Label(r2, text="hari (Frek Minus — anak tab Analisa Kronis)",
+                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="left", padx=(3, 0))
+
+        # sinkron 2 arah: ubah dari spinbox kartu Filter tab 📦/🧩 → var
+        # kartu pra-pipeline ikut (listener shared state; var.set TIDAK
+        # memicu command spinbox → tanpa loop umpan balik).
+        self._shared_acr.subscribe(
+            lambda v: self._set_pre_var("_pre_acr_var", v))
+        self._shared_com.subscribe(
+            lambda v: self._set_pre_var("_pre_com_var", v))
+        self._shared_drastis.subscribe(
+            lambda v: self._set_pre_var("_pre_drastis_var", v))
+        self._shared_manual.subscribe(
+            lambda v: self._set_pre_var("_pre_manual_var", v))
+        self._shared_saldo_sistem.subscribe(
+            lambda v: self._set_pre_var(
+                "_pre_saldo_var",
+                "42.17" if str(v) == "4217" else "Pivot"))
+        # H bersama berubah (Apply H tab 📦 / ✕ reset) → var spin ikut.
+        self._shared_h.subscribe(self._on_pre_h_sync)
+
+    @staticmethod
+    def _fmt_pre_num(v) -> str:
+        """v3.11.56 — format angka kartu pra-pipeline ('80', '1.3')."""
+        f = float(v)
+        return str(int(f)) if f.is_integer() else f"{f:g}"
+
+    def _set_pre_var(self, attr, value):
+        """v3.11.56 — listener shared state → var kartu pra-pipeline
+        (sinkron 2 arah dgn spinbox kartu Filter tab 📦/🧩)."""
+        var = getattr(self, attr, None)
+        if var is not None:
+            with contextlib.suppress(tk.TclError):
+                var.set(value if isinstance(value, str)
+                        else self._fmt_pre_num(value))
+
+    def _on_pre_h_sync(self, new_h):
+        """v3.11.56 — listener H bersama → var spin kartu pra-pipeline
+        (H di-apply/reset dari tab 📦 Deviasi GR dsb.)."""
+        var = getattr(self, "_pre_h_var", None)
+        if var is not None:
+            with contextlib.suppress(tk.TclError):
+                var.set(str(int(new_h)))
+
+    def _pre_float(self, var, cur, lo, hi, title, msg):
+        """v3.11.56 — parse nilai spinbox pra-pipeline (koma/dot ID) +
+        validasi rentang; return None + reset var bila tak valid."""
+        try:
+            val = float(str(var.get()).strip().replace(",", "."))
+        except ValueError:
+            var.set(self._fmt_pre_num(cur))
+            return None
+        if not (lo <= val <= hi):
+            messagebox.showwarning(title, msg, parent=self.root)
+            var.set(self._fmt_pre_num(cur))
+            return None
+        return val
+
+    def _on_pre_h_change(self):
+        """v3.11.56 — pra-pipeline: set H PRESET (terkunci) — dipanggil
+        spin command / Enter / uncheck Auto. lock_preset → set() state
+        (listener view refresh bila H berubah) + preset_locked menahan
+        snap load_data run pipeline berikutnya."""
+        try:
+            v = int(float(str(self._pre_h_var.get()).strip()))
+        except ValueError:
+            self._pre_h_var.set(str(self._shared_h.h))
+            return
+        v = max(1, min(31, v))
+        self._pre_h_var.set(str(v))
+        self._shared_h.lock_preset(v)
+        save_h_preset(v)
+        self._pre_auto_var.set(False)
+        # state repair: jalur apapun yang sampai sini = preset manual →
+        # spin harus aktif (mis. command spin dari state disabled).
+        with contextlib.suppress(tk.TclError):
+            self._pre_h_spin.configure(state="normal")
+
+    def _on_pre_auto_toggle(self):
+        """v3.11.56 — checkbox Auto: lepas kunci preset → H kembali
+        deteksi dinamis (snap data — perilaku lama). Data sudah dimuat →
+        snap SEKARANG supaya spin menampilkan nilai yang dipakai run
+        berikutnya."""
+        if self._pre_auto_var.get():
+            self._shared_h.clear_preset()
+            save_h_preset(None)
+            self._pre_h_spin.configure(state="disabled")
+            dv = getattr(self, "deviasi_gr_view", None)
+            df = getattr(self, "append1_df", None)
+            new_h = None
+            if (dv is not None and df is not None
+                    and not getattr(df, "empty", True)):
+                new_h = dv._default_h_from_data(df)
+            if new_h is None:
+                # tanpa data (pra-pipeline) → deteksi kalender hari-standar
+                # (parity nilai awal startup SharedTanggalH).
+                new_h = SharedTanggalH.detect_standard_h()
+            if new_h != self._shared_h.h:
+                self._shared_h.set(new_h)
+            self._pre_h_var.set(str(self._shared_h.h))
+        else:
+            # manual: kunci nilai spin saat ini sebagai preset.
+            self._pre_h_spin.configure(state="normal")
+            self._on_pre_h_change()
+
+    def _on_pre_acr_change(self):
+        val = self._pre_float(
+            self._pre_acr_var, self._shared_acr.pct, 1.0, 200.0,
+            "Ambang ACR to BOM",
+            "Ambang harus angka 1–200 (% × Total ACR/BOM).")
+        if val is None:
+            return
+        if self._shared_acr.set(val):
+            save_acr_threshold(val)
+
+    def _on_pre_com_change(self):
+        val = self._pre_float(
+            self._pre_com_var, self._shared_com.pct, 0.0, 500.0,
+            "Ambang COM",
+            "Ambang harus angka 0–500 (persen dari |median| selisih COM).")
+        if val is None:
+            return
+        if self._shared_com.set(val):
+            save_com_ambang(val)
+
+    def _on_pre_drastis_change(self):
+        val = self._pre_float(
+            self._pre_drastis_var, self._shared_drastis.pct, 5.0, 95.0,
+            "Ambang Drastis",
+            "Ambang harus angka 5–95 (persen perubahan SO vs kemarin). "
+            "50 = bawaan (Turun < 50% / Naik > 150%).")
+        if val is None:
+            return
+        if self._shared_drastis.set(val):
+            save_drastis_ambang(val)
+
+    def _on_pre_manual_change(self):
+        val = self._pre_float(
+            self._pre_manual_var, self._shared_manual.val, 1.05, 5.0,
+            "Ambang Hitung Manual",
+            "Ambang harus angka 1,05–5,0 (rasio |SO−W|/|W|). "
+            "1,3 = bawaan (sel Y1 sheet user).")
+        if val is None:
+            return
+        if self._shared_manual.set(val):
+            save_manual_ambang(val)
+
+    def _on_pre_saldo_change(self):
+        raw = str(self._pre_saldo_var.get()).strip()
+        mode = "pivot" if raw == "Pivot" else "4217"
+        if self._shared_saldo_sistem.set(mode):
+            save_saldo_sistem_mode(mode)
+
+    def _on_pre_kronis_change(self):
+        """v3.11.56 — pra-pipeline: threshold kronis (Frek Minus min).
+        Diteruskan ke anak tab 'Analisa Kronis' (spinbox view tetap
+        berlaku saat runtime)."""
+        try:
+            v = int(str(self._pre_kronis_var.get()).strip())
+        except ValueError:
+            self._pre_kronis_var.set(str(self._kronis_threshold))
+            return
+        v = max(1, min(31, v))
+        self._pre_kronis_var.set(str(v))
+        if v == self._kronis_threshold:
+            return
+        self._kronis_threshold = v
+        save_kronis_threshold(v)
+        nr = getattr(self, "nominal_resto_view", None)
+        if nr is not None:
+            with contextlib.suppress(Exception):
+                nr.set_kronis_threshold(v)
+
+    # =====================================================================
+    # v3.11.56 — U3: PANEL RINGKASAN hasil pipeline + tombol deep-link
+    # lintas tab (U2) — tab 🚀 Proses, muncul setelah run pertama.
+    # =====================================================================
+    def _build_ringkasan_card(self, parent):
+        card = tk.Frame(parent, bg=C_CARD, highlightbackground="#e2e8f0",
+                        highlightthickness=1)
+        self._ringkasan_card = card
+        inner = tk.Frame(card, bg=C_CARD)
+        inner.pack(fill="x", padx=16, pady=(12, 12))
+        tk.Label(inner, text="📋 Ringkasan Hasil Pipeline",
+                 bg=C_CARD, fg=C_HEADER, font=font(12, "bold")).pack(
+            anchor="w")
+        self._rk_stats_var = tk.StringVar(value="")
+        tk.Label(inner, textvariable=self._rk_stats_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(9)).pack(anchor="w", pady=(4, 0))
+        self._rk_kpi_var = tk.StringVar(value="")
+        tk.Label(inner, textvariable=self._rk_kpi_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(9)).pack(anchor="w", pady=(2, 0))
+        self._rk_cek_var = tk.StringVar(value="")
+        tk.Label(inner, textvariable=self._rk_cek_var, bg=C_CARD,
+                 fg=C_TEXT_MUTED, font=font(9), justify="left",
+                 wraplength=860).pack(anchor="w", pady=(2, 0))
+        # tombol deep-link (U2): lompat ke tab analisa terkait.
+        nav = tk.Frame(inner, bg=C_CARD)
+        nav.pack(fill="x", pady=(8, 0))
+        GhostButton(nav, text="📦 Deviasi GR",
+                    command=lambda: self._go_to_deviasi()).pack(side="left")
+        GhostButton(nav, text="🧩 Deviasi PCS",
+                    command=self._go_to_deviasi_pcs).pack(
+            side="left", padx=(6, 0))
+        GhostButton(nav, text="📤 Rekap Selisih IN",
+                    command=lambda: self._go_to_tab(
+                        self.tab_in_selisih)).pack(side="left", padx=(6, 0))
+        GhostButton(nav, text="💰 Nominal → Analisa Kronis",
+                    command=self._open_kronis_subtab).pack(
+            side="left", padx=(6, 0))
+        GhostButton(nav, text="☑ Follow Up",
+                    command=lambda: self._go_to_tab(
+                        self.tab_followup)).pack(side="left", padx=(6, 0))
+        # tersembunyi sampai pipeline pertama sukses — di-pack ulang oleh
+        # _update_ringkasan (before=log card → tetap DI ATAS konsol log).
+        card.pack_forget()
+
+    def _update_ringkasan(self):
+        """v3.11.56 — U3: tampilkan + isi Panel Ringkasan dari hasil run
+        terakhir (dipanggil _on_pipeline_done jalur sukses). Gagal
+        menghitung bagian mana pun → bagian itu tampil '—' (panel
+        ringkasan TIDAK boleh menjatuhkan jalur sukses pipeline)."""
+        try:
+            self._ringkasan_card.pack(fill="x", pady=(12, 0),
+                                      before=self._log_card_ref)
+        except (tk.TclError, AttributeError):
+            return
+        df = getattr(self, "append1_df", None)
+        # FIX (test Xvfb): `getattr(df, "columns", []) or []` memicu
+        # ValueError 'truth value of Index is ambiguous' saat df non-None
+        # (Index pandas tak bisa di-truthify oleh `or`) — dulu tertelan
+        # suppress(Exception) pemanggil → panel ringkasan tak pernah
+        # terisi. Kini eksplisit per-kasus.
+        _cols = list(df.columns) if df is not None else []
+        try:
+            n_rows = fmt_int_id(len(df)) if df is not None else "0"
+        except TypeError:
+            n_rows = "0"
+        n_resto = (fmt_int_id(df["NAMA RESTO"].nunique())
+                   if df is not None and "NAMA RESTO" in _cols else "—")
+        n_barang = (fmt_int_id(df["Nama Barang"].nunique())
+                    if df is not None and "Nama Barang" in _cols else "—")
+        _preset = bool(getattr(self._shared_h, "preset_locked", False))
+        _h_badge = (f"{self._shared_h.h} (preset — terkunci)" if _preset
+                    else f"{self._shared_h.h} (auto)")
+        with contextlib.suppress(tk.TclError):
+            self._rk_stats_var.set(
+                f"Data: {n_rows} baris · {n_resto} resto · {n_barang} "
+                f"barang · Tanggal H aktif: {_h_badge}")
+        kpi = ((self.audit_result or {}).get("kpi") or {})
+        try:
+            _fu_n = len(self.followup_store)
+        except TypeError:
+            _fu_n = 0
+        with contextlib.suppress(tk.TclError):
+            self._rk_kpi_var.set(
+                "Audit: OK " + fmt_int_id(kpi.get("ok", 0) or 0)
+                + " · CUT-OFF " + fmt_int_id(kpi.get("cutoff", 0) or 0)
+                + " · DEVIASI MURNI "
+                + fmt_int_id(kpi.get("deviasi_murni", 0) or 0)
+                + " · COM minus " + fmt_int_id(kpi.get("com_minus", 0) or 0)
+                + f" · Follow Up aktif {_fu_n}")
+        self._refresh_ringkasan_cek()
+
+    def _refresh_ringkasan_cek(self):
+        """v3.11.56 — U3: baris distribusi label CEK (GR) dari pivot
+        TER-CACHE deviasi_gr_view — pivot dihitung LAZY (saat tab 📦
+        dibuka); dipanggil ulang tiap user kembali ke tab 🚀 Proses
+        (_on_tab_changed) supaya angka menyusul tanpa compute paksa."""
+        var = getattr(self, "_rk_cek_var", None)
+        if var is None:
+            return
+        pivot = getattr(getattr(self, "deviasi_gr_view", None),
+                        "_cached_pivot", None)
+        if (pivot is None or getattr(pivot, "empty", True)
+                or "CEK" not in getattr(pivot, "columns", [])):
+            with contextlib.suppress(tk.TclError):
+                var.set("Distribusi CEK: angka tersedia setelah tab 📦 "
+                        "Deviasi GR dibuka (pivot dihitung lazy) — "
+                        "kembali ke tab ini untuk memuatnya.")
+            return
+        try:
+            s = pivot["CEK"].astype(str).str.strip()
+            s = s.map(lambda t: t.split(" · ")[0])
+            vc = s[s != ""].value_counts()
+            if vc.empty:
+                var.set("Distribusi CEK (GR): tidak ada baris ber-label.")
+                return
+            top = " · ".join(f"{k} {fmt_int_id(v)}"
+                             for k, v in vc.head(9).items())
+            var.set("Distribusi CEK (GR, " + fmt_int_id(int(vc.sum()))
+                    + " baris ber-label): " + top)
+        except Exception as exc:  # noqa: BLE001 — panel ringkasan saja
+            with contextlib.suppress(tk.TclError):
+                var.set(f"Distribusi CEK: gagal dihitung ({exc})")
 
     def _clear_log(self):
         self.log_text.configure(state="normal")
@@ -5563,6 +6158,11 @@ class StockMonitorApp:
         # FIX 6a-01: enable via sync helper (kriteria ketersediaan data
         # = guard _export_excel) — jalur ERROR/STOP di atas kini sync juga.
         self._sync_export_buttons()
+        # v3.11.56 — U3: PANEL RINGKASAN tab 🚀 Proses — munculkan + isi
+        # dari hasil run ini (stats data + KPI audit + Follow Up;
+        # distribusi CEK menyusul lazy — lihat _refresh_ringkasan_cek).
+        with contextlib.suppress(Exception):
+            self._update_ringkasan()
 
         # =================================================================
         # v3.9.46 — STATUS AKHIR JUJUR (audit 66 temuan #1 — PRIORITAS #1)
@@ -6250,6 +6850,8 @@ class StockMonitorApp:
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
             com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
             saldo_sistem_state=self._shared_saldo_sistem,  # v3.11.40 — mode saldo sistem
+            drastis_state=self._shared_drastis,  # v3.11.56 — U6: ambang Drastis
+            manual_state=self._shared_manual,    # v3.11.56 — U6: ambang Hitung Manual
             # v3.9.53 — Dev. Bulan Lalu: file deviasi aktif (tab ⚖ Komparasi)
             # via lalu_provider (pola nominal_resto v3.9.36 — lambda selalu
             # membaca _file_df AKTIF; file berganti → _on_dev_file_loaded
@@ -6269,6 +6871,8 @@ class StockMonitorApp:
             acr_state=self._shared_acr,   # v3.9.21 — ambang ACR bersama
             com_state=self._shared_com,   # v3.11.12 — ambang COM bersama
             saldo_sistem_state=self._shared_saldo_sistem,  # v3.11.40 — mode saldo sistem
+            drastis_state=self._shared_drastis,  # v3.11.56 — U6: ambang Drastis
+            manual_state=self._shared_manual,    # v3.11.56 — U6: ambang Hitung Manual
             lalu_provider=lambda: self._lalu_file_df)  # v3.11.30 — app-level
         self.deviasi_pcs_view.pack(fill="both", expand=True)
 
@@ -6276,7 +6880,8 @@ class StockMonitorApp:
         """v3.4 — tab 📤 Rekap Selisih IN (drill-down rincian dokumen IN)."""
         self.in_selisih_view = InSelisihView(
             self.tab_in_selisih,
-            go_to_proses=self._go_to_proses_tab)
+            go_to_proses=self._go_to_proses_tab,
+            go_to_deviasi=self._go_to_deviasi)  # v3.11.56 — U2 deep-link
         self.in_selisih_view.pack(fill="both", expand=True)
 
     # =====================================================================
@@ -6413,11 +7018,15 @@ class StockMonitorApp:
         self.nominal_resto_view = NominalRestoView(
             self.tab_nominal_resto,
             go_to_proses=self._go_to_proses_tab,
+            go_to_deviasi=self._go_to_deviasi,   # v3.11.56 — U2 deep-link
             h_state=self._shared_h,
             lalu_provider=lambda: self._lalu_file_df,
             # v3.11.42 — mode saldo sistem dibagi dgn tab 📦/🧩 (utk
             # anak tab 'Saldo Sistem Minus').
             saldo_sistem_state=self._shared_saldo_sistem,
+            # v3.11.56 — pra-pipeline: nilai awal threshold anak tab
+            # 'Analisa Kronis' (kartu pra-pipeline tab 🚀 Proses).
+            kronis_threshold=self._kronis_threshold,
             # rincian_po_df (3243) di-pass saat load_data (bisa None
             # pra-pipeline; __init__ simpan placeholder None).
             rincian_po_df=None)

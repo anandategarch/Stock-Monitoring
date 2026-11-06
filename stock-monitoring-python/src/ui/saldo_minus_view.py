@@ -161,7 +161,8 @@ class SaldoMinusView(tk.Frame):
     def __init__(self, parent,
                  h_state=None,
                  saldo_sistem_state=None,
-                 go_to_proses: Callable | None = None):
+                 go_to_proses: Callable | None = None,
+                 go_to_deviasi: Callable | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self._h_state = h_state
@@ -174,6 +175,9 @@ class SaldoMinusView(tk.Frame):
         self.saldo_sistem_map: dict = {}
         self.rincian_po_df: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
+        # v3.11.56 — U2: deep-link ke tab 📦 Deviasi GR (context menu
+        # klik-kanan pasangan — diteruskan nominal_resto_view dari app).
+        self.go_to_deviasi = go_to_deviasi
         self._busy = False
         self._pending = False
         self._dirty = False
@@ -305,6 +309,9 @@ class SaldoMinusView(tk.Frame):
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)
         self.tree.bind("<Double-1>", self._on_double_click, add="+")
+        # v3.11.56 — U2: context menu deep-link (klik-kanan pasangan →
+        # filter pasangan itu di tab 📦 Deviasi GR).
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")
         # v3.11.47 — Fitur 2: tooltip hover untuk kolom panjang yang
         # sering terpotong (Keterangan narasi gabungan, Nomor PO,
         # Status PO). Provider mengambil nilai dari tree.set(iid, col)
@@ -786,6 +793,44 @@ class SaldoMinusView(tk.Frame):
         self._col_sel = {c[0]: None for c in MINUS_COLUMNS}
         self._filters.clear()
         self._refresh()
+
+    # =========================================================================
+    # v3.11.56 — U2: CONTEXT MENU DEEP-LINK (klik-kanan pasangan → tab 📦)
+    # =========================================================================
+    def _on_context_menu(self, event):
+        """v3.11.56 — U2: klik-kanan baris pasangan → menu "Buka di 📦
+        Deviasi GR" (app._go_to_deviasi → DeviasiView.focus_pair memasang
+        filter Resto+Nama Barang + memilih barisnya). Tanpa callback
+        (standalone/test) → no-op senyap."""
+        if self.go_to_deviasi is None:
+            return
+        tree = event.widget
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+        try:
+            if iid not in tree.selection():
+                tree.selection_set(iid)
+            vals = tree.item(iid, "values")
+        except tk.TclError:
+            return
+        if not vals:
+            return
+        # Resto = kolom 0, Nama Barang = kolom 1 (urutan MINUS_COLUMNS —
+        # mirror _on_double_click)
+        resto = str(vals[0]).strip() if len(vals) > 0 else ""
+        barang = str(vals[1]).strip() if len(vals) > 1 else ""
+        if not resto and not barang:
+            return
+        menu = tk.Menu(tree, tearoff=0)
+        menu.add_command(
+            label=f"🔎 Buka {(barang or resto)[:40]} di 📦 Deviasi GR",
+            command=lambda: self.go_to_deviasi(resto or None,
+                                               barang or None))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     # =========================================================================
     # DOUBLE-CLICK → DRILL-DOWN (ide G)

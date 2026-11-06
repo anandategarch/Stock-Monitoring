@@ -130,7 +130,9 @@ class AnalisaKronisView(tk.Frame):
     def __init__(self, parent,
                  h_state=None,
                  saldo_sistem_state=None,
-                 go_to_proses: Callable | None = None):
+                 go_to_proses: Callable | None = None,
+                 go_to_deviasi: Callable | None = None,
+                 initial_threshold: int | None = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self._h_state = h_state
@@ -143,11 +145,20 @@ class AnalisaKronisView(tk.Frame):
         self.saldo_sistem_map: dict = {}
         self.rincian_po_df: pd.DataFrame | None = None
         self.go_to_proses = go_to_proses
+        # v3.11.56 — U2: deep-link ke tab 📦 Deviasi GR (context menu
+        # klik-kanan pasangan — diteruskan nominal_resto_view dari app).
+        self.go_to_deviasi = go_to_deviasi
         self._busy = False
         self._pending = False
         self._dirty = False
         # threshold "kronis" — frek minus minimum (default 3).
-        self.threshold = _DEFAULT_THRESHOLD
+        # v3.11.56 — pra-pipeline: nilai awal dari kartu pra-pipeline tab
+        # 🚀 Proses (app → nominal_resto_view → sini); None = default 3.
+        # _initial_threshold = tujuan reset ✕ (spin runtime tetap bisa
+        # mengubah threshold — hanya ✕ yang kembali ke nilai awal).
+        self.threshold = (int(initial_threshold)
+                          if initial_threshold else _DEFAULT_THRESHOLD)
+        self._initial_threshold = self.threshold
         # cache hasil compute
         self._kronis_df: pd.DataFrame | None = None
         self._cache_key: tuple | None = None  # (data_id, h, mode, threshold)
@@ -282,6 +293,9 @@ class AnalisaKronisView(tk.Frame):
         enable_col_resize(self.tree)
         enable_multi_select(self.tree)
         self.tree.bind("<Double-1>", self._on_double_click, add="+")
+        # v3.11.56 — U2: context menu deep-link (klik-kanan pasangan →
+        # filter pasangan itu di tab 📦 Deviasi GR).
+        self.tree.bind("<Button-3>", self._on_context_menu, add="+")
         # v3.11.47 — Fitur 2: tooltip hover kolom Rekomendasi (narasi
         # panjang) + kolom panjang lain.
         _LONG_COLS = ("Rekomendasi", "Nama Barang", "Resto")
@@ -689,11 +703,34 @@ class AnalisaKronisView(tk.Frame):
     def _reset_filter(self):
         self._col_sel = {c[0]: None for c in KRONIS_COLUMNS}
         self._filters.clear()
-        # reset threshold juga
-        self.threshold = _DEFAULT_THRESHOLD
+        # reset threshold ke nilai AWAL (v3.11.56 — pra-pipeline: dulu
+        # konstan 3, kartu pra-pipeline yang men-set nilai lain terabaikan
+        # oleh ✕ Reset)
+        self.threshold = self._initial_threshold
         self._thr_var.set(self.threshold)
         self._kronis_df = None  # invalidate cache (threshold berubah)
         self._refresh()
+
+    # v3.11.56 — pra-pipeline: threshold baru dari kartu pra-pipeline
+    # (app._on_pre_kronis_change → nominal_resto_view.set_kronis_threshold
+    # → sini). Clamp 1..H (mirror _on_threshold_changed), invalidasi cache
+    # + refresh/dirty (pola _on_threshold_changed).
+    def set_threshold(self, thr: int):
+        try:
+            v = int(thr)
+        except (TypeError, ValueError):
+            return
+        v = max(1, min(self.tanggal_h, v))
+        if v == self.threshold:
+            return
+        self.threshold = v
+        with contextlib.suppress(tk.TclError):
+            self._thr_var.set(v)
+        self._kronis_df = None  # invalidate cache (threshold berubah)
+        if self.winfo_ismapped():
+            self._refresh()
+        else:
+            self._dirty = True
 
     def _on_threshold_changed(self):
         try:
@@ -713,6 +750,48 @@ class AnalisaKronisView(tk.Frame):
             self._refresh()
         else:
             self._dirty = True
+
+    # =========================================================================
+    # v3.11.56 — U2: CONTEXT MENU DEEP-LINK (klik-kanan pasangan → tab 📦)
+    # =========================================================================
+    def _on_context_menu(self, event):
+        """v3.11.56 — U2: klik-kanan baris pasangan → menu "Buka di 📦
+        Deviasi GR" (app._go_to_deviasi → DeviasiView.focus_pair memasang
+        filter Resto+Nama Barang + memilih barisnya). Tanpa callback
+        (standalone/test) → no-op senyap."""
+        if self.go_to_deviasi is None:
+            return
+        tree = event.widget
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+        try:
+            if iid not in tree.selection():
+                tree.selection_set(iid)
+            vals = tree.item(iid, "values")
+        except tk.TclError:
+            return
+        if not vals:
+            return
+        col_ids = [c[0] for c in KRONIS_COLUMNS]
+        try:
+            r_idx = col_ids.index("Resto")
+            b_idx = col_ids.index("Nama Barang")
+        except ValueError:
+            return
+        resto = str(vals[r_idx]).strip() if len(vals) > r_idx else ""
+        barang = str(vals[b_idx]).strip() if len(vals) > b_idx else ""
+        if not resto and not barang:
+            return
+        menu = tk.Menu(tree, tearoff=0)
+        menu.add_command(
+            label=f"🔎 Buka {(barang or resto)[:40]} di 📦 Deviasi GR",
+            command=lambda: self.go_to_deviasi(resto or None,
+                                               barang or None))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     # =========================================================================
     # DOUBLE-CLICK → DRILL-DOWN (mirror saldo_minus_view)
