@@ -196,7 +196,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.54"  # v3.11.54 — rapikan repo: hapus dead code (_auto_load_lalu, _dev_bulanan_mode, _dev_bulanan_last_cfg, bench_views.py) + README profesional
+APP_VERSION = "3.11.55"  # v3.11.55 — FIX AttributeError 'StockMonitorApp has no after' di jalur manual load deviasi bulan lalu (app.py:6389): run_async(self) → run_async(self.root). Bug lama tersembunyi sejak run_async ditulis, baru muncul setelah v3.11.52 pattern file diperbaiki + v3.11.53 hapus auto-load (jalur manual pertama kali dipakai end-to-end). Mirror precedent app.py:6231 (export Excel).
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -6386,7 +6386,18 @@ class StockMonitorApp:
                 f"\n[DEV BULANAN] ⚠ Gagal memuat file deviasi bulan lalu: "
                 f"{err}\n")
 
-        run_async(self, work, done, on_error=on_error)
+        # v3.11.55 — FIX: pass self.root (tk.Tk), BUKAN self (StockMonitorApp
+        # wrapper — plain class, tidak punya .after()/.master/.winfo_exists()).
+        # Bug lama: _poll_host(widget) di widgets.py naik rantai .master utk
+        # cari Tk root — tapi StockMonitorApp tidak punya .master, sehingga
+        # _poll_host return controller itu sendiri → host.after(70, poll)
+        # → AttributeError 'StockMonitorApp has no after'. Sebelum v3.11.52
+        # jalur ini early-return (file deviasi bulan lalu tak ketemu pattern
+        # "20." hardcode) → bug tidak ter-trigger; v3.11.52 fix pattern +
+        # v3.11.53 hapus auto-load → user pertama kali klik 📂 manual →
+        # exception baru kelihatan. Mirror precedent app.py:6231 (export
+        # Excel): run_async(self.root, ...).
+        run_async(self.root, work, done, on_error=on_error)
 
     def _build_nominal_resto_tab(self):
         """v3.9.34 — tab 🧮 Nominal Deviasi: Σ (Harga 41.09 × Qty

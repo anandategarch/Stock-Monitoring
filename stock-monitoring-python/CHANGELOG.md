@@ -3,6 +3,33 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.55 — FIX AttributeError `'StockMonitorApp' object has no attribute 'after'`
+
+User: log `Exception in Tkinter callback` saat klik tombol 📂 "Pilih file deviasi bulan lalu" di tab Nominal Deviasi.
+
+**Root cause:** `app.py:_load_lalu_paths` (line 6389) memanggil
+`run_async(self, ...)` — `self` adalah instance `StockMonitorApp`, **plain
+class wrapper** (bukan `tk.Misc`), tidak punya `.after()` / `.master` /
+`.winfo_exists()`. Helper `run_async` → `_poll_host(widget)` di widgets.py
+naik rantai `.master` utk cari Tk root; karena `StockMonitorApp` tidak punya
+`.master`, `_poll_host` return controller itu sendiri → `host.after(70, poll)`
+→ `AttributeError`.
+
+**Mengapa baru muncul sekarang:** Bug sudah ada sejak `run_async` ditulis,
+tapi jalur manual ini selalu early-return sebelum v3.11.52 (pattern file
+hardcode `"20."` → file tidak ketemu → no-op senyap). v3.11.52 memperbaiki
+pattern jadi `{12+month}.{BULAN} {TAHUN}` → file bisa ketemu; v3.11.53
+menghapus auto-load (hanya tombol 📂 manual tersisa); v3.11.54 rapikan repo
+→ user pertama kali benar-benar klik 📂 + pilih file valid → `paths` tidak
+kosong → `run_async(self, ...)` pertama kalinya dipanggil end-to-end →
+exception muncul.
+
+**Fix:** 1-token perubahan — `run_async(self, ...)` → `run_async(self.root, ...)`.
+Mirror precedent yang sudah benar di file yang sama (`app.py:6231` export
+Excel). 12 caller `run_async` lainnya (view-view) adalah `tk.Frame` /
+`tk.Toplevel` subclass — `_poll_host` berfungsi normal, tidak terkena
+dampak.
+
 ## v3.11.54 — rapikan repo: hapus dead code + README profesional
 
 User: "Rapikan repo, hapus dead code dan read me rapikan lebih professional dan sesuai kondisi aktual"
