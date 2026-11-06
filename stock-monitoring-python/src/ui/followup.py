@@ -15,7 +15,11 @@ utk file korup, flag last_recovery / last_save_error).
 - auto_resolve_pending(append1_df) — dipanggil app pasca-pipeline:
   baris DEVIASI GR/PCS MENUNGGU yang deviasinya tidak ada lagi di
   data revisi → AUTO-DONE (PIC "AUTO" + auto_reason); deviasi masih
-  ≠ 0 tetap MENUNGGU; entri resolved lain tak disentuh.
+  ≠ 0 tetap MENUNGGU; entri resolved lain tak disentuh. v3.11.59 —
+  kunci pasangan DINORMALISASI kedua sisi (Bug 2) + jalur dev==0
+  kini bersyarat BASIS KONSISTEN: sistem snapshot harus = running
+  saldo revisi di H (Bug 1 — snapshot mode 42.17 tidak lagi
+  auto-done palsu).
 - export_xlsx(path) → sheet "FOLLOW UP": kolom BERHENTI di Keterangan
   (Resto · Nama Barang · SO tanggal H−2..H+2 · Sistem · Deviasi ·
   Loss Surplus to BOM · Keterangan) + number-format "#,##0;[Red](#,##0)"
@@ -34,6 +38,19 @@ from pathlib import Path
 import pandas as pd
 
 from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
+# v3.11.59 — FIX BUG 2 (MED): normalisasi kunci pasangan dari pipeline
+# helpers (barang: upper + rapat spasi ganda; resto: upper + segmen
+# setelah titik TERAKHIR) — dipakai auto_resolve_pending supaya snapshot
+# LAMA (pra-v3.11.10) ber-ejaan asli ('Ayam Broiler' / 'Resto A') tetap
+# cocok dgn data revisi KANONIK ('AYAM BROILER' / 'RESTO A'). Versi
+# _series = varian vektor (factorize) utk frame besar — paritas per-
+# elemen identik dgn versi skalar.
+from ..pipeline.helpers import (
+    norm_nama_barang_key,
+    norm_nama_barang_key_series,
+    norm_nama_resto_key,
+    norm_nama_resto_key_series,
+)
 
 _LOG = logging.getLogger("stock_monitoring.followup")
 
@@ -86,6 +103,57 @@ _PCT_NUMFMT = "0.00%;[Red](0.00%)"
 
 # Pergeseran kolom tanggal relatif H (T-2 → h−2 … T+2 → h+2)
 DATE_COL_OFFSETS = dict(zip(DATE_COL_IDS, (-2, -1, 0, 1, 2)))
+
+
+def _closing_so_key(df) -> int | None:
+    """v3.11.59 — FIX BUG 4 (LOW): kunci PENUTUPAN bulan lalu = Tanggal
+    NEGATIF TERKECIL yang punya baris JENIS "1.SO" (mirror _closing_key
+    deviasi_view v3.11.1: rekap lalu bernomor −25..−31 → penutupan =
+    −30/−31, hari TERAKHIR bulan lalu yang tercatat SO). Dipakai label
+    heading kolom tanggal follow-up (view + export). None = data
+    kosong / tanpa baris bulan-lalu → pemanggil pakai fallback "lalu"."""
+    try:
+        if df is None or getattr(df, "empty", True):
+            return None
+        t = pd.to_numeric(df["Tanggal"], errors="coerce")
+        neg = t[(df["JENIS"].astype(str).str.strip() == "1.SO") & (t < 0)]
+        neg = neg.dropna()
+        return int(neg.min()) if len(neg) else None
+    except Exception:
+        return None  # kolom hilang / tipe aneh → label fallback (jujur)
+
+
+def _date_heading_label(h_ref: int, offset: int, closing_key) -> str:
+    """v3.11.59 — FIX BUG 4 (LOW): label heading SATU kolom tanggal
+    (offset −2..+2 relatif H). Dulu `h_ref + offset` mentah → di H=1
+    muncul label "−1"/"0" yang MENYESATKAN: kolom "0" berisi saldo
+    PENUTUPAN bulan lalu (tanggal 25-31 lalu), bukan "tanggal 0".
+    Pemetaan kini mirror _day_key deviasi_view + konvensi header
+    "25•" pivot_view (• = bulan lalu):
+    - raw ≥ 1        → angka tanggal bulan berjalan ("23".."27");
+    - raw = 0        → tanggal PENUTUPAN (kunci negatif terkecil
+                       ber-baris 1.SO, mis. −31 → "31•");
+    - raw ≤ −1       → satu hari SEBELUM penutupan dst (−31 → "30•");
+    - tanpa data SO bulan-lalu → "lalu" (jujur generik, BUKAN "0"/
+      "−1" yang menyesatkan).
+    Sort/filter kolom tak tersentuh — label heading murni display
+    (parser sort membaca NILAI sel, bukan heading)."""
+    raw = int(h_ref) + int(offset)
+    if raw >= 1:
+        return str(raw)
+    if closing_key is None:
+        return "lalu"
+    day = abs(int(closing_key)) + raw   # 0 → penutupan; −1 → sebelumnya
+    return f"{day}•" if day >= 1 else "lalu"
+
+
+def _date_heading_labels(h_ref, closing_key) -> dict:
+    """v3.11.59 — FIX BUG 4: label heading SEMUA kolom tanggal →
+    {"T-2": …, "T-1": …, "T": …, "T+1": …, "T+2": …} (dipakai view
+    _refresh_date_headings + export_xlsx supaya dua tempat konsisten)."""
+    return {cid: _date_heading_label(h_ref, off, closing_key)
+            for cid, off in DATE_COL_OFFSETS.items()}
+
 
 CHECK_ON, CHECK_OFF = "☑", "☐"
 
@@ -436,10 +504,33 @@ class FollowUpStore:
         2. pasangan ada tapi TANPA baris 3.DEVIASI → SELESAI "tanpa
            baris deviasi";
         3. H snapshot ADA di data: Deviasi(H) == 0 → SELESAI "deviasi
-           H kini 0"; ≠ 0 → TETAP MENUNGGU (anomali masih ada);
+           H kini 0" (v3.11.59 — HANYA bila BASIS KONSISTEN, lihat
+           catatan Bug 1 di bawah); ≠ 0 → TETAP MENUNGGU (anomali
+           masih ada);
         4. H tak tercakup data (rentang bergeser): SELESAI hanya bila
            SEMUA deviasi pasangan itu 0; ada yang ≠ 0 → TETAP MENUNGGU
            (konservatif — tak bisa diverifikasi, jangan salah tandai).
+
+        v3.11.59 — FIX BUG 2 (MED): kunci pasangan kini DINORMALISASI
+        kedua sisi (norm_nama_barang_key / norm_nama_resto_key dari
+        pipeline.helpers — dulu RAW strip saja). Snapshot LAMA
+        (pra-v3.11.10) ber-ejaan asli ("Ayam Broiler") vs data revisi
+        KANONIK ("AYAM BROILER") dulu MISS → auto-done PALSU "pasangan
+        tidak ada lagi di data revisi".
+
+        v3.11.59 — FIX BUG 1 (MED-HIGH): dev_map = Σ baris 3.DEVIASI
+        append1 = SO − RUNNING-STOCK, sedangkan snapshot Follow Up
+        diambil dari tabel Deviasi yang di mode default "4217" memakai
+        deviasi = SO − SALDO SISTEM 42.17 (override deviasi_view).
+        dev==0 versi running-stock TIDAK otomatis berarti anomali
+        snapshot selesai (terbukti: snapshot 42.17=100 · SO=50 ·
+        running=50 → tiap re-run pipeline auto-done PALSU "deviasi H
+        kini 0" padahal kolom Deviasi follow-up masih −50). Jalur 3
+        kini bersyarat BASIS KONSISTEN: sistem snapshot harus = running
+        saldo revisi di H (Σ "2.SALDO AKHIR" Tanggal h pasangan itu,
+        epsilon 1e-6) — beda → kemungkinan besar snapshot berbasis
+        42.17 → TETAP MENUNGGU (resolusi manual); sama → jalur lama
+        sah (dev 0 = benar-benar selesai di basis yang sama).
 
         Entri resolved ber-PIC "AUTO" + Cek FU "AUTO-DONE (…)" + field
         auto_reason/Selisih/Selisih Deviasi (kolom kerja FU tetap
@@ -465,28 +556,55 @@ class FollowUpStore:
             return []
 
         def _pair(r, b) -> tuple:
-            return (str(r or "").strip(), str(b or "").strip())
+            # v3.11.59 — FIX BUG 2 (MED): kunci pasangan DINORMALISASI
+            # (bukan RAW strip) — dipakai KEDUA sisi (pembuatan map di
+            # bawah + lookup snapshot) supaya konsisten: snapshot lama
+            # 'Ayam Broiler'/'Resto A' tetap cocok dgn data revisi
+            # kanonik 'AYAM BROILER'/'RESTO A' (dulu miss → auto-done
+            # PALSU 'pasangan hilang dari data revisi').
+            return (norm_nama_resto_key(r), norm_nama_barang_key(b))
 
-        df = append1_df
-        pairs_all = {
-            _pair(r, b) for r, b in zip(
-                df["NAMA RESTO"].astype(str).str.strip(),
-                df["Nama Barang"].astype(str).str.strip())}
-        dev = df[df["JENIS"].astype(str).str.strip() == "3.DEVIASI"]
-        dev_map: dict = {}
-        if not dev.empty:
-            # vektor: agregat Σ NILAI per (resto, barang, tanggal) —
-            # sum menutup duplikat baris (defensif; append1 normalnya
-            # unik per kunci).
-            tnum = pd.to_numeric(dev["Tanggal"], errors="coerce")
-            agg = (pd.to_numeric(dev["NILAI"], errors="coerce")
-                   .fillna(0).groupby(
-                       [dev["NAMA RESTO"].astype(str).str.strip(),
-                        dev["Nama Barang"].astype(str).str.strip(),
-                        tnum]).sum())
+        def _agg_map(jenis: str) -> dict:
+            """Σ NILAI per (resto, barang, tanggal) utk satu JENIS —
+            kunci pasangan ternormalisasi (FIX BUG 2). Vektor: sum
+            menutup duplikat baris (defensif; append1 normalnya unik
+            per kunci). v3.11.59 — dipakai utk '3.DEVIASI' (dev_map,
+            perilaku lama) + '2.SALDO AKHIR' & '1.SO' (syarat BASIS
+            KONSISTEN Bug 1 — running saldo revisi & SO revisi di H)."""
+            sub = df[df["JENIS"].astype(str).str.strip() == jenis]
+            out: dict = {}
+            if sub.empty:
+                return out
+            tnum = pd.to_numeric(sub["Tanggal"], errors="coerce")
+            agg = (pd.to_numeric(sub["NILAI"], errors="coerce")
+                   .fillna(0).groupby([
+                       norm_nama_resto_key_series(
+                           sub["NAMA RESTO"].astype(str)),
+                       norm_nama_barang_key_series(
+                           sub["Nama Barang"].astype(str)),
+                       tnum]).sum())
             for (r, b, t), v in agg.items():
                 if pd.notna(t):
-                    dev_map.setdefault((r, b), {})[float(t)] = float(v)
+                    out.setdefault((r, b), {})[float(t)] = float(v)
+            return out
+
+        df = append1_df
+        # v3.11.59 — FIX BUG 2: pairs_all juga ber-kunci ternormalisasi
+        # (varian vektor — frame penuh bisa besar).
+        pairs_all = set(zip(
+            norm_nama_resto_key_series(df["NAMA RESTO"].astype(str)),
+            norm_nama_barang_key_series(df["Nama Barang"].astype(str))))
+        dev_map: dict = _agg_map("3.DEVIASI")
+        # v3.11.59 — FIX BUG 1: peta pendukung syarat BASIS KONSISTEN —
+        # MALAS (dihitung SEKALI saat cabang dev==0 pertama kali dicapai;
+        # kasus umum 'anomali masih ada / tak ada pending' tak membayar
+        # 2 agregat ekstra atas frame penuh).
+        _basis_maps: dict = {}
+
+        def _lazy_map(jenis: str) -> dict:
+            if jenis not in _basis_maps:
+                _basis_maps[jenis] = _agg_map(jenis)
+            return _basis_maps[jenis]
 
         done: list = []
         now = datetime.now().isoformat(timespec="seconds")
@@ -509,7 +627,40 @@ class FollowUpStore:
                         dev_now = tmap[h]
                         if dev_now != 0:
                             continue       # anomali MASIH ada di H → menunggu
-                        reason = f"deviasi H={h} kini 0 di data revisi"
+                        # v3.11.59 — FIX BUG 1 (MED-HIGH): SYARAT BASIS
+                        # KONSISTEN sebelum auto-done via jalur dev==0.
+                        # dev_map berbasis RUNNING-STOCK (3.DEVIASI =
+                        # SO − saldo running), sedangkan snapshot bisa
+                        # berbasis SALDO SISTEM 42.17 (mode default
+                        # deviasi_view "4217"). Cek: sistem snapshot ==
+                        # running saldo revisi di H (Σ "2.SALDO AKHIR"
+                        # Tanggal h pasangan ini, epsilon 1e-6)?
+                        #   beda / saldo absen → kemungkinan besar
+                        #   snapshot 42.17 → JANGAN auto-done di sini
+                        #   (tetap MENUNGGU, resolusi manual — jujur
+                        #   konservatif, dua arah: tidak salah SELESAI,
+                        #   tapi juga tidak menunggu palsu selamanya
+                        #   karena jalur 1/2/4 tetap hidup);
+                        #   sama → dev 0 memang benar-benar selesai di
+                        #   basis yang sama (jalur lama sah).
+                        saldo_h = (_lazy_map("2.SALDO AKHIR").get(key)
+                                   or {}).get(float(h))
+                        so_now = (_lazy_map("1.SO").get(key)
+                                  or {}).get(float(h))
+                        try:
+                            snap_sistem = float(snap.get("sistem") or 0)
+                        except (TypeError, ValueError):
+                            snap_sistem = None
+                        if (saldo_h is None or snap_sistem is None
+                                or abs(snap_sistem - saldo_h) > 1e-6):
+                            continue   # basis beda/tak terverifikasi → menunggu
+                        # so_now (Σ "1.SO" @h) dicantumkan di alasan utk
+                        # log jujur app (SO revisi = saldo revisi = 0 dev).
+                        _so_txt = (f", SO H kini {so_now:g}"
+                                   if so_now is not None else "")
+                        reason = (f"deviasi H={h} kini 0 di data revisi "
+                                  f"(basis konsisten: sistem snapshot = "
+                                  f"saldo revisi di H{_so_txt})")
                     else:
                         if any(v != 0 for v in tmap.values()):
                             continue       # tak terverifikasi → menunggu
@@ -594,7 +745,7 @@ class FollowUpStore:
                 _notify_recovery(self, pr, f"korup: {e}")
 
     # -- export ------------------------------------------------------------------
-    def export_xlsx(self, path: str) -> str:
+    def export_xlsx(self, path: str, closing_key: int | None = None) -> str:
         """Tulis sheet 'FOLLOW UP' — FORMAT FILE SAMPLE (v3.9.6 → v3.11.4).
 
         Urutan kolom v3.11.4 (user: "Setelah kolom keterangan kapus aja")
@@ -605,6 +756,14 @@ class FollowUpStore:
         [SO tgl H-2..H+2 — heading angka tanggal, mis. H=25 →
         23/24/25/26/27] · Sistem · Deviasi · Loss Surplus to BOM ·
         Keterangan.
+
+        v3.11.59 — FIX BUG 4 (LOW): heading kolom tanggal memakai
+        _date_heading_labels — offset yang jatuh ≤ 0 (H=1/2) ber-label
+        bulan-lalu ("31•" dst; fallback "lalu"), BUKAN "0"/"−1" mentah
+        yang menyesatkan (kolom "0" = saldo PENUTUPAN bulan lalu —
+        mirror _day_key deviasi_view + header "25•" pivot_view).
+        closing_key (kunci penutupan bulan lalu) diteruskan view dari
+        append1 via _closing_so_key; None → fallback "lalu".
 
         Format angka v3.11.4 (user: "kolom 23 24 25 26 27 Sistem Deviasi
         pakai separator , dan tanpa desimal. kolom Loss Surplus to BOM
@@ -631,9 +790,16 @@ class FollowUpStore:
                 break
         if h_ref is None:
             header = list(EXPORT_COLS)
+            _date_hdrs = set(DATE_COL_IDS)
         else:
-            header = [f"{h_ref + DATE_COL_OFFSETS[c]}" if c in DATE_COL_IDS
-                      else c for c in EXPORT_COLS]
+            # v3.11.59 — FIX BUG 4 (LOW): label via _date_heading_labels
+            # (pemetaan bulan-lalu "31•"/"lalu" utk offset ≤ 0 — dulu
+            # h_ref + offset mentah → H=1 tampil "−1"/"0" menyesatkan).
+            # Kolom/urutan export TIDAK berubah — hanya TEKS heading.
+            _labels = _date_heading_labels(h_ref, closing_key)
+            header = [_labels[c] if c in DATE_COL_IDS else c
+                      for c in EXPORT_COLS]
+            _date_hdrs = set(_labels.values())
 
         wb = Workbook()
         ws = wb.active
@@ -663,7 +829,15 @@ class FollowUpStore:
                 snap.get("so", ""), snap.get("so_p1", ""),
                 snap.get("so_p2", ""),
                 snap.get("sistem", ""), snap.get("deviasi", ""),
-                snap.get("loss_bom", ""), snap.get("cek", ""),
+                snap.get("loss_bom", ""),
+                # v3.11.59 — FIX BUG 3 (LOW): kolom Keterangan memakai
+                # _cek_display_text — fungsi yang SAMA dgn UI tabel
+                # (hidup di modul ini) supaya segmen ANALISA ('Peningkatan
+                # Tertinggi +p%' dst) ber-prefiks "Analisa: " juga di
+                # Excel (regresi FIX 6d1-04: UI sudah ber-prefiks, export
+                # masih RAW → baris analisa tampak seperti label anomali;
+                # label kanonik/kosong tetap wajar "-"/apa adanya).
+                _cek_display_text(snap.get("cek", "")),
             ]
             for j, v in enumerate(vals):
                 cell = ws.cell(row=r, column=j + 1, value=v)
@@ -684,8 +858,11 @@ class FollowUpStore:
                   "Deviasi": 11, "Loss Surplus to BOM": 12,
                   "Keterangan": 18}
         for j, c in enumerate(header, start=1):
+            # v3.11.59 — FIX BUG 4: heading tanggal bisa "31•"/"lalu"
+            # (bukan digit murni) — lebar kolom tanggal tetap 8 seperti
+            # heading angka (c.isdigit() saja akan melebar tak perlu).
             ws.column_dimensions[get_column_letter(j)].width = \
-                widths.get(c, 8 if c.isdigit() else 12)
+                widths.get(c, 8 if (c.isdigit() or c in _date_hdrs) else 12)
         # v3.9.59 — FIX 2f-04 (audit 2-f): tulis ATOMIK (tmp + os.replace —
         # pola 6a-02 app._export_excel). wb.save() dulu menulis LANGSUNG
         # ke path tujuan → exception di tengah (disk penuh / styling)

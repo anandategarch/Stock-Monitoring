@@ -50,19 +50,25 @@ def norm_sat(v) -> str:
 # FORMAT ANGKA INDONESIA (dipakai kolom Nominal/Harga semua tabel)
 # ---------------------------------------------------------------------------
 def fmt_harga_id(v) -> str:
-    """Harga: pecahan → 2 desimal (18,25); bulat → 1.234 (fmt_int_id)."""
+    """Harga: pecahan → 2 desimal (18,25); bulat → 1.234 (fmt_int_id).
+    v3.11.59 — FIX (bug 3, LOW): nilai NEGATIF tak lagi kehilangan tanda
+    (dulu av=abs(v) tanpa mengembalikan tanda → harga −1.825 tampil
+    '1.825' positif menyesatkan). Konsisten gaya _fmt_num repo
+    (saldo_minus_view): negatif dalam KURUNG — '(1.825,50)'."""
     try:
         v = float(v)
     except (TypeError, ValueError):
         return str(v)
+    neg = v < 0
     av = abs(v)
     if av == int(av):
         # fmt_int_id lokal (hindari import widgets — modul UI-agnostic;
         # hasil identik: titik ribuan)
         s = f"{av:,.0f}".replace(",", ".")
-        return s
-    return f"{av:,.2f}".replace(",", "X").replace(".", ",") \
-        .replace("X", ".")
+    else:
+        s = f"{av:,.2f}".replace(",", "X").replace(".", ",") \
+            .replace("X", ".")
+    return f"({s})" if neg else s
 
 
 def fmt_nominal_cell(val) -> str:
@@ -164,6 +170,14 @@ def fmt_pct_cell(val) -> str:
 # ---------------------------------------------------------------------------
 # LOOKUP HARGA PER PASANGAN (barang, satuan-rekap)
 # ---------------------------------------------------------------------------
+# v3.11.59 — FIX (bug 4, LOW): penanda display kolom 'Harga Tampil' utk
+# barang yang ADA di peta 41.09 tapi harga-nya None (Qty=0 → NaN).
+# Dibedakan dari '-' (barang tak ada di 41.09) supaya keterangan anak
+# tab 'Tanpa Harga' jujur — lookup_harga_pair → label "" → konstanta
+# ini; dipetakan ke teks keterangan oleh NominalRestoView._noharga_ket.
+HARGA_41_KOSONG_LABEL = "(harga 41.09 kosong)"
+
+
 def norm_barang_harga_key(v) -> str:
     """v3.9.55 — normalisasi kunci nama barang utk lookup harga 41.09
     (strip + rapat spasi + UPPER). HARUS identik dgn
@@ -188,6 +202,17 @@ def lookup_harga_pair(harga_map: dict | None,
     nominal '-' senyap (akar keluhan "ada deviasi yang tidak ada nominal
     nya") — pasangan tetap fallback label '-'/'*' bila benar2 tak ada
     harga di 41.09 / satuan tak terkonversi.
+    v3.11.59 — FIX (bug 4, LOW): dua kasus harga None kini DIBEDAKAN
+    lewat label — barang TIDAK ADA di peta → (None, "-", False);
+    barang ADA tapi harga None (Qty=0 → NaN — janji docstring
+    fn_4109.build_harga_map "tetap masuk peta dgn harga None supaya
+    view bisa menampilkan 'tanpa harga' secara eksplisit (bukan
+    keliru dianggap tak ada di file)") → (None, "", False). Dulu KEDUA
+    kasus identik → keterangan anak tab 'Tanpa Harga' selalu "barang
+    tak ada di 41.09" + cabang "harga 41.09 kosong" = dead code.
+    Bentuk & panjang tuple 3-elemen DIPERTAHANKAN (pemanggil luar
+    deviasi_view memakai unpack posisional); "" diterjemahkan
+    hitung_nominal_pairs ke konstanta HARGA_41_KOSONG_LABEL.
     """
     b = norm_barang_harga_key(barang)
     entry = (harga_map or {}).get(b)
@@ -198,8 +223,10 @@ def lookup_harga_pair(harga_map: dict | None,
     if entry is None:
         return None, "-", False
     h41, sat41 = entry
+    # v3.11.59 — FIX (bug 4): barang ADA di 41.09 tapi harga None →
+    # sentinel label "" (bukan '-') — lihat docstring di atas.
     if h41 is None:
-        return None, "-", False
+        return None, "", False
     sat_rekap = norm_sat(satuan_rekap)
     if not sat41 or not sat_rekap or sat41 == sat_rekap \
             or sat_rekap == "-":
@@ -251,6 +278,7 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
                          harga_map: dict | None,
                          konversi_map: dict | None,
                          saldo_sistem_map: dict | None = None,
+                         saldo_sistem_mode: str = "4217",
                          deviasi_only: bool = False) -> pd.DataFrame:
     """Frame per pasangan tanggal H:
     [Nama Barang, Resto, Satuan, Harga, Harga Tampil, Qty Deviasi,
@@ -267,6 +295,12 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     Pasangan di luar peta → 3.DEVIASI apa adanya (fallback running-stock
     — perilaku lama). Kunci dinormalisasi (upper + rapat spasi + segmen
     resto setelah titik — mirror deviasi_view v3.11.1).
+    v3.11.59 — FIX (bug 1, HIGH): override 42.17 di atas kini HANYA
+    bila saldo_sistem_mode == "4217" (DEFAULT — pemanggil lama aman).
+    Mode "pivot" (SharedSaldoSistemMode tab 📦/🧩) + peta terisi →
+    TANPA override: Qty Deviasi = 3.DEVIASI apa adanya (dulu peta
+    SELALU menimpa tanpa cek mode → user pilih mode Pivot di tab 📦 →
+    dua tab menampilkan deviasi BERBEDA utk pasangan yang sama).
     Dtype float64 EKSPLISIT utk Harga/Nominal (semua-None → kolom
     object → .abs() TypeError di worker — bug v3.9.32, dijaga di sini).
     DataFrame kosong bila tak ada baris DEVIASI tanggal H.
@@ -384,7 +418,12 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
     # SO_H per pasangan = Σ baris 1.SO Tanggal H (0 bila tak direkam —
     # pasangan saldo-only: Deviasi = 0 − saldo 42.17, mirror deviasi_
     # view cabang override). Pasangan di luar peta tak tersentuh.
-    if saldo_sistem_map:
+    # v3.11.59 — FIX (bug 1, HIGH): syarat MODE — override hanya bila
+    # saldo_sistem_mode == "4217" (mirror deviasi_view v3.11.40
+    # `_ss_map and self.saldo_sistem_mode == "4217"`). Mode "pivot" +
+    # peta terisi → JANGAN override (3.DEVIASI apa adanya — konsisten
+    # kolom Deviasi tab 📦/🧩 mode Pivot; dulu mode diabaikan).
+    if saldo_sistem_map and saldo_sistem_mode == "4217":
         try:
             _so_h = data[(_jenis == "1.SO") & (tnum == h)]
             _so_map: dict = {}
@@ -441,7 +480,15 @@ def hitung_nominal_pairs(data: pd.DataFrame | None, h: int,
             harga_disp.append(f"{fmt_harga_id(harga)} {label}")
         else:
             nom = None
-            harga_disp.append(label or "-")
+            # v3.11.59 — FIX (bug 4): label "" (barang ADA di peta 41.09
+            # tapi harga None — Qty=0, janji fn_4109.build_harga_map)
+            # diterjemahkan ke penanda display khusus, BUKAN fallback
+            # '-' (dulu dua kasus tanpa harga identik → keterangan anak
+            # tab 'Tanpa Harga' selalu "barang tak ada di 41.09" dan
+            # cabang "harga 41.09 kosong" = dead code — _noharga_ket
+            # membaca kolom ini).
+            harga_disp.append(
+                HARGA_41_KOSONG_LABEL if label == "" else (label or "-"))
         harga_vals.append(harga)
         nominal_vals.append(nom)
 
@@ -510,6 +557,7 @@ def pasangan_tanpa_harga_global(
         data: pd.DataFrame | None, h: int, harga_map: dict | None,
         konversi_map: dict | None,
         saldo_sistem_map: dict | None = None,
+        saldo_sistem_mode: str = "4217",
         deviasi_only: bool = False) -> pd.DataFrame:
     """v3.9.63 — frame barang TANPA HARGA GLOBAL (ANAK TAB 'Tanpa Harga'
     tab 🧮 Nominal Deviasi; user: "barang yang tidak ada harga nya
@@ -523,9 +571,13 @@ def pasangan_tanpa_harga_global(
     Nama Barang, Satuan, Qty Deviasi, Harga Tampil, Nominal] urut
     |Qty Deviasi| menurun (warisan urutan hitung_nominal_pairs).
     v3.11.9 — deviasi_only diteruskan (mirror tab utama: pasangan
-    non-deviasi dikecualikan — jumlahnya di attrs hasil)."""
+    non-deviasi dikecualikan — jumlahnya di attrs hasil).
+    v3.11.59 — FIX (bug 1): saldo_sistem_mode diteruskan ke
+    hitung_nominal_pairs (mode "pivot" → TANPA override 42.17 — anak
+    tab harus konsisten dgn tabel utama & tab 📦/🧩)."""
     pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map,
                                   saldo_sistem_map,
+                                  saldo_sistem_mode=saldo_sistem_mode,
                                   deviasi_only=deviasi_only)
     _nd = pairs.attrs.get("deviasi_only_dropped") if pairs is not None \
         else None
@@ -552,6 +604,7 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
                                harga_map: dict | None,
                                konversi_map: dict | None,
                                saldo_sistem_map: dict | None = None,
+                               saldo_sistem_mode: str = "4217",
                                deviasi_only: bool = False) -> tuple:
     """→ (frame_per_resto, frame_pasangan).
 
@@ -567,9 +620,15 @@ def agregasi_nominal_per_resto(data: pd.DataFrame | None, h: int,
     kategori benar-benar deviasi"); jumlah pasangan non-deviasi
     dikecualikan terekspos via frame_pasangan.attrs
     ["deviasi_only_dropped"] (dipakai status view).
+    v3.11.59 — FIX (bug 1, HIGH): saldo_sistem_mode diteruskan ke
+    hitung_nominal_pairs — mode "pivot" (SharedSaldoSistemMode tab
+    📦/🧩) + peta 42.17 terisi → TANPA override (Qty = 3.DEVIASI apa
+    adanya; dulu peta selalu menimpa tanpa cek mode → deviasi tab 🧮
+    BEDA dgn tab 📦/🧩 utk pasangan yang sama).
     """
     pairs = hitung_nominal_pairs(data, h, harga_map, konversi_map,
                                   saldo_sistem_map,
+                                  saldo_sistem_mode=saldo_sistem_mode,
                                   deviasi_only=deviasi_only)
     _nd = pairs.attrs.get("deviasi_only_dropped") \
         if pairs is not None else None
@@ -1018,15 +1077,25 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     - ``Tgl Mulai Minus`` — tanggal pertama saldo < 0 di 1..H (sorted asc)
     - ``Qty Mulai Minus`` — saldo pd tgl mulai minus (user: "mulai minus
       aja" utk Kuantiti)
-    - ``Min Qty`` — saldo terendah 1..H (ide B)
-    - ``Max Qty`` — saldo tertinggi 1..H (ide B; bisa plus)
-    - ``Tipe`` — ``Konsisten`` (semua tgl dgn saldo ≠ 0 itu minus) /
-      ``Fluktuatif`` (sebagian tgl plus/0) — ide C
+    - ``Min Qty`` — saldo terendah di antara tanggal TEREKAM 1..H (ide B)
+    - ``Max Qty`` — saldo tertinggi di antara tanggal TEREKAM 1..H (ide
+      B; bisa plus)
+    - ``Tipe`` — ``Konsisten`` (semua tgl TEREKAM dgn saldo ≠ 0 itu
+      minus) / ``Fluktuatif`` (sebagian tgl plus/0) — ide C
     - ``Durasi`` — H − tgl_mulai + 1 (ide A; hari sejak mulai minus)
 
     Pasangan dgn saldo >= 0 sepanjang 1..H dikecualikan. DataFrame kosong
     bila tak ada pasangan minus / data None/kosong / kolom kurang.
     Urutan: |Qty Mulai Minus| MENURUN (paling minus di atas).
+
+    v3.11.59 — FIX (bug 2, MEDIUM): Min/Max/Tipe/qty-mulai-minus kini
+    hanya dihitung atas tanggal yang BENAR-BENAR TEREKAM utk pasangan
+    itu (pivot TANPA fill_value — dulu sel (pasangan, tgl) tanpa baris
+    2.SALDO AKHIR di-fabrikasi 0 → contoh terbukti: pasangan hanya
+    terekam t=3 (−5) & t=5 (−2) → Max Qty 0.0 padahal seharusnya −2 ·
+    Tipe Fluktuatif padahal Konsisten). Durasi tetap atas KALENDER
+    (H − tgl_mulai + 1); Frek Minus tetap jumlah tanggal TEREKAM
+    bernilai < 0 (makna kolom lama dipertahankan).
 
     v3.11.45 — ``stats_out`` (dict opsional, diisi in-place): transparansi
     KENAPA hasil kosong (user: "tab saldominus juga kosong dengan mode
@@ -1071,10 +1140,22 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     if saldo_df.empty:
         return pd.DataFrame()
 
-    # Pivot: index (barang, resto), columns tgl, values saldo sum
+    # Pivot: index (barang, resto), columns tgl, values saldo sum.
+    # v3.11.59 — FIX (bug 2, MEDIUM): TANPA fill_value (dulu 0.0)
+    # MENGARANG saldo 0 utk tanggal yang pasangan tak punya baris
+    # 2.SALDO AKHIR → Max Qty salah (0.0 padahal seharusnya saldo
+    # tertinggi TEREKAM) + Tipe salah (Fluktuatif padahal Konsisten —
+    # sel 0 fabrikasi dianggap tanggal non-minus). Sel tak terekam
+    # kini NaN; SEMUA konsumen pivot di bawah sudah NaN-aware
+    # (min/max per baris skipna-default, guard pd.notna di loop
+    # tgl_minus/range_vals) → min/max/tipe hanya atas tanggal
+    # TEREKAM. Deteksi minus (pivot.min(axis=1) < 0) tak berubah —
+    # 0 fabrikasi tak pernah membuat minus baru maupun menghilangkan
+    # minus terekam. Override 42.17 tgl H tetap bekerja (menimpa sel
+    # NaN seperti dulu menimpa sel 0).
     pivot = saldo_df.pivot_table(
         index=["_b", "_r"], columns="_t", values="_v",
-        aggfunc="sum", fill_value=0.0)
+        aggfunc="sum")
     if stats_out is not None:
         stats_out["saldo_pairs"] = len(pivot)
 
@@ -1161,6 +1242,8 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
         # Tipe: Konsisten = beruntun minus dari tgl_mulai sampai H
         # (semua tgl di range [tgl_mulai..H] minus); Fluktuatif = ada
         # tgl non-minus (plus/0) di antara tgl_mulai dan H.
+        # v3.11.59 — FIX (bug 2): hanya tanggal TEREKAM yang dievaluasi
+        # (guard pd.notna di bawah — sel NaN bukan tanggal plus/0).
         range_vals = [float(row[t]) for t in row.index
                       if pd.notna(row[t]) and int(t) >= tgl_mulai]
         all_minus_in_range = bool(range_vals) and all(v < 0 for v in range_vals)

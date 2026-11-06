@@ -27,7 +27,14 @@ from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
 
-from .followup import CHECK_ON, DATE_COL_IDS, FollowUpStore, _cek_display_text
+from .followup import (
+    CHECK_ON,
+    DATE_COL_IDS,
+    FollowUpStore,
+    _cek_display_text,
+    _closing_so_key,       # v3.11.59 — FIX BUG 4: kunci penutupan bulan-lalu
+    _date_heading_labels,  # v3.11.59 — FIX BUG 4: label heading bulan-lalu
+)
 from .theme import (
     C_BG,
     C_CARD,
@@ -138,6 +145,11 @@ class FollowUpView(tk.Frame):
         self._render_after: str | None = None
         self._save_after: str | None = None
         self._suppress_render_notify = False
+        # v3.11.59 — FIX BUG 4 (LOW): cache kunci penutupan bulan-lalu
+        # (Tanggal negatif terkecil ber-baris 1.SO di append1) per
+        # IDENTITAS frame — pola _tnum deviasi_view; _render berulang
+        # tidak menghitung ulang groupby frame penuh.
+        self._closing_cache: tuple | None = None
 
         self._build_ui()
         self._setup_tags()
@@ -533,10 +545,34 @@ class FollowUpView(tk.Frame):
             (snap.get("added_at", "") or "")[:16].replace("T", " "),
         ]
 
+    def _closing_so_key_cached(self):
+        """v3.11.59 — FIX BUG 4 (LOW): kunci PENUTUPAN bulan lalu dari
+        frame append1 (self.get_data — akses data pipeline view) untuk
+        label heading kolom tanggal. None bila data belum ada / tanpa
+        baris SO bulan-lalu (label fallback "lalu"). Di-cache per
+        identitas frame supaya _render berulang murah."""
+        try:
+            df = self.get_data() if self.get_data else None
+        except Exception:
+            df = None
+        cached = self._closing_cache
+        if cached is not None and cached[0] is df:
+            return cached[1]
+        key = _closing_so_key(df)
+        self._closing_cache = (df, key)
+        return key
+
     def _refresh_date_headings(self, rows):
         """v3.9.6: heading kolom tanggal = ANGKA TANGGAL dari H snapshot
         terbaru (H=25 → '23'..'27' — persis sheet Follow UP file sample
-        '22.0..27.0'). H tidak ada → id default T-2..T+2."""
+        '22.0..27.0'). H tidak ada → id default T-2..T+2.
+        v3.11.59 — FIX BUG 4 (LOW): offset yang jatuh ≤ 0 (H=1/2) kini
+        ber-label BULAN-LALU ('31•' dst; fallback 'lalu') via
+        _date_heading_labels — mirror pemetaan _day_key deviasi_view +
+        konvensi header '25•' pivot_view. Dulu `h_ref + offset` mentah
+        → di H=1 tampil '−1'/'0' yang MENYESATKAN (kolom '0' berisi
+        saldo PENUTUPAN bulan lalu, bukan 'tanggal 0'). Label murni
+        display — parser sort/filter membaca nilai sel, bukan heading."""
         h_ref = None
         for snap in reversed(rows):
             h_val = snap.get("h")
@@ -547,8 +583,10 @@ class FollowUpView(tk.Frame):
             for col_id in DATE_COL_IDS:
                 self.tree.heading(col_id, text=col_id)
         else:
-            for col_id, off in zip(DATE_COL_IDS, (-2, -1, 0, 1, 2)):
-                self.tree.heading(col_id, text=str(h_ref + off))
+            labels = _date_heading_labels(
+                h_ref, self._closing_so_key_cached())
+            for col_id in DATE_COL_IDS:
+                self.tree.heading(col_id, text=labels[col_id])
         if getattr(self, "header_filters", None) is not None:
             self.header_filters.refresh_icons()
 
@@ -873,7 +911,11 @@ class FollowUpView(tk.Frame):
             return
 
         def work():
-            return self.store.export_xlsx(filepath)
+            # v3.11.59 — FIX BUG 4 (LOW): kunci penutupan bulan-lalu
+            # diteruskan ke export supaya heading kolom tanggal Excel
+            # SAMA dgn heading tabel UI ('31•'/'lalu', bukan '0'/'−1').
+            return self.store.export_xlsx(
+                filepath, closing_key=self._closing_so_key_cached())
 
         def done(path):
             # FIX C-06 (audit 2-c): frasa instruksi "Kolom PIC / ...

@@ -2,6 +2,13 @@
 po_keterangan.py — Keterangan "Potensi PO belum dibuat" per pasangan
 barang × resto.
 
+v3.11.59 — KUNCI PASANGAN KANONIK: semua peta di modul ini (potensi /
+Nomor PO 3224 / Nomor+Status PO 3243) ber-kunci `norm_nama_barang_key`
+× `norm_nama_resto_key` (UPPER + rapat-spasi + segmen resto setelah
+titik — konvensi append1 sejak v3.11.10, paritas fn_audit v3.11.34);
+lookup tipis (potensi_po_label_for / po_nomor_for / po_nomor_3243_for)
+menormalkan kunci sisi pemanggil dgn helper yang sama.
+
 Keterangan menyala bila SEMUA terpenuhi pada suatu tanggal:
 - Scope: SOURCE KIRIMAN pasangan ∈ {Eksternal, Campuran} ATAU nama
   barang muncul di file 32.24 mana pun (internal-only 42.05 murni
@@ -25,6 +32,18 @@ SEKALI per identitas objek (data, in_detail).
 import bisect
 
 import pandas as pd
+
+# v3.11.59 — FIX (task 3-e bug 2+3): helper kanonik kunci pasangan dari
+# pipeline (helpers import-free dari ui — tak ada circular; paritas
+# widgets.py yang juga import level-modul). Naik dari lazy import lama
+# (resto_from_cabang_po) karena kini dipakai _build_map + 3 peta PO.
+from ..pipeline.helpers import (
+    norm_nama_barang_key,
+    norm_nama_barang_key_series,
+    norm_nama_resto_key,
+    norm_nama_resto_key_series,
+    resto_from_cabang_po,
+)
 
 POTENSI_PO_LABEL = "Potensi PO belum dibuat"
 
@@ -67,9 +86,20 @@ def _build_map(data: pd.DataFrame, in_detail) -> dict:
     if not _det_ok:
         return {}
 
+    # v3.11.59 — FIX (task 3-e bug 2, P1 diakui CHANGELOG v3.11.35 "Yang
+    # TIDAK di-fix"): kunci pasangan KANONIK di KEDUA sisi. Dulu core
+    # (data append1 — ejaan kanonik sejak v3.11.10) dicocokkan dgn
+    # in_detail RAW (ejaan file 32.24/99.01) → pasangan ber-drift case/
+    # whitespace ("Air Mineral 600ML" vs "AIR MINERAL 600ML") MISS di
+    # item_3224/in32/in99 → 3224 dianggap 0 → label "Potensi PO belum
+    # dibuat" MENYALA PALSU. norm_nama_*_key_series dipakai TANPA
+    # astype(str) dulu (paritas append1: float utuh 100383.0 → "100383",
+    # bukan "100383.0"; NA → sentinel sama di kedua sisi). Kunci peta
+    # OUTPUT pun kanonik — pemanggil (deviasi_view / details_popup /
+    # saldo_minus_view) memakai nilai data yang sama-sama kanonik.
     core = pd.DataFrame({
-        "_b": data["Nama Barang"].astype(str),
-        "_r": data["NAMA RESTO"].astype(str),
+        "_b": norm_nama_barang_key_series(data["Nama Barang"]),
+        "_r": norm_nama_resto_key_series(data["NAMA RESTO"]),
         "_t": pd.to_numeric(data["Tanggal"], errors="coerce"),
         "_j": data["JENIS"].astype(str),
         "_v": pd.to_numeric(data["NILAI"], errors="coerce").fillna(0.0),
@@ -84,9 +114,12 @@ def _build_map(data: pd.DataFrame, in_detail) -> dict:
     item_3224: frozenset = frozenset()
     _si = in_detail["SOURCE IN"].astype(str).str.strip()
     # "32.24" + "32.24 (Bulan Lalu)" — startswith menutup keduanya.
-    item_3224 = frozenset(
+    # v3.11.59 — FIX (task 3-e bug 2): kunci KANONIK (dibangun dari ejaan
+    # RAW file 32.24) supaya cocok dgn core["_b"] kanonik di isin bawah
+    # (dulu RAW × kanonik → scope item-level miss utk pasangan drift).
+    item_3224 = frozenset(norm_nama_barang_key_series(
         in_detail.loc[_si.str.startswith("32.24"),
-                       "Nama Barang"].astype(str))
+                      "Nama Barang"]).tolist())
     if item_3224:
         in_scope |= core["_b"].isin(item_3224)
 
@@ -117,9 +150,12 @@ def _build_map(data: pd.DataFrame, in_detail) -> dict:
     # --- penerimaan sistem 32.24 / 9901 per (pasangan, tgl) — peta.
     in32: dict = {}
     in99: dict = {}
+    # v3.11.59 — FIX (task 3-e bug 2): kunci KANONIK (dulu RAW — drift
+    # ejaan vs core membuat in32/in99 miss → 3224/9901 dianggap 0 →
+    # label potensi palsu utk pasangan ber-drift).
     det = pd.DataFrame({
-        "_b": in_detail["Nama Barang"].astype(str),
-        "_r": in_detail["NAMA RESTO"].astype(str),
+        "_b": norm_nama_barang_key_series(in_detail["Nama Barang"]),
+        "_r": norm_nama_resto_key_series(in_detail["NAMA RESTO"]),
         "_t": pd.to_numeric(in_detail["Tanggal"], errors="coerce"),
         "_v": pd.to_numeric(in_detail["Value"],
                             errors="coerce").fillna(0.0),
@@ -207,13 +243,17 @@ def potensi_po_label_for(data: pd.DataFrame, in_detail, nama_barang: str,
                          nama_resto: str, tanggal) -> str:
     """Label keterangan utk SATU (pasangan, tanggal) — dipakai popup:
     POTENSI_PO_LABEL bila kondisi menyala di tanggal itu, '' lainnya.
-    (lookup tipis di atas potensi_po_map — tidak menghitung ulang)."""
+    (lookup tipis di atas potensi_po_map — tidak menghitung ulang).
+    v3.11.59 — kunci lookup KANONIK (paritas _build_map: peta kini
+    ber-kunci norm_nama_*; pemanggil deviasi_popup meneruskan nama dari
+    data append1 yang sudah kanonik — norm idempoten)."""
     try:
         ti = int(float(tanggal))
     except (TypeError, ValueError):
         return ""
     tgls = potensi_po_map(data, in_detail).get(
-        (str(nama_barang), str(nama_resto)))
+        (norm_nama_barang_key(nama_barang),
+         norm_nama_resto_key(nama_resto)))
     if tgls and ti in tgls:
         return POTENSI_PO_LABEL
     return ""
@@ -226,6 +266,8 @@ def po_nomor_map(in_detail) -> dict:
     unik (di-dedup + urut) dari baris in_detail ber-SOURCE IN '32.24'
     (file 3224 — Rincian Penerimaan Barang; kolom 'Nomor PO' hasil rename
     'Nomor # PO' fn_3224). in_detail None/kosong/tak ber-Nomor PO → {}.
+    v3.11.59 — kunci (barang, resto) KANONIK norm_nama_* (dulu RAW
+    astype(str) — drift ejaan vs pemanggil kanonik → Nomor PO kosong).
 
     Dipakai kolom 'KETERANGAN PO' popup details (tab Pivot) — user: "Pop up
     keterangan PO di pivot tabel kok gak muncul? itu ambil dari file 3224
@@ -245,9 +287,12 @@ def po_nomor_map(in_detail) -> dict:
         return {}
     if "Nomor PO" not in cols:
         return {}
+    # v3.11.59 — FIX (task 3-e bug 3): kunci KANONIK (dulu RAW astype(str)
+    # — "Air Mineral  600ML" file ≠ "AIR MINERAL 600ML" pemanggil →
+    # fallback Nomor PO 3224 kosong utk pasangan drifted).
     det = pd.DataFrame({
-        "_b": in_detail["Nama Barang"].astype(str),
-        "_r": in_detail["NAMA RESTO"].astype(str),
+        "_b": norm_nama_barang_key_series(in_detail["Nama Barang"]),
+        "_r": norm_nama_resto_key_series(in_detail["NAMA RESTO"]),
         "_t": pd.to_numeric(in_detail["Tanggal"], errors="coerce"),
         "_s": in_detail["SOURCE IN"].astype(str).str.strip(),
         "_p": in_detail["Nomor PO"].astype(str).str.strip(),
@@ -270,13 +315,15 @@ def po_nomor_for(in_detail, nama_barang: str, nama_resto: str,
                  tanggal) -> str:
     """Nomor PO 3224 utk SATU (pasangan, tanggal) — dipakai popup (lookup
     tipis di atas po_nomor_map). '' bila tak ada penerimaan 3224 / Nomor PO
-    kosong / in_detail None."""
+    kosong / in_detail None. v3.11.59 — kunci lookup KANONIK (paritas
+    po_nomor_map)."""
     try:
         ti = int(float(tanggal))
     except (TypeError, ValueError):
         return ""
     return po_nomor_map(in_detail).get(
-        (str(nama_barang), str(nama_resto), ti), "")
+        (norm_nama_barang_key(nama_barang),
+         norm_nama_resto_key(nama_resto), ti), "")
 
 
 def po_nomor_map_3243(rincian_po_df) -> dict:
@@ -308,19 +355,30 @@ def po_nomor_map_3243(rincian_po_df) -> dict:
       = Nomor PO. SELALU ada (semua PO yg pernah dibuat, termasuk yg
       belum diterima / Menunggu). Punya juga 'Keterangan PO' + 'Status
       Pesanan Pembelian'.
-    → 3243 lebih lengkap & relevan utk "Nomor PO" popup."""
+    → 3243 lebih lengkap & relevan utk "Nomor PO" popup.
+
+    v3.11.59 — kunci (barang, resto) KANONIK: norm_nama_barang_key(b) +
+    norm_nama_resto_key(resto_from_cabang_po(cab)) — dulu RAW astype(str)
+    ("1370.mlgpar" → "mlgpar" ≠ "MLGPAR" milik pemanggil kanonik
+    details_popup/saldo_minus_view → Nomor/Status PO kosong utk pasangan
+    drifted; contoh nyata v3.11.34: "Air Mineral  600ML" @ "1370.mlgpar").
+    """
     if rincian_po_df is None or getattr(rincian_po_df, "empty", True):
         return {}
     cols = set(getattr(rincian_po_df, "columns", []))
     if not {"Nama Barang", "Cabang PO", "Nomor #"} <= cols:
         return {}
-    # lazy import utk hindari circular (po_keterangan dipakai details_popup
-    # & deviasi_popup; helpers import-free dari ui)
-    from ..pipeline.helpers import resto_from_cabang_po
+    # resto_from_cabang_po kini import level-modul (v3.11.59 — lihat
+    # kepala modul; helpers import-free dari ui, tak ada circular).
     det = pd.DataFrame({
-        "_b": rincian_po_df["Nama Barang"].astype(str),
-        "_r": rincian_po_df["Cabang PO"].map(resto_from_cabang_po)
-                              .astype(str),
+        # v3.11.59 — FIX (task 3-e bug 3): kunci KANONIK kedua sisi peta —
+        # resto: resto_from_cabang_po DULU ("1370.mlgpar" → "mlgpar") lalu
+        # norm ("mlgpar" → "MLGPAR"); barang: norm langsung dari ejaan RAW
+        # file 32.43. Supaya cocok dgn kunci pemanggil kanonik (data
+        # append1). Resto "" (Cabang PO kosong) tetap terbuang mask bawah.
+        "_b": norm_nama_barang_key_series(rincian_po_df["Nama Barang"]),
+        "_r": norm_nama_resto_key_series(
+            rincian_po_df["Cabang PO"].map(resto_from_cabang_po)),
         "_p": rincian_po_df["Nomor #"].astype(str).str.strip(),
     })
     mask = ((det["_p"] != "")
@@ -340,9 +398,11 @@ def po_nomor_3243_for(rincian_po_df, nama_barang: str,
                       nama_resto: str) -> str:
     """Nomor PO 3244 utk SATU pasangan (barang, resto) — dipakai popup
     (lookup tipis di atas po_nomor_map_3243). '' bila tak ada PO 3243 /
-    rincian_po_df None."""
+    rincian_po_df None. v3.11.59 — kunci lookup KANONIK (paritas
+    po_nomor_map_3243)."""
     return po_nomor_map_3243(rincian_po_df).get(
-        (str(nama_barang), str(nama_resto)), "")
+        (norm_nama_barang_key(nama_barang),
+         norm_nama_resto_key(nama_resto)), "")
 
 
 def po_status_map_3243(rincian_po_df) -> dict:
@@ -357,17 +417,24 @@ def po_status_map_3243(rincian_po_df) -> dict:
 
     Dipakai kolom 'Status PO' anak tab "Saldo Sistem Minus" tab 🧮
     Nominal Deviasi (ide J — konteks "minus karena PO belum diterima /
-    Menunggu diproses")."""
+    Menunggu diproses").
+
+    v3.11.59 — kunci (barang, resto) KANONIK (mirror po_nomor_map_3243
+    — dulu RAW: pasangan drifted ber-Status PO kosong di saldo_minus_view).
+    """
     if rincian_po_df is None or getattr(rincian_po_df, "empty", True):
         return {}
     cols = set(getattr(rincian_po_df, "columns", []))
     if not {"Nama Barang", "Cabang PO", "Status Pesanan Pembelian"} <= cols:
         return {}
-    from ..pipeline.helpers import resto_from_cabang_po
+    # resto_from_cabang_po kini import level-modul (v3.11.59 — lihat
+    # kepala modul; helpers import-free dari ui, tak ada circular).
     det = pd.DataFrame({
-        "_b": rincian_po_df["Nama Barang"].astype(str),
-        "_r": rincian_po_df["Cabang PO"].map(resto_from_cabang_po)
-                              .astype(str),
+        # v3.11.59 — FIX (task 3-e bug 3): kunci KANONIK (mirror
+        # po_nomor_map_3243 — norm setelah resto_from_cabang_po).
+        "_b": norm_nama_barang_key_series(rincian_po_df["Nama Barang"]),
+        "_r": norm_nama_resto_key_series(
+            rincian_po_df["Cabang PO"].map(resto_from_cabang_po)),
         "_s": rincian_po_df["Status Pesanan Pembelian"]
                 .astype(str).str.strip(),
     })

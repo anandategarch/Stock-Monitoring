@@ -1033,6 +1033,16 @@ class PivotTableView(tk.Frame):
         mode = st["mode"]
         hide_empty = st["hide_empty"]
 
+        # v3.11.59 — FIX (audit 3-a #1/#2): pivot mode TANGGAL dibangun
+        # TANPA fill_value dulu (NaN = sel tanpa baris asli) — dibutuhkan
+        # _compute_com utk semantik presence-aware base SO(t−1)/SA(1)/SO
+        # penutupan (mirror deviasi_popup._compute_com_series). Pivot
+        # DISPLAY = pivot_raw.fillna(0) — identik sel-per-sel dgn
+        # fill_value=0 lama (diverifikasi pandas 2.2.3: DataFrame.equals
+        # True; kolom & dtype sama) → baris metric NON-COM tak berubah
+        # + tanpa biaya pivot_table ekstra. Mode resto (tanpa baris COM)
+        # tetap fill_value=0.
+        pivot_raw = None
         try:
             if mode == "resto":
                 pivot = df.pivot_table(
@@ -1043,13 +1053,13 @@ class PivotTableView(tk.Frame):
                     fill_value=0,
                 )
             else:
-                pivot = df.pivot_table(
+                pivot_raw = df.pivot_table(
                     index=["Nama Barang", "JENIS"],
                     columns="Tanggal",
                     values="NILAI",
                     aggfunc="sum",
-                    fill_value=0,
                 )
+                pivot = pivot_raw.fillna(0)
         except Exception as e:
             out = dict(empty)
             out["status"] = f"Error pivot: {e}"
@@ -1102,12 +1112,14 @@ class PivotTableView(tk.Frame):
             _tmin = _tall.min()
             if pd.notna(_tmin) and st["tgl_start"] > float(_tmin):
                 try:
+                    # v3.11.59 — FIX (audit 3-a): TANPA fill_value — NaN
+                    # = sel tanpa baris asli (presence utk _compute_com;
+                    # pivot_full HANYA dipakai matrix COM, bukan display).
                     pivot_full = df_predate.pivot_table(
                         index=["Nama Barang", "JENIS"],
                         columns="Tanggal",
                         values="NILAI",
                         aggfunc="sum",
-                        fill_value=0,
                     )
                     if not pivot_full.empty:
                         full_keys = sorted(pivot_full.columns.tolist(),
@@ -1144,10 +1156,18 @@ class PivotTableView(tk.Frame):
                     # tanggal df_predate). Fallback jalur lama bila matrix
                     # penuh tak tersedia.
                     if com_full is not None and item in com_full:
-                        row_data = com_full[item].reindex(col_keys) \
-                            .fillna(0.0)
+                        # v3.11.59 — FIX (audit 3-a): TANPA fillna(0.0)
+                        # — kolom tanpa SO terekam kini NaN → tampil
+                        # kosong (mirror deviasi_popup), bukan '-' (0
+                        # palsu dari base-0 garbage).
+                        row_data = com_full[item].reindex(col_keys)
                     else:
-                        row_data = self._compute_com(pivot, item, col_keys)
+                        # v3.11.59 — FIX (audit 3-a): fallback kini juga
+                        # presence-aware — pivot_raw (tanpa fill), bukan
+                        # pivot display yang 0-terisi.
+                        row_data = self._compute_com(
+                            pivot_raw if pivot_raw is not None else pivot,
+                            item, col_keys)
                 elif item_grp is not None:
                     try:
                         row_data = item_grp.loc[metric]
@@ -1737,25 +1757,72 @@ class PivotTableView(tk.Frame):
         tidak pernah terpakai & pair tanpa data bulan lalu mendapat
         com(1) ≈ −SO(1) = MINUS PALSU. Formula COM kini tetap identik
         antar ketiga view.
+
+        v3.11.59 — FIX (audit 3-a #1/#2 — parity deviasi_popup
+        _compute_com_series & com_analisa _build_matrices; klaim lama
+        "formula identik antar ketiga view" PALSU utk pivot_view):
+        semantik PRESENCE-AWARE — caller kini mempass pivot TANPA fill
+        (NaN = tanggal tanpa baris asli; lihat _compute_payload), jadi:
+        • com(t) hanya dihitung bila pasangan MEREKAM baris 1.SO di
+          kolom t (sel non-NaN — SO terekam 0 asli tetap "hadir");
+          kolom tanpa SO → NaN (tampil kosong), bukan com base-0
+          garbage (dulu: SO tak direkam tetap dihitung dari basis 0);
+        • base t=1 = SA(1) bila baris SA pasangan ada di t=1 (bedakan
+          "SA tercatat 0" dari "tanpa baris SA" — dulu fallback
+          get_series SA semua-nol membuat has_sa_t1 selalu True →
+          rantai fallback v3.9.5 di atas DEAD CODE); ELSE SO penutupan
+          bulan lalu = nilai SO di kolom tanggal NEGATIF kronologis
+          TERAKHIR yang merekam SO pasangan (kunci kalender terakhir
+          bisa hanya ber-IN tanpa SO — mirror com_analisa._closing_so);
+          ELSE 0 (janji docstring v3.9.5; deviasi_popup mengosongkan —
+          pivot mempertahankan fallback 0);
+        • base t>1 = SO kolom global SEBELUMNYA hanya bila pasangan
+          merekam SO di kolom itu (cek KEHADIRAN di index series SO
+          hasil dropna — bukan nilai numeriknya); kolom pertama global
+          (i==0) bukan t=1 & kolom tanpa SO(t−1) → NaN (mirror
+          _compute_com_series: tak ada basis = tak dihitung).
         """
         def get_series(jenis):
+            # v3.11.59 — FIX (audit 3-a): KeyError → series KOSONG
+            # (bukan semua-nol). Nilai tetap 0 via .get(t, 0) (perilaku
+            # pembacaan 1.SO/4.IN/8.BARANG KELUAR lama tak berubah),
+            # tapi KEHADIRAN kolom jadi jujur — index kosong = pasangan
+            # tanpa baris jenis itu sama sekali. dropna(): pivot tanpa
+            # fill → NaN = tanggal tanpa baris asli (baris ADA dengan
+            # NILAI 0 — atau NILAI NaN yang di-sum groupby jadi 0 —
+            # tetap hadir).
             try:
-                return pivot.loc[(item, jenis)]
+                return pivot.loc[(item, jenis)].dropna()
             except KeyError:
-                return pd.Series({t: 0 for t in tanggals})
+                return pd.Series(dtype=float)
 
         so = get_series("1.SO")
         bm = get_series("4.IN")
         bk = get_series("8.BARANG KELUAR")
         sa = get_series("SALDO AWAL")
 
-        # v3.9.5: SA pair di Tanggal 1 (None/NaN = tidak ada baris SA)
-        sa_t1 = sa.get(1)
-        has_sa_t1 = sa_t1 is not None and not pd.isna(sa_t1)
-        sa_t1_val = float(sa_t1) if has_sa_t1 else 0.0
+        # v3.11.59 — kehadiran 1.SO pasangan per kolom (baris asli,
+        # bukan nilai: SO terekam 0 asli ≠ SO tak direkam) + SO
+        # penutupan bulan lalu = kolom negatif kronologis TERAKHIR
+        # yang MEREKAM SO pasangan (mirror deviasi_popup
+        # reversed(col_keys); kunci kalender terakhir bisa hanya ber-IN
+        # tanpa baris 1.SO).
+        so_pres = set(so.index.tolist())
+        closing = None
+        for t in reversed(tanggals):
+            try:
+                if int(float(t)) < 0 and t in so_pres:
+                    closing = float(so.get(t) or 0)
+                    break
+            except (TypeError, ValueError):
+                continue
 
         com_values = {}
         for i, t in enumerate(tanggals):
+            if t not in so_pres:
+                # SO(t) tak direkam pasangan → com(t) tak bermakna
+                com_values[t] = float("nan")
+                continue
             so_val = float(so.get(t, 0) or 0)
             bm_val = float(bm.get(t, 0) or 0)
             bk_val = float(bk.get(t, 0) or 0)
@@ -1764,14 +1831,25 @@ class PivotTableView(tk.Frame):
                 is_t1 = int(float(t)) == 1
             except (TypeError, ValueError):
                 is_t1 = False
-            if is_t1 and has_sa_t1:
-                # tanggal 1 → base SALDO AWAL pair (audit fix)
-                base = sa_t1_val
+            # SA di t=1 via kunci kolom ASLI (bukan literal 1 — kolom
+            # bisa Int64/float/str): None = tanpa baris SA di t=1.
+            sa_t1 = sa.get(t) if is_t1 else None
+            if is_t1 and sa_t1 is not None and not pd.isna(sa_t1):
+                # tanggal 1 → base SALDO AWAL pair (audit fix v3.9.5)
+                base = float(sa_t1)
+            elif is_t1:
+                # tanpa baris SA → SO penutupan bulan lalu, else 0
+                base = closing if closing is not None else 0.0
             elif i == 0:
-                base = 0.0
+                # kolom pertama global bukan t=1: tak ada t−1 → kosong
+                com_values[t] = float("nan")
+                continue
+            elif tanggals[i - 1] not in so_pres:
+                # SO(t−1) tak direkam pasangan → basis 0 = garbage
+                com_values[t] = float("nan")
+                continue
             else:
                 base = float(so.get(tanggals[i - 1], 0) or 0)
-            com_val = base + bm_val - bk_val - so_val
-            com_values[t] = com_val
+            com_values[t] = base + bm_val - bk_val - so_val
 
         return pd.Series(com_values)

@@ -271,7 +271,13 @@ class RincianPoView(tk.Frame):
             return []
         if col == "#0":
             if "Nomor #" in df.columns:
-                vals = df["Nomor #"].dropna().astype(str).unique().tolist()
+                # v3.11.59 — FIX (task 3-e bug 4): nilai filter dari
+                # _format_col_series("#0") — baris TANPA Nomor # ikut
+                # ditawarkan sebagai "(Tanpa Nomor)" (dulu dropna() →
+                # "pilih semua" pun tetap membuang baris tanpa nomor
+                # karena label "nan" tak pernah ada di seleksi).
+                vals = self._format_col_series("#0", df["Nomor #"]) \
+                    .unique().tolist()
                 return [v for v in vals if v not in ("None", "nan", "NaT")]
             return []
         src = COL_SRC.get(col, col)
@@ -311,6 +317,15 @@ class RincianPoView(tk.Frame):
             return series.map(self._fmt_num)
         if col == "Nama Resto":   # v3.9.19 — Cabang PO → kode resto
             return series.map(_resto_name)
+        if col == "#0":
+            # v3.11.59 — FIX (task 3-e bug 4): Nomor # NA → label
+            # "(Tanpa Nomor)" (paritas baris induk _prepare_rows + daftar
+            # nilai popup filter ⧩ #0). Dulu astype(str) → "nan" — tak
+            # pernah ada di seleksi filter ("nan" di-exclude _col_values)
+            # → mengaktifkan filter ⧩ Nomor # membuang baris tanpa nomor
+            # SENYAP meski user mencentang SEMUA nilai.
+            return series.map(
+                lambda v: "(Tanpa Nomor)" if pd.isna(v) else str(v))
         return series.astype(str)
 
     def _on_combo_filter(self):
@@ -655,7 +670,21 @@ class RincianPoView(tk.Frame):
                 .replace("X", ".")
 
         # nilai per kolom PO: konsisten dalam satu PO → ambil nilai pertama
-        for nomor, group in df_sorted.groupby("Nomor #", sort=False):
+        # v3.11.59 — FIX (task 3-e bug 4): dropna=False — baris PO TANPA
+        # Nomor # (sel kosong file 32.43 → None via safe_to_str) dulu
+        # HILANG SENYAP dari tabel & grand total (default groupby
+        # dropna=True; terbukti: 4 baris → tampil "2 PO · 3 dari 4 item",
+        # baris TELUR lenyap, hitungan "dari N" jadi membingungkan).
+        # Kini tetap tampil sebagai grup "(Tanpa Nomor)" dan ikut
+        # terhitung di po_count/item_count/total_qty.
+        for nomor, group in df_sorted.groupby("Nomor #", sort=False,
+                                              dropna=False):
+            # v3.11.59 — label tampilan utk grup tanpa nomor (str(nan)
+            # = "nan" tak informatif). Kolom baris induk LAIN aman: Tanggal
+            # NaT-safe (_fmt_date), Kuantitas sum() tak pernah NaN, dan
+            # _fmt_num/_fmt_qty sudah NA-safe.
+            nomor_txt = ("(Tanpa Nomor)" if pd.isna(nomor)
+                         else str(nomor))
             po_count += 1
             n_items = len(group)
             po_qty = (group["Kuantitas"].sum()
@@ -692,7 +721,7 @@ class RincianPoView(tk.Frame):
             # v3.9.37: Keterangan PO & Tgl/Jam Pembuatan TIDAK lagi kolom
             # tampilan (lihat anotasi anak di bawah).
             items.append(("", parent_iid,
-                          {"text": str(nomor),
+                          {"text": nomor_txt,
                            "values": [
                                self._fmt_date(group["Tanggal"].iloc[0])
                                if "Tanggal" in group.columns else "",

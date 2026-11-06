@@ -2944,7 +2944,17 @@ class InSelisihView(tk.Frame):
                 or not (-31 <= s <= 31 and -31 <= e <= 31)):
             self.status_var.set("Tanggal harus angka -31..31 (contoh: 1–31).")
             return
-        if s > e:
+        # v3.11.59 — FIX BUG 1 (P1): swap NUMERIK mentah menukar arah yang
+        # SALAH utk rentang dua-negatif (bulan lalu). Tanggal negatif =
+        # hari bulan lalu, tapi urutan numeriknya TERBALIK dari kronologis:
+        # input start=−25, end=−31 (maksud user "25• s/d 31•") dulu dinilai
+        # −25 > −31 → DITUKAR jadi (−31, −25) → filter kronologis
+        # tgl_range_mask (start=31•, end=25•) menghasilkan TABEL KOSONG.
+        # Kini swap memakai KUNCI KRONOLOGIS tgl_chrono_key — mirror
+        # PERSIS jalur export _do_export (v3.11.1 audit 12-c2 B1): −25
+        # (hari 25•) < −31 (hari 31•) → TIDAK ditukar. Validasi rentang
+        # −31..31 di atas tetap utuh.
+        if tgl_chrono_key(s) > tgl_chrono_key(e):
             s, e = e, s
             self.tgl_start_var.set(str(s))
             self.tgl_end_var.set(str(e))

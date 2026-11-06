@@ -3438,15 +3438,40 @@ class DeviasiView(tk.Frame):
         # seperti nya belum"): syarat dua-periode (searah H & lalu) + gate
         # `if lalu_map` membuat segmen MATI bila file ⚖ tak dimuat — padahal
         # keluhan user murni arah DATA SAAT INI. Kini: grup = NAMA BARANG
-        # (tanpa satuan — persis kelompok yang terlihat di tabel), kandidat
+        # (v3.11.59: + SATUAN — pembanding se-satuan dgn baris analisa,
+        # lihat blok fix v3.11.59 di bawah), kandidat
         # = baris ber-deviasi ≠ 0 (arah lalu TAK lagi disyaratkan), ambang
         # rasio v3.11.22 tetap. Hanya bila len(idxs) ≥ 3 (self + ≥2 resto
         # lain pembanding). Resto lain ber-deviasi 0/NaN dianggap NETRAL
         # (bukan searah, bukan berlawanan — tak memveto).
+        # v3.11.59 — FIX "BEDA DARI RESTO LAIN" (P2): grup lama = NAMA
+        # BARANG saja atas SEMUA baris pivot shared GR+PCS — baris PCS
+        # resto lain (yang bahkan tak tampil di tab GR) ikut jadi
+        # pembanding & resto yang sama terhitung 2x (baris GR + PCS)
+        # -> label PADAM (bukti: barang X GR R1=+90, R2-R4=-90; PCS
+        # R5-R7=+90 -> di tab GR R1 seharusnya 'Surplus - 3/3 resto lain
+        # Defisit' tapi same=3 dari PCS R5-R7 mematikan label). Kini
+        # (a) SATUAN masuk kunci grup — pembanding WAJIB sama satuan
+        # dgn baris yang dianalisa (normalisasi strip+upper, mirror
+        # filter tab _prepare_rows: 'GR '/'gr' satu kelompok dgn 'GR';
+        # di tab PCS pembanding = baris non-GR bersatuan sama), dan
+        # (b) resto dihitung UNIK — resto sama dgn baris analisa
+        # dikecualikan (identitas resto = _norm_resto_lalu, konvensi
+        # join repo); resto lain dgn >1 baris se-satuan (duplikat raw
+        # 'GR' vs 'GR ') cukup 1x — baris ber-deviasi-nonzero PERTAMA
+        # yang menang (urutan pivot, deterministik); resto ber-deviasi
+        # 0/NaN di semua barisnya tetap NETRAL. Ambang rasio v3.11.22
+        # & format label TIDAK berubah.
         _br_txt = np.full(n, "", dtype=object)
         _grp_br: dict = {}
+        # v3.11.59 — kunci grup (barang, satuan-ternormalisasi) +
+        # identitas resto ternormalisasi utk dedup (konvensi join repo).
+        _resto_br = (pivot["NAMA RESTO"].astype(str)
+                     .map(_norm_resto_lalu).to_numpy())
+        _satuan_br = (pivot["SATUAN"].astype(str).str.strip()
+                      .str.upper().to_numpy())
         for _i, _b in enumerate(barang_s.to_numpy()):
-            _grp_br.setdefault(str(_b), []).append(_i)
+            _grp_br.setdefault((str(_b), _satuan_br[_i]), []).append(_i)
         for _idxs in _grp_br.values():
             if len(_idxs) < 3:
                 continue
@@ -3454,14 +3479,22 @@ class DeviasiView(tk.Frame):
                 _d0 = float(deviasi[_i])
                 if _d0 == 0.0:
                     continue
+                _r0 = _resto_br[_i]
                 _same = 0
                 _opp = 0
+                _seen_br: set = set()
                 for _j in _idxs:
                     if _j == _i:
                         continue
+                    _rj = _resto_br[_j]
+                    if _rj == _r0:
+                        continue   # resto sama dgn baris analisa
                     _dj = float(deviasi[_j])
                     if _dj == 0.0:
-                        continue
+                        continue   # NETRAL — tak masuk pembilang/penyebut
+                    if _rj in _seen_br:
+                        continue   # resto ini sudah menyumbang 1x
+                    _seen_br.add(_rj)
                     if (_dj > 0.0) == (_d0 > 0.0):
                         _same += 1
                     else:
@@ -4721,6 +4754,15 @@ class DeviasiView(tk.Frame):
             # rincian IN per sumber (32.24/9901) — sumber yang sama dgn
             # CEK "Potensi PO belum dibuat".
             in_detail=self.in_detail,
+            # v3.11.59 — FIX POPUP 42.17 (P1): teruskan peta + mode saldo
+            # sistem (sumber yang sama dgn blok override kolom Sistem di
+            # _compute_pivot) supaya Saldo Akhir baris H → Deviasi popup
+            # identik kolom Sistem/Deviasi tabel utama. Mode "4217"
+            # (default) = override file 42.17; "pivot" = running-stock.
+            # getattr: saldo_sistem_map baru diisi load_data (standalone/
+            # pra-load → None = perilaku lama).
+            saldo_sistem_map=getattr(self, "saldo_sistem_map", None),
+            saldo_sistem_mode=self.saldo_sistem_mode,
         )
 
     # =========================================================================

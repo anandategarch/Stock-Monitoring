@@ -854,13 +854,27 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     # jangan bikin rumus keempat" dipulihkan (probe_fn_audit_com: 2/6
     # baris BEBEK beda, kini parity). Basis COM ≠ "Qty SO Kemarin"
     # (kolom display/ΔSO TETAP ffill-last-observed — kontrak v3.10.1
-    # utuh): basis = SO BARIS AKTIVITAS SEBELUMNYA hanya bila tercatat
-    # DI BARIS ITU (raw shift per-pasangan, tanpa ffill — BEBEK t4:
-    # baris t3 ber-IN tanpa SO → NaN; dulu ffill SO(2) → 10 ≠ popup);
-    # Tanggal 1 → SA(1) / SO penutupan bulan lalu (nilai "Qty SO
-    # Kemarin" baris tgl-1 = anchor SA / ffill penutupan — persis
-    # basis kanonik). SO(t) tak direkam → NaN (undefined ≠ 0 — tak
-    # memicu KPI com_minus, tampil '-' / blank di export).
+    # utuh): basis hanya dari baris yang BENAR-BENAR merekam SO (tanpa
+    # ffill — BEBEK t4: baris t3 ber-IN tanpa SO → NaN; dulu ffill
+    # SO(2) → 10 ≠ popup); Tanggal 1 → SA(1) / SO penutupan bulan lalu
+    # (nilai "Qty SO Kemarin" baris tgl-1 = anchor SA / ffill
+    # penutupan — persis basis kanonik). SO(t) tak direkam → NaN
+    # (undefined ≠ 0 — tak memicu KPI com_minus, tampil '-' / blank di
+    # export).
+    # v3.11.59 — FIX BUG 3 (MEDIUM-HIGH): semantik basis t>1 diselaraskan
+    # PENUH ke kanonik _compute_com_series (deviasi_popup — satu-satunya
+    # rumus presence-aware bersama com_analisa). Basis lama = SO BARIS
+    # AKTIVITAS PASANGAN SENDIRI sebelumnya (raw shift per-pasangan) —
+    # padahal kolom kanonik = UNION tanggal aktivitas SEMUA pasangan.
+    # Bukti eksekusi: SO(2)=100, IN(5)=50, SO(5)=90 (+ pasangan lain
+    # merekam tgl 3&4) → basis lama SO(2) → COM(5)=+60; kanonik: kolom
+    # global sebelum tgl 5 = TGL 4, pasangan TIDAK merekam SO di situ →
+    # COM(5) ABSENT/NaN (pivot lama malah −40 — 3 nilai beda dari input
+    # sama). Kini basis t>1 = SO pasangan HANYA bila pasangan merekam
+    # SO persis di TANGGAL AKTIVITAS GLOBAL tepat sebelumnya (bila tidak
+    # → NaN, TIDAK mencari SO yang lebih lama); jangkar t=1 ("Qty SO
+    # Kemarin" = SA 42.17 / penutupan bulan lalu, v3.10.1) & baris
+    # bulan-lalu-tanpa-COM (t<0 → NaN) TETAP utuh.
     _so = pd.to_numeric(audit["Hasil SO"], errors="coerce")
     _prev = pd.to_numeric(audit["Qty SO Kemarin"], errors="coerce")
     _in_sys = pd.to_numeric(audit["Penerimaan Sistem"],
@@ -885,15 +899,39 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     audit["Qty BK"] = _bk
     _pid = np.cumsum(((_r != _r.shift(1)) | (_b != _b.shift(1)))
                      .to_numpy(dtype="int64"))
-    _so_prev_row = _so.groupby(_pid).shift(1)
-    _t_prev = _t.groupby(_pid).shift(1)
-    # t>1: basis hanya dari baris positif (bulan berjalan) sebelumnya;
-    # t=1: SA(1) / penutupan ("Qty SO Kemarin" baris tgl-1).
-    _prev_com = _so_prev_row.where(_t_prev >= 1)
+    # KOLOM GLOBAL (v3.11.59 — mirror col_keys _compute_com_series):
+    # union TANGGAL AKTIVITAS semua pasangan (frame audit = union
+    # baris aktivitas), urut KRONOLOGIS (negatif dulu hari naik — kunci
+    # _k1/_k2 build_audit_input / tgl_chrono_key: −25=25• < −31=31• < 1).
+    _du = _t.dropna().unique().tolist()
+    _du.sort(key=lambda v: (0, -v) if v < 0 else (1, v))
+    _g_prev = {d: _du[j - 1] for j, d in enumerate(_du) if j > 0}
+    # Peta SO TERCATAT per (pasangan, tanggal) — baris ADA ≠ nilai 0
+    # (Hasil SO notna); duplikat (pasangan, tanggal) — drift ejaan RAW
+    # yang melebur ke satu kunci kanonik — dijumlahkan defensif
+    # (mirror aggfunc="sum" pivot kanonik).
+    _so_at: dict = {}
+    for _p, _d, _s in zip(_pid, _t, _so):
+        if pd.notna(_d) and pd.notna(_s):
+            _k = (_p, _d)
+            _so_at[_k] = _so_at.get(_k, 0.0) + float(_s)
+    # Basis t>1: SO pasangan di tanggal aktivitas global TEPAT sebelum
+    # t — HANYA bila pasangan merekam SO persis di tanggal itu (miss →
+    # NaN, tidak ffill ke SO yang lebih lama).
+    _g = _t.map(_g_prev)
+    _prev_com = pd.Series(
+        [_so_at.get((_p, _gvi), np.nan) if pd.notna(_gvi) else np.nan
+         for _p, _gvi in zip(_pid, _g)],
+        index=audit.index, dtype="float64")
+    # t=1: jangkar SA(1) / SO penutupan bulan lalu = "Qty SO Kemarin"
+    # baris tgl-1 (v3.10.1 utuh); t<0 / t NaN: tanpa COM (perilaku lama).
     _prev_com = _prev_com.mask(_t == 1, _prev)
+    _prev_com = _prev_com.where(_t.notna() & (_t >= 1))
     _com = (_prev_com + _in_sys - _bk.fillna(0.0) - _so).astype("float64")
     _com = _com.where(_so.notna() & _prev_com.notna(), np.nan)
     audit["Qty COM"] = _com
+    # NaN AMAN utk KPI: NaN < 0 = False → baris tanpa basis/SO(t) tak
+    # dihitung com_minus; frame tanpa COM sama sekali → 0 (tanpa crash).
     kpi["com_minus"] = int((_com < 0).sum())
 
     # v3.9.72 — checkpoint ⏹ pasca engine (varian kedua tak perlu mulai

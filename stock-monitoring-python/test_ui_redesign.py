@@ -1955,9 +1955,16 @@ def main():
               and r["IN"] == "100" and r["Selisih IN"] == "100"
               and r["Barang Masuk"] == "200",
               f"got {r}")
-        check("(v3.10) Kolom COM tampil (KOPI tgl5: 100+100−0−300 = "
-              "−100 → '(100)' minus)",
-              r["COM"] == "(100)", f"got {r['COM']!r}")
+        # v3.11.59 — COM kanonik (paritas deviasi_popup._compute_com_series
+        # + com_analisa + pivot_view): basis t>1 WAJIB SO pasangan terekam
+        # di tanggal aktivitas GLOBAL sebelumnya. KOPI merekam SO t3 & t5
+        # saja — t4 (tanggal aktivitas global sebelum t5, dari AYAM/GULA)
+        # TANPA SO KOPI → COM t5 tak terdefinisi → NaN → kolom '-'
+        # (dulu basis baris aktivitas pasangan sendiri yang lebih lama
+        # → −100 palsu; 3 implementasi COM saling bertentangan).
+        check("(v3.11.59) Kolom COM kanonik: KOPI tgl5 tanpa SO di tgl "
+              "global sebelumnya (t4) → NaN → '-' (paritas popup COM)",
+              r["COM"] == "-", f"got {r['COM']!r}")
         check("(v3.6) Kolom Hasil Audit terisi",
               r["Hasil Audit"] == "CUT-OFF RESOLVED",
               f"got {r['Hasil Audit']!r}")
@@ -2050,9 +2057,14 @@ def main():
             check("(v3.10) Popup: nilai chip SO KEMARIN = 900",
                   _i_sok >= 0 and _chip_labels[_i_sok + 1] == "900",
                   f"got {_chip_labels[_i_sok:_i_sok + 2]}")
-            check("(v3.10) Popup Rincian IN: chip COM tampil (0)",
-                  "COM" in _chip_labels
-                  and _chip_labels[_chip_labels.index("COM") + 1] == "0",
+            # v3.11.59 — COM kanonik: AYAM merekam SO t4/t5/t10/t15;
+            # tanggal aktivitas global sebelum t10 = t8 (IN KOPI) tanpa
+            # SO AYAM → COM t10 NaN → tabel '-' → row_summary com None
+            # → chip COM DISEMBUNYIKAN (bukan 0 palsu — kontrak chip).
+            check("(v3.11.59) Popup Rincian IN: chip COM disembunyikan "
+                  "saat COM NaN (AYAM t10 tanpa SO di tgl global "
+                  "sebelumnya)",
+                  "COM" not in _chip_labels,
                   f"got {_chip_labels[:14]}")
             pop.destroy()
             root.update()
@@ -2238,7 +2250,9 @@ def main():
           audit_kpi["rows"] == 11 and audit_kpi["omit"] == 0
           and audit_kpi["cutoff"] == 2 and audit_kpi["deviasi_murni"] == 1
           and abs(audit_kpi["deviasi_qty"] - 80.0) < 0.001
-          and audit_kpi.get("com_minus") == 2,
+          # v3.11.59 — COM kanonik: KOPI t5 & SUSU t5 kini NaN (tanpa SO
+          # di tgl global sebelumnya) → tak lagi dihitung com_minus
+          and audit_kpi.get("com_minus") == 0,
           f"got {audit_kpi}")
     dm = audit_df[audit_df["Status Analisis Audit"] == "DEVIASI MURNI"]
     check("Engine: catatan Sisa Gantung VBA-style",
@@ -2263,13 +2277,22 @@ def main():
           and float(_ak.loc[("KOPI BUBUK 100G", 5), "Qty Delta SO"])
           == 200.0,
           f"got {_ak_dump}")
-    check("(v3.10) COM = SO(t−1) + IN − BK − SO(t) (KOPI t5: 100+100−"
-          "0−300 = −100 → COM minus; SUSU t5: −80)",
-          float(_ak.loc[("KOPI BUBUK 100G", 5), "Qty COM"]) == -100.0
-          and float(_ak.loc[("SUSU UHT 1L", 5), "Qty COM"]) == -80.0,
+    # v3.11.59 — COM KANONIK (paritas deviasi_popup._compute_com_series
+    # & com_analisa & pivot_view._compute_com — klaim paritas lama
+    # fn_audit "PERSIS formula pivot" kini benar-benar terpenuhi):
+    # basis t>1 = SO pasangan HANYA bila terekam di tanggal aktivitas
+    # GLOBAL sebelumnya; miss → NaN. KOPI t5 (SO t3&t5, global sebelumnya
+    # t4 tanpa SO KOPI) & SUSU t5 (SO t2&t5, idem) → NaN (dulu −100/−80
+    # dari basis baris aktivitas pasangan sendiri yang lebih lama).
+    check("(v3.11.59) COM kanonik: tanpa SO di tgl global sebelumnya → "
+          "NaN (KOPI t5 & SUSU t5; AYAM t5 = 400+500−0−900 = 0 tetap)",
+          bool(pd.isna(_ak.loc[("KOPI BUBUK 100G", 5), "Qty COM"]))
+          and bool(pd.isna(_ak.loc[("SUSU UHT 1L", 5), "Qty COM"]))
+          and float(_ak.loc[("AYAM FILET", 5), "Qty COM"]) == 0.0,
           f"got {audit_df['Qty COM'].tolist()}")
-    check("(v3.11.5) desc audit menyebut basis BM rekap + COM minus",
-          "BM rekap" in audit_desc and "COM minus 2" in audit_desc
+    check("(v3.11.5) desc audit menyebut basis BM rekap + COM minus "
+          "(v3.11.59: 0 — COM NaN tak terhitung)",
+          "BM rekap" in audit_desc and "COM minus 0" in audit_desc
           and "SO kemarin" not in audit_desc,
           f"got {audit_desc!r}")
 

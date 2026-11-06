@@ -25,6 +25,10 @@ from tkinter import ttk
 import numpy as np
 import pandas as pd
 
+from .nominal_common import (  # v3.11.59 — FIX POPUP 42.17: normalisasi
+    _norm_name_lalu,  # kunci pasangan peta saldo sistem — KONVENSI
+    _norm_resto_lalu,  # identik blok override deviasi_view._compute_pivot
+)
 from .theme import (
     C_ACCENT_DARK,
     C_ACCENT_SOFT,
@@ -946,14 +950,19 @@ def _com_acr_avg(df: pd.DataFrame, nama_barang: str, nama_resto: str,
 def build_popup_rows(data: pd.DataFrame, nama_barang: str,
                      nama_resto: str, satuan: str | None = None,
                      in_detail: pd.DataFrame | None = None,
-                     h: int | None = None
+                     h: int | None = None,
+                     saldo_sistem_map: dict | None = None,
+                     saldo_sistem_mode: str = "4217"
                      ) -> pd.DataFrame:
     """Pure pandas (thread-safe) — siapkan baris popup per Tanggal.
 
     Hanya 3 JENIS yang dipakai (permintaan user: nilai saldo akhir, SO,
     IN, deviasi — TANPA OUT/BARANG KELUAN/BARANG MASUK):
       Saldo Akhir = Σ 2.SALDO AKHIR · SO = Σ 1.SO · IN = Σ 4.IN
-      Deviasi = SO − Saldo Akhir (identik 3.DEVIASI & tabel utama).
+      Deviasi = SO − Saldo Akhir (baris H dapat menimpa Saldo Akhir
+      dgn saldo sistem 42.17 — lihat blok v3.11.59 di bawah; HANYA
+      baris Tanggal H yang identik kolom Deviasi tabel utama, baris
+      lain = deviasi running-stock harian).
 
     v3.9.25 — dua kolom baru (user: "tambah kolom nomor po dan COM"):
       Nomor PO = nomor pesanan pembelian baris 4.IN per tanggal
@@ -997,6 +1006,20 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     n hari valid terekspos via out.attrs["avg_days"] / ["avg_h"] utk
     footer status. h None/pemanggil lama → kolom ACR tetap (data-
     driven), kolom Avg kosong semua.
+
+    v3.11.59 — FIX POPUP 42.17 (P1): kolom "Saldo Akhir" baris
+    Tanggal H kini MENGIKUTI mode saldo sistem tabel utama. Mode
+    "4217" (default) DAN pasangan ada di saldo_sistem_map (peta
+    {(Nama Barang, NAMA RESTO): nilai} folder '6. 42.17' — peta yang
+    sama dgn kolom Sistem tabel, diteruskan DeviasiView.
+    _on_double_click) → Saldo Akhir baris H = nilai sistem 42.17
+    (Deviasi baris H = SO_H − sistem, PERSIS kolom Deviasi tabel
+    utama; dulu running-stock → Deviasi popup BERTENTANGAN dgn
+    tabel). Baris tanggal LAIN tetap running-stock (tabel utama hanya
+    menimpa Sistem di H). Mode "pivot" / peta kosong / pasangan tak
+    ada di peta → perilaku lama (running-stock semua baris).
+    saldo_sistem_map None/pemanggil lama → tanpa override (test
+    kompatibel).
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
                                   "Nomor", "Nomor PO", "COM", "ACR",
@@ -1074,7 +1097,35 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         "SO": wide[_JENIS_SO].to_numpy(),
         "IN": wide[_JENIS_IN].to_numpy(),
     })
-    # Deviasi = SO − Saldo Akhir (identik kolom Deviasi tabel utama)
+    # v3.11.59 — FIX POPUP 42.17 (P1): tabel utama (blok override
+    # deviasi_view._compute_pivot) MENIMPA kolom Sistem dgn saldo
+    # sistem file 42.17 folder '6. 42.17' saat mode "4217" (default)
+    # — popup dulu TIDAK menerima peta/mode itu → Deviasi baris H =
+    # SO_H − running-stock, BERTENTANGAN dgn kolom Deviasi tabel
+    # (bukti eksekusi: tabel Sistem=999/Deviasi=−909 vs popup baris H
+    # Saldo Akhir=60/Deviasi=30). Kini di BARIS Tanggal H SAJA:
+    # Saldo Akhir = nilai peta 42.17 (kunci normalisasi identik tabel
+    # utama: _norm_name_lalu(b) + "\x1f" + _norm_resto_lalu(r)) →
+    # Deviasi H = SO_H − sistem PERSIS tabel; baris tanggal LAIN
+    # tetap running-stock (tabel hanya menimpa Sistem di H). Mode
+    # "pivot"/peta kosong/pasangan tak ada di peta/nilai NaN → tanpa
+    # override (perilaku lama; mirror mask notna tabel utama — entri
+    # bernilai NaN efektif tidak menimpa).
+    _ss_val = None
+    if saldo_sistem_map and saldo_sistem_mode == "4217" and h is not None:
+        _ss_lookup = {f"{_norm_name_lalu(b)}\x1f{_norm_resto_lalu(r)}": v
+                      for (b, r), v in saldo_sistem_map.items()}
+        _ss_val = _ss_lookup.get(
+            f"{_norm_name_lalu(nama_barang)}\x1f"
+            f"{_norm_resto_lalu(nama_resto)}")
+    if _ss_val is not None and not pd.isna(_ss_val):
+        _ss_mask_h = out["_t"].astype(float) == float(h)
+        if _ss_mask_h.any():
+            out.loc[_ss_mask_h, "Saldo Akhir"] = float(_ss_val)
+    # Deviasi = SO − Saldo Akhir; baris H (bila override 42.17 aktif
+    # di atas) = SO_H − sistem 42.17 — identik kolom Deviasi tabel
+    # utama HANYA untuk baris H; baris lain = deviasi running-stock
+    # harian per tanggal.
     out["Deviasi"] = out["SO"] - out["Saldo Akhir"]
     out["Nomor"] = [", ".join(sorted(_nomor_per_tgl.get(t, ())))
                     for t in out["_t"]]
@@ -1140,7 +1191,9 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
 def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
                        nama_resto: str, satuan: str | None = None,
                        h: int | None = None,
-                       in_detail: pd.DataFrame | None = None):
+                       in_detail: pd.DataFrame | None = None,
+                       saldo_sistem_map: dict | None = None,
+                       saldo_sistem_mode: str = "4217"):
     """Buka popup ringkas utk pasangan (barang, resto).
 
     Dipanggil dari DeviasiView._on_double_click (tab Deviasi GR & PCS,
@@ -1149,13 +1202,22 @@ def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
     v3.11 — in_detail: rincian IN per sumber (42.05/32.24/99.01) dari
     view — sumber kolom "Keterangan PO" (potensi PO belum dibuat);
     None/pemanggil lama → kolom kosong (test kompatibel).
+
+    v3.11.59 — FIX POPUP 42.17 (P1): saldo_sistem_map +
+    saldo_sistem_mode diteruskan dari view (peta folder '6. 42.17' +
+    mode "4217"/"pivot") supaya Saldo Akhir baris H → Deviasi popup
+    identik kolom Sistem/Deviasi tabel utama (lihat
+    build_popup_rows v3.11.59). None/default → perilaku lama
+    (running-stock; test kompatibel).
     """
     title = f"{nama_barang} — {nama_resto}"
     if satuan:
         title += f"  ({satuan})"
 
     rows = build_popup_rows(data, nama_barang, nama_resto, satuan=satuan,
-                            in_detail=in_detail, h=h)
+                            in_detail=in_detail, h=h,
+                            saldo_sistem_map=saldo_sistem_map,
+                            saldo_sistem_mode=saldo_sistem_mode)
     h_label = _fmt_tanggal(h) if h is not None else ""
     popup = DeviasiPopup(parent, title, rows, h_label=h_label)
     return popup

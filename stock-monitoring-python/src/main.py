@@ -28,7 +28,10 @@ from src.pipeline.fn_audit import (
     extract_po_pending,
     month_lengths,
 )
-from src.pipeline.helpers import norm_nama_barang_key  # v3.11.35 — _rekap_barangs
+# v3.11.35 — _rekap_barangs · v3.11.59 — _extract_append1_maps (kunci
+# peta SA/BK ternormalisasi kanonik paritas sisi lookup fn_audit)
+from src.pipeline.helpers import (norm_nama_barang_key,
+                                  norm_nama_resto_key)
 from src.pipeline.rincian_po import build_rincian_po
 
 
@@ -46,6 +49,18 @@ def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dic
       '8.BARANG KELUAR' (42.15 Kirim) — v3.10.1: baris NILAI=0 artifact
       juga dibuang (peta hanya memuat pasangan-tgl yang benar-benar
       ber-BK — angka tak berubah, memori/loop jauh lebih kecil).
+
+    v3.11.59 — FIX BUG 2 (P1): kunci peta DINORMALISASI KANONIK
+    (norm_nama_resto_key / norm_nama_barang_key — UPPER + segmen
+    setelah titik utk resto · UPPER + rapat-spasi utk barang) persis
+    helper yang dipakai sisi LOOKUP fn_audit (_attach_so_kemarin :150
+    utk SA · blok COM :872 utk BK). Dulu kunci RAW astype(str) → nama
+    mixed-case / spasi-ganda (nyata: "GULA  MERAH" rekap vs "GULA
+    MERAH" audit, v3.11.58) membuat .get() MISS SENYAP → Qty SO
+    Kemarin / Qty BK salah (BK dianggap tak ada → COM melenceng).
+    Normalisasi diterapkan SETELAH astype(str) supaya arahnya IDENTIK
+    dgn sisi lookup (build_audit_input juga astype(str) dulu, baru
+    fn_audit menormalkan).
 
     Frame kosong/tanpa kolom JENIS/NILAI → peta kosong (audit jalan
     tanpa SA/BK — fallback NaN/0 di fn_audit)."""
@@ -69,8 +84,12 @@ def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dic
         _keep = _vals.notna() & (_vals != 0)
         _sa = _sa[_keep]
         _vals = _vals[_keep]
-        for r, b, v in zip(_sa["NAMA RESTO"].astype(str),
-                           _sa["Nama Barang"].astype(str), _vals):
+        # v3.11.59 — FIX BUG 2: kunci ternormalisasi kanonik (paritas
+        # lookup fn_audit._attach_so_kemarin) — bukan RAW astype(str).
+        for r, b, v in zip(_sa["NAMA RESTO"].astype(str)
+                           .map(norm_nama_resto_key),
+                           _sa["Nama Barang"].astype(str)
+                           .map(norm_nama_barang_key), _vals):
             if pd.notna(v) and (r, b) not in sa:
                 sa[(r, b)] = float(v)
     _bk = append1_df[jenis == "8.BARANG KELUAR"]
@@ -83,8 +102,12 @@ def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dic
         _bk = _bk[_keep]
         _t = _t[_keep]
         _vals = _vals[_keep]
-        for r, b, t, v in zip(_bk["NAMA RESTO"].astype(str),
-                              _bk["Nama Barang"].astype(str), _t, _vals):
+        # v3.11.59 — FIX BUG 2: idem SA — kunci ternormalisasi kanonik
+        # (paritas lookup blok COM fn_audit :872).
+        for r, b, t, v in zip(_bk["NAMA RESTO"].astype(str)
+                              .map(norm_nama_resto_key),
+                              _bk["Nama Barang"].astype(str)
+                              .map(norm_nama_barang_key), _t, _vals):
             key = (r, b, int(t))
             bk[key] = bk.get(key, 0.0) + float(v)
     return sa, bk

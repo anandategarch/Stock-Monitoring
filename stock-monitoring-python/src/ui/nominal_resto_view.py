@@ -32,6 +32,8 @@ from tkinter import filedialog, messagebox, ttk
 import pandas as pd
 
 from .nominal_common import (
+    HARGA_41_KOSONG_LABEL,  # v3.11.59 — FIX bug 4: label harga-41.09-
+    # kosong (barang ADA di peta tapi harga None) utk _noharga_ket
     _norm_name_lalu,
     _norm_resto_lalu,
     agregasi_nominal_per_resto,
@@ -325,6 +327,16 @@ class NominalRestoView(tk.Frame):
         # mode saldo sistem dibagi dgn tab 📦/🧩 (SharedSaldoSistemMode)
         # + rincian_po_df (3243) utk kolom Nomor PO / Status PO.
         self._saldo_sistem_state = saldo_sistem_state
+        # v3.11.59 — FIX (bug 1, HIGH): MODE saldo sistem (pivot/4217)
+        # kini dibaca view ini (pola saldo_minus_view:172-174 — dulu
+        # hanya state-nya disimpan TANPA pernah membaca mode).
+        # hitung_nominal_pairs menerima saldo_sistem_mode: mode "pivot"
+        # → TANPA override 42.17 (Qty = 3.DEVIASI) — konsisten kolom
+        # Deviasi tab 📦/🧩 (dulu tab 🧮 SELALU override bila peta
+        # terisi → dua tab menampilkan deviasi BEDA utk pasangan sama).
+        self.saldo_sistem_mode = (saldo_sistem_state.mode
+                                  if saldo_sistem_state is not None
+                                  else "4217")
         self._rincian_po_df = rincian_po_df
         # v3.9.63 — ANAK TAB 'Tanpa Harga' (global): frame pasangan tanpa
         # harga dari data MENTAH (pasangan_tanpa_harga_global — dihitung
@@ -538,6 +550,15 @@ class NominalRestoView(tk.Frame):
         # chip H bersama + auto-refresh saat H diubah di tab Deviasi GR
         if self._h_state is not None:
             self._h_state.subscribe(self._on_shared_h_changed)
+        # v3.11.59 — FIX (bug 1, HIGH): subscribe MODE saldo sistem
+        # bersama (pola saldo_minus_view:203-205) — mode "4217" ↔
+        # "pivot" diubah di tab 📦/🧩 → tab 🧮 recompute (Qty Deviasi
+        # ikut mode: override SO_H − saldo 42.17 vs 3.DEVIASI).
+        if self._saldo_sistem_state is not None:
+            self._saldo_sistem_state.subscribe(
+                self._on_shared_saldo_sistem_changed)
+        if (self._h_state is not None
+                or self._saldo_sistem_state is not None):
             self.bind("<Destroy>", self._on_view_destroy, add="+")
 
         # v3.9.63 — anak tab 'Tanpa Harga' (global) — dibangun SETELAH
@@ -968,9 +989,18 @@ class NominalRestoView(tk.Frame):
         self._nh_status_var.set(status)
 
     def _on_view_destroy(self, event):
-        if event.widget is self and self._h_state is not None:
+        # v3.11.59 — FIX (bug 1): unsubscribe KEDUA state bersama
+        # (pola saldo_minus_view:936-943 — dulu hanya h_state; listener
+        # saldo_sistem_state tertinggal di state → leak + callback mati).
+        if event.widget is not self:
+            return
+        if self._h_state is not None:
             with contextlib.suppress(Exception):
                 self._h_state.unsubscribe(self._on_shared_h_changed)
+        if self._saldo_sistem_state is not None:
+            with contextlib.suppress(Exception):
+                self._saldo_sistem_state.unsubscribe(
+                    self._on_shared_saldo_sistem_changed)
 
     # v3.11.44 — FIX WIRING: klik sub-notebook anak tab → bila tab
     # 'Saldo Sistem Minus' terpilih → pastikan view-nya di-refresh
@@ -997,6 +1027,24 @@ class NominalRestoView(tk.Frame):
         self.tanggal_h = int(h)
         if hasattr(self, "_h_chip_var"):
             self._h_chip_var.set(str(self.tanggal_h))
+        if self._dirty:
+            return
+        if not self.winfo_ismapped():
+            self._dirty = True
+            return
+        if self.data is not None and not self.data.empty:
+            self._refresh()
+
+    # v3.11.59 — FIX (bug 1, HIGH): listener MODE saldo sistem bersama
+    # (pola saldo_minus_view._on_shared_saldo_sistem_changed — tiruan
+    # persis termasuk penanganan dirty). Mode berubah → simpan mode baru
+    # + recompute: _compute_resto selalu menghitung ulang per _refresh
+    # (tak ada cache hasil — invalidasi = trigger _refresh saja; tabel
+    # utama & anak tab Tanpa Harga sama-sama ikut karena keduanya
+    # dihitung/di-render dari _refresh). Tab tersembunyi → _dirty,
+    # di-clear ensure_refreshed saat tab dibuka.
+    def _on_shared_saldo_sistem_changed(self, new_mode):
+        self.saldo_sistem_mode = str(new_mode)
         if self._dirty:
             return
         if not self.winfo_ismapped():
@@ -1409,6 +1457,10 @@ class NominalRestoView(tk.Frame):
         self._noharga_df = pasangan_tanpa_harga_global(
             df, h, self.harga_map, self.konversi_map,
             self.saldo_sistem_map,
+            # v3.11.59 — FIX (bug 1): mode saldo sistem ikut tab 📦/🧩 —
+            # mode "pivot" → TANPA override 42.17 (anak tab konsisten
+            # dgn tabel utama).
+            saldo_sistem_mode=self.saldo_sistem_mode,
             deviasi_only=True)   # v3.11.9 — mirror tab utama (global utk
                                  # kategori anak tab, tapi pasangan
                                  # non-deviasi tetap dikecualikan)
@@ -1497,6 +1549,11 @@ class NominalRestoView(tk.Frame):
         g, pairs = agregasi_nominal_per_resto(
             df, h, self.harga_map, self.konversi_map,
             self.saldo_sistem_map,
+            # v3.11.59 — FIX (bug 1, HIGH): mode saldo sistem ikut tab
+            # 📦/🧩 — mode "pivot" + peta terisi → TANPA override 42.17
+            # (Qty = 3.DEVIASI; dulu selalu menimpa → deviasi tab 🧮
+            # BEDA dgn tab 📦/🧩 utk pasangan yang sama).
+            saldo_sistem_mode=self.saldo_sistem_mode,
             deviasi_only=True)   # v3.11.9 — user: "Nominal Deviasi hanya
                                  # kategori benar-benar deviasi"
         # jumlah pasangan non-deviasi dikecualikan (status jujur)
@@ -2496,13 +2553,22 @@ class NominalRestoView(tk.Frame):
     @staticmethod
     def _noharga_ket(harga_tampil) -> str:
         """Alasan pasangan tanpa harga — dari 'Harga Tampil' pairs:
-        '-' = barang tak ada / harga None di 41.09; ber-'*' = satuan
-        rekap tak ter-cover peta rasio (harga as-is ditampilkan)."""
+        '-' = barang tak ada di 41.09; ber-'*' = satuan rekap tak
+        ter-cover peta rasio (harga as-is ditampilkan).
+        v3.11.59 — FIX (bug 4, LOW): kasus barang ADA di 41.09 tapi
+        harga None (Qty=0 — janji fn_4109.build_harga_map "tetap masuk
+        peta dgn harga None supaya view bisa menampilkan 'tanpa harga'
+        secara eksplisit (bukan keliru dianggap tak ada di file)") kini
+        dibedakan via penanda HARGA_41_KOSONG_LABEL — dulu kedua kasus
+        identik '-' → label selalu "barang tak ada di 41.09" dan
+        cabang "harga 41.09 kosong" = dead code."""
         s = str(harga_tampil or "").strip()
         if not s or s == "-":
             return "barang tak ada di 41.09 (09.Harga)"
         if "*" in s:
             return f"satuan tak terkonversi — harga 41.09: {s}"
+        if s == HARGA_41_KOSONG_LABEL:
+            return "harga 41.09 kosong (Qty 0 — barang ada di 09.Harga)"
         return "harga 41.09 kosong"
 
     # =========================================================================

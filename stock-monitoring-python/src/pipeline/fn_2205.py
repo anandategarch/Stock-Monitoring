@@ -138,6 +138,15 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205,
     fin = fil[["Tanggal", "NAMA RESTO", "Nama Barang", "Value"]].copy()
 
     # Drop rows dengan NAMA RESTO null
-    fin = fin.dropna(subset=["NAMA RESTO"]).reset_index(drop=True)
+    # v3.11.59 — FIX (task 3-e bug 1): string KOSONG "" / whitespace-only
+    # juga dibuang — dropna saja meloloskan pelanggan "X ()" (tanda kurung
+    # tanpa kode resto → BetweenDelimiters hasil "") sebagai pasangan hantu
+    # (Nama Barang, '') di pivot sumber OUT 22.05, melanggar janji docstring
+    # :19 "Baris dengan NAMA RESTO kosong dibuang". Mirror pola reader lain
+    # (fn_3224 · fn_4205 'lalu' · fn_9901 · queries.query_kirim):
+    # notna() + str.strip() != "" (dropna lama tetap tercakup notna()).
+    _resto = fin["NAMA RESTO"]
+    _valid = _resto.notna() & (_resto.astype(str).str.strip() != "")
+    fin = fin[_valid].reset_index(drop=True)
 
     return fin

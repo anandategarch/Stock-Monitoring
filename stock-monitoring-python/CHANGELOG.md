@@ -3,6 +3,164 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.59 — AUDIT FORMULA SEMUA TAB ("cek formula atau rumus di semua tab sesuai gak?") → 13 fix terbukti
+
+Audit mendalam rumus SETIAP tab (Pivot · Deviasi GR/PCS · Rekap Selisih
+IN · Nominal Deviasi · Follow Up · Rincian PO · Saldo Minus/Kronis) +
+pipeline fondasinya (append1 · running stock · rekap mentah · 3224/4205/
+4217/9901/2205 · konversi satuan · fn_audit) — semua temuan DIBUKTIKAN
+dengan eksekusi kode asli (bukan spekulasi) sebelum diperbaiki:
+
+### Fix 1 (HIGH) — Rumus COM tidak konsisten 3-implementasi → kini KANONIK
+Tiga implementasi `COM(t) = basis + IN − BK − SO` saling mengklaim
+identik tapi menghasilkan **3 nilai berbeda untuk input yang sama**
+(bukti: SO(2)=100, IN(5)=50, SO(5)=90 + pasangan lain aktif tgl 3&4 →
+fn_audit **+60** · deviasi_popup **absent** · pivot lama **−40**):
+- **pivot_view `_compute_com`** (baris "6.PEMAKAIAN (COM)" tab 🧮):
+  fallback series SEMUA-NOL membuat pasangan **tanpa** baris SALDO AWAL
+  dianggap SA=0 → `has_sa_t1` selalu True → base-0 **palsu** di t=1
+  (bukti: tanpa SA + SO(−31)=40, SO(1)=45, IN(1)=5 → COM(1)=−40,
+  seharusnya **0**) & fallback "SO(t−1) bulan lalu" yang dijanjikan
+  docstring = DEAD CODE; t>1 tanpa presence-awareness → COM sampah utk
+  tanggal yang SO-nya tak direkam. Fix: pivot dibangun TANPA fill_value
+  (kehadiran baris asli terlihat via NaN; pivot display tetap identik
+  sel-per-sel) + port semantik kanonik `_compute_com_series`: t=1 base
+  = SA(1) → **SO penutupan bulan lalu** (kolom negatif terakhir yang
+  merekam SO) → 0; t>1 base = SO **wajib terekam** di kolom global
+  sebelumnya, miss → NaN (tampil kosong).
+- **fn_audit** (kolom "Qty COM" + KPI com_minus tab 📤): basis = SO
+  **baris aktivitas pasangan sendiri** yang lebih lama (gap-skipping)
+  alih-alih kolom global sebelumnya — klaim komentar "PERSIS formula
+  pivot" palsu. Fix: mirror `_compute_com_series` (union tanggal
+  aktivitas global; basis hanya bila SO pasangan terekam persis di
+  tanggal global sebelumnya; miss → NaN, tak menghitung com_minus;
+  jangkar t=1 "Qty SO Kemarin" SA 42.17/penutupan v3.10.1 utuh).
+- 5 asersi test_ui_redesign yang mengunci perilaku penyimpang lama
+  (KOPI/SUSU t5 −100/−80, com_minus 2) di-update ke basis kanonik
+  (NaN/NaN, com_minus 0 — **terverifikasi paritas 2-arah** dengan
+  `_compute_com_series` atas fixture yang sama).
+
+### Fix 2 (P1) — Popup Deviasi (double-click) mengabaikan mode saldo sistem 42.17
+Popup per-tanggal menghitung `Deviasi = SO − Saldo Akhir(running-stock)`
+dan berkomentar "identik kolom Deviasi tabel utama" — **klaim palsu** di
+mode default "4217": tabel menimpa Sistem dengan snapshot folder
+'6. 42.17' (bukti: tabel Sistem=999/Deviasi=−909 vs popup Saldo=60/
+Deviasi=30). Fix: `build_popup_rows`/`show_deviasi_popup` menerima
+`saldo_sistem_map`+`saldo_sistem_mode` (kunci normalisasi persis tabel);
+baris **tanggal H** ditimpa nilai sistem 42.17 → Deviasi baris H kini
+PERSIS kolom Deviasi tabel; baris tanggal lain tetap running-stock
+harian; mode "pivot" → perilaku lama.
+
+### Fix 3 (P2) — "Beda dari Resto Lain" terkontaminasi lintas-satuan GR↔PCS
+Pembanding dikelompokkan per Nama Barang TANPA satuan atas pivot shared
+GR+PCS → baris PCS resto lain (yang bahkan **tak tampil** di tab GR)
+menjadi pembanding + resto sama dihitung 2× (bukti: label R1 GR PADAM
+karena 3 baris PCS resto lain). Fix: pembanding wajib **sama satuan**
+dengan baris analisa + resto dihitung **UNIK** (dedup; resto baris
+analisa dikecualikan) — benar untuk kedua tab GR & PCS.
+
+### Fix 4 (HIGH) — Tab 💰 Nominal Deviasi mengabaikan mode saldo sistem
+`hitung_nominal_pairs` **selalu** menimpa Qty dengan SO_H − saldo 42.17
+bila peta terisi (tanpa cek mode) — user pilih mode "Pivot" di tab 📦 →
+dua tab menampilkan deviasi BERBEDA utk pasangan sama (bukti: GR −20 vs
+Nominal −10; −84 vs −60) — persis kelas keluhan yang v3.11.8 klaim
+sudah tuntas. Fix: parameter `saldo_sistem_mode` (default "4217",
+pemanggil lama aman) — override hanya mode "4217"; NominalRestoView
+kini **subscribe** `SharedSaldoSistemMode` (pola saldo_minus_view:
+baca mode awal + listener + unsubscribe Destroy) & meneruskan mode ke
+tabel utama + anak tab Tanpa Harga → tab 🧮 konsisten dgn 📦/🧩.
+
+### Fix 5 (P1) — Rekap Selisih IN: rentang tanggal dua-negatif → TABEL KOSONG
+`_on_tanggal_change` swap **numerik** (`if s > e`) membalik makna rentang
+bulan-lalu: input −25 s/d −31 ("25•..31•") ditukar jadi (−31,−25) →
+filter kronologis 0 baris (bukti: semua kombinasi dua-negatif kosong).
+Jalur export sudah benar sejak v3.11.1 (kunci kronologis) — handler UI
+terlewat. Fix: swap memakai `tgl_chrono_key` (mirror export persis).
+
+### Fix 6 (P1) — Peta sa/bk (main.py) kunci RAW vs lookup fn_audit ternormalisasi
+`_extract_append1_maps` membangun peta kunci RAW sementara lookup
+`_attach_so_kemarin`/blok COM memakai kunci kanonik (upper+rapat-spasi)
+→ nama mixed-case/spasi-ganda (nyata: "GULA  MERAH") **miss senyap** →
+Qty SO Kemarin/BK salah (bukti: BK 20 dianggap 0 → COM −80 vs −90).
+Fix: kunci peta dinormalisasi helper yang sama persis dgn sisi lookup.
+
+### Fix 7 (MED — diakui CHANGELOG v3.11.35 sebagai P1 yang belum difix) — po_keterangan kunci campuran RAW×kanonik
+(1) `item_3224`/`in32`/`in99` RAW vs data append1 kanonik → label
+**"Potensi PO belum dibuat" MENYALA PALSU** utk pasangan ber-ejaan drift
+(bukti: "Air Mineral 600ML" vs "AIR MINERAL 600ML" → in32 miss →
+dianggap 0 padahal PO sudah dibuat & diterima). (2) `po_nomor_map_3243`
+/`po_status_map_3243`/`po_nomor_map` kunci RAW ("1370.mlgpar"→"mlgpar"
+≠ "MLGPAR") → Nomor/Status PO **kosong** utk pasangan drifted (contoh
+nyata v3.11.34). Fix: normalisasi `norm_nama_barang_key`/`norm_nama_
+resto_key` **kedua sisi** utk 4 peta + lookup tipis.
+
+### Fix 8 (MED-HIGH) — Follow Up: auto-resolve palsu + kunci RAW + export + heading
+(a) `auto_resolve_pending` menandai SELESAI bila `3.DEVIASI@h == 0`
+padahal snapshot diambil dari basis 42.17 (mode default) → **auto-DONE
+palsu** tiap re-run padahal tab Deviasi & kolom Deviasi follow-up masih
+−50 (bukti eksekusi). Fix: syarat **basis konsisten** — snapshot.sistem
+harus == saldo running revisi di H (epsilon 1e-6); beda basis (42.17) →
+tetap menunggu (resolusi manual). (b) kunci pasangan RAW → snapshot lama
+pra-v3.11.10 ("Ayam Broiler") vs data revisi kanonik ("AYAM BROILER") →
+auto-done "pasangan tidak ada lagi" PALSU. Fix: normalisasi kedua sisi.
+(c) Export Keterangan menulis segmen ANALISA tanpa prefiks "Analisa: "
+(regresi ambigu FIX 6d1-04 di UI). Fix: export memakai `_cek_display_
+text` yang sama. (d) Heading kolom T-2..T+2 = `h_ref+offset` mentah →
+label "−1"/"0" di H≤2 padahal kolom itu saldo penutupan bulan lalu.
+Fix: heading bulan-lalu "31•"/"30•" (kunci penutupan = tanggal negatif
+terkecil ber-baris 1.SO, mirror `_closing_key` deviasi_view) + fallback
+"lalu"; export ikut.
+
+### Fix 9 (LOW-MED) — fn_2205: resto string-kosong lolos → pasangan hantu
+`dropna` saja — pelanggan "X ()" menghasilkan resto `""` → baris OUT
+masuk pivot sebagai pasangan `(barang, '')` (docstring menjanjikan
+dibuang; semua reader lain memfilter `str.strip() != ""`). Fix: mirror
+pola reader lain.
+
+### Fix 10 (LOW) — Rincian PO: baris TANPA Nomor # hilang senyap
+`groupby("Nomor #")` default dropna=True → baris PO tanpa nomor lenyap
+dari tabel & grand total (bukti: 4 baris → tampil "2 PO · 3 dari 4",
+grand total 17 seharusnya 24). Fix: `dropna=False` + label induk
+"(Tanpa Nomor)" + jalur filter ⧩ #0 ikut memetakan NA.
+
+### Fix 11 (MED) — Saldo Minus/Kronis: `fill_value=0.0` MENGARANG saldo 0
+Pivot per (pasangan × tanggal) memfabrikasi sel 0 utk tanggal tanpa
+baris → `Max Qty`/`Tipe` salah (bukti: pasangan terekam t3=−5 & t5=−2 →
+Max Qty 0.0 seharusnya −2; Tipe Fluktuatif seharusnya Konsisten —
+kontra docstring sendiri). Fix: pivot TANPA fill_value; Min/Max/Tipe/
+Frek hanya atas tanggal TEREKAM (Durasi tetap kalender; override 42.17
+tgl H tetap bekerja; deteksi minus tak berubah).
+
+### Fix 12 (LOW) — `fmt_harga_id` membuang tanda negatif
+`av = abs(v)` tanpa mengembalikan tanda → harga negatif (Nilai Saldo
+Akhir negatif ÷ Qty) tampil positif. Fix: negatif dalam kurung
+"(1.825,50)" — konsisten `_fmt_num`.
+
+### Fix 13 (LOW) — "barang tak ada di 41.09" vs "harga 41.09 kosong" tak terbedakan
+`lookup_harga_pair` mengembalikan tuple identik utk dua kasus berbeda →
+keterangan anak tab Tanpa Harga selalu "barang tak ada di 41.09" &
+cabang "harga 41.09 kosong" dead code — melanggar janji docstring
+`fn_4109.build_harga_map`. Fix: sentinel label khusus (bentuk tuple
+3-elemen dipertahankan — pemanggil luar aman) + `_noharga_ket`
+menerjemahkan keduanya benar.
+
+### Yang TERVERIFIKASI BENAR (tak diubah)
+Running stock `SA+Σ(IN−OUT−BK)`; `3.DEVIASI = SO − SALDO AKHIR`;
+`7.Selisih IN = BM − IN`; jendela SO bulan-lalu −25..−31 & IN 5-hari-
+terakhir (32.24/4205 lalu) tanpa off-by-one; konversi satuan arah benar
+(qty×rasio; harga `harga41 × rasio_rekap ÷ rasio_41`); `Nominal =
+harga × Deviasi` konsisten lintas tab; kunci penutupan bulan-lalu;
+presence-awareness append1; dedup 9901; whitelist 42.17 versi-toleran;
+pembanding SO tanggal 1 = SO bulan lalu; PO Menunggu konversi satuan
+terkecil; semua ambang CEK (Drastis/Manual/ACR/COM configurable);
+urutan & prioritas label CEK; format angka Indonesia.
+
+### Verifikasi
+`test_ui_redesign.py` **1630 PASS / 3 FAIL** — 3 gagal zoom pre-existing
+(identik baseline `git stash` pada tree bersih, tak terkait formula);
+`test_mock.py` e2e pipeline **ALL TESTS PASSED**; sanity eksekusi per
+fix (probe sintetik kode asli) semuanya PASS sebelum/validasi sesudah.
+
 ## v3.11.58 — DEEP AUDIT "mapping manual di config" (KategoriManual) → 5 fix
 
 User: *"mapping manual di config coba deep audit"*. Audit penuh alur
