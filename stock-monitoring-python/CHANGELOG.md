@@ -3,6 +3,62 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.11.57 — FIX pra-pipeline: nilai KETIK tanpa Enter terbuang senyap
+
+User: *"cek juga kenapa kolom H sebelum proses pipeline aku isi 5 misalnya
+kok di tab deviasi gr dan pcs tetap 25 mendeteksi tanggal terdekat? harusnya
+misal aku setting sebelum pipeline 5 itu juga ganti 5"*.
+
+### Root cause (terbukti — repro app ASLI + Xvfb: uncheck Auto → ketik 5 → klik MULAI tanpa Enter → state tetap 25; kontrol "dengan Enter" → 5)
+Spinbox kartu Pra-Pipeline (v3.11.56) hanya punya DUA jalur commit:
+`command=` (HANYA klik panah ▲▼) dan `bind("<Return>")` (HANYA Enter).
+Tidak ada `<FocusOut>` dan `_start_pipeline` tidak me-flush — alur natural
+user **"ketik 5 → langsung klik 🚀 MULAI PROSES"** membuang nilai secara
+SENYAP. Lebih parah: kartu tetap MENAMPILKAN "5" (StringVar berubah saat
+mengetik) padahal state H masih 25 — UI menampilkan nilai yang TIDAK
+dipakai. Akibat: H terkunci di nilai deteksi saat uncheck Auto (7/14/25)
+→ `load_data` menjaga kunci → tab 📦 Deviasi GR & 🧩 Deviasi PCS menampilkan
+snap tanggal terdekat (25), bukan 5 yang user minta. Bukti: kontrol
+"dengan Enter" menghasilkan 5 — satu-satunya perbedaan = commit.
+
+### Fix
+- **`<FocusOut>` commit** di SEMUA 6 spin pra-pipeline (H, ACR, COM,
+  Drastis, Manual, Kronis) via `_on_pre_focusout(which)` — commit SENYAP:
+  teks tak valid/di luar rentang → balik ke nilai state tanpa dialog
+  (FocusOut tidak boleh memicu messagebox modal — fokus berperebutan →
+  FocusOut berantai). `_pre_float(..., silent=True)` untuk jalur ini.
+- **`_flush_prepipeline_card()`** dipanggil di `_start_pipeline` SETELAH
+  semua guard (jalur tombol 🚀, F5, ↻ Refresh Sumber) — jaring pengaman:
+  nilai ketik DIJAMIN terpakai run INI walau fokus tidak pernah keluar
+  dari spin. Kontrak kartu "set sekali → proses" kini penuh: apa yang
+  tertulis di kartu saat MULAI ditekan = yang dipakai render pertama.
+- **Guard mode Auto** di `_on_pre_h_change`: checkbox Auto tercentang →
+  flush/FocusOut TIDAK mengunci preset dari teks sisa spin (mode Auto =
+  tanpa preset, deteksi dinamis utuh).
+
+### Repair test suite (pre-existing, ditemukan saat verifikasi fix)
+Suite `test_ui_redesign.py` **CRASH total sejak v3.11.53** (AttributeError
+`_dev_bulanan_mode` — API mode-auto dihapus v3.11.53 tapi cek §95-D tak
+diupdate; kegagalan bawahnya tertutup crash) + 13 cek stale tertinggal
+era v3.9.x–v3.11.8. Kini: **1630 PASS / 3 FAIL** (3 sisanya dependen
+lingkungan sandbox Xvfb — clamp layar 1280×900 + metrik font "times";
+identik gagalnya di HEAD pra-perubahan ini, hijau di mesin Windows asli).
+- §95-D1–D4/D8: kontrak baru mode manual-only (tanpa
+  `_dev_bulanan_mode`/`_auto_load_lalu`/SegmentBar; `DeviasiBulananMode`
+  tak ditulis lagi).
+- §94-E1/§95-D7/§96-D3/§96-D5: fixture file JULI → `19.JULI 2026.xlsx`
+  (konvensi prefix 12+bulan v3.11.52).
+- §60/§65-F1: `kategori_multi_values` kini 4 nilai rekap+stem (v3.11.45).
+- §92-F4: `_kategori_values` nilai rekap kanonik di depan (v3.11.45).
+- §63 E2E anak tab: 4 anak tab (+ Saldo Sistem Minus v3.11.42, Analisa
+  Kronis v3.11.47).
+- Cek versi: hard-pin "3.11.39" (stale 17 versi) → konsistensi
+  APP_VERSION ↔ entri teratas CHANGELOG; headline README root+app
+  disinkronkan ke v3.11.57.
+- App: `_PIPELINE_WARN_RE` + `detect_data_period` (warning fallback
+  periode v3.11.9 luput dari pola → tak terhitung `_schema_warnings` —
+  kontrak §82b-1).
+
 ## v3.11.56 — Pra-Pipeline "set sekali" + deep-link lintas tab + UX (U2–U6)
 
 User: *"kerjakan U2,U3,U4,U5,U6 dan sekarang aku bisa set kolom H atau key

@@ -964,8 +964,19 @@ def main():
           len(app.notebook.tabs()) == 9,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
-    check("Versi = 3.11.39", APP_VERSION == "3.11.39",
-          f"got {APP_VERSION}")
+    # v3.11.57 — dulunya hard-pin "APP_VERSION == 3.11.39" (stale 17
+    # versi — selalu gagal tiap bump). Kini cek KONSISTENSI: versi aktif
+    # HARUS = entri teratas CHANGELOG.md (bump tanpa changelog → gagal).
+    import re as _re_ver
+    _cl_head = _re_ver.search(
+        r"^## v(\d+\.\d+\.\d+)",
+        Path(__file__).with_name("CHANGELOG.md").read_text(
+            encoding="utf-8"),
+        _re_ver.MULTILINE)
+    check(f"Versi = {APP_VERSION} & sinkron dgn entri teratas CHANGELOG",
+          _cl_head is not None and _cl_head.group(1) == APP_VERSION,
+          f"APP_VERSION={APP_VERSION} · CHANGELOG teratas="
+          f"{_cl_head.group(1) if _cl_head else None}")
     check("(v3.9.12) atribut app.pareto_view / app.tab_pareto DIHAPUS",
           not hasattr(app, "pareto_view") and not hasattr(app, "tab_pareto"))
     check("(v3.9.12) judul tab 'Pareto' tidak ada di notebook",
@@ -1164,8 +1175,13 @@ def main():
             adonan2 = iid
     if adonan2:
         n_child = len(pv.tree.get_children(adonan2))
-        check("hide-empty OFF: 9 metric tampil (tanpa COM)",
-              n_child == 9, f"got {n_child}")
+        # make_mock_append1 memuat 8 JENIS (tanpa '7.Selisih IN' — mock
+        # tak mensimulasikan in_detail) → hide-empty OFF = 8 baris metric
+        # (semua kind yang ADA di data; '6.PEMAKAIAN (COM)' eksklusif
+        # mode tanggal). Dulu berharap 9 — angka era fixture lama.
+        check("hide-empty OFF: SEMUA metric yang ada di data tampil "
+              "(8 kind fixture, tanpa COM/Selisih IN)",
+              n_child == 8, f"got {n_child}")
     pv.hide_empty_var.set(True)
 
     # ---- PIVOT MODE TANGGAL ----
@@ -11897,6 +11913,9 @@ def main():
         KATEGORI_DEFAULT_LABEL as _KDL60,
     )
     from src.pipeline.helpers import (
+        KATEGORI_GABUNGAN_VALUES as _KGV60,
+    )
+    from src.pipeline.helpers import (
         kategori_multi_values as _kmv60,
     )
     from src.ui.theme import rescale_named_fonts as _rsf60
@@ -11905,18 +11924,21 @@ def main():
 
     # --- (a) kategori_multi_values CASE-INSENSITIVE (audit 3-b: dulu
     # exact-case — asimetri vs kategori_passthrough yang lower) ---------
-    check("(v3.9.50) kategori_multi_values: label gabungan LOWERCASE "
-          "→ 2 nilai (case-insensitive — parity passthrough)",
-          _kmv60(_KDL60.lower()) == ("COM DEVIASI - RESTO",
-                                     "Biaya Packaging - RESTO"),
+    # v3.11.45 — return kini KATEGORI_GABUNGAN_VALUES = 2 nilai rekap
+    # + 2 STEM pendek (fix mapping manual 'COM DEVIASI' tak muncul di
+    # filter default) — bukan lagi 2 nilai rekap saja.
+    check("(v3.9.50+v3.11.45) kategori_multi_values: label gabungan "
+          "LOWERCASE → 4 nilai rekap+stem (case-insensitive — parity "
+          "passthrough)",
+          _kmv60(_KDL60.lower()) == _KGV60,
           f"got {_kmv60(_KDL60.lower())!r}")
     check("(v3.9.50) kategori_multi_values: label gabungan + spasi tepi "
-          "→ 2 nilai",
+          "→ nilai tetap dikenali",
           _kmv60("  " + _KDL60 + "  ") is not None)
-    check("(v3.9.50) kategori_multi_values: kapitalisasi acak tetap "
-          "dikenali (bukan strict)",
+    check("(v3.9.50+v3.11.45) kategori_multi_values: kapitalisasi acak "
+          "tetap dikenali (bukan strict) → 4 nilai rekap+stem",
           _kmv60("Com Deviasi - Resto + Biaya Packaging - Resto")
-          == ("COM DEVIASI - RESTO", "Biaya Packaging - RESTO"))
+          == _KGV60)
 
     # --- (b) kontras cek_manual (audit 3-c: 2,89:1 → 3,9:1 di grp_head) -
     _top60 = tk.Toplevel(root)
@@ -13202,7 +13224,7 @@ def main():
     # --- (a) F1: KATEGORI label RINGKA (default gabungan 2 kategori) -----
     from src.pipeline.helpers import KATEGORI_DEFAULT_LABEL as _KDL65
     from src.pipeline.helpers import (
-        KATEGORI_REKAP_VALUES as _KRV65,
+        KATEGORI_GABUNGAN_VALUES as _KGV65,
     )
     from src.pipeline.helpers import (
         kategori_multi_values as _kmv65,
@@ -13214,11 +13236,12 @@ def main():
           "Packaging)' (dropdown kembali tampil daftar kategori DBS)",
           _KDL65 == "Deviasi (COM + Packaging)",
           f"got {_KDL65!r}")
-    check("(v3.9.55) F1: label lama 49-char tetap DIKENALI (seleksi "
-          "tersimpan/pemanggil lama — kompatibilitas)",
+    check("(v3.9.55+v3.11.45) F1: label lama 49-char tetap DIKENALI "
+          "(seleksi tersimpan/pemanggil lama — kompatibilitas; return "
+          "kini 4 nilai rekap+stem)",
           _kmv65("COM DEVIASI - RESTO + Biaya Packaging - RESTO")
-          == _KRV65
-          and _kmv65("deviasi (com + packaging)") == _KRV65,
+          == _KGV65
+          and _kmv65("deviasi (com + packaging)") == _KGV65,
           "label lama tak dikenali")
     check("(v3.9.55) F1: label ringka BUKAN passthrough blank (semantik "
           "STRICT v3.9.53 utuh — BASKOM tetap tersembunyi)",
@@ -17345,10 +17368,12 @@ def main():
     # anak tab: default GLOBAL 'Semua' + kolom Kategori + filter
     _tabs75 = [str(_rv75._sub_nb.tab(_t75, "text"))
                for _t75 in _rv75._sub_nb.tabs()]
-    check("(v3.9.63) E2E ANAK TAB: sub-notebook 2 anak tab ('Per "
-          "Resto' + 'Tanpa Harga') + default kategori anak 'Semua' "
+    check("(v3.9.63+v3.11.42+v3.11.47) E2E ANAK TAB: sub-notebook 4 anak "
+          "tab ('Per Resto' + 'Tanpa Harga' + 'Saldo Sistem Minus' + "
+          "'Analisa Kronis') + default kategori anak 'Semua' "
           "(GLOBAL) + kolom Kategori + SUMPIT '(Tanpa Kategori)'",
-          _tabs75 == ["Per Resto", "Tanpa Harga"]
+          _tabs75 == ["Per Resto", "Tanpa Harga",
+                      "Saldo Sistem Minus", "Analisa Kronis"]
           and _rv75._nh_kategori_var.get() == "Semua"
           and "Kategori" in list(_rv75.tree_noharga["columns"])
           and any(
@@ -20886,11 +20911,13 @@ def main():
                    for k in app.kat_map_tree.get_children("")] ==
               ["BRG KOSONG 1", "BRG KOSONG 2"],
               "save/refresh gagal")
-        check("(v3.11.8) §92-F4 nilai combobox dialog: kategori dari "
-              "data + mapping manual (sorted — user bisa pilih COM "
-              "Deviasi / Packaging / Beban Gas / ketik baru)",
+        check("(v3.11.8+v3.11.45) §92-F4 nilai combobox dialog: kategori "
+              "dari data + mapping manual — nilai rekap KANONIK DI DEPAN "
+              "('Biaya Packaging - RESTO' duluan), sisanya sorted (user "
+              "bisa pilih COM Deviasi / Packaging / Beban Gas / ketik "
+              "baru)",
               app._kategori_values() ==
-              ["BAHAN", "BEBAN GAS - RESTO", "Biaya Packaging - RESTO"],
+              ["Biaya Packaging - RESTO", "BAHAN", "BEBAN GAS - RESTO"],
               f"got {app._kategori_values()}")
         # pencarian live (user: "ada filter juga biar aku enak cari nama
         # barang nya") — trace var → repopulasi tanpa recompute rows
@@ -21706,16 +21733,18 @@ def main():
 
     # ---- (E) auto file deviasi bulan lalu ---------------------------------
     _tmp94e = _tf94.mkdtemp(prefix="t94_devbulan_")
-    for _nm94 in ("20.AGUSTUS 2026.xlsx", "20.JULI 2026.xlsx",
+    # v3.11.52 — prefix nama file = 12+bulan (JAN=13 … JUL=19, AGU=20)
+    for _nm94 in ("20.AGUSTUS 2026.xlsx", "19.JULI 2026.xlsx",
                   "20.agustus 2026.xlsb", "readme.txt"):
         (Path(_tmp94e) / _nm94).write_text("x", encoding="utf-8")
     _paths94 = _abp94((_tmp94e, (2026, 9), 2))
-    check("(v3.11.9+v3.11.30) §94-E1 auto_bulanan_paths (relokasi "
-          "deviasi_file): period Sep-2026 + jumlah "
+    check("(v3.11.9+v3.11.30+v3.11.52) §94-E1 auto_bulanan_paths "
+          "(relokasi deviasi_file): period Sep-2026 + jumlah "
           "2 → AGU & JUL 2026 urut KRONOLOGIS + .xlsx MENANG atas .xlsb "
-          "(case-insensitive uppercase) + non-Excel diabaikan",
+          "(case-insensitive uppercase) + non-Excel diabaikan + prefix "
+          "12+bulan (JULI=19 — v3.11.52)",
           [Path(p).name for p in _paths94] ==
-          ["20.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
+          ["19.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
           f"got {[Path(p).name for p in _paths94]}")
     check("(v3.11.9+v3.11.30) §94-E2 wrap tahun (period Jan-2027 jumlah 2 "
           "→ Des 2026 + Nov 2026 — tak ada di folder) → [] + cfg invalid "
@@ -22223,39 +22252,47 @@ def main():
     _cfg95d.write_text(_json95.dumps({}, ensure_ascii=False),
                        encoding="utf-8")
     _fld95 = tempfile.mkdtemp(prefix="t95_files_")
-    for _nm95 in ("20.AGUSTUS 2026.xlsx", "20.JULI 2026.xlsx"):
+    # v3.11.52 — prefix nama file = 12+bulan (JULI=19, AGU=20)
+    for _nm95 in ("20.AGUSTUS 2026.xlsx", "19.JULI 2026.xlsx"):
         (Path(_fld95) / _nm95).write_text("x", encoding="utf-8")
     _appmod95.CONFIG_PATH = _cfg95d
     try:
-        check("(v3.11.11) §95-D1 _dev_bulanan_mode: DEFAULT BARU = manual "
-              "(config tanpa key — user: 'aku bisa proses pipeline sendiri "
-              "tidak jadi 1 lagi')",
-              app._dev_bulanan_mode() == "manual")
-        check("(v3.11.11) §95-D2 kartu: mode bar ada + default Manual "
-              "(indeks 0) + tombol + status menyebut manual",
-              getattr(app, "dev_bulanan_mode_bar", None) is not None
-              and app.dev_bulanan_mode_bar.active == 0
-              and "manual" in app.dev_bulanan_status_var.get(),
-              f"active={app.dev_bulanan_mode_bar.active} "
+        check("(v3.11.53) §95-D1 mode auto DIHAPUS TOTAL: tanpa "
+              "_dev_bulanan_mode/_auto_load_lalu + mode selector "
+              "SegmentBar tidak ada (user: 'hapus auto file deviasi "
+              "bulan lalu' — selalu manual)",
+              not hasattr(app, "_dev_bulanan_mode")
+              and not hasattr(app, "_auto_load_lalu")
+              and getattr(app, "dev_bulanan_mode_bar", None) is None)
+        check("(v3.11.53) §95-D2 kartu: form folder+jumlah ada + status "
+              "menyebut manual/muat via tombol (satu-satunya jalur "
+              "load file bulan lalu)",
+              getattr(app, "dev_bulanan_folder_var", None) is not None
+              and getattr(app, "dev_bulanan_jumlah_var", None) is not None
+              and "manual" in app.dev_bulanan_status_var.get()
+              and "tombol" in app.dev_bulanan_status_var.get(),
               f"status={app.dev_bulanan_status_var.get()!r}")
-        # simpan mode ⚡ Otomatis → config key DeviasiBulananMode='auto'
+        # simpan folder+jumlah → config key Folder/Jumlah; key mode
+        # TIDAK ditulis lagi (v3.11.53 — auto dihapus)
         app.dev_bulanan_folder_var.set(_fld95)
         app.dev_bulanan_jumlah_var.set("2")
-        app.dev_bulanan_mode_bar.set_active_silent(1)
         app._dev_bulanan_save()
         _saved95 = _json95.loads(_cfg95d.read_text(encoding="utf-8"))
-        check("(v3.11.11) §95-D3 Simpan mode Otomatis → key "
-              "DeviasiBulananMode='auto' + _dev_bulanan_mode() ikut 'auto'",
-              _saved95.get("DeviasiBulananMode") == "auto"
-              and app._dev_bulanan_mode() == "auto",
-              f"got {_saved95.get('DeviasiBulananMode')!r}")
-        # balik manual → tersimpan 'manual'
-        app.dev_bulanan_mode_bar.set_active_silent(0)
+        check("(v3.11.53) §95-D3 Simpan → key DeviasiBulananFolder/"
+              "DeviasiBulananJumlah tersimpan + key DeviasiBulananMode "
+              "TIDAK ditulis lagi",
+              _saved95.get("DeviasiBulananFolder") == _fld95
+              and _saved95.get("DeviasiBulananJumlah") == 2
+              and "DeviasiBulananMode" not in _saved95,
+              f"folder={_saved95.get('DeviasiBulananFolder')!r} "
+              f"jumlah={_saved95.get('DeviasiBulananJumlah')!r} "
+              f"mode={_saved95.get('DeviasiBulananMode')!r}")
+        # simpan ulang → tetap tanpa key mode (idempoten)
         app._dev_bulanan_save()
-        check("(v3.11.11) §95-D4 balik Manual → tersimpan 'manual' + "
-              "status kartu menyebut tombol",
+        check("(v3.11.53) §95-D4 simpan ulang → tetap TANPA key "
+              "DeviasiBulananMode + status menyebut muat via tombol",
+              "DeviasiBulananMode" not in
               _json95.loads(_cfg95d.read_text(encoding="utf-8"))
-              .get("DeviasiBulananMode") == "manual"
               and "muat via tombol" in app.dev_bulanan_status_var.get(),
               f"status={app.dev_bulanan_status_var.get()!r}")
         # tombol 📂: validasi folder kosong
@@ -22294,29 +22331,24 @@ def main():
             root.update()
         finally:
             app._load_lalu_paths = _orig_ll95
-        check("(v3.11.11+v3.11.30) §95-D7 happy path: 2 file dimuat "
-              "KRONOLOGIS (JULI lalu AGUSTUS 2026 — periode Sep-2026 "
-              "mundur 2) ke _lalu_file_df (TANPA pindah tab — komparasi "
-              "dihapus) + flash sukses",
-              _rec95.get("paths") == ["20.JULI 2026.xlsx",
+        check("(v3.11.11+v3.11.30+v3.11.52) §95-D7 happy path: 2 file "
+              "dimuat KRONOLOGIS (JULI lalu AGUSTUS 2026 — periode "
+              "Sep-2026 mundur 2) ke _lalu_file_df (TANPA pindah tab — "
+              "komparasi dihapus) + flash sukses",
+              _rec95.get("paths") == ["19.JULI 2026.xlsx",
                                       "20.AGUSTUS 2026.xlsx"]
               and "2 file deviasi bulan lalu dimuat"
               in app.dev_bulanan_status_var.get(),
               f"rec={_rec95}")
-        # wiring pasca-pipeline: mode manual → _auto_load_lalu NO-OP
-        # (v3.11.30 — app-level; komparasi _auto_bulanan_cfg dihapus)
-        _dbul95 = app._dev_bulanan_cfg({"period": [2026, 9]})
-        _mode95 = app._dev_bulanan_mode()
+        # wiring pasca-pipeline: TIDAK ADA auto-load (v3.11.53 —
+        # _auto_load_lalu dihapus total; file bulan lalu murni via
+        # tombol 📂; _lalu_file_df tak tersentuh pipeline-done)
         app._lalu_file_df = None
-        try:
-            app._auto_load_lalu({"period": [2026, 9]})
-        except Exception:
-            pass
-        check("(v3.11.11+v3.11.30) §95-D8 wiring _on_pipeline_done (mode "
-              "manual): _auto_load_lalu NO-OP (file bulan lalu murni "
-              "via tombol; _lalu_file_df tak tersentuh)",
-              app._lalu_file_df is None,
-              f"mode={_mode95} cfg={_dbul95}")
+        check("(v3.11.53) §95-D8 wiring _on_pipeline_done: TANPA "
+              "auto-load deviasi bulan lalu (_auto_load_lalu dihapus "
+              "— _lalu_file_df murni via tombol 📂)",
+              not hasattr(app, "_auto_load_lalu")
+              and app._lalu_file_df is None)
     finally:
         _appmod95.CONFIG_PATH = _orig_cfg95
         with contextlib.suppress(Exception):
@@ -22578,7 +22610,8 @@ def main():
     # D5 butuh folder dgn KEDUA file (utk uji kronologis multi-file);
     # _fld96 utk D3 hanya ber-SATU file (tanda ✓ vs ✗).
     _fld96b = tempfile.mkdtemp(prefix="t96_files_b_")
-    for _nm96 in ("20.AGUSTUS 2026.xlsx", "20.JULI 2026.xlsx"):
+    # v3.11.52 — prefix nama file = 12+bulan (JULI=19, AGU=20)
+    for _nm96 in ("20.AGUSTUS 2026.xlsx", "19.JULI 2026.xlsx"):
         (Path(_fld96b) / _nm96).write_text("x", encoding="utf-8")
     _ar96 = app.audit_result
     try:
@@ -22587,14 +22620,15 @@ def main():
         app.audit_result = {"period": [2026, 9]}
         app._dev_bulanan_status_default()
         _st96d = app.dev_bulanan_status_var.get()
-        check("(v3.11.12) §96-D3 status transparansi (user: \"gimana cara "
+        check("(v3.11.12+v3.11.52) §96-D3 status transparansi (user: \"gimana cara "
               "tau misal sekarang bulan september apakah program otomatis "
               "ambil yang agustus?\"): baris 'Periode data: SEPTEMBER 2026 "
               "(data run terakhir) → file dicari: 20.AGUSTUS 2026 ✓ · "
-              "20.JULI 2026 ✗' + baris lama utuh (manual +)",
+              "19.JULI 2026 ✗' (prefix 12+bulan — v3.11.52) + baris lama "
+              "utuh (manual +)",
               "Periode data: SEPTEMBER 2026" in _st96d
               and "20.AGUSTUS 2026 ✓" in _st96d
-              and "20.JULI 2026 ✗" in _st96d
+              and "19.JULI 2026 ✗" in _st96d
               and "manual" in _st96d and "muat via tombol" in _st96d,
               f"got {_st96d!r}")
         app.audit_result = None
@@ -22605,12 +22639,12 @@ def main():
               "Periode data:" in _st96e
               and "bulan komputer" in _st96e,
               f"got {_st96e!r}")
-        check("(v3.11.12+v3.11.30) §96-D5 auto_bulanan_paths (relokasi "
-              "deviasi_file) via bulan_mundur_list: perilaku identik "
-              "(Sep-2026 mundur 2 → JULI lalu AGUSTUS kronologis)",
+        check("(v3.11.12+v3.11.30+v3.11.52) §96-D5 auto_bulanan_paths "
+              "(relokasi deviasi_file) via bulan_mundur_list: perilaku "
+              "identik (Sep-2026 mundur 2 → JULI lalu AGUSTUS kronologis)",
               [Path(_p96).name for _p96 in
                auto_bulanan_paths((_fld96b, (2026, 9), 2))]
-              == ["20.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
+              == ["19.JULI 2026.xlsx", "20.AGUSTUS 2026.xlsx"],
               "parity gagal")
     finally:
         app.audit_result = _ar96

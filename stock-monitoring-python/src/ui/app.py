@@ -209,7 +209,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.11.56"  # v3.11.56 — PRA-PIPELINE (user: "semua aku bisa set di awal dulu terus proses pipeline biar gak nunggu 2x") + U2 deep-link lintas tab + U3 Panel Ringkasan + U4 Ctrl+1..9 + U5 hint statusbar + U6 ambang Drastis/Manual configurable. Kartu Pra-Pipeline tab 🚀 Proses: Tanggal H preset terkunci (lock_preset — load_data tak men-snap), ambang ACR/COM/Drastis/Manual + Saldo Sistem + threshold Kronis; render pertama langsung pakai nilai user.
+APP_VERSION = "3.11.57"  # v3.11.57 — FIX pra-pipeline (user: "kolom H sebelum proses pipeline aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi tanggal terdekat"): nilai yang DIKETIK di spin kartu Pra-Pipeline kini di-commit saat <FocusOut> + di-flush tepat sebelum pipeline berjalan (_start_pipeline) — sebelumnya hanya panah spin/Enter yang meng-commit, alur 'ketik 5 → klik 🚀 MULAI PROSES' membuang nilai secara senyap. v3.11.56 — PRA-PIPELINE + U2 deep-link lintas tab + U3 Panel Ringkasan + U4 Ctrl+1..9 + U5 hint statusbar + U6 ambang Drastis/Manual configurable.
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -1928,9 +1928,12 @@ _FILTER_LOAD_WARNINGS: list = []
 # ulang akan menggandakan angka di status).
 # KONTRAK TES: §82b memindai SEMUA literal print WARNING di modul
 # pipeline dan gagal bila ada format baru yang tak tertangkap pola ini.
+# v3.11.57 — +detect_data_period (warning fallback periode v3.11.9
+# luput dari pola → tak terhitung _schema_warnings; ditemukan §82b-1
+# setelah crash suite v3.11.53 di-repair).
 _PIPELINE_WARN_RE = re.compile(
     r"\[WARNING\] (?:combine_folder|fn_rekap_mentah|File harga"
-    r"|Harga 41\.09|4217|42\.17)"
+    r"|Harga 41\.09|4217|42\.17|detect_data_period)"
     r"|\[(?:fn_\w+|Append1)\][^\n]*?WARNING"
 )
 
@@ -4974,6 +4977,14 @@ class StockMonitorApp:
             width=4, font=font(9), command=self._on_pre_h_change)
         self._pre_h_spin.pack(side="left", padx=(6, 6))
         self._pre_h_spin.bind("<Return>", lambda e: self._on_pre_h_change())
+        # v3.11.57 — FIX laporan user ("kolom H aku isi 5 ... tetap 25"):
+        # command= spinbox HANYA menembak klik panah ▲▼; <Return> hanya
+        # tombol Enter. Ketik lalu klik 🚀 MULAI PROSES = nilai TERBUANG
+        # senyap (kartu bahkan masih menampilkan nilai itu). Kini nilai
+        # di-commit juga saat fokus meninggalkan spin (<FocusOut>) —
+        # jaring kedua: _flush_prepipeline_card di _start_pipeline.
+        self._pre_h_spin.bind(
+            "<FocusOut>", lambda e: self._on_pre_focusout("h"))
         # Auto = perilaku lama (deteksi dinamis + snap data — no preset)
         self._pre_auto_var = tk.BooleanVar(
             value=not getattr(self._shared_h, "preset_locked", False))
@@ -4996,6 +5007,8 @@ class StockMonitorApp:
             command=self._on_pre_acr_change)
         acr_spin.pack(side="left", padx=(6, 0))
         acr_spin.bind("<Return>", lambda e: self._on_pre_acr_change())
+        acr_spin.bind(
+            "<FocusOut>", lambda e: self._on_pre_focusout("acr"))  # v3.11.57
         tk.Label(r1, text="% ×BOM", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 16))
 
@@ -5009,6 +5022,8 @@ class StockMonitorApp:
             command=self._on_pre_com_change)
         com_spin.pack(side="left", padx=(6, 0))
         com_spin.bind("<Return>", lambda e: self._on_pre_com_change())
+        com_spin.bind(
+            "<FocusOut>", lambda e: self._on_pre_focusout("com"))  # v3.11.57
         tk.Label(r1, text="% dr median", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 0))
 
@@ -5024,7 +5039,10 @@ class StockMonitorApp:
             increment=5, width=5, font=font(9),
             command=self._on_pre_drastis_change)
         drastis_spin.pack(side="left", padx=(6, 0))
-        drastis_spin.bind("<Return>", lambda e: self._on_pre_drastis_change())
+        drastis_spin.bind(
+            "<Return>", lambda e: self._on_pre_drastis_change())
+        drastis_spin.bind(
+            "<FocusOut>", lambda e: self._on_pre_focusout("drastis"))  # v3.11.57
         tk.Label(r2, text="% drastis", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 16))
 
@@ -5038,6 +5056,8 @@ class StockMonitorApp:
             command=self._on_pre_manual_change)
         manual_spin.pack(side="left", padx=(6, 0))
         manual_spin.bind("<Return>", lambda e: self._on_pre_manual_change())
+        manual_spin.bind(
+            "<FocusOut>", lambda e: self._on_pre_focusout("manual"))  # v3.11.57
         tk.Label(r2, text="× rasio", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 16))
 
@@ -5063,6 +5083,8 @@ class StockMonitorApp:
             command=self._on_pre_kronis_change)
         kronis_spin.pack(side="left", padx=(6, 0))
         kronis_spin.bind("<Return>", lambda e: self._on_pre_kronis_change())
+        kronis_spin.bind(
+            "<FocusOut>", lambda e: self._on_pre_focusout("kronis"))  # v3.11.57
         tk.Label(r2, text="hari (Frek Minus — anak tab Analisa Kronis)",
                  bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
             side="left", padx=(3, 0))
@@ -5108,16 +5130,21 @@ class StockMonitorApp:
             with contextlib.suppress(tk.TclError):
                 var.set(str(int(new_h)))
 
-    def _pre_float(self, var, cur, lo, hi, title, msg):
+    def _pre_float(self, var, cur, lo, hi, title, msg, silent=False):
         """v3.11.56 — parse nilai spinbox pra-pipeline (koma/dot ID) +
-        validasi rentang; return None + reset var bila tak valid."""
+        validasi rentang; return None + reset var bila tak valid.
+        v3.11.57 — silent=True (jalur <FocusOut>): teks tak valid cukup
+        di-reset TANPA dialog — FocusOut tidak boleh memicu messagebox
+        modal yang memperebutkan fokus (fokus berpindah lagi saat dialog
+        ditutup → FocusOut berantai)."""
         try:
             val = float(str(var.get()).strip().replace(",", "."))
         except ValueError:
             var.set(self._fmt_pre_num(cur))
             return None
         if not (lo <= val <= hi):
-            messagebox.showwarning(title, msg, parent=self.root)
+            if not silent:
+                messagebox.showwarning(title, msg, parent=self.root)
             var.set(self._fmt_pre_num(cur))
             return None
         return val
@@ -5126,7 +5153,17 @@ class StockMonitorApp:
         """v3.11.56 — pra-pipeline: set H PRESET (terkunci) — dipanggil
         spin command / Enter / uncheck Auto. lock_preset → set() state
         (listener view refresh bila H berubah) + preset_locked menahan
-        snap load_data run pipeline berikutnya."""
+        snap load_data run pipeline berikutnya.
+        v3.11.57 — dipanggil JUGA dari <FocusOut> spin + flush
+        _start_pipeline (FIX "kolom H aku isi 5 ... tetap 25": ketik
+        tanpa Enter kini tetap ter-commit). Guard Auto: mode Auto =
+        spin non-aktif → tidak ada nilai manual untuk dikunci."""
+        # v3.11.57 — mode Auto tercentang: jangan kunci apa pun (FocusOut
+        # pada spin disabled / flush pra-pipeline tidak boleh mengunci
+        # preset dari teks sisa di spin).
+        with contextlib.suppress(tk.TclError):
+            if bool(self._pre_auto_var.get()):
+                return
         try:
             v = int(float(str(self._pre_h_var.get()).strip()))
         except ValueError:
@@ -5169,43 +5206,47 @@ class StockMonitorApp:
             self._pre_h_spin.configure(state="normal")
             self._on_pre_h_change()
 
-    def _on_pre_acr_change(self):
+    def _on_pre_acr_change(self, silent=False):
         val = self._pre_float(
             self._pre_acr_var, self._shared_acr.pct, 1.0, 200.0,
             "Ambang ACR to BOM",
-            "Ambang harus angka 1–200 (% × Total ACR/BOM).")
+            "Ambang harus angka 1–200 (% × Total ACR/BOM).",
+            silent=silent)
         if val is None:
             return
         if self._shared_acr.set(val):
             save_acr_threshold(val)
 
-    def _on_pre_com_change(self):
+    def _on_pre_com_change(self, silent=False):
         val = self._pre_float(
             self._pre_com_var, self._shared_com.pct, 0.0, 500.0,
             "Ambang COM",
-            "Ambang harus angka 0–500 (persen dari |median| selisih COM).")
+            "Ambang harus angka 0–500 (persen dari |median| selisih COM).",
+            silent=silent)
         if val is None:
             return
         if self._shared_com.set(val):
             save_com_ambang(val)
 
-    def _on_pre_drastis_change(self):
+    def _on_pre_drastis_change(self, silent=False):
         val = self._pre_float(
             self._pre_drastis_var, self._shared_drastis.pct, 5.0, 95.0,
             "Ambang Drastis",
             "Ambang harus angka 5–95 (persen perubahan SO vs kemarin). "
-            "50 = bawaan (Turun < 50% / Naik > 150%).")
+            "50 = bawaan (Turun < 50% / Naik > 150%).",
+            silent=silent)
         if val is None:
             return
         if self._shared_drastis.set(val):
             save_drastis_ambang(val)
 
-    def _on_pre_manual_change(self):
+    def _on_pre_manual_change(self, silent=False):
         val = self._pre_float(
             self._pre_manual_var, self._shared_manual.val, 1.05, 5.0,
             "Ambang Hitung Manual",
             "Ambang harus angka 1,05–5,0 (rasio |SO−W|/|W|). "
-            "1,3 = bawaan (sel Y1 sheet user).")
+            "1,3 = bawaan (sel Y1 sheet user).",
+            silent=silent)
         if val is None:
             return
         if self._shared_manual.set(val):
@@ -5236,6 +5277,52 @@ class StockMonitorApp:
         if nr is not None:
             with contextlib.suppress(Exception):
                 nr.set_kronis_threshold(v)
+
+    def _on_pre_focusout(self, which: str):
+        """v3.11.57 — FIX laporan user ("kolom H sebelum proses pipeline
+        aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi
+        tanggal terdekat"): nilai yang DIKETIK di spin kartu Pra-Pipeline
+        kini di-commit saat fokus meninggalkan widget (<FocusOut>).
+
+        ROOT CAUSE: command= ttk.Spinbox HANYA menembak klik panah ▲▼ dan
+        binding <Return> hanya tombol Enter — alur natural user "ketik
+        nilai → langsung klik 🚀 MULAI PROSES" membuang nilai secara
+        SENYAP (kartu bahkan masih MENAMPILKAN nilai yang tidak dipakai;
+        H tetap terkunci di nilai deteksi 7/14/25 → tab 📦/🧩 menampilkan
+        snap tanggal terdekat, bukan angka user).
+
+        Commit di sini SENYAP: teks tak valid/di luar rentang → cukup
+        di-balik ke nilai state (FocusOut tidak boleh memicu dialog
+        modal yang memperebutkan fokus — dialog menutup → fokus berpindah
+        lagi → FocusOut berantai)."""
+        with contextlib.suppress(tk.TclError, AttributeError):
+            if which == "h":
+                # guard Auto ada di _on_pre_h_change (mode Auto = skip)
+                self._on_pre_h_change()
+            elif which == "acr":
+                self._on_pre_acr_change(silent=True)
+            elif which == "com":
+                self._on_pre_com_change(silent=True)
+            elif which == "drastis":
+                self._on_pre_drastis_change(silent=True)
+            elif which == "manual":
+                self._on_pre_manual_change(silent=True)
+            elif which == "kronis":
+                # tak ada dialog di handler kronis — aman langsung
+                self._on_pre_kronis_change()
+
+    def _flush_prepipeline_card(self):
+        """v3.11.57 — commit SEMUA nilai spin pra-pipeline yang belum
+        ter-commit, TEPAT sebelum pipeline berjalan (semua jalur mulai:
+        tombol 🚀 MULAI PROSES, F5, ↻ Refresh Sumber).
+
+        Jaring pengaman <FocusOut>: nilai ketik DIJAMIN terpakai pada run
+        INI walau fokus tidak pernah meninggalkan spin (klik tombol via
+        keyboard accessibility, Enter virtual, dsb.). Kontrak kartu
+        "set sekali → proses" (v3.11.56) kini penuh: apa yang tertulis
+        di kartu saat MULAI ditekan = yang dipakai render pertama."""
+        for _which in ("h", "acr", "com", "drastis", "manual", "kronis"):
+            self._on_pre_focusout(_which)
 
     # =====================================================================
     # v3.11.56 — U3: PANEL RINGKASAN hasil pipeline + tombol deep-link
@@ -5535,6 +5622,14 @@ class StockMonitorApp:
                 "Tunggu sampai status berubah, lalu Mulai lagi.",
                 parent=self.root)
             return
+
+        # v3.11.57 — FLUSH kartu pra-pipeline SEBELUM run (setelah semua
+        # guard: run pasti berjalan): commit nilai yang DIKETIK user tapi
+        # belum ter-commit (ketik tanpa Enter → klik MULAI — FIX laporan
+        # "kolom H aku isi 5 ... di tab deviasi tetap 25"). Tanpa flush,
+        # teks di kartu bisa berbohong (menampilkan nilai yang TIDAK
+        # dipakai run ini).
+        self._flush_prepipeline_card()
 
         # FIX D-04: reset penghitung file yang di-skip reader
         self._skipped_files = 0
