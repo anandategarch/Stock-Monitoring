@@ -3,6 +3,65 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.12.2 — IMPOR FOLLOW UP (pemulihan daftar terhapus)
+
+User: *"ada opsi import Follow up misal follow up kemarin terhapus,
+format nya sama kaya waktu export excel follow up"*.
+
+### 1. `FollowUpStore.import_xlsx(path)` — store-level
+- **Kontrak format = OUTPUT `export_xlsx` persis** — sheet `FOLLOW UP`
+  (atau sheet aktif): `Resto · Nama Barang · [5 kolom SO tgl H-2..H+2 —
+  heading tanggal dinamis '23'..'27' / literal 'T-2'..'T+2' bila H tak
+  diketahui] · Sistem · Deviasi · Loss Surplus to BOM · Keterangan`.
+- **Rekonstruksi snapshot** (inverse export): angka tetap angka (nilai
+  MENTAH — number-format cuma tampilan); `cek` via `_cek_from_export`
+  (inverse `_cek_display_text`: `'-'` → `''`, prefiks `'Analisa: '`
+  dibuang — roundtrip bersih); `h` dari label heading kolom T
+  (`'25'`/`25.0` → 25; `'T'`/`'lalu'`/`'31•'` → `''`); `asal` ←
+  `'IMPORT'` (baris aman dari `auto_resolve_pending` — hanya memproses
+  asal `DEVIASI*`); `satuan`/`aktif` ← `''` (tidak ada di format).
+- **MERGE + dedup dua lapis**: fingerprint hasil rekonstruksi (fp
+  identik → impor ulang file sama = **idempoten**, 0 duplikat) +
+  **SOFT-KEY** kesamaan data (resto · barang · so · sistem · deviasi ·
+  cek · so_m2..so_p2 · loss_bom — fingerprint minus asal/satuan/h; h
+  level-sheet tak membedakan baris di format export) — impor atas
+  daftar yang masih berisi baris sama TIDAK menduplikasi. `_norm_num`
+  menyetarakan int/float (openpyxl membaca `1234567.0` sebagai int).
+- **Persist** followup.json (baris pulihan bertahan restart) + jejak
+  `imported_from` (nama file asal per baris).
+- **Thread-safe**: `import_xlsx` TIDAK memanggil `_notify` (berjalan di
+  thread worker `run_async`); view memanggil `notify_changed()` baru di
+  callback `done` (main thread) — konvensi yang sama dengan
+  `auto_resolve_pending`.
+- **Error jujur**: file tanpa kolom `Resto`/`Nama Barang`/`Sistem`/
+  `Deviasi` → `'format tidak dikenali'` (bukan crash); baris kosong
+  dibuang; file tak terbuka → pesan exception.
+
+### 2. Tab ☑ Follow Up — pintu impor
+- Tombol **📥 Impor Excel** di baris aksi (selalu aktif — skenario
+  pemulihan justru mulai dari daftar kosong; pendahulu v3.2 *Impor
+  Hasil TL* beda fungsi — menandai SELESAI, dihapus user v3.8; method
+  lama `import_workbook` tetap tidak ada).
+- **EmptyState CTA sekunder** (`cta2_text`/`on_cta2` — kemampuan baru
+  widget `EmptyState`): saat daftar KOSONG kartu aksi tersembunyi →
+  tombol 📥 Impor wajib ada DI empty state ("📥 Impor Excel Follow Up").
+- `_on_import` → `run_async`: worker membaca file (UI tetap responsif,
+  overlay "Mengimpor follow-up…"), `done` main-thread → ringkasan
+  (`N baris dikembalikan · dibaca X · Y sudah ada · Z kosong`).
+- Subtitle empty state + footer hint menyebut opsi pemulihan impor.
+
+### Test §102 (regression)
+(A) roundtrip export→clear→import — 3 snapshot: lengkap (H=25, semua
+field identik termasuk loss_bom −1,0053 + `imported_from`), legacy
+tanpa field tanggal (so dari kolom T; Keterangan `'-'` → cek `''`),
+cek segmen ANALISA (prefiks dibuang); (B) persist — store baru
+(restart) memuat hasil impor; (C) idempoten — impor ulang = 0 tambah;
+(D) dedup soft-key vs baris asli — 0 tambah, 3 skip; (E) format asing
+→ error jujur; (F) heading literal `T-2..T+2` → h `''`; (G) wiring
+view — btn_import aktif + CTA empty state + `notify_changed` → render
+3 baris + status kartu. (+) asersi v3.8 di-update: btn_import hidup
+kembali utk fitur BARU, `import_workbook` lama tetap dihapus.
+
 ## v3.12.1 — HAPUS TAB ⚖ LAPORAN VERSUS + FIX "filter tidak berfungsi" tab 🧮
 
 User: *"hapus tab laporan versus. cek penyebab filter tidak berfungsi

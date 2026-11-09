@@ -818,11 +818,15 @@ class EmptyState(tk.Frame):
     (ikon opsional — v3.11.13: default TANPA ikon, UI bersih tanpa emoji).
 
     on_cta: callback tombol (biasanya: pindah ke tab Proses).
+    cta2_text/on_cta2 (v3.12.2): CTA SEKUNDER GhostButton di bawah CTA
+    utama — dipakai tab ☑ Follow Up (empty state-nya adalah pintu utama
+    fitur impor: daftar terhapus → 📥 Impor Excel harus terjangkau saat
+    kosong, bukan hanya saat ada baris).
     """
 
     def __init__(self, parent, icon: str = "", title: str = "Belum ada data",
                  subtitle: str = "", cta_text: str = "Jalankan Pipeline",
-                 on_cta=None, **kw):
+                 on_cta=None, cta2_text: str = "", on_cta2=None, **kw):
         super().__init__(parent, bg=C_CARD, highlightbackground=C_BORDER,
                          highlightthickness=1, **kw)
         # Frame center adaptif (FIX B-11 audit 2-b): dulu FIXED 520x260 —
@@ -847,12 +851,17 @@ class EmptyState(tk.Frame):
                 center, text=subtitle, bg=C_CARD, fg=C_TEXT_MUTED,
                 font=font(10), wraplength=420, justify="center")
             self._subtitle_lbl.pack()
+        # v3.12.2 — CTA sekunder: CTA utama diberi pady bawah 6 (bukan 20)
+        # supaya keduanya rapat sebagai satu grup aksi.
         if on_cta is not None and cta_text:
             AccentButton(center, text=cta_text, command=on_cta).pack(
-                pady=(14, 20))
+                pady=(14, 6 if (on_cta2 is not None and cta2_text) else 20))
         else:
             # tanpa CTA: jaga padding bawah agar frame tetap proporsional
             tk.Frame(center, bg=C_CARD, height=20).pack()
+        if on_cta2 is not None and cta2_text:
+            GhostButton(center, text=cta2_text,
+                        command=on_cta2).pack(pady=(0, 20))
         self.bind("<Configure>", self._resize_center, add="+")
 
     def _resize_center(self, event=None):

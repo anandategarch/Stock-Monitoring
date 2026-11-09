@@ -1760,11 +1760,18 @@ def main():
     _wb.close()
     os.unlink(xlsx_path)
 
-    # v3.8: fitur impor DIHAPUS — tombol & method tidak ada lagi
-    check("v3.8: tombol Impor Hasil TL dihapus",
-          fu.btn_import is None)
-    check("v3.8: FollowUpStore.import_workbook dihapus",
+    # v3.8: fitur impor HASIL TL DIHAPUS — tombol lama & method lama tak
+    # ada lagi (v3.12.2: tombol btn_import HIDUP kembali utk fitur BARU
+    # — pemulihan daftar dari file export; method baru import_xlsx ≠
+    # import_workbook lama yang menandai SELESAI).
+    check("(v3.8→v3.12.2) tombol Impor Hasil TL lama diganti Impor Excel "
+          "pemulihan (btn_import hidup — fitur BARU beda fungsi)",
+          fu.btn_import is not None
+          and "Impor" in str(fu.btn_import.cget("text")))
+    check("v3.8: FollowUpStore.import_workbook (hasil TL) tetap dihapus",
           not hasattr(store, "import_workbook"))
+    check("(v3.12.2) FollowUpStore.import_xlsx (pemulihan) tersedia",
+          hasattr(store, "import_xlsx"))
 
     # -- persistensi: store baru membaca followup.json --
     from src.ui.followup import FollowUpStore
@@ -23340,6 +23347,209 @@ def main():
           and _NCDF101.get("Nama Barang") == "Nama Barang"
           and _NCDF101.get("Satuan") == "Satuan",
           f"got {_NCDF101!r}")
+
+
+    # =====================================================================
+    print()
+    print("== §102. (v3.12.2) IMPOR FOLLOW UP — pemulihan daftar terhapus "
+          "dari file EXPORT Excel (format sama persis) ==")
+    # USER: "ada opsi import Follow up misal follow up kemarin terhapus,
+    # format nya sama kaya waktu export excel follow up". Store-level
+    # (pola §90 — monkeypatch path persist ke tmp) + view-level wiring.
+    import src.ui.followup as _fumod102
+
+    _tmp102 = tempfile.mkdtemp(prefix="v3122_s102_")
+    _orig_fp102, _orig_rp102 = _fumod102.followup_path, _fumod102.resolved_path
+    _fumod102.followup_path = lambda: Path(_tmp102) / "followup.json"
+    _fumod102.resolved_path = lambda: Path(_tmp102) / "resolved.json"
+    try:
+        _store102 = _fumod102.FollowUpStore()
+        # 3 snapshot: lengkap (H=25) · LEGACY tanpa field tanggal ·
+        # cek segmen ANALISA (roundtrip prefiks 'Analisa: ').
+        _sA102 = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                  "barang": "BRG BESAR", "satuan": "GR", "aktif": "AKTIF",
+                  "h": 25, "so": 1234.5, "sistem": 2469.0,
+                  "deviasi": -1234.5, "cek": "Turun Drastis",
+                  "so_m2": 1234567.0, "so_m1": 6.25, "so_p1": 7.0,
+                  "so_p2": 8.0, "loss_bom": -1.0053}
+        _sB102 = {"asal": "DEVIASI PCS", "resto": "SBYKET",
+                  "barang": "BARANG LAMA", "satuan": "PCS", "h": None,
+                  "so": 10.0, "sistem": 10.0, "deviasi": 0.0, "cek": ""}
+        _sC102 = {"asal": "DEVIASI GR", "resto": "MLGPAR",
+                  "barang": "ANALISA ROW", "satuan": "GR", "h": 25,
+                  "so": 5.0, "sistem": 5.0, "deviasi": 0.0,
+                  "cek": "Peningkatan Tertinggi +5%"}
+        for _fp102, _sn102 in (("a", _sA102), ("b", _sB102),
+                               ("c", _sC102)):
+            _store102.toggle(_fp102, _sn102)
+        _x102 = os.path.join(_tmp102, "fu102.xlsx")
+        _store102.export_xlsx(_x102)
+        _store102.clear()
+        check("(v3.12.2) §102-0 skenario: daftar terhapus (clear) setelah "
+              "export — file export tetap ada",
+              len(_store102) == 0 and os.path.exists(_x102),
+              f"n={len(_store102)}")
+
+        # ---- (A) roundtrip: impor file export → snapshot dibangun ulang --
+        _res102 = _store102.import_xlsx(_x102)
+        check("(v3.12.2) §102-A roundtrip pemulihan: 3 baris dibaca → 3 "
+              "ditambahkan, h dari heading kolom T ('25'), tanpa error",
+              _res102["error"] is None and _res102["n_read"] == 3
+              and _res102["n_added"] == 3 and _res102["h"] == 25,
+              f"res={_res102}")
+        _byB102 = {r["barang"]: r for r in _store102.rows.values()}
+        _ra102 = _byB102.get("BRG BESAR", {})
+        check("(v3.12.2) §102-A1 snapshot lengkap dipulihkan IDENTIK (resto "
+              "· so 1234,5 · sistem 2469 · deviasi −1234,5 · so_m2 "
+              "1234567 · so_m1 6,25 · so_p1 7 · so_p2 8 · loss_bom "
+              "−1,0053 · cek 'Turun Drastis' · h 25) + asal 'IMPORT' + "
+              "jejak imported_from",
+              _ra102.get("resto") == "MLGPAR"
+              and _ra102.get("so") == 1234.5
+              and _ra102.get("sistem") == 2469
+              and _ra102.get("deviasi") == -1234.5
+              and _ra102.get("so_m2") == 1234567
+              and _ra102.get("so_m1") == 6.25
+              and _ra102.get("so_p1") == 7
+              and _ra102.get("so_p2") == 8
+              and _ra102.get("loss_bom") == -1.0053
+              and _ra102.get("cek") == "Turun Drastis"
+              and _ra102.get("h") == 25
+              and _ra102.get("asal") == "IMPORT"
+              and _ra102.get("imported_from") == "fu102.xlsx",
+              f"got {_ra102!r}")
+        _rb102 = _byB102.get("BARANG LAMA", {})
+        check("(v3.12.2) §102-A2 snapshot LEGACY (tanpa field tanggal) "
+              "dipulihkan: so/sistem/deviasi dari kolom T/Sistem/Deviasi; "
+              "kolom tanggal kosong ''; Keterangan '-' → cek '' (inverse "
+              "_cek_display_text)",
+              _rb102.get("so") == 10 and _rb102.get("sistem") == 10
+              and _rb102.get("deviasi") == 0
+              and _rb102.get("so_m2") == "" and _rb102.get("cek") == "",
+              f"got {_rb102!r}")
+        _rc102 = _byB102.get("ANALISA ROW", {})
+        check("(v3.12.2) §102-A3 cek segmen ANALISA roundtrip bersih: "
+              "export menulis 'Analisa: Peningkatan Tertinggi +5%' → "
+              "impor mengembalikan MENTAH 'Peningkatan Tertinggi +5%'",
+              _rc102.get("cek") == "Peningkatan Tertinggi +5%",
+              f"got {_rc102.get('cek')!r}")
+
+        # ---- (B) persist: store baru memuat baris hasil impor ----------
+        _store102b = _fumod102.FollowUpStore()
+        check("(v3.12.2) §102-B hasil impor PERSIST di followup.json — "
+              "store baru (restart) memuat 3 baris",
+              len(_store102b) == 3, f"n={len(_store102b)}")
+
+        # ---- (C) idempoten: impor file sama dua kali --------------------
+        _res102c = _store102.import_xlsx(_x102)
+        check("(v3.12.2) §102-C idempoten: impor ulang file sama → 0 "
+              "ditambah, 3 duplikat (fp hasil rekonstruksi identik — "
+              "tidak menduplikasi baris)",
+              _res102c["n_added"] == 0 and _res102c["n_skip_dup"] == 3
+              and len(_store102) == 3,
+              f"res={_res102c} n={len(_store102)}")
+
+        # ---- (D) dedup soft-key vs baris ASLI yang masih ada -----------
+        _store102d = _fumod102.FollowUpStore()
+        _store102d.clear()
+        for _fp102, _sn102 in (("a", _sA102), ("b", _sB102),
+                               ("c", _sC102)):
+            _store102d.toggle(_fp102, _sn102)
+        _res102d = _store102d.import_xlsx(_x102)
+        check("(v3.12.2) §102-D dedup SOFT-KEY vs baris asli (asal DEVIASI "
+              "GR/PCS — fp beda, data sama): 0 ditambah, 3 dilewati — "
+              "impor atas daftar yang masih ada TIDAK menduplikasi",
+              _res102d["n_added"] == 0 and _res102d["n_skip_dup"] == 3
+              and len(_store102d) == 3,
+              f"res={_res102d} n={len(_store102d)}")
+
+        # ---- (E) format tak dikenali → error jujur ----------------------
+        import openpyxl as _oxl102
+        _bad102 = os.path.join(_tmp102, "bad102.xlsx")
+        _wb102 = _oxl102.Workbook()
+        _ws102 = _wb102.active
+        _ws102.title = "FOLLOW UP"
+        _ws102.append(["Foo", "Bar"])
+        _ws102.append(["x", "y"])
+        _wb102.save(_bad102)
+        _wb102.close()
+        _res102e = _store102.import_xlsx(_bad102)
+        check("(v3.12.2) §102-E file tanpa kolom Resto/Nama Barang/Sistem/"
+              "Deviasi → error 'format tidak dikenali' (bukan crash)",
+              _res102e["error"] is not None
+              and "format tidak dikenali" in _res102e["error"],
+              f"err={_res102e['error']!r}")
+
+        # ---- (F) heading literal T-2..T+2 (export tanpa H) → h '' ------
+        _tmp102f = os.path.join(_tmp102, "noh")
+        os.makedirs(_tmp102f, exist_ok=True)
+        _fumod102.followup_path = lambda: Path(_tmp102f) / "followup.json"
+        _fumod102.resolved_path = lambda: Path(_tmp102f) / "resolved.json"
+        _store102f = _fumod102.FollowUpStore()
+        _store102f.toggle("z", {"asal": "DEVIASI GR", "resto": "RZ",
+                                "barang": "BZ", "satuan": "GR", "h": None,
+                                "so": 1.0, "sistem": 1.0, "deviasi": 0.0,
+                                "cek": ""})
+        _x102f = os.path.join(_tmp102f, "fu102f.xlsx")
+        _store102f.export_xlsx(_x102f)
+        _store102f.clear()
+        _res102f = _store102f.import_xlsx(_x102f)
+        check("(v3.12.2) §102-F export tanpa H (heading literal 'T-2'.."
+              "'T+2') → h tidak diketahui (''), nilai kolom tetap "
+              "dipulihkan (so=1)",
+              _res102f["error"] is None and _res102f["n_added"] == 1
+              and _res102f["h"] is None
+              and list(_store102f.rows.values())[0].get("h") == ""
+              and list(_store102f.rows.values())[0].get("so") == 1,
+              f"res={_res102f}")
+
+        # ---- (G) view wiring: tombol + CTA empty-state + render ---------
+        _fumod102.followup_path = lambda: Path(_tmp102) / "followup.json"
+        _fumod102.resolved_path = lambda: Path(_tmp102) / "resolved.json"
+        _store102g = _fumod102.FollowUpStore()
+        _store102g.clear()
+        _top102 = tk.Toplevel(root)
+        _top102.geometry("1100x640+10+10")
+        from src.ui.followup_view import FollowUpView as _FUV102
+        _fu102 = _FUV102(_top102, store=_store102g,
+                         get_data=lambda: None)
+        _fu102.pack(fill="both", expand=True)
+        root.update()
+        # empty state tampil + CTA sekunder 📥 ada (pintu utama fitur —
+        # daftar KOSONG = skenario pemulihan)
+        _cta_btns102 = [
+            w for w in _fu102.empty._center.winfo_children()
+            if isinstance(w, ttk.Button)]
+        check("(v3.12.2) §102-G1 wiring view: btn_import hidup + SELALU "
+              "aktif (tidak ikut guard n>0) + CTA sekunder 📥 Impor di "
+              "EMPTY STATE (daftar kosong = pintu pemulihan — kartu aksi "
+              "tersembunyi saat kosong)",
+              _fu102.btn_import is not None
+              and "Impor" in str(_fu102.btn_import.cget("text"))
+              and str(_fu102.btn_import.cget("state")) != "disabled"
+              and any("Impor" in str(b.cget("text"))
+                      for b in _cta_btns102),
+              f"btn={_fu102.btn_import!r} cta={[b.cget('text') for b in _cta_btns102]!r}")
+        # impor programatik (jalur store sama dgn work() run_async) →
+        # notify_changed() (jalur done() main-thread) → render
+        _res102g = _store102g.import_xlsx(_x102)
+        _store102g.notify_changed()
+        root.update()
+        check("(v3.12.2) §102-G2 alur lengkap: impor file → notify_changed "
+              "→ tabel view merender 3 baris pulihan + status kartu "
+              "menghitung (3 baris · 0 selesai · 3 menunggu)",
+              _res102g["n_added"] == 3
+              and len(_fu102.tree.get_children("")) == 3
+              and _fu102.status_var.get().startswith("3 baris"),
+              f"res={_res102g} rows={len(_fu102.tree.get_children(''))} "
+              f"status={_fu102.status_var.get()!r}")
+        _fu102.destroy()
+        _top102.destroy()
+        root.update()
+    finally:
+        _fumod102.followup_path = _orig_fp102
+        _fumod102.resolved_path = _orig_rp102
+        shutil.rmtree(_tmp102, ignore_errors=True)
 
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

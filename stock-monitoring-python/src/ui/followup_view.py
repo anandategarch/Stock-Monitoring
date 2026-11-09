@@ -13,6 +13,9 @@ Selisih · Selisih Deviasi · Cek FU · PIC · Status TL · Ditambahkan
 - Klik sel ✓ di tabel ini = KELUARKAN baris dari daftar.
 - 💾 Export Excel mengikuti format file sample; kolom export
   BERHENTI di Keterangan.
+- 📥 Impor Excel (v3.12.2) — PEMULIHAN daftar terhapus: baca file
+  export follow-up (format sama persis) → MERGE (dedup, idempoten);
+  tersedia juga di empty state (skenario utama: daftar kosong).
 - ✕ Kosongkan menghapus seluruh daftar (dgn konfirmasi).
 - Double-click baris → popup detail source (bila data pipeline
   tersedia); nilai popup filter = baris yang tampil.
@@ -170,13 +173,19 @@ class FollowUpView(tk.Frame):
         # tetap (berguna bila data belum ada), tapi kini ada petunjuk
         # cara mengisi daftar. Dulu CTA sendirian menyesatkan: user yang
         # SUDAH menjalankan pipeline mengkliknya dan daftar tetap kosong.
+        # v3.12.2 — CTA SEKUNDER 📥 Impor Excel Follow Up: skenario utama
+        # fitur impor justru daftar KOSONG (follow up kemarin terhapus →
+        # kartu aksi tersembunyi oleh empty state → tombol impor WAJIB
+        # ada di sini, bukan cuma di baris aksi).
         self.empty = EmptyState(
             self, title="Daftar Follow Up masih kosong",
             subtitle="Baris masuk daftar lewat centang ✓ di tab Deviasi "
-                     "GR / Deviasi PCS / Laporan Deviasi — jalankan "
-                     "pipeline dulu bila data belum ada.",
+                     "GR / Deviasi PCS — atau 📥 impor kembali file "
+                     "export Excel follow-up lama.",
             cta_text="Jalankan Pipeline",
-            on_cta=lambda: self.go_to_proses() if self.go_to_proses else None)
+            on_cta=lambda: self.go_to_proses() if self.go_to_proses else None,
+            cta2_text="📥 Impor Excel Follow Up",
+            on_cta2=self._on_import)
         self.empty.pack(fill="both", expand=True, padx=12, pady=12)
 
         # --- Konten utama ---
@@ -193,7 +202,16 @@ class FollowUpView(tk.Frame):
                                        command=self._on_export)
         self.btn_export.pack(side="left")
 
-        self.btn_import = None  # v3.8: Impor Hasil TL DIHAPUS (user)
+        # v3.12.2 — IMPOR (user: "ada opsi import Follow up misal follow
+        # up kemarin terhapus, format nya sama kaya waktu export excel
+        # follow up"): baca file EXPORT Excel follow-up → snapshot dibangun
+        # ulang & MERGE (dedup — baris sama tidak diduplikasi). Selalu
+        # aktif (tidak ikut guard n>0 export/clear — skenario pemulihan
+        # justru mulai dari daftar kosong). Pendahulu v3.2 'Impor Hasil
+        # TL' beda fungsi (menandai SELESAI; dihapus user v3.8).
+        self.btn_import = GhostButton(r0, text="📥 Impor Excel",
+                                      command=self._on_import)
+        self.btn_import.pack(side="left", padx=(8, 0))
 
         self.btn_clear = DangerButton(r0, text="Kosongkan",
                                       command=self._on_clear)
@@ -264,7 +282,8 @@ class FollowUpView(tk.Frame):
             foot,
             text="klik ✓ = keluarkan baris dari daftar (status TL/PIC ikut "
                  "terhapus) · centang ✓ lagi di tab Deviasi utk menambah "
-                 "· Dobel-klik baris = detail sumber",
+                 "· 📥 Impor Excel = pulihkan dari file export · "
+                 "Dobel-klik baris = detail sumber",
             bg=C_CARD, fg=C_TEXT_MUTED, font=font(8))
         self._foot_hint.pack(side="left")
 
@@ -932,6 +951,65 @@ class FollowUpView(tk.Frame):
 
         run_async(self, work, done, overlay=self.overlay,
                   loading_text="Mengekspor follow-up…", on_error=on_error)
+
+    # --- v3.12.2 — IMPOR (pemulihan daftar dari file export) ----------------
+    def _on_import(self):
+        """v3.12.2 — pilih file export Excel follow-up → FollowUpStore
+        .import_xlsx (thread worker) → MERGE + ringkasan. Format = OUTPUT
+        export_xlsx persis (user: "format nya sama kaya waktu export
+        excel follow up").
+
+        Notifikasi store sengaja TIDAK dilakukan di dalam worker —
+        ``import_xlsx`` tanpa ``_notify`` (listener menyentuh widget Tk;
+        mutasi di thread non-main dilarang); ``done`` (main thread via
+        polling run_async) memanggil ``store.notify_changed()`` → render
+        tabel ini + badge tab ☑ + listener lain sinkron."""
+        filepath = filedialog.askopenfilename(
+            title="Pilih File Export Follow Up (format 💾 Export Excel)",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            parent=self,
+        )
+        if not filepath:
+            return
+
+        def work():
+            return self.store.import_xlsx(filepath)
+
+        def done(res):
+            if not isinstance(res, dict):
+                res = {"error": "hasil impor tidak valid"}
+            if res.get("error"):
+                messagebox.showwarning("Impor Gagal", res["error"],
+                                       parent=self)
+                return
+            n_added = res.get("n_added", 0)
+            n_dup = res.get("n_skip_dup", 0)
+            n_blank = res.get("n_skip_blank", 0)
+            n_read = res.get("n_read", 0)
+            if n_added:
+                # main thread — aman picu render + badge
+                self.store.notify_changed()
+                messagebox.showinfo(
+                    "Impor Berhasil",
+                    f"{n_added} baris follow-up dikembalikan ke daftar.\n"
+                    f"(dibaca {n_read} baris · {n_dup} sudah ada · "
+                    f"{n_blank} kosong dilewati)",
+                    parent=self)
+            else:
+                messagebox.showinfo(
+                    "Impor Selesai",
+                    "Tidak ada baris baru dari file ini — "
+                    + (f"semua {n_dup} baris sudah ada di daftar."
+                       if n_dup else
+                       "file tanpa baris data."),
+                    parent=self)
+
+        def on_error(e):
+            messagebox.showerror(
+                "Impor Gagal", f"Tidak bisa impor:\n{e}", parent=self)
+
+        run_async(self, work, done, overlay=self.overlay,
+                  loading_text="Mengimpor follow-up…", on_error=on_error)
 
     def _on_clear(self):
         if not self.store.rows:

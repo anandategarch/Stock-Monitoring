@@ -24,6 +24,11 @@ utk file korup, flag last_recovery / last_save_error).
   (Resto · Nama Barang · SO tanggal H−2..H+2 · Sistem · Deviasi ·
   Loss Surplus to BOM · Keterangan) + number-format "#,##0;[Red](#,##0)"
   dan persen "0.00%;[Red](0.00%)"; tulis atomik.
+- import_xlsx(path) (v3.12.2) — PEMULIHAN: baca kembali file EXPORT
+  (format sama persis) → snapshot dibangun ulang & MERGE ke daftar
+  (dedup soft-key + idempoten; user: "ada opsi import Follow up misal
+  follow up kemarin terhapus"). notify_changed() = pintu listener utk
+  pemanggil main-thread (impor bermutasi di thread worker).
 - Modul murni — tanpa Tk saat import (dialog pemulihan lazy, GUI saja).
 """
 from __future__ import annotations
@@ -187,6 +192,35 @@ def _cek_display_text(v) -> str:
     if t.startswith(_ANALISA_PREFIXES):
         return f"Analisa: {t}"
     return t
+
+
+def _cek_from_export(v) -> str:
+    """v3.12.2 — INVERSE ``_cek_display_text`` utk IMPOR: label kolom
+    Keterangan file EXPORT → snapshot 'cek' MENTAH ('-' (tampilan kosong
+    export) → ''; prefiks 'Analisa: ' dibuang (export menambahkannya);
+    label kanonik/apa adanya tetap). Roundtrip bersih: cek mentah →
+    export (``_cek_display_text``) → impor → cek mentah kembali."""
+    t = str(v or "").strip()
+    if t in ("", "-", "—"):
+        return ""
+    if t.startswith("Analisa: "):
+        return t[len("Analisa: "):]
+    return t
+
+
+def _import_cell(v):
+    """v3.12.2 — nilai sel file impor → tipe python murni: None → '';
+    angka (int/float, NON-bool) apa adanya (openpyxl membaca nilai MENTAH
+    — number-format hanya tampilan); teks di-strip; bool/datetime → str
+    (bukan data numerik sah)."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return str(v)
+    if isinstance(v, (int, float)):
+        return v
+    s = str(v).strip()
+    return s if s else ""
 
 # Path (dynamis — pola config.json di app.py)
 # v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
@@ -884,5 +918,213 @@ class FollowUpStore:
                 except OSError:
                     pass
         return path
+
+    # -- impor (v3.12.2) --------------------------------------------------------
+    def notify_changed(self) -> None:
+        """v3.12.2 — picu listener store dari MAIN THREAD.
+
+        ``import_xlsx`` bermutasi di thread worker ``run_async`` (view)
+        — Tk widget TIDAK boleh disentuh dari thread non-main → impor
+        sengaja TIDAK memanggil ``_notify``; view memanggil metode ini
+        dari callback ``done`` (main thread) supaya render tabel + badge
+        tab ☑ tetap sinkron (pola konvensi auto_resolve: mutasi+notify
+        dijalankan dari ``after()`` main thread)."""
+        self._notify()
+
+    def import_xlsx(self, path: str) -> dict:
+        """v3.12.2 — IMPOR (pemulihan) daftar follow-up dari file EXPORT
+        Excel (user: "ada opsi import Follow up misal follow up kemarin
+        terhapus, format nya sama kaya waktu export excel follow up").
+
+        Kontrak format = OUTPUT ``export_xlsx`` persis — sheet 'FOLLOW
+        UP' (atau sheet aktif bila nama beda): ``Resto · Nama Barang ·
+        [5 kolom SO tgl H-2..H+2 — heading tanggal DINAMIS ('23'..'27'
+        / 'T-2'..'T+2' bila H tak diketahui)] · Sistem · Deviasi · Loss
+        Surplus to BOM · Keterangan``.
+
+        Rekonstruksi snapshot (inverse export):
+        - resto/barang/sistem/deviasi/loss_bom/so_m2..so_p2 ← sel apa
+          adanya (angka tetap angka — nilai MENTAH, number-format cuma
+          tampilan);
+        - cek ← Keterangan via ``_cek_from_export`` ('-' → '', prefiks
+          'Analisa: ' dibuang);
+        - h ← label heading kolom T (tengah 5 kolom tanggal) bila angka
+          ('25' / 25.0 → 25; 'T'/'lalu'/'31•' → '');
+        - asal ← 'IMPORT' (penanda asal-baris; ``auto_resolve_pending``
+          hanya memproses asal DEVIASI* → baris impor TIDAK pernah
+          di-auto-done);
+        - satuan/aktif ← '' (tidak terdapat di format export).
+
+        Fingerprint dihitung ULANG dari field hasil rekonstruksi (asal
+        'IMPORT' + satuan '' ≠ fp asli) → impor file sama DUA KALI =
+        idempoten (fp identik → skip). Dedup vs baris ASLI yang masih
+        ada (fp beda): SOFT-KEY kesamaan data (resto · barang · so ·
+        sistem · deviasi · cek · so_m2..so_p2 · loss_bom — fingerprint
+        minus asal/satuan/h; h level-sheet tak membedakan baris di
+        format export) — pasangan sama dilewati supaya tidak
+        menduplikasi baris.
+
+        MERGE (bukan replace): baris yang sudah ada tidak tersentuh;
+        status resolved ikut baris lama. Baris kosong (tanpa Resto DAN
+        Nama Barang) dibuang. ``_notify`` TIDAK dipanggil (thread worker
+        — lihat ``notify_changed``). Persist followup.json (+ flag
+        ``last_save_error`` bila gagal — pola toggle). Return dict::
+
+            {"error": None|str, "n_read": int, "n_added": int,
+             "n_skip_dup": int, "n_skip_blank": int, "h": int|None}
+        """
+        res = {"error": None, "n_read": 0, "n_added": 0,
+               "n_skip_dup": 0, "n_skip_blank": 0, "h": None}
+        try:
+            from openpyxl import load_workbook
+        except ImportError as e:
+            res["error"] = f"openpyxl tidak tersedia: {e}"
+            return res
+        try:
+            wb = load_workbook(path, data_only=True, read_only=True)
+        except Exception as e:  # noqa: BLE001 — file rusak/terkunci
+            res["error"] = f"tidak bisa membuka file: {e}"
+            return res
+
+        try:
+            ws = (wb["FOLLOW UP"] if "FOLLOW UP" in (wb.sheetnames or [])
+                  else wb.active)
+            if ws is None:
+                res["error"] = "workbook tanpa sheet."
+                return res
+            rows_iter = ws.iter_rows(values_only=True)
+            header = next(rows_iter, None)
+            if header is None:
+                res["error"] = "sheet kosong (tanpa baris header)."
+                return res
+            hdr_raw = list(header)
+            hdr = [str(c).strip() if c is not None else "" for c in hdr_raw]
+
+            def _idx(name: str):
+                return hdr.index(name) if name in hdr else None
+
+            i_resto = _idx("Resto")
+            i_barang = _idx("Nama Barang")
+            i_sistem = _idx("Sistem")
+            i_dev = _idx("Deviasi")
+            i_ket = _idx("Keterangan")
+            i_pct = _idx("Loss Surplus to BOM")
+            if None in (i_resto, i_barang, i_sistem, i_dev):
+                res["error"] = ("format tidak dikenali — kolom Resto / Nama "
+                                "Barang / Sistem / Deviasi tidak ditemukan "
+                                "(harus file export Excel Follow Up).")
+                return res
+            # 5 kolom tanggal: rentang posisional antara Nama Barang dan
+            # Sistem (layout export — heading dinamis tak bisa nama-match);
+            # fallback heading literal 'T-2'..'T+2' (export tanpa H).
+            i_date: dict = {}
+            if (i_barang is not None and i_sistem is not None
+                    and i_sistem - i_barang - 1 == 5):
+                i_date = dict(zip(DATE_COL_IDS,
+                                  range(i_barang + 1, i_sistem)))
+            if not i_date:
+                i_date = {c: hdr.index(c) for c in DATE_COL_IDS
+                          if c in hdr}
+            # H dari heading kolom T (tengah): '25' / 25.0 → 25.
+            h_imp = None
+            iT = i_date.get("T")
+            if iT is not None and iT < len(hdr_raw):
+                rh = hdr_raw[iT]
+                if isinstance(rh, bool):
+                    h_imp = None
+                elif isinstance(rh, (int, float)):
+                    h_imp = int(rh)
+                else:
+                    s = str(rh).strip()
+                    h_imp = int(s) if s.isdigit() else None
+            res["h"] = h_imp
+
+            def _g(vals, i):
+                if i is None or i >= len(vals):
+                    return ""
+                return _import_cell(vals[i])
+
+            # soft-key baris yang sudah ada = kesamaan DATA penuh minus
+            # (asal · satuan · h): h level-SHEET di format export (satu
+            # heading utk semua baris — baris dgn H beda tak bisa
+            # dibedakan dari file); _norm_num menyetarakan int/float
+            # (openpyxl membaca '1234567.0' sebagai int 1234567).
+            def _soft(snap) -> tuple:
+                return (
+                    str(snap.get("resto", "") or "").strip(),
+                    str(snap.get("barang", "") or "").strip(),
+                    _norm_num(snap.get("so")),
+                    _norm_num(snap.get("sistem")),
+                    _norm_num(snap.get("deviasi")),
+                    str(snap.get("cek", "") or "").strip(),
+                    _norm_num(snap.get("so_m2")),
+                    _norm_num(snap.get("so_m1")),
+                    _norm_num(snap.get("so_p1")),
+                    _norm_num(snap.get("so_p2")),
+                    _norm_num(snap.get("loss_bom")),
+                )
+
+            existing_soft = {_soft(s) for s in self.rows.values()}
+            now = datetime.now().isoformat(timespec="seconds")
+            fname = os.path.basename(str(path))
+
+            for vals in rows_iter:
+                if vals is None:
+                    continue
+                if not any(v is not None and str(v).strip() != ""
+                           for v in vals):
+                    continue        # baris sepenuhnya kosong — buang senyap
+                resto = str(_g(vals, i_resto) or "").strip()
+                barang = str(_g(vals, i_barang) or "").strip()
+                if not resto and not barang:
+                    res["n_skip_blank"] += 1
+                    continue
+                res["n_read"] += 1
+                snap = {
+                    "asal": "IMPORT", "resto": resto, "barang": barang,
+                    "satuan": "", "aktif": "",
+                    "h": h_imp if h_imp is not None else "",
+                    "so": _g(vals, i_date.get("T")),
+                    "sistem": _g(vals, i_sistem),
+                    "deviasi": _g(vals, i_dev),
+                    "cek": (_cek_from_export(vals[i_ket])
+                            if i_ket is not None and i_ket < len(vals)
+                            else ""),
+                    "so_m2": _g(vals, i_date.get("T-2")),
+                    "so_m1": _g(vals, i_date.get("T-1")),
+                    "so_p1": _g(vals, i_date.get("T+1")),
+                    "so_p2": _g(vals, i_date.get("T+2")),
+                    "loss_bom": _g(vals, i_pct),
+                    "barang_app": "", "resto_app": "",
+                }
+                fp = row_fingerprint(snap)
+                if (fp in self.rows) or (_soft(snap) in existing_soft):
+                    res["n_skip_dup"] += 1
+                    continue
+                snap["fp"] = fp
+                snap["added_at"] = now
+                # penanda asal-baris (tidak dipakai view; jejak transparan
+                # di followup.json supaya baris pulihan teridentifikasi)
+                snap["imported_from"] = fname
+                self.rows[fp] = snap
+                existing_soft.add(_soft(snap))
+                res["n_added"] += 1
+        except Exception as e:  # noqa: BLE001 — parse gagal = error jujur
+            res["error"] = f"gagal membaca sheet: {e}"
+            return res
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
+
+        if res["n_added"]:
+            ok = self.save()
+            self.last_save_error = None if ok else (
+                "gagal menyimpan status followup (file terkunci/disk?) "
+                "— perubahan hanya di memori")
+            if self.last_save_error:
+                print(f"[WARNING] followup: {self.last_save_error}")
+        return res
 
 
