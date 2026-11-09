@@ -498,6 +498,37 @@ from src.ui.widgets import (
     run_async,
 )
 
+# ============================================================================
+# (v3.12.3) §103 PRE-FLIGHT — stub messagebox DEVIASI VIEW (auto-Ya).
+# Konfirmasi uncek ✓ tab 📦/🧩 (v3.12.3 _confirm_unfollow) memakai
+# messagebox.askyesno NATIVE — di Xvfb tanpa interaksi itu MEM-BLOCK
+# seluruh suite (dialog modal menunggu klik yang tak pernah datang).
+# BINDING modul deviasi_view diganti stub (BUKAN mutasi objek
+# tkinter.messagebox global — modul lain tak terpengaruh; pola patch
+# §18/§30): askyesno → auto-Ya + rekaman calls; §103 membalik `result`
+# per-kasus utk menguji jalur 'Tidak' (batal) dan memeriksa argumen.
+# ============================================================================
+import src.ui.deviasi_view as _dvm103
+
+
+class _MBStub103:
+    """Stub messagebox utk deviasi_view — hanya askyesno di-intercept."""
+
+    def __init__(self, real):
+        self._real = real
+        self.calls = []      # [(args, kwargs)] — askyesno yang lewat
+        self.result = True   # §103 membalik utk skenario 'Tidak'/batal
+
+    def askyesno(self, *a, **k):
+        self.calls.append((a, k))
+        return self.result
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+_dvm103.messagebox = _MBStub103(_dvm103.messagebox)
+
 PASS = []
 FAIL = []
 
@@ -23550,6 +23581,247 @@ def main():
         _fumod102.followup_path = _orig_fp102
         _fumod102.resolved_path = _orig_rp102
         shutil.rmtree(_tmp102, ignore_errors=True)
+
+
+    # =====================================================================
+    print()
+    print("== §103. (v3.12.3) ☑ FOLLOW-UP DI TAB DEVIASI GR/PCS (level "
+          "pasangan — entri IMPOR) + KONFIRMASI UNCEK ==")
+    # USER: "ada keterangan di tab deviasi pcs dan deviasi gr kalau row
+    # ini sudah masuk follow up gak? buat aja kecentang ya di tab
+    # deviais pcs dan gr nya dan ada konfirmasi misal aku uncek jaga jaga
+    # misal gak sengaja pencet uncek". Kolom ✓ ada sejak v3.2, tapi ☑
+    # hanya fp-stabil → entri IMPOR v3.12.2 (asal 'IMPORT'/satuan '') tak
+    # pernah menandai baris pasangan sama. Fix: pencocokan LEVEL
+    # PASANGAN + dialog konfirmasi uncek (stub global §103 pre-flight —
+    # dialog native akan mem-block suite Xvfb).
+    # ---------------------------------------------------------------------
+    import tempfile as _tf103
+
+    from src.ui import followup as _fumod103
+    from src.ui.followup import row_fingerprint as _rfp103
+    from src.ui.deviasi_view import DeviasiView as _DV103
+
+    _tmp103 = _tf103.mkdtemp(prefix="v3123_")
+    _orig_fp103 = _fumod103.followup_path
+    _orig_rp103 = _fumod103.resolved_path
+    _fumod103.followup_path = lambda: Path(_tmp103) / "followup.json"
+    _fumod103.resolved_path = lambda: Path(_tmp103) / "followup_resolved.json"
+    _mb103 = _dvm103.messagebox
+    store = app.followup_store
+    try:
+        # ---- (A) normalisasi kunci pasangan --------------------------
+        _pkA = _DV103._pair_key_parts({
+            "resto": "1041.mlgpar ", "barang": "ayam  filet",
+            "satuan": " gr "})
+        check("(v3.12.3) §103-A _pair_key_parts: resto kode-ber-titik → "
+              "segmen akhir ('1041.mlgpar ' → 'MLGPAR') + barang casing/"
+              "spasi-ganda dirapatkan + satuan strip-upper",
+              _pkA == ("MLGPAR", "AYAM FILET", "GR"), f"got {_pkA!r}")
+
+        # ---- (B) index pasangan + isolasi satuan GR↔PCS ---------------
+        store.clear()
+        root.update()
+        dv = app.deviasi_gr_view
+        select_and_wait(root, app, app.tab_deviasi_gr, dv)
+        _kids103 = list(dv.tree.get_children(""))
+        check("(v3.12.3) §103 prasyarat: tabel Deviasi GR berisi baris",
+              len(_kids103) >= 2, f"n={len(_kids103)}")
+        _iid103 = _kids103[0]
+        _snap103 = dict(dv._row_snaps[_iid103])
+        _fp103 = dv._fp_map[_iid103]
+        _r103 = str(_snap103.get("resto", ""))
+        _b103 = str(_snap103.get("barang", ""))
+        # entri IMPOR: pasangan sama, asal 'IMPORT' + satuan '' + nilai
+        # DRIFTED total (fp beda segala field — bukti ☑ datang dari
+        # PASANGAN, bukan kebetulan fp)
+        _imp103 = {"asal": "IMPORT", "resto": _r103, "barang": _b103,
+                   "satuan": "", "aktif": "", "h": "",
+                   "so": 777.0, "sistem": 778.0, "deviasi": 1.0,
+                   "cek": ""}
+        _fpimp103 = _rfp103(_imp103)
+        check("(v3.12.3) §103 prasyarat: fp entri impor BEDA total dgn "
+              "fp stabil baris (asal/satuan/h/nilai beda — tanpa fix "
+              "level-pasangan ☑ tak akan pernah muncul)",
+              _fpimp103 != _fp103)
+        store.toggle(_fpimp103, _imp103)
+        store.toggle("k_gr_103", {**_snap103, "asal": "DEVIASI GR"})
+        store.toggle("k_pcs_103", {**_snap103, "asal": "DEVIASI PCS",
+                                   "satuan": "PCS"})
+        _idx103 = dv._pair_key_index()
+        _gotB = set(dv._pair_matched_keys(_snap103, _idx103))
+        check("(v3.12.3) §103-B1 _pair_matched_keys baris GR: cocok entri "
+              "satuan-GR + entri IMPOR satuan-'' (entri PCS TIDAK ikut — "
+              "isolasi lintas satuan)",
+              _gotB == {"k_gr_103", _fpimp103},
+              f"got {sorted(_gotB)!r}")
+        _gotB2 = set(dv._pair_matched_keys(
+            {**_snap103, "satuan": "PCS"}, _idx103))
+        check("(v3.12.3) §103-B2 baris PCS pasangan sama: cocok entri "
+              "satuan-PCS + entri IMPOR (satuan '') — entri GR TIDAK "
+              "bocor lintas tab",
+              _gotB2 == {"k_pcs_103", _fpimp103},
+              f"got {sorted(_gotB2)!r}")
+
+        # ---- (C) RENDER: ☑ dari entri IMPOR saja ---------------------
+        root.update()      # flush callback after(0) §B sebelum isolasi
+        _orig_rcc103 = dv._refresh_check_cells
+        dv._refresh_check_cells = lambda: None   # isolasi jalur RENDER
+        store.clear()
+        store.toggle(_fpimp103, _imp103)
+        dv._dirty = True
+        select_and_wait(root, app, app.tab_deviasi_gr, dv)
+        dv._refresh_check_cells = _orig_rcc103
+        _kids103 = list(dv.tree.get_children(""))
+        _iid103 = _kids103[0]      # iid rebuild pasca render penuh
+        check("(v3.12.3) §103-C jalur RENDER: baris pasangan ☑ dari "
+              "entri IMPOR SAJA (asal IMPORT · satuan '' · fp beda "
+              "total — dulu ☐ senyap: habis impor, tab deviasi tampak "
+              "belum dipantau sama sekali)",
+              dv.tree.set(_iid103, "✓") == "☑",
+              f"got {dv.tree.set(_iid103, '✓')!r}")
+
+        # ---- (D) uncek + dialog 'Tidak' → BATAL ----------------------
+        _mb103.calls.clear()
+        _mb103.result = False
+        _bbox103 = dv.tree.bbox(_iid103)
+        check("(v3.12.3) §103 prasyarat: bbox baris tersedia",
+              bool(_bbox103))
+        if _bbox103:
+            ev103 = _Ev()
+            ev103.widget = dv.tree
+            ev103.x = _bbox103[0] + 8
+            ev103.y = _bbox103[1] + _bbox103[3] // 2
+            dv._on_tree_click(ev103)
+            root.update()
+            check("(v3.12.3) §103-D uncek + jawaban 'Tidak' → BATAL: "
+                  "dialog dipanggil TEPAT 1×, entri IMPOR tetap di "
+                  "store, sel tetap ☑, status 'Batal' (jaga-jaga klik "
+                  "tak sengaja — user)",
+                  len(_mb103.calls) == 1
+                  and _fpimp103 in store.rows
+                  and dv.tree.set(_iid103, "✓") == "☑"
+                  and "Batal" in dv.status_var.get(),
+                  f"calls={len(_mb103.calls)} n={len(store.rows)} "
+                  f"cell={dv.tree.set(_iid103, '✓')!r} "
+                  f"st={dv.status_var.get()!r}")
+
+            # ---- (I) argumen dialog --------------------------------
+            _a103, _k103 = _mb103.calls[-1]
+            check("(v3.12.3) §103-I dialog: judul menyebut 'Keluarkan "
+                  "dari daftar Follow Up' + isi memuat Resto & Barang "
+                  "baris + parent = toplevel view",
+                  "Follow Up" in str(_a103[0])
+                  and _r103 in str(_a103[1])
+                  and _b103 in str(_a103[1])
+                  and _k103.get("parent") is dv.winfo_toplevel(),
+                  f"title={_a103[0]!r} parent={_k103.get('parent')!r}")
+
+            # ---- (E) uncek + dialog 'Ya' → hapus --------------------
+            _mb103.result = True
+            dv._on_tree_click(ev103)
+            root.update()
+            check("(v3.12.3) §103-E uncek + jawaban 'Ya' → entri IMPOR "
+                  "terhapus (pasangan keluar daftar; daftar kini "
+                  "kosong → pesan 'Dikeluarkan — daftar Follow Up "
+                  "kosong'), sel ☐ (tanpa dialog ke-2)",
+                  _fpimp103 not in store.rows
+                  and dv.tree.set(_iid103, "✓") == "☐"
+                  and ("Keluar" in dv.status_var.get()
+                       or "Dikeluarkan" in dv.status_var.get()),
+                  f"n={len(store.rows)} "
+                  f"cell={dv.tree.set(_iid103, '✓')!r} "
+                  f"st={dv.status_var.get()!r}")
+
+            # ---- (F) centang ☐→☑ TANPA dialog -----------------------
+            _mb103.calls.clear()
+            dv._on_tree_click(ev103)   # keys kosong → jalur TAMBAH
+            root.update()
+            check("(v3.12.3) §103-F centang (☐→☑) TIDAK memanggil dialog "
+                  "(tambah bukan operasi destruktif) + entri ber-fp "
+                  "stabil asal 'DEVIASI GR' masuk store",
+                  len(_mb103.calls) == 0
+                  and _fp103 in store.rows
+                  and list(store.rows.values())[0].get("asal")
+                  == "DEVIASI GR"
+                  and dv.tree.set(_iid103, "✓") == "☑",
+                  f"calls={len(_mb103.calls)} n={len(store.rows)} "
+                  f"cell={dv.tree.set(_iid103, '✓')!r}")
+
+            # ---- (H) opt-out programmatic ---------------------------
+            _mb103.calls.clear()
+            dv.confirm_unfollow = False
+            dv._on_tree_click(ev103)   # uncek LANGSUNG tanpa konfirmasi
+            root.update()
+            dv.confirm_unfollow = True
+            check("(v3.12.3) §103-H opt-out confirm_unfollow=False → "
+                  "uncek langsung tanpa dialog (pintu programmatic/"
+                  "test), entri terhapus + sel ☐",
+                  len(_mb103.calls) == 0
+                  and _fp103 not in store.rows
+                  and dv.tree.set(_iid103, "✓") == "☐",
+                  f"calls={len(_mb103.calls)} n={len(store.rows)}")
+
+        # ---- (G) jalur LISTENER: notify_changed → ☑ tanpa render ----
+        _gen103 = dv._render_gen
+        store.clear()
+        _kids103 = list(dv.tree.get_children(""))
+        _snap103b = next(
+            (dict(dv._row_snaps[k]) for k in _kids103
+             if _DV103._pair_key_parts(dv._row_snaps[k])
+             != _DV103._pair_key_parts(_snap103)), None)
+        check("(v3.12.3) §103 prasyarat: ada baris pasangan BERBEDA "
+              "utk uji jalur listener", _snap103b is not None)
+        if _snap103b is not None:
+            _iid103b = next(k for k in _kids103
+                            if dv._row_snaps[k] is not None
+                            and _DV103._pair_key_parts(dv._row_snaps[k])
+                            == _DV103._pair_key_parts(_snap103b))
+            _imp103b = {"asal": "IMPORT",
+                        "resto": _snap103b.get("resto", ""),
+                        "barang": _snap103b.get("barang", ""),
+                        "satuan": "", "aktif": "", "h": "",
+                        "so": 555.0, "sistem": 556.0, "deviasi": -1.0,
+                        "cek": ""}
+            _fpimp103b = _rfp103(_imp103b)
+            store.toggle(_fpimp103b, _imp103b)
+            root.update()   # after(0) → _refresh_check_cells (listener)
+            check("(v3.12.3) §103-G jalur LISTENER: store berubah dari "
+                  "tab mana pun (impor/uncek tab ☑/clear) → sel ✓ baris "
+                  "pasangan ikut ☑ TANPA render penuh (_render_gen tak "
+                  "berubah; baris pertama tetap ☐, baris pasangan-impor "
+                  "☑)",
+                  dv.tree.set(_iid103b, "✓") == "☑"
+                  and dv.tree.set(_iid103, "✓") == "☐"
+                  and dv._render_gen == _gen103,
+                  f"cellB={dv.tree.set(_iid103b, '✓')!r} "
+                  f"cellA={dv.tree.set(_iid103, '✓')!r} "
+                  f"gen={_gen103}→{dv._render_gen}")
+
+        # ---- (J) legacy fp-sweep TANPA snap tak berubah --------------
+        _snapJ = dict(_snap103)
+        _snapJ["cek"] = "Turun Drastis"   # label volatil era pra-6d1-01
+        _fpJ = _rfp103(_snapJ)
+        store.clear()
+        store.toggle(_fpJ, _snapJ)
+        _keysJ = dv._followup_keys_for(dv._fp_stable(_snapJ))
+        check("(v3.12.3) §103-J legacy: _followup_keys_for TANPA snap = "
+              "perilaku lama murni (fp-exact + identitas-stabil era "
+              "fp-volatil) — entri ber-label cek tetap tersapu saat "
+              "uncheck",
+              _keysJ == [_fpJ], f"got {_keysJ!r}")
+    finally:
+        # clear SEBELUM path dipulihkan (pola §102 — hindari [WARNING]
+        # persist ke direktori §45 yang sudah di-rmtree)
+        try:
+            store.clear()
+        except Exception:
+            pass
+        _fumod103.followup_path = _orig_fp103
+        _fumod103.resolved_path = _orig_rp103
+        _mb103.result = True
+        del _mb103.calls[:]
+        shutil.rmtree(_tmp103, ignore_errors=True)
 
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

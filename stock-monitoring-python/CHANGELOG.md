@@ -3,6 +3,69 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.12.3 — ☑ FOLLOW-UP DI TAB DEVIASI GR/PCS (level pasangan) + KONFIRMASI UNCEK
+
+User: *"ada keterangan di tab deviasi pcs dan deviasi gr kalau row ini
+sudah masuk follow up gak? buat aja kecentang ya di tab deviais pcs dan
+gr nya dan ada konfirmasi misal aku uncek jaga jaga misal gak sengaja
+pencet uncek"*.
+
+Kolom ✓ (toggle masuk/keluarkan follow-up) SUDAH ada sejak v3.2 —
+tetapi pencocokan ☑ hanya fp stabil (`asal|resto|barang|satuan|h|so|
+sistem|deviasi`) sehingga **entri hasil 📥 impor v3.12.2** (asal
+`'IMPORT'`, satuan `''` — format export tak membawa keduanya) TIDAK
+PERNAH menandai baris pasangan sama: selesai impor, tab 📦/🧩 tampak
+belum dipantau sama sekali. Kini ☑ jatuh **level PASANGAN** + uncek
+**dikONFIRMASI**.
+
+### 1. ☑ level PASANGAN — `_pair_key_parts/_pair_key_index/_pair_matched_keys`
+- Kunci pasangan `(resto, barang, satuan)` ternormalisasi — normalisasi
+  sama dgn `auto_resolve` v3.11.59 (`norm_nama_resto_key` /
+  `norm_nama_barang_key` dari `pipeline.helpers`: casing, spasi ganda,
+  segmen setelah titik pada nama resto); satuan strip+upper (entri impor
+  = `''`).
+- **Aturan cocok**: entri ber-satuan SAMA **atau** entri ber-satuan
+  KOSONG (impor — format export tanpa satuan, cocok di tab pasangan
+  mana pun). Entri GR vs PCS **tidak pernah** saling cocok — pasangan
+  tetap terisolasi per tab.
+- Terpasang di **3 titik**: render baris (`checked`), listener
+  `_refresh_check_cells` (index dibangun sekali per pemanggilan — pola
+  `_legacy_fp_index`), dan `_followup_keys_for(fp, snap)` — uncek
+  menyapu entri pasangan-sama penyebab ☑ (impor + era nilai-tergeser)
+  sekalian. Tanpa `snap` = perilaku lama murni (fp + identitas-stabil).
+- Thread worker aman (iterasi store di-snapshot dulu — `RuntimeError`
+  → index kosong, fallback fp saja — pola `_legacy_fp_index`).
+
+### 2. KONFIRMASI UNCEK — `_confirm_unfollow` (ClassVar `confirm_unfollow=True`)
+- Klik / double-click sel ✓ pada baris yang **SUDAH ☑** →
+  `messagebox.askyesno` (pola `_on_clear` followup_view): judul
+  *"Keluarkan dari daftar Follow Up?"*, isi Resto/Barang + petunjuk
+  pemulihan 📥 Impor Excel; `>1` entri → info "entri lama pasangan ini
+  ikut terhapus"; `parent` = toplevel view.
+- **Tidak** = BATAL — sel tetap ☑, store tak tersentuh, status
+  *"Batal — baris tetap di daftar ☑ Follow Up"*.
+- **Ya** = hapus — sel di-RECOMPUTE dari state store sebenarnya (bukan
+  kebalikan toggle: entri pasangan lain bisa masih menandai baris itu).
+- Mencentang (☐→☑) **tidak** dikonfirmasi — tambah bukan operasi
+  destruktif. `TclError` saat dialog (view mati) → lanjut hapus.
+- Opt-out programmatic/test: `view.confirm_unfollow = False`.
+- **Legenda** ✓ di-update: *"☑ = baris/pasangan sudah masuk daftar —
+  uncek ada konfirmasi"*.
+
+### Test §103 (regression)
+(A) normalisasi kunci pasangan (casing/spasi/kode resto ber-titik);
+(B) index pasangan + isolasi satuan GR↔PCS (entri GR tak cocok baris
+PCS; entri satuan '' cocok keduanya); (C) render ☑ dari entri IMPORT
+saja (fp beda total — asal/satuan/nilai beda); (D) uncek + dialog
+**Tidak** → BATAL (store utuh, sel tetap ☑, status Batal); (E) dialog
+**Ya** → entri terhapus, sel ☐, status Keluar; (F) centang ☐→☑ TIDAK
+memanggil dialog; (G) jalur listener `notify_changed` →
+`_refresh_check_cells` menandai ☑ tanpa render penuh; (H) opt-out
+`confirm_unfollow=False` → langsung hapus tanpa dialog; (I) argumen
+dialog (judul/parent/isi resto-barang); (J) legacy fp-sweep tanpa snap
+tak berubah. (+) stub `messagebox` deviasi_view dipasang global di
+harness (auto-Ya — dialog native akan mem-block suite Xvfb; pola §30).
+
 ## v3.12.2 — IMPOR FOLLOW UP (pemulihan daftar terhapus)
 
 User: *"ada opsi import Follow up misal follow up kemarin terhapus,

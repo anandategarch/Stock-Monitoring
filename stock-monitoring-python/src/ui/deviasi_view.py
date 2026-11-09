@@ -64,6 +64,10 @@ import numpy as np
 import pandas as pd
 
 from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
+from ..pipeline.helpers import (  # v3.12.3 — kunci pasangan ternormalisasi
+    norm_nama_barang_key,      # (mirror followup.auto_resolve — ☑ level
+    norm_nama_resto_key,       #  pasangan utk entri IMPOR/nilai-tergeser)
+)
 from .cell_tooltip import CellTooltip  # v3.11.47 — hover tooltip kolom CEK
 from .com_analisa import (  # v3.11.7 — segmen CEK "COM Tinggi" (COM
     COM_RENDAH_LABEL,  # v3.11.8 — arah bawah median (sistem > fisik)
@@ -844,6 +848,17 @@ class DeviasiView(tk.Frame):
     # Y1 sheet user). Konstanta dipertahankan sbg penanda era pra-U6.
     CEK_THRESHOLD = 1.3
 
+    # v3.12.3 — KONFIRMASI UNCHECK ✓ (user: "ada keterangan di tab deviasi
+    # pcs dan deviasi gr kalau row ini sudah masuk follow up gak? buat aja
+    # kecentang ya di tab deviais pcs dan gr nya dan ada konfirmasi misal
+    # aku uncek jaga jaga misal gak sengaja pencet uncek"): klik sel ✓ pada
+    # baris yang SUDAH terpantau meminta konfirmasi dulu (askyesno — pola
+    # _on_clear followup_view) supaya uncek tak sengaja tidak serta-merta
+    # menghapus entri dari followup.json. Mencentang (☐→☑) TIDAK
+    # dikonfirmasi. Matikan lewat instance attr (test/programmatic):
+    # ``view.confirm_unfollow = False``.
+    confirm_unfollow: ClassVar[bool] = True
+
     # v3.11.27 — MERGE-VERTIKAL DIBUBARKAN TOTAL (user: "ternyata jadi
     # jelek ketika merger vertical, sekarang gak perlu merger vertical
     # kembali menjadi awal aja"): seluruh era merge (v3.11.15-26 — TIGA
@@ -1489,7 +1504,10 @@ class DeviasiView(tk.Frame):
             # ikon-only tanpa affordance — dikecualikan dari filter ⧩)
             # kini dijelaskan di legenda: mencentang = masuk/keluarkan
             # daftar pantauan (persist followup.json, tab ☑ Follow Up).
-            ("✓ = tambah/keluarkan dari daftar pantauan (tab Follow Up)",
+            # v3.12.3 — ☑ juga utk entri IMPOR (pasangan-sama) + uncek
+            # dikonfirmasi (jaga-jaga klik tak sengaja — user).
+            ("✓ = tambah/keluarkan daftar pantauan (tab Follow Up; "
+             "☑ = baris/pasangan sudah masuk daftar — uncek ada konfirmasi)",
              "#475569"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
@@ -1853,11 +1871,17 @@ class DeviasiView(tk.Frame):
                 idx.setdefault(sid, k)
         return idx
 
-    def _followup_keys_for(self, fp: str) -> list:
+    def _followup_keys_for(self, fp: str, snap: dict | None = None) -> list:
         """FIX 6d1-01 — SEMUA kunci store yang mewakili baris ber-fp stabil:
         kunci stabil itu sendiri + entri lama ber-identitas sama (era
         fp-volatil bisa meninggalkan >1 entri per baris — uncheck
-        menyapu semuanya, entri orphan tidak menetap)."""
+        menyapu semuanya, entri orphan tidak menetap).
+
+        v3.12.3 — ``snap`` diberikan (jalur klik ✓ / render) → entri
+        ber-PASANGAN-sama ikut tersapu: kunci pasangan+satuan sama
+        (entri IMPOR / entri era nilai-tergeser — ☑ di baris ini bisa
+        datang dari entri yang fp-nya tak lagi cocok). Tanpa snap =
+        perilaku lama murni (fp + identitas-stabil)."""
         store = self.store
         if store is None:
             return []
@@ -1866,13 +1890,105 @@ class DeviasiView(tk.Frame):
         except RuntimeError:
             return [fp] if store.has(fp) else []
         keys: list = []
+
+        def _add(k: str) -> None:
+            if k and k not in keys:
+                keys.append(k)
+
+        # v3.12.3 — pencocokan PASANGAN (hanya bila snapshot baris ada)
+        if snap is not None:
+            for k in self._pair_matched_keys(snap, self._pair_key_index()):
+                _add(k)
         for k, s in items:
             if k == fp:
-                keys.append(k)
+                _add(k)
                 continue
             if self._fp_stable(s) == fp:
-                keys.append(k)
+                _add(k)
         return keys
+
+    # ------------------------------------------------------------------
+    # v3.12.3 — ☑ LEVEL PASANGAN (entri IMPOR / nilai-tergeser)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _pair_key_parts(snap: dict) -> tuple[str, str, str]:
+        """(resto, barang, satuan) ternormalisasi — kunci pasangan baris
+        deviasi / snapshot follow-up. Normalisasi sama dgn
+        followup.auto_resolve (norm_nama_resto_key / norm_nama_barang_key
+        dari pipeline.helpers — ejaan/casing/spasi ganda tak memutus
+        kecocokan); satuan di-upper + strip (entri IMPOR = '')."""
+        return (
+            norm_nama_resto_key(snap.get("resto", "") or ""),
+            norm_nama_barang_key(snap.get("barang", "") or ""),
+            str(snap.get("satuan", "") or "").strip().upper(),
+        )
+
+    def _pair_key_index(self) -> dict:
+        """v3.12.3 — {(resto, barang, satuan) → [kunci store]} SELURUH
+        entri follow-up (asal apapun — termasuk IMPOR). Dipakai
+        pencocokan ☑ level PASANGAN: entri impor v3.12.2 (asal IMPORT,
+        satuan '' — format export tak membawa satuan/asal) dan entri
+        era nilai-tergeser tetap terdeteksi di baris pasangan sama walau
+        fp-nya tak lagi cocok (user: "ada keterangan ... kalau row ini
+        sudah masuk follow up gak?"). Thread worker aman: iterasi
+        di-snapshot dulu (RuntimeError → index kosong, fallback fp
+        saja — pola _legacy_fp_index)."""
+        store = self.store
+        if store is None or not store.rows:
+            return {}
+        try:
+            items = list(store.rows.items())
+        except RuntimeError:      # dict dimutasi main thread saat iterasi
+            return {}
+        idx: dict = {}
+        for k, s in items:
+            idx.setdefault(self._pair_key_parts(s), []).append(k)
+        return idx
+
+    def _pair_matched_keys(self, snap: dict, pair_idx: dict) -> list:
+        """v3.12.3 — kunci store yang cocok level PASANGAN dgn baris
+        ``snap``: entri ber-satuan SAMA (pasangan yang sama) + entri
+        ber-satuan KOSONG (impor — format export tak membawa satuan,
+        cocok di tab pasangan mana pun). Entri ber-satuan BERBEDA (GR vs
+        PCS) tidak pernah cocok — pasangan tetap terisolasi per tab."""
+        if not pair_idx:
+            return []
+        r, b, s = self._pair_key_parts(snap)
+        out: list = []
+        for key in ((r, b, s), (r, b, "")):
+            for k in pair_idx.get(key) or ():
+                if k not in out:
+                    out.append(k)
+        return out
+
+    def _confirm_unfollow(self, snap: dict, n_ent: int) -> bool:
+        """v3.12.3 — konfirmasi sebelum MENGELUARKAN baris dari daftar
+        ☑ Follow Up via uncek ✓ di tab Deviasi GR/PCS (user: "ada
+        konfirmasi misal aku uncek jaga jaga misal gak sengaja pencet
+        uncek"). Return True = lanjut hapus; False = batal (baris tetap
+        terpantau). Opt-out programmatic: ``view.confirm_unfollow =
+        False`` (default aktif — ClassVar)."""
+        if not self.confirm_unfollow:
+            return True
+        resto = str(snap.get("resto", "") or "")
+        barang = str(snap.get("barang", "") or "")
+        extra = (f"\n({n_ent} entri lama pasangan ini ikut terhapus)"
+                 if n_ent > 1 else "")
+        try:
+            return messagebox.askyesno(
+                "Keluarkan dari daftar Follow Up?",
+                "Keluarkan baris ini dari daftar ☑ Follow Up?\n\n"
+                f"Resto : {resto}\n"
+                f"Barang : {barang}{extra}\n\n"
+                "Klik Tidak bila centang ini lepas tanpa sengaja — "
+                "baris tetap dipantau.\n"
+                "Daftar yang terhapus masih bisa dipulihkan lewat "
+                "📥 Impor Excel di tab ☑ Follow Up (bila ada file "
+                "export).",
+                parent=self.winfo_toplevel())
+        except tk.TclError:
+            # view/toplevel mati di tengah dialog — jangan blok hapus
+            return True
 
     def _on_tree_click(self, event):
         tree = event.widget
@@ -1904,20 +2020,33 @@ class DeviasiView(tk.Frame):
         # + entri lama era fp-volatil — menyapu duplikat/orphan sekaligus).
         # Check: tambahkan SATU entri ber-kunci stabil (tahan perubahan
         # ambang ACR / file lalu berikutnya).
-        keys = self._followup_keys_for(fp)
+        # v3.12.3 — snap ikut diberikan: entri PASANGAN-sama (IMPOR /
+        # nilai-tergeser — sumber ☑ yang fp-nya tak cocok) ikut tersapu
+        # saat uncheck; dan uncek DIKONFIRMASI dulu (jaga-jaga klik tak
+        # sengaja — user).
+        keys = self._followup_keys_for(fp, snap)
         if keys:
+            if not self._confirm_unfollow(snap, len(keys)):
+                # batal — sel TETAP ☑, tak ada mutasi store
+                try:
+                    self.status_var.set(
+                        "Batal — baris tetap di daftar ☑ Follow Up "
+                        f"(total {len(self.store)} baris)")
+                except tk.TclError:
+                    pass
+                return
             for k in keys:
                 self.store.toggle(k, snap)
-            added = False
+            checked_now = bool(self._followup_keys_for(fp, snap))
         else:
-            added = self.store.toggle(fp, snap)
+            checked_now = self.store.toggle(fp, snap)
         try:
-            tree.set(row_iid, "✓", CHECK_ON if added else CHECK_OFF)
+            tree.set(row_iid, "✓", CHECK_ON if checked_now else CHECK_OFF)
         except tk.TclError:
             pass
         n = len(self.store)
         self.status_var.set(
-            f"{'Masuk' if added else 'Keluar'} daftar Follow Up — total "
+            f"{'Masuk' if checked_now else 'Keluar'} daftar Follow Up — total "
             f"{n} baris" if n else "Dikeluarkan — daftar Follow Up kosong")
 
     # ------------------------------------------------------------------
@@ -1987,7 +2116,13 @@ class DeviasiView(tk.Frame):
 
     def _refresh_check_cells(self):
         """Perbarui SEMUA sel kolom ✓ dari state store saat ini (iid →
-        fingerprint via _fp_map; baris tanpa fp di-skip)."""
+        fingerprint via _fp_map; baris tanpa fp di-skip).
+
+        v3.12.3 — ☑ juga level PASANGAN: index pasangan dibangun SEKALI
+        per pemanggilan (pola _legacy_fp_index — store kecil); baris
+        ber-pasangan sama dgn entri IMPOR / nilai-tergeser ikut ☑ walau
+        fp-nya tak cocok (user: "ada keterangan ... sudah masuk follow
+        up gak?")."""
         if self.store is None or not self._fp_map:
             return
         try:
@@ -1997,15 +2132,20 @@ class DeviasiView(tk.Frame):
         # FIX 6d1-01 — ☑ bila entri ber-kunci stabil ADA **atau** entri lama
         # ber-identitas-stabil sama masih terdaftar (fp era volatil).
         legacy = self._legacy_fp_index()
+        pair_idx = self._pair_key_index()   # v3.12.3 — level pasangan
         for iid in children:
             fp = self._fp_map.get(iid)
             if fp is None:
                 continue
+            snap = self._row_snaps.get(iid)   # v3.12.3 — pair-match
+            checked = (self.store.has(fp) or fp in legacy
+                       or (snap is not None
+                           and bool(self._pair_matched_keys(snap,
+                                                            pair_idx))))
             try:
                 self.tree.set(
                     iid, "✓",
-                    CHECK_ON if (self.store.has(fp) or fp in legacy)
-                    else CHECK_OFF)
+                    CHECK_ON if checked else CHECK_OFF)
             except tk.TclError:
                 return   # tree/view mati di tengah loop — batal
 
@@ -3864,6 +4004,11 @@ class DeviasiView(tk.Frame):
         # CEK-nya berubah pasca-entri (ambang ACR to BOM / file lalu);
         # uncheck menghapus entri lama tsb via _followup_keys_for.
         legacy_fp = self._legacy_fp_index()
+        # v3.12.3 — index PASANGAN (sekali per render — pola legacy_fp):
+        # baris ber-pasangan sama dgn entri IMPOR / era nilai-tergeser
+        # tetap ☑ (fp beda asal/satuan/h — user: "ada keterangan ... sudah
+        # masuk follow up gak? buat aja kecentang ya").
+        pair_idx = self._pair_key_index() if store is not None else {}
         # v3.3.1 FIX "Saldo SO kosong semua": vektorisasi v3.2 lupa memasukkan
         # kolom matrix selain SO_H/Sistem/Deviasi ke cols_np → semua kolom
         # SO_H-2 … SO_H+2, In, Out, BK jatuh ke `else 0` → selalu tampil "-".
@@ -3957,9 +4102,14 @@ class DeviasiView(tk.Frame):
             # FIX 6d1-01 — fp STABIL (bagian 'cek' volatil dinetralkan —
             # lihat _fp_stable): centang bertahan saat label CEK berubah;
             # entri lama dicocokkan lewat identitas-stabil (legacy_fp).
+            # v3.12.3 — ☑ level PASANGAN: entri IMPOR (asal IMPORT,
+            # satuan '') / entri era nilai-tergeser tetap menandai baris
+            # pasangan sama (pencocokan fp mentah saja akan menyembunyikan
+            # ☑ — baris hasil impor v3.12.2 tampak belum dipantau).
             fp = self._fp_stable(snap)
             checked = store is not None and (
-                store.has(fp) or fp in legacy_fp)
+                store.has(fp) or fp in legacy_fp
+                or bool(self._pair_matched_keys(snap, pair_idx)))
             values[0] = CHECK_ON if checked else CHECK_OFF
             fp_map[f"row_{i}"] = fp
             row_snaps[f"row_{i}"] = snap
