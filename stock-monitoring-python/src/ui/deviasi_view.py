@@ -116,6 +116,7 @@ from .widgets import (
     col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
+    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -2203,12 +2204,14 @@ class DeviasiView(tk.Frame):
                     filtered["KATEGORI"].astype(str)
                     == str(self._kategori_sel)]
         # filter header kolom lain (nilai TERFORMAT — identik render)
+        # v3.12.1 — FIX filter: seleksi popup ber-LABEL tampilan ('␣' /
+        # '(Kosong)') — cocokkan mentah ATAU label (pola v3.11.10 clone).
         for col, sel in self._col_sel.items():
             if sel is None or col == exclude_col:
                 continue
             if col in filtered.columns:
                 fmt = self._format_col_series(col, filtered[col])
-                filtered = filtered[fmt.isin(sel)]
+                filtered = filtered[filter_disp_mask(fmt, sel)]
         return filtered
 
     def _merge_value_get(self, iid, col, cur):
@@ -3796,10 +3799,12 @@ class DeviasiView(tk.Frame):
 
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel; menggantikan RESTO/Nama Barang combo)
+        # v3.12.1 — FIX filter: seleksi popup ber-LABEL tampilan ('␣' /
+        # '(Kosong)') — cocokkan mentah ATAU label (pola v3.11.10 clone).
         for col, sel in st["col_sel"].items():
             if col in filtered.columns:
                 fmt = self._format_col_series(col, filtered[col])
-                filtered = filtered[fmt.isin(sel)]
+                filtered = filtered[filter_disp_mask(fmt, sel)]
 
         if filtered.empty:
             # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebab 0

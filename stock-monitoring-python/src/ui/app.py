@@ -5,7 +5,7 @@ Struktur jendela (ala aplikasi Waste):
     ┌────────────────────────────────────────────────────┐
     │ ⬛ Toolbar gelap: 📊 judul + vX.Y.Z  + [💾 Export] │
     ├────────────────────────────────────────────────────┤
-    │ Tab modern ber-ikon (10 tab, fungsi tidak berubah) │
+    │ Tab modern ber-ikon (9 tab, fungsi tidak berubah) │
     ├────────────────────────────────────────────────────┤
     │ Konten card-based per view (tabel lebar & besar)   │
     ├────────────────────────────────────────────────────┤
@@ -32,6 +32,12 @@ Struktur jendela (ala aplikasi Waste):
                           VBA × data app) + drill-down
   7. ☑ Follow Up        : daftar baris tercentang + export
   8. 🛒 Rincian PO      : rekap PO + item (baris teal/putih)
+
+(v3.12.1 — tab ⚖ Laporan Versus DIHAPUS (user: "hapus tab laporan
+versus") — view/export/parser kolom ekstra dibongkar bersama dead
+code-nya, pola v3.11.30. File deviasi bulan lalu tetap dimuat app-level
+→ kolom 'Nominal Deviasi Bulan Lalu' tab 🧮 + analisa lalu-kini tab
+📦/🧩 tetap hidup.)
 
 (v3.11.30 — tab 📋 Laporan Deviasi DIHAPUS total bersama 3 modenya
 — ⚖ Komparasi File Deviasi · 🚨 Anomali COM · 💰 Nominal (H) — user:
@@ -136,7 +142,6 @@ from src.ui.deviasi_file import (  # v3.11.30 — parser file deviasi (relokasi
     bulan_mundur_list,
     parse_deviasi_file,
 )
-from src.ui.laporan_versus_view import LaporanVersusView
 from src.ui.nominal_resto_view import NominalRestoView
 from src.ui.pivot_view import PivotTableView
 from src.ui.refresh_sources import RefreshSourcesDialog
@@ -210,7 +215,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.12.0"  # v3.12.0 — TAB ⚖ LAPORAN VERSUS (user: "poin 1-12 laporan resmi itu jadi laporan versus — dua mode: resto vs area / vs resto lain banyak, atau satu resto vs satu resto lainnya; poin 13 = komparasi dua resto mis. BKS gold vs CGK Pak"): tab baru ⚖ Laporan Versus (13 poin MIRROR STRUKTUR KOLOM laporan resmi — QTY BOM/COM/DEVIASI/WASTE/SUSUT/TRIAL/LOSS-SURPLUS + NOMINAL ×5, poin 13 = komparasi dua resto + PENJUALAN + %NomDev÷Penj); parser parse_deviasi_file +11 kolom opsional (12 ukuran lengkap + AREA + PENJUALAN + Akun — file lama kompatibel); 2 mode pembanding (se-Area otomatis kolom AREA / Semua Resto Lain — statistik per-bahan atas PEMBAWA bahan saja; 1v1 dengan sisi tanpa bahan = 0); QTY antar-bahan tidak dijumlahkan (satuan campur) — TOTAL hanya ukuran nominal Rp; export Excel 13 poin nilai mentah + % rasio 0..1; pelanggan _notify_lalu_consumers; test §100 (fixture 4 resto × 2 area + verifikasi independen 20.AGUSTUS asli BKSGOL/CKGPAH). v3.11.59 — AUDIT FORMULA SEMUA TAB: 13 fix terbukti (rumus COM kanonik 3-implementasi, popup & tab Nominal hormati mode saldo sistem 42.17, swap tanggal kronologis, kunci kanonik sa/bk + po_keterangan + followup, resto kosong 2205, PO tanpa nomor, saldo minus tanpa fabrikasi 0, fmt harga negatif, label harga 41.09)  # v3.11.59 — AUDIT FORMULA SEMUA TAB (user: "cek formula atau rumus di semua tab sesuai gak?") → 13 fix terbukti: (1) rumus COM kini KANONIK 3-implementasi (fn_audit + pivot_view _compute_com diselaraskan dgn deviasi_popup/com_analisa — pivot: fallback series SEMUA-NOL membuat pasangan tanpa SALDO AWAL dianggap SA=0 → base-0 palsu di t=1 & fallback SO penutupan dead-code; fn_audit: basis baris aktivitas pasangan sendiri yang lebih lama alih-alih kolom global sebelumnya → 3 nilai beda utk input sama; kini: SA(1) → SO penutupan → 0 utk t=1, SO wajib terekam di kolom global sebelumnya utk t>1, miss → NaN); (2) popup Deviasi (double-click) kini menghormati mode saldo sistem 42.17 (baris H identik kolom Deviasi tabel — dulu bertentangan: tabel −909 vs popup 30); (3) segmen "Beda dari Resto Lain" tidak lagi terkontaminasi lintas-satuan GR↔PCS + resto dihitung UNIK; (4) tab Nominal Deviasi menghormati mode saldo sistem (subscribe SharedSaldoSistemMode — dulu mode Pivot diabaikan → deviasi tab 🧮 ≠ tab 📦/🧩 utk pasangan sama); (5) Rekap Selisih IN: swap rentang tanggal dua-negatif kini kronologis (tgl_chrono_key — dulu swap numerik → tabel KOSONG utk "25• s/d 31•"); (6) peta sa/bk main.py kunci ternormalisasi (dulu RAW → Qty SO Kemarin/BK salah senyap utk nama mixed-case/spasi-ganda); (7) po_keterangan 4 peta ber-kunci kanonik dua sisi (dulu label "Potensi PO belum dibuat" PALSU + Nomor/Status PO 3243 kosong utk pasangan drifted); (8) followup auto-resolve: syarat basis konsisten (snapshot.sistem == saldo revisi — dulu auto-DONE palsu jalur dev==0 saat snapshot berbasis 42.17) + kunci kanonik (dulu "pasangan hilang" palsu) + export ber-prefiks "Analisa: " + heading tanggal bulan-lalu "31•" (dulu "−1"/"0" menyesatkan di H≤2); (9) fn_2205 resto string-kosong dibuang (dulu pasangan hantu (barang, '')); (10) Rincian PO tanpa Nomor # tetap tampil "(Tanpa Nomor)" (dulu hilang senyap + grand total salah); (11) Saldo Minus/Kronis tanpa fill_value=0 fabrikasi (Min/Max/Tipe hanya atas tanggal TEREKAM — dulu Max Qty 0.0 palsu & Tipe Fluktuatif palsu utk pasangan sparse); (12) fmt_harga_id mempertahankan tanda negatif; (13) label "harga 41.09 kosong" dibedakan dari "barang tak ada di 41.09" (janji fn_4109.build_harga_map terpenuhi). Test: test_ui_redesign 1630 PASS/3 FAIL zoom pre-existing (identik baseline git stash) + 5 asersi COM di-update ke basis kanonik; test_mock ALL PASS. v3.11.58 — DEEP AUDIT "mapping manual di config" (KategoriManual) → 5 fix: (1) key app_map daftar 42.17 kini kanonik rapat-spasi (norm_nama_barang_key_series — dulu strip+upper → nama ber-spasi ganda miss senyap → "Kategori (app)" kosong palsu → barang salah ditandai perlu identifikasi); (2) tab Rekap Selisih IN ikut di-refresh instant-apply (on_kategori_manual_changed baru — dulu TERLEWAT v3.11.44: kolom KATEGORI + filter ⧩ default 'Deviasi' basi sampai re-run); (3) HAPUS mapping kini instant-revert via snapshot pra-manual per sesi (_kat_pra_manual — dulu kolom "Kategori (app)" menampilkan nilai manual yang sudah dihapus); (4) penanda BARU tidak lagi terserap setiap refresh card (guard identitas frame — seen hanya diperluas saat data 42.17 baru per-run); (5) teks status card jujur soal instant-apply (dulu menyuruh tunggu re-run padahal sudah langsung). v3.11.57 — FIX pra-pipeline (user: "kolom H sebelum proses pipeline aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi tanggal terdekat"): nilai yang DIKETIK di spin kartu Pra-Pipeline kini di-commit saat <FocusOut> + di-flush tepat sebelum pipeline berjalan (_start_pipeline) — sebelumnya hanya panah spin/Enter yang meng-commit, alur 'ketik 5 → klik 🚀 MULAI PROSES' membuang nilai secara senyap.
+APP_VERSION = "3.12.1"  # v3.12.1 — HAPUS TAB ⚖ LAPORAN VERSUS + FIX "filter tidak berfungsi" tab 🧮 Nominal Deviasi (user: "hapus tab laporan versus. cek penyebab filter tidak berfungsi di tab nominal deviasi"). (1) Tab ⚖ Laporan Versus + view/export/parser 11 kolom ekstra (AREA/PENJUALAN/Akun + 8 QTY/NOMINAL WASTE/SUSUT/TRIAL/LOSS) dibongkar total bersama dead code-nya (pola v3.11.30 — file laporan resmi tetap dimuat app-level, kolom 'Nominal Deviasi Bulan Lalu' tab 🧮 + analisa lalu-kini tetap hidup). (2) FIX AKAR filter ⧩ tab 🧮 + anak tab (Tanpa Harga/Saldo Minus/Kronis) + 3 view lain (Deviasi GR/PCS, Rekap Selisih IN, Rincian PO): popup HeaderFilter meng-emit seleksi ber-LABEL TAMPILAN (_filter_disp_value — ''/'nan' → '(Kosong)', spasi tepi 'GR ' → 'GR␣'), view filter dgn fmt.isin(sel) atas nilai MENTAH → baris DICENTANG justru terbuang (centang semua = hilang; search 'MLG' = 0 baris; kolom ber-sel kosong tak pernah cocok). Fix: helper filter_disp_mask(fmt, sel) cocokkan mentah ATAU label (pola clone ⛶ v3.11.10) + peta NOHARGA_COL_TO_DF resolve 3 kolom TAMPILAN → df ('Kategori'→'KATEGORI', 'Kuantiti Deviasi'→'Qty Deviasi', 'Keterangan'→'Harga Tampil') yang dulu skip senyap. Test §101 (4 skenario: centang semua = semua lolos; satu nilai = hanya itu; search+Enter; '(Kosong)' match sel kosong). v3.11.59 — AUDIT FORMULA SEMUA TAB: 13 fix terbukti (rumus COM kanonik 3-implementasi, popup & tab Nominal hormati mode saldo sistem 42.17, swap tanggal kronologis, kunci kanonik sa/bk + po_keterangan + followup, resto kosong 2205, PO tanpa nomor, saldo minus tanpa fabrikasi 0, fmt harga negatif, label harga 41.09)  # v3.11.59 — AUDIT FORMULA SEMUA TAB (user: "cek formula atau rumus di semua tab sesuai gak?") → 13 fix terbukti: (1) rumus COM kini KANONIK 3-implementasi (fn_audit + pivot_view _compute_com diselaraskan dgn deviasi_popup/com_analisa — pivot: fallback series SEMUA-NOL membuat pasangan tanpa SALDO AWAL dianggap SA=0 → base-0 palsu di t=1 & fallback SO penutupan dead-code; fn_audit: basis baris aktivitas pasangan sendiri yang lebih lama alih-alih kolom global sebelumnya → 3 nilai beda utk input sama; kini: SA(1) → SO penutupan → 0 utk t=1, SO wajib terekam di kolom global sebelumnya utk t>1, miss → NaN); (2) popup Deviasi (double-click) kini menghormati mode saldo sistem 42.17 (baris H identik kolom Deviasi tabel — dulu bertentangan: tabel −909 vs popup 30); (3) segmen "Beda dari Resto Lain" tidak lagi terkontaminasi lintas-satuan GR↔PCS + resto dihitung UNIK; (4) tab Nominal Deviasi menghormati mode saldo sistem (subscribe SharedSaldoSistemMode — dulu mode Pivot diabaikan → deviasi tab 🧮 ≠ tab 📦/🧩 utk pasangan sama); (5) Rekap Selisih IN: swap rentang tanggal dua-negatif kini kronologis (tgl_chrono_key — dulu swap numerik → tabel KOSONG utk "25• s/d 31•"); (6) peta sa/bk main.py kunci ternormalisasi (dulu RAW → Qty SO Kemarin/BK salah senyap utk nama mixed-case/spasi-ganda); (7) po_keterangan 4 peta ber-kunci kanonik dua sisi (dulu label "Potensi PO belum dibuat" PALSU + Nomor/Status PO 3243 kosong utk pasangan drifted); (8) followup auto-resolve: syarat basis konsisten (snapshot.sistem == saldo revisi — dulu auto-DONE palsu jalur dev==0 saat snapshot berbasis 42.17) + kunci kanonik (dulu "pasangan hilang" palsu) + export ber-prefiks "Analisa: " + heading tanggal bulan-lalu "31•" (dulu "−1"/"0" menyesatkan di H≤2); (9) fn_2205 resto string-kosong dibuang (dulu pasangan hantu (barang, '')); (10) Rincian PO tanpa Nomor # tetap tampil "(Tanpa Nomor)" (dulu hilang senyap + grand total salah); (11) Saldo Minus/Kronis tanpa fill_value=0 fabrikasi (Min/Max/Tipe hanya atas tanggal TEREKAM — dulu Max Qty 0.0 palsu & Tipe Fluktuatif palsu utk pasangan sparse); (12) fmt_harga_id mempertahankan tanda negatif; (13) label "harga 41.09 kosong" dibedakan dari "barang tak ada di 41.09" (janji fn_4109.build_harga_map terpenuhi). Test: test_ui_redesign 1630 PASS/3 FAIL zoom pre-existing (identik baseline git stash) + 5 asersi COM di-update ke basis kanonik; test_mock ALL PASS. v3.11.58 — DEEP AUDIT "mapping manual di config" (KategoriManual) → 5 fix: (1) key app_map daftar 42.17 kini kanonik rapat-spasi (norm_nama_barang_key_series — dulu strip+upper → nama ber-spasi ganda miss senyap → "Kategori (app)" kosong palsu → barang salah ditandai perlu identifikasi); (2) tab Rekap Selisih IN ikut di-refresh instant-apply (on_kategori_manual_changed baru — dulu TERLEWAT v3.11.44: kolom KATEGORI + filter ⧩ default 'Deviasi' basi sampai re-run); (3) HAPUS mapping kini instant-revert via snapshot pra-manual per sesi (_kat_pra_manual — dulu kolom "Kategori (app)" menampilkan nilai manual yang sudah dihapus); (4) penanda BARU tidak lagi terserap setiap refresh card (guard identitas frame — seen hanya diperluas saat data 42.17 baru per-run); (5) teks status card jujur soal instant-apply (dulu menyuruh tunggu re-run padahal sudah langsung). v3.11.57 — FIX pra-pipeline (user: "kolom H sebelum proses pipeline aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi tanggal terdekat"): nilai yang DIKETIK di spin kartu Pra-Pipeline kini di-commit saat <FocusOut> + di-flush tepat sebelum pipeline berjalan (_start_pipeline) — sebelumnya hanya panah spin/Enter yang meng-commit, alur 'ketik 5 → klik 🚀 MULAI PROSES' membuang nilai secara senyap.
 # (pin versi 3.11.30 + §13b/§94-H masih kunci analisa 6-seksi lama yang
 # dihapus user di v3.11.31 → crash _btn94.invoke() mematikan ±1100 baris
 # test akhir) di-rewrite jujur mengunci kontrak analisa selisih baru
@@ -2997,11 +3002,9 @@ class StockMonitorApp:
         self.tab_in_selisih = tk.Frame(self.notebook, bg=C_BG)
         # v3.9.34 — tab 🧮 Nominal Deviasi (Σ nominal per resto)
         self.tab_nominal_resto = tk.Frame(self.notebook, bg=C_BG)
-        # v3.12.0 — tab ⚖ Laporan Versus (13 poin laporan resmi format
-        # versus 2 mode; user: "poin 1-12 itu laporan versus ... dua mode
-        # ... versus area / resto lain banyak, atau satu resto vs satu
-        # resto lainnya")
-        self.tab_laporan_versus = tk.Frame(self.notebook, bg=C_BG)
+        # v3.12.1 — tab ⚖ Laporan Versus DIHAPUS (user: "hapus tab
+        # laporan versus") — frame/notebook/build/view/export + dead
+        # code parser kolom ekstranya dibongkar (pola v3.11.30).
         self.tab_followup = tk.Frame(self.notebook, bg=C_BG)
         self.tab_rincian = tk.Frame(self.notebook, bg=C_BG)
 
@@ -3018,11 +3021,6 @@ class StockMonitorApp:
         # v3.9.34 — tab 🧮 Nominal Deviasi: Σ harga×qty deviasi per resto
         self.notebook.add(self.tab_nominal_resto,
                           text="💰 Nominal Deviasi")
-        # v3.12.0 — tab ⚖ Laporan Versus: 13 poin laporan resmi format
-        # versus (poin 1-12 = 12 ukuran QTY/NOMINAL mirror kolom laporan;
-        # poin 13 = komparasi dua resto mis. BKSGOL vs CKGPAH)
-        self.notebook.add(self.tab_laporan_versus,
-                          text="⚖ Laporan Versus")
         self.notebook.add(self.tab_followup, text="☑ Follow Up")
         self.notebook.add(self.tab_rincian, text="🛒 Rincian PO")
         # v3.9.59 — FIX 2a-05: register label FULL per tab + pantau
@@ -3036,7 +3034,6 @@ class StockMonitorApp:
             str(self.tab_deviasi_pcs): "🧩 Deviasi PCS",
             str(self.tab_in_selisih): "📤 Rekap Selisih IN",
             str(self.tab_nominal_resto): "💰 Nominal Deviasi",
-            str(self.tab_laporan_versus): "⚖ Laporan Versus",
             str(self.tab_followup): "☑ Follow Up",
             str(self.tab_rincian): "🛒 Rincian PO",
         }
@@ -3068,7 +3065,6 @@ class StockMonitorApp:
             str(self.tab_deviasi_pcs): "Pemeriksaan & Rekonsiliasi",
             str(self.tab_in_selisih): "Pemeriksaan & Rekonsiliasi",
             str(self.tab_nominal_resto): "Analisis",
-            str(self.tab_laporan_versus): "Analisis",
             str(self.tab_followup): "Tindak Lanjut",
             str(self.tab_rincian): "Tindak Lanjut",
         }
@@ -3099,10 +3095,6 @@ class StockMonitorApp:
             str(self.tab_nominal_resto):
                 "double-click resto = rincian · klik-kanan = opsi · anak tab: "
                 "Tanpa Harga / Saldo Minus / Kronis · Ctrl+1..9 pindah tab",
-            str(self.tab_laporan_versus):
-                "Poin 1-13 laporan resmi · 2 mode (vs Area/Banyak Resto, "
-                "1v1) · sort klik judul · 💾 Export 13 poin · "
-                "Ctrl+1..9 pindah tab",
             str(self.tab_followup):
                 "✓ = keluarkan entri · export Excel tersedia · Ctrl+1..9 pindah tab",
             str(self.tab_rincian):
@@ -3116,7 +3108,6 @@ class StockMonitorApp:
         self._build_deviasi_pcs_tab()
         self._build_in_selisih_tab()
         self._build_nominal_resto_tab()   # v3.9.34 — tab 🧮
-        self._build_laporan_versus_tab()  # v3.12.0 — tab ⚖
         self._build_followup_tab()
         self._build_rincian_tab()
         self._build_tab_views()  # FIX A-11: routing tab berbasis widget
@@ -3209,8 +3200,6 @@ class StockMonitorApp:
             str(self.tab_in_selisih): self.in_selisih_view,
             # v3.9.34 — dispatch _on_tab_changed → ensure_refreshed
             str(self.tab_nominal_resto): self.nominal_resto_view,
-            # v3.12.0 — dispatch _on_tab_changed → ensure_refreshed
-            str(self.tab_laporan_versus): self.laporan_versus_view,
             str(self.tab_rincian): self.rincian_view,
         }
 
@@ -7150,12 +7139,6 @@ class StockMonitorApp:
                 nr.on_lalu_file_changed()
             except Exception as exc:  # noqa: BLE001 — consumer crash ≠ app crash
                 print(f"[WARNING] nominal_resto.on_lalu_file_changed: {exc}")
-        lv = getattr(self, "laporan_versus_view", None)
-        if lv is not None:
-            try:
-                lv.on_lalu_file_changed()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[WARNING] laporan_versus.on_lalu_file_changed: {exc}")
         for dv in (getattr(self, "deviasi_gr_view", None),
                    getattr(self, "deviasi_pcs_view", None)):
             if dv is not None:
@@ -7278,21 +7261,6 @@ class StockMonitorApp:
             # pra-pipeline; __init__ simpan placeholder None).
             rincian_po_df=None)
         self.nominal_resto_view.pack(fill="both", expand=True)
-
-    def _build_laporan_versus_tab(self):
-        """v3.12.0 — tab ⚖ Laporan Versus (user: "poin 1-12 laporan
-        resmi itu jadi laporan versus, dua mode: resto vs area / vs
-        resto lain banyak, atau satu resto vs satu resto lainnya;
-        poin 13 = komparasi dua resto mis. BKS gold vs CGK Pak").
-
-        Sumber = file laporan resmi bulan lalu (app _lalu_file_df —
-        diisi tombol 📂 tab ⚙️ Config; ganti file → _notify_lalu
-        _consumers memanggil on_lalu_file_changed view ini)."""
-        self.laporan_versus_view = LaporanVersusView(
-            self.tab_laporan_versus,
-            lalu_provider=lambda: self._lalu_file_df,
-            go_to_config=lambda: self._go_to_tab(self.tab_config))
-        self.laporan_versus_view.pack(fill="both", expand=True)
 
     def _build_followup_tab(self):
         self.followup_view = FollowUpView(

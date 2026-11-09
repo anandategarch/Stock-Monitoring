@@ -159,6 +159,40 @@ def _filter_disp_value(v) -> str:
     return s
 
 
+def filter_disp_mask(fmt, sel):
+    """v3.12.1 — FIX "filter tidak berfungsi": mask baris yang lolos
+    seleksi ⧩ — MENTAH **ATAU** LABEL TAMPILAN (pola _tree_row_passes
+    v3.11.10 audit 3-c #18/#21, kini utk filter TABEL UTAMA view).
+
+    AKAR BUG (user: "cek penyebab filter tidak berfungsi di tab nominal
+    deviasi"): popup HeaderFilter meng-emit seleksi ber-LABEL TAMPILAN
+    (_filter_disp_value — ''/'nan' → '(Kosong)', spasi tepi → penanda
+    '␣' — data 'GR ' nyata di rekap user), sedangkan view memfilter
+    dgn ``fmt.isin(sel)`` atas nilai TERFORMAT MENTAH ('GR ' ≠ 'GR␣')
+    → baris yang DICENTANG justru terbuang: centang semua = baris
+    hilang; search+Enter ('MLG') = 0 baris; kolom ber-sel kosong =
+    '(Kosong)' tak pernah cocok. Fix: cocokkan KEDUANYA (mentah diuji
+    dulu, label fallback — konvensi clone ⛶ v3.11.10 dipakai ke semua
+    tabel utama ber-⧩).
+
+    ``fmt`` = Series nilai terformat; ``sel`` = seleksi (set/list ber-
+    label tampilan ATAU nilai mentah — jalur programatik lama tetap
+    didukung). Return boolean Series (all-True bila sel kosong)."""
+    if sel is None:
+        return fmt == fmt  # tanpa filter — semua lolos
+    try:
+        m = fmt.isin(list(sel))
+    except (TypeError, ValueError):
+        m = fmt == fmt
+    # label tampilan (fall-back / satu-satunya jalur popup):
+    try:
+        disp = fmt.map(_filter_disp_value)
+        m = m | disp.isin(list(sel))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return m
+
+
 def _filter_value_sort_key(v: str):
     """Key tuple (grup, angka, kunci_teks) — grup −1: label tanggal
     bulan-lalu 'N•' (kronologis, PALING AWAL), grup 0: angka (naik),

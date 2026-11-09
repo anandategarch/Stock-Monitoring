@@ -70,6 +70,7 @@ from .widgets import (
     auto_fit_columns,
     enable_col_resize,
     enable_multi_select,
+    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     fmt_int_id,
     insert_tree_items,
     reset_autofit_once,
@@ -542,7 +543,10 @@ class SaldoMinusView(tk.Frame):
             if not df_col or df_col not in filtered.columns or not sel:
                 continue
             fmt = self._format_col_series(col, filtered[df_col])
-            filtered = filtered[fmt.isin(sel)]
+            # v3.12.1 — FIX filter tidak berfungsi (anak tab Saldo Minus):
+            # seleksi popup ber-LABEL tampilan ('␣'/'(Kosong)') — cocokkan
+            # nilai mentah ATAU label (pola nominal_resto v3.12.1).
+            filtered = filtered[filter_disp_mask(fmt, sel)]
         if filtered.empty:
             _hint = zero_row_filter_message(st["col_sel"])
             return {"items": [],

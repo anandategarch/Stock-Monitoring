@@ -959,11 +959,10 @@ def main():
           app.statusbar._right_var.get() ==
           f"v{APP_VERSION} · Python Edition",
           f"got {app.statusbar._right_var.get()!r}")
-    check("App + toolbar + 10 tab terbangun (v3.12.0 — tab ⚖ Laporan "
-          "Versus ditambahkan setelah 💰 Nominal Deviasi)",
-          len(app.notebook.tabs()) == 10
-          and "⚖ Laporan Versus" in app.notebook.tab(app.tab_laporan_versus,
-                                                     "text"),
+    check("App + toolbar + 9 tab terbangun (v3.12.1 — tab ⚖ Laporan "
+          "Versus dihapus; 9 tab: Proses/Mutasi/Deviasi GR/Deviasi PCS/"
+          "Rekap Selisih IN/Nominal Deviasi/Follow Up/Rincian PO)",
+          len(app.notebook.tabs()) == 9,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
     # v3.11.57 — dulunya hard-pin "APP_VERSION == 3.11.39" (stale 17
@@ -3457,16 +3456,14 @@ def main():
           bool(root.bind("<Control-Tab>")))
 
     # ---- A-11: routing tab berbasis WIDGET (bukan index) ----
-    check("(v3.9.10→v3.12.0) A-11: peta _tab_views 7 entry berbasis "
-          "nama widget (v3.12.0: + tab ⚖ Laporan Versus)",
-          len(app._tab_views) == 7
+    check("(v3.9.10→v3.12.1) A-11: peta _tab_views 6 entry berbasis "
+          "nama widget (v3.12.1: tab ⚖ Laporan Versus dihapus)",
+          len(app._tab_views) == 6
           and app._tab_views.get(str(app.tab_rincian)) is app.rincian_view
           and app._tab_views.get(str(app.tab_deviasi_pcs))
           is app.deviasi_pcs_view
           and app._tab_views.get(str(app.tab_nominal_resto))
-          is app.nominal_resto_view
-          and app._tab_views.get(str(app.tab_laporan_versus))
-          is app.laporan_versus_view,
+          is app.nominal_resto_view,
           f"got {len(app._tab_views)} entry")
 
     # ---- A-03: DPI-awareness no-op di Linux (tanpa crash) ----
@@ -18765,19 +18762,17 @@ def main():
           "(audit eksternal T5+T3) ==")
     # -- (a) objek tooltip + grup lengkap -----------------------------------
     tt81 = getattr(app, "_tab_tooltips", None)
-    check("(v3.9.68+v3.12.0) §81a: NotebookTabTooltips terpasang + "
-          "grup 10 tab LENGKAP (Operasional 3 · Pemeriksaan & "
-          "Rekonsiliasi 3 · Analisis 2 · Tindak Lanjut 2 — v3.12.0: "
-          "tab ⚖ Laporan Versus masuk grup Analisis)",
-          tt81 is not None and len(app._tab_groups) == 10
+    check("(v3.9.68+v3.12.1) §81a: NotebookTabTooltips terpasang + "
+          "grup 9 tab LENGKAP (Operasional 3 · Pemeriksaan & "
+          "Rekonsiliasi 3 · Analisis 1 · Tindak Lanjut 2 — v3.12.1: "
+          "tab ⚖ Laporan Versus dihapus dari grup Analisis)",
+          tt81 is not None and len(app._tab_groups) == 9
           and sum(g == "Operasional"
                   for g in app._tab_groups.values()) == 3
           and sum(g == "Pemeriksaan & Rekonsiliasi"
                   for g in app._tab_groups.values()) == 3
           and sum(g == "Analisis"
-                  for g in app._tab_groups.values()) == 2
-          and app._tab_groups.get(str(app.tab_laporan_versus))
-          == "Analisis"
+                  for g in app._tab_groups.values()) == 1
           and sum(g == "Tindak Lanjut"
                   for g in app._tab_groups.values()) == 2,
           f"grup={app._tab_groups!r}")
@@ -23264,406 +23259,87 @@ def main():
 
     # =====================================================================
     print()
-    print("== §100. (v3.12.0) TAB ⚖ LAPORAN VERSUS — 13 POIN LAPORAN RESMI "
-          "FORMAT VERSUS (2 MODE) + PARSER 12 UKURAN/AREA/PENJUALAN ==")
-    # USER: "poin 1-12 laporan resmi itu jadi laporan versus — dua mode:
-    # resto vs area / vs resto lain banyak, atau satu resto vs satu resto
-    # lainnya; poin 13 = komparasi dua resto (mis. BKS gold vs CGK Pak)".
+    print("== §101. (v3.12.1) FIX \"filter tidak berfungsi\" tab 🧮 Nominal "
+          "Deviasi — label tampilan vs nilai mentah (helper + peta kolom) ==")
+    # USER: "cek penyebab filter tidak berfungsi di tab nominal deviasi".
+    # AKAR BUG: popup HeaderFilter meng-emit seleksi ber-LABEL TAMPILAN
+    # (_filter_disp_value — ''/'nan' → '(Kosong)', spasi tepi 'GR ' →
+    # 'GR␣'), view filter dgn fmt.isin(sel) atas nilai MENTAH → baris
+    # yang DICENTANG justru terbuang. Fix: filter_disp_mask cocokkan
+    # mentah ATAU label + NOHARGA_COL_TO_DF resolve 3 kolom tampilan →
+    # df yang dulu skip senyap.
     # ---------------------------------------------------------------------
-    import tempfile
+    import pandas as _pd101
 
-    import openpyxl
-
-    from src.ui.deviasi_file import parse_deviasi_file
-    from src.ui.export_sheets import write_laporan_versus_book
-    from src.ui.laporan_versus_view import (
-        _TOT_TAG,
-        BASELINE_AREA,
-        BASELINE_LAIN,
-        MODE_VS_GROUP,
-        MODE_VS_SATU,
-        compute_laporan_versus,
+    from src.ui.widgets import (
+        _filter_disp_value as _fdv101,
+        filter_disp_mask as _fdm101,
     )
+    from src.ui.nominal_resto_view import NOHARGA_COL_TO_DF as _NCDF101
 
-    # ---- (A) FIXTURE parse-like 4 resto × 2 area × 3 bahan × 2 minggu --
-    def _lv_row(resto, bahan, satuan, minggu, dev, nom, bulan_num,
-                bulan_txt):
-        return {
-            "Resto": resto, "Nama Barang": bahan, "Satuan": satuan,
-            "Minggu": minggu,
-            "BOM Lalu": -1000.0, "COM Lalu": -1000.0 + dev, "DEV Lalu": dev,
-            "QTY WASTE Lalu": -10.0, "QTY SUSUT Lalu": 0.0,
-            "QTY TRIAL Lalu": -1.0, "QTY LOSS SURPLUS Lalu": dev + 11.0,
-            "Nominal Deviasi Lalu": nom, "NOMINAL WASTE Lalu": -100.0,
-            "NOMINAL SUSUT Lalu": 0.0, "NOMINAL TRIAL Lalu": -10.0,
-            "NOMINAL LOSS/SURPLUS Lalu": nom + 110.0,
-            "BULAN": bulan_txt, "_bulan_num": bulan_num,
-            "_resto_norm": resto.split(".")[-1], "_bahan_norm": bahan,
-            "_h": 7 if minggu == "WEEK 1" else 25,
-            "AREA": {"RAAA": "AREA SATU", "RBBB": "AREA SATU",
-                     "RCCC": "AREA DUA", "RDDD": "AREA DUA"}[resto.split(".")[-1]],
-            "PENJUALAN": {"RAAA": 10_000_000, "RBBB": 5_000_000,
-                          "RCCC": 20_000_000, "RDDD": 8_000_000}[
-                              resto.split(".")[-1]],
-            "Akun": "COM DEVIASI - RESTO",
-            "%TO BOM Lalu": float("nan"),
-        }
+    # ---- (A) helper _filter_disp_value: konversi label tampilan ---------
+    # spasi tepi → penanda '␣' dipasang SETELAH spasi ('GR ' → 'GR ␣' —
+    # ruang spasi dipertahankan + penanda, BUKAN 'GR␣'); '' / 'nan' →
+    # '(Kosong)'. (None literal → 'None' — quirk prav3.12.1; formatter
+    # view produksi '' / 'nan' bukan None.)
+    _sA = _pd101.Series(["GR", "GR ", "", float("nan"), "MLG"])
+    _dispA = _sA.map(_fdv101)
+    check("(v3.12.1) §101-A _filter_disp_value: spasi tepi ditandai '␣' "
+          "SETELAH spasi ('GR ' → 'GR ␣' — data nyata rekap user) + "
+          "kosong ('' & NaN) → '(Kosong)'",
+          list(_dispA) == ["GR", "GR ␣", "(Kosong)", "(Kosong)", "MLG"],
+          f"got {list(_dispA)!r}")
 
-    _lv_rows = []
-    # bulan 8 (terbaru) WEEK 4 — nilai utama; WEEK 1 + bulan 7 = pengganggu
-    _lv_specs8 = [
-        ("001.RAAA", "BAHAN X", "GR", 100.0, 1_000_000.0),
-        ("001.RAAA", "BAHAN Y", "PCS", 10.0, 50_000.0),
-        ("001.RAAA", "BAHAN Z", "GR", -20.0, -200_000.0),
-        ("002.RBBB", "BAHAN X", "GR", 60.0, 600_000.0),
-        ("002.RBBB", "BAHAN Y", "PCS", 4.0, 20_000.0),   # RBBB tanpa Z
-        ("003.RCCC", "BAHAN X", "GR", 300.0, 3_000_000.0),
-        ("003.RCCC", "BAHAN Z", "GR", 5.0, 50_000.0),    # RCCC tanpa Y
-        ("004.RDDD", "BAHAN X", "GR", -50.0, -500_000.0),
-        ("004.RDDD", "BAHAN Y", "PCS", 2.0, 10_000.0),
-    ]
-    for r, b, s, d, n in _lv_specs8:
-        _lv_rows.append(_lv_row(r, b, s, "WEEK 4", d, n, 8, "204.AGUSTUS 26"))
-    for r, b, s, d, n in _lv_specs8:  # WEEK 1 bulan 8 (pengganggu minggu)
-        _lv_rows.append(_lv_row(r, b, s, "WEEK 1", d * 0.5, n * 0.5, 8,
-                                "201.AGUSTUS 26"))
-    for r, b, s, d, n in _lv_specs8:  # bulan 7 (terlewat — bukan terbaru)
-        _lv_rows.append(_lv_row(r, b, s, "WEEK 4", d * 2, n * 2, 7,
-                                "204.JULI 26"))
-    _lv_df = pd.DataFrame(_lv_rows)
+    # ---- (B) BUG REPRO: centang SEMUA nilai (seleksi = label tampilan) -
+    # dulu fmt.isin(sel) atas MENTAH → 'GR ' ≠ 'GR␣' → baris terbuang;
+    # fix: filter_disp_mask cocokkan mentah ATAU label → SEMUA lolos.
+    _sB = _pd101.Series(["GR", "GR ", "MLG", ""])
+    _all_labels = list(_sB.map(_fdv101))   # popup emit label tampilan
+    _maskB = _fdm101(_sB, set(_all_labels))
+    check("(v3.12.1) §101-B BUG REPRO 'centang semua = baris hilang': "
+          "seleksi ber-LABEL TAMPILAN kini SEMUA lolos (dulu 2 dari 4 "
+          "terbuang: 'GR '≠'GR␣' & ''≠'(Kosong)')",
+          list(_maskB) == [True, True, True, True],
+          f"got {list(_maskB)!r}")
 
-    # ---- (B) COMPUTE MODE 2 (1v1) — angka tangan ------------------------
-    p2 = compute_laporan_versus(_lv_df, "001.RAAA", MODE_VS_SATU,
-                                BASELINE_AREA, "003.RCCC", "WEEK 4")
-    m2 = p2["meta"]
-    check("(v3.12.0) §100-B0 payload ok: bulan TERBARU dipakai (8 "
-          "AGUSTUS, bukan 7 JULI) + minggu WEEK 4 + area map",
-          p2["ok"] and m2["minggu"] == "WEEK 4" and m2["minggu_h"] == 25
-          and m2["bulan_raw"] in ("204.AGUSTUS 26", "201.AGUSTUS 26")
-          and m2["area_a"] == "AREA SATU" and m2["area_b"] == "AREA DUA"
-          and m2["n_resto"] == 4,
-          f"meta={ {k: m2[k] for k in ('minggu', 'minggu_h', 'bulan_raw', 'area_a', 'area_b')} }")
-    _p3 = p2["poin"][3]
-    _row_x = _p3[_p3["Nama Bahan"] == "BAHAN X"].iloc[0]
-    check("(v3.12.0) §100-B1 poin 3 mode 1v1: BAHAN X A=100 B=300 "
-          "Δ=(200) %=−66,7% (rumus (A−B)÷|B|×100)",
-          _row_x["A"] == "100" and _row_x["B"] == "300"
-          and _row_x["Δ"] == "(200)" and _row_x["%"] == "-66,7%",
-          f"row={_row_x.to_dict()}")
-    _row_y = _p3[_p3["Nama Bahan"] == "BAHAN Y"].iloc[0]
-    _row_z = _p3[_p3["Nama Bahan"] == "BAHAN Z"].iloc[0]
-    check("(v3.12.0) §100-B2 sisi TANPA bahan = 0 (B '-' — resto tidak "
-          "membawa bahan; Δ = nilai A penuh; RCCC tanpa Y, RAAA-lah "
-          "yang punya — B tampil '-' bukan 0)",
-          _row_y["B"] == "-" and _row_y["Δ"] == "10"
-          and _row_z["B"] == "5" and _row_z["Δ"] == "(25)",
-          f"Y={_row_y.to_dict()} Z={_row_z.to_dict()}")
-    _p8 = p2["poin"][8]
-    _tot8 = _p8[_p8["Nama Bahan"] == "TOTAL"].iloc[0]
-    check("(v3.12.0) §100-B3 poin 8 (Rp) TOTAL mode 1v1: A=850.000 "
-          "B=3.050.000 Δ=(2.200.000) %=−72,1% + baris _total",
-          _tot8["A"] == "Rp 850.000" and _tot8["B"] == "Rp 3.050.000"
-          and _tot8["Δ"] == "(Rp 2.200.000)" and _tot8["%"] == "-72,1%"
-          and bool(_tot8.get("_total")),
-          f"tot={_tot8.to_dict()}")
-    _s13 = p2["poin13_score"]
-    _srow = _s13[_s13["Ukuran"] == "PENJUALAN (s/d minggu)"].iloc[0]
-    _rrow = _s13[_s13["Ukuran"] == "% NOM DEVIASI ÷ PENJUALAN"].iloc[0]
-    check("(v3.12.0) §100-B4 poin 13 skor: PENJUALAN A Rp 10.000.000 · "
-          "B Rp 20.000.000 + rasio %NomDev÷Penj A 8,50% · B 15,25%",
-          _srow["A"] == "Rp 10.000.000" and _srow["B"] == "Rp 20.000.000"
-          and _rrow["A"] == "8,50%" and _rrow["B"] == "15,25%",
-          f"penj={_srow.to_dict()} rasio={_rrow.to_dict()}")
-    _b13 = p2["poin13_bahan"]
-    _b13x = _b13[_b13["Nama Bahan"] == "BAHAN X"].iloc[0]
-    _btot = _b13[_b13["Nama Bahan"] == "TOTAL"].iloc[0]
-    check("(v3.12.0) §100-B5 poin 13 rincian: urut |Δ NOM| (X paling "
-          "atas) + TOTAL NOM A Rp 850.000 · B Rp 3.050.000 · "
-          "TOTAL QTY = '-' (satuan campur tak dijumlah)",
-          _b13.iloc[0]["Nama Bahan"] == "BAHAN X"
-          and _b13x["Δ NOM"] == "(Rp 2.000.000)"
-          and _btot["A NOM"] == "Rp 850.000"
-          and _btot["B NOM"] == "Rp 3.050.000"
-          and _btot["Δ QTY"] == "-",
-          f"first={_b13.iloc[0]['Nama Bahan']!r} tot={_btot.to_dict()}")
+    # ---- (C) search+Enter satu nilai: hanya itu lolos ------------------
+    # user ketik 'MLG' + Enter → popup emit ['MLG'] → hanya baris MLG.
+    _maskC = _fdm101(_sB, {"MLG"})
+    check("(v3.12.1) §101-C search+Enter 'MLG': hanya 1 baris lolos "
+          "(dulu tetap 1 — kasus ini tidak broken, tapi pastikan fix "
+          "tidak regresi)",
+          list(_maskC) == [False, False, True, False],
+          f"got {list(_maskC)!r}")
 
-    # ---- (C) COMPUTE MODE 1 (grup) — statistik se-area -------------------
-    p1a = compute_laporan_versus(_lv_df, "001.RAAA", MODE_VS_GROUP,
-                                 BASELINE_AREA, "003.RCCC", "WEEK 4")
-    m1a = p1a["meta"]
-    check("(v3.12.0) §100-C0 mode 1a grup = se-AREA SATU (2 resto — "
-          "hanya pembawa bahan masuk statistik, RAAA+RBBB)",
-          m1a["group_label"] == "se-Area AREA SATU · 2 resto",
-          f"group={m1a['group_label']!r}")
-    _p3a = p1a["poin"][3]
-    _ax = _p3a[_p3a["Nama Bahan"] == "BAHAN X"].iloc[0]
-    check("(v3.12.0) §100-C1 poin 3 vs se-area BAHAN X: Σ=160 "
-          "Rata²=80 Med=80 Δ(A−Rata²)=20 %=+25%",
-          _ax["Σ"] == "160" and _ax["Rata²"] == "80"
-          and _ax["Med"] == "80" and _ax["Δ"] == "20" and _ax["%"] == "+25,0%",
-          f"row={_ax.to_dict()}")
-    _az = _p3a[_p3a["Nama Bahan"] == "BAHAN Z"].iloc[0]
-    check("(v3.12.0) §100-C2 BAHAN Z hanya RAAA pembawa (RBBB tak punya) "
-          "→ Σ=−20 rata²=−20 med=−20 Δ=0 %=0,0% (statistik ATAS "
-          "PEMBAWA — non-carrier tidak menyeret rata-rata)",
-          _az["Σ"] == "(20)" and _az["Rata²"] == "(20)" and _az["Med"] == "(20)"
-          and _az["Δ"] == "-" and _az["%"] == "0,0%",
-          f"row={_az.to_dict()}")
-    _p8a = p1a["poin"][8]
-    _t8a = _p8a[_p8a["Nama Bahan"] == "TOTAL"].iloc[0]
-    check("(v3.12.0) §100-C3 poin 8 TOTAL vs se-area: Σ=Rp 1.470.000 "
-          "(850rb+620rb) rata²=Rp 735.000 Δ=+115.000 %=+15,6%",
-          _t8a["Σ"] == "Rp 1.470.000" and _t8a["Rata²"] == "Rp 735.000"
-          and _t8a["Δ"] == "Rp 115.000" and _t8a["%"] == "+15,6%",
-          f"tot={_t8a.to_dict()}")
-    p1b = compute_laporan_versus(_lv_df, "001.RAAA", MODE_VS_GROUP,
-                                 BASELINE_LAIN, "003.RCCC", "WEEK 4")
-    _p3b = p1b["poin"][3]
-    _bx = _p3b[_p3b["Nama Bahan"] == "BAHAN X"].iloc[0]
-    check("(v3.12.0) §100-C4 mode 1b 'Semua Resto Lain' BAHAN X: "
-          "pembawa RBBB 60 · RCCC 300 · RDDD −50 → Σ=310 rata²=103,33 "
-          "med=60 Δ=(3,33)",
-          p1b["meta"]["group_label"] == "Semua Resto Lain · 3 resto"
-          and _bx["Σ"] == "310" and _bx["Rata²"] == "103,33"
-          and _bx["Med"] == "60" and _bx["Δ"] == "(3,33)",
-          f"row={_bx.to_dict()}")
+    # ---- (D) seleksi '(Kosong)' → hanya sel kosong/NaN -----------------
+    # dulu '' ≠ '(Kosong)' → baris kosong tak pernah cocok → kolom ber-
+    # sel kosong seolah tak terfilter; fix: label '(Kosong)' match.
+    _maskD = _fdm101(_sB, {"(Kosong)"})
+    check("(v3.12.1) §101-D seleksi '(Kosong)' match sel kosong ('' & "
+          "NaN) — dulu tak pernah cocok",
+          list(_maskD) == [False, False, False, True],
+          f"got {list(_maskD)!r}")
 
-    # ---- (D) parser real 20.AGUSTUS — kolom baru + angka independen ------
-    _real_path = os.path.join(os.path.dirname(__file__),
-                              "..", "20.AGUSTUS 2026.xlsx")
-    if os.path.exists(_real_path):
-        _rr = parse_deviasi_file(_real_path)
-        _rdf = _rr["df"]
-        _need_cols = ["QTY WASTE Lalu", "QTY SUSUT Lalu", "QTY TRIAL Lalu",
-                      "QTY LOSS SURPLUS Lalu", "NOMINAL WASTE Lalu",
-                      "NOMINAL SUSUT Lalu", "NOMINAL TRIAL Lalu",
-                      "NOMINAL LOSS/SURPLUS Lalu", "AREA", "PENJUALAN",
-                      "Akun"]
-        check("(v3.12.0) §100-D1 parse_deviasi_file: 11 kolom baru "
-              "v3.12.0 terbaca dari file resmi + AREA/PENJUALAN non-kosong",
-              _rr["ok"] and all(c in _rdf.columns for c in _need_cols)
-              and _rdf["AREA"].astype(str).str.strip().ne("").sum() > 0
-              and _rdf["PENJUALAN"].notna().sum() > 0
-              and _rdf["Akun"].astype(str).str.strip().ne("").sum() > 0,
-              f"ok={_rr['ok']} "
-              f"area_n={(_rdf['AREA'].astype(str).str.strip() != '').sum() if _rr['ok'] else 0}")
-        _rp = compute_laporan_versus(_rdf, "1084.BKSGOL", MODE_VS_GROUP,
-                                     BASELINE_AREA, "1137.CKGPAH", "WEEK 4")
-        _rm = _rp["meta"]
-        _rp1b = compute_laporan_versus(_rdf, "1084.BKSGOL", MODE_VS_GROUP,
-                                       BASELINE_LAIN, "1137.CKGPAH",
-                                       "WEEK 4")
-        _t8r = _rp["poin"][8]
-        _t8r_tot = _t8r[_t8r["Nama Bahan"] == "TOTAL"].iloc[0]
-        _t8rb = _rp1b["poin"][8]
-        _t8rb_tot = _t8rb[_t8rb["Nama Bahan"] == "TOTAL"].iloc[0]
-        check("(v3.12.0) §100-D2 REAL 20.AGUSTUS BKSGOL se-area JAWA "
-              "BARAT 2 · 51 resto: TOTAL NOM DEVIASI A=37.595.486,18 "
-              "Σ area=965.866.635,25 (verifikasi independen groupby)",
-              _rp["ok"] and _rm["group_label"] ==
-              "se-Area JAWA BARAT 2 · 51 resto"
-              and abs(_t8r_tot["A_raw"] - 37595486.180848) < 0.01
-              and abs(_t8r_tot["Σ_raw"] - 965866635.2508) < 0.01,
-              f"group={_rm['group_label']!r} A={_t8r_tot['A_raw']} "
-              f"Σ={_t8r_tot['Σ_raw']}")
-        check("(v3.12.0) §100-D3 REAL 'Semua Resto Lain' 339 resto: "
-              "rata²=5.240.741,64 (verifikasi independen) + BKSGOL "
-              "7,2× rata-rata nasional",
-              _rp1b["meta"]["group_label"] ==
-              "Semua Resto Lain · 339 resto"
-              and abs(_t8rb_tot["Rata²_raw"] - 5240741.6396) < 0.01,
-              f"rata²={_t8rb_tot['Rata²_raw']}")
-        _rp2 = compute_laporan_versus(_rdf, "1084.BKSGOL", MODE_VS_SATU,
-                                      BASELINE_AREA, "1137.CKGPAH",
-                                      "WEEK 4")
-        _rs = _rp2["poin13_score"]
-        _rrr = _rs[_rs["Ukuran"] == "% NOM DEVIASI ÷ PENJUALAN"].iloc[0]
-        check("(v3.12.0) §100-D4 REAL BKSGOL vs CKGPAH (poin 13 — contoh "
-              "user 'BKS gold sama CGK Pak'): A 2,04% vs B 0,32% + "
-              "area JAWA BARAT 2 vs JAKARTA",
-              _rp2["ok"] and _rp2["meta"]["area_a"] == "JAWA BARAT 2"
-              and _rp2["meta"]["area_b"] == "JAKARTA"
-              and _rrr["A"] == "2,04%" and _rrr["B"] == "0,32%",
-              f"rasio A={_rrr['A']!r} B={_rrr['B']!r}")
-    else:
-        check("(v3.12.0) §100-D1 skip: file 20.AGUSTUS 2026.xlsx tak "
-              "ada di checkout ini", True, "")
+    # ---- (E) sel=None → semua lolos (tanpa filter) ---------------------
+    _maskE = _fdm101(_sB, None)
+    check("(v3.12.1) §101-E sel=None → semua lolos (tanpa filter)",
+          list(_maskE) == [True, True, True, True],
+          f"got {list(_maskE)!r}")
 
-    # ---- (E) VIEW wiring: combo/mode/poin/export -------------------------
-    _app_lv = app.laporan_versus_view
-    _app_lalu_backup = app._lalu_file_df
-    try:
-        app._lalu_file_df = _lv_df
-        app._notify_lalu_consumers()
-        app.notebook.select(app.tab_laporan_versus)
-        root.update()
-        for _ in range(80):
-            root.update()
-            if _app_lv._payload is not None and _app_lv._payload.get("ok"):
-                break
-            time.sleep(0.02)
-        check("(v3.12.0) §100-E1 tab ⚖ aktif + on_lalu_file_changed → "
-              "payload ok + combo terisi (4 resto, WEEK 1+WEEK 4, "
-              "default minggu TERAKHIR WEEK 4) + status file_var",
-              _app_lv._payload is not None and _app_lv._payload.get("ok")
-              and len(_app_lv._combo_a.cget("values")) == 4
-              and "WEEK 4 (H=25)" in _app_lv._combo_w.cget("values")
-              and _app_lv._minggu == "WEEK 4"
-              and "AREA SATU" in _app_lv._file_var.get(),
-              f"restos={list(_app_lv._combo_a.cget('values'))} "
-              f"minggu={_app_lv._minggu!r} file={_app_lv._file_var.get()!r}")
-        # pilih 1v1 RAAA vs RCCC, poin 3
-        _app_lv._combo_mode.set(_app_lv.MODE_LABELS[MODE_VS_SATU])
-        _app_lv._on_pick_mode()
-        for _ in range(80):
-            root.update()
-            if _app_lv._payload is not None and _app_lv._payload.get("ok") \
-                    and _app_lv._payload["meta"]["mode"] == "satu":
-                break
-            time.sleep(0.02)
-        _app_lv._combo_a.set("001.RAAA"); _app_lv._on_pick_a()
-        for _ in range(80):
-            root.update()
-            if _app_lv._payload is not None and _app_lv._payload.get("ok") \
-                    and _app_lv._payload["meta"]["a_label"] == "001.RAAA":
-                break
-            time.sleep(0.02)
-        _app_lv._combo_b.set("003.RCCC"); _app_lv._on_pick_b()
-        for _ in range(80):
-            root.update()
-            if _app_lv._payload is not None and _app_lv._payload.get("ok") \
-                    and _app_lv._payload["meta"]["b_label"] == "003.RCCC":
-                break
-            time.sleep(0.02)
-        _app_lv._poin = 3
-        _app_lv._combo_p.set(_app_lv._poin_label(3)); _app_lv._on_pick_poin()
-        root.update()
-        _kids = _app_lv.tree.get_children()
-        _vals0 = _app_lv.tree.item(_kids[0], "values")
-        check("(v3.12.0) §100-E2 render poin 3 mode 1v1: baris BAHAN X "
-              "(100 | 300 | (200) | -66,7%) + heading kolom A = label "
-              "resto mentah '001.RAAA' (bukan 'A')",
-              _vals0[3] == "100" and _vals0[4] == "300"
-              and _vals0[5] == "(200)" and _vals0[6] == "-66,7%"
-              and _app_lv.tree.heading("A")["text"] == "001.RAAA"
-              and "001.RAAA" in _app_lv._poin_note_var.get(),
-              f"vals={_vals0} headA={_app_lv.tree.heading('A')['text']!r}")
-        _neg_n = len(_app_lv._neg_cells.get(_app_lv.tree, []))
-        check("(v3.12.0) §100-E3 minus merah per-cell: sel negatif "
-              "(format kurung) diberi tag 'neg_cell'",
-              _neg_n >= 1,
-              f"neg={_neg_n}")
-        # ganti poin TANPA recompute (cache — payload id sama)
-        _pl_before = id(_app_lv._payload)
-        _app_lv._poin = 8
-        _app_lv._combo_p.set(_app_lv._poin_label(8)); _app_lv._on_pick_poin()
-        root.update()
-        _t8 = _app_lv.tree.get_children()
-        _t8v = _app_lv.tree.item(_t8[-1], "values")
-        check("(v3.12.0) §100-E4 ganti poin = render CACHE (payload "
-              "tak dihitung ulang) + baris TOTAL poin 8 tebal: "
-              "Rp 850.000 | Rp 3.050.000 | (Rp 2.200.000)",
-              id(_app_lv._payload) == _pl_before
-              and _app_lv.tree.exists(_t8[-1])
-              and _t8v[3] == "Rp 850.000" and _t8v[4] == "Rp 3.050.000"
-              and _t8v[5] == "(Rp 2.200.000)"
-              and _TOT_TAG in (
-                  _app_lv.tree.item(_t8[-1], "tags") or []),
-              f"vals={_t8v} tags={_app_lv.tree.item(_t8[-1], 'tags')}")
-        # mode 1 (grup se-area) — slot pembanding swap
-        _app_lv._combo_mode.set(_app_lv.MODE_LABELS[MODE_VS_GROUP])
-        _app_lv._on_pick_mode()
-        for _ in range(80):
-            root.update()
-            if _app_lv._payload is not None and _app_lv._payload.get("ok") \
-                    and _app_lv._payload["meta"]["mode"] == "group":
-                break
-            time.sleep(0.02)
-        _app_lv._poin = 3
-        _app_lv._combo_p.set(_app_lv._poin_label(3))
-        _app_lv._on_pick_poin()
-        root.update()
-        _kids1 = _app_lv.tree.get_children()
-        _v1 = _app_lv.tree.item(_kids1[0], "values")
-        check("(v3.12.0) §100-E5 mode 1 render: BAHAN X Σ=160 Rata²=80 "
-              "Med=80 Δ=20 %=+25,0% + heading Σ = 'Σ se-Area AREA SATU'",
-              _v1[4] == "160" and _v1[5] == "80" and _v1[6] == "80"
-              and _v1[7] == "20" and _v1[8] == "+25,0%"
-              and _app_lv.tree.heading("Σ")["text"] ==
-              "Σ se-Area AREA SATU",
-              f"vals={_v1} headΣ={_app_lv.tree.heading('Σ')['text']!r}")
-        # poin 13 + export
-        _app_lv._poin = 13
-        _app_lv._combo_p.set(_app_lv.POIN13_LABEL); _app_lv._on_pick_poin()
-        root.update()
-        _exp = os.path.join(tempfile.gettempdir(),
-                            "lv_test_export.xlsx")
-        try:
-            os.unlink(_exp)
-        except OSError:
-            pass
-        _n_exp = write_laporan_versus_book(
-            _exp, _app_lv._payload, _app_lv._mode)
-        _wb = openpyxl.load_workbook(_exp)
-        _ws = _wb.active
-        _titles = [str(r[0].value)
-                   for r in _ws.iter_rows(max_col=1)
-                   if r[0].value and str(r[0].value).startswith("POIN")]
-        _tot_rows = [r[0].row for r in _ws.iter_rows(max_col=2)
-                     if r[1].value == "TOTAL"]
-        _num_tot = None
-        for _tr in _tot_rows:
-            for _c in range(4, 9):
-                _cell = _ws.cell(row=_tr, column=_c)
-                if isinstance(_cell.value, (int, float)) \
-                        and _cell.value != 0:
-                    _num_tot = _cell.value
-                    break
-            if _num_tot is not None:
-                break
-        _pct_cell = None
-        for _row in _ws.iter_rows(max_col=10):
-            for _c in _row:
-                if isinstance(_c.value, (int, float)) \
-                        and _c.number_format and "%" in _c.number_format \
-                        and abs(_c.value - 0.25) < 1e-9:
-                    _pct_cell = _c.value
-                    break
-            if _pct_cell is not None:
-                break
-        check("(v3.12.0) §100-E6 export 13 poin: 13 section POIN + "
-              "baris TOTAL angka MENTAH (bisa dihitung) + kolom % "
-              "disimpan RASIO 0..1 (0.0% fmt — tampil % benar)",
-              _n_exp > 0 and len(_titles) == 13
-              and _num_tot is not None and abs(_num_tot) > 0
-              and _pct_cell is not None and 0 < abs(_pct_cell) <= 1.0,
-              f"n={_n_exp} titles={len(_titles)} tot={_num_tot} "
-              f"pct={_pct_cell}")
-        try:
-            os.unlink(_exp)
-        except OSError:
-            pass
-    finally:
-        app._lalu_file_df = _app_lalu_backup
-        app._notify_lalu_consumers()
-
-    # ---- (F) degrade: resto tak dikenal + df tanpa kolom baru ----------
-    p_bad = compute_laporan_versus(_lv_df, "999.NOSUCH", MODE_VS_SATU,
-                                   BASELINE_AREA, "003.RCCC", "WEEK 4")
-    _old_df = _lv_df.drop(columns=[
-        c for c in ("AREA", "PENJUALAN", "Akun", "QTY WASTE Lalu",
-                    "NOMINAL LOSS/SURPLUS Lalu") if c in _lv_df.columns])
-    p_old = compute_laporan_versus(_old_df, "001.RAAA", MODE_VS_GROUP,
-                                   BASELINE_AREA, "003.RCCC", "WEEK 4")
-    check("(v3.12.0) §100-F1 degrade jujur: resto tak dikenal → ok "
-          "False + pesan; df TANPA kolom AREA/PENJUALAN/12-ukuran → "
-          "tetap ok (kolom opsional — file lama kompatibel; baseline "
-          "area tanpa AREA → fallback 'Semua Resto Lain')",
-          (not p_bad["ok"]) and "tidak ada" in (p_bad["error"] or "").lower()
-          and p_old["ok"]
-          and p_old["meta"]["group_label"] == "Semua Resto Lain · 3 resto"
-          and p_old["meta"]["penjualan_a"] is None,
-          f"bad={p_bad['error']!r} old_group={p_old['meta']['group_label']!r}")
+    # ---- (F) peta NOHARGA_COL_TO_DF: 3 kolom tampilan → df -------------
+    # dulu 'Kategori'≠'KATEGORI', 'Kuantiti Deviasi'≠'Qty Deviasi',
+    # 'Keterangan'≠'Harga Tampil' → popup "Tidak ada nilai" + loop filter
+    # skip senyap (3 dari 6 corong ⧩ MATI).
+    check("(v3.12.1) §101-F NOHARGA_COL_TO_DF resolve 3 kolom tampilan "
+          "→ df (dulu 3 dari 6 corong ⧩ MATI senyap — nama tak pernah "
+          "match kolom df)",
+          _NCDF101.get("Kategori") == "KATEGORI"
+          and _NCDF101.get("Kuantiti Deviasi") == "Qty Deviasi"
+          and _NCDF101.get("Keterangan") == "Harga Tampil"
+          and _NCDF101.get("Resto") == "Resto"
+          and _NCDF101.get("Nama Barang") == "Nama Barang"
+          and _NCDF101.get("Satuan") == "Satuan",
+          f"got {_NCDF101!r}")
 
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

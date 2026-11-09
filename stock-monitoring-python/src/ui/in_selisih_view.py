@@ -98,6 +98,7 @@ from .widgets import (
     enable_col_resize,
     enable_multi_select,
     enable_smooth_wheel_list,  # v3.9.60 — leaderboard rekap ber-scroll
+    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -1572,7 +1573,8 @@ class InSelisihView(tk.Frame):
             if sel is None or c == col or c not in f.columns:
                 continue
             fmt = _format_col_values(c, f[c])
-            f = f[fmt.isin(sel)]
+            # v3.12.1 — FIX filter: label ATAU mentah (pola v3.11.10)
+            f = f[filter_disp_mask(fmt, sel)]
         if (getattr(self, "only_selisih_var", None) is not None
                 and self.only_selisih_var.get()
                 and "Selisih IN" in f.columns):
@@ -2076,7 +2078,8 @@ class InSelisihView(tk.Frame):
                 continue
             if col in f.columns:
                 fmt = _format_col_values(col, f[col])
-                f = f[fmt.isin(sel)]
+                # v3.12.1 — FIX filter: label ATAU mentah (pola v3.11.10)
+                f = f[filter_disp_mask(fmt, sel)]
 
         # v3.9.55 — F3: snapshot frame pra-only_selisih (dasar SKOR RESTO
         # — baris selisih sama baik checkbox aktif / tidak).
@@ -2085,7 +2088,8 @@ class InSelisihView(tk.Frame):
 
         if _resto_sel is not None and "Resto" in f.columns:
             fmt_r = _format_col_values("Resto", f["Resto"])
-            f = f[fmt_r.isin(_resto_sel)]
+            # v3.12.1 — FIX filter: label ATAU mentah (pola v3.11.10)
+            f = f[filter_disp_mask(fmt_r, _resto_sel)]
 
         # v3.10 — snapshot konteks analisa: POST rentang tanggal + ⧩ +
         # filter Resto, PRA checkbox 'Hanya Selisih ≠ 0' (analisa memang

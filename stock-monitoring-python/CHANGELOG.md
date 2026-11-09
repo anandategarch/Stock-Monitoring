@@ -3,6 +3,73 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.12.1 — HAPUS TAB ⚖ LAPORAN VERSUS + FIX "filter tidak berfungsi" tab 🧮
+
+User: *"hapus tab laporan versus. cek penyebab filter tidak berfungsi
+di tab nominal deviasi"*.
+
+### 1. Tab ⚖ Laporan Versus DIHAPUS total (+ dead code)
+Dibongkar bersama pola v3.11.30 (dulu tab 📋 Laporan Deviasi juga
+dihapus user — file laporan resmi tetap dimuat app-level):
+- **`laporan_versus_view.py`** — file dihapus.
+- **`app.py`** — frame `tab_laporan_versus`, `notebook.add`, label
+  grup, hint, `_build_laporan_versus_tab()`, entry `_tab_views`, import
+  `LaporanVersusView`, consumer `_notify_lalu_consumers` — semua dibuang.
+- **`export_sheets.py`** — `write_laporan_versus_book()` + section header
+  dihapus.
+- **`deviasi_file.py`** — 11 kolom parser v3.12.0 (`QTY/NOMINAL
+  WASTE/SUSUT/TRIAL/LOSS-SURPLUS Lalu` + `AREA` + `PENJUALAN` + `Akun`)
+  dihapus. Kolom `BOM`/`COM`/`DEVIASI` + `Nominal Deviasi Lalu`
+  (prav3.12.0) tetap — dipakai tab 🧮 & analisa lalu-kini tab 📦/🧩.
+- **`test_ui_redesign.py`** — §100 (13 poin laporan versus) dihapus +
+  3 asersi wiring (`§A` 10→9 tab, `§A-11` _tab_views 7→6, `§81a`
+  grup Analisis 2→1).
+- Notebook kini **9 tab** (dulu 10): Proses · Mutasi · Deviasi GR ·
+  Deviasi PCS · Rekap Selisih IN · Nominal Deviasi · Follow Up ·
+  Rincian PO.
+
+### 2. FIX AKAR "filter tidak berfungsi" tab 🧮 Nominal Deviasi
+Bug sistemik — mempengaruhi **tab 🧮 + 3 anak tab** (Tanpa Harga /
+Saldo Minus / Kronis) **+ 3 view lain** (Deviasi GR/PCS, Rekap Selisih
+IN, Rincian PO).
+
+**AKAR BUG**: popup `HeaderFilter.open_popup()` meng-emit seleksi ber-
+**LABEL TAMPILAN** (`_filter_disp_value` — `''`/`'nan'` → `'(Kosong)'`,
+spasi tepi `'GR '` → `'GR␣'` — data nyata di rekap user), sedangkan
+view memfilter dgn `fmt.isin(sel)` atas nilai **TERFORMAT MENTAH**
+(`'GR '` ≠ `'GR␣'`) → baris yang **DICENTANG justru terbuang**:
+- centang **semua** = baris hilang (semua nilai terfilter keluar)
+- **search + Enter** (`'MLG'`) = 0 baris (label `'MLG'` tidak cocok
+  nilai mentah bila ada tepi-spasi / normalisasi)
+- kolom ber-sel **kosong** = `'(Kosong)'` tak pernah cocok `''`
+
+**FIX** — helper baru `filter_disp_mask(fmt, sel)` di `widgets.py`:
+cocokkan **mentah ATAU label tampilan** (pola clone ⛶ v3.11.10 audit
+3-c #18/#21, kini diterapkan ke semua tabel utama ber-⧩). `fmt.isin(sel)`
+diganti `filter_disp_mask(fmt, sel)` di **8 titik filter**:
+- `nominal_resto_view.py` — tabel utama + anak tab Tanpa Harga
+  (`_render_noharga` + `_nh_col_values` daftar nilai popup).
+- `saldo_minus_view.py`, `analisa_kronis_view.py` — anak tab 🧮.
+- `deviasi_view.py`, `in_selisih_view.py`, `rincian_po_view.py`.
+
+**FIX tambahan anak tab Tanpa Harga** — peta `NOHARGA_COL_TO_DF`
+resolve 3 kolom **TAMPILAN** → kolom df (`'Kategori'`→`'KATEGORI'`,
+`'Kuantiti Deviasi'`→`'Qty Deviasi'`, `'Keterangan'`→`'Harga Tampil'`)
+yang dulu **skip senyap** (nama tidak pernah match → popup "Tidak ada
+nilai yang bisa difilter" + loop filter `_render_noharga` melewatkan
+kolomnya). `_nh_col_values` + `_nh_format_col_series('Keterangan')`
+kini mengembalikan nilai sesuai tampilan tabel.
+
+### Test §101 (regression — 6 asersi)
+Helper `filter_disp_mask` + peta `NOHARGA_COL_TO_DF` diuji langsung:
+- (A) `_filter_disp_value`: `'GR '` → `'GR␣'`, `''`/NaN → `'(Kosong)'`.
+- (B) **BUG REPRO** "centang semua = baris hilang": seleksi ber-label
+  tampilan kini SEMUA lolos (dulu 2/4 terbuang).
+- (C) search+Enter `'MLG'`: hanya 1 baris (anti-regresi).
+- (D) seleksi `'(Kosong)'` match sel kosong (dulu tak pernah cocok).
+- (E) `sel=None` → semua lolos.
+- (F) `NOHARGA_COL_TO_DF` resolve 6 kolom (3 dulu broken + 3 OK).
+
 ## v3.12.0 — TAB ⚖ LAPORAN VERSUS ("poin 1-12 jadi laporan versus, 2 mode")
 
 User: *"yang komparasi laporan yang dua Resto — misalnya BKS gold sama

@@ -44,6 +44,7 @@ from .widgets import (
     col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
+    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     fmt_int_id,
     insert_tree_items,
     open_tree_maximized,
@@ -306,7 +307,8 @@ class RincianPoView(tk.Frame):
             src_col = "Nomor #" if c == "#0" else COL_SRC.get(c, c)
             if src_col in df.columns:
                 fmt = self._format_col_series(c, df[src_col])
-                df = df[fmt.isin(sel)]
+                # v3.12.1 — FIX filter: label ATAU mentah (pola v3.11.10)
+                df = df[filter_disp_mask(fmt, sel)]
         return df
 
     def _format_col_series(self, col: str, series):
@@ -615,11 +617,13 @@ class RincianPoView(tk.Frame):
 
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (semua kolom;
         # v3.9: mapping nama kolom tampilan → kolom df sumber)
+        # v3.12.1 — FIX filter: seleksi popup ber-LABEL tampilan ('␣' /
+        # '(Kosong)') — cocokkan mentah ATAU label (pola v3.11.10 clone).
         for col, sel in st["col_sel"].items():
             src_col = "Nomor #" if col == "#0" else COL_SRC.get(col, col)
             if src_col in df.columns:
                 fmt = self._format_col_series(col, df[src_col])
-                df = df[fmt.isin(sel)]
+                df = df[filter_disp_mask(fmt, sel)]
 
         if df.empty:
             # v3.9.68 — TRI-STATE (audit eksternal T1): pesan jujur bila

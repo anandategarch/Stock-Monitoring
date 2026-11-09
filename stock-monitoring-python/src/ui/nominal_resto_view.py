@@ -74,6 +74,7 @@ from .widgets import (
     enable_multi_select,
     fmt_int_id,
     insert_tree_items,
+    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
     kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
@@ -115,6 +116,23 @@ NOHARGA_COLUMNS = [
     ("Kuantiti Deviasi", 120, "e"),
     ("Keterangan", 240, "w"),
 ]
+
+# v3.12.1 — FIX "filter tidak berfungsi" (anak tab Tanpa Harga): peta
+# kolom TAMPILAN tree → kolom DataFrame pasangan_tanpa_harga_global
+# ([Resto, KATEGORI, Nama Barang, Satuan, Qty Deviasi, Harga Tampil,
+# Nominal]). Dulu 3 dari 6 corong ⧩ MATI senyap — "Kategori" ≠ "KATEGORI",
+# "Kuantiti Deviasi" ≠ "Qty Deviasi", "Keterangan" ≠ "Harga Tampil" →
+# _nh_col_values mengembalikan [] (popup "Tidak ada nilai yang bisa
+# difilter") + loop filter _render_noharga skip kolomnya (pola bug
+# saldo_minus v3.11.48 audit #6/#10 — kini mirror _col_to_df).
+NOHARGA_COL_TO_DF = {
+    "Resto": "Resto",
+    "Kategori": "KATEGORI",
+    "Nama Barang": "Nama Barang",
+    "Satuan": "Satuan",
+    "Kuantiti Deviasi": "Qty Deviasi",
+    "Keterangan": "Harga Tampil",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +840,11 @@ class NominalRestoView(tk.Frame):
             return series.map(fmt_nominal_cell)
         if col == "Kategori":
             return series.map(self._nh_kategori_disp)
+        # v3.12.1 — FIX filter: 'Keterangan' diformat dari kolom df
+        # 'Harga Tampil' via _noharga_ket — identik dgn sel yang tampil
+        # (dulu astype(str) → daftar nilai popup ≠ tampilan tabel).
+        if col == "Keterangan":
+            return series.map(self._noharga_ket)
         return series.astype(str)
 
     @staticmethod
@@ -835,9 +858,16 @@ class NominalRestoView(tk.Frame):
 
     def _nh_col_values(self, col: str) -> list:
         """Nilai unik TERFORMAT utk popup ⧩ anak tab (pola _col_values:
-        seleksi kolom LAIN diterapkan dulu supaya daftar selaras)."""
+        seleksi kolom LAIN diterapkan dulu supaya daftar selaras).
+        v3.12.1 — FIX "filter tidak berfungsi": resolve kolom TAMPILAN
+        → kolom df via NOHARGA_COL_TO_DF (dulu 'Kategori'/'Kuantiti
+        Deviasi'/'Keterangan' tak pernah match kolom df → popup selalu
+        'Tidak ada nilai yang bisa difilter')."""
         df = self._noharga_df
-        if df is None or df.empty or col not in df.columns:
+        if df is None or df.empty:
+            return []
+        df_col = NOHARGA_COL_TO_DF.get(col, col)
+        if df_col not in df.columns:
             return []
         f = df
         m = self._kategori_mask_series(f["KATEGORI"],
@@ -845,13 +875,18 @@ class NominalRestoView(tk.Frame):
         if m is not None:
             f = f[m]
         for c, sel in self._nh_col_sel.items():
-            if sel is None or c == col or c not in f.columns:
+            if sel is None or c == col:
                 continue
-            fmt = self._nh_format_col_series(c, f[c])
-            f = f[fmt.isin(sel)]
+            c_df = NOHARGA_COL_TO_DF.get(c, c)
+            if c_df not in f.columns:
+                continue
+            fmt = self._nh_format_col_series(c, f[c_df])
+            # v3.12.1 — FIX filter tidak berfungsi: seleksi popup ber-
+            # LABEL tampilan ('␣'/'(Kosong)') — cocokkan mentah ATAU label
+            f = f[filter_disp_mask(fmt, sel)]
         if f.empty:
             return []
-        return self._nh_format_col_series(col, f[col]).unique().tolist()
+        return self._nh_format_col_series(col, f[df_col]).unique().tolist()
 
     def _on_nh_col_filter(self, col: str, selected):
         self._nh_col_sel[col] = selected
@@ -933,10 +968,19 @@ class NominalRestoView(tk.Frame):
         if m is not None:
             f = f[m]
         # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
+        # v3.12.1 — FIX filter tidak berfungsi: seleksi popup ber-LABEL
+        # tampilan (spasi tepi 'GR ' → 'GR␣', sel kosong → '(Kosong)') —
+        # cocokkan nilai mentah ATAU label (pola clone ⛶ v3.11.10)
+        # + resolve kolom TAMPILAN → kolom df via NOHARGA_COL_TO_DF
+        # (dulu 3 dari 6 kolom skip senyap — nama tidak pernah match).
         for col, sel in self._nh_col_sel.items():
-            if sel is not None and col in f.columns:
-                fmt = self._nh_format_col_series(col, f[col])
-                f = f[fmt.isin(sel)]
+            if sel is None:
+                continue
+            df_col = NOHARGA_COL_TO_DF.get(col, col)
+            if df_col not in f.columns:
+                continue
+            fmt = self._nh_format_col_series(col, f[df_col])
+            f = f[filter_disp_mask(fmt, sel)]
         if f.empty:
             # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebabnya
             # seleksi ⧩ KOSONG → pesan jujur eksplisit + cara keluar.
@@ -1098,7 +1142,8 @@ class NominalRestoView(tk.Frame):
                 continue
             if c in f.columns:
                 fmt = self._format_col_series(c, f[c])
-                f = f[fmt.isin(sel)]
+                # v3.12.1 — FIX filter tidak berfungsi: label ATAU mentah
+                f = f[filter_disp_mask(fmt, sel)]
         if f.empty or col not in f.columns:
             return []
         return self._format_col_series(col, f[col]).unique().tolist()
@@ -1730,11 +1775,18 @@ class NominalRestoView(tk.Frame):
                     "status": status, "total_chip": ""}
 
         # filter header ⧩ (nilai TERFORMAT — identik yang tampil)
+        # v3.12.1 — FIX "filter tidak berfungsi di tab nominal deviasi":
+        # popup HeaderFilter meng-emit seleksi ber-LABEL TAMPILAN
+        # (_filter_disp_value: ''/'nan' → '(Kosong)', spasi tepi → '␣' —
+        # data 'GR '/'MLGPAR ' nyata di rekap user) sedangkan dulu filter
+        # memakai fmt.isin(sel) atas nilai MENTAH → baris yang DICENTANG
+        # justru terbuang (centang semua = baris hilang; search+Enter =
+        # 0 baris). Kini: mentah ATAU label (konvensi clone ⛶ v3.11.10).
         filtered = result
         for col, sel in col_sel.items():
             if sel is not None and col in filtered.columns:
                 fmt = self._format_col_series(col, filtered[col])
-                filtered = filtered[fmt.isin(sel)]
+                filtered = filtered[filter_disp_mask(fmt, sel)]
         if filtered.empty:
             # v3.9.68 — TRI-STATE (audit eksternal T1): bila penyebabnya
             # seleksi ⧩ KOSONG → pesan jujur eksplisit (bukan generik).
