@@ -1968,13 +1968,16 @@ def main():
     # v3.11 — kolom "SO Kemarin" (saldo kemarin) DIHAPUS + "COM" pindah
     # ke kanan "Hasil SO" (user: "di tab rekap selisin in hapus kolom
     # saldo kemarin. Kolom COM pindah disebelah kanan Hasil SO")
-    check("(v3.9.30/v3.11) Kolom = 14: + Hasil SO + Saldo + PO Menunggu + "
-          "Hasil Audit + Catatan (v3.10: + COM; v3.11: − SO Kemarin, COM "
-          "pindah kanan Hasil SO)",
+    # v3.12.4 — + "Kode IT/RI" tepat kanan "PO Menunggu" (user: "Tambah
+    # 1 kolom di sebelah kanan PO menunggu yaitu kolom KODE IT/RI").
+    check("(v3.9.30/v3.11/v3.12.4) Kolom = 15: + Hasil SO + Saldo + PO "
+          "Menunggu + Kode IT/RI + Hasil Audit + Catatan (v3.10: + COM; "
+          "v3.11: − SO Kemarin, COM pindah kanan Hasil SO)",
           hdrs == ["Resto", "Tanggal", "Nama Barang", "KATEGORI", "Satuan",
                    "Hasil SO", "COM", "Barang Masuk", "IN",
                    "Selisih IN", "Saldo",
-                   "PO Menunggu", "Hasil Audit", "Catatan Audit"],
+                   "PO Menunggu", "Kode IT/RI", "Hasil Audit",
+                   "Catatan Audit"],
           f"got {hdrs}")
     check("(v3.6) Tidak ada segment Ringkas|Audit lagi (SATU tabel)",
           not hasattr(iv, "mode_seg"))
@@ -2369,7 +2372,16 @@ def main():
     # --- (c) BUG FIX v3.6: klik funnel heading → popup TERBUKA ---
     select_and_wait(root, app, app.tab_in_selisih, iv)
     popups_before = [w for w in root.winfo_children() if w.winfo_exists()]
-    x_resto = 35   # tengah kolom pertama 'Resto'
+    # v3.12.4 — x dihitung dari LEBAR AKTUAL kolom Resto (pola §13e
+    # v3.9.55 F8 "hitung x dari LEBAR AKTUAL"): auto-fit + redistribusi
+    # stretch Tk membuat lebar kolom bergantung JUMLAH KOLOM TOTAL —
+    # kolom ke-15 'Kode IT/RI' (v3.12.4) mengecilkan Resto 48→42 → x lama
+    # 35 kini jatuh DALAM toleransi edge_px=7 handler resize kolom
+    # (enable_col_resize _near_edge → 'break') → klik funnel TERTELAN +
+    # state drag nyangkut (tanpa release) merusak §13e/§15a berikutnya.
+    # Tengah kolom selalu jauh dari tepi kanan → klik funnel stabil.
+    _w_resto = int(tree_in.column("Resto", "width") or 74)
+    x_resto = max(2, _w_resto // 2)   # tengah kolom pertama 'Resto'
     tree_in.event_generate("<Button-1>", x=x_resto, y=10, when="now")
     root.update()
     new_pops = [w for w in root.winfo_children()
@@ -23822,6 +23834,237 @@ def main():
         _mb103.result = True
         del _mb103.calls[:]
         shutil.rmtree(_tmp103, ignore_errors=True)
+
+
+    # =====================================================================
+    print()
+    print("== §104. (v3.12.4) FIX CUT-OFF 1 HARI (VALID vs rentang gantung) "
+          "+ KOLOM KODE IT/RI tab 📤 Rekap Selisih IN ==")
+    # USER: "coba cek perhitungan dan logika nya, hasil dari input barang
+    # masuk tgl 5 tapi IN di tanggal 6 malah menghasilkan Deviasi murni
+    # yang harusnya cut off resolved. Tambah 1 kolom di sebelah kanan PO
+    # menungu yaitu kolom KODE IT/RI nah itu dari 42.05 dengan nomor misal
+    # IT.2026.10.24306 atau dari 3224 misal RI.2026.11.16044 atau kode
+    # PI.... dari 9901. Itu cuman tiap ada data IN>0 ya".
+    # AKAR BUG (A): aturan VALID "SO naik + BM=0 + IN>0 → omit selisih"
+    # dulu SELALU aktif → IN t6 yang menutup BM t5 di-omit → +BM t5
+    # gantung → DEVIASI MURNI padahal pola 1-hari cut-off. Fix: omit hanya
+    # bila TIDAK ada rentang gantung terbuka (start_idx < 0).
+    from src.pipeline.fn_audit import (
+        build_audit_from_app as _baf104,
+        _kode_it_ri_map as _kim104,
+    )
+
+    _Q104 = 217.080
+
+    # ---- (A) BUG REPRO: BM t5 + IN t6 + SO naik t6 ----------------------
+    # (barang tiba fisik t5 — BM diinput; kiriman HO masuk sistem t6; SO
+    # t6 naik +217 karena barang baru terhitung besoknya)
+    _rk104 = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG UJI 217",
+         "JENIS": "BARANG MASUK", "Tanggal": 5, "Value": _Q104},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG UJI 217",
+         "JENIS": "SO", "Tanggal": 4, "Value": 1000.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG UJI 217",
+         "JENIS": "SO", "Tanggal": 5, "Value": 1000.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG UJI 217",
+         "JENIS": "SO", "Tanggal": 6, "Value": 1000.0 + _Q104},
+    ])
+    _in104 = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG UJI 217",
+         "Tanggal": 6, "Value": _Q104, "Nomor": "IT.2026.10.24306",
+         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "42.05", "JENIS": "IN"},
+    ])
+    _a104, _k104, _ = _baf104(_rk104, _in104, bulan_lalu=False)
+    check("(v3.12.4) §104-A BUG REPRO BM t5 + IN t6 + SO naik t6 → CUT-OFF "
+          "RESOLVED ×2 'Beda 1 Hari (Periode Tgl 5 - 6)' + saldo 0 (dulu: "
+          "DEVIASI MURNI t5 'Sisa Gantung +217' + VALID t6 — IN di-omit "
+          "tak pernah menutup saldo +BM)",
+          _a104["Status Analisis Audit"].tolist() ==
+          ["OK (Matching)", "CUT-OFF RESOLVED", "CUT-OFF RESOLVED"]
+          and _k104["omit"] == 0 and _k104["deviasi_murni"] == 0
+          and "Beda 1 Hari (Periode Tgl 5 - 6)" in
+          str(_a104.iloc[1]["Detail & Catatan Audit"])
+          and abs(float(_a104.iloc[2]["Saldo Kumulatif"])) < 0.0001,
+          f"got {_a104['Status Analisis Audit'].tolist()} kpi={_k104}")
+
+    # ---- (B) VALID murni TAK berubah ------------------------------------
+    # resto lupa input BM (saldo bersih saat IN datang) → omit tetap jalan.
+    _rk104b = _rk104[_rk104["JENIS"] != "BARANG MASUK"]
+    _a104b, _k104b, _ = _baf104(_rk104b, _in104, bulan_lalu=False)
+    check("(v3.12.4) §104-B VALID murni (tanpa BM — start_idx bersih) tetap "
+          "terpicu: omit=1, tanpa deviasi (paritas kasus VBA asli)",
+          "VALID (Sistem Masuk)" in
+          _a104b["Status Analisis Audit"].tolist()
+          and _k104b["omit"] == 1 and _k104b["deviasi_murni"] == 0,
+          f"got {_a104b['Status Analisis Audit'].tolist()} kpi={_k104b}")
+
+    # ---- (C) resolusi SEBAGIAN: sisa genuine tetap DEVIASI MURNI --------
+    # BM t5 +100; IN t6 hanya 80 (SO naik +80) → tak di-omit → sisa +20
+    # gantung genuine (bukan orphan penuh +100).
+    _rk104c = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG PART",
+         "JENIS": "BARANG MASUK", "Tanggal": 5, "Value": 100.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG PART",
+         "JENIS": "SO", "Tanggal": 4, "Value": 1000.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG PART",
+         "JENIS": "SO", "Tanggal": 5, "Value": 1000.0},
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG PART",
+         "JENIS": "SO", "Tanggal": 6, "Value": 1080.0},
+    ])
+    _in104c = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "BRG PART",
+         "Tanggal": 6, "Value": 80.0, "Nomor": "RI.2026.11.16044",
+         "Nomor PO": "PO-1", "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "32.24", "JENIS": "IN"},
+    ])
+    _a104c, _k104c, _ = _baf104(_rk104c, _in104c, bulan_lalu=False)
+    _dm104c = _a104c[_a104c["Status Analisis Audit"] == "DEVIASI MURNI"]
+    check("(v3.12.4) §104-C IN menutup SEBAGIAN BM (BM 100 vs IN 80, SO "
+          "naik +80) → sisa +20 tetap DEVIASI MURNI GENUINE (tak di-omit; "
+          "dulu orphan penuh +100)",
+          _k104c["omit"] == 0 and _k104c["deviasi_murni"] == 2
+          and abs(_k104c["deviasi_qty"] - 20.0) < 0.001
+          and len(_dm104c) == 2
+          and "Sisa Gantung: +20" in
+          str(_dm104c.iloc[0]["Detail & Catatan Audit"]),
+          f"got kpi={_k104c}")
+
+    # ---- (D) _kode_it_ri_map: dedup + gabung urut + kanonik + guard -----
+    _det104 = pd.DataFrame([
+        # 2 line-item SATU dokumen (ejaan beda) → dedup + kunci kanonik cocok
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "Tanggal": 7, "Value": 50.0, "Nomor": "RI.2026.11.16044",
+         "Nomor PO": "PO-1", "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "32.24", "JENIS": "IN"},
+        {"NAMA RESTO": "mlgpar ", "Nama Barang": "susu uht 1l",
+         "Tanggal": 7, "Value": 50.0, "Nomor": "RI.2026.11.16044",
+         "Nomor PO": "PO-1", "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "32.24", "JENIS": "IN"},
+        # dokumen lain + sumber lain (99.01 → PI) tanggal sama → gabung
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "Tanggal": 7, "Value": 50.0, "Nomor": "PI.2026.11.00099",
+         "Nomor PO": "PO-2", "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "99.01", "JENIS": "IN"},
+        # Value 0 → DIBUANG ("cuman tiap ada data IN>0")
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "Tanggal": 8, "Value": 0.0, "Nomor": "IT.2026.10.99999",
+         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "42.05", "JENIS": "IN"},
+        # tanpa Nomor → dilewati
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "SUSU UHT 1L",
+         "Tanggal": 9, "Value": 10.0, "Nomor": None,
+         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "42.05", "JENIS": "IN"},
+    ])
+    _m104 = _kim104(_det104)
+    check("(v3.12.4) §104-D _kode_it_ri_map: nomor ganda (2 line-item satu "
+          "dokumen) DEDUP + ejaan drift rekap↔IN cocok (kunci kanonik) + "
+          ">1 dokumen digabung TERURUT + Value 0 & tanpa Nomor dibuang",
+          _m104.get(("MLGPAR", "SUSU UHT 1L", 7)) ==
+          ["PI.2026.11.00099", "RI.2026.11.16044"]
+          and ("MLGPAR", "SUSU UHT 1L", 8) not in _m104
+          and ("MLGPAR", "SUSU UHT 1L", 9) not in _m104
+          and _kim104(None) == {} and _kim104(pd.DataFrame()) == {},
+          f"got {_m104!r}")
+
+    # ---- (E) kolom engine: kedua varian + jalur kosong + bulan lalu -----
+    _af104, _, _ = _baf104(_rk104, _in104, bulan_lalu=True)
+    _am104, _, _ = _baf104(_rk104, _in104, bulan_lalu=False)
+    _ae104, _, _ = _baf104(None, None)
+    # baris bulan-lalu (42.05 Lalu ber-Tanggal negatif) ikut terkode di
+    # varian PENUH; varian Bulan Ini membuang baris negatif.
+    _rk104e = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI LALU",
+         "JENIS": "BARANG MASUK", "Tanggal": -26, "Value": 10.0},
+    ])
+    _in104e = pd.DataFrame([
+        {"NAMA RESTO": "MLGPAR", "Nama Barang": "KOPI LALU",
+         "Tanggal": -26, "Value": 10.0, "Nomor": "IT.2026.09.00111",
+         "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+         "SOURCE IN": "42.05 (Bulan Lalu)", "JENIS": "IN"},
+    ])
+    _full104e, _, _ = _baf104(_rk104e, _in104e, bulan_lalu=True)
+    _cur104e, _, _ = _baf104(_rk104e, _in104e, bulan_lalu=False)
+    check("(v3.12.4) §104-E kolom 'Kode IT/RI' hadir di KEDUA varian + "
+          "jalur kosong; baris IN ≠ 0 ber-kode (baris tanpa IN '') + "
+          "baris bulan-lalu (42.05 Lalu, Tanggal −26) terkode di varian "
+          "PENUH & terbuang di varian Bulan Ini",
+          all("Kode IT/RI" in _d.columns
+              for _d in (_af104, _am104, _ae104, _full104e, _cur104e))
+          and _am104.iloc[2]["Kode IT/RI"] == "IT.2026.10.24306"
+          and _am104.iloc[1]["Kode IT/RI"] == ""
+          and _full104e.iloc[0]["Kode IT/RI"] == "IT.2026.09.00111"
+          and len(_cur104e) == 0,
+          f"got full={_full104e[['Tanggal', 'Kode IT/RI']].to_dict('records')}"
+          f" cur_len={len(_cur104e)}")
+
+    # ---- (F) view: kolom tabel di-render (view STANDALONE — pola §48) ---
+    # KOPI t5/t8 = baris ber-IN → kode IT; KOPI t3 = baris SO-only → '-';
+    # AYAM t10 = 2 dokumen (42.05 IT + 32.24 RI) → gabung terurut; GULA
+    # t5 = 99.01 → PI. (audit mock §3 — frame §104 ber-kode otomatis.)
+    from src.ui.in_selisih_view import InSelisihView as _ISV104
+    _top104 = tk.Toplevel(root)
+    _top104.geometry("1350x700+10+10")
+    _isv104 = _ISV104(_top104)
+    _isv104.pack(fill="both", expand=True)
+    _isv104.load_data(append1, in_detail,
+                      audit_result={"df": audit_df, "kpi": audit_kpi,
+                                    "desc": audit_desc})
+    _pump30(1.0)
+    _isv104.only_selisih_var.set(False)   # semua baris tampil
+    _isv104._refresh(sync=True)
+    wait_view(root, _isv104)
+    root.update()
+    _rows104 = {}
+    for _k104v in _isv104.tree.get_children(""):
+        _rows104[(_isv104.tree.set(_k104v, "Nama Barang"),
+                  str(_isv104.tree.set(_k104v, "Tanggal")))] = \
+            _isv104.tree.set(_k104v, "Kode IT/RI")
+    check("(v3.12.4) §104-F view: kolom Kode IT/RI TER-RENDER — baris "
+          "ber-IN ≠ 0 ber-kode (KOPI t5 IT.2026.09.00404 · t8 "
+          "IT.2026.09.00405 · AYAM t10 gabungan 'IT.2026.09.00202, "
+          "RI.2026.09.009' · GULA t5 PI.2026.10.01556), baris TANPA IN "
+          "'-' (KOPI t3 SO-only)",
+          _rows104.get(("KOPI BUBUK 100G", "5")) == "IT.2026.09.00404"
+          and _rows104.get(("KOPI BUBUK 100G", "8")) == "IT.2026.09.00405"
+          and _rows104.get(("KOPI BUBUK 100G", "3")) == "-"
+          and _rows104.get(("AYAM FILET", "10")) ==
+          "IT.2026.09.00202, RI.2026.09.009"
+          and _rows104.get(("GULA PASIR", "5")) == "PI.2026.10.01556",
+          f"got {_rows104}")
+
+    # ---- (G) export: kolom opsi audit + sel kosong baris tanpa IN -------
+    from src.ui.export_sheets import (
+        AUDIT_EXPORT_COLUMNS as _AEC104,
+        build_selisih_export_df as _bse104,
+    )
+    check("(v3.12.4) §104-G AUDIT_EXPORT_COLUMNS: 'Kode IT/RI' TEPAT "
+          "setelah 'PO Menunggu' (checkbox dialog opsi export)",
+          "Kode IT/RI" in _AEC104
+          and _AEC104.index("Kode IT/RI") == _AEC104.index("PO Menunggu") + 1,
+          f"got {_AEC104}")
+    _base104 = _isv104._cached_base
+    _exp104 = _bse104(_base104, 1, 31,
+                      audit_cols=["PO Menunggu", "Kode IT/RI"])
+    _expk104 = _exp104[(_exp104["Nama Barang"] == "KOPI BUBUK 100G")
+                       & (_exp104["Tanggal"] == 8)]
+    _expo104 = _exp104[(_exp104["Nama Barang"] == "KOPI BUBUK 100G")
+                       & (_exp104["Tanggal"] == 3)]
+    check("(v3.12.4) §104-G export: kolom Kode IT/RI TERBAWA — baris IN ≠ 0 "
+          "ber-kode (KOPI t8 IT.2026.09.00405), baris tanpa IN sel KOSONG "
+          "(KOPI t3 '')",
+          "Kode IT/RI" in _exp104.columns
+          and len(_expk104) == 1
+          and str(_expk104["Kode IT/RI"].iloc[0]) == "IT.2026.09.00405"
+          and len(_expo104) == 1
+          and str(_expo104["Kode IT/RI"].iloc[0]) == "",
+          f"got kolom={list(_exp104.columns)} "
+          f"k8={_expk104['Kode IT/RI'].tolist()} "
+          f"k3={_expo104['Kode IT/RI'].tolist()}")
+    _top104.destroy()
+    root.update()
 
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)

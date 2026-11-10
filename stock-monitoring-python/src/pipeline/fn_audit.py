@@ -22,6 +22,17 @@ build_audit_from_app — keduanya + perluasan:
 - PO menunggu (32.43 'Menunggu diproses') → kolom 'Qty PO Menunggu' + KPI
   dev_murni_po + catatan di DEVIASI MURNI; qty satuan terkecil via konversi.
 - detect_data_period + month_lengths: panjang bulan sesuai kalender nyata (bukan hardcode 31).
+
+v3.12.4 — (1) FIX CUT-OFF 1 HARI (user: "input barang masuk tgl 5 tapi IN
+di tanggal 6 malah menghasilkan Deviasi murni yang harusnya cut off
+resolved"): aturan VALID (Sistem Masuk) — SO naik + BM=0 + IN>0 → omit
+selisih — kini hanya aktif bila TIDAK ada rentang gantung terbuka; dulu
+penerimaan IN t6 yang menutup BM t5 di-omit → +BM gantung → DEVIASI MURNI
+padahal pola 1-hari cut-off (kini CUT-OFF RESOLVED "Beda N Hari").
+(2) KOLOM 'Kode IT/RI' — nomor dokumen penerimaan per baris ber-IN ≠ 0
+(42.05 → IT.…, 32.24 → RI.…, 99.01 → PI.…; dedup + urut + gabung ', ')
+via _kode_it_ri_map/_apply_kode_it_ri (user: "Tambah 1 kolom di sebelah
+kanan PO menunggu ... cuman tiap ada data IN>0").
 """
 import calendar
 import re
@@ -431,7 +442,21 @@ def build_audit_rekap(df: pd.DataFrame,
                     delta_so = hasil_so[i] - hasil_so[i - 1]
 
             # ATURAN BISNIS: SO Naik + Penerimaan Sistem > 0 + SO Harian = 0
-            if delta_so > 0 and so_harian[i] == 0.0 and penerimaan[i] > 0.0:
+            # v3.12.4 — FIX CUT-OFF 1 HARI (user: "hasil dari input barang
+            # masuk tgl 5 tapi IN di tanggal 6 malah menghasilkan Deviasi
+            # murni yang harusnya cut off resolved"): aturan VALID kini
+            # hanya aktif bila TIDAK ada rentang gantung terbuka
+            # (start_idx < 0). Dulu omit SELALU aktif → penerimaan IN t6
+            # yang datang menutup BM t5 justru DIABAIKAN (selisih −IN tak
+            # masuk saldo) → +BM t5 gantung sampai akhir grup → DEVIASI
+            # MURNI padahal pola 1-hari cut-off (fisik t5, sistem t6 —
+            # barang umumnya baru terhitung SO besoknya → SO naik di tgl
+            # IN → omit terpicu). Kini bila ada rentang terbuka, baris IN
+            # diakumulasi NORMAL → saldo kembali 0 → CUT-OFF RESOLVED
+            # "Beda N Hari". Kasus VALID murni (resto lupa input BM —
+            # saldo bersih saat IN datang) tak berubah.
+            if (delta_so > 0 and so_harian[i] == 0.0
+                    and penerimaan[i] > 0.0 and start_idx < 0):
                 saldo[i] = cum
                 status[i] = ST_VALID
                 detail[i] = (f"SO Naik +{_fmt_qty(delta_so)} | Omit Input "
@@ -649,6 +674,82 @@ def _join_engine_note(existing: str, note: str) -> str:
     return f"{s} | {note}"
 
 
+# =============================================================================
+# v3.12.4 — KOLOM 'Kode IT/RI' (user: "Tambah 1 kolom di sebelah kanan PO
+# menunggu yaitu kolom KODE IT/RI ... dari 42.05 dengan nomor misal
+# IT.2026.10.24306 atau dari 3224 misal RI.2026.11.16044 atau kode PI....
+# dari 9901. Itu cuman tiap ada data IN>0 ya") — nomor dokumen penerimaan
+# per baris audit ber-IN ≠ 0.
+# =============================================================================
+
+def _kode_it_ri_map(in_detail_df: "pd.DataFrame | None") -> dict:
+    """{(resto, barang, tgl): 'IT.2026.10.24306, RI.2026.11.16044'} dari
+    detail IN — nomor dokumen penerimaan (42.05/42.05 Lalu → IT/SJ,
+    32.24/32.24 Lalu → RI, 99.01 → PI), HANYA baris ber-Value ≠ 0
+    ("cuman tiap ada data IN>0"). Nomor ganda (multi line-item satu
+    dokumen) di-dedupe; hasil diurut; baris tanpa Nomor dilewati.
+
+    Kunci DINORMALISASI kanonik (UPPER + rapat-spasi barang; UPPER +
+    segmen-titik resto — paritas _apply_po_menunggu v3.11.34) supaya
+    cocok dgn pasangan audit apa pun ejaannya; Tanggal dipakai APA ADANYA
+    (negatif = bulan lalu — identik kunci agregasi _agg_sum audit).
+    """
+    out: dict = {}
+    if in_detail_df is None or getattr(in_detail_df, "empty", True):
+        return out
+    cols = set(getattr(in_detail_df, "columns", []))
+    if not {"NAMA RESTO", "Nama Barang", "Tanggal", "Value"} <= cols:
+        return out
+    d = in_detail_df
+    _v = pd.to_numeric(d["Value"], errors="coerce").fillna(0.0)
+    d = d.loc[_v != 0.0]
+    _t = pd.to_numeric(d["Tanggal"], errors="coerce")
+    _has_nomor = "Nomor" in cols
+    for r, b, t, n in zip(d["NAMA RESTO"], d["Nama Barang"], _t,
+                          (d["Nomor"] if _has_nomor
+                           else [None] * len(d))):
+        if pd.isna(t):
+            continue
+        resto = norm_nama_resto_key(r)
+        brg = norm_nama_barang_key(_po_nomor_str(b))
+        if not resto or not brg:
+            continue
+        nom = _po_nomor_str(n)
+        if not nom:
+            continue
+        lst = out.setdefault((resto, brg, int(t)), [])
+        if nom not in lst:
+            lst.append(nom)
+    for lst in out.values():
+        lst.sort()
+    return out
+
+
+def _apply_kode_it_ri(audit: pd.DataFrame, kode_map: dict) -> None:
+    """v3.12.4 — kolom 'Kode IT/RI' ke hasil audit (mutasi in place —
+    frame fresh milik build_audit_from_app): nomor dokumen penerimaan per
+    baris, digabung ', ' bila >1 dokumen di tanggal itu (dedup + urut);
+    baris tanpa IN ≠ 0 → '' (view/export menampilkan '-'). Baris bulan
+    lalu (42.05/32.24 Lalu ber-Tanggal negatif) ikut terkode — kunci
+    persis kunci agregasi audit. kode_map kosong → kolom '' penuh (skema
+    tetap konsisten utk pemanggil/view)."""
+    audit["Kode IT/RI"] = ""
+    if not kode_map or audit.empty:
+        return
+    resto = audit["Resto"].map(norm_nama_resto_key)
+    item = audit["Nama Item"].map(norm_nama_barang_key)
+    tgl = pd.to_numeric(audit["Tanggal"], errors="coerce")
+    vals = []
+    for r, b, t in zip(resto, item, tgl):
+        if pd.notna(t):
+            lst = kode_map.get((r, b, int(t)))
+            if lst:
+                vals.append(", ".join(lst))
+                continue
+        vals.append("")
+    audit["Kode IT/RI"] = vals
+
+
 def _apply_po_menunggu(audit: pd.DataFrame, kpi: dict,
                        pairs: dict, stop_event=None) -> None:
     """v3.9.30 — perkaya hasil audit dgn info PO Menunggu (mutasi in
@@ -834,6 +935,8 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
             raw["Qty PO Menunggu"] = pd.Series(
                 dtype="float64")
             kpi0["dev_murni_po"] = 0
+        # v3.12.4 — skema konsisten walau kosong (kolom kode dokumen IN)
+        raw["Kode IT/RI"] = pd.Series(dtype="object")
         return raw, kpi0, "tidak ada data rekap SO / IN utk audit"
 
     # v3.11.5 — KEMBALI KE RUMUS LAMA (user: "kembali ke rumus lama"):
@@ -845,6 +948,9 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     audit, kpi = build_audit_rekap(raw, stop_event=stop_event)
     if po_pairs is not None:
         _apply_po_menunggu(audit, kpi, po_pairs, stop_event=stop_event)
+    # v3.12.4 — kolom 'Kode IT/RI' (nomor dokumen penerimaan — IT/RI/PI)
+    # tepat setelah enrich PO Menunggu: per baris ber-IN ≠ 0 saja.
+    _apply_kode_it_ri(audit, _kode_it_ri_map(in_detail_df))
 
     # v3.10 — KOLOM COM (formula kanonik pivot): COM = SO(t−1) + IN −
     # BK − SO(t); NaN bila SO(t) atau basis tak tersedia.

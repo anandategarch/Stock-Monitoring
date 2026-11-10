@@ -3,6 +3,60 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.12.4 — FIX CUT-OFF 1 HARI (VALID vs rentang gantung) + KOLOM KODE IT/RI
+
+User: *"coba cek perhitungan dan logika nya, hasil dari input barang
+masuk tgl 5 tapi IN di tanggal 6 malah menghasilkan Deviasi murni yang
+harusnya cut off resolved. Tambah 1 kolom di sebelah kanan PO menungu
+yaitu kolom KODE IT/RI nah itu dari 42.05 dengan nomor misal
+IT.2026.10.24306 atau dari 3224 misal RI.2026.11.16044 atau kode
+PI.... dari 9901. Itu cuman tiap ada data IN>0 ya"*.
+
+### 1. FIX ENGINE — VALID (Sistem Masuk) vs rentang gantung terbuka
+- **Akar bug** (engine `build_audit_rekap`, port macro VBA): aturan
+  bisnis VALID = "SO naik + BM rekap 0 + penerimaan sistem > 0 → selisih
+  baris DI-OMIT (tak masuk saldo kumulatif)". Pada pola klasik
+  **BM t5 → IN t6** (barang tiba fisik t5, kiriman HO masuk sistem t6,
+  dan barang baru terhitung SO BESOKNYA → SO t6 naik), omit terpicu di
+  t6 → selisih −IN **tidak menutup** saldo +BM t5 → gantung sampai akhir
+  grup → **DEVIASI MURNI "Sisa Gantung +217 (Sejak Tgl 5)"** padahal
+  pola 1-hari cut-off.
+- **Fix**: aturan VALID kini hanya aktif bila **tidak ada rentang
+  gantung terbuka** (`start_idx < 0`). Saat rentang terbuka, baris IN
+  diakumulasi normal → saldo kembali 0 → kedua baris **CUT-OFF RESOLVED
+  "Beda 1 Hari (Periode Tgl 5 - 6)"**.
+- Kasus **VALID murni** (resto lupa input BM — saldo bersih saat IN
+  datang) tidak berubah (omit tetap jalan). IN yang hanya menutup
+  **sebagian** BM → sisa genuine tetap DEVIASI MURNI (kini sebesar sisa
+  sebenarnya, bukan orphan penuh).
+
+### 2. KOLOM "Kode IT/RI" (tepat di kanan "PO Menunggu")
+- **Engine** (`_kode_it_ri_map` / `_apply_kode_it_ri`, dipanggil
+  `build_audit_from_app` di kedua varian + jalur kosong): nomor dokumen
+  penerimaan per baris dari detail IN — 42.05/42.05 (Bulan Lalu) →
+  `IT.…`, 32.24/32.24 (Bulan Lalu) → `RI.…`, 99.01 → `PI.…`.
+- **Hanya baris ber-IN ≠ 0** ("cuman tiap ada data IN>0"); nomor ganda
+  (multi line-item satu dokumen) di-**dedup**; >1 dokumen di tanggal itu
+  digabung `', '` **terurut**; kunci ternormalisasi kanonik (paritas
+  `_apply_po_menunggu` v3.11.34 — ejaan drift rekap↔IN tetap cocok);
+  baris bulan-lalu (Tanggal negatif) ikut terkode.
+- **View** tab 📤 Rekap Selisih IN: kolom tabel `("Kode IT/RI", 150, "w")`
+  tepat kanan "PO Menunggu"; baris tanpa IN tampil `-` (paritas
+  KATEGORI/Satuan); filter ⧩ / sort / hide-unhide kolom otomatis ikut.
+- **Export**: `AUDIT_EXPORT_COLUMNS` + "Kode IT/RI" (checkbox dialog
+  opsi export, default aktif) — sel kosong utk baris tanpa IN; lebar
+  kolom 26. Sheet app-level "Laporan Deviasi (Audit)" ikut otomatis
+  (kolom ada di frame audit).
+
+### Test §104
+A repro engine BM t5 + IN t6 + SO naik t6 → CUT-OFF RESOLVED ×2
+"Beda 1 Hari" (dulu DEVIASI MURNI + VALID); B VALID murni tanpa BM tetap
+terpicu (omit=1); C resolusi sebagian (BM 100 vs IN 80 → sisa +20
+DEVIASI MURNI genuine); D `_kode_it_ri_map` dedup / multi-dok / gabung
+urut / IN=0 kosong / ejaan drift cocok; E kolom engine hadir di kedua
+varian + jalur kosong; F view kolom 15 + render kode baris IN + `-`
+tanpa IN; G export membawa kolom.
+
 ## v3.12.3 — ☑ FOLLOW-UP DI TAB DEVIASI GR/PCS (level pasangan) + KONFIRMASI UNCEK
 
 User: *"ada keterangan di tab deviasi pcs dan deviasi gr kalau row ini

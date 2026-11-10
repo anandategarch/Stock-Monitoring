@@ -11,6 +11,13 @@ MASUK + IN per tanggal; sheet '29 Rekap Barang Masuk' tidak dibaca):
 - COM         = pembanding, tepat di kanan Hasil SO
 - PO Menunggu = Σ qty PO 'Menunggu diproses' per pasangan, dikonversi
                 ke satuan terkecil (peta rasio 42.05+32.24; '*' bila gagal)
+- Kode IT/RI  = nomor dokumen penerimaan baris itu (v3.12.4 — user:
+                "Tambah 1 kolom di sebelah kanan PO menunggu yaitu kolom
+                KODE IT/RI ... dari 42.05 misal IT.2026.10.24306 atau dari
+                3224 misal RI.2026.11.16044 atau kode PI.... dari 9901.
+                Itu cuman tiap ada data IN>0 ya") — hanya baris ber-IN ≠ 0;
+                >1 dokumen di tanggal itu digabung ', ' (dedup + urut);
+                baris tanpa IN tampil '-'
 - Saldo       = kumulatif per (Resto × Barang) urut tanggal
 - Hasil Audit = port macro VBA: VALID / OK (Matching) / CUT-OFF RESOLVED
                 / OK (Dalam Cut-off) / DEVIASI MURNI
@@ -118,6 +125,14 @@ from .widgets import (
 # di-update sistem → selisih gantung akan resolve saat PO diproses).
 # Nilai konstanta per pasangan; baris DEVIASI MURNI pasangan itu juga
 # dapat catatan 'PO Menunggu: PO.xxx (qty n)' (fn_audit, ikut export).
+# v3.12.4 — KOLOM BARU 'Kode IT/RI' (tepat di KANAN 'PO Menunggu' —
+# user: "Tambah 1 kolom di sebelah kanan PO menunggu yaitu kolom KODE
+# IT/RI"): nomor dokumen penerimaan per baris — 42.05 → IT.2026.10.24306,
+# 32.24 → RI.2026.11.16044, 99.01 → PI.…; HANYA baris ber-IN ≠ 0
+# ("cuman tiap ada data IN>0"); >1 dokumen/tanggal digabung ', '
+# (dedup + urut — engine fn_audit _kode_it_ri_map/_apply_kode_it_ri);
+# baris tanpa IN → '-'. Ikut export (AUDIT_EXPORT_COLUMNS) + sheet
+# "Laporan Deviasi (Audit)" app-level (kolom ikut frame audit).
 COLUMNS = [
     ("Resto", 74, "w"),
     ("Tanggal", 64, "e"),
@@ -139,6 +154,8 @@ COLUMNS = [
                                       # v3.10..3.11.4 sempat ΔSO − IN)
     ("Saldo", 100, "e"),           # saldo kumulatif audit (basis baru)
     ("PO Menunggu", 96, "e"),      # v3.9.30 — qty PO 32.43 'Menunggu diproses'
+    ("Kode IT/RI", 150, "w"),      # v3.12.4 — nomor dokumen IN (IT/RI/PI),
+                                      # hanya baris ber-IN ≠ 0
     ("Hasil Audit", 150, "w"),     # ← kolom hasil audit (v3.6)
     ("Catatan Audit", 260, "w"),
 ]
@@ -424,9 +441,16 @@ def _format_col_values(col: str, series: pd.Series) -> pd.Series:
     v3.10.1 — "SO Kemarin"/"COM" pakai _fmt_num_keepzero (0 meaningful).
     v3.11.1 — Tanggal bulan-lalu ber-label '25•' (audit 12-c2 B2 —
     konvensi pivot; angka minus mentah tak terbaca; entry rentang
-    tetap numerik −25..−31)."""
+    tetap numerik −25..−31).
+    v3.12.4 — "Kode IT/RI": teks kode dokumen; kosong → '-' (paritas
+    kolom teks lain: KATEGORI/Satuan '-' saat tak ada)."""
     if col == "Tanggal":
         return series.map(_fmt_tgl_ui)
+    if col == "Kode IT/RI":
+        # v3.12.4 — '' (baris tanpa IN ≠ 0) → '-' agar terbedakan dari
+        # sel kosong literal & konsisten dgn gaya kolom teks tabel.
+        return (series.fillna("").astype(str)
+                .replace({"": "-", "nan": "-", "None": "-"}))
     if col in _KEEPZERO_COLS:
         return series.map(_fmt_num_keepzero)
     if col in _NUM_COLS:
@@ -1675,6 +1699,12 @@ class InSelisihView(tk.Frame):
                              if "Qty PO Menunggu" in df.columns else
                              pd.Series([pd.NA] * len(df),
                                        index=df.index, dtype="Float64")),
+            # v3.12.4 — kode dokumen penerimaan (IT/RI/PI) per baris
+            # ber-IN ≠ 0; frame audit lama/test tanpa kolom → '' → '-'.
+            "Kode IT/RI": (df["Kode IT/RI"].fillna("").astype(str)
+                           if "Kode IT/RI" in df.columns else
+                           pd.Series([""] * len(df), index=df.index,
+                                     dtype="object")),
             "Hasil Audit": df["Status Analisis Audit"].astype(str),
             # v3.9.33 — AUDIT FIX (48-e): NaN/None di kolom catatan engine
             # jangan jadi literal 'nan'/'None' setelah astype(str) —

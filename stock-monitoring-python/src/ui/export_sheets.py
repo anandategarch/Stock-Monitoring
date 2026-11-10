@@ -85,8 +85,12 @@ SELISIH_EXPORT_COLUMNS = [
 # (user: "hapus kolom saldo kemarin. Kolom COM pindah disebelah kanan
 # Hasil SO") — keduanya keluar dari daftar opsi; "COM" kini selalu
 # ikut (posisi tetap di SELISIH_EXPORT_COLUMNS di atas).
+# v3.12.4 — + "Kode IT/RI" tepat setelah "PO Menunggu" (user: "Tambah
+# 1 kolom di sebelah kanan PO menunggu yaitu kolom KODE IT/RI"): nomor
+# dokumen penerimaan per baris ber-IN ≠ 0 (42.05 → IT.…, 32.24 →
+# RI.…, 99.01 → PI.…; teks, gabung ', ' bila >1 dokumen).
 AUDIT_EXPORT_COLUMNS = ["Hasil Audit", "Saldo", "Catatan Audit",
-                        "PO Menunggu"]
+                        "PO Menunggu", "Kode IT/RI"]
 
 
 # =============================================================================
@@ -221,6 +225,11 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
             # v3.9.31 — nilai terkonversi satuan terkecil (fallback qty
             # PO asli utk pasangan tak terkonversi — label '*' di catatan)
             out[col] = _num_col(f, "PO Menunggu").fillna(0.0)
+        elif col == "Kode IT/RI":     # v3.12.4 — teks (kode dokumen IN)
+            # baris tanpa IN ≠ 0 → '' (sel kosong — "cuman tiap ada data
+            # IN>0"; base lama tanpa kolom → seluruh kolom kosong)
+            out[col] = (f["Kode IT/RI"].fillna("").astype(str)
+                        if "Kode IT/RI" in f.columns else "")
         elif col in f.columns:
             out[col] = f[col].astype(str)
         else:
@@ -285,6 +294,7 @@ def write_selisih_sheet(writer, df: pd.DataFrame,
         # v3.9: kolom audit opsional
         "Hasil Audit": 22, "Saldo": 12, "Catatan Audit": 40,
         "PO Menunggu": 14,   # v3.9.30
+        "Kode IT/RI": 26,    # v3.12.4 — IT.2026.10.24306 (+gabungan)
     }
     for j, col in enumerate(df.columns, start=1):
         ws.column_dimensions[get_column_letter(j)].width = \
