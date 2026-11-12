@@ -14,11 +14,11 @@ LaporanDeviasiView. Fitur v3.1:
 - Loading overlay saat render
 """
 
+import contextlib
 import tkinter as tk
 from tkinter import ttk
 from typing import Optional
 
-import contextlib
 import pandas as pd
 
 from .theme import (
@@ -187,7 +187,7 @@ class DetailsPopup(tk.Toplevel):
         self._pending = False
         self._base_status = ""
         self._flash_after = None
-        self._render_df: Optional[pd.DataFrame] = df
+        self._render_df: pd.DataFrame | None = df
         # v3.9.2: minus merah PER CELL (kolom NILAI) — fallback Tk 8 per baris
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
@@ -1014,10 +1014,25 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     # PO dari 3224 (per tanggal — po_nomor_map) bila 3243 tidak tersedia
     # utk pasangan itu. Lalu label 'Potensi PO belum dibuat' bila keduanya
     # tidak ada (pasangan tanpa PO 3243 + tanpa penerimaan 3224 + kondisi
-    # potensi terpenuhi). 3243 ada ⇒ PO sudah dibuat ⇒ label potensi
-    # TIDAK relevan (skip — hindari kontradiksi "PO belum dibuat" padahal
-    # Nomor PO tampil). Tanpa rincian_po_df & in_detail → kolom kosong.
+    # potensi terpenuhi).
+    # v3.13.0 — POTENSI PO (user: "potensi PO"): label potensi TAK
+    # lagi ditenggelamkan oleh 3243 — "3243 ada ⇒ PO sudah dibuat"
+    # asumsi terlalu kuat (PO 3243 bisa dari bulan lain / sudah
+    # selesai / utk qty berbeda), dulu keberadaannya mematikan label
+    # utk SEMUA tanggal pasangan; kini label tanggal-spesifik TETAP
+    # tampil BERDAMPING dgn nomor PO ("ada PO tercatat, tapi penerimaan
+    # tanggal ini belum" — saling melengkapi, bukan kontradiksi).
+    # Kunci lookup kini KANONIK norm_nama_* (peta ber-kunci kanonik
+    # sejak v3.11.59 tapi sisi pemanggil masih RAW astype(str) — frame
+    # non-kanonik miss senyap; kelas bug yang sama dgn v3.11.59).
+    # Tanpa rincian_po_df & in_detail → kolom kosong.
     if in_detail is not None and df is not None and not df.empty:
+        from ..pipeline.helpers import (
+            norm_nama_barang_key as _nbk_dp,
+        )
+        from ..pipeline.helpers import (
+            norm_nama_resto_key as _nrk_dp,
+        )
         from .po_keterangan import (
             POTENSI_PO_LABEL,
             po_nomor_map,
@@ -1034,24 +1049,29 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
             _ket = []
             for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
+                # v3.13.0 — kunci KANONIK kedua sisi (norm idempoten utk
+                # frame yang sudah kanonik; drift ejaan kini cocok).
+                _kb = _nbk_dp(_bb)
+                _kr = _nrk_dp(_rr)
                 _parts: list = []
                 # 1. Prioritas: Nomor PO dari 3243 (semua PO pasangan)
-                _po_3243 = _nomor_m_3243.get((_bb, _rr))
+                _po_3243 = _nomor_m_3243.get((_kb, _kr))
                 if _po_3243:
                     _parts.append(_po_3243)
                 else:
                     # 2. Fallback: Nomor PO dari 3224 (per tanggal) bila
                     #    3243 tidak ada utk pasangan ini
                     if _tt is not None and pd.notna(_tt):
-                        _po_3224 = _nomor_m_3224.get((_bb, _rr, int(_tt)))
+                        _po_3224 = _nomor_m_3224.get((_kb, _kr, int(_tt)))
                         if _po_3224:
                             _parts.append(_po_3224)
-                        elif _po_m:
-                            # 3. Label potensi bila TIDAK ada Nomor PO
-                            #    sama sekali (3243 & 3224 kosong)
-                            _tg = _po_m.get((_bb, _rr))
-                            if _tg and int(_tt) in _tg:
-                                _parts.append(POTENSI_PO_LABEL)
+                # 3. v3.13.0 — label potensi tanggal-spesifik TETAP
+                #    tampil walau 3243/3224 ada (PO lama tak lagi
+                #    menenggelamkan potensi tanggal ini).
+                if _po_m and _tt is not None and pd.notna(_tt):
+                    _tg = _po_m.get((_kb, _kr))
+                    if _tg and int(_tt) in _tg:
+                        _parts.append(POTENSI_PO_LABEL)
                 _ket.append(" · ".join(_parts) if _parts else "")
             df = df.assign(**{"KETERANGAN PO": _ket})
 

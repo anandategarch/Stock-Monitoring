@@ -43,6 +43,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
+
 # v3.11.59 — FIX BUG 2 (MED): normalisasi kunci pasangan dari pipeline
 # helpers (barang: upper + rapat spasi ganda; resto: upper + segmen
 # setelah titik TERAKHIR) — dipakai auto_resolve_pending supaya snapshot
@@ -170,12 +171,23 @@ CHECK_ON, CHECK_OFF = "☑", "☐"
 # anomali — footer CEK tab Deviasi tidak menghitungnya sbg anomali.
 # Display Follow Up menandainya 'Analisa: …' supaya dua tab konsisten
 # (bukan tertukar dgn label anomali).
+# v3.13.0 — mirror _CEK_CHECK_LABELS deviasi_view (12 label kanonik;
+# label LAMA "Kosong/Non Aktif" dipertahankan utk entri followup.json
+# persisten era sebelum pecah — display tetap apa adanya).
 _CEK_CANONICAL_LABELS = (
-    "Promix 04", "RI Balancing", "Kosong/Non Aktif", "Beda Tanggal",
-    "Hitung Manual", "Turun Drastis", "ACR to BOM",
+    "Promix 04", "RI Balancing", "Kosong (AKTIF)",
+    "Non Aktif (Masih Stok)", "Beda Tanggal", "Hitung Manual",
+    "Hilang dari Pencatatan", "Turun Drastis",
+    "Turun Drastis (SO Tidak Diinput)", "Naik Drastis",
+    "ACR to BOM", "BOM 0", "Kosong/Non Aktif",
 )
+# v3.13.0 — label analisa di-RENAME basis Qty ("Peningkatan/Penurunan
+# Qty" — deviasi_view.ANALISA_*_TXT); prefix LAMA tetap dikenali
+# supaya entri persisten/export lama tetap berprefiks 'Analisa: '
+# (back-compat dua arah — roundtrip impor v3.12.2 tak patah).
 _ANALISA_PREFIXES = ("Berubah Arah", "Peningkatan Tertinggi",
-                     "Penurunan Tertinggi")
+                     "Penurunan Tertinggi", "Peningkatan Qty",
+                     "Penurunan Qty")
 
 
 def _cek_display_text(v) -> str:

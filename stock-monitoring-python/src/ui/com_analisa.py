@@ -2,7 +2,11 @@
 com_analisa.py — Analisa "COM Tinggi"/"COM Rendah" (segmen CEK tab Deviasi
 GR/PCS; dipakai deviasi_view).
 
-Semantik per pasangan (Nama Barang × Nama Resto) di tanggal analisa H:
+Semantik per pasangan (Nama Barang × Nama Resto × SATUAN) di tanggal
+analisa H (v3.13.0 — kunci SATUAN: pasangan yang tercatat di GR sekaligus
+PCS dihitung TERPISAH per satuan, paritas pivot tabel utama & popup
+per-satuan; sebelumnya nilai dua satuan DIJUMLAHKAN lintas satuan →
+angka pembentuk label tak cocok dgn yang dilihat user di popup):
 
     d(t) = COM(t) − ACR(t)
     COM(t) = pemakaian aktual resto — com(1) = SALDO AWAL + IN(1) −
@@ -88,8 +92,18 @@ def _build_matrices(data: pd.DataFrame):
         return None
     d["_tgl"] = d["_tgl"].astype("int64")
     d["_v"] = pd.to_numeric(d["NILAI"], errors="coerce").fillna(0.0)
+    # v3.13.0 — KUNCI SATUAN (user: "com kunci satuan"): satuan
+    # ternormalisasi strip+upper (NaN → "") supaya 'GR'/'GR '/'gr' satu
+    # kelompok — konvensi sama dgn filter tab & segmen "Beda dari Resto
+    # Lain" (v3.11.59). Frame tanpa kolom SATUAN (pemanggil lama/test)
+    # → "" konstan (perilaku lama: semua baris satu kelompok).
+    if "SATUAN" in cols:
+        d["_sat"] = (d["SATUAN"].fillna("").astype(str)
+                     .str.strip().str.upper())
+    else:
+        d["_sat"] = ""
 
-    idx = ["Nama Barang", "NAMA RESTO", "JENIS"]
+    idx = ["Nama Barang", "NAMA RESTO", "_sat", "JENIS"]
     try:
         piv = d.pivot_table(
             index=idx, columns="_tgl", values="_v",
@@ -104,6 +118,8 @@ def _build_matrices(data: pd.DataFrame):
         return None
 
     col_keys = sorted(piv.columns.tolist(), key=_chrono)
+    # v3.13.0 — pairs kini (Nama Barang, NAMA RESTO, SATUAN) — pasangan
+    # dua-satuan (GR + PCS) jadi DUA baris matriks terpisah.
     pairs = piv.index.droplevel("JENIS").unique()
 
     def _mat(jenis: str, presence: bool = False,
@@ -160,9 +176,13 @@ def _build_matrices(data: pd.DataFrame):
 
 def com_gap_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
     """v3.11.8 — peta segmen COM BERSAMA dua arah:
-    {(Nama Barang, NAMA RESTO): (sisi, selisih_dari_median)} — sisi
-    "tinggi" (d(H) > median; selisih = d(H) − median, positif) atau
-    "rendah" (d(H) < median; selisih = median − d(H), positif).
+    {(Nama Barang, NAMA RESTO, SATUAN): (sisi, selisih_dari_median)} —
+    sisi "tinggi" (d(H) > median; selisih = d(H) − median, positif)
+    atau "rendah" (d(H) < median; selisih = median − d(H), positif).
+    v3.13.0 — kunci kini 3-TUPLE ber-SATUAN ternormalisasi
+    (strip+upper, NaN → ""; mirror _build_matrices) — pasangan GR + PCS
+    dianalisa TERPISAH; pemanggil (deviasi_view) mencari dgn satuan
+    baris pivot yang sama ternormalisasi.
     HANYA pasangan terpicu (d(H) valid; ≥3 hari sampel valid di
     1..H−1). Frame kosong / kolom kurang / h < 4 → peta kosong
     (degrade jujur, mirror po_keterangan). Hasil di-cache per
@@ -271,17 +291,19 @@ def com_gap_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
         # ambang tak memicu).
         _cut = (min_pct / 100.0) * abs(med)
         if d_h > med and (d_h - med) > _cut:
-            out[(str(pair[0]), str(pair[1]))] = ("tinggi", d_h - med)
+            out[(str(pair[0]), str(pair[1]), str(pair[2]))] = \
+                ("tinggi", d_h - med)
         elif d_h < med and (med - d_h) > _cut:
-            out[(str(pair[0]), str(pair[1]))] = ("rendah", med - d_h)
+            out[(str(pair[0]), str(pair[1]), str(pair[2]))] = \
+                ("rendah", med - d_h)
 
     _RES.update(data=data, h=h, pct=min_pct, map=out)
     return out
 
 
 def com_tinggi_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
-    """Peta segmen COM Tinggi: {(Nama Barang, NAMA RESTO): selisih di
-    atas median (float)} — HANYA pasangan arah TINGGI (back-compat
+    """Peta segmen COM Tinggi: {(Nama Barang, NAMA RESTO, SATUAN): selisih
+    di atas median (float)} — HANYA pasangan arah TINGGI (back-compat
     v3.11.7; turunan tipis com_gap_map — tanpa hitung ulang; min_pct
     v3.11.12 diteruskan apa adanya)."""
     return {p: d for p, (s, d) in com_gap_map(data, h, min_pct).items()
@@ -289,8 +311,8 @@ def com_tinggi_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
 
 
 def com_rendah_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
-    """v3.11.8 — peta segmen COM Rendah: {(Nama Barang, NAMA RESTO):
-    selisih di bawah median (float positif)} — HANYA pasangan arah
+    """v3.11.8 — peta segmen COM Rendah: {(Nama Barang, NAMA RESTO,
+    SATUAN): selisih di bawah median (float positif)} — HANYA pasangan arah
     RENDAH (turunan tipis com_gap_map; min_pct v3.11.12
     diteruskan)."""
     return {p: d for p, (s, d) in com_gap_map(data, h, min_pct).items()
@@ -298,11 +320,17 @@ def com_rendah_map(data: pd.DataFrame, h, min_pct: float = 0.0) -> dict:
 
 
 def com_tinggi_segment(data: pd.DataFrame, h, nama_barang: str,
-                       nama_resto: str) -> str:
+                       nama_resto: str, satuan: str | None = None) -> str:
     """Label segmen utk SATU (pasangan, H) — dipakai popup/debug:
     'COM Tinggi' bila terpicu arah tinggi, '' lainnya (lookup tipis di
-    atas com_tinggi_map — tidak menghitung ulang)."""
+    atas com_tinggi_map — tidak menghitung ulang). v3.13.0 — kunci
+    ber-satuan: satuan None → dicoba TANPA normalisasi dulu lalu ""
+    (frame test tanpa kolom SATUAN); satuan diberikan → normalisasi
+    strip+upper (konvensi modul)."""
     m = com_tinggi_map(data, h)
-    if (str(nama_barang), str(nama_resto)) in m:
+    _keys = ((str(nama_barang), str(nama_resto),
+              str(satuan).strip().upper()) if satuan is not None else
+             ((str(nama_barang), str(nama_resto), ""),))
+    if any(k in m for k in _keys):
         return COM_TINGGI_LABEL
     return ""

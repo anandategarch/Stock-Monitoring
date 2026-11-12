@@ -446,6 +446,21 @@ class DeviasiPopup(tk.Toplevel):
                            f"{int(_avg_days)} hari valid")
             except (TypeError, ValueError):
                 pass
+        # v3.13.0 — median d(t)=COM−ACR vs d(H): bukti label CEK
+        # "COM Tinggi/Rendah" kini terbaca langsung dari popup (dulu
+        # user hanya melihat Avg COM/Avg ACR = MEAN terpisah — tak bisa
+        # membuktikan label yang membandingkan MEDIAN selisih).
+        _med_d = _attrs.get("med_d")
+        _d_h = _attrs.get("d_h")
+        if _med_d is not None and _d_h is not None:
+            _gap_d = float(_d_h) - float(_med_d)
+            _gap_txt = self._fmt_num(abs(_gap_d))
+            if _gap_d > 0:
+                _gap_txt = f"+{_gap_txt}"
+            elif _gap_d < 0:
+                _gap_txt = f"-{_gap_txt}"
+            status += (f" \u00b7 d(H) {self._fmt_num(_d_h)} vs median "
+                       f"{self._fmt_num(_med_d)} (selisih {_gap_txt})")
         # v3.9.59 — 2d-03: simpan status dasar utk pemulihan flash copy
         self._base_status = status
         self.status_var.set(status)
@@ -947,6 +962,62 @@ def _com_acr_avg(df: pd.DataFrame, nama_barang: str, nama_resto: str,
     return (s_com / n, s_acr / n, n)
 
 
+def _com_d_median(df: pd.DataFrame, nama_barang: str, nama_resto: str,
+                  satuan: str | None, h) -> "tuple[float, float, int] | None":
+    """v3.13.0 — median d(t) = COM−ACR jendela valid 1..H−1 + d(H) utk
+    baris key H — BUKTI label CEK "COM Tinggi/Rendah" dari popup
+    (segmen CEK membandingkan d(H) vs MEDIAN selisih, sedangkan kolom
+    Avg COM/Avg ACR = MEAN terpisah — dulu user tak bisa membuktikan
+    label dari popup; kini footer menampilkan keduanya, mirror
+    com_analisa pasca kunci-satuan).
+
+    Validitas hari = _com_acr_avg (SO tercatat kedua ujung; t=1 pakai
+    SALDO AWAL / SO penutupan bulan lalu). Return (median, d_H,
+    n_valid); None bila < 3 hari sampel valid (mirror
+    com_analisa._MIN_VALID_DAYS — label CEK tak pernah terpicu di bawah
+    itu) atau d(H) tak valid."""
+    try:
+        h_i = int(h)
+    except (TypeError, ValueError):
+        return None
+    if h_i < 2:
+        return None
+
+    com = _compute_com_series(df, nama_barang, nama_resto, satuan)
+    if not com:
+        return None
+    acr = _acr_series(df, nama_barang, nama_resto, satuan)
+    so_pres = _pair_presence(df, nama_barang, nama_resto, _JENIS_SO, satuan)
+    sa_pres = _pair_presence(df, nama_barang, nama_resto, _JENIS_SA, satuan)
+
+    col_keys = _com_col_keys(df)
+    neg_so = [t for t in col_keys
+              if float(t) < 0 and float(t) in so_pres]
+    prev_neg = float(neg_so[-1]) if neg_so else None
+
+    vals: list = []
+    d_h = None
+    for t in range(1, h_i + 1):
+        tf = float(t)
+        if tf not in so_pres:
+            continue
+        if t == 1:
+            ok_prev = ((tf in sa_pres)
+                       or (prev_neg is not None and prev_neg in so_pres))
+        else:
+            ok_prev = float(t - 1) in so_pres
+        if not ok_prev:
+            continue
+        d_t = float(com.get(tf, 0.0)) - float(acr.get(tf, 0.0))
+        if t < h_i:
+            vals.append(d_t)
+        else:
+            d_h = d_t
+    if len(vals) < 3 or d_h is None:
+        return None
+    return (float(np.median(vals)), float(d_h), len(vals))
+
+
 def build_popup_rows(data: pd.DataFrame, nama_barang: str,
                      nama_resto: str, satuan: str | None = None,
                      in_detail: pd.DataFrame | None = None,
@@ -1146,6 +1217,10 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     out["Avg COM"] = float("nan")
     out["Avg ACR"] = float("nan")
     _avg_days = None
+    # v3.13.0 — median d(t)=COM−ACR + d(H) (bukti label CEK COM
+    # Tinggi/Rendah; diekspos via attrs utk footer, bukan kolom baru).
+    _med_d = None
+    _d_h = None
     if h is not None:
         _avg_com, _avg_acr, _avg_days = _com_acr_avg(
             df, nama_barang, nama_resto, satuan, h)
@@ -1154,6 +1229,9 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
             _i = int(out.index[_h_mask][0])
             out.at[_i, "Avg COM"] = _avg_com
             out.at[_i, "Avg ACR"] = _avg_acr
+        _med_info = _com_d_median(df, nama_barang, nama_resto, satuan, h)
+        if _med_info is not None:
+            _med_d, _d_h = _med_info[0], _med_info[1]
 
     # v3.11 — KETERANGAN PO per tanggal (potensi PO belum dibuat —
     # logika & scope sama dgn segmen CEK tabel; level pasangan).
@@ -1185,6 +1263,10 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     if h is not None:
         res.attrs["avg_days"] = _avg_days
         res.attrs["avg_h"] = h
+        # v3.13.0 — median d & d(H) utk footer (None bila < 3 hari
+        # valid — mirror ambang com_analisa).
+        res.attrs["med_d"] = _med_d
+        res.attrs["d_h"] = _d_h
     return res
 
 

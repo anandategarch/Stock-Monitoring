@@ -2,13 +2,13 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.12.3** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.13.0** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 
 - **Pipeline end-to-end** dari 14 sumber Excel (Rekap Mentah, 22.05, 42.15, 32.24, 42.05, 9901, 42.17 Saldo Awal & Sistem, 41.09 Harga, 32.43 Rincian PO, DBS Kategori) → 892k+ baris append1 terstruktur
 - **10 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
-- **Analisa deviasi otomatis** — kolom CEK dengan 12+ kategori anomali (Rank, Turun Drastis, Beda dari Resto Lain, ACR to BOM, COM Tinggi/Rendah, dll)
+- **Analisa deviasi otomatis** — kolom CEK dengan 12 label anomali (Promix 04, RI Balancing, Kosong (AKTIF), Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Turun Drastis + varian SO Tidak Diinput, Naik Drastis, ACR to BOM, BOM 0) + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO belum dibuat, analisa lalu-kini berbasis Qty
 - **Saldo sistem minus** — rekapan pasangan Eksternal/Campuran dengan saldo < 0 di rentang 1..H, dengan keterangan mulai minus dari tanggal berapa
 - **Analisa Kronis** — pasangan (Resto, Barang) kronis minus + flag eksklusif (barang hanya minus di 1 resto)
 - **File deviasi bulan lalu** — dimuat manual via tombol 📂 (parse async, gak bekui UI), pattern `{12+month}.{BULAN} {TAHUN}.xlsx`
@@ -49,7 +49,7 @@ Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Port
 | ⚙️ Config | RootPath, Folders, Sheets, KategoriBarang4217, kartu DEV BULANAN, ambang COM, DPI |
 | 🚀 Proses | Kontrol pipeline (MULAI/Stop/Refresh Sumber), KPI real-time, log konsol gelap, tombol Export Excel |
 | 🧮 Pivot Table | Matrix per Resto/Tanggal (rentang default 25•–31• bulan lalu s/d 31 berjalan; kategori default "Deviasi") |
-| 📦 Deviasi GR / 🧩 Deviasi PCS | Analisa deviasi per barang×resto — kolom **CEK** (analisa otomatis: Rank, Turun Drastis, Beda dari Resto Lain, ACR to BOM, COM Tinggi/Rendah, dll), minus merah per-cell, popup detail per tanggal, kolom Nominal (Harga 41.09 × Qty Deviasi), kolom **Dev. Bulan Lalu**, tooltip hover cell CEK |
+| 📦 Deviasi GR / 🧩 Deviasi PCS | Analisa deviasi per barang×resto — kolom **CEK** (12 label anomali: Turun Drastis dibedakan vs SO Tidak Diinput, Kosong (AKTIF) vs Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Naik Drastis, ACR to BOM, BOM 0, Promix 04, RI Balancing + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO, Peningkatan/Penurunan Qty ±p%), minus merah per-cell, popup detail per tanggal (footer: median d & gap), kolom Nominal (Harga 41.09 × Qty Deviasi), kolom **Dev. Bulan Lalu**, tooltip hover cell CEK |
 | 📤 Rekap Selisih IN | IN (Accurate) vs Barang Masuk + kolom SO + Hasil Audit + PO Menunggu; mode hitung Bulan Ini / Lalu+Ini; mode 📈 Analisa = tabel selisih (Resto·Tgl·Barang) urut \|selisih\|↓; export per resto |
 | 💰 Nominal Deviasi | Σ Nominal Deviasi per resto + perbandingan bulan lalu + baris TOTAL. Sub-tab: **Per Resto** · **Tanpa Harga** (global) · **Saldo Sistem Minus** (pasangan Eksternal/Campuran minus) · **Analisa Kronis** (pasangan kronis + eksklusif) |
 | ☑ Follow Up | Shortlist baris tercentang (persist `followup.json`) + export |

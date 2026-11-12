@@ -1060,7 +1060,10 @@ def main():
         """Label statis (non textvariable) di view — tanpa legenda & KPI."""
         out = []
         for lbl in _all_labels_text(view):
-            if any(k in lbl for k in ("Kosong/Non Aktif", "Beda Tanggal",
+            if any(k in lbl for k in ("Kosong/Non Aktif",
+                                      "Kosong (AKTIF)",
+                                      "Non Aktif (Masih Stok)",
+                                      "Beda Tanggal",
                                       "Hitung Manual", "Turun Drastis",
                                       "ACR to BOM", "negatif (merah)",
                                       "IN", "BARANG MASUK",
@@ -4622,21 +4625,23 @@ def main():
     _cek29 = {_dv29b.tree.set(k, "Nama Barang"):
               _strip_rank_prefix(_dv29b.tree.set(k, "CEK"))
               for k in _dv29b.tree.get_children("")}
-    check("(v3.11.7) CEK 'Promix 04': SO 'input promix 04 dine in' → "
-          "Promix 04 TETAP LABEL UTAMA (mengalahkan Beda Tanggal — "
-          "prioritas pertama) + v3.11.7 GABUNG-SEMUA-LABEL: kondisi lain "
-          "yg ikut terpicu (Beda Tanggal cabang-2 + Naik Drastis — SO "
-          "30→60 melonjak 100%) kini TAMPIL sebagai segmen ' · ' (dulu "
-          "np.select hanya label pertama) + v3.11.9 label BOM 0 "
-          "(tanpa baris 9.ACR → Total ACR 0 & SO_H 60 > 0)",
+    check("(v3.11.7+v3.13.0) CEK 'Promix 04': SO 'input promix 04 dine "
+          "in' → Promix 04 TETAP LABEL UTAMA + GABUNG-SEMUA-LABEL: "
+          "kondisi lain yg ikut terpicu (Naik Drastis — SO 30→60 "
+          "melonjak 100%; v3.13.0 merge-1: cabang-2 Beda Tanggal "
+          "digabung ke Naik Drastis) kini TAMPIL sebagai segmen ' · ' + "
+          "v3.11.9 label BOM 0 (tanpa baris 9.ACR → Total ACR 0 & SO_H "
+          "60 > 0)",
           _cek29.get("BRG PROMIX") ==
-          "Promix 04 · Beda Tanggal · Naik Drastis · BOM 0",
+          "Promix 04 · Naik Drastis · BOM 0",
           f"got {_cek29.get('BRG PROMIX')!r}")
-    check("(v3.11.7) CEK: SO 'input so harian' → 'Beda Tanggal · Naik "
-          "Drastis' (v3.9.19-3.11.6: hanya 'Beda Tanggal' — label lain "
-          "tenggelam) + v3.11.9 BOM 0 (ACR 0 & SO_H 60)",
+    check("(v3.11.7+v3.13.0) CEK: SO 'input so harian' → 'Naik "
+          "Drastis · BOM 0' (v3.13.0 merge-1: cabang-2 Beda Tanggal "
+          "digabung ke Naik Drastis; v3.11.7: 'Beda Tanggal · Naik "
+          "Drastis'; v3.9.19-3.11.6: hanya 'Beda Tanggal') + v3.11.9 "
+          "BOM 0 (ACR 0 & SO_H 60)",
           _cek29.get("BRG HARIAN") ==
-          "Beda Tanggal · Naik Drastis · BOM 0",
+          "Naik Drastis · BOM 0",
           f"got {_cek29.get('BRG HARIAN')!r}")
     check("(v3.11.7) CEK 'Promix 04': varian 'take away' juga Promix 04 "
           "(· Hitung Manual ikut — gabung-semua; so_m1=0 → stok W=0 & "
@@ -4671,9 +4676,10 @@ def main():
     wait_view(root, _dv29c)
     _gr_cek_vals = _dv29b._col_values("CEK")
     _pcs_cek_vals = _dv29c._col_values("CEK")
-    check("(v3.9.19) GR: nilai filter CEK hanya data GR yang ada "
-          "('Beda Tanggal' — tanpa nilai PCS)",
-          "Beda Tanggal" in _gr_cek_vals and
+    check("(v3.9.19+v3.13.0) GR: nilai filter CEK hanya data GR yang "
+          "ada ('Naik Drastis' — v3.13.0 merge-1 ganti label cabang-2; "
+          "tanpa nilai PCS)",
+          "Naik Drastis" in _gr_cek_vals and
           "Hitung Manual" not in _gr_cek_vals,
           f"got {_gr_cek_vals}")
     check("(v3.9.19) PCS: nilai filter CEK hanya data PCS yang ada "
@@ -5019,15 +5025,15 @@ def main():
     ]
     _top30v1, _dv30v1 = _make_dv30(pd.DataFrame(_rows30v))
     _, _vv30v1 = _row_vals30(_dv30v1, "V_DUP")
-    check("(v3.11.7) _so_source_lookup PER-TANGGAL H (sumber tgl-25 "
-          "promix dipakai; tgl-24 so-harian tak menimpa) → CEK Promix 04 "
-          "LABEL UTAMA (+ segmen Beda Tanggal · Naik Drastis — SO "
-          "30→60)",
+    check("(v3.11.7+v3.13.0) _so_source_lookup PER-TANGGAL H (sumber "
+          "tgl-25 promix dipakai; tgl-24 so-harian tak menimpa) → CEK "
+          "Promix 04 LABEL UTAMA (+ segmen Naik Drastis — SO 30→60; "
+          "v3.13.0 merge-1 tanpa Beda Tanggal cabang-2)",
           _dv30v1._so_source_lookup.get(("V_DUP", "R")) ==
           "input promix 04 dine in" and
           _vv30v1 is not None and
           _vv30v1["CEK"] ==
-          "Promix 04 · Beda Tanggal · Naik Drastis · BOM 0",
+          "Promix 04 · Naik Drastis · BOM 0",
           f"src={_dv30v1._so_source_lookup.get(('V_DUP', 'R'))!r} "
           f"cek={None if _vv30v1 is None else _vv30v1['CEK']!r}")
     _top30v1.destroy()
@@ -5928,12 +5934,13 @@ def main():
     ]
     _top31r, _dv31r = _make_dv30(pd.DataFrame(_rows31r))
     _, _vv31r = _row_vals30(_dv31r, "P-H")
-    check("(v3.11.7) H=25: SO tgl-25 promix → CEK Promix 04 LABEL UTAMA "
-          "+ segmen (Beda Tanggal · Naik Drastis — SO 30→60) + v3.11.9 "
-          "BOM 0 (ACR 0 & SO_H > 0)",
+    check("(v3.11.7+v3.13.0) H=25: SO tgl-25 promix → CEK Promix 04 "
+          "LABEL UTAMA + segmen (Naik Drastis — SO 30→60; v3.13.0 "
+          "merge-1 tanpa Beda Tanggal cabang-2) + v3.11.9 BOM 0 (ACR 0 "
+          "& SO_H > 0)",
           _vv31r is not None and
           _vv31r["CEK"] ==
-          "Promix 04 · Beda Tanggal · Naik Drastis · BOM 0",
+          "Promix 04 · Naik Drastis · BOM 0",
           f"cek={None if _vv31r is None else _vv31r['CEK']!r}")
     _dv31r.tanggal_h_var.set("24")
     _dv31r._on_tanggal_h_change()
@@ -5985,15 +5992,15 @@ def main():
     # formula LET sheet 'Data Base Cek Deviasi' kolom Y. STALE (SO 24=10
     # → SO 25=0 TERCATAT NOL): v3.11.7 — baris 1.SO ADA di H dgn nilai 0
     # + tanpa mutasi IN/OUT/BK → label BARU 'Hilang dari Pencatatan'
-    # (kasus ekstrem, prioritas DI ATAS Turun Drastis) + 'Turun Drastis'
-    # ikut sebagai segmen (kondisi 4 sheet: F 10 > 0 & H/F 0 < 50%).
-    check("(v3.11.7) CEK pasangan SO stale (SO terakhir 24 < H 25, baris "
-          "1.SO t25 ADA bernilai 0): 'Hilang dari Pencatatan · Turun "
-          "Drastis' (label baru v3.11.7 — SO tercatat NOL persis tanpa "
-          "mutasi penutup; v3.9.27: 'Turun Drastis' saja; v3.9.22-26: "
-          "'Beda Tanggal')",
+    # (kasus ekstrem Turun Drastis). v3.13.0 — MERGE nested: Hilang
+    # MENGECUALIKAN Turun Drastis (dulu dobel label; subsumsi).
+    check("(v3.11.7+v3.13.0) CEK pasangan SO stale (SO terakhir 24 < H "
+          "25, baris 1.SO t25 ADA bernilai 0): 'Hilang dari Pencatatan' "
+          "SAJA (v3.13.0 merge-nested mengecualikan Turun Drastis; "
+          "v3.11.7: '… · Turun Drastis'; v3.9.27: 'Turun Drastis'; "
+          "v3.9.22-26: 'Beda Tanggal')",
           _stale32 is not None and
-          _stale32["CEK"] == "Hilang dari Pencatatan · Turun Drastis",
+          _stale32["CEK"] == "Hilang dari Pencatatan",
           f"cek={None if _stale32 is None else _stale32['CEK']!r}")
     # NOSO: tanpa baris SO sama sekali → SO_H=0 & so_m1=0 → tak ada
     # kondisi sheet yang terpicu → '' (dulu stale men-flag 'Beda Tanggal')
@@ -6456,22 +6463,26 @@ def main():
         return "<missing>"
 
     _top33a, _dv33a = _make_dv33(pd.DataFrame(_ROWS33), _det33)
-    check("(v3.11.7) CEK RI Balancing: pasangan ber-dokumen balancing "
-          "(tgl dok 20 ≤ H 25) TERFLAG 'RI Balancing' LABEL UTAMA (+ "
-          "'Turun Drastis' sbg segmen — SO 24=10, tanpa baris SO 25 → "
-          "drop 100%) — dulu hanya terlihat di popup Rincian IN",
-          _cek33(_dv33a, "RBAL") == "RI Balancing · Turun Drastis",
+    check("(v3.11.7+v3.13.0) CEK RI Balancing: pasangan ber-dokumen "
+          "balancing (tgl dok 20 ≤ H 25) TERFLAG 'RI Balancing' LABEL "
+          "UTAMA (+ 'Turun Drastis (SO Tidak Diinput)' sbg segmen — SO "
+          "24=10, TANPA baris SO 25 → drop palsu 100% krn fill-0; "
+          "v3.13.0 membedakan turun-drastis vs SO-tak-diinput) — dulu "
+          "hanya terlihat di popup Rincian IN",
+          _cek33(_dv33a, "RBAL") ==
+          "RI Balancing · Turun Drastis (SO Tidak Diinput)",
           f"cek={_cek33(_dv33a, 'RBAL')!r}")
     # v3.9.27: stale dihapus → STALE jatuh ke 'Turun Drastis' (kondisi
     # 4 sheet, F 10 > 0 & H/F 0 < 50%); prioritas RI Balancing di atas
     # kondisi numerik tetap terbukti lewat RBAL.
-    check("(v3.11.7) Prioritas: RI Balancing MENGALAHKAN kondisi numerik "
-          "(RBAL='RI Balancing' label utama meski SO 24→25 turun "
+    check("(v3.11.7+v3.13.0) Prioritas: RI Balancing MENGALAHKAN kondisi "
+          "numerik (RBAL='RI Balancing' label utama meski SO 24→25 turun "
           "drastis); stale TANPA dokumen ber-baris-SO-0 → 'Hilang dari "
-          "Pencatatan · Turun Drastis' (v3.9.27: 'Turun Drastis'; "
-          "v3.9.22-26: 'Beda Tanggal')",
+          "Pencatatan' SAJA (v3.13.0 merge-nested; v3.11.7: '… · Turun "
+          "Drastis'; v3.9.27: 'Turun Drastis'; v3.9.22-26: 'Beda "
+          "Tanggal')",
           _cek33(_dv33a, "STALE") ==
-          "Hilang dari Pencatatan · Turun Drastis",
+          "Hilang dari Pencatatan",
           f"cek={_cek33(_dv33a, 'STALE')!r}")
     check("(v3.9.23) Scope analisa: dokumen balancing bertanggal 27 > "
           "H 25 TIDAK terflag (belum termasuk analisa) — v3.11.9: "
@@ -6513,10 +6524,11 @@ def main():
     # v3.9.27: stale dihapus → tanpa in_detail, RBAL (SO 24=10 → 25=0)
     # jatuh ke 'Turun Drastis' (kondisi 4 sheet; v3.9.22-26: 'Beda
     # Tanggal' via aturan stale)
-    check("(v3.9.23→v3.9.27) Kompatibel: load_data TANPA in_detail "
+    check("(v3.9.23→v3.13.0) Kompatibel: load_data TANPA in_detail "
           "(pemanggil lama/test) → kondisi tidak berlaku, RBAL = "
-          "'Turun Drastis' (v3.9.22-26: 'Beda Tanggal')",
-          _cek33(_dv33b, "RBAL") == "Turun Drastis",
+          "'Turun Drastis (SO Tidak Diinput)' (v3.13.0 — tanpa baris SO "
+          "di H; v3.9.27: 'Turun Drastis'; v3.9.22-26: 'Beda Tanggal')",
+          _cek33(_dv33b, "RBAL") == "Turun Drastis (SO Tidak Diinput)",
           f"cek={_cek33(_dv33b, 'RBAL')!r}")
     _top33b.destroy()
     root.update()
@@ -7081,13 +7093,13 @@ def main():
           "8.BARANG KELUAR; v3.9.6-26 pakai 9.ACR → tak pernah terpicu)",
           _cek33(_dv38a, "BEDA-TGL-ACR") == "Beda Tanggal",
           f"cek={_cek33(_dv38a, 'BEDA-TGL-ACR')!r}")
-    check("(v3.11.7) Kondisi 2 cabang-2: SO naik >50% + IN 0 + KIRIMAN "
-          "KELUAR 0 → TERFLAG meski PENJUALAN ≠ 0 — 'Beda Tanggal · "
-          "Hitung Manual · Naik Drastis · ACR to BOM' (4 kondisi "
-          "TERPICU BERSAMAAN — bukti gabung-semua-label: dulu hanya "
-          "'Beda Tanggal' yg tampil)",
+    check("(v3.13.0) MERGE-1: SO naik >50% + IN 0 + KIRIMAN KELUAR 0 "
+          "→ cabang-2 Beda Tanggal DIGABUNG ke Naik Drastis — 'Hitung "
+          "Manual · Naik Drastis · ACR to BOM' (v3.11.7: 4 label dobel "
+          "'Beda Tanggal · …' — kenaikan drastis kini SATU ambang "
+          "configurable)",
           _cek33(_dv38a, "BEDA-TGL-BK") ==
-          "Beda Tanggal · Hitung Manual · Naik Drastis · ACR to BOM",
+          "Hitung Manual · Naik Drastis · ACR to BOM",
           f"cek={_cek33(_dv38a, 'BEDA-TGL-BK')!r}")
     check("(v3.11.7) KIRIMAN KELUAR ≠ 0 mematikan kedua cabang Beda "
           "Tanggal (J sheet = KIRIMAN KELUAR, bukan PENJUALAN) → tanpa "
@@ -11022,7 +11034,7 @@ def main():
           list(_nv56.tree["columns"]) == [
               "Resto", "COM Deviasi", "Biaya Packaging",
               "Nominal Deviasi", "Nominal Deviasi Bulan Lalu",
-              "Persen Kenaikan/Penurunan", "Lalu 203.SEP 26"],
+              "Persen Kenaikan/Penurunan (Nominal)", "Lalu 203.SEP 26"],
           f"got {list(_nv56.tree['columns'])}")
     check("(v3.9.45) heading bulan utama menyebut LABEL bulan file "
           "(204.OKT 26) + minggu ter-cocok",
@@ -12270,21 +12282,20 @@ def main():
           "BOM 0 · Berubah Arah",
           f"got {None if _kcm61 is None else _dv61._cek_map.get(str(_kcm61))!r}")
     _kcp61 = _find61("CABE", "PWKTAM")
-    check("(v3.9.51+v3.11.30) Analisa PENURUNAN + persen: |25| vs |50| → "
-          "'Penurunan Tertinggi -50,0%' (basis |lalu|, 1 desimal koma) "
-          "+ v3.11.9 BOM 0 (v3.11.30 — tanpa prefiks Rank)",
+    check("(v3.9.51+v3.13.0) Analisa PENURUNAN + persen: |25| vs |50| → "
+          "'Penurunan Qty -50,0%' (basis |lalu|, 1 desimal koma; "
+          "v3.13.0 rename basis Qty) + v3.11.9 BOM 0",
           _kcp61 is not None
           and _dv61._cek_map.get(str(_kcp61), "") ==
-          "BOM 0 · Penurunan Tertinggi -50,0%",
+          "BOM 0 · Penurunan Qty -50,0%",
           f"got {None if _kcp61 is None else _dv61._cek_map.get(str(_kcp61))!r}")
     _kpp61 = _find61("PENTOL", "PWKTAM")
-    check("(v3.9.51+v3.11.30) Analisa PENINGKATAN + persen MENEMPEL "
-          "pada label check lama ('Hitung Manual · Peningkatan Tertinggi "
-          "+133,3%' — |70| vs |30|) + v3.11.9 BOM 0 (v3.11.30 — tanpa "
-          "prefiks Rank)",
+    check("(v3.9.51+v3.13.0) Analisa PENINGKATAN + persen MENEMPEL "
+          "pada label check lama ('Hitung Manual · BOM 0 · Peningkatan "
+          "Qty +133,3%' — |70| vs |30|; v3.13.0 rename basis Qty)",
           _kpp61 is not None
           and _dv61._cek_map.get(str(_kpp61), "") ==
-          "Hitung Manual · BOM 0 · Peningkatan Tertinggi +133,3%",
+          "Hitung Manual · BOM 0 · Peningkatan Qty +133,3%",
           f"got {None if _kpp61 is None else _dv61._cek_map.get(str(_kpp61))!r}")
     _kbm61 = _find61("BUMBU", "MLGPAR")
     check("(v3.9.53+v3.11.30) Pasangan TANPA baris di FILE deviasi → "
@@ -13377,9 +13388,9 @@ def main():
           f"got {str(_dv65.status_var.get())!r}")
 
     # --- (c) F7: tombol sort analisa CEK (parser tuple tier+pct) ---------
-    _cek65 = ["Berubah Arah", "Peningkatan Tertinggi +133,3%",
-              "Penurunan Tertinggi -50,0%", "Hitung Manual",
-              "Peningkatan Tertinggi +10,0%"]
+    _cek65 = ["Berubah Arah", "Peningkatan Qty +133,3%",
+              "Penurunan Qty -50,0%", "Hitung Manual",
+              "Peningkatan Qty +10,0%"]
     _p65 = _dv65._analisa_parse("naik")
     _keys65 = [_p65(c) for c in _cek65]
     check("(v3.9.55) F7: parser analisa 'naik' (kunci ASCENDING (2-tier, "
@@ -13392,12 +13403,12 @@ def main():
     check("(v3.9.55) F7: parser analisa 'turun': label turun grup 0 dgn "
           "pct NEGATIF (-50,0 → -50.0 — terkecil = teratas); tanpa persen "
           "→ -∞",
-          _p65t("Penurunan Tertinggi -50,0%") == (0, -50.0)
-          and _p65t("Penurunan Tertinggi") == (0, float("-inf")),
-          f"got {_p65t('Penurunan Tertinggi -50,0%')}")
+          _p65t("Penurunan Qty -50,0%") == (0, -50.0)
+          and _p65t("Penurunan Qty") == (0, float("-inf")),
+          f"got {_p65t('Penurunan Qty -50,0%')}")
     check("(v3.9.55) F7: parser tanpa persen 'naik' → (0, -∞) (|lalu|=0: "
           "peningkatan tanpa dasar pembanding — TERATAS)",
-          _p65("Peningkatan Tertinggi") == (0, float("-inf")),
+          _p65("Peningkatan Qty") == (0, float("-inf")),
           "sentinel inf salah")
     # sort E2E: fixture §63-style dengan analisa di CEK
     _dv65.destroy()
@@ -14737,7 +14748,7 @@ def main():
           "kosong → '-'",
           _cdt68("ACR to BOM") == "ACR to BOM"
           and _cdt68("Berubah Arah").startswith("Analisa: ")
-          and _cdt68("Penurunan Tertinggi -25%").startswith("Analisa: ")
+          and _cdt68("Penurunan Qty -25%").startswith("Analisa: ")
           and _cdt68("MINUS + > MEDIAN") == "MINUS + > MEDIAN"
           and _cdt68("") == "-",
           f"got {_cdt68('Berubah Arah')!r}")
@@ -17357,7 +17368,7 @@ def main():
           list(_rv75.tree["columns"]) == [
               "Resto", "COM Deviasi", "Biaya Packaging",
               "Nominal Deviasi", "Nominal Deviasi Bulan Lalu",
-              "Persen Kenaikan/Penurunan"]
+              "Persen Kenaikan/Penurunan (Nominal)"]
           and _rv75._kategori_var.get() == "Deviasi (COM + Packaging)",
           f"cols={list(_rv75.tree['columns'])} "
           f"kat={_rv75._kategori_var.get()!r}")
@@ -17421,7 +17432,7 @@ def main():
           and _r75c["TOTAL"][4] == "Rp 376"
           and _r75c["TOTAL"][5] == "-84,6%",
           f"got {_r75c}")
-    _rv75._sort_by("Persen Kenaikan/Penurunan", reverse=True)
+    _rv75._sort_by("Persen Kenaikan/Penurunan (Nominal)", reverse=True)
     root.update()
     _p75 = [_rv75.tree.item(_i75, "values")[5]
             for _i75 in _rv75.tree.get_children("")
@@ -17435,7 +17446,7 @@ def main():
           f"got {_p75}")
     # ⧩ daftar nilai persen identik sel tabel
     check("(v3.9.63) Persen: daftar nilai = format sel ('-94,7%')",
-          set(_rv75._col_values("Persen Kenaikan/Penurunan"))
+          set(_rv75._col_values("Persen Kenaikan/Penurunan (Nominal)"))
           <= {"-", "-94,7%"},
           f"got {_rv75._col_values('Persen Kenaikan/Penurunan')}")
 
@@ -20692,17 +20703,17 @@ def main():
     check("(v3.11.7) §92-A1 COM Tinggi: d(7)=100 > median d(1..6)=0 → "
           "excess +100 (SO flat + IN 100 di H — COM pemakaian aktual "
           "melampaui ACR pemakaian sistem)",
-          _m92.get(("BRG COMTINGGI", "R92")) == 100.0,
+          _m92.get(("BRG COMTINGGI", "R92", "GR")) == 100.0,
           f"got {_m92.get(('BRG COMTINGGI', 'R92'))!r}")
     check("(v3.11.7) §92-A2 COM Tinggi: d(H) == median → strict > tak "
           "terpicu (BRG NOCOM tak berlabel)",
-          ("BRG NOCOM", "R92") not in _m92, f"got {_m92}")
+          ("BRG NOCOM", "R92", "GR") not in _m92, f"got {_m92}")
     check("(v3.11.7) §92-A3 COM Tinggi: SO sparse (hanya 2 hari valid) → "
           "median < 3 hari → tak berlabel (anti label palsu)",
-          ("BRG SPARSE", "R92") not in _m92, f"got {_m92}")
+          ("BRG SPARSE", "R92", "GR") not in _m92, f"got {_m92}")
     check("(v3.11.7) §92-A4 COM Tinggi: median historis non-zero — "
           "d(t)=−10 (ACR 10 harian), d(7)=0 > −10 → excess +10",
-          _m92.get(("BRG ACRGAP", "R92")) == 10.0,
+          _m92.get(("BRG ACRGAP", "R92", "GR")) == 10.0,
           f"got {_m92.get(('BRG ACRGAP', 'R92'))!r}")
     check("(v3.11.7) §92-A5 COM Tinggi: h < 4 / data kosong / None → "
           "peta kosong (degrade jujur, mirror po_keterangan)",
@@ -20736,12 +20747,12 @@ def main():
         _row38("BEDA4", "2.SALDO AKHIR", 25, 60.0),
     ]
     _top92b, _dv92b = _make_dv33(pd.DataFrame(_rows92b), None)
-    check("(v3.11.7) §92-B4 footer 'CEK n' = BARIS (1) bukan jumlah "
-          "label (4) — baris 'Beda Tanggal · Hitung Manual · Naik "
-          "Drastis · ACR to BOM' dihitung SEKALI (semantik footer tak "
-          "berubah pasca gabung-semua)",
+    check("(v3.11.7+v3.13.0) §92-B4 footer 'CEK n' = BARIS (1) bukan "
+          "jumlah label (3) — baris 'Hitung Manual · Naik Drastis · "
+          "ACR to BOM' (v3.13.0 tanpa segmen Beda Tanggal — merge-1) "
+          "dihitung SEKALI (semantik footer tak berubah)",
           _cek33(_dv92b, "BEDA4") ==
-          "Beda Tanggal · Hitung Manual · Naik Drastis · ACR to BOM"
+          "Hitung Manual · Naik Drastis · ACR to BOM"
           and "CEK 1 · " in _dv92b.status_var.get(),
           f"cek={_cek33(_dv92b, 'BEDA4')!r} "
           f"status={_dv92b.status_var.get()!r}")
@@ -20799,19 +20810,23 @@ def main():
           "mati krn IN≠0; dulu baris ini TANPA label)",
           _cek33(_dv92c, "NAIK-MURNI") == "Naik Drastis",
           f"cek={_cek33(_dv92c, 'NAIK-MURNI')!r}")
-    check("(v3.11.7) §92-C2 'Hilang dari Pencatatan': SO tercatat NOL "
-          "persis tanpa mutasi penutup → 'Hilang dari Pencatatan · Turun "
-          "Drastis' (label utama kasus ekstrem)",
+    check("(v3.11.7+v3.13.0) §92-C2 'Hilang dari Pencatatan': SO "
+          "tercatat NOL persis tanpa mutasi penutup → 'Hilang dari "
+          "Pencatatan' SAJA (v3.13.0 merge-nested mengecualikan Turun "
+          "Drastis — label utama kasus ekstrem)",
           _cek33(_dv92c, "HILANG-MURNI") ==
-          "Hilang dari Pencatatan · Turun Drastis",
+          "Hilang dari Pencatatan",
           f"cek={_cek33(_dv92c, 'HILANG-MURNI')!r}")
-    check("(v3.11.7) §92-C3 guard 'Hilang': TANPA baris SO di H (tak "
+    check("(v3.13.0) §92-C3 DIBEDAKAN: TANPA baris SO di H (tak "
           "direkam → tampil '-') → BUKAN Hilang dari Pencatatan → "
-          "'Turun Drastis' saja",
-          _cek33(_dv92c, "TAK-DIREKAM") == "Turun Drastis",
+          "'Turun Drastis (SO Tidak Diinput)' (drop palsu krn fill-0; "
+          "v3.11.7: 'Turun Drastis')",
+          _cek33(_dv92c, "TAK-DIREKAM") == "Turun Drastis (SO Tidak Diinput)",
           f"cek={_cek33(_dv92c, 'TAK-DIREKAM')!r}")
-    check("(v3.11.7) §92-C4 guard mutasi: SO 0 tercatat TAPI ada IN → "
-          "BUKAN Hilang → 'Beda Tanggal · Turun Drastis' (cabang-1)",
+    check("(v3.11.7+v3.13.0) §92-C4 guard mutasi: SO 0 tercatat TAPI "
+          "ada IN → BUKAN Hilang → 'Beda Tanggal · Turun Drastis' "
+          "(cabang-1 sheet TETAP ada pasca merge-1; Turun Drastis "
+          "rekord-nyata krn baris SO ADA)",
           _cek33(_dv92c, "HILANG-BERIN") ==
           "Beda Tanggal · Turun Drastis",
           f"cek={_cek33(_dv92c, 'HILANG-BERIN')!r}")
@@ -21165,14 +21180,14 @@ def main():
     check("(v3.11.8) §93-A1 com_gap_map DUA ARAH: COMRENDAH d(7)=−20 < "
           "median −10 → ('rendah', 10.0); COMTINGGI93 d(7)=100 > median "
           "0 → ('tinggi', 100.0) — satu frame, dua arah",
-          _gap93.get(("BRG COMRENDAH", "R93")) == ("rendah", 10.0)
-          and _gap93.get(("BRG COMTINGGI93", "R93")) == ("tinggi", 100.0),
+          _gap93.get(("BRG COMRENDAH", "R93", "GR")) == ("rendah", 10.0)
+          and _gap93.get(("BRG COMTINGGI93", "R93", "GR")) == ("tinggi", 100.0),
           f"got {_gap93}")
     check("(v3.11.8) §93-A2 turunan back-compat: com_tinggi_map HANYA "
           "pasangan arah tinggi (rendah TIDAK ikut — perilaku §92-A tak "
           "berubah) + com_rendah_map hanya arah rendah",
-          _ctm93(_df93a, 7) == {("BRG COMTINGGI93", "R93"): 100.0}
-          and _crm93(_df93a, 7) == {("BRG COMRENDAH", "R93"): 10.0},
+          _ctm93(_df93a, 7) == {("BRG COMTINGGI93", "R93", "GR"): 100.0}
+          and _crm93(_df93a, 7) == {("BRG COMRENDAH", "R93", "GR"): 10.0},
           f"tinggi={_ctm93(_df93a, 7)} rendah={_crm93(_df93a, 7)}")
     _t93a = set(_ctm93(_df93a, 7))
     _r93a = set(_crm93(_df93a, 7))
@@ -21180,8 +21195,8 @@ def main():
           "(tinggi ∩ rendah = ∅) + d(H) == median → NIRlabel (BRG "
           "SAMPAI93 tak muncul di arah mana pun — strict dua sisi)",
           not (_t93a & _r93a)
-          and ("BRG SAMPAI93", "R93") not in _t93a
-          and ("BRG SAMPAI93", "R93") not in _r93a,
+          and ("BRG SAMPAI93", "R93", "GR") not in _t93a
+          and ("BRG SAMPAI93", "R93", "GR") not in _r93a,
           f"tinggi={_t93a} rendah={_r93a}")
     check("(v3.11.8) §93-A4 label konstan + degrade jujur (h<4 / None → "
           "peta kosong — mirror §92-A5 utk arah rendah)",
@@ -21595,11 +21610,11 @@ def main():
     check("(v3.11.9) §94-C1 label 'BOM 0': Total ACR sebulan 0 & SO(H) > 0 "
           "→ 'BOM 0' SENDIRIAN (user: 'analisa BOM 0 di kolom CEK bila "
           "ACR = 0 dan ada Saldo SO'); pasangan ber-9.ACR → TANPA BOM 0; "
-          "SO_H=0 (tak direkam) → BOM 0 TAK terpicu, cukup Turun "
-          "Drastis (guard so_h>0)",
+          "SO_H=0 (tak direkam) → BOM 0 TAK terpicu, cukup 'Turun "
+          "Drastis (SO Tidak Diinput)' (v3.13.0; guard so_h>0)",
           _cek33(_dv94c, "BOM0X") == "BOM 0"
           and _cek33(_dv94c, "ACRADA") == ""
-          and _cek33(_dv94c, "NOSO") == "Turun Drastis",
+          and _cek33(_dv94c, "NOSO") == "Turun Drastis (SO Tidak Diinput)",
           f"bom0x={_cek33(_dv94c, 'BOM0X')!r} "
           f"acrada={_cek33(_dv94c, 'ACRADA')!r} "
           f"noso={_cek33(_dv94c, 'NOSO')!r}")
@@ -21793,11 +21808,11 @@ def main():
           "resto lain searah (RW — veto lama) + 8 berlawanan → BERLABEL "
           "berrasio '8/9' (RN dev-0 netral tak masuk penyebut — dulu "
           "v3.11.9: _same==0 membunuh kasus ini); RAW per-baris utuh "
-          "'BOM 0 · Beda… · Peningkatan Tertinggi +25,0%' + sel CEK "
+          "'BOM 0 · Beda… · Peningkatan Qty +25,0%' + sel CEK "
           "grup (head RS) memuat segmen tsb (union kelompok)",
           _cek94d4_raw("RS", "Z94") == "BOM 0 · Beda dari Resto Lain "
                                         "(Surplus · 8/9 resto lain "
-                                        "Defisit) · Peningkatan Tertinggi "
+                                        "Defisit) · Peningkatan Qty "
                                         "+25,0%"
           and "Beda dari Resto Lain (Surplus · 8/9 resto lain Defisit)"
           in _cek94d4("RS", "Z94"),
@@ -22495,42 +22510,42 @@ def main():
     _m96 = _cgm96(_df96a, 7, 50.0)
     check("(v3.11.12) §96-A1 ambang 50%: gap 10 > 5 → ('tinggi', 10.0); "
           "gap rendah 6 > 5 → ('rendah', 6.0)",
-          _m96.get(("BRG ATAS96", "R96")) == ("tinggi", 10.0)
-          and _m96.get(("BRG RENDAH96", "R96")) == ("rendah", 6.0),
+          _m96.get(("BRG ATAS96", "R96", "GR")) == ("tinggi", 10.0)
+          and _m96.get(("BRG RENDAH96", "R96", "GR")) == ("rendah", 6.0),
           f"got {_m96}")
     check("(v3.11.12) §96-A2 ambang 50% menahan selisih kecil: gap 5 "
           "TEPAT di ambang → strict > tak label; gap 3 < 5 → tak label",
-          ("BRG TEPAT96", "R96") not in _m96
-          and ("BRG BAWAH96", "R96") not in _m96,
+          ("BRG TEPAT96", "R96", "GR") not in _m96
+          and ("BRG BAWAH96", "R96", "GR") not in _m96,
           f"got {_m96}")
     check("(v3.11.12) §96-A3 min_pct=0 DEFAULT = perilaku lama: TEPAT96 "
           "('tinggi', 5.0) + BAWAH96 ('tinggi', 3.0) kembali berlabel "
           "(semua selisih bertanda) + tanpa argumen == 0 eksplisit",
-          _cgm96(_df96a, 7).get(("BRG TEPAT96", "R96")) == ("tinggi", 5.0)
-          and _cgm96(_df96a, 7).get(("BRG BAWAH96", "R96")) == ("tinggi", 3.0)
+          _cgm96(_df96a, 7).get(("BRG TEPAT96", "R96", "GR")) == ("tinggi", 5.0)
+          and _cgm96(_df96a, 7).get(("BRG BAWAH96", "R96", "GR")) == ("tinggi", 3.0)
           and _cgm96(_df96a, 7) == _cgm96(_df96a, 7, 0.0),
           "back-compat gagal")
     check("(v3.11.12) §96-A4 median 0: cut = ambang%×0 = 0 → gap nonzero "
           "3 tetap memicu walau ambang 500 (persen vs 0 tak terhingga)",
-          _cgm96(_df96a, 7, 50.0).get(("BRG MEDNOL96", "R96"))
+          _cgm96(_df96a, 7, 50.0).get(("BRG MEDNOL96", "R96", "GR"))
           == ("tinggi", 3.0)
-          and _cgm96(_df96a, 7, 500.0).get(("BRG MEDNOL96", "R96"))
+          and _cgm96(_df96a, 7, 500.0).get(("BRG MEDNOL96", "R96", "GR"))
           == ("tinggi", 3.0),
           f"50={_cgm96(_df96a, 7, 50.0).get(('BRG MEDNOL96', 'R96'))!r} "
           f"500={_cgm96(_df96a, 7, 500.0).get(('BRG MEDNOL96', 'R96'))!r}")
     check("(v3.11.12) §96-A5 cache _RES +key pct (ambang berganti tak "
           "basi): 50 → 0 → 50 kembali menahan TEPAT96",
-          ("BRG TEPAT96", "R96") not in _cgm96(_df96a, 7, 50.0)
-          and ("BRG TEPAT96", "R96") in _cgm96(_df96a, 7, 0.0)
-          and ("BRG TEPAT96", "R96") not in _cgm96(_df96a, 7, 50.0),
+          ("BRG TEPAT96", "R96", "GR") not in _cgm96(_df96a, 7, 50.0)
+          and ("BRG TEPAT96", "R96", "GR") in _cgm96(_df96a, 7, 0.0)
+          and ("BRG TEPAT96", "R96", "GR") not in _cgm96(_df96a, 7, 50.0),
           "cache basi")
     check("(v3.11.12) §96-A6 turunan meneruskan min_pct + invalid clamp 0: "
           "negatif / >10000 → 0 (perilaku lama)",
-          _ctm96(_df96a, 7, 50.0).get(("BRG ATAS96", "R96")) == 10.0
-          and ("BRG RENDAH96", "R96") not in _ctm96(_df96a, 7, 50.0)
-          and _crm96(_df96a, 7, 50.0) == {("BRG RENDAH96", "R96"): 6.0}
-          and ("BRG TEPAT96", "R96") in _cgm96(_df96a, 7, -5.0)
-          and ("BRG TEPAT96", "R96") in _cgm96(_df96a, 7, 99999.0),
+          _ctm96(_df96a, 7, 50.0).get(("BRG ATAS96", "R96", "GR")) == 10.0
+          and ("BRG RENDAH96", "R96", "GR") not in _ctm96(_df96a, 7, 50.0)
+          and _crm96(_df96a, 7, 50.0) == {("BRG RENDAH96", "R96", "GR"): 6.0}
+          and ("BRG TEPAT96", "R96", "GR") in _cgm96(_df96a, 7, -5.0)
+          and ("BRG TEPAT96", "R96", "GR") in _cgm96(_df96a, 7, 99999.0),
           f"tinggi={_ctm96(_df96a, 7, 50.0)} rendah={_crm96(_df96a, 7, 50.0)}")
 
     # ---- (B) integrasi view — spinbox + shared state + persist ----------

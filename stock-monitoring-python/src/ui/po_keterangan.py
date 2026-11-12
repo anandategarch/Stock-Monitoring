@@ -239,6 +239,23 @@ def potensi_po_map(data: pd.DataFrame, in_detail=None) -> dict:
     return out
 
 
+def potensi_po_verifiable(in_detail) -> bool:
+    """v3.13.0 — apakah kondisi "Potensi PO belum dibuat" BISA
+    diverifikasi dari in_detail (rincian IN per sumber): frame non-None,
+    non-kosong, dan ber-kolom wajib {Nama Barang, NAMA RESTO, Tanggal,
+    Value, SOURCE IN} — syarat IDENTIK _build_map. False ⇒ peta potensi
+    kosong BUKAN berarti "tidak ada potensi", melainkan "tak bisa
+    diverifikasi" (detail IN tak dilampirkan / folder kosong / kolom
+    sumber tak ada) — pemanggil (status footer deviasi_view) menyatakan
+    hal ini eksplisit, tidak lenyap senyap."""
+    _det_cols = set(getattr(in_detail, "columns", [])) \
+        if in_detail is not None else set()
+    return bool(
+        in_detail is not None and not in_detail.empty
+        and {"Nama Barang", "NAMA RESTO", "Tanggal", "Value",
+             "SOURCE IN"} <= _det_cols)
+
+
 def potensi_po_label_for(data: pd.DataFrame, in_detail, nama_barang: str,
                          nama_resto: str, tanggal) -> str:
     """Label keterangan utk SATU (pasangan, tanggal) — dipakai popup:

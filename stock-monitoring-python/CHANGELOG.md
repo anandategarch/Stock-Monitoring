@@ -3,6 +3,104 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.13.0 — TURUN DRASTIS DIBEDAKAN + COM KUNCI SATUAN + POTENSI PO + 4 MERGE LABEL CEK
+
+User: *"aku mau turun drastis dibedakan, com kunci satuan, potensi PO.
+mau coba yang gabung"*.
+
+### 1. TURUN DRASTIS DIBEDAKAN (SO tidak diinput vs turun nyata)
+- **Akar masalah**: pivot fill-0 tidak membedakan "SO tercatat 0" dari
+  "baris 1.SO tidak ada di H" → pasangan yang tidak input SO hari H
+  terlabel **Turun Drastis palsu** (drop 100% dari fill-0) setiap hari.
+- **Fix**: dasar drastis (`_drastis_base`) kini dikali `_so_h_rec`
+  (baris 1.SO tercatat di H — infrastruktur yang sudah ada sejak
+  v3.11.7 untuk Hilang dari Pencatatan):
+  - baris SO **TERCATAT** & turun > ambang → **"Turun Drastis"**
+    (penurunan NYATA — termasuk SO 0 persis dengan mutasi penutup);
+  - baris SO **TAK ADA** di H → **"Turun Drastis (SO Tidak Diinput)"**
+    — penurunan murni karena data SO belum direkam (data-quality,
+    warna merah muda `#ef4444`, tag `cek_drastis_norec` + legend).
+- Guard `so_m1 > 0` dipertahankan (pasangan tanpa rekam SO kemarin
+  tidak berlabel — tidak mengulangi dominasi aturan SO-stale v3.9.22).
+
+### 2. MERGE — Beda Tanggal cabang-2 ⊕ Naik Drastis (satu ambang)
+- Cabang-2 Beda Tanggal (SO naik > 150% **hardcode** tanpa kiriman)
+  **dihapus** — kenaikan drastis, dengan maupun tanpa kiriman, cukup
+  label **Naik Drastis** dengan SATU ambang configurable
+  (SharedDrastisAmbang). Dulu pola ini selalu mendapat dobel label
+  "Beda Tanggal · Naik Drastis" dan ambangnya tidak konsisten saat
+  user mengubah ambang Drastis.
+- Beda Tanggal kini murni cabang-1 sheet: IN masuk tapi SO justru
+  turun tanpa kiriman keluar (pemakaian tidak disyaratkan — port persis
+  formula LET sheet user).
+
+### 3. MERGE — Hilang dari Pencatatan mengecualikan Turun Drastis
+- Hilang dari Pencatatan = kasus ekstrem Turun Drastis (SO tercatat 0
+  persis tanpa mutasi apa pun) → kini Turun Drastis **tidak ikut**
+  sebagai segmen (dulu dobel "Hilang dari Pencatatan · Turun Drastis" —
+  informasi sama ditulis 2×). Prioritas label utama tetap Hilang.
+
+### 4. MERGE — "Kosong/Non Aktif" dipecah dua label
+- **"Kosong (AKTIF)"** = barang AKTIF & SO(H) < 0 (stok fisik minus —
+  anomali transaksi; amber `#b45309`, tag `cek_kosong`).
+- **"Non Aktif (Masih Stok)"** = barang NON AKTIF & SO(H) > 0 (kondisi
+  master data **kronis**, bukan anomali harian; amber muda `#d97706`,
+  tag `cek_nonaktif`).
+- `_CEK_CHECK_LABELS` kini 12 label; footer "CEK n" semantik tak
+  berubah (menghitung baris ber-label utama kanonik).
+
+### 5. MERGE — label % lalu-kini eksplisit basis (Qty vs Nominal)
+- Segmen analisa CEK di-rename **"Peningkatan/Penurunan Qty ±p%"**
+  (dulu "…Tertinggi" — menyesatkan sejak Rank dihapus v3.11.30, dan
+  bisa **bertentangan arah** dengan % NOMINAL tab 💰).
+- Kolom tab 💰 di-rename **"Persen Kenaikan/Penurunan (Nominal)"**
+  (basis Rp bertanda — dua % kini menyebut basisnya masing-masing).
+- Tombol sort "▲ Kenaikan Qty" / "▼ Penurunan Qty"; parser sort
+  (`_ANALISA_PCT_RE` membaca ±p% di mana pun) tidak berubah.
+- `followup._ANALISA_PREFIXES` mengenali prefix **lama+baru** — entri
+  followup.json persisten era lama tetap berprefiks "Analisa: "
+  (roundtrip impor v3.12.2 tidak patah).
+
+### 6. COM KUNCI SATUAN + popup tampilkan median & gap
+- **Akar masalah**: `com_analisa._build_matrices` memivot per
+  (barang × resto) **tanpa SATUAN** → pasangan yang tercatat GR
+  sekaligus PCS **dijumlahkan lintas satuan** → angka pembentuk label
+  CEK COM Tinggi/Rendah tidak cocok dengan yang dilihat user di popup
+  (yang per-satuan).
+- **Fix**: SATUAN ternormalisasi (strip+upper, NaN → "") masuk index
+  pivot — pasangan GR+PCS menjadi dua baris matriks **terpisah**;
+  `com_gap_map`/`com_tinggi_map`/`com_rendah_map` ber-kunci 3-tuple
+  `(barang, resto, satuan)`; `deviasi_view` me-lookup dengan satuan
+  baris pivot yang sama (konvensi mirror v3.11.59).
+- **Popup Deviasi** (double-click) footer kini menampilkan
+  **"d(H) X vs median Y (selisih ±Z)"** (`_com_d_median`, ≥3 hari
+  valid — mirror com_analisa) → label CEK COM Tinggi/Rendah kini bisa
+  dibuktikan langsung dari popup (dulu hanya Avg COM/Avg ACR = MEAN
+  terpisah — statistik berbeda dari MEDIAN selisih yang dipakai label).
+
+### 7. POTENSI PO — tak ditenggelamkan 3243 + status verifiability
+- **details_popup** (tab 🧮 Pivot, kolom KETERINGAN PO): label
+  "Potensi PO belum dibuat" **tidak lagi dimatikan** oleh keberadaan PO
+  3243 — asumsi "3243 ada ⇒ PO sudah dibuat" terlalu kuat (PO bisa
+  dari bulan lain / sudah selesai / untuk qty berbeda) dan dulu
+  menenggelamkan label untuk SEMUA tanggal pasangan. Kini label
+  tanggal-spesifik tampil berdampingan dengan nomor PO ("ada PO
+  tercatat, tapi penerimaan tanggal ini belum").
+- Kunci lookup details_popup kini **kanonik** `norm_nama_*` (sisi
+  pemanggil dulu RAW `astype(str)` — kelas bug v3.11.59 yang tersisa
+  di jalur ini; frame ber-drift ejaan kini cocok).
+- **`potensi_po_verifiable(in_detail)`** (po_keterangan) + status
+  footer tab 📦/🧩: *"Potensi PO: detail IN kosong — tak bisa
+  diverifikasi"* saat detail IN tidak dilampirkan — pembeda jujur
+  "bukan potensi" vs "fitur mati karena data" (dulu lenyap senyap).
+
+### Tests
+- Asersi label lama di-update ke kontrak v3.13.0 (§32/§33/§38/§61/
+  §65/§68/§92/§93/§94/§96 + filter legend §4): TAK-DIREKAM/NOSO kini
+  "Turun Drastis (SO Tidak Diinput)", HILANG-MURNI kini satu label,
+  BEDA4/BEDA-TGL-BK tanpa segmen Beda Tanggal, kunci peta COM 3-tuple
+  + "GR", label analisa "Qty", kolom "…(Nominal)".
+
 ## v3.12.4 — FIX CUT-OFF 1 HARI (VALID vs rentang gantung) + KOLOM KODE IT/RI
 
 User: *"coba cek perhitungan dan logika nya, hasil dari input barang

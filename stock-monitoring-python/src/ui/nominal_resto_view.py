@@ -9,7 +9,7 @@ Filter KATEGORI default "Deviasi" (case-insensitive; fallback "Semua").
 Kolom: Resto · COM Deviasi · Biaya Packaging (Σ nominal per klas
 substring "COM"/"PACKAGING" pada KATEGORI) · Nominal Deviasi (heading
 dinamis "(H=n)") · Nominal Deviasi Bulan Lalu (Σ "Nominal Lalu" file
-deviasi tab ⚖ per resto; multi-bulan) · Persen Kenaikan/Penurunan =
+deviasi tab ⚖ per resto; multi-bulan) · Persen Kenaikan/Penurunan (Nominal) =
 (H − Lalu) ÷ |Lalu| × 100. Baris TOTAL di ujung; urutan default
 |Σ Nominal| MENURUN.
 
@@ -38,7 +38,7 @@ from .nominal_common import (
     _norm_resto_lalu,
     agregasi_nominal_per_resto,
     fmt_nominal_cell,
-    fmt_pct_cell,  # v3.9.63 — kolom Persen Kenaikan/Penurunan
+    fmt_pct_cell,  # v3.9.63 — kolom Persen Kenaikan/Penurunan (Nominal)
     fmt_rp_cell,
     hitung_nominal_lalu_multi,  # v3.9.45 — multi-bulan file deviasi
     hitung_persen_kenaikan,  # v3.9.63 — idem
@@ -72,9 +72,9 @@ from .widgets import (
     col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
+    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     fmt_int_id,
     insert_tree_items,
-    filter_disp_mask,  # v3.12.1 — FIX: seleksi ⧩ label-vs-mentah
     kategori_blank_mask,  # v3.9.44 — passthrough barang tanpa kategori master
     kategori_filter_mask,  # v3.9.49 — mask seleksi kategori gabungan
     kategori_has_default_values,  # v3.9.49 — entry default hanya bila ada di data
@@ -272,8 +272,13 @@ class NominalRestoView(tk.Frame):
     #   - 'COM Deviasi'/'Biaya Packaging' = Σ nominal per klas kategori
     #     (agregasi_nominal_per_resto; resto tanpa pasangan klas → 0.0
     #     tampil '-' via fmt_rp_cell);
-    #   - 'Persen Kenaikan/Penurunan' = (H − Lalu) ÷ |Lalu| × 100 —
-    #     sort numerik (parser '%'-aware) + minus merah per-cell.
+    #   - 'Persen Kenaikan/Penurunan (Nominal)' = (H − Lalu) ÷ |Lalu| ×
+    #     100 — sort numerik (parser '%'-aware) + minus merah per-cell.
+    #     v3.13.0 — kolom DI-RENAME eksplisit basis NOMINAL Rp (merge
+    #     analisa % vs CEK: segmen lalu-kini kolom CEK tab 📦/🧩 kini
+    #     ber-label "Peningkatan/Penurunan Qty ±p%" berbasis KUANTITI
+    #     absolut — dua % bisa berbeda arah utk resto yang sama; nama
+    #     kolom menyebut basisnya supaya tak tertukar).
     # 'N Barang'/'Tanpa Harga' DIHAPUS (jumlah tanpa harga kini di anak
     # tab 'Tanpa Harga' + footer status).
     COLUMNS = [
@@ -285,14 +290,14 @@ class NominalRestoView(tk.Frame):
         # di tab nominal deviasi ini buat versus bulan lalu"
         ("Nominal Deviasi Bulan Lalu", 130, "e"),
         # v3.9.63 — user: "Persen kenaikan/penurunan (bisa sort)"
-        ("Persen Kenaikan/Penurunan", 110, "e"),
+        ("Persen Kenaikan/Penurunan (Nominal)", 150, "e"),
     ]
 
     # v3.9.63 — klas nominal + persen (parser sort _parse_num_id kini
     # '%'-aware: '+12,5%' → 12.5).
     NUMERIC_COLS = ("COM Deviasi", "Biaya Packaging", "Nominal Deviasi",
                     "Nominal Deviasi Bulan Lalu",
-                    "Persen Kenaikan/Penurunan")
+                    "Persen Kenaikan/Penurunan (Nominal)")
 
     # v3.9.45 — id kolom BASIS (statis) — pembanding utk register kolom
     # dinamis 'Lalu <label>' di _ensure_tree_columns.
@@ -1161,7 +1166,7 @@ class NominalRestoView(tk.Frame):
             # filter clone ⛶ (apply_tree_row_filters mencocokkan nilai
             # DISPLAY tree vs seleksi) tak pernah cocok → 0 baris.
             return series.map(fmt_rp_cell)
-        if col == "Persen Kenaikan/Penurunan":
+        if col == "Persen Kenaikan/Penurunan (Nominal)":
             # v3.9.63 — nilai ⧩ identik dgn sel tabel ('+12,5%').
             return series.map(fmt_pct_cell)
         return series.astype(str)
@@ -1471,7 +1476,7 @@ class NominalRestoView(tk.Frame):
     def _compute_resto(self, data: pd.DataFrame | None = None,
                        h: int | None = None) -> pd.DataFrame:
         """Frame per resto: [Resto, COM Deviasi, Biaya Packaging, Nominal
-        Deviasi, Nominal Deviasi Bulan Lalu, Persen Kenaikan/Penurunan]
+        Deviasi, Nominal Deviasi Bulan Lalu, Persen Kenaikan/Penurunan (Nominal)]
         urut |Σ| menurun (v3.9.63 — 'N Barang'/'Tanpa Harga' tetap
         dihitung di agregasi tapi TIDAK ditampilkan). self._pairs_df
         (rincian popup), self._lalu_df (pasangan file deviasi — v3.9.36),
@@ -1623,11 +1628,11 @@ class NominalRestoView(tk.Frame):
             _fr = next((_f for _l, _f in self._lalu_frames[1:]
                         if f"Lalu {_l}" == _cid), None)
             self._assign_lalu_column(g, pairs, _cid, _fr)
-        # v3.9.63 — KOLOM 'Persen Kenaikan/Penurunan' (user: "Persen
+        # v3.9.63 — KOLOM 'Persen Kenaikan/Penurunan (Nominal)' (user: "Persen
         # kenaikan/penurunan (bisa sort)"): (H − Lalu) ÷ |Lalu| × 100
         # per resto vs kolom Bulan Lalu UTAMA (hitung_persen_kenaikan —
         # None bila tak terdefinisi: lalu kosong/0 dgn H ≠ 0).
-        g["Persen Kenaikan/Penurunan"] = pd.Series(
+        g["Persen Kenaikan/Penurunan (Nominal)"] = pd.Series(
             [hitung_persen_kenaikan(_h, _l) for _h, _l in zip(
                 g["Nominal Deviasi"],
                 g["Nominal Deviasi Bulan Lalu"])],
@@ -1853,7 +1858,7 @@ class NominalRestoView(tk.Frame):
                 fmt_rp_cell(nom_l),
                 # v3.9.63 — persen kenaikan/penurunan vs bulan lalu
                 # (user: "Persen kenaikan/penurunan (bisa sort)").
-                fmt_pct_cell(row.get("Persen Kenaikan/Penurunan")),
+                fmt_pct_cell(row.get("Persen Kenaikan/Penurunan (Nominal)")),
             ] + [fmt_rp_cell(v) for v in vals_extra]
             values = tuple(values)
             tags = ["evenrow" if i % 2 == 0 else "oddrow"]
@@ -1862,7 +1867,7 @@ class NominalRestoView(tk.Frame):
             com_v = self._safe_float(row.get("COM Deviasi"))
             pkg_v = self._safe_float(row.get("Biaya Packaging"))
             pct_v = self._safe_float(
-                row.get("Persen Kenaikan/Penurunan"))
+                row.get("Persen Kenaikan/Penurunan (Nominal)"))
             nom_v = self._safe_float(nom)
             noml_v = self._safe_float(nom_l)
             _neg_any = any(v is not None and v < 0
@@ -1872,7 +1877,7 @@ class NominalRestoView(tk.Frame):
                                (pkg_v, "Biaya Packaging"),
                                (nom_v, "Nominal Deviasi"),
                                (noml_v, "Nominal Deviasi Bulan Lalu"),
-                               (pct_v, "Persen Kenaikan/Penurunan")):
+                               (pct_v, "Persen Kenaikan/Penurunan (Nominal)")):
                     if _v is not None and _v < 0:
                         neg_cells.append((f"row_{i}", _c))
                 for _j, _ev in enumerate(vals_extra):
