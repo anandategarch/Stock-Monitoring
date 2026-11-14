@@ -3187,9 +3187,30 @@ class DeviasiView(tk.Frame):
         # nilai 0 — arr() fill 0 tak membedakan): dasar kondisi CEK
         # "Hilang dari Pencatatan" (SO tercatat NOL persis, bukan
         # sekadar tak direkam → tampil '-' di tabel).
-        _so_h_pairs = pd.Index(_pair_key[
-            (df["JENIS"] == "1.SO") & (tnum == h)].unique())
-        _so_h_rec = _pk_pivot.isin(_so_h_pairs).to_numpy()
+        #
+        # v3.13.1 — FIX DEEP AUDIT (repro /home/z/audit/repro1): kunci
+        # kini BER-SATUAN. Pivot rows = (Nama Barang, NAMA RESTO,
+        # SATUAN) — kunci lama (barang, resto) tanpa satuan membuat
+        # baris PCS pasangan yang SO-nya hanya diinput di GR (satuan
+        # sibling) ikut dianggap "SO terekam di H" → SALAH LABEL:
+        # "Hilang dari Pencatatan" (so_h==0 & tanpa mutasi) padahal SO
+        # satuan itu sekadar belum diinput — harusnya varian data-
+        # quality "Turun Drastis (SO Tidak Diinput)". SATUAN di-key APA
+        # ADANYA (fillna "" — mirror nilai index pivot; bukan
+        # strip/upper: pivot juga raw) supaya kedua sisi konsisten.
+        if "SATUAN" in df.columns:
+            _pk_sat_src = (df["Nama Barang"].astype(str) + "\x1f"
+                           + df["NAMA RESTO"].astype(str) + "\x1f"
+                           + df["SATUAN"].fillna("").astype(str))
+            _so_h_pairs = pd.Index(_pk_sat_src[
+                (df["JENIS"] == "1.SO") & (tnum == h)].unique())
+            _pk_pivot_sat = (_pk_pivot + "\x1f"
+                             + pivot["SATUAN"].astype(str))
+            _so_h_rec = _pk_pivot_sat.isin(_so_h_pairs).to_numpy()
+        else:
+            _so_h_pairs = pd.Index(_pair_key[
+                (df["JENIS"] == "1.SO") & (tnum == h)].unique())
+            _so_h_rec = _pk_pivot.isin(_so_h_pairs).to_numpy()
         _saldo_only_rows = ~(_pk_pivot.isin(_window_pairs)
                              & _pk_pivot.isin(_saldo_h_pairs)).to_numpy()
         if _saldo_only_rows.any():

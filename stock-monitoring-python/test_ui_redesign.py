@@ -24082,6 +24082,179 @@ def main():
     root.update()
 
 
+    # =====================================================================
+    print()
+    print("== §105. (v3.13.1) DEEP AUDIT FIX: _so_h_rec BER-SATUAN (Turun "
+          "Drastis dibedakan) + KOLOM PO 3243 TAB SALDO MINUS KANONIK ==")
+    # USER: "Deep audit dan fix ya ... cek semua perhitungan dan logika "
+    # barang kali ada yang salah".
+    # BUG 1 (deviasi_view._compute_pivot): kunci _so_h_rec dulu (barang,
+    # resto) TANPA satuan — pivot rows per (barang, resto, SATUAN) → baris
+    # PCS pasangan yang SO-nya hanya diinput di GR (satuan sibling)
+    # dianggap "SO terekam di H" → SALAH LABEL "Hilang dari Pencatatan"
+    # (so_h==0 & tanpa mutasi) padahal SO satuan itu belum diinput —
+    # harusnya "Turun Drastis (SO Tidak Diinput)".
+    # BUG 3 (saldo_minus_view): lookup Nomor/Status PO 3243 memakai
+    # pasangan RAW minus_df (rep ejaan append1 — bisa ber-titik /
+    # mixed-case) vs peta po_nomor_map_3243 ber-kunci KANONIK → SELALU
+    # MISS utk pasangan drifted → kolom PO kosong senyap (kelas bug
+    # v3.11.59 yang tersisa di jalur ini).
+    from src.ui.deviasi_view import DeviasiView as _DV105
+
+    _d105 = pd.DataFrame([
+        # KOPI — pasangan DUA satuan: SO diinput di GR t10, PCS TIDAK
+        {"Nama Barang": "KOPI 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 9, "NILAI": 50.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "KOPI 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 10, "NILAI": 40.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "KOPI 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "2.SALDO AKHIR", "Tanggal": 10, "NILAI": 45.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "KOPI 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 9, "NILAI": 100.0,
+         "SATUAN": "PCS", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "KOPI 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "2.SALDO AKHIR", "Tanggal": 10, "NILAI": 105.0,
+         "SATUAN": "PCS", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        # BEBEK — SATU satuan: SO terekam 0 persis di H tanpa mutasi
+        # → "Hilang dari Pencatatan" (perilaku LAMA tetap — guard fix)
+        {"Nama Barang": "BEBEK 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 9, "NILAI": 100.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "BEBEK 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 10, "NILAI": 0.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "BEBEK 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "2.SALDO AKHIR", "Tanggal": 10, "NILAI": 100.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        # AYAM — SATU satuan: SO terekam 20 setelah 100 (drop 80% > 50%)
+        # → "Turun Drastis" NYATA (tercatat — bukan varian norec)
+        {"Nama Barang": "AYAM 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 9, "NILAI": 100.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "AYAM 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "1.SO", "Tanggal": 10, "NILAI": 20.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+        {"Nama Barang": "AYAM 105", "NAMA RESTO": "1041.BDG",
+         "JENIS": "2.SALDO AKHIR", "Tanggal": 10, "NILAI": 95.0,
+         "SATUAN": "GR", "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+         "SOURCE KIRIMAN": "GUDANG"},
+    ])
+
+    # ---- (A) tab PCS: KOPI PCS = norec; guard BEBEK/AYAM GR tak tersentuh -
+    _top105 = tk.Toplevel(root)
+    _top105.geometry("1350x700+10+10")
+    _dv105p = _DV105(_top105, satuan_mode="PCS")
+    _dv105p.pack(fill="both", expand=True)
+    _dv105p.data = _d105
+    _dv105p.in_detail = None
+    _dv105p.tanggal_h = 10
+    _dv105p._show_content()
+    _dv105p._refresh(sync=True)
+    wait_view(root, _dv105p)
+    root.update()
+    _cek105p = {}
+    for _k105 in _dv105p.tree.get_children(""):
+        _cek105p[_dv105p.tree.set(_k105, "Nama Barang")] = \
+            _dv105p.tree.set(_k105, "CEK")
+    check("(v3.13.1) §105-A KOPI PCS (SO t10 HANYA diinput di GR sibling): "
+          "label 'Turun Drastis (SO Tidak Diinput)' — BUKAN 'Hilang dari "
+          "Pencatatan' palsu (dulu: kunci (barang, resto) tanpa satuan "
+          "membuat baris PCS ikut dianggap ber-SO via sibling GR)",
+          _cek105p.get("KOPI 105") == "Turun Drastis (SO Tidak Diinput)",
+          f"got {_cek105p.get('KOPI 105')!r}")
+    _dv105p.destroy()
+
+    # ---- (B) tab GR: guard label lama TIDAK berubah -------------------
+    _dv105g = _DV105(_top105, satuan_mode="GR")
+    _dv105g.pack(fill="both", expand=True)
+    _dv105g.data = _d105
+    _dv105g.in_detail = None
+    _dv105g.tanggal_h = 10
+    _dv105g._show_content()
+    _dv105g._refresh(sync=True)
+    wait_view(root, _dv105g)
+    root.update()
+    _cek105g = {}
+    for _k105 in _dv105g.tree.get_children(""):
+        _cek105g[_dv105g.tree.set(_k105, "Nama Barang")] = \
+            _dv105g.tree.set(_k105, "CEK")
+    check("(v3.13.1) §105-B guard: BEBEK GR (SO terekam 0 persis, tanpa "
+          "mutasi) TETAP 'Hilang dari Pencatatan' + AYAM GR (SO terekam "
+          "20 < 50%×100) TETAP 'Turun Drastis' NYATA (bukan varian norec) "
+          "+ KOPI GR (SO terekam 40 = 80% dari 50) tanpa label drastis",
+          _cek105g.get("BEBEK 105") == "Hilang dari Pencatatan"
+          and _cek105g.get("AYAM 105", "").startswith("Turun Drastis")
+          and "SO Tidak Diinput" not in _cek105g.get("AYAM 105", "")
+          and "Drastis" not in _cek105g.get("KOPI 105", ""),
+          f"got {_cek105g}")
+    _dv105g.destroy()
+    _top105.destroy()
+    root.update()
+
+    # ---- (C) saldo_minus: kolom PO 3243 terisi utk pasangan drifted ----
+    from src.ui.saldo_minus_view import SaldoMinusView as _SMV105
+    _d105m = pd.DataFrame([
+        # resto RAW ber-titik + barang mixed-case (rep ejaan append1)
+        {"Nama Barang": "Air Mineral 600ML", "NAMA RESTO": "1041.MLGPAR",
+         "JENIS": "2.SALDO AKHIR", "Tanggal": t, "NILAI": -5.0,
+         "SATUAN": "BOTOL", "SOURCE KIRIMAN": "Eksternal"}
+        for t in (1, 2, 3)
+    ] + [
+        # pasangan kanonik-bersih (guard idempotensi norm)
+        {"Nama Barang": "SUSU UHT 1L", "NAMA RESTO": "BDGUKU",
+         "JENIS": "2.SALDO AKHIR", "Tanggal": t, "NILAI": -2.0,
+         "SATUAN": "KARTON", "SOURCE KIRIMAN": "Campuran"}
+        for t in (1, 2)
+    ])
+    _po105 = pd.DataFrame([
+        {"Nama Barang": "Air Mineral  600ML", "Cabang PO": "1370.MLGPAR",
+         "Nomor #": "PO.2026.10.001",
+         "Status Pesanan Pembelian": "Menunggu diproses",
+         "Kuantitas": 10.0},
+        {"Nama Barang": "SUSU UHT 1L", "Cabang PO": "2001.BDGUKU",
+         "Nomor #": "PO.2026.10.002",
+         "Status Pesanan Pembelian": "Diproses",
+         "Kuantitas": 5.0},
+    ])
+    _smv105 = _SMV105(root)
+    _smv105.pack(fill="both", expand=True)
+    _smv105.load_data(_d105m, {}, _po105)
+    root.update()
+    _smv105._compute({"tanggal_h": 3, "saldo_sistem_mode": "4217",
+                      "col_sel": {}})
+    _m105 = _smv105._minus_df
+    _m105a = _m105[_m105["Nama Barang"] == "Air Mineral 600ML"]
+    _m105s = _m105[_m105["Nama Barang"] == "SUSU UHT 1L"]
+    check("(v3.13.1) §105-C Saldo Minus: Nomor PO / Status PO TERISI utk "
+          "pasangan drifted (resto '1041.MLGPAR' ↔ kunci peta 'MLGPAR', "
+          "barang mixed-case ↔ kanonik; dulu lookup RAW selalu miss → "
+          "kolom kosong senyap) + pasangan kanonik-bersih tetap cocok "
+          "(norm idempoten)",
+          len(_m105a) == 1
+          and str(_m105a.iloc[0]["Nomor PO"]) == "PO.2026.10.001"
+          and str(_m105a.iloc[0]["Status PO"]) == "Menunggu diproses"
+          and len(_m105s) == 1
+          and str(_m105s.iloc[0]["Nomor PO"]) == "PO.2026.10.002"
+          and str(_m105s.iloc[0]["Status PO"]) == "Diproses",
+          f"got A={_m105a[['Nomor PO', 'Status PO']].to_dict('records') if len(_m105a) else None} "
+          f"S={_m105s[['Nomor PO', 'Status PO']].to_dict('records') if len(_m105s) else None}")
+    _smv105.destroy()
+    root.update()
+
+
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()

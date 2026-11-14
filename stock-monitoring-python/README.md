@@ -2,7 +2,7 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.13.0** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.13.1** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 

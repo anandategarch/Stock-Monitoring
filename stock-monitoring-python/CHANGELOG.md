@@ -3,6 +3,68 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.13.1 — DEEP AUDIT SEMUA PERHITUNGAN & LOGIKA (2 bug terbukti di-fix)
+
+User: *"Deep audit dan fix ya ... cek semua perhitungan dan logika barang
+kali ada yang salah"*.
+
+Audit menyeluruh 26 modul perhitungan (pipeline `fn_*` + `append1` +
+`helpers` + `konversi_satuan` + running stock + engine audit `fn_audit` +
+rumus COM kanonik 4-implementasi + nominal/week-bucketing +
+`po_keterangan` + follow-up auto-resolve + engine sort + wiring app) —
+dua bug terbukti lewat repro eksekusi dan diperbaiki; kandidat lain
+diverifikasi BUKAN bug (detail di bawah).
+
+### 1. FIX — `_so_h_rec` BER-SATUAN (label Turun Drastis dibedakan)
+- **Akar masalah** (`deviasi_view._compute_pivot`): kunci `_so_h_rec`
+  (baris 1.SO tercatat di H) memakai pasangan **(barang, resto) TANPA
+  satuan** — padahal baris pivot adalah per **(barang, resto, SATUAN)**.
+  Pasangan dua-satuan (GR + PCS) yang SO-nya **hanya diinput di GR**
+  membuat baris PCS ikut dianggap "SO terekam di H" via satuan sibling.
+- **Dampak**: baris PCS salah label **"Hilang dari Pencatatan"**
+  (so_h==0 & tanpa mutasi = tuduhan stok lenyap tanpa jejak sistem)
+  padahal SO satuan itu sekadar belum diinput — seharusnya varian
+  data-quality **"Turun Drastis (SO Tidak Diinput)"**. Fitur pemilahan
+  v3.13.0 jebol untuk pasangan dua-satuan.
+- **Fix**: kunci kini 3-tuple + SATUAN apa adanya (`fillna("")` —
+  mirror nilai index pivot; bukan strip/upper supaya kedua sisi
+  konsisten). Guard: label "Hilang dari Pencatatan" / "Turun Drastis"
+  nyata untuk pasangan satu-satuan TIDAK berubah (§105-A/B).
+- **Repro**: KOPI @1041.BDG — GR SO t9=50/t10=40 (diinput), PCS SO
+  t9=100 tanpa baris t10 → dulu PCS "Hilang dari Pencatatan", kini
+  "Turun Drastis (SO Tidak Diinput)".
+
+### 2. FIX — Kolom Nomor PO / Status PO tab Saldo Sistem Minus (kunci kanonik)
+- **Akar masalah** (`saldo_minus_view._compute`): lookup kolom
+  "Nomor PO"/"Status PO" (peta `po_nomor_map_3243`/`po_status_map_3243`)
+  memakai pasangan **RAW** `minus_df` (rep ejaan append1 — resto
+  ber-titik `"1041.MLGPAR"`, barang mixed-case) sedangkan peta
+  ber-kunci **KANONIK** (`norm_nama_barang_key` × `norm_nama_resto_key`
+  → `"MLGPAR"`) sejak v3.11.59.
+- **Dampak**: lookup **selalu miss** untuk pasangan drifted → kedua
+  kolom PO kosong senyap sejak fitur dibuat (v3.11.42) — kelas bug
+  v3.11.59 yang tersisa di jalur ini (sisi peta sudah kanonik, sisi
+  konsumen belum).
+- **Fix**: lookup menormalkan kedua sisi (`norm` idempoten untuk nilai
+  yang sudah kanonik — pasangan bersih tetap cocok; repro E2E: kolom
+  terisi `PO.2026.10.001` / `Menunggu diproses`).
+
+### Diverifikasi BUKAN bug (dicatat supaya tidak di-audit ulang)
+- 3 kegagalan test zoom/geometry di Xvfb resolusi lain = **artefak
+  environment** (ekspektasi hardcoded layar 1920×1080 — bukti:
+  1675/1675 LULUS di 1920×1080, termasuk sebelum fix ini).
+- `_extract_append1_maps` membuang SA=0: bukan divergence — `fn_4217`
+  (saldo awal) sudah membuang baris `Value == 0` sejak awal, jadi SA=0
+  terekam tidak pernah ada di append1 (paritas fn_audit ↔ com_analisa
+  utuh di data produksi).
+- Konvensi minggu H 26–31 → cut-off 25 (WEEK 3/4) konsisten di semua
+  modul (perubahan disengaja v3.9.22 — teks header test lama menyesatkan).
+
+### Test
+- §105 baru (A label PCS varian norec · B guard 3 label lama ·
+  C kolom PO saldo-minus terisi + idempotensi norm).
+- **1678 PASS, 0 FAIL** @1920×1080 + `test_mock` ALL PASS.
+
 ## v3.13.0 — TURUN DRASTIS DIBEDAKAN + COM KUNCI SATUAN + POTENSI PO + 4 MERGE LABEL CEK
 
 User: *"aku mau turun drastis dibedakan, com kunci satuan, potensi PO.

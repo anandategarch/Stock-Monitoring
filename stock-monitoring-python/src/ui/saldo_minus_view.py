@@ -44,6 +44,9 @@ from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
 
+# v3.13.1 — FIX DEEP AUDIT: kunci lookup PO 3243 kanonik (lihat _compute)
+from ..pipeline.helpers import norm_nama_barang_key as _nbk_sm
+from ..pipeline.helpers import norm_nama_resto_key as _nrk_sm
 from .cell_tooltip import CellTooltip
 from .nominal_common import (
     hitung_saldo_minus_pairs,
@@ -479,18 +482,31 @@ class SaldoMinusView(tk.Frame):
                   f"(Internal) · {stats.get('shown', 0):,} tampil")
             self._minus_stats = stats
             # merge PO info (3243)
+            # v3.13.1 — FIX DEEP AUDIT (repro /home/z/audit/repro3):
+            # peta po_nomor_map_3243/po_status_map_3243 ber-kunci KANONIK
+            # (norm_nama_barang_key × norm_nama_resto_key — resto
+            # "1041.BDGUKU" → "BDGUKU"-style segmen setelah titik), tapi
+            # lookup lama memakai pasangan RAW minus_df (rep ejaan
+            # append1 — bisa ber-titik / mixed-case) → SELALU MISS utk
+            # pasangan drifted → kolom Nomor PO / Status PO kosong senyap
+            # (kelas bug v3.11.59 yang tersisa di jalur ini — sisi peta
+            # sudah kanonik sejak itu, sisi konsumen belum). Lookup kini
+            # menormalkan kedua sisi (norm idempoten utk nilai yang sudah
+            # kanonik).
             if not minus_df.empty and self.rincian_po_df is not None:
                 _nomor_m = po_nomor_map_3243(self.rincian_po_df)
                 _status_m = po_status_map_3243(self.rincian_po_df)
+                _br_sm = (minus_df["Nama Barang"].astype(str)
+                          .map(_nbk_sm))
+                _rr_sm = (minus_df["NAMA RESTO"].astype(str)
+                          .map(_nrk_sm))
                 minus_df = minus_df.assign(
-                    **{"Nomor PO": minus_df.apply(
-                        lambda r: _nomor_m.get(
-                            (r["Nama Barang"], r["NAMA RESTO"]), ""),
-                        axis=1),
-                       "Status PO": minus_df.apply(
-                        lambda r: _status_m.get(
-                            (r["Nama Barang"], r["NAMA RESTO"]), ""),
-                        axis=1)})
+                    **{"Nomor PO": [
+                        _nomor_m.get((b, r), "")
+                        for b, r in zip(_br_sm, _rr_sm)],
+                       "Status PO": [
+                        _status_m.get((b, r), "")
+                        for b, r in zip(_br_sm, _rr_sm)]})
             elif not minus_df.empty:
                 minus_df = minus_df.assign(
                     **{"Nomor PO": "", "Status PO": ""})
