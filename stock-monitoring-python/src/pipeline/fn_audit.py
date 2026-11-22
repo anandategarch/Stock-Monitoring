@@ -519,7 +519,7 @@ def build_audit_rekap(df: pd.DataFrame,
     detail = [""] * n
     # v3.14 — catatan review per baris (mirror aReview VBA; dedup
     # persis — InStr VBA ≈ membership list).
-    review: "list[list[str] | None]" = [None] * n
+    review: list[list[str] | None] = [None] * n
 
     def _add_review(i: int, note: str) -> None:
         if review[i] is None:

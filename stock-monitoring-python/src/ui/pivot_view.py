@@ -450,8 +450,7 @@ class PivotTableView(tk.Frame):
                 # between numerik membuang hari 26•..31• saat start=−25;
                 # swap memakai kunci kronologis (mirror in_selisih
                 # v3.11.59 — swap numerik menukar arah rentang dua-negatif).
-                from .export_sheets import (tgl_chrono_key,
-                                            tgl_range_mask)
+                from .export_sheets import tgl_chrono_key, tgl_range_mask
                 if tgl_chrono_key(t1) > tgl_chrono_key(t2):
                     t1, t2 = t2, t1
                 df = df[tgl_range_mask(df["Tanggal"], t1, t2)]
@@ -857,8 +856,7 @@ class PivotTableView(tk.Frame):
                 # T-7 — rentang KRONOLOGIS, identik _compute_payload /
                 # _name_values (between numerik membuang 26•..31• saat
                 # start=−25; swap kunci kronologis — in_selisih v3.11.59).
-                from .export_sheets import (tgl_chrono_key,
-                                            tgl_range_mask)
+                from .export_sheets import tgl_chrono_key, tgl_range_mask
                 if tgl_chrono_key(t1) > tgl_chrono_key(t2):
                     t1, t2 = t2, t1
                 df = df[tgl_range_mask(df["Tanggal"], t1, t2)]

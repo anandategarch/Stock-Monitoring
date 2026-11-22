@@ -18,6 +18,8 @@ followup*.json.bad
 # Screenshot / hasil uji sementara
 *.png
 !docs/**/*.png
+# v3.15 — ikon aplikasi (aset build spec, bukan screenshot)
+!stock-monitoring-python/assets/*.png
 
 # Dev tools sandbox (skrip uji real-data — path sandbox, bukan kode app)
 .dev/

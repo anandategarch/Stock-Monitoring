@@ -3,6 +3,93 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.15.0 — CI HIJAU + OBSERVABILITAS PERSISTEN + PACKAGING PRO
+
+Batch 3 permintaan (user: "Perbaiki 6 isu ruff → CI hijau lagi ·
+Penulisan versi ke EXE + ikon + pembersihan README 5 titik basi ·
+Berkas log + excepthook global RotatingFileHandler + crash.log
+timestamp — no bug no mistakes").
+
+### 1. CI HIJAU — 6 isu ruff baru era v3.14.x (gerbang 207 > 201)
+2 run GHA terakhir (v3.14.0, v3.14.1) GAGAL di gerbang ruff —
+rilis EXE otomatis terblokir. 6 isu baru (diverifikasi via diff
+konkret vs commit hijau terakhir `39b1677`) di-fix minimal:
+- `pivot_view` ×2 + `details_popup` — I001 import isort (import
+  `export_sheets` era T-7 di posisi/kurung non-kanonik).
+- `fn_audit` — UP037 anotasi tipe ber-tanda kutip.
+- `in_selisih_view` — RUF012 default kelas mutan → `ClassVar`.
+- `nominal_common` — FURB192 `sorted(...)[-1]` → `max(...)` (kunci
+  unik karena menyertakan label — hasil identik).
+Hasil: ruff 0.17.1 = **201 tepat** (gerbang ≤ 201 LOLOS); isu baru
+dari kode v3.15 sendiri = 0 (diagnostics.py bersih: suppress
+alih-alih blind-except, anotasi modern, import terurut).
+
+### 2. OBSERVABILITAS PERSISTEN — `src/ui/diagnostics.py` BARU
+Menutup temuan audit gap F1/F2:
+- **`logs/app.log`** — `RotatingFileHandler` 2 MB × 3 backup, UTF-8,
+  di `app_base_dir()/logs/` (frozen-aware: di samping .exe). Handler
+  dipasang di ROOT logger + `logging.captureWarnings(True)` → record
+  `logging` modul mana pun (4 modul sudah pakai `logging` tapi TANPA
+  satu pun handler — record lenyap total) + warning Python ikut
+  tercatat.
+- **Mirror konsol UI** — `StreamToQueue` menulis BARENG ke queue UI
+  dan file: jejak run pipeline utuh di disk (konsol tab 🚀 terpangkas
+  3000→2000 baris tak lagi membuang bukti; app ditutup tak lagi
+  menghilangkan log). Baris-utuh (buffer sampai newline), anti-rekursi
+  guard thread-local (error di dalam logging → stderr → mirror tidak
+  boleh memicu logging lagi).
+- **Excepthook global** — `sys.excepthook` + `threading.excepthook`
+  menambah jejak file SEBELUM perilaku default dirantai (perilaku
+  lama tidak berubah). SystemExit/KeyboardInterrupt tanpa crash.log
+  (bukan crash).
+- **`report_callback_exception`** — di-override di instance root
+  (tkinter merutekan callback SEMUA widget ke root — terverifikasi
+  dari source Tk 9): exception handler tombol dulu hanya di-print ke
+  konsol UI; kini + app.log + crash.log. Perilaku default Tkinter
+  (print + `sys.last_*`) dipertahankan persis — tanpa dialog baru.
+- **crash.log APPEND ber-timestamp** — dulu `write_text` MENIMPA
+  (crash beruntun saling menimpa jejak); kini append per-kejadian
+  dengan header `[timestamp] kind — vX.Y.Z — pid`. Launcher
+  (`run_app.py`, `src/ui/__main__.py`) tetap **stdlib-murni** dengan
+  writer append sendiri — jalur itu hidup justru saat modul proyek
+  gagal di-import. Idempoten (suite membuat app puluhan kali —
+  handler tidak dobel; base pindah → handler diganti).
+- `.gitignore`: `logs/` + `crash.log` diabaikan.
+
+### 3. PACKAGING PRO — version stamping + ikon
+- **`stock-monitoring.spec`** — resource versi .exe dibaca OTOMATIS
+  dari `APP_VERSION` `src/ui/app.py` (regex → `build/version_info.txt`
+  VSVersionInfo; ditulis ulang tiap build — aman terhadap
+  `--clean` karena spec dieksekusi setelah pembersihan). Properti
+  file .exe dulu KOSONG (0.0.0.0) — user tak bisa cek versi build
+  tanpa menjalankan app (akar kasus "tetap sama aja" v3.11.45).
+- **Ikon** — `assets/icon.ico` multi-resolusi 16..256 px (dulu ikon
+  generic PyInstaller — memperparah false-positive antivirus).
+  `version=`/`icon=` hanya dipasang di Windows (EXE resource
+  Windows-only; jalur dev Linux smoke-build tetap polos).
+- `.gitignore` root: `!stock-monitoring-python/assets/*.png`
+  (pengecualian ikon dari pola `*.png`).
+- CI `py_compile`: referensi `bench_views.py` (file dihapus v3.11.54)
+  dibersihkan dari daftar compileall (compileall menelan file hilang
+  tanpa error — referensi basi tak terlihat).
+
+### 4. README 5 titik basi dibersihkan (root + python)
+- Versi terkini → v3.15.0 (dikunci test §78).
+- "10 tab analisa" → **9** (kode: 9 tab — Laporan Versus dihapus
+  v3.12.1).
+- Bullet fitur "⚖ Laporan Versus" DIHAPUS dari README python
+  (mendokumentasikan fitur yang tidak ada).
+- Klaim "ruff baseline ≤ 18" → **≤ 201** (nilai gerbang CI aktual).
+- README root: 2 file terhapus dari tabel Isi Repository
+  (`01.1 CEK STOCK V2.xlsb`, `20.AGUSTUS 2026.xlsx` — sudah
+  di-delete dari repo) + klaim "tanpa ketergantungan Excel/Windows"
+  diluruskan + stat jumlah baris kode disegarkan.
+
+### Verifikasi
+ruff 0.17.1 = 201 EXACT · py_compile seluruh file · suite UI penuh
+(Xvfb 1920×1080, Tk 9) · pipeline mock end-to-end · smoke 2 entry
+tanpa crash.log.
+
 ## v3.14.1 — PERBAIKAN BUG MENYELURUH (AUDIT EKSTERNAL 45 FILE / ±48.300 BARIS)
 
 Batch perbaikan bug hasil audit penuh repo. Setiap temuan DIVERIFIKASI

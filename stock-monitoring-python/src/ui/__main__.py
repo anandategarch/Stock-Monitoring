@@ -31,8 +31,10 @@ launch"):
   IMPORT yang main() tidak bisa lihat).
 """
 import contextlib
+import os
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 # Lokasi crash.log = di samping config.json (root proyek) — konsisten
@@ -58,7 +60,14 @@ def _report_import_failure(tb_text: str) -> None:
     with contextlib.suppress(Exception):
         sys.stderr.write(tb_text + "\n")
     with contextlib.suppress(Exception):
-        _CRASH_LOG.write_text(tb_text, encoding="utf-8")
+        # v3.15 — APPEND ber-timestamp (dulu write_text menimpa: crash
+        # beruntun saling menimpa jejak). Stdlib-murni SENGAJA — modul
+        # ini tak boleh meng-import modul proyek di level atas.
+        _stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(_CRASH_LOG, "a", encoding="utf-8") as _f:
+            _f.write(f"\n===== [{_stamp}] GAGAL IMPORT (launcher "
+                     f"src.ui.__main__) pid {os.getpid()} =====\n")
+            _f.write(tb_text if tb_text.endswith("\n") else tb_text + "\n")
     with contextlib.suppress(Exception):
         # tkinter LAZY: bila tkinter sendiri rusak/hilang, dialog
         # dilewati — crash.log di atas tetap tertulis.

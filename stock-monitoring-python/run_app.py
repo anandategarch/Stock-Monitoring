@@ -21,8 +21,10 @@ Kenapa ada file ini:
   diduplikasi.
 """
 import contextlib
+import os
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 
@@ -33,8 +35,15 @@ def _base_dir() -> Path:
 
 
 def _report_import_failure(tb_text: str) -> None:
-    with open(_base_dir() / "crash.log", "w", encoding="utf-8") as f:
-        f.write(tb_text)
+    # v3.15 — crash.log kini APPEND ber-timestamp (dulu "w" menimpa:
+    # crash beruntun saling menimpa jejak). Stdlib-murni SENGAJA — jalur
+    # ini justru hidup saat modul PROYEK (termasuk src.ui.diagnostics)
+    # gagal di-import; tidak boleh bergantung modul manapun.
+    _stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(_base_dir() / "crash.log", "a", encoding="utf-8") as f:
+        f.write(f"\n===== [{_stamp}] GAGAL IMPORT (launcher run_app.py) "
+                f"pid {os.getpid()} =====\n")
+        f.write(tb_text if tb_text.endswith("\n") else tb_text + "\n")
     # dialog best-effort (pola __main__.py): pelapor tak boleh menimpa
     # error asli — kegagalan dialog dilewati senyap (crash.log tetap ada)
     with contextlib.suppress(Exception):

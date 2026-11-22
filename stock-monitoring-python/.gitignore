@@ -29,3 +29,7 @@ desktop.ini
 build/
 dist/
 runx.sh
+
+# v3.15 — log file rotasi + crash.log (diagnostics.py, app_base_dir())
+logs/
+crash.log

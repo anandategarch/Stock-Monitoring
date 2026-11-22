@@ -107,8 +107,11 @@ jobs:
 
       - name: py_compile seluruh file Python
         run: |
+          # v3.15 — bench_views.py dihapus v3.11.54 (rapikan repo) —
+          # daftar compileall disinkronkan (compileall menelan file
+          # hilang tanpa error, referensi basi tak terlihat bertahun-tahun).
           .venv/bin/python -m compileall -q src run_app.py build_exe.py \
-            test_ui_redesign.py test_mock.py screenshot_ui.py bench_views.py
+            test_ui_redesign.py test_mock.py screenshot_ui.py
           echo "py_compile OK"
 
       - name: Validasi config.json

@@ -1076,13 +1076,15 @@ def dev_lalu_qty_map(file_df: pd.DataFrame | None,
             def _lab_num(lab):
                 m = re.search(r"(\d+)", lab)
                 return int(m.group(1)) if m else 0
-            # S-7 FIX — pilihan label DETERMINISTIK: sort eksplisit, ambil
-            # TERAKHIR = nomor minggu TERBESAR (penutupan — semantik
-            # v3.9.36), SERI nomor sama dipatahkan LEXIKOGRAFIS (terbesar).
-            # max() polos pada seri (mis. 'WEEK 3' vs 'MINGGU 3') memilih
-            # sesuai URUTAN BARIS file → label pemenang & himpunan pasangan
-            # yang bertahan/terbuang bergantung urutan file, bukan konten.
-            _lab_sel = sorted(_labs, key=lambda l: (_lab_num(l), l))[-1]
+            # S-7 FIX — pilihan label DETERMINISTIK: max() dgn kunci
+            # eksplisit = nomor minggu TERBESAR (penutupan — semantik
+            # v3.9.36), seri nomor sama dipatahkan LEXIKOGRAFIS (terbesar).
+            # (FURB192 — dulu sorted(...)[-1], identik hasil: kunci unik
+            # karena menyertakan label itu sendiri.) max() polos pada seri
+            # (mis. 'WEEK 3' vs 'MINGGU 3') memilih sesuai URUTAN BARIS file
+            # → label pemenang & himpunan pasangan yang bertahan/terbuang
+            # bergantung urutan file, bukan konten.
+            _lab_sel = max(_labs, key=lambda lab: (_lab_num(lab), lab))
             out = out[out["Minggu"].astype(str).str.strip()
                       .str.upper() == _lab_sel].copy()
         if not out.empty:

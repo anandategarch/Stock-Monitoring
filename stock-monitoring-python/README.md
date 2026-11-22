@@ -2,17 +2,17 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.13.1** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.15.0** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 
 - **Pipeline end-to-end** dari 14 sumber Excel (Rekap Mentah, 22.05, 42.15, 32.24, 42.05, 9901, 42.17 Saldo Awal & Sistem, 41.09 Harga, 32.43 Rincian PO, DBS Kategori) → 892k+ baris append1 terstruktur
-- **10 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
+- **9 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
 - **Analisa deviasi otomatis** — kolom CEK dengan 12 label anomali (Promix 04, RI Balancing, Kosong (AKTIF), Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Turun Drastis + varian SO Tidak Diinput, Naik Drastis, ACR to BOM, BOM 0) + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO belum dibuat, analisa lalu-kini berbasis Qty
 - **Saldo sistem minus** — rekapan pasangan Eksternal/Campuran dengan saldo < 0 di rentang 1..H, dengan keterangan mulai minus dari tanggal berapa
 - **Analisa Kronis** — pasangan (Resto, Barang) kronis minus + flag eksklusif (barang hanya minus di 1 resto)
 - **File deviasi bulan lalu** — dimuat manual via tombol 📂 (parse async, gak bekui UI), pattern `{12+month}.{BULAN} {TAHUN}.xlsx`
-- **⚖ Laporan Versus** — 13 poin laporan resmi format versus (poin 1-12 = 12 ukuran QTY/NOMINAL mirror kolom laporan; poin 13 = komparasi dua resto, mis. BKSGOL vs CKGPAH). Dua mode: resto vs **se-Area**/vs **Semua Resto Lain** (Σ · rata-rata · median per bahan), atau **1v1** satu resto vs satu resto; + PENJUALAN & %NomDev÷Penj; export Excel 13 poin (angka mentah)
+- **Log persisten + crash trace** — `logs/app.log` (rotasi otomatis) merekam seluruh log run pipeline & exception runtime; `crash.log` append ber-timestamp per kejadian (v3.15)
 - **Tooltip hover** untuk cell panjang (CEK narasi, Keterangan, Rekomendasi) — muncul dekat cursor
 - **Persistensi** — filter, ukuran window, zoom, threshold ACR/COM tersimpan lintas sesi (settings.json)
 - **DPI-aware** — tajam di layar scaling 125%/150%; zoom Ctrl+Scroll 50%–200%
@@ -79,14 +79,15 @@ src/
 │   ├── fn_rekap_mentah.py     # Rekap Mentah SO
 │   └── fn_2205 … fn_9901     # readers per sumber Excel
 └── ui/                        # shell + view per tab (Tkinter)
-    ├── app.py                 # StockMonitorApp (6.600+ baris)
+    ├── app.py                 # StockMonitorApp (7.500+ baris)
     ├── widgets.py             # komponen reusable (Treeview, HeaderFilter, dll)
     ├── theme.py               # design system (colors, fonts)
-    ├── deviasi_view.py        # tab 📦/🧩 (4.200+ baris)
-    ├── nominal_resto_view.py  # tab 💰 + 4 sub-tab (2.450+ baris)
+    ├── deviasi_view.py        # tab 📦/🧩 (5.200+ baris)
+    ├── nominal_resto_view.py  # tab 💰 + 4 sub-tab (2.700+ baris)
     ├── saldo_minus_view.py    # sub-tab Saldo Sistem Minus
     ├── analisa_kronis_view.py # sub-tab Analisa Kronis
     ├── cell_tooltip.py        # reusable hover tooltip
+    ├── diagnostics.py         # log file rotasi + excepthook global + crash.log (v3.15)
     ├── deviasi_file.py        # parse file deviasi bulan lalu
     ├── nominal_common.py      # hitung saldo minus, kronis, nominal lalu
     ├── po_keterangan.py       # peta PO 3243
@@ -110,7 +111,7 @@ src/
 bash run_tests.sh          # test_ui_redesign.py + test_mock.py (auto-Xvfb)
 ```
 
-GitHub Actions (`.github/workflows/release-windows.yml`) menjalankan gerbang tes pada tiap push/PR: ruff (baseline ≤ 18) · py_compile · validasi config.json · suite UI penuh · pipeline mock · smoke 2 entry. Rilis EXE (tag `v*`) hanya dibuat bila gerbang hijau.
+GitHub Actions (`.github/workflows/release-windows.yml`) menjalankan gerbang tes pada tiap push/PR: ruff (baseline ≤ 201) · py_compile · validasi config.json · suite UI penuh · pipeline mock · smoke 2 entry. Rilis EXE (tag `v*`) hanya dibuat bila gerbang hijau.
 
 ## Build EXE (Windows)
 

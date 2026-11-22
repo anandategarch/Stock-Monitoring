@@ -67,6 +67,7 @@ import os
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
+from typing import ClassVar
 
 import numpy as np  # _compute_base isnan + saldo/COM ops (v3.10)
 import pandas as pd
@@ -2841,7 +2842,9 @@ class InSelisihView(tk.Frame):
     # tersedia sebagai opsi di dialog export.
     SORT_RESTO_BARANG_TANGGAL = "resto_barang_tanggal"
     SORT_RESTO_TANGGAL_BARANG = "resto_tanggal_barang"
-    _EXPORT_SORT_MODES = [
+    # RUF012 — list mutan di kelas → anotasi ClassVar eksplisit (konstanta
+    # mode urut export, tak pernah di-assign ulang per-instance).
+    _EXPORT_SORT_MODES: ClassVar[list[tuple[str, str]]] = [
         (SORT_RESTO_BARANG_TANGGAL,
          "Resto → Nama Barang → Tanggal  (urut baru)"),
         (SORT_RESTO_TANGGAL_BARANG,
