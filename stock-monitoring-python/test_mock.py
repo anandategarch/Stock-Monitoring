@@ -765,8 +765,12 @@ def run_test_v3920_fixes():
         ("IT.2026.08.5", "GUDANG HO (MLGPAR)", 5, "BRG", 2),
     ])
     r_b = fn_4205(d5, mode="berjalan")
-    check20("T9b mode berjalan TIDAK berubah (NA-resto tetap lolos)",
-            len(r_b) == 2 and r_b["NAMA RESTO"].isna().sum() == 1)
+    # S-1 FIX (bug hunt 1-e) — mode berjalan kini ikut membuang baris
+    # NA-resto (paritas mode "lalu"/fn_3224/fn_9901; dulu lolos → pasangan
+    # hantu (Nama Barang, NA) di pivot append1 groupby(dropna=False)).
+    check20("T9b mode berjalan ikut membuang NA-resto (S-1 — paritas "
+            "mode lalu)",
+            len(r_b) == 1 and r_b["NAMA RESTO"].notna().all())
 
     r_miss = fn_4205(os.path.join(d, "TIDAK ADA"), mode="lalu")
     r_empty = fn_4205(tempfile.mkdtemp(prefix="t35d_w5_"), mode="lalu")

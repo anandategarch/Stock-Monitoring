@@ -3,6 +3,132 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.14.1 — PERBAIKAN BUG MENYELURUH (AUDIT EKSTERNAL 45 FILE / ±48.300 BARIS)
+
+Batch perbaikan bug hasil audit penuh repo. Setiap temuan DIVERIFIKASI
+dulu (baca kode + repro/simulasi) sebelum diperbaiki; **4 temuan
+terbukti false positive dan DITOLAK** (lihat akhir). Test diselaraskan
+ke perilaku BENAR — termasuk 9 asersi engine pra-V2 yang catatan v3.14.0
+nyatakan "gagal by design ... perlu penyesuaian test di iterasi
+berikutnya" (iterasi ini).
+
+### 1. KRITIS
+- **K-1 `fn_audit` — jangkar `so_lalu_map` TERBALIK**: hari bulan lalu
+  bernegatif → hari kronologis TERAKHIR = nilai numerik TERKECIL
+  (31• = −31), tapi komparator `>` menyimpan hari numerik TERBESAR
+  (25• = TERAWAL) → baseline tgl-1 salah jangkar: review palsu
+  "baseline tgl N tidak tersedia" padahal SO penutupan ADA (entri map
+  juga menimpa fallback `so_at` tgl len_lalu). Fix: `>` → `<`.
+- **K-2/T-4 — kunci Bulan Lalu kini BER-SATUAN** (`nominal_common` /
+  `nominal_resto_view` / `deviasi_file` / `deviasi_view`): peta lalu
+  dulu ber-kunci (resto, barang) → barang dua-satuan (GR+PCS)
+  menjumlahkan nominal lalu 2× di TOTAL "Nominal Deviasi Bulan Lalu"
+  + baris satuan kedua hilang di dedup parse file (kolom
+  "Dev. Bulan Lalu" tab 📦/🧩 menampilkan qty satuan yang salah).
+  Kini kunci (resto, barang, satuan) + **FALLBACK drift-satuan**:
+  file tanpa kolom Satuan / rename unit antar bulan (KG↔GR) tetap
+  match via kunci (resto, barang) HANYA bila file punya persis SATU
+  satuan utk pasangan itu (multi-satuan = ambigu → kunci eksak wajib
+  mengenai) — paritas perilaku lama utk pasangan satu-satuan.
+
+### 2. TINGGI
+- **T-1 `fn_audit` — kunci merge DINORMALISASI** (norm_nama_resto/
+  barang_key_series di `_agg_sum` sebelum groupby/merge): drift
+  case/whitespace ejaan antara file rekap mentah (SO/BM) dan detail
+  IN (42.05/32.24/99.01) bikin merge miss senyap → baris pasangan
+  ±deviasi palsu.
+- **T-2 `deviasi_view`/`deviasi_popup` — sentinel satuan `""` ≠ None**:
+  baris IN-only tanpa SATUAN membuka popup kosong. Fix: `satuan or
+  None` + normalisasi di pintu popup.
+- **T-3 `deviasi_view` — fallback tanpa "2.SALDO AKHIR"**: dulu pakai
+  saldo t=1 mentah (mengabaikan IN/OUT/BK setelah t=1); kini
+  saldo_t1 + Σ(IN−OUT−BK) t=2..H — konsisten rumus utama.
+- **T-5 `nominal_common` — override 42.17 batal senyap** saat TIDAK
+  ada pasangan yang merekam saldo di hari H (kolom H absen pivot):
+  guard `h in pivot.columns` dibuang; kolom H kosong = tak ada saldo
+  terekam (bukan alasan melewati override).
+- **T-6 `po_keterangan` — jangkar jendela verifikasi PO**: `.max()`
+  pada hari negatif mengambil hari TERAWAL; harusnya `.min()` = hari
+  TERAKHIR → label "Potensi PO" meleset beberapa hari.
+- **T-7 `pivot_view`/`details_popup` — rentang tanggal KRONOLOGIS**:
+  `between(-25, 31)` numerik membuang hari 26•..31• (urutan numerik
+  blok negatif = kronologis TERBALIK). Kini `tgl_range_mask`
+  chrono-aware di semua situs (`_compute_payload`/`_filter_state`/
+  `_name_values`/`_cascade_frame`/details_popup) + default/reset
+  **-25** (jendela audit 25•..31• + 1..31 utuh); swap & fallback ikut
+  kronologis; guard matrix COM 6c-01 kini chrono-aware.
+
+### 3. SEDANG
+- `fn_4205`: mode "berjalan" kini membuang baris NA-resto (paritas
+  mode "lalu"/fn_3224/fn_9901 — dulu lolos → pasangan hantu di pivot
+  append1).
+- `konversi_satuan`: rasio kolom #Sat. Terkecil (42.05, otoritatif)
+  tak lagi tertimpa inferensi rasio==1 dari 32.24 (dua-tahap: kolom
+  dulu, inferensi utk barang tanpa kolom).
+- `fn_rekap_mentah`: parser header hari tahan mangling duplikat
+  '5.1' MAUPUN '5_1' (jalur calamine) — resolusi hari ganda hidup
+  kembali.
+- `fn_9901`: tripwire skema sheet non-9901 + dedup LINTAS sumber di
+  level output (salinan file dgn skema drift tak lagi menduplikasi
+  baris IN; dedup dalam-folder lama utuh).
+- `fn_4109`: "harga terbaru" kini per PERIODE (metadata "Dari … s/d
+  …" → fallback nama file period-aware), bukan urutan alfabetis;
+  penghapusan baris total kini exact-match ("Total Nama Barang"/
+  "Total Kategori Barang") — barang sungguhan berawalan "Total"
+  selamat.
+- `nominal_common`: label minggu deterministik (sort eksplisit —
+  dulu `max()` polos tergantung urutan baris file); indikator Saldo
+  Minus/Kronis per-satuan (dulu GR+PCS dijumlah); flag "Eksklusif"
+  dihitung dari data PRA-filter sumber.
+- `pivot_view`: basis COM tgl-1 kini NaN saat tanpa SA & tanpa SO
+  penutupan (parity engine fn_audit — dulu fallback 0 → COM minus
+  palsu).
+- `app.py`: guard audit_kpi None/parsial (`.get(..., 0)` — dulu
+  TypeError saat audit gagal); basis flag "● berubah" = waktu MULAI
+  run (bukan selesai — file yang berubah di tengah run tak lagi
+  dianggap segar).
+- `rincian_po_view`: PO tanpa nomor tak lagi dilebur jadi SATU grup
+  ("(Tanpa Nomor) #1, #2, …" per baris).
+- `saldo_minus_view`: export kini atomik (tmp + os.replace).
+- `in_selisih_view`: remark B4 tak lagi menuduh "BM 0 padahal IN n"
+  saat data BM sama sekali tak ada (remark B3 faktual yang tampil).
+
+### 4. RENDAH
+- `append1`: NaN literal-string ("nan") diperlakukan kosong (mask
+  vocabulary — `notna()` mati oleh `astype(str)` pra-filter).
+- `fn_2205`: prefix "SI" kini strict `SI.`/exact (SIJ./SIT./SIM.
+  selamat).
+- `main.py`: log pipeline format angka ID (2.150 — EN "2,150"
+  terbaca 2,15 di konvensi ID).
+- `widgets`: sort default strip '•' (label hari 25• kini
+  numeric-sortable).
+- `app.py`: template nama file bulanan `{12+bulan}.{BULAN} {TAHUN}`
+  pada pesan status (dulu sisa `20.{BULAN}`).
+- `deviasi_view`: −0,0001 tak lagi tampil "(0,00)%" (ambang tampil).
+
+### 5. Test diselaraskan (mengunci perilaku BENAR)
+- 9 asersi engine pra-V2 (gagal by-design per catatan v3.14.0)
+  di-update ke semantik V2: CUT-OFF ≤1 hari, VALID diverifikasi ketat
+  (fixture v3.9.6 kini ΔSO==IN → VALID), Sisa Gantung per-baris SUSU,
+  filter DEVIASI MURNI 3 baris, catatan lintas bulan "Periode Tgl
+  31• - 1" (jeda kronologis 1 hari).
+- Kunci 3-tuple `dev_lalu_qty_map` (file tanpa Satuan → ""), dedup
+  (resto, bahan, satuan), KONSISTENSI Rp 150.000 via fallback drift.
+- Rentang pivot kronologis (default −25; start −26 = 26•..31• + 1..).
+- `test_mock` T9b: NA-resto dibuang di mode berjalan (S-1).
+- Hasil akhir: **test_ui_redesign 1676 PASS / 0 FAIL · test_mock ALL
+  PASS** (pra-fix: 9 FAIL by-design + 14 ✗ pra-V2 di HEAD).
+
+### False positive yang DITOLAK (bukan bug — tak diubah)
+- S-5 `fn_running_stock` `.max()` = groupby per-grup (bukan clamp 0);
+  saldo awal negatif terjaga di kedua varian.
+- S-16 config.json korup: sudah ada dialog error + backup .json.bak
+  (tak pernah ditimpa senyap).
+- S-14 matrix COM "terpengaruh filter": scoped-display by design
+  (regresi 6c-01 bila dipaksa full-scope).
+- L-2 "export popup 1 desimal": formatter display popup itu sendiri
+  (bukan mismatch export-vs-UI).
+
 ## v3.14.0 — ENGINE AUDIT V2 (ADAPTASI MACRO VBA RULE ENGINE V2) + EXPORT SORT RESTO→BARANG→TANGGAL
 
 User: *"coba cek logika rekap selisih ini dan bandingkan dengan yang

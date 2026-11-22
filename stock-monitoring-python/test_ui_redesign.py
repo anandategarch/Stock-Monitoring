@@ -1156,9 +1156,10 @@ def main():
     # ---- PIVOT MODE RESTO (default) ----
     pv = app.pivot_view
     check("Pivot default mode = resto", pv.pivot_mode == "resto")
-    check("(v3.8) Pivot default tanggal = -31 s/d 31 (kolom 25•-31• bulan "
-          "lalu lengkap + 1-31 berjalan)",
-          pv.tgl_start_var.get() == "-31" and pv.tgl_end_var.get() == "31",
+    check("(v3.8) Pivot default tanggal = -25 s/d 31 (kolom 25•-31• bulan "
+          "lalu lengkap + 1-31 berjalan; T-7 — filter rentang KRONOLOGIS: "
+          "-31 kini berarti hari 31• semata)",
+          pv.tgl_start_var.get() == "-25" and pv.tgl_end_var.get() == "31",
           f"got {pv.tgl_start_var.get()}..{pv.tgl_end_var.get()}")
     cols = list(pv.tree["columns"])
     check("Pivot resto: kolom = resto (MLGPAR, SBYKET)",
@@ -2010,14 +2011,17 @@ def main():
         check("(v3.11.59) Kolom COM kanonik: KOPI tgl5 tanpa SO di tgl "
               "global sebelumnya (t4) → NaN → '-' (paritas popup COM)",
               r["COM"] == "-", f"got {r['COM']!r}")
+        # v3.14 — engine V2 (MAX_CUTOFF_DAYS=1): jendela +100 t5 berumur
+        # 3 hari saat −100 t8 tiba → ditutup DEVIASI MURNI di tengah grup
+        # (resolve ≤1 hari diuji §104-A "Beda 1 Hari (Periode Tgl 5 - 6)").
         check("(v3.6) Kolom Hasil Audit terisi",
-              r["Hasil Audit"] == "CUT-OFF RESOLVED",
+              r["Hasil Audit"] == "DEVIASI MURNI",
               f"got {r['Hasil Audit']!r}")
     st_cells = {tree_in.set(k, "Hasil Audit") for k in kids_in}
-    check("(v3.6) Status VBA tampil (CUT-OFF/DEVIASI; VALID tak terpicu "
-          "— BM terisi v3.11.5)",
-          {"CUT-OFF RESOLVED", "DEVIASI MURNI"} <= st_cells
-          and "VALID (Sistem Masuk)" not in st_cells,
+    check("(v3.6) Status VBA tampil (DEVIASI; VALID tak terpicu — BM "
+          "terisi v3.11.5; v3.14 V2: tanpa CUT-OFF — semua jeda > 1 hari; "
+          "filter Hanya-Selisih aktif → baris OK tak tampak)",
+          st_cells == {"DEVIASI MURNI"},
           f"got {st_cells}")
     check("(v3.11.30) KPI chips DIHAPUS (user: 'OK (matching) ini dan "
           "teman2 nya hapus aja') — kpi_card tak lagi dibangun",
@@ -2287,22 +2291,34 @@ def main():
           "VALID (Sistem Masuk)" not in sts
           and sts.count("OK (Matching)") == 8,
           f"got {sorted(set(sts))}")
-    check("Engine: CUT-OFF RESOLVED (+100 lalu −100)",
-          sts.count("CUT-OFF RESOLVED") == 2)
+    # v3.14 — engine V2 (MAX_CUTOFF_DAYS=1): jendela +100 t5 berumur 3
+    # hari saat −100 t8 tiba → ditutup DEVIASI MURNI di tengah grup
+    # (dulu pra-V2 menunggu akhir grup → retro-aktif "resolve"; resolve
+    # jeda ≤1 hari diuji §104-A "Beda 1 Hari (Periode Tgl 5 - 6)").
+    check("Engine V2: CUT-OFF RESOLVED tak terpicu (+100 t5 lalu −100 "
+          "t8 — jeda 3 hari > batas cut-off 1 hari)",
+          sts.count("CUT-OFF RESOLVED") == 0)
     check("Engine: DEVIASI MURNI (sisa gantung)",
           "DEVIASI MURNI" in sts)
-    check("Engine: KPI lengkap dari data app (basis BM rekap — v3.11.5)",
+    check("Engine: KPI lengkap dari data app (basis BM rekap — v3.11.5; "
+          "v3.14 V2: cutoff 0 · deviasi_murni 3 — jendela KOPI jeda 3 "
+          "hari kedaluwarsa, SUSU +80 gantung)",
           audit_kpi["rows"] == 11 and audit_kpi["omit"] == 0
-          and audit_kpi["cutoff"] == 2 and audit_kpi["deviasi_murni"] == 1
+          and audit_kpi["cutoff"] == 0 and audit_kpi["deviasi_murni"] == 3
           and abs(audit_kpi["deviasi_qty"] - 80.0) < 0.001
           # v3.11.59 — COM kanonik: KOPI t5 & SUSU t5 kini NaN (tanpa SO
           # di tgl global sebelumnya) → tak lagi dihitung com_minus
           and audit_kpi.get("com_minus") == 0,
           f"got {audit_kpi}")
     dm = audit_df[audit_df["Status Analisis Audit"] == "DEVIASI MURNI"]
+    # v3.14 V2 — 3 baris DEVIASI MURNI (KOPI t5/t8 jendela kedaluwarsa +
+    # SUSU +80 gantung); catatan "Sisa Gantung: +80" milik baris SUSU.
+    _dm_susu = dm[dm["Nama Item"] == "SUSU UHT 1L"]
+    _dm_susu_txt = (str(_dm_susu.iloc[0]["Detail & Catatan Audit"])
+                    if len(_dm_susu) else "")
     check("Engine: catatan Sisa Gantung VBA-style",
-          "Sisa Gantung: +80" in str(dm.iloc[0]["Detail & Catatan Audit"]),
-          f"got {dm.iloc[0]['Detail & Catatan Audit']!r}")
+          len(_dm_susu) == 1 and "Sisa Gantung: +80" in _dm_susu_txt,
+          f"got {_dm_susu_txt!r}")
     # v3.10 — kolom output baru + KPI com_minus; v3.11.5 — slot lama
     # "Qty SO Harian" (BM) hadir KEMBALI di output (tanpa rename).
     check("(v3.10/v3.11.5) Kolom output audit: SO Kemarin/Delta SO/BM "
@@ -2352,7 +2368,7 @@ def main():
         _aud_rows.append({"NAMA RESTO": "BKSALT", "Nama Barang": "ITEM X",
                           "JENIS": "SO", "Tanggal": -_day, "Value": _so})
     _aud_rows.append({"NAMA RESTO": "BKSALT", "Nama Barang": "ITEM X",
-                      "JENIS": "SO", "Tanggal": 1, "Value": 200.0})
+                      "JENIS": "SO", "Tanggal": 1, "Value": 210.0})
     _aud_in = [{"Tanggal": 1, "NAMA RESTO": "BKSALT",
                 "Nama Barang": "ITEM X", "SOURCE IN": "42.05",
                 "Value": 50.0}]
@@ -2365,10 +2381,12 @@ def main():
     _audit2, _ = build_audit_rekap(_raw2)
     _r1 = _audit2[_audit2["Tanggal"] == 1].iloc[0]
     check("(v3.9.6) Audit tgl 1: delta SO vs SO bulan lalu TERAKHIR "
-          "(SO Naik +40 = 200−160•)",
-          "SO Naik +40" in str(_r1["Detail & Catatan Audit"]),
+          "(Kenaikan SO +50 = 210−160• — K-1: jangkar 31• TERAKHIR, "
+          "bukan 25• TERAWAL)",
+          "Kenaikan SO +50" in str(_r1["Detail & Catatan Audit"]),
           f"got {_r1['Detail & Catatan Audit']!r}")
-    check("(v3.9.6) Audit tgl 1: status VALID (SO naik vs bulan lalu)",
+    check("(v3.9.6) Audit tgl 1: status VALID (v3.14 V2 diverifikasi "
+          "KETAT: ΔSO +50 == IN 50 · baseline SO penutupan 31• tersedia)",
           _r1["Status Analisis Audit"] == "VALID (Sistem Masuk)",
           f"got {_r1['Status Analisis Audit']!r}")
 
@@ -2404,9 +2422,11 @@ def main():
     iv._on_col_filter("Hasil Audit", {"DEVIASI MURNI"})
     wait_view(root, iv)
     kids_f = list(tree_in.get_children(""))
-    check("Filter header Hasil Audit=DEVIASI MURNI → hanya baris SUSU",
-          len(kids_f) == 1 and
-          tree_in.set(kids_f[0], "Nama Barang") == "SUSU UHT 1L",
+    check("Filter header Hasil Audit=DEVIASI MURNI → baris SUSU + KOPI "
+          "t5/t8 (v3.14 V2: jendela KOPI jeda 3 hari kedaluwarsa)",
+          len(kids_f) == 3 and
+          {tree_in.set(k, "Nama Barang") for k in kids_f} ==
+          {"KOPI BUBUK 100G", "SUSU UHT 1L"},
           f"got {[(tree_in.set(k, 'Nama Barang')) for k in kids_f]}")
     iv._reset_filter_states()
     iv._refresh()
@@ -2766,8 +2786,9 @@ def main():
     check("(v3.8) Reset Selisih IN kembali ke 1–31",
           app.in_selisih_view.tgl_start_var.get() == "1")
     app.pivot_view._reset_filter()
-    check("(v3.8) Reset Pivot kembali ke -31–31",
-          app.pivot_view.tgl_start_var.get() == "-31")
+    check("(v3.8) Reset Pivot kembali ke -25–31 (T-7 — default jendela "
+          "audit kronologis 25•..31• + 1..31)",
+          app.pivot_view.tgl_start_var.get() == "-25")
 
     # (b) kolom tanggal pivot mode TANGGAL: -25..-31 lalu 1..3 (kronologis)
     #     — akar bug user "25, 26, lalu 1": rentang lama -26 memotong
@@ -2786,7 +2807,7 @@ def main():
     try:
         pv.data = test_df
         st = {"name_selected": None, "resto": "(All)", "source": "(All)",
-              "kategori": "(All)", "tgl_start": -31, "tgl_end": 31,
+              "kategori": "(All)", "tgl_start": -25, "tgl_end": 31,
               "mode": "tanggal", "hide_empty": False}
         payload = pv._compute_payload(st)
         want_cols = ["-25", "-26", "-27", "-28", "-29", "-30", "-31",
@@ -2795,11 +2816,16 @@ def main():
               "(bukan '25,26,lalu 1')",
               payload["columns"] == want_cols,
               f"got {payload['columns']}")
-        # rentang lama (-26) memang memotong — bukti akar masalah
+        # T-7 — rentang kini KRONOLOGIS: start -26 (hari 26•) memuat
+        # 26•..31• + 1..31 (dulu between numerik justru MEMASUKAN 25•
+        # yang lebih awal & MEMBUANG 27•..31• — akar bug "25,26,lalu 1")
         st_old = dict(st, tgl_start=-26)
         payload_old = pv._compute_payload(st_old)
-        check("(v3.8) Bukti akar bug: rentang lama -26 memotong -27..-31",
-              payload_old["columns"] == ["-25", "-26", "1", "2", "3", "4",
+        check("(v3.8) T-7 rentang kronologis: start -26 = hari 26• → "
+              "kolom 26•..31• + 1..5 (dulu numerik: 25• ikut terpakai "
+              "padahal lebih awal & 27•..31• terbuang)",
+              payload_old["columns"] == ["-26", "-27", "-28", "-29",
+                                         "-30", "-31", "1", "2", "3", "4",
                                          "5"],
               f"got {payload_old['columns']}")
     finally:
@@ -12721,20 +12747,20 @@ def main():
     _m63b, _l63b = _dlm63(_f63a, h=14)
     check("(v3.9.53) dev_lalu_qty_map h=14 → bulan TERBARU (9) + minggu "
           "cut-off 14 (nilai ASLI 14,0; bulan-8 & label WEEK 4 tak "
-          "terpakai)",
-          _m63b == {("MLGPAR", "CABE"): 14.0}
+          "terpakai; T-4 — kunci 3-tuple, file tanpa Satuan → '')",
+          _m63b == {("MLGPAR", "CABE", ""): 14.0}
           and _l63b == "WEEK 2 · 209.SEP 26",
           f"got {_m63b!r} / {_l63b!r}")
     _m63c, _l63c = _dlm63(_f63a, h=7)
     check("(v3.9.53) dev_lalu_qty_map h=7 → minggu WEEK 1 (7,0 — 'jika "
           "week 1 maka ambil data week 1 juga' v3.9.41)",
-          _m63c == {("MLGPAR", "CABE"): 7.0}
+          _m63c == {("MLGPAR", "CABE", ""): 7.0}
           and _l63c == "WEEK 1 · 209.SEP 26",
           f"got {_m63c!r} / {_l63c!r}")
     _m63d, _l63d = _dlm63(_f63a, h=None)
     check("(v3.9.53) dev_lalu_qty_map h=None → minggu TERAKHIR "
           "(penutupan bulan — kompatibilitas)",
-          _m63d == {("PWKTAM", "CABE"): 25.0}
+          _m63d == {("PWKTAM", "CABE", ""): 25.0}
           and _l63d == "WEEK 4 · 209.SEP 26",
           f"got {_m63d!r} / {_l63d!r}")
     _f63e = pd.DataFrame({
@@ -12748,8 +12774,8 @@ def main():
     })
     check("(v3.9.53) WEEK 3 & WEEK 4 sama-sama _h=25 → label minggu "
           "TERBESAR deterministik (WEEK 4; mirror audit 61-a/61-b)",
-          _dlm63(_f63e, h=25) == ({("MLGPAR", "CABE"): 34.0,
-                                   ("PWKTAM", "CABE"): 35.0},
+          _dlm63(_f63e, h=25) == ({("MLGPAR", "CABE", ""): 34.0,
+                                   ("PWKTAM", "CABE", ""): 35.0},
                                   "WEEK 4 · 209.SEP 26"),
           f"got {_dlm63(_f63e, h=25)}")
     _f63f = pd.DataFrame({
@@ -12761,9 +12787,9 @@ def main():
         "Minggu": ["WEEK 4", "WEEK 4"],
         "BULAN": ["209.SEP 26", "209.SEP 26"],
     })
-    check("(v3.9.53) Dedup (resto, bahan) keep-first (baris file ganda "
-          "minggu sama)",
-          _dlm63(_f63f, h=25)[0] == {("MLGPAR", "CABE"): 31.0},
+    check("(v3.9.53) Dedup (resto, bahan, satuan) keep-first (baris file "
+          "ganda minggu sama; T-4 — satuan masuk kunci)",
+          _dlm63(_f63f, h=25)[0] == {("MLGPAR", "CABE", ""): 31.0},
           f"got {_dlm63(_f63f, h=25)[0]!r}")
 
     # --- (b) round-trip FILE ASLI (parse_deviasi_file → map) ------------
@@ -12777,17 +12803,18 @@ def main():
     _m63f, _l63f = _dlm63(_r63["df"], h=14)
     check("(v3.9.53) File asli h=14 → minggu WEEK 2: (MLGPAR, AYAM "
           "FILET) = 113 NILAI ASLI (baris WEEK 1/SBYKET 49/74 & WEEK 4 "
-          "150 tak terpakai — persis kolom 'DEV Lalu' tab)",
-          _m63f == {("MLGPAR", "AYAM FILET"): 113.0}
+          "150 tak terpakai — persis kolom 'DEV Lalu' tab; T-4 — kunci "
+          "3-tuple ber-satuan)",
+          _m63f == {("MLGPAR", "AYAM FILET", "GR"): 113.0}
           and _l63f == "WEEK 2 · 201.OKT 26",
           f"got {_m63f!r} / {_l63f!r}")
     _m63g, _l63g = _dlm63(_r63["df"], h=7)
     check("(v3.9.53) File asli h=7 → WEEK 1: 3 pasangan (MLGPAR 49 · "
           "SBYKET 74 · XYZZZ 5) + BARANG TAK ADA 0",
-          _m63g == {("MLGPAR", "AYAM FILET"): 49.0,
-                    ("SBYKET", "AYAM FILET"): 74.0,
-                    ("XYZZZ", "AYAM FILET"): 5.0,
-                    ("MLGPAR", "BARANG TAK ADA"): 0.0},
+          _m63g == {("MLGPAR", "AYAM FILET", "GR"): 49.0,
+                    ("SBYKET", "AYAM FILET", "GR"): 74.0,
+                    ("XYZZZ", "AYAM FILET", "GR"): 5.0,
+                    ("MLGPAR", "BARANG TAK ADA", "GR"): 0.0},
           f"got {_m63g!r}")
 
     # --- (c) SharedPivotCache: identitas FILE = bagian kunci ------------
@@ -19821,18 +19848,22 @@ def main():
     _v86.saldo_sistem_map = {}
 
     # -- (e) catatan audit: label tanggal bulan-lalu --------------------
-    # v3.11.5 — rumus lama BM−IN: BM −26 = 100 (sel +100) lalu IN t1 = 100
-    # tanpa BM (sel −100) → saldo kembali 0 → CUT-OFF "Periode Tgl 26• - 1"
-    # (dulu basis ΔSO: ΔSO −26 +100 / t1 −100 — SO rows kini display-only).
+    # v3.14 — engine V2 (MAX_CUTOFF_DAYS=1): jendela lintas bulan yang
+    # tetap resolve = penutupan bulan lalu (31•) → tgl 1 (jeda KRONOLOGIS
+    # lintas bulan ≤ 1 hari; 25•/26• → 1 = 5-6 hari → kedaluwarsa).
+    # BM −31• +100 lalu IN t1 −100 → resolve "Periode Tgl 31• - 1"
+    # (rumus BM−IN v3.11.5 — SO rows display-only).
     _rs87 = pd.DataFrame([
         {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
          "Tanggal": -25, "SATUAN": "GR", "Value": 100.0},
         {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
          "Tanggal": -26, "SATUAN": "GR", "Value": 200.0},
         {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
+         "Tanggal": -31, "SATUAN": "GR", "Value": 300.0},
+        {"NAMA RESTO": "R1", "Nama Barang": "BRG", "JENIS": "SO",
          "Tanggal": 1, "SATUAN": "GR", "Value": 100.0},
         {"NAMA RESTO": "R1", "Nama Barang": "BRG",
-         "JENIS": "BARANG MASUK", "Tanggal": -26, "SATUAN": "GR",
+         "JENIS": "BARANG MASUK", "Tanggal": -31, "SATUAN": "GR",
          "Value": 100.0},
     ])
     _det87b = pd.DataFrame([
@@ -19844,10 +19875,11 @@ def main():
     _aud87, _kpi87, _ = _baf37(_rs87, _det87b)
     _notes87 = " | ".join(
         _aud87["Detail & Catatan Audit"].astype(str).tolist())
-    check("(v3.11.1) Catatan audit: tanggal bulan-lalu ber-label '26•' "
-          "(\"Periode Tgl 26• - 1\" — dulu 'Periode Tgl -26 - 1' angka "
-          "minus mentah tak terbaca)",
-          "Periode Tgl 26• - 1" in _notes87,
+    check("(v3.11.1) Catatan audit: tanggal bulan-lalu ber-label '31•' "
+          "(\"Periode Tgl 31• - 1\" — dulu 'Periode Tgl -31 - 1' angka "
+          "minus mentah tak terbaca; v3.14 V2: jeda kronologis 31•→1 = "
+          "≤1 hari → jendela lintas bulan tetap resolve)",
+          "Periode Tgl 31• - 1" in _notes87,
           f"got {_notes87!r}")
 
     # -- (f) sort race: sort#2 saat batch sort#1 masih in-flight ---------
