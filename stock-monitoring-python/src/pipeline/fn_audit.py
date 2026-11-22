@@ -76,7 +76,9 @@ import pandas as pd
 
 from .helpers import (
     norm_nama_barang_key,
+    norm_nama_barang_key_series,
     norm_nama_resto_key,
+    norm_nama_resto_key_series,
     resto_from_cabang_po,
     stop_check,
 )
@@ -97,6 +99,16 @@ def _agg_sum(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
     d["Tanggal"] = pd.to_numeric(d["Tanggal"], errors="coerce")
     d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
     d = d.dropna(subset=_KEY_COLS)
+    # FIX T-1 (bug hunt 1-a): kunci pasangan DINORMALISASI kanonik (UPPER
+    # + rapat-spasi utk Nama Barang; UPPER + segmen setelah titik utk NAMA
+    # RESTO — paritas append1 v3.11.10 & kunci map saldo_awal/bk/PO/kode
+    # dokumen fn_audit v3.11.34/35) SEBELUM groupby + merge
+    # build_audit_input: rekap mentah (SO/BM) dan detail IN
+    # (42.05/32.24/99.01) berasal dari file BERBEDA — drift case/
+    # whitespace ejaan membuat merge keys MISS senyap → baris pasangan
+    # ±deviasi palsu (SO/BM tanpa IN + IN tanpa SO/BM).
+    d["NAMA RESTO"] = norm_nama_resto_key_series(d["NAMA RESTO"])
+    d["Nama Barang"] = norm_nama_barang_key_series(d["Nama Barang"])
     return d.groupby(_KEY_COLS, as_index=False, dropna=False)[value_col].sum()
 
 
@@ -537,7 +549,11 @@ def build_audit_rekap(df: pd.DataFrame,
         for j in range(first_row, last_row + 1):
             if status[j] != "":
                 continue
-            if selisih[j] != 0.0:
+            # FIX S-12 (bug hunt 1-a): tes nol selisih baris memakai
+            # toleransi _EPS — paritas pembuka jendela abs(sel_val) < _EPS
+            # di loop utama (dulu != 0.0 eksak di sini → residu floating
+            # dihitung sbg baris deviasi/pending di dalam rentang).
+            if abs(selisih[j]) >= _EPS:
                 if pending:
                     status[j] = ST_PENDING
                     detail[j] = (f"Saldo rentang {_fmt_signed(net_range)} "
@@ -719,7 +735,9 @@ def build_audit_rekap(df: pd.DataFrame,
                             f"cut-off; perlu rekonsiliasi manual")
                     for j in range(start_idx, i + 1):
                         if status[j] == "":
-                            if selisih[j] != 0.0:
+                            # FIX S-12 (bug hunt 1-a): toleransi _EPS —
+                            # paritas _tandai_rentang/pembuka jendela.
+                            if abs(selisih[j]) >= _EPS:
                                 status[j] = ST_CUTOFF
                                 detail[j] = range_text + overall_text
                                 kpi["cutoff"] += 1
@@ -1211,7 +1229,13 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
             _k = (_r, _b)
             _d = int(_t)
             _prev = so_lalu_map.get(_k)
-            if _prev is None or _d > _prev[0]:
+            # FIX K-1 (bug hunt 1-a): hari bulan lalu NEGATIF — hari
+            # kronologis TERAKHIR = nilai numerik TERKECIL (31• = -31 <
+            # -25 = 25•); dulu '>' menyimpan hari numerik TERBESAR (25• =
+            # TERAWAL) → baseline tgl-1 salah jangkar (deviasi phantom +
+            # review palsu; entri map juga MENIMPA fallback so_at tgl
+            # len_lalu yang benar).
+            if _prev is None or _d < _prev[0]:
                 so_lalu_map[_k] = (_d, float(_s))
 
     if not bulan_lalu:
