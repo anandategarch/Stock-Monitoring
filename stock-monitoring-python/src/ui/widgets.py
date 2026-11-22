@@ -5171,6 +5171,16 @@ def sort_tree_by_column(tree: ttk.Treeview, col: str, reverse: bool = True,
             # sort (perilaku lama utk kolom teks).
             s = str(s).replace("%", "").replace("—", "") \
                 .replace("Rp", "").strip()
+            # v3.14.1 — FIX L-7 (audit): penanda bulan-lalu '•' pada label
+            # tanggal ('25•' — konvensi pivot/in_selisih/details_popup)
+            # dibuang utk PERBANDINGAN (tampilan tak berubah). Dulu
+            # float('25•') ValueError → SATU sel '•' menjatuhkan seluruh
+            # kolom ke fallback natural teks ('25•' vs '25' terurut beda
+            # + semua tetangga kehilangan sort numerik). Strip → '25•'
+            # ter-parse 25 (paritas '—'/'%' yang sudah dibuang di atas;
+            # parser KRONOLOGIS khusus kolom Tanggal tetap milik view —
+            # in_selisih._parse_tgl_chrono).
+            s = s.replace("•", "").strip()
             if s in ("-", ""):
                 return 0
             neg = s.startswith("(") and s.endswith(")")

@@ -38,6 +38,7 @@ Fitur pelengkap (ide E-K):
   v3.11.40 tab 📦/🧩)
 """
 import contextlib
+import os
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
@@ -923,7 +924,25 @@ class SaldoMinusView(tk.Frame):
             col_order = [c[0] for c in MINUS_COLUMNS
                          if c[0] in df.columns]
             df = df[col_order]
-            df.to_excel(path, index=False, sheet_name="Saldo Minus")
+            # v3.14.1 — FIX S-19: tulis ATOMIK (tmp + os.replace — pola
+            # 2f-04/6a-02 app._export_excel / export_sheets / in_selisih).
+            # df.to_excel(path) dulu menulis LANGSUNG ke path tujuan →
+            # exception di tengah (disk penuh / file terkunci) meninggal-
+            # kan .xlsx PARSIAL/KORUP yang MENIMPA export LAMA yang baik
+            # di path sama. Kini file tujuan hanya tersentuh os.replace()
+            # atomik SETELAH sukses penuh; kegagalan (finally) menghapus
+            # tmp (tmp ber-ekstensi .xlsx — pandas to_excel menolak
+            # ekstensi non-Excel).
+            tmp_path = path + ".tmp.xlsx"
+            _ok = False
+            try:
+                df.to_excel(tmp_path, index=False, sheet_name="Saldo Minus")
+                os.replace(tmp_path, path)
+                _ok = True
+            finally:
+                if not _ok:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp_path)
             self.status_var.set(f"💾 Export: {path}")
         except Exception as exc:  # noqa: BLE001 — export I/O
             messagebox.showerror("Export Gagal", str(exc),

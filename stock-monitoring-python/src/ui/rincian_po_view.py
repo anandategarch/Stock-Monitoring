@@ -681,14 +681,34 @@ class RincianPoView(tk.Frame):
         # baris TELUR lenyap, hitungan "dari N" jadi membingungkan).
         # Kini tetap tampil sebagai grup "(Tanpa Nomor)" dan ikut
         # terhitung di po_count/item_count/total_qty.
-        for nomor, group in df_sorted.groupby("Nomor #", sort=False,
+        # v3.14.1 — FIX S-17 (audit): groupby(dropna=False) melebur SEMUA
+        # baris tanpa nomor jadi SATU grup — beberapa PO berbeda tampil
+        # seolah SATU PO (tanggal/pemasok/status dari baris pertama +
+        # "N item · Total qty" GABUNGAN menyesatkan audit). Kini tiap
+        # baris tanpa nomor = grup SENDIRI ber-label "(Tanpa Nomor) #1",
+        # "#2", … (urut kemunculan); PO ber-nomor tetap satu grup utuh
+        # per nomor (perilaku lama). Kunci sentinel unik per baris —
+        # nilai "Nomor #" asli tak tersentuh.
+        _grp = df_sorted["Nomor #"].copy()
+        _label_tanpa: dict = {}
+        _blank = (_grp.isna()
+                  | (_grp.astype(str).str.strip() == ""))
+        for _i in _grp.index[_blank]:
+            _n = len(_label_tanpa) + 1
+            _sent = f"__TANPA_NOMOR__{_n}"
+            _grp.loc[_i] = _sent
+            _label_tanpa[_sent] = f"(Tanpa Nomor) #{_n}"
+        for nomor, group in df_sorted.groupby(_grp, sort=False,
                                               dropna=False):
             # v3.11.59 — label tampilan utk grup tanpa nomor (str(nan)
             # = "nan" tak informatif). Kolom baris induk LAIN aman: Tanggal
             # NaT-safe (_fmt_date), Kuantitas sum() tak pernah NaN, dan
             # _fmt_num/_fmt_qty sudah NA-safe.
-            nomor_txt = ("(Tanpa Nomor)" if pd.isna(nomor)
-                         else str(nomor))
+            # v3.14.1 — FIX S-17: grup sentinel → label "(Tanpa Nomor) #N"
+            # (peta di atas); nomor asli str() apa adanya.
+            nomor_txt = (_label_tanpa.get(nomor)
+                         or ("(Tanpa Nomor)" if pd.isna(nomor)
+                             else str(nomor)))
             po_count += 1
             n_items = len(group)
             po_qty = (group["Kuantitas"].sum()

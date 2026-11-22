@@ -1868,8 +1868,19 @@ class InSelisihView(tk.Frame):
         # basis_v310=False → jalur narasi lama "IN a > BM b" (BM kembali
         # jadi basis); cabang ΔSO hanya utk kompatibilitas basis
         # v3.10..3.11.4 bila dipakai lagi.
-        bm = pd.to_numeric(out["Barang Masuk"], errors="coerce") \
-            .fillna(0).to_numpy(dtype="float64")
+        bm_raw = pd.to_numeric(out["Barang Masuk"], errors="coerce")
+        bm = bm_raw.fillna(0).to_numpy(dtype="float64")
+        # v3.14.1 — FIX S-20 (audit): B4 ("BM 0 padahal IN … (input rekap
+        # belum diisi)") hanya bila data BM (penerimaan rekap) ADA di
+        # cakupan tabel. Kolom "Barang Masuk" ALL-NaN = sumber rekap BM
+        # tidak ada/tak terbaca sama sekali (bm_agg kosong di
+        # build_audit_input / format audit lama tanpa kolom BM) — BM TIDAK
+        # DIKETAHUI, bukan 0: dulu fillna(0) menyamarkan absennya data →
+        # SEMUA baris ber-IN dituduh "input rekap belum diisi" (false
+        # positive). Baris per-baris NaN tetap sah didiagnosis B4 bila
+        # kolom punya ≥1 nilai tercatat (rekap BM ada utk pasangan/tanggal
+        # lain — baris ini memang belum diisi).
+        _bm_ada = bool(bm_raw.notna().any())
         ins = pd.to_numeric(out["IN"], errors="coerce") \
             .fillna(0).to_numpy(dtype="float64")
         sel = pd.to_numeric(out["Selisih IN"], errors="coerce") \
@@ -1910,7 +1921,7 @@ class InSelisihView(tk.Frame):
                 _add(r, t, b,
                      "SO belum direkam (ΔSO tak diketahui — selisih "
                      "menunggu input SO)")
-            if bm[i] == 0 and ins[i] > 0:
+            if _bm_ada and bm[i] == 0 and ins[i] > 0:
                 _add(r, t, b,
                      f"BM 0 padahal IN {_fmt_num(ins[i])} "
                      f"(input rekap belum diisi)")

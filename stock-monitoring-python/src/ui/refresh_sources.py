@@ -7,7 +7,10 @@ refresh semua tapi".
 - List SEMUA file Excel sumber pipeline (folder Folders + RootPath utk
   workbook gabungan rekap) dgn checkbox per file.
 - Default tercentang = file yang BERUBAH sejak proses terakhir (mtime >
-  waktu pipeline terakhir selesai) — sisanya tidak dibaca ulang.
+  waktu pipeline terakhir MULAI — v3.14.1 FIX S-18: basis waktu MULAI,
+  bukan waktu selesai, supaya file yang berubah DI TENGAH run — dibaca
+  versi lamanya, mtime < waktu selesai — tetap tertandai "berubah") —
+  sisanya tidak dibaca ulang.
 - "↻ Refresh Terpilih" → hanya file tercentang dibaca ulang dari disk
   (entry cache bacaan file lain tetap dipakai — invalidasi selektif
   lewat helpers.read_cache_invalidate(paths)).
@@ -63,8 +66,12 @@ class RefreshSourcesDialog(tk.Toplevel):
     Parameter:
     - config: objek src.config.Config (RootPath + Folders dipakai utk
       memindai file sumber).
-    - last_run_at: waktu (time.time()) pipeline TERAKHIR selesai — file
+    - last_run_at: waktu (time.time()) pipeline TERAKHIR DIMULAI — file
       dengan mtime > last_run_at dianggap BERUBAH (tercentang default).
+      Basis waktu MULAI (v3.14.1 FIX S-18): file yang berubah DI TENGAH
+      run terbaca versi lamanya (mtime < waktu selesai) — basis waktu
+      selesai melewatkannya senyap (data tampil belum memuat revisinya
+      padahal tak ditandai "berubah").
       None = belum pernah run (tak ada yang tercentang default).
     - on_refresh: callback(paths) — None = refresh SEMUA (buang seluruh
       cache), list[str] = refresh file terpilih tersebut.

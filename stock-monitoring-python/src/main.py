@@ -35,6 +35,23 @@ from src.pipeline.helpers import (norm_nama_barang_key,
 from src.pipeline.rincian_po import build_rincian_po
 
 
+# v3.14.1 — FIX L-6 (audit): format angka gaya INDONESIA (1.234.567) utk
+# log verbose pipeline — paritas fmt_int_id src/ui/widgets.py (UI tak
+# boleh di-import dari pipeline — helper lokal 3 baris, logika identik).
+# Dulu grouping EN "1,234" di log yang SAMA (stdout pipeline dialihkan
+# ke log tab 🚀 Proses app) dengan pasangan ID "1.234" dari app
+# (FIX C-03/6a-05: "Audit Rekonsiliasi: … OK 1.234") — nilai identik
+# tampil dua format berbeda satu layar; koma = DESIMAL di konvensi
+# Indonesia → "2,150" bisa salah dibaca 2,15.
+def _fmt_int_id(v) -> str:
+    """Integer gaya Indonesia — 1.234.567 (bukan 1,234,567)."""
+    try:
+        n = round(float(v))
+    except (TypeError, ValueError):
+        return str(v)
+    return f"{n:,}".replace(",", ".")
+
+
 def _extract_append1_maps(append1_df: "pd.DataFrame | None") -> "tuple[dict, dict]":
     """v3.10 — peta SALDO AWAL & BARANG KELUAR dari output append1
     (format long JENIS/NILAI) utk basis "SO kemarin" + kolom COM audit:
@@ -278,7 +295,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     month_len, lalu_month_len = month_lengths(period)
     if verbose:
         print(f"  Basis selisih v3.10: SO kemarin (ΔSO − IN) · "
-              f"SA {len(saldo_awal_map):,} pasangan · BK {len(bk_map):,} "
+              f"SA {_fmt_int_id(len(saldo_awal_map))} pasangan · "
+              f"BK {_fmt_int_id(len(bk_map))} "
               f"baris · periode {period[0]:04d}-{period[1]:02d} "
               f"({month_len} hari; lalu {lalu_month_len} hari)")
 
@@ -378,7 +396,8 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
     audit_result["konversi_map"] = konversi_holder.get("map")
     if verbose and audit_result["harga_map"]:
         _nh = len(audit_result["harga_map"])
-        print(f"  Harga 41.09 (v3.9.32): {_nh:,} barang — mode Nominal "
+        print(f"  Harga 41.09 (v3.9.32): {_fmt_int_id(_nh)} barang — mode "
+              f"Nominal "
               f"(H) siap (Harga × Qty Deviasi)")
     if verbose:
         n_neg = (pd.to_numeric(audit_df["Tanggal"], errors="coerce") < 0
@@ -392,20 +411,21 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
 
     if verbose:
         k = audit_kpi
-        print(f"  Audit: {len(audit_df)} rows | OK {k['ok']:,} | "
-              f"Cut-off {k['cutoff']:,} | Valid {k['omit']:,} | "
-              f"Deviasi Murni {k['deviasi_murni']:,} | "
-              f"Sisa Gantung {k['deviasi_qty']:,.0f}")
+        print(f"  Audit: {len(audit_df)} rows | OK {_fmt_int_id(k['ok'])} | "
+              f"Cut-off {_fmt_int_id(k['cutoff'])} | "
+              f"Valid {_fmt_int_id(k['omit'])} | "
+              f"Deviasi Murni {_fmt_int_id(k['deviasi_murni'])} | "
+              f"Sisa Gantung {_fmt_int_id(k['deviasi_qty'])}")
         if k.get("dev_murni_po", 0):
             print(f"  Deviasi Murni ber-PO Menunggu (v3.9.30): "
-                  f"{k['dev_murni_po']:,} baris — explainable, "
+                  f"{_fmt_int_id(k['dev_murni_po'])} baris — explainable, "
                   f"sisanya perlu audit fisik")
         _km31 = konversi_holder.get("map") or {}
         if _km31.get("n_rasio"):
             print(f"  Konversi satuan PO (v3.9.31): peta "
-                  f"{_km31['n_rasio']:,} rasio / "
-                  f"{_km31['n_barang']:,} barang — qty PO Menunggu "
-                  f"tampil satuan terkecil")
+                  f"{_fmt_int_id(_km31['n_rasio'])} rasio / "
+                  f"{_fmt_int_id(_km31['n_barang'])} barang — qty PO "
+                  f"Menunggu tampil satuan terkecil")
 
     elapsed = time.time() - start_time
     if verbose:
