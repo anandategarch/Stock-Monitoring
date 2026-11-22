@@ -96,8 +96,10 @@ from .followup import CHECK_OFF, CHECK_ON, FollowUpStore, row_fingerprint
 from .nominal_common import (  # v3.9.34 — Nominal; v3.9.51 — Rp; v3.9.53 — lalu file
     _norm_name_lalu,  # v3.9.53 — kunci pasangan file deviasi (mirror komparasi)
     _norm_resto_lalu,  # v3.9.53 — idem (sisi resto)
+    _norm_sat_lalu,  # T-4 FIX — idem (sisi satuan — kunci 3-tuple)
     dev_lalu_qty_map,  # v3.9.53 — Dev. Bulan Lalu kuantiti dari FILE deviasi
     fmt_rp_cell,
+    lalu_fallback_keys,  # T-4 FALLBACK — pasangan satu-satuan utk drift satuan
     lookup_harga_pair,
 )
 from .po_keterangan import (  # v3.11 — keterangan PO "Potensi PO belum
@@ -2896,8 +2898,9 @@ class DeviasiView(tk.Frame):
         yang dicapture worker) — default membaca self.* (kompatibel
         pemanggilan lama/test).
 
-        v3.9.53 — lalu_map/lalu_label: peta {(resto_norm, bahan_norm):
-        qty} + label 'WEEK n · <bulan>' dari FILE deviasi (dibangun work()
+        v3.9.53 — lalu_map/lalu_label: peta {(resto_norm, bahan_norm,
+        satuan_norm): qty} + label 'WEEK n · <bulan>' dari FILE deviasi
+        (dibangun work()
         via dev_lalu_qty_map sekali per job — pivot di-cache ber-identitas
         file). None/{} = tanpa file → kolom Dev. Bulan Lalu semua NaN
         (tampil '-')."""
@@ -3178,7 +3181,9 @@ class DeviasiView(tk.Frame):
         # — Sistem = saldo t=1 juga (Deviasi = SO_H − saldo). Pasangan
         # BER baris saldo di H (AYAM-style) tetap jalur normal — nilai
         # tabel tak berubah (regresi diuji /tmp).
-        _sistem_t1 = arr("2.SALDO AKHIR", 1)
+        # T-3 FIX — fallback kini = saldo t=1 + Σ mutasi (IN − OUT − BK)
+        # tanggal 2..H (lihat blok _saldo_only_rows di bawah); dulu CUMA
+        # saldo t=1 → SEMUA mutasi setelah t=1 diabaikan.
         _saldo_h_pairs = pd.Index(_pair_key[
             (df["JENIS"] == "2.SALDO AKHIR") & (tnum == h)].unique())
         _pk_pivot = (pivot["Nama Barang"].astype(str) + "\x1f"
@@ -3214,7 +3219,47 @@ class DeviasiView(tk.Frame):
         _saldo_only_rows = ~(_pk_pivot.isin(_window_pairs)
                              & _pk_pivot.isin(_saldo_h_pairs)).to_numpy()
         if _saldo_only_rows.any():
-            sistem = np.where(_saldo_only_rows, _sistem_t1, sistem)
+            # T-3 FIX — fallback pasangan TANPA baris '2.SALDO AKHIR' di
+            # H: saldo t=1 + Σ mutasi (IN − OUT − BK) tanggal 2..H per
+            # (pasangan, satuan) — konsisten rumus running-stock pipeline
+            # (SALDO AKHIR = saldo_awal + cumsum mutasi; dulu CUMA saldo
+            # t=1 → mutasi setelah t=1 diabaikan, mis. saldo 42.17 t=1
+            # + IN t=5). Dihitung dari df PENUH, bukan pivot: window pivot
+            # hanya H±2 (mutasi 2..H−3 tak pernah masuk pivot) & baris
+            # saldo t=1 hanya di-pull utk pasangan NON-window (pasangan
+            # window H>3 ber-basis 0 di pivot). Join key-frame = pola
+            # blok Total ACR di bawah; pasangan tanpa mutasi setelah t=1
+            # → nilai saldo t=1 persis perilaku lama (regresi §44/§55).
+            _is_sa1 = ((df["JENIS"] == "2.SALDO AKHIR") & (tnum == 1))
+            _is_mov = (df["JENIS"].isin(("4.IN", "9.ACR",
+                                         "8.BARANG KELUAR"))
+                       & (tnum > 1) & (tnum <= h))
+            _fb_mask = (_is_sa1 | _is_mov).fillna(False).to_numpy(
+                dtype=bool)
+            _fb_src = df[_fb_mask]
+            if _fb_src.empty:
+                _sistem_fb = np.zeros(n, dtype="float64")
+            else:
+                _fb_sign = np.where(
+                    (_fb_src["JENIS"] == "4.IN").to_numpy()
+                    | (_fb_src["JENIS"] == "2.SALDO AKHIR").to_numpy(),
+                    1.0, -1.0)
+                _fb_sum = _fb_src.assign(
+                    _v=_fb_sign * pd.to_numeric(
+                        _fb_src["NILAI"], errors="coerce").fillna(0.0)
+                    .to_numpy(dtype="float64"),
+                    SATUAN=_fb_src["SATUAN"].fillna(""),
+                ).groupby(["Nama Barang", "NAMA RESTO", "SATUAN"],
+                          as_index=False, dropna=False)["_v"].sum()
+                _fb = pd.DataFrame({
+                    "Nama Barang": pivot["Nama Barang"].to_numpy(),
+                    "NAMA RESTO": pivot["NAMA RESTO"].to_numpy(),
+                    "SATUAN": pivot["SATUAN"].to_numpy(),
+                }).merge(_fb_sum, on=["Nama Barang", "NAMA RESTO",
+                                      "SATUAN"], how="left")
+                _sistem_fb = _fb["_v"].fillna(0.0).to_numpy(
+                    dtype="float64")
+            sistem = np.where(_saldo_only_rows, _sistem_fb, sistem)
 
         # v3.11 — SALDO SISTEM dari file 42.17 folder '6. 42.17' (format
         # sama dgn saldo awal; user: "harusnya khusus saldo sistem di
@@ -3274,16 +3319,33 @@ class DeviasiView(tk.Frame):
         # → DIGANTI sumber file. NaN = pasangan tanpa file/tanpa baris
         # pembanding (tampil '-'); ABSOLUTE dipakai HANYA klasifikasi
         # ANALISA CEK lalu→kini di bawah (|kini| vs |lalu|). Kunci pasangan
-        # (resto_norm, bahan_norm) — mirror normalisasi join komparasi;
-        # satuan pasangan konstan, GR/PCS dipisah di _prepare_rows per tab.
+        # (resto_norm, bahan_norm, satuan_norm) — mirror normalisasi join
+        # komparasi; T-4 FIX — satuan masuk kunci (barang dua-satuan GR+PCS
+        # dulu SATU entri: tab GR & tab PCS sama-sama menampilkan qty
+        # satuan pertama — salah satuan; kini per-satuan).
         if lalu_map:
-            _lkey53 = (pivot["NAMA RESTO"].astype(str)
-                       .map(_norm_resto_lalu) + "\x1f"
-                       + pivot["Nama Barang"].astype(str)
-                       .map(_norm_name_lalu))
-            _lmap53 = {f"{r}\x1f{b}": q
-                       for (r, b), q in lalu_map.items()}
+            _r53 = pivot["NAMA RESTO"].astype(str).map(_norm_resto_lalu)
+            _b53 = pivot["Nama Barang"].astype(str).map(_norm_name_lalu)
+            _s53 = pivot["SATUAN"].astype(str).map(_norm_sat_lalu)
+            _lkey53 = _r53 + "\x1f" + _b53 + "\x1f" + _s53
+            _lmap53 = {f"{r}\x1f{b}\x1f{s}": q
+                       for (r, b, s), q in lalu_map.items()}
             dev_lalu = _lkey53.map(_lmap53).to_numpy(dtype="float64")
+            # T-4 FALLBACK — baris yang MISS kunci eksak satuan dicoba
+            # lagi kunci (resto, barang) HANYA bila file punya PERSIS
+            # SATU satuan utk pasangan itu (drift rename satuan file↔
+            # sekarang mis. KG↔GR, atau file TANPA kolom Satuan → semua
+            # ''; pasangan multi-satuan = ambigu → tanpa fallback).
+            _miss53 = np.isnan(dev_lalu)
+            if _miss53.any():
+                _fb_ok53 = lalu_fallback_keys(lalu_map.keys())
+                _fb53 = {f"{r}\x1f{b}": q
+                         for (r, b, s), q in lalu_map.items()
+                         if (r, b) in _fb_ok53}
+                if _fb53:
+                    _dev_fb53 = (_r53 + "\x1f" + _b53).map(_fb53)\
+                        .to_numpy(dtype="float64")
+                    dev_lalu[_miss53] = _dev_fb53[_miss53]
         else:
             dev_lalu = np.full(n, np.nan, dtype="float64")
 
@@ -3378,7 +3440,15 @@ class DeviasiView(tk.Frame):
         # mengubah ambang Drastis). Beda Tanggal kini MURNI cabang-1
         # sheet: IN masuk tapi SO malah TURUN tanpa kiriman keluar
         # (pemakaian/penjualan TIDAK disyaratkan — port persis sheet).
-        cond_tanggal = ((in_h > 0) & (so_h < so_m1) & (bk_h == 0))
+        # S-10 FIX — SO TAK DIINPUT ≠ SO TERCATAT 0: 'Beda Tanggal' &
+        # 'Hitung Manual' hanya bila baris 1.SO ADA di H (_so_h_rec —
+        # pola cond_hilang/cond_drastis_norec). SO H hilang → pivot
+        # fill-0 membuat so_h=0 PALSU (turun/rasio sampah) → serahkan ke
+        # label missing-SO yg sesuai ('Turun Drastis (SO Tidak
+        # Diinput)' bila pola turunnya terpenuhi) / CEK kosong, bukan
+        # label pola-angka sheet.
+        cond_tanggal = ((in_h > 0) & (so_h < so_m1) & (bk_h == 0)
+                        & _so_h_rec)
 
         # v3.9.27 — kondisi 3 "Hitung Manual": STOK kini = W sheet
         # (= Stok Seharusnya): W = F + I − J − S = SO(H-1) + IN_H −
@@ -3396,8 +3466,10 @@ class DeviasiView(tk.Frame):
         # hardcoded 1.3 — ambang sel Y1 sheet user): SharedManualAmbang —
         # spinbox kartu Filter + kartu pra-pipeline tab Proses + persist
         # settings.json (default 1.3 = perilaku lama PERSIS).
-        cond_manual = np.where(stok == 0, so_h != 0,
-                               ratio > float(self.manual_ratio))
+        # S-10 FIX — mirror guard cond_tanggal: rasio/stok-W hanya
+        # bermakna bila SO H TERCATAT (_so_h_rec).
+        cond_manual = _so_h_rec & np.where(
+            stok == 0, so_h != 0, ratio > float(self.manual_ratio))
 
         with np.errstate(divide="ignore", invalid="ignore"):
             drop_ratio = np.divide(
@@ -4994,7 +5066,13 @@ class DeviasiView(tk.Frame):
         if _snap is not None:
             nama_barang = _snap.get("barang") or row_data.get("Nama Barang")
             nama_resto = _snap.get("resto") or row_data.get("Resto")
-            satuan = _snap.get("satuan") or row_data.get("Satuan")
+            # T-2 FIX — satuan "" (baris pivot satuan-NaN, pasangan
+            # IN-only) dinormalisasi ke None: popup memakai None = TANPA
+            # filter satuan; "" lolos guard `is not None` di popup tapi
+            # tak pernah cocok di mask SATUAN (NaN → astype(str) 'nan' ≠
+            # '') → popup KOSONG utk baris itu.
+            satuan = (_snap.get("satuan") or row_data.get("Satuan")
+                      or None)
         else:
             nama_barang = row_data.get("Nama Barang")
             nama_resto = row_data.get("Resto")
@@ -5107,6 +5185,12 @@ class DeviasiView(tk.Frame):
             val = float(val)
         except (TypeError, ValueError):
             return str(val)
+        # L-1 FIX — nilai nyaris-nol: |persen| di bawah ambang tampil
+        # 2-desimal (< 0,005) → 0.0 dulu — minus mungil (mis. deviasi
+        # -0,0001 vs ACR besar → persen -0,0001) jangan tampil artefak
+        # negatif-nol '(0,00)%'; nilai data TIDAK disentuh (display-only).
+        if abs(val * 100.0) < 0.005:
+            val = 0.0
         if val == 0:
             return "0,00%"
         s = f"{val * 100:,.2f}".replace(",", "\u00a0").replace(

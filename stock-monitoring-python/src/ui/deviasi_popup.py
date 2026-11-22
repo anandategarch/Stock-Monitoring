@@ -1100,6 +1100,14 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         return empty
 
     df = data
+    # T-2 FIX — normalisasi sentinel satuan: "" (baris pivot satuan-NaN /
+    # sel tree kosong, pasangan IN-only) ≡ None = TANPA filter satuan.
+    # Sebelumnya "" lolos guard `is not None` di mask SATUAN & helper
+    # satuan-scoped (COM/ACR/Avg/presence) lalu _col_code_mask(df,
+    # "SATUAN", "") tak pernah cocok (SATUAN NaN → astype(str) 'nan') →
+    # popup KOSONG utk baris itu; normalisasi di sini menjaga SEMUA
+    # lookup satuan fungsi ini konsisten.
+    satuan = satuan or None
     # FIX 6e-PERF — mask pasangan via kode factorize astype(str) (cache
     # per identitas df; IDENTIK hasil mask versi lama — objek == full-
     # frame × 3 + astype × 3 per popup diganti kode int ≈ 0,1 ms).
