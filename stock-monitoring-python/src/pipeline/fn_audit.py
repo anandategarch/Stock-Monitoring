@@ -1,14 +1,47 @@
 """
 fn_audit.py — Audit rekonsiliasi BM resto vs penerimaan sistem (port engine VBA).
 
+v3.14.0 — ENGINE AUDIT V2 (adaptasi macro VBA user
+"modRekapSelisihIN_RULE_ENGINE_V2_FIX_FORMATSTATUS.bas" — user: "cek
+logika rekap selisih ini ... kayaknya logika VBA tersebut lebih kuat
+untuk analisa nya jadi adaptasi logika nya ya cuman jangan rubah
+struktur output kolom nya") — port JalankanAuditV2 + TandaiRentangTerbuka
+KE build_audit_rekap (struktur kolom output TIDAK berubah):
+- CUT-OFF MAKSIMAL 1 HARI (MAX_CUTOFF_DAYS): rentang selisih yang belum
+  kembali nol saat datang hari aktivitas > 1 hari setelah rentang dibuka
+  LANGSUNG ditutup sebagai DEVIASI MURNI (tidak lagi menunggu akhir
+  grup — IN yang datang terlambat tidak bisa meretro-aktif "resolve"
+  deviasi lama; rentang BARU dimulai dari baris itu).
+- PENDING CUT-OFF: rentang yang masih terbuka di akhir grup DAN berumur
+  ≤ 1 hari dari hari referensi (bulan berjalan = hari ini; bulan
+  tertutup = seluruh rentang akhir langsung DEVIASI MURNI).
+- NO MOVEMENT - OPEN BALANCE: baris tanpa selisih baru tetapi masih ada
+  saldo terbuka (menggantikan status "OK" pada baris nol di rentang
+  gantung — kini jujur bahwa saldo belum pulih).
+- VALID (Sistem Masuk) diverifikasi KETAT (bukan sekadar "SO naik"):
+  kandidat BM=0 & IN>0 wajib (1) SO hari ini tercatat, (2) baseline SO
+  tersedia — tgl 1: SO penutupan bulan lalu HARI TERAKHIR saja (tgl
+  len_lalu), tgl lain: SO yang TERCATAT persis di hari kalender
+  sebelumnya (bukan baris sebelumnya / ffill), (3) ΔSO > 0, (4) ΔSO =
+  IN (toleransi 0.0001), (5) tidak ada rentang/saldo terbuka. Gagal
+  verifikasi → baris tetap diakumulasi NORMAL + catatan PERLU REVIEW
+  spesifik (mirror teks VBA).
+- PERLU REVIEW: catatan review per baris digabung ke 'Detail & Catatan
+  Audit' dengan format VBA BuildKeterangan ("PERLU REVIEW | alasan |
+  Klasifikasi: status | detail engine") — termasuk review rentang yang
+  kembali neto-nol tapi saldo pasangan belum pulih.
+- Jeda "Beda N Hari" kini dihitung KRONOLOGIS lintas bulan (25• → 1 =
+  1 hari; dulu abs(numerik) = 32 — salah arah di rentang lintas batas
+  bulan pada mode 📆 Lalu + Ini).
+
 build_audit_input — 10 kolom kanonik dari data app: Hasil SO ← rekap 'SO';
 Qty SO Harian ← rekap 'BARANG MASUK' (BM); Qty SJ ← IN 42.05; Qty RI ← 32.24
 (keduanya + varian Bulan Lalu); Qty Pembelian ← IN 99.01. Baris = union
 tanggal ber-aktivitas, urut kronologis per (Resto, Item): bulan lalu 25•→31•
 dulu lalu 1..31 (pembanding SO tgl 1 = SO terakhir bulan lalu).
 
-build_audit_rekap — port 1:1 macro VBA BuatLaporanDeviasiSampel (grup kontigu
-Resto+Item): Penerimaan Sistem = SJ + RI + Pembelian; Selisih Harian = BM −
+build_audit_rekap — port 1:1 macro VBA (grup kontigu Resto+Item):
+Penerimaan Sistem = SJ + RI + Pembelian; Selisih Harian = BM −
 Penerimaan (rumus "BM − IN"). Status: VALID (Sistem Masuk) = SO naik + BM=0 +
 IN>0 (input di-omit); OK (Matching) = selisih 0 & saldo 0; saldo kembali
 ±0.0001 → CUT-OFF RESOLVED / OK (Dalam Cut-off); sisa gantung akhir grup → DEVIASI MURNI.
@@ -36,6 +69,7 @@ kanan PO menunggu ... cuman tiap ada data IN>0").
 """
 import calendar
 import re
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -316,6 +350,17 @@ ST_IN_CUTOFF = "OK (Dalam Cut-off)"
 ST_DEV_MURNI = "DEVIASI MURNI"
 ST_OK = "OK"
 
+# v3.14 — ENGINE AUDIT V2 (adaptasi macro modRekapSelisihIN RULE ENGINE
+# V2): status baru + batas cut-off. PENDING CUT-OFF = rentang masih
+# terbuka tapi berumur ≤ MAX_CUTOFF_DAYS dari hari referensi (IN masih
+# mungkin datang); NO MOVEMENT - OPEN BALANCE = baris tanpa selisih baru
+# namun saldo pasangan belum pulih.
+ST_PENDING = "PENDING CUT-OFF"
+ST_OPEN_BAL = "NO MOVEMENT - OPEN BALANCE"
+ST_REVIEW = "PERLU REVIEW"
+MAX_CUTOFF_DAYS = 1   # mirror VBA MAX_CUTOFF_DAYS ("ubah ke 2 bila SOP
+                      # mengizinkan dua hari")
+
 # v3.9.30 — status Pesanan Pembelian 32.43 yang berarti PO SUDAH dibuat
 # tapi belum diproses jadi penerimaan (RI) — hipotesis user: penyebab
 # deviasi murni (PO ada, penerimaan belum di-update sistem → Qty RI 0
@@ -345,25 +390,62 @@ def _fmt_signed(v: float) -> str:
 
 
 def build_audit_rekap(df: pd.DataFrame,
-                     stop_event=None) -> tuple[pd.DataFrame, dict]:
+                      stop_event=None,
+                      len_lalu: int = 31,
+                      reference_day: "int | None" = None,
+                      so_lalu_map: "dict | None" = None,
+                      ) -> tuple[pd.DataFrame, dict]:
     """Jalankan algoritma rekonsiliasi → (df hasil + kolom audit, KPI dict).
 
-    Baris diproses PERSIS urutan input; grup = blok kontigu dengan
-    pasangan (Resto, Nama Item) sama — perilaku identik macro VBA (input
-    v3.6 sudah diurutkan per Resto+Item+Tanggal). FIX 6f-02: pasangan
-    dibandingkan sebagai TUPLE (bukan konkatenasi 'Resto|Item' — kolisi
-    bila nilai memuat '|').
+    v3.14 — ENGINE AUDIT V2: port 1:1 JalankanAuditV2 +
+    TandaiRentangTerbuka macro VBA modRekapSelisihIN RULE ENGINE V2
+    (STRUKTUR KOLOM OUTPUT TIDAK BERUBAH — hanya aturan klasifikasi
+    yang menguat):
 
-    stop_event: v3.9.72 — threading.Event opsional (audit 1-d: loop
-    baris Python murni ini TIDAK terputus ⏹ dulu). Checkpoint per GRUP
-    (input ter-sort per pasangan → grup ≈ ≤62 baris: 31 hari × 2 varian
-    bulan) + tiap 1024 baris dalam grup patologis (input tak ter-sort →
-    satu grup raksasa). Default None = perilaku lama.
+    - Rentang selisih (window) berumur > MAX_CUTOFF_DAYS (1 hari)
+      terhadap HARI KALENDER ditutup LANGSUNG sebagai DEVIASI MURNI
+      (rentang baru boleh dibuka baris itu juga) — tidak menunggu
+      akhir grup; IN terlambat tak bisa meretro-resolve deviasi lama.
+    - Rentang terbuka di akhir grup: berumur ≤ 1 hari dari hari
+      referensi → PENDING CUT-OFF; selebihnya (atau bulan data sudah
+      tertutup — ``reference_day`` None) → DEVIASI MURNI.
+    - Baris tanpa selisih baru saat saldo terbuka → NO MOVEMENT -
+      OPEN BALANCE (dulu "OK"/tanpa status — tidak jujur).
+    - VALID (Sistem Masuk) KETAT: kandidat BM=0 & IN>0 diverifikasi
+      (SO hari ini ada · baseline SO hari kalender SEBELUMNYA ada ·
+      ΔSO>0 · ΔSO=IN · tanpa rentang/saldo terbuka); gagal → catatan
+      PERLU REVIEW spesifik + akumulasi normal (tidak omit).
+    - Review per baris digabung ke 'Detail & Catatan Audit' format
+      BuildKeterangan VBA: "PERLU REVIEW | alasan | Klasifikasi:
+      <status> | <detail engine>".
+
+    Param V2 (opsional — default kompatibel pemanggil lama):
+    - ``len_lalu``: panjang bulan lalu ASLI (kalender) — aritmetika
+      hari lintas batas bulan (25• → 1 = 1 hari) + syarat baseline
+      tgl 1 (hari terakhir bulan lalu = tgl len_lalu).
+    - ``reference_day``: hari referensi "hari ini" (Day(Date) VBA)
+      utk status PENDING vs DEVIASI rentang akhir; None = bulan data
+      TERTUTUP → semua rentang akhir langsung DEVIASI MURNI.
+    - ``so_lalu_map``: {(resto, item): (tgl_negatif, SO)} observasi
+      SO bulan lalu TERAKHIR per pasangan (sumber baseline tgl 1 —
+      dibangun build_audit_from_app dari frame PRA-filter bulan ini
+      supaya varian "Bulan Ini" tetap punya baseline tgl 1).
+
+    Baris diproses PERSIS urutan input; grup = blok kontigu dengan
+    pasangan (Resto, Nama Item) sama — perilaku identik macro VBA
+    (input sudah diurutkan per Resto+Item+Tanggal kronologis).
+    FIX 6f-02: pasangan dibandingkan sebagai TUPLE (bukan
+    konkatenasi 'Resto|Item' — kolisi bila nilai memuat '|').
+
+    stop_event: threading.Event opsional — checkpoint per GRUP + tiap
+    1024 baris dalam grup patologis. Default None = perilaku lama.
     """
     n = len(df)
     kpi = {
         "rows": n, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
         "deviasi_qty": 0.0, "ok": 0,
+        # v3.14 — KPI V2 (aditif; pemanggil lama pakai .get default 0)
+        "pending": 0, "open_bal": 0, "review": 0,
     }
     out = df.copy()
     if n == 0:
@@ -390,32 +472,100 @@ def build_audit_rekap(df: pd.DataFrame,
         .to_numpy(dtype="float64")
 
     # FIX 6f-02 (audit 6-f): kunci grup = TUPLE (resto, item) — bukan
-    # konkatenasi 'Resto|Item': pasangan ('A','B|C') dan ('A|B','C') dulu
-    # menyatu jadi 'A|B|C' (satu grup palsu — saldo kumulatif lintas
-    # pasangan menyambung, KPI cut-off/deviasi meleset). Tuple
-    # dibandingkan eksak; konsisten dgn kunci pasangan (resto, barang)
-    # di _po_menunggu_pairs / _apply_po_menunggu.
-    keys = list(zip(df["Resto"].astype(str),
-                    df["Nama Item"].astype(str)))
+    # konkatenasi 'Resto|Item'. Tuple dibandingkan eksak; konsisten dgn
+    # kunci pasangan (resto, barang) di _po_menunggu_pairs.
+    resto_s = df["Resto"].astype(str).tolist()
+    item_s = df["Nama Item"].astype(str).tolist()
+    keys = list(zip(resto_s, item_s))
+
+    # v3.14 — SO TERCATAT per (pasangan, tanggal): peta lookup baseline
+    # V2 (mirror mSo VBA — SO harus tercatat PERSIS di hari kalender
+    # sebelumnya, bukan baris sebelumnya / ffill).
+    so_at: dict = {}
+    for i in range(n):
+        if not np.isnan(hasil_so[i]):
+            so_at[(resto_s[i], item_s[i], int(tgl[i]))] = hasil_so[i]
+
+    # v3.14 — indeks kronologis HARIAAN lintas bulan (mirror kunci
+    # _k1/_k2 + panjang bulan asli): 25•→25 … 31•→31, lalu 1→len_lalu+1,
+    # 2→len_lalu+2 … — selisih indeks = selisih HARI KALENDER yang benar
+    # untuk rentang lintas batas bulan (mode 📆 Lalu + Ini).
+    _len_lalu = int(len_lalu) if len_lalu else 31
+
+    def _cidx(t: float) -> int:
+        return -int(t) if t < 0 else _len_lalu + int(t)
+
+    tgl_idx = [_cidx(t) for t in tgl]
+
+    # Hari referensi "hari ini" (Day(Date) VBA) → indeks kronologis;
+    # None = bulan data TERTUTUP (historis) — semua rentang akhir grup
+    # langsung expired (tak ada IN yang masih bisa datang).
+    ref_idx = None if reference_day is None else _cidx(reference_day)
 
     saldo = [0.0] * n
     status = [""] * n
     detail = [""] * n
+    # v3.14 — catatan review per baris (mirror aReview VBA; dedup
+    # persis — InStr VBA ≈ membership list).
+    review: "list[list[str] | None]" = [None] * n
+
+    def _add_review(i: int, note: str) -> None:
+        if review[i] is None:
+            review[i] = [note]
+            kpi["review"] += 1
+        elif note not in review[i]:
+            review[i].append(note)
 
     def _tgl_int(i: int) -> int:
         return int(tgl[i])
 
     def _tgl_lbl(v: int) -> str:
-        # v3.11.1 — FIX P2 (audit 12-c2, kelas B2): label tanggal utk
-        # catatan audit — bulan-lalu negatif → '28•' ("Periode Tgl -28 -
-        # 1" tak terbaca; konvensi '•' = bulan lalu, mirror label tabel
-        # & export). Jeda/angka lain tak tersentuh.
+        # v3.11.1 — label tanggal utk catatan audit — bulan-lalu
+        # negatif → '28•' (konvensi '•' = bulan lalu, mirror label
+        # tabel & export).
         return f"{-int(v)}•" if v < 0 else str(int(v))
+
+    def _tandai_rentang(first_row: int, last_row: int, net_range: float,
+                        pending: bool, total_balance: float) -> None:
+        """Port TandaiRentangTerbuka VBA — tutup rentang terbuka:
+        baris ber-selisih → PENDING CUT-OFF (masih dalam jendela) /
+        DEVIASI MURNI (melewati batas); baris nol → NO MOVEMENT -
+        OPEN BALANCE. Saldo berjalan total disertakan bila belum nol."""
+        if first_row < 0 or last_row < first_row:
+            return
+        start_t = int(tgl[first_row])
+        for j in range(first_row, last_row + 1):
+            if status[j] != "":
+                continue
+            if selisih[j] != 0.0:
+                if pending:
+                    status[j] = ST_PENDING
+                    detail[j] = (f"Saldo rentang {_fmt_signed(net_range)} "
+                                 f"(Sejak Tgl {_tgl_lbl(start_t)}) — "
+                                 f"jendela cut-off {MAX_CUTOFF_DAYS} hari "
+                                 f"masih aktif")
+                    kpi["pending"] += 1
+                else:
+                    status[j] = ST_DEV_MURNI
+                    detail[j] = (f"Sisa Gantung: {_fmt_signed(net_range)} "
+                                 f"(Sejak Tgl {_tgl_lbl(start_t)}) — "
+                                 f"melewati batas cut-off {MAX_CUTOFF_DAYS} "
+                                 f"hari")
+                    kpi["deviasi_murni"] += 1
+                if abs(total_balance) >= _EPS:
+                    detail[j] += (f"; saldo berjalan "
+                                  f"{_fmt_signed(total_balance)}")
+            else:
+                status[j] = ST_OPEN_BAL
+                detail[j] = (f"Tidak ada selisih baru; rentang sejak Tgl "
+                             f"{_tgl_lbl(start_t)} masih memiliki saldo "
+                             f"{_fmt_signed(net_range)}")
+                kpi["open_bal"] += 1
 
     group_start = 0
     while group_start < n:
-        # v3.9.72 — checkpoint ⏹ per grup (audit 1-d; engine = loop
-        # baris Python murni — dulu ⏹ tak terasa sampai engine selesai)
+        # checkpoint ⏹ per grup (audit 1-d; engine = loop baris Python
+        # murni — ⏹ tak terasa sampai engine selesai)
         if not (group_start & 1023):
             stop_check(stop_event,
                        f"audit rekonsiliasi (baris {group_start:,}/{n:,})")
@@ -423,100 +573,200 @@ def build_audit_rekap(df: pd.DataFrame,
         while group_end + 1 < n and keys[group_end + 1] == keys[group_start]:
             group_end += 1
 
-        cum = 0.0
-        start_idx = -1          # sentinel (VBA startIdx = 0, array 1-based)
+        cum = 0.0                 # runningBalance VBA
+        start_idx = -1            # jendela terbuka (VBA startIdx=0, 1-based)
+        window_net = 0.0          # windowNet VBA
 
         for i in range(group_start, group_end + 1):
-            # v3.9.72 — checkpoint ⏹ tiap 1024 baris dalam grup patologis
-            # (input tak ter-sort → SATU grup bisa raksasa; grup normal
-            # ≤62 baris tak pernah kena cabang ini)
+            # checkpoint ⏹ tiap 1024 baris dalam grup patologis
             if not (i & 1023):
                 stop_check(stop_event,
                            f"audit rekonsiliasi (baris {i:,}/{n:,})")
             sel_val = selisih[i]
-            has_so = not np.isnan(hasil_so[i])
-            delta_so = 0.0
-            if i > group_start:
-                has_prev = not np.isnan(hasil_so[i - 1])
-                if has_so and has_prev:
-                    delta_so = hasil_so[i] - hasil_so[i - 1]
+            this_day = int(tgl[i])
+            this_idx = tgl_idx[i]
 
-            # ATURAN BISNIS: SO Naik + Penerimaan Sistem > 0 + SO Harian = 0
-            # v3.12.4 — FIX CUT-OFF 1 HARI (user: "hasil dari input barang
-            # masuk tgl 5 tapi IN di tanggal 6 malah menghasilkan Deviasi
-            # murni yang harusnya cut off resolved"): aturan VALID kini
-            # hanya aktif bila TIDAK ada rentang gantung terbuka
-            # (start_idx < 0). Dulu omit SELALU aktif → penerimaan IN t6
-            # yang datang menutup BM t5 justru DIABAIKAN (selisih −IN tak
-            # masuk saldo) → +BM t5 gantung sampai akhir grup → DEVIASI
-            # MURNI padahal pola 1-hari cut-off (fisik t5, sistem t6 —
-            # barang umumnya baru terhitung SO besoknya → SO naik di tgl
-            # IN → omit terpicu). Kini bila ada rentang terbuka, baris IN
-            # diakumulasi NORMAL → saldo kembali 0 → CUT-OFF RESOLVED
-            # "Beda N Hari". Kasus VALID murni (resto lupa input BM —
-            # saldo bersih saat IN datang) tak berubah.
-            if (delta_so > 0 and so_harian[i] == 0.0
-                    and penerimaan[i] > 0.0 and start_idx < 0):
+            # (V2) Tutup jendela lama SEBELUM memproses hari yang sudah
+            # melewati batas cut-off: umur = selisih HARI KALENDER
+            # (kronologis lintas bulan), bukan jumlah baris.
+            if start_idx >= 0 \
+                    and this_idx - tgl_idx[start_idx] > MAX_CUTOFF_DAYS:
+                _tandai_rentang(start_idx, i - 1, window_net, False, cum)
+                kpi["deviasi_qty"] += window_net
+                start_idx = -1
+                window_net = 0.0
+
+            # (V2) Baseline SO: tgl 1 → SO penutupan bulan lalu HARI
+            # TERAKHIR saja (tgl len_lalu — mirror syarat
+            # mLastSOLaluDay==31 VBA, panjang bulan ASLI); hari lain →
+            # SO yang TERCATAT persis di hari kalender sebelumnya
+            # (lookup langsung — bukan baris sebelumnya / ffill).
+            # Hari bulan lalu (negatif): encoding terbalik — hari
+            # sebelumnya = t+1 (25• sebelum 26•).
+            has_so = not np.isnan(hasil_so[i])
+            has_baseline = False
+            baseline = 0.0
+            review_text = ""
+            if this_day == 1:
+                info = (so_lalu_map or {}).get(keys[i])
+                if info is None:
+                    _v0 = so_at.get((resto_s[i], item_s[i], -_len_lalu))
+                    if _v0 is not None:
+                        info = (-_len_lalu, _v0)
+                if info is not None:
+                    _d, _v = info
+                    if -int(_d) == _len_lalu:
+                        baseline = float(_v)
+                        has_baseline = True
+                    else:
+                        review_text = (
+                            f"SO penutupan bulan lalu terakhir tercatat "
+                            f"pada tgl {-int(_d)}; baseline tgl "
+                            f"{_len_lalu} tidak tersedia")
+            else:
+                prev_day = this_day + 1 if this_day < 0 else this_day - 1
+                _v = so_at.get((resto_s[i], item_s[i], prev_day))
+                if _v is not None:
+                    baseline = float(_v)
+                    has_baseline = True
+            delta_so = (hasil_so[i] - baseline) \
+                if (has_so and has_baseline) else 0.0
+
+            # (V2) Kandidat VALID diverifikasi KETAT — bukti tidak
+            # lengkap/tidak cocok → baris tetap masuk saldo selisih +
+            # catatan PERLU REVIEW (mirror urutan cek VBA).
+            is_verified_valid = False
+            if abs(so_harian[i]) < _EPS and penerimaan[i] > _EPS:
+                if not has_so:
+                    review_text = (
+                        f"BM=0 dan IN={_fmt_signed(penerimaan[i])}, "
+                        f"tetapi Hasil SO hari ini tidak tercatat")
+                elif not has_baseline:
+                    if not review_text:
+                        review_text = (
+                            "SO hari ini tercatat, tetapi SO baseline "
+                            "hari sebelumnya tidak tersedia")
+                elif delta_so <= _EPS:
+                    review_text = (
+                        f"IN={_fmt_signed(penerimaan[i])}, tetapi SO "
+                        f"tidak meningkat (delta SO="
+                        f"{_fmt_signed(delta_so)})")
+                elif abs(delta_so - penerimaan[i]) > _EPS:
+                    review_text = (
+                        f"Kenaikan SO={_fmt_signed(delta_so)} tidak sama "
+                        f"dengan IN={_fmt_signed(penerimaan[i])}")
+                elif start_idx >= 0 or abs(cum) >= _EPS:
+                    review_text = (
+                        "Delta SO sama dengan IN, tetapi masih ada "
+                        "saldo/rentang sebelumnya yang terbuka")
+                else:
+                    is_verified_valid = True
+
+            if is_verified_valid:
+                # IN terbukti masuk melalui kenaikan SO — tidak
+                # menambah selisih/saldo (omit, perilaku lama).
                 saldo[i] = cum
                 status[i] = ST_VALID
-                detail[i] = (f"SO Naik +{_fmt_qty(delta_so)} | Omit Input "
-                             "SO Harian (Penerimaan Sistem OK)")
+                detail[i] = (f"Kenaikan SO {_fmt_signed(delta_so)} sesuai "
+                             f"IN {_fmt_signed(penerimaan[i])}; BM=0 dan "
+                             f"baseline SO tersedia")
                 kpi["omit"] += 1
             else:
-                if sel_val == 0.0 and cum == 0.0:
-                    saldo[i] = 0.0
-                    status[i] = ST_OK_MATCH
-                    detail[i] = "-"
-                    kpi["ok"] += 1
-                else:
-                    if cum == 0.0 and sel_val != 0.0:
-                        start_idx = i
-                    cum += sel_val
-                    saldo[i] = cum
+                if review_text:
+                    _add_review(i, review_text)
 
-                    if abs(cum) < _EPS and start_idx >= 0:
-                        start_tgl = _tgl_int(start_idx)
-                        end_tgl = _tgl_int(i)
-                        jeda = abs(end_tgl - start_tgl)
-                        for j in range(start_idx, i + 1):
-                            if status[j] == "":
-                                if selisih[j] != 0.0:
-                                    status[j] = ST_CUTOFF
-                                    detail[j] = (f"Beda {jeda} Hari "
-                                                 f"(Periode Tgl "
-                                                 f"{_tgl_lbl(start_tgl)} - "
-                                                 f"{_tgl_lbl(end_tgl)})")
-                                    kpi["cutoff"] += 1
-                                else:
-                                    status[j] = ST_IN_CUTOFF
-                                    detail[j] = (f"Rentang Cut-off Tgl "
-                                                 f"{_tgl_lbl(start_tgl)} - "
-                                                 f"{_tgl_lbl(end_tgl)}")
-                        cum = 0.0
-                        start_idx = -1
+                cum += sel_val
+                saldo[i] = cum
 
-        # sisa gantung di akhir grup → Deviasi Murni
-        if start_idx >= 0 and abs(cum) >= _EPS:
-            open_tgl = _tgl_int(start_idx)
-            for j in range(start_idx, group_end + 1):
-                if status[j] == "":
-                    if selisih[j] != 0.0:
-                        status[j] = ST_DEV_MURNI
-                        detail[j] = (f"Sisa Gantung: {_fmt_signed(cum)} "
-                                     f"(Sejak Tgl {_tgl_lbl(open_tgl)})")
-                        kpi["deviasi_murni"] += 1
+                if start_idx < 0:
+                    if abs(sel_val) < _EPS:
+                        if abs(cum) < _EPS:
+                            status[i] = ST_OK_MATCH
+                            detail[i] = "-"
+                            kpi["ok"] += 1
+                        else:
+                            # (V2) saldo lama belum pulih — jujur
+                            # "NO MOVEMENT - OPEN BALANCE" (dulu: tanpa
+                            # status / "OK").
+                            status[i] = ST_OPEN_BAL
+                            detail[i] = (f"Tidak ada selisih baru; saldo "
+                                         f"sebelumnya masih terbuka "
+                                         f"{_fmt_signed(cum)}")
+                            kpi["open_bal"] += 1
                     else:
-                        status[j] = ST_OK
-                        detail[j] = "-"
-            kpi["deviasi_qty"] += cum
+                        start_idx = i
+                        window_net = sel_val
+                else:
+                    window_net += sel_val
+
+                # (V2) Rentang kembali neto-nol DI DALAM jendela cut-off
+                # → resolved; saldo global belum pulih → review.
+                if start_idx >= 0 and abs(window_net) < _EPS:
+                    start_t = _tgl_int(start_idx)
+                    jeda = this_idx - tgl_idx[start_idx]
+                    range_text = (f"Beda {jeda} Hari (Periode Tgl "
+                                  f"{_tgl_lbl(start_t)} - "
+                                  f"{_tgl_lbl(this_day)})")
+                    overall_text = ""
+                    res_review = ""
+                    if abs(cum) >= _EPS:
+                        overall_text = (f"; masih ada saldo keseluruhan "
+                                        f"{_fmt_signed(cum)}")
+                        res_review = (
+                            f"Rentang ini kembali neto nol, tetapi saldo "
+                            f"pasangan masih {_fmt_signed(cum)} dari "
+                            f"deviasi periode sebelumnya di luar jendela "
+                            f"cut-off; perlu rekonsiliasi manual")
+                    for j in range(start_idx, i + 1):
+                        if status[j] == "":
+                            if selisih[j] != 0.0:
+                                status[j] = ST_CUTOFF
+                                detail[j] = range_text + overall_text
+                                kpi["cutoff"] += 1
+                            else:
+                                status[j] = ST_IN_CUTOFF
+                                detail[j] = (f"Rentang Cut-off Tgl "
+                                             f"{_tgl_lbl(start_t)} - "
+                                             f"{_tgl_lbl(this_day)}"
+                                             f"{overall_text}")
+                        if res_review:
+                            _add_review(j, res_review)
+                    start_idx = -1
+                    window_net = 0.0
+
+        # (V2) Sisa rentang di akhir grup: masih dalam jendela cut-off
+        # hari referensi → PENDING CUT-OFF; selebihnya (atau bulan data
+        # tertutup) → DEVIASI MURNI.
+        if start_idx >= 0:
+            pending = (ref_idx is not None
+                       and ref_idx - tgl_idx[start_idx] <= MAX_CUTOFF_DAYS)
+            _tandai_rentang(start_idx, group_end, window_net, pending, cum)
+            if not pending:
+                kpi["deviasi_qty"] += window_net
 
         group_start = group_end + 1
 
     out["Penerimaan Sistem"] = penerimaan
     out["Selisih Harian"] = selisih
     out["Saldo Kumulatif"] = saldo
+    # (V2) Gabung catatan review — format BuildKeterangan VBA:
+    # "PERLU REVIEW | alasan | Klasifikasi: <status> | <detail engine>".
+    detail_out = []
+    for i in range(n):
+        rv = review[i]
+        base = detail[i]
+        if rv:
+            status_txt = status[i] if status[i] else \
+                "PERLU REVIEW - STATUS TIDAK TERBENTUK"
+            parts = [f"{ST_REVIEW} | {' ; '.join(rv)}",
+                     f"Klasifikasi: {status_txt}"]
+            if base and base != "-":
+                parts.append(base)
+            detail_out.append(" | ".join(parts))
+        else:
+            detail_out.append(base)
     out["Status Analisis Audit"] = status
-    out["Detail & Catatan Audit"] = detail
+    out["Detail & Catatan Audit"] = detail_out
     return out, kpi
 
 
@@ -835,9 +1085,25 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
                          konversi: "dict | None" = None,
                          saldo_awal_map: "dict | None" = None,
                          bk_map: "dict | None" = None,
+                         period=None,
                          stop_event=None
                          ) -> tuple[pd.DataFrame, dict, str]:
     """Input dari data app + engine sekali jalan.
+
+    v3.14 — ENGINE AUDIT V2 (adaptasi macro RULE ENGINE V2): param baru
+    ``period`` (tahun, bulan) periode data — None = deteksi otomatis
+    via detect_data_period(in_detail_df) (fallback jam sistem). Dari
+    periode: ``len_lalu`` (panjang bulan lalu ASLI — aritmetika hari
+    lintas batas bulan + syarat baseline tgl 1) + ``reference_day``:
+    - periode = bulan BERJALAN → hari ini (Day(Date) VBA) — rentang
+      akhir ≤ 1 hari dari hari ini → PENDING CUT-OFF;
+    - periode = bulan LAMPAU (tertutup) → None — semua rentang akhir
+      langsung DEVIASI MURNI (tak ada IN yang masih bisa datang).
+    ``so_lalu_map`` {(resto, item): (tgl_negatif, SO)} dibangun dari
+    frame PRA-filter (observasi SO bulan lalu TERAKHIR per pasangan —
+    supaya varian "Bulan Ini" yang membuang baris negatif tetap punya
+    baseline tgl 1).
+    KPI baru (aditif): ``pending`` · ``open_bal`` · ``review``.
 
     v3.11.5 — KEMBALI KE RUMUS LAMA (user: "kembali ke rumus lama"):
     slot engine "Qty SO Harian" = BM REKAP persis pra-v3.10 → Selisih
@@ -906,6 +1172,48 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     stop_check(stop_event, "audit rekonsiliasi (persiapan)")
     raw = build_audit_input(rekap_so_df, in_detail_df,
                             saldo_awal_map=saldo_awal_map)
+
+    # v3.14 — PARAM ENGINE V2: periode data (diberikan pipeline main.py
+    # — deteksiTimestamp IN + fallback kode Nomor; None = deteksi
+    # internal, fallback jam sistem = perilaku VBA yang selalu memproses
+    # bulan berjalan).
+    if period is None:
+        period = detect_data_period(in_detail_df)
+    if period is None:
+        _now = datetime.now()
+        period = (_now.year, _now.month)
+    try:
+        _len_ini, len_lalu = month_lengths(period)
+    except (TypeError, ValueError):
+        len_lalu = 31
+    # Hari referensi "hari ini": bulan data = bulan berjalan → hari ini
+    # (PENDING CUT-OFF masih mungkin); bulan lampau/berbeda = TERTUTUP →
+    # None (seluruh rentang akhir grup langsung DEVIASI MURNI).
+    _now = datetime.now()
+    if (int(period[0]), int(period[1])) == (_now.year, _now.month):
+        reference_day = _now.day
+    else:
+        reference_day = None
+
+    # v3.14 — so_lalu_map: observasi SO bulan lalu TERAKHIR per pasangan
+    # {(resto, item): (tgl_negatif, SO)} dari frame PRA-filter (SEBELUM
+    # _filter_bulan_ini membuang baris negatif — varian Bulan Ini tetap
+    # punya baseline tgl 1; kunci RAW pasangan = kunci grup engine).
+    so_lalu_map: dict = {}
+    if not raw.empty:
+        _rt = pd.to_numeric(raw["Tanggal"], errors="coerce")
+        _rs = pd.to_numeric(raw["Hasil SO"], errors="coerce")
+        for _r, _b, _t, _s in zip(raw["Resto"].astype(str),
+                                  raw["Nama Item"].astype(str),
+                                  _rt, _rs):
+            if pd.isna(_t) or pd.isna(_s) or _t >= 0:
+                continue
+            _k = (_r, _b)
+            _d = int(_t)
+            _prev = so_lalu_map.get(_k)
+            if _prev is None or _d > _prev[0]:
+                so_lalu_map[_k] = (_d, float(_s))
+
     if not bulan_lalu:
         # v3.10.1 — FIX P1 (bug hunt 1-a): baris bulan lalu dibuang SETELAH
         # basis SO-kemarin dihitung (dulu difilter SEBELUM build_audit_input
@@ -925,7 +1233,9 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
         if po_pending_df is not None else None
     if raw.empty:
         kpi0 = {"rows": 0, "cutoff": 0, "omit": 0, "deviasi_murni": 0,
-                "deviasi_qty": 0.0, "ok": 0, "com_minus": 0}
+                "deviasi_qty": 0.0, "ok": 0, "com_minus": 0,
+                # v3.14 — KPI V2 (skema konsisten walau kosong)
+                "pending": 0, "open_bal": 0, "review": 0}
         # v3.10 — skema konsisten walau kosong (kolom basis baru hadir)
         for c in ("Qty BM Rekap", "Qty SO Kemarin", "Qty Delta SO",
                   "Qty BK", "Qty COM"):
@@ -945,7 +1255,14 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     # (persis pra-v3.10) → Selisih Harian = BM − Penerimaan Sistem;
     # aturan VALID (SO naik + BM=0 + IN>0) aktif lagi. Kolom basis v3.10
     # (BM Rekap/SO Kemarin/Delta SO) tetap hadir sbg display/bahan COM.
-    audit, kpi = build_audit_rekap(raw, stop_event=stop_event)
+    # v3.14 — ENGINE AUDIT V2: len_lalu (aritmetika hari lintas bulan +
+    # baseline tgl 1) · reference_day (PENDING vs DEVIASI rentang akhir)
+    # · so_lalu_map (baseline tgl 1 varian Bulan Ini) diteruskan ke
+    # build_audit_rekap (lihat docstring-nya utk aturan V2 lengkap).
+    audit, kpi = build_audit_rekap(raw, stop_event=stop_event,
+                                   len_lalu=len_lalu,
+                                   reference_day=reference_day,
+                                   so_lalu_map=so_lalu_map)
     if po_pairs is not None:
         _apply_po_menunggu(audit, kpi, po_pairs, stop_event=stop_event)
     # v3.12.4 — kolom 'Kode IT/RI' (nomor dokumen penerimaan — IT/RI/PI)
@@ -1048,11 +1365,17 @@ def build_audit_from_app(rekap_so_df: pd.DataFrame | None,
     n_in = int((pd.to_numeric(audit["Penerimaan Sistem"], errors="coerce")
                 .fillna(0) != 0).sum())
     cakupan = "incl. bulan lalu" if bulan_lalu else "bulan berjalan saja"
+    # v3.14 — desc menyebut engine V2 + hari referensi (transparansi
+    # status PENDING CUT-OFF vs DEVIASI MURNI rentang akhir).
+    _ref_txt = (f"hari ini tgl {reference_day}" if reference_day
+                else "bulan tertutup")
     desc = (f"Data app (rekap SO + BM + IN 42.05/32.24/99.01 "
             f"{cakupan}) · "
             f"{len(raw):,} baris · {raw['Resto'].nunique()} resto · "
             f"SO {n_so:,} · IN {n_in:,} · "
             f"basis selisih: BM rekap (BM − IN)"
+            f" · engine V2 cut-off {MAX_CUTOFF_DAYS} hari "
+            f"(referensi: {_ref_txt})"
             f" · COM minus {kpi.get('com_minus', 0):,}")
     if po_pairs:
         _tot_po = sum(q for v in po_pairs.values()

@@ -6,9 +6,11 @@ worker; pure pandas + openpyxl — import openpyxl LAZY per-fungsi).
    per Resto": Resto · Tanggal · Nama Barang · Kategori · Satuan ·
    Hasil SO · COM (tepat kanan Hasil SO) · Sheet Barang Masuk ·
    Kiriman HO (42.05) · Kiriman Supplier (32.24) · Pembelian by Resto
-   (99.01) · Selisih; urut Resto → Tanggal KRONOLOGIS (bulan lalu
-   25•..31• lalu 1..) → Nama Barang; audit_cols opsional ("Hasil
-   Audit" · "Saldo" · "Catatan Audit") setelah Selisih.
+   (99.01) · Selisih; v3.14 urut DEFAULT Resto → Nama Barang →
+   Tanggal KRONOLOGIS (bulan lalu 25•..31• lalu 1..) — sort_mode
+   "resto_tanggal_barang" = urut lama Resto → Tanggal → Nama Barang;
+   audit_cols opsional ("Hasil Audit" · "Saldo" · "Catatan Audit")
+   setelah Selisih.
 2. add_pivot_sheet → sheet "PIVOT" mirror tab "Mutasi Barang - New"
    milik user — page-filter (All), header tanggal −25..−31 lalu 1..31
    kronologis, Sum of NILAI + conditional formatting persis file user
@@ -153,25 +155,27 @@ def tgl_label(v):
 
 def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
                             tgl_end: int = 31,
-                            audit_cols: list | None = None) -> pd.DataFrame:
+                            audit_cols: list | None = None,
+                            sort_mode: str = "resto_barang_tanggal",
+                            ) -> pd.DataFrame:
     """Bangun tabel rekap Selisih IN per resto dari base (keluaran
     InSelisihView._compute_base — sudah membawa komponen 42.05/32.24/99.01).
 
     - Filter: rentang tanggal aktif KRONOLOGIS (default 1–31 = bulan
       berjalan saja; start negatif = hari bulan lalu — v3.11.1 FIX P1
       audit 12-c2: numerik mentah membuang 26•..31• saat start=−25).
-    - Urut: Resto → Tanggal KRONOLOGIS → Nama Barang. v3.11 — dulu
-      sort Tanggal NUMERIK menempatkan blok bulan-lalu TERBALIK
-      (−31, −30, …, −25 sebelum 1..N) — mode 📆 Lalu+Ini membuat
-      export tampak acak (user: "Misal aku pakai mode bulan lalu + ini
-      maka tanggal tampilkan urut yaitu 25,26 sampai tanggal hari ini
-      di bulan ini terutama pada hasil export file excel nya"). Kini
-      kunci kronologis (0, −t) untuk t<0 / (1, t) utk t≥1 — mirror
-      _chrono / fn_audit _k1/_k2: 25•, 26•, … 31•, 1, 2, … hari ini.
+    - Urut: v3.14 — ``sort_mode`` (user: "hasil export selisih in bisa
+      gak sort by nama resto dan nama barang dan tanggal"):
+      * "resto_barang_tanggal" (DEFAULT BARU): Resto → Nama Barang →
+        Tanggal kronologis — paritas urutan tabel audit (baris satu
+        pasangan resto×barang berkelompok, tanggal naik di dalamnya);
+      * "resto_tanggal_barang" (lama): Resto → Tanggal → Nama Barang.
+      Tanggal tetap KRONOLOGIS (25•, 26•, … 31•, 1, 2, … — kunci
+      (0, −t) utk t<0 / (1, t) utk t≥1, mirror fn_audit _k1/_k2).
     - Hasil SO: NaN → sel kosong (tanggal tanpa SO tercatat);
       komponen IN & selisih: NaN → 0.
-    - v3.9: audit_cols = subset ["Hasil Audit", "Saldo", "Catatan Audit"]
-      → kolom tsb DITAMBAHKAN setelah Selisih (None/[] = tanpa audit).
+    - v3.9: audit_cols = subset AUDIT_EXPORT_COLUMNS → kolom tsb
+      DITAMBAHKAN setelah Selisih (None/[] = tanpa audit).
       "Saldo" mengikuti nilai audit dari data PENUH (bukan rentang tampilan)
       — konsisten dgn kolom Saldo di tabel UI.
     """
@@ -235,20 +239,23 @@ def build_selisih_export_df(base: pd.DataFrame, tgl_start: int = 1,
         else:
             out[col] = ""
 
-    # v3.11 — URUT KRONOLOGIS (mirror fn_audit _k1/_k2 + _chrono):
-    # tanggal negatif (bulan lalu) diurutkan HARI NAIK (25•, 26•, …,
-    # 31•) LALU tanggal berjalan 1..N — sort numerik lama membalik blok
-    # bulan-lalu (−31 paling awal). mergesort = stabil (baris
-    # Nama Barang dlm tanggal sama tetap terurut alfabetis).
-    # (float64 — Int64/pd.NA di np.where menghasilkan object + pd.NA
-    # yang tak terurut bersih; NaN float + na_position="last" aman.)
+    # v3.14 — URUT BARIS per sort_mode (user: "sort by nama resto dan
+    # nama barang dan tanggal"); tanggal tetap KRONOLOGIS (mirror
+    # fn_audit _k1/_k2 + _chrono): tanggal negatif (bulan lalu) diurutkan
+    # HARI NAIK (25•, 26•, …, 31•) LALU tanggal berjalan 1..N.
+    # mergesort = stabil. (float64 — Int64/pd.NA di np.where menghasilkan
+    # object + pd.NA yang tak terurut bersih; NaN float + na_position
+    # "last" aman.)
     _tnum = pd.to_numeric(out["Tanggal"], errors="coerce") \
         .astype("float64")
     out = out.assign(
         _k1=np.where(_tnum < 0, 0, 1),
         _k2=np.where(_tnum < 0, -_tnum, _tnum),
     )
-    out = out.sort_values(["Resto", "_k1", "_k2", "Nama Barang"],
+    _sort_cols = (["Resto", "Nama Barang", "_k1", "_k2"]
+                  if sort_mode != "resto_tanggal_barang"
+                  else ["Resto", "_k1", "_k2", "Nama Barang"])
+    out = out.sort_values(_sort_cols,
                           kind="mergesort", na_position="last") \
         .drop(columns=["_k1", "_k2"]).reset_index(drop=True)
     # v3.11.1 — FIX P2 (audit 12-c2 B2): LABEL tanggal bulan-lalu

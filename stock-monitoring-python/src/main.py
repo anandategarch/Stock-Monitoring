@@ -294,6 +294,7 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         konversi=konversi_holder.get("map"),
         saldo_awal_map=saldo_awal_map,
         bk_map=bk_map,
+        period=period,
         stop_event=stop_event)
     # v3.11.28 — nama barang rekap mentah (deviasi weekly) ternormalisasi
     # (strip + upper — konvensi _kat_norm app / append1 LANGKAH 5d),
@@ -346,6 +347,7 @@ def run_pipeline(config_path: str = None, verbose: bool = True, stop_event=None)
         bulan_lalu=False, konversi=konversi_holder.get("map"),
         saldo_awal_map=saldo_awal_map,
         bk_map=bk_map,
+        period=period,
         stop_event=stop_event)
     audit_result["df_bulan_ini"] = audit_df2
     audit_result["kpi_bulan_ini"] = audit_kpi2

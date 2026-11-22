@@ -3,6 +3,85 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.14.0 — ENGINE AUDIT V2 (ADAPTASI MACRO VBA RULE ENGINE V2) + EXPORT SORT RESTO→BARANG→TANGGAL
+
+User: *"coba cek logika rekap selisih ini dan bandingkan dengan yang
+ada di program stock monitoring python, kayaknya logika VBA tersebut
+lebih kuat untuk analisa nya jadi adaptasi logika nya ya cuman jangan
+rubah struktur output kolom nya. Terus hasil export selisih in bisa
+gak sort by nama resto dan nama barang dan tanggal"* (sumber logika:
+`modRekapSelisihIN_RULE_ENGINE_V2_FIX_FORMATSTATUS.bas`).
+
+### 1. Engine audit V2 — `fn_audit.build_audit_rekap`
+Port 1:1 `JalankanAuditV2` + `TandaiRentangTerbuka` macro VBA.
+**Struktur kolom output TIDAK berubah** (Penerimaan Sistem · Selisih
+Harian · Saldo Kumulatif · Status Analisis Audit · Detail & Catatan
+Audit + seluruh kolom view/export utuh) — yang berubah hanya aturan
+klasifikasi:
+
+- **CUT-OFF MAKSIMAL 1 HARI** (`MAX_CUTOFF_DAYS = 1`): rentang selisih
+  yang belum kembali nol saat datang hari aktivitas > 1 hari setelah
+  rentang dibuka **langsung ditutup DEVIASI MURNI di tengah grup**
+  (dulu menunggu akhir grup — IN yang datang terlambat bisa
+  meretro-aktif "resolve" deviasi lama). Rentang baru boleh dibuka
+  mulai baris itu.
+- **PENDING CUT-OFF** (status baru): rentang masih terbuka di akhir
+  grup dan berumur ≤ 1 hari dari **hari referensi** — bulan data =
+  bulan berjalan → hari ini (`Day(Date)` VBA; param `period` kini
+  diteruskan pipeline `main.py`); bulan lampau/tertutup → semua
+  rentang akhir langsung DEVIASI MURNI (tidak ada IN yang masih bisa
+  datang).
+- **NO MOVEMENT - OPEN BALANCE** (status baru): baris tanpa selisih
+  baru tetapi saldo pasangan belum pulih — menggantikan status "OK"
+  pada baris nol di rentang gantung (dulu tidak jujur).
+- **VALID (Sistem Masuk) diverifikasi KETAT** (bukan sekadar "SO
+  naik"): kandidat BM=0 & IN>0 wajib (1) SO hari ini tercatat,
+  (2) baseline SO tersedia — tgl 1: SO penutupan bulan lalu **hari
+  terakhir saja** (tgl `len_lalu`, panjang bulan ASLI — via
+  `so_lalu_map` dari frame PRA-filter sehingga varian "Bulan Ini"
+  tetap punya baseline), tgl lain: SO yang **tercatat persis di hari
+  kalender sebelumnya** (peta `so_at` — bukan baris sebelumnya /
+  ffill), (3) ΔSO > 0, (4) ΔSO = IN (toleransi 0.0001), (5) tanpa
+  rentang/saldo terbuka.
+- **PERLU REVIEW**: kandidat VALID yang gagal verifikasi tetap
+  diakumulasi normal + catatan review spesifik (mirror teks VBA:
+  "SO tidak tercatat" / "baseline tidak tersedia" / "SO tidak
+  meningkat" / "kenaikan ≠ IN" / "masih ada saldo terbuka"),
+  digabung ke Catatan Audit format BuildKeterangan VBA:
+  `PERLU REVIEW | alasan | Klasifikasi: <status> | <detail engine>`
+  — termasuk review rentang neto-nol saat saldo global belum pulih
+  (perlu rekonsiliasi manual) dan "saldo berjalan" di detail
+  deviasi.
+- **Jeda "Beda N Hari" kini KRONOLOGIS lintas bulan** — 25• → 1 = 1
+  hari (indeks chrono + `len_lalu`; dulu `abs(numerik)` = 32 — salah
+  arah di rentang lintas batas bulan mode 📆 Lalu + Ini).
+- **KPI aditif**: `pending` · `open_bal` · `review` (log pipeline
+  app + skema kosong konsisten).
+
+### 2. View & warna status — `in_selisih_view.py`
+- `_STATUS_TAG` + tag baru `st_pending` (#FCE5CD / #994C00) dan
+  `st_openbal` (#FFF2CC / #806000) — mirror `ApplyStatusFormat` VBA
+  class 4/5 (PENDING CUT-OFF oranye soft; OPEN BALANCE kuning soft).
+
+### 3. Export sort Resto → Nama Barang → Tanggal
+- `build_selisih_export_df(..., sort_mode=)` — **default baru
+  `"resto_barang_tanggal"`** (Resto → Nama Barang → Tanggal
+  kronologis — paritas urutan tabel audit); `"resto_tanggal_barang"`
+  = urut lama tetap tersedia. Struktur kolom export TIDAK berubah.
+- Dialog opsi export: pilihan radio **"Urut baris"** (default urut
+  baru); `_do_export(..., sort_mode=)` — pemanggil lama tetap jalan.
+
+### 4. Lain-lain
+- `main.py`: kedua varian audit kini meneruskan `period` (deteksi
+  periode data → hari referensi + panjang bulan lalu).
+- `app.py` log pipeline audit: + Pending Cut-off · Open Balance ·
+  Perlu Review.
+- Catatan: 9 asersi test lama yang mengunci perilaku engine pra-V2
+  (VALID longgar "SO naik", CUT-OFF lintas bulan tanpa batas umur,
+  detail "Sisa Gantung" gaya lama, dsb.) kini gagal **by design** —
+  perilaku memang diubah makro V2 (lihat poin 1) dan perlu
+  penyesuaian test di iterasi berikutnya; test_mock.py ALL PASS.
+
 ## v3.13.2 — KOLOM BARANG MASUK DI POPUP TAB PIVOT
 
 User: *"Cek repo itu dan cek bagian tab pivot waktu pop up bisa gak

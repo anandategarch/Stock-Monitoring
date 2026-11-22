@@ -21,6 +21,15 @@ MASUK + IN per tanggal; sheet '29 Rekap Barang Masuk' tidak dibaca):
 - Saldo       = kumulatif per (Resto × Barang) urut tanggal
 - Hasil Audit = port macro VBA: VALID / OK (Matching) / CUT-OFF RESOLVED
                 / OK (Dalam Cut-off) / DEVIASI MURNI
+                (v3.14 — ENGINE AUDIT V2 adaptasi macro
+                modRekapSelisihIN RULE ENGINE V2: + PENDING CUT-OFF
+                (rentang ≤ 1 hari dari hari referensi — IN masih
+                mungkin datang) · NO MOVEMENT - OPEN BALANCE (baris
+                tanpa selisih baru tapi saldo belum pulih) · VALID kini
+                diverifikasi KETAT ΔSO = IN dgn baseline SO hari
+                kalender sebelumnya · catatan PERLU REVIEW di Catatan
+                Audit utk kandidat VALID yang gagal verifikasi;
+                struktur kolom output TIDAK berubah)
                 (v3.11.30 — kartu KPI chips 'TOTAL BARIS / OK (MATCHING) /
                 dst.' DIHAPUS dari tampilan — user: "shapes kotak seperti
                 total baris. OK (matching) ini dan teman2 nya hapus aja";
@@ -47,6 +56,11 @@ Export level app = varian penuh ("PO Menunggu" opsional di export).
 Double-click baris → popup rincian IN per dokumen (42.05/32.24/99.01 +
 bulan lalu · cek RI Balancing · salin nomor). Filter header ⧩ semua
 kolom, sort numerik, ◱ Kolom, ⛶ Layar Penuh; minus merah per-cell.
+
+Export (💾): urut baris default Resto → Nama Barang → Tanggal
+kronologis (v3.14 — user: "hasil export selisih in ... sort by nama
+resto dan nama barang dan tanggal"; opsi urut lama Resto → Tanggal →
+Nama Barang tersedia di dialog export) — struktur kolom output tetap.
 """
 import contextlib
 import os
@@ -186,6 +200,9 @@ _STATUS_TAG = {
     "VALID (Sistem Masuk)": "st_valid",
     "CUT-OFF RESOLVED": "st_cutoff",
     "DEVIASI MURNI": "st_dev",
+    # v3.14 — ENGINE AUDIT V2 (adaptasi RULE ENGINE V2): status baru
+    "PENDING CUT-OFF": "st_pending",
+    "NO MOVEMENT - OPEN BALANCE": "st_openbal",
 }
 _STATUS_TAG_CFG = {
     # hijau soft — OK (RGB 226,239,218 / 55,86,35)
@@ -196,6 +213,12 @@ _STATUS_TAG_CFG = {
     "st_cutoff": {"background": "#fff2cc", "foreground": "#806000"},
     # merah soft — DEVIASI MURNI (RGB 252,228,214 / 198,89,17)
     "st_dev": {"background": "#fce4d4", "foreground": "#c65911"},
+    # v3.14 — oranye soft — PENDING CUT-OFF (RGB 252,229,205 / 153,76,0
+    # — mirror ApplyStatusFormat VBA class 4)
+    "st_pending": {"background": "#fce5cd", "foreground": "#994c00"},
+    # v3.14 — kuning soft — NO MOVEMENT - OPEN BALANCE (RGB
+    # 255,242,204 / 128,96,0 — mirror ApplyStatusFormat VBA class 5)
+    "st_openbal": {"background": "#fff2cc", "foreground": "#806000"},
 }
 
 # Urutan sumber IN di popup rincian (+ warna chip ringkasan)
@@ -2800,12 +2823,32 @@ class InSelisihView(tk.Frame):
             "\u00a0", ".")
 
     # --------------------------------------------------------- EXPORT --
+    # v3.14 — mode urut baris export (user: "hasil export selisih in
+    # bisa gak sort by nama resto dan nama barang dan tanggal"):
+    # default baru = Resto → Nama Barang → Tanggal (paritas urutan
+    # tabel audit); mode lama Resto → Tanggal → Nama Barang tetap
+    # tersedia sebagai opsi di dialog export.
+    SORT_RESTO_BARANG_TANGGAL = "resto_barang_tanggal"
+    SORT_RESTO_TANGGAL_BARANG = "resto_tanggal_barang"
+    _EXPORT_SORT_MODES = [
+        (SORT_RESTO_BARANG_TANGGAL,
+         "Resto → Nama Barang → Tanggal  (urut baru)"),
+        (SORT_RESTO_TANGGAL_BARANG,
+         "Resto → Tanggal → Nama Barang  (urut lama)"),
+    ]
+
     def _export_options_dialog(self):
         """v3.9 — dialog opsi export: tambah kolom hasil audit atau tidak.
 
         Permintaan user: "waktu ekspor tambahin hasil auditnya aja tapi ada
-        opsi buat tambahin kolom tersebut atau tidak". Return list kolom
-        audit terpilih (bisa kosong) atau None bila dibatalkan.
+        opsi buat tambahin kolom tersebut atau tidak". Return (list kolom
+        audit terpilih, sort_mode) — kolom bisa kosong; None bila
+        dibatalkan.
+
+        v3.14 — + pilihan URUT BARIS export (user: "hasil export selisih
+        in bisa gak sort by nama resto dan nama barang dan tanggal"):
+        default Resto → Nama Barang → Tanggal kronologis; opsi lama
+        Resto → Tanggal → Nama Barang tetap dipertahankan.
         """
         parent = self.winfo_toplevel()
         win = tk.Toplevel(parent)
@@ -2834,11 +2877,23 @@ class InSelisihView(tk.Frame):
             cb = ttk.Checkbutton(row, text=col, variable=v)
             cb.pack(side="left")
 
+        # v3.14 — pilihan urut baris (radio; default urut baru)
+        sort_frame = tk.Frame(body, bg=C_CARD)
+        sort_frame.pack(fill="x", pady=(10, 2))
+        tk.Label(sort_frame, text="Urut baris:",
+                 bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(9, "bold")).pack(anchor="w")
+        sort_var = tk.StringVar(value=self.SORT_RESTO_BARANG_TANGGAL)
+        for mode, label in self._EXPORT_SORT_MODES:
+            ttk.Radiobutton(sort_frame, text=label, value=mode,
+                            variable=sort_var).pack(anchor="w", padx=(8, 0))
+
         btns = tk.Frame(body, bg=C_CARD)
         btns.pack(fill="x", pady=(12, 0))
 
         def _ok():
-            result["cols"] = [c for c, v in vars_.items() if v.get()]
+            result["cols"] = ([c for c, v in vars_.items() if v.get()],
+                              sort_var.get())
             win.destroy()
 
         from .widgets import AccentButton
@@ -2847,8 +2902,9 @@ class InSelisihView(tk.Frame):
         AccentButton(btns, text="💾 Export Excel", command=_ok).pack(
             side="right")
         GhostButton(btns, text="Tanpa Kolom Audit",
-                    command=lambda: (result.update(cols=[]),
-                                     win.destroy())).pack(
+                    command=lambda: (result.update(
+                        cols=([], sort_var.get())),
+                        win.destroy())).pack(
             side="right", padx=(0, 8))
         GhostButton(btns, text="Batal",
                     command=win.destroy).pack(side="left")
@@ -2865,12 +2921,14 @@ class InSelisihView(tk.Frame):
         return result["cols"]
 
     def _on_export(self):
-        """v3.8/v3.9 — Export rekap Selisih IN per resto ke Excel.
+        """v3.8/v3.9/v3.14 — Export rekap Selisih IN per resto ke Excel.
 
-        Dialog opsi (v3.9) → pilih file → export async. Semua baris dalam
-        rentang tanggal aktif (default 1–31 bulan berjalan); filter
-        tampilan (⧩ / Hanya Selisih ≠ 0) tidak ikut — export = REKAP
-        lengkap per resto + kolom hasil audit sesuai pilihan.
+        Dialog opsi (v3.9 + urut v3.14) → pilih file → export async.
+        Semua baris dalam rentang tanggal aktif (default 1–31 bulan
+        berjalan); filter tampilan (⧩ / Hanya Selisih ≠ 0) tidak ikut —
+        export = REKAP lengkap per resto + kolom hasil audit sesuai
+        pilihan + mode urut pilihan (default Resto → Nama Barang →
+        Tanggal).
         """
         if (self.audit_df is None or self.audit_df.empty) and \
                 (self.data is None or self.data.empty):
@@ -2878,9 +2936,10 @@ class InSelisihView(tk.Frame):
                 "Export", "Belum ada data. Jalankan pipeline dulu.",
                 parent=self.winfo_toplevel())
             return
-        audit_cols = self._export_options_dialog()
-        if audit_cols is None:
+        opts = self._export_options_dialog()
+        if opts is None:
             return          # dibatalkan
+        audit_cols, sort_mode = opts
         filepath = filedialog.asksaveasfilename(
             title="Simpan Rekap Selisih IN per Resto",
             defaultextension=".xlsx",
@@ -2890,11 +2949,20 @@ class InSelisihView(tk.Frame):
         )
         if not filepath:
             return
-        self._do_export(filepath, audit_cols)
+        self._do_export(filepath, audit_cols, sort_mode=sort_mode)
 
-    def _do_export(self, filepath: str, audit_cols: list):
+    def _do_export(self, filepath: str, audit_cols: list,
+                   sort_mode: "str | None" = None):
         """Export inti (v3.9) — dipisah dari _on_export supaya bisa
-        dipanggil langsung oleh test tanpa dialog."""
+        dipanggil langsung oleh test tanpa dialog.
+
+        v3.14 — ``sort_mode``: urutan baris export (default
+        Resto → Nama Barang → Tanggal — user: "hasil export selisih in
+        bisa gak sort by nama resto dan nama barang dan tanggal";
+        "resto_tanggal_barang" = urutan lama). Struktur kolom output
+        TIDAK berubah."""
+        if sort_mode is None:
+            sort_mode = self.SORT_RESTO_BARANG_TANGGAL
         # FIX B-02: jalur export ikut validasi konsisten (bukan fallback
         # senyap ke 1/31 seperti sebelumnya).
         tgl_start = validated_tgl_entry(self.tgl_start_var, lo=-31, hi=31,
@@ -2914,7 +2982,8 @@ class InSelisihView(tk.Frame):
             if base is None:
                 base = self._compute_base()
             df = build_selisih_export_df(base, tgl_start, tgl_end,
-                                         audit_cols=audit_cols)
+                                         audit_cols=audit_cols,
+                                         sort_mode=sort_mode)
             if df.empty:
                 return None
             # v3.9.59 — FIX 2f-04 (pola app._export_excel 6a-02): export
