@@ -1705,6 +1705,12 @@ class PivotTableView(tk.Frame):
             # (Rincian Pesanan Pembelian). None bila app tak punya
             # rincian_po_df (jalur test/standalone) → fallback 3224.
             rincian_po_df=getattr(self, "rincian_po_df", None),
+            # v3.13.2 — KOLOM BARANG MASUK popup pivot (user: "cek
+            # bagian tab pivot waktu pop up bisa gak tampilan juga
+            # kolom barang masuk?"): qty rekap resto 5.BARANG MASUK
+            # per pasangan × tanggal, disisip di kanan NILAI — nilai
+            # baris (mis. 4.IN) langsung bisa dibanding dgn BM-nya.
+            with_barang_masuk=True,
         )
 
     # =========================================================================

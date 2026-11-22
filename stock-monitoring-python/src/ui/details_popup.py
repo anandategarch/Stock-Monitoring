@@ -12,6 +12,14 @@ LaporanDeviasiView. Fitur v3.1:
   v3.9.59 fix 2f-13: label kanonik ⛶='Layar Penuh' — dulu '⛶ Perbesar'…
   glyph clone-fullscreen dipasangkan label in-place)
 - Loading overlay saat render
+
+v3.13.2 — KOLOM "BARANG MASUK" (user: "cek bagian tab pivot waktu pop up
+bisa gak tampilan juga kolom barang masuk?"): jalur PIVOT (param
+``with_barang_masuk=True`` dari pivot_view) menambahkan kolom "BARANG
+MASUK" tepat di kanan NILAI — qty 5.BARANG MASUK (input rekap resto)
+per pasangan × Tanggal baris itu, dihitung dari FRAME PENUH ``data``
+(df ter-filter popup umumnya membuang baris BM itu sendiri). Pemanggil
+lama (followup / analisa kronis / saldo minus / test) tak berubah.
 """
 
 import contextlib
@@ -78,6 +86,70 @@ COLUMNS = [
 ]
 
 COL_IDS = [c[0] for c in COLUMNS]
+
+# v3.13.2 — KOLOM "BARANG MASUK" jalur PIVOT (user: "cek bagian tab pivot
+# waktu pop up bisa gak tampilan juga kolom barang masuk?"). Definisi kolom
+# + peta nilai {(barang, resto, tgl) → Σ NILAI JENIS '5.BARANG MASUK'}
+# (qty SO harian yang diinput resto di rekap — sumber kolom pivot
+# "5.BARANG MASUK" & pengurang formula "7.Selisih IN" = BM − IN).
+# Diletakkan tepat di KANAN NILAI supaya nilai baris (mis. 4.IN) bisa
+# dibanding langsung dgn BM pasangan × tanggal yang sama.
+_BM_COL = ("BARANG MASUK", 85, "e")
+
+
+def _columns_with_bm() -> list:
+    """v3.13.2 — COLUMNS + kolom BARANG MASUK disisip setelah NILAI
+    (posisi visual: nilai baris vs qty rekap resto bersebelahan)."""
+    out: list = []
+    for c in COLUMNS:
+        out.append(c)
+        if c[0] == "NILAI":
+            out.append(_BM_COL)
+    return out
+
+
+# Cache peta BM per identitas frame (pola po_keterangan._CACHE) —
+# double-click berulang di popup pivot tidak menghitung ulang groupby
+# atas frame 200k baris.
+_BM_CACHE: dict = {"data": None, "map": {}}
+
+
+def _barang_masuk_map(data: pd.DataFrame) -> dict:
+    """v3.13.2 — peta {(barang, resto, tgl): Σ NILAI} baris JENIS
+    '5.BARANG MASUK' dari FRAME PENUH append1.
+
+    Kunci KANONIK norm_nama_barang_key × norm_nama_resto_key (konvensi
+    v3.11.59 po_keterangan — drift ejaan pasangan tetap cocok; norm
+    idempoten utk data yang sudah kanonik). Frame tanpa kolom wajib →
+    {} (pemanggil lama / data mock tak terdampak). Hasil di-cache per
+    identitas objek ``data``."""
+    if data is None or getattr(data, "empty", True):
+        return {}
+    cols = set(getattr(data, "columns", []))
+    if not {"Nama Barang", "NAMA RESTO", "Tanggal", "JENIS", "NILAI"} <= cols:
+        return {}
+    if _BM_CACHE["data"] is data:
+        return _BM_CACHE["map"]
+    from ..pipeline.helpers import (
+        norm_nama_barang_key_series,
+        norm_nama_resto_key_series,
+    )
+    core = pd.DataFrame({
+        "_b": norm_nama_barang_key_series(data["Nama Barang"]),
+        "_r": norm_nama_resto_key_series(data["NAMA RESTO"]),
+        "_t": pd.to_numeric(data["Tanggal"], errors="coerce"),
+        "_j": data["JENIS"].astype(str),
+        "_v": pd.to_numeric(data["NILAI"], errors="coerce").fillna(0.0),
+    })
+    bm = core[(core["_j"] == "5.BARANG MASUK") & core["_t"].notna()]
+    out: dict = {}
+    if not bm.empty:
+        bm = bm.assign(_t=lambda d: d["_t"].astype("int64"))
+        for (b, r, t), v in bm.groupby(["_b", "_r", "_t"])["_v"].sum().items():
+            out[(b, r, int(t))] = float(v)
+    _BM_CACHE["data"] = data
+    _BM_CACHE["map"] = out
+    return out
 
 # v3.9.54 (audit 8-a P0-1) — JENIS COMPUTED pivot: "6.PEMAKAIAN (COM)"
 # dihitung _compute_com (base + IN − BK − SO; base = SA tgl-1 / SO(t−1))
@@ -148,10 +220,14 @@ class DetailsPopup(tk.Toplevel):
     """Popup window menampilkan source rows untuk kombinasi cell pivot."""
 
     def __init__(self, parent, title: str, df: pd.DataFrame,
-                 filter_info: str = "", show_maximize: bool = True):
+                 filter_info: str = "", show_maximize: bool = True,
+                 columns: list | None = None):
         super().__init__(parent)
         self._title = title
         self._show_maximize = show_maximize
+        # v3.13.2 — kolom popup OVERRIDABLE (jalur pivot menambah kolom
+        # BARANG MASUK via _columns_with_bm; pemanggil lama → COLUMNS).
+        self._columns: list = list(columns) if columns else list(COLUMNS)
         self.title(f"Detail — {title}")
         # v3.9.32 — popup diperbesar ADAPTIF ±90% layar (user: "popup di
         # tab pivot ada deviasinya — terlalu kecil, besarkan lagi");
@@ -197,12 +273,13 @@ class DetailsPopup(tk.Toplevel):
 
         # v3.9.42 — audit 61-d P3: kolom DISKALA memenuhi lebar jendela
         # (pola popup 🧮 v3.9.41; dulu fixed-width → sisi kanan kosong).
+        # v3.13.2 — diskala atas self._columns (bisa ber-BARANG MASUK).
         with contextlib.suppress(tk.TclError):
             _avail = int(getattr(self, "_geom_w", 0)) - 48
-            _total = sum(w for _n, w, _a in COLUMNS)
+            _total = sum(w for _n, w, _a in self._columns)
             if _total > 0 and _avail > _total:
                 _extra = _avail - _total
-                for _n, _w, _a in COLUMNS:
+                for _n, _w, _a in self._columns:
                     self.tree.column(
                         _n, width=_w + int(_extra * _w / _total))
 
@@ -273,10 +350,12 @@ class DetailsPopup(tk.Toplevel):
         card_in = tk.Frame(card, bg=C_CARD)
         card_in.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.tree = ttk.Treeview(card_in, columns=COL_IDS, show="headings",
+        self.tree = ttk.Treeview(card_in,
+                                 columns=[c[0] for c in self._columns],
+                                 show="headings",
                                  selectmode="extended")
 
-        for col_name, width, anchor in COLUMNS:
+        for col_name, width, anchor in self._columns:
             self.tree.column(col_name, width=width, minwidth=50, anchor=anchor)
             # kolom Nomor / Nomor PO tanpa sort-click (heading dipakai filter
             # Nama Barang; copy via klik kanan / double-click)
@@ -378,7 +457,8 @@ class DetailsPopup(tk.Toplevel):
 
         def work():
             return self._prepare_rows(df, self._name_selected,
-                                       per_cell=self._cell_tags)
+                                       per_cell=self._cell_tags,
+                                       columns=self._columns)
 
         def done(payload):
             self._render_rows(payload)
@@ -399,12 +479,19 @@ class DetailsPopup(tk.Toplevel):
 
     @staticmethod
     def _prepare_rows(df: pd.DataFrame, name_selected: set | None,
-                      per_cell: bool = False) -> dict:
+                      per_cell: bool = False,
+                      columns: list | None = None) -> dict:
         """Pure: filter + format baris → payload render (thread-safe).
 
         v3.9.2: per_cell=True (Tk 9) → minus dikumpulkan sebagai neg_cells
         [(iid, 'NILAI')] utk tag PER-CELL; False (Tk 8) → tag per baris
-        (perilaku lama)."""
+        (perilaku lama).
+        v3.13.2: param ``columns`` — definisi kolom popup (default
+        COLUMNS; jalur pivot memakai _columns_with_bm() + df ber-kolom
+        "BARANG MASUK"). Kolom BM diformat SAMA persis dgn NILAI
+        (separator ribuan Indonesia, 0 → '-', minus dalam kurung)
+        tapi TIDAK ikut total NILAI / tag minus — ia nilai REFERENSI
+        pasangan × tanggal, bukan nilai baris."""
         if df is None or df.empty:
             return {"items": [], "status": "Tidak ada source data untuk "
                                            "kombinasi ini.", "total": 0}
@@ -419,8 +506,9 @@ class DetailsPopup(tk.Toplevel):
             return {"items": [], "status": "Tidak ada source data untuk "
                                            "kombinasi ini.", "total": 0}
 
+        cols = list(columns) if columns else COLUMNS
         col_data = {}
-        for col_name, _, _ in COLUMNS:
+        for col_name, _, _ in cols:
             if col_name in render_df.columns:
                 col_data[col_name] = render_df[col_name].tolist()
             else:
@@ -434,7 +522,7 @@ class DetailsPopup(tk.Toplevel):
         for i in range(n):
             values = []
             has_negative = False
-            for col_name, _, _ in COLUMNS:
+            for col_name, _, _ in cols:
                 val = col_data[col_name][i]
                 if col_name == "NILAI":
                     formatted, is_neg = DetailsPopup._fmt_nilai(val)
@@ -446,6 +534,10 @@ class DetailsPopup(tk.Toplevel):
                             not pd.isna(val) else 0
                     except (TypeError, ValueError):
                         pass
+                elif col_name == "BARANG MASUK":
+                    # v3.13.2 — format identik NILAI; tanpa total/tag minus
+                    formatted, _ = DetailsPopup._fmt_nilai(val)
+                    values.append(formatted)
                 else:
                     _txt = DetailsPopup._fmt_cell(val, col_name)
                     values.append(_txt)
@@ -569,7 +661,9 @@ class DetailsPopup(tk.Toplevel):
         values = tree.item(iid, "values")
         if not values:
             return
-        row = dict(zip(COL_IDS, values))
+        # v3.13.2 — zip atas kolom TREE (bukan COL_IDS modul): popup pivot
+        # punya kolom ekstra BARANG MASUK → pemetaan posisi tetap benar.
+        row = dict(zip(tree["columns"], values))
         nomor = str(row.get("Nomor", "") or "")
         nomor_po = str(row.get("Nomor PO", "") or "")
 
@@ -684,7 +778,8 @@ class DetailsPopup(tk.Toplevel):
         values = tree.item(sel[0], "values")
         if not values:
             return
-        row = dict(zip(COL_IDS, values))
+        # v3.13.2 — zip atas kolom TREE (kolom ekstra BARANG MASUK aman).
+        row = dict(zip(tree["columns"], values))
         # 2d-06 — label = kolom asal nilai yang benar-benar disalin
         label = "Nomor"
         val = str(row.get("Nomor", "") or "")
@@ -778,7 +873,8 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                         filters: dict = None, show_maximize: bool = True,
                         tgl_range=None, scols_cache: "dict | None" = None,
                         in_detail: pd.DataFrame | None = None,
-                        rincian_po_df: pd.DataFrame | None = None):
+                        rincian_po_df: pd.DataFrame | None = None,
+                        with_barang_masuk: bool = False):
     """Filter data + show popup.
 
     v3.9.3: tanpa ``data.copy()`` upfront — setiap filter boolean sudah
@@ -818,6 +914,17 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     — po_nomor_map) bila 3243 tidak tersedia; lalu label 'Potensi PO
     belum dibuat' bila keduanya tidak ada. None / pemanggil lama →
     jalur 3224/label potensi (perilaku v3.11.40).
+
+    v3.13.2 — param ``with_barang_masuk`` (jalur PIVOT — user: "cek
+    bagian tab pivot waktu pop up bisa gak tampilan juga kolom barang
+    masuk?"): True → kolom "BARANG MASUK" (qty rekap resto JENIS
+    '5.BARANG MASUK' per pasangan × Tanggal) disisip setelah NILAI.
+    Peta dihitung dari FRAME PENUH ``data`` — df ter-filter popup
+    umumnya justru membuang baris BM (double-click baris 4.IN / 1.SO
+    dsb.), persis pola peta KETERANGAN PO di atas. None/kosong →
+    kolom tetap tampil kosong (data tanpa baris BM). Default False →
+    pemanggil lama (followup / analisa kronis / saldo minus) tak
+    berubah.
     """
     if data is None or data.empty:
         popup = DetailsPopup(parent, "Tidak ada data", pd.DataFrame(),
@@ -1075,6 +1182,36 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 _ket.append(" · ".join(_parts) if _parts else "")
             df = df.assign(**{"KETERANGAN PO": _ket})
 
+    # v3.13.2 — KOLOM "BARANG MASUK" (jalur pivot): qty rekap resto
+    # (JENIS '5.BARANG MASUK') per pasangan × Tanggal TIAP BARIS popup.
+    # Peta dibangun dari FRAME PENUH ``data`` — df popup ter-filter
+    # jenis/tanggal umumnya tidak memuat baris BM (mis. double-click
+    # baris 4.IN) → lookup dari df sendiri selalu kosong. Kunci KANONIK
+    # norm_nama_* (paritas peta KETERANGAN PO di atas; drift ejaan
+    # tetap cocok). Tanpa baris BM utk (pasangan, tgl) → None → tampil
+    # kosong (dibedakan dari BM terekam 0 → '-').
+    _bm_columns = None
+    if with_barang_masuk and df is not None and not df.empty:
+        _bm_m = _barang_masuk_map(data)
+        if _bm_m:
+            from ..pipeline.helpers import (
+                norm_nama_barang_key as _nbk_bm,
+                norm_nama_resto_key as _nrk_bm,
+            )
+            _b_s = df["Nama Barang"].astype(str)
+            _r_s = df["NAMA RESTO"].astype(str)
+            _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
+            _bm_vals = []
+            for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
+                if _tt is None or pd.isna(_tt):
+                    _bm_vals.append(None)
+                    continue
+                _bm_vals.append(_bm_m.get(
+                    (_nbk_bm(_bb), _nrk_bm(_rr), int(_tt))))
+            df = df.assign(**{"BARANG MASUK": _bm_vals})
+        _bm_columns = _columns_with_bm()
+
     popup = DetailsPopup(parent, title, df.reset_index(drop=True),
-                         filter_info, show_maximize=show_maximize)
+                         filter_info, show_maximize=show_maximize,
+                         columns=_bm_columns)
     return popup

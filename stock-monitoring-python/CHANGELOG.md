@@ -3,6 +3,53 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.13.2 — KOLOM BARANG MASUK DI POPUP TAB PIVOT
+
+User: *"Cek repo itu dan cek bagian tab pivot waktu pop up bisa gak
+tampilan juga kolom barang masuk?"*.
+
+### 1. Kolom "BARANG MASUK" di popup double-click tab 📊 Pivot
+- **Sebelumnya**: popup detail (double-click cell/baris pivot) hanya
+  membawa kolom NILAI milik JENIS baris yang diklik — nilai
+  `5.BARANG MASUK` (qty rekap resto) tidak terlihat kecuali user
+  double-click baris BM itu sendiri, padahal perbandingan
+  IN (sistem) vs BM (rekap resto) adalah just pemeriksaan utama
+  (penganan formula `7.Selisih IN = BM − IN`).
+- **Sekarang**: kolom **BARANG MASUK** muncul di semua popup jalur
+  Pivot, disisip tepat di kanan NILAI — tiap baris popup
+  (pasangan × Tanggal) menampilkan Σ NILAI `5.BARANG MASUK`
+  pasangan-tanggal itu, apa pun JENIS baris yang diklik.
+- **Implementasi**:
+  - `show_details_popup(..., with_barang_masuk=True)` dari
+    `pivot_view._on_double_click`; default `False` — pemanggil lama
+    (followup / analisa kronis / saldo minus) tak berubah.
+  - `DetailsPopup(..., columns=...)` — definisi kolom popup kini
+    overridable (`_columns_with_bm()`); `_prepare_rows` diformat
+    mengikuti kolom aktual.
+  - Peta `_barang_masuk_map(data)` dibangun dari **frame penuh**
+    append1 (df ter-filter popup umumnya membuang baris BM — pola
+    peta KETERANGAN PO), kunci **kanonik**
+    `norm_nama_barang_key × norm_nama_resto_key × int(Tanggal)`
+    (drift ejaan pasangan tetap cocok), di-cache per identitas frame.
+  - Format tampilan identik NILAI (ribuan Indonesia, 0 → `-`, minus
+    dalam kurung) tetapi TIDAK ikut total NILAI footer / tag minus —
+    BM adalah nilai referensi pasangan × tanggal, bukan nilai baris.
+  - Pasangan × tanggal tanpa baris BM → sel KOSONG (dibedakan dari
+    BM terekam 0 → `-`).
+
+### 2. Fix menyertai — pemetaan kolom handler copy
+- `dict(zip(COL_IDS, values))` di menu konteks & Ctrl+C diganti
+  `dict(zip(tree["columns"], values))` — dengan kolom ekstra BARANG
+  MASUK, zip atas daftar kolom modul menggeser pembacaan
+  Nomor/Nomor PO satu posisi (nilai kolom sebelah kiri yang
+  terbaca). Kini pemetaan selalu mengikuti kolom tree aktual
+  (clone ⛶ aman — kolomnya disalin dari tree sumber).
+
+### Test
+- Perilaku default (tanpa `with_barang_masuk`) identik v3.13.1 —
+  semua 1678 test lama tak tersentuh; suite penuh + `test_mock`
+  ALL PASS @1920×1080.
+
 ## v3.13.1 — DEEP AUDIT SEMUA PERHITUNGAN & LOGIKA (2 bug terbukti di-fix)
 
 User: *"Deep audit dan fix ya ... cek semua perhitungan dan logika barang
