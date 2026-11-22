@@ -20,7 +20,11 @@ fallback di-log WARNING):
 - Nomor # → Nomor; 'Nomor # Pesanan Pembelian' → Nomor PO.
 
 Dedup: baris duplikat persis dibuang hanya LINTAS sumber (file × sheet);
-baris identik SE-SUMBER dipertahankan (PO multi-baris legit). Baris dengan
+baris identik SE-SUMBER dipertahankan (PO multi-baris legit). FIX S-4
+(audit 1-e): dedup lintas sumber diterapkan DUA level — kolom mentah
+(v3.11.10) + kolom OUTPUT ternormalisasi (menangkap salinan export yang
+schema-nya beda — kolom tambahan/hilang); sheet tanpa kolom khas 9901
+sama sekali di-skip + WARNING (validasi schema minimal). Baris dengan
 NAMA RESTO kosong dibuang.
 """
 import os
@@ -126,6 +130,29 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
                     print(f"  [fn_9901] Skip sheet '{sn}' in {f}: {e}")
                     continue
             if df is not None and len(df) > 0:
+                # FIX S-4 (audit 1-e): VALIDASI SCHEMA MINIMAL — sheet tanpa
+                # SATU PUN kolom khas 9901 (penerimaan / jenis barang /
+                # qty / nama barang / cabang / tanggal) = file bukan-9901
+                # yang kebetulan ada di folder (workbook lain / sheet
+                # catatan) — dulu ikut ter-concat SENYAP (barisnya tak
+                # mungkin valid: tanpa cabang → NAMA RESTO NA → terbuang
+                # di ujung; tapi ikut mengotori dedup & binding kolom).
+                # Skip + WARNING keras.
+                _schema_ok = any(
+                    _find_column(df.columns, [], contains_any=_subs) is not None
+                    for _subs in (("penerimaan",),
+                                  ("jenis", "barang & jasa", "barang jasa"),
+                                  ("prime", "qty", "kuantiti", "kuantitas"),
+                                  ("nama barang", "barang"),
+                                  ("cabang",),
+                                  ("tanggal", "tgl", "date")))
+                if not _schema_ok:
+                    print(f"  [fn_9901] WARNING: sheet '{sn}' di "
+                          f"{os.path.basename(f)} tanpa kolom khas 9901 "
+                          f"(penerimaan/jenis/qty/barang/cabang/tanggal) "
+                          f"— DILEWATI, bukan export 9901 (kolom: "
+                          f"{[str(c) for c in list(df.columns)[:6]]})")
+                    continue
                 # v3.11.10 — FIX (audit 3-b, bug #5): tag SUMBER per frame
                 # (file × sheet) — cache bacaan aman dimutasi (fn_buka_sheet
                 # menyajikan copy defensif; lihat helpers._read_cache_get).
@@ -173,6 +200,13 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
                   f"{n_before - len(prom)} baris duplikat persis LINTAS "
                   f"sheet/file dibuang (sheet backup/salinan? — baris "
                   f"identik se-sheet dipertahankan, PO multi-baris legit)")
+    # FIX S-4 (audit 1-e): tag sumber per-baris disimpan SEBELUM kolom
+    # tag dibuang (blok dedup in-folder di atas TAK diubah) — dibawa ke
+    # output via reindex utk dedup lintas sumber level OUTPUT (lihat
+    # bawah); schema output tak berubah (tag dibuang lagi sebelum
+    # return).
+    _src_all = (prom[_SRC_9901].copy()
+                if _SRC_9901 in prom.columns else None)
     prom = prom.drop(columns=[_SRC_9901])
 
     if prom.empty:
@@ -371,10 +405,43 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
     else:
         out["Nomor PO"] = pd.NA
 
+    # FIX S-4 (audit 1-e): tag sumber dibawa ke output (dibuang lagi
+    # sebelum return — schema output TAK berubah) utk dedup lintas
+    # sumber SETELAH normalisasi kolom (lihat blok dedup di bawah).
+    # Reindex: filter penerimaan/persediaan di atas hanya MEN-SUBSET
+    # baris prom (index terjaga) — tag baris yang lolos filter saja.
+    if _src_all is not None:
+        out[_SRC_9901] = _src_all.reindex(prom.index)
+
     # Drop rows where NAMA RESTO is empty (mirror fn_3224 behavior)
     mask_valid_resto = out["NAMA RESTO"].notna() & (
         out["NAMA RESTO"].astype(str).str.strip() != "")
     out = out[mask_valid_resto].reset_index(drop=True)
+
+    # FIX S-4 (audit 1-e): DEDUP LINTAS SUMBER level OUTPUT — dedup
+    # v3.9.33/v3.11.10 di atas memakai SEMUA kolom mentah position-based:
+    # salinan export yang schema-nya BERBEDA (kolom tambahan/hilang
+    # antar file — hasil round-trip export ulang) LOLOS dari dedup itu
+    # → baris IN terhitung DOBEL. Kunci kini = kolom OUTPUT ternormalisasi
+    # (Tanggal, NAMA RESTO, Nama Barang, Value, Nomor, Nomor PO); logika
+    # sumber-tag IDENTIK dedup in-folder (baris dari SUMBER PERTAMA grup
+    # menang; baris identik SE-SUMBER dipertahankan — PO multi-baris
+    # legit, janji v3.11.10 tetap terpenuhi).
+    if _SRC_9901 in out.columns:
+        _key_cols = [c for c in ("Tanggal", "NAMA RESTO", "Nama Barang",
+                                 "Value", "Nomor", "Nomor PO")
+                     if c in out.columns]
+        _first_src = out.groupby(_key_cols, dropna=False,
+                                 sort=False)[_SRC_9901].transform("first")
+        _drop_dup = out[_SRC_9901] != _first_src
+        if bool(_drop_dup.any()):
+            _n_dup = int(_drop_dup.sum())
+            out = out[~_drop_dup]
+            print(f"  [fn_9901] 9901: {_n_dup} baris duplikat lintas "
+                  f"file/sheet dibuang setelah normalisasi kolom (isi "
+                  f"sama, schema beda — salinan export? baris identik "
+                  f"se-sumber dipertahankan)")
+        out = out.drop(columns=[_SRC_9901])
 
     print(f"  [fn_9901] DONE: {len(out)} rows")
     return out

@@ -135,7 +135,8 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
     # baris tanpa NAMA RESTO bertanggal akhir bulan tidak lagi menggeser
     # jendela 5 hari dan membuang semua baris resto. Output lalu = baris
     # resto-valid dalam jendela (identik bentuk output fn_3224 lalu);
-    # mode berjalan TIDAK berubah (NA-resto tetap lolos — M-mirror asal).
+    # mode berjalan: dulu NA-resto tetap lolos (M-mirror asal) — kini
+    # ikut terfilter (FIX S-1 audit 1-e, lihat return akhir).
     if mode == "lalu":
         # fil = Table.SelectRows(final, each [NAMA RESTO] <> null and <> "")
         mask = final["NAMA RESTO"].notna() & (
@@ -153,4 +154,11 @@ def fn_4205(folder_path: str, sheet_name: str = "#42.05. Rincian Pemindahan Bara
         fil5["Tanggal"] = (-fil5["Tanggal"]).astype("Int64")
         return fil5.reset_index(drop=True)
 
-    return final
+    # FIX S-1 (audit 1-e): mode "berjalan" kini JUGA membuang baris tanpa
+    # NAMA RESTO (mask identik mode "lalu" di atas + fn_3224:148-150 yang
+    # memfilter KEDUA mode; fn_9901/fn_2205 sama). Dulu baris NA-resto
+    # lolos → pivot append1 (groupby dropna=False) membuat pasangan
+    # phantom (Nama Barang, NA) di sumber IN 42.05.
+    mask = final["NAMA RESTO"].notna() & (
+        final["NAMA RESTO"].astype(str).str.strip() != "")
+    return final[mask].reset_index(drop=True)

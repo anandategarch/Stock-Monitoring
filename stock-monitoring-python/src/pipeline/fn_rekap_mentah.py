@@ -24,6 +24,7 @@ Aturan saat ini:
   (+ KATEGORI bila ada), Attribute, Value.
 """
 import os
+import re
 from typing import List, Optional
 
 import pandas as pd
@@ -59,6 +60,13 @@ def _parse_day_header(h: str):
         s = s[len("SUM OF "):].strip()
     elif s.startswith("SUM OF"):
         s = s[len("SUM OF"):].strip()
+    # FIX S-3 (audit 1-e): buang suffix MANGLING kolom duplikat — pandas
+    # 2.x pd.read_excel menghasilkan '5.1' (gaya titik) sedangkan
+    # _promote_at (jalur calamine) '5_1' (gaya garis bawah); tanpa ini
+    # nama ter-mangle gaya '_1' TIDAK ter-parse jadi hari → kolom
+    # duplikatnya hilang SENYAP dan resolusi duplikat hari (FIX 6f-03 di
+    # _combined_to_long) tak pernah terpicu di jalur calamine.
+    s = re.sub(r"[._]\d+$", "", s)
     if not s or s in ("NONE", "NAN"):
         return None
     try:

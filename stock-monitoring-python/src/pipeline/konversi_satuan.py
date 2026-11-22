@@ -114,6 +114,9 @@ def build_konversi_map(in_df: "pd.DataFrame | None") -> dict:
     rasio = pd.to_numeric(in_df[KOL_RASIO], errors="coerce").tolist()
     terk = (in_df[KOL_TERKECIL].tolist() if KOL_TERKECIL in cols
             else [None] * n)
+    # FIX S-2 (audit 1-e): inferensi terkecil (rasio==1, jalur 32.24 tanpa
+    # kolom '#Sat. Terkecil') DITUNDA ke pass-2 — lihat catatan di bawah.
+    _infer_terkecil: dict = {}
     for i in range(n):
         # v3.11.35 — kunci barang DINORMALISASI kanonik (UPPER + rapat-
         # spasi) paritas append1.py + fn_audit._po_menunggu_pairs (v3.11.34).
@@ -136,8 +139,19 @@ def build_konversi_map(in_df: "pd.DataFrame | None") -> dict:
         if t:
             out["terkecil"].setdefault(b, t)
         elif float(r) == 1.0:
-            # satuan dokumen == satuan dasar (baris rasio 1)
-            out["terkecil"].setdefault(b, s)
+            # satuan dokumen == satuan dasar (baris rasio 1) — INFERENSI,
+            # prioritas DI BAWAH kolom '#Sat. Terkecil' (pass-2 di bawah)
+            _infer_terkecil.setdefault(b, s)
+    # FIX S-2 (audit 1-e): prioritas satuan terkecil pernah TERBALIK —
+    # setdefault SATU pass membuat baris PERTAMA menang: baris 32.24
+    # (tanpa kolom '#Sat. Terkecil') yang muncul lebih dulu di concat
+    # query_in menutup nilai kolom '#Sat. Terkecil' 42.05 yang
+    # otoritatif — MELANGGAR kebijakan docstring ini ("kolom '#Sat.
+    # Terkecil' (42.05) menang; baris rasio == 1 … sebagai inferensi").
+    # Dua pass: pass-1 (loop atas) = nilai kolom eksplisit; pass-2 =
+    # inferensi rasio==1 HANYA mengisi barang tanpa nilai eksplisit.
+    for _b, _s in _infer_terkecil.items():
+        out["terkecil"].setdefault(_b, _s)
     out["n_rasio"] = len(out["rasio"])
     out["n_barang"] = len({b for b, _ in out["rasio"]})
     return out

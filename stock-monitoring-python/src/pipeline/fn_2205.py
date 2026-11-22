@@ -7,8 +7,9 @@ Barang). Output: Tanggal (day-of-month), NAMA RESTO (teks di antara "("
 dan ")" pada kolom Nama Pelanggan), Nama Barang, Value (dari Kuantitas).
 
 Aturan filter saat ini:
-- Baris dengan 'Nomor #' berawalan "SI" (case-sensitive) DIKECUALIKAN dari
-  sumber OUT; semua kode lain (ACR./RETUR./dll.) tetap masuk. Jumlah baris
+- Baris dengan 'Nomor #' berawalan "SI." (case-sensitive — kode
+  dokumen SI…; 'SIJ…'/'SIT…' dsb. BUKAN SI) DIKECUALIKAN dari sumber
+  OUT; semua kode lain (ACR./RETUR./dll.) tetap masuk. Jumlah baris
   SI yang dibuang dicatat di log sebagai INFO (bukan warning).
 - 'Nomor #' kosong/NA dianggap BUKAN SI (baris tetap masuk); kolom tersebut
   bukan kolom wajib — hilang → baris diproses apa adanya + WARNING keras
@@ -81,15 +82,20 @@ def fn_2205(folder_path: str, sheet_name: str = SHEET_2205,
     # lupa bilang kemarin"): v3.9.70 membuka SEMUA kode masuk; kini
     # hanya kode SI yang dikecualikan — semua kode lain (ACR./RETUR./
     # dll.) tetap masuk. Mirror semantik filter M lama (Text.StartsWith
-    # case-sensitive): prefix "SI" case-sensitive, bukan "si.", dan
-    # Nomor # kosong/NA dianggap BUKAN SI (baris tetap masuk).
+    # case-sensitive): case-sensitive, bukan "si.", dan Nomor #
+    # kosong/NA dianggap BUKAN SI (baris tetap masuk).
+    # FIX L-4 (audit 1-e): prefix "SI" polos OVERMATCH kode dokumen lain
+    # ber-awalan SI ('SIJ…'/'SIT…'/'SIM…'). Vokabular kode dokumen app
+    # = PREFIKS.TAHUN.BULAN.NOMOR (doc_codes.py; queries.py
+    # "berawalan 'SI.'") → SI = 'SI' + pemisah '.' (atau 'SI' persis),
+    # case-sensitive.
     # 'Nomor #' tetap BUKAN kolom wajib identitas: hilang → baris
     # diproses APA ADANYA + WARNING keras (kode SI tak teridentifikasi
     # — data berpotensi tercemar SI; peringatan ini ikut menaikkan
     # status akhir run, pola §82b).
     if "Nomor #" in sel.columns:
         _kode = safe_to_str(sel["Nomor #"])
-        _si = _kode.str.startswith("SI", na=False)
+        _si = _kode.str.match(r"SI(?:\.|$)", na=False)
         if bool(_si.any()):
             print(f"  [fn_2205] INFO: {int(_si.sum())} baris kode SI "
                   f"dikecualikan dari perhitungan (22.05 tanpa kode "

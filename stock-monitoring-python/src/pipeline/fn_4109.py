@@ -73,6 +73,91 @@ def _hdr(v) -> str:
     return str(v).strip().lower() if v is not None else ""
 
 
+# FIX S-6 (audit 1-e): nama bulan (Indonesia + Inggris, penuh +
+# singkatan) utk kunci PERIODE file harga — baris metadata 'Dari …
+# s/d …' 41.09 / nama file 'harga oktober 2026.xlsx'.
+_BULAN_4109 = {}
+for _i, _nms in enumerate((
+        ("januari", "jan", "january"), ("februari", "feb", "february"),
+        ("maret", "mar", "march"), ("april", "apr"), ("mei", "may"),
+        ("juni", "jun", "june"), ("juli", "jul", "july"),
+        ("agustus", "agu", "ags", "agt", "aug", "august"),
+        ("september", "sep", "sept"),
+        ("oktober", "okt", "oct", "october"),
+        ("november", "nov"), ("desember", "des", "dec", "december")), 1):
+    for _nm in _nms:
+        _BULAN_4109[_nm] = _i
+
+_TGL_RE_4109 = re.compile(r"^(\d{1,2})[\s\-/.]*([a-z]+)[\s\-/.]*(\d{4})$")
+_TGL_NUM_RE_4109 = re.compile(r"^(\d{1,2})[\s\-/.]+(\d{1,2})[\s\-/.]+(\d{4})$")
+_DARI_SD_RE_4109 = re.compile(r"dari\s+(.+?)\s+s/d\s+(.+)", re.IGNORECASE)
+
+
+def _parse_tgl_4109(v):
+    """'01 Okt 2026' / '01/10/2026' → (tahun, bulan, hari); None bila
+    tak terparse (nama bulan tak dikenal / bulan di luar 1..12)."""
+    s = str(v).strip().lower() if v is not None else ""
+    m = _TGL_RE_4109.match(s)
+    if m and m.group(2) in _BULAN_4109:
+        return (int(m.group(3)), _BULAN_4109[m.group(2)], int(m.group(1)))
+    m = _TGL_NUM_RE_4109.match(s)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return (int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    return None
+
+
+def _period_key_4109(raw, fname: str):
+    """FIX S-6 (audit 1-e) — kunci PERIODE file harga 41.09: 'harga
+    terbaru' (keep='last' setelah concat) dulu ditentukan URUTAN NAMA
+    FILE — nama file yang tak kronologis (nama bulan / angka bulan
+    non-zero-pad) membuat file LAMA yang menang. Kini urutan file =
+    periode. Prioritas sumber kunci:
+    1. baris metadata sheet 'Dari … s/d …' (tanggal S/D = per 41.09,
+       struktur file user — docstring modul); tanggal AKHIR dipakai,
+       fallback tanggal awal;
+    2. bulan/tahun dari NAMA FILE (nama bulan ID/EN, pola 2026-10 /
+       10-2026, atau angka bulan tunggal 1..12 — pembandingan NUMERIK
+       zero-pad-aware);
+    3. tak terparse → (-1, -1, -1) = paling LAMA (file ber-periode
+       eksplisit menang; antar file tak-terparse urutan lama tetap
+       dipertahankan oleh sort stabil)."""
+    # (1) metadata 'Dari … s/d …' (≤12 baris pertama — batas yang sama
+    # dgn pencarian baris header _extract_4109)
+    if raw is not None and len(raw):
+        for v in raw.iloc[:12].astype(str).values.ravel():
+            m = _DARI_SD_RE_4109.search(v)
+            if m:
+                k = _parse_tgl_4109(m.group(2)) or _parse_tgl_4109(m.group(1))
+                if k is not None:
+                    return k
+    # (2) nama file: bulan (nama / pola numerik) + tahun 4-digit
+    s = str(fname).lower()
+    tahun = 0
+    m = re.search(r"(?:19|20)\d{2}", s)
+    if m:
+        tahun = int(m.group(0))
+    bulan = 0
+    for _nm, _num in _BULAN_4109.items():
+        if re.search(r"(?<![a-z])" + _nm + r"(?![a-z])", s):
+            bulan = _num
+            break
+    if not bulan:
+        m = re.search(r"(?<!\d)(\d{4})[\s\-/.](\d{1,2})(?!\d)", s)  # 2026-10
+        if m and 1 <= int(m.group(2)) <= 12:
+            tahun, bulan = int(m.group(1)), int(m.group(2))
+        else:
+            m = re.search(r"(?<!\d)(\d{1,2})[\s\-/.](\d{4})(?!\d)", s)  # 10-2026
+            if m and 1 <= int(m.group(1)) <= 12:
+                tahun, bulan = int(m.group(2)), int(m.group(1))
+    if not bulan:
+        m = re.search(r"(?<![\da-z])(\d{1,2})(?![\da-z])", s)  # bln 1..12
+        if m and 1 <= int(m.group(1)) <= 12:
+            bulan = int(m.group(1))
+    if tahun or bulan:
+        return (tahun, bulan, 0)
+    return (-1, -1, -1)
+
+
 def _extract_4109(raw: pd.DataFrame) -> pd.DataFrame | None:
     """Deteksi posisi kolom dari header 2 baris → frame bersih per file.
 
@@ -152,13 +237,19 @@ def _extract_4109(raw: pd.DataFrame) -> pd.DataFrame | None:
     out["Harga"] = nil / qty.where(qty != 0)
 
     # filter (semua mask dihitung di index yang SAMA — bebas reindex):
-    # - buang subtotal/grand total ('Total Nama Barang' / 'Total Kategori
-    #   Barang' — kolom nama ATAU kolom kategori berawalan 'Total');
+    # - buang subtotal/grand total — baris total 41.09 adalah LITERAL
+    #   'Total Nama Barang' (subtotal per grup) / 'Total Kategori
+    #   Barang' (grand total) di kolom nama ATAU kategori (struktur file
+    #   user — docstring modul + mock test);
     # - buang baris tanpa nama barang (NaN/blank).
+    # FIX S-11 (audit 1-e): dulu prefix startswith("Total") ikut membuang
+    # barang ASLI ber-nama awalan 'Total' (mis. 'Total Kas') — kini match
+    # PERSIS signature baris total (case/space-tolerant).
     _nama_s = out["Nama Barang"].astype(str).str.strip()
     _kat_s = out["Kategori"].astype(str).str.strip()
-    keep = (~_nama_s.str.startswith("Total", na=False)
-            & ~_kat_s.str.startswith("Total", na=False)
+    _total_row = {"total nama barang", "total kategori barang"}
+    keep = (~_nama_s.str.lower().isin(_total_row)
+            & ~_kat_s.str.lower().isin(_total_row)
             & _nama_s.ne("")
             & _nama_s.str.lower().ne("nan"))
     out = out[keep]
@@ -198,7 +289,10 @@ def fn_4109(folder_path: str, sheet_name: str = SHEET_4109_DEFAULT,
             continue
         extracted = _extract_4109(raw)
         if extracted is not None and not extracted.empty:
-            frames.append(extracted)
+            # FIX S-6 (audit 1-e): frame disimpan dgn kunci PERIODE +
+            # urutan asli (diurutkan sebelum concat di bawah).
+            frames.append((_period_key_4109(raw, os.path.basename(f)),
+                           len(frames), extracted))
         else:
             print(f"  [WARNING] File harga {f}: struktur 41.09 tidak "
                   "dikenali — dilewati")
@@ -207,9 +301,16 @@ def fn_4109(folder_path: str, sheet_name: str = SHEET_4109_DEFAULT,
         print("    41.09 Harga: 0 baris terbaca — peta harga tidak dibangun")
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
-    combined = pd.concat(frames, ignore_index=True, sort=False)
+    # FIX S-6 (audit 1-e): urutkan frame per PERIODE sebelum concat —
+    # 'duplikat → terakhir menang' (keep='last' di bawah) kini = file
+    # ber-PERIODE TERBARU yang menang, bukan file terakhir menurut nama
+    # (nama file tak kronologis — nama bulan / non-zero-pad — pernah
+    # membuat file LAMA menang). File tanpa periode terparse = paling
+    # lama; antar file se-periode urutan lama dipertahankan (stabil).
+    frames.sort(key=lambda t: (t[0], t[1]))
+    combined = pd.concat([t[2] for t in frames], ignore_index=True, sort=False)
     # duplikat barang (varian plain + (V.20) adalah barang BERBEDA —
-    # keduanya dipertahankan; duplikat persis → terakhir menang)
+    # keduanya dipertahankan; duplikat persis → periode TERAKHIR menang)
     combined = combined.drop_duplicates(
         subset=["Nama Barang", "Satuan"], keep="last")
     print(f"    41.09 Harga: {len(combined):,} barang "

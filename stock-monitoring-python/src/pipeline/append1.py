@@ -1070,8 +1070,16 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         _sat4217 = _sat4217[_sat4217["SATUAN"] != ""]
         # baris nama NA dibuang SEBELUM kunci (sentinel __k tak boleh
         # match final — perilaku lama: astype(str) 'nan' tak pernah match)
-        _sat4217 = _sat4217[_sat4217["Nama Barang"].notna()
-                            & _sat4217["NAMA RESTO"].notna()]
+        # FIX L-3 (audit 1-e): NaN hulu sampai di sini sebagai STRING
+        # 'nan' (astype(str) dua baris di atas) → notna() lama NO-OP
+        # (selalu True — filter tak pernah membuang apa pun); baris nama
+        # 'nan' lolos dan kunci sentinel-nya match baris NA final
+        # (SATUAN phantom). 'nan'/'none'/'nat'/'' (strip + lower) kini
+        # dianggap NA (vokabular kosong mirror fn_9901).
+        _blank_l3 = {"", "nan", "none", "nat"}
+        _nb_l3 = _sat4217["Nama Barang"].str.strip().str.lower()
+        _nr_l3 = _sat4217["NAMA RESTO"].str.strip().str.lower()
+        _sat4217 = _sat4217[~_nb_l3.isin(_blank_l3) & ~_nr_l3.isin(_blank_l3)]
         _sat4217 = (
             _sat4217.drop_duplicates(subset=[_K_BAR, _K_RST],
                                      keep="first")
