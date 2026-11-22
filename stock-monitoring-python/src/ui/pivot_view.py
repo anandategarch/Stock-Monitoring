@@ -5,8 +5,9 @@ resto/tanggal, nilai = total NILAI (mirror pivot "Mutasi Barang").
 Mode (segment "PIVOT PER"):
 - 🏪 RESTO (default): kolom = NAMA RESTO, nilai = Σ NILAI per resto
   dalam rentang tanggal; kolom Total sengaja tidak ditampilkan.
-- 📅 TANGGAL: kolom = Tanggal; default rentang −31..31 KRONOLOGIS
-  (blok bulan lalu 25•..31• lalu 1..).
+- 📅 TANGGAL: kolom = Tanggal; default rentang −25..31 KRONOLOGIS
+  (blok bulan lalu 25•..31• lalu 1..; T-7 — filter rentang KRONOLOGIS
+  tgl_range_mask: between numerik membuang 26•..31• saat start=−25).
 - ☑ "Sembunyikan baris kosong" (default ON): sembunyikan baris yang
   SEMUA sel 0/kosong; baris ber-sel ≠ 0 (termasuk negatif) tetap tampil.
 - KOLOM NAMA BARANG di-FREEZE di tree beku kiri — scroll horizontal
@@ -207,7 +208,7 @@ class PivotTableView(tk.Frame):
         r1.pack(fill="x")
         tk.Label(r1, text="TANGGAL", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8, "bold")).pack(side="left")
-        self.tgl_start_var = tk.StringVar(value="-31")  # v3.8: 31 BULAN LALU
+        self.tgl_start_var = tk.StringVar(value="-25")  # T-7: 25• BULAN LALU (jendela audit −25..31; −31 kini = hari 31• semata di bawah filter kronologis)
         t1 = ttk.Entry(r1, textvariable=self.tgl_start_var, width=6)
         t1.pack(side="left", padx=(6, 2))
         t1.bind("<Return>", lambda e: self._refresh_pivot())
@@ -444,10 +445,16 @@ class PivotTableView(tk.Frame):
             except (TypeError, ValueError):
                 t1 = t2 = None
             if t1 is not None and t2 is not None:
-                if t1 > t2:
+                # T-7 — rentang KRONOLOGIS (mirror _compute_payload): di
+                # blok negatif urutan numerik = kronologis TERBALIK →
+                # between numerik membuang hari 26•..31• saat start=−25;
+                # swap memakai kunci kronologis (mirror in_selisih
+                # v3.11.59 — swap numerik menukar arah rentang dua-negatif).
+                from .export_sheets import (tgl_chrono_key,
+                                            tgl_range_mask)
+                if tgl_chrono_key(t1) > tgl_chrono_key(t2):
                     t1, t2 = t2, t1
-                tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
-                df = df[tnum.between(t1, t2)]
+                df = df[tgl_range_mask(df["Tanggal"], t1, t2)]
         if df.empty:
             return []
         if self.hide_empty_var.get() and {"JENIS", "NILAI"} <= set(df.columns):
@@ -847,10 +854,14 @@ class PivotTableView(tk.Frame):
             except (TypeError, ValueError):
                 t1 = t2 = None
             if t1 is not None and t2 is not None:
-                if t1 > t2:
+                # T-7 — rentang KRONOLOGIS, identik _compute_payload /
+                # _name_values (between numerik membuang 26•..31• saat
+                # start=−25; swap kunci kronologis — in_selisih v3.11.59).
+                from .export_sheets import (tgl_chrono_key,
+                                            tgl_range_mask)
+                if tgl_chrono_key(t1) > tgl_chrono_key(t2):
                     t1, t2 = t2, t1
-                tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
-                df = df[tnum.between(t1, t2)]
+                df = df[tgl_range_mask(df["Tanggal"], t1, t2)]
         return df
 
     def _combo_offered_values(self, dim: str) -> list:
@@ -921,13 +932,21 @@ class PivotTableView(tk.Frame):
         # v3.9.33 — AUDIT FIX (48-d LOW): fallback TANGGAL AWAL kini -31
         # (batas kiri default v3.8) — dulu fallback 1 MEMPERSEMPIT rentang
         # secara senyap setelah satu kali input invalid.
+        # T-7 — fallback & swap kini KRONOLOGIS: fallback -25 (default
+        # baru = jendela audit 25•..31; -31 kini berarti hari 31• semata
+        # di bawah mask kronologis); swap memakai kunci kronologis
+        # tgl_chrono_key (mirror in_selisih v3.11.59 — swap numerik menukar
+        # arah yang SALAH utk rentang dua-negatif: start=-25, end=-31 =
+        # maksud "25• s/d 31•" → TIDAK ditukar). Lazy import: export_sheets
+        # mengimpor PivotTableView (circular — pola _do_export_excel).
+        from .export_sheets import tgl_chrono_key
         t1 = validated_tgl_entry(self.tgl_start_var, lo=-31, hi=31,
-                                 fallback=-31, label="Tanggal awal",
+                                 fallback=-25, label="Tanggal awal",
                                  parent=self)
         t2 = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
                                  fallback=31, label="Tanggal akhir",
                                  parent=self)
-        if t1 > t2:
+        if tgl_chrono_key(t1) > tgl_chrono_key(t2):
             # 2c-04 (audit 2c) — rentang terbalik: selain menukar nilai
             # filter, ISI kedua entry ikut ditukar + warning (pola
             # validated_tgl_entry: invalid = warn + revert; dulu swap
@@ -1014,11 +1033,24 @@ class PivotTableView(tk.Frame):
         # PERTAMA rentang = 0 → COM minus palsu (mis. rentang 4..6 → COM(4)
         # '(5)' padahal oracle '5') + total COM salah → baris COM bisa
         # lenyap senyap di ☑ hide-empty.
+        # S-14 DITOLAK (false positive — bug hunt 1-d): filter name/resto/
+        # source/kategori MEMANG harus mempengaruhi COM — kolom COM tampil
+        # di samping baris pivot TER-SCOPE filter itu (regresi 6c-01:
+        # matrix dari self.data tak-terfilter menjumlahkan SEMUA resto →
+        # nilai COM 3× ≠ oracle per-resto di bawah filter resto). Yang
+        # dijamin kebal-filter hanyalah RENTANG TANGGAL — sudah oleh
+        # snapshot pra-filter-rentang ini.
         df_predate = df
-        # rentang tanggal berlaku untuk kedua mode
+        # rentang tanggal berlaku untuk kedua mode — T-7: mask KRONOLOGIS
+        # (between numerik membuang hari 26•..31• saat start=−25: di blok
+        # negatif urutan numerik = kronologis TERBALIK; mirror tgl_range_mask
+        # export_sheets v3.11.1 / in_selisih). st["tgl_*"] sudah terurut
+        # kronologis oleh swap _filter_state. Lazy import anti-circular
+        # (export_sheets → PivotTableView).
         if "Tanggal" in df.columns and not df.empty:
-            tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
-            df = df[tnum.between(st["tgl_start"], st["tgl_end"])]
+            from .export_sheets import tgl_range_mask
+            df = df[tgl_range_mask(df["Tanggal"], st["tgl_start"],
+                                   st["tgl_end"])]
 
         if df.empty:
             out = dict(empty)
@@ -1100,17 +1132,22 @@ class PivotTableView(tk.Frame):
         metrics = [m for m in metrics if m != "SALDO AWAL"]
 
         # FIX 6c-01 — matrix COM PENUH (hanya bila rentang memotong sisi
-        # KIRI data: tgl_start > tanggal minimum — rentang penuh dari
-        # batas kiri tak memotong konteks SO(t−1)/SA). Pivot atas df
-        # PRA-filter-rentang (semua JENIS, superset kolom rentang) →
-        # _compute_com per item atas full_keys (rantai so_prev + SA(1)
+        # KIRI data — tgl_start KRONOLOGIS > tanggal minimum; rentang
+        # penuh dari batas kiri tak memotong konteks SO(t−1)/SA). Pivot
+        # atas df PRA-filter-rentang (semua JENIS, superset kolom rentang)
+        # → _compute_com per item atas full_keys (rantai so_prev + SA(1)
         # persis laporan) → baris display memakai slice col_keys.
+        # S-14 DITOLAK (lihat catatan df_predate) — guard 6c-01 asli
+        # dipulihkan, kini KRONOLOGIS (dulu numerik: utk tanggal negatif
+        # arahnya TERBALIK — start=-26 vs tmin=-25 lolos padahal rentang
+        # kronologis memotong hari 25•).
         com_full = None
         if mode == "tanggal" and "Tanggal" in getattr(
                 df_predate, "columns", []) and not df_predate.empty:
             _tall = pd.to_numeric(df_predate["Tanggal"], errors="coerce")
             _tmin = _tall.min()
-            if pd.notna(_tmin) and st["tgl_start"] > float(_tmin):
+            if pd.notna(_tmin) \
+                    and _chrono(st["tgl_start"]) > _chrono(_tmin):
                 try:
                     # v3.11.59 — FIX (audit 3-a): TANPA fill_value — NaN
                     # = sel tanpa baris asli (presence utk _compute_com;
@@ -1475,7 +1512,7 @@ class PivotTableView(tk.Frame):
         self.resto_var.set("(All)")
         self.source_var.set("(All)")
         self._reset_kategori()    # v3.9.36 — reset = default 'Deviasi'
-        self.tgl_start_var.set("-31")  # v3.8: 31 bulan lalu → 31 berjalan
+        self.tgl_start_var.set("-25")  # T-7: 25• bulan lalu → 31 berjalan (jendela audit; parity default _build_ui)
         self.tgl_end_var.set("31")
         self.hide_empty_var.set(True)
         self._name_selected = None
@@ -1780,8 +1817,9 @@ class PivotTableView(tk.Frame):
           bulan lalu = nilai SO di kolom tanggal NEGATIF kronologis
           TERAKHIR yang merekam SO pasangan (kunci kalender terakhir
           bisa hanya ber-IN tanpa SO — mirror com_analisa._closing_so);
-          ELSE 0 (janji docstring v3.9.5; deviasi_popup mengosongkan —
-          pivot mempertahankan fallback 0);
+          ELSE NaN (S-13 — parity engine audit fn_audit: basis tgl-1
+          "Qty SO Kemarin" NaN → Qty COM NaN; dulu pivot fallback 0 →
+          COM base-0 garbage ≠ engine utk data yang sama);
         • base t>1 = SO kolom global SEBELUMNYA hanya bila pasangan
           merekam SO di kolom itu (cek KEHADIRAN di index series SO
           hasil dropna — bukan nilai numeriknya); kolom pertama global
@@ -1844,8 +1882,14 @@ class PivotTableView(tk.Frame):
                 # tanggal 1 → base SALDO AWAL pair (audit fix v3.9.5)
                 base = float(sa_t1)
             elif is_t1:
-                # tanpa baris SA → SO penutupan bulan lalu, else 0
-                base = closing if closing is not None else 0.0
+                # tanpa baris SA → SO penutupan bulan lalu; tanpa
+                # penutupan → NaN (S-13 — parity fn_audit: basis tgl-1
+                # NaN → COM NaN; dulu base 0 → COM = IN−BK−SO minus
+                # palsu ≠ engine audit).
+                if closing is None:
+                    com_values[t] = float("nan")
+                    continue
+                base = closing
             elif i == 0:
                 # kolom pertama global bukan t=1: tak ada t−1 → kosong
                 com_values[t] = float("nan")

@@ -64,6 +64,11 @@ from .widgets import (
     run_async,
 )
 
+# T-7 — mask rentang tanggal KRONOLOGIS + kunci chrono (parity
+# _compute_payload pivot_view / in_selisih; export_sheets tak mengimpor
+# modul ini — bebas circular).
+from .export_sheets import tgl_chrono_key, tgl_range_mask
+
 # Column definitions: (column_id, width, anchor)
 # v3.11 — kolom KATEGORI & SOURCE KIRIMAN DIHAPUS, diganti KETERANGAN
 # PO (user: "Pop up di tab deviasi gr dan deviasi pcs dan pivot tabel
@@ -1019,13 +1024,17 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             pass
 
     # v3.9.54 FIX (audit 8-a P1-2) — rentang tanggal tampilan pivot
-    # (parity _compute_payload: tnum.between(t1, t2), kedua mode);
-    # dulu popup mengabaikan rentang → baris di luar rentang yang
-    # difilter tabel tetap muncul di popup.
+    # (parity _compute_payload, kedua mode); dulu popup mengabaikan
+    # rentang → baris di luar rentang yang difilter tabel tetap muncul
+    # di popup.
+    # T-7 — rentang KRONOLOGIS: tgl_range_mask + swap kunci kronologis
+    # (between numerik membuang hari 26•..31• saat start=−25: di blok
+    # negatif urutan numerik = kronologis TERBALIK; swap numerik menukar
+    # arah rentang dua-negatif — mirror pivot_view / in_selisih v3.11.59).
     if tgl_range is not None:
         try:
             _t1, _t2 = int(tgl_range[0]), int(tgl_range[1])
-            if _t1 > _t2:
+            if tgl_chrono_key(_t1) > tgl_chrono_key(_t2):
                 _t1, _t2 = _t2, _t1
             if _com_prev_tgl is not None:
                 # FIX 6c-02 / 6e-04 — baris BASE SO(t−1) berboleh DI LUAR
@@ -1034,10 +1043,9 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 _tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
                 _so_m = _scol("JENIS") == "1.SO"
                 df = df[((_tnum == _com_prev_tgl) & _so_m)
-                        | _tnum.between(_t1, _t2)]
+                        | tgl_range_mask(_tnum, _t1, _t2)]
             else:
-                df = df[pd.to_numeric(df["Tanggal"], errors="coerce")
-                        .between(_t1, _t2)]
+                df = df[tgl_range_mask(df["Tanggal"], _t1, _t2)]
             _range_note = f"Tgl {_t1}..{_t2}"
         except (TypeError, ValueError, IndexError):
             _range_note = None

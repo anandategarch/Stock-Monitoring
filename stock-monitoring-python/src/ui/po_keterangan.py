@@ -176,7 +176,14 @@ def _build_map(data: pd.DataFrame, in_detail) -> dict:
     # Tanpa baris 32.24-lalu sama sekali (folder/file tak ada) → seluruh
     # blok bulan-lalu tak terverifikasi.
     _si32_lalu = det["_s"].str.startswith("32.24") & (det["_t"] < 0)
-    _lalu_max = (int(-det.loc[_si32_lalu, "_t"].max())
+    # T-6 — hari MAKSIMUM file = _t numerik TERKECIL (negatif = hari
+    # bulan lalu; -31 = hari 31 = TERAKHIR). .max() lama memilih _t
+    # terbesar (mis. -27 = hari 27 = hari PERTAMA jendela import) →
+    # _lalu_max 4 hari terlalu kecil → hari (maxT-3)..maxT yang
+    # TER-IMPORT dinilai tak terverifikasi + hari pra-jendela (25•/26•)
+    # salah dianggap terverifikasi → label palsu (docstring: "25•/26•
+    # aman" justru dilanggar).
+    _lalu_max = (int(-det.loc[_si32_lalu, "_t"].min())
                  if bool(_si32_lalu.any()) else None)
 
     def _lalu_verifiable(ti: int) -> bool:
