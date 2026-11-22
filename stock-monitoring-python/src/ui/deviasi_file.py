@@ -332,9 +332,14 @@ def parse_deviasi_file(path: str) -> dict:
     # v3.9.5 dulu: baris bulan lain dibuang & dihitung di meta). Nomor
     # bulan (bukan string mentah) — file asli memakai kode periode
     # ("201.OKT 26" vs "202.OKT 26" = bulan SAMA).
+    # K-2/T-4 FIX — SATUAN masuk dedup-key: barang multi-satuan (GR + PCS
+    # dua baris utk pasangan resto·barang yang sama) mempertahankan SATU
+    # baris per satuan (dulu baris satuan kedua dibuang sebagai "duplikat"
+    # → nominal/qty bulan-lalu satuan itu hilang total di semua konsumen).
     before_dedup = len(out)
     out = out.drop_duplicates(
-        subset=["_bulan_num", "Minggu", "_resto_norm", "_bahan_norm"],
+        subset=["_bulan_num", "Minggu", "_resto_norm", "_bahan_norm",
+                "Satuan"],
         keep="first")
     n_dup = before_dedup - len(out)
 

@@ -36,12 +36,14 @@ from .nominal_common import (
     # kosong (barang ADA di peta tapi harga None) utk _noharga_ket
     _norm_name_lalu,
     _norm_resto_lalu,
+    _norm_sat_lalu,  # K-2/T-4 FIX — kunci satuan join file lalu
     agregasi_nominal_per_resto,
     fmt_nominal_cell,
     fmt_pct_cell,  # v3.9.63 — kolom Persen Kenaikan/Penurunan (Nominal)
     fmt_rp_cell,
     hitung_nominal_lalu_multi,  # v3.9.45 — multi-bulan file deviasi
     hitung_persen_kenaikan,  # v3.9.63 — idem
+    lalu_fallback_keys,  # K-2/T-4 FALLBACK — drift satuan file↔sekarang
     pasangan_tanpa_harga_global,  # v3.9.63 — anak tab Tanpa Harga global
 )
 from .theme import (
@@ -1657,13 +1659,33 @@ class NominalRestoView(tk.Frame):
             # bersamaan) + kolom pembanding tak ikut scope filter
             # kategori (pasangan Supplies lalu ikut terhitung →
             # perbandingan tidak sebanding).
+            # K-2/T-4 FIX — join scope kini BER-SATUAN (resto, barang,
+            # satuan): baris lalu GR masuk scope bila pasangan GR hadir
+            # di data sekarang (tetap PERSIS popup rincian & TOTAL LALU
+            # popup yang kini juga ber-kunci satuan; dulu kunci (resto,
+            # barang) menarik SEMUA satuan file lalu ke scope saat
+            # salah satu satuan saja hadir → baris satuan tanpa pasangan
+            # sekarang ikut terjumlah).
             _key_now = set(zip(
                 pairs["Resto"].astype(str).map(_norm_resto_lalu),
-                pairs["Nama Barang"].astype(str).map(_norm_name_lalu)))
+                pairs["Nama Barang"].astype(str).map(_norm_name_lalu),
+                pairs["Satuan"].astype(str).map(_norm_sat_lalu)))
+            _rn_l = lalu["_resto_norm"].astype(str)
+            _bn_l = lalu["_bahan_norm"].astype(str)
+            _sn_l = lalu["Satuan"].map(_norm_sat_lalu)
+            # K-2/T-4 FALLBACK — baris lalu yang MISS kunci eksak satuan
+            # tetap masuk scope bila (a) pasangan (resto, barang) hadir
+            # di data sekarang DAN (b) file punya PERSIS SATU satuan utk
+            # pasangan itu (drift rename satuan KG↔GR antar bulan / file
+            # tanpa kolom Satuan; pasangan multi-satuan = ambigu → kunci
+            # eksak wajib mengenai — paritas perilaku join lama utk
+            # pasangan satu-satuan).
+            _key_now_rb = {(r, b) for r, b, _s in _key_now}
+            _fb_ok = lalu_fallback_keys(zip(_rn_l, _bn_l, _sn_l))
             lalu_f = lalu[[
-                (_rn, _bn) in _key_now for _rn, _bn in zip(
-                    lalu["_resto_norm"].astype(str),
-                    lalu["_bahan_norm"].astype(str))]]
+                ((_rn, _bn, _sn) in _key_now)
+                or ((_rn, _bn) in _key_now_rb and (_rn, _bn) in _fb_ok)
+                for _rn, _bn, _sn in zip(_rn_l, _bn_l, _sn_l)]]
             per_lalu = lalu_f.groupby("_resto_norm")["Nominal Lalu"].sum()
             g[col_id] = (
                 g["Resto"].astype(str).map(_norm_resto_lalu).map(per_lalu)
@@ -2165,6 +2187,10 @@ class NominalRestoView(tk.Frame):
     def _lalu_map(self) -> dict:
         """v3.9.36 — peta (_resto_norm, _bahan_norm) → baris frame
         Bulan Lalu (snapshot self._lalu_df).
+        K-2/T-4 FIX — kunci kini BER-SATUAN (_resto_norm, _bahan_norm,
+        satuan): barang multi-satuan (GR+PCS) punya SATU entri per
+        satuan (baris sekarang GR & PCS tidak lagi mencocokkan rekaman
+        lalu yang sama → tidak terhitung 2× di TOTAL).
         PERF 6d2 (audit 6-d2) — dibangun VEKTOR (zip kolom +
         to_dict("records")), bukan `iloc` per baris: pembuatan Series per
         baris ~100ms @5.000 baris di MAIN thread SETIAP popup rincian
@@ -2177,24 +2203,53 @@ class NominalRestoView(tk.Frame):
         if lalu is None or lalu.empty:
             return {}
         keys = zip(lalu["_resto_norm"].astype(str).tolist(),
-                   lalu["_bahan_norm"].astype(str).tolist())
+                   lalu["_bahan_norm"].astype(str).tolist(),
+                   lalu["Satuan"].map(_norm_sat_lalu).tolist())
         return dict(zip(keys, lalu.to_dict("records")))
 
     def _lalu_maps(self) -> list:
-        """v3.9.45 — list peta (_resto_norm, _bahan_norm) → baris frame
-        Bulan Lalu PER BULAN (index 0 = bulan utama self._lalu_df;
+        """v3.9.45 — list peta (_resto_norm, _bahan_norm, satuan) → baris
+        frame Bulan Lalu PER BULAN (index 0 = bulan utama self._lalu_df;
         index berikut = bulan ≥2 self._lalu_frames[1:]) — popup rincian
         multi-bulan.
+        K-2/T-4 FIX — kunci BER-SATUAN (mirror _lalu_map).
         PERF 6d2 (audit 6-d2) — vektor per frame (lihat _lalu_map)."""
         maps = []
         for _lab, _fr in self._lalu_frames:
             m = {}
             if _fr is not None and not _fr.empty:
                 keys = zip(_fr["_resto_norm"].astype(str).tolist(),
-                           _fr["_bahan_norm"].astype(str).tolist())
+                           _fr["_bahan_norm"].astype(str).tolist(),
+                           _fr["Satuan"].map(_norm_sat_lalu).tolist())
                 m = dict(zip(keys, _fr.to_dict("records")))
             maps.append(m)
         return maps
+
+    @staticmethod
+    def _lalu_fb_map_from(frame) -> dict:
+        """K-2/T-4 FALLBACK — peta {(resto_norm, bahan_norm): baris} dari
+        frame lalu, HANYA utk pasangan ber-PERSIS-SATU satuan: menopang
+        lookup popup saat satuan FILE ≠ satuan data sekarang (drift
+        rename KG↔GR antar bulan / file tanpa kolom Satuan). Pasangan
+        multi-satuan TIDAK dimasukkan (ambigu — kunci eksak satuan
+        wajib mengenai)."""
+        if frame is None or frame.empty:
+            return {}
+        rn = frame["_resto_norm"].astype(str).tolist()
+        bn = frame["_bahan_norm"].astype(str).tolist()
+        sn = frame["Satuan"].map(_norm_sat_lalu).tolist()
+        fb_ok = lalu_fallback_keys(zip(rn, bn, sn))
+        return {(r, b): rec for (r, b), rec in zip(
+            zip(rn, bn), frame.to_dict("records")) if (r, b) in fb_ok}
+
+    def _lalu_fb_map(self) -> dict:
+        """K-2/T-4 FALLBACK utk bulan utama (mirror _lalu_map)."""
+        return self._lalu_fb_map_from(self._lalu_df)
+
+    def _lalu_fb_maps(self) -> list:
+        """K-2/T-4 FALLBACK per bulan (mirror _lalu_maps — index paritas)."""
+        return [self._lalu_fb_map_from(_fr) for _lab, _fr
+                in self._lalu_frames]
 
     def _show_resto_popup(self, resto: str):
         """Popup RINCIAN PER ITEM utk satu resto (double-click baris) —
@@ -2213,8 +2268,12 @@ class NominalRestoView(tk.Frame):
         if sub.empty:
             return
         lalu_map = self._lalu_map()
+        # K-2/T-4 FALLBACK — peta (resto, barang) pasangan satu-satuan
+        # (drift satuan file↔sekarang; mirror _assign_lalu_column)
+        lalu_fb = self._lalu_fb_map()
         # v3.9.45 — peta per bulan ≥2 (kolom dinamis popup)
         _maps_extra = self._lalu_maps()[1:]
+        _fb_extra = self._lalu_fb_maps()[1:]
         _extra_cols = [(cid, 150, "e")
                        for cid, lab, wk in self._lalu_extra]
 
@@ -2311,10 +2370,18 @@ class NominalRestoView(tk.Frame):
             row = sub.iloc[i]
             nom = row.get("Nominal")
             # pasangan Bulan Lalu — kunci ternormalisasi (pola join
-            # komparasi: '1030.BDGSET' ↔ 'BDGSET')
+            # komparasi: '1030.BDGSET' ↔ 'BDGSET'); K-2/T-4 FIX —
+            # BER-SATUAN: baris satuan (GR/PCS) mencocokkan rekaman lalu
+            # SATUANNYA sendiri (dulu kedua baris satuan mencocokkan
+            # rekaman (resto, barang) yang sama).
             _key_l = (_norm_resto_lalu(resto),
-                      _norm_name_lalu(row["Nama Barang"]))
+                      _norm_name_lalu(row["Nama Barang"]),
+                      _norm_sat_lalu(row["Satuan"]))
             lrow = lalu_map.get(_key_l)
+            if lrow is None:
+                # K-2/T-4 FALLBACK — satuan file ≠ satuan sekarang →
+                # kunci (resto, barang) bila tak ambigu (satu satuan)
+                lrow = lalu_fb.get(_key_l[:2])
             nom_lalu = lrow.get("Nominal Lalu") if lrow is not None \
                 else None
             if lrow is None:
@@ -2323,6 +2390,9 @@ class NominalRestoView(tk.Frame):
             vals_extra = []
             for _mi, _m in enumerate(_maps_extra):
                 _r = _m.get(_key_l)
+                if _r is None:
+                    _r = _fb_extra[_mi].get(_key_l[:2]) \
+                        if _mi < len(_fb_extra) else None
                 _v = _r.get("Nominal Lalu") if _r is not None else None
                 vals_extra.append(_v)
                 try:
@@ -2390,9 +2460,20 @@ class NominalRestoView(tk.Frame):
         # ditarik; skipna seperti TOTAL sekarang).
         total_lalu = 0.0
         for i in range(len(sub)):
+            # K-2/T-4 FIX — kunci BER-SATUAN: tiap baris satuan sekarang
+            # menarik nominal lalu satuanNYA → TOTAL menjumlah tiap baris
+            # satuan TEPAT SEKALI (dulu baris GR & PCS pasangan multi-
+            # satuan mencocokkan rekaman (resto, barang) yang sama →
+            # nominal lalu terhitung 2×).
             lrow = lalu_map.get(
                 (_norm_resto_lalu(resto),
-                 _norm_name_lalu(sub.iloc[i]["Nama Barang"])))
+                 _norm_name_lalu(sub.iloc[i]["Nama Barang"]),
+                 _norm_sat_lalu(sub.iloc[i]["Satuan"])))
+            if lrow is None:
+                # K-2/T-4 FALLBACK — drift satuan (satu-satuan tak ambigu)
+                lrow = lalu_fb.get((
+                    _norm_resto_lalu(resto),
+                    _norm_name_lalu(sub.iloc[i]["Nama Barang"])))
             if lrow is not None:
                 v = lrow.get("Nominal Lalu")
                 try:

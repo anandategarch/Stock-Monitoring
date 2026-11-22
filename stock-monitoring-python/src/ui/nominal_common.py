@@ -271,6 +271,33 @@ def _norm_name_lalu(v) -> str:
     return re.sub(r"\s+", " ", str(v).strip().upper())
 
 
+def _norm_sat_lalu(v) -> str:
+    """K-2/T-4 FIX — satuan ternormalisasi utk KUNCI JOIN file lalu
+    (peta Bulan Lalu kini ber-kunci (resto, barang, satuan)): norm_sat +
+    placeholder '-' (pasangan TANPA satuan di data sekarang —
+    hitung_nominal_pairs memetakan satuan kosong → '-') disamakan dgn ''
+    supaya sisi pasangan-sekarang & sisi file-lalu konsisten (GR↔GR,
+    PCS↔PCS, kosong↔kosong)."""
+    s = norm_sat(v)
+    return "" if s == "-" else s
+
+
+def lalu_fallback_keys(keys) -> set:
+    """K-2/T-4 FALLBACK — himpunan {(resto, barang)} pasangan file-lalu
+    ber-PERSIS-SATU satuan (dari kunci map lalu): menopang join saat
+    satuan FILE ≠ satuan data SEKARANG (drift rename unit antar bulan
+    mis. KG↔GR, atau file tanpa kolom Satuan → semua ''). Pasangan
+    MULTI-satuan sengaja TIDAK dimasukkan — ambigu (tak bisa dipastikan
+    rekaman satuan mana yang dimaksud; rekaman itu wajib dikenai kunci
+    eksak satuan). Perilaku pasangan satu-satuan = paritas join lama
+    pra-kunci-satuan (kunci (resto, barang))."""
+    sats: dict = {}
+    for k in keys:
+        rb = (k[0], k[1])
+        sats.setdefault(rb, set()).add(k[2] if len(k) > 2 else "")
+    return {rb for rb, ss in sats.items() if len(ss) == 1}
+
+
 # ---------------------------------------------------------------------------
 # PASANGAN NOMINAL TANGGAL H (port inti _compute_nominal v3.9.32)
 # ---------------------------------------------------------------------------
@@ -829,8 +856,18 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
         _cand = str(out["Minggu"].iloc[0]).strip().upper()
         if _cand and _cand not in ("NAN", "NONE"):
             _wk_label = _cand
-    out = out.drop_duplicates(subset=["_resto_norm", "_bahan_norm"],
-                              keep="first")
+    # K-2/T-4 FIX — dedup BER-SATUAN (resto, bahan, satuan): barang
+    # multi-satuan (GR + PCS utk pasangan resto·barang sama) mempertahankan
+    # SATU baris per satuan. Dulu kunci (resto, bahan) menjatuhkan baris
+    # satuan kedua → nominal lalu satuan itu hilang, DAN di view baris
+    # sekarang GR & PCS mencocokkan rekaman lalu yang SAMA → terhitung 2×
+    # di TOTAL 'Nominal Deviasi Bulan Lalu' (join view kini ber-kunci
+    # (resto, bahan, satuan) — lihat _norm_sat_lalu).
+    out["_sat_norm"] = out["Satuan"].map(norm_sat)
+    out = out.drop_duplicates(
+        subset=["_resto_norm", "_bahan_norm", "_sat_norm"],
+        keep="first")
+    out = out.drop(columns=["_sat_norm"])
     out = out.reset_index(drop=True)
     out["_minggu"] = _wk_label
     out = out.drop(columns=["Minggu"], errors="ignore")
@@ -960,7 +997,8 @@ def hitung_nominal_lalu_multi(
 def dev_lalu_qty_map(file_df: pd.DataFrame | None,
                      h: int | None = None,
                      bulan_sel: int | None = None):
-    """v3.9.53 — peta {(resto_norm, bahan_norm): qty_dev_lalu} NILAI ASLI
+    """v3.9.53 — peta {(resto_norm, bahan_norm, satuan_norm): qty_dev_lalu}
+    NILAI ASLI
     (bertanda — plus surplus / minus kekurangan) dari FILE deviasi resmi
     (parse_deviasi_file tab ⚖ Komparasi; user: "Deviasi bulan lalu yang
     ditampilkan di tab deviasi gr dan pcs pakai nilai asli jangan pakai
@@ -975,8 +1013,12 @@ def dev_lalu_qty_map(file_df: pd.DataFrame | None,
         'jika week 1 maka ambil data week 1 juga'): minggu yang MEMUAT H;
         tidak ada → terbesar ≤ target, lalu terkecil > target; h=None →
         minggu terakhir (penutupan bulan);
-      - dedup (resto, bahan) keep="first" + label minggu deterministik
-        (WEEK 3 & WEEK 4 sama-sama _h=25 — nomor minggu terbesar menang).
+      - dedup (resto, bahan, satuan) keep="first" + label minggu
+        deterministik (WEEK 3 & WEEK 4 sama-sama _h=25 — nomor minggu
+        terbesar menang). T-4 FIX — satuan masuk kunci: barang dua-satuan
+        (GR+PCS) kini punya ENTRI PER SATUAN (dulu baris satuan kedua
+        hilang di dedup → tab GR & tab PCS sama-sama menampilkan qty
+        satuan pertama — salah satuan).
 
     Return (map, label) — label = "WEEK n · <bulan>" (dipakai status/
     legend supaya asal angka JELIHAT; None bila file kosong/tak valid).
@@ -999,6 +1041,13 @@ def dev_lalu_qty_map(file_df: pd.DataFrame | None,
         "Minggu": (file_df["Minggu"].astype(str).values
                    if "Minggu" in file_df.columns
                    else np.full(len(file_df), "")),
+        # T-4 FIX — satuan ternormalisasi masuk frame (kolom Satuan
+        # opsional: file tanpa Satuan → semua "" = perilaku lama utk
+        # barang satu-satuan).
+        "_sat_norm": (file_df["Satuan"].map(_norm_sat_lalu)
+                      .astype(str).values
+                      if "Satuan" in file_df.columns
+                      else np.full(len(file_df), "")),
     })
     # (a) bulan TERBARU (atau bulan PILIHAN — parity hitung_nominal_lalu_
     # pairs; bulan paling akhir di file multi-bulan = 'bulan lalu')
@@ -1027,16 +1076,25 @@ def dev_lalu_qty_map(file_df: pd.DataFrame | None,
             def _lab_num(lab):
                 m = re.search(r"(\d+)", lab)
                 return int(m.group(1)) if m else 0
+            # S-7 FIX — pilihan label DETERMINISTIK: sort eksplisit, ambil
+            # TERAKHIR = nomor minggu TERBESAR (penutupan — semantik
+            # v3.9.36), SERI nomor sama dipatahkan LEXIKOGRAFIS (terbesar).
+            # max() polos pada seri (mis. 'WEEK 3' vs 'MINGGU 3') memilih
+            # sesuai URUTAN BARIS file → label pemenang & himpunan pasangan
+            # yang bertahan/terbuang bergantung urutan file, bukan konten.
+            _lab_sel = sorted(_labs, key=lambda l: (_lab_num(l), l))[-1]
             out = out[out["Minggu"].astype(str).str.strip()
-                      .str.upper() == max(_labs, key=_lab_num)].copy()
+                      .str.upper() == _lab_sel].copy()
         if not out.empty:
             _cand = str(out["Minggu"].iloc[0]).strip().upper()
             if _cand and _cand not in ("NAN", "NONE"):
                 _wk_label = _cand
-    out = out.drop_duplicates(subset=["_resto_norm", "_bahan_norm"],
+    out = out.drop_duplicates(subset=["_resto_norm", "_bahan_norm",
+                                      "_sat_norm"],
                               keep="first")
     qty_map = {
-        (str(r["_resto_norm"]), str(r["_bahan_norm"])): float(r["qty"])
+        (str(r["_resto_norm"]), str(r["_bahan_norm"]),
+         str(r["_sat_norm"])): float(r["qty"])
         for _, r in out.iterrows()}
     label = f"{_wk_label} · {_bulan_label_multi(file_df, _target_bulan)}"
     return (qty_map, label)
@@ -1056,12 +1114,14 @@ _SRC_EKSTERNAL_MINUS = ("Eksternal", "Campuran")
 def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
                              saldo_sistem_map: dict | None = None,
                              mode_4217: bool = True,
+                             semua_sumber: bool = False,
                              stats_out: dict | None = None) -> pd.DataFrame:
     """v3.11.42 — Pasangan (barang, resto) dgn SALDO SISTEM minus di
     rentang 1..H (Opsi 2 — SEMUA pasangan yg pernah minus, bukan hanya
     snapshot H).
 
-    Scan ``2.SALDO AKHIR`` per (pasangan, tgl 1..H) di append1_df.
+    Scan ``2.SALDO AKHIR`` per (pasangan-satuan, tgl 1..H) di append1_df
+    (S-8: pasangan multi-satuan GR+PCS dievaluasi PER SATUAN).
     Override tgl H dgn ``saldo_sistem_map`` (file 42.17 folder '6. 42.17')
     bila ``mode_4217=True`` & pasangan ada di peta (konsisten dgn tab
     📦/🧩 Deviasi GR/PCS — SharedSaldoSistemMode). Mode ``pivot`` (mode_4217
@@ -1105,6 +1165,10 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     Eksternal/Campuran), ``shown`` (baris hasil), ``schema_ok``. View
     memakainya utk status ber-penjelasan + log 1 baris (pola 'pesan
     kosong yang jujur' v3.9.46).
+    S-9 FIX — ``semua_sumber=True`` (dipakai hitung_saldo_minus_kronis):
+    TANPA filter Source Kiriman (frame PENUH — semua sumber) supaya
+    konsumen menghitung flag Eksklusif atas SEMUA pasangan minus
+    SEBELUM filter sumber diterapkan.
     """
     if stats_out is not None:
         stats_out.update(saldo_rows=0, saldo_pairs=0, minus_pairs=0,
@@ -1134,13 +1198,24 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
           .astype("Int64"),
         _v=pd.to_numeric(saldo_df["NILAI"], errors="coerce").fillna(0.0),
         _b=saldo_df["Nama Barang"].astype(str),
-        _r=saldo_df["NAMA RESTO"].astype(str))
+        _r=saldo_df["NAMA RESTO"].astype(str),
+        # S-8 FIX — satuan ternormalisasi per baris saldo (kosong → ''):
+        # indikator minus dievaluasi PER (barang, resto, SATUAN) — dulu
+        # pivot menjumlahkan qty LINTAS SATUAN utk pasangan multi-satuan
+        # (GR + PCS — tak bermakna).
+        _s=(saldo_df["SATUAN"].map(
+                lambda v: norm_sat(v) if norm_sat(v) else "")
+            if "SATUAN" in cols else ""))
     # Drop tgl NaN (defensive — tnum Int64 bisa NA)
     saldo_df = saldo_df.dropna(subset=["_t"])
     if saldo_df.empty:
         return pd.DataFrame()
 
-    # Pivot: index (barang, resto), columns tgl, values saldo sum.
+    # Pivot: index (barang, resto, satuan), columns tgl, values saldo sum.
+    # S-8 FIX — index BER-SATUAN: pasangan multi-satuan (GR + PCS)
+    # dievaluasi sebagai DUA baris satuan (menjumlah GR + PCS tak
+    # bermakna); data tanpa kolom SATUAN → level _s '' semua baris =
+    # satu baris per pasangan (perilaku lama utuh).
     # v3.11.59 — FIX (bug 2, MEDIUM): TANPA fill_value (dulu 0.0)
     # MENGARANG saldo 0 utk tanggal yang pasangan tak punya baris
     # 2.SALDO AKHIR → Max Qty salah (0.0 padahal seharusnya saldo
@@ -1154,7 +1229,7 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     # minus terekam. Override 42.17 tgl H tetap bekerja (menimpa sel
     # NaN seperti dulu menimpa sel 0).
     pivot = saldo_df.pivot_table(
-        index=["_b", "_r"], columns="_t", values="_v",
+        index=["_b", "_r", "_s"], columns="_t", values="_v",
         aggfunc="sum")
     if stats_out is not None:
         stats_out["saldo_pairs"] = len(pivot)
@@ -1165,7 +1240,16 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
             _ss_lookup = {
                 f"{_norm_name_lalu(b)}\x1f{_norm_resto_lalu(r)}": float(v)
                 for (b, r), v in saldo_sistem_map.items()}
-            if _ss_lookup and h in pivot.columns:
+            # T-5 FIX — kolom H ABSEN dari pivot = tak ada pasangan dgn
+            # saldo terekam di tgl H; override 42.17 tgl H TETAP harus
+            # diterapkan (saldo 42.17 = snapshot sistem tgl H) — buat
+            # kolom H (NaN) dulu, lalu timpa pasangan ber-peta. Dulu
+            # override diam-diam DIBATALKAN bila kolom H absen. Sel NaN
+            # utk pasangan di luar peta aman — konsumen pivot NaN-aware
+            # (min/max skipna, guard pd.notna — v3.11.59).
+            if _ss_lookup:
+                if h not in pivot.columns:
+                    pivot[h] = np.nan
                 _idx_b = pivot.index.get_level_values("_b")
                 _idx_r = pivot.index.get_level_values("_r")
                 _keys = (_idx_b.to_series().map(_norm_name_lalu).values
@@ -1203,8 +1287,10 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
             _sk_map = {k: str(v).strip() for k, v in _g.items()
                        if pd.notna(v) and str(v).strip()}
 
-    # 5. Lookup Satuan per pasangan (dari baris 2.SALDO AKHIR — konstan
-    # per pasangan; bila NA, fallback baris 1.SO)
+    # 5. Lookup Satuan per pasangan (dari baris 2.SALDO AKHIR; bila NA,
+    # fallback baris 1.SO) — S-8: kini hanya FALLBACK utk baris pivot
+    # ber-satuan kosong; satuan utama sudah dibawa kunci pivot per
+    # (barang, resto, satuan)
     _sat_map: dict = {}
     if "SATUAN" in cols:
         _sg = saldo_df.dropna(subset=["SATUAN"])
@@ -1229,7 +1315,7 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
 
     # 6. Per pasangan minus: tgl mulai minus, qty, min/max, tipe, durasi
     rows = []
-    for (b, r), row in pivot_minus.iterrows():
+    for (b, r, s), row in pivot_minus.iterrows():
         # tgl dgn saldo < 0 (sorted asc)
         tgl_minus = sorted(int(t) for t in row.index
                            if pd.notna(row[t]) and float(row[t]) < 0)
@@ -1250,7 +1336,9 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
         tipe = "Konsisten" if all_minus_in_range else "Fluktuatif"
         durasi = h - tgl_mulai + 1
         src = _sk_map.get((b, r), "")
-        sat = _sat_map.get((b, r), "")
+        # S-8 FIX — satuan dari KUNCI pivot (per unit row); _sat_map hanya
+        # fallback bila satuan baris saldo kosong.
+        sat = s or _sat_map.get((b, r), "")
         # v3.11.47 — Frek Minus: jumlah TANGGAL minus di 1..H (untuk
         # analisa kronis — pasangan kronis = frek >= threshold). Beda
         # dgn Durasi (H - tgl_mulai + 1): durasi = rentang sejak mulai
@@ -1282,9 +1370,13 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     # v3.11.45 — stats_out['excluded_src']: minus tapi dibuang sumber
     # (Internal) — transparansi 'kosong tapi KENAPA'.
     _n_pre_src = len(out)
-    out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)
-              | (out["Source Kiriman"] == "")
-              | out["Source Kiriman"].isna()]
+    # S-9 FIX — semua_sumber=True: LEWATI filter sumber (frame PENUH utk
+    # hitung flag Eksklusif di konsumen — hitung_saldo_minus_kronis
+    # menerapkan filter yang sama SETELAH flag dihitung).
+    if not semua_sumber:
+        out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)
+                  | (out["Source Kiriman"] == "")
+                  | out["Source Kiriman"].isna()]
     if stats_out is not None:
         stats_out["excluded_src"] = _n_pre_src - len(out)
     if out.empty:
@@ -1324,9 +1416,11 @@ def hitung_saldo_minus_kronis(
     (barang hanya minus di 1 resto — bukan masalah global).
 
     Sumber: ``hitung_saldo_minus_pairs`` (minus_df dgn kolom Frek Minus,
-    hasil scan 2.SALDO AKHIR per pasangan×tgl). Filter kronis diterapkan
-    SETELAH minus_df (sudah ter-filter Source Kiriman Eksternal/Campuran
-    — konsisten dgn tab Saldo Sistem Minus).
+    hasil scan 2.SALDO AKHIR per pasangan-satuan×tgl). S-9 FIX — flag
+    Eksklusif dihitung atas SEMUA pasangan minus PRA-filter Source
+    Kiriman (``semua_sumber=True``); filter sumber (Eksternal/Campuran —
+    aturan identik hitung_saldo_minus_pairs) & filter kronis diterapkan
+    SETELAHNYA → hasil akhir tetap konsisten dgn tab Saldo Sistem Minus.
 
     Output per pasangan kronis:
     - ``Nama Barang``, ``NAMA RESTO``, ``Satuan``, ``Source Kiriman``
@@ -1347,14 +1441,30 @@ def hitung_saldo_minus_kronis(
                          threshold=threshold, eksklusif_pairs=0)
     if data is None or getattr(data, "empty", True):
         return pd.DataFrame()
-    # 1. Panggil hitung_saldo_minus_pairs (sudah ber-Frek Minus, sudah
-    #    ter-filter Source Kiriman Eksternal/Campuran — konsisten dgn
-    #    tab Saldo Sistem Minus).
+    # 1. Panggil hitung_saldo_minus_pairs (sudah ber-Frek Minus).
+    #    S-9 FIX — SEMUA_SUMBER=True: minta frame PENUH (TANPA filter
+    #    Source Kiriman) supaya hitung resto-per-barang utk flag
+    #    Eksklusif menghitung SEMUA pasangan minus — termasuk resto
+    #    INTERNAL yang oleh filter sumber dibuang. Dulu frame SUDAH
+    #    ter-filter sumber → resto Internal tak kehitung → barang yang
+    #    minus global salah flag Eksklusif + Rekomendasi Resto-spesifik
+    #    menyesatkan. Filter sumber diterapkan SETELAH resto-per-barang
+    #    dihitung (aturan identik langkah 7 hitung_saldo_minus_pairs).
     minus_df = hitung_saldo_minus_pairs(
-        data, h, saldo_sistem_map, mode_4217=mode_4217)
+        data, h, saldo_sistem_map, mode_4217=mode_4217,
+        semua_sumber=True)
     if minus_df is None or minus_df.empty:
         return pd.DataFrame()
     if "Frek Minus" not in minus_df.columns:
+        return pd.DataFrame()
+    # S-9 FIX — (3a) resto per barang dihitung atas data PENUH
+    # (pra-filter sumber), LALU (1b) filter sumber diterapkan.
+    resto_per_barang = (minus_df.groupby("Nama Barang")["NAMA RESTO"]
+                        .nunique())
+    _sk = minus_df["Source Kiriman"]
+    minus_df = minus_df[_sk.isin(_SRC_EKSTERNAL_MINUS)
+                        | (_sk == "") | _sk.isna()]
+    if minus_df.empty:
         return pd.DataFrame()
     if stats_out is not None:
         stats_out["total_minus_pairs"] = len(minus_df)
@@ -1375,14 +1485,13 @@ def hitung_saldo_minus_kronis(
         return pd.DataFrame()
 
     # 3. Eksklusif: barang hanya minus di 1 resto? Hitung berapa resto
-    #    per barang di minus_df (SEMUA pasangan minus — bukan hanya
-    #    kronis — supaya "barang ini minus global" tetap kehitung bila
-    #    non-kronis di resto lain). Contoh: barang A kronis di MLGPAR
-    #    (frek 5), dan minus 1 kali di BDGSEK (frek 1 < threshold 3) →
-    #    BDGSEK tidak masuk kronis tapi TETAP dihitung sbg "resto lain
-    #    juga minus" → Eksklusif = "✗".
-    resto_per_barang = (minus_df.groupby("Nama Barang")["NAMA RESTO"]
-                        .nunique())
+    #    per barang (S-9: ``resto_per_barang`` dihitung di ATAS atas
+    #    SEMUA pasangan minus pra-filter sumber — bukan hanya kronis —
+    #    supaya "barang ini minus global" tetap kehitung bila non-kronis
+    #    di resto lain). Contoh: barang A kronis di MLGPAR (frek 5), dan
+    #    minus 1 kali di BDGSEK (frek 1 < threshold 3) → BDGSEK tidak
+    #    masuk kronis tapi TETAP dihitung sbg "resto lain juga minus" →
+    #    Eksklusif = "✗".
     kronis["_resto_lain_n"] = kronis["Nama Barang"].map(
         lambda b: int(resto_per_barang.get(b, 1)))
     kronis["Eksklusif"] = kronis["_resto_lain_n"].apply(
