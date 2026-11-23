@@ -302,7 +302,12 @@ def _read_combined_file(file_path: str, mode: str,
             else:
                 peek = pd.read_excel(file_path, sheet_name=sn, header=None,
                                      nrows=8, dtype=object, **engine_kwargs)
-        except Exception:
+        except Exception as e:
+            # v3.16.0 — FIX (audit V3 E-6): peek-gagal dulu DILEWATI SENYAP
+            # (file korup/terkunci lenyap tanpa jejak di fallback scan)
+            # — kini log dulu (pola sheet-read failure di bawah).
+            print(f"  [INFO] fn_rekap_mentah: peek sheet '{sn}' "
+                  f"{os.path.basename(file_path)} gagal: {e!r}")
             continue
         det = _detect_rekap_header(peek)
         if det is None:
@@ -471,6 +476,48 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
         nama_resto_series = nama_resto_series.iloc[:, 0]
     ren["NAMA RESTO"] = nama_resto_series.astype(str).str.split(".").str[0]
 
+    # === STEP 5b (v3.16.0 — FIX audit V3 E-2/E-3): KANONIKALISASI nama
+    # kolom TOLERAN sebelum seleksi eksak STEP 7 ===
+    # Header ber-spasi-tepi ('JENIS ', ' 5') / bentuk-float ('1.0' — sel
+    # numerik Excel) / 'KATEGORI ' ganda dulu DIBUANG SENYAP oleh seleksi
+    # eksak (data resto itu lenyap tanpa jejak) — atau lebih burus:
+    # 'JENIS ' membuat kolom JENIS tak terpilih → KeyError 'JENIS' di
+    # STEP 8 yang MEMBUNUH SELURUH pipeline. Mirror _parse_day_header
+    # jalur combined + fix KATEGORI ' ' v3.9.50 — jalur per-resto kini
+    # setara toleransinya dgn jalur combined.
+    _canon_map: dict = {}     # actual → canonical (kolom yang di-keep)
+    _canon_taken: dict = {}   # canonical → actual terpilih
+    for _c in list(ren.columns):
+        _cu = str(_c).strip().upper()
+        if _cu in ("NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS",
+                   "NAMA BARANG", "SATUAN", "KATEGORI"):
+            _canon = _cu
+        else:
+            _d = _parse_day_header(_c)
+            _canon = str(_d) if _d is not None else None
+        if _canon is None:
+            continue
+        _taken = _canon_taken.get(_canon)
+        if _taken is None:
+            _canon_taken[_canon] = _c
+            _canon_map[_c] = _canon
+        elif (_cu == _canon
+              and str(_taken).strip().upper() != _canon):
+            # kandidat BARU persis-kanonik menggantikan varian drift
+            # ('JENIS' menang atas 'JENIS ' — semantik exact-match lama
+            # utk kasus ganda dipertahankan).
+            del _canon_map[_taken]
+            _canon_taken[_canon] = _c
+            _canon_map[_c] = _canon
+        else:
+            # v3.16.0 E-3: duplikat kanonik ('KATEGORI' + 'KATEGORI ')
+            # dulu menghasilkan DUA kolom ber-label sama pasca-rename →
+            # DataFrame-where-Series-expected di safe_to_str/melt; kini
+            # varian tambahan DIBUANG + log.
+            print(f"  [WARNING] fn_rekap_mentah: kolom duplikat "
+                  f"{_canon!r} ({_taken!r} vs {_c!r}) — memakai {_taken!r}")
+    ren = ren[list(_canon_map)].rename(columns=_canon_map)
+
     # === STEP 6: base columns + days ===
     base = ["NAMA RESTO", "SOURCE DATA", "JENIS", "STATUS", "NAMA BARANG", "SATUAN"]
     # v3.9.49 — kolom KATEGORI rekap mentah dibawa BILA ADA di sheet
@@ -498,14 +545,23 @@ def fn_rekap_mentah(folder_path: str, mode: str, jenis_filter: Optional[List[str
 
     # === STEP 8: fil = filter JENIS (if jenisFilter given) ===
     if jenis_filter is not None:
-        # v3.9.42 — AUDIT FIX (61-a, F6): normalisasi KEDUA sisi
-        # (fillna→strip→upper — mirror _combined_to_long jalur combined)
-        # — dulu exact-case: JENIS 'so' / 'So ' di file user tertolak
-        # SENYAP, baris hilang tergantung kapitalisasi file.
-        jf = {str(j).strip().upper() for j in jenis_filter}
-        jj = (sel["JENIS"].fillna("").astype(str).str.strip()
-              .str.upper())
-        sel = sel[jj.isin(jf)].copy()
+        if "JENIS" not in sel.columns:
+            # v3.16.0 — FIX (audit V3 E-2): dulu KeyError 'JENIS' tak
+            # terkunci menggalatkan SELURUH pipeline dari folder ini;
+            # kini degrade JUJUR — filter dilewati + WARNING (kolom
+            # memang tak ada di sheet user).
+            print("  [WARNING] fn_rekap_mentah: sheet per-resto tanpa "
+                  "kolom JENIS — jenis_filter dilewati utk folder ini")
+        else:
+            # v3.9.42 — AUDIT FIX (61-a, F6): normalisasi KEDUA sisi
+            # (fillna→strip→upper — mirror _combined_to_long jalur
+            # combined) — dulu exact-case: JENIS 'so' / 'So ' di file
+            # user tertolak SENYAP, baris hilang tergantung kapitalisasi
+            # file.
+            jf = {str(j).strip().upper() for j in jenis_filter}
+            jj = (sel["JENIS"].fillna("").astype(str).str.strip()
+                  .str.upper())
+            sel = sel[jj.isin(jf)].copy()
 
     # === STEP 9: Type cast: base → text, days → number ===
     # Vectorized text conversion

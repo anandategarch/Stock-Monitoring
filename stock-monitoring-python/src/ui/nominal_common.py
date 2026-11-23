@@ -844,7 +844,11 @@ def hitung_nominal_lalu_pairs(file_df: pd.DataFrame | None,
             def _lab_num(lab):
                 m = re.search(r"(\d+)", lab)
                 return int(m.group(1)) if m else 0
-            _lab_sel = max(_labs, key=_lab_num)
+            # v3.16.0 — FIX (audit V3 U-6): tie-break deterministik —
+            # seri angka ('WEEK 3' vs 'MINGGU 3') dulu diselesaikan
+            # urutan-temu (file-order dependent); mirror S-7 versi
+            # _lab_num di dev_lalu_qty_map (nominal_common bawah).
+            _lab_sel = max(_labs, key=lambda lab: (_lab_num(lab), lab))
             out = out[out["Minggu"].astype(str).str.strip()
                       .str.upper() == _lab_sel].copy()
     # label minggu terpilih utk display (label asli file; fallback

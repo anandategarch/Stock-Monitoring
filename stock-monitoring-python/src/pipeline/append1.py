@@ -136,42 +136,6 @@ def _value_to_text_series(series: pd.Series) -> pd.Series:
     return result
 
 
-def _concat_valid_values(series: pd.Series) -> str:
-    """
-    Mirror M: untuk setiap InfoColumn di InformationGrouped.
-    - Transform: null → null, else Text.Trim(Text.From(_))
-    - Filter: not null, not "", not "0"
-    - Distinct (preserve order)
-    - Text.Combine dengan ", "
-
-    OPTIMIZED: pre-convert series, avoid .apply() for common types.
-    """
-    # Fast path: if series is datetime dtype, use vectorized strftime
-    if pd.api.types.is_datetime64_any_dtype(series):
-        values = series.dt.strftime("%d/%m/%Y %H:%M:%S")
-        values = values.where(series.notna(), other=None)
-    elif pd.api.types.is_numeric_dtype(series):
-        # Convert numeric to text (whole numbers as int, others as float)
-        def _num_to_text(v):
-            if pd.isna(v):
-                return None
-            if v == int(v):
-                return str(int(v))
-            return str(v)
-        values = series.apply(_num_to_text)
-    else:
-        # Mixed/object dtype — use _value_to_text
-        values = series.apply(_value_to_text)
-
-    # Filter valid: not null, not "", not "0"
-    mask = values.notna() & (values != "") & (values != "0")
-    valid = values[mask]
-    # Distinct (preserve order of first appearance)
-    distinct = list(dict.fromkeys(valid.tolist()))
-    # Join
-    return ", ".join(distinct) if distinct else None
-
-
 def _group_info_columns(info_prep: pd.DataFrame, key_columns: list,
                         info_columns: list) -> pd.DataFrame:
     """
@@ -1027,9 +991,14 @@ def build_append1(config, stop_event=None, in_detail_out: dict | None = None,
         _sm = full_rekap_so[["Nama Barang", "NAMA RESTO", "SATUAN"]].copy()
         _sm[_K_BAR] = norm_nama_barang_key_series(_sm["Nama Barang"])
         _sm[_K_RST] = norm_nama_resto_key_series(_sm["NAMA RESTO"])
+        # v3.16.0 — FIX (audit V3 E-4): keep="last" — urutan concat
+        # full_rekap_so = [bulan LALU, bulan BERJALAN] (queries.py), jadi
+        # keep="first" memilih satuan LALU yang basi saat pasangan ganti
+        # satuan antar-bulan (PCS→GR). Kebijakan = KATEGORI LANGKAH 5c:
+        # "bulan berjalan otoritatif" (keep="last").
         satuan_map = (
             _sm.dropna(subset=["SATUAN"])
-            .drop_duplicates(subset=[_K_BAR, _K_RST], keep="first")
+            .drop_duplicates(subset=[_K_BAR, _K_RST], keep="last")
         )
         if not satuan_map.empty:
             # Merge SATUAN to final (creates SATUAN column if not exists, fills if exists)

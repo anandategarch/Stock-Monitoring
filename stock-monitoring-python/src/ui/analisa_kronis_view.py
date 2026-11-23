@@ -27,6 +27,7 @@ Fitur (mirror saldo_minus_view):
 from __future__ import annotations
 
 import contextlib
+import os
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
@@ -54,6 +55,7 @@ from .widgets import (
     EmptyState,
     GhostButton,
     HeaderFilterGroup,
+    _filter_value_sort_key,  # v3.16.0 — FIX (audit V3 U-8): sort nilai ⧩
     apply_cell_tag,
     auto_fit_columns,
     enable_col_resize,
@@ -618,9 +620,14 @@ class AnalisaKronisView(tk.Frame):
         if not df_col:
             return []
         if col in KRONIS_NUMERIC_COLS:
-            return sorted({_fmt_num(v) for v in self._kronis_df[df_col]})
+            # v3.16.0 — FIX (audit V3 U-8): sort daftar nilai ⧩ via
+            # widgets._filter_value_sort_key (angka-format-Indonesia
+            # terurut NUMERIK — "(1.000)" < "999" dulu salah
+            # leksikografis; mirror saldo_minus_view/followup_view).
+            return sorted({_fmt_num(v) for v in self._kronis_df[df_col]},
+                          key=_filter_value_sort_key)
         return sorted({str(v) for v in self._kronis_df[df_col]
-                       if str(v).strip()})
+                       if str(v).strip()}, key=_filter_value_sort_key)
 
     def _render(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -693,8 +700,14 @@ class AnalisaKronisView(tk.Frame):
     # =========================================================================
     # FILTER ⧩ + SORT + THRESHOLD
     # =========================================================================
-    def _on_col_filter(self, col_sel: dict):
-        self._col_sel = dict(col_sel)
+    def _on_col_filter(self, col: str, selected):
+        # v3.16.0 — FIX (audit V3 U-2): HeaderFilterGroup memanggil
+        # on_apply DENGAN DUA argumen (col, selected) — kontrak
+        # widgets.HeaderFilterGroup._add_column
+        # (`lambda sel, c=col: self._on_apply(c, sel)`). Signature lama
+        # satu-argumen → TypeError di SETIAP apply ⧩ (filter mati
+        # senyap). Mirror deviasi_view._on_col_filter.
+        self._col_sel[col] = selected
         self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True):
@@ -706,7 +719,10 @@ class AnalisaKronisView(tk.Frame):
 
     def _reset_filter(self):
         self._col_sel = {c[0]: None for c in KRONIS_COLUMNS}
-        self._filters.clear()
+        # v3.16.0 — FIX (audit V3 U-3): HeaderFilterGroup tidak punya
+        # method clear() (hanya clear_all()) → AttributeError di setiap
+        # klik ✕ Reset Filter (reset mati senyap, tabel tidak berubah).
+        self._filters.clear_all()
         # reset threshold ke nilai AWAL (v3.11.56 — pra-pipeline: dulu
         # konstan 3, kartu pra-pipeline yang men-set nilai lain terabaikan
         # oleh ✕ Reset)
@@ -861,7 +877,24 @@ class AnalisaKronisView(tk.Frame):
             col_order = [c[0] for c in KRONIS_COLUMNS
                          if c[0] in df.columns]
             df = df[col_order]
-            df.to_excel(path, index=False, sheet_name="Analisa Kronis")
+            # v3.16.0 — FIX (audit V3 U-4): tulis ATOMIK (tmp +
+            # os.replace — pola S-19 saldo_minus_view._export_excel /
+            # app._export_excel). df.to_excel(path) dulu menulis
+            # LANGSUNG ke path tujuan → exception di tengah (disk penuh
+            # / file terkunci Excel) meninggalkan .xlsx PARSIAL/KORUP
+            # yang MENIMPA export LAMA yang baik di path sama. Kini file
+            # tujuan hanya tersentuh os.replace() atomik SETELAH sukses
+            # penuh; kegagalan (finally) menghapus tmp.
+            tmp_path = path + ".tmp.xlsx"
+            _ok = False
+            try:
+                df.to_excel(tmp_path, index=False, sheet_name="Analisa Kronis")
+                os.replace(tmp_path, path)
+                _ok = True
+            finally:
+                if not _ok:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp_path)
             self.status_var.set(f"💾 Export: {path}")
         except Exception as exc:  # noqa: BLE001 — export I/O
             messagebox.showerror("Export Gagal", str(exc),

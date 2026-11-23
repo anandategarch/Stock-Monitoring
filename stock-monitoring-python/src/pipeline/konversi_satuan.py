@@ -109,11 +109,20 @@ def build_konversi_map(in_df: "pd.DataFrame | None") -> dict:
         return out
 
     n = len(in_df)
-    barang = in_df["Nama Barang"].tolist()
     sat = in_df[KOL_SATUAN_DOK].tolist()
     rasio = pd.to_numeric(in_df[KOL_RASIO], errors="coerce").tolist()
     terk = (in_df[KOL_TERKECIL].tolist() if KOL_TERKECIL in cols
             else [None] * n)
+    # v3.16.0 — FIX (audit V3 E-8): normalisasi barang HANYA atas nilai
+    # UNIK (factorize — pola _norm_pair_key_series helpers) — frame IN
+    # real (32.24+42.05 ×2 periode + 9901) 10^4..10^5 baris mengulang
+    # regex norm PER BARIS (~1-3 dtk Python murni per run); hasil
+    # IDENTIK per-baris (norm murni per nilai + kode -1/NA dipetakan ke
+    # norm(NaN) = sentinel — semantik loop lama dipertahankan).
+    _codes, _uniques = in_df["Nama Barang"].factorize()
+    _b_keys_unique = [norm_nama_barang_key(u) for u in _uniques.tolist()]
+    _b_keys_unique.append(norm_nama_barang_key(float("nan")))  # kode -1
+    b_keys = [_b_keys_unique[c] for c in _codes]
     # FIX S-2 (audit 1-e): inferensi terkecil (rasio==1, jalur 32.24 tanpa
     # kolom '#Sat. Terkecil') DITUNDA ke pass-2 — lihat catatan di bawah.
     _infer_terkecil: dict = {}
@@ -122,7 +131,8 @@ def build_konversi_map(in_df: "pd.DataFrame | None") -> dict:
         # spasi) paritas append1.py + fn_audit._po_menunggu_pairs (v3.11.34).
         # Sebelumnya cuma .strip() → mismatch saat PO case/whitespace
         # beda dari IN → lookup_rasio miss → PO Menunggu tak terkonversi.
-        b = norm_nama_barang_key(barang[i])
+        # (v3.16.0 E-8: nilai pre-computed via factorize — lihat atas.)
+        b = b_keys[i]
         if not b:
             continue
         s = _norm_sat(sat[i])

@@ -3564,9 +3564,18 @@ class DeviasiView(tk.Frame):
         # SO-stale pernah mendominasi 97,8% pasangan GR — dihapus
         # v3.9.27, lihat blok kondisi 2 di atas.)
         _ri_bal_pairs = getattr(self, "_ri_bal_pairs", frozenset())
+        # v3.16.0 — FIX (audit V3 U-13): kunci lookup dinormalisasi —
+        # ri_balancing_docs (doc_codes) kini ber-kunci kanonik; sisi
+        # pivot memakai ejaan perwakilan RAW append1 (bisa '1041.BDGUKU'
+        # / drift case) → tanpa normalisasi sini, label "RI Balancing"
+        # me-miss senyap utk pasangan drift (kelas bug v3.11.59 yang
+        # tersisa di jalur ini). Normalisasi idempoten pada nilai
+        # kanonik (mirror blok override 42.17 L3287).
+        _bk_s = barang_s.map(norm_nama_barang_key)
+        _rk_s = pivot["NAMA RESTO"].astype(str).map(norm_nama_resto_key)
         cond_ri_bal = np.array(
             [(b, r) in _ri_bal_pairs
-             for b, r in zip(barang_s, pivot["NAMA RESTO"].astype(str))],
+             for b, r in zip(_bk_s, _rk_s)],
             dtype=bool,
         )
 
@@ -3656,10 +3665,17 @@ class DeviasiView(tk.Frame):
         _po_seg = np.zeros(n, dtype=bool)
         if _po_map:
             _h_int = int(h)
+            # v3.16.0 — FIX (audit V3 U-12): potensi_po_map ber-kunci
+            # KANONIK (norm_nama_barang_key × norm_nama_resto_key —
+            # po_keterangan._build_map) tapi lookup memakai ejaan RAW
+            # perwakilan append1 → pasangan drift ('1041.BDGUKU' dsb.)
+            # me-miss senyap: kolom CEK tanpa "Potensi PO belum dibuat"
+            # PADAHAL popup (potensi_po_label_for — normalisasi internal)
+            # MENUNJUKKAN label-nya. Lookup kini ber-kunci kanonik
+            # (idempoten — mirror U-13 di atas).
             _po_seg = np.array(
                 [_h_int in _po_map.get((b, r), ())
-                 for b, r in zip(barang_s,
-                                 pivot["NAMA RESTO"].astype(str))],
+                 for b, r in zip(_bk_s, _rk_s)],
                 dtype=bool,
             )
 
@@ -5131,7 +5147,11 @@ class DeviasiView(tk.Frame):
             v = float(val)
         except (TypeError, ValueError):
             return str(val)
-        if v == 0:
+        # v3.16.0 — FIX (audit V3 U-15): nilai nyaris-nol NEGATIF
+        # (mis. -0.04) jangan tampil artefak '(0,0)' — kurung menyirat-
+        # kan nilai minus nyata padahal magnitudonya di bawah resolusi
+        # tampil 1-desimal; clamp display-only (mirror L-1 _fmt_pct).
+        if v == 0 or (v < 0 and abs(v) < 0.05):
             return "-"
         # FIX C-03: format angka gaya Indonesia — 1.234.567 / 1.234,5
         # (sebelumnya koma gaya Inggris: 1,234,567 / 1,234.5).

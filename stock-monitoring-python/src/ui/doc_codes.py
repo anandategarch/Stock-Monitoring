@@ -25,6 +25,16 @@ import re
 
 import pandas as pd
 
+# v3.16.0 — FIX (audit V3 U-13/M-2): kunci pasangan (barang, resto)
+# dinormalisasi saat BUILD — drift ejaan lintas-file ('Air Mineral  600ML'
+# vs 'AIR MINERAL 600ML' — kasus nyata T-1) tak lagi bikin lookup
+# consumer (deviasi_view CEK, in_selisih Catatan Audit) me-miss senyap.
+# Normalisasi idempoten pada nilai yang sudah kanonik.
+from ..pipeline.helpers import (
+    norm_nama_barang_key,
+    norm_nama_resto_key,
+)
+
 # v3.9.19 — struktur kode dokumen: PREFIKS.TAHUN.BULAN.NOMOR
 # (mis. "PO.2026.08.00571" / "RI.2026.10.10354" — 2026 tahun, 08/10
 # bulan). FIX 35-c1: bulan boleh 1-2 digit ("RI.2026.8.10354" non-
@@ -172,7 +182,10 @@ def ri_balancing_docs(in_detail: pd.DataFrame | None):
                                        tgl_iter):
         if _ri_balancing(nomor, nomor_po, t) == "":
             continue
-        key = (str(b), str(r))
+        # v3.16.0 — FIX (audit V3 U-13): kunci NORMALIZED (barang, resto)
+        # — drift ejaan in_detail vs append1 tak lagi me-miss di consumer.
+        key = (norm_nama_barang_key(str(b)),
+               norm_nama_resto_key(str(r)))
         n = _doc_code_str(nomor)
         if n and n not in out.setdefault(key, []):
             out[key].append(n)
@@ -205,10 +218,16 @@ def duplicated_doc_numbers(in_detail: pd.DataFrame | None) -> dict:
     d = d[d["_nomor"].ne("")]
     if d.empty:
         return out
-    grp = d.groupby(["Nama Barang", "NAMA RESTO", "_nomor"],
+    # v3.16.0 — FIX (audit V3 M-2): groupby per kunci NORMALIZED —
+    # baris kembar yang ejaannya drift ('gula  (V.20)' vs 'GULA (V.20)'
+    # dalam SATU dokumen) dulu terhitung 2 grup terpisah → nomor dobel
+    # lolos tak terflag; kunci out juga normalized (sinkron consumer).
+    d["_b"] = d["Nama Barang"].map(norm_nama_barang_key)
+    d["_r"] = d["NAMA RESTO"].map(norm_nama_resto_key)
+    grp = d.groupby(["_b", "_r", "_nomor"],
                     dropna=False).size().reset_index(name="_n")
     dup = grp[grp["_n"] > 1]
-    for b, r, nomor, n in zip(dup["Nama Barang"], dup["NAMA RESTO"],
+    for b, r, nomor, n in zip(dup["_b"], dup["_r"],
                               dup["_nomor"], dup["_n"]):
-        out.setdefault((str(b), str(r)), {})[str(nomor)] = int(n)
+        out.setdefault((b, r), {})[str(nomor)] = int(n)
     return out

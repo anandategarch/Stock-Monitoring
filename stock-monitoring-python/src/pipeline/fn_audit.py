@@ -30,9 +30,10 @@ KE build_audit_rekap (struktur kolom output TIDAK berubah):
   Audit' dengan format VBA BuildKeterangan ("PERLU REVIEW | alasan |
   Klasifikasi: status | detail engine") — termasuk review rentang yang
   kembali neto-nol tapi saldo pasangan belum pulih.
-- Jeda "Beda N Hari" kini dihitung KRONOLOGIS lintas bulan (25• → 1 =
-  1 hari; dulu abs(numerik) = 32 — salah arah di rentang lintas batas
-  bulan pada mode 📆 Lalu + Ini).
+- Jeda "Beda N Hari" kini dihitung KRONOLOGIS lintas bulan (31• → 1 =
+  1 hari; 25• → 1 = 7 hari pada bulan-lalu 31 hari; dulu abs(numerik)
+  menghitung jarak yang salah arah di rentang lintas batas bulan pada
+  mode 📆 Lalu + Ini).
 
 build_audit_input — 10 kolom kanonik dari data app: Hasil SO ← rekap 'SO';
 Qty SO Harian ← rekap 'BARANG MASUK' (BM); Qty SJ ← IN 42.05; Qty RI ← 32.24
@@ -623,6 +624,14 @@ def build_audit_rekap(df: pd.DataFrame,
             has_baseline = False
             baseline = 0.0
             review_text = ""
+            # v3.16.0 — FIX (audit V3 M-4): review baseline tgl-1 disimpan
+            # terpisah & dipromosikan HANYA utk kandidat VALID (BM=0 &
+            # IN>0) di bawah — dulu langsung ke review_text → BOCOR ke
+            # baris NON-kandidat (mis. BM=50 IN=0 biasa) → spurious
+            # "PERLU REVIEW | SO penutupan bulan lalu terakhir tercatat
+            # pada tgl 30; baseline tgl 31 tidak tersedia" + KPI review
+            # bengkak (baris DEVIASI MURNI biasa ikut terhitung).
+            _tgl1_review = None
             if this_day == 1:
                 info = (so_lalu_map or {}).get(keys[i])
                 if info is None:
@@ -635,7 +644,7 @@ def build_audit_rekap(df: pd.DataFrame,
                         baseline = float(_v)
                         has_baseline = True
                     else:
-                        review_text = (
+                        _tgl1_review = (
                             f"SO penutupan bulan lalu terakhir tercatat "
                             f"pada tgl {-int(_d)}; baseline tgl "
                             f"{_len_lalu} tidak tersedia")
@@ -658,7 +667,13 @@ def build_audit_rekap(df: pd.DataFrame,
                         f"BM=0 dan IN={_fmt_signed(penerimaan[i])}, "
                         f"tetapi Hasil SO hari ini tidak tercatat")
                 elif not has_baseline:
-                    if not review_text:
+                    # v3.16.0 — FIX (audit V3 M-4): utk kandidat di tgl 1,
+                    # pakai pesan spesifik baseline tgl-1 (SO lalu ada
+                    # tapi bukan hari penutupan) — pesan generik tetap
+                    # utk kasus lain (tanpa SO lalu sama sekali).
+                    if _tgl1_review is not None:
+                        review_text = _tgl1_review
+                    elif not review_text:
                         review_text = (
                             "SO hari ini tercatat, tetapi SO baseline "
                             "hari sebelumnya tidak tersedia")

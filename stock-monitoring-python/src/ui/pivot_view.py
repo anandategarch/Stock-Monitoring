@@ -63,6 +63,7 @@ from .widgets import (
     col_sel_to_json,  # v3.9.66 — filter persisten antar sesi
     enable_col_resize,
     enable_multi_select,
+    filter_disp_mask,  # v3.16.0 — FIX (audit V3 P-2): seleksi ⧩ label-vs-mentah
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -437,13 +438,12 @@ class PivotTableView(tk.Frame):
             else:
                 df = df[df["KATEGORI"].astype(str) == kategori]
         # rentang tanggal berlaku untuk kedua mode (identik _compute_payload;
-        # parse longgar tanpa dialog — pola in_selisih _col_values)
+        # parse TERVERIDASI-senyap utk jalur non-Apply (P-6 — lihat
+        # _parse_tgl_entry_silent) — sampah di entry ('32'/'abc') dulu
+        # di-parse longgar tanpa dialog.
         if "Tanggal" in df.columns and not df.empty:
-            try:
-                t1 = int(float(self.tgl_start_var.get()))
-                t2 = int(float(self.tgl_end_var.get()))
-            except (TypeError, ValueError):
-                t1 = t2 = None
+            t1 = self._parse_tgl_entry_silent(self.tgl_start_var, None)
+            t2 = self._parse_tgl_entry_silent(self.tgl_end_var, None)
             if t1 is not None and t2 is not None:
                 # T-7 — rentang KRONOLOGIS (mirror _compute_payload): di
                 # blok negatif urutan numerik = kronologis TERBALIK →
@@ -471,6 +471,13 @@ class PivotTableView(tk.Frame):
             metrics = [m for m in self.METRICS
                        if m != "6.PEMAKAIAN (COM)"
                        or self.pivot_mode == "tanggal"]
+            # v3.16.0 — FIX (audit V3 P-3): SALDO AWAL DIKECUALIKAN dari
+            # agregasi penawaran — mirror _compute_payload (baris display
+            # SALDO AWAL dihidden sejak v3.11.40): barang yang satu-satunya
+            # metrik ≠ 0 adalah SALDO AWAL pasti TERSEMBUNYI di tree →
+            # menawarkannya di ⧩ = pilih-nya lalu tabel kosong (kelas bug
+            # UX cascade v3.11.6 yang tersisa di jalur ini).
+            metrics = [m for m in metrics if m != "SALDO AWAL"]
             f = df[df["Nama Barang"].notna()]
             f = f[f["JENIS"].astype(str).isin(metrics)]
             if f.empty:
@@ -825,7 +832,11 @@ class PivotTableView(tk.Frame):
             return df
         ns = self._name_selected
         if ns is not None and "Nama Barang" in df.columns:
-            df = df[df["Nama Barang"].astype(str).isin(ns)]
+            # v3.16.0 — FIX (audit V3 P-2): mask label-ATAU-mentah —
+            # HeaderFilter meng-emit LABEL TAMPILAN (spasi tepi → '␣',
+            # kosong → '(Kosong)') tapi isin mentah membuang baris yang
+            # justru dicentang (kelas bug v3.12.1 di jalur on_apply ini).
+            df = df[filter_disp_mask(df["Nama Barang"].astype(str), ns)]
         resto = self.resto_var.get()
         if (exclude != "resto" and self.pivot_mode == "tanggal"
                 and resto and resto != "(All)"
@@ -847,11 +858,8 @@ class PivotTableView(tk.Frame):
             else:
                 df = df[df["KATEGORI"].astype(str) == kategori]
         if "Tanggal" in df.columns and not df.empty:
-            try:
-                t1 = int(float(self.tgl_start_var.get()))
-                t2 = int(float(self.tgl_end_var.get()))
-            except (TypeError, ValueError):
-                t1 = t2 = None
+            t1 = self._parse_tgl_entry_silent(self.tgl_start_var, None)
+            t2 = self._parse_tgl_entry_silent(self.tgl_end_var, None)
             if t1 is not None and t2 is not None:
                 # T-7 — rentang KRONOLOGIS, identik _compute_payload /
                 # _name_values (between numerik membuang 26•..31• saat
@@ -924,6 +932,26 @@ class PivotTableView(tk.Frame):
     # =========================================================================
     # FILTER STATE + COMPUTE (pure — berjalan di thread)
     # =========================================================================
+    def _parse_tgl_entry_silent(self, var, fallback):
+        """v3.16.0 — FIX (audit V3 P-6): parse entry tanggal TERVERIDASI-
+        senyap utk jalur NON-Apply (⧩ value list / cascade combo / double-
+        click popup) — sampah di entry ('abc', '32', pecahan) dulu di-
+        parse longgar polos: '32' lolos tanpa clamp (rentang tak sahih
+        -31..31), sampah → None → popup MENGABAIKAN rentang sepenuhnya
+        sementara tabel masih menampilkan rentang ter-Apply terakhir
+        (tabel ≠ popup). Kini: clamp senyap ke -31..31 + fallback bila
+        tak terbaca (mirror _filter_state/validated_tgl_entry, TANPA
+        dialog — jalur Apply tetap yang memvalidasi + revert)."""
+        try:
+            v = int(float(var.get()))
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+        if v < -31:
+            return -31
+        if v > 31:
+            return 31
+        return v
+
     def _filter_state(self) -> dict:
         # FIX B-02: validasi input konsisten (warning + revert) — sebelumnya
         # input invalid difallback SENYAP ke 1/31 tanpa memberi tahu user.
@@ -990,8 +1018,11 @@ class PivotTableView(tk.Frame):
 
         # v3.9.13: seleksi kosong (set()) = 0 baris (semantik Excel) —
         # dulu truthiness menelan set() sebagai "tanpa filter".
+        # v3.16.0 — FIX (audit V3 P-2): mask label-ATAU-mentah (parity
+        # _cascade_frame — popup ⧩ meng-emit label tampilan).
         if st["name_selected"] is not None and "Nama Barang" in df.columns:
-            df = df[df["Nama Barang"].astype(str).isin(st["name_selected"])]
+            df = df[filter_disp_mask(df["Nama Barang"].astype(str),
+                                     st["name_selected"])]
         if st["resto"] and st["resto"] != "(All)" and \
                 "NAMA RESTO" in df.columns and st["mode"] == "tanggal":
             df = df[df["NAMA RESTO"].astype(str) == st["resto"]]
@@ -1112,9 +1143,27 @@ class PivotTableView(tk.Frame):
                 return (2, str(v))
 
         col_keys = sorted(pivot.columns.tolist(), key=_chrono)
-        columns = [str(c) for c in col_keys]
+
+        def _col_id(c) -> str:
+            # v3.16.0 — FIX (audit V3 P-9): id kolom tree DETERMINISTIK —
+            # label float utuh (Tanggal float64 dari pivot_table) jangan
+            # jadi '25.0' (id kolom, red_cells, heading sort parser);
+            # dipakai BERSAMA oleh columns + red_cells supaya apply_cell_
+            # tag tetap cocok.
+            try:
+                if isinstance(c, float) and c == int(c):
+                    return str(int(c))
+            except (TypeError, ValueError, OverflowError):
+                pass
+            return str(c)
+
+        columns = [_col_id(c) for c in col_keys]
+        # v3.16.0 — FIX (audit V3 P-9): sorted TANPA key meledak pada nama
+        # barang campuran int+str (TypeError '<' not supported) → seluruh
+        # tab pivot mati utk data itu; key=str stabil (identik utk data
+        # semua-string).
         items = sorted(pivot.index.get_level_values("Nama Barang")
-                       .unique().tolist())
+                       .unique().tolist(), key=lambda x: str(x))
 
         metrics = list(self.METRICS)
         if mode == "resto":
@@ -1243,14 +1292,19 @@ class PivotTableView(tk.Frame):
                     v = row_data.get(c, 0)
                     try:
                         v = float(v)
-                        if pd.isna(v):
-                            v = 0.0
                     except (TypeError, ValueError):
                         v = 0.0
+                    # v3.16.0 — FIX (audit V3 P-10): NaN (baris COM tanpa
+                    # SO terekam — presence-aware v3.11.59) TIDAK lagi
+                    # dipaksa 0.0 → export menulis sel KOSONG (bukan 0
+                    # palsu — parity tampilan _format_num ''); writer
+                    # display export_sheets kini NaN-safe (audit V3 X-2).
+                    # Baris pivot non-COM tak pernah NaN (fill 0) — guard
+                    # notna di bawah tetap aman utk kedua jalur.
                     raw_vals.append(v)
-                    if self._cell_tags and (
+                    if self._cell_tags and not pd.isna(v) and (
                             v < 0 or (metric == "7.Selisih IN" and v != 0)):
-                        red_cells.append((iid, str(c)))
+                        red_cells.append((iid, _col_id(c)))
                 rows_data.append((iid, metric, False, metric, raw_vals))
 
             if not child_rows:
@@ -1286,8 +1340,17 @@ class PivotTableView(tk.Frame):
         if self._busy:
             self._pending = True
             return
-        st = self._filter_state()
+        # v3.16.0 — FIX (audit V3 P-8): _busy dipasang SEBELUM _filter_
+        # state() — _filter_state bisa MEMBLOCK di messagebox rentang
+        # terbalik (showwarning); after(60, _refresh_pivot) yang tertunda
+        # dapat mem-fire SAAT dialog terbuka → compute/render re-entrant
+        # ganda (guard terpasang terlambat). Exception → reset jujur.
         self._busy = True
+        try:
+            st = self._filter_state()
+        except BaseException:
+            self._busy = False
+            raise
 
         def work():
             return self._compute_payload(st)
@@ -1602,9 +1665,21 @@ class PivotTableView(tk.Frame):
                 parent=self.winfo_toplevel())
 
         def on_error(e):
-            messagebox.showerror(
-                "Export Gagal", f"Tidak bisa export:\n{e}",
-                parent=self.winfo_toplevel())
+            # v3.16.0 — FIX (audit V3, M-8 parity): file terkunci (masih
+            # dibuka Excel) dulu tampil exception mentah English — kini
+            # pesan Indonesia yang actionable (mirror app._export_excel
+            # FIX 2f-09; helper lokal menghindari import melingkar).
+            from .export_sheets import _is_file_locked_error
+            if _is_file_locked_error(e):
+                messagebox.showerror(
+                    "Export Gagal",
+                    "File sedang dibuka (Excel?) — tutup dulu lalu "
+                    f"ulangi.\n\nPath: {filepath}",
+                    parent=self.winfo_toplevel())
+            else:
+                messagebox.showerror(
+                    "Export Gagal", f"Tidak bisa export:\n{e}",
+                    parent=self.winfo_toplevel())
 
         run_async(self, work, done, overlay=self.overlay,
                   loading_text="Mengekspor matrix pivot…",
@@ -1708,17 +1783,20 @@ class PivotTableView(tk.Frame):
                 active_filters[col] = val
 
         # v3.9.54 FIX (audit 8-a P1-2) — rentang tanggal TAMPILAN
-        # diteruskan ke popup (parity _compute_payload: tnum.between
-        # — kedua mode memfilter rentang; parse longgar identik
-        # _name_values). Dulu popup mengabaikan rentang → baris tanggal
-        # di luar rentang yang difilter tabel tetap muncul di popup.
+        # diteruskan ke popup (parity _compute_payload — kedua mode
+        # memfilter rentang). Dulu popup mengabaikan rentang → baris
+        # tanggal di luar rentang yang difilter tabel tetap muncul di
+        # popup.
+        # v3.16.0 — FIX (audit V3 P-6): parse TERVERIDASI-senyap (dulu
+        # longgar polos — '32'/sampah → rentang salah/None → popup tak
+        # konsisten dgn tabel yang menampilkan rentang ter-Apply).
+        # min/max numerik TETAP (details_popup menukar ke kronologis
+        # sendiri — L1036 tgl_chrono_key, termasuk kasus −25/−31).
         tgl_range = None
-        try:
-            _t1 = int(float(self.tgl_start_var.get()))
-            _t2 = int(float(self.tgl_end_var.get()))
+        _t1 = self._parse_tgl_entry_silent(self.tgl_start_var, None)
+        _t2 = self._parse_tgl_entry_silent(self.tgl_end_var, None)
+        if _t1 is not None and _t2 is not None:
             tgl_range = (min(_t1, _t2), max(_t1, _t2))
-        except (TypeError, ValueError):
-            pass
 
         from src.ui.details_popup import show_details_popup
         root = self.winfo_toplevel()

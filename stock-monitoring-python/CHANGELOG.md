@@ -3,6 +3,146 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.16.0 — DEEP AUDIT V3: 35 PERBAIKAN TERVERIFIKASI
+
+(user: "Deep audit lagi dan fix push to stock monitoring repo ku") —
+audit menyeluruh era-v3.15 oleh 6 agen paralel (pivot+popup · rekap
+selisih+engine VBA · export · pipeline core · deviasi+nominal+sub-tab ·
+app-shell) atas ~49 rb baris; SETIAP temuan diverifikasi eksekusi repro
+sebelum di-fix. Tag gelombang: **U** (UI sub-tab/deviasi), **M** (tab 📤
+Rekap Selisih IN + engine), **P** (tab Pivot + popup), **X** (export),
+**E** (pipeline engine). Struktur kolom output TIDAK berubah.
+
+### 1. HIGH — fitur mati senyap & angka salah yang terlihat user
+- **U-1/U-2/U-3 — filter ⧩ + ✕ Reset anak tab "Saldo Sistem Minus" &
+  "Analisa Kronis" MATI SENYAP sejak lahirnya sub-tab**: callback
+  `_on_col_filter` 1-argumen vs kontrak HeaderFilterGroup 2-argumen
+  `(col, selected)` → TypeError di SETIAP apply (ikon corong menipu
+  "terfilter", tabel tidak); `_reset_filter` memanggil `.clear()` yang
+  tidak ada (hanya `clear_all()`) → AttributeError. Kedua sub-tab kini
+  berperilaku seperti tab lain (mirror deviasi_view).
+- **E-1 — pasangan barang bernama-numerik TERBELAH jadi 2 grup pivot**:
+  rekap reader meng-stringify sel numerik Excel → teks `'100383.0'`
+  sedangkan 42.17 membawa float `100383.0` (→ kunci `'100383'`) → SATU
+  pasangan fisik, DUA kunci kanonik → saldo awal mendarat di satu grup,
+  SO/BM di grup lain → `2.SALDO AKHIR`/`3.DEVIASI` salah untuk KEDUA
+  pecahan. `_pair_key_base` kini mengkanonikkan string-bentuk-float-utuh
+  (`'100383.0'`/`'100383.00'` → `'100383'`; desimal NYATA `'100383.5'`
+  tak disentuh) — berlaku seragam di semua varian (skalar + seri).
+- **M-1/M-2/M-3 — tab 📤 lookup ejaan-mentah vs kunci engine-kanonik**
+  (kelas bug T-1 yang tersisa di sisi view; engine sudah kanonik sejak
+  v3.14): popup "Rincian IN" KOSONG di baris yang menampilkan IN=10;
+  catatan audit B1 (RI Balancing)/B2 (Nomor dobel) lenyap; kolom
+  KATEGORI & Satuan `'-'` di tabel DAN export untuk pasangan drift
+  ('gula  (V.20)' vs 'GULA (V.20)'). Semua kunci lookup kini kanonik
+  dua sisi (idempoten) — termasuk `ri_balancing_docs`/
+  `duplicated_doc_numbers` (groupby normalized → dobel ber-ejaan-drift
+  dalam SATU dokumen kini terdeteksi).
+- **U-12/U-13 — kolom CEK "Potensi PO belum dibuat" & "RI Balancing"
+  me-miss senyap** di pasangan drifted (peta kanonik vs lookup ejaan
+  perwakilan RAW append1 — sementara popup-nya SENDIRI menampilkan
+  label: tabel ⊥ popup). Lookup deviasi_view kini kanonik.
+- **U-14 — popup Deviasi MENGARANG angka**: `pivot_table(fill_value=0)`
+  memfabrikasi Saldo Akhir=0 untuk tanggal tanpa baris saldo → semua
+  baris bulan-lalu menampilkan "Deviasi" setinggi SO penutupan.
+  Kini presence-check per (pasangan × tanggal) → tampil kosong
+  ('tidak ada baris' ≠ 'nilai 0', mirror kolom COM/ACR); baris H
+  ter-override 42.17 tetap dihitung (identik tabel utama).
+- **M-4 — engine V2: catatan review baseline tgl-1 BOCOR ke baris
+  NON-kandidat** (BM≠0 biasa) → spurious "PERLU REVIEW | SO penutupan
+  bulan lalu terakhir tercatat pada tgl 30; baseline tgl 31 tidak
+  tersedia" pada baris DEVIASI MURNI biasa + KPI `review` bengkak.
+  Review kini hanya menempel pada kandidat VALID (BM=0 & IN>0) yang
+  gagal verifikasi — sesuai spesifikasi port VBA.
+
+### 2. MEDIUM — konsistensi data & ekspor
+- **P-1** `pd.NA` tampil literal `<NA>` di popup NILAI/BARANG MASUK
+  (guard `isinstance(float)` meloloskan Int64-nullable; fix yang sama
+  sudah ada di pivot v3.11.10 tapi tak sampai ke popup).
+- **P-2** ⧩ Nama Barang pivot+popup `isin` mentah vs label tampilan
+  ('␣' penanda spasi-tepi, '(Kosong)') → baris yang DICENTANG justru
+  terbuang (kelas bug v3.12.1 di 4 jalur on_apply) → `filter_disp_mask`.
+- **P-3** barang yang satu-satunya metrik ≠ 0 = SALDO AWAL tak lagi
+  DITAWARKAN ⧩/combo (barisnya pasti tersembunyi — ghost value).
+- **P-4** catatan formula popup COM ("+ SO 4 BASE") difinalisasi
+  SETELAH filter RESTO/SOURCE/KATEGORI (komennya sendiri sudah
+  menyatakan itu tapi urutan kodenya terbalik).
+- **P-5** baris resto-NaN kini match peta BM/PO (sentinel series
+  `'\x00NA'` — scalar norm atas astype(str) menghasilkan 'NAN' ≠).
+- **P-10** sel COM NaN (tanpa SO terekam) diekspor KOSONG, bukan 0
+  palsu (parity tampilan; penanda X-2 membuat writer NaN-safe).
+- **X-1/X-2** writer display NaN/±inf-safe: `_is_int` + OverflowError;
+  NaN float ke openpyxl menghasilkan XML `<v></v>` INVALID (Excel
+  repair-prompt) → sel kosong; ±inf sama.
+- **X-3** nilai meta None → sel kosong (dulu literal 'None').
+- **X-4** judul sheet di-sanitize (karakter invalid `[]:*?/\`,
+  duplikat → sufiks angka eksplisit; hardening — nama kini dipakai app
+  semuanya valid, output tak berubah).
+- **M-5** sort kolom Tanggal mode 📈 Analisa kini KRONOLOGIS ('10'
+  dulu sebelum '2'; '25•' paling awal) — parser utama tabel dipakai.
+- **M-6** chip strip barang×resto memakai `filter_disp_mask` (parity
+  jalur filter utama). **M-7** `_refresh` ikut swap kronologis
+  `tgl_chrono_key` (restore filter dua-negatif tak lagi tabel kosong).
+- **U-15** `-0.04` tak lagi tampil `(0,0)` (deviasi_view + popup —
+  clamp display-only mirror L-1). **U-5** idem `_fu_pct` follow-up
+  `(0,00)`.
+- **U-4** export Analisa Kronis kini ATOMIK (tmp + os.replace — pola
+  S-19; gagal menimpa tidak lagi merusak export lama).
+- **E-4** lookup SATUAN `keep="last"` — bulan BERJALAN otoritatif saat
+  pasangan ganti satuan antar-bulan (dulu PCS lalu menang atas GR baru;
+  kebijakan = KATEGORI LANGKAH 5c).
+- **E-2/E-3** jalur per-resto `fn_rekap_mentah` header-TOLERAN:
+  'JENIS ' (trailing space) dulu KeyError yang MEMBUNUH seluruh
+  pipeline; ' 5'/'5 '/'1.0' dulu dibuang senyap (data resto lenyap);
+  'KATEGORI'+'KATEGORI ' ganda dulu menghasilkan kolom duplikat.
+  Kanonikalisasi toleran + warning jujur (parity jalur combined).
+- **E-5** `fn_9901` multi-sheet `.xlsb` — openpyxl inline tak bisa
+  membaca .xlsb → except senyap memangkas ke sheet PERTAMA saja;
+  kini `helpers._list_sheet_names` (calamine/pyxlsb) + double-I/O file
+  dihapus.
+- **E-9** baris PO tanpa nama barang tak lagi terfabrikasi KATEGORI
+  (NaN→'nan'→'NAN' match master NaN di kedua sisi).
+
+### 3. LOW — hardening, performa, kebersihan
+- **P-6** parse tanggal jalur non-Apply (double-click popup, cascade,
+  ⧩ value list) kini TERVERIDASI-senyap (clamp -31..31; '32'/'abc'
+  dulu lolos polos → tabel ⊥ popup). **P-7** KeyError masuk except-tuple
+  jalur popup pemanggil-lama. **P-8** `_busy` dipasang SEBELUM
+  `_filter_state()` (messagebox rentang-terbalik bisa mem-fire refresh
+  tertunda → re-entrant). **P-9** nama barang campuran int+str tak lagi
+  meledakkan `sorted()` (TypeError → tab mati) + id kolom float-utuh
+  ('25.0' → '25', konsisten `red_cells`).
+- **P-11** `po_nomor_map`/`po_nomor_map_3243` di-CACHE per identitas
+  frame (double-click pivot berulang kini gratis — pola potensi_po_map).
+- **M-8/U-9** export pivot/in-selisih/nominal: file terkunci (masih
+  dibuka Excel) kini pesan Indonesia actionable (helper bersama
+  `export_sheets._is_file_locked_error`).
+- **U-6** tie-break label minggu deterministik (seri 'WEEK 3' vs
+  'MINGGU 3' tak lagi file-order dependent). **U-7** baris no-op
+  dihapus. **U-8** daftar nilai ⧫ sub-tab terurut numerik
+  (`_filter_value_sort_key` — '(1.000)' dulu sebelum '999').
+- **E-6/E-7** peek-gagal saat scan gabungan DI-LOG (dulu lenyap senyap);
+  fallback engine calamine→openpyxl me-log penyebab pertama.
+- **E-8** `build_konversi_map` normalisasi barang via factorize
+  (hanya nilai unik — parity IDENTIK terverifikasi probe, regex per
+  baris 10⁴-10⁵ baris hilang).
+- **E-10** dead code dihapus: `text_before/after_delimiter` (skalar+vec,
+  0 call-site) & `_concat_valid_values` — 3 isu ruff ikut hilang.
+- Kontrak pola warning §82b: `fn_9901` ditambahkan ke branch-1
+  `_PIPELINE_WARN_RE` (format baru `[WARNING] fn_9901: …`).
+
+### Verifikasi
+- Suite UI `test_ui_redesign.py`: **1676 PASS, 0 FAIL** (+1 dari 1675:
+  kontrak §82b-1 kini hijau).
+- `test_mock.py`: ALL TESTS PASSED (via harness `run_tests.sh` exit 0).
+- ruff 0.17.1 `ruff check .` = **199 ≤ 201** (baseline CI; -2 dari
+  penghapusan dead code).
+- Probe E2E per-fix dieksekusi: normalisasi kunci (U-13/M-1..M-3),
+  leak review engine (M-4, negatif+positif kontrol), popup Deviasi
+  bulan-lalu (U-14), kunci numerik E-1, header toleran E-2/E-3 (file
+  .xlsx mini nyata), parity konversi E-8, NaN/inf export X-1..X-4,
+  cache P-11, sentinel P-5, pd.NA P-1.
+
 ## v3.15.0 — CI HIJAU + OBSERVABILITAS PERSISTEN + PACKAGING PRO
 
 Batch 3 permintaan (user: "Perbaiki 6 isu ruff → CI hijau lagi ·

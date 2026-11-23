@@ -96,7 +96,8 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
     """
     # The 9901 file may have varying sheet names. Try common ones.
     # First, attempt to list files and find a sheet name.
-    from .helpers import _list_excel_files, fn_buka_sheet, stop_check
+    from .helpers import _list_excel_files, _list_sheet_names
+    from .helpers import fn_buka_sheet, stop_check
     files = _list_excel_files(folder_path)
     if not files:
         print(f"  [fn_9901] No Excel files found in: {folder_path}")
@@ -107,12 +108,17 @@ def fn_9901(folder_path: str, stop_event=None) -> pd.DataFrame:
         # v3.9.72 — checkpoint ⏹ ANTAR file (di luar try: Stop ≠ skip-file)
         stop_check(stop_event, f"baca 9901 {os.path.basename(f)!r}")
         try:
-            # Try to find a suitable sheet. Many 9901 exports have a single sheet
-            # or use the default first sheet. We'll read all sheets and concat.
-            import openpyxl
-            wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
-            sheet_names = wb.sheetnames
-            wb.close()
+            # v3.16.0 — FIX (audit V3 E-5): daftar sheet via helpers
+            # _list_sheet_names (calamine/pyxlsb — MENDUKUNG .xlsb;
+            # openpyxl inline dulu GAGAL utk .xlsb → except senyap
+            # memangkas ke sheet PERTAMA saja: sheet 2..N workbook 9901
+            # .xlsb tak pernah terbaca tanpa jejak; sekaligus menghapus
+            # double-I/O per file — struktur-pass + data-pass).
+            sheet_names = _list_sheet_names(f)
+            if not sheet_names:
+                print(f"  [WARNING] fn_9901: daftar sheet {os.path.basename(f)} "
+                      f"tak terbaca — fallback sheet pertama")
+                sheet_names = [0]
         except Exception:
             sheet_names = [0]  # fallback to first sheet
 

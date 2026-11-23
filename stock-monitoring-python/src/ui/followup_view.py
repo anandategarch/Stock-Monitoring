@@ -504,7 +504,11 @@ class FollowUpView(tk.Frame):
             f = float(v)
         except (TypeError, ValueError):
             return str(v)
-        if pd.isna(f) or f == 0:
+        # v3.16.0 — FIX (audit V3 U-5): nilai nyaris-nol NEGATIF (mis.
+        # -0.0001) jangan tampil artefak '(0,00)' — clamp display-only
+        # di bawah resolusi tampil 2-desimal (mirror L-1 _fmt_pct
+        # deviasi_view; nilai data tak disentuh).
+        if pd.isna(f) or f == 0 or abs(f) < 0.005:
             return "-"
         s = (f"{abs(f):,.2f}".replace(",", "\u00a0")
              .replace(".", ",").replace("\u00a0", "."))

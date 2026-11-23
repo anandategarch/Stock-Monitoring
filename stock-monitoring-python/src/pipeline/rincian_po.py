@@ -105,6 +105,17 @@ def build_rincian_po(config, semua_out: dict | None = None,
     # BufferedKategori + Merged (LeftOuter on Nama Barang = NAMA BARANG)
     dbs_kategori = query_dbs_kategori(config, stop_event=stop_event)
     if len(dbs_kategori) > 0 and "Nama Barang" in sel.columns:
+        # v3.16.0 — FIX (audit V3 E-9): buang baris PO TANPA nama barang
+        # (NaN/blank) SEBELUM astype(str) — dulu NaN → 'nan' → key 'NAN'
+        # di KEDUA sisi (sel + master) → left-join mem-FABRIKASI kategori
+        # utk baris PO tanpa nama (dan bisa lolos filter DEVIASI); baris
+        # PO tanpa nama barang tak bermakna utk view Rincian PO.
+        _nb_raw = sel["Nama Barang"]
+        _blank_nb = _nb_raw.isna() | (_nb_raw.astype(str).str.strip() == "")
+        if bool(_blank_nb.any()):
+            print(f"  [INFO] rincian_po: {int(_blank_nb.sum())} baris tanpa "
+                  f"nama barang dibuang (merge kategori)")
+            sel = sel[~_blank_nb]
         kat = dbs_kategori[["NAMA BARANG", "KATEGORI"]].copy()
         kat = kat.rename(columns={"NAMA BARANG": "Nama Barang", "KATEGORI": "DBS_Kategori.KATEGORI"})
         sel["Nama Barang"] = sel["Nama Barang"].astype(str)

@@ -670,7 +670,10 @@ class DeviasiPopup(tk.Toplevel):
             v = float(val)
         except (TypeError, ValueError):
             return str(val)
-        if v == 0:
+        # v3.16.0 — FIX (audit V3 U-15): nilai nyaris-nol NEGATIF (mis.
+        # -0.04) jangan tampil artefak '(0,0)' — clamp display-only
+        # (mirror L-1 _fmt_pct deviasi_view + U-15 deviasi_view._fmt_num).
+        if v == 0 or (v < 0 and abs(v) < 0.05):
             return "-"
         if v == int(v):
             s = fmt_int_id(v)
@@ -1197,15 +1200,30 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         _ss_val = _ss_lookup.get(
             f"{_norm_name_lalu(nama_barang)}\x1f"
             f"{_norm_resto_lalu(nama_resto)}")
+    _ss_applied_t = None
     if _ss_val is not None and not pd.isna(_ss_val):
         _ss_mask_h = out["_t"].astype(float) == float(h)
         if _ss_mask_h.any():
             out.loc[_ss_mask_h, "Saldo Akhir"] = float(_ss_val)
-    # Deviasi = SO − Saldo Akhir; baris H (bila override 42.17 aktif
-    # di atas) = SO_H − sistem 42.17 — identik kolom Deviasi tabel
-    # utama HANYA untuk baris H; baris lain = deviasi running-stock
-    # harian per tanggal.
-    out["Deviasi"] = out["SO"] - out["Saldo Akhir"]
+            _ss_applied_t = float(h)
+    # v3.16.0 — FIX (audit V3 U-14): Deviasi hanya dihitung bila baris
+    # 2.SALDO AKHIR benar-benar ADA pada tanggal itu (atau baris H
+    # ter-override 42.17 di atas). pivot_table(fill_value=0.0) dulu
+    # MENGARANG Saldo Akhir=0 utk tanggal tanpa baris saldo → Deviasi
+    # = SO − 0 = SO PENUH: semua baris bulan-lalu (rekap lalu tak
+    # membawa baris saldo) menampilkan "Deviasi" setinggi SO penutupan
+    # — angka salah yang terlihat user di setiap popup berisi baris
+    # bulan-lalu. Tanggal tanpa baris saldo → NaN (tampil kosong —
+    # 'tidak ada baris' ≠ 'nilai 0', mirror kolom COM/ACR; presence
+    # check ala so_pres _compute_com_series).
+    _saldo_dates = frozenset(
+        float(t) for t in sub.loc[sub["JENIS"] == _JENIS_SALDO, "_t"])
+    out["Deviasi"] = [
+        (float(s) - float(a))
+        if (float(t) in _saldo_dates or float(t) == _ss_applied_t)
+        else float("nan")
+        for t, s, a in zip(out["_t"], out["SO"], out["Saldo Akhir"])
+    ]
     out["Nomor"] = [", ".join(sorted(_nomor_per_tgl.get(t, ())))
                     for t in out["_t"]]
     out["Nomor PO"] = [", ".join(sorted(_po_per_tgl.get(t, ())))

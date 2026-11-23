@@ -25,6 +25,7 @@ worker; pure pandas + openpyxl — import openpyxl LAZY per-fungsi).
    tab 📋 Laporan Deviasi (mode ⚖ Komparasi · 🚨 Anomali COM (H) ·
    💰 Nominal (H)).
 """
+import math
 import os
 from collections.abc import Callable
 
@@ -524,10 +525,58 @@ def _col_label(c) -> str:
 
 
 def _is_int(v: float) -> bool:
+    # v3.16.0 — FIX (audit V3 X-1): + OverflowError (int(inf) meledak —
+    # tak tertangkap → crash writer display) + nilai NON-FINITE bukan
+    # int (±inf/NaN → sel kosong di jalur pemanggil, bukan crash).
     try:
-        return float(v) == int(float(v))
-    except (TypeError, ValueError):
+        fv = float(v)
+    except (TypeError, ValueError, OverflowError):
         return False
+    if not math.isfinite(fv):
+        return False
+    return fv == int(fv)
+
+
+# v3.16.0 — FIX (audit V3 X-4): karakter invalid judul sheet openpyxl
+# ([]:*?/\ — openpyxl RAISES ValueError bila lolos ke ws.title).
+_SHEET_TITLE_INVALID = set("[]:*?/\\")
+
+
+def _is_file_locked_error(exc: BaseException) -> bool:
+    """v3.16.0 — FIX (audit V3, M-8/U-9 parity): deteksi error "file
+    target terkunci / tak bisa ditulis" — tipikal file export masih
+    dibuka di Excel saat export dijalankan ulang. Dipakai on_error export
+    view (pivot_view / in_selisih_view / nominal_resto_view) utk pesan
+    Indonesia yang actionable (bukan exception mentah English).
+    Copy logika app._is_file_locked_error (FIX 2f-09) — ditaruh di modul
+    export bersama supaya view tak perlu import app (melingkar)."""
+    if isinstance(exc, PermissionError):
+        return True
+    if isinstance(exc, OSError):
+        # winerror 32 = sharing violation, 5 = access denied (Windows);
+        # errno 13 = EACCES, 26 = ETXTBSY (POSIX).
+        return (getattr(exc, "winerror", None) in (5, 32)
+                or getattr(exc, "errno", None) in (13, 26))
+    return False
+
+
+def _safe_sheet_title(name: str, existing: "set | None" = None) -> str:
+    """v3.16.0 — FIX (audit V3 X-4): judul sheet openpyxl-SAFE — buang
+    karakter invalid, potong 31, dan bila bentrok dgn judul sheet lain
+    di workbook tambahkan sufiks angka (openpyxl me-rename duplikat
+    SENYAP 'PIVOT' → 'PIVOT1'; eksplisit lebih jujur). Nama yang sudah
+    valid + unik dikembalikan APA ADANYA (semua nama sheet app hari ini
+    valid → output tak berubah; pure hardening)."""
+    base = "".join(ch for ch in str(name)
+                   if ch not in _SHEET_TITLE_INVALID)
+    base = base[:31] or "Sheet"
+    title = base
+    k = 1
+    while existing and title in existing:
+        suffix = str(k)
+        title = base[:31 - len(suffix)] + suffix
+        k += 1
+    return title
 
 
 def write_pivot_display_sheet(filepath: str, payload: dict,
@@ -576,14 +625,20 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
     from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
-    ws.title = sheet_name[:31]
+    # v3.16.0 — FIX (audit V3 X-4): judul sheet di-SANITIZE (karakter
+    # invalid + duplikat — lihat _safe_sheet_title).
+    ws.title = _safe_sheet_title(
+        sheet_name, {s.title for s in wb.worksheets if s is not ws})
 
     # --- baris filter (ala layout "Mutasi Barang - New" + info mode) ---
     meta = [
         ("MODE", mode_label),
-        ("NAMA RESTO", str(st.get("resto", "(All)"))),
-        ("SOURCE KIRIMAN", str(st.get("source", "(All)"))),
-        ("KATEGORI", str(st.get("kategori", "(All)"))),
+        # v3.16.0 — FIX (audit V3 X-3): None → '(All)' — .get(k, default)
+        # hanya menyala utk key HILANG, bukan nilai None (dulu 'None'
+        # tampil di meta export).
+        ("NAMA RESTO", st.get("resto") or "(All)"),
+        ("SOURCE KIRIMAN", st.get("source") or "(All)"),
+        ("KATEGORI", st.get("kategori") or "(All)"),
     ]
     for i, (k, v) in enumerate(meta, start=1):
         ws.cell(row=i, column=1, value=k).font = Font(bold=True,
@@ -649,6 +704,12 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
                     v = float(vals[ci])
                 except (TypeError, ValueError, IndexError):
                     continue
+                # v3.16.0 — FIX (audit V3 X-2): NaN (baris COM tanpa SO
+                # terekam — payload P-10 kini membawa NaN) / ±inf → sel
+                # KOSONG (bukan 0 palsu; openpyxl menulis <v></v> XML
+                # INVALID utk NaN float → Excel repair prompt).
+                if not math.isfinite(v):
+                    continue
                 vc = ws.cell(row=r, column=j, value=v)
                 vc.number_format = fmt_int if _is_int(v) else fmt_dec
                 # MINUS → font merah PER CELL (permintaan v3.9.2);
@@ -704,9 +765,11 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
 # =============================================================================
 def _cell_value(v):
     """Normalisasi nilai sel utk write_table_display_sheet.
-    Return (None, None) bila kosong (None/NaN/NA → sel KOSONG — konsisten
-    export Selisih IN "Hasil SO"), (True, float) utk angka, (False, str)
-    utk teks. bool → teks (tak pernah angka)."""
+    Return (None, None) bila kosong (None/NaN/NA/±inf → sel KOSONG —
+    konsisten export Selisih IN "Hasil SO"; v3.16.0 X-2: ±inf ikut
+    dikosongkan — openpyxl menulis XML invalid utk non-finite),
+    (True, float) utk angka, (False, str) utk teks. bool → teks (tak
+    pernah angka)."""
     if v is None:
         return None, None
     if isinstance(v, str):
@@ -720,9 +783,13 @@ def _cell_value(v):
         return False, str(v)
     if isinstance(v, (int, float, np.integer, np.floating)):
         try:
-            return True, float(v)
+            fv = float(v)
         except (TypeError, ValueError, OverflowError):
             return False, str(v)
+        # v3.16.0 — FIX (audit V3 X-2): ±inf → sel KOSONG.
+        if not math.isfinite(fv):
+            return None, None
+        return True, fv
     return False, str(v)
 
 
@@ -770,14 +837,19 @@ def write_table_display_sheet(filepath, sheet_name, columns, rows,
 
     wb = Workbook()
     ws = wb.active
-    ws.title = str(sheet_name)[:31]
+    # v3.16.0 — FIX (audit V3 X-4): judul sheet di-SANITIZE (mirror
+    # write_pivot_display_sheet).
+    ws.title = _safe_sheet_title(
+        sheet_name, {s.title for s in wb.worksheets if s is not ws})
 
     # --- baris meta (ala layout pivot display: SUMBER/TANGGAL H/FILE) ---
     r = 1
     for k, v in (meta_rows or []):
         ws.cell(row=r, column=1, value=str(k)).font = Font(
             bold=True, color="FF475569")
-        ws.cell(row=r, column=2, value=str(v))
+        # v3.16.0 — FIX (audit V3 X-3): nilai meta None → sel KOSONG
+        # (dulu literal 'None' tertulis di file export).
+        ws.cell(row=r, column=2, value="" if v is None else str(v))
         r += 1
     if meta_rows:
         r += 1                      # satu baris kosong pemisah

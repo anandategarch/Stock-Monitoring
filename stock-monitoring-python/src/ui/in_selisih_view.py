@@ -72,6 +72,18 @@ from typing import ClassVar
 import numpy as np  # _compute_base isnan + saldo/COM ops (v3.10)
 import pandas as pd
 
+# v3.16.0 — FIX (audit V3 M-1/M-2/M-3): kunci lookup kanonik — engine
+# fn_audit meng-output nama ternormalisasi (UPPER + spasi rapat +
+# segmen resto pasca-titik) tapi lookup view ini (popup Rincian IN,
+# catatan B1/B2, peta KATEGORI/Satuan) memakai ejaan MENTAH file →
+# pasangan drift ('gula  (V.20)' vs 'GULA (V.20)' — kelas bug T-1
+# yang tersisa di sisi view) me-miss SENYAP: popup kosong, catatan
+# lenyap, kategori/satuan '-'. Semua kini ber-kunci kanonik dua sisi
+# (normalisasi idempoten pada nilai yang sudah kanonik).
+from ..pipeline.helpers import (
+    norm_nama_barang_key,
+    norm_nama_resto_key,
+)
 from .doc_codes import (
     _doc_code_str,  # v3.9.23 — helper kode dokumen diangkat ke modul
     _doc_month,  # noqa: F401 — re-export nama lama (test §29/§30)
@@ -81,6 +93,7 @@ from .doc_codes import (
 )
 from .export_sheets import (
     AUDIT_EXPORT_COLUMNS,
+    _is_file_locked_error,  # v3.16.0 — FIX (audit V3 M-8): pesan file-terkunci
     build_selisih_export_df,
     tgl_chrono_key,
     tgl_label,
@@ -134,6 +147,8 @@ from .widgets import (
 )
 
 # --- Kolom tabel (v3.6: SATU tabel — Ringkas + Audit digabung) -------------
+
+
 # v3.9.30 — KOLOM BARU 'PO Menunggu' (setelah Saldo): total qty PO
 # 32.43 ber-status 'Menunggu diproses' utk pasangan (resto, barang)
 # itu — penjelas deviasi murni (PO sudah dibuat, penerimaan/RI belum
@@ -303,7 +318,11 @@ def _ri_balancing_by_date(in_detail: pd.DataFrame | None) -> dict:
         p_po = _doc_period(nomor_po)
         po_txt = (f" (PO {p_po[0]:04d}-{p_po[1]:02d})"
                   if p_po is not None else "")
-        per_pair = out.setdefault((str(b), str(r)), {})
+        # v3.16.0 — FIX (audit V3 M-2): kunci NORMALIZED — lookup _add
+        # memakai nama baris tabel (engine, ternormalisasi); ejaan mentah
+        # file 32.24/42.05 tak lagi bikin catatan B1 lenyap di pasangan drift.
+        per_pair = out.setdefault(
+            (norm_nama_barang_key(str(b)), norm_nama_resto_key(str(r))), {})
         lst = per_pair.setdefault(tkey, [])
         item = (n, po_txt)
         if item not in lst:
@@ -336,9 +355,15 @@ def _duplicated_doc_dates(in_detail: pd.DataFrame | None,
         return out
     d["_tgl"] = d["Tanggal"].map(_tgl_key)
     d = d[d["_tgl"].notna()]
+    # v3.16.0 — FIX (audit V3 M-2): kunci dup kini NORMALIZED (doc_codes
+    # duplicated_doc_numbers di-normalize saat build) — pembanding sisi
+    # baris ikut dinormalisasi supaya pasangan drift tetap ketemu;
+    # out-key ikut kanonik (sinkron _add lookup engine-normalized).
+    d["_b"] = d["Nama Barang"].astype(str).map(norm_nama_barang_key)
+    d["_r"] = d["NAMA RESTO"].astype(str).map(norm_nama_resto_key)
     for (b, r), nomors in dup.items():
-        sub = d[(d["Nama Barang"].astype(str) == str(b))
-                & (d["NAMA RESTO"].astype(str) == str(r))
+        sub = d[(d["_b"] == str(b))
+                & (d["_r"] == str(r))
                 & (d["_nomor"].isin(nomors))]
         if sub.empty:
             continue
@@ -1758,9 +1783,11 @@ class InSelisihView(tk.Frame):
                                  ("Qty BK", "Qty BK")):
             out[col_out] = _num_or_na(col_in)
         out.insert(3, "KATEGORI",
-                   [self._kategori_map.get(b, "-")
+                   [self._kategori_map.get(norm_nama_barang_key(b), "-")
                     for b in out["Nama Barang"]])
-        out["Satuan"] = [self._satuan_map.get((b, r), "-")
+        out["Satuan"] = [self._satuan_map.get(
+                              (norm_nama_barang_key(b),
+                               norm_nama_resto_key(r)), "-")
                           for b, r in zip(out["Nama Barang"],
                                           out["Resto"])]
         # v3.9.23 (poin B) — CATATAN AUDIT OTOMATIS: catatan app
@@ -1827,7 +1854,12 @@ class InSelisihView(tk.Frame):
         notes: dict = {}
 
         def _add(r, t, b, note):
-            notes.setdefault((str(r), _tgl_key(t), str(b)), []).append(note)
+            # v3.16.0 — FIX (audit V3 M-2): kunci NORMALIZED — baris tabel
+            # (engine) ber-nama kanonik; peta B1/B2 juga kanonik sejak
+            # perbaikan ini → catatan menempel di pasangan drift juga.
+            notes.setdefault(
+                (norm_nama_resto_key(str(r)), _tgl_key(t),
+                 norm_nama_barang_key(str(b))), []).append(note)
 
         # --- B1: RI Balancing (per tanggal — dokumen milik baris itu) ---
         rib = _ri_balancing_by_date(in_detail)
@@ -1998,14 +2030,23 @@ class InSelisihView(tk.Frame):
         return out
 
     def _ensure_maps(self, df):
-        """Lookup satuan per (barang, resto) + kategori per barang (v3.5)."""
+        """Lookup satuan per (barang, resto) + kategori per barang (v3.5).
+
+        v3.16.0 — FIX (audit V3 M-3): kunci map kini KANONIK
+        (norm_nama_barang_key × norm_nama_resto_key) — sebelumnya RAW
+        ejaan perwakilan append1 sedangkan lookup memakai nama ENGINE
+        (UPPER-normalized) → pasangan drift ('Gula (V.20)' vs
+        'GULA (V.20)') tampil '-' di kolom KATEGORI & Satuan tabel
+        DAN export-nya; kini kategori/satuan tetap nyambung apa pun
+        ejaannya (lookup sisi engine juga dinormalisasi — idempoten)."""
         if not self._satuan_map and "SATUAN" in df.columns:
             sat = (df[["Nama Barang", "NAMA RESTO", "SATUAN"]]
                    .dropna(subset=["SATUAN"])
                    .drop_duplicates(subset=["Nama Barang", "NAMA RESTO"],
                                     keep="first"))
             self._satuan_map = {
-                (str(b), str(r)): str(s)
+                (norm_nama_barang_key(str(b)), norm_nama_resto_key(str(r))):
+                    str(s)
                 for b, r, s in zip(sat["Nama Barang"], sat["NAMA RESTO"],
                                    sat["SATUAN"])
             }
@@ -2014,7 +2055,7 @@ class InSelisihView(tk.Frame):
                    .dropna(subset=["KATEGORI"])
                    .drop_duplicates(subset=["Nama Barang"], keep="first"))
             self._kategori_map = {
-                str(b): str(k)
+                norm_nama_barang_key(str(b)): str(k)
                 for b, k in zip(kat["Nama Barang"], kat["KATEGORI"])
             }
 
@@ -2036,6 +2077,15 @@ class InSelisihView(tk.Frame):
         tgl_end = validated_tgl_entry(self.tgl_end_var, lo=-31, hi=31,
                                       fallback=31, label="Tanggal akhir",
                                       parent=self)
+        # v3.16.0 — FIX (audit V3 M-7): swap KUNCI KRONOLOGIS — jalur
+        # _on_tanggal_change & _do_export sudah bertukar via
+        # tgl_chrono_key, tapi _refresh (dipakai restore_filter_state /
+        # pemanggil programatik) TIDAK → rentang dua-negatif tersimpan
+        # (-31..-25) menghasilkan tabel KOSONG padahal export dgn rentang
+        # sama berhasil (tgl_range_mask kronologis). Kini konsisten tiga
+        # jalur (mirror v3.11.59 BUG 1 P1 / v3.11.1 audit 12-c2 B1).
+        if tgl_chrono_key(tgl_start) > tgl_chrono_key(tgl_end):
+            tgl_start, tgl_end = tgl_end, tgl_start
         st = {
             "tgl_start": tgl_start,
             "tgl_end": tgl_end,
@@ -2063,8 +2113,16 @@ class InSelisihView(tk.Frame):
             # cache) → cache basi tak terpakai.
             if in_detail is not None and not in_detail.empty \
                     and self._scols_cache_detail is not in_detail:
+                # v3.16.0 — FIX (audit V3 M-1): kolom cache kini
+                # NORMALIZED (norm_nama_resto_key / norm_nama_barang_key)
+                # — _detail_for membandingkan dgn nama baris tabel (engine,
+                # kanonik); ejaan mentah file 32.24/42.05/9901 tak lagi
+                # bikin popup "Rincian IN" KOSONG di pasangan drift
+                # (baris IN=10 tapi popup "tidak ada dokumen").
                 self._scols_cache = {
-                    c: in_detail[c].astype(str)
+                    c: in_detail[c].astype(str).map(
+                        norm_nama_resto_key if c == "NAMA RESTO"
+                        else norm_nama_barang_key)
                     for c in ("NAMA RESTO", "Nama Barang")
                     if c in in_detail.columns}
                 self._scols_cache_detail = in_detail
@@ -2231,10 +2289,15 @@ class InSelisihView(tk.Frame):
                             or _col not in _f_bar.columns:
                         continue
                     _fmt_b = _format_col_values(_col, _f_bar[_col])
-                    _f_bar = _f_bar[_fmt_b.isin(_sel)]
+                    # v3.16.0 — FIX (audit V3 M-6): chip strip kini
+                    # filter_disp_mask (label ATAU mentah) — parity dgn
+                    # jalur filter utama; isin mentah bisa berbeda hasil
+                    # utk seleksi label-only ('(Kosong)', marker tepi-
+                    # spasi) → strip menghitung konteks beda dari tabel.
+                    _f_bar = _f_bar[filter_disp_mask(_fmt_b, _sel)]
                 if _resto_sel is not None and "Resto" in _f_bar.columns:
                     _fmt_rb = _format_col_values("Resto", _f_bar["Resto"])
-                    _f_bar = _f_bar[_fmt_rb.isin(_resto_sel)]
+                    _f_bar = _f_bar[filter_disp_mask(_fmt_rb, _resto_sel)]
                 _sv4 = pd.to_numeric(_f_bar["Selisih IN"],
                                      errors="coerce").fillna(0)
                 _sel4 = _f_bar[_sv4 != 0]
@@ -2524,6 +2587,14 @@ class InSelisihView(tk.Frame):
                     return (0, float(_s))
                 except ValueError:
                     return (1, raw)
+            if col == "tanggal":
+                # v3.16.0 — FIX (audit V3 M-5): sort TANGGAL kronologis —
+                # dulu leksikografis ('10' < '2', '25•' terakhir);
+                # _parse_tgl_chrono = parser sort utama tabel (L-7).
+                ck = self._parse_tgl_chrono(raw)
+                if ck is not None:
+                    return (0, ck, "")
+                return (1, 0, raw.lower())
             return (0, raw.lower())
 
         for idx, iid in enumerate(sorted(items, key=_key, reverse=rev)):
@@ -3036,9 +3107,20 @@ class InSelisihView(tk.Frame):
                 parent=self.winfo_toplevel())
 
         def on_error(e):
-            messagebox.showerror(
-                "Export Gagal", f"Tidak bisa export:\n{e}",
-                parent=self.winfo_toplevel())
+            # v3.16.0 — FIX (audit V3 M-8): file target terkunci (masih
+            # dibuka Excel) dulu tampil sebagai exception mentah English —
+            # kini pesan Indonesia yang actionable (mirror app._export_
+            # excel FIX 2f-09; helper lokal — hindari import melingkar).
+            if _is_file_locked_error(e):
+                messagebox.showerror(
+                    "Export Gagal",
+                    "File sedang dibuka (Excel?) — tutup dulu lalu "
+                    f"ulangi.\n\nPath: {filepath}",
+                    parent=self.winfo_toplevel())
+            else:
+                messagebox.showerror(
+                    "Export Gagal", f"Tidak bisa export:\n{e}",
+                    parent=self.winfo_toplevel())
 
         run_async(self, work, done, overlay=self.overlay,
                   loading_text="Mengekspor rekap Selisih IN…",
@@ -3327,12 +3409,22 @@ class InSelisihView(tk.Frame):
 
         def _s(col):
             s = (scols or {}).get(col)
-            return s.reindex(d.index) if s is not None \
-                else d[col].astype(str)
+            if s is not None:
+                return s.reindex(d.index)
+            # v3.16.0 — FIX (audit V3 M-1): fallback cache-miss juga
+            # NORMALIZED (parity jalur cache — dgn tanpa ini, double-click
+            # sebelum refresh pertama membandingkan mentah vs kanonik).
+            _norm = (norm_nama_resto_key if col == "NAMA RESTO"
+                     else norm_nama_barang_key)
+            return d[col].astype(str).map(_norm)
 
         d = det
-        d = d[_s("NAMA RESTO") == str(resto)]
-        d = d[_s("Nama Barang") == str(barang)]
+        # v3.16.0 — FIX (audit V3 M-1): kedua sisi KANONIK — baris tabel
+        # (engine) ber-nama ternormalisasi; in_detail membawa ejaan file
+        # mentah ('gula  (V.20)') → perbandingan mentah me-miss senyap,
+        # popup "Rincian IN" kosong di baris yang MENUNJUKKAN IN=10.
+        d = d[_s("NAMA RESTO") == norm_nama_resto_key(str(resto))]
+        d = d[_s("Nama Barang") == norm_nama_barang_key(str(barang))]
         t = pd.to_numeric(d["Tanggal"], errors="coerce")
         d = d[t == tgl]
         if d.empty:

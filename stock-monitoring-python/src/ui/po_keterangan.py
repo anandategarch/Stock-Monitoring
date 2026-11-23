@@ -55,6 +55,14 @@ _SRC_EKSTERNAL = ("Eksternal", "Campuran")
 
 _CACHE: dict = {"data": None, "in_detail": None, "map": {}}
 
+# v3.16.0 — FIX (audit V3 P-11): cache per identitas utk po_nomor_map /
+# po_nomor_map_3243 — details_popup membangun KEDUA peta (norm series +
+# groupby atas in_detail / rincian_po PENUH) di SETIAP double-click pivot
+# (pola _CACHE potensi_po_map di atas; UI freeze puluhan-ratusan ms per
+# klik yang sebenarnya gratis setelah data pertama).
+_NOMOR_CACHE: dict = {"in_detail": None, "map": {}}
+_NOMOR3243_CACHE: dict = {"df": None, "map": {}}
+
 # v3.11.1 — jendela import file RI bulan-lalu (fn_3224/fn_4205 mode
 # 'lalu': Tanggal >= maxT-4 → hanya 5 hari terakhir FILE yang dibawa
 # pipeline) sedangkan rekap lalu 7 hari (−25..−31) → tanggal 25•/26•
@@ -292,6 +300,9 @@ def po_nomor_map(in_detail) -> dict:
     'Nomor # PO' fn_3224). in_detail None/kosong/tak ber-Nomor PO → {}.
     v3.11.59 — kunci (barang, resto) KANONIK norm_nama_* (dulu RAW
     astype(str) — drift ejaan vs pemanggil kanonik → Nomor PO kosong).
+    v3.16.0 — FIX (audit V3 P-11): hasil di-CACHE per identitas frame
+    (pola _CACHE potensi_po_map) — tanpa cache, details_popup mengulang
+    norm series + groupby atas frame penuh di setiap double-click.
 
     Dipakai kolom 'KETERANGAN PO' popup details (tab Pivot) — user: "Pop up
     keterangan PO di pivot tabel kok gak muncul? itu ambil dari file 3224
@@ -304,6 +315,16 @@ def po_nomor_map(in_detail) -> dict:
     potensi TIDAK terpenuhi (kedua info saling eksklusif per tanggal — popup
     menampilkan SALAH SATU: Nomor PO bila ada penerimaan 3224, label potensi
     bila 3224=0 dan kondisi lain terpenuhi, kosong bila keduanya tidak)."""
+    if _NOMOR_CACHE["in_detail"] is in_detail:
+        return _NOMOR_CACHE["map"]
+    out = _po_nomor_map_build(in_detail)
+    _NOMOR_CACHE["in_detail"] = in_detail
+    _NOMOR_CACHE["map"] = out
+    return out
+
+
+def _po_nomor_map_build(in_detail) -> dict:
+    """Body po_nomor_map (tanpa cache — dipanggil wrapper ber-cache)."""
     if in_detail is None or getattr(in_detail, "empty", True):
         return {}
     cols = set(getattr(in_detail, "columns", []))
@@ -361,6 +382,9 @@ def po_nomor_map_3243(rincian_po_df) -> dict:
     kolom 'Cabang PO' via ``resto_from_cabang_po`` ("1370.MLGPAR" →
     "MLGPAR" — logika bersama pipeline fn_audit PO Menunggu + UI
     rincian_po_view). rincian_po_df None/kosong/tak ber-Nomor # → {}.
+    v3.16.0 — FIX (audit V3 P-11): hasil di-CACHE per identitas frame
+    (pola _CACHE potensi_po_map — details_popup memanggil tiap double-
+    click).
 
     Dipakai kolom 'KETERANGAN PO' popup details (tab Pivot) — Opsi A:
     prioritas NOMOR PO dari 3243 (PO itu sendiri — lebih lengkap: semua
@@ -387,6 +411,16 @@ def po_nomor_map_3243(rincian_po_df) -> dict:
     details_popup/saldo_minus_view → Nomor/Status PO kosong utk pasangan
     drifted; contoh nyata v3.11.34: "Air Mineral  600ML" @ "1370.mlgpar").
     """
+    if _NOMOR3243_CACHE["df"] is rincian_po_df:
+        return _NOMOR3243_CACHE["map"]
+    out = _po_nomor_map_3243_build(rincian_po_df)
+    _NOMOR3243_CACHE["df"] = rincian_po_df
+    _NOMOR3243_CACHE["map"] = out
+    return out
+
+
+def _po_nomor_map_3243_build(rincian_po_df) -> dict:
+    """Body po_nomor_map_3243 (tanpa cache — dipanggil wrapper ber-cache)."""
     if rincian_po_df is None or getattr(rincian_po_df, "empty", True):
         return {}
     cols = set(getattr(rincian_po_df, "columns", []))

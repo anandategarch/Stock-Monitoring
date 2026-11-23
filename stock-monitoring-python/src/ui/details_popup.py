@@ -59,6 +59,7 @@ from .widgets import (
     copy_tree_selection_tsv,  # v3.9.33 — AUDIT FIX 48-c (Ctrl+C multi-baris)
     enable_col_resize,
     enable_multi_select,
+    filter_disp_mask,  # v3.16.0 — FIX (audit V3 P-2): seleksi ⧩ label-vs-mentah
     fmt_int_id,
     identify_to_column,
     insert_tree_items,
@@ -503,8 +504,12 @@ class DetailsPopup(tk.Toplevel):
         render_df = df
         # v3.9.13: seleksi kosong (set()) = 0 baris (semantik Excel) —
         # dulu truthiness menelan set() sebagai "tanpa filter".
+        # v3.16.0 — FIX (audit V3 P-2): mask label-ATAU-mentah — ⧩ popup
+        # meng-emit LABEL TAMPILAN (spasi tepi '␣', '(Kosong)') tapi isin
+        # mentah membuang baris yang dicentang (kelas bug v3.12.1).
         if name_selected is not None and "Nama Barang" in df.columns:
-            render_df = df[df["Nama Barang"].astype(str).isin(name_selected)]
+            render_df = df[filter_disp_mask(df["Nama Barang"].astype(str),
+                                            name_selected)]
 
         if render_df.empty:
             return {"items": [], "status": "Tidak ada source data untuk "
@@ -607,8 +612,11 @@ class DetailsPopup(tk.Toplevel):
             return df
         # v3.9.13: seleksi kosong (set()) = 0 baris — `is not None`,
         # bukan truthiness (set() kosong tetap filter AKTIF).
+        # v3.16.0 — FIX (audit V3 P-2): mask label-ATAU-mentah (parity
+        # _prepare_rows — ⧩ meng-emit label tampilan).
         if self._name_selected is not None and "Nama Barang" in df.columns:
-            return df[df["Nama Barang"].astype(str).isin(self._name_selected)]
+            return df[filter_disp_mask(df["Nama Barang"].astype(str),
+                                       self._name_selected)]
         return df
 
     # =====================================================================
@@ -829,9 +837,19 @@ class DetailsPopup(tk.Toplevel):
         """Format NILAI: separator ribuan, negatif dalam kurung, 1 desimal.
         FIX C-03 (audit 2-c): format INDONESIA (1.234,5 · (1.234,5)) — dulu
         EN "1,234.5"; popup ini drill-down dari view berformat Indonesia,
-        nilai sama harus tampil sama."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        nilai sama harus tampil sama.
+        v3.16.0 — FIX (audit V3 P-1): pd.NA ≡ NaN → "" — guard
+        `isinstance(val, float)` meloloskan pd.NA (Int64 nullable
+        Series.tolist) → float(pd.NA) TypeError → str '<NA>' TAMPIL di
+        popup (fix yang sama sudah ada di pivot_view._format_num v3.11.10
+        tapi tak sampai ke popup ini)."""
+        if val is None:
             return "", False
+        try:
+            if pd.isna(val):
+                return "", False
+        except (TypeError, ValueError):
+            pass
         try:
             v = float(val)
         except (TypeError, ValueError):
@@ -850,9 +868,16 @@ class DetailsPopup(tk.Toplevel):
 
     @staticmethod
     def _fmt_cell(val, col_name: str) -> str:
-        """Format cell value for display (identik versi lama)."""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
+        """Format cell value for display (identik versi lama).
+        v3.16.0 — FIX (audit V3 P-1): pd.NA ≡ NaN → "" (guard isinstance
+        meloloskan pd.NA → '<NA>' tampil — mirror _fmt_nilai)."""
+        if val is None:
             return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
         if col_name in ("#Tgl/Jam Pembuatan IT",):
             if hasattr(val, "strftime"):
                 return val.strftime("%d/%m/%Y %H:%M:%S")
@@ -1019,7 +1044,10 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
                 df = df[pd.to_numeric(df["Tanggal"], errors="coerce")
                         == tgl_int]
             title_parts.append(f"Tgl {tgl_int}")
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, KeyError):
+            # v3.16.0 — FIX (audit V3 P-7): + KeyError — akses kolom tanpa
+            # guard (df tanpa 'Tanggal' lewat jalur pemanggil lama) dulu
+            # lolos dari except → traceback di dalam callback Tk.
             pass
 
     # v3.9.54 FIX (audit 8-a P1-2) — rentang tanggal tampilan pivot
@@ -1046,35 +1074,13 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             else:
                 df = df[tgl_range_mask(df["Tanggal"], _t1, _t2)]
             _range_note = f"Tgl {_t1}..{_t2}"
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError, KeyError):
+            # v3.16.0 — FIX (audit V3 P-7): + KeyError (df tanpa 'Tanggal'
+            # via pemanggil lama — jalur public entry point).
             _range_note = None
 
     # Apply additional filters (from active pivot filters)
     filter_info_parts = []
-    if _formula_note == "_COM_BASE_PENDING_":
-        # FIX 6c-02 / 6e-04 — finalisasi catatan formula SETELAH semua
-        # filter (klaim baris BASE hanya bila baris 1.SO di tanggal base
-        # benar-benar tampil — pasangan/resto tanpa SO di t−1 → base
-        # com = 0, tak ada baris untuk diklaim).
-        _prev_lbl = _tgl_lalu_label(_com_prev_tgl)
-        try:
-            _tn = pd.to_numeric(df["Tanggal"], errors="coerce")
-            _has_base_row = bool(
-                ((_scol("JENIS") == "1.SO")
-                 & (_tn == _com_prev_tgl)).any())
-        except (KeyError, TypeError, ValueError):
-            _has_base_row = False
-        if _has_base_row:
-            _formula_note = (
-                f"JENIS=SO+IN+BK + SO {_prev_lbl} BASE "
-                "(formula COM: SO(t−1)+IN−BK−SO)")
-        else:
-            _formula_note = (
-                f"JENIS=SO+IN+BK (formula COM: base 0 — "
-                f"pasangan tanpa SO {_prev_lbl})")
-    for _note in (_formula_note, _range_note):
-        if _note:
-            filter_info_parts.append(_note)
     if filters:
         for col, val in filters.items():
             if not val or val == "(All)" or col not in df.columns:
@@ -1100,6 +1106,38 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
             else:
                 df = df[_scol(col) == str(val)]
             filter_info_parts.append(f"{col}={val}")
+    # v3.16.0 — FIX (audit V3 P-4): finalisasi catatan formula COM
+    # DIPINDAH ke SETELAH loop filter RESTO/SOURCE/KATEGORI — komentarnya
+    # sendiri (FIX 6c-02/6e-04) menyatakan finalisasi harus SETELAH semua
+    # filter karena filter NAMA RESTO bisa membuang baris BASE SO(t−1)
+    # (baris base direlaksasi masuk utk resto LAIN), tapi urutan kodenya
+    # TERBALIK → header popup mengklaim '+ SO 4 BASE' padahal baris base
+    # tak tampil. Urutan bagian info tetap (formula/range dulu, lalu
+    # label filter) supaya tampilan tak berubah.
+    if _formula_note == "_COM_BASE_PENDING_":
+        # FIX 6c-02 / 6e-04 — finalisasi catatan formula SETELAH semua
+        # filter (klaim baris BASE hanya bila baris 1.SO di tanggal base
+        # benar-benar tampil — pasangan/resto tanpa SO di t−1 → base
+        # com = 0, tak ada baris untuk diklaim).
+        _prev_lbl = _tgl_lalu_label(_com_prev_tgl)
+        try:
+            _tn = pd.to_numeric(df["Tanggal"], errors="coerce")
+            _has_base_row = bool(
+                ((_scol("JENIS") == "1.SO")
+                 & (_tn == _com_prev_tgl)).any())
+        except (KeyError, TypeError, ValueError):
+            _has_base_row = False
+        if _has_base_row:
+            _formula_note = (
+                f"JENIS=SO+IN+BK + SO {_prev_lbl} BASE "
+                "(formula COM: SO(t−1)+IN−BK−SO)")
+        else:
+            _formula_note = (
+                f"JENIS=SO+IN+BK (formula COM: base 0 — "
+                f"pasangan tanpa SO {_prev_lbl})")
+    filter_info_parts = (
+        [_n for _n in (_formula_note, _range_note) if _n]
+        + filter_info_parts)
 
     title = " / ".join(title_parts) if title_parts else "All Data"
     filter_info = ", ".join(filter_info_parts) if filter_info_parts else ""
@@ -1141,11 +1179,16 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     # non-kanonik miss senyap; kelas bug yang sama dgn v3.11.59).
     # Tanpa rincian_po_df & in_detail → kolom kosong.
     if in_detail is not None and df is not None and not df.empty:
+        # v3.16.0 — FIX (audit V3 P-5): normalisasi SERI (bukan astype(str)
+        # + norm scalar per baris) — NaN resto kini jadi sentinel '\x00NA'
+        # PERSIS sisi peta (norm scalar atas astype(str) menghasilkan
+        # 'NAN' ≠ sentinel → baris resto-NaN tak pernah cocok dgn peta);
+        # sekaligus menghapus norm per-baris (lebih cepat).
         from ..pipeline.helpers import (
-            norm_nama_barang_key as _nbk_dp,
+            norm_nama_barang_key_series as _nbks_dp,
         )
         from ..pipeline.helpers import (
-            norm_nama_resto_key as _nrk_dp,
+            norm_nama_resto_key_series as _nrks_dp,
         )
         from .po_keterangan import (
             POTENSI_PO_LABEL,
@@ -1158,15 +1201,13 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
         _nomor_m_3243 = (po_nomor_map_3243(rincian_po_df)
                          if rincian_po_df is not None else {})
         if _po_m or _nomor_m_3224 or _nomor_m_3243:
-            _b_s = df["Nama Barang"].astype(str)
-            _r_s = df["NAMA RESTO"].astype(str)
+            _b_s = _nbks_dp(df["Nama Barang"])
+            _r_s = _nrks_dp(df["NAMA RESTO"])
             _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
             _ket = []
-            for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
+            for _kb, _kr, _tt in zip(_b_s, _r_s, _t_s):
                 # v3.13.0 — kunci KANONIK kedua sisi (norm idempoten utk
                 # frame yang sudah kanonik; drift ejaan kini cocok).
-                _kb = _nbk_dp(_bb)
-                _kr = _nrk_dp(_rr)
                 _parts: list = []
                 # 1. Prioritas: Nomor PO dari 3243 (semua PO pasangan)
                 _po_3243 = _nomor_m_3243.get((_kb, _kr))
@@ -1201,20 +1242,23 @@ def show_details_popup(parent, data: pd.DataFrame, nama_barang: str = None,
     if with_barang_masuk and df is not None and not df.empty:
         _bm_m = _barang_masuk_map(data)
         if _bm_m:
+            # v3.16.0 — FIX (audit V3 P-5): normalisasi SERI — NaN resto
+            # jadi sentinel '\x00NA' persis sisi peta (scalar norm atas
+            # astype(str) → 'NAN' ≠ sentinel → miss senyap); tanpa norm
+            # per-baris (lebih cepat).
             from ..pipeline.helpers import (
-                norm_nama_barang_key as _nbk_bm,
-                norm_nama_resto_key as _nrk_bm,
+                norm_nama_barang_key_series as _nbks_bm,
+                norm_nama_resto_key_series as _nrks_bm,
             )
-            _b_s = df["Nama Barang"].astype(str)
-            _r_s = df["NAMA RESTO"].astype(str)
+            _b_s = _nbks_bm(df["Nama Barang"])
+            _r_s = _nrks_bm(df["NAMA RESTO"])
             _t_s = pd.to_numeric(df["Tanggal"], errors="coerce")
             _bm_vals = []
-            for _bb, _rr, _tt in zip(_b_s, _r_s, _t_s):
+            for _kb, _kr, _tt in zip(_b_s, _r_s, _t_s):
                 if _tt is None or pd.isna(_tt):
                     _bm_vals.append(None)
                     continue
-                _bm_vals.append(_bm_m.get(
-                    (_nbk_bm(_bb), _nrk_bm(_rr), int(_tt))))
+                _bm_vals.append(_bm_m.get((_kb, _kr, int(_tt))))
             df = df.assign(**{"BARANG MASUK": _bm_vals})
         _bm_columns = _columns_with_bm()
 

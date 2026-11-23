@@ -70,6 +70,7 @@ from .widgets import (
     EmptyState,
     GhostButton,
     HeaderFilterGroup,
+    _filter_value_sort_key,  # v3.16.0 — FIX (audit V3 U-8): sort nilai ⧩
     apply_cell_tag,
     auto_fit_columns,
     enable_col_resize,
@@ -608,8 +609,9 @@ class SaldoMinusView(tk.Frame):
                 elif col_id == "Status PO":
                     values.append(str(row.get("Status PO", "") or "") or "-")
                 elif col_id in MINUS_NUMERIC_COLS:
-                    v = row.get(col_id.replace("Qty Mulai Minus",
-                               "Qty Mulai Minus"), 0)
+                    # v3.16.0 — FIX (audit V3 U-7): buang baris no-op
+                    # (replace dengan dirinya sendiri, langsung ditimpa
+                    # _col_to_df di bawah) — code smell audit.
                     # map nama kolom tampilan → nama df
                     df_col = self._col_to_df(col_id)
                     v = row.get(df_col, 0) if df_col else 0
@@ -709,9 +711,14 @@ class SaldoMinusView(tk.Frame):
         if not df_col:
             return []
         if col in MINUS_NUMERIC_COLS:
-            return sorted({_fmt_num(v) for v in self._minus_df[df_col]})
+            # v3.16.0 — FIX (audit V3 U-8): sort daftar nilai ⧩ via
+            # widgets._filter_value_sort_key (angka-format-Indonesia
+            # terurut NUMERIK — "(1.000)" < "999" dulu salah
+            # leksikografis; mirror followup_view/in_selisih_view).
+            return sorted({_fmt_num(v) for v in self._minus_df[df_col]},
+                          key=_filter_value_sort_key)
         return sorted({str(v) for v in self._minus_df[df_col]
-                       if str(v).strip()})
+                       if str(v).strip()}, key=_filter_value_sort_key)
 
     def _render(self, payload: dict):
         self.tree.delete(*self.tree.get_children())
@@ -798,8 +805,16 @@ class SaldoMinusView(tk.Frame):
     # =========================================================================
     # FILTER ⧩ + SORT
     # =========================================================================
-    def _on_col_filter(self, col_sel: dict):
-        self._col_sel = dict(col_sel)
+    def _on_col_filter(self, col: str, selected):
+        # v3.16.0 — FIX (audit V3 U-1): HeaderFilterGroup memanggil
+        # on_apply DENGAN DUA argumen (col, selected) — kontrak
+        # widgets.HeaderFilterGroup._add_column
+        # (`lambda sel, c=col: self._on_apply(c, sel)`). Signature lama
+        # satu-argumen → TypeError di SETIAP apply ⧩ (filter mati
+        # senyap, ikon funnel menipu "terfilter" tapi tabel tidak
+        # terfilter). Mirror deviasi_view._on_col_filter /
+        # nominal_resto_view._on_col_filter.
+        self._col_sel[col] = selected
         self._refresh()
 
     def _sort_by(self, col: str, reverse: bool = True):
@@ -812,7 +827,10 @@ class SaldoMinusView(tk.Frame):
 
     def _reset_filter(self):
         self._col_sel = {c[0]: None for c in MINUS_COLUMNS}
-        self._filters.clear()
+        # v3.16.0 — FIX (audit V3 U-3): HeaderFilterGroup tidak punya
+        # method clear() (hanya clear_all()) → AttributeError di setiap
+        # klik ✕ Reset Filter (reset mati senyap, tabel tidak berubah).
+        self._filters.clear_all()
         self._refresh()
 
     # =========================================================================

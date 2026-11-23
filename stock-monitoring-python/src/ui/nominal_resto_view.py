@@ -2639,7 +2639,7 @@ class NominalRestoView(tk.Frame):
         — jadi pekerjaan dijalankan seketika + umpan balik messagebox
         ber-parent popup."""
         # lazy import — hindari circular import (pola §88 view lain).
-        from .export_sheets import write_table_display_sheet
+        from .export_sheets import _is_file_locked_error, write_table_display_sheet
         payload = getattr(win, "_export_payload", None) or {}
         rows = [list(r) for r in (payload.get("rows") or [])]
         cols = [str(c) for c in (payload.get("cols") or [])]
@@ -2665,8 +2665,18 @@ class NominalRestoView(tk.Frame):
                 bold_last_rows=1,
                 note=payload.get("note") or None)
         except Exception as e:  # noqa: BLE001 — umpan balik apa adanya
-            messagebox.showerror(
-                "Export Gagal", f"Tidak bisa export:\n{e}", parent=win)
+            # v3.16.0 — FIX (audit V3 U-9): file terkunci (masih dibuka
+            # Excel) dulu tampil exception mentah English — kini pesan
+            # Indonesia yang actionable (mirror app._export_excel 2f-09).
+            if _is_file_locked_error(e):
+                messagebox.showerror(
+                    "Export Gagal",
+                    "File sedang dibuka (Excel?) — tutup dulu lalu "
+                    f"ulangi.\n\nPath: {filepath}", parent=win)
+            else:
+                messagebox.showerror(
+                    "Export Gagal", f"Tidak bisa export:\n{e}",
+                    parent=win)
             return
         if not n:
             messagebox.showwarning(

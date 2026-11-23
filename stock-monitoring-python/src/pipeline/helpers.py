@@ -35,29 +35,11 @@ import pandas as pd
 
 # =============================================================================
 # TEXT DELIMITER FUNCTIONS (vectorized via .str accessor)
+# v3.16.0 — FIX (audit V3 E-10): text_before/after_delimiter (skalar +
+# vec) TANPA call-site di seluruh repo (hanya vec_text_between_delimiters
+# dipakai fn_3224/4205/4217/4215) — dead code dihapus (mengurangi
+# permukaan audit; _concat_valid_values append1 ikut dihapus).
 # =============================================================================
-
-def text_before_delimiter(s, delimiter: str = ".") -> Optional[str]:
-    """Mirror M: Text.BeforeDelimiter(text, delimiter). Single value."""
-    if s is None or (isinstance(s, float) and np.isnan(s)):
-        return None
-    s = str(s)
-    idx = s.find(delimiter)
-    if idx < 0:
-        return s
-    return s[:idx]
-
-
-def text_after_delimiter(s, delimiter: str = ".") -> Optional[str]:
-    """Mirror M: Text.AfterDelimiter(text, delimiter). Single value."""
-    if s is None or (isinstance(s, float) and np.isnan(s)):
-        return None
-    s = str(s)
-    idx = s.find(delimiter)
-    if idx < 0:
-        return s
-    return s[idx + len(delimiter):]
-
 
 def text_between_delimiters(s, open_delim: str = "(", close_delim: str = ")") -> Optional[str]:
     """Mirror M: Text.BetweenDelimiters(text, openDelim, closeDelim). Single value."""
@@ -75,36 +57,6 @@ def text_between_delimiters(s, open_delim: str = "(", close_delim: str = ")") ->
 
 
 # === VECTORIZED VERSIONS (for pandas Series — 10-50x faster than .apply) ===
-
-def vec_text_before_delimiter(series: pd.Series, delimiter: str = ".") -> pd.Series:
-    """Vectorized Text.BeforeDelimiter untuk pandas Series.
-
-    Perilaku: baris mengandung delimiter → teks sebelum delimiter;
-    tanpa delimiter → teks asli; NaN → None. (v3.3: dead lines dibersihkan
-    — dulu `result` dihitung dua kali, hasil pertama ditimpa.)
-    """
-    s = series.astype(str).where(series.notna(), other=np.nan)
-    idx = s.str.find(delimiter)
-    result = s.copy()
-    has_delim = idx >= 0
-    if bool(has_delim.any()):
-        positions = idx[has_delim].values
-        vals = s[has_delim].values
-        result[has_delim] = [str(v)[:int(p)] for v, p in zip(vals, positions)]
-    result = result.where(series.notna(), other=None)
-    return result
-
-
-def vec_text_after_delimiter(series: pd.Series, delimiter: str = ".") -> pd.Series:
-    """Vectorized Text.AfterDelimiter untuk pandas Series."""
-    s = series.astype(str)
-    parts = s.str.split(delimiter, n=1, expand=True)
-    if parts.shape[1] < 2:
-        # No delimiter found in any row
-        return series
-    result = parts[1].fillna(series.astype(str))
-    result = result.where(series.notna(), other=None)
-    return result
 
 
 def vec_text_between_delimiters(series: pd.Series, open_delim: str = "(", close_delim: str = ")") -> pd.Series:
@@ -654,6 +606,13 @@ def fn_buka_sheet(file_path: str, sheet_name: str, header_row: int = 0,
     except Exception as e:
         # Fallback to openpyxl if calamine fails (e.g., unsupported format)
         if _EXCEL_ENGINE:
+            # v3.16.0 — FIX (audit V3 E-7): exception PERTAMA di-log sebelum
+            # retry — bila retry openpyxl sukses, penyebab kegagalan engine
+            # utama dulu LENYAP SENYAP (bentuk data bisa relevan utk
+            # diagnosa; pola log [INFO] pipeline).
+            print(f"[INFO] fn_buka_sheet: engine utama {_EXCEL_ENGINE!r} "
+                  f"gagal utk {file_path} (sheet {sheet_name!r}), fallback "
+                  f"openpyxl: {e!r}")
             if raw:
                 df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=object)
             else:
@@ -973,11 +932,25 @@ def date_to_day(series: pd.Series) -> pd.Series:
 # =============================================================================
 _NA_KEY = "\x00NA"
 
+# v3.16.0 — FIX (audit V3 E-1): pola string-bentuk-float-utuh ('100383.0'
+# / '100383.00' — hasil astype(str)/safe_to_str sel numerik Excel, BUKAN
+# desimal nyata) — dikanonikkan ke int-string supaya kuncinya SAMA dgn
+# float 100383.0 / teks '100383' (desimal NYATA '100383.5' tak match).
+_PAIR_NUM_STR_RE = re.compile(r"^\d+\.0+$")
+
 
 def _pair_key_base(v) -> str:
     """Nilai mentah → basis kunci: NA/None → sentinel unik (grup NA tetap
     SATU grup, persis groupby dropna=False; '' tetap '' — grup berbeda);
-    float utuh → string int; lainnya str(v)."""
+    float utuh → string int; lainnya str(v).
+
+    v3.16.0 — FIX (audit V3 E-1): STRING '100383.0' (rekap reader
+    meng-stringify sel numerik Excel via astype(str)/safe_to_str)
+    dulu menghasilkan kunci BERBEDA dari float 100383.0 (→ '100383')
+    milik fn_4217 → SATU pasangan fisik TERBELAH jadi 2 grup pivot:
+    saldo awal mendarat di satu grup, SO/BM di grup lain → 2.SALDO
+    AKHIR / 3.DEVIASI salah utk KEDUA pecahan. Kini string-bentuk-
+    float-utuh dikanonikkan ke int-string (idempoten utk '100383')."""
     if v is None:
         return _NA_KEY
     try:
@@ -992,7 +965,10 @@ def _pair_key_base(v) -> str:
         except (OverflowError, ValueError):
             pass
         return str(v)
-    return str(v)
+    s = str(v)
+    if isinstance(v, str) and _PAIR_NUM_STR_RE.match(s):
+        return str(int(s.split(".")[0]))
+    return s
 
 
 def norm_nama_barang_key(v) -> str:
