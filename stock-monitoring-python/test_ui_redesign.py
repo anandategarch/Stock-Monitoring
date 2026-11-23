@@ -4447,12 +4447,13 @@ def main():
         _row18("BRG Z", "RESTO Y", "1.SO", 25, 77.0),
     ])
     pr18 = build_popup_rows(pop_df18, "BRG X", "RESTO Y")
-    check("(v3.9.18→v3.11.9) Popup rows: skema 12 kolom "
-          "(v3.11.9 +ACR/Avg COM/Avg ACR — hanya baris H ber-Avg)",
+    check("(v3.9.18→v3.11.9→v3.16.1) Popup rows: skema 13 kolom "
+          "(v3.11.9 +ACR/Avg COM/Avg ACR — hanya baris H ber-Avg; "
+          "v3.16.1 +Barang Masuk di kanan IN)",
           list(pr18.columns) == ["Tanggal", "Saldo Akhir", "SO", "IN",
-                                 "Nomor", "Nomor PO", "COM", "ACR",
-                                 "Avg COM", "Avg ACR", "Deviasi",
-                                 "Keterangan PO"],
+                                 "Barang Masuk", "Nomor", "Nomor PO",
+                                 "COM", "ACR", "Avg COM", "Avg ACR",
+                                 "Deviasi", "Keterangan PO"],
           f"got {list(pr18.columns)}")
     check("(v3.9.18) Popup rows: 3 tanggal (pasangan lain terfilter)",
           len(pr18) == 3, f"got {len(pr18)}")
@@ -4479,16 +4480,17 @@ def main():
           isinstance(pop18, DeviasiPopup))
     check("(v3.9.18) Popup judul memuat Nama Barang — Nama Resto (satuan)",
           pop18._title == "BRG X — RESTO Y  (GR)", f"got {pop18._title!r}")
-    check("(v3.9.18→v3.9.55→v3.11.9) Popup tabel: 12 kolom persis "
-          "(URUTAN v3.9.55 + v3.11.9: Tanggal, SO, Saldo Akhir, "
-          "Deviasi, COM, ACR, Avg COM, Avg ACR, IN, Nomor, Nomor PO, "
-          "Keterangan PO — user: 'ACR per tanggal + Avg COM & Avg ACR "
-          "hanya di baris H')",
+    check("(v3.9.18→v3.9.55→v3.11.9→v3.16.1) Popup tabel: 13 kolom "
+          "persis (URUTAN v3.9.55 + v3.11.9 + v3.16.1: Tanggal, SO, "
+          "Saldo Akhir, Deviasi, COM, ACR, Avg COM, Avg ACR, IN, "
+          "Barang Masuk, Nomor, Nomor PO, Keterangan PO — user: 'ACR "
+          "per tanggal + Avg COM & Avg ACR hanya di baris H' + "
+          "'tambahain kolom barang masuk')",
           list(pop18.tree["columns"]) == ["Tanggal", "SO", "Saldo Akhir",
                                           "Deviasi", "COM", "ACR",
                                           "Avg COM", "Avg ACR", "IN",
-                                          "Nomor", "Nomor PO",
-                                          "Keterangan PO"],
+                                          "Barang Masuk", "Nomor",
+                                          "Nomor PO", "Keterangan PO"],
           f"got {list(pop18.tree['columns'])}")
     _pk18 = list(pop18.tree.get_children(""))
     check("(v3.9.18) Popup tabel: 3 baris; baris-1 bulan lalu '26•'",
@@ -24284,6 +24286,141 @@ def main():
           f"got A={_m105a[['Nomor PO', 'Status PO']].to_dict('records') if len(_m105a) else None} "
           f"S={_m105s[['Nomor PO', 'Status PO']].to_dict('records') if len(_m105s) else None}")
     _smv105.destroy()
+    root.update()
+
+    # ==================================================================
+    print()
+    print("== 106. (v3.16.1) KOLOM BARANG MASUK DI POPUP DEVIASI GR/PCS ==")
+    # (user: "Pada tab deviasi gr dan deviasi pcs pop up nya tambahain
+    # kolom barang masuk ya") — Σ qty 5.BARANG MASUK (rekap resto) per
+    # pasangan × tanggal, disisip di KANAN IN (pola popup Pivot v3.13.2).
+    from src.ui.deviasi_popup import build_popup_rows as _bpr106
+    from src.ui.deviasi_popup import show_deviasi_popup as _sdp106
+
+    def _row106(barang, resto, jenis, tgl, nilai, satuan="GR"):
+        return {"Nama Barang": barang, "JENIS": jenis, "NAMA RESTO": resto,
+                "Tanggal": tgl, "NILAI": nilai, "SATUAN": satuan,
+                "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                "SOURCE KIRIMAN": "GUDANG", "Nomor": None,
+                "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None}
+
+    _df106 = pd.DataFrame([
+        # tgl 24: BM 4 — IN 2 vs BM 4 bersebelahan (Selisih IN = 2)
+        _row106("BRG BM", "R106", "1.SO", 24, 10.0),
+        _row106("BRG BM", "R106", "2.SALDO AKHIR", 24, 8.0),
+        _row106("BRG BM", "R106", "4.IN", 24, 2.0),
+        _row106("BRG BM", "R106", "5.BARANG MASUK", 24, 4.0),
+        # tgl 25: BM dobel baris 3+5 → Σ 8
+        _row106("BRG BM", "R106", "1.SO", 25, 12.0),
+        _row106("BRG BM", "R106", "2.SALDO AKHIR", 25, 9.0),
+        _row106("BRG BM", "R106", "5.BARANG MASUK", 25, 3.0),
+        _row106("BRG BM", "R106", "5.BARANG MASUK", 25, 5.0),
+        # tgl 26: TANPA baris BM → kolom KOSONG (bukan '-')
+        _row106("BRG BM", "R106", "1.SO", 26, 6.0),
+        _row106("BRG BM", "R106", "2.SALDO AKHIR", 26, 6.0),
+        # tgl 27: BM 0 terekam → '-'
+        _row106("BRG BM", "R106", "1.SO", 27, 7.0),
+        _row106("BRG BM", "R106", "2.SALDO AKHIR", 27, 7.0),
+        _row106("BRG BM", "R106", "5.BARANG MASUK", 27, 0.0),
+        # pasangan LAIN → terfilter; tanggal BM-only (28) → tak
+        # memunculkan baris (indeks baris TETAP 3 JENIS — pola ACR)
+        _row106("BRG BM", "R LAIN", "5.BARANG MASUK", 24, 99.0),
+        _row106("BRG BM", "R106", "5.BARANG MASUK", 28, 9.0),
+    ])
+    _bm106 = _bpr106(_df106, "BRG BM", "R106")
+    _bmv106 = dict(zip(_bm106["Tanggal"], _bm106["Barang Masuk"]))
+    check("(v3.16.1) Popup BM: tgl 24 → '4' & kolom di KANAN IN "
+          "(IN sistem vs BM rekap bersebelahan — pola popup Pivot "
+          "v3.13.2)",
+          _bmv106.get("24") == "4"
+          and list(_bm106.columns).index("Barang Masuk")
+          == list(_bm106.columns).index("IN") + 1,
+          f"got {_bmv106}")
+    check("(v3.16.1) Popup BM: tgl 25 dobel baris 3+5 → Σ '8' "
+          "(baris dobel dijumlah — pola _acr_series)",
+          _bmv106.get("25") == "8", f"got {_bmv106}")
+    check("(v3.16.1) Popup BM: tgl 26 TANPA baris BM → KOSONG '' "
+          "(bukan '-' — 'tak direkam' ≠ 'BM 0')",
+          _bmv106.get("26") == "", f"got {_bmv106}")
+    check("(v3.16.1) Popup BM: tgl 27 BM 0 terekam → '-' "
+          "(di data real append1 baris BM fillna 0 → '-' = tanpa "
+          "gerakan)",
+          _bmv106.get("27") == "-", f"got {_bmv106}")
+    check("(v3.16.1) Popup BM: pasangan lain terfilter + tanggal "
+          "BM-only (28) TIDAK memunculkan baris (indeks baris TETAP "
+          "3 JENIS — pola kolom ACR v3.11.9; kolom lama tak bergeser)",
+          set(_bm106["Tanggal"]) == {"24", "25", "26", "27"}
+          and len(_bm106) == 4,
+          f"got {list(_bm106['Tanggal'])}")
+
+    # satuan-scoped: pasangan 2-satuan — GR & PCS punya BM masing-masing
+    _dual106 = pd.DataFrame([
+        _row106("DUAL", "R106", "1.SO", 24, 10.0, "GR"),
+        _row106("DUAL", "R106", "2.SALDO AKHIR", 24, 8.0, "GR"),
+        _row106("DUAL", "R106", "4.IN", 24, 2.0, "GR"),
+        _row106("DUAL", "R106", "5.BARANG MASUK", 24, 6.0, "GR"),
+        _row106("DUAL", "R106", "1.SO", 24, 5.0, "PCS"),
+        _row106("DUAL", "R106", "2.SALDO AKHIR", 24, 2.0, "PCS"),
+        _row106("DUAL", "R106", "4.IN", 24, 1.0, "PCS"),
+        _row106("DUAL", "R106", "5.BARANG MASUK", 24, 3.0, "PCS"),
+    ])
+    check("(v3.16.1) Popup BM SATUAN-SCOPED: GR '6' ≠ PCS '3' (mirror "
+          "fix 35-b — popup GR/PCS mengagregasi grup satuan baris yang "
+          "diklik, dulu jumlah lintas-satuan)",
+          _bpr106(_dual106, "DUAL", "R106", satuan="GR")
+          .iloc[0]["Barang Masuk"] == "6"
+          and _bpr106(_dual106, "DUAL", "R106", satuan="PCS")
+          .iloc[0]["Barang Masuk"] == "3",
+          f"GR={_bpr106(_dual106, 'DUAL', 'R106', satuan='GR').iloc[0]['Barang Masuk']!r} "
+          f"PCS={_bpr106(_dual106, 'DUAL', 'R106', satuan='PCS').iloc[0]['Barang Masuk']!r}")
+
+    # BM negatif (koreksi rekap) → minus kurung + merah per-cell
+    _negdf106 = pd.DataFrame([
+        _row106("NEGBM", "R106", "1.SO", 24, 10.0),
+        _row106("NEGBM", "R106", "2.SALDO AKHIR", 24, 8.0),
+        _row106("NEGBM", "R106", "5.BARANG MASUK", 24, -5.0),
+    ])
+    check("(v3.16.1) Popup BM negatif → '(5)' minus kurung (format "
+          "identik kolom numerik lain)",
+          _bpr106(_negdf106, "NEGBM", "R106")
+          .iloc[0]["Barang Masuk"] == "(5)",
+          f"got {_bpr106(_negdf106, 'NEGBM', 'R106').iloc[0]['Barang Masuk']!r}")
+
+    # GUI: kolom tree 13 + posisi kanan IN + nilai baris + H row
+    _pop106 = _sdp106(root, _df106, "BRG BM", "R106", satuan="GR", h=25)
+    root.update()
+    _cols106 = list(_pop106.tree["columns"])
+    check("(v3.16.1) Popup GUI: 'Barang Masuk' di KANAN IN (13 kolom)",
+          "Barang Masuk" in _cols106
+          and _cols106.index("Barang Masuk") == _cols106.index("IN") + 1
+          and len(_cols106) == 13, f"got {_cols106}")
+    _k106 = next(k for k in _pop106.tree.get_children("")
+                 if _pop106.tree.set(k, "Tanggal") == "24")
+    check("(v3.16.1) Popup GUI: baris tgl 24 BM '4' vs IN '2' "
+          "bersebelahan; baris H (tgl 25) BM '8'",
+          _pop106.tree.set(_k106, "Barang Masuk") == "4"
+          and _pop106.tree.set(_k106, "IN") == "2"
+          and _pop106.tree.set(
+              next(k for k in _pop106.tree.get_children("")
+                   if "h_row" in _pop106.tree.item(k, "tags")),
+              "Barang Masuk") == "8",
+          f"BM={_pop106.tree.set(_k106, 'Barang Masuk')!r} "
+          f"IN={_pop106.tree.set(_k106, 'IN')!r}")
+    if CELL_TAGS_SUPPORTED:
+        _pop106n = _sdp106(root, _negdf106, "NEGBM", "R106",
+                           satuan="GR")
+        root.update()
+        _k106n = _pop106n.tree.get_children("")[0]
+        _negp106 = lambda i, c: root.tk.call(str(_pop106n.tree), "tag",
+                                            "cell", "has", "neg_cell",
+                                            (i, c))
+        check("(v3.16.1) Popup GUI: BM negatif minus MERAH per-cell "
+              "(Tk 9; koreksi rekap terlihat)",
+              _negp106(_k106n, "Barang Masuk") == 1
+              and _negp106(_k106n, "SO") == 0)
+        _pop106n.destroy()
+        root.update()
+    _pop106.destroy()
     root.update()
 
 

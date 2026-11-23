@@ -3,6 +3,50 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.16.1 — KOLOM BARANG MASUK DI POPUP TAB DEVIASI GR/PCS
+
+User: *"Pada tab deviasi gr dan deviasi pcs pop up nya tambahain
+kolom barang masuk ya"*.
+
+### 1. Kolom "Barang Masuk" di popup double-click tab 📦 Deviasi GR & 🧩 PCS
+- **Sebelumnya**: popup per-tanggal (Tanggal · SO · Saldo Akhir ·
+  Deviasi · COM · ACR · Avg COM · Avg ACR · IN · Nomor · Nomor PO ·
+  Keterangan PO) hanya membawa IN (Σ `4.IN` dokumen sistem IT./RI.) —
+  qty `5.BARANG MASUK` (rekap resto) tak terlihat, padahal perbandingan
+  IN (sistem) vs BM (rekap resto) adalah pemeriksaan utama formula
+  `7.Selisih IN = BM − IN` — sudah tersedia di popup tab Pivot sejak
+  v3.13.2, tetapi tidak di popup Deviasi.
+- **Sekarang**: kolom **Barang Masuk** muncul di popup Deviasi GR & PCS
+  (kedua tab memakai `show_deviasi_popup` yang sama), disisip tepat di
+  KANAN IN — nilai IN sistem vs BM rekap resto per pasangan × tanggal
+  bersebelahan, langsung terbanding (pola penempatan popup Pivot
+  v3.13.2).
+- **Implementasi** (`src/ui/deviasi_popup.py`):
+  - `_bm_series()` — Σ NILAI `5.BARANG MASUK` per tanggal utk pasangan
+    yang diklik; **SATUAN-SCOPED** persis kolom lain (mirror
+    `_acr_series`: pasangan 2-satuan GR/PCS mengagregasi grup satuan
+    baris yang diklik — fix 35-b; baris dobel per tanggal dijumlahkan;
+    mask factorize-cache idiom `_PERF_CACHE` modul ini).
+  - Tanggal tanpa baris BM → sel **KOSONG** (dibedakan dari BM terekam
+    0 → `-`; di data real append1 baris BM ter-fillna 0 per tanggal
+    rekap → `-` = tanpa gerakan masuk).
+  - Format identik kolom numerik lain (ribuan Indonesia, 0 → `-`,
+    minus dalam kurung) + minus **MERAH per-cell** ikut kolom BM
+    (koreksi rekap minus langsung terlihat).
+  - **Indeks baris TETAP 3 JENIS** (`2.SALDO AKHIR` · `1.SO` · `4.IN`)
+    — tanggal BM-only tak memunculkan baris baru (pola kolom ACR
+    v3.11.9); kolom lama tak bergeser selain sisipan baru.
+  - Tabel utama, export, dan popup tab lain **tak tersentuh** — murni
+    tampilan popup Deviasi GR/PCS.
+
+### Test
+- 2 asersi skema 12 → 13 kolom diselaraskan (pola rilis v3.14.1
+  "selaraskan asersi ke perilaku BENAR") + **§106 baru**: nilai BM per
+  tanggal (dobel-baris Σ, kosong-vs-nol, pasangan lain terfilter,
+  tanggal BM-only tak memunculkan baris), satuan-scoped GR `6` ≠ PCS
+  `3`, BM negatif `(5)` + minus merah per-cell GUI, kolom tree 13 di
+  posisi kanan IN. Suite UI + `test_mock` ALL PASS.
+
 ## v3.16.0 — DEEP AUDIT V3: 35 PERBAIKAN TERVERIFIKASI
 
 (user: "Deep audit lagi dan fix push to stock monitoring repo ku") —

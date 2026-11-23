@@ -3,7 +3,8 @@ deviasi_popup.py — Popup ringkas per tanggal utk tab Deviasi GR/PCS
 (dibuka dengan double-click baris; judul = Nama Barang + Nama Resto).
 
 Kolom: Tanggal · SO · Saldo Akhir · Deviasi (= SO − Saldo Akhir) ·
-COM · ACR · Avg COM · Avg ACR · IN · Nomor · Nomor PO · Keterangan PO.
+COM · ACR · Avg COM · Avg ACR · IN · Barang Masuk · Nomor · Nomor PO ·
+Keterangan PO.
 
 - Semua angka difilter SATUAN baris yang diklik (GR atau non-GR).
 - COM = pemakaian harian aktual: com(t) = so_prev(t) + IN(t) − BK(t) −
@@ -15,6 +16,10 @@ COM · ACR · Avg COM · Avg ACR · IN · Nomor · Nomor PO · Keterangan PO.
   penerimaan 32.24; >1 digabung koma, didedup + diurut); Nomor PO =
   pesanan pembelian baris 4.IN; Keterangan PO = potensi PO belum
   dibuat (po_keterangan).
+- Barang Masuk = Σ qty 5.BARANG MASUK (rekap resto) per tanggal —
+  pembanding langsung IN sistem vs BM rekap (formula pivot
+  7.Selisih IN = BM − IN; pola popup Pivot v3.13.2), satuan-scoped
+  seperti kolom lain; tanpa baris BM → kosong, BM 0 terekam → '-'.
 - Baris Tanggal H diberi latar #fef3c7; tanggal bulan lalu berlabel
   '25•' (urut kronologis 25•…31• lalu 1…31); minus merah per-cell.
 - Ctrl+C salin seleksi TSV · klik-kanan salin sel · Ctrl+F cari.
@@ -80,6 +85,12 @@ from .widgets import (
 # tanggal + Avg COM & Avg ACR (rata-rata 1..H−1) — hanya di baris H"):
 # ACR (pemakaian sistem 9.ACR per tanggal) + Avg COM / Avg ACR (diisi
 # CUMA di baris Tanggal H — baris lain kosong).
+# v3.16.1 — KOLOM "Barang Masuk" (user: "Pada tab deviasi gr dan
+# deviasi pcs pop up nya tambahain kolom barang masuk ya"): Σ qty
+# JENIS '5.BARANG MASUK' (rekap resto — sumber kolom pivot
+# "5.BARANG MASUK" & pengurang formula "7.Selisih IN" = BM − IN) per
+# tanggal, disisip tepat di KANAN IN (pola popup Pivot v3.13.2: nilai
+# IN sistem vs BM rekap resto bersebelahan, langsung terbanding).
 COLUMNS = [
     ("Tanggal", 76, "e"),
     ("SO", 110, "e"),
@@ -90,6 +101,7 @@ COLUMNS = [
     ("Avg COM", 92, "e"),
     ("Avg ACR", 92, "e"),
     ("IN", 110, "e"),
+    ("Barang Masuk", 100, "e"),
     ("Nomor", 200, "w"),
     ("Nomor PO", 190, "w"),
     # v3.11 — keterangan PO (user: "Pop up di tab deviasi gr dan deviasi
@@ -110,6 +122,11 @@ _JENIS_IN = "4.IN"
 # v3.11.9 — JENIS pemakaian sistem (ACR) — kolom popup baru (mirror
 # deviasi_view "9.ACR" / com_analisa).
 _JENIS_ACR = "9.ACR"
+
+# v3.16.1 — JENIS qty rekap resto utk kolom popup "Barang Masuk"
+# (pengurang formula 7.Selisih IN — mirror details_popup jalur pivot
+# v3.13.2 _barang_masuk_map).
+_JENIS_BM = "5.BARANG MASUK"
 
 # v3.9.25 — JENIS input formula COM (persis jenis_needed
 # laporan_deviasi_view._compute_com_matrix / pivot 6.PEMAKAIAN).
@@ -411,9 +428,10 @@ class DeviasiPopup(tk.Toplevel):
                 tags.append("evenrow" if i % 2 == 0 else "oddrow")
             has_neg = False
             # v3.9.25 — COM ikut minus merah per-cell (kolom numerik);
-            # v3.11.9 — ACR + Avg COM / Avg ACR ikut (kolom numerik baru).
-            for col in ("Saldo Akhir", "SO", "IN", "COM", "ACR", "Avg COM",
-                        "Avg ACR", "Deviasi"):
+            # v3.11.9 — ACR + Avg COM / Avg ACR ikut (kolom numerik baru);
+            # v3.16.1 — Barang Masuk ikut (koreksi rekap minus → merah).
+            for col in ("Saldo Akhir", "SO", "IN", "Barang Masuk", "COM",
+                        "ACR", "Avg COM", "Avg ACR", "Deviasi"):
                 if _is_neg_display(rec.get(col, "")):
                     has_neg = True
                     if self._cell_tags:
@@ -883,6 +901,33 @@ def _acr_series(df: pd.DataFrame, nama_barang: str, nama_resto: str,
     return {float(t): float(v) for t, v in g.items()}
 
 
+def _bm_series(df: pd.DataFrame, nama_barang: str, nama_resto: str,
+               satuan: str | None = None) -> dict:
+    """v3.16.1 — Barang Masuk (JENIS 5.BARANG MASUK, qty rekap resto)
+    per tanggal utk 1 pasangan: {tanggal(float) → Σ nilai} (baris dobel
+    dijumlahkan; satuan-scoped — pola _acr_series, konsisten dgn kolom
+    COM/ACR popup — pasangan 2-satuan mengagregasi grup satuan yang
+    diklik, mirror fix 35-b)."""
+    if df is None or df.empty:
+        return {}
+    mask = (_col_code_mask(df, "Nama Barang", nama_barang)
+            & _col_code_mask(df, "NAMA RESTO", nama_resto)
+            & df["JENIS"].isin((_JENIS_BM,)).to_numpy())
+    if satuan is not None:
+        mask &= _col_code_mask(df, "SATUAN", satuan)
+    sub = df[mask]
+    if sub.empty:
+        return {}
+    sub = sub.assign(
+        _t=pd.to_numeric(sub["Tanggal"], errors="coerce"),
+        _v=pd.to_numeric(sub["NILAI"], errors="coerce"),
+    ).dropna(subset=["_t", "_v"])
+    if sub.empty:
+        return {}
+    g = sub.groupby("_t")["_v"].sum()
+    return {float(t): float(v) for t, v in g.items()}
+
+
 def _pair_presence(df: pd.DataFrame, nama_barang: str, nama_resto: str,
                    jenis: str, satuan: str | None = None) -> set:
     """v3.11.9 — set tanggal(float) yang punya BARIS JENIS utk pasangan
@@ -1094,11 +1139,23 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     ada di peta → perilaku lama (running-stock semua baris).
     saldo_sistem_map None/pemanggil lama → tanpa override (test
     kompatibel).
+
+    v3.16.1 — KOLOM "Barang Masuk" (user: "Pada tab deviasi gr dan
+    deviasi pcs pop up nya tambahain kolom barang masuk ya"):
+    Σ NILAI JENIS '5.BARANG MASUK' (qty rekap resto) per tanggal —
+    pembanding langsung IN sistem vs BM rekap (formula pivot
+    7.Selisih IN = BM − IN; pola popup Pivot v3.13.2), satuan-scoped
+    (_bm_series mirror _acr_series). Tanggal tanpa baris BM → NaN
+    (kolom kosong — 'tak direkam' ≠ 'BM 0'; di data real append1
+    baris BM ter-fillna 0 per tanggal rekap → '-' = tanpa gerakan).
+    Indeks baris TETAP 3 JENIS (tanggal BM-only tak memunculkan
+    baris baru — pola kolom ACR v3.11.9; kolom lama tak bergeser
+    selain sisipan baru).
     """
     empty = pd.DataFrame(columns=["Tanggal", "Saldo Akhir", "SO", "IN",
-                                  "Nomor", "Nomor PO", "COM", "ACR",
-                                  "Avg COM", "Avg ACR", "Deviasi",
-                                  "Keterangan PO"])
+                                  "Barang Masuk", "Nomor", "Nomor PO",
+                                  "COM", "ACR", "Avg COM", "Avg ACR",
+                                  "Deviasi", "Keterangan PO"])
     if data is None or data.empty:
         return empty
 
@@ -1239,6 +1296,14 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
     _acr_by_t = _acr_series(df, nama_barang, nama_resto, satuan)
     out["ACR"] = [_acr_by_t.get(t, float("nan")) for t in out["_t"]]
 
+    # v3.16.1 — Barang Masuk per tanggal (qty rekap resto
+    # 5.BARANG MASUK — pembanding IN, pola popup Pivot v3.13.2);
+    # tanggal tanpa baris BM → NaN (kolom kosong — 'tak direkam' ≠
+    # 'BM 0'; mirror COM/ACR).
+    _bm_by_t = _bm_series(df, nama_barang, nama_resto, satuan)
+    out["Barang Masuk"] = [_bm_by_t.get(t, float("nan"))
+                           for t in out["_t"]]
+
     # v3.11.9 — Avg COM / Avg ACR: diisi CUMA di baris Tanggal H.
     out["Avg COM"] = float("nan")
     out["Avg ACR"] = float("nan")
@@ -1276,13 +1341,14 @@ def build_popup_rows(data: pd.DataFrame, nama_barang: str,
         .drop(columns=["_k"]).reset_index(drop=True)
 
     # format angka Indonesia (string — siap render); v3.11.9 — ACR +
-    # Avg COM / Avg ACR ikut (NaN → '').
-    for col in ("Saldo Akhir", "SO", "IN", "COM", "ACR", "Avg COM",
-                "Avg ACR", "Deviasi"):
+    # Avg COM / Avg ACR ikut (NaN → ''); v3.16.1 — Barang Masuk ikut
+    # (pola kolom numerik; NaN → '').
+    for col in ("Saldo Akhir", "SO", "IN", "Barang Masuk", "COM", "ACR",
+                "Avg COM", "Avg ACR", "Deviasi"):
         out[col] = out[col].map(DeviasiPopup._fmt_num)
 
-    res = out[["Tanggal", "Saldo Akhir", "SO", "IN", "Nomor",
-               "Nomor PO", "COM", "ACR", "Avg COM", "Avg ACR",
+    res = out[["Tanggal", "Saldo Akhir", "SO", "IN", "Barang Masuk",
+               "Nomor", "Nomor PO", "COM", "ACR", "Avg COM", "Avg ACR",
                "Deviasi", "Keterangan PO"]]
     # v3.11.9 — ekspos info rata-rata utk footer popup (set pada frame
     # FINAL — pandas attrs tidak selalu propagasi lewat seleksi kolom).
