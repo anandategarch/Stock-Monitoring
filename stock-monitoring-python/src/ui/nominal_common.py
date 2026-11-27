@@ -1120,7 +1120,6 @@ _SRC_EKSTERNAL_MINUS = ("Eksternal", "Campuran")
 def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
                              saldo_sistem_map: dict | None = None,
                              mode_4217: bool = True,
-                             semua_sumber: bool = False,
                              stats_out: dict | None = None) -> pd.DataFrame:
     """v3.11.42 — Pasangan (barang, resto) dgn SALDO SISTEM minus di
     rentang 1..H (Opsi 2 — SEMUA pasangan yg pernah minus, bukan hanya
@@ -1160,8 +1159,7 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     2.SALDO AKHIR di-fabrikasi 0 → contoh terbukti: pasangan hanya
     terekam t=3 (−5) & t=5 (−2) → Max Qty 0.0 padahal seharusnya −2 ·
     Tipe Fluktuatif padahal Konsisten). Durasi tetap atas KALENDER
-    (H − tgl_mulai + 1); Frek Minus tetap jumlah tanggal TEREKAM
-    bernilai < 0 (makna kolom lama dipertahankan).
+    (H − tgl_mulai + 1).
 
     v3.11.45 — ``stats_out`` (dict opsional, diisi in-place): transparansi
     KENAPA hasil kosong (user: "tab saldominus juga kosong dengan mode
@@ -1171,10 +1169,10 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     Eksternal/Campuran), ``shown`` (baris hasil), ``schema_ok``. View
     memakainya utk status ber-penjelasan + log 1 baris (pola 'pesan
     kosong yang jujur' v3.9.46).
-    S-9 FIX — ``semua_sumber=True`` (dipakai hitung_saldo_minus_kronis):
-    TANPA filter Source Kiriman (frame PENUH — semua sumber) supaya
-    konsumen menghitung flag Eksklusif atas SEMUA pasangan minus
-    SEBELUM filter sumber diterapkan.
+    v3.17.0 — param ``semua_sumber`` (jalur frame PENUH pra-filter utk
+    hitung_saldo_minus_kronis) DIHAPUS bersama konsumennya (tab Analisa
+    Kronis dihapus) — filter Source Kiriman kini selalu diterapkan
+    (perilaku tab 'Saldo Sistem Minus' tak berubah).
     """
     if stats_out is not None:
         stats_out.update(saldo_rows=0, saldo_pairs=0, minus_pairs=0,
@@ -1345,11 +1343,10 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
         # S-8 FIX — satuan dari KUNCI pivot (per unit row); _sat_map hanya
         # fallback bila satuan baris saldo kosong.
         sat = s or _sat_map.get((b, r), "")
-        # v3.11.47 — Frek Minus: jumlah TANGGAL minus di 1..H (untuk
-        # analisa kronis — pasangan kronis = frek >= threshold). Beda
-        # dgn Durasi (H - tgl_mulai + 1): durasi = rentang sejak mulai
-        # minus; frek = berapa kali minus terjadi (Fluktuatif bisa <
-        # durasi krn ada tgl plus di antara). Konsisten → frek = durasi.
+        # v3.17.0 — kolom "Frek Minus" (jumlah tgl minus — basis threshold
+        # anak tab Analisa Kronis v3.11.47) DIHAPUS bersama konsumennya
+        # (tab dihapus; MINUS_COLUMNS saldo_minus_view tak pernah
+        # menampilkannya).
         rows.append({
             "Nama Barang": b, "NAMA RESTO": r, "Satuan": sat,
             "Source Kiriman": src,
@@ -1357,7 +1354,6 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
             "Qty Mulai Minus": qty_mulai,
             "Min Qty": min_qty, "Max Qty": max_qty,
             "Tipe": tipe, "Durasi": durasi,
-            "Frek Minus": len(tgl_minus),
         })
 
     if not rows:
@@ -1376,13 +1372,11 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
     # v3.11.45 — stats_out['excluded_src']: minus tapi dibuang sumber
     # (Internal) — transparansi 'kosong tapi KENAPA'.
     _n_pre_src = len(out)
-    # S-9 FIX — semua_sumber=True: LEWATI filter sumber (frame PENUH utk
-    # hitung flag Eksklusif di konsumen — hitung_saldo_minus_kronis
-    # menerapkan filter yang sama SETELAH flag dihitung).
-    if not semua_sumber:
-        out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)
-                  | (out["Source Kiriman"] == "")
-                  | out["Source Kiriman"].isna()]
+    # v3.17.0 — jalur semua_sumber (pra-filter utk Analisa Kronis)
+    # dihapus bersama tab-nya — filter selalu diterapkan.
+    out = out[out["Source Kiriman"].isin(_SRC_EKSTERNAL_MINUS)
+              | (out["Source Kiriman"] == "")
+              | out["Source Kiriman"].isna()]
     if stats_out is not None:
         stats_out["excluded_src"] = _n_pre_src - len(out)
     if out.empty:
@@ -1405,144 +1399,8 @@ def hitung_saldo_minus_pairs(data: pd.DataFrame | None, h: int,
 
 
 # ---------------------------------------------------------------------------
-# v3.11.47 — ANALISA KRONIS (anak tab "Analisa Kronis" tab 🧮 Nominal Deviasi)
-# User: "tambahin analisa juga di saldo minus dengan nama barang yang sering
-# minus dan hanya barang itu aja yang minus di resto itu". Interpretasi C:
-# pasangan (Resto, Barang) kronis + eksklusif (barang TIDAK minus di resto
-# lain) → investigasi lapangan fokus ke pasangan ini.
-# ---------------------------------------------------------------------------
-def hitung_saldo_minus_kronis(
-        data: pd.DataFrame | None, h: int,
-        saldo_sistem_map: dict | None = None,
-        mode_4217: bool = True,
-        threshold: int = 3,
-        stats_out: dict | None = None) -> pd.DataFrame:
-    """v3.11.47 — Pasangan (Resto, Barang) kronis minus: ``Frek Minus``
-    >= ``threshold`` (jumlah tanggal minus di 1..H). Plus flag eksklusif
-    (barang hanya minus di 1 resto — bukan masalah global).
-
-    Sumber: ``hitung_saldo_minus_pairs`` (minus_df dgn kolom Frek Minus,
-    hasil scan 2.SALDO AKHIR per pasangan-satuan×tgl). S-9 FIX — flag
-    Eksklusif dihitung atas SEMUA pasangan minus PRA-filter Source
-    Kiriman (``semua_sumber=True``); filter sumber (Eksternal/Campuran —
-    aturan identik hitung_saldo_minus_pairs) & filter kronis diterapkan
-    SETELAHNYA → hasil akhir tetap konsisten dgn tab Saldo Sistem Minus.
-
-    Output per pasangan kronis:
-    - ``Nama Barang``, ``NAMA RESTO``, ``Satuan``, ``Source Kiriman``
-    - ``Frek Minus`` — jumlah tgl minus 1..H (≥ threshold)
-    - ``Total Durasi`` — H − tgl_mulai + 1 (rentang sejak mulai minus)
-    - ``Tipe`` — Konsisten/Fluktuatif (mirror hitung_saldo_minus_pairs)
-    - ``Min Qty``, ``Max Qty`` — range saldo 1..H
-    - ``Eksklusif`` — "✅" bila barang hanya minus di 1 resto (resto ini)
-    - ``Resto Lain`` — jumlah resto lain yg juga minus (0 bila eksklusif)
-    - ``Rekomendasi`` — narasi investigasi (resto-spesifik vs global)
-
-    Sort: Frek Minus MENURUN → |Qty Mulai Minus| MENURUN (paling kronis
-    di atas). DataFrame kosong bila tak ada pasangan kronis / data None
-    / kolom kurang / threshold > max frek.
-    """
-    if stats_out is not None:
-        stats_out.update(total_minus_pairs=0, kronis_pairs=0, shown=0,
-                         threshold=threshold, eksklusif_pairs=0)
-    if data is None or getattr(data, "empty", True):
-        return pd.DataFrame()
-    # 1. Panggil hitung_saldo_minus_pairs (sudah ber-Frek Minus).
-    #    S-9 FIX — SEMUA_SUMBER=True: minta frame PENUH (TANPA filter
-    #    Source Kiriman) supaya hitung resto-per-barang utk flag
-    #    Eksklusif menghitung SEMUA pasangan minus — termasuk resto
-    #    INTERNAL yang oleh filter sumber dibuang. Dulu frame SUDAH
-    #    ter-filter sumber → resto Internal tak kehitung → barang yang
-    #    minus global salah flag Eksklusif + Rekomendasi Resto-spesifik
-    #    menyesatkan. Filter sumber diterapkan SETELAH resto-per-barang
-    #    dihitung (aturan identik langkah 7 hitung_saldo_minus_pairs).
-    minus_df = hitung_saldo_minus_pairs(
-        data, h, saldo_sistem_map, mode_4217=mode_4217,
-        semua_sumber=True)
-    if minus_df is None or minus_df.empty:
-        return pd.DataFrame()
-    if "Frek Minus" not in minus_df.columns:
-        return pd.DataFrame()
-    # S-9 FIX — (3a) resto per barang dihitung atas data PENUH
-    # (pra-filter sumber), LALU (1b) filter sumber diterapkan.
-    resto_per_barang = (minus_df.groupby("Nama Barang")["NAMA RESTO"]
-                        .nunique())
-    _sk = minus_df["Source Kiriman"]
-    minus_df = minus_df[_sk.isin(_SRC_EKSTERNAL_MINUS)
-                        | (_sk == "") | _sk.isna()]
-    if minus_df.empty:
-        return pd.DataFrame()
-    if stats_out is not None:
-        stats_out["total_minus_pairs"] = len(minus_df)
-
-    # 2. Filter kronis: Frek Minus >= threshold.
-    # v3.11.48 — FIX audit #20: clamp threshold SEBELUM dipakai + update
-    # stats_out['threshold'] konsisten (sebelumnya init pakai pre-clamp value).
-    threshold = max(1, int(threshold))
-    if stats_out is not None:
-        stats_out["threshold"] = threshold
-    kronis = minus_df[minus_df["Frek Minus"].fillna(0).astype(int)
-                      >= threshold].copy()
-    if kronis.empty:
-        if stats_out is not None:
-            stats_out["kronis_pairs"] = 0
-            stats_out["shown"] = 0
-            stats_out["eksklusif_pairs"] = 0
-        return pd.DataFrame()
-
-    # 3. Eksklusif: barang hanya minus di 1 resto? Hitung berapa resto
-    #    per barang (S-9: ``resto_per_barang`` dihitung di ATAS atas
-    #    SEMUA pasangan minus pra-filter sumber — bukan hanya kronis —
-    #    supaya "barang ini minus global" tetap kehitung bila non-kronis
-    #    di resto lain). Contoh: barang A kronis di MLGPAR (frek 5), dan
-    #    minus 1 kali di BDGSEK (frek 1 < threshold 3) → BDGSEK tidak
-    #    masuk kronis tapi TETAP dihitung sbg "resto lain juga minus" →
-    #    Eksklusif = "✗".
-    kronis["_resto_lain_n"] = kronis["Nama Barang"].map(
-        lambda b: int(resto_per_barang.get(b, 1)))
-    kronis["Eksklusif"] = kronis["_resto_lain_n"].apply(
-        lambda n: "✅" if n <= 1 else "✗")
-    kronis["Resto Lain"] = (kronis["_resto_lain_n"] - 1).clip(lower=0)
-
-    # 4. Rekomendasi narasi (interpretasi C — resto-spesifik vs global)
-    def _rek(row) -> str:
-        b = str(row["Nama Barang"])
-        r = str(row["NAMA RESTO"])
-        frek = int(row["Frek Minus"])
-        tipe = str(row.get("Tipe", ""))
-        if row["Eksklusif"] == "✅":
-            return (f"Resto-spesifik: '{b}' HANYA minus di {r} "
-                    f"({frek} tgl) — tidak di resto lain. Investigasi "
-                    f"pencatatan/stok fisik di {r} (bukan masalah barang "
-                    f"secara global).")
-        n_lain = int(row["Resto Lain"])
-        return (f"Barang global: '{b}' juga minus di {n_lain} resto lain "
-                f"(di {r} frek {frek} tgl) — bukan masalah khusus {r}, "
-                f"cek pola supply/permintaan '{b}' secara umum "
-                f"(tipe {tipe}).")
-    kronis["Rekomendasi"] = kronis.apply(_rek, axis=1)
-    kronis = kronis.drop(columns=["_resto_lain_n"])
-
-    # 5. Rename untuk tampilan: Durasi → Total Durasi (klarifikasi).
-    # v3.11.48 — FIX audit #19: remove dead rename "Tgl Mulai Minus" →
-    # "Mulai Minus" (sebelumnya column produced tapi NEVER displayed/exported
-    # di KRONIS_COLUMNS — wasted column). "Tgl Mulai Minus" tetap di df
-    # (tidak digunakan view, tapi konsisten dgn minus_df asli).
-    kronis = kronis.rename(columns={
-        "Durasi": "Total Durasi",
-    })
-
-    # 6. Sort: Frek Minus MENURUN → |Qty Mulai Minus| MENURUN
-    kronis = kronis.assign(_abs=kronis["Qty Mulai Minus"].abs())
-    kronis = kronis.sort_values(
-        ["Frek Minus", "_abs"], ascending=[False, False], kind="mergesort")
-    kronis = kronis.drop(columns="_abs").reset_index(drop=True)
-
-    if stats_out is not None:
-        stats_out["kronis_pairs"] = len(kronis)
-        stats_out["shown"] = len(kronis)
-        stats_out["eksklusif_pairs"] = int(
-            (kronis["Eksklusif"] == "✅").sum())
-
-    return kronis
-
+# v3.17.0 — ANALISA KRONIS DIHAPUS TOTAL (user: "hapus aja tab analisa
+# kronis dan dead code nya hapus"): hitung_saldo_minus_kronis (pasangan
+# kronis + flag eksklusif) + kolom "Frek Minus" + jalur semua_sumber di
+# hitung_saldo_minus_pairs dibongkar bersama tab-nya. Anak tab tersisa:
+# Per Resto · Tanpa Harga · Saldo Sistem Minus.

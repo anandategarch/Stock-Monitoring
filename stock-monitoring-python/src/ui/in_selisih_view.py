@@ -1113,20 +1113,12 @@ class InSelisihView(tk.Frame):
                                    highlightthickness=1)
         self._skor_zone_active_resto = None
 
-        # v3.11.8 — strip SELISIH TERBANYAK BARANG × RESTO (user: "pada
-        # rekap selisih in bisa gak tampil selisih terbanyak nama barang
-        # + resto") — SATU BARIS kompak (judul + maks 3 chip pasangan
-        # teratas per Σ|Selisih IN| + '+N lainnya'; anggaran vertikal
-        # §70b v3.9.60 — viewport tabel ≥120px @1280x760 harus tetap
-        # terjaga, papan LEBAR penuh akan mengembalikan bug 'tidak bisa
-        # scroll'). Chip dihitung TANPA filter Nama Barang (tak kolapse
-        # saat diklik — mirror FIX 6d2-02); klik chip = toggle ⧩ Nama
-        # Barang. Konten dibangun ulang tiap render
-        # (_render_barang_scores dari payload worker).
-        self._barang_zone = tk.Frame(self.content, bg=C_CARD,
-                                     highlightbackground="#e2e8f0",
-                                     highlightthickness=1)
-        self._barang_zone_active = None
+        # v3.17.0 — strip SELISIH TERBANYAK — BARANG × RESTO (v3.11.8)
+        # DIHAPUS total bersama dead code-nya (user: "bagian selisih
+        # terbanyak barang x resto hapus aja dan dead code nya hapus
+        # juga"): zona + _render_barang_scores + _on_barang_row_click +
+        # blok worker barang_scores + snapshot f_ctx — papan SKOR RESTO
+        # (fitur berbeda) TETAP ada.
 
         # --- Tabel card ---
         tcard = Card(self.content)
@@ -1192,10 +1184,9 @@ class InSelisihView(tk.Frame):
 
         # v3.9 (ala Waste): ⤢ Perbesar Tabel — ciutkan kartu Filter +
         # kartu SKOR RESTO + judul; tombol toolbar tetap tampil
-        # utk mengembalikan.
+        # utk mengembalikan. (v3.17.0 — zona barang dihapus.)
         self._expander = TableExpander(
-            btn_expand, [fcard, self._skor_zone,
-                         self._barang_zone, self.title_label])
+            btn_expand, [fcard, self._skor_zone, self.title_label])
 
         self._apply_columns()
 
@@ -1422,17 +1413,16 @@ class InSelisihView(tk.Frame):
     def _apply_view_mode(self):
         """v3.10 — pasang/lepas panel sesuai MODE TAMPILAN aktif.
         v3.11.9 — mode 📈 Analisa kini MENYEMBUNYIKAN kartu ringkasan
-        (SKOR RESTO + strip barang — user: "Hapus semua aja yang lain
-        juga biar clean"): panel analisa memakai seluruh tinggi konten.
-        Mode 📋 memulihkan URUTAN AWAL (barang → skor, masing-masing
-        before anchor managed berikutnya — pola before= renderer); zona
-        tanpa konten tetap tersembunyi (mirror renderer kosong); saat ⤢
-        expander aktif kartu milik expander (skip — pola
-        _render_resto_scores). v3.11.30 — kartu KPI dihapus total."""
+        (SKOR RESTO — user: "Hapus semua aja yang lain juga biar clean"):
+        panel analisa memakai seluruh tinggi konten. Mode 📋 memulihkan
+        URUTAN AWAL (skor before anchor managed berikutnya — pola
+        before= renderer); zona tanpa konten tetap tersembunyi (mirror
+        renderer kosong); saat ⤢ expander aktif kartu milik expander
+        (skip — pola _render_resto_scores). v3.11.30 — kartu KPI dihapus
+        total. v3.17.0 — strip barang dihapus (zona ikut lenyap)."""
         if self._view_analisa:
             self._tcard.pack_forget()
             self._skor_zone.pack_forget()
-            self._barang_zone.pack_forget()
             self._analisa_card.pack(fill="both", expand=True,
                                     padx=12, pady=(10, 0))
         else:
@@ -1440,8 +1430,7 @@ class InSelisihView(tk.Frame):
             self._tcard.pack(fill="both", expand=True, padx=12, pady=(10, 0))
             if not getattr(self._expander, "expanded", False):
                 for _zone, _cands in (
-                        (self._barang_zone, (self._tcard,)),
-                        (self._skor_zone, (self._barang_zone, self._tcard))):
+                        (self._skor_zone, (self._tcard,)),):
                     if not _zone.winfo_children():
                         continue     # zona tanpa konten tetap tersembunyi
                     _anchor = None
@@ -2178,11 +2167,8 @@ class InSelisihView(tk.Frame):
             f = f[tgl_range_mask(f["Tanggal"],
                                  st["tgl_start"], st["tgl_end"])]
 
-        # v3.11.8 — snapshot konteks PRA-⧩ (dasar chip SELISIH TERBANYAK
-        # barang×resto: rentang tanggal saja — filter ⧩ mana pun BELUM,
-        # disaring ulang khusus di bawah tanpa Nama Barang supaya chip
-        # tak kolapse saat diklik).
-        f_ctx = f
+        # v3.17.0 — snapshot konteks PRA-⧩ `f_ctx` (dasar chip SELISIH
+        # TERBANYAK barang×resto v3.11.8) DIHAPUS bersama strip-nya.
 
         # filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel).
@@ -2270,61 +2256,10 @@ class InSelisihView(tk.Frame):
         except (KeyError, TypeError, ValueError):
             resto_scores = []
 
-        # v3.11.8 — SELISIH TERBANYAK BARANG × RESTO (user: "pada rekap
-        # selisih in bisa gak tampil selisih terbanyak nama barang +
-        # resto") — per pasangan: Σ|Selisih IN| (ranking — seberapa
-        # bermasalah), Σ Selisih BERSIH (arah), TERBESAR (baris tunggal
-        # |selisih| maks + tanggalnya), n tanggal terdampak. Konteks =
-        # rentang tanggal + ⧩ kolom lain + filter Resto (klik papan
-        # resto → chip barang menyempit ke item TERBURUK resto itu),
-        # TANPA filter Nama Barang (chip tak kolapse saat diklik —
-        # mirror 6d2-02) & tanpa checkbox 'Hanya Selisih ≠ 0' (papan
-        # memang tentang baris bermasalah).
-        barang_scores = []
-        try:
-            if "Selisih IN" in getattr(f_ctx, "columns", []):
-                _f_bar = f_ctx
-                for _col, _sel in st["col_sel"].items():
-                    if _col in ("Resto", "Nama Barang") \
-                            or _col not in _f_bar.columns:
-                        continue
-                    _fmt_b = _format_col_values(_col, _f_bar[_col])
-                    # v3.16.0 — FIX (audit V3 M-6): chip strip kini
-                    # filter_disp_mask (label ATAU mentah) — parity dgn
-                    # jalur filter utama; isin mentah bisa berbeda hasil
-                    # utk seleksi label-only ('(Kosong)', marker tepi-
-                    # spasi) → strip menghitung konteks beda dari tabel.
-                    _f_bar = _f_bar[filter_disp_mask(_fmt_b, _sel)]
-                if _resto_sel is not None and "Resto" in _f_bar.columns:
-                    _fmt_rb = _format_col_values("Resto", _f_bar["Resto"])
-                    _f_bar = _f_bar[filter_disp_mask(_fmt_rb, _resto_sel)]
-                _sv4 = pd.to_numeric(_f_bar["Selisih IN"],
-                                     errors="coerce").fillna(0)
-                _sel4 = _f_bar[_sv4 != 0]
-                if not _sel4.empty:
-                    _sel4 = _sel4.assign(
-                        _b=_sel4["Nama Barang"].astype(str),
-                        _r=_sel4["Resto"].astype(str),
-                        _t=pd.to_numeric(_sel4["Tanggal"],
-                                         errors="coerce"),
-                        _v=pd.to_numeric(_sel4["Selisih IN"],
-                                         errors="coerce").fillna(0))
-                    for (_b, _r), _g4 in _sel4.groupby(["_b", "_r"]):
-                        _imax = _g4["_v"].abs().idxmax()
-                        barang_scores.append({
-                            "barang": _b, "resto": _r,
-                            "n_dates": int(_g4["_t"].dropna().nunique()),
-                            "sum_abs": float(_g4["_v"].abs().sum()),
-                            "sum_net": float(_g4["_v"].sum()),
-                            "max_val": float(_g4.loc[_imax, "_v"]),
-                            "max_tgl": (None if pd.isna(_g4.loc[_imax, "_t"])
-                                        else int(_g4.loc[_imax, "_t"])),
-                        })
-                    barang_scores.sort(
-                        key=lambda x: (-x["sum_abs"], x["barang"],
-                                       x["resto"]))
-        except (KeyError, TypeError, ValueError):
-            barang_scores = []
+        # v3.17.0 — blok worker SELISIH TERBANYAK BARANG × RESTO
+        # (barang_scores) DIHAPUS bersama strip UI-nya (user: "bagian
+        # selisih terbanyak barang x resto hapus aja dan dead code nya
+        # hapus juga").
 
         if f.empty:
             # v3.9.68 — TRI-STATE (audit eksternal T1): pesan jujur bila
@@ -2333,7 +2268,6 @@ class InSelisihView(tk.Frame):
                     "status": (zero_row_filter_message(st["col_sel"])
                                or "Tidak ada data setelah filter."),
                     "resto_scores": resto_scores,
-                    "barang_scores": barang_scores,
                     # v3.10 — analisa tetap dihitung dari konteks pra-
                     # checkbox (mode 📈 tidak ikut kosong saat checkbox
                     # 'Hanya Selisih ≠ 0' menyaring tabel kosong).
@@ -2422,7 +2356,6 @@ class InSelisihView(tk.Frame):
         return {"items": items, "status": status_txt, "keys": keys,
                 "neg_cells": neg_cells,
                 "resto_scores": resto_scores,
-                "barang_scores": barang_scores,
                 # v3.10 — payload analisa mode 📈 (dihitung worker ini;
                 # checkbox 'Hanya Selisih ≠ 0' diabaikan — lihat f_analisa)
                 "analisa": self._compute_analisa_rows(f_analisa)}
@@ -2437,9 +2370,8 @@ class InSelisihView(tk.Frame):
         # v3.9.55 — F3: kartu SKOR RESTO ikut render tiap refresh (konteks
         # filter tanggal/⧩ aktif).
         self._render_resto_scores(payload.get("resto_scores") or [])
-        # v3.11.8 — strip SELISIH TERBANYAK BARANG × RESTO ikut render
-        # tiap refresh (konteks filter tanggal/⧩/Resto aktif).
-        self._render_barang_scores(payload.get("barang_scores") or [])
+        # v3.17.0 — render strip SELISIH TERBANYAK BARANG × RESTO dihapus
+        # bersama strip-nya (payload tak lagi membawa barang_scores).
         # v3.10 — mode 📈 Analisa: payload analisa disimpan (toggle balik
         # ⚡ tanpa recompute) & panel dirender bila mode sedang aktif.
         self._analisa_payload = payload.get("analisa") or {}
@@ -2791,104 +2723,10 @@ class InSelisihView(tk.Frame):
                 self.header_filters.set_selected("Resto", [resto])
         self._refresh()
 
-    def _render_barang_scores(self, scores: list):
-        """v3.11.8 — bangun ulang strip SELISIH TERBANYAK BARANG × RESTO
-        (user: "pada rekap selisih in bisa gak tampil selisih terbanyak
-        nama barang + resto").
-
-        SATU BARIS kompak (anggaran vertikal tab — §70b v3.9.60
-        menjamin viewport tabel ≥120px @1280x760; kartu papan skor
-        resto sudah memakan ±160px, papan barang LEBAR penuh akan
-        mengembalikan bug 'tidak bisa scroll'): judul + maks 3 CHIP
-        pasangan teratas (urut Σ|Selisih IN| ↓ — nama barang · resto ·
-        Σ|selisih| · TERBESAR baris-tunggal + tanggalnya) + penanda
-        '+N lainnya'. KLIK chip = TOGGLE filter ⧩ Nama Barang (klik
-        lagi = lepas); chip terseleksi di-highlight amber. Strip
-        dihitung PRA-filter-Nama-Barang (worker) → tak kolapse saat
-        chip diklik (mirror FIX 6d2-02 papan resto)."""
-        zone = self._barang_zone
-        for w in zone.winfo_children():
-            w.destroy()
-        if not scores:
-            zone.pack_forget()
-            self._barang_zone_active = None
-            return
-        _sel_barang = self._col_sel.get("Nama Barang")
-        active_set = ({str(x) for x in _sel_barang}
-                      if isinstance(_sel_barang, list) else set())
-        self._barang_zone_active = (min(active_set)
-                                    if active_set else None)
-
-        row = tk.Frame(zone, bg=C_CARD)
-        row.pack(fill="x", padx=12, pady=(6, 8))
-        tk.Label(row, text="SELISIH TERBANYAK — BARANG × RESTO:",
-                 bg=C_CARD, fg=C_HEADER, font=font(9, "bold")).pack(
-            side="left")
-        for i, r in enumerate(scores[:3]):
-            _b = str(r["barang"])
-            is_active = _b in active_set
-            bg = "#fef3c7" if is_active else self._SKOR_RANK_BG[i]
-            _tgl_txt = ("" if r.get("max_tgl") is None
-                        else _fmt_tgl_ui(r.get("max_tgl")))
-            _txt = (f"#{i + 1} {_b} @ {r['resto']} · "
-                    f"Σ|{self._fmt_num_skor(r['sum_abs'])}|"
-                    + (f" · terbesar {self._fmt_num_skor(r['max_val'])}"
-                       f"@{_tgl_txt}" if _tgl_txt else ""))
-            chip = tk.Frame(row, bg=bg, cursor="hand2",
-                            highlightbackground="#e2e8f0",
-                            highlightthickness=1 if is_active else 0)
-            chip.pack(side="left", padx=(8, 0))
-            tk.Label(
-                chip, text=_txt, bg=bg, padx=6, pady=2,
-                fg=("#b91c1c" if (i == 0 and not is_active) else
-                    ("#0e7490" if is_active else C_HEADER)),
-                font=font(8, "bold" if i < 3 or is_active else "normal"),
-            ).pack()
-            chip.bind("<Button-1>", lambda e, b=_b:
-                      self._on_barang_row_click(b))
-            for ch in chip.winfo_children():
-                ch.bind("<Button-1>", lambda e, b=_b:
-                        self._on_barang_row_click(b))
-        if len(scores) > 3:
-            tk.Label(
-                row,
-                text=f"+{fmt_int_id(len(scores) - 3)} pasangan lainnya "
-                     f"(dari {fmt_int_id(len(scores))} ber-selisih) — "
-                     "klik chip utk filter tabel",
-                bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
-                side="left", padx=(10, 0))
-        if not getattr(self._expander, "expanded", False):
-            # saat ⤢ diperbesar (kartu disembunyikan), JANGAN di-pack
-            # ulang — TableExpander yang mengelola restore (pola skor).
-            # v3.11.9 — mode 📈 Analisa: strip disembunyikan TOTAL (user:
-            # "biar clean"; konten tetap dibangun — mirror _render_resto_
-            # scores; _apply_view_mode yang re-pack saat balik 📋).
-            if self._view_analisa:
-                zone.pack_forget()
-                return
-            for _cand in (self._tcard, self._analisa_card):
-                if _cand.winfo_manager() == "pack":
-                    zone.pack(fill="x", padx=12, pady=(10, 0),
-                              before=_cand)
-                    break
-            else:
-                zone.pack(fill="x", padx=12, pady=(10, 0))
-
-    def _on_barang_row_click(self, barang: str):
-        """v3.11.8 — klik chip papan barang → TOGGLE filter kolom Nama
-        Barang (klik = fokus tabel ke barang itu; klik lagi = lepas).
-        Filter ⧩ header disinkronkan (mirror _on_skor_row_click)."""
-        cur = self._col_sel.get("Nama Barang")
-        if isinstance(cur, list) and len(cur) == 1 \
-                and str(cur[0]) == str(barang):
-            self._col_sel["Nama Barang"] = None
-            if self.header_filters is not None:
-                self.header_filters.set_selected("Nama Barang", None)
-        else:
-            self._col_sel["Nama Barang"] = [barang]
-            if self.header_filters is not None:
-                self.header_filters.set_selected("Nama Barang", [barang])
-        self._refresh()
+    # v3.17.0 — _render_barang_scores + _on_barang_row_click (strip
+    # SELISIH TERBANYAK — BARANG × RESTO v3.11.8) DIHAPUS total bersama
+    # zona _barang_zone-nya (user: "bagian selisih terbanyak barang x
+    # resto hapus aja dan dead code nya hapus juga").
 
     @staticmethod
     def _fmt_num_skor(v) -> str:

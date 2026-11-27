@@ -752,39 +752,9 @@ def save_h_preset(h):
         return
 
 
-# v3.11.56 — PRE-SET PRA-PIPELINE: threshold "kronis" (Frek Minus min)
-# dipakai kartu pra-set tab Proses + Panel Ringkasan + nilai awal anak
-# tab Analisa Kronis (spinbox view tetap bisa mengubah saat runtime).
-def load_kronis_threshold() -> int:
-    """Threshold kronis tersimpan (default 3 bila file hilang/korup/
-    nilai di luar 1..31 — senyap)."""
-    try:
-        with open(acr_settings_path(), "r", encoding="utf-8") as f:
-            val = int(json.load(f).get("kronis_threshold", 3))
-        return val if 1 <= val <= 31 else 3
-    except (OSError, ValueError, TypeError, AttributeError):
-        return 3
-
-
-def save_kronis_threshold(thr: int) -> None:
-    """Simpan atomik key kronis_threshold (mirror save_com_ambang)."""
-    p = acr_settings_path()
-    old = {}
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            old = loaded
-    except (OSError, ValueError, TypeError):
-        old = {}
-    try:
-        old["kronis_threshold"] = int(thr)
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(old, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, p)
-    except (OSError, ValueError, TypeError):
-        return
+# v3.17.0 — load_kronis_threshold/save_kronis_threshold DIHAPUS bersama
+# anak tab 'Analisa Kronis' (user: "hapus aja tab analisa kronis dan dead
+# code nya hapus") — konsumen satu-satunya adalah app.py pra-pipeline.
 
 
 class DeviasiView(tk.Frame):

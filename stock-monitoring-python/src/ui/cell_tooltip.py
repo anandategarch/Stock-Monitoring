@@ -6,8 +6,9 @@ lengkap nya bisa gak?" — pilih opsi 2A (tooltip hover saja, 0.5 dtk).
 
 Modul ini dibuat reusable supaya bisa dipakai:
 - ``deviasi_view`` untuk kolom CEK (panjang narasi anomali);
-- ``saldo_minus_view`` untuk kolom Keterangan / Nomor PO / Status PO;
-- ``analisa_kronis_view`` untuk kolom Rekomendasi (narasi panjang).
+- ``saldo_minus_view`` untuk kolom Keterangan / Nomor PO / Status PO.
+  (v3.17.0 — ``analisa_kronis_view`` [kolom Rekomendasi] dihapus bersama
+  tab 'Analisa Kronis'.)
 
 Pola Tkinter Toplevel + ``after(delay_ms)``: hover 500ms di cell target
 → Toplevel tip kecil dekat cursor (clamp ke layar); mouse leave / klik /

@@ -3,6 +3,129 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.17.0 — ROW 10.% GROWTH DEVIASI (PIVOT) + HAPUS TAB ANALISA KRONIS + HAPUS STRIP BARANG×RESTO
+
+User: *"bisa gak di bagian tab pivot tabel ada row baru yaitu 10.% Growth
+Deviasi. Datanya diambil dari row 3.Deviasi. Jadi row baru itu untuk tau
+berapa persen kenaikan deviasi per tanggal nya. Tapi sebelum itu data
+row 3.deviasi di absolute dulu dan persen yang ditampilkan di row baru
+data asli tanpa absolute"* + *"hapus aja tab analisa kronis dan dead
+code nya hapus"* + *"bagian selisih terbanyak barang x resto hapus aja
+dan dead code nya hapus juga"*.
+
+### 1. Row baru `10.% Growth Deviasi` — tab 🧮 Pivot Table (mode 📅 Tanggal)
+- **Sebelumnya**: baris pivot per barang = 9 metric (1.SO · 2.SALDO
+  AKHIR · 3.DEVIASI · 4.IN · 5.BARANG MASUK · 6.PEMAKAIAN (COM) ·
+  7.Selisih IN · 8.BARANG KELUAR · 9.ACR) — kenaikan deviasi antar
+  tanggal harus dibanding manual per kolom.
+- **Sekarang**: baris ke-10 **`10.% Growth Deviasi`** (posisi TEPAT
+  setelah `9.ACR`, urutan `METRICS`): persen kenaikan/penurunan deviasi
+  per tanggal vs kolom tanggal sebelumnya.
+- **Rumus (persis permintaan user)**: `(Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100`
+  — pembagi `Dev(t−1)` **di-ABSOLUT dulu** (baseline minus tak
+  membalik arah); **persen yang ditampilkan dari DATA ASLI tanpa
+  absolut** (selisih ber-tanda menentukan kenaikan vs penurunan).
+  Konvensi identik `nominal_common.hitung_persen_kenaikan`
+  `(H−L)/|L|×100` (tab 💰 sejak v3.9.63). Contoh: deviasi −50 → −40 →
+  `+20%` (KENAIKAN — data asli naik), bukan tanda terbalik.
+- **Hanya mode 📅 Tanggal** (metric harian urutan kolom tanggal — pola
+  `6.PEMAKAIAN (COM)`; mode 🏪 resto tak punya urutan kronologis antar
+  kolom — baris tak dirender).
+- **Semantik sel**: kolom PERTAMA rentang → kosong (tak ada t−1 —
+  kecuali Dev(t−1) tersedia di matrix PENUH pra-rentang, mirror COM
+  FIX 6c-01: rentang 3..4 dgn data 1..4 → growth kolom 3 dihitung dari
+  Dev(2)); pembagi 0 dgn nilai ≠ 0 → kosong (kenaikan tak terhingga);
+  kedua 0 → `0,0%` (tak berubah); sel tanpa baris 3.DEVIASI ≡ 0
+  (semantik tampilan baris 3.DEVIASI matrix).
+- **Format sel**: `'+12,5%'` / `'-8,3%'` / `'0,0%'` (desimal koma
+  Indonesia, gaya tanda ± — konvensi `fmt_pct_cell`; BEDA format kurung
+  `'(1.234)'` baris metric kuantitas — baris persen); **minus MERAH
+  per-cell** (jalur `red_cells` v < 0 yang sama — Tk 9).
+- **Warna baris**: pastel teal `#E8F6F3` (METRIC_BG).
+- **Double-click baris growth** → drill-down popup baris SUMBER
+  `3.DEVIASI` (data growth diambil dari sana).
+- **Export 💾 sesuai tampilan**: row otomatis ikut `rows_data`;
+  number format `'+0.0"%";-0.0"%";0.0"%"'` (literal `%`, tanda ±,
+  1 desimal — mirror sel UI); minus tetap font merah per-cell; `0,0%`
+  TETAP tampil (trick font-putih "nol tak terlihat" hanya utk metric
+  non-persen); legenda export diperluas (pembagi |Dev(t−1)|, kolom
+  pertama kosong).
+- **Implementasi** (`src/ui/pivot_view.py`):
+  - `METRICS` + `"10.% Growth Deviasi"`; `METRIC_BG` + pastel.
+  - `_compute_growth(pivot, item, tanggals)` — engine murni (Series
+    per tanggal; KeyError baris 3.DEVIASI → NaN semua).
+  - `_format_pct(val)` — formatter persen ('' utk None/NaN/inf).
+  - `_compute_payload`: branch metric (mirror branch COM) —
+    `growth_full` dari `pivot_full` pra-rentang + fallback jalur
+    rentang; eksklusi mode resto (`metrics` filter); formatter per-row.
+  - `_metric_tag` sanitasi `'%'` tambahan (iid/tag Tk aman).
+  - numpy import utk `np.isinf`.
+- **Tabel utama/export/tab lain tak tersentuh** — murni baris tambahan
+  di tab Pivot; sheet PIVOT export workbook penuh tak berubah (JENIS
+  "10." tak ada di data mentah — sama seperti 6.PEMAKAIAN (COM)).
+
+### 2. Tab "Analisa Kronis" DIHAPUS total + dead code (pola v3.12.1)
+- **Sebelumnya**: anak tab ke-4 tab 💰 Nominal Deviasi (v3.11.47):
+  pasangan (Resto, Barang) kronis minus (`Frek Minus` ≥ threshold) +
+  flag eksklusif + rekomendasi narasi; spin `KRONIS ≥` kartu pra-pipeline
+  tab 🚀 Proses + tombol deep-link "💰 Nominal → Analisa Kronis" Panel
+  Ringkasan.
+- **Sekarang**: sub-notebook anak tab tinggal **3** — Per Resto · Tanpa
+  Harga · Saldo Sistem Minus. Dibongkar total:
+  - `src/ui/analisa_kronis_view.py` — FILE DIHAPUS (939 baris).
+  - `nominal_resto_view.py` — param `kronis_threshold`, frame
+    `_tab_kronis`, instansiasi `_kronis_view`, delegate `load_data` /
+    `ensure_refreshed` / branch `_on_sub_tab_changed`,
+    `open_kronis_subtab()` / `set_kronis_threshold()`.
+  - `app.py` — import `load/save_kronis_threshold`, `self._kronis_threshold`,
+    `_open_kronis_subtab()`, spin `KRONIS ≥` kartu pra-pipeline
+    (+ `_on_pre_kronis_change` + branch focusout + tuple
+    `_flush_prepipeline_card`), tombol deep-link Panel Ringkasan, arg
+    `kronis_threshold` konstruksi NominalRestoView, hint tab.
+  - `deviasi_view.py` — `load_kronis_threshold()` /
+    `save_kronis_threshold()` (persist settings.json).
+  - `nominal_common.py` — `hitung_saldo_minus_kronis()` (140+ baris);
+    kolom **`Frek Minus`** di `hitung_saldo_minus_pairs` (konsumen
+    tunggal — `MINUS_COLUMNS` saldo_minus_view tak pernah
+    menampilkannya); param **`semua_sumber`** (jalur frame penuh
+    pra-filter sumber utk flag Eksklusif) — filter Source Kiriman kini
+    SELALU diterapkan.
+- **Anak tab "Saldo Sistem Minus" TAK berubah** (output
+  `hitung_saldo_minus_pairs` kolom yang dipakai view identik; sort /
+  zebra / PO 3243 / tooltip utuh) — hanya kolom data internal yang tak
+  pernah tampil itu ikut dibersihkan.
+
+### 3. Strip "SELISIH TERBANYAK — BARANG × RESTO" DIHAPUS total + dead code
+- **Sebelumnya** (v3.11.8): satu baris chip di tab 📤 Rekap Selisih IN —
+  maks 3 pasangan barang×resto teratas per Σ|Selisih IN| + "+N
+  lainnya"; klik chip = toggle filter ⧩ Nama Barang.
+- **Sekarang**: strip lenyap. Dibongkar (`in_selisih_view.py`): zona
+  `_barang_zone` + `_barang_zone_active`, `_render_barang_scores()`,
+  `_on_barang_row_click()`, blok worker `barang_scores` (+ snapshot
+  `f_ctx` pra-⧩), key payload `"barang_scores"` (dua return), entri
+  `TableExpander` + `_apply_view_mode`.
+- **Papan "Beri Skor per resto" (SKOR RESTO v3.9.55) TETAP ADA** — fitur
+  BERBEDA (leaderboard resto; resto "KRONIS" di test §68 = nama resto
+  fiktif fitur itu, tak terkait).
+
+### 4. Test
+- §75: asersi sub-notebook 4 → **3 anak tab** (+ `not hasattr
+  _kronis_view`).
+- §93: sub-blok (F) strip barang×resto DIHAPUS (F1/F2/F3 — fixture &
+  view-nya) + header diperbarui; engine `build_audit_from_app` blok
+  §93-E tak tersentuh.
+- 2 asersi mode-BERSIH (§11b & §94-H1): konjungsi `_barang_zone` →
+  `not hasattr` (dead-code assertion).
+- **§107 BARU** (13 cek): konstanta METRICS/urutan; `_format_pct` 5
+  kasus; `_compute_growth` baseline-minus (+20%/−50%/NaN kolom 1);
+  GUI mode tanggal — urutan tepat setelah 9.ACR, nilai +50/−50/0,0 &
+  baseline minus +20/+100/0,0, merah per-cell; mode resto absen; batas
+  kiri rentang (matrix penuh, mirror 6c-01); rows_data + export number
+  format persen; penghapusan kronis (modul gone, anak tab 3, attr app
+  gone) & strip (attr view gone, payload tanpa key).
+- Baseline pra-perubahan di environment ini: **1686 PASS / 0 FAIL** +
+  `test_mock.py` ALL PASS (identik HEAD v3.16.1).
+
 ## v3.16.1 — KOLOM BARANG MASUK DI POPUP TAB DEVIASI GR/PCS
 
 User: *"Pada tab deviasi gr dan deviasi pcs pop up nya tambahain

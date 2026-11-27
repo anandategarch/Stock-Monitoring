@@ -671,6 +671,10 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
     # --- data ---
     METRIC_BG = {k: v for k, v in PivotTableView.METRIC_BG.items()}
     fmt_int, fmt_dec = "#,##0;(#,##0)", "#,##0.0;(#,##0.0)"
+    # v3.17.0 — baris 10.% Growth Deviasi: nilai = persen-point (12,5
+    # = +12,5%); format literal '%' dgn tanda ± (mirror tampilan UI
+    # '+12,5%' / '-8,3%'; minus tetap font MERAH per-cell di bawah).
+    fmt_pct = '+0.0"%";-0.0"%";0.0"%"'
     r = 8
     n_data = 0
     for iid, label, is_item, metric, vals in rows:
@@ -711,15 +715,22 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
                 if not math.isfinite(v):
                     continue
                 vc = ws.cell(row=r, column=j, value=v)
-                vc.number_format = fmt_int if _is_int(v) else fmt_dec
+                if metric == "10.% Growth Deviasi":
+                    # v3.17.0 — persen growth (1 desimal, tanda ±,
+                    # suffix '%' literal — mirror sel UI).
+                    vc.number_format = fmt_pct
+                else:
+                    vc.number_format = fmt_int if _is_int(v) else fmt_dec
                 # MINUS → font merah PER CELL (permintaan v3.9.2);
                 # Selisih IN ≠ 0 → merah (anomaly per cell, mirror UI)
                 red = v < 0 or (metric == "7.Selisih IN" and v != 0)
                 if red:
                     vc.font = Font(color="FFCC0000",
                                    bold=metric == "7.Selisih IN")
-                elif v == 0:
-                    vc.font = Font(color=C_WHITE)   # nol tak terlihat
+                elif v == 0 and metric != "10.% Growth Deviasi":
+                    # nol tak terlihat (0,0% growth TETAP tampil — mirror
+                    # UI '0,0%' v3.17.0)
+                    vc.font = Font(color=C_WHITE)
                 elif fg:
                     vc.font = Font(color=fg)
         r += 1
@@ -728,7 +739,9 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
     # catatan legenda
     note = ws.cell(row=last_row + 2, column=1,
                    value="• = tanggal bulan lalu · nilai dalam kurung = minus "
-                         "(font merah) · 0 disembunyikan (font putih)")
+                         "(font merah) · 0 disembunyikan (font putih) · "
+                         "10.% Growth Deviasi = ±x,x% (pembagi |Dev(t−1)|, "
+                         "kolom pertama kosong)")
     note.font = Font(italic=True, color="FF94A3B8")
 
     ws.column_dimensions["A"].width = 30

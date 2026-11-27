@@ -10,7 +10,7 @@ Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Port
 - **9 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
 - **Analisa deviasi otomatis** — kolom CEK dengan 12 label anomali (Promix 04, RI Balancing, Kosong (AKTIF), Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Turun Drastis + varian SO Tidak Diinput, Naik Drastis, ACR to BOM, BOM 0) + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO belum dibuat, analisa lalu-kini berbasis Qty
 - **Saldo sistem minus** — rekapan pasangan Eksternal/Campuran dengan saldo < 0 di rentang 1..H, dengan keterangan mulai minus dari tanggal berapa
-- **Analisa Kronis** — pasangan (Resto, Barang) kronis minus + flag eksklusif (barang hanya minus di 1 resto)
+- **% Growth Deviasi (pivot)** — baris `10.% Growth Deviasi` di tab Pivot (mode Tanggal): persen kenaikan/penurunan deviasi per tanggal dari baris `3.Deviasi` — `(Dev(t)−Dev(t−1)) ÷ |Dev(t−1)| × 100`, pembagi absolut & persen ber-tanda dari data asli (v3.17.0)
 - **File deviasi bulan lalu** — dimuat manual via tombol 📂 (parse async, gak bekui UI), pattern `{12+month}.{BULAN} {TAHUN}.xlsx`
 - **Log persisten + crash trace** — `logs/app.log` (rotasi otomatis) merekam seluruh log run pipeline & exception runtime; `crash.log` append ber-timestamp per kejadian (v3.15)
 - **Tooltip hover** untuk cell panjang (CEK narasi, Keterangan, Rekomendasi) — muncul dekat cursor
@@ -48,10 +48,10 @@ Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Port
 |---|---|
 | ⚙️ Config | RootPath, Folders, Sheets, KategoriBarang4217, kartu DEV BULANAN, ambang COM, DPI |
 | 🚀 Proses | Kontrol pipeline (MULAI/Stop/Refresh Sumber), KPI real-time, log konsol gelap, tombol Export Excel |
-| 🧮 Pivot Table | Matrix per Resto/Tanggal (rentang default 25•–31• bulan lalu s/d 31 berjalan; kategori default "Deviasi") |
+| 🧮 Pivot Table | Matrix per Resto/Tanggal (rentang default 25•–31• bulan lalu s/d 31 berjalan; kategori default "Deviasi") + baris **10.% Growth Deviasi** dari 3.Deviasi per tanggal (mode Tanggal saja) |
 | 📦 Deviasi GR / 🧩 Deviasi PCS | Analisa deviasi per barang×resto — kolom **CEK** (12 label anomali: Turun Drastis dibedakan vs SO Tidak Diinput, Kosong (AKTIF) vs Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Naik Drastis, ACR to BOM, BOM 0, Promix 04, RI Balancing + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO, Peningkatan/Penurunan Qty ±p%), minus merah per-cell, popup detail per tanggal (footer: median d & gap), kolom Nominal (Harga 41.09 × Qty Deviasi), kolom **Dev. Bulan Lalu**, tooltip hover cell CEK |
 | 📤 Rekap Selisih IN | IN (Accurate) vs Barang Masuk + kolom SO + Hasil Audit + PO Menunggu; mode hitung Bulan Ini / Lalu+Ini; mode 📈 Analisa = tabel selisih (Resto·Tgl·Barang) urut \|selisih\|↓; export per resto |
-| 💰 Nominal Deviasi | Σ Nominal Deviasi per resto + perbandingan bulan lalu + baris TOTAL. Sub-tab: **Per Resto** · **Tanpa Harga** (global) · **Saldo Sistem Minus** (pasangan Eksternal/Campuran minus) · **Analisa Kronis** (pasangan kronis + eksklusif) |
+| 💰 Nominal Deviasi | Σ Nominal Deviasi per resto + perbandingan bulan lalu + baris TOTAL. Sub-tab: **Per Resto** · **Tanpa Harga** (global) · **Saldo Sistem Minus** (pasangan Eksternal/Campuran minus) · *(v3.17.0 — sub-tab **Analisa Kronis** dihapus)* |
 | ☑ Follow Up | Shortlist baris tercentang (persist `followup.json`) + export |
 | 🛒 Rincian PO | Daftar PO + item; keterangan & status tampil sebagai anotasi `↳` di kolom Pemasok/Nomor # |
 
@@ -83,13 +83,12 @@ src/
     ├── widgets.py             # komponen reusable (Treeview, HeaderFilter, dll)
     ├── theme.py               # design system (colors, fonts)
     ├── deviasi_view.py        # tab 📦/🧩 (5.200+ baris)
-    ├── nominal_resto_view.py  # tab 💰 + 4 sub-tab (2.700+ baris)
+    ├── nominal_resto_view.py  # tab 💰 + 3 sub-tab (2.700+ baris)
     ├── saldo_minus_view.py    # sub-tab Saldo Sistem Minus
-    ├── analisa_kronis_view.py # sub-tab Analisa Kronis
     ├── cell_tooltip.py        # reusable hover tooltip
     ├── diagnostics.py         # log file rotasi + excepthook global + crash.log (v3.15)
     ├── deviasi_file.py        # parse file deviasi bulan lalu
-    ├── nominal_common.py      # hitung saldo minus, kronis, nominal lalu
+    ├── nominal_common.py      # hitung saldo minus, nominal lalu
     ├── po_keterangan.py       # peta PO 3243
     ├── details_popup.py       # popup drill-down
     ├── deviasi_popup.py       # popup ringkas per tanggal

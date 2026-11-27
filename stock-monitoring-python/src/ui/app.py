@@ -19,7 +19,9 @@ Struktur jendela (ala aplikasi Waste):
   2. 🚀 Proses          : kontrol pipeline + KPI + konsol log gelap
   3. 🧮 Pivot Table     : pivot matrix Excel-like (per resto default;
                           rentang tanggal default tgl 25-31 bulan lalu
-                          s/d 31 bulan berjalan)
+                          s/d 31 bulan berjalan; v3.17.0 — baris 10.%
+                          Growth Deviasi dari 3.DEVIASI, hanya mode
+                          TANGGAL: (Dev(t)−Dev(t−1))÷|Dev(t−1)|×100)
   4. 📦 Deviasi GR      : wide matrix + CEK anomaly (satuan GR) + ✓;
                           satu-satunya input TANGGAL H + Apply H
                           (berlaku juga ke tab PCS) + spinbox AMBANG
@@ -38,6 +40,12 @@ versus") — view/export/parser kolom ekstra dibongkar bersama dead
 code-nya, pola v3.11.30. File deviasi bulan lalu tetap dimuat app-level
 → kolom 'Nominal Deviasi Bulan Lalu' tab 🧮 + analisa lalu-kini tab
 📦/🧩 tetap hidup.)
+
+(v3.17.0 — anak tab 'Analisa Kronis' (tab 🧮 Nominal Deviasi) DIHAPUS
+bersama dead code-nya (user: "hapus aja tab analisa kronis dan dead
+code nya hapus" — view, hitung_saldo_minus_kronis, kolom Frek Minus,
+jalur semua_sumber, threshold pra-pipeline) — pola v3.12.1. Anak tab
+tersisa: Per Resto · Tanpa Harga · Saldo Sistem Minus.)
 
 (v3.11.30 — tab 📋 Laporan Deviasi DIHAPUS total bersama 3 modenya
 — ⚖ Komparasi File Deviasi · 🚨 Anomali COM · 💰 Nominal (H) — user:
@@ -121,14 +129,12 @@ from src.ui.deviasi_view import (
     load_com_ambang,
     load_drastis_ambang,    # v3.11.56 — U6: persist ambang Drastis
     load_h_preset,          # v3.11.56 — pra-pipeline: H preset
-    load_kronis_threshold,  # v3.11.56 — pra-pipeline: threshold kronis
     load_manual_ambang,     # v3.11.56 — U6: persist ambang Hitung Manual
     load_saldo_sistem_mode,
     save_acr_threshold,     # v3.11.56 — pra-pipeline: persist ambang
     save_com_ambang,
     save_drastis_ambang,    # v3.11.56 — U6
     save_h_preset,          # v3.11.56 — pra-pipeline
-    save_kronis_threshold,  # v3.11.56 — pra-pipeline
     save_manual_ambang,     # v3.11.56 — U6
     save_saldo_sistem_mode,
 )
@@ -221,7 +227,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.16.1"  # v3.16.1 — KOLOM BARANG MASUK DI POPUP DEVIASI GR/PCS (user: "Pada tab deviasi gr dan deviasi pcs pop up nya tambahain kolom barang masuk ya"): kolom "Barang Masuk" (Σ qty JENIS '5.BARANG MASUK' rekap resto per pasangan × tanggal) disisip tepat di KANAN IN — pembanding langsung IN sistem vs BM rekap (formula pivot 7.Selisih IN = BM − IN), pola & posisi identik popup Pivot v3.13.2; satuan-scoped mirror _acr_series (pasangan 2-satuan GR/PCS mengagregasi grup satuan baris yang diklik — fix 35-b; baris dobel per tanggal dijumlah), tanggal tanpa baris BM → KOSONG ≠ BM 0 terekam → '-' (data real append1: baris BM fillna 0 → '-' = tanpa gerakan), minus merah per-cell ikut kolom BM, indeks baris TETAP 3 JENIS (tanggal BM-only tak memunculkan baris — pola ACR v3.11.9; kolom lama tak bergeser selain sisipan); tabel utama & export tak tersentuh. Verifikasi: suite UI + §106 baru ALL PASS + mock ALL PASS. Rincian: CHANGELOG.md v3.16.1.
+APP_VERSION = "3.17.0"  # v3.17.0 — PIVOT ROW 10.% GROWTH DEVIASI + HAPUS TAB ANALISA KRONIS + HAPUS STRIP SELISIH TERBANYAK BARANG×RESTO (user: "ada row baru yaitu 10.% Growth Deviasi. Datanya diambil dari row 3.Deviasi ... berapa persen kenaikan deviasi per tanggal nya. Tapi sebelum itu data row 3.deviasi di absolute dulu dan persen yang ditampilkan di row baru data asli tanpa absolute" + "hapus aja tab analisa kronis dan dead code nya hapus" + "bagian selisih terbanyak barang x resto hapus aja dan dead code nya hapus juga"): (1) ROW BARU "10.% Growth Deviasi" tab 🧮 Pivot (posisi TEPAT setelah 9.ACR; hanya mode 📅 Tanggal — metric harian persis pola 6.PEMAKAIAN (COM)): (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 dari baris 3.DEVIASI — pembagi Dev(t−1) DI-ABSOLUT dulu (arah kenaikan/penurunan tetap dari selisih DATA ASLI ber-tanda, baseline minus tak membalik tanda — konvensi identik nominal_common.hitung_persen_kenaikan (H−L)/|L|×100); kolom pertama & pembagi-0-nonzero → tampil KOSONG (mirror baris COM NaN); format sel '+12,5%'/'-8,3%'/'0,0%' (desimal koma ID, gaya tanda ± konvensi fmt_pct_cell; BEDA format kurung baris metric lain — baris persen); minus MERAH per-cell (v<0, jalur red_cells yang sama); Dev(t−1) utk kolom pertama rentang dari matrix PENUH pra-rentang (mirror COM FIX 6c-01 — pivot_full kini juga membawa growth_full); fallback jalur rentang; double-click baris growth → drill-down popup baris SUMBER 3.DEVIASI; _format_pct/_compute_growth helper baru + METRIC_BG pastel teal; export sesuai tampilan: number format '+0.0"%";-0.0"%";0.0"%"' (literal %) + 0,0% TETAP tampil (font putih trick hanya utk metric non-persen) + legenda export diperluas; _metric_tag sanitasi '%' tambahan. (2) TAB "Analisa Kronis" DIHAPUS TOTAL + dead code (pola v3.12.1 Laporan Versus): analisa_kronis_view.py (939 baris) dihapus; nominal_resto_view (param kronis_threshold, _tab_kronis, instansiasi _kronis_view, delegate load_data/ensure_refreshed/_on_sub_tab_changed branch, open_kronis_subtab/set_kronis_threshold); app.py (import load/save_kronis_threshold, _kronis_threshold init, _open_kronis_subtab, spin KRONIS ≥ kartu pra-pipeline + _on_pre_kronis_change + branch focusout + tuple flush, tombol deep-link "💰 Nominal → Analisa Kronis" Panel Ringkasan, arg kronis_threshold konstruksi NominalRestoView, hint tab); deviasi_view (load/save_kronis_threshold); nominal_common (hitung_saldo_minus_kronis + kolom "Frek Minus" + jalur semua_sumber hitung_saldo_minus_pairs — filter sumber kini selalu diterapkan; perilaku anak tab Saldo Sistem Minus TAK berubah — MINUS_COLUMNS tak pernah menampilkan Frek Minus); anak tab tersisa Per Resto · Tanpa Harga · Saldo Sistem Minus. (3) STRIP "SELISIH TERBANYAK — BARANG × RESTO" (v3.11.8) DIHAPUS TOTAL + dead code: in_selisih_view zona _barang_zone + _barang_zone_active, _render_barang_scores + _on_barang_row_click, blok worker barang_scores + snapshot f_ctx, key payload "barang_scores", entri TableExpander/_apply_view_mode — papan SKOR RESTO (fitur v3.9.55 BERBEDA) tetap utuh. Tests: §75 asersi sub-notebook 4→3 anak tab + not hasattr; §93-F (F1/F2/F3 strip) dihapus + header §93 diperbarui; 2 asersi mode-BERSIH (§11b+§94-H1) berubah cek not hasattr; §107 BARU (13 cek): METRICS index, _format_pct 5 kasus, _compute_growth baseline-minus +20%/−50%, GUI mode tanggal (urutan setelah 9.ACR, nilai +50/−50/0,0, t1 kosong, baseline minus +20/+100/0,0, merah per-cell), mode resto absen, batas kiri rentang 3..4 matrix penuh (−50,0%), rows_data + export number-format persen, penghapusan kronis (modul gone + anak tab 3 + attr app gone) + penghapusan strip (attr view gone + payload tanpa key). Verifikasi: suite UI + mock ALL PASS. Rincian: CHANGELOG.md v3.17.0.
 # v3.16.0 — DEEP AUDIT V3 (user: "Deep audit lagi dan fix push to stock monitoring repo ku"): 6 agen audit paralel menyisir seluruh modul (pivot/popup · selisih+engine VBA · export · pipeline · deviasi+nominal · sub-tab) → 35 perbaikan TERVERIFIKASI repro, ter-tag U/M/P/X/E: U-1/2/3 filter ⧩ anak tab Saldo Minus & Analisa Kronis MATI SENYAP (TypeError arity on_apply + clear() vs clear_all()); U-12/13 CEK "Potensi PO"/"RI Balancing" kunci kanonik; U-14 popup Deviasi bulan-lalu tak lagi MENGARANG Deviasi=SO penuh (presence baris 2.SALDO AKHIR); M-1/2/3 tab 📤 lookup kanonik menyeluruh (popup Rincian IN · catatan B1/B2 · KATEGORI/Satuan); M-4 review baseline tgl-1 engine tak BOCOR ke non-kandidat (PERLU REVIEW palsu + KPI bengkak); M-5..8 sort analisa kronologis + chip mask + swap _refresh + pesan file-terkunci; P-1 pd.NA "<NA>" popup; P-2 ⧩ pivot label-vs-mentah 4 titik; P-3 penawaran SALDO-AWAL-only dihapus; P-4 catatan base COM finalisasi SETELAH filter resto; P-5 sentinel NaN-resto; P-6 parse tgl tervalidasi utk popup; P-7 KeyError guard; P-8 _busy pra-filter_state; P-9 sort campuran + id kolom int; P-10 COM NaN → sel export KOSONG; P-11 cache po_nomor_map/3243; X-1/2 writer NaN/inf-safe (OOXML invalid → Excel repair); X-3 None→""; X-4 judul sheet sanitize; E-1 KUNCI-HIGH string "100383.0" ≡ float 100383.0 ≡ "100383" (pasangan numerik tak lagi TERBELAH 2 grup pivot — saldo/SO salah di KEDUA pecahan); E-2/3 header rekap per-resto TOLERAN ("JENIS " dulu KeyError PEMBUNUH pipeline; " 5"/"1.0" lenyap senyap; duplikat KATEGORI); E-4 satuan keep=last (bulan berjalan otoritatif — mirror 5c); E-5 fn_9901 .xlsb MULTI-SHEET via _list_sheet_names (sheet 2..N dulu tak pernah terbaca); E-6/7 log peek-gagal + fallback engine; E-8 konversi factorize (parity identik); E-9 PO tanpa nama tak terfabrikasi kategori; E-10 dead code dihapus; U-4/5/6/7/8/9/15 (export atomik kronis · near-zero display · tie-break minggu · no-op line · sort nilai ⧩ · pesan terkunci · "(0,0)"). Struktur kolom output TIDAK berubah. Verifikasi: suite UI 1676 PASS 0 FAIL + mock ALL PASS + ruff 0.17.1 = 199 ≤ 201 + probe E2E per-fix. Rincian: CHANGELOG.md v3.16.0.
 # v3.15.0 — CI HIJAU + OBSERVABILITAS PERSISTEN + PACKAGING PRO (batch 3 permintaan user: "Perbaiki 6 isu ruff (±15 menit) → CI hijau lagi"; "Penulisan versi ke EXE (version stamping) + ikon + pembersihan README (5 titik basi)"; "Berkas log + excepthook global (RotatingFileHandler + crash.log dengan cap waktu/timestamp)"): (1) RUFF 6 isu baru era v3.14.x di-fix (I001 pivot_view ×2 + details_popup, UP037 fn_audit, RUF012 in_selisih ClassVar, FURB192 nominal_common max()) → 201 tepat = baseline gerbang CI (2 run GHA terakhir GAGAL 207>201 — rilis EXE terblokir); (2) src/ui/diagnostics.py BARU — logs/app.log RotatingFileHandler 2MB×3 UTF-8 di app_base_dir() (handler di ROOT logger + logging.captureWarnings → record _LOG modul mana pun + warning Python ikut tercatat; dulu 4 modul pakai logging TANPA satu pun handler — record lenyap total), MIRROR StreamToQueue (konsol UI tab 🚀 → file bersamaan — jejak run pipeline utuh di disk, konsol terpangkas 3000→2000 tak lagi membuang bukti; baris-utuh via buffer newline; anti-rekursi guard thread-local), excepthook global sys+threading (jejak file DITAMBAHKAN sebelum perilaku default dirantai), report_callback_exception di-override di instance root (tkinter merutekan callback SEMUA widget ke root — exception handler tombol dulu hanya print ke konsol; SystemExit tak pernah sampai/KeyboardInterrupt diteruskan default TANPA crash.log), crash.log kini APPEND per-kejadian dgn header timestamp+versi+pid (dulu ditimpa — crash beruntun saling menimpa jejak; launcher run_app.py/src.ui.__main__ TETAP stdlib-murni dgn writer append sendiri — jalur itu hidup justru saat modul proyek gagal import); (3) stock-monitoring.spec — version= resource dibaca OTOMATIS dari APP_VERSION src/ui/app.py (regex → build/version_info.txt VSVersionInfo; properti file .exe dulu 0.0.0.0 — user tak bisa cek versi build, akar kasus "tetap sama aja" v3.11.45) + icon= assets/icon.ico multi-resolusi 16..256 (dulu ikon generic PyInstaller — memperparah false-positive antivirus) — keduanya Windows-only gating (jalur dev Linux smoke tetap polos); (4) README root + python 5 titik basi dibersihkan (versi terkini, "10 tab analisa"→9, bullet fitur ⚖ Laporan Versus yang dihapus v3.12.1, klaim ruff baseline ≤18→≤201, 2 file terhapus dari tabel Isi Repository root + stat jumlah baris kode) + .gitignore: logs/ diabaikan, assets/*.png di-whitelist (root *.png); (5) CI py_compile: referensi bench_views.py (file dihapus v3.11.54) dibersihkan dari compileall. Verifikasi: ruff 0.17.1 = 201 EXACT + py_compile semua + suite UI penuh + mock PASS. Rincian: CHANGELOG.md v3.15.0.
 # v3.14.1 — PERBAIKAN BUG MENYELURUH (AUDIT EKSTERNAL 45 FILE): K-1 jangkar so_lalu_map hari TERAKHIR (baseline tgl-1 — dulu TERAWAL → deviasi phantom); K-2/T-4 kunci Bulan Lalu BER-SATUAN + fallback drift satuan (TOTAL nominal lalu 2× utk barang GR+PCS; kolom Dev. Bulan Lalu salah satuan); T-1 kunci merge audit dinormalisasi (drift ejaan antar file); T-2 popup satuan kosong; T-3 fallback saldo akhir pasca t-1; T-5 override 42.17 tanpa kolom H; T-6 jendela verifikasi PO hari TERAKHIR; T-7 rentang tanggal pivot/popup KRONOLOGIS (26•..31• tak lagi terbuang; default -25); S-1 fn_4205 NA-resto; S-2 konversi prioritas #Sat. Terkecil; S-3 mangling '5_1'; S-4 dedup 9901 lintas sumber; S-6/S-11 harga 4109 per periode + exact "Total"; S-7 label minggu deterministik; S-8 minus per-satuan; S-9 Eksklusif pra-filter; S-13 basis COM NaN parity engine; S-15 guard audit_kpi; S-17 PO tanpa nomor per-grup; S-18 flag refresh waktu MULAI; S-19 export atomik; S-20 remark B4 tanpa BM; L-3/L-4/L-5/L-6/L-7 + display -0,00%; test diselaraskan ke semantik engine V2 (9 asersi by-design v3.14.0) + kunci 3-tuple + T9b NA-resto; 4 temuan false positive DITOLAK (S-5, S-14, S-16, L-2). Rincian: CHANGELOG.md v3.14.1.
@@ -2421,11 +2427,9 @@ class StockMonitorApp:
         # (default 50 / 1.3 = perilaku lama PERSIS).
         self._shared_drastis = SharedDrastisAmbang(load_drastis_ambang())
         self._shared_manual = SharedManualAmbang(load_manual_ambang())
-        # v3.11.56 — pra-pipeline: threshold "kronis" (Frek Minus min —
-        # anak tab Analisa Kronis) — nilai awal dari settings (kartu
-        # pra-pipeline + Panel Ringkasan; spinbox view tetap bisa
-        # mengubah saat runtime).
-        self._kronis_threshold = load_kronis_threshold()
+        # v3.17.0 — threshold "kronis" (Frek Minus min — anak tab Analisa
+        # Kronis) DIHAPUS bersama tab-nya (user: "hapus aja tab analisa
+        # kronis dan dead code nya hapus").
         # v3.11.30 — FILE deviasi bulan lalu kini APP-LEVEL (tab 📋
         # Laporan Deviasi dihapus): sumber lalu_provider tab 📦/🧩 +
         # popup Nominal Deviasi. Diisi tombol 📂 'Muat Sekarang' di
@@ -2993,7 +2997,7 @@ class StockMonitorApp:
     def _go_to_deviasi(self, resto=None, barang=None):
         """v3.11.56 — U2: DEEP-LINK ke tab 📦 Deviasi GR; bila resto/barang
         diberikan (context menu "Buka di Deviasi GR" tab Saldo Minus /
-        Analisa Kronis / Rekap Selisih IN / Nominal Deviasi) →
+        Rekap Selisih IN / Nominal Deviasi) →
         focus_pair memasang filter kolom + memilih baris pasangan.
         after_idle supaya focus_pair berjalan SETELAH event
         <<NotebookTabChanged>> (ensure_refreshed) — sisa tabrakan refresh
@@ -3010,18 +3014,6 @@ class StockMonitorApp:
     def _go_to_deviasi_pcs(self):
         """v3.11.56 — U2: tombol Panel Ringkasan → tab 🧩 Deviasi PCS."""
         self._go_to_tab(self.tab_deviasi_pcs)
-
-    def _open_kronis_subtab(self):
-        """v3.11.56 — U2: deep-link tab 💰 Nominal Deviasi → anak tab
-        'Analisa Kronis' (tombol Panel Ringkasan; sub-notebook anak tab
-        men-trigger ensure_refreshed sendiri via <<NotebookTabChanged>>)."""
-        self.notebook.select(self.tab_nominal_resto)
-
-        def _after():
-            self._focus_notebook_content()
-            self.nominal_resto_view.open_kronis_subtab()
-
-        self.root.after_idle(_after)
 
     def _select_tab_index(self, idx: int):
         """v3.11.56 — U4: Ctrl+1..9 → pilih tab ke-idx (urutan notebook)
@@ -3138,7 +3130,7 @@ class StockMonitorApp:
                 "= Buka di Deviasi GR · Ctrl+1..9 pindah tab",
             str(self.tab_nominal_resto):
                 "double-click resto = rincian · klik-kanan = opsi · anak tab: "
-                "Tanpa Harga / Saldo Minus / Kronis · Ctrl+1..9 pindah tab",
+                "Tanpa Harga / Saldo Minus · Ctrl+1..9 pindah tab",
             str(self.tab_followup):
                 "✓ = keluarkan entri · export Excel tersedia · Ctrl+1..9 pindah tab",
             str(self.tab_rincian):
@@ -5119,11 +5111,12 @@ class StockMonitorApp:
     def _build_prepipeline_card(self, parent):
         """v3.11.56 — kartu "set sekali sebelum proses": SEMUA parameter
         analisa (Tanggal H preset + ambang ACR/COM/Drastis/Manual + mode
-        Saldo Sistem + threshold Kronis) yang DULU baru bisa diatur
+        Saldo Sistem) yang DULU baru bisa diatur
         SETELAH pipeline (spinbox kartu Filter tab 📦/🧩 → recompute)
         kini bisa diatur di AWAL — render pertama 🚀 MULAI PROSES
         langsung memakai nilai itu (tanpa "load pipeline → set H →
         reload" 2× — keluhan user).
+        v3.17.0 — spin KRONIS dihapus bersama anak tab 'Analisa Kronis'.
 
         Mekanisme: shared state yang SAMA dipakai kedua tab Deviasi
         (listener — sinkron 2 arah dgn spinbox kartu Filter) + persist
@@ -5210,7 +5203,7 @@ class StockMonitorApp:
         tk.Label(r1, text="% dr median", bg=C_CARD, fg=C_TEXT_MUTED,
                  font=font(8)).pack(side="left", padx=(3, 0))
 
-        # --- r2: AMBANG DRASTIS + AMBANG MANUAL + SALDO SISTEM + KRONIS ---
+        # --- r2: AMBANG DRASTIS + AMBANG MANUAL + SALDO SISTEM ---
         r2 = tk.Frame(inner, bg=C_CARD)
         r2.pack(fill="x", pady=(6, 0))
         tk.Label(r2, text="AMBANG DRASTIS ±", bg=C_CARD, fg=C_TEXT_MUTED,
@@ -5256,21 +5249,9 @@ class StockMonitorApp:
         saldo_combo.pack(side="left", padx=(6, 0))
         saldo_combo.bind("<<ComboboxSelected>>",
                          lambda e: self._on_pre_saldo_change())
-
-        tk.Label(r2, text="KRONIS ≥", bg=C_CARD, fg=C_TEXT_MUTED,
-                 font=font(8, "bold")).pack(side="left", padx=(16, 0))
-        self._pre_kronis_var = tk.StringVar(value=str(self._kronis_threshold))
-        kronis_spin = ttk.Spinbox(
-            r2, textvariable=self._pre_kronis_var, from_=1, to=31,
-            increment=1, width=4, font=font(9),
-            command=self._on_pre_kronis_change)
-        kronis_spin.pack(side="left", padx=(6, 0))
-        kronis_spin.bind("<Return>", lambda e: self._on_pre_kronis_change())
-        kronis_spin.bind(
-            "<FocusOut>", lambda e: self._on_pre_focusout("kronis"))  # v3.11.57
-        tk.Label(r2, text="hari (Frek Minus — anak tab Analisa Kronis)",
-                 bg=C_CARD, fg=C_TEXT_MUTED, font=font(8)).pack(
-            side="left", padx=(3, 0))
+        # v3.17.0 — spinbox KRONIS ≥ (anak tab Analisa Kronis) dihapus
+        # bersama tab-nya (user: "hapus aja tab analisa kronis dan dead
+        # code nya hapus").
 
         # sinkron 2 arah: ubah dari spinbox kartu Filter tab 📦/🧩 → var
         # kartu pra-pipeline ikut (listener shared state; var.set TIDAK
@@ -5441,26 +5422,6 @@ class StockMonitorApp:
         if self._shared_saldo_sistem.set(mode):
             save_saldo_sistem_mode(mode)
 
-    def _on_pre_kronis_change(self):
-        """v3.11.56 — pra-pipeline: threshold kronis (Frek Minus min).
-        Diteruskan ke anak tab 'Analisa Kronis' (spinbox view tetap
-        berlaku saat runtime)."""
-        try:
-            v = int(str(self._pre_kronis_var.get()).strip())
-        except ValueError:
-            self._pre_kronis_var.set(str(self._kronis_threshold))
-            return
-        v = max(1, min(31, v))
-        self._pre_kronis_var.set(str(v))
-        if v == self._kronis_threshold:
-            return
-        self._kronis_threshold = v
-        save_kronis_threshold(v)
-        nr = getattr(self, "nominal_resto_view", None)
-        if nr is not None:
-            with contextlib.suppress(Exception):
-                nr.set_kronis_threshold(v)
-
     def _on_pre_focusout(self, which: str):
         """v3.11.57 — FIX laporan user ("kolom H sebelum proses pipeline
         aku isi 5 ... di tab deviasi gr dan pcs tetap 25 mendeteksi
@@ -5490,9 +5451,6 @@ class StockMonitorApp:
                 self._on_pre_drastis_change(silent=True)
             elif which == "manual":
                 self._on_pre_manual_change(silent=True)
-            elif which == "kronis":
-                # tak ada dialog di handler kronis — aman langsung
-                self._on_pre_kronis_change()
 
     def _flush_prepipeline_card(self):
         """v3.11.57 — commit SEMUA nilai spin pra-pipeline yang belum
@@ -5504,7 +5462,7 @@ class StockMonitorApp:
         keyboard accessibility, Enter virtual, dsb.). Kontrak kartu
         "set sekali → proses" (v3.11.56) kini penuh: apa yang tertulis
         di kartu saat MULAI ditekan = yang dipakai render pertama."""
-        for _which in ("h", "acr", "com", "drastis", "manual", "kronis"):
+        for _which in ("h", "acr", "com", "drastis", "manual"):
             self._on_pre_focusout(_which)
 
     # =====================================================================
@@ -5541,9 +5499,6 @@ class StockMonitorApp:
         GhostButton(nav, text="📤 Rekap Selisih IN",
                     command=lambda: self._go_to_tab(
                         self.tab_in_selisih)).pack(side="left", padx=(6, 0))
-        GhostButton(nav, text="💰 Nominal → Analisa Kronis",
-                    command=self._open_kronis_subtab).pack(
-            side="left", padx=(6, 0))
         GhostButton(nav, text="☑ Follow Up",
                     command=lambda: self._go_to_tab(
                         self.tab_followup)).pack(side="left", padx=(6, 0))
@@ -7351,9 +7306,6 @@ class StockMonitorApp:
             # v3.11.42 — mode saldo sistem dibagi dgn tab 📦/🧩 (utk
             # anak tab 'Saldo Sistem Minus').
             saldo_sistem_state=self._shared_saldo_sistem,
-            # v3.11.56 — pra-pipeline: nilai awal threshold anak tab
-            # 'Analisa Kronis' (kartu pra-pipeline tab 🚀 Proses).
-            kronis_threshold=self._kronis_threshold,
             # rincian_po_df (3243) di-pass saat load_data (bisa None
             # pra-pipeline; __init__ simpan placeholder None).
             rincian_po_df=None)

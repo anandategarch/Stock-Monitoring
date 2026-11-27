@@ -23,6 +23,14 @@ Mode (segment "PIVOT PER"):
   ≠ 0 fill merah muda. 💾 Export Excel sesuai tampilan (minus font
   merah per cell, 0 font putih). Lazy refresh (compute saat tab
   terlihat) + loading overlay + compute/render async.
+- v3.17.0 — baris 10.% Growth Deviasi (hanya mode 📅 TANGGAL; urutan
+  setelah 9.ACR): (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 dari baris
+  3.DEVIASI — pembagi |Dev(t−1)| di-ABSOLUT, persen ber-tanda dari
+  DATA ASLI tanpa absolut (mirror nominal_common.hitung_persen_
+  kenaikan); kolom pertama & pembagi-0-nonzero tampil KOSONG;
+  format sel '+12,5%' / '-8,3%' / '0,0%'; Dev(t−1) kolom pertama
+  rentang dari matrix PENUH pra-rentang (mirror COM 6c-01); export
+  memakai number format persen.
 """
 
 import contextlib  # v3.9.66 — suppress senyap jalur restore filter
@@ -32,6 +40,7 @@ from collections.abc import Callable
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
+import numpy as np          # v3.17.0 — np.isinf utk _format_pct
 import pandas as pd
 
 from .theme import (
@@ -89,10 +98,18 @@ class PivotTableView(tk.Frame):
     """Pivot matrix view dengan tampilan card-based."""
 
     # Metric order — fixed (identik versi lama):
+    # v3.17.0 — + "10.% Growth Deviasi" (user: "ada row baru yaitu 10.%
+    # Growth Deviasi. Datanya diambil dari row 3.Deviasi ... untuk tau
+    # berapa persen kenaikan deviasi per tanggal nya") — baris METRIK
+    # hasil-derivat (sama pola dgn 6.PEMAKAIAN (COM)): nilai dihitung
+    # on-the-fly di _compute_payload dari baris 3.DEVIASI, hanya mode
+    # 📅 TANGGAL (growth vs kolom tanggal SEBELUMNYA tak bermakna di
+    # mode resto tanpa urutan kronologis).
     METRICS = [
         "SALDO AWAL", "1.SO", "2.SALDO AKHIR", "3.DEVIASI",
         "4.IN", "5.BARANG MASUK", "6.PEMAKAIAN (COM)",
         "7.Selisih IN", "8.BARANG KELUAR", "9.ACR",
+        "10.% Growth Deviasi",
     ]
 
     # Soft pastel background per metric (identik versi lama)
@@ -107,6 +124,7 @@ class PivotTableView(tk.Frame):
         "7.Selisih IN": "#FCEEE8",
         "8.BARANG KELUAR": "#FFF0E0",
         "9.ACR": "#F8F0F0",
+        "10.% Growth Deviasi": "#E8F6F3",
     }
 
     def __init__(self, parent, data: pd.DataFrame = None,
@@ -1167,9 +1185,10 @@ class PivotTableView(tk.Frame):
 
         metrics = list(self.METRICS)
         if mode == "resto":
-            # COM adalah metric harian (urutan tanggal) — hanya relevan
-            # di mode Tanggal
-            metrics = [m for m in metrics if m != "6.PEMAKAIAN (COM)"]
+            # COM & % Growth Deviasi adalah metric harian (urutan
+            # tanggal) — hanya relevan di mode Tanggal
+            metrics = [m for m in metrics if m not in
+                       ("6.PEMAKAIAN (COM)", "10.% Growth Deviasi")]
         # v3.11.40 — SALDO AWAL DIHIDDEN dari tampilan pivot (user: "Saldo
         # awal di pivot tabel hide aja"). Baris tetap ADA di pivot DataFrame
         # internal (dasar base COM tanggal 1 — _compute_com get_series
@@ -1189,6 +1208,7 @@ class PivotTableView(tk.Frame):
         # arahnya TERBALIK — start=-26 vs tmin=-25 lolos padahal rentang
         # kronologis memotong hari 25•).
         com_full = None
+        growth_full = None
         if mode == "tanggal" and "Tanggal" in getattr(
                 df_predate, "columns", []) and not df_predate.empty:
             _tall = pd.to_numeric(df_predate["Tanggal"], errors="coerce")
@@ -1214,8 +1234,19 @@ class PivotTableView(tk.Frame):
                             for item in pivot_full.index.get_level_values(
                                 "Nama Barang").unique().tolist()
                         }
+                        # v3.17.0 — 10.% Growth Deviasi dari matrix PENUH
+                        # pra-rentang (mirror COM 6c-01): Dev(t−1) utk
+                        # kolom PERTAMA rentang tetap tersedia bila tgl
+                        # sebelum rentang ada di data.
+                        growth_full = {
+                            item: self._compute_growth(
+                                pivot_full, item, full_keys)
+                            for item in pivot_full.index.get_level_values(
+                                "Nama Barang").unique().tolist()
+                        }
                 except (TypeError, ValueError):
                     com_full = None   # fallback: jalur lama (pivot rentang)
+                    growth_full = None
 
         tree_items = []
         rows_data = []          # v3.9.2 — data mentah utk export
@@ -1252,6 +1283,22 @@ class PivotTableView(tk.Frame):
                         row_data = self._compute_com(
                             pivot_raw if pivot_raw is not None else pivot,
                             item, col_keys)
+                elif mode == "tanggal" and metric == "10.% Growth Deviasi":
+                    # v3.17.0 — 10.% Growth Deviasi (user: "untuk tau
+                    # berapa persen kenaikan deviasi per tanggal nya"):
+                    # (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 — pembagi
+                    # 3.DEVIASI(t−1) di-ABSOLUT dulu (arah tak terbalik
+                    # saat baseline minus), selisih & persen yang TAMPIL
+                    # dari DATA ASLI tanpa absolut (konvensi mirror
+                    # nominal_common.hitung_persen_kenaikan). Matrix
+                    # PENUH pra-rentang utk Dev(t−1) kolom pertama
+                    # (mirror COM 6c-01); fallback jalur rentang.
+                    if growth_full is not None and item in growth_full:
+                        row_data = growth_full[item].reindex(col_keys)
+                    else:
+                        row_data = self._compute_growth(
+                            pivot_raw if pivot_raw is not None else pivot,
+                            item, col_keys)
                 elif item_grp is not None:
                     try:
                         row_data = item_grp.loc[metric]
@@ -1278,8 +1325,14 @@ class PivotTableView(tk.Frame):
 
                 tags = self._compute_row_tags(metric, item, row_data,
                                               col_keys)
-                values = [self._format_num(row_data.get(c, 0))
-                          for c in col_keys]
+                # v3.17.0 — baris 10.% Growth Deviasi diformat PERSEN
+                # ('+12,5%' / '−8,3%' gaya tanda — konvensi persen
+                # nominal_common.fmt_pct_cell), bukan format angka
+                # ribuan/parentesis baris metric lain.
+                fmt_fn = (self._format_pct
+                          if metric == "10.% Growth Deviasi"
+                          else self._format_num)
+                values = [fmt_fn(row_data.get(c, 0)) for c in col_keys]
                 iid = f"{item_iid}_{self._metric_tag(metric)}"
                 child_rows.append((
                     item_iid, iid,
@@ -1748,6 +1801,11 @@ class PivotTableView(tk.Frame):
         if parent_iid:
             nama_barang = tree.item(parent_iid, "text")
             jenis = tree.item(row_iid, "text")
+            # v3.17.0 — drill-down baris 10.% Growth Deviasi dialihkan
+            # ke baris SUMBER 3.DEVIASI (data growth diambil dari sana —
+            # popup menampilkan deviasi asli, bukan persen derivat).
+            if jenis == "10.% Growth Deviasi":
+                jenis = "3.DEVIASI"
         else:
             nama_barang = tree.item(row_iid, "text")
             jenis = None
@@ -1831,7 +1889,11 @@ class PivotTableView(tk.Frame):
     # =========================================================================
     @staticmethod
     def _metric_tag(metric: str) -> str:
-        return metric.lower().replace(" ", "_").replace(".", "_").replace("-", "_")
+        # v3.17.0 — '%' ikut disanitasi (label "10.% Growth Deviasi" —
+        # tag/iid Tk bebas karakter aneh; sanitasi ekstra zero-risk utk
+        # metric yang memuat '%').
+        return (metric.lower().replace(" ", "_").replace(".", "_")
+                .replace("-", "_").replace("%", "_"))
 
     @staticmethod
     def _format_num(val) -> str:
@@ -1862,6 +1924,86 @@ class PivotTableView(tk.Frame):
         if val < 0:
             return f"({s[1:]})"
         return s
+
+    @staticmethod
+    def _format_pct(val) -> str:
+        """v3.17.0 — format sel 10.% Growth Deviasi: '+12,5%' / '-8,3%'
+        / '0,0%' (gaya tanda ±, desimal koma Indonesia — konvensi persen
+        nominal_common.fmt_pct_cell / hitung_persen_kenaikan).
+        None/NaN/inf (kolom pertama tanpa t−1, pembagi 0) → '' KOSONG
+        (parity baris COM yang NaN tampil kosong — bukan '-')."""
+        if val is None:
+            return ""
+        try:
+            if pd.isna(val):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return str(val)
+        if pd.isna(v) or np.isinf(v):
+            return ""
+        if round(v, 1) == 0:
+            return "0,0%"
+        s = f"{v:+,.1f}".replace(",", "X").replace(".", ",") \
+            .replace("X", ".")
+        return s + "%"
+
+    @staticmethod
+    def _compute_growth(pivot, item, tanggals):
+        """v3.17.0 — Hitung 10.% Growth Deviasi per tanggal dari baris
+        3.DEVIASI item: (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100.
+
+        Pembagi Dev(t−1) di-ABSOLUT dulu (user: "data row 3.deviasi di
+        absolute dulu") supaya ARAH kenaikan/penurunan tetap ditentukan
+        oleh selisih DATA ASLI (user: "persen yang ditampilkan di row
+        baru data asli tanpa absolute") — baseline minus tak membalik
+        tanda (konvensi identik nominal_common.hitung_persen_kenaikan
+        (H−L)/|L|×100 dgn L=Dev(t−1), H=Dev(t)).
+
+        Nilai Dev dibaca dari pivot display-semantics: sel tanpa baris
+        3.DEVIASI ≡ 0 (persis yang TAMPIL di baris 3.DEVIASI matrix).
+        Kolom pertama list (i==0) → NaN (tak ada t−1). Pembagi 0:
+        kedua 0 → 0.0 (tak berubah); Dev(t−1)=0 dgn Dev(t)≠0 → NaN
+        (kenaikan tak terhingga — tampil kosong '-'), mirror konvensi
+        hitung_persen_kenaikan."""
+        dev = None
+        try:
+            dev = pivot.loc[item].loc["3.DEVIASI"]
+        except KeyError:
+            dev = None
+
+        def _v(key):
+            if dev is None:
+                return None
+            try:
+                x = dev.get(key)
+            except (AttributeError, KeyError):
+                return None
+            if x is None or pd.isna(x):
+                return 0.0   # sel tanpa baris ≡ 0 (semantik tampilan)
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
+        out = {}
+        for i, t in enumerate(tanggals):
+            if i == 0:
+                # kolom pertama global: tak ada t−1 → NaN (tampil '')
+                out[t] = float("nan")
+                continue
+            prev = _v(tanggals[i - 1])
+            curr = _v(t)
+            if prev is None or curr is None:
+                out[t] = float("nan")
+            elif prev == 0.0:
+                out[t] = 0.0 if curr == 0.0 else float("nan")
+            else:
+                out[t] = (curr - prev) / abs(prev) * 100.0
+        return pd.Series(out, index=tanggals)
 
     @staticmethod
     def _compute_com(pivot, item, tanggals):

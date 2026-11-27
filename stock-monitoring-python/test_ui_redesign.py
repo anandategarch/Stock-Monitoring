@@ -2206,15 +2206,17 @@ def main():
           and ("80", ("pos",)) in _an_tags,
           f"got {sorted(_an_tags)}")
     # v3.11.9 — mode 📈 kini BERSIH (user: "biar clean"): kartu KPI +
-    # papan skor + strip barang disembunyikan TOTAL (panel analisa
-    # memakai seluruh tinggi konten).
-    check("(v3.11.9+v3.11.30) Mode BERSIH: skor + strip barang "
-          "disembunyikan (KPI card dihapus total — user)",
+    # papan skor disembunyikan TOTAL (panel analisa memakai seluruh
+    # tinggi konten). v3.17.0 — strip barang DIHAPUS (attr tak ada lagi).
+    check("(v3.11.9+v3.11.30+v3.17.0) Mode BERSIH: skor disembunyikan "
+          "+ strip barang & KPI card TIDAK ADA lagi (dihapus total — "
+          "user)",
           iv._skor_zone.winfo_manager() == ""
-          and iv._barang_zone.winfo_manager() == ""
+          and not hasattr(iv, "_barang_zone")
+          and not hasattr(iv, "kpi_card")
           and iv._analisa_card.winfo_manager() == "pack",
           f"skor={iv._skor_zone.winfo_manager()!r} "
-          f"barang={iv._barang_zone.winfo_manager()!r}")
+          f"barang={hasattr(iv, '_barang_zone')}")
     # toggle balik ke 📋 Tabel — tanpa recompute (payload cache)
     iv._on_view_mode_change(0)
     root.update()
@@ -17482,12 +17484,13 @@ def main():
     # anak tab: default GLOBAL 'Semua' + kolom Kategori + filter
     _tabs75 = [str(_rv75._sub_nb.tab(_t75, "text"))
                for _t75 in _rv75._sub_nb.tabs()]
-    check("(v3.9.63+v3.11.42+v3.11.47) E2E ANAK TAB: sub-notebook 4 anak "
-          "tab ('Per Resto' + 'Tanpa Harga' + 'Saldo Sistem Minus' + "
-          "'Analisa Kronis') + default kategori anak 'Semua' "
-          "(GLOBAL) + kolom Kategori + SUMPIT '(Tanpa Kategori)'",
+    check("(v3.9.63+v3.11.42) E2E ANAK TAB: sub-notebook 3 anak tab "
+          "('Per Resto' + 'Tanpa Harga' + 'Saldo Sistem Minus'; "
+          "v3.17.0 — 'Analisa Kronis' DIHAPUS) + default kategori anak "
+          "'Semua' (GLOBAL) + kolom Kategori + SUMPIT '(Tanpa Kategori)'",
           _tabs75 == ["Per Resto", "Tanpa Harga",
-                      "Saldo Sistem Minus", "Analisa Kronis"]
+                      "Saldo Sistem Minus"]
+          and not hasattr(_rv75, "_kronis_view")
           and _rv75._nh_kategori_var.get() == "Semua"
           and "Kategori" in list(_rv75.tree_noharga["columns"])
           and any(
@@ -21158,11 +21161,14 @@ def main():
 
     # =====================================================================
     # §93 v3.11.8 — COM RENDAH (dua arah com_analisa) + fn_4217
-    #      keep_kategori + NOMINAL override saldo sistem 42.17 + PAPAN
-    #      SELISIH TERBANYAK BARANG × RESTO (Rekap Selisih IN)
+    #      keep_kategori + NOMINAL override saldo sistem 42.17
+    #      (v3.17.0 — sub-blok (F) PAPAN SELISIH TERBANYAK BARANG ×
+    #      RESTO dihapus bersama strip-nya — user: "bagian selisih
+    #      terbanyak barang x resto hapus aja dan dead code nya hapus
+    #      juga"; verifikasi penghapusan ada di §107)
     # =====================================================================
     print("\n== 93. (v3.11.8) COM Rendah + 42.17 keep_kategori + nominal "
-          "override 42.17 + papan selisih barang×resto ==")
+          "override 42.17 ==")
 
     import tempfile as _tf93
 
@@ -21391,138 +21397,13 @@ def main():
           _qty93(_p93e3, "BRG A")[0] == 30.0,
           f"A={_qty93(_p93e3, 'BRG A')}")
 
-    # ---- (F) PAPAN SELISIH TERBANYAK BARANG × RESTO (in_selisih) -------
-    from src.pipeline.fn_audit import build_audit_from_app as _bafa93
-    from src.ui.in_selisih_view import InSelisihView as _ISV93
-
-    _rows93f = []
-    _det93f = []
-
-    def _so93f(r, b, t, v):
-        _rows93f.append({"NAMA RESTO": r, "Nama Barang": b, "JENIS": "SO",
-                         "Tanggal": t, "Value": v})
-
-    def _bm93f(r, b, t, v):
-        _rows93f.append({"NAMA RESTO": r, "Nama Barang": b,
-                         "JENIS": "BARANG MASUK", "Tanggal": t, "Value": v})
-
-    def _in93f(r, b, t, v):
-        _det93f.append({"NAMA RESTO": r, "Nama Barang": b, "Tanggal": t,
-                        "Value": v, "Nomor": "IT.2026.11.001",
-                        "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
-                        "SOURCE IN": "42.05", "JENIS": "IN"})
-
-    # KOPI93 @MLGPAR: BM t5 200 (IN 0) → +200; t8 BM 0 + IN 100 → −100
-    # → Σ|300| · Σ +100 · TERBESAR +200@5 · 2 tgl.
-    for _t93 in range(1, 11):
-        _so93f("MLGPAR", "KOPI93", _t93, 100.0)
-    _bm93f("MLGPAR", "KOPI93", 5, 200.0)
-    _in93f("MLGPAR", "KOPI93", 8, 100.0)
-    # SUSU93 @MLGPAR: BM t5 160 − IN t5 80 → +80 → Σ|80|.
-    for _t93 in range(1, 11):
-        _so93f("MLGPAR", "SUSU93", _t93, 100.0)
-    _bm93f("MLGPAR", "SUSU93", 5, 160.0)
-    _in93f("MLGPAR", "SUSU93", 5, 80.0)
-    # OK93 @JKT01: BM 50 == IN 50 → selisih 0 → TIDAK masuk papan.
-    for _t93 in range(1, 11):
-        _so93f("JKT01", "OK93", _t93, 100.0)
-    _bm93f("JKT01", "OK93", 5, 50.0)
-    _in93f("JKT01", "OK93", 5, 50.0)
-    _sdf93, _skpi93, _sdesc93 = _bafa93(pd.DataFrame(_rows93f),
-                                         pd.DataFrame(_det93f))
-    _items93 = [("KOPI93", "MLGPAR"), ("SUSU93", "MLGPAR"),
-                ("OK93", "JKT01")]
-    _sdata93 = pd.DataFrame({
-        "Nama Barang": [b for b, _ in _items93],
-        "NAMA RESTO": [r for _, r in _items93],
-        "SATUAN": ["GR"] * len(_items93),
-        "KATEGORI": ["DEVIASI"] * len(_items93),
-        "JENIS": ["3.DEVIASI"] * len(_items93),
-        "Tanggal": [1] * len(_items93),
-        "NILAI": [0.0] * len(_items93),
-    })
-    _top93f = tk.Toplevel(root)
-    _top93f.geometry("1400x900+5+5")
-    _isv93 = _ISV93(_top93f)
-    _isv93.pack(fill="both", expand=True)
-    root.update()
-    _isv93.load_data(_sdata93, pd.DataFrame(_det93f),
-                     audit_result={"df": _sdf93, "kpi": _skpi93,
-                                   "desc": _sdesc93})
-    wait_view(root, _isv93)
-
-    def _walk93(w):
-        for _ch93 in w.winfo_children():
-            yield _ch93
-            yield from _walk93(_ch93)
-
-    def _bzone_texts93(view):
-        # v3.11.8 — strip SATU BARIS: kumpulkan teks SEMUA label di zona
-        # (judul + chip pasangan + penanda '+N lainnya').
-        _out93 = []
-        for _w93 in _walk93(view._barang_zone):
-            if isinstance(_w93, tk.Label):
-                _out93.append(str(_w93["text"]))
-        return _out93
-
-    def _bchip_hi93(view, barang):
-        # ketebalan border chip utk pasangan (highlight is_active)
-        for _w93 in _walk93(view._barang_zone):
-            if isinstance(_w93, tk.Frame):
-                _labs93 = [c for c in _w93.winfo_children()
-                           if isinstance(c, tk.Label)]
-                if _labs93 and barang in str(_labs93[0]["text"]):
-                    try:
-                        return int(str(_w93.cget("highlightthickness")))
-                    except (TypeError, ValueError, tk.TclError):
-                        return -1
-        return -1
-
-    _texts93 = _bzone_texts93(_isv93)
-    _joined93 = " | ".join(_texts93)
-    check("(v3.11.8) §93-F1 strip SELISIH TERBANYAK BARANG×RESTO tampil "
-          "(user: 'pada rekap selisih in bisa gak tampil selisih "
-          "terbanyak nama barang + resto'): chip #1 KOPI93@MLGPAR urut "
-          "Σ|selisih| 300 · terbesar 200@5; #2 SUSU93 (Σ|80| · terbesar "
-          "80@5); OK93 selisih 0 TIDAK masuk strip",
-          any("KOPI93" in t and "MLGPAR" in t and "Σ|300|" in t
-              and "terbesar 200@5" in t for t in _texts93)
-          and any("SUSU93" in t and "Σ|80|" in t
-                  and "terbesar 80@5" in t for t in _texts93)
-          and "OK93" not in _joined93,
-          f"got {_texts93}")
-    _isv93._on_barang_row_click("KOPI93")
-    wait_view(root, _isv93)
-    _texts93b = _bzone_texts93(_isv93)
-    _n_kopi93 = sum(1 for _i93 in _isv93.tree.get_children("")
-                    if _isv93.tree.set(_i93, "Nama Barang") == "KOPI93")
-    _n_susu93 = sum(1 for _i93 in _isv93.tree.get_children("")
-                    if _isv93.tree.set(_i93, "Nama Barang") == "SUSU93")
-    check("(v3.11.8) §93-F2 klik chip → TOGGLE filter Nama Barang "
-          "(tabel TERFILTER ke KOPI93) + strip TETAP UTUH 2 pasangan "
-          "(dihitung PRA-filter-Nama-Barang — mirror 6d2-02, bukan "
-          "kolapse jadi 1 chip) + chip terseleksi di-highlight amber",
-          _n_kopi93 > 0 and _n_susu93 == 0
-          and any("KOPI93" in t for t in _texts93b)
-          and any("SUSU93" in t for t in _texts93b)
-          and _isv93._barang_zone_active == "KOPI93"
-          and _bchip_hi93(_isv93, "KOPI93") == 1
-          and _bchip_hi93(_isv93, "SUSU93") == 0,
-          f"kopi={_n_kopi93} susu={_n_susu93} texts={_texts93b} "
-          f"hi={_bchip_hi93(_isv93, 'KOPI93')}")
-    _isv93._on_barang_row_click("KOPI93")     # klik lagi = lepas filter
-    wait_view(root, _isv93)
-    _n_all93 = len(_isv93.tree.get_children(""))
-    check("(v3.11.8) §93-F3 klik LAGI = lepas filter (tabel kembali "
-          "ber-SUSU93; state aktif strip bersih)",
-          sum(1 for _i93 in _isv93.tree.get_children("")
-              if _isv93.tree.set(_i93, "Nama Barang") == "SUSU93") > 0
-          and _n_all93 > _n_kopi93
-          and _isv93._barang_zone_active is None,
-          f"all={_n_all93}")
-    _isv93.destroy()
-    _top93f.destroy()
-    root.update()
+    # ---- (F) PAPAN SELISIH TERBANYAK BARANG × RESTO — DIHAPUS v3.17.0 ---
+    # (user: "bagian selisih terbanyak barang x resto hapus aja dan dead
+    # code nya hapus juga") — zona _barang_zone + _render_barang_scores
+    # + _on_barang_row_click + blok worker barang_scores dibongkar total;
+    # asersi penghapusan (not hasattr + payload tanpa 'barang_scores') ada
+    # di §107. Fixture BM t5/t8 §93-E di atas TETAP dipakai cek engine di
+    # blok-blok sebelumnya (build_audit_from_app tak tersentuh).
 
     # =====================================================================
     print("\n== 94. (v3.11.9) Popup ACR+Avg baris H · CEK BOM 0 · Beda dari "
@@ -22174,11 +22055,12 @@ def main():
     root.update()
     _isv94._on_view_mode_change(1)
     root.update()
-    check("(v3.11.9+v3.11.30) §94-H1 mode BERSIH: skor/strip/tabel "
-          "tersembunyi + analisa ter-pack penuh (KPI dihapus total)",
+    check("(v3.11.9+v3.11.30+v3.17.0) §94-H1 mode BERSIH: skor/tabel "
+          "tersembunyi + analisa ter-pack penuh (KPI dihapus total; "
+          "strip barang dihapus v3.17.0 — attr tak ada)",
           not hasattr(_isv94, "kpi_card")
+          and not hasattr(_isv94, "_barang_zone")
           and _isv94._skor_zone.winfo_manager() == ""
-          and _isv94._barang_zone.winfo_manager() == ""
           and _isv94._tcard.winfo_manager() == ""
           and _isv94._analisa_card.winfo_manager() == "pack")
 
@@ -24422,6 +24304,235 @@ def main():
         root.update()
     _pop106.destroy()
     root.update()
+
+
+    # =====================================================================
+    print()
+    print("== 107. (v3.17.0) PIVOT ROW 10.% GROWTH DEVIASI + HAPUS TAB ==")
+    print("   ANALISA KRONIS + HAPUS STRIP BARANG×RESTO (Rekap Selisih IN) ==")
+    # (user: "ada row baru yaitu 10.% Growth Deviasi. Datanya diambil dari
+    # row 3.Deviasi ... berapa persen kenaikan deviasi per tanggal nya.
+    # Tapi sebelum itu data row 3.deviasi di absolute dulu dan persen yang
+    # ditampilkan di row baru data asli tanpa absolute" + "hapus aja tab
+    # analisa kronis dan dead code nya hapus" + "selisih terbanyak barang
+    # x resto hapus aja dan dead code nya hapus juga").
+
+    # ---- (A) konstanta + helper murni (tanpa GUI) ----------------------
+    from src.ui.pivot_view import PivotTableView as _PV107
+
+    check("(v3.17.0) METRICS memuat '10.% Growth Deviasi' TEPAT setelah "
+          "'9.ACR' + METRIC_BG punya warna baris",
+          _PV107.METRICS.index("10.% Growth Deviasi")
+          == _PV107.METRICS.index("9.ACR") + 1
+          and "10.% Growth Deviasi" in _PV107.METRIC_BG,
+          f"got {_PV107.METRICS}")
+    check("(v3.17.0) _format_pct: '+50,0%' / '-8,3%' / '0,0%' / '' utk "
+          "None/NaN (kolom pertama & pembagi-0-nonzero)",
+          _PV107._format_pct(50.0) == "+50,0%"
+          and _PV107._format_pct(-8.34) == "-8,3%"
+          and _PV107._format_pct(0.0) == "0,0%"
+          and _PV107._format_pct(None) == ""
+          and _PV107._format_pct(float("nan")) == "")
+    # rumus: pembagi |Dev(t−1)| DI-ABSOLUT; selisih dari DATA ASLI —
+    # baseline minus tak membalik arah kenaikan.
+    _idx107 = pd.MultiIndex.from_tuples([("B", "3.DEVIASI")])
+    _mat107 = pd.DataFrame([[-50.0, -40.0, -60.0]], index=_idx107,
+                           columns=[1, 2, 3])
+    _g107 = _PV107._compute_growth(_mat107, "B", [1, 2, 3])
+    check("(v3.17.0) _compute_growth baseline MINUS: (−40−(−50))÷|−50| = "
+          "+20% (pembagi absolut; ARAH dari data asli — kenaikan karena "
+          "−40 > −50, bukan flip tanda) & (−60−(−40))÷|−40| = −50% & "
+          "kolom pertama NaN",
+          pd.isna(_g107.get(1))
+          and abs(_g107.get(2) - 20.0) < 1e-9
+          and abs(_g107.get(3) - (-50.0)) < 1e-9,
+          f"got {_g107.to_dict()}")
+
+    # ---- (B) GUI pivot mode TANGGAL ------------------------------------
+    def _r107(barang, jenis, t, nilai):
+        return {"Nama Barang": barang, "JENIS": jenis,
+                "NAMA RESTO": "MLGPAR", "Tanggal": t,
+                "NILAI": float(nilai), "SATUAN": "GR",
+                "AKTIF/NON": "AKTIF", "KATEGORI": "BAHAN",
+                "SOURCE KIRIMAN": "GUDANG"}
+
+    # BRG A: deviasi 100 → 150 (+50%) → 75 (−50%) → 75 (0,0% tak berubah)
+    # BRG MIN: deviasi −50 → −40 (baseline minus → +20%) lalu kosong (0)
+    _d107 = pd.DataFrame(
+        [_r107("BRG A", "3.DEVIASI", t, v)
+         for t, v in ((1, 100.0), (2, 150.0), (3, 75.0), (4, 75.0))]
+        + [_r107("BRG MIN", "3.DEVIASI", t, v)
+           for t, v in ((1, -50.0), (2, -40.0))]
+        + [_r107("BRG A", "1.SO", t, 10.0) for t in (1, 2, 3, 4)]
+        + [_r107("BRG MIN", "1.SO", t, 10.0) for t in (1, 2)])
+    _p107 = _PV107(root)
+    _p107.pack(fill="both", expand=True)
+    _p107.pivot_mode = "tanggal"
+    _p107.tgl_start_var.set("1")
+    _p107.tgl_end_var.set("4")
+    _p107.data = _d107
+    _p107._populate_filters()
+    _p107._show_content()
+    _p107._refresh_pivot(sync=True)
+    for _ in range(80):
+        root.update()
+        if not _p107._busy and len(_p107.tree.get_children("")):
+            break
+        time.sleep(0.02)
+
+    def _row107(pv, barang, metric):
+        for _p in pv.tree.get_children(""):
+            if pv.tree.item(_p, "text") == barang:
+                for _c in pv.tree.get_children(_p):
+                    if pv.tree.item(_c, "text") == metric:
+                        return _c
+        return None
+
+    def _wait107(pv):
+        for _ in range(80):
+            root.update()
+            if not pv._busy and len(pv.tree.get_children("")):
+                break
+            time.sleep(0.02)
+
+    # urutan label: hide-empty OFF → SEMUA 10 metric tampil urut METRICS
+    _p107.hide_empty_var.set(False)
+    _p107._refresh_pivot()
+    _wait107(_p107)
+    _pA107 = next(_p for _p in _p107.tree.get_children("")
+                  if _p107.tree.item(_p, "text") == "BRG A")
+    _kinds107 = [_p107.tree.item(_c, "text")
+                 for _c in _p107.tree.get_children(_pA107)]
+    check("(v3.17.0) Mode TANGGAL (hide-empty OFF): baris '10.% Growth "
+          "Deviasi' TEPAT setelah '9.ACR' (urutan METRICS — row ke-10)",
+          "10.% Growth Deviasi" in _kinds107
+          and _kinds107.index("10.% Growth Deviasi")
+          == _kinds107.index("9.ACR") + 1
+          and _kinds107.index("10.% Growth Deviasi") == len(_kinds107) - 1,
+          f"got {_kinds107}")
+    _p107.hide_empty_var.set(True)
+    _p107._refresh_pivot()
+    _wait107(_p107)
+
+    _gA107 = _row107(_p107, "BRG A", "10.% Growth Deviasi")
+    _vA107 = [_p107.tree.set(_gA107, str(c)) for c in (1, 2, 3, 4)]
+    check("(v3.17.0) Growth BRG A: t1 KOSONG (tak ada t−1) · t2 '+50,0%' "
+          "(150 vs 100) · t3 '-50,0%' (75 vs 150) · t4 '0,0%' (75 vs 75 "
+          "tak berubah)",
+          _gA107 is not None and _vA107 == ["", "+50,0%", "-50,0%", "0,0%"],
+          f"got {_vA107}")
+    _gM107 = _row107(_p107, "BRG MIN", "10.% Growth Deviasi")
+    check("(v3.17.0) Growth BRG MIN (deviasi BASELINE MINUS): t2 = "
+          "'+20,0%' — (−40 − (−50)) ÷ |−50| (pembagi ABSOLUT; persen "
+          "ber-tanda dari DATA ASLI: kenaikan) · t3 '+100,0%' (dev 0 "
+          "display vs −40) · t4 '0,0%'",
+          _gM107 is not None
+          and _p107.tree.set(_gM107, "1") == ""
+          and _p107.tree.set(_gM107, "2") == "+20,0%"
+          and _p107.tree.set(_gM107, "3") == "+100,0%"
+          and _p107.tree.set(_gM107, "4") == "0,0%",
+          f"got {[_p107.tree.set(_gM107, str(c)) for c in (1, 2, 3, 4)]}")
+    if CELL_TAGS_SUPPORTED:
+        _hcn107 = lambda i, c: root.tk.call(
+            str(_p107.tree), "tag", "cell", "has", "neg_cell", (i, c))
+        check("(v3.17.0) Growth NEGATIF '−50,0%' MERAH per-cell (t3) · "
+              "positif '+50,0%' TIDAK (t2)",
+              _hcn107(_gA107, "3") == 1 and _hcn107(_gA107, "2") == 0,
+              f"t3={_hcn107(_gA107, '3')} t2={_hcn107(_gA107, '2')}")
+
+    # mode RESTO: growth (dan COM) tak relevan — baris tak dirender
+    _p107._on_mode_change(0)
+    _wait107(_p107)
+    _pA107r = next(_p for _p in _p107.tree.get_children("")
+                   if _p107.tree.item(_p, "text") == "BRG A")
+    _kindsR107 = [_p107.tree.item(_c, "text")
+                  for _c in _p107.tree.get_children(_pA107r)]
+    check("(v3.17.0) Mode RESTO: baris '10.% Growth Deviasi' TIDAK ada "
+          "(metric harian urutan tanggal — mirror 6.PEMAKAIAN (COM))",
+          "10.% Growth Deviasi" not in _kindsR107
+          and "6.PEMAKAIAN (COM)" not in _kindsR107,
+          f"got {_kindsR107}")
+
+    # ---- (C) batas kiri rentang: Dev(t−1) dari matrix PENUH -----------
+    # (mirror COM FIX 6c-01): rentang 3..4, data 1..4 → growth kolom
+    # pertama (t3) memakai Dev(2)=150 dari luar rentang.
+    _p107._on_mode_change(1)
+    _wait107(_p107)
+    _p107.tgl_start_var.set("3")
+    _p107.tgl_end_var.set("4")
+    _p107._refresh_pivot()
+    _wait107(_p107)
+    _gA107b = _row107(_p107, "BRG A", "10.% Growth Deviasi")
+    check("(v3.17.0) Rentang 3..4: growth kolom PERTAMA '3' terhitung "
+          "dari Dev(2)=150 matrix PENUH pra-rentang (mirror COM 6c-01) → "
+          "'-50,0%'; kolom '4' '0,0%'",
+          _gA107b is not None
+          and _p107.tree.set(_gA107b, "3") == "-50,0%"
+          and _p107.tree.set(_gA107b, "4") == "0,0%",
+          f"got 3={_p107.tree.set(_gA107b, '3')!r} "
+          f"4={_p107.tree.set(_gA107b, '4')!r}")
+
+    # ---- (D) export: rows_data membawa row 10 + number format persen ----
+    _rd107 = [r for r in _p107._last_payload.get("rows_data", [])
+              if r[3] == "10.% Growth Deviasi"]
+    check("(v3.17.0) payload rows_data membawa baris '10.% Growth Deviasi' "
+          "BRG A (rentang 3..4 — BRG MIN terfilter keluar rentang) nilai "
+          "mentah persen-point [-50,0] (iid = baris tree)",
+          len(_rd107) == 1
+          and _rd107[0][0] == _gA107b
+          and abs(_rd107[0][4][0] - (-50.0)) < 1e-9
+          and abs(_rd107[0][4][1] - 0.0) < 1e-9,
+          f"got {[(r[1], r[4]) for r in _rd107]}")
+    from src.ui.export_sheets import write_pivot_display_sheet as _wps107
+    from openpyxl import load_workbook as _lw107
+    _exp107 = os.path.join(tempfile.mkdtemp(), "pivot_v3170.xlsx")
+    _n107 = _wps107(_exp107, _p107._last_payload, visible_cols=None)
+    _ws107 = _lw107(_exp107).active
+    _rows107 = [r for r in range(8, _ws107.max_row + 1)
+                if str(_ws107.cell(row=r, column=1).value or "")
+                == "10.% Growth Deviasi"]
+    _fmt_ok107 = any("%" in str(_ws107.cell(row=r, column=c).number_format)
+                     for r in _rows107 for c in range(2, 5))
+    check("(v3.17.0) Export pivot: baris 10.% Growth Deviasi DITULIS + "
+          "number format PERSEN ('+0,0\"%\"...' — literal %, tanda ±)",
+          _n107 > 0 and len(_rows107) >= 1 and _fmt_ok107,
+          f"n={_n107} rows={len(_rows107)} fmt={_fmt_ok107}")
+    _p107.destroy()
+    root.update()
+
+    # ---- (E) penghapusan: Analisa Kronis + strip barang×resto ----------
+    try:
+        import src.ui.analisa_kronis_view  # noqa: F401 — harus GAGAL
+        _kronis_gone107 = False
+    except ImportError:
+        _kronis_gone107 = True
+    check("(v3.17.0) Analisa Kronis DIHAPUS TOTAL: modul view GONE + "
+          "anak tab tinggal 3 + app tanya threshold kronis + tombol "
+          "deep-link & spin pra-pipeline GONE",
+          _kronis_gone107
+          and not hasattr(app.nominal_resto_view, "_kronis_view")
+          and not hasattr(app.nominal_resto_view, "_tab_kronis")
+          and [str(app.nominal_resto_view._sub_nb.tab(_t, "text"))
+               for _t in app.nominal_resto_view._sub_nb.tabs()]
+          == ["Per Resto", "Tanpa Harga", "Saldo Sistem Minus"]
+          and not hasattr(app, "_kronis_threshold")
+          and not hasattr(app, "_pre_kronis_var")
+          and not hasattr(app, "_open_kronis_subtab"),
+          f"module_gone={_kronis_gone107} "
+          f"kv={hasattr(app.nominal_resto_view, '_kronis_view')} "
+          f"thr={hasattr(app, '_kronis_threshold')}")
+    _ism107 = app.in_selisih_view
+    check("(v3.17.0) Strip SELISIH TERBANYAK BARANG×RESTO DIHAPUS: view "
+          "tanpa _barang_zone/_render_barang_scores/_on_barang_row_click "
+          "+ payload worker TANPA key 'barang_scores'",
+          not hasattr(_ism107, "_barang_zone")
+          and not hasattr(_ism107, "_render_barang_scores")
+          and not hasattr(_ism107, "_on_barang_row_click")
+          and "barang_scores" not in (app.in_selisih_view._last_payload
+                                      if hasattr(app.in_selisih_view,
+                                                 "_last_payload") else {}),
+          f"bz={hasattr(_ism107, '_barang_zone')} "
+          f"rbs={hasattr(_ism107, '_render_barang_scores')}")
 
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
