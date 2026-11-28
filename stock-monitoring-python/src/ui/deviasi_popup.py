@@ -22,6 +22,13 @@ Keterangan PO.
   seperti kolom lain; tanpa baris BM → kosong, BM 0 terekam → '-'.
 - Baris Tanggal H diberi latar #fef3c7; tanggal bulan lalu berlabel
   '25•' (urut kronologis 25•…31• lalu 1…31); minus merah per-cell.
+- v3.18.5 — MARK TANGGAL KEJADIAN SHIFT (popup dibuka dari tab 🚨 Radar
+  Anomali — user: "waktu pop up muncul di tab radar anomali kasih
+  tanda dong di bagian tanggal nya yang terpicu nya mungkin warna gitu
+  biar aku langsung lihat oh dari tanggal ini kelihata anomali nya"):
+  mark_tgl (tgl_shift pasangan) → sel Tanggal diberi prefiks '⚑' +
+  latar amber kuat #FDE68A (Tk 8: baris utuh) + keterangan footer —
+  tanggal di mana deviasi mulai naik stabil langsung terlihat.
 - Ctrl+C salin seleksi TSV · klik-kanan salin sel · Ctrl+F cari.
 """
 import tkinter as tk
@@ -114,6 +121,13 @@ COLUMNS = [
 COL_IDS = [c[0] for c in COLUMNS]
 
 _H_ROW_BG = "#fef3c7"   # sama dgn HIGHLIGHT_BG deviasi_view (v3.9.18)
+
+# v3.18.5 — tanda tanggal kejadian shift (popup dari tab 🚨 Radar):
+# glyph + latar amber KUAT di sel Tanggal (beda dari latar baris H
+# #fef3c7 yang lembut — dua penanda tanggal tak tertukar).
+SHIFT_MARK_GLYPH = "⚑"
+_SHIFT_TGL_BG = "#FDE68A"   # amber-200
+_SHIFT_TGL_FG = "#92400E"   # amber-800
 
 _JENIS_SALDO = "2.SALDO AKHIR"
 _JENIS_SO = "1.SO"
@@ -211,7 +225,7 @@ class DeviasiPopup(tk.Toplevel):
     """Popup ringkas: nilai kunci per Tanggal utk 1 pasangan (barang, resto)."""
 
     def __init__(self, parent, title: str, rows: pd.DataFrame,
-                 h_label: str = ""):
+                 h_label: str = "", mark_tgl=None):
         super().__init__(parent)
         self._title = title
         self.title(f"Detail Deviasi — {title}")
@@ -246,6 +260,12 @@ class DeviasiPopup(tk.Toplevel):
 
         self.rows = rows
         self._h_label = h_label
+        # v3.18.5 — label tanggal kejadian shift (⚑ — dari tab 🚨 Radar):
+        # dicocokkan ke label Tanggal terformat (_fmt_tanggal — '23' /
+        # '25•' bulan lalu) di _render.
+        self._mark_label = (_fmt_tanggal(mark_tgl)
+                            if mark_tgl is not None else "")
+        self._shift_cells: list = []   # [(iid, "Tanggal")] — Tk 9 per-cell
         # v3.9.2 (pola): minus merah PER CELL — fallback Tk 8 tag baris
         self._cell_tags = CELL_TAGS_SUPPORTED
         self._neg_cells: list = []
@@ -403,6 +423,11 @@ class DeviasiPopup(tk.Toplevel):
         # v3.9.18 — baris Tanggal H (satu-satunya tag utk baris H:
         # TANPA evenrow — tidak ada konflik opsi background antar tag)
         tree.tag_configure("h_row", background=_H_ROW_BG)
+        # v3.18.5 — sel Tanggal tanggal-kejadian shift (⚑): latar amber
+        # kuat + teks amber-800 (Tk 8: baris utuh — fallback di _render).
+        tree.tag_configure("shift_tgl", background=_SHIFT_TGL_BG,
+                           foreground=_SHIFT_TGL_FG)
+        tree.tag_configure("shift_mark_row", background=_SHIFT_TGL_BG)
 
     # =====================================================================
     # RENDER (sync — tabel kecil ≤ ~62 baris)
@@ -410,6 +435,7 @@ class DeviasiPopup(tk.Toplevel):
     def _render(self):
         self.tree.delete(*self.tree.get_children())
         self._neg_cells = []
+        self._shift_cells = []   # v3.18.5 — sel ⚑ Tanggal kejadian shift
         rows = self.rows
         n = len(rows)
 
@@ -422,6 +448,18 @@ class DeviasiPopup(tk.Toplevel):
             # v3.9.22 — kolom Nomor ikut (posisi mengikuti COLUMNS)
             values = [rec.get(c, "") for c in COL_IDS]
             tags = []
+            # v3.18.5 — MARK ⚑ TANGGAL KEJADIAN SHIFT (popup dari tab 🚨
+            # Radar — user: "kasih tanda dong di bagian tanggal nya yang
+            # terpicu nya mungkin warna gitu"): prefiks glyph + sel
+            # Tanggal diberi latar amber kuat (Tk 9 per-cell; Tk 8:
+            # baris utuh) — tanggal deviasi mulai naik stabil langsung
+            # terlihat di bukti per-tanggal ini.
+            if self._mark_label and str(rec["Tanggal"]) == self._mark_label:
+                values[0] = f"{SHIFT_MARK_GLYPH} {rec['Tanggal']}"
+                if self._cell_tags:
+                    self._shift_cells.append((f"row_{i}", "Tanggal"))
+                else:
+                    tags.append("shift_mark_row")
             if self._h_label and rec["Tanggal"] == self._h_label:
                 tags.append("h_row")       # baris Tanggal H — latar lembut
             else:
@@ -445,6 +483,8 @@ class DeviasiPopup(tk.Toplevel):
         # = clear overlay).
         if self._cell_tags:
             apply_cell_tag(self.tree, "neg_cell", self._neg_cells)
+            # v3.18.5 — sel Tanggal ⚑ tanggal kejadian shift (amber kuat).
+            apply_cell_tag(self.tree, "shift_tgl", self._shift_cells)
 
         # footer status: jumlah baris + legenda '•' bila ada bulan lalu
         has_lalu = any(str(v).endswith("\u2022") for v in rows["Tanggal"])
@@ -453,6 +493,13 @@ class DeviasiPopup(tk.Toplevel):
             status += " \u00b7 \u2022 = bulan lalu"
         if self._h_label:
             status += f" \u00b7 H={self._h_label}"
+        # v3.18.5 — legenda penanda ⚑ (hanya bila tanggal kejadian aktif):
+        # user tahu ⚑ tgl X = tanggal deviasi mulai naik stabil (dari tab
+        # 🚨 Radar Anomali — bukan sekadar dekorasi warna).
+        if self._mark_label:
+            status += (f" \u00b7 \u2691 = tanggal kejadian shift "
+                       f"(tgl {self._mark_label} — deviasi mulai naik "
+                       "stabil; dari tab \U0001F6A8 Radar Anomali)")
         # v3.11.9 — info rata-rata COM/ACR jendela 1..H−1 (baris key H):
         # jumlah hari valid (SO tercatat kedua ujung — mirror com_analisa).
         _attrs = getattr(rows, "attrs", None) or {}
@@ -1367,11 +1414,18 @@ def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
                        h: int | None = None,
                        in_detail: pd.DataFrame | None = None,
                        saldo_sistem_map: dict | None = None,
-                       saldo_sistem_mode: str = "4217"):
+                       saldo_sistem_mode: str = "4217",
+                       mark_tgl=None):
     """Buka popup ringkas utk pasangan (barang, resto).
 
     Dipanggil dari DeviasiView._on_double_click (tab Deviasi GR & PCS,
     termasuk window clone ⛶ — event.widget-agnostic).
+
+    v3.18.5 — mark_tgl: tanggal KEJADIAN shift pasangan (dari tab 🚨
+    Radar Anomali — rec['tgl_shift']): sel Tanggal baris itu diberi ⚑ +
+    latar amber kuat + keterangan footer (user: "kasih tanda dong di
+    bagian tanggal nya yang terpicu nya"). None/pemanggil lama → tanpa
+    penanda (perilaku tab 📦/🧩 tak berubah).
 
     v3.11 — in_detail: rincian IN per sumber (42.05/32.24/99.01) dari
     view — sumber kolom "Keterangan PO" (potensi PO belum dibuat);
@@ -1393,5 +1447,6 @@ def show_deviasi_popup(parent, data: pd.DataFrame, nama_barang: str,
                             saldo_sistem_map=saldo_sistem_map,
                             saldo_sistem_mode=saldo_sistem_mode)
     h_label = _fmt_tanggal(h) if h is not None else ""
-    popup = DeviasiPopup(parent, title, rows, h_label=h_label)
+    popup = DeviasiPopup(parent, title, rows, h_label=h_label,
+                         mark_tgl=mark_tgl)
     return popup

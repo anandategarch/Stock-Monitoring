@@ -31,36 +31,6 @@ nya kalau di filter helper ini"* — combobox **CEK** di kartu Filter tab
   `Shift Deviasi` → hanya baris itu (teks sel utuh) · B3 label tanpa
   kecocokan → 0 baris + status jujur · B4 capture/restore/_reset_cek.
 
-## v3.18.6 — FILTER KATEGORI RADAR ANOMALI TER-LINK 📦/🧩
-
-User: *"di tab radar anomali juga bisa filter kategori ya misal Deviasi
-atau packaging sama kaya di tab deviasi gr dan pcs dan kateogri nya
-ngelink ke deviasi gr dan pcs misal di situ buka apa maka di radar
-anomali juga bakal memfilter kateogri itu"* — kategori kini **dibagikan
-2-arah** tab 📦 Deviasi GR · 🧩 PCS · 🚨 Radar Anomali.
-
-- **SharedKategori** (pola SharedTanggalH): ganti kategori di salah
-  satu tempat → ketiganya mengikuti (combobox + seleksi + refresh);
-  `set()` hanya memanggil listener saat nilai berubah (anti-loop).
-- **Radar**: combobox KATEGORI lintas satuan (GR+PCS satu tabel) —
-  `Semua` + gabungan default `Deviasi (COM + Packaging)` + `(Tanpa
-  Kategori)` + nilai master; peta `_pair_kategori_map` per pasangan
-  (first non-blank — worker thread); filter mask kanonik
-  `kategori_match_mask` (semantik PERSIS tab 📦/🧩); tooltip baris
-  menambah `Kategori: X`; load_data ikut seleksi shared.
-- **Deviasi GR/PCS**: `_on_kategori_changed` push ke shared;
-  `_on_shared_kategori_changed` listener (pola listener H: guard
-  `_load_depth` — sinkron state tanpa render ganda di tengah load);
-  `_reset_kategori` broadcast default data-driven (guard dipasang di
-  call-site load_data — jalur ✕ Reset/kategori manual tetap me-refresh
-  saudara).
-- Tests §114 (7 cek): A1 SharedKategori set/no-op/None→Semua · A2
-  `_pair_kategori_map` first-non-blank · B1 combobox radar + nilai · B2
-  link 📦/🧩→radar (2→1 baris pasangan kategori itu) · B3 link balik
-  radar→📦/🧩 (state ikut, tanpa loop) · C1 jalur user lengkap (ganti di
-  tab Deviasi → radar memfilter) · C2 wiring app (ketiga view satu
-  state).
-
 ## v3.18.3 — KOLOM TAB 🚨 RADAR DISEDERHANAKAN + DEV H + PENYEBAB
 
 User: *"bisa gak jadi lebih sederhana aja tampilan nya ... Tampilan

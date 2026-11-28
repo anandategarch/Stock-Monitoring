@@ -834,6 +834,12 @@ class AnomaliRadarView(tk.Frame):
         if rec is None:
             return
         from .deviasi_popup import show_deviasi_popup
+        # v3.18.5 — mark_tgl = TANGGAL KEJADIAN (tgl_shift): popup Detail
+        # Deviasi menandai tanggal itu dgn ⚑ + latar amber kuat (user:
+        # "waktu pop up muncul di tab radar anomali kasih tanda dong di
+        # bagian tanggal nya yang terpicu nya mungkin warna gitu biar aku
+        # langsung lihat oh dari tanggal ini kelihata anomali nya").
+        _tgl_shift = rec.get("tgl_shift")
         show_deviasi_popup(
             self.winfo_toplevel(), self.data,
             nama_barang=str(rec.get("barang")),
@@ -844,6 +850,8 @@ class AnomaliRadarView(tk.Frame):
             in_detail=self.in_detail,
             saldo_sistem_map=self.saldo_sistem_map,
             saldo_sistem_mode=self.saldo_sistem_mode,
+            mark_tgl=(int(_tgl_shift)
+                      if _tgl_shift is not None else None),
         )
 
     def _on_copy(self, _event=None):

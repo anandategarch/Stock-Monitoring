@@ -25232,6 +25232,90 @@ def main():
           and _out112d.iloc[0]["barang"] == "CUP 16 - BAKSO",
           f"slope={_ts_cup16:.2f} n={len(_out112d)}")
 
+    # ---- (H) v3.18.5 — ⚑ TANGGAL KEJADIAN DI POPUP (dari Radar) -------
+    print()
+    print("== §113. (v3.18.5) POPUP — ⚑ TANDA TANGGAL KEJADIAN SHIFT ==")
+
+    # B1 — mark_tgl di popup data lengkap (frame §109: baris SO/SALDO/ACR
+    # per tanggal — sumbu Tanggal popup utuh 2..25, termasuk baris H=25).
+    _pop113 = show_deviasi_popup(root, _df109, "CUP 14 (V.20)", "BJMHAS",
+                                 satuan="PCS", h=25, mark_tgl=23)
+    root.update()
+    _kids113 = list(_pop113.tree.get_children(""))
+    _tgl113 = {k: _pop113.tree.set(k, "Tanggal") for k in _kids113}
+    check("(v3.18.5) §113-B1: mark_tgl=23 → sel Tanggal baris tgl 23 "
+          "berprefiks '⚑' (glyph) + latar amber kuat tag shift_tgl "
+          "(#FDE68A — beda dari latar baris H #fef3c7) + footer "
+          "menjelaskan '⚑ = tanggal kejadian shift (tgl 23'",
+          any(v.startswith("\u2691 23") for v in _tgl113.values())
+          and "23" in [v.replace("\u2691 ", "")
+                      for v in _tgl113.values()]
+          and str(_pop113.tree.tag_configure("shift_tgl", "background"))
+          == "#FDE68A"
+          and "tanggal kejadian shift" in _pop113.status_var.get()
+          and "tgl 23" in _pop113.status_var.get(),
+          f"tgl={_tgl113} status={_pop113.status_var.get()!r}")
+    if CELL_TAGS_SUPPORTED:
+        _mk_iid113 = next(k for k, v in _tgl113.items()
+                          if v.startswith("\u2691"))
+        check("(v3.18.5) §113-B1b: sel Tanggal tgl 23 ber-tag CELL "
+              "shift_tgl (Tk 9 — apply_cell_tag); H tetap h_row",
+              root.tk.call(str(_pop113.tree), "tag", "cell", "has",
+                           "shift_tgl", (_mk_iid113, "Tanggal")) == 1
+              and any("h_row" in _pop113.tree.item(k, "tags")
+                      for k in _kids113
+                      if _pop113.tree.set(k, "Tanggal") == "25"),
+              f"tgl={_tgl113}")
+    _pop113.destroy()
+    root.update()
+    # tanpa mark_tgl (pemanggil tab 📦/🧩) — perilaku lama: tak ada ⚑.
+    _pop113b = show_deviasi_popup(root, _df109, "CUP 14 (V.20)", "BJMHAS",
+                                   satuan="PCS", h=25)
+    root.update()
+    _tgl113b = [_pop113b.tree.set(k, "Tanggal")
+                for k in _pop113b.tree.get_children("")]
+    check("(v3.18.5) §113-B2: tanpa mark_tgl (tab 📦/🧩 — default None) → "
+          "TANPA ⚑ (perilaku lama utuh) + footer tanpa legenda shift",
+          all(not v.startswith("\u2691") for v in _tgl113b)
+          and "tanggal kejadian" not in _pop113b.status_var.get(),
+          f"tgl={_tgl113b}")
+    _pop113b.destroy()
+    root.update()
+    # radar double-click meneruskan tgl_shift baris → mark_tgl.
+    import src.ui.deviasi_popup as _dp113
+    _cap113: dict = {}
+    _orig_sp113 = _dp113.show_deviasi_popup
+
+    def _spy113(*a, **kw):
+        _cap113.update(kw)
+
+    _dp113.show_deviasi_popup = _spy113
+    _top113 = tk.Toplevel(root)
+    _rv113 = _ARV108(_top113, go_to_proses=lambda: None,
+                     go_to_deviasi=lambda *a: None, h_state=None)
+    _rv113.pack(fill="both", expand=True)
+    root.update()
+    _rv113.load_data(_df108)
+    wait_view(root, _rv113)
+    _kid113 = _rv113.tree.get_children("")[0]
+
+    class _Ev113:
+        pass
+
+    _ev113 = _Ev113()
+    _ev113.widget = _rv113.tree
+    _bb113 = _rv113.tree.bbox(_kid113)
+    _ev113.y = _bb113[1] + _bb113[3] // 2
+    _rv113._on_double_click(_ev113)
+    _dp113.show_deviasi_popup = _orig_sp113
+    check("(v3.18.5) §113-C1: radar double-click meneruskan mark_tgl = "
+          "tgl_shift baris (23) ke popup — user langsung lihat 'dari "
+          "tanggal ini anomali mulai terlihat'",
+          _cap113.get("mark_tgl") == 23,
+          f"captured={_cap113}")
+    _top113.destroy()
+    root.update()
+
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()
