@@ -2,7 +2,7 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.17.1** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.17.2** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 
@@ -111,6 +111,17 @@ bash run_tests.sh          # test_ui_redesign.py + test_mock.py (auto-Xvfb)
 ```
 
 GitHub Actions (`.github/workflows/release-windows.yml`) menjalankan gerbang tes pada tiap push/PR: ruff (baseline ≤ 201) · py_compile · validasi config.json · suite UI penuh · pipeline mock · smoke 2 entry. Rilis EXE (tag `v*`) hanya dibuat bila gerbang hijau.
+
+Benchmark performa (P1, v3.17.2) — `benchmarks/` (dataset sintetis, tanpa data bisnis):
+
+```bash
+python benchmarks/synth_data.py --out /tmp/bench --restos 16 --barang 20   # buat dataset
+python benchmarks/benchmark_pipeline.py --data-dir /tmp/bench --config /tmp/bench/config.json --tag 100k
+python benchmarks/benchmark_views.py --restos 18 --barang 20 --tag 100k      # butuh Xvfb
+python benchmarks/benchmark_report.py                                        # rapikan hasil → markdown
+```
+
+Mengukur: pipeline per-tahap (cold/warm/refresh cache), peak RAM (psutil), pivot/deviasi/nominal compute + render + sort + filter + export. `psutil` hanya tooling benchmark — bukan dependency runtime.
 
 ## Build EXE (Windows)
 

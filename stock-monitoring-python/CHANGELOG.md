@@ -3,6 +3,65 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.17.2 — CI REPAIR + SISTEM BENCHMARK PIPELINE & VIEWS (P0/P1)
+
+User: *"push ke git hub bertahap ya ke repo stock monitoring dan validasi
+ya setiap prompt agent ai berikut"* (master task: perbaiki Ruff & pulihkan
+CI, rilis ulang EXE, benchmark pipeline + peak RAM, lalu optimasi
+berbasis bukti).
+
+### 1. CI repair — ruff 202 → 199 (commit bd5dd03; run GHA 46102794929)
+- **Diagnosis**: run 46096669135 (v3.17.1) FAILURE — ruff **202 > baseline
+  201**. Diff rule-level antar v3.16.1 (=199, run 45291781533 hijau),
+  v3.17.0 (=202, run 45980151062 gagal), v3.17.1 (=202): **3 temuan NET
+  baru** era v3.17.x, semua kosmetik — (a) `pivot_view.py` I001
+  (alignment 10→2 spasi komentar `import numpy`), (b) `test_ui_redesign.py`
+  §107 I001 (urutan + separator grup import lokal openpyxl/src), (c)
+  `test_ui_redesign.py:1018` RUF100 (directive `# noqa: F401` pada
+  import-probe `pareto_view` terbukti tak pernah terpakai → dihapus).
+- **Perbaikan minimal**: baseline TIDAK dinaikkan (tetap 201), tanpa rule
+  di-disable, tanpa noqa baru. Ruff = **199** (paritas v3.16.1).
+- **Gerbang hijau penuh** (run 46102794929): ruff ≤201 ✓ · py_compile ✓ ·
+  config.json ✓ · suite UI ✓ · mock ✓ · smoke 2 entry ✓.
+
+### 2. Sistem benchmark P1 — folder `benchmarks/` (BARU)
+- **`synth_data.py`** — generator dataset SINTETIS deterministik yang
+  meniru skema export Accurate (16 folder + REKAP MENTAH per resto,
+  22.05/32.24 berjalan+lalu/42.15/42.05/42.17/41.09/konversi/DBS/PO/9901
+  + config.json) — nama barang/resto generik (`BRG SYN 0001 (V.20)`,
+  `RS01A`), TANPA data bisnis operasional; + `make_big_append1()`
+  frame append1-like in-memory (skala baris parametrik).
+- **`benchmark_pipeline.py`** — pipeline end-to-end per-TAHAP (7 tahap
+  mirror urutan `run_pipeline`: config → append1 → rincian PO → maps →
+  audit penuh → audit bulan-ini → harga 41.09); skenario cache
+  cold/warm/refresh-one/refresh-all dalam satu proses (pipeline PENUH
+  dijalankan ulang — hit/miss dari `read_cache_stats`, bukan replay);
+  **psutil RSS level-OS** (sampler 50ms → peak; snapshot per tahap);
+  fingerprint kesetaraan hasil antar skenario (cache tidak boleh
+  mengubah hasil analisis); output JSON `benchmarks/results/`.
+- **`benchmark_views.py`** — pivot compute (resto/tanggal) + render +
+  filter 25% + reset + export Excel; deviasi GR compute+render; sort
+  kolom (`sort_tree_by_column`); nominal headless
+  (`nominal_common`); event-loop maxgap (`root.update()` — proxy
+  responsivitas UI). Popup detail & jendela fullscreen tabel tidak
+  diukur (butuh interaksi seleksi baris — keterbatasan dijelaskan di
+  AUDIT_PERFORMANCE_REPORT.md).
+- **`benchmark_report.py`** — rapikan JSON hasil → tabel markdown.
+- `psutil` = tooling benchmark SAJA — `requirements.txt` TIDAK berubah
+  (bukan dependency runtime app). Ruff folder benchmarks = 0 temuan
+  tambahan (total repo tetap 199).
+
+### 3. Verifikasi
+- ruff 0.17.1 = **199** (≤ 201) · py_compile semua ✓ · config.json ✓ ·
+  suite UI 1704 PASS / 0 FAIL (paritas baseline v3.17.1) · mock ALL
+  PASS · smoke 2 entry exit-124 tanpa crash.log.
+- Hasil benchmark awal (dataset sintetis ~100k baris Append1):
+  pipeline cold 1,94s → warm 1,36s; cache 58 file (58 hit / 0 miss
+  warm); peak RSS ~185MB; fingerprint cold==warm. Hasil skala penuh
+  (100k/300k/600k/900k) + laporan AUDIT_PERFORMANCE_REPORT.md menyusul
+  pada commit tersendiri.
+
+
 ## v3.17.1 — GROWTH DEVIASI RUMUS ABSOLUT PENUH + HEATMAP PER-SEL
 
 User: *"Kalau deviasinya di-absolutekan dulu baru dihitung growth-nya,

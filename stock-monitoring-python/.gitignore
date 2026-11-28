@@ -33,3 +33,7 @@ runx.sh
 # v3.15 — log file rotasi + crash.log (diagnostics.py, app_base_dir())
 logs/
 crash.log
+
+# v3.17.2 — hasil benchmark besar (JSON hasil ulang digenerate lokal;
+# laporan ringkas dibawa via AUDIT_PERFORMANCE_REPORT.md & hasil final terpilih)
+benchmarks/results/
