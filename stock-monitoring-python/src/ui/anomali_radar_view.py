@@ -199,8 +199,10 @@ class AnomaliRadarView(tk.Frame):
                      "baseline pasangan — dan apakah dipicu kiriman IN? "
                      "Naik 1 hari lalu besoknya turun = spike, tidak "
                      "dianalisa (≥2 hari di level baru, Rasio ≥ "
-                     f"×{RATIO_CUT:g}). Hover baris = analisa lengkap; "
-                     "double-click = bukti per tanggal.")).pack(
+                     f"×{RATIO_CUT:g}). Naik BERTAHAP sepanjang bulat "
+                     "(ramp) juga bukan shift — hanya yang MELONJAK lalu "
+                     "menempel di level baru. Hover baris = analisa "
+                     "lengkap; double-click = bukti per tanggal.")).pack(
             anchor="w", pady=(2, 0))
         # toolbar ⤢ TERPISAH dari target expander (button tetap terlihat)
         toolbar = tk.Frame(self.content, bg=C_BG)
@@ -278,6 +280,8 @@ class AnomaliRadarView(tk.Frame):
         legend = LegendRow(self.content, [
             (("Shift Deviasi · |dev| ≥ ×2 baseline (median dua-jendela "
               "per pasangan) & ≥2 hari di level baru"), "#c026d3"),
+            (("Naik BERTAHAP (ramp) ≠ shift — jendela level masih "
+              "memanjat ≥35% × Δ → dilewati (v3.18.4)"), "#475569"),
             ("Deviasi = nilai tanggal H (terkini) — BUKAN akumulasi",
              "#475569"),
             (("Dipicu IN · Δ ≈ kiriman sistem ±1 hari — cut-off input? "

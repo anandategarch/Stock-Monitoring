@@ -25156,6 +25156,82 @@ def main():
     _top111.destroy()
     root.update()
 
+    # ---- (G) v3.18.4 — GATE STABILITAS LEVEL (ramp bertahap ≠ shift) ----
+    print()
+    print("== §112. (v3.18.4) ENGINE — NAIK BERTAHAP (RAMP) BUKAN SHIFT ==")
+
+    # A1 — kasus nyata user (gambar popup CUP 16 - BAKSO · MLGPAR PCS):
+    # deviasi naik BERTAHAP 55 → 103 sepanjang tgl 1-25, TANPA melonjak
+    # lalu konstan — user: "kenapa jadi terdeteksi shift deviasi? padahal
+    # menurutku itu wajar karna naik nya deviasi atau growth nya deviasi
+    # naik bertahap dan bukan langsung melonjak konsisten gitu dari
+    # tanggal 1 sampai 25 nya".
+    _cup16 = {1: -55, 2: -41, 3: -1, 4: -1, 5: -6, 6: -5, 7: -43, 8: -10,
+              9: -13, 10: -17, 11: -17, 12: -24, 13: -29, 14: -26,
+              15: -28, 16: -58, 17: -66, 18: -74, 19: -78, 20: -66,
+              21: -92, 22: -95, 23: -102, 24: -103, 25: -98}
+    _rows112 = [_r108(t, v, barang="CUP 16 - BAKSO", resto="MLGPAR")
+                for t, v in _cup16.items()]
+    _df112 = pd.DataFrame(_rows112)
+    _out112 = _det108(_df112, 25)
+    check("(v3.18.4) §112-A1: ramp bertahap kasus user (CUP 16 - BAKSO · "
+          "MLGPAR PCS — naik 55 → 103 bertahap tgl 1-25) → 0 baris "
+          "(jendela level masih memanjat: slope Theil-Sen × span 41 ≥ "
+          "35% × Δ 25,0 → ramp, BUKAN pergeseran level)",
+          len(_out112) == 0,
+          f"got {len(_out112)}: "
+          f"{_out112.to_dict('records') if len(_out112) else ''}")
+
+    # A2 — ramp murni (linear) + ramp-lalu-stabil juga ditolak (naik
+    # bertahap sampai level, tanpa lompatan): hanya MELONJAK-lalu-TEMPEL
+    # yang shift.
+    _ramp112 = [_r108(t, -(10 + 8 * (t - 1)), barang="RAMP MURNI",
+                      resto="R112") for t in range(1, 26)]
+    _rampflat112 = ([_r108(t, -10.0, barang="RAMP STABIL", resto="R112")
+                     for t in range(1, 11)]
+                    + [_r108(t, -v, barang="RAMP STABIL", resto="R112")
+                       for t, v in ((11, 20.0), (12, 30.0), (13, 40.0),
+                                    (14, 50.0))]
+                    + [_r108(t, -60.0, barang="RAMP STABIL", resto="R112")
+                       for t in range(15, 18)])
+    _out112b = _det108(pd.DataFrame(_ramp112 + _rampflat112), 17)
+    check("(v3.18.4) §112-A2: ramp murni (naik 8/hari konstan) & "
+          "ramp-lalu-stabil (10 → 20..50 → 60 bertahap tanpa lompatan) → "
+          "0 baris — 'bertahap' bukan 'melonjak konsisten'",
+          len(_out112b) == 0,
+          f"got {len(_out112b)}")
+
+    # A3 — shift sejati tetap lolos: BJMHAS (panjatan jendela level 97 =
+    # 8,7% dari Δ 1.119 << ½Δ) + pure step + noise besar.
+    _rng112 = __import__("random").Random(11)
+    _noisy112 = ([_r108(t, -(224 + _rng112.gauss(0, 30)), barang="NOISY",
+                         resto="R112") for t in range(1, 21)]
+                 + [_r108(t, -(1343 + _rng112.gauss(0, 50)), barang="NOISY",
+                           resto="R112") for t in range(21, 26)])
+    _out112c = _det108(pd.DataFrame(_noisy112), 25)
+    check("(v3.18.4) §112-A3: shift sejati + noise tetap terdeteksi — "
+          "melonjak lalu MENEMPEL (jendela level flat; slope ~0) — "
+          "BJMHAS tgl 23 (§108-A1) + NOISY 1 baris tgl 21",
+          len(_out112c) == 1
+          and int(_out112c.iloc[0]["tgl_shift"]) == 21,
+          f"got {len(_out112c)}")
+
+    # A4 — helper slope Theil-Sen + bypass: kwargs stab_frac custom
+    # (non-default → memo bypass): stab_frac=99 mematikan gate → ramp
+    # CUP 16 kembali terdeteksi (bukti gate-lah yang menolak, bukan
+    # guard lain).
+    from src.ui.anomali_shift import _theil_sen_slope as _ts112
+    _ts_cup16 = _ts112(list(range(17, 26)),
+                       [66, 74, 78, 66, 92, 95, 102, 103, 98])
+    _out112d = _det108(_df112, 25, stab_frac=99.0)
+    check("(v3.18.4) §112-A4: _theil_sen_slope jendela level CUP 16 ≈ "
+          "+5,1/hari (masih memanjat) & kwargs stab_frac non-default "
+          "(memo bypass) → gate mati → CUP 16 TERDETEKSI (isolasi sebab)",
+          4.5 < _ts_cup16 < 6.0
+          and len(_out112d) == 1
+          and _out112d.iloc[0]["barang"] == "CUP 16 - BAKSO",
+          f"slope={_ts_cup16:.2f} n={len(_out112d)}")
+
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()

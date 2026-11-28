@@ -3,6 +3,64 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.18.7 — FILTER HELPER CEK (LABEL RINGKASAN TANPA ANGKA)
+
+User: *"di kolom Cek tab deviasi gr dan pcs itu seperti nya perlu helper
+filter. Buat filter seperti Akfit/non yaa jadi nama filter nya CEK dan
+isi nya ringkasan aja misal: ACR TO BOM / COM RENDAH / COM TINGGI /
+BEDA TANGGAL / SHIFT DEVIASI dan lain lain jadi gak perlu sebut angka
+nya kalau di filter helper ini"* — combobox **CEK** di kartu Filter tab
+📦 Deviasi GR & 🧩 PCS (pola AKTIF/NON), label ringkasan tanpa angka.
+
+- **Combobox CEK** (samping AKTIF/NON): `Semua` + **20 label
+  ringkasan** — 13 label anomali kanonik prioritas (Promix 04 … BOM 0)
+  + segmen analisa yang bisa muncul di teks CEK (COM Tinggi · COM
+  Rendah · Potensi PO belum dibuat · Beda dari Resto Lain ·
+  Peningkatan/Penurunan Qty · Berubah Arah).
+- **Kecocokan prefix segmen** `_cek_label_hit`: teks CEK dipecah
+  segmen ` · ` — baris tampil bila salah satu segmen SAMA label atau
+  ber-prefiks `label + " (" / " +" / " -"` (detail angka TAK
+  disyaratkan): `COM Tinggi (+25)` cocok `COM Tinggi`; `Shift
+  Deviasi · Level ×6,0 tgl 23 (…)` cocok `Shift Deviasi`; `Turun
+  Drastis (SO Tidak Diinput)` ikut label lebar `Turun Drastis`.
+- 0-baris → status jujur `Tidak ada baris ber-label CEK 'X'` (pola
+  status AKTIF/NON); capture/restore `filter_state.cek` lintas sesi;
+  reset di load_data + ✕ Reset Filter (pola AKTIF).
+- Tests §115 (6 cek): A1 20 label + contoh user tanpa angka · A2
+  `_cek_label_hit` prefix/kebalikan · B1 combobox + Semua · B2 pilih
+  `Shift Deviasi` → hanya baris itu (teks sel utuh) · B3 label tanpa
+  kecocokan → 0 baris + status jujur · B4 capture/restore/_reset_cek.
+
+## v3.18.6 — FILTER KATEGORI RADAR ANOMALI TER-LINK 📦/🧩
+
+User: *"di tab radar anomali juga bisa filter kategori ya misal Deviasi
+atau packaging sama kaya di tab deviasi gr dan pcs dan kateogri nya
+ngelink ke deviasi gr dan pcs misal di situ buka apa maka di radar
+anomali juga bakal memfilter kateogri itu"* — kategori kini **dibagikan
+2-arah** tab 📦 Deviasi GR · 🧩 PCS · 🚨 Radar Anomali.
+
+- **SharedKategori** (pola SharedTanggalH): ganti kategori di salah
+  satu tempat → ketiganya mengikuti (combobox + seleksi + refresh);
+  `set()` hanya memanggil listener saat nilai berubah (anti-loop).
+- **Radar**: combobox KATEGORI lintas satuan (GR+PCS satu tabel) —
+  `Semua` + gabungan default `Deviasi (COM + Packaging)` + `(Tanpa
+  Kategori)` + nilai master; peta `_pair_kategori_map` per pasangan
+  (first non-blank — worker thread); filter mask kanonik
+  `kategori_match_mask` (semantik PERSIS tab 📦/🧩); tooltip baris
+  menambah `Kategori: X`; load_data ikut seleksi shared.
+- **Deviasi GR/PCS**: `_on_kategori_changed` push ke shared;
+  `_on_shared_kategori_changed` listener (pola listener H: guard
+  `_load_depth` — sinkron state tanpa render ganda di tengah load);
+  `_reset_kategori` broadcast default data-driven (guard dipasang di
+  call-site load_data — jalur ✕ Reset/kategori manual tetap me-refresh
+  saudara).
+- Tests §114 (7 cek): A1 SharedKategori set/no-op/None→Semua · A2
+  `_pair_kategori_map` first-non-blank · B1 combobox radar + nilai · B2
+  link 📦/🧩→radar (2→1 baris pasangan kategori itu) · B3 link balik
+  radar→📦/🧩 (state ikut, tanpa loop) · C1 jalur user lengkap (ganti di
+  tab Deviasi → radar memfilter) · C2 wiring app (ketiga view satu
+  state).
+
 ## v3.18.3 — KOLOM TAB 🚨 RADAR DISEDERHANAKAN + DEV H + PENYEBAB
 
 User: *"bisa gak jadi lebih sederhana aja tampilan nya ... Tampilan

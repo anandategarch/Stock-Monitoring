@@ -28,6 +28,17 @@ satuan) atas seri |3.DEVIASI| harian 1..H:
   nol; pasangan ber-baseline nol punya label CEK lain yang lebih
   tepat) · rekaman terakhir ≥ H−STALE_GAP (pasangan yang berhenti
   direkam jauh sebelum H = alarm basi).
+- v3.18.4 — GATE STABILITAS LEVEL (kasus nyata user CUP 16 - BAKSO ·
+  MLGPAR PCS: deviasi naik BERTAHAP 55 → 103 sepanjang tgl 1-25 —
+  user: "padahal menurutku itu wajar karna naik nya deviasi atau
+  growth nya deviasi naik bertahap dan bukan langsung melonjak
+  konsisten"): slope Theil-Sen jendela level × span tanggal (total
+  panjatan di DALAM jendela level) ≥ STAB_FRAC (0,35) × Δ → seri
+  MASIH MEMANJAT pasca-split = ramp bertahap (juga
+  ramp-lalu-stabil), BUKAN pergeseran level → skip. Shift sejati =
+  melonjak LALU menempel (BJMHAS: 224 → 1.293/1.343/1.390 —
+  panjatan jendela 97 dari Δ 1.119 = 8,7%);
+  CUP 16: panjatan 41 dari Δ 71,5 = 57% → ditolak.
 - z = (level − median) ÷ 1,4826×MAD — INFO keparahan, bukan gerbang
   (MAD 0 → z tak hingga, baseline datar sempurna).
 - v3.18.3 — dev_h + dev_h_tgl: |deviasi| DI TANGGAL H (nilai terkini
@@ -66,6 +77,11 @@ LEVEL_FLOOR = 1.0     # median baseline < 1.0 → rasio tak bermakna → skip
 STALE_GAP = 3         # rekaman terakhir < H−3 → pasangan basi → skip
 IN_TOL = 0.35         # |IN − Δ| ≤ 35% × |Δ| → "cocok kiriman"
 IN_WINDOW = (-1, 0, 1)  # tanggal IN/BM dilihat shift−1..shift+1 (cut-off 1 hari)
+# v3.18.4 — STABILITAS LEVEL: slope Theil-Sen jendela level × span
+# tanggal < STAB_FRAC × Δ — naik BERTAHAP (ramp) BUKAN pergeseran level.
+# 0,35: ramp-lalu-stabil pun ditolak (panjatan 40% Δ — kasus uji) dgn
+# margin lega dua sisi (shift sejati BJMHAS panjatan 8,7% Δ).
+STAB_FRAC = 0.35
 
 RESULT_COLUMNS = [
     "barang", "resto", "satuan",           # RAW — display & popup
@@ -95,13 +111,30 @@ def _remove_sorted(s: list, v: float) -> None:
         s.pop(i)
 
 
+def _theil_sen_slope(tgls: list, vals: list) -> float:
+    """Slope regresi Theil-Sen robust (median kemiringan pasangan titik)
+    atas (tanggal, nilai) — v3.18.4 gate stabilitas level.
+
+    Robust terhadap outlier (median semua slope pasangan — spike 1 hari
+    tak menggeser slope); O(n²) pasangan, n ≤ 31 → murah."""
+    slopes: list = []
+    for a in range(len(tgls)):
+        ta, va = tgls[a], vals[a]
+        for b in range(a + 1, len(tgls)):
+            dt = tgls[b] - ta
+            if dt > 0:
+                slopes.append((vals[b] - va) / dt)
+    return float(np.median(slopes)) if slopes else 0.0
+
+
 def detect_shift_anomalies(df: pd.DataFrame | None, h: int | None,
                             *, min_baseline: int = MIN_BASELINE,
                             min_durasi: int = MIN_DURASI,
                             ratio_cut: float = RATIO_CUT,
                             level_floor: float = LEVEL_FLOOR,
                             stale_gap: int = STALE_GAP,
-                            in_tol: float = IN_TOL) -> pd.DataFrame:
+                            in_tol: float = IN_TOL,
+                            stab_frac: float = STAB_FRAC) -> pd.DataFrame:
     """Deteksi pergeseran level |3.DEVIASI| per pasangan × satuan 1..H.
 
     Input: frame long append1 (kolom Nama Barang / NAMA RESTO / Tanggal
@@ -120,7 +153,8 @@ def detect_shift_anomalies(df: pd.DataFrame | None, h: int | None,
     _hk = None if h is None else int(h)
     _default = (min_baseline == MIN_BASELINE and min_durasi == MIN_DURASI
                 and ratio_cut == RATIO_CUT and level_floor == LEVEL_FLOOR
-                and stale_gap == STALE_GAP and in_tol == IN_TOL)
+                and stale_gap == STALE_GAP and in_tol == IN_TOL
+                and stab_frac == STAB_FRAC)
     if _default:
         _m = _MEMO.get("e")
         if _m is not None and _m[0] is df and _m[1] == _hk:
@@ -128,7 +162,7 @@ def detect_shift_anomalies(df: pd.DataFrame | None, h: int | None,
     out = _detect_impl(df, h, min_baseline=min_baseline,
                        min_durasi=min_durasi, ratio_cut=ratio_cut,
                        level_floor=level_floor, stale_gap=stale_gap,
-                       in_tol=in_tol)
+                       in_tol=in_tol, stab_frac=stab_frac)
     if _default:
         _MEMO["e"] = (df, _hk, out)
     return out
@@ -141,7 +175,8 @@ _MEMO: dict = {}
 def _detect_impl(df: pd.DataFrame | None, h: int | None,
                   *, min_baseline: int, min_durasi: int,
                   ratio_cut: float, level_floor: float,
-                  stale_gap: int, in_tol: float) -> pd.DataFrame:
+                  stale_gap: int, in_tol: float,
+                  stab_frac: float) -> pd.DataFrame:
     """Implementasi deteksi (pure) — panggil lewat detect_shift_anomalies."""
     empty = pd.DataFrame(columns=RESULT_COLUMNS)
     if df is None or getattr(df, "empty", True):
@@ -284,6 +319,28 @@ def _detect_impl(df: pd.DataFrame | None, h: int | None,
         durasi = sum(1 for v in vals[i:] if v >= _thr_lvl)
         if durasi < min_dur_n:
             continue
+
+        # v3.18.4 — GATE STABILITAS LEVEL (kasus nyata user CUP 16 - BAKSO
+        # · MLGPAR PCS: deviasi naik BERTAHAP sepanjang bulan — 55, 41, 1
+        # … 28, lalu memanjat 58 → 103 tgl 16-25 TANPA pernah melonjak
+        # lalu KONSTAN; user: "kenapa jadi terdeteksi shift deviasi?
+        # padahal menurutku itu wajar karna naik nya deviasi atau growth
+        # nya deviasi naik bertahap dan bukan langsung melonjak
+        # konsisten"). Pergeseran level sejati = MELONJAK lalu BERTEMPEL
+        # di level baru (BJMHAS: 224 stabil → 1.293/1.343/1.390 flat);
+        # ramp bertahap = jendela level MASIH MEMANJAT. Ukur: slope
+        # Theil-Sen (robust) atas seri jendela level × span tanggal =
+        # total panjatan DI DALAM jendela; ramp bila panjatan itu ≥
+        # STAB_FRAC × Δ (naik ≥35% lompatan LAGI sesudah split → level
+        # belum menempel, seri masih bergerak — ramp murni, ramp-lalu-
+        # stabil, semua kelas 'bertahap' ditolak). Slope NEGATIF (loncat
+        # lalu melandai) tetap shift — yang ditolak hanya naik terus.
+        _lw = len(vals) - i
+        if _lw >= 2 and delta > 0:
+            _slope = _theil_sen_slope(tgls[i:], vals[i:])
+            _climb = _slope * (tgls[-1] - tgls[i])
+            if _climb >= stab_frac * delta:
+                continue
 
         # --- hint kiriman: IN & BM di sekitar tgl shift ---------------
         tgl_shift = int(tgls[i])
