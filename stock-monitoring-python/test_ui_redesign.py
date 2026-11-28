@@ -24813,6 +24813,93 @@ def main():
           and callable(getattr(app, "_update_radar_badge", None)),
           f"idx={app.notebook.index(app.tab_anomali_radar)}")
 
+    # ---- (D) v3.18.1 — LABEL CEK "Shift Deviasi" TAB DEVIASI GR/PCS ----
+    print()
+    print("== §109. (v3.18.1) LABEL CEK 'Shift Deviasi' TAB DEVIASI ==")
+    # seri kasus user + SO konstan (tak menyalak label per-hari lain) +
+    # 9.ACR besar (ACR to BOM/BOM 0 mati) → CEK murni label shift.
+    def _r109(t, jenis, nilai):
+        return {"Nama Barang": "CUP 14 (V.20)", "NAMA RESTO": "BJMHAS",
+                "Tanggal": t, "JENIS": jenis, "NILAI": float(nilai),
+                "SATUAN": "PCS", "AKTIF/NON": "AKTIF",
+                "KATEGORI": "COM", "SOURCE KIRIMAN": "GUDANG",
+                "Nomor": None, "Nomor PO": None,
+                "#Tgl/Jam Pembuatan IT": None,
+                "SOURCE DATA": "input so harian"}
+
+    _rows109 = []
+    _dev109 = {20: -384.0, 21: -339.0, 22: -338.0, 23: -1293.0,
+               24: -1343.0, 25: -1390.0}
+    for _t109 in range(2, 26):
+        _rows109.append(_r109(_t109, "1.SO", 100.0))
+        _rows109.append(_r109(_t109, "2.SALDO AKHIR", 324.0))
+        # 9.ACR hanya s.d. tgl 24: ACR di H ikut rumus W 'Hitung Manual'
+        # (stok = so_m1 + in_h − bk_h − out_h) — tanpa baris ACR di H,
+        # W = 100 = so_h → label lain mati, CEK murni label shift.
+        if _t109 < 25:
+            _rows109.append(_r109(_t109, "9.ACR", 300.0))
+        _rows109.append(_r109(_t109, "3.DEVIASI",
+                              _dev109.get(_t109, -224.0)))
+    _rows109.append(_r109(23, "4.IN", 1000.0))
+    _df109 = pd.DataFrame(_rows109)
+    check("(v3.18.1) §109-A1: _CEK_CHECK_LABELS 13 label (+'Shift "
+          "Deviasi') + urutan prioritas (setelah 'Naik Drastis', "
+          "sebelum 'ACR to BOM')",
+          len(DeviasiView._CEK_CHECK_LABELS) == 13
+          and DeviasiView._CEK_CHECK_LABELS.index("Shift Deviasi")
+          == DeviasiView._CEK_CHECK_LABELS.index("Naik Drastis") + 1,
+          f"got {DeviasiView._CEK_CHECK_LABELS}")
+    _top109 = tk.Toplevel(root)
+    _top109.geometry("1250x700+15+15")
+    _dv109 = DeviasiView(_top109, satuan_mode="PCS")
+    _dv109.pack(fill="both", expand=True)
+    root.update()
+    root.update_idletasks()
+    root.update()
+    _dv109.load_data(_df109)
+    wait_view(root, _dv109)
+    _cek109 = ""
+    for _k109 in _dv109.tree.get_children(""):
+        _cek109 = _dv109.tree.set(_k109, "CEK")
+        break
+    check("(v3.18.1) §109-B1: tab Deviasi PCS — CEK berlabel utama "
+          "'Shift Deviasi' + segmen detail engine 'Level ×6,0 tgl 23 "
+          "(224 → 1.343 · 3 hari · cocok IN 1.000)' (narasi IDENTIK "
+          "tab 🚨 Radar — shift_segment_text)",
+          _cek109.startswith("Shift Deviasi")
+          and "Level ×6,0 tgl 23" in _cek109
+          and "3 hari" in _cek109 and "cocok IN 1.000" in _cek109,
+          f"cek={_cek109!r}")
+    check("(v3.18.1) §109-B2: baris ber-tag warna cek_shift (fuchsia "
+          "#c026d3) + tag ter-configure",
+          any("cek_shift" in _dv109.tree.item(_k109, "tags")
+              for _k109 in _dv109.tree.get_children(""))
+          and str(_dv109.tree.tag_configure("cek_shift", "foreground"))
+          == "#c026d3",
+          f"tags={[_dv109.tree.item(_k109, 'tags') for _k109 in _dv109.tree.get_children('')]}")
+    _leg109 = []
+    for _chip109 in _dv109._legend.winfo_children():
+        for _w109 in _chip109.winfo_children():
+            if isinstance(_w109, tk.Label):
+                _leg109.append(_w109.cget("text"))
+    check("(v3.18.1) §109-B3: legenda CEK memuat chip 'Shift Deviasi' "
+          "(penanda fuchsia — menjelaskan deteksi tab 🚨 Radar)",
+          any("Shift Deviasi" in _t109 for _t109 in _leg109),
+          f"got {[t for t in _leg109 if 'Shift' in t]}")
+    # memo single-entry: pivot PCS & radar & GR memanggil engine dgn frame
+    # sama → hasil IDENTIK tanpa hitung ulang (identitas objek df).
+    from src.ui import anomali_shift as _as109
+    _memo109 = _as109._MEMO.get("e")
+    check("(v3.18.1) §109-C1: memo single-entry engine terisi (df, h=25) "
+          "oleh jalur pivot DeviasiView — deteksi berat dibagi radar/GR/"
+          "PCS (sekali per run)",
+          _memo109 is not None and _memo109[0] is _df109
+          and _memo109[1] == 25,
+          f"memo_h={_memo109[1] if _memo109 else None} "
+          f"is_df={_memo109 is not None and _memo109[0] is _df109}")
+    _top109.destroy()
+    root.update()
+
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()

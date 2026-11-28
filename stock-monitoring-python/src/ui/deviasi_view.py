@@ -13,7 +13,8 @@ Era segmen "Rank N" (v3.11.27-29) ditutup.
 KOLOM CEK — SEMUA label anomali terpicu digabung ' · ' (urutan = prioritas):
   Promix 04 → RI Balancing → Kosong (AKTIF) → Non Aktif (Masih Stok) →
   Beda Tanggal → Hitung Manual → Hilang dari Pencatatan → Turun Drastis →
-  Turun Drastis (SO Tidak Diinput) → Naik Drastis → ACR to BOM → BOM 0
+  Turun Drastis (SO Tidak Diinput) → Naik Drastis → Shift Deviasi →
+  ACR to BOM → BOM 0
 - Promix 04: SOURCE DATA rekap SO ≠ "input so harian" (SO turunan sistem).
 - RI Balancing: ada dokumen IN yang periode PO-nya di luar periode bisnis RI (doc_codes).
 - Kosong (AKTIF): barang AKTIF & SO(H)<0 (stok fisik minus) · Non Aktif (Masih
@@ -32,6 +33,13 @@ KOLOM CEK — SEMUA label anomali terpicu digabung ' · ' (urutan = prioritas):
   syarat turun sama TAPI baris 1.SO di H TIDAK ada (pivot fill 0 → drop
   palsu 100%) — v3.13.0 DIBEDAKAN (data-quality, merah lebih muda).
   Naik Drastis: SO_H>(1+ambang%)·SO_H-1.
+- Shift Deviasi (v3.18.1 — engine anomali_shift, SAMA dgn tab 🚨 Radar
+  Anomali): pergeseran LEVEL |deviasi| harian per pasangan × satuan —
+  median level pasca-shift ≥ ×2 median baseline & bertahan ≥2 hari di
+  level baru (spike 1 hari/pemulihan tak berlabel); satu-satunya label
+  yang menilai SERI DEVIASI lintas tanggal (label lain SO/stok per-
+  hari). Segmen detail: "Level ×N tgl X (baseline → level · n hari ·
+  cocok IN q)" — kecocokan kiriman IN ±1 hari ≈ Δ (pola cut-off).
 - ACR to BOM: |Deviasi| > ambang% × Total ACR (default 80; spinbox GR & PCS
   sinkron — SharedACRThreshold, settings.json). BOM 0: Total ACR=0 & SO(H)>0.
 
@@ -84,6 +92,10 @@ from ..config import app_base_dir as _app_base_dir  # v3.9.62 — frozen-aware
 from ..pipeline.helpers import (  # v3.12.3 — kunci pasangan ternormalisasi
     norm_nama_barang_key,  # (mirror followup.auto_resolve — ☑ level
     norm_nama_resto_key,  #  pasangan utk entri IMPOR/nilai-tergeser)
+)
+from .anomali_shift import (  # v3.18.1 — label CEK "Shift Deviasi"
+    detect_shift_anomalies,  # (engine tab 🚨 Radar Anomali — memo shared)
+    shift_segment_text,
 )
 from .cell_tooltip import CellTooltip  # v3.11.47 — hover tooltip kolom CEK
 from .com_analisa import (  # v3.11.7 — segmen CEK "COM Tinggi" (COM
@@ -894,13 +906,15 @@ class DeviasiView(tk.Frame):
     # v3.11.7 — +Hilang dari Pencatatan & Naik Drastis; v3.11.9 — +BOM 0.
     # v3.13.0 — "Kosong/Non Aktif" DIPECAH ("Kosong (AKTIF)" + "Non
     # Aktif (Masih Stok)") & +varian "Turun Drastis (SO Tidak
-    # Diinput)" → 12 label; footer 'CEK n' tetap menghitung BARIS
-    # ber-label utama kanonik (semantik tak berubah).
+    # Diinput)" → 12 label; v3.18.1 +"Shift Deviasi" → 13 label; footer
+    # 'CEK n' tetap menghitung BARIS ber-label utama kanonik
+    # (semantik tak berubah).
     _CEK_CHECK_LABELS = (
         "Promix 04", "RI Balancing", "Kosong (AKTIF)",
         "Non Aktif (Masih Stok)", "Beda Tanggal", "Hitung Manual",
         "Hilang dari Pencatatan", "Turun Drastis",
         "Turun Drastis (SO Tidak Diinput)", "Naik Drastis",
+        "Shift Deviasi",
         "ACR to BOM", "BOM 0")
 
     # FIX 6d1-02 — counter load_data aktif (CLASS-level, dibagi antar
@@ -1476,6 +1490,9 @@ class DeviasiView(tk.Frame):
             # v3.11.7 — 2 label anomali baru (gabung-semua-label).
             ("Hilang dari Pencatatan", "#991b1b"),
             ("Naik Drastis", "#059669"),
+            # v3.18.1 — label Shift Deviasi (engine Radar Anomali).
+            ("Shift Deviasi · pergeseran level deviasi (deteksi tab 🚨 "
+             "Radar — segmen Level ×N tgl X)", "#c026d3"),
             ("Turun Drastis", "#dc2626"),
             # v3.13.0 — varian SO(H) tak diinput (data-quality, muda).
             ("Turun Drastis (SO Tidak Diinput)", "#ef4444"),
@@ -2570,6 +2587,10 @@ class DeviasiView(tk.Frame):
         # v3.11.7 — 2 label anomali baru (gabung-semua-label CEK).
         tree.tag_configure("cek_hilang", foreground="#991b1b")  # red-800
         tree.tag_configure("cek_naik", foreground="#059669")    # emerald
+        # v3.18.1 — label "Shift Deviasi" (pergeseran level |deviasi| —
+        # engine tab 🚨 Radar Anomali): fuchsia — kontras dgn SELURUH
+        # tag cek_* lain (merah/amber/biru/oranye/emerald/ungu/teal).
+        tree.tag_configure("cek_shift", foreground="#c026d3")
         # v3.9.19 — kondisi ke-0 "Promix 04" (SO bersumber non input so
         # harian): teal
         tree.tag_configure("cek_promix", foreground="#0e7490")
@@ -3549,6 +3570,42 @@ class DeviasiView(tk.Frame):
             dtype=bool,
         )
 
+        # v3.18.1 — kondisi "Shift Deviasi" (engine anomali_shift — SAMA
+        # dgn tab 🚨 Radar Anomali; memo single-entry (data, H) → GR/PCS/
+        # radar BERBAGI hasil, deteksi berat hanya SEKALI per run):
+        # pergeseran LEVEL |deviasi| harian per pasangan × satuan —
+        # median level pasca-shift ≥ ×2 median baseline & ≥2 hari di
+        # level baru (spike 1 hari / pemulihan tak berlabel). Kasus user:
+        # BJMHAS · CUP 14 PCS — stabil (224) tgl 2-22 → (1.293) tgl 23
+        # bersama IN 1.000 → KONSTAN (1.343)/(1.390) tgl 24-25: growth
+        # harian 'tenang' lagi di 24-25 padahal level baru MENEMPEL —
+        # satu-satunya label CEK yang menilai SERI DEVIASI lintas
+        # tanggal (label lain SO/stok per-hari). Kunci KANONIK 3-tuple
+        # (kb, kr, satuan upper — mirror com_gap_map v3.13.0). Kegagalan
+        # engine → segmen kosong (fitur pelengkap ≠ tabel gagal — pola
+        # potensi_po_map/com_gap_map di atas).
+        _sh_map: dict = {}
+        try:
+            _anom = detect_shift_anomalies(data, h)
+        except Exception:  # noqa: BLE001 — segmen ≠ tabel gagal
+            _LOG.debug("deviasi: peta shift anomali gagal dibangun",
+                       exc_info=True)
+            _anom = None
+        if _anom is not None and not _anom.empty:
+            for _rec in _anom.to_dict("records"):
+                _sh_map[(_rec["kb"], _rec["kr"], _rec["satn"])] = _rec
+        cond_shift = np.zeros(n, dtype=bool)
+        _sh_txt = np.full(n, "", dtype=object)
+        if _sh_map:
+            _sat_sh = (pivot["SATUAN"].fillna("").astype(str)
+                       .str.strip().str.upper().to_numpy())
+            for _i, (_b, _r, _s) in enumerate(zip(
+                    _bk_s.to_numpy(), _rk_s.to_numpy(), _sat_sh)):
+                _rec = _sh_map.get((_b, _r, _s))
+                if _rec is not None:
+                    cond_shift[_i] = True
+                    _sh_txt[_i] = shift_segment_text(_rec, self._fmt_num)
+
         # v3.11.7 — SEMUA LABEL TERPICU TAMPIL BERGABUNG ' · ' (user:
         # "Semua yang terpicu"): dulu np.select mengembalikan HANYA
         # label prioritas pertama — kondisi lain yang juga terpenuhi
@@ -3568,6 +3625,7 @@ class DeviasiView(tk.Frame):
             (cond_drastis, "Turun Drastis"),
             (cond_drastis_norec, "Turun Drastis (SO Tidak Diinput)"),
             (cond_naik, "Naik Drastis"),
+            (cond_shift, "Shift Deviasi"),
             (cond_acr, "ACR to BOM"),
             (cond_bom0, "BOM 0"),
         )
@@ -3801,13 +3859,14 @@ class DeviasiView(tk.Frame):
                         f"Beda dari Resto Lain ({_side} \u00b7 "
                         f"{_opp}/{_opp + _same} resto lain {_oside})")
 
-        if any(ana) or _po_seg.any() or any(_com_txt) or any(_br_txt):
+        if any(ana) or _po_seg.any() or any(_com_txt) or any(_br_txt) \
+                or cond_shift.any():
             cek = np.array(
-                [" \u00b7 ".join(p for p in (c,
+                [" \u00b7 ".join(p for p in (c, sh,
                                              POTENSI_PO_LABEL if po else "",
                                              ct, br, a) if p)
-                 for c, po, ct, br, a in zip(cek, _po_seg, _com_txt,
-                                             _br_txt, ana)],
+                 for c, sh, po, ct, br, a in zip(cek, _sh_txt, _po_seg,
+                                                 _com_txt, _br_txt, ana)],
                 dtype=object)
 
         result = pd.DataFrame({
@@ -4344,6 +4403,8 @@ class DeviasiView(tk.Frame):
                 tags.append("cek_drastis_norec")
             elif cek_val == "Naik Drastis":               # v3.11.7
                 tags.append("cek_naik")
+            elif cek_val == "Shift Deviasi":               # v3.18.1
+                tags.append("cek_shift")
             elif cek_val == "ACR to BOM":
                 tags.append("cek_acr")
             elif cek_val == "BOM 0":                     # v3.11.9

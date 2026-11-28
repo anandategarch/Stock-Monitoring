@@ -102,7 +102,40 @@ def detect_shift_anomalies(df: pd.DataFrame | None, h: int | None,
     (None → tgl terakhir data). Output: DataFrame RESULT_COLUMNS — satu
     baris per pasangan ber-shift naik aktif; kosong bila tak ada / data
     kurang (bukan error). Murni pandas/angka — TANPA widget (dipanggil
-    worker thread radar + _compute_pivot deviasi_view)."""
+    worker thread radar + _compute_pivot deviasi_view).
+
+    v3.18.1 — MEMO single-entry {(df, h) → hasil}: konsumen TAB 🚨 Radar
+    Anomali + pivot Deviasi GR + PCS memanggil dgn (data, H) SAMA per
+    run → deteksi berat (groupby + scan per pasangan) cukup SEKALI;
+    identitas objek `is` (bukan id() — tak bisa reuse-GC) + hanya bila
+    SEMUA ambang default (kwargs custom bypass memo). Frame dipegang
+    kuat oleh memo (dilepas saat entri baru menimpa — satu frame saja)."""
+    _hk = None if h is None else int(h)
+    _default = (min_baseline == MIN_BASELINE and min_durasi == MIN_DURASI
+                and ratio_cut == RATIO_CUT and level_floor == LEVEL_FLOOR
+                and stale_gap == STALE_GAP and in_tol == IN_TOL)
+    if _default:
+        _m = _MEMO.get("e")
+        if _m is not None and _m[0] is df and _m[1] == _hk:
+            return _m[2]
+    out = _detect_impl(df, h, min_baseline=min_baseline,
+                       min_durasi=min_durasi, ratio_cut=ratio_cut,
+                       level_floor=level_floor, stale_gap=stale_gap,
+                       in_tol=in_tol)
+    if _default:
+        _MEMO["e"] = (df, _hk, out)
+    return out
+
+
+# v3.18.1 — single-entry memo detect_shift_anomalies (lihat docstring).
+_MEMO: dict = {}
+
+
+def _detect_impl(df: pd.DataFrame | None, h: int | None,
+                  *, min_baseline: int, min_durasi: int,
+                  ratio_cut: float, level_floor: float,
+                  stale_gap: int, in_tol: float) -> pd.DataFrame:
+    """Implementasi deteksi (pure) — panggil lewat detect_shift_anomalies."""
     empty = pd.DataFrame(columns=RESULT_COLUMNS)
     if df is None or getattr(df, "empty", True):
         return empty

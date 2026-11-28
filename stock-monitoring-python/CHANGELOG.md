@@ -3,6 +3,39 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.18.1 — LABEL CEK "Shift Deviasi" DI TAB DEVIASI GR/PCS
+
+User (item 2 permintaan bertahap): *"Kolom penanda di tab Deviasi GR/PCS"* —
+pasangan ber-anomali shift kini berlabel LANGSUNG di tempat audit manual
+(tanpa perlu buka tab 🚨 Radar Anomali).
+
+- **Kondisi np.select ke-11** (setelah "Naik Drastis", sebelum "ACR to
+  BOM"): prioritas = anomali STRUKTUR dokumen > pola numerik SO per-hari >
+  **pergeseran SERI DEVIASI lintas tanggal** > pembanding BOM. Engine
+  deteksi SAMA dgn tab 🚨 Radar (`anomali_shift.detect_shift_anomalies`)
+  + **MEMO single-entry (df, H)** — GR + PCS + radar BERBAGI satu hasil:
+  deteksi berat (groupby + scan per pasangan) cukup SEKALI per run;
+  identitas objek `is` (bukan id() — tak bisa reuse-GC); kwargs
+  non-default bypass memo. Kunci lookup KANONIK 3-tuple (kb, kr, satuan
+  upper — mirror com_gap_map v3.13.0; drift ejaan tetap cocok).
+- **Segmen detail** teks CEK — `shift_segment_text(rec, _fmt_num)`,
+  narasi IDENTIK tab radar: "Level ×6,0 tgl 23 (224 → 1.343 · 3 hari ·
+  cocok IN 1.000)" — disisip TEPAT setelah label utama (sebelum Potensi
+  PO / COM / Beda-Resto / analisa-lalu).
+- `_CEK_CHECK_LABELS` 12 → **13 label** (footer 'CEK n' + filter
+  kanonik otomatis mengenali); tag baris `cek_shift` FUCHSIA #c026d3
+  (kontras seluruh tag cek_* lain) + chip legenda; docstring modul
+  diperbarui (urutan label + bar deskripsi).
+- Kegagalan engine → segmen kosong (pola potensi_po_map/com_gap_map —
+  fitur pelengkap ≠ tabel gagal).
+
+### Verifikasi
+- §109 (5 cek): A1 13 label + urutan prioritas · B1 CEK PCS kasus user
+  = "Shift Deviasi · Level ×6,0 tgl 23 (224 → 1.343 · 3 hari · cocok IN
+  1.000)" · B2 tag warna baris + configure · B3 chip legenda · C1 memo
+  single-entry terisi jalur pivot (df, h=25).
+- Suite ALL PASS + mock ALL PASS + ruff ≤ baseline + py_compile semua.
+
 ## v3.18.0 — TAB 🚨 RADAR ANOMALI + ENGINE DETEKSI SHIFT DEVIASI
 
 User (popup Detail Deviasi BJMHAS · CUP 14 (V.20) PCS): *"deviasi 2-22
