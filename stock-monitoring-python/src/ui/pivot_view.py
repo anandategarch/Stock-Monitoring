@@ -24,13 +24,19 @@ Mode (segment "PIVOT PER"):
   merah per cell, 0 font putih). Lazy refresh (compute saat tab
   terlihat) + loading overlay + compute/render async.
 - v3.17.0 — baris 10.% Growth Deviasi (hanya mode 📅 TANGGAL; urutan
-  setelah 9.ACR): (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 dari baris
-  3.DEVIASI — pembagi |Dev(t−1)| di-ABSOLUT, persen ber-tanda dari
-  DATA ASLI tanpa absolut (mirror nominal_common.hitung_persen_
-  kenaikan); kolom pertama & pembagi-0-nonzero tampil KOSONG;
-  format sel '+12,5%' / '-8,3%' / '0,0%'; Dev(t−1) kolom pertama
-  rentang dari matrix PENUH pra-rentang (mirror COM 6c-01); export
-  memakai number format persen.
+  setelah 9.ACR) dari baris 3.DEVIASI; kolom pertama & pembagi-0-nonzero
+  tampil KOSONG; format sel '+12,5%' / '-8,3%' / '0,0%'; Dev(t−1) kolom
+  pertama rentang dari matrix PENUH pra-rentang (mirror COM 6c-01);
+  export memakai number format persen.
+- v3.17.1 — RUMUS ABSOLUT PENUH (validasi user, kolom 2/5/7/10/11/13/15
+  salah tanda): Growth = (|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100 —
+  KEDUA sisi absolut (bukan hanya pembagi; arah murni dari MAGNITUDO
+  deviasi: |Dev| naik = plus, |Dev| turun = minus) + HEATMAP per-sel
+  baris growth: bg MERAH utk growth + (deviasi membesar — makin
+  menyimpang) & HIJAU utk growth − (mengecil — mendingin), intensitas 4
+  bucket |growth| <5% / <25% / <100% / ≥100%; minus growth TIDAK lagi
+  dimerahkan per-cell (semantik sign dibawa heatmap — tag bg + tanda ±
+  teks); export Excel ikut membawa heat fill per sel (parity tampilan).
 """
 
 import contextlib  # v3.9.66 — suppress senyap jalur restore filter
@@ -39,6 +45,7 @@ import tkinter as tk
 from collections.abc import Callable
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
+from typing import ClassVar  # v3.17.1 — RUF012: GROWTH_HEAT_BG ClassVar
 
 import numpy as np          # v3.17.0 — np.isinf utk _format_pct
 import pandas as pd
@@ -125,6 +132,27 @@ class PivotTableView(tk.Frame):
         "8.BARANG KELUAR": "#FFF0E0",
         "9.ACR": "#F8F0F0",
         "10.% Growth Deviasi": "#E8F6F3",
+    }
+
+    # v3.17.1 — HEATMAP baris 10.% Growth Deviasi (user: "kasih heat map
+    # dong bisa gak growth deviasi nya"): tag PER-CELL (background saja —
+    # KOEXIST dgn fg tag lain di sel sama, pola CellColorOverlay/neg_cell)
+    # dgn intensitas bucket |growth|%:
+    #   level 1: 0 < |g| < 5%    (nyaris datar)
+    #   level 2: 5% ≤ |g| < 25%
+    #   level 3: 25% ≤ |g| < 100%
+    #   level 4: |g| ≥ 100%       (paling pekat)
+    # ARAH: growth + (|Dev| NAIK = deviasi membesar = makin menyimpang)
+    # → keluarga MERAH; growth − (|Dev| TURUN = deviasi mengecil = mendingin)
+    # → keluarga HIJAU. Skala material-design 50..400 — teks gelap default
+    # tetap terbaca di semua level. Sel 0,0% / KOSONG (kolom pertama &
+    # pembagi-0) TANPA heat (jatuh ke bg pastel teal baris METRIC_BG).
+    GROWTH_HEAT_EDGES = (5.0, 25.0, 100.0)
+    GROWTH_HEAT_BG: ClassVar[dict[str, str]] = {
+        "hm_pos_1": "#FFEBEE", "hm_pos_2": "#FFCDD2",
+        "hm_pos_3": "#EF9A9A", "hm_pos_4": "#E57373",
+        "hm_neg_1": "#E8F5E9", "hm_neg_2": "#C8E6C9",
+        "hm_neg_3": "#A5D6A7", "hm_neg_4": "#81C784",
     }
 
     def __init__(self, parent, data: pd.DataFrame = None,
@@ -346,6 +374,8 @@ class PivotTableView(tk.Frame):
             self.content,
             [("IN", "#9C5700"), ("BARANG MASUK", "#006100"),
              ("Minus / nilai < 0", "#dc2626"), ("Selisih ≠ 0", "#FFC9C9"),
+             ("Growth merah = deviasi naik", "#E57373"),
+             ("hijau = deviasi turun", "#81C784"),
              ("tgl • = bulan lalu", "#94a3b8")])
         legend.pack(fill="x", padx=12, pady=(6, 0))
         self._legend = legend
@@ -577,6 +607,11 @@ class PivotTableView(tk.Frame):
         register_find_tags(tree)
         for metric, color in self.METRIC_BG.items():
             tree.tag_configure(self._metric_tag(metric), background=color)
+        # v3.17.1 — HEATMAP growth: tag bg PER-CELL (dipasang via
+        # apply_cell_tag di render_done; hanya bg — fg sel tetap default
+        # gelap supaya kontras teks di semua level intensitas).
+        for tag, color in self.GROWTH_HEAT_BG.items():
+            tree.tag_configure(tag, background=color)
 
         tree.tag_configure(
             "item_header", font=font(9, "bold"), background="#e2e8f0",
@@ -1251,6 +1286,11 @@ class PivotTableView(tk.Frame):
         tree_items = []
         rows_data = []          # v3.9.2 — data mentah utk export
         red_cells = []          # v3.9.2 — cell minus (per-cell merah)
+        # v3.17.1 — HEATMAP growth: tag heat → [(iid, col_id)] — dipasang
+        # per-tag lewat apply_cell_tag di render_done (mirror pola
+        # red_cells; dikunci per payload supaya render baru tak membawa
+        # bucket basi).
+        heat_cells: dict[str, list] = {}
         n_rows = 0
         n_items_shown = 0
         empty_series = pd.Series({c: 0 for c in col_keys})
@@ -1284,15 +1324,20 @@ class PivotTableView(tk.Frame):
                             pivot_raw if pivot_raw is not None else pivot,
                             item, col_keys)
                 elif mode == "tanggal" and metric == "10.% Growth Deviasi":
-                    # v3.17.0 — 10.% Growth Deviasi (user: "untuk tau
-                    # berapa persen kenaikan deviasi per tanggal nya"):
-                    # (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 — pembagi
-                    # 3.DEVIASI(t−1) di-ABSOLUT dulu (arah tak terbalik
-                    # saat baseline minus), selisih & persen yang TAMPIL
-                    # dari DATA ASLI tanpa absolut (konvensi mirror
-                    # nominal_common.hitung_persen_kenaikan). Matrix
-                    # PENUH pra-rentang utk Dev(t−1) kolom pertama
-                    # (mirror COM 6c-01); fallback jalur rentang.
+                    # v3.17.1 — RUMUS ABSOLUT PENUH (validasi user: "Jika
+                    # menggunakan rumus absolut penuh Growth =
+                    # (|Dev_sekarang| − |Dev_sebelumnya|) /
+                    # |Dev_sebelumnya| × 100%" — kolom 2/5/7/10/11/13/15
+                    # salah tanda dgn rumus lama ber-numerator ASLI):
+                    # (|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100 — KEDUA
+                    # sisi di-ABSOLUT; arah murni dari MAGNITUDO deviasi
+                    # (naik/turun-nya |Dev|), BUKAN selisih data asli
+                    # ber-tanda (rumus lama membalik tanda saat baseline
+                    # minus ↔ positif: dev −41.447 → +3.044,5 dulu +107,3%
+                    # [sign numeratur asli], seharusnya −92,7% [magnitudo
+                    # 41.447 → 3.044,5 = turun]). Matrix PENUH pra-rentang
+                    # utk Dev(t−1) kolom pertama (mirror COM 6c-01);
+                    # fallback jalur rentang.
                     if growth_full is not None and item in growth_full:
                         row_data = growth_full[item].reindex(col_keys)
                     else:
@@ -1355,9 +1400,24 @@ class PivotTableView(tk.Frame):
                     # Baris pivot non-COM tak pernah NaN (fill 0) — guard
                     # notna di bawah tetap aman utk kedua jalur.
                     raw_vals.append(v)
+                    # v3.17.1 — baris growth: minus TIDAK lagi dimerahkan
+                    # per-cell (red text di atas heat HIJAU = tabrakan
+                    # warna; semantik naik/turun kini dibawa HEATMAP bg +
+                    # tanda ± tetap terbaca di teks sel) — hanya baris
+                    # metric lain yang tetap merah per-cell.
+                    _is_growth = metric == "10.% Growth Deviasi"
                     if self._cell_tags and not pd.isna(v) and (
-                            v < 0 or (metric == "7.Selisih IN" and v != 0)):
+                            (v < 0 and not _is_growth)
+                            or (metric == "7.Selisih IN" and v != 0)):
                         red_cells.append((iid, _col_id(c)))
+                    # v3.17.1 — HEATMAP growth per-sel: bucket bg dari
+                    # MAGNITUDO growth (merah=naik/hijau=turun; sel 0 /
+                    # NaN / kolom pertama → None → tetap bg pastel baris).
+                    if _is_growth:
+                        _heat = self._growth_heat_tag(v)
+                        if _heat:
+                            heat_cells.setdefault(_heat, []).append(
+                                (iid, _col_id(c)))
                 rows_data.append((iid, metric, False, metric, raw_vals))
 
             if not child_rows:
@@ -1381,7 +1441,7 @@ class PivotTableView(tk.Frame):
         return {"columns": columns, "col_kind": mode, "items": tree_items,
                 "kpi": kpi, "status": status, "filtered_rows": len(df),
                 "red_cells": red_cells, "rows_data": rows_data,
-                "filters": dict(st)}
+                "heat_cells": heat_cells, "filters": dict(st)}
 
     # =========================================================================
     # REFRESH (async + render batched)
@@ -1429,6 +1489,9 @@ class PivotTableView(tk.Frame):
         # (export = SESUAI TAMPILAN: filter + mode + hide-empty aktif)
         self._last_payload = payload
         self._red_cells = payload.get("red_cells", [])
+        # v3.17.1 — heatmap growth (tag → sel) — dipasang ulang setelah
+        # insert/sort/clone (mirror _red_cells).
+        self._heat_cells = payload.get("heat_cells") or {}
         self.tree.delete(*self.tree.get_children())
         # reset displaycolumns SEBELUM re-assign columns — Tk memvalidasi
         # displaycolumns lama terhadap daftar kolom baru (mode resto→tanggal
@@ -1526,6 +1589,12 @@ class PivotTableView(tk.Frame):
             # sel minus tidak meninggalkan label STALE).
             if self._cell_tags:
                 apply_cell_tag(self.tree, "neg_cell", self._red_cells)
+            # v3.17.1 — HEATMAP growth: pasang SETIAP bucket-tag ke sel
+            # anggotanya (bg merah/hijau per intensitas; koexist dgn
+            # neg_cell karena heat tag hanya mengeset background).
+            if self._cell_tags and self._heat_cells:
+                for _tag, _cells in self._heat_cells.items():
+                    apply_cell_tag(self.tree, _tag, _cells)
             # v3.9.55 — F8: auto-fit kolom SEKALI per muat data
             # v3.9.71 — freeze-pane: auto-fit DUA sisi; sisi matrix di
             # sini (render_done batch kanan), sisi nama di on_done batch
@@ -1773,6 +1842,11 @@ class PivotTableView(tk.Frame):
             # render_done).
             if self._cell_tags:
                 apply_cell_tag(new_tree, "neg_cell", self._red_cells)
+                # v3.17.1 — heatmap growth ikut dipasang di clone ⛶
+                # (setelah insert ulang, tag sel ter-reset — mirror
+                # pola neg_cell; _setup_tags clone mendaftar warna heat).
+                for _tag, _cells in (self._heat_cells or {}).items():
+                    apply_cell_tag(new_tree, _tag, _cells)
 
         return open_tree_maximized(
             self.tree, f"Pivot Table — {mode}",
@@ -1952,16 +2026,56 @@ class PivotTableView(tk.Frame):
         return s + "%"
 
     @staticmethod
-    def _compute_growth(pivot, item, tanggals):
-        """v3.17.0 — Hitung 10.% Growth Deviasi per tanggal dari baris
-        3.DEVIASI item: (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100.
+    def _growth_heat_tag(val) -> str | None:
+        """v3.17.1 — bucket HEATMAP utk sel 10.% Growth Deviasi.
 
-        Pembagi Dev(t−1) di-ABSOLUT dulu (user: "data row 3.deviasi di
-        absolute dulu") supaya ARAH kenaikan/penurunan tetap ditentukan
-        oleh selisih DATA ASLI (user: "persen yang ditampilkan di row
-        baru data asli tanpa absolute") — baseline minus tak membalik
-        tanda (konvensi identik nominal_common.hitung_persen_kenaikan
-        (H−L)/|L|×100 dgn L=Dev(t−1), H=Dev(t)).
+        Return nama tag (`hm_pos_1..4` = merah — deviasi NAIK/membesar;
+        `hm_neg_1..4` = hijau — deviasi TURUN/mengecil) atau None (nilai
+        0 / NaN / None / tak-angka → tanpa heat, jatuh ke bg pastel
+        baris). Bucket dari MAGNITUDO |growth|% via GROWTH_HEAT_EDGES
+        (5 / 25 / 100) — intensitas makin pekat makin besar perubahan.
+        Hanya dipakai baris growth (dipanggil _compute_payload &
+        export_sheets parity fill).
+        """
+        if val is None:
+            return None
+        try:
+            if pd.isna(val):
+                return None
+            v = float(val)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(v) or v == 0.0:
+            return None
+        mag = abs(v)
+        if mag < 5.0:
+            lvl = 1
+        elif mag < 25.0:
+            lvl = 2
+        elif mag < 100.0:
+            lvl = 3
+        else:
+            lvl = 4
+        return f"hm_pos_{lvl}" if v > 0 else f"hm_neg_{lvl}"
+
+    @staticmethod
+    def _compute_growth(pivot, item, tanggals):
+        """v3.17.1 — Hitung 10.% Growth Deviasi per tanggal dari baris
+        3.DEVIASI item — RUMUS ABSOLUT PENUH (validasi user kolom-per-
+        kolom: "Jika menggunakan rumus absolut penuh
+        Growth = (|Dev_sekarang| − |Dev_sebelumnya|) /
+        |Dev_sebelumnya| × 100%"):
+
+            (|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100
+
+        KEDUA operand absolut — ARAH murni dari MAGNITUDO deviasi
+        (|Dev| naik → plus "deviasi membesar"; |Dev| turun → minus
+        "deviasi mengecil"), bukan dari selisih data asli ber-tanda.
+        (Rumus v3.17.0 hanya meng-absolut PEMBAGI — numerator asli
+        membuat tanda terbalik saat deviasi berpindah sisi minus↔plus:
+        −41.447 → +3.044,5 dihitung +107,3% padahal magnitudo TURUN
+        92,7% — inilah salah-tanda kolom 2/5/7/10/11/13/15 yang
+        dilaporkan user.)
 
         Nilai Dev dibaca dari pivot display-semantics: sel tanpa baris
         3.DEVIASI ≡ 0 (persis yang TAMPIL di baris 3.DEVIASI matrix).
@@ -1999,10 +2113,13 @@ class PivotTableView(tk.Frame):
             curr = _v(t)
             if prev is None or curr is None:
                 out[t] = float("nan")
-            elif prev == 0.0:
-                out[t] = 0.0 if curr == 0.0 else float("nan")
+            elif abs(prev) == 0.0:
+                out[t] = 0.0 if abs(curr) == 0.0 else float("nan")
             else:
-                out[t] = (curr - prev) / abs(prev) * 100.0
+                # v3.17.1 — ABSOLUT PENUH: (|Dev(t)| − |Dev(t−1)|) ÷
+                # |Dev(t−1)| × 100 — arah dari magnitudo, bukan tanda
+                # data asli (fix salah-tanda kolom 2/5/7/10/11/13/15).
+                out[t] = (abs(curr) - abs(prev)) / abs(prev) * 100.0
         return pd.Series(out, index=tanggals)
 
     @staticmethod

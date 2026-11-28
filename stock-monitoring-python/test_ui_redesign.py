@@ -24308,7 +24308,7 @@ def main():
 
     # =====================================================================
     print()
-    print("== 107. (v3.17.0) PIVOT ROW 10.% GROWTH DEVIASI + HAPUS TAB ==")
+    print("== 107. (v3.17.0/v3.17.1) PIVOT ROW 10.% GROWTH DEVIASI + HAPUS TAB ==")
     print("   ANALISA KRONIS + HAPUS STRIP BARANG×RESTO (Rekap Selisih IN) ==")
     # (user: "ada row baru yaitu 10.% Growth Deviasi. Datanya diambil dari
     # row 3.Deviasi ... berapa persen kenaikan deviasi per tanggal nya.
@@ -24316,6 +24316,13 @@ def main():
     # ditampilkan di row baru data asli tanpa absolute" + "hapus aja tab
     # analisa kronis dan dead code nya hapus" + "selisih terbanyak barang
     # x resto hapus aja dan dead code nya hapus juga").
+    # v3.17.1 (user: "Kalau deviasinya di-absolutekan dulu baru dihitung
+    # growth-nya, perhitungan Anda hampir semuanya sudah benar—hanya ada
+    # kesalahan tanda (+/-) pada Kolom 2, 5, 7, 10, 11, 13, dan 15.
+    # Jika menggunakan rumus absolut penuh: Growth = (|Dev_sekarang| −
+    # |Dev_sebelumnya|) / |Dev_sebelumnya| × 100%" + "kasih heat map dong
+    # bisa gak growth deviasi nya") — rumus diperbaiki ke ABSOLUT PENUH
+    # + HEATMAP per-sel baris growth.
 
     # ---- (A) konstanta + helper murni (tanpa GUI) ----------------------
     from src.ui.pivot_view import PivotTableView as _PV107
@@ -24333,20 +24340,65 @@ def main():
           and _PV107._format_pct(0.0) == "0,0%"
           and _PV107._format_pct(None) == ""
           and _PV107._format_pct(float("nan")) == "")
-    # rumus: pembagi |Dev(t−1)| DI-ABSOLUT; selisih dari DATA ASLI —
-    # baseline minus tak membalik arah kenaikan.
+    # v3.17.1 — RUMUS ABSOLUT PENUH (validasi user): Growth =
+    # (|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100 — KEDUA operand
+    # absolut; arah murni dari MAGNITUDO (rumus v3.17.0 numerator ASLI
+    # membalik tanda saat deviasi berpindah sisi minus↔plus).
     _idx107 = pd.MultiIndex.from_tuples([("B", "3.DEVIASI")])
     _mat107 = pd.DataFrame([[-50.0, -40.0, -60.0]], index=_idx107,
                            columns=[1, 2, 3])
     _g107 = _PV107._compute_growth(_mat107, "B", [1, 2, 3])
-    check("(v3.17.0) _compute_growth baseline MINUS: (−40−(−50))÷|−50| = "
-          "+20% (pembagi absolut; ARAH dari data asli — kenaikan karena "
-          "−40 > −50, bukan flip tanda) & (−60−(−40))÷|−40| = −50% & "
+    check("(v3.17.1) _compute_growth ABSOLUT PENUH baseline MINUS: "
+          "(|−40|−|−50|)÷|−50| = −20% (magnitudo 50→40 MENGECIL walau "
+          "data asli NAIK −50→−40) & (|−60|−|−40|)÷|−40| = +50% & "
           "kolom pertama NaN",
           pd.isna(_g107.get(1))
-          and abs(_g107.get(2) - 20.0) < 1e-9
-          and abs(_g107.get(3) - (-50.0)) < 1e-9,
+          and abs(_g107.get(2) - (-20.0)) < 1e-9
+          and abs(_g107.get(3) - 50.0) < 1e-9,
           f"got {_g107.to_dict()}")
+    # v3.17.1 — kasus nyata user kolom 2: dev −41.447 → +3.044,5
+    # (berpindah sisi minus→plus): magnitudo TURUN → −92,7% (rumus lama
+    # numerator asli: +107,3% — salah tanda).
+    _idx107b = pd.MultiIndex.from_tuples([("B", "3.DEVIASI")])
+    _mat107b = pd.DataFrame([[-41447.0, 3044.5]], index=_idx107b,
+                            columns=[1, 2])
+    _g107b = _PV107._compute_growth(_mat107b, "B", [1, 2])
+    check("(v3.17.1) _compute_growth kasus user kolom 2 (−41.447 → "
+          "+3.044,5): ABSOLUT PENUH → −92,7% (dulu +107,3% — inilah "
+          "salah-tanda kolom 2 yang dilaporkan)",
+          pd.isna(_g107b.get(1))
+          and abs(_g107b.get(2) - (-92.65)) < 0.05,
+          f"got {_g107b.to_dict()}")
+    # v3.17.1 — bucket HEATMAP (dipakai _compute_payload + export parity)
+    check("(v3.17.1) _growth_heat_tag bucket intensitas: <5% lvl1 · "
+          "5..25% lvl2 · 25..100% lvl3 · ≥100% lvl4 · pos=merah "
+          "(hm_pos_*) / neg=hijau (hm_neg_*) · 0/NaN/None/inf/tak-angka "
+          "→ None",
+          _PV107._growth_heat_tag(2.0) == "hm_pos_1"
+          and _PV107._growth_heat_tag(4.99) == "hm_pos_1"
+          and _PV107._growth_heat_tag(5.0) == "hm_pos_2"
+          and _PV107._growth_heat_tag(24.9) == "hm_pos_2"
+          and _PV107._growth_heat_tag(25.0) == "hm_pos_3"
+          and _PV107._growth_heat_tag(99.9) == "hm_pos_3"
+          and _PV107._growth_heat_tag(100.0) == "hm_pos_4"
+          and _PV107._growth_heat_tag(2176.4) == "hm_pos_4"
+          and _PV107._growth_heat_tag(-2.0) == "hm_neg_1"
+          and _PV107._growth_heat_tag(-120.5) == "hm_neg_4"
+          and _PV107._growth_heat_tag(0.0) is None
+          and _PV107._growth_heat_tag(float("nan")) is None
+          and _PV107._growth_heat_tag(None) is None
+          and _PV107._growth_heat_tag(float("inf")) is None
+          and _PV107._growth_heat_tag("x") is None,
+          f"got pos1={_PV107._growth_heat_tag(2.0)!r} "
+          f"neg4={_PV107._growth_heat_tag(-120.5)!r}")
+    check("(v3.17.1) GROWTH_HEAT_BG 8 bucket lengkap (pos 1..4 keluarga "
+          "merah, neg 1..4 hijau — hex #RRGGBB valid)",
+          set(_PV107.GROWTH_HEAT_BG) == {
+              "hm_pos_1", "hm_pos_2", "hm_pos_3", "hm_pos_4",
+              "hm_neg_1", "hm_neg_2", "hm_neg_3", "hm_neg_4"}
+          and all(str(v).startswith("#") and len(str(v)) == 7
+                  for v in _PV107.GROWTH_HEAT_BG.values()),
+          f"got {sorted(_PV107.GROWTH_HEAT_BG)}")
 
     # ---- (B) GUI pivot mode TANGGAL ------------------------------------
     def _r107(barang, jenis, t, nilai):
@@ -24357,7 +24409,8 @@ def main():
                 "SOURCE KIRIMAN": "GUDANG"}
 
     # BRG A: deviasi 100 → 150 (+50%) → 75 (−50%) → 75 (0,0% tak berubah)
-    # BRG MIN: deviasi −50 → −40 (baseline minus → +20%) lalu kosong (0)
+    # BRG MIN: deviasi −50 → −40 (ABSOLUT PENUH: magnitudo 50→40 → −20%)
+    #          lalu kosong (display 0 → |0|−|−40| → −100%)
     _d107 = pd.DataFrame(
         [_r107("BRG A", "3.DEVIASI", t, v)
          for t, v in ((1, 100.0), (2, 150.0), (3, 75.0), (4, 75.0))]
@@ -24422,23 +24475,66 @@ def main():
           _gA107 is not None and _vA107 == ["", "+50,0%", "-50,0%", "0,0%"],
           f"got {_vA107}")
     _gM107 = _row107(_p107, "BRG MIN", "10.% Growth Deviasi")
-    check("(v3.17.0) Growth BRG MIN (deviasi BASELINE MINUS): t2 = "
-          "'+20,0%' — (−40 − (−50)) ÷ |−50| (pembagi ABSOLUT; persen "
-          "ber-tanda dari DATA ASLI: kenaikan) · t3 '+100,0%' (dev 0 "
-          "display vs −40) · t4 '0,0%'",
+    check("(v3.17.1) Growth BRG MIN (deviasi BASELINE MINUS — ABSOLUT "
+          "PENUH): t2 = '-20,0%' — (|−40|−|−50|)÷|−50| (magnitudo 50→40 "
+          "MENGECIL walau data asli naik −50→−40) · t3 '-100,0%' (|0|−"
+          "|−40| dari dev display 0) · t4 '0,0%'",
           _gM107 is not None
           and _p107.tree.set(_gM107, "1") == ""
-          and _p107.tree.set(_gM107, "2") == "+20,0%"
-          and _p107.tree.set(_gM107, "3") == "+100,0%"
+          and _p107.tree.set(_gM107, "2") == "-20,0%"
+          and _p107.tree.set(_gM107, "3") == "-100,0%"
           and _p107.tree.set(_gM107, "4") == "0,0%",
           f"got {[_p107.tree.set(_gM107, str(c)) for c in (1, 2, 3, 4)]}")
+    # v3.17.1 — struktur payload heat_cells (tanpa Tk): bucket → sel
+    _heat107 = _p107._last_payload.get("heat_cells") or {}
+    check("(v3.17.1) payload heat_cells: hm_pos_3 → sel kolom '2' baris "
+          "growth BRG A & hm_neg_3 → kolom '3' & hm_neg_2/hm_neg_4 BRG "
+          "MIN; kolom pertama (t1 '') & 0,0% TANPA heat",
+          any(iid == _gA107 and str(c) == "2"
+              for iid, c in _heat107.get("hm_pos_3", []))
+          and any(iid == _gA107 and str(c) == "3"
+                  for iid, c in _heat107.get("hm_neg_3", []))
+          and any(iid == _gM107 and str(c) == "2"
+                  for iid, c in _heat107.get("hm_neg_2", []))
+          and any(iid == _gM107 and str(c) == "3"
+                  for iid, c in _heat107.get("hm_neg_4", []))
+          and not any(iid == _gA107 and str(c) == "1"
+                      for cells in _heat107.values() for iid, c in cells)
+          and not any(iid == _gA107 and str(c) == "4"
+                      for cells in _heat107.values() for iid, c in cells),
+          f"got buckets {sorted(_heat107)}")
     if CELL_TAGS_SUPPORTED:
-        _hcn107 = lambda i, c: root.tk.call(
-            str(_p107.tree), "tag", "cell", "has", "neg_cell", (i, c))
-        check("(v3.17.0) Growth NEGATIF '−50,0%' MERAH per-cell (t3) · "
-              "positif '+50,0%' TIDAK (t2)",
-              _hcn107(_gA107, "3") == 1 and _hcn107(_gA107, "2") == 0,
-              f"t3={_hcn107(_gA107, '3')} t2={_hcn107(_gA107, '2')}")
+        _hcn107 = lambda i, c, t="neg_cell": root.tk.call(
+            str(_p107.tree), "tag", "cell", "has", t, (i, c))
+        check("(v3.17.1) Growth TIDAK lagi dimerahkan per-cell (t3 "
+              "'-50,0%' & t2 '+50,0%' & BRG MIN '-20,0%' TANPA neg_cell "
+              "— semantik sign kini dibawa HEATMAP bg + tanda ± teks)",
+              _hcn107(_gA107, "3") == 0 and _hcn107(_gA107, "2") == 0
+              and _hcn107(_gM107, "2") == 0,
+              f"t3={_hcn107(_gA107, '3')} t2={_hcn107(_gA107, '2')} "
+              f"min-t2={_hcn107(_gM107, '2')}")
+        check("(v3.17.1) HEATMAP growth per-sel: BRG A t2 '+50,0%' → "
+              "hm_pos_3 (merah 25≤|g|<100) · t3 '-50,0%' → hm_neg_3 "
+              "(hijau) · t4 '0,0%' TANPA heat · BRG MIN t2 '-20,0%' → "
+              "hm_neg_2 · t3 '-100,0%' → hm_neg_4 (≥100%)",
+              _hcn107(_gA107, "2", "hm_pos_3") == 1
+              and _hcn107(_gA107, "3", "hm_neg_3") == 1
+              and _hcn107(_gA107, "4", "hm_neg_3") == 0
+              and _hcn107(_gM107, "2", "hm_neg_2") == 1
+              and _hcn107(_gM107, "3", "hm_neg_4") == 1,
+              f"A-t2={_hcn107(_gA107, '2', 'hm_pos_3')} "
+              f"A-t3={_hcn107(_gA107, '3', 'hm_neg_3')} "
+              f"A-t4={_hcn107(_gA107, '4', 'hm_neg_3')} "
+              f"M-t2={_hcn107(_gM107, '2', 'hm_neg_2')} "
+              f"M-t3={_hcn107(_gM107, '3', 'hm_neg_4')}")
+        check("(v3.17.1) tag heat ter-configure background-nya di tree "
+              "utama (_setup_tags — hm_pos_4/hm_neg_4 = GROWTH_HEAT_BG)",
+              str(_p107.tree.tag_configure("hm_pos_4", "background"))
+              == _PV107.GROWTH_HEAT_BG["hm_pos_4"]
+              and str(_p107.tree.tag_configure("hm_neg_4", "background"))
+              == _PV107.GROWTH_HEAT_BG["hm_neg_4"],
+              f"pos4={_p107.tree.tag_configure('hm_pos_4', 'background')} "
+              f"neg4={_p107.tree.tag_configure('hm_neg_4', 'background')}")
 
     # mode RESTO: growth (dan COM) tak relevan — baris tak dirender
     _p107._on_mode_change(0)
@@ -24471,6 +24567,16 @@ def main():
           and _p107.tree.set(_gA107b, "4") == "0,0%",
           f"got 3={_p107.tree.set(_gA107b, '3')!r} "
           f"4={_p107.tree.set(_gA107b, '4')!r}")
+    if CELL_TAGS_SUPPORTED:
+        _hcn107b = lambda i, c, t: root.tk.call(
+            str(_p107.tree), "tag", "cell", "has", t, (i, c))
+        check("(v3.17.1) heat dipasang ulang pasca re-render rentang "
+              "3..4 (kolom '3' '-50,0%' → hm_neg_3; kolom '4' 0,0% "
+              "tanpa heat)",
+              _hcn107b(_gA107b, "3", "hm_neg_3") == 1
+              and _hcn107b(_gA107b, "4", "hm_neg_3") == 0,
+              f"t3={_hcn107b(_gA107b, '3', 'hm_neg_3')} "
+              f"t4={_hcn107b(_gA107b, '4', 'hm_neg_3')}")
 
     # ---- (D) export: rows_data membawa row 10 + number format persen ----
     _rd107 = [r for r in _p107._last_payload.get("rows_data", [])
@@ -24497,6 +24603,20 @@ def main():
           "number format PERSEN ('+0,0\"%\"...' — literal %, tanda ±)",
           _n107 > 0 and len(_rows107) >= 1 and _fmt_ok107,
           f"n={_n107} rows={len(_rows107)} fmt={_fmt_ok107}")
+    # v3.17.1 — export parity HEATMAP: sel pertama baris growth (t3
+    # '-50,0%') → fill hijau hm_neg_3 (FFA5D6A7) & font TIDAK merah
+    # (minus growth dibawa heat, mirror UI).
+    _gc107 = _ws107.cell(row=_rows107[0], column=2)
+    _rgb107 = str(getattr(_gc107.fill.start_color, "rgb", "") or "")
+    _fc107 = ""
+    if getattr(_gc107, "font", None) is not None \
+            and getattr(_gc107.font, "color", None) is not None:
+        _fc107 = str(getattr(_gc107.font.color, "rgb", "") or "")
+    check("(v3.17.1) Export heat fill per sel: t3 '-50,0%' → fill "
+          "FFA5D6A7 (hm_neg_3 hijau) & font TANPA merah CC0000 (growth "
+          "minus → heat, bukan red font — parity UI)",
+          _rgb107 == "FFA5D6A7" and _fc107 != "FFCC0000",
+          f"fill={_rgb107} font={_fc107!r}")
     _p107.destroy()
     root.update()
 

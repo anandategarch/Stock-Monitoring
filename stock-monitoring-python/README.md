@@ -2,7 +2,7 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.16.1** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.17.1** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 
@@ -10,7 +10,7 @@ Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Port
 - **9 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
 - **Analisa deviasi otomatis** — kolom CEK dengan 12 label anomali (Promix 04, RI Balancing, Kosong (AKTIF), Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Turun Drastis + varian SO Tidak Diinput, Naik Drastis, ACR to BOM, BOM 0) + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO belum dibuat, analisa lalu-kini berbasis Qty
 - **Saldo sistem minus** — rekapan pasangan Eksternal/Campuran dengan saldo < 0 di rentang 1..H, dengan keterangan mulai minus dari tanggal berapa
-- **% Growth Deviasi (pivot)** — baris `10.% Growth Deviasi` di tab Pivot (mode Tanggal): persen kenaikan/penurunan deviasi per tanggal dari baris `3.Deviasi` — `(Dev(t)−Dev(t−1)) ÷ |Dev(t−1)| × 100`, pembagi absolut & persen ber-tanda dari data asli (v3.17.0)
+- **% Growth Deviasi (pivot)** — baris `10.% Growth Deviasi` di tab Pivot (mode Tanggal): persen kenaikan/penurunan deviasi per tanggal dari baris `3.Deviasi` — **absolut penuh** `(|Dev(t)|−|Dev(t−1)|) ÷ |Dev(t−1)| × 100` (arah dari magnitudo) + **heatmap per-sel**: merah = deviasi naik / hijau = turun, intensitas <5%/<25%/<100%/≥100% (v3.17.0; rumus & heatmap v3.17.1)
 - **File deviasi bulan lalu** — dimuat manual via tombol 📂 (parse async, gak bekui UI), pattern `{12+month}.{BULAN} {TAHUN}.xlsx`
 - **Log persisten + crash trace** — `logs/app.log` (rotasi otomatis) merekam seluruh log run pipeline & exception runtime; `crash.log` append ber-timestamp per kejadian (v3.15)
 - **Tooltip hover** untuk cell panjang (CEK narasi, Keterangan, Rekomendasi) — muncul dekat cursor

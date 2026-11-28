@@ -673,7 +673,9 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
     fmt_int, fmt_dec = "#,##0;(#,##0)", "#,##0.0;(#,##0.0)"
     # v3.17.0 — baris 10.% Growth Deviasi: nilai = persen-point (12,5
     # = +12,5%); format literal '%' dgn tanda ± (mirror tampilan UI
-    # '+12,5%' / '-8,3%'; minus tetap font MERAH per-cell di bawah).
+    # '+12,5%' / '-8,3%').
+    # v3.17.1 — minus growth TIDAK lagi font merah: semantik sign dibawa
+    # HEATMAP fill per sel (merah=deviasi naik / hijau=turun — parity UI).
     fmt_pct = '+0.0"%";-0.0"%";0.0"%"'
     r = 8
     n_data = 0
@@ -719,11 +721,23 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
                     # v3.17.0 — persen growth (1 desimal, tanda ±,
                     # suffix '%' literal — mirror sel UI).
                     vc.number_format = fmt_pct
+                    # v3.17.1 — HEATMAP fill per sel (parity UI: bucket
+                    # sama _growth_heat_tag; merah=|Dev| naik, hijau=turun;
+                    # sel 0/NaN tanpa heat → bg pastel baris METRIC_BG).
+                    _h = PivotTableView._growth_heat_tag(v)
+                    if _h is not None:
+                        _bg = "FF" + PivotTableView.GROWTH_HEAT_BG[
+                            _h].lstrip("#").upper()
+                        vc.fill = PatternFill(start_color=_bg, end_color=_bg,
+                                              fill_type="solid")
                 else:
                     vc.number_format = fmt_int if _is_int(v) else fmt_dec
                 # MINUS → font merah PER CELL (permintaan v3.9.2);
-                # Selisih IN ≠ 0 → merah (anomaly per cell, mirror UI)
-                red = v < 0 or (metric == "7.Selisih IN" and v != 0)
+                # Selisih IN ≠ 0 → merah (anomaly per cell, mirror UI);
+                # v3.17.1 — baris growth DIKECUALIKAN (minus hijau-heat,
+                # bukan merah — mirror UI heatmap).
+                red = (v < 0 and metric != "10.% Growth Deviasi") or (
+                    metric == "7.Selisih IN" and v != 0)
                 if red:
                     vc.font = Font(color="FFCC0000",
                                    bold=metric == "7.Selisih IN")
@@ -740,8 +754,10 @@ def write_pivot_display_sheet(filepath: str, payload: dict,
     note = ws.cell(row=last_row + 2, column=1,
                    value="• = tanggal bulan lalu · nilai dalam kurung = minus "
                          "(font merah) · 0 disembunyikan (font putih) · "
-                         "10.% Growth Deviasi = ±x,x% (pembagi |Dev(t−1)|, "
-                         "kolom pertama kosong)")
+                         "10.% Growth Deviasi = ±x,x% ABSOLUT PENUH "
+                         "(|Dev(t)|−|Dev(t−1)|)÷|Dev(t−1)| · kolom "
+                         "pertama kosong · heat merah = deviasi naik, "
+                         "hijau = turun")
     note.font = Font(italic=True, color="FF94A3B8")
 
     ws.column_dimensions["A"].width = 30

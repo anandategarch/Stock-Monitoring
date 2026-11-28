@@ -3,6 +3,69 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.17.1 — GROWTH DEVIASI RUMUS ABSOLUT PENUH + HEATMAP PER-SEL
+
+User: *"Kalau deviasinya di-absolutekan dulu baru dihitung growth-nya,
+perhitungan Anda hampir semuanya sudah benar—hanya ada kesalahan tanda
+(+/-) pada Kolom 2, 5, 7, 10, 11, 13, dan 15. Jika menggunakan rumus
+absolut penuh: Growth = (|Dev_sekarang| − |Dev_sebelumnya|) /
+|Dev_sebelumnya| × 100%"* + *"cek dan validasi ya ... fitur baru
+10.growth deviasi ada salah dan kasih heat map dong bisa gak growth
+deviasi nya"*.
+
+### 1. Fix rumus — ABSOLUT PENUH (numerator & pembagi)
+- **Sebelumnya (v3.17.0)**: `(Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100` —
+  hanya pembagi yang di-absolut; numerator dari data asli ber-tanda →
+  TANDA TERBALIK saat deviasi berpindah sisi minus↔plus (kolom 2/5/7/
+  10/11/13/15 pada tabel validasi user; kasus nyata: −41.447 → +3.044,5
+  dihitung `+107,3%` padahal magnitudo TURUN).
+- **Sekarang**: **`(|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100`** —
+  KEDUA operand di-ABSOLUT; arah murni dari MAGNITUDO deviasi (|Dev|
+  naik → plus "deviasi membesar"; |Dev| turun → minus "deviasi
+  mengecil"). Kolom 2 kasus user kini `-92,7%` (magnitudo 41.447 →
+  3.044,5 = turun) — seluruh 14 kolom tabel validasi user cocok.
+- Semantik sel lain TAK berubah: kolom pertama & pembagi-0-nonzero →
+  kosong; kedua 0 → `0,0%`; kolom pertama rentang tetap dihitung dari
+  matrix PENUH pra-rentang (mirror COM FIX 6c-01).
+
+### 2. Heatmap per-sel baris `10.% Growth Deviasi` (user: "kasih heat
+map dong bisa gak growth deviasi nya")
+- **Tag bg PER-CELL** (jalur `apply_cell_tag` Tk 9 native / overlay
+  Label Tk 8.6 — persis pola `neg_cell` v3.9.2) — 8 bucket:
+  - growth **+** (deviasi MEMBESAR = makin menyimpang) → keluarga
+    **MERAH** `hm_pos_1..4` (`#FFEBEE` → `#FFCDD2` → `#EF9A9A` →
+    `#E57373`);
+  - growth **−** (deviasi MENGECIL = mendingin) → keluarga **HIJAU**
+    `hm_neg_1..4` (`#E8F5E9` → `#C8E6C9` → `#A5D6A7` → `#81C784`);
+  - intensitas bucket magnitudo: `<5%` / `5..25%` / `25..100%` /
+    `≥100%` (makin pekat = makin besar perubahan);
+  - sel `0,0%` / KOSONG (kolom pertama & pembagi-0) TANPA heat →
+    jatuh ke bg pastel teal baris METRIC_BG.
+- **Minus growth TIDAK lagi dimerahkan per-cell**: semantik sign kini
+  dibawa HEATMAP bg + tanda ± tetap terbaca di teks sel (font merah di
+  atas heat HIJAU = tabrakan warna); baris metric LAIN tetap minus
+  merah per-cell seperti biasa. Tag heat hanya mengeset `background`
+  → KOEXIST dgn tag fg lain di sel sama (pola CellColorOverlay/Tk 9).
+- **Legenda** +2 chip: "Growth merah = deviasi naik" / "hijau =
+  deviasi turun".
+- **Export 💾 PARITY tampilan**: sel growth kini membawa FILL heat per
+  sel (bucket sama `_growth_heat_tag`); font minus growth TIDAK merah
+  lagi; catatan legenda export di-update (rumus absolut penuh + heat).
+- **Implementasi** (`src/ui/pivot_view.py`): konstanta
+  `GROWTH_HEAT_EDGES`/`GROWTH_HEAT_BG`; helper `_growth_heat_tag(val)`;
+  `_compute_payload` mengumpulkan `heat_cells` per payload (baris
+  growth dikecualikan dari `red_cells`); payload key `heat_cells`;
+  `render_done`/clone ⛶ `cells_setup` memasang setiap bucket-tag;
+  `_setup_tags` mendaftar 8 tag bg. `src/ui/export_sheets.py`: fill
+  heat + font + note.
+
+### 3. Verifikasi
+- Tests §107 di-update/ditambah (rumus absolut penuh; kasus nyata
+  kolom user −92,7%; 16 kasus bucket `_growth_heat_tag`; GUI BRG MIN
+  −20/−100; heat per-sel native Tk 9 `tag cell has` hm_pos_3/hm_neg_3/
+  hm_neg_2/hm_neg_4; payload `heat_cells`; export fill `FFA5D6A7` +
+  font bukan CC0000) — semuanya PASS.
+
 ## v3.17.0 — ROW 10.% GROWTH DEVIASI (PIVOT) + HAPUS TAB ANALISA KRONIS + HAPUS STRIP BARANG×RESTO
 
 User: *"bisa gak di bagian tab pivot tabel ada row baru yaitu 10.% Growth
