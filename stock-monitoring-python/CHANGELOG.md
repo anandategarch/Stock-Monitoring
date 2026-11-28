@@ -3,6 +3,35 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.18.2 — INTEGRASI FOLLOW UP DI TAB 🚨 RADAR ANOMALI
+
+User (item 3 permintaan bertahap): *"Integrasi Follow Up"* — pasangan
+shift bisa didaftarkan KE daftar ☑ langsung dari radar.
+
+- **Kolom ✓ AWAL** tabel radar — klik sel ✓ = daftarkan pasangan shift
+  (asal `'RADAR'`; snapshot so/sistem/deviasi + so_m2..so_p2 per tanggal
+  H dari frame — `_pair_series_maps` helper pure; fp STABIL cek `""` —
+  pola snap deviasi_view).
+- **☑ LEVEL PASANGAN** (mirror v3.12.3 deviasi_view): entri lama
+  GR/PCS/IMPOR ber-pasangan+satuan-sama ikut menandai baris radar
+  (isolasi GR↔PCS tetap); `_pair_key_index`/`_pair_matched_keys` kunci
+  kanonik `norm_nama_*` × satuan upper.
+- **Uncek DIKONFIRMASI** (messagebox.askyesno — jaga-jaga klik tak
+  sengaja; opt-out `view.confirm_unfollow = False`; uncek menyapu SEMUA
+  entri pasangan-sama).
+- **Listener FollowUpStore** → `_refresh_check_cells`: sel ✓ radar
+  sinkron saat toggle dari tab mana pun (tanpa re-render penuh).
+- Legenda chip ✓ (pola tab 📦/🧩); ⧩ filter mengecualikan kolom ✓
+  (ikon-only tanpa affordance).
+
+### Verifikasi
+- §110 (6 cek): A1 `_pair_series_maps` per (kb,kr,satn)×3 JENIS · B1 ☑
+  dari entri asal GR (fp beda asal — level pasangan) + snapshot RADAR ·
+  B2 tambah entri asal RADAR · B3 uncek ber-konfirmasi + sapu semua
+  entri pasangan · B4 listener store sinkron sel tanpa re-render · B5
+  chip legenda ✓ · C1 wiring app shared store.
+- Suite ALL PASS + mock ALL PASS + ruff 193 < baseline + py_compile.
+
 ## v3.18.1 — LABEL CEK "Shift Deviasi" DI TAB DEVIASI GR/PCS
 
 User (item 2 permintaan bertahap): *"Kolom penanda di tab Deviasi GR/PCS"* —

@@ -24,15 +24,33 @@ Status footer: "N pasangan shift aktif · terbesar ×N (Barang — Resto)".
 H mengikuti SharedTanggalH (tab 📦) — refresh saat H berubah.
 Empty state: belum ada anomali ≠ error (normal / baseline kurang / awal
 bulan) — dijelaskan + CTA ke tab Deviasi GR.
+
+v3.18.2 — INTEGRASI FOLLOW UP (user: "Integrasi Follow Up"): kolom ✓
+awal — klik = daftarkan pasangan shift ke daftar ☑ (asal 'RADAR';
+snapshot so/sistem/deviasi per H dari frame — pola snap deviasi_view);
+☑ LEVEL PASANGAN (entri lama GR/PCS/IMPOR ber-pasangan-sama ikut
+menandai — isolasi satuan GR↔PCS tetap; mirror v3.12.3 deviasi_view);
+uncek DIKONFIRMASI (jaga-jaga klik tak sengaja — pola _confirm_
+unfollow); listener store → sel ✓ radar ikut sinkron saat toggle dari
+tab mana pun.
 """
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import pandas as pd
 
+from ..pipeline.helpers import (  # v3.18.2 — kunci pasangan kanonik
+    norm_nama_barang_key,
+    norm_nama_resto_key,
+)
 from .anomali_shift import (
     RATIO_CUT,  # v3.18 — legenda ambang
     detect_shift_anomalies,
+)
+from .followup import (  # v3.18.2 — kolom ✓ (pola deviasi_view)
+    CHECK_OFF,
+    CHECK_ON,
+    row_fingerprint,
 )
 from .nominal_common import (
     fmt_rp_cell,  # v3.18 — Est. Nominal (Δ × harga 41.09)
@@ -66,7 +84,10 @@ from .widgets import (
 
 # Kolom (id, lebar, anchor) — GR+PCS SATU tabel (kolom Satuan tampil
 # selalu — beda tab 📦/🧩 yang menyembunyikannya karena per-tab seragam).
+# v3.18.2 — kolom ✓ AWAL (tambah/keluarkan daftar ☑ Follow Up — pola
+# deviasi GR/PCS; satu-satunya kolom ikon-only, dikecualikan dari ⧩).
 COLUMNS = [
+    ("✓", 34, "center"),
     ("Resto", 70, "w"),
     ("Nama Barang", 190, "w"),
     ("Satuan", 55, "w"),
@@ -100,7 +121,8 @@ class AnomaliRadarView(tk.Frame):
 
     def __init__(self, parent, go_to_proses=None, go_to_deviasi=None,
                  h_state=None, saldo_sistem_state=None,
-                 on_count_changed=None):
+                 on_count_changed=None,
+                 followup_store=None):
         super().__init__(parent, bg=C_BG)
         self.go_to_proses = go_to_proses
         self.go_to_deviasi = go_to_deviasi
@@ -111,6 +133,9 @@ class AnomaliRadarView(tk.Frame):
                                   if saldo_sistem_state is not None
                                   else "4217")
         self.saldo_sistem_state = saldo_sistem_state
+        # v3.18.2 — store Follow Up (kolom ✓; listener reaktif — pola
+        # deviasi_view: toggle dari tab mana pun menyinkronkan sel ✓).
+        self.store = followup_store
 
         self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None
@@ -121,17 +146,21 @@ class AnomaliRadarView(tk.Frame):
         self._rows: list[dict] = []        # baris tampil (raw+disp)
         self._rows_all: list[dict] = []    # pra-filter ⧩
         self._rows_by_iid: dict = {}
+        self._fp_map: dict = {}            # v3.18.2 — iid → fp stabil
         self._busy = False
         self._dirty = False
         self._last_count = 0
 
-        self._col_sel: dict = {c: None for c, _, _ in COLUMNS}
+        self._col_sel: dict = {c: None for c, _, _ in COLUMNS
+                               if c != "✓"}
         self._sort_col = "Rasio"
         self._sort_rev = True
 
         self._build()
         if self.h_state is not None:
             self.h_state.subscribe(self._on_shared_h_changed)
+        if self.store is not None:
+            self.store.add_listener(self._on_store_changed)
 
     # ------------------------------------------------------------------
     # LAYOUT
@@ -209,14 +238,17 @@ class AnomaliRadarView(tk.Frame):
 
         self.overlay = None   # LoadingOverlay dibuat lazy (perlu window)
 
-        # ⧩ filter header (semua kolom) + sort
+        # v3.18.2 — ⧩ filter header semua kolom KECUALI ✓ (toggle — pola
+        # deviasi_view; kolom ikon-only tanpa affordance dikecualikan).
+        _filter_cols = [c[0] for c in COLUMNS if c[0] != "✓"]
         self.header_filters = HeaderFilterGroup(
-            self.tree, col_ids,
+            self.tree, _filter_cols,
             get_values=self._col_values,
             on_apply=self._on_col_filter,
             on_sort=lambda c, d: self._sort_by(c, reverse=d))
 
         # Interaksi
+        self.tree.bind("<Button-1>", self._on_tree_click, add="+")
         self.tree.bind("<Double-1>", self._on_double_click, add="+")
         self.tree.bind("<Button-3>", self._on_context_menu, add="+")
         self.tree.bind("<Control-c>", self._on_copy, add="+")
@@ -234,8 +266,13 @@ class AnomaliRadarView(tk.Frame):
             ("Rasio · heat merah muda → kuat (×2 / ×4 / ×8)", "#EF9A9A"),
             ("Est. Nominal = Δ Deviasi × harga 41.09 (satuan-aware)",
              "#475569"),
+            # v3.18.2 — kolom ✓ (pola legenda ✓ tab 📦/🧩 v3.12.3).
+            (("✓ = tambah/keluarkan daftar pantauan (tab Follow Up; "
+              "☑ = baris/pasangan sudah masuk daftar — uncek ada "
+              "konfirmasi)"), "#475569"),
         ])
         legend.pack(fill="x", padx=12, pady=(6, 0))
+        self._legend = legend   # v3.18.2 — chip ✓ dibaca test/legenda
         self._expander = TableExpander(toolbar, [head, legend])
 
     # ------------------------------------------------------------------
@@ -256,7 +293,7 @@ class AnomaliRadarView(tk.Frame):
             self.saldo_sistem_mode = self.saldo_sistem_state.mode
         self._rows_all = []
         self._rows = []
-        self._col_sel = {c: None for c, _, _ in COLUMNS}
+        self._col_sel = {c: None for c, _, _ in COLUMNS if c != "✓"}
         self.header_filters.clear_all()
         reset_autofit_once(self)
         _empty = data is None or getattr(data, "empty", True)
@@ -298,6 +335,10 @@ class AnomaliRadarView(tk.Frame):
 
         def work():
             anoms = detect_shift_anomalies(data, h)
+            # v3.18.2 — peta SO/SALDO/DEVIASI per (kb, kr, satn) utk
+            # snapshot follow-up baris radar (nilai per tanggal — pola
+            # snap deviasi_view; pure, thread-safe).
+            so_map, sa_map, dv_map = _pair_series_maps(data, h)
             rows = []
             for rec in anoms.to_dict("records"):
                 harga = None
@@ -305,7 +346,8 @@ class AnomaliRadarView(tk.Frame):
                     harga = lookup_harga_pair(
                         harga_map, konversi_map,
                         str(rec.get("barang")), str(rec.get("satuan")))[0]
-                rows.append(self._row_build(rec, harga))
+                rows.append(self._row_build(rec, harga, h,
+                                             so_map, sa_map, dv_map))
             return {"rows": rows}
 
         def done(payload):
@@ -375,9 +417,14 @@ class AnomaliRadarView(tk.Frame):
             return "∞"
         return cls._fmt_num(round(z, 1))
 
-    def _row_build(self, rec: dict, harga) -> dict:
+    def _row_build(self, rec: dict, harga, h,
+                   so_map: dict | None = None,
+                   sa_map: dict | None = None,
+                   dv_map: dict | None = None) -> dict:
         """Baris tampil: display strings + raw values (sort/filter) +
-        record engine (popup/follow-up)."""
+        record engine (popup) + snapshot follow-up (v3.18.2 — nilai
+        so/sistem/deviasi per tanggal H dari frame, pola snap
+        deviasi_view; kosong bila tanggal tak terekam)."""
         in_qty = rec.get("in_qty")
         has_in = in_qty is not None and not (
             isinstance(in_qty, float) and pd.isna(in_qty))
@@ -434,7 +481,35 @@ class AnomaliRadarView(tk.Frame):
             "Est. Nominal": (nominal if nominal is not None
                              else float("nan")),
         }
-        return {"disp": disp, "raw": raw, "rec": rec}
+        # v3.18.2 — snapshot follow-up baris radar (fp STABIL: cek "" —
+        # pola _fp_stable deviasi_view; nilai so/sistem/deviasi + so_m2..
+        # p2 dari peta per tanggal, kosong bila tak terekam).
+        key = (rec.get("kb"), rec.get("kr"), rec.get("satn"))
+        so_map = so_map or {}
+        sa_map = sa_map or {}
+        dv_map = dv_map or {}
+        _val = lambda m, t: m.get(key, {}).get(t, "")
+        snap = {
+            "asal": "RADAR",
+            "resto": str(rec.get("resto") or ""),
+            "barang": str(rec.get("barang") or ""),
+            "satuan": str(rec.get("satuan") or ""),
+            "aktif": "",
+            "h": h,
+            "so": _val(so_map, h),
+            "sistem": _val(sa_map, h),
+            "deviasi": _val(dv_map, h),
+            "cek": "",
+            "so_m2": _val(so_map, h - 2),
+            "so_m1": _val(so_map, h - 1),
+            "so_p1": _val(so_map, h + 1),
+            "so_p2": _val(so_map, h + 2),
+            "loss_bom": "",
+            "barang_app": str(rec.get("barang") or ""),
+            "resto_app": str(rec.get("resto") or ""),
+        }
+        return {"disp": disp, "raw": raw, "rec": rec, "snap": snap,
+                "fp": row_fingerprint(snap)}
 
     # ------------------------------------------------------------------
     # FILTER + SORT + RENDER
@@ -496,8 +571,17 @@ class AnomaliRadarView(tk.Frame):
             # heat sel Rasio (Tk 9 per-cell; Tk 8.6: pola melewatkan)
             # — kumpulkan per-TAG lalu satu panggilan (pola deviasi_view).
             rasio_cells: dict = {"ras_1": [], "ras_2": [], "ras_3": []}
+            fp_map: dict = {}
+            pair_idx = self._pair_key_index()   # v3.18.2 — ☑ level pasangan
             for i, row in enumerate(rows):
-                disp = [row["disp"][c] for c, _, _ in COLUMNS]
+                snap = row.get("snap")
+                fp = row.get("fp")
+                fp_map[f"row_{i}"] = fp
+                checked = (self.store is not None and fp is not None and
+                           (self.store.has(fp)
+                            or bool(self._pair_matched_keys(snap, pair_idx))))
+                disp = [CHECK_ON if checked else CHECK_OFF] + [
+                    row["disp"][c] for c, _, _ in COLUMNS if c != "✓"]
                 tags = ["evenrow" if i % 2 == 0 else "oddrow"]
                 rec = row["rec"]
                 if rec.get("in_match"):
@@ -519,6 +603,7 @@ class AnomaliRadarView(tk.Frame):
                 for _tag, _cells in rasio_cells.items():
                     apply_cell_tag(self.tree, _tag, _cells)
             self._rows_by_iid = {f"row_{i}": r for i, r in enumerate(rows)}
+            self._fp_map = fp_map   # v3.18.2 — sel ✓ toggle/refresh
             self._update_status()
         finally:
             self._busy = False
@@ -551,6 +636,151 @@ class AnomaliRadarView(tk.Frame):
     def _show_content(self):
         self.empty.pack_forget()
         self.content.pack(fill="both", expand=True)
+
+    # ------------------------------------------------------------------
+    # ✓ FOLLOW-UP (v3.18.2 — pola deviasi_view: klik sel ✓ = daftar/
+    # keluar; ☑ level PASANGAN; uncek dikonfirmasi; listener store)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _pair_key_parts(snap: dict) -> tuple[str, str, str]:
+        """(resto, barang, satuan) ternormalisasi — kunci pasangan
+        (mirror DeviasiView._pair_key_parts v3.12.3; satuan upper+strip)."""
+        return (
+            norm_nama_resto_key(snap.get("resto", "") or ""),
+            norm_nama_barang_key(snap.get("barang", "") or ""),
+            str(snap.get("satuan", "") or "").strip().upper(),
+        )
+
+    def _pair_key_index(self) -> dict:
+        """{(resto, barang, satuan) → [kunci store]} SELURUH entri follow-up
+        (asal apapun — RADAR/GR/PCS/IMPOR; pola deviasi_view._pair_key_index
+        v3.12.3 — thread-safe snapshot iterasi)."""
+        store = self.store
+        if store is None or not store.rows:
+            return {}
+        try:
+            items = list(store.rows.items())
+        except RuntimeError:
+            return {}
+        idx: dict = {}
+        for k, s in items:
+            idx.setdefault(self._pair_key_parts(s), []).append(k)
+        return idx
+
+    def _pair_matched_keys(self, snap: dict | None, pair_idx: dict) -> list:
+        """Kunci store ber-pasangan-sama dgn snap (satuan SAMA + satuan
+        KOSONG impor; GR↔PCS terisolasi — mirror v3.12.3)."""
+        if not snap or not pair_idx:
+            return []
+        r, b, s = self._pair_key_parts(snap)
+        out: list = []
+        for key in ((r, b, s), (r, b, "")):
+            for k in pair_idx.get(key) or ():
+                if k not in out:
+                    out.append(k)
+        return out
+
+    def _confirm_unfollow(self, snap: dict, n_ent: int) -> bool:
+        """Konfirmasi sebelum mengeluarkan (pola deviasi_view v3.12.3):
+        return True = lanjut hapus; False = batal. Opt-out programmatic:
+        ``view.confirm_unfollow = False``."""
+        if not self.confirm_unfollow:
+            return True
+        extra = (f"\n({n_ent} entri lama pasangan ini ikut terhapus)"
+                 if n_ent > 1 else "")
+        try:
+            return messagebox.askyesno(
+                "Keluarkan dari daftar Follow Up?",
+                "Keluarkan baris ini dari daftar ☑ Follow Up?\n\n"
+                f"Resto : {snap.get('resto', '')}\n"
+                f"Barang : {snap.get('barang', '')}{extra}\n\n"
+                "Klik Tidak bila centang ini lepas tanpa sengaja — "
+                "baris tetap dipantau.\n"
+                "Daftar yang terhapus masih bisa dipulihkan lewat "
+                "📥 Impor Excel di tab ☑ Follow Up (bila ada file "
+                "export).",
+                parent=self.winfo_toplevel())
+        except tk.TclError:
+            return True
+
+    confirm_unfollow: bool = True
+
+    def _on_tree_click(self, event):
+        """Klik sel ✓ = toggle follow-up (pola deviasi_view._on_tree_click:
+        identifikasi kolom by NAME — bukan posisi display)."""
+        tree = event.widget
+        try:
+            if tree.identify_region(event.x, event.y) != "cell":
+                return
+            if identify_to_column(tree, tree.identify_column(event.x)) != "✓":
+                return
+            row_iid = tree.identify_row(event.y)
+        except tk.TclError:
+            return
+        if not row_iid or self.store is None:
+            return
+        fp = self._fp_map.get(row_iid)
+        snap = (self._rows_by_iid.get(row_iid) or {}).get("snap")
+        if not fp or snap is None:
+            return
+        keys = self._pair_matched_keys(snap, self._pair_key_index())
+        if keys:
+            if not self._confirm_unfollow(snap, len(keys)):
+                try:
+                    self.status_var.set(
+                        "Batal — baris tetap di daftar ☑ Follow Up "
+                        f"(total {len(self.store)} baris)")
+                except tk.TclError:
+                    pass
+                return
+            for k in keys:
+                self.store.toggle(k, snap)
+            checked_now = bool(self._pair_matched_keys(
+                snap, self._pair_key_index()))
+        else:
+            checked_now = self.store.toggle(fp, snap)
+        try:
+            tree.set(row_iid, "✓", CHECK_ON if checked_now else CHECK_OFF)
+        except tk.TclError:
+            pass
+        n = len(self.store)
+        self.status_var.set(
+            f"{'Masuk' if checked_now else 'Keluar'} daftar Follow Up — "
+            f"total {n} baris" if n else "Dikeluarkan — daftar kosong")
+
+    def _on_store_changed(self, _store=None):
+        """Listener FollowUpStore (toggle dari tab mana pun) → jadwalkan
+        pembaruan sel ✓ radar di main thread (pola deviasi_view — tanpa
+        re-render penuh; view mati → telan TclError)."""
+        try:
+            if not self.winfo_exists():
+                return
+            self.after(0, self._refresh_check_cells)
+        except tk.TclError:
+            pass
+
+    def _refresh_check_cells(self):
+        """Perbarui sel ✓ dari state store (☑ level pasangan — v3.12.3
+        mirror: entri lama/IMPOR ber-pasangan-sama ikut menandai)."""
+        if self.store is None or not getattr(self, "_fp_map", None):
+            return
+        try:
+            children = self.tree.get_children("")
+        except tk.TclError:
+            return
+        pair_idx = self._pair_key_index()
+        for iid in children:
+            fp = self._fp_map.get(iid)
+            snap = (self._rows_by_iid.get(iid) or {}).get("snap")
+            if fp is None or snap is None:
+                continue
+            checked = (self.store.has(fp)
+                       or bool(self._pair_matched_keys(snap, pair_idx)))
+            try:
+                self.tree.set(iid, "✓",
+                              CHECK_ON if checked else CHECK_OFF)
+            except tk.TclError:
+                pass
 
     # ------------------------------------------------------------------
     # INTERAKSI
@@ -618,3 +848,36 @@ class AnomaliRadarView(tk.Frame):
             self.tree.clipboard_append(txt)
         except tk.TclError:
             pass
+
+
+def _pair_series_maps(df, h) -> tuple[dict, dict, dict]:
+    """v3.18.2 — Peta {(kb, kr, satn): {tgl: nilai}} utk 1.SO /
+    2.SALDO AKHIR / 3.DEVIASI (tgl ≥ 1 semua tanggal terekam — lookup
+    so/sistem/deviasi + so_m2..so_p2 snapshot follow-up baris radar).
+    Pure pandas — thread-safe (dipanggil worker _refresh)."""
+    empty = ({}, {}, {})
+    if df is None or getattr(df, "empty", True):
+        return empty
+    cols = set(df.columns)
+    if not {"Nama Barang", "NAMA RESTO", "JENIS", "NILAI"} <= cols:
+        return empty
+    tnum = pd.to_numeric(df["Tanggal"], errors="coerce")
+    nilai = pd.to_numeric(df["NILAI"], errors="coerce").fillna(0)
+    jenis = df["JENIS"].astype(str)
+    _sat = (df["SATUAN"].fillna("").astype(str).str.strip().str.upper()
+            if "SATUAN" in cols
+            else pd.Series([""] * len(df), index=df.index))
+    kb_s = df["Nama Barang"].astype(str).map(norm_nama_barang_key)
+    kr_s = df["NAMA RESTO"].astype(str).map(norm_nama_resto_key)
+    out: tuple = ({}, {}, {})
+    for j, target in (("1.SO", out[0]), ("2.SALDO AKHIR", out[1]),
+                      ("3.DEVIASI", out[2])):
+        m = (tnum.notna() & (tnum >= 1) & (jenis == j))
+        if not bool(m.any()):
+            continue
+        for k, t, v in zip(zip(kb_s[m].tolist(), kr_s[m].tolist(),
+                               _sat[m].tolist()),
+                           tnum[m].astype("Int64").tolist(),
+                           nilai[m].tolist()):
+            target.setdefault(k, {})[int(t)] = float(v)
+    return out

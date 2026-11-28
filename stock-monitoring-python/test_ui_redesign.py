@@ -484,6 +484,17 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import tkinter as tk
 from tkinter import ttk
 
+# ============================================================================
+# (v3.12.3) §103 PRE-FLIGHT — stub messagebox DEVIASI VIEW (auto-Ya).
+# Konfirmasi uncek ✓ tab 📦/🧩 (v3.12.3 _confirm_unfollow) memakai
+# messagebox.askyesno NATIVE — di Xvfb tanpa interaksi itu MEM-BLOCK
+# seluruh suite (dialog modal menunggu klik yang tak pernah datang).
+# BINDING modul deviasi_view diganti stub (BUKAN mutasi objek
+# tkinter.messagebox global — modul lain tak terpengaruh; pola patch
+# §18/§30): askyesno → auto-Ya + rekaman calls; §103 membalik `result`
+# per-kasus utk menguji jalur 'Tidak' (batal) dan memeriksa argumen.
+# ============================================================================
+import src.ui.deviasi_view as _dvm103
 from src.ui.app import APP_VERSION, StockMonitorApp
 from src.ui.deviasi_file import (  # v3.11.30 — relokasi dari komparasi
     auto_bulanan_paths,
@@ -497,18 +508,6 @@ from src.ui.widgets import (
     copy_cell_region_tsv,
     run_async,
 )
-
-# ============================================================================
-# (v3.12.3) §103 PRE-FLIGHT — stub messagebox DEVIASI VIEW (auto-Ya).
-# Konfirmasi uncek ✓ tab 📦/🧩 (v3.12.3 _confirm_unfollow) memakai
-# messagebox.askyesno NATIVE — di Xvfb tanpa interaksi itu MEM-BLOCK
-# seluruh suite (dialog modal menunggu klik yang tak pernah datang).
-# BINDING modul deviasi_view diganti stub (BUKAN mutasi objek
-# tkinter.messagebox global — modul lain tak terpengaruh; pola patch
-# §18/§30): askyesno → auto-Ya + rekaman calls; §103 membalik `result`
-# per-kasus utk menguji jalur 'Tidak' (batal) dan memeriksa argumen.
-# ============================================================================
-import src.ui.deviasi_view as _dvm103
 
 
 class _MBStub103:
@@ -23255,11 +23254,13 @@ def main():
     # ---------------------------------------------------------------------
     import pandas as _pd101
 
+    from src.ui.nominal_resto_view import NOHARGA_COL_TO_DF as _NCDF101
     from src.ui.widgets import (
         _filter_disp_value as _fdv101,
+    )
+    from src.ui.widgets import (
         filter_disp_mask as _fdm101,
     )
-    from src.ui.nominal_resto_view import NOHARGA_COL_TO_DF as _NCDF101
 
     # ---- (A) helper _filter_disp_value: konversi label tampilan ---------
     # spasi tepi → penanda '␣' dipasang SETELAH spasi ('GR ' → 'GR ␣' —
@@ -23545,8 +23546,8 @@ def main():
     import tempfile as _tf103
 
     from src.ui import followup as _fumod103
-    from src.ui.followup import row_fingerprint as _rfp103
     from src.ui.deviasi_view import DeviasiView as _DV103
+    from src.ui.followup import row_fingerprint as _rfp103
 
     _tmp103 = _tf103.mkdtemp(prefix="v3123_")
     _orig_fp103 = _fumod103.followup_path
@@ -23785,8 +23786,10 @@ def main():
     # gantung → DEVIASI MURNI padahal pola 1-hari cut-off. Fix: omit hanya
     # bila TIDAK ada rentang gantung terbuka (start_idx < 0).
     from src.pipeline.fn_audit import (
-        build_audit_from_app as _baf104,
         _kode_it_ri_map as _kim104,
+    )
+    from src.pipeline.fn_audit import (
+        build_audit_from_app as _baf104,
     )
 
     _Q104 = 217.080
@@ -23972,6 +23975,8 @@ def main():
     # ---- (G) export: kolom opsi audit + sel kosong baris tanpa IN -------
     from src.ui.export_sheets import (
         AUDIT_EXPORT_COLUMNS as _AEC104,
+    )
+    from src.ui.export_sheets import (
         build_selisih_export_df as _bse104,
     )
     check("(v3.12.4) §104-G AUDIT_EXPORT_COLUMNS: 'Kode IT/RI' TEPAT "
@@ -24667,6 +24672,8 @@ def main():
     # (1293/1343/1390) 23-25 bersama IN 1.000 + BM 1.000 di tgl 23.
     from src.ui.anomali_shift import (
         detect_shift_anomalies as _det108,
+    )
+    from src.ui.anomali_shift import (
         shift_segment_text as _seg108,
     )
 
@@ -24899,6 +24906,161 @@ def main():
           f"is_df={_memo109 is not None and _memo109[0] is _df109}")
     _top109.destroy()
     root.update()
+
+    # ---- (E) v3.18.2 — INTEGRASI FOLLOW UP DI RADAR ----------------------
+    print()
+    print("== §110. (v3.18.2) INTEGRASI FOLLOW UP DI RADAR ==")
+    from src.ui.anomali_radar_view import _pair_series_maps as _psm110
+    from src.ui.followup import FollowUpStore as _FUS110
+    # A1 — peta seri per pasangan (pure)
+    _so110, _sa110, _dv110 = _psm110(_df109, 25)
+    _key110 = ("CUP 14 (V.20)", "BJMHAS", "PCS")
+    check("(v3.18.2) §110-A1: _pair_series_maps — 3 peta per (kb, kr, "
+          "satn): SO[25]=100 · SALDO[25]=324 · DEVIASI[25]=-1290 → "
+          "-1390 (kasus user: serah tgl)",
+          _so110.get(_key110, {}).get(25) == 100.0
+          and _sa110.get(_key110, {}).get(25) == 324.0
+          and _dv110.get(_key110, {}).get(25) == -1390.0
+          and _dv110.get(_key110, {}).get(23) == -1293.0,
+          f"so={_so110.get(_key110)} dv={_dv110.get(_key110)}")
+    # Store terisolasi (tmp — jangan sentuh followup.json sesi dev):
+    # pola store.load() baca file; simpan di tmp dir via monkeypatch path.
+    import tempfile as _tf110
+
+    from src.ui import followup as _fu110
+    _orig_fp110 = _fu110.followup_path
+    _tmp110 = _tf110.mkdtemp()
+    _fu110.followup_path = lambda: Path(_tmp110) / "followup.json"
+    _fu110.resolved_path = lambda: Path(_tmp110) / "followup_resolved.json"
+    try:
+        _store110 = _FUS110()
+        # B1 — ☑ level pasangan: entri asal GR (fp beda asal) tetap
+        # menandai baris radar pasangan+satuan sama.
+        _snap_gr110 = {
+            "asal": "GR", "resto": "BJMHAS", "barang": "CUP 14 (V.20)",
+            "satuan": "PCS", "aktif": "AKTIF", "h": 25,
+            "so": 100.0, "sistem": 324.0, "deviasi": -1390.0,
+            "cek": "Shift Deviasi", "so_m2": "", "so_m1": "",
+            "so_p1": "", "so_p2": "", "loss_bom": "",
+            "barang_app": "CUP 14 (V.20)", "resto_app": "BJMHAS"}
+        _fp_gr110 = row_fingerprint(_snap_gr110)
+        _store110.toggle(_fp_gr110, _snap_gr110)
+        _top110 = tk.Toplevel(root)
+        _top110.geometry("1500x820+15+15")
+        from src.ui.anomali_radar_view import AnomaliRadarView as _ARV110
+        _rv110 = _ARV110(
+            _top110, go_to_proses=lambda: None,
+            go_to_deviasi=lambda *a: None, h_state=None,
+            followup_store=_store110)
+        _rv110.pack(fill="both", expand=True)
+        root.update()
+        root.update_idletasks()
+        _rv110.load_data(_df109)
+        wait_view(root, _rv110)
+        _kids110 = _rv110.tree.get_children("")
+        check("(v3.18.2) §110-B1: ☑ LEVEL PASANGAN — baris radar ☑ dari "
+              "entri asal GR ber-pasangan+satuan sama (fp beda asal; "
+              "mirror v3.12.3 deviasi_view) + snapshot asal RADAR "
+              "terbangun (so/sistem/deviasi per H)",
+              len(_kids110) == 1
+              and _rv110.tree.set(_kids110[0], "✓") == "☑"
+              and _rv110._rows_by_iid[_kids110[0]]["snap"]["asal"]
+              == "RADAR"
+              and _rv110._rows_by_iid[_kids110[0]]["snap"]["deviasi"]
+              == -1390.0,
+              f"cek={_rv110.tree.set(_kids110[0], '✓')!r}")
+        # B2 — tambah entri asal RADAR via toggle langsung (tanpa dialog —
+        # menambah bukan operasi destruktif; §103-F pola: TIDAK dikonfirmasi).
+        _iid110 = _kids110[0]
+        _snap110 = _rv110._rows_by_iid[_iid110]["snap"]
+        _fp110 = _rv110._fp_map[_iid110]
+        _was110 = len(_store110)
+        _checked110 = _store110.toggle(_fp110, _snap110)
+        _rv110._refresh_check_cells()
+        root.update()
+        check("(v3.18.2) §110-B2: tambah entri asal RADAR via toggle — "
+              "store bertambah + sel ✓ tetap ☑ (pasangan sudah dipantau)",
+              _checked110 and len(_store110) == _was110 + 1
+              and _rv110.tree.set(_iid110, "✓") == "☑"
+              and any(s.get("asal") == "RADAR"
+                      for s in _store110.rows.values()),
+              f"n={len(_store110)}")
+        # B3 — uncek menyapu SEMUA entri pasangan-sama (GR + RADAR)
+        # + dialog dikonfirmasi (stub askyesno auto-Ya — pola §103).
+        import src.ui.anomali_radar_view as _arv110
+        _calls110: list = []
+
+        class _MB110:
+            def askyesno(self, *a, **kw):
+                _calls110.append((a, kw))
+                return True
+
+        _orig_mb110 = _arv110.messagebox
+        _arv110.messagebox = _MB110()
+        try:
+            _keys110 = _rv110._pair_matched_keys(
+                _snap110, _rv110._pair_key_index())
+
+            class _Ev110:
+                pass
+
+            _ev110 = _Ev110()
+            _ev110.widget = _rv110.tree
+            _bb110 = _rv110.tree.bbox(_iid110)
+            _ev110.x = _bb110[0] + 8
+            _ev110.y = _bb110[1] + _bb110[3] // 2
+            _rv110._on_tree_click(_ev110)
+            root.update()
+        finally:
+            _arv110.messagebox = _orig_mb110
+        check("(v3.18.2) §110-B3: uncek DIKONFIRMASI (askyesno — judul "
+              "'Keluarkan dari daftar Follow Up?') + menyapu SEMUA entri "
+              "pasangan-sama (GR + RADAR) → sel ☐ + store kosong utk "
+              "pasangan",
+              bool(_calls110)
+              and len(_store110) == 0
+              and _rv110.tree.set(_iid110, "✓") == "☐"
+              and _calls110[0][1].get("parent") is _rv110.winfo_toplevel(),
+              f"calls={len(_calls110)} n={len(_store110)}")
+        # B4 — listener store: toggle dari 'tab lain' menyinkronkan sel ✓
+        # radar tanpa re-render (pola _refresh_check_cells deviasi_view).
+        _gen110 = len(_rv110.tree.get_children(""))
+        _store110.toggle(_rv110._fp_map[_iid110], _snap110)
+        root.update()
+        for _ in range(50):
+            root.update()
+            if _rv110.tree.set(_iid110, "✓") == "☑":
+                break
+            time.sleep(0.02)
+        check("(v3.18.2) §110-B4: listener FollowUpStore — toggle dari "
+              "luar radar → sel ✓ radar ☑ via _refresh_check_cells "
+              "TANPA re-render penuh (iid tak berganti)",
+              _rv110.tree.set(_iid110, "✓") == "☑"
+              and len(_rv110.tree.get_children("")) == _gen110,
+              f"val={_rv110.tree.set(_iid110, '✓')!r}")
+        # B5 — legenda chip ✓ (pola legenda ✓ tab 📦/🧩).
+        _leg110 = []
+        for _chip110 in _rv110._legend.winfo_children():
+            for _w110 in _chip110.winfo_children():
+                if isinstance(_w110, tk.Label):
+                    _leg110.append(_w110.cget("text"))
+        check("(v3.18.2) §110-B5: legenda radar memuat chip '✓' "
+              "(tambah/keluarkan daftar pantauan — konfirmasi uncek)",
+              any(_t110.startswith("✓ = tambah/keluarkan")
+                  for _t110 in _leg110),
+              f"got {[t for t in _leg110 if '✓' in t]}")
+        _top110.destroy()
+        root.update()
+    finally:
+        _fu110.followup_path = _orig_fp110
+        _store110.clear()
+    check("(v3.18.2) §110-C1: wiring app — radar dibangun BER-SHARED "
+          "store followup app (self.followup_store) — entri dari radar "
+          "tampil di tab ☑ Follow Up & badge ikut",
+          getattr(app.anomali_radar_view, "store", None)
+          is app.followup_store,
+          f"store is app.followup_store="
+          f"{getattr(app.anomali_radar_view, 'store', None) is app.followup_store}")
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
