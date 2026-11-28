@@ -990,10 +990,10 @@ def main():
           app.statusbar._right_var.get() ==
           f"v{APP_VERSION} · Python Edition",
           f"got {app.statusbar._right_var.get()!r}")
-    check("App + toolbar + 9 tab terbangun (v3.12.1 — tab ⚖ Laporan "
-          "Versus dihapus; 9 tab: Proses/Mutasi/Deviasi GR/Deviasi PCS/"
-          "Rekap Selisih IN/Nominal Deviasi/Follow Up/Rincian PO)",
-          len(app.notebook.tabs()) == 9,
+    check("App + toolbar + 10 tab terbangun (v3.18 — tab 🚨 Radar "
+          "Anomali baru ke-6: Proses/Mutasi/Deviasi GR/Deviasi PCS/Radar "
+          "Anomali/Rekap Selisih IN/Nominal Deviasi/Follow Up/Rincian PO)",
+          len(app.notebook.tabs()) == 10,
           f"tabs={len(app.notebook.tabs())}")
     check("Status bar ada", app.statusbar is not None)
     # v3.11.57 — dulunya hard-pin "APP_VERSION == 3.11.39" (stale 17
@@ -3537,12 +3537,15 @@ def main():
           bool(root.bind("<Control-Tab>")))
 
     # ---- A-11: routing tab berbasis WIDGET (bukan index) ----
-    check("(v3.9.10→v3.12.1) A-11: peta _tab_views 6 entry berbasis "
-          "nama widget (v3.12.1: tab ⚖ Laporan Versus dihapus)",
-          len(app._tab_views) == 6
+    check("(v3.9.10→v3.12.1+v3.18) A-11: peta _tab_views 7 entry "
+          "berbasis nama widget (v3.18: +Radar Anomali; v3.12.1: tab ⚖ "
+          "Laporan Versus dihapus)",
+          len(app._tab_views) == 7
           and app._tab_views.get(str(app.tab_rincian)) is app.rincian_view
           and app._tab_views.get(str(app.tab_deviasi_pcs))
           is app.deviasi_pcs_view
+          and app._tab_views.get(str(app.tab_anomali_radar))
+          is app.anomali_radar_view
           and app._tab_views.get(str(app.tab_nominal_resto))
           is app.nominal_resto_view,
           f"got {len(app._tab_views)} entry")
@@ -18855,15 +18858,15 @@ def main():
           "(audit eksternal T5+T3) ==")
     # -- (a) objek tooltip + grup lengkap -----------------------------------
     tt81 = getattr(app, "_tab_tooltips", None)
-    check("(v3.9.68+v3.12.1) §81a: NotebookTabTooltips terpasang + "
-          "grup 9 tab LENGKAP (Operasional 3 · Pemeriksaan & "
-          "Rekonsiliasi 3 · Analisis 1 · Tindak Lanjut 2 — v3.12.1: "
-          "tab ⚖ Laporan Versus dihapus dari grup Analisis)",
-          tt81 is not None and len(app._tab_groups) == 9
+    check("(v3.9.68+v3.12.1+v3.18) §81a: NotebookTabTooltips terpasang + "
+          "grup 10 tab LENGKAP (Operasional 3 · Pemeriksaan & "
+          "Rekonsiliasi 4 — v3.18: +🚨 Radar Anomali · Analisis 1 · "
+          "Tindak Lanjut 2)",
+          tt81 is not None and len(app._tab_groups) == 10
           and sum(g == "Operasional"
                   for g in app._tab_groups.values()) == 3
           and sum(g == "Pemeriksaan & Rekonsiliasi"
-                  for g in app._tab_groups.values()) == 3
+                  for g in app._tab_groups.values()) == 4
           and sum(g == "Analisis"
                   for g in app._tab_groups.values()) == 1
           and sum(g == "Tindak Lanjut"
@@ -24655,6 +24658,160 @@ def main():
           f"bz={hasattr(_ism107, '_barang_zone')} "
           f"rbs={hasattr(_ism107, '_render_barang_scores')}")
 
+
+    print()
+    print("== §108. (v3.18) 🚨 RADAR ANOMALI — ENGINE SHIFT + TAB ==")
+
+    # ---- (A) ENGINE: repro kasus nyata user BJMHAS · CUP 14 (V.20) ----
+    # stabil (224) tgl 2-19 · ramp (384/339/338) 20-22 · lompatan
+    # (1293/1343/1390) 23-25 bersama IN 1.000 + BM 1.000 di tgl 23.
+    from src.ui.anomali_shift import (
+        detect_shift_anomalies as _det108,
+        shift_segment_text as _seg108,
+    )
+
+    def _r108(t, nilai, jenis="3.DEVIASI", barang="CUP 14 (V.20)",
+              resto="BJMHAS", sat="PCS", nomor=None, po=None):
+        d = {"Nama Barang": barang, "NAMA RESTO": resto, "Tanggal": t,
+             "JENIS": jenis, "NILAI": float(nilai), "SATUAN": sat}
+        if nomor is not None:
+            d["Nomor"] = nomor
+        if po is not None:
+            d["Nomor PO"] = po
+        return d
+
+    _rows108 = [_r108(t, -224.0) for t in range(2, 20)]
+    _rows108 += [_r108(t, v) for t, v in ((20, -384.0), (21, -339.0),
+                                          (22, -338.0))]
+    _rows108.append(_r108(23, -1293.0))
+    _rows108.append(_r108(23, 1000.0, jenis="4.IN",
+                          nomor="RI.2026.11.16805", po="PO.2026.11.11594"))
+    _rows108.append(_r108(23, 1000.0, jenis="5.BARANG MASUK"))
+    _rows108 += [_r108(24, -1343.0), _r108(25, -1390.0)]
+    # pasangan kontrol GR stabil — tak boleh muncul
+    _rows108 += [_r108(t, -5.0, barang="KOPI", sat="GR")
+                 for t in range(1, 26)]
+    _df108 = pd.DataFrame(_rows108)
+    _out108 = _det108(_df108, 25)
+    check("(v3.18) §108-A1: engine menangkap kasus user — 1 baris "
+          "(pasangan GR stabil TIDAK); tgl_shift 23 (bukan 24 — "
+          "refinement tarik-balik median-split) · durasi 3 · baseline 21 "
+          "hari · rasio ±6,0 · Δ 1.119",
+          len(_out108) == 1
+          and int(_out108.iloc[0]["tgl_shift"]) == 23
+          and int(_out108.iloc[0]["durasi"]) == 3
+          and int(_out108.iloc[0]["n_baseline"]) == 21
+          and abs(float(_out108.iloc[0]["ratio"]) - 6.0) < 0.05
+          and abs(float(_out108.iloc[0]["delta"]) - 1119.0) < 1e-9,
+          f"got {len(_out108)} baris: "
+          f"{_out108.to_dict('records') if len(_out108) else ''}")
+    check("(v3.18) §108-A2: hint kiriman — in_match True (IN 1.000 ≈ Δ "
+          "1.119 dlm toleransi ±35%) + Nomor/Nomor PO + BM rekap dibawa",
+          bool(_out108.iloc[0]["in_match"])
+          and _out108.iloc[0]["in_nomor"] == "RI.2026.11.16805"
+          and _out108.iloc[0]["in_nomor_po"] == "PO.2026.11.11594"
+          and float(_out108.iloc[0]["bm_qty"]) == 1000.0,
+          f"rec={_out108.iloc[0].to_dict()}")
+    _seg_t108 = _seg108(_out108.iloc[0],
+                        lambda v: f"{float(v):,.0f}")
+    check("(v3.18) §108-A3: segmen teks seragam engine — 'Level ×6,0 tgl "
+          "23 (224 → 1.343 · 3 hari · cocok IN 1.000)'",
+          "tgl 23" in _seg_t108 and "3 hari" in _seg_t108
+          and "cocok IN" in _seg_t108 and _seg_t108.startswith("Level"),
+          f"got {_seg_t108!r}")
+    _spike108 = ([_r108(t, -100.0) for t in range(1, 24)]
+                 + [_r108(24, -1200.0)])
+    _pulih108 = ([_r108(t, -1300.0) for t in range(1, 24)]
+                 + [_r108(t, -200.0) for t in (24, 25, 26)])
+    _base108 = ([_r108(t, -100.0) for t in (1, 2, 3, 4)]
+                + [_r108(t, -900.0) for t in (5, 6, 7)])
+    check("(v3.18) §108-A4: guard — spike 1 hari ≠ shift (0 baris) · "
+          "pemulihan mengecil tak dilaporkan · baseline asli < 5 hari "
+          "ditolak · frame kosong/kolom hilang aman",
+          len(_det108(pd.DataFrame(_spike108), 24)) == 0
+          and len(_det108(pd.DataFrame(_pulih108), 26)) == 0
+          and len(_det108(pd.DataFrame(_base108), 7)) == 0
+          and len(_det108(pd.DataFrame(), 25)) == 0
+          and len(_det108(pd.DataFrame({"A": [1]}), 25)) == 0,
+          "lihat asersi")
+    _dual108 = ([_r108(t, -100.0, sat="GR") for t in range(1, 24)]
+                + [_r108(t, -800.0, sat="GR") for t in (24, 25, 26)]
+                + _rows108)
+    _dualout108 = _det108(pd.DataFrame(_dual108), 26)
+    check("(v3.18) §108-A5: SATU deteksi lintas satuan — pasangan sama "
+          "GR & PCS = 2 baris terpisah (kolom satuan; kunci 3-tuple)",
+          len(_dualout108) == 2
+          and set(_dualout108["satuan"]) == {"GR", "PCS"},
+          f"got {len(_dualout108)}")
+
+    # ---- (B) GUI: tab radar terhadap frame kasus user -------------------
+    _top108 = tk.Toplevel(root)
+    _top108.geometry("1500x820+15+15")
+    from src.ui.anomali_radar_view import AnomaliRadarView as _ARV108
+    _counts108: list = []
+    _rv108 = _ARV108(
+        _top108, go_to_proses=lambda: None, go_to_deviasi=lambda *a: None,
+        h_state=None, on_count_changed=lambda n: _counts108.append(n))
+    _rv108.pack(fill="both", expand=True)
+    root.update()
+    root.update_idletasks()
+    _rv108.load_data(_df108)
+    wait_view(root, _rv108)
+    _kids108 = _rv108.tree.get_children("")
+    _vals108 = ({c: _rv108.tree.set(_kids108[0], c)
+                 for c in ("Satuan", "Tgl Shift", "Durasi", "Baseline",
+                           "Level Kini", "Rasio", "Δ Deviasi",
+                           "Kecocokan IN", "Nomor (IT/RI)", "Nomor PO",
+                           "Est. Nominal")} if len(_kids108) else {})
+    check("(v3.18) §108-B1: tab radar render — 1 baris; Rasio '×6,0' · "
+          "Tgl Shift '23' · Durasi '3 hari' · Kecocokan IN menyebut "
+          "'Cocok IN 1.000' + RI/PO terisi",
+          len(_kids108) == 1
+          and _vals108.get("Rasio") == "×6,0"
+          and _vals108.get("Tgl Shift") == "23"
+          and _vals108.get("Durasi") == "3 hari"
+          and _vals108.get("Satuan") == "PCS"
+          and "Cocok IN" in _vals108.get("Kecocokan IN", "")
+          and _vals108.get("Nomor (IT/RI)") == "RI.2026.11.16805"
+          and _vals108.get("Nomor PO") == "PO.2026.11.11594",
+          f"vals={_vals108}")
+    check("(v3.18) §108-B2: status footer radar + callback badge "
+          "on_count_changed terpanggil dgn jumlah",
+          "1 pasangan shift aktif" in _rv108.status_var.get()
+          and "H=25" in _rv108.status_var.get()
+          and bool(_counts108) and _counts108[-1] == 1,
+          f"status={_rv108.status_var.get()!r} counts={_counts108}")
+    _rv108._sort_by("Δ Deviasi", reverse=True)
+    root.update()
+    check("(v3.18) §108-B3: sort kolom numeric (Δ Deviasi ↓) tetap 1 "
+          "baris + heat sel Rasio terpasang (Tk 9: tag ras_* di sel "
+          "Rasio; rasio 6,0 → bucket ras_2 ×4..8)",
+          len(_rv108.tree.get_children("")) == 1
+          and (not CELL_TAGS_SUPPORTED
+               or root.tk.call(str(_rv108.tree), "tag", "cell", "has",
+                               "ras_2", (_kids108[0], "Rasio")) == 1),
+          f"rows={len(_rv108.tree.get_children(''))}")
+    _rv108.load_data(pd.DataFrame())
+    root.update()
+    check("(v3.18) §108-B4: empty state — frame kosong → status 'Belum "
+          "ada data' + badge 0 (bukan crash)",
+          "Belum ada data" in _rv108.status_var.get()
+          and _counts108[-1] == 0,
+          f"status={_rv108.status_var.get()!r}")
+    _top108.destroy()
+    root.update()
+
+    # ---- (C) wiring app: tab ke-6 + hint + _tab_views + badge method ---
+    check("(v3.18) §108-C1: app wiring — tab 🚨 Radar Anomali ke-6 "
+          "(index 5, tepat setelah 🧩 Deviasi PCS) + attr view + "
+          "_tab_views + hint + _update_radar_badge + tombol Panel "
+          "Ringkasan deep-link",
+          app.notebook.index(app.tab_anomali_radar) == 5
+          and hasattr(app, "anomali_radar_view")
+          and str(app.tab_anomali_radar) in app._tab_views
+          and str(app.tab_anomali_radar) in app._tab_hints
+          and callable(getattr(app, "_update_radar_badge", None)),
+          f"idx={app.notebook.index(app.tab_anomali_radar)}")
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 

@@ -94,6 +94,7 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 from src.config import app_base_dir as _app_base_dir
+
 # v3.9.72 — FIX (audit UX 2-c / startup -300..500ms): import src.main
 # TIDAK LAGI di level modul — rantai import itu menyeret SELURUH graf
 # pipeline (semua fn_*.py + queries + rincian_po) plus openpyxl (via
@@ -116,44 +117,45 @@ from src.pipeline.helpers import (
     read_cache_reset_counters,
     read_cache_stats,
 )
+from src.ui.anomali_radar_view import AnomaliRadarView  # v3.18 — 🚨
+from src.ui.deviasi_file import (  # v3.11.30 — parser file deviasi (relokasi
+    _BULAN_NAME,  # dari komparasi_deviasi_view — tab 📋
+    auto_bulanan_paths,  # Laporan Deviasi dihapus total)
+    bulan_mundur_list,
+    parse_deviasi_file,
+)
 from src.ui.deviasi_view import (
     DeviasiView,
     SharedACRThreshold,
     SharedComAmbang,
     SharedDrastisAmbang,  # v3.11.56 — U6: ambang Turun/Naik Drastis bersama
-    SharedManualAmbang,   # v3.11.56 — U6: ambang Hitung Manual bersama
+    SharedManualAmbang,  # v3.11.56 — U6: ambang Hitung Manual bersama
     SharedPivotCache,
     SharedSaldoSistemMode,  # v3.11.40 — mode saldo sistem 42.17/pivot
     SharedTanggalH,
     load_acr_threshold,
     load_com_ambang,
-    load_drastis_ambang,    # v3.11.56 — U6: persist ambang Drastis
-    load_h_preset,          # v3.11.56 — pra-pipeline: H preset
-    load_manual_ambang,     # v3.11.56 — U6: persist ambang Hitung Manual
+    load_drastis_ambang,  # v3.11.56 — U6: persist ambang Drastis
+    load_h_preset,  # v3.11.56 — pra-pipeline: H preset
+    load_manual_ambang,  # v3.11.56 — U6: persist ambang Hitung Manual
     load_saldo_sistem_mode,
-    save_acr_threshold,     # v3.11.56 — pra-pipeline: persist ambang
+    save_acr_threshold,  # v3.11.56 — pra-pipeline: persist ambang
     save_com_ambang,
-    save_drastis_ambang,    # v3.11.56 — U6
-    save_h_preset,          # v3.11.56 — pra-pipeline
-    save_manual_ambang,     # v3.11.56 — U6
+    save_drastis_ambang,  # v3.11.56 — U6
+    save_h_preset,  # v3.11.56 — pra-pipeline
+    save_manual_ambang,  # v3.11.56 — U6
     save_saldo_sistem_mode,
+)
+from src.ui.diagnostics import (  # v3.15 — observabilitas persisten
+    log_callback_exception,  # (app.log rotasi + crash.log
+    log_crash,  # ber-timestamp + excepthook global)
+    mirror_text,  # mirror konsol UI → file
+    setup_diagnostics,
 )
 from src.ui.export_sheets import ExportCancelled, add_pivot_sheet, tgl_label
 from src.ui.followup import FollowUpStore
 from src.ui.followup_view import FollowUpView
 from src.ui.in_selisih_view import InSelisihView
-from src.ui.deviasi_file import (  # v3.11.30 — parser file deviasi (relokasi
-    _BULAN_NAME,                  # dari komparasi_deviasi_view — tab 📋
-    auto_bulanan_paths,           # Laporan Deviasi dihapus total)
-    bulan_mundur_list,
-    parse_deviasi_file,
-)
-from src.ui.diagnostics import (  # v3.15 — observabilitas persisten
-    log_callback_exception,       # (app.log rotasi + crash.log
-    log_crash,                    # ber-timestamp + excepthook global)
-    mirror_text,                  # mirror konsol UI → file
-    setup_diagnostics,
-)
 from src.ui.nominal_resto_view import NominalRestoView
 from src.ui.pivot_view import PivotTableView
 from src.ui.refresh_sources import RefreshSourcesDialog
@@ -227,7 +229,7 @@ def _ensure_pipeline_symbols():
 
 # --- Konstanta UI -----------------------------------------------------------
 APP_TITLE = "Stock Monitoring"
-APP_VERSION = "3.17.3"  # v3.17.3 — OPTIMASI P1 CACHE nilai combo pivot (5,1s -> 0,9s render ulang state sama @900k; kesetaraan diverifikasi).  # v3.17.2 — CI REPAIR (ruff 202 -> 199, run GHA 46102794929 hijau) + SISTEM BENCHMARK P1 (benchmarks/: pipeline cold/warm/refresh per-tahap + psutil peak RSS + views pivot/deviasi/nominal/sort/export; dataset sintetis deterministik).  # v3.17.1 — GROWTH DEVIASI RUMUS ABSOLUT PENUH + HEATMAP (user: "Kalau deviasinya di-absolutekan dulu baru dihitung growth-nya, perhitungan Anda hampir semuanya sudah benar—hanya ada kesalahan tanda (+/-) pada Kolom 2, 5, 7, 10, 11, 13, dan 15. Jika menggunakan rumus absolut penuh: Growth = (|Dev_sekarang| − |Dev_sebelumnya|) / |Dev_sebelumnya| × 100%" + "kasih heat map dong bisa gak growth deviasi nya"): (1) RUMUS DIPERBAIKI ke ABSOLUT PENUH — KEDUA operand (numerator & pembagi) di-ABSOLUT: (|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100 — arah murni dari MAGNITUDO deviasi (|Dev| naik = plus, |Dev| turun = minus); rumus v3.17.0 (numerator data-asli ber-tanda) MEMBALIK TANDA saat deviasi berpindah sisi minus↔plus — kasus nyata user: −41.447 → +3.044,5 dulu +107,3% [salah], sekarang −92,7% [magnitudo 41.447 → 3.044,5 = turun]; seluruh 14 kolom tabel validasi user kini cocok; kolom pertama & pembagi-0-nonzero tetap KOSONG, kedua-0 tetap 0,0%. (2) HEATMAP per-sel baris 10.% Growth Deviasi (user: "kasih heat map dong"): tag bg PER-CELL (jalur apply_cell_tag Tk 9 / overlay Tk 8.6 — pola neg_cell) 8 bucket: growth + (deviasi MEMBESAR = makin menyimpang) → keluarga MERAH (hm_pos_1..4 #FFEBEE→#E57373), growth − (deviasi MENGECIL = mendingin) → keluarga HIJAU (hm_neg_1..4 #E8F5E9→#81C784), intensitas |growth| <5%/<25%/<100%/≥100%; sel 0,0%/KOSONG tetap bg pastel teal baris; minus growth TIDAK lagi dimerahkan per-cell (semantik sign dibawa heat + tanda ± teks — merah-teks di atas heat hijau = tabrakan warna); tag hanya mengeset background → KOEXIST dgn fg tag sel lain; legenda view +2 chip (merah=deviasi naik / hijau=deviasi turun); export Excel PARITY: fill heat per sel + font minus growth bukan merah + catatan legenda rumus absolut penuh. Tests §107 diperbarui/ditambah (24 cek): _compute_growth absolut penuh −20/+50 + kasus nyata kolom 2 −92,7%, _growth_heat_tag 16 kasus bucket, GROWTH_HEAT_BG 8 tag, GUI BRG MIN −20/−100/0,0 + BRG A tak berubah, payload heat_cells, neg_cell growth = 0, heat per-sel hm_pos_3/hm_neg_3/hm_neg_2/hm_neg_4 native Tk 9, tag bg ter-configure, re-render rentang, export fill FFA5D6A7 + font bukan CC0000. Verifikasi: suite UI + mock ALL PASS + ruff + py_compile. Rincian: CHANGELOG.md v3.17.1.  # v3.17.0 — PIVOT ROW 10.% GROWTH DEVIASI + HAPUS TAB ANALISA KRONIS + HAPUS STRIP SELISIH TERBANYAK BARANG×RESTO (user: "ada row baru yaitu 10.% Growth Deviasi. Datanya diambil dari row 3.Deviasi ... berapa persen kenaikan deviasi per tanggal nya. Tapi sebelum itu data row 3.deviasi di absolute dulu dan persen yang ditampilkan di row baru data asli tanpa absolute" + "hapus aja tab analisa kronis dan dead code nya hapus" + "bagian selisih terbanyak barang x resto hapus aja dan dead code nya hapus juga"): (1) ROW BARU "10.% Growth Deviasi" tab 🧮 Pivot (posisi TEPAT setelah 9.ACR; hanya mode 📅 Tanggal — metric harian persis pola 6.PEMAKAIAN (COM)): (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 dari baris 3.DEVIASI — pembagi Dev(t−1) DI-ABSOLUT dulu (arah kenaikan/penurunan tetap dari selisih DATA ASLI ber-tanda, baseline minus tak membalik tanda — konvensi identik nominal_common.hitung_persen_kenaikan (H−L)/|L|×100); kolom pertama & pembagi-0-nonzero → tampil KOSONG (mirror baris COM NaN); format sel '+12,5%'/'-8,3%'/'0,0%' (desimal koma ID, gaya tanda ± konvensi fmt_pct_cell; BEDA format kurung baris metric lain — baris persen); minus MERAH per-cell (v<0, jalur red_cells yang sama); Dev(t−1) utk kolom pertama rentang dari matrix PENUH pra-rentang (mirror COM FIX 6c-01 — pivot_full kini juga membawa growth_full); fallback jalur rentang; double-click baris growth → drill-down popup baris SUMBER 3.DEVIASI; _format_pct/_compute_growth helper baru + METRIC_BG pastel teal; export sesuai tampilan: number format '+0.0"%";-0.0"%";0.0"%"' (literal %) + 0,0% TETAP tampil (font putih trick hanya utk metric non-persen) + legenda export diperluas; _metric_tag sanitasi '%' tambahan. (2) TAB "Analisa Kronis" DIHAPUS TOTAL + dead code (pola v3.12.1 Laporan Versus): analisa_kronis_view.py (939 baris) dihapus; nominal_resto_view (param kronis_threshold, _tab_kronis, instansiasi _kronis_view, delegate load_data/ensure_refreshed/_on_sub_tab_changed branch, open_kronis_subtab/set_kronis_threshold); app.py (import load/save_kronis_threshold, _kronis_threshold init, _open_kronis_subtab, spin KRONIS ≥ kartu pra-pipeline + _on_pre_kronis_change + branch focusout + tuple flush, tombol deep-link "💰 Nominal → Analisa Kronis" Panel Ringkasan, arg kronis_threshold konstruksi NominalRestoView, hint tab); deviasi_view (load/save_kronis_threshold); nominal_common (hitung_saldo_minus_kronis + kolom "Frek Minus" + jalur semua_sumber hitung_saldo_minus_pairs — filter sumber kini selalu diterapkan; perilaku anak tab Saldo Sistem Minus TAK berubah — MINUS_COLUMNS tak pernah menampilkan Frek Minus); anak tab tersisa Per Resto · Tanpa Harga · Saldo Sistem Minus. (3) STRIP "SELISIH TERBANYAK — BARANG × RESTO" (v3.11.8) DIHAPUS TOTAL + dead code: in_selisih_view zona _barang_zone + _barang_zone_active, _render_barang_scores + _on_barang_row_click, blok worker barang_scores + snapshot f_ctx, key payload "barang_scores", entri TableExpander/_apply_view_mode — papan SKOR RESTO (fitur v3.9.55 BERBEDA) tetap utuh. Tests: §75 asersi sub-notebook 4→3 anak tab + not hasattr; §93-F (F1/F2/F3 strip) dihapus + header §93 diperbarui; 2 asersi mode-BERSIH (§11b+§94-H1) berubah cek not hasattr; §107 BARU (13 cek): METRICS index, _format_pct 5 kasus, _compute_growth baseline-minus +20%/−50%, GUI mode tanggal (urutan setelah 9.ACR, nilai +50/−50/0,0, t1 kosong, baseline minus +20/+100/0,0, merah per-cell), mode resto absen, batas kiri rentang 3..4 matrix penuh (−50,0%), rows_data + export number-format persen, penghapusan kronis (modul gone + anak tab 3 + attr app gone) + penghapusan strip (attr view gone + payload tanpa key). Verifikasi: suite UI + mock ALL PASS. Rincian: CHANGELOG.md v3.17.0.
+APP_VERSION = "3.18.0"  # v3.18.0 — TAB 🚨 RADAR ANOMALI + ENGINE DETEKSI SHIFT DEVIASI (user: popup Detail Deviasi BJMHAS · CUP 14 (V.20) PCS — "deviasi 2-22 stabil 200-300 pcs, tgl 23 tiba-tiba naik 1200 pcs, tgl 24-25 konstan di 1200 — mau tangkap anomali kayak gini ada ide gak? analisa dulu jangan langsung push"): (1) ENGINE anomali_shift.py — deteksi PERGESERAN LEVEL |3.DEVIASI| per pasangan × satuan via median dua-jendela (baseline = median hari pra-shift, level = median pasca-shift; shift naik bila level ≥ ×2 baseline & ≥2 hari BENAR-BENAR di level baru — spike 1 hari & pemulihan tak dilaporkan; baseline ≥5 hari; rekaman ≥ H−3; z robust MAD; REFINEMENT tarik-balik split ke hari lompatan asli — median-split menyerap hari pertama lompatan, kasus user split mentah jatuh tgl 24 padahal lompatan tgl 23; hint kecocokan kiriman: IN ±1 hari ≈ Δ (±35%) → cut-off?, BM rekap + Nomor IT/RI + Nomor PO dibawa; kunci kanonik norm_nama_* × satuan upper — drift ejaan tetap cocok). (2) TAB 🚨 Radar Anomali — SATU tabel GR+PCS (kolom Satuan; user: "jadi 1 aja GR dan PCS sekaligus"): Resto · Barang · Satuan · Tgl Shift · Durasi · Baseline · Level Kini · Rasio (heat 3 bucket ×2/×4/×8) · Δ Deviasi · Z · Kecocokan IN · IN Tgl · Nomor (IT/RI) · Nomor PO · BM/BM Tgl · Est. Nominal (Δ × harga 41.09 satuan-aware); double-click = popup Detail Deviasi pasangan (bukti per tanggal); klik-kanan = salin sel/baris + deep-link "Buka di Deviasi GR"; ⧩ filter header + sort kolom + Ctrl+F; H mengikuti SharedTanggalH; badge tab "🚨 Radar Anomali (N)" + tombol deep-link Panel Ringkasan; empty state jujur (tidak ada anomali ≠ error). Tab ke-6 (setelah 🧩 Deviasi PCS — kelompok Pemeriksaan & Rekonsiliasi; Rincian PO jadi #10 — tetap terjangkau Ctrl+Tab/klik).  # v3.17.3 — OPTIMASI P1 CACHE nilai combo pivot (5,1s -> 0,9s render ulang state sama @900k; kesetaraan diverifikasi).  # v3.17.2 — CI REPAIR (ruff 202 -> 199, run GHA 46102794929 hijau) + SISTEM BENCHMARK P1 (benchmarks/: pipeline cold/warm/refresh per-tahap + psutil peak RSS + views pivot/deviasi/nominal/sort/export; dataset sintetis deterministik).  # v3.17.1 — GROWTH DEVIASI RUMUS ABSOLUT PENUH + HEATMAP (user: "Kalau deviasinya di-absolutekan dulu baru dihitung growth-nya, perhitungan Anda hampir semuanya sudah benar—hanya ada kesalahan tanda (+/-) pada Kolom 2, 5, 7, 10, 11, 13, dan 15. Jika menggunakan rumus absolut penuh: Growth = (|Dev_sekarang| − |Dev_sebelumnya|) / |Dev_sebelumnya| × 100%" + "kasih heat map dong bisa gak growth deviasi nya"): (1) RUMUS DIPERBAIKI ke ABSOLUT PENUH — KEDUA operand (numerator & pembagi) di-ABSOLUT: (|Dev(t)| − |Dev(t−1)|) ÷ |Dev(t−1)| × 100 — arah murni dari MAGNITUDO deviasi (|Dev| naik = plus, |Dev| turun = minus); rumus v3.17.0 (numerator data-asli ber-tanda) MEMBALIK TANDA saat deviasi berpindah sisi minus↔plus — kasus nyata user: −41.447 → +3.044,5 dulu +107,3% [salah], sekarang −92,7% [magnitudo 41.447 → 3.044,5 = turun]; seluruh 14 kolom tabel validasi user kini cocok; kolom pertama & pembagi-0-nonzero tetap KOSONG, kedua-0 tetap 0,0%. (2) HEATMAP per-sel baris 10.% Growth Deviasi (user: "kasih heat map dong"): tag bg PER-CELL (jalur apply_cell_tag Tk 9 / overlay Tk 8.6 — pola neg_cell) 8 bucket: growth + (deviasi MEMBESAR = makin menyimpang) → keluarga MERAH (hm_pos_1..4 #FFEBEE→#E57373), growth − (deviasi MENGECIL = mendingin) → keluarga HIJAU (hm_neg_1..4 #E8F5E9→#81C784), intensitas |growth| <5%/<25%/<100%/≥100%; sel 0,0%/KOSONG tetap bg pastel teal baris; minus growth TIDAK lagi dimerahkan per-cell (semantik sign dibawa heat + tanda ± teks — merah-teks di atas heat hijau = tabrakan warna); tag hanya mengeset background → KOEXIST dgn fg tag sel lain; legenda view +2 chip (merah=deviasi naik / hijau=deviasi turun); export Excel PARITY: fill heat per sel + font minus growth bukan merah + catatan legenda rumus absolut penuh. Tests §107 diperbarui/ditambah (24 cek): _compute_growth absolut penuh −20/+50 + kasus nyata kolom 2 −92,7%, _growth_heat_tag 16 kasus bucket, GROWTH_HEAT_BG 8 tag, GUI BRG MIN −20/−100/0,0 + BRG A tak berubah, payload heat_cells, neg_cell growth = 0, heat per-sel hm_pos_3/hm_neg_3/hm_neg_2/hm_neg_4 native Tk 9, tag bg ter-configure, re-render rentang, export fill FFA5D6A7 + font bukan CC0000. Verifikasi: suite UI + mock ALL PASS + ruff + py_compile. Rincian: CHANGELOG.md v3.17.1.  # v3.17.0 — PIVOT ROW 10.% GROWTH DEVIASI + HAPUS TAB ANALISA KRONIS + HAPUS STRIP SELISIH TERBANYAK BARANG×RESTO (user: "ada row baru yaitu 10.% Growth Deviasi. Datanya diambil dari row 3.Deviasi ... berapa persen kenaikan deviasi per tanggal nya. Tapi sebelum itu data row 3.deviasi di absolute dulu dan persen yang ditampilkan di row baru data asli tanpa absolute" + "hapus aja tab analisa kronis dan dead code nya hapus" + "bagian selisih terbanyak barang x resto hapus aja dan dead code nya hapus juga"): (1) ROW BARU "10.% Growth Deviasi" tab 🧮 Pivot (posisi TEPAT setelah 9.ACR; hanya mode 📅 Tanggal — metric harian persis pola 6.PEMAKAIAN (COM)): (Dev(t) − Dev(t−1)) ÷ |Dev(t−1)| × 100 dari baris 3.DEVIASI — pembagi Dev(t−1) DI-ABSOLUT dulu (arah kenaikan/penurunan tetap dari selisih DATA ASLI ber-tanda, baseline minus tak membalik tanda — konvensi identik nominal_common.hitung_persen_kenaikan (H−L)/|L|×100); kolom pertama & pembagi-0-nonzero → tampil KOSONG (mirror baris COM NaN); format sel '+12,5%'/'-8,3%'/'0,0%' (desimal koma ID, gaya tanda ± konvensi fmt_pct_cell; BEDA format kurung baris metric lain — baris persen); minus MERAH per-cell (v<0, jalur red_cells yang sama); Dev(t−1) utk kolom pertama rentang dari matrix PENUH pra-rentang (mirror COM FIX 6c-01 — pivot_full kini juga membawa growth_full); fallback jalur rentang; double-click baris growth → drill-down popup baris SUMBER 3.DEVIASI; _format_pct/_compute_growth helper baru + METRIC_BG pastel teal; export sesuai tampilan: number format '+0.0"%";-0.0"%";0.0"%"' (literal %) + 0,0% TETAP tampil (font putih trick hanya utk metric non-persen) + legenda export diperluas; _metric_tag sanitasi '%' tambahan. (2) TAB "Analisa Kronis" DIHAPUS TOTAL + dead code (pola v3.12.1 Laporan Versus): analisa_kronis_view.py (939 baris) dihapus; nominal_resto_view (param kronis_threshold, _tab_kronis, instansiasi _kronis_view, delegate load_data/ensure_refreshed/_on_sub_tab_changed branch, open_kronis_subtab/set_kronis_threshold); app.py (import load/save_kronis_threshold, _kronis_threshold init, _open_kronis_subtab, spin KRONIS ≥ kartu pra-pipeline + _on_pre_kronis_change + branch focusout + tuple flush, tombol deep-link "💰 Nominal → Analisa Kronis" Panel Ringkasan, arg kronis_threshold konstruksi NominalRestoView, hint tab); deviasi_view (load/save_kronis_threshold); nominal_common (hitung_saldo_minus_kronis + kolom "Frek Minus" + jalur semua_sumber hitung_saldo_minus_pairs — filter sumber kini selalu diterapkan; perilaku anak tab Saldo Sistem Minus TAK berubah — MINUS_COLUMNS tak pernah menampilkan Frek Minus); anak tab tersisa Per Resto · Tanpa Harga · Saldo Sistem Minus. (3) STRIP "SELISIH TERBANYAK — BARANG × RESTO" (v3.11.8) DIHAPUS TOTAL + dead code: in_selisih_view zona _barang_zone + _barang_zone_active, _render_barang_scores + _on_barang_row_click, blok worker barang_scores + snapshot f_ctx, key payload "barang_scores", entri TableExpander/_apply_view_mode — papan SKOR RESTO (fitur v3.9.55 BERBEDA) tetap utuh. Tests: §75 asersi sub-notebook 4→3 anak tab + not hasattr; §93-F (F1/F2/F3 strip) dihapus + header §93 diperbarui; 2 asersi mode-BERSIH (§11b+§94-H1) berubah cek not hasattr; §107 BARU (13 cek): METRICS index, _format_pct 5 kasus, _compute_growth baseline-minus +20%/−50%, GUI mode tanggal (urutan setelah 9.ACR, nilai +50/−50/0,0, t1 kosong, baseline minus +20/+100/0,0, merah per-cell), mode resto absen, batas kiri rentang 3..4 matrix penuh (−50,0%), rows_data + export number-format persen, penghapusan kronis (modul gone + anak tab 3 + attr app gone) + penghapusan strip (attr view gone + payload tanpa key). Verifikasi: suite UI + mock ALL PASS. Rincian: CHANGELOG.md v3.17.0.
 # v3.16.0 — DEEP AUDIT V3 (user: "Deep audit lagi dan fix push to stock monitoring repo ku"): 6 agen audit paralel menyisir seluruh modul (pivot/popup · selisih+engine VBA · export · pipeline · deviasi+nominal · sub-tab) → 35 perbaikan TERVERIFIKASI repro, ter-tag U/M/P/X/E: U-1/2/3 filter ⧩ anak tab Saldo Minus & Analisa Kronis MATI SENYAP (TypeError arity on_apply + clear() vs clear_all()); U-12/13 CEK "Potensi PO"/"RI Balancing" kunci kanonik; U-14 popup Deviasi bulan-lalu tak lagi MENGARANG Deviasi=SO penuh (presence baris 2.SALDO AKHIR); M-1/2/3 tab 📤 lookup kanonik menyeluruh (popup Rincian IN · catatan B1/B2 · KATEGORI/Satuan); M-4 review baseline tgl-1 engine tak BOCOR ke non-kandidat (PERLU REVIEW palsu + KPI bengkak); M-5..8 sort analisa kronologis + chip mask + swap _refresh + pesan file-terkunci; P-1 pd.NA "<NA>" popup; P-2 ⧩ pivot label-vs-mentah 4 titik; P-3 penawaran SALDO-AWAL-only dihapus; P-4 catatan base COM finalisasi SETELAH filter resto; P-5 sentinel NaN-resto; P-6 parse tgl tervalidasi utk popup; P-7 KeyError guard; P-8 _busy pra-filter_state; P-9 sort campuran + id kolom int; P-10 COM NaN → sel export KOSONG; P-11 cache po_nomor_map/3243; X-1/2 writer NaN/inf-safe (OOXML invalid → Excel repair); X-3 None→""; X-4 judul sheet sanitize; E-1 KUNCI-HIGH string "100383.0" ≡ float 100383.0 ≡ "100383" (pasangan numerik tak lagi TERBELAH 2 grup pivot — saldo/SO salah di KEDUA pecahan); E-2/3 header rekap per-resto TOLERAN ("JENIS " dulu KeyError PEMBUNUH pipeline; " 5"/"1.0" lenyap senyap; duplikat KATEGORI); E-4 satuan keep=last (bulan berjalan otoritatif — mirror 5c); E-5 fn_9901 .xlsb MULTI-SHEET via _list_sheet_names (sheet 2..N dulu tak pernah terbaca); E-6/7 log peek-gagal + fallback engine; E-8 konversi factorize (parity identik); E-9 PO tanpa nama tak terfabrikasi kategori; E-10 dead code dihapus; U-4/5/6/7/8/9/15 (export atomik kronis · near-zero display · tie-break minggu · no-op line · sort nilai ⧩ · pesan terkunci · "(0,0)"). Struktur kolom output TIDAK berubah. Verifikasi: suite UI 1676 PASS 0 FAIL + mock ALL PASS + ruff 0.17.1 = 199 ≤ 201 + probe E2E per-fix. Rincian: CHANGELOG.md v3.16.0.
 # v3.15.0 — CI HIJAU + OBSERVABILITAS PERSISTEN + PACKAGING PRO (batch 3 permintaan user: "Perbaiki 6 isu ruff (±15 menit) → CI hijau lagi"; "Penulisan versi ke EXE (version stamping) + ikon + pembersihan README (5 titik basi)"; "Berkas log + excepthook global (RotatingFileHandler + crash.log dengan cap waktu/timestamp)"): (1) RUFF 6 isu baru era v3.14.x di-fix (I001 pivot_view ×2 + details_popup, UP037 fn_audit, RUF012 in_selisih ClassVar, FURB192 nominal_common max()) → 201 tepat = baseline gerbang CI (2 run GHA terakhir GAGAL 207>201 — rilis EXE terblokir); (2) src/ui/diagnostics.py BARU — logs/app.log RotatingFileHandler 2MB×3 UTF-8 di app_base_dir() (handler di ROOT logger + logging.captureWarnings → record _LOG modul mana pun + warning Python ikut tercatat; dulu 4 modul pakai logging TANPA satu pun handler — record lenyap total), MIRROR StreamToQueue (konsol UI tab 🚀 → file bersamaan — jejak run pipeline utuh di disk, konsol terpangkas 3000→2000 tak lagi membuang bukti; baris-utuh via buffer newline; anti-rekursi guard thread-local), excepthook global sys+threading (jejak file DITAMBAHKAN sebelum perilaku default dirantai), report_callback_exception di-override di instance root (tkinter merutekan callback SEMUA widget ke root — exception handler tombol dulu hanya print ke konsol; SystemExit tak pernah sampai/KeyboardInterrupt diteruskan default TANPA crash.log), crash.log kini APPEND per-kejadian dgn header timestamp+versi+pid (dulu ditimpa — crash beruntun saling menimpa jejak; launcher run_app.py/src.ui.__main__ TETAP stdlib-murni dgn writer append sendiri — jalur itu hidup justru saat modul proyek gagal import); (3) stock-monitoring.spec — version= resource dibaca OTOMATIS dari APP_VERSION src/ui/app.py (regex → build/version_info.txt VSVersionInfo; properti file .exe dulu 0.0.0.0 — user tak bisa cek versi build, akar kasus "tetap sama aja" v3.11.45) + icon= assets/icon.ico multi-resolusi 16..256 (dulu ikon generic PyInstaller — memperparah false-positive antivirus) — keduanya Windows-only gating (jalur dev Linux smoke tetap polos); (4) README root + python 5 titik basi dibersihkan (versi terkini, "10 tab analisa"→9, bullet fitur ⚖ Laporan Versus yang dihapus v3.12.1, klaim ruff baseline ≤18→≤201, 2 file terhapus dari tabel Isi Repository root + stat jumlah baris kode) + .gitignore: logs/ diabaikan, assets/*.png di-whitelist (root *.png); (5) CI py_compile: referensi bench_views.py (file dihapus v3.11.54) dibersihkan dari compileall. Verifikasi: ruff 0.17.1 = 201 EXACT + py_compile semua + suite UI penuh + mock PASS. Rincian: CHANGELOG.md v3.15.0.
 # v3.14.1 — PERBAIKAN BUG MENYELURUH (AUDIT EKSTERNAL 45 FILE): K-1 jangkar so_lalu_map hari TERAKHIR (baseline tgl-1 — dulu TERAWAL → deviasi phantom); K-2/T-4 kunci Bulan Lalu BER-SATUAN + fallback drift satuan (TOTAL nominal lalu 2× utk barang GR+PCS; kolom Dev. Bulan Lalu salah satuan); T-1 kunci merge audit dinormalisasi (drift ejaan antar file); T-2 popup satuan kosong; T-3 fallback saldo akhir pasca t-1; T-5 override 42.17 tanpa kolom H; T-6 jendela verifikasi PO hari TERAKHIR; T-7 rentang tanggal pivot/popup KRONOLOGIS (26•..31• tak lagi terbuang; default -25); S-1 fn_4205 NA-resto; S-2 konversi prioritas #Sat. Terkecil; S-3 mangling '5_1'; S-4 dedup 9901 lintas sumber; S-6/S-11 harga 4109 per periode + exact "Total"; S-7 label minggu deterministik; S-8 minus per-satuan; S-9 Eksklusif pra-filter; S-13 basis COM NaN parity engine; S-15 guard audit_kpi; S-17 PO tanpa nomor per-grup; S-18 flag refresh waktu MULAI; S-19 export atomik; S-20 remark B4 tanpa BM; L-3/L-4/L-5/L-6/L-7 + display -0,00%; test diselaraskan ke semantik engine V2 (9 asersi by-design v3.14.0) + kunci 3-tuple + T9b NA-resto; 4 temuan false positive DITOLAK (S-5, S-14, S-16, L-2). Rincian: CHANGELOG.md v3.14.1.
@@ -3035,6 +3037,7 @@ class StockMonitorApp:
         self.tab_pivot = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_gr = tk.Frame(self.notebook, bg=C_BG)
         self.tab_deviasi_pcs = tk.Frame(self.notebook, bg=C_BG)
+        self.tab_anomali_radar = tk.Frame(self.notebook, bg=C_BG)  # v3.18
         self.tab_in_selisih = tk.Frame(self.notebook, bg=C_BG)
         # v3.9.34 — tab 🧮 Nominal Deviasi (Σ nominal per resto)
         self.tab_nominal_resto = tk.Frame(self.notebook, bg=C_BG)
@@ -3049,6 +3052,11 @@ class StockMonitorApp:
         self.notebook.add(self.tab_pivot, text="🧮 Pivot Table")
         self.notebook.add(self.tab_deviasi_gr, text="📦 Deviasi GR")
         self.notebook.add(self.tab_deviasi_pcs, text="🧩 Deviasi PCS")
+        # v3.18 — tab 🚨 Radar Anomali (ke-6 — kelompok Pemeriksaan &
+        # Rekonsiliasi, tepat setelah tab deviasi; Rincian PO menjadi #10
+        # — tetap terjangkau klik/Ctrl+Tab; user: "jadi 1 aja GR dan PCS
+        # sekaligus" — radar SATU tabel lintas satuan).
+        self.notebook.add(self.tab_anomali_radar, text="🚨 Radar Anomali")
         self.notebook.add(self.tab_in_selisih, text="📤 Rekap Selisih IN")
         # v3.11.30 — tab 📋 Laporan Deviasi DIHAPUS (user: "Hapus tab
         # laporan deviasi dan dead code nya") — 3 mode (Komparasi/Anomali
@@ -3068,6 +3076,7 @@ class StockMonitorApp:
             str(self.tab_pivot): "🧮 Pivot Table",
             str(self.tab_deviasi_gr): "📦 Deviasi GR",
             str(self.tab_deviasi_pcs): "🧩 Deviasi PCS",
+            str(self.tab_anomali_radar): "🚨 Radar Anomali",  # v3.18
             str(self.tab_in_selisih): "📤 Rekap Selisih IN",
             str(self.tab_nominal_resto): "💰 Nominal Deviasi",
             str(self.tab_followup): "☑ Follow Up",
@@ -3099,6 +3108,7 @@ class StockMonitorApp:
             str(self.tab_pivot): "Operasional",
             str(self.tab_deviasi_gr): "Pemeriksaan & Rekonsiliasi",
             str(self.tab_deviasi_pcs): "Pemeriksaan & Rekonsiliasi",
+            str(self.tab_anomali_radar): "Pemeriksaan & Rekonsiliasi",  # v3.18
             str(self.tab_in_selisih): "Pemeriksaan & Rekonsiliasi",
             str(self.tab_nominal_resto): "Analisis",
             str(self.tab_followup): "Tindak Lanjut",
@@ -3125,6 +3135,10 @@ class StockMonitorApp:
             str(self.tab_deviasi_pcs):
                 "Ctrl+F cari · ⧩ filter kolom · double-click = rincian "
                 "· H diatur di tab 📦 · Ctrl+1..9 pindah tab",
+            str(self.tab_anomali_radar):
+                "double-click = bukti popup per tanggal · klik-kanan = "
+                "Buka di Deviasi GR · ⧩ filter + sort kolom · Ctrl+1..9 "
+                "pindah tab",  # v3.18
             str(self.tab_in_selisih):
                 "Ctrl+F cari · double-click = rincian IN · klik-kanan baris "
                 "= Buka di Deviasi GR · Ctrl+1..9 pindah tab",
@@ -3142,6 +3156,7 @@ class StockMonitorApp:
         self._build_pivot_tab()
         self._build_deviasi_gr_tab()
         self._build_deviasi_pcs_tab()
+        self._build_anomali_radar_tab()   # v3.18 — 🚨 Radar Anomali
         self._build_in_selisih_tab()
         self._build_nominal_resto_tab()   # v3.9.34 — tab 🧮
         self._build_followup_tab()
@@ -3233,6 +3248,7 @@ class StockMonitorApp:
             str(self.tab_pivot): self.pivot_view,
             str(self.tab_deviasi_gr): self.deviasi_gr_view,
             str(self.tab_deviasi_pcs): self.deviasi_pcs_view,
+            str(self.tab_anomali_radar): self.anomali_radar_view,  # v3.18
             str(self.tab_in_selisih): self.in_selisih_view,
             # v3.9.34 — dispatch _on_tab_changed → ensure_refreshed
             str(self.tab_nominal_resto): self.nominal_resto_view,
@@ -5469,6 +5485,16 @@ class StockMonitorApp:
     # v3.11.56 — U3: PANEL RINGKASAN hasil pipeline + tombol deep-link
     # lintas tab (U2) — tab 🚀 Proses, muncul setelah run pertama.
     # =====================================================================
+    def _update_radar_badge(self):
+        """v3.18 — badge jumlah pasangan shift aktif di judul tab radar
+        (pola _update_followup_badge — lewat _set_tab_label supaya mode
+        label compact tetap konsisten)."""
+        with contextlib.suppress(Exception):
+            n = int(getattr(self.anomali_radar_view, "_last_count", 0))
+            self._set_tab_label(
+                self.tab_anomali_radar,
+                "🚨 Radar Anomali" + (f" ({n})" if n else ""))
+
     def _build_ringkasan_card(self, parent):
         card = tk.Frame(parent, bg=C_CARD, highlightbackground="#e2e8f0",
                         highlightthickness=1)
@@ -5496,6 +5522,10 @@ class StockMonitorApp:
         GhostButton(nav, text="🧩 Deviasi PCS",
                     command=self._go_to_deviasi_pcs).pack(
             side="left", padx=(6, 0))
+        # v3.18 — deep-link radar anomali (kelompok Pemeriksaan).
+        GhostButton(nav, text="🚨 Radar Anomali",
+                    command=lambda: self._go_to_tab(
+                        self.tab_anomali_radar)).pack(side="left", padx=(6, 0))
         GhostButton(nav, text="📤 Rekap Selisih IN",
                     command=lambda: self._go_to_tab(
                         self.tab_in_selisih)).pack(side="left", padx=(6, 0))
@@ -6371,6 +6401,15 @@ class StockMonitorApp:
                        harga_map=_hm, konversi_map=_kv,
                        saldo_sistem_map=_ssm),
                    self.deviasi_pcs_view)
+        # v3.18 — tab 🚨 Radar Anomali (engine anomali_shift — deteksi
+        # pergeseran level deviasi; in_detail utk popup Keterangan PO,
+        # harga_map utk Est. Nominal, saldo sistem utk popup parity).
+        _load_view("Radar Anomali",
+                   lambda: self.anomali_radar_view.load_data(
+                       append1_df, in_detail_df,
+                       harga_map=_hm, konversi_map=_kv,
+                       saldo_sistem_map=_ssm),
+                   self.anomali_radar_view)
         _load_view("Rekap Selisih IN",
                    lambda: self.in_selisih_view.load_data(
                        append1_df, in_detail_df, audit_result=audit_result),
@@ -7157,6 +7196,19 @@ class StockMonitorApp:
             manual_state=self._shared_manual,    # v3.11.56 — U6: ambang Hitung Manual
             lalu_provider=lambda: self._lalu_file_df)  # v3.11.30 — app-level
         self.deviasi_pcs_view.pack(fill="both", expand=True)
+
+    def _build_anomali_radar_tab(self):
+        """v3.18 — tab 🚨 Radar Anomali: SATU tabel GR+PCS pasangan
+        ber-shift level deviasi (engine anomali_shift). H mengikuti
+        SharedTanggalH; badge jumlah via on_count_changed."""
+        self.anomali_radar_view = AnomaliRadarView(
+            self.tab_anomali_radar,
+            go_to_proses=self._go_to_proses_tab,
+            go_to_deviasi=self._go_to_deviasi,
+            h_state=self._shared_h,
+            saldo_sistem_state=self._shared_saldo_sistem,
+            on_count_changed=lambda _n: self._update_radar_badge())
+        self.anomali_radar_view.pack(fill="both", expand=True)
 
     def _build_in_selisih_tab(self):
         """v3.4 — tab 📤 Rekap Selisih IN (drill-down rincian dokumen IN)."""

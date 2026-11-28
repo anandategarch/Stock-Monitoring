@@ -3,6 +3,84 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.18.0 — TAB 🚨 RADAR ANOMALI + ENGINE DETEKSI SHIFT DEVIASI
+
+User (popup Detail Deviasi BJMHAS · CUP 14 (V.20) PCS): *"deviasi 2-22
+stabil di kisaran 200-300 pcs, tgl 23 tiba-tiba naik 1200 pcs, tgl 24-25
+konstan naiknya 1200. Mau tangkap anomali kayak gini ada ide gak?"* —
+lompakan LEVEL yang BERTAHAN: baris 10.% Growth Deviasi menangkap tgl 23
+(+282%) tapi tgl 24-25 "tenang" lagi (+3-4%) padahal level baru menempel;
+label CEK Naik/Turun Drastis menilai SO (stok), bukan seri deviasi.
+
+### (1) ENGINE — `src/ui/anomali_shift.py` (baru, murni pandas)
+- **Median dua-jendela per pasangan × satuan** atas seri |3.DEVIASI| 1..H:
+  split kandidat t → baseline = median nilai pra-t, level = median pasca-t;
+  **shift naik** bila level ≥ ×2,0 baseline (`RATIO_CUT`) & Δ > 0 — split
+  terpilih = perbedaan median TERBESAR.
+- **Refinement tarik-balik**: median-split menyerap hari lompatan
+  PERTAMA (median tahan 1 outlier — kasus user: split mentah jatuh tgl 24
+  padahal lompatan tgl 23) → split ditarik mundur selama hari terakhir
+  baseline ≥ baseline + ½Δ; baseline asli < minimum → skip.
+- **Guard**: ≥5 hari baseline (`MIN_BASELINE`) · **durasi = hari yang
+  BENAR-BENAR di level baru** (nilai ≥ baseline + ½Δ; ≥2 hari — spike
+  1 hari insidental BUKAN pergeseran, tidak dilaporkan; jendela berisi
+  hari level-lama tidak dihitung) · pemulihan (level mengecil) tidak
+  dilaporkan (kabar BAIK, bukan anomali) · median baseline ≥ 1,0 (rasio
+  tak bermakna dekat nol) · rekaman terakhir ≥ H−3 (pasangan berhenti
+  direkam jauh sebelum H = alarm basi).
+- **Statistik**: z robust = Δ ÷ 1,4826×MAD (MAD 0 → ∞ — baseline datar
+  sempurna); SEMUA ambang konstanta modul (tunable).
+- **Hint kiriman**: IN sistem (4.IN) tgl shift ±1 ≈ Δ (±35% →
+  `in_match`) — pola cut-off (persis kelas engine audit Rekap Selisih
+  IN); BM rekap (5.BARANG MASUK) + Nomor (IT/RI) + Nomor PO dibawa untuk
+  drill-down bukti. Kunci pasangan KANONIK `norm_nama_barang_key ×
+  norm_nama_resto_key × SATUAN upper` (konvensi v3.11.59 — drift ejaan
+  tetap cocok; GR & PCS = baris terpisah).
+- `shift_segment_text(rec, fmt_num)` — narasi seragam
+  "Level ×6,0 tgl 23 (224 → 1.343 · 3 hari · cocok IN 1.000)".
+
+### (2) TAB 🚨 Radar Anomali — `src/ui/anomali_radar_view.py` (baru)
+- **SATU tabel GR+PCS** (user: *"jadi 1 aja GR dan PCS sekaligus"* —
+  kolom Satuan tampil): Resto · Nama Barang · Satuan · Tgl Shift ·
+  Durasi · Baseline · Level Kini · **Rasio** (heat sel 3 bucket ×2/×4/×8
+  — jalur apply_cell_tag Tk 9) · Δ Deviasi · Z · Kecocokan IN · IN Tgl ·
+  Nomor (IT/RI) · Nomor PO · BM/BM Tgl · **Est. Nominal** (Δ × harga
+  41.09 satuan-aware — `lookup_harga_pair`, format Rp).
+- Interaksi: **double-click = popup Detail Deviasi** pasangan itu (bukti
+  per tanggal — `show_deviasi_popup`, in_detail + saldo sistem +
+  mode parity tab 📦/🧩) · klik-kanan = salin sel/baris TSV + **"Buka di
+  Deviasi GR"** (deep-link `focus_pair`) · ⧩ filter header semua kolom ·
+  sort kolom numeric-aware · Ctrl+F · ⤢ perbesar.
+- H mengikuti `SharedTanggalH` (refresh saat H berubah); deteksi di
+  worker thread (`run_async`) — compute murni; legenda menjelaskan
+  metode + ambang; status footer "N pasangan shift aktif · terbesar
+  ×N (Barang — Resto) · H=n · GR+PCS".
+- **Empty state jujur**: "belum ada anomali ≠ error" (normal / baseline
+  kurang / awal bulan) + CTA ke tab Proses; frame kosong → "Belum ada
+  data".
+- **app.py wiring**: tab ke-6 (setelah 🧩 Deviasi PCS — kelompok
+  "Pemeriksaan & Rekonsiliasi"; Rincian PO menjadi #10 — tetap
+  terjangkau Ctrl+Tab/klik) + `_tab_views` (lazy refresh) + hint
+  StatusBar + **badge judul tab "🚨 Radar Anomali (N)"** (`_update_
+  radar_badge`, pola badge Follow Up) + tombol deep-link Panel
+  Ringkasan + fan-out `_load_view` di `_on_pipeline_done` (isolasi error
+  per-view).
+
+### Verifikasi
+- Repro engine kasus user: tgl_shift 23 (bukan 24 — refinement) · durasi
+  3 · baseline 21 hari · rasio ×6,0 · Δ 1.119 · in_match True (IN 1.000)
+  + RI/PO + BM 1.000; guard: spike-1-hari 0 baris · pemulihan 0 ·
+  baseline 4-hari 0 · pasangan basi 0 · frame kosong aman · GR+PCS 2
+  baris terpisah.
+- Suite §108 (10 cek): A1-A5 engine + B1-B4 GUI (render 1 baris, Rasio
+  "×6,0", badge callback, sort, heat sel ras_2, empty state) + C1
+  wiring app (index tab 5, _tab_views, hint, badge method).
+- Asersi era lama di-update: "9 tab" → 10 (main §1 + §81a grup 4 tab
+  Pemeriksaan).
+- `ruff check .` = 199 (baseline, 0 isu baru) + `py_compile` semua.
+- Baseline suite pra-perubahan: ALL PASS — perubahan tidak mengubah
+  perilaku 9 tab lain.
+
 ## v3.17.3 — OPTIMASI P1: CACHE nilai combo pivot (berbasis bukti benchmark)
 
 User: master task P1 — *"Jangan mengoptimasi kode berdasarkan tebakan. Ukur
