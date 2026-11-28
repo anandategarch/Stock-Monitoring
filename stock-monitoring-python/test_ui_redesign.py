@@ -25469,6 +25469,101 @@ def main():
           is app._shared_kategori,
           "lihat asersi")
 
+    # ---- (J) v3.18.7 — FILTER HELPER CEK (label ringkasan) -------------
+    print()
+    print("== §115. (v3.18.7) DEVIASI — FILTER HELPER CEK (RINGKASAN) ==")
+
+    from src.ui.deviasi_view import _cek_label_hit as _hit115
+    _CFL115 = DeviasiView._CEK_FILTER_LABELS
+    check("(v3.18.7) §115-A1: _CEK_FILTER_LABELS — 20 label ringkasan "
+          "(13 label kanonik UTUH + 7 label segmen TANPA angka/kurung "
+          "detail), memuat contoh user (ACR to BOM · COM Rendah · COM "
+          "Tinggi · Beda Tanggal · Shift Deviasi)",
+          len(_CFL115) == 20
+          and {"ACR to BOM", "COM Rendah", "COM Tinggi", "Beda Tanggal",
+               "Shift Deviasi"} <= set(_CFL115)
+          and not any("(" in lab
+                      or any(ch.isdigit() for ch in lab)
+                      for lab in _CFL115[13:])
+          and all(DeviasiView._CEK_CHECK_LABELS[i] == _CFL115[i]
+                  for i in range(13)),
+          f"n={len(_CFL115)} labels={_CFL115}")
+    check("(v3.18.7) §115-A2: _cek_label_hit — 'Shift Deviasi · Level "
+          "×6,0 tgl 23 (…)' cocok 'Shift Deviasi' (detail angka TAK "
+          "disyaratkan) · 'COM Tinggi (+25)' cocok 'COM Tinggi' · "
+          "'Peningkatan Qty +25,0%' cocok · 'Turun Drastis (SO Tidak "
+          "Diinput)' ikut label lebar · bukan: label lain/segmen Level",
+          _hit115("Shift Deviasi \u00b7 Level \u00d76,0 tgl 23 (224 \u2192 "
+                  "1.343 \u00b7 3 hari)", "shift deviasi")
+          and _hit115("COM Tinggi (+25)", "com tinggi")
+          and _hit115("Turun Drastis \u00b7 Peningkatan Qty +25,0%",
+                      "peningkatan qty")
+          and _hit115("Turun Drastis (SO Tidak Diinput)", "turun drastis")
+          and not _hit115("Shift Deviasi \u00b7 Level \u00d76,0 tgl 23",
+                          "level")
+          and not _hit115("COM Tinggi (+25)", "com rendah"),
+          "lihat asersi")
+
+    _top115 = tk.Toplevel(root)
+    _dv115 = DeviasiView(_top115, satuan_mode="PCS")
+    _dv115.pack(fill="both", expand=True)
+    root.update()
+    _dv115.load_data(_df109)
+    wait_view(root, _dv115)
+    _cek_vals115 = list(_dv115._cek_combo["values"])
+    _n_all115 = len(_dv115.tree.get_children(""))
+    check("(v3.18.7) §115-B1: combobox CEK di kartu Filter (pola "
+          "AKTIF/NON — user: 'Buat filter seperti Akfit/non yaa jadi "
+          "nama filter nya CEK') — values 'Semua' + 20 label ringkasan; "
+          "seleksi 'Semua' = tanpa filter (semua baris tampil)",
+          _cek_vals115[0] == "Semua"
+          and len(_cek_vals115) == 21
+          and _dv115._cek_sel is None
+          and _n_all115 >= 1,
+          f"n_vals={len(_cek_vals115)} rows={_n_all115}")
+    # B2 — pilih 'Shift Deviasi' → hanya baris ber-label itu.
+    _dv115._cek_var.set("Shift Deviasi")
+    _dv115._on_cek_changed()
+    wait_view(root, _dv115)
+    _kids115 = _dv115.tree.get_children("")
+    _cek_txt115 = (_dv115.tree.set(_kids115[0], "CEK")
+                   if _kids115 else "")
+    check("(v3.18.7) §115-B2: pilih 'Shift Deviasi' → hanya baris "
+          "ber-label itu (teks CEK utuh tetap ber-segmen angka — filter "
+          "tak mengubah tampilan sel)",
+          len(_kids115) == 1
+          and _cek_txt115.startswith("Shift Deviasi")
+          and "Level \u00d76,0 tgl 23" in _cek_txt115,
+          f"rows={len(_kids115)} cek={_cek_txt115!r}")
+    # B3 — label tanpa baris → status JUJUR (bukan tabel kosong senyap).
+    _dv115._cek_var.set("Beda Tanggal")
+    _dv115._on_cek_changed()
+    wait_view(root, _dv115)
+    check("(v3.18.7) §115-B3: label tanpa kecocokan ('Beda Tanggal') → "
+          "0 baris + status jujur 'Tidak ada baris ber-label CEK' (pola "
+          "status AKTIF/NON)",
+          len(_dv115.tree.get_children("")) == 0
+          and "ber-label CEK" in _dv115.status_var.get()
+          and "Beda Tanggal" in _dv115.status_var.get(),
+          f"status={_dv115.status_var.get()!r}")
+    # B4 — capture/restore + reset (pola AKTIF/NON).
+    _dv115._cek_var.set("COM Tinggi")
+    _dv115._on_cek_changed()
+    wait_view(root, _dv115)
+    _st115 = _dv115.capture_filter_state()
+    _dv115._reset_cek()
+    _has_cek115 = _st115.get("cek") == "COM Tinggi"
+    _dv115.restore_filter_state({"cek": "COM Tinggi"})
+    check("(v3.18.7) §115-B4: capture_filter_state membawa 'cek' + "
+          "restore pulihkan seleksi + _reset_cek ke 'Semua' (pola "
+          "AKTIF/NON — bertahan lintas sesi)",
+          _has_cek115
+          and _dv115._cek_var.get() == "COM Tinggi"
+          and _dv115._cek_sel == "COM Tinggi",
+          f"st={_st115} var={_dv115._cek_var.get()!r}")
+    _top115.destroy()
+    root.update()
+
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()

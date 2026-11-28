@@ -3,6 +3,113 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.18.7 — FILTER HELPER CEK (LABEL RINGKASAN TANPA ANGKA)
+
+User: *"di kolom Cek tab deviasi gr dan pcs itu seperti nya perlu helper
+filter. Buat filter seperti Akfit/non yaa jadi nama filter nya CEK dan
+isi nya ringkasan aja misal: ACR TO BOM / COM RENDAH / COM TINGGI /
+BEDA TANGGAL / SHIFT DEVIASI dan lain lain jadi gak perlu sebut angka
+nya kalau di filter helper ini"* — combobox **CEK** di kartu Filter tab
+📦 Deviasi GR & 🧩 PCS (pola AKTIF/NON), label ringkasan tanpa angka.
+
+- **Combobox CEK** (samping AKTIF/NON): `Semua` + **20 label
+  ringkasan** — 13 label anomali kanonik prioritas (Promix 04 … BOM 0)
+  + segmen analisa yang bisa muncul di teks CEK (COM Tinggi · COM
+  Rendah · Potensi PO belum dibuat · Beda dari Resto Lain ·
+  Peningkatan/Penurunan Qty · Berubah Arah).
+- **Kecocokan prefix segmen** `_cek_label_hit`: teks CEK dipecah
+  segmen ` · ` — baris tampil bila salah satu segmen SAMA label atau
+  ber-prefiks `label + " (" / " +" / " -"` (detail angka TAK
+  disyaratkan): `COM Tinggi (+25)` cocok `COM Tinggi`; `Shift
+  Deviasi · Level ×6,0 tgl 23 (…)` cocok `Shift Deviasi`; `Turun
+  Drastis (SO Tidak Diinput)` ikut label lebar `Turun Drastis`.
+- 0-baris → status jujur `Tidak ada baris ber-label CEK 'X'` (pola
+  status AKTIF/NON); capture/restore `filter_state.cek` lintas sesi;
+  reset di load_data + ✕ Reset Filter (pola AKTIF).
+- Tests §115 (6 cek): A1 20 label + contoh user tanpa angka · A2
+  `_cek_label_hit` prefix/kebalikan · B1 combobox + Semua · B2 pilih
+  `Shift Deviasi` → hanya baris itu (teks sel utuh) · B3 label tanpa
+  kecocokan → 0 baris + status jujur · B4 capture/restore/_reset_cek.
+
+## v3.18.6 — FILTER KATEGORI RADAR ANOMALI TER-LINK 📦/🧩
+
+User: *"di tab radar anomali juga bisa filter kategori ya misal Deviasi
+atau packaging sama kaya di tab deviasi gr dan pcs dan kateogri nya
+ngelink ke deviasi gr dan pcs misal di situ buka apa maka di radar
+anomali juga bakal memfilter kateogri itu"* — kategori kini **dibagikan
+2-arah** tab 📦 Deviasi GR · 🧩 PCS · 🚨 Radar Anomali.
+
+- **SharedKategori** (pola SharedTanggalH): ganti kategori di salah
+  satu tempat → ketiganya mengikuti (combobox + seleksi + refresh);
+  `set()` hanya memanggil listener saat nilai berubah (anti-loop).
+- **Radar**: combobox KATEGORI lintas satuan (GR+PCS satu tabel) —
+  `Semua` + gabungan default `Deviasi (COM + Packaging)` + `(Tanpa
+  Kategori)` + nilai master; peta `_pair_kategori_map` per pasangan
+  (first non-blank — worker thread); filter mask kanonik
+  `kategori_match_mask` (semantik PERSIS tab 📦/🧩); tooltip baris
+  menambah `Kategori: X`; load_data ikut seleksi shared.
+- **Deviasi GR/PCS**: `_on_kategori_changed` push ke shared;
+  `_on_shared_kategori_changed` listener (pola listener H: guard
+  `_load_depth` — sinkron state tanpa render ganda di tengah load);
+  `_reset_kategori` broadcast default data-driven (guard dipasang di
+  call-site load_data — jalur ✕ Reset/kategori manual tetap me-refresh
+  saudara).
+- Tests §114 (7 cek): A1 SharedKategori set/no-op/None→Semua · A2
+  `_pair_kategori_map` first-non-blank · B1 combobox radar + nilai · B2
+  link 📦/🧩→radar (2→1 baris pasangan kategori itu) · B3 link balik
+  radar→📦/🧩 (state ikut, tanpa loop) · C1 jalur user lengkap (ganti di
+  tab Deviasi → radar memfilter) · C2 wiring app (ketiga view satu
+  state).
+
+## v3.18.5 — ⚑ TANGGAL KEJADIAN DI POPUP DETAIL DEVIASI
+
+User: *"waktu pop up muncul di tab radar anomali kasih tanda dong di
+bagian tanggal nya yang terpicu nya mungkin warna gitu biar aku
+langsung lihat oh dari tanggal ini kelihata anomali nya gitu"* — popup
+Detail Deviasi yang dibuka dari tab 🚨 Radar kini **menandai tanggal
+kejadian** langsung di kolom Tanggal.
+
+- `show_deviasi_popup(..., mark_tgl=)` → `DeviasiPopup(mark_tgl=)`:
+  baris Tanggal == tgl_shift diberi **prefiks glyph `⚑`** + **latar
+  amber kuat `#FDE68A`** + teks amber-800 (Tk 9 per-cell
+  `apply_cell_tag` tag `shift_tgl`; Tk 8 fallback baris utuh) — warna
+  berbeda dari latar baris H `#fef3c7` sehingga dua penanda tanggal tak
+  tertukar; footer popup menjelaskan `⚑ = tanggal kejadian shift (tgl
+  23 — deviasi mulai naik stabil; dari tab 🚨 Radar Anomali)`.
+- Radar `_on_double_click` meneruskan `rec['tgl_shift']` baris →
+  user langsung lihat "dari tanggal ini anomali mulai terlihat" di
+  bukti per-tanggal.
+- Tanpa `mark_tgl` (pemanggil lama tab 📦/🧩) → perilaku lama utuh.
+- Tests §113 (5 cek): B1 glyph + tag + footer · B1b tag CELL Tk 9 · B2
+  tanpa mark_tgl tak ada ⚑ · C1 radar double-click meneruskan tgl 23
+  (spy).
+
+## v3.18.4 — ENGINE SHIFT: NAIK BERTAHAP (RAMP) ≠ SHIFT
+
+User (popup CUP 16 - BAKSO · MLGPAR PCS deviasi 55 → 103 naik
+bertahap tgl 1-25): *"kenapa jadi terdeteksi shift deviasi? padahal
+menurutku itu wajar karna naik nya deviasi atau growth nya deviasi
+naik bertahap dan bukan langsung melonjak konsisten gitu dari tanggal
+1 sampai 25 nya coba cek lagi"* — engine kini menolak **ramp
+bertahap**; hanya lompatan-lalu-menempel yang dilaporkan.
+
+- **GATE STABILITAS LEVEL**: slope Theil-Sen (robust, median slope
+  pasangan titik) atas seri **jendela level** × span tanggal = total
+  panjatan DI DALAM jendela; panjatan ≥ `STAB_FRAC` (0,35) × Δ → seri
+  masih memanjat pasca-split = **ramp bertahap** (ramp murni maupun
+  ramp-lalu-stabil) → skip. Shift sejati = melonjak lalu BERTEMPEL
+  (BJMHAS: panjatan jendela 97 = 8,7% dari Δ 1.119 → lolos; CUP 16:
+  panjatan 41 = 57% dari Δ 71,5 → ditolak).
+  Slope negatif (loncat lalu melandai) tetap shift — yang ditolak
+  hanya masih-naik.
+- Konstanta `STAB_FRAC` + kwargs `stab_frac` (non-default bypass
+  memo — pola kwargs lain); subtitle + legend tab 🚨 radar menyatakan
+  guard "Naik BERTAHAP (ramp) ≠ shift".
+- Tests §112 (4 cek): A1 kasus user CUP 16 → 0 baris · A2 ramp murni
+  + ramp-lalu-stabil → 0 baris · A3 shift + noise tetap terdeteksi ·
+  A4 `_theil_sen_slope` + isolasi sebab (stab_frac=99 → CUP 16
+  terdeteksi lagi).
+
 ## v3.18.3 — KOLOM TAB 🚨 RADAR DISEDERHANAKAN + DEV H + PENYEBAB
 
 User: *"bisa gak jadi lebih sederhana aja tampilan nya ... Tampilan

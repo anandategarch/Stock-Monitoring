@@ -812,6 +812,25 @@ def save_h_preset(h):
 # code nya hapus") — konsumen satu-satunya adalah app.py pra-pipeline.
 
 
+# v3.18.7 — kecocokan label ringkasan CEK (filter helper — user:
+# "isi nya ringkasan aja misal: ACR TO BOM / COM RENDAH / COM TINGGI /
+# BEDA TANGGAL / SHIFT DEVIASI dan lain lain jadi gak perlu sebut
+# angka nya"): teks CEK dipecah segmen (' · ') — kecocokan bila segmen
+# SAMA label atau ber-prefiks label + ' (' (detail angka) / ' +' /
+# ' -' (persen analisa Qty) — 'COM Tinggi (+25)' cocok 'COM Tinggi';
+# 'Peningkatan Qty +25,0%' cocok 'Peningkatan Qty'; segmen detail
+# shift 'Level ×6,0 tgl 23 (…)' tak pernah cocok label (tak disyaratkan).
+# Case-insensitive (label kanonik & segmen dinormalisasi lower).
+def _cek_label_hit(txt: str, lab: str) -> bool:
+    """True bila teks CEK memuat segmen ber-label ringkasan ``lab``."""
+    for seg in str(txt).split(" \u00b7 "):
+        s = seg.strip().lower()
+        if (s == lab or s.startswith((f"{lab} (", f"{lab} +",
+                                      f"{lab} -"))):
+            return True
+    return False
+
+
 class DeviasiView(tk.Frame):
     """Wide matrix view untuk DEVIASI GR/PCS.
 
@@ -960,6 +979,21 @@ class DeviasiView(tk.Frame):
         "Shift Deviasi",
         "ACR to BOM", "BOM 0")
 
+    # v3.18.7 — LABEL RINGKASAN utk FILTER HELPER CEK (user: "terus coba
+    # cek di kolom Cek tab deviasi gr dan pcs itu seperti nya perlu
+    # helper filter. Buat filter seperti Akfit/non yaa jadi nama filter
+    # nya CEK dan isi nya ringkasan aja misal: ACR TO BOM / COM RENDAH /
+    # COM TINGGI / BEDA TANGGAL / SHIFT DEVIASI dan lain lain jadi gak
+    # perlu sebut angka nya kalau di filter helper ini"): 13 label utama
+    # kanonik + segmen analisa yang bisa muncul di teks CEK — TANPA
+    # angka. Kecocokan: segmen teks CEK ber-prefiks label (lihat
+    # _cek_label_hit — 'COM Tinggi (+25)' cocok 'COM Tinggi'; label
+    # 'Turun Drastis' juga menampung varian '(SO Tidak Diinput)').
+    _CEK_FILTER_LABELS = _CEK_CHECK_LABELS + (
+        "COM Tinggi", "COM Rendah", "Potensi PO belum dibuat",
+        "Beda dari Resto Lain", "Peningkatan Qty", "Penurunan Qty",
+        "Berubah Arah")
+
     # FIX 6d1-02 — counter load_data aktif (CLASS-level, dibagi antar
     # instance GR & PCS yang sama-sama berlangganan SharedTanggalH).
     # load_data memanggil _h_state.set(default-H-baru) SEBELUM filter
@@ -1066,6 +1100,9 @@ class DeviasiView(tk.Frame):
         # v3.9.49 — filter AKTIF/NON (pindahan dari kolom tabel;
         # None = "Semua" = tanpa filter).
         self._aktif_sel: str | None = None
+        # v3.18.7 — filter helper CEK (label ringkasan tanpa angka —
+        # pola combobox AKTIF/NON; None = "Semua" = tanpa filter).
+        self._cek_sel: str | None = None
         self.go_to_proses = go_to_proses
         self._busy = False
         self._pending = False
@@ -1236,6 +1273,28 @@ class DeviasiView(tk.Frame):
         self._aktif_combo.pack(side="left", padx=(6, 0))
         self._aktif_combo.bind(
             "<<ComboboxSelected>>", lambda e: self._on_aktif_changed())
+
+        # v3.18.7 — FILTER HELPER CEK (user: "di kolom Cek tab deviasi gr
+        # dan pcs itu seperti nya perlu helper filter. Buat filter
+        # seperti Akfit/non yaa jadi nama filter nya CEK dan isi nya
+        # ringkasan aja misal: ACR TO BOM / COM RENDAH / COM TINGGI /
+        # BEDA TANGGAL / SHIFT DEVIASI dan lain lain jadi gak perlu
+        # sebut angka nya kalau di filter helper ini"): combobox label
+        # ringkasan (pola AKTIF/NON) — baris ditampilkan bila SALAH SATU
+        # segmen teks CEK-nya ber-prefiks label terpilih (lihat
+        # _cek_label_hit di _prepare_rows: 'COM Tinggi (+25)' cocok
+        # 'COM Tinggi' — angka tak perlu).
+        tk.Label(r0b, text="CEK", bg=C_CARD, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left", padx=(18, 0))
+        self._cek_var = tk.StringVar(value="Semua")
+        self._cek_combo = ttk.Combobox(
+            r0b, textvariable=self._cek_var, state="readonly",
+            width=30, font=font(9))
+        self._cek_combo["values"] = ["Semua"] + list(
+            self._CEK_FILTER_LABELS)
+        self._cek_combo.pack(side="left", padx=(6, 0))
+        self._cek_combo.bind(
+            "<<ComboboxSelected>>", lambda e: self._on_cek_changed())
 
         # v3.9.21 — AMBANG ACR to BOM (user: "di bagian ACR to BOM itu
         # harusnya ada threshold > 80% absolute dan aku bisa atur"):
@@ -2579,6 +2638,17 @@ class DeviasiView(tk.Frame):
         self._aktif_var.set("Semua")
         self._aktif_sel = None
 
+    # v3.18.7 — combobox CEK ("Semua" = tanpa filter — pola AKTIF/NON;
+    # label ringkasan tanpa angka — kecocokan prefix segmen teks CEK).
+    def _on_cek_changed(self):
+        val = self._cek_var.get()
+        self._cek_sel = None if (not val or val == "Semua") else val
+        self._refresh()
+
+    def _reset_cek(self):
+        self._cek_var.set("Semua")
+        self._cek_sel = None
+
     # --- v3.9.66 — FILTER PERSISTEN ANTAR SESI (quick win Wave 1 #1) -------
     # Snapshot / pulihkan kombinasi filter view ini (app menyimpan semua
     # view ke settings.json saat jendela ditutup + memanggil restore SEKALI
@@ -2593,6 +2663,9 @@ class DeviasiView(tk.Frame):
         st["kategori"] = self._kategori_var.get()
         if hasattr(self, "_aktif_var"):
             st["aktif"] = self._aktif_var.get()
+        # v3.18.7 — filter CEK ikut bertahan lintas sesi (pola AKTIF).
+        if hasattr(self, "_cek_var"):
+            st["cek"] = self._cek_var.get()
         return st
 
     def restore_filter_state(self, state) -> None:
@@ -2630,6 +2703,19 @@ class DeviasiView(tk.Frame):
                         and self._aktif_var.get() != _av):
                     self._aktif_var.set(_av)
                     self._aktif_sel = (None if _av == "Semua" else _av)
+                    changed = True
+        # v3.18.7 — filter CEK dipulihkan (pola AKTIF; values statis).
+        if hasattr(self, "_cek_var"):
+            _cv = state.get("cek")
+            if isinstance(_cv, str):
+                try:
+                    _cvals = list(self._cek_combo["values"])
+                except tk.TclError:
+                    _cvals = []
+                if (_cv in _cvals
+                        and self._cek_var.get() != _cv):
+                    self._cek_var.set(_cv)
+                    self._cek_sel = (None if _cv == "Semua" else _cv)
                     changed = True
         if changed and self.winfo_ismapped():
             self._refresh()
@@ -2967,6 +3053,9 @@ class DeviasiView(tk.Frame):
         # (pola _reset_kategori; kolom pindahan dari tabel → filter).
         if hasattr(self, "_aktif_var"):
             self._reset_aktif()
+        # v3.18.7 — filter CEK ikut di-reset (pola AKTIF/NON).
+        if hasattr(self, "_cek_var"):
+            self._reset_cek()
         if _data_empty:
             self._show_empty()
             self.status_var.set(
@@ -4089,6 +4178,7 @@ class DeviasiView(tk.Frame):
             "tanggal_h": self.tanggal_h,
             "kategori": self._kategori_sel,   # v3.9.13
             "aktif": self._aktif_sel,         # v3.9.49 — filter AKTIF/NON
+            "cek": self._cek_sel,             # v3.18.7 — filter helper CEK
         }
 
         def work():
@@ -4253,6 +4343,26 @@ class DeviasiView(tk.Frame):
                 return {"items": [], "kpi": (0, 0.0, 0),
                         "status": ("Tidak ada baris untuk status "
                                     f"AKTIF/NON '{st['aktif']}'.")}
+
+        # v3.18.7 — FILTER HELPER CEK (user: "Buat filter seperti
+        # Akfit/non yaa jadi nama filter nya CEK dan isi nya ringkasan
+        # aja ... jadi gak perlu sebut angka nya"): baris ditampilkan
+        # bila SALAH SATU segmen teks CEK ber-prefiks label ringkasan
+        # terpilih — segmen = potongan teks ber-pisah ' · ' (label utama
+        # maupun segmen analisa COM/PO/Bedaresto/lalu-kini); 'COM Tinggi
+        # (+25)' cocok 'COM Tinggi'; 'Turun Drastis (SO Tidak Diinput)'
+        # ikut label lebar 'Turun Drastis'; detail 'Level ×N tgl X'
+        # segmen SHIFT tidak pernah cocok label (angkanya justru yang
+        # tak disyaratkan — user).
+        if st.get("cek"):
+            _lab = str(st["cek"]).strip().lower()
+            filtered = filtered[filtered["CEK"].astype(str).map(
+                lambda t: _cek_label_hit(t, _lab))]
+            if filtered.empty:
+                return {"items": [], "kpi": (0, 0.0, 0),
+                        "status": ("Tidak ada baris ber-label CEK "
+                                    f"'{st['cek']}' di tab "
+                                    f"{self.satuan_mode} ini.")}
 
         # v3.5: filter header ⧩ — kecocokan nilai TERFORMAT (identik dgn
         # yang tampil di tabel; menggantikan RESTO/Nama Barang combo)
@@ -4976,6 +5086,7 @@ class DeviasiView(tk.Frame):
         self.header_filters.clear_all()
         self._reset_kategori()   # v3.9.13 — combobox kategori ikut di-reset
         self._reset_aktif()      # v3.9.49 — combobox AKTIF/NON ikut di-reset
+        self._reset_cek()        # v3.18.7 — combobox CEK ikut di-reset
         # FIX B-07: ✕ Reset Filter kini juga me-reset TANGGAL H ke default
         # — sebelumnya nilai H lama tetap aktif, semantik reset tidak total
         # dan membingungkan. (v3.9: reset lewat SharedTanggalH supaya KEDUA
