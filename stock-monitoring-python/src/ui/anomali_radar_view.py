@@ -10,20 +10,37 @@ menempel — kasus nyata user: BJMHAS · CUP 14 (V.20) PCS: stabil
 Deteksi = engine anomali_shift (median/MAD dua-jendela per pasangan ×
 satuan; level ≥ ×2 baseline & ≥2 hari di level baru; hint kecocokan
 kiriman IN ±1 hari — lihat docstring modul itu). SATU tabel lintas
-satuan (kolom Satuan — user: "jadi 1 aja GR dan PCS sekaligus").
+satuan (user: "jadi 1 aja GR dan PCS sekaligus").
 
-Kolom: Resto · Nama Barang · Satuan · Tgl Shift · Durasi · Baseline ·
-Level Kini · Rasio · Δ Deviasi · Z · Kecocokan IN · IN Tgl · Nomor
-(IT/RI) · Nomor PO · BM · BM Tgl · Est. Nominal (Δ × harga 41.09).
+v3.18.3 — KOLOM DISEDERHANAKAN (user: "bisa gak jadi lebih sederhana
+aja tampilan nya ... Tampilan kolom nya menjadi gini aja: Resto ·
+Nama Barang · Tanggal Kejadian · Durasi · Rasio · Deviasi — inti nya
+itu berisi informasi dari tanggal berapa sih deviasi nya tuh
+meningkat secara stabil dibanding base line? apa karna pengaruh IN
+atau gimana meningkat?" + "jika deviasi meningkat di 1 hari dan
+trend besok nya mulai turun maka gak perlu dijadikan analisa"): 18
+kolom v3.18.2 → 8 INTI —
+  ✓ · Resto · Nama Barang (satuan dilipat: "CUP 14 (V.20) · PCS") ·
+  Tanggal Kejadian (tgl shift — tgl deviasi mulai naik stabil) ·
+  Durasi (hari di level baru) · Rasio (×N, heat) · Deviasi (|dev|
+  TANGGAL H — nilai terkini, BUKAN akumulasi; engine dev_h) ·
+  Penyebab (3 keadaan: "Dipicu IN 1.000 tgl 23" hijau · "IN 300 tgl
+  21 ≠ Δ 1.100" amber · "Tanpa kiriman IN" merah — baris diwarnai
+  sesuai keadaan).
+Bukti lengkap yang dulunya kolom (baseline, level, Δ, z, IN ± nomor
+IT/RI & PO, BM, est nominal) dilipat ke TOOLTIP HOVER baris
+(CellTooltip — pola kolom CEK tab 📦/🧩): tabel sederhana, analisa
+tetap lengkap ("perkuat analisa sesuai kebutuhan ku").
 
-Interaksi: double-click baris = popup Detail Deviasi pasangan itu (bukti
-per tanggal — pola tab 📦/🧩) · klik-kanan = salin sel/baris + "Buka di
-Deviasi GR" (deep-link focus_pair) · ⧩ filter header · sort kolom ·
-Ctrl+F cari · ⤢ perbesar. Legend menjelaskan metode + ambang.
+Interaksi: hover baris = analisa lengkap · double-click baris = popup
+Detail Deviasi pasangan itu (bukti per tanggal — pola tab 📦/🧩) ·
+klik-kanan = salin sel/baris + "Buka di Deviasi GR" (deep-link
+focus_pair) · ⧩ filter header · sort kolom · Ctrl+F cari · ⤢
+perbesar. Legend menjelaskan metode + ambang.
 Status footer: "N pasangan shift aktif · terbesar ×N (Barang — Resto)".
 H mengikuti SharedTanggalH (tab 📦) — refresh saat H berubah.
-Empty state: belum ada anomali ≠ error (normal / baseline kurang / awal
-bulan) — dijelaskan + CTA ke tab Deviasi GR.
+Empty state: belum ada anomali ≠ error (normal / baseline kurang /
+awal bulan) — dijelaskan + CTA ke tab Deviasi GR.
 
 v3.18.2 — INTEGRASI FOLLOW UP (user: "Integrasi Follow Up"): kolom ✓
 awal — klik = daftarkan pasangan shift ke daftar ☑ (asal 'RADAR';
@@ -47,13 +64,14 @@ from .anomali_shift import (
     RATIO_CUT,  # v3.18 — legenda ambang
     detect_shift_anomalies,
 )
+from .cell_tooltip import CellTooltip  # v3.18.3 — tooltip hover
 from .followup import (  # v3.18.2 — kolom ✓ (pola deviasi_view)
     CHECK_OFF,
     CHECK_ON,
     row_fingerprint,
 )
 from .nominal_common import (
-    fmt_rp_cell,  # v3.18 — Est. Nominal (Δ × harga 41.09)
+    fmt_rp_cell,  # v3.18.3 — est nominal di teks tooltip (Δ × harga)
     lookup_harga_pair,  # satuan-aware (pola kolom Nominal deviasi_view)
 )
 from .theme import (
@@ -82,34 +100,28 @@ from .widgets import (
     run_async,
 )
 
-# Kolom (id, lebar, anchor) — GR+PCS SATU tabel (kolom Satuan tampil
-# selalu — beda tab 📦/🧩 yang menyembunyikannya karena per-tab seragam).
+# Kolom (id, lebar, anchor) — GR+PCS SATU tabel (pasangan GR/PCS = 2
+# baris terpisah, satuan DILIPAT ke Nama Barang "CUP 14 (V.20) · PCS" —
+# user v3.18.3 minta kolom inti saja).
 # v3.18.2 — kolom ✓ AWAL (tambah/keluarkan daftar ☑ Follow Up — pola
 # deviasi GR/PCS; satu-satunya kolom ikon-only, dikecualikan dari ⧩).
+# v3.18.3 — KOLOM INTI (user): "Resto · Nama Barang · Tanggal Kejadian
+# (tanggal shift) · Durasi · Rasio · Deviasi (tanggal H — bukan
+# akumulasi)" + Penyebab (pertanyaan inti user: "apa karna pengaruh
+# IN atau gimana meningkat?") — bukti lain di tooltip hover baris.
 COLUMNS = [
     ("✓", 34, "center"),
     ("Resto", 70, "w"),
-    ("Nama Barang", 190, "w"),
-    ("Satuan", 55, "w"),
-    ("Tgl Shift", 62, "e"),
-    ("Durasi", 55, "e"),        # hari di level baru (bukan ukuran jendela)
-    ("Baseline", 75, "e"),      # median |dev| pra-shift
-    ("Level Kini", 80, "e"),    # median |dev| pasca-shift
-    ("Rasio", 58, "e"),         # level ÷ baseline (×N) — sort default ↓
-    ("Δ Deviasi", 85, "e"),     # level − baseline
-    ("Z", 55, "e"),             # robust z (MAD)
-    ("Kecocokan IN", 150, "w"),
-    ("IN Tgl", 55, "e"),
-    ("Nomor (IT/RI)", 135, "w"),
-    ("Nomor PO", 125, "w"),
-    ("BM", 55, "e"),
-    ("BM Tgl", 55, "e"),
-    ("Est. Nominal", 95, "e"),
+    ("Nama Barang", 235, "w"),
+    ("Tanggal Kejadian", 95, "e"),  # tgl shift — tgl mulai stabil naik
+    ("Durasi", 60, "e"),           # hari di level baru (bukan jendela)
+    ("Rasio", 60, "e"),            # level ÷ baseline (×N) — sort default ↓
+    ("Deviasi", 90, "e"),           # |dev| tanggal H — nilai terkini
+    ("Penyebab", 205, "w"),         # dipicu IN / IN ≠ Δ / tanpa kiriman
 ]
 
 # Kolom numerik (sort/filter numeric-aware) vs teks.
-_NUM_COLS = {"Tgl Shift", "Durasi", "Baseline", "Level Kini", "Rasio",
-             "Δ Deviasi", "Z", "BM", "Est. Nominal"}
+_NUM_COLS = {"Tanggal Kejadian", "Durasi", "Rasio", "Deviasi"}
 
 # v3.18 — pewarnaan sel Rasio (heat 3 bucket: ×2 merah muda → ×8 kuat)
 RASIO_BG = {"ras_1": "#FFEBEE", "ras_2": "#FFCDD2", "ras_3": "#EF9A9A"}
@@ -183,12 +195,13 @@ class AnomaliRadarView(tk.Frame):
             anchor="w")
         tk.Label(head, bg=C_BG, fg=C_TEXT_MUTED, font=font(9), wraplength=980,
                  justify="left", text=(
-                     "Pasangan (Barang × Resto × Satuan) dengan |deviasi| "
-                     "melompat ke LEVEL BARU yang bertahan — median "
-                     "dua-jendela vs baseline pasangan sendiri (bukan "
-                     "ambang global). Double-click = bukti per tanggal; "
-                     f"Rasio ≥ ×{RATIO_CUT:g} & durasi ≥ 2 hari di level "
-                     "baru.")).pack(anchor="w", pady=(2, 0))
+                     "Dari tanggal berapa deviasi naik STABIL dibanding "
+                     "baseline pasangan — dan apakah dipicu kiriman IN? "
+                     "Naik 1 hari lalu besoknya turun = spike, tidak "
+                     "dianalisa (≥2 hari di level baru, Rasio ≥ "
+                     f"×{RATIO_CUT:g}). Hover baris = analisa lengkap; "
+                     "double-click = bukti per tanggal.")).pack(
+            anchor="w", pady=(2, 0))
         # toolbar ⤢ TERPISAH dari target expander (button tetap terlihat)
         toolbar = tk.Frame(self.content, bg=C_BG)
         toolbar.pack(fill="x", padx=12, pady=(2, 0))
@@ -222,9 +235,12 @@ class AnomaliRadarView(tk.Frame):
         # tag pewarnaan
         self.tree.tag_configure("evenrow", background=ROW_EVEN)
         self.tree.tag_configure("oddrow", background=ROW_ODD)
+        # v3.18.3 — warna baris = keadaan Penyebab (pertanyaan inti user:
+        # "apa karna pengaruh IN atau gimana meningkat?"): dipicu IN hijau
+        # · IN ≠ Δ amber (kiriman tak menjelaskan) · tanpa kiriman merah.
         self.tree.tag_configure("cocok_in", foreground="#059669")
+        self.tree.tag_configure("in_sebagian", foreground="#b45309")
         self.tree.tag_configure("tanpa_kiriman", foreground="#dc2626")
-        self.tree.tag_configure("neg_cell", foreground="#dc2626")
         for _t, _bg in RASIO_BG.items():
             self.tree.tag_configure(_t, background=_bg)
 
@@ -252,20 +268,27 @@ class AnomaliRadarView(tk.Frame):
         self.tree.bind("<Double-1>", self._on_double_click, add="+")
         self.tree.bind("<Button-3>", self._on_context_menu, add="+")
         self.tree.bind("<Control-c>", self._on_copy, add="+")
+        # v3.18.3 — tooltip hover: analisa lengkap per baris (bukti yang
+        # dulunya kolom — baseline/level/Δ/z/IN±nomor/PO/BM/nominal —
+        # pola CellTooltip kolom CEK tab 📦/🧩; pasif, no grab).
+        self._tip = CellTooltip(self.tree,
+                                provider=self._tooltip_provider)
 
         # Legend metode (transparansi deteksi)
         legend = LegendRow(self.content, [
-            (("Shift Deviasi · level |deviasi| ≥ ×2 baseline (median "
-              "dua-jendela per pasangan)"), "#c026d3"),
-            (("Durasi ≥ 2 hari di level baru — spike 1 hari tidak "
-              "dilaporkan"), "#475569"),
-            ("Cocok IN · Δ ≈ kiriman sistem ±1 hari (cut-off?) — hijau",
-             "#059669"),
-            ("Tanpa kiriman · pergeseran tanpa sebab sistem — merah",
+            (("Shift Deviasi · |dev| ≥ ×2 baseline (median dua-jendela "
+              "per pasangan) & ≥2 hari di level baru"), "#c026d3"),
+            ("Deviasi = nilai tanggal H (terkini) — BUKAN akumulasi",
+             "#475569"),
+            (("Dipicu IN · Δ ≈ kiriman sistem ±1 hari — cut-off input? "
+              "(hijau)"), "#059669"),
+            (("IN ≠ Δ · ada kiriman tapi tak menjelaskan lompatan "
+              "(amber)"), "#b45309"),
+            ("Tanpa kiriman · naik tanpa sebab sistem (merah)",
              "#dc2626"),
             ("Rasio · heat merah muda → kuat (×2 / ×4 / ×8)", "#EF9A9A"),
-            ("Est. Nominal = Δ Deviasi × harga 41.09 (satuan-aware)",
-             "#475569"),
+            (("Hover baris = analisa lengkap (baseline, Δ, IN, nomor, "
+              "PO, BM, est nominal)"), "#475569"),
             # v3.18.2 — kolom ✓ (pola legenda ✓ tab 📦/🧩 v3.12.3).
             (("✓ = tambah/keluarkan daftar pantauan (tab Follow Up; "
               "☑ = baris/pasangan sudah masuk daftar — uncek ada "
@@ -424,62 +447,57 @@ class AnomaliRadarView(tk.Frame):
         """Baris tampil: display strings + raw values (sort/filter) +
         record engine (popup) + snapshot follow-up (v3.18.2 — nilai
         so/sistem/deviasi per tanggal H dari frame, pola snap
-        deviasi_view; kosong bila tanggal tak terekam)."""
+        deviasi_view; kosong bila tanggal tak terekam) + v3.18.3
+        cause_tag & tooltip (analisa lengkap — bukti yang dulunya
+        kolom)."""
         in_qty = rec.get("in_qty")
         has_in = in_qty is not None and not (
             isinstance(in_qty, float) and pd.isna(in_qty))
         delta = rec.get("delta")
-        if has_in and delta:
-            pct = round(100.0 * float(in_qty) / float(delta))
-            cocok = ("Cocok IN" if rec.get("in_match")
-                     else "IN ≠ Δ")
-            cocok_txt = f"{cocok} {self._fmt_num(in_qty)} ({pct}%)"
+        # v3.18.3 — Penyebab 3 keadaan (pertanyaan inti user: "apa karna
+        # pengaruh IN atau gimana meningkat?"): dipicu IN (cocok, hijau)
+        # · IN ≠ Δ (kiriman ada tapi tak menjelaskan, amber) · tanpa
+        # kiriman (naik tanpa sebab sistem, merah).
+        if has_in:
+            qty_txt = self._fmt_num(in_qty)
+            if rec.get("in_match"):
+                penyebab = f"Dipicu IN {qty_txt} tgl {self._fmt_num(rec.get('in_tgl'))}"
+                cause_tag = "cocok_in"
+            else:
+                penyebab = (f"IN {qty_txt} tgl "
+                            f"{self._fmt_num(rec.get('in_tgl'))} ≠ Δ "
+                            f"{self._fmt_num(delta)}")
+                cause_tag = "in_sebagian"
         else:
-            cocok_txt = "Tanpa IN ±1 hari"
-        bm_qty = rec.get("bm_qty")
-        bm_has = bm_qty is not None and not (
-            isinstance(bm_qty, float) and pd.isna(bm_qty))
-        nominal = (None if harga is None
-                   else float(harga) * float(rec.get("delta") or 0.0))
+            penyebab = "Tanpa kiriman IN"
+            cause_tag = "tanpa_kiriman"
+        dev_h = rec.get("dev_h")
+        has_dev = dev_h is not None and not (
+            isinstance(dev_h, float) and pd.isna(dev_h))
+        # v3.18.3 — satuan DILIPAT ke Nama Barang ("CUP 14 (V.20) · PCS"
+        # — user minta kolom inti; pasangan GR/PCS tetap 2 baris).
+        barang = str(rec.get("barang") or "")
+        satuan = str(rec.get("satuan") or "")
+        nama = f"{barang} · {satuan}" if satuan and satuan != "-" else barang
         disp = {
             "Resto": str(rec.get("resto") or ""),
-            "Nama Barang": str(rec.get("barang") or ""),
-            "Satuan": str(rec.get("satuan") or "-"),
-            "Tgl Shift": str(rec.get("tgl_shift")),
-            "Durasi": f"{int(rec.get('durasi'))} hari",
-            "Baseline": self._fmt_num(rec.get("baseline")),
-            "Level Kini": self._fmt_num(rec.get("level")),
+            "Nama Barang": nama,
+            "Tanggal Kejadian": self._fmt_num(rec.get("tgl_shift")),
+            "Durasi": f"{int(rec.get('durasi') or 0)} hari",
             "Rasio": self._fmt_ratio(rec.get("ratio")),
-            "Δ Deviasi": self._fmt_num(delta),
-            "Z": self._fmt_z(rec.get("z")),
-            "Kecocokan IN": cocok_txt,
-            "IN Tgl": self._fmt_num(rec.get("in_tgl")),
-            "Nomor (IT/RI)": str(rec.get("in_nomor") or "-"),
-            "Nomor PO": str(rec.get("in_nomor_po") or "-"),
-            "BM": self._fmt_num(bm_qty) if bm_has else "-",
-            "BM Tgl": self._fmt_num(rec.get("bm_tgl")) if bm_has else "-",
-            "Est. Nominal": fmt_rp_cell(nominal),
+            # |dev| TANGGAL H — nilai terkini, BUKAN akumulasi (user).
+            "Deviasi": self._fmt_num(dev_h) if has_dev else "-",
+            "Penyebab": penyebab,
         }
         raw = {
-            "Resto": disp["Resto"], "Nama Barang": disp["Nama Barang"],
-            "Satuan": disp["Satuan"],
-            "Tgl Shift": float(rec.get("tgl_shift") or 0),
+            "Resto": disp["Resto"], "Nama Barang": nama,
+            "Tanggal Kejadian": float(rec.get("tgl_shift") or 0),
             "Durasi": float(rec.get("durasi") or 0),
-            "Baseline": float(rec.get("baseline") or 0),
-            "Level Kini": float(rec.get("level") or 0),
             "Rasio": (float("inf") if (r := rec.get("ratio")) is None
                       else float(r)),
-            "Δ Deviasi": float(delta or 0),
-            "Z": float(rec.get("z") or 0),
-            "Kecocokan IN": (1 if has_in and rec.get("in_match")
-                             else (0 if has_in else -1)),
-            "IN Tgl": float(rec.get("in_tgl") or 0),
-            "Nomor (IT/RI)": disp["Nomor (IT/RI)"],
-            "Nomor PO": disp["Nomor PO"],
-            "BM": float(bm_qty or 0) if bm_has else 0.0,
-            "BM Tgl": float(rec.get("bm_tgl") or 0),
-            "Est. Nominal": (nominal if nominal is not None
-                             else float("nan")),
+            "Deviasi": (float(dev_h) if has_dev else float("nan")),
+            "Penyebab": (1 if has_in and rec.get("in_match")
+                         else (0 if has_in else -1)),
         }
         # v3.18.2 — snapshot follow-up baris radar (fp STABIL: cek "" —
         # pola _fp_stable deviasi_view; nilai so/sistem/deviasi + so_m2..
@@ -509,7 +527,11 @@ class AnomaliRadarView(tk.Frame):
             "resto_app": str(rec.get("resto") or ""),
         }
         return {"disp": disp, "raw": raw, "rec": rec, "snap": snap,
-                "fp": row_fingerprint(snap)}
+                "fp": row_fingerprint(snap),
+                # v3.18.3 — keadaan penyebab (warna baris) + tooltip
+                # analisa lengkap (dihitung pure di worker thread).
+                "cause_tag": cause_tag,
+                "tip": _tooltip_text(rec, harga)}
 
     # ------------------------------------------------------------------
     # FILTER + SORT + RENDER
@@ -583,11 +605,11 @@ class AnomaliRadarView(tk.Frame):
                 disp = [CHECK_ON if checked else CHECK_OFF] + [
                     row["disp"][c] for c, _, _ in COLUMNS if c != "✓"]
                 tags = ["evenrow" if i % 2 == 0 else "oddrow"]
-                rec = row["rec"]
-                if rec.get("in_match"):
-                    tags.append("cocok_in")
-                else:
-                    tags.append("tanpa_kiriman")
+                # v3.18.3 — warna baris = keadaan Penyebab (cause_tag
+                # dihitung _row_build — pure, thread-safe).
+                cause = row.get("cause_tag")
+                if cause:
+                    tags.append(cause)
                 iid = f"row_{i}"
                 self.tree.insert("", "end", iid=iid,
                                   values=disp, tags=tuple(tags))
@@ -618,7 +640,7 @@ class AnomaliRadarView(tk.Frame):
             return
         best = max(self._rows_all,
                    key=lambda r: (r["raw"].get("Rasio") or 0.0,
-                                  r["raw"].get("Δ Deviasi") or 0.0))
+                                  float(r["rec"].get("delta") or 0.0)))
         ratio = best["raw"].get("Rasio") or 0.0
         ratio_txt = ("×∞" if ratio == float("inf")
                      else f"×{ratio:,.1f}".replace(",", "."))
@@ -788,6 +810,16 @@ class AnomaliRadarView(tk.Frame):
     def _row_rec(self, iid: str) -> dict | None:
         return (self._rows_by_iid.get(str(iid), {}) or {}).get("rec")
 
+    def _tooltip_provider(self, iid: str, _col: str):
+        """v3.18.3 — teks tooltip baris (sama utk semua kolom — analisa
+        lengkap muncul di hover bagian baris mana pun; CellTooltip pola
+        kolom CEK tab 📦/🧩)."""
+        row = self._rows_by_iid.get(str(iid))
+        if not row:
+            return None
+        tip = row.get("tip")
+        return tip if tip else None
+
     def _on_double_click(self, event):
         if self.data is None or self.data.empty:
             return
@@ -848,6 +880,70 @@ class AnomaliRadarView(tk.Frame):
             self.tree.clipboard_append(txt)
         except tk.TclError:
             pass
+
+
+def _tooltip_text(rec: dict, harga=None) -> str:
+    """v3.18.3 — Narasi lengkap utk tooltip hover baris radar: seluruh
+    bukti yang DULU-nya kolom tabel (baseline, level, Δ, z, IN + nomor
+    IT/RI & PO, BM, est nominal) dilipat ke satu teks — tabel kolom
+    inti, analisa tetap lengkap (user: "bisa gak jadi lebih sederhana
+    aja tampilan nya" + "perkuat analisa sesuai kebutuhan ku"). Pure —
+    dihitung di worker thread _row_build."""
+    F = AnomaliRadarView._fmt_num
+    lines = [
+        (f"{rec.get('resto') or ''} · {rec.get('barang') or ''}"
+         f" · {rec.get('satuan') or '-'}"),
+        (f"Deviasi naik stabil sejak tgl {F(rec.get('tgl_shift'))} — "
+         f"{int(rec.get('durasi') or 0)} hari di level baru (naik 1 hari "
+         "lalu turun = spike, bukan anomali)"),
+        (f"Baseline {F(rec.get('baseline'))} "
+         f"({int(rec.get('n_baseline') or 0)} hari) → level baru "
+         f"{F(rec.get('level'))} (median pasca-shift)"),
+    ]
+    dev_h = rec.get("dev_h")
+    if dev_h is not None and not (isinstance(dev_h, float)
+                                  and pd.isna(dev_h)):
+        lines.append(f"Deviasi H (tgl {F(rec.get('dev_h_tgl'))}): "
+                     f"{F(dev_h)} — nilai terkini, BUKAN akumulasi")
+    delta = float(rec.get("delta") or 0.0)
+    lines.append(f"Rasio {AnomaliRadarView._fmt_ratio(rec.get('ratio'))}"
+                 f" · Δ +{F(delta)} · z {AnomaliRadarView._fmt_z(rec.get('z'))}")
+    in_qty = rec.get("in_qty")
+    has_in = in_qty is not None and not (
+        isinstance(in_qty, float) and pd.isna(in_qty))
+    if has_in:
+        try:
+            pct = (f" ({round(100.0 * float(in_qty) / delta)}% dari Δ)"
+                   if delta else "")
+        except (ZeroDivisionError, ValueError):
+            pct = ""
+        verdict = ("≈ Δ — cocok kiriman, pola cut-off input?"
+                   if rec.get("in_match")
+                   else "≠ Δ — kiriman tak menjelaskan seluruh lompatan")
+        lines.append(f"IN sistem {F(in_qty)} tgl "
+                     f"{F(rec.get('in_tgl'))}{pct} · {verdict}")
+        if rec.get("in_nomor"):
+            lines.append(f"Nomor IT/RI: {rec.get('in_nomor')}")
+        if rec.get("in_nomor_po"):
+            lines.append(f"Nomor PO: {rec.get('in_nomor_po')}")
+    else:
+        lines.append("Tanpa kiriman IN ±1 hari sekitar tgl shift — naik "
+                     "tanpa sebab sistem")
+    bm_qty = rec.get("bm_qty")
+    if bm_qty is not None and not (isinstance(bm_qty, float)
+                                   and pd.isna(bm_qty)):
+        lines.append(f"BM rekap tgl {F(rec.get('bm_tgl'))}: "
+                     f"{F(bm_qty)} (pembanding fisik resto)")
+    if harga is not None:
+        try:
+            nominal = float(harga) * delta
+            lines.append(f"Est. nominal: Δ {F(delta)} × harga "
+                         f"{F(harga)} = {fmt_rp_cell(nominal)}")
+        except (TypeError, ValueError):
+            pass
+    lines.append("Double-click = bukti per tanggal · ✓ = daftarkan ke "
+                 "Follow Up")
+    return "\n".join(lines)
 
 
 def _pair_series_maps(df, h) -> tuple[dict, dict, dict]:

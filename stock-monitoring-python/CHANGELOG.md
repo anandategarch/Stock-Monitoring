@@ -3,6 +3,57 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.18.3 — KOLOM TAB 🚨 RADAR DISEDERHANAKAN + DEV H + PENYEBAB
+
+User: *"bisa gak jadi lebih sederhana aja tampilan nya ... Tampilan
+kolom nya menjadi gini aja: Resto · Nama Barang · Tanggal Kejadian ·
+Durasi · Rasio · Deviasi — inti nya itu berisi informasi dari tanggal
+berapa sih deviasi nya tuh meningkat secara stabil dibanding base
+line? apa karna pengaruh IN atau gimana meningkat?"* + *"jika deviasi
+meningkat di 1 hari dan trend besok nya mulai turun maka gak perlu
+dijadikan analisa"* + *"perkuat analisa sesuai kebutuhan ku"* — tabel
+radar 18 kolom → **8 kolom inti**, bukti tetap lengkap via hover.
+
+- **8 kolom inti**: `✓` · `Resto` · `Nama Barang` (satuan dilipat:
+  "CUP 14 (V.20) · PCS" — pasangan GR/PCS tetap 2 baris terpisah) ·
+  `Tanggal Kejadian` (tgl shift — tanggal deviasi mulai naik stabil) ·
+  `Durasi` (hari di level baru) · `Rasio` (×N, heat ×2/×4/×8) ·
+  `Deviasi` (**|dev| TANGGAL H — nilai terkini, BUKAN akumulasi**;
+  kolom baru engine `dev_h` + `dev_h_tgl` — jawaban pertanyaan user
+  "ini deviasi di tanggal kolom H kan? atau di tanggal H bukan
+  akumulasi deviasi ya") · `Penyebab` (pertanyaan inti "apa karna
+  pengaruh IN atau gimana meningkat?").
+- **Penyebab 3 keadaan + warna baris**: `Dipicu IN 1.000 tgl 23`
+  (hijau `cocok_in` — Δ ≈ kiriman sistem) · `IN 300 tgl 21 ≠ Δ 1.100`
+  (amber `in_sebagian` — kiriman ada tapi tak menjelaskan seluruh
+  lompatan) · `Tanpa kiriman IN` (merah `tanpa_kiriman` — naik tanpa
+  sebab sistem).
+- **Tooltip hover = analisa lengkap** (perkuat analisa tanpa
+  menambah kolom): seluruh bukti eks-kolom — baseline (n hari) →
+  level baru, Deviasi H (tgl H), Rasio · Δ · z, IN sistem (% dari Δ)
+  ± Nomor IT/RI & PO, BM rekap, est nominal (Δ × harga) — via
+  `CellTooltip` (pola kolom CEK tab 📦/🧩); `_tooltip_text` pure
+  di worker thread.
+- **Guard spike (permintaan eksplisit user)**: naik 1 hari lalu
+  besoknya turun TIDAK dianalisa — engine `MIN_DURASI=2` hari
+  BENAR-BENAR di level baru (bukan ukuran jendela) sudah melayani
+  ini sejak v3.18.0; legenda/subtitle kini menyatakannya eksplisit.
+- Subtitle + legenda dirombak ke narasi inti ("dari tanggal berapa
+  naik stabil & apa dipicu IN"); sort default Rasio ↓; ⧩ filter ·
+  sort · Ctrl+F · ⤢ · double-click popup Detail Deviasi · klik-kanan
+  salin + deep-link Deviasi GR — tak berubah; kolom ✓ Follow Up
+  (v3.18.2) tak tersentuh.
+
+### Verifikasi
+- §111 (4 cek): A1 engine `dev_h` kasus user 1.390 tgl 25 (bukan Δ
+  1.119 / level-median 1.343) · B1 Penyebab 3 keadaan + warna baris ·
+  B2 tooltip analisa lengkap (baseline/level/Deviasi H/89% dari Δ/
+  IT-RI/PO/BM) + `CellTooltip` terpasang · B3 skema 8 kolom inti +
+  12 eks-kolom hilang dari tabel.
+- §108-B1/B3 disesuaikan skema baru (Nama Barang · PCS, Tanggal
+  Kejadian, Deviasi 1.390, sort Deviasi).
+- Suite UI ALL PASS + mock ALL PASS + ruff ≤ baseline + py_compile.
+
 ## v3.18.2 — INTEGRASI FOLLOW UP DI TAB 🚨 RADAR ANOMALI
 
 User (item 3 permintaan bertahap): *"Integrasi Follow Up"* — pasangan

@@ -22,12 +22,18 @@ satuan) atas seri |3.DEVIASI| harian 1..H:
   TERBESAR (tgl lompatan asli — bukan tanggal ramp naik).
 - Guard: ≥ MIN_BASELINE hari baseline (5) · ≥ MIN_DURASI hari di level
   baru (2 — spike 1 hari insidental BUKAN pergeseran level, tidak
-  dilaporkan) · median baseline ≥ LEVEL_FLOOR (1,0 — rasio tak
-  bermakna di sekitar nol; pasangan ber-baseline nol punya label CEK
-  lain yang lebih tepat) · rekaman terakhir ≥ H−STALE_GAP (pasangan
-  yang berhenti direkam jauh sebelum H = alarm basi).
+  dilaporkan; user v3.18.3: "jika deviasi meningkat di 1 hari dan
+  trend besok nya mulai turun maka gak perlu dijadikan analisa") ·
+  median baseline ≥ LEVEL_FLOOR (1,0 — rasio tak bermakna di sekitar
+  nol; pasangan ber-baseline nol punya label CEK lain yang lebih
+  tepat) · rekaman terakhir ≥ H−STALE_GAP (pasangan yang berhenti
+  direkam jauh sebelum H = alarm basi).
 - z = (level − median) ÷ 1,4826×MAD — INFO keparahan, bukan gerbang
   (MAD 0 → z tak hingga, baseline datar sempurna).
+- v3.18.3 — dev_h + dev_h_tgl: |deviasi| DI TANGGAL H (nilai terkini
+  pasangan — tanggal terekam terakhir ≤ H), BUKAN akumulasi; kolom
+  "Deviasi" tabel radar yang disederhanakan (user: "ini deviasi di
+  tanggal kolom H kan? atau di tanggal H bukan akumulasi deviasi ya").
 
 Hint penyebab — KECOCOKAN KIRIMAN: IN sistem (JENIS 4.IN) tanggal
 shift ±1 dibandingkan Δlevel (toleransi ±IN_TOL × |Δ|): cocok →
@@ -66,6 +72,7 @@ RESULT_COLUMNS = [
     "kb", "kr", "satn",                    # kanonik — lookup konsumen
     "tgl_shift", "durasi", "n_baseline",   # peristiwa
     "baseline", "mad", "level",            # statistik (|dev|)
+    "dev_h", "dev_h_tgl",                  # v3.18.3 — |dev| tanggal H
     "delta", "ratio", "z",                 # ukuran pergeseran
     "in_qty", "in_tgl", "in_nomor", "in_nomor_po", "in_match",
     "bm_qty", "bm_tgl",
@@ -249,6 +256,16 @@ def _detect_impl(df: pd.DataFrame | None, h: int | None,
         if i < min_base_n:
             continue
 
+        # v3.18.3 — REFINEMENT DORONG-MAJU (pasangan simetris tarik-balik):
+        # pada step BERSIH, split dua-jendela median jatuh di i TERAWAL
+        # yang jendela kanannya sudah mayoritas level (kasus uji: baseline
+        # 100×20 → 1.200×5 mulai tgl 21 — split mentah i=16/tgl 17 padahal
+        # lompatan asli tgl 21) → Tanggal Kejadian salah & IN tgl
+        # lompatan terlewat. Dorong i maju selama hari PERTAMA "level"
+        # masih < ambang ½Δ — hari itu milik baseline, bukan level baru.
+        while i < n - 1 and vals[i] < _thr:
+            i += 1
+
         med_l = float(np.median(vals[:i]))
         med_r = float(np.median(vals[i:]))
         ratio = med_r / med_l if med_l > 0 else float("inf")
@@ -270,6 +287,12 @@ def _detect_impl(df: pd.DataFrame | None, h: int | None,
 
         # --- hint kiriman: IN & BM di sekitar tgl shift ---------------
         tgl_shift = int(tgls[i])
+        # v3.18.3 — |dev| DI TANGGAL H: tanggal terekam terakhir ≤ H
+        # (semua tanggal seri sudah ≤ H lewat filter _in_range; stale
+        # guard menjaga kesegaran) — nilai TERKHINI pasangan, bukan
+        # akumulasi (kolom "Deviasi" tabel radar).
+        dev_h_tgl = int(tgls[-1])
+        dev_h = float(sv[tgls[-1]])
         in_qty = in_tgl = float("nan")
         in_nomor = in_nomor_po = ""
         in_match = False
@@ -294,6 +317,7 @@ def _detect_impl(df: pd.DataFrame | None, h: int | None,
             "kb": key[0], "kr": key[1], "satn": key[2],
             "tgl_shift": tgl_shift, "durasi": durasi, "n_baseline": i,
             "baseline": med_l, "mad": mad, "level": med_r,
+            "dev_h": dev_h, "dev_h_tgl": dev_h_tgl,
             "delta": delta, "ratio": ratio, "z": z,
             "in_qty": in_qty, "in_tgl": in_tgl,
             "in_nomor": in_nomor, "in_nomor_po": in_nomor_po,

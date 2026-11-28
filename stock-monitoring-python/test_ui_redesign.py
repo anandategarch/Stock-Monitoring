@@ -24766,21 +24766,22 @@ def main():
     wait_view(root, _rv108)
     _kids108 = _rv108.tree.get_children("")
     _vals108 = ({c: _rv108.tree.set(_kids108[0], c)
-                 for c in ("Satuan", "Tgl Shift", "Durasi", "Baseline",
-                           "Level Kini", "Rasio", "Δ Deviasi",
-                           "Kecocokan IN", "Nomor (IT/RI)", "Nomor PO",
-                           "Est. Nominal")} if len(_kids108) else {})
-    check("(v3.18) §108-B1: tab radar render — 1 baris; Rasio '×6,0' · "
-          "Tgl Shift '23' · Durasi '3 hari' · Kecocokan IN menyebut "
-          "'Cocok IN 1.000' + RI/PO terisi",
+                 for c in ("Nama Barang", "Tanggal Kejadian", "Durasi",
+                           "Rasio", "Deviasi", "Penyebab")}
+                if len(_kids108) else {})
+    check("(v3.18.3) §108-B1: tab radar render SIMPLIFIED (user: kolom "
+          "inti) — 1 baris; Nama Barang 'CUP 14 (V.20) · PCS' (satuan "
+          "dilipat) · Tanggal Kejadian '23' · Durasi '3 hari' · Rasio "
+          "'×6,0' · Deviasi '1.390' (nilai tanggal H — BUKAN akumulasi) "
+          "· Penyebab 'Dipicu IN 1.000 tgl 23'; nomor IT/RI & PO & BM "
+          "kini di TOOLTIP hover (bukan kolom)",
           len(_kids108) == 1
-          and _vals108.get("Rasio") == "×6,0"
-          and _vals108.get("Tgl Shift") == "23"
+          and _vals108.get("Nama Barang") == "CUP 14 (V.20) · PCS"
+          and _vals108.get("Tanggal Kejadian") == "23"
           and _vals108.get("Durasi") == "3 hari"
-          and _vals108.get("Satuan") == "PCS"
-          and "Cocok IN" in _vals108.get("Kecocokan IN", "")
-          and _vals108.get("Nomor (IT/RI)") == "RI.2026.11.16805"
-          and _vals108.get("Nomor PO") == "PO.2026.11.11594",
+          and _vals108.get("Rasio") == "×6,0"
+          and _vals108.get("Deviasi") == "1.390"
+          and _vals108.get("Penyebab") == "Dipicu IN 1.000 tgl 23",
           f"vals={_vals108}")
     check("(v3.18) §108-B2: status footer radar + callback badge "
           "on_count_changed terpanggil dgn jumlah",
@@ -24788,9 +24789,9 @@ def main():
           and "H=25" in _rv108.status_var.get()
           and bool(_counts108) and _counts108[-1] == 1,
           f"status={_rv108.status_var.get()!r} counts={_counts108}")
-    _rv108._sort_by("Δ Deviasi", reverse=True)
+    _rv108._sort_by("Deviasi", reverse=True)
     root.update()
-    check("(v3.18) §108-B3: sort kolom numeric (Δ Deviasi ↓) tetap 1 "
+    check("(v3.18.3) §108-B3: sort kolom numeric (Deviasi ↓) tetap 1 "
           "baris + heat sel Rasio terpasang (Tk 9: tag ras_* di sel "
           "Rasio; rasio 6,0 → bucket ras_2 ×4..8)",
           len(_rv108.tree.get_children("")) == 1
@@ -25061,6 +25062,99 @@ def main():
           is app.followup_store,
           f"store is app.followup_store="
           f"{getattr(app.anomali_radar_view, 'store', None) is app.followup_store}")
+
+    # ---- (F) v3.18.3 — KOLOM SIMPLIFIED + DEV H + PENYEBAB + TOOLTIP --
+    print()
+    print("== §111. (v3.18.3) RADAR SIMPLIFIED — DEV H + PENYEBAB + "
+          "TOOLTIP ==")
+
+    # A1 — engine dev_h: |dev| DI TANGGAL H (nilai terkini, BUKAN
+    # akumulasi) + tgl bacaannya; kasus user: 1.390 per tgl 25.
+    check("(v3.18.3) §111-A1: engine dev_h/dev_h_tgl — |dev| tanggal H "
+          "(bukan Δ 1.119 / level-median 1.343) — jawaban pertanyaan "
+          "user 'ini deviasi di tanggal kolom H kan?'",
+          float(_out108.iloc[0]["dev_h"]) == 1390.0
+          and int(_out108.iloc[0]["dev_h_tgl"]) == 25,
+          f"dev_h={_out108.iloc[0]['dev_h']} "
+          f"tgl={_out108.iloc[0]['dev_h_tgl']}")
+
+    # B — GUI: 3 keadaan Penyebab + tooltip + skema kolom simplified.
+    _rows111 = list(_rows108)
+    _rows111 += [_r108(t, -100.0, barang="SEBAGIAN", resto="R111")
+                 for t in range(1, 21)]
+    _rows111 += [_r108(t, -1200.0, barang="SEBAGIAN", resto="R111")
+                 for t in range(21, 26)]
+    _rows111.append(_r108(21, 300.0, jenis="4.IN", barang="SEBAGIAN",
+                          resto="R111"))
+    _rows111 += [_r108(t, -100.0, barang="TANPA", resto="R111")
+                 for t in range(1, 21)]
+    _rows111 += [_r108(t, -1200.0, barang="TANPA", resto="R111")
+                 for t in range(21, 26)]
+    _top111 = tk.Toplevel(root)
+    _top111.geometry("1500x820+15+15")
+    _rv111 = _ARV108(
+        _top111, go_to_proses=lambda: None, go_to_deviasi=lambda *a: None,
+        h_state=None)
+    _rv111.pack(fill="both", expand=True)
+    root.update()
+    root.update_idletasks()
+    _rv111.load_data(pd.DataFrame(_rows111))
+    wait_view(root, _rv111)
+    _kid111 = _rv111.tree.get_children("")
+    _vals111 = {_rv111._rows_by_iid[k]["rec"]["barang"]:
+                _rv111.tree.set(k, "Penyebab") for k in _kid111}
+    _tags111 = {_rv111._rows_by_iid[k]["rec"]["barang"]:
+                _rv111.tree.item(k, "tags") for k in _kid111}
+    check("(v3.18.3) §111-B1: Penyebab 3 keadaan + warna baris — "
+          "'Dipicu IN 1.000 tgl 23' (hijau cocok_in) · 'IN 300 tgl 21 "
+          "≠ Δ 1.100' (amber in_sebagian — kiriman tak menjelaskan) · "
+          "'Tanpa kiriman IN' (merah tanpa_kiriman — tanpa sebab "
+          "sistem)",
+          _vals111.get("CUP 14 (V.20)") == "Dipicu IN 1.000 tgl 23"
+          and _vals111.get("SEBAGIAN") == "IN 300 tgl 21 ≠ Δ 1.100"
+          and _vals111.get("TANPA") == "Tanpa kiriman IN"
+          and "cocok_in" in _tags111.get("CUP 14 (V.20)", ())
+          and "in_sebagian" in _tags111.get("SEBAGIAN", ())
+          and "tanpa_kiriman" in _tags111.get("TANPA", ()),
+          f"vals={_vals111} tags={_tags111}")
+    # tooltip hover = analisa lengkap (bukti eks-kolom v3.18.2).
+    from src.ui.cell_tooltip import CellTooltip as _CT111
+    _tip111 = _rv111._tooltip_provider(
+        next(k for k in _kid111
+             if _rv111._rows_by_iid[k]["rec"]["barang"]
+             == "CUP 14 (V.20)"),
+        "Penyebab")
+    check("(v3.18.3) §111-B2: tooltip hover = analisa lengkap eks-kolom — "
+          "baseline/level/Δ/z + 'Deviasi H (tgl 25): 1.390 — nilai "
+          "terkini' + IN sistem (89% dari Δ) + Nomor IT/RI + Nomor PO "
+          "+ BM rekap + CellTooltip terpasang di tree",
+          _tip111 is not None
+          and "Baseline 224" in _tip111
+          and "level baru 1.343" in _tip111
+          and "Deviasi H (tgl 25): 1.390" in _tip111
+          and "89% dari Δ" in _tip111
+          and "RI.2026.11.16805" in _tip111
+          and "PO.2026.11.11594" in _tip111
+          and "BM rekap tgl 23: 1.000" in _tip111
+          and isinstance(_rv111._tip, _CT111),
+          f"tip={_tip111!r}")
+    # skema kolom: 8 inti; kolom eks v3.18.2 hilang dari tabel.
+    _cols111 = list(_rv111.tree["columns"])
+    check("(v3.18.3) §111-B3: skema kolom SIMPLIFIED — 8 kolom inti (✓ + "
+          "user: Resto · Nama Barang · Tanggal Kejadian · Durasi · "
+          "Rasio · Deviasi + Penyebab); kolom eks v3.18.2 (Satuan · "
+          "Baseline · Level Kini · Δ Deviasi · Z · Kecocokan IN · IN "
+          "Tgl · Nomor (IT/RI) · Nomor PO · BM · BM Tgl · Est. Nominal) "
+          "HILANG (kini di tooltip)",
+          _cols111 == ["✓", "Resto", "Nama Barang", "Tanggal Kejadian",
+                       "Durasi", "Rasio", "Deviasi", "Penyebab"]
+          and not ({"Satuan", "Baseline", "Level Kini", "Δ Deviasi",
+                    "Z", "Kecocokan IN", "IN Tgl", "Nomor (IT/RI)",
+                    "Nomor PO", "BM", "BM Tgl", "Est. Nominal"}
+                   & set(_cols111)),
+          f"cols={_cols111}")
+    _top111.destroy()
+    root.update()
 
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
