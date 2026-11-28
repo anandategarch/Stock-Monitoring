@@ -47,7 +47,7 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 from typing import ClassVar  # v3.17.1 — RUF012: GROWTH_HEAT_BG ClassVar
 
-import numpy as np          # v3.17.0 — np.isinf utk _format_pct
+import numpy as np  # v3.17.0 — np.isinf utk _format_pct
 import pandas as pd
 
 from .theme import (

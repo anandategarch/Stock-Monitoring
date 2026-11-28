@@ -1015,7 +1015,7 @@ def main():
           not any("Pareto" in app.notebook.tab(t, "text")
                   for t in app.notebook.tabs()))
     try:
-        import src.ui.pareto_view  # noqa: F401
+        import src.ui.pareto_view
         _pv_gone = False
     except ImportError:
         _pv_gone = True
@@ -24589,8 +24589,9 @@ def main():
           and abs(_rd107[0][4][0] - (-50.0)) < 1e-9
           and abs(_rd107[0][4][1] - 0.0) < 1e-9,
           f"got {[(r[1], r[4]) for r in _rd107]}")
-    from src.ui.export_sheets import write_pivot_display_sheet as _wps107
     from openpyxl import load_workbook as _lw107
+
+    from src.ui.export_sheets import write_pivot_display_sheet as _wps107
     _exp107 = os.path.join(tempfile.mkdtemp(), "pivot_v3170.xlsx")
     _n107 = _wps107(_exp107, _p107._last_payload, visible_cols=None)
     _ws107 = _lw107(_exp107).active
