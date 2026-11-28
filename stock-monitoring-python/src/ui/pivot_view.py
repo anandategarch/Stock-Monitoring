@@ -178,6 +178,14 @@ class PivotTableView(tk.Frame):
         self._col_w_cache: dict[str, dict[str, int]] = {}
         self._last_col_kind: str | None = None
         self._frozen_reset_pending = True
+        # v3.17.3 — CACHE nilai combo RESTO/SOURCE (optimasi P1 berbasis
+        # bukti benchmark: _combo_offered_values = 3,5s dari 7,5s render
+        # 900k baris — normalisasi string 2,7jt lambda + groupby dihitung
+        # ULANG tiap render ulang dgn state filter SAMA; key mencakup
+        # SELURUH input fungsi + identitas objek data (strong-ref per
+        # entry → id() tak bisa reuse selama cache hidup) → hit = hasil
+        # identik matematis; reset di load_data; dibatasi 32 entri).
+        self._combo_vals_cache: dict = {}
         self._build_ui()
         self._setup_tags()
         if data is not None and not data.empty:
@@ -658,6 +666,8 @@ class PivotTableView(tk.Frame):
         self._col_w_cache = {}
         self._last_col_kind = None
         self._frozen_reset_pending = True
+        # v3.17.3 — data baru → cache nilai combo combo_vals di-invalidasi
+        self._combo_vals_cache = {}
         # v3.9: pulihkan layout bila sedang di-perbesar ⤢
         if getattr(self, "_expander", None) is not None:
             self._expander.reset()
@@ -929,7 +939,28 @@ class PivotTableView(tk.Frame):
         sembunyikan baris kosong aktif, hanya nilai dgn ≥1 sel matriks
         ≠ 0 (mirror agregasi _name_values v3.9.69 — sel dilihat pada
         granularity barang×JENIS×kolom-pivot supaya resto yang seluruh
-        selnya 0 — pasti tersembunyi — tak ditawarkan)."""
+        selnya 0 — pasti tersembunyi — tak ditawarkan).
+
+        v3.17.3 — CACHE: render ulang dengan state filter identik kini
+        memakai hasil cache (benchmark 900k: menghapus 3,5s normalisasi
+        string + groupby ULANG dari render 7,5s). Key = SELURUH input
+        fungsi: (dim, name_selected, resto/source/kategori var, entry
+        tanggal start/end, pivot_mode, hide_empty) + identitas objek
+        data via strong-ref tuple cache (data baru → otomatis miss).
+        Hit = daftar identik dengan komputasi penuh (murni fungsi dari
+        state — tidak ada efek samping)."""
+        # --- v3.17.3: cek cache per (dim, state) — data dipegang strong-ref
+        # per entry sehingga id() tak bisa dipakai ulang GC selama hidup ---
+        _ckey = (dim,
+                 frozenset(self._name_selected)
+                 if self._name_selected is not None else None,
+                 self.resto_var.get(), self.source_var.get(),
+                 self.kategori_var.get(),
+                 self.tgl_start_var.get(), self.tgl_end_var.get(),
+                 self.pivot_mode, bool(self.hide_empty_var.get()))
+        _ent = self._combo_vals_cache.get(_ckey)
+        if (_ent is not None and _ent[0] is self.data):
+            return list(_ent[1])
         df = self._cascade_frame(exclude=dim)
         col = ("NAMA RESTO" if dim == "resto" else "SOURCE KIRIMAN")
         if df is None or df.empty or col not in df.columns:
@@ -955,7 +986,15 @@ class PivotTableView(tk.Frame):
         nz = nz[nz != 0]
         if nz.empty:
             return []
-        return sorted({str(ix[0]).strip() for ix in nz.index if str(ix[0]).strip()})
+        _result = sorted({str(ix[0]).strip() for ix in nz.index
+                          if str(ix[0]).strip()})
+        # v3.17.3 — simpan cache per (dim, state); batasi pertumbuhan
+        # (32 entri — kombinasi state filter user; entries berisi list
+        # kecil + strong-ref data)
+        if len(self._combo_vals_cache) >= 32:
+            self._combo_vals_cache.clear()
+        self._combo_vals_cache[_ckey] = (self.data, list(_result))
+        return _result
 
     def _repopulate_filter_combos(self) -> bool:
         """v3.11.6 — refresh daftar nilai RESTO/SOURCE berkascade + reset

@@ -3,6 +3,46 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
+## v3.17.3 — OPTIMASI P1: CACHE nilai combo pivot (berbasis bukti benchmark)
+
+User: master task P1 — *"Jangan mengoptimasi kode berdasarkan tebakan. Ukur
+dahulu, temukan bottleneck, lalu optimasi."*
+
+### Bukti pengukuran (cProfile 900k baris, sandbox 2 CPU/4GB, Xvfb)
+- Render pivot 7,5s: **`_repopulate_filter_combos` = 3,7s (~50%)** —
+  `_combo_offered_values` menghitung ULANG normalisasi string 2,7jt lambda
+  + groupby 900k baris tiap render, di MAIN THREAD (event loop maxgap
+  4,2s).
+- Bottleneck: pekerjaan redundan — render ulang dengan state filter
+  SAMA menghitung daftar combo identik lagi dari awal.
+
+### Perubahan (minimal — 1 fungsi + 2 baris reset)
+- `pivot_view.py` `_combo_offered_values(dim)`: cache per
+  **(dim, seluruh-state-filter)** — key mencakup dim, name_selected,
+  resto/source/kategori var, entry tanggal start/end, pivot_mode,
+  hide_empty + **identitas objek data via strong-ref per entry** (data
+  diganti `load_data` → otomatis miss; id() tak bisa reuse GC selama
+  cache hidup). Batas 32 entri (anti pertumbuhan tak terbatas). Jalur
+  komputasi ASLI tidak diubah satu baris pun — cache murni memoization.
+- Nol perubahan hasil analisis / struktur kolom / urutan / format.
+
+### Verifikasi
+1. **Kesetaraan hasil**: 8 kasus (mode tanggal×resto × dim resto/source
+   × filter barang × hide-off) — output `IDENTIK` vs implementasi lama
+   (baseline disnapshot sebelum edit).
+2. **Regresi penuh**: suite UI **1704 PASS / 0 FAIL** · mock ALL PASS ·
+   ruff 0.17.1 = 199 ≤ 201 · py_compile OK.
+3. **Benchmark ulang 900k baris** (dataset sintetis `make_big_append1`):
+   - render ulang state sama: **5,10s → 0,94s (−82%)**
+   - pulang-pergi mode resto→tanggal→resto: render #3 **0,98s** (dulu
+     menghitung ulang penuh 5,1s)
+   - render pertama state baru: tetap 5,1s (miss natural — tak bisa
+     dihindari tanpa mengubah semantik)
+   - entries cache ≈ 4 (kecil); `load_data` data baru → cache reset OK.
+4. Popup/judul/export/semua jalur lain tak tersentuh (diff hanya
+   `_combo_offered_values` + reset cache).
+
+
 ## v3.17.2 — CI REPAIR + SISTEM BENCHMARK PIPELINE & VIEWS (P0/P1)
 
 User: *"push ke git hub bertahap ya ke repo stock monitoring dan validasi
