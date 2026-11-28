@@ -3,34 +3,6 @@
 Versi kanonik: `APP_VERSION` di `src/ui/app.py`.
 Riwayat lengkap per-commit: `git log --oneline`.
 
-## v3.18.7 — FILTER HELPER CEK (LABEL RINGKASAN TANPA ANGKA)
-
-User: *"di kolom Cek tab deviasi gr dan pcs itu seperti nya perlu helper
-filter. Buat filter seperti Akfit/non yaa jadi nama filter nya CEK dan
-isi nya ringkasan aja misal: ACR TO BOM / COM RENDAH / COM TINGGI /
-BEDA TANGGAL / SHIFT DEVIASI dan lain lain jadi gak perlu sebut angka
-nya kalau di filter helper ini"* — combobox **CEK** di kartu Filter tab
-📦 Deviasi GR & 🧩 PCS (pola AKTIF/NON), label ringkasan tanpa angka.
-
-- **Combobox CEK** (samping AKTIF/NON): `Semua` + **20 label
-  ringkasan** — 13 label anomali kanonik prioritas (Promix 04 … BOM 0)
-  + segmen analisa yang bisa muncul di teks CEK (COM Tinggi · COM
-  Rendah · Potensi PO belum dibuat · Beda dari Resto Lain ·
-  Peningkatan/Penurunan Qty · Berubah Arah).
-- **Kecocokan prefix segmen** `_cek_label_hit`: teks CEK dipecah
-  segmen ` · ` — baris tampil bila salah satu segmen SAMA label atau
-  ber-prefiks `label + " (" / " +" / " -"` (detail angka TAK
-  disyaratkan): `COM Tinggi (+25)` cocok `COM Tinggi`; `Shift
-  Deviasi · Level ×6,0 tgl 23 (…)` cocok `Shift Deviasi`; `Turun
-  Drastis (SO Tidak Diinput)` ikut label lebar `Turun Drastis`.
-- 0-baris → status jujur `Tidak ada baris ber-label CEK 'X'` (pola
-  status AKTIF/NON); capture/restore `filter_state.cek` lintas sesi;
-  reset di load_data + ✕ Reset Filter (pola AKTIF).
-- Tests §115 (6 cek): A1 20 label + contoh user tanpa angka · A2
-  `_cek_label_hit` prefix/kebalikan · B1 combobox + Semua · B2 pilih
-  `Shift Deviasi` → hanya baris itu (teks sel utuh) · B3 label tanpa
-  kecocokan → 0 baris + status jujur · B4 capture/restore/_reset_cek.
-
 ## v3.18.3 — KOLOM TAB 🚨 RADAR DISEDERHANAKAN + DEV H + PENYEBAB
 
 User: *"bisa gak jadi lebih sederhana aja tampilan nya ... Tampilan

@@ -25316,6 +25316,159 @@ def main():
     _top113.destroy()
     root.update()
 
+    # ---- (I) v3.18.6 — FILTER KATEGORI RADAR + LINK 📦/🧩 --------------
+    print()
+    print("== §114. (v3.18.6) RADAR — FILTER KATEGORI TER-LINK 📦/🧩 ==")
+
+    from src.ui.deviasi_view import SharedKategori as _SK114
+
+    # A1 — state: set hanya saat berubah; None → "Semua"; listener.
+    _sk114 = _SK114("Semua")
+    _heard114: list = []
+    _sk114.subscribe(_heard114.append)
+    check("(v3.18.6) §114-A1: SharedKategori — set('X') → listener X; "
+          "set('X') lagi no-op; set(None) → 'Semua'",
+          _sk114.set("X") and _heard114 == ["X"]
+          and not _sk114.set("X")
+          and _sk114.set(None) and _heard114[-1] == "Semua"
+          and _sk114.value == "Semua",
+          f"heard={_heard114}")
+
+    # A2 — peta kategori pasangan (pure): first non-blank menang.
+    from src.ui.anomali_radar_view import _pair_kategori_map as _pkm114
+    _km114 = _pkm114(pd.DataFrame([
+        {"Nama Barang": "A", "NAMA RESTO": "R", "SATUAN": "PCS",
+         "KATEGORI": "COM DEVIASI - RESTO"},
+        {"Nama Barang": "A", "NAMA RESTO": "R", "SATUAN": "PCS",
+         "KATEGORI": None},
+        {"Nama Barang": "B", "NAMA RESTO": "R", "SATUAN": "GR",
+         "KATEGORI": "Biaya Packaging - RESTO"},
+    ]))
+    check("(v3.18.6) §114-A2: _pair_kategori_map — first NON-BLANK "
+          "per pasangan menang (blank/'nan' tak menimpa)",
+          _km114.get(("A", "R", "PCS")) == "COM DEVIASI - RESTO"
+          and _km114.get(("B", "R", "GR")) == "Biaya Packaging - RESTO",
+          f"got {_km114}")
+
+    # B — GUI: 2 pasangan shift ber-kategori beda + combobox + filter.
+    def _r114(t, jenis, nilai, barang, resto, kat):
+        return {"Nama Barang": barang, "NAMA RESTO": resto, "Tanggal": t,
+                "JENIS": jenis, "NILAI": float(nilai), "SATUAN": "PCS",
+                "AKTIF/NON": "AKTIF", "KATEGORI": kat,
+                "SOURCE KIRIMAN": "GUDANG", "Nomor": None,
+                "Nomor PO": None, "#Tgl/Jam Pembuatan IT": None,
+                "SOURCE DATA": "input so harian"}
+
+    _rows114 = []
+    for _b114, _r114n, _k114 in (("SHIFT A", "RA", "COM DEVIASI - RESTO"),
+                                  ("SHIFT B", "RB",
+                                   "Biaya Packaging - RESTO")):
+        _dev114 = {20: -384.0, 21: -339.0, 22: -338.0, 23: -1293.0,
+                   24: -1343.0, 25: -1390.0}
+        for _t114 in range(2, 26):
+            _rows114.append(_r114(_t114, "1.SO", 100.0, _b114, _r114n,
+                                 _k114))
+            _rows114.append(_r114(_t114, "2.SALDO AKHIR", 324.0, _b114,
+                                  _r114n, _k114))
+            if _t114 < 25:
+                _rows114.append(_r114(_t114, "9.ACR", 300.0, _b114,
+                                     _r114n, _k114))
+            _rows114.append(_r114(_t114, "3.DEVIASI",
+                                  _dev114.get(_t114, -224.0), _b114,
+                                  _r114n, _k114))
+    _df114 = pd.DataFrame(_rows114)
+    _sk114b = _SK114("Semua")
+    _top114 = tk.Toplevel(root)
+    _rv114 = _ARV108(_top114, go_to_proses=lambda: None,
+                     go_to_deviasi=lambda *a: None, h_state=None,
+                     kategori_state=_sk114b)
+    _rv114.pack(fill="both", expand=True)
+    root.update()
+    _rv114.load_data(_df114)
+    wait_view(root, _rv114)
+    _kv114 = list(_rv114._kategori_combo["values"])
+    check("(v3.18.6) §114-B1: combobox KATEGORI radar terpasang + nilai "
+          "'Semua' + gabungan default 'Deviasi (COM + Packaging)' + "
+          "'(Tanpa Kategori)' + nilai master lintas satuan (2 kategori "
+          "pasangan) — tanpa filter: 2 baris (kedua pasangan)",
+          "Semua" in _kv114
+          and "Deviasi (COM + Packaging)" in _kv114
+          and "(Tanpa Kategori)" in _kv114
+          and "COM DEVIASI - RESTO" in _kv114
+          and "Biaya Packaging - RESTO" in _kv114
+          and len(_rv114.tree.get_children("")) == 2,
+          f"values={_kv114} rows={len(_rv114.tree.get_children(''))}")
+    # B2 — kategori diganti DI TAB DEVIASI (shared.set) → radar ikut
+    # (user: "misal di situ buka apa maka di radar anomali juga bakal
+    # memfilter kateogri itu").
+    _sk114b.set("Biaya Packaging - RESTO")
+    root.update()
+    check("(v3.18.6) §114-B2: LINK 📦/🧩→radar — SharedKategori.set "
+          "(kategori diganti di tab Deviasi GR/PCS) → combobox radar "
+          "ikut + tabel radar memfilter (2 → 1 baris pasangan Packaging)",
+          _rv114._kategori_var.get() == "Biaya Packaging - RESTO"
+          and len(_rv114.tree.get_children("")) == 1
+          and _rv114._rows_by_iid[
+              _rv114.tree.get_children("")[0]]["rec"]["barang"]
+          == "SHIFT B",
+          f"var={_rv114._kategori_var.get()!r} "
+          f"rows={len(_rv114.tree.get_children(''))}")
+    # B3 — arah sebaliknya: ganti di radar → shared ikut (2-arah).
+    _rv114._kategori_var.set("COM DEVIASI - RESTO")
+    _rv114._on_kategori_changed()
+    check("(v3.18.6) §114-B3: LINK radar→📦/🧩 — ganti kategori DI RADAR "
+          "→ SharedKategori ikut (state.value) + tabel radar 1 baris "
+          "pasangan COM DEVIASI (tanpa loop ganda)",
+          _sk114b.value == "COM DEVIASI - RESTO"
+          and len(_rv114.tree.get_children("")) == 1,
+          f"state={_sk114b.value!r} "
+          f"rows={len(_rv114.tree.get_children(''))}")
+    _top114.destroy()
+    root.update()
+    # C — deviasi GR asal perubahan → radar ikut (jalur lengkap) +
+    # wiring app: ketiga view ber-state sama.
+    _sk114c = _SK114("Semua")
+    _dv114 = DeviasiView(_top114 if _top114.winfo_exists()
+                         else tk.Toplevel(root), satuan_mode="PCS",
+                         kategori_state=_sk114c)
+    _dv114.pack(fill="both", expand=True)
+    root.update()
+    _dv114.load_data(_df114)
+    wait_view(root, _dv114)
+    _rv114c = _ARV108(_dv114.master, go_to_proses=lambda: None,
+                      go_to_deviasi=lambda *a: None, h_state=None,
+                      kategori_state=_sk114c)
+    _rv114c.pack(fill="both", expand=True)
+    root.update()
+    _rv114c.load_data(_df114)
+    wait_view(root, _rv114c)
+    _dv114._kategori_var.set("Biaya Packaging - RESTO")
+    _dv114._on_kategori_changed()
+    wait_view(root, _dv114)
+    root.update()
+    check("(v3.18.6) §114-C1: jalur USER lengkap — ganti KATEGORI di tab "
+          "Deviasi (GR/PCS) → radar ikut memfilter kategori itu (1 "
+          "baris SHIFT B) + deviasi PCS ikut (combobox/state sinkron)",
+          _rv114c._kategori_var.get() == "Biaya Packaging - RESTO"
+          and len(_rv114c.tree.get_children("")) == 1
+          and _dv114._kategori_sel == "Biaya Packaging - RESTO",
+          f"radar_var={_rv114c._kategori_var.get()!r} "
+          f"dv_sel={_dv114._kategori_sel!r} "
+          f"rows={len(_rv114c.tree.get_children(''))}")
+    _dv114.destroy()
+    _rv114c.destroy()
+    root.update()
+    check("(v3.18.6) §114-C2: wiring app — ketiga view (📦 GR, 🧩 PCS, "
+          "🚨 Radar) ber-langganan SharedKategori yang SAMA "
+          "(app._shared_kategori)",
+          getattr(app.anomali_radar_view, "_kategori_state", None)
+          is app._shared_kategori
+          and getattr(app.deviasi_gr_view, "_kategori_state", None)
+          is app._shared_kategori
+          and getattr(app.deviasi_pcs_view, "_kategori_state", None)
+          is app._shared_kategori,
+          "lihat asersi")
+
     root.destroy()   # v3.11.6 — ditunda dari akhir §89 (§91 butuh GUI)
 
     print()

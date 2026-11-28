@@ -2,14 +2,14 @@
 
 Aplikasi desktop untuk monitoring stok resto berbasis **Python + Tkinter**. Porting pipeline Power Query M (1.009 baris, 30 query) ke Python — membaca export Accurate Online, menggabungkan, memutar (pivot), menghitung running stock & deviasi, lalu menampilkan langsung di UI tanpa output Excel perantara.
 
-> **Versi terkini: v3.18.5** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
+> **Versi terkini: v3.18.6** — riwayat lengkap: [CHANGELOG.md](CHANGELOG.md)
 
 ## Fitur Utama
 
 - **Pipeline end-to-end** dari 14 sumber Excel (Rekap Mentah, 22.05, 42.15, 32.24, 42.05, 9901, 42.17 Saldo Awal & Sistem, 41.09 Harga, 32.43 Rincian PO, DBS Kategori) → 892k+ baris append1 terstruktur
 - **9 tab analisa** dengan tabel interaktif (sort, filter ⧩, multi-select, copy Excel-style, auto-fit, layar penuh)
 - **Analisa deviasi otomatis** — kolom CEK dengan 12 label anomali (Promix 04, RI Balancing, Kosong (AKTIF), Non Aktif (Masih Stok), Beda Tanggal, Hitung Manual, Hilang dari Pencatatan, Turun Drastis + varian SO Tidak Diinput, Naik Drastis, ACR to BOM, BOM 0) + segmen COM Tinggi/Rendah per satuan, Beda dari Resto Lain, Potensi PO belum dibuat, analisa lalu-kini berbasis Qty
-- **🚨 Radar Anomali Shift Deviasi** — pasangan (Barang × Resto × Satuan) yang deviasinya TERGESER LEVEL: melonjak lalu menempel ≥2 hari di level baru (×2 baseline); naik bertahap/ramp & spike 1 hari DILEWATI (v3.18.0; gate ramp v3.18.4); kolom inti Resto · Nama Barang · Tanggal Kejadian · Durasi · Rasio · Deviasi · Penyebab + tooltip analisa lengkap; popup Detail Deviasi menandai ⚑ tanggal kejadian (v3.18.5)
+- **🚨 Radar Anomali Shift Deviasi** — pasangan (Barang × Resto × Satuan) yang deviasinya TERGESER LEVEL: melonjak lalu menempel ≥2 hari di level baru (×2 baseline); naik bertahap/ramp & spike 1 hari DILEWATI (v3.18.0; gate ramp v3.18.4); kolom inti Resto · Nama Barang · Tanggal Kejadian · Durasi · Rasio · Deviasi · Penyebab + tooltip analisa lengkap; popup Detail Deviasi menandai ⚑ tanggal kejadian (v3.18.5); filter KATEGORI ter-link 2-arah dgn tab 📦/🧩 (v3.18.6)
 - **Saldo sistem minus** — rekapan pasangan Eksternal/Campuran dengan saldo < 0 di rentang 1..H, dengan keterangan mulai minus dari tanggal berapa
 - **% Growth Deviasi (pivot)** — baris `10.% Growth Deviasi` di tab Pivot (mode Tanggal): persen kenaikan/penurunan deviasi per tanggal dari baris `3.Deviasi` — **absolut penuh** `(|Dev(t)|−|Dev(t−1)|) ÷ |Dev(t−1)| × 100` (arah dari magnitudo) + **heatmap per-sel**: merah = deviasi naik / hijau = turun, intensitas <5%/<25%/<100%/≥100% (v3.17.0; rumus & heatmap v3.17.1)
 - **File deviasi bulan lalu** — dimuat manual via tombol 📂 (parse async, gak bekui UI), pattern `{12+month}.{BULAN} {TAHUN}.xlsx`

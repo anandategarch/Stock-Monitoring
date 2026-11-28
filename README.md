@@ -3,7 +3,7 @@
 Monitoring stok & deviasi resto berbasis export **Accurate Online**.
 Awalnya Power Query M di Excel — kini berupa aplikasi desktop Python (pipeline + UI Tkinter) dengan hasil identik. Berjalan di Windows + Python 3.12 (lihat [README aplikasi](stock-monitoring-python/README.md)); EXE rilis dibangun otomatis tiap tag `v*`.
 
-> **Versi terkini: v3.18.5** — riwayat versi: [CHANGELOG](stock-monitoring-python/CHANGELOG.md)
+> **Versi terkini: v3.18.6** — riwayat versi: [CHANGELOG](stock-monitoring-python/CHANGELOG.md)
 
 ## Isi Repository
 

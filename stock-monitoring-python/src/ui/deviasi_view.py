@@ -547,6 +547,49 @@ class SharedManualAmbang:
         return True
 
 
+# v3.18.6 — state seleksi KATEGORI yang DIBAGI lintas tab Deviasi GR & PCS
+# & tab 🚨 Radar Anomali (user: "di tab radar anomali juga bisa filter
+# kategori ya misal Deviasi atau packaging sama kaya di tab deviasi gr
+# dan pcs dan kateogri nya ngelink ke deviasi gr dan pcs misal di situ
+# buka apa maka di radar anomali juga bakal memfilter kateogri itu").
+# Pola SharedTanggalH: pemegang combobox → set() → SEMUA subscriber
+# mengikuti (combobox + seleksi + refresh); set() hanya memanggil saat
+# nilai BENAR-BENAR berubah (guard anti-loop — pemegang asal tak
+# dipanggil ulang dgn nilai sama). Radar = tabel LINTAS satuan (GR+PCS
+# satu tabel) → pilihan kategori yang sama berlaku di ketiga tempat.
+class SharedKategori:
+
+    def __init__(self, initial: str = "Semua"):
+        self._val = str(initial)
+        self._listeners: list[Callable] = []
+
+    @property
+    def value(self) -> str:
+        return self._val
+
+    def subscribe(self, fn: Callable):
+        self._listeners.append(fn)
+
+    def unsubscribe(self, fn: Callable) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def set(self, new_val) -> bool:
+        """Ubah kategori + panggil SEMUA listener. Return True bila berubah.
+
+        None/kosong → "Semua" (tanpa penyaringan — konvensi combobox)."""
+        new_val = str(new_val).strip() if new_val is not None else ""
+        if not new_val:
+            new_val = "Semua"
+        if new_val == self._val:
+            return False
+        self._val = new_val
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):
+                fn(new_val)
+        return True
+
+
 # --- persistensi ambang ACR (settings.json — pola followup.json) ----------
 # v3.9.62 — frozen-aware (app_base_dir): mode PyInstaller → folder .exe.
 _SETTINGS_BASE = _app_base_dir()
@@ -939,7 +982,8 @@ class DeviasiView(tk.Frame):
                  saldo_sistem_state: "SharedSaldoSistemMode | None" = None,
                  lalu_provider: Callable | None = None,
                  drastis_state: "SharedDrastisAmbang | None" = None,
-                 manual_state: "SharedManualAmbang | None" = None):
+                 manual_state: "SharedManualAmbang | None" = None,
+                 kategori_state: "SharedKategori | None" = None):
         super().__init__(parent, bg=C_BG)
         self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None   # v3.9.23 (poin 6)
@@ -1013,6 +1057,12 @@ class DeviasiView(tk.Frame):
         # combobox KATEGORI (None = "Semua" = tanpa filter).
         self._kategori_lookup = {}
         self._kategori_sel: str | None = None
+        # v3.18.6 — seleksi kategori DIBAGI dgn tab satuan-saudara & tab 🚨
+        # Radar Anomali (SharedKategori — pola SharedTanggalH): ganti
+        # kategori di salah satu tempat → ketiga tempat mengikuti.
+        self._kategori_state = kategori_state
+        if kategori_state is not None:
+            kategori_state.subscribe(self._on_shared_kategori_changed)
         # v3.9.49 — filter AKTIF/NON (pindahan dari kolom tabel;
         # None = "Semua" = tanpa filter).
         self._aktif_sel: str | None = None
@@ -2458,7 +2508,43 @@ class DeviasiView(tk.Frame):
     def _on_kategori_changed(self):
         val = self._kategori_var.get()
         self._kategori_sel = None if (not val or val == "Semua") else val
+        # v3.18.6 — push ke SharedKategori: tab satuan-saudara & tab 🚨
+        # Radar Anomali ikut memfilter kategori yang sama (user: "kategori
+        # nya ngelink ke deviasi gr dan pcs misal di situ buka apa maka di
+        # radar anomali juga bakal memfilter kategori itu"). set() hanya
+        # memanggil bila nilai benar-benar berubah — pemanggil (view ini)
+        # tak di-refresh ganda.
+        if self._kategori_state is not None:
+            self._kategori_state.set(val)
         self._refresh()
+
+    def _on_shared_kategori_changed(self, new_val: str):
+        """v3.18.6 — listener SharedKategori (kategori diganti di tempat
+        lain — tab saudara / tab 🚨 Radar): sinkronkan combobox + seleksi
+        TANPA memanggil set() kembali (anti-loop; pemanggil asal sudah
+        memfilter dgn nilai ini). Pola _on_shared_h_changed: load_data
+        sedang berjalan (load_depth) → state saja; tab tersembunyi →
+        dirty; data kosong → jangan render."""
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._kategori_var.set(new_val)
+        self._kategori_sel = None if (not new_val or new_val == "Semua") \
+            else new_val
+        # FIX 6d1-02 pola: load_data (instance ini / saudara) sedang
+        # berjalan → jangan refresh dgn state filter lama; akhir
+        # load_data me-render dgn state baru.
+        if type(self)._load_depth > 0:
+            return
+        if self._dirty:
+            return          # belum pernah dirender — refresh saat tab dibuka
+        if not self.winfo_ismapped():
+            self._dirty = True
+            return
+        if self.data is not None and not self.data.empty:
+            self._refresh()
 
     def _default_kategori_value(self) -> str:
         values = list(self._kategori_combo["values"] or [])
@@ -2473,6 +2559,14 @@ class DeviasiView(tk.Frame):
         val = self._default_kategori_value()
         self._kategori_var.set(val)
         self._kategori_sel = None if val == "Semua" else val
+        # v3.18.6 — reset data-driven ikut di-broadcast (GR/PCS/radar
+        # kembali sinkron ke default yang sama — pola reset H lewat
+        # SharedTanggalH; set() no-op bila nilai tak berubah). Guard
+        # _load_depth dipasang di CALL-SITE load_data (di sana sibling
+        # cukup sinkron state tanpa refresh ganda); jalur lain
+        # (_reset_filter / kategori manual) → sibling ikut refresh.
+        if self._kategori_state is not None:
+            self._kategori_state.set(val)
 
     # v3.9.49 — combobox AKTIF/NON ("Semua" = tanpa filter — pindahan
     # kolom tabel ke bagian filter, dekat KATEGORI).
@@ -2859,8 +2953,16 @@ class DeviasiView(tk.Frame):
         # v3.11.44 — blok populasi di-extract ke _repopulate_kategori_combo
         # (dipakai juga on_kategori_manual_changed — instant-apply kategori
         # manual tanpa re-run pipeline).
-        self._repopulate_kategori_combo()
-        self._reset_kategori()
+        # v3.18.6 — guard _load_depth saat reset kategori (pola FIX 6d1-02
+        # blok H di atas): broadcast SharedKategori men-SINKRONKAN state
+        # saudara (combobox + seleksi) TANPA refresh ganda di tengah load
+        # — tiap view me-render sekali di akhir load_data-nya sendiri.
+        type(self)._load_depth += 1
+        try:
+            self._repopulate_kategori_combo()
+            self._reset_kategori()
+        finally:
+            type(self)._load_depth -= 1
         # v3.9.49 — filter AKTIF/NON direset ke 'Semua' tiap load data
         # (pola _reset_kategori; kolom pindahan dari tabel → filter).
         if hasattr(self, "_aktif_var"):

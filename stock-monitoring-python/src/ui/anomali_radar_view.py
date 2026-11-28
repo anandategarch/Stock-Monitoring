@@ -57,6 +57,10 @@ from tkinter import messagebox, ttk
 import pandas as pd
 
 from ..pipeline.helpers import (  # v3.18.2 — kunci pasangan kanonik
+    KATEGORI_BLANK_LABEL,  # v3.18.6 — filter kategori radar (mirror 📦)
+    KATEGORI_DEFAULT_LABEL,  # v3.18.6 — entry gabungan default rekap
+    kategori_has_default_values,  # v3.18.6 — entry default hanya bila ada
+    kategori_match_mask,  # v3.18.6 — mask kanonik (semua cabang entri)
     norm_nama_barang_key,
     norm_nama_resto_key,
 )
@@ -65,6 +69,7 @@ from .anomali_shift import (
     detect_shift_anomalies,
 )
 from .cell_tooltip import CellTooltip  # v3.18.3 — tooltip hover
+from .deviasi_view import SharedKategori  # v3.18.6 — kategori ter-link
 from .followup import (  # v3.18.2 — kolom ✓ (pola deviasi_view)
     CHECK_OFF,
     CHECK_ON,
@@ -134,7 +139,8 @@ class AnomaliRadarView(tk.Frame):
     def __init__(self, parent, go_to_proses=None, go_to_deviasi=None,
                  h_state=None, saldo_sistem_state=None,
                  on_count_changed=None,
-                 followup_store=None):
+                 followup_store=None,
+                 kategori_state: SharedKategori | None = None):
         super().__init__(parent, bg=C_BG)
         self.go_to_proses = go_to_proses
         self.go_to_deviasi = go_to_deviasi
@@ -148,6 +154,15 @@ class AnomaliRadarView(tk.Frame):
         # v3.18.2 — store Follow Up (kolom ✓; listener reaktif — pola
         # deviasi_view: toggle dari tab mana pun menyinkronkan sel ✓).
         self.store = followup_store
+        # v3.18.6 — seleksi KATEGORI DIBAGI dgn tab 📦 Deviasi GR & 🧩 PCS
+        # (user: "di tab radar anomali juga bisa filter kategori ya misal
+        # Deviasi atau packaging sama kaya di tab deviasi gr dan pcs dan
+        # kateogri nya ngelink ke deviasi gr dan pcs misal di situ buka
+        # apa maka di radar anomali juga bakal memfilter kateogri itu"):
+        # ganti kategori di 📦/🧩 → radar ikut; ganti di radar → 📦/🧩 ikut
+        # (pola SharedTanggalH).
+        self._kategori_state = kategori_state
+        self._kategori_sel: str | None = None
 
         self.data: pd.DataFrame | None = None
         self.in_detail: pd.DataFrame | None = None
@@ -173,6 +188,10 @@ class AnomaliRadarView(tk.Frame):
             self.h_state.subscribe(self._on_shared_h_changed)
         if self.store is not None:
             self.store.add_listener(self._on_store_changed)
+        # v3.18.6 — listener kategori bersama (pola listener H).
+        if self._kategori_state is not None:
+            self._kategori_state.subscribe(
+                self._on_shared_kategori_changed)
 
     # ------------------------------------------------------------------
     # LAYOUT
@@ -204,6 +223,30 @@ class AnomaliRadarView(tk.Frame):
                      "menempel di level baru. Hover baris = analisa "
                      "lengkap; double-click = bukti per tanggal.")).pack(
             anchor="w", pady=(2, 0))
+
+        # v3.18.6 — filter KATEGORI (user: "di tab radar anomali juga bisa
+        # filter kategori ya misal Deviasi atau packaging sama kaya di tab
+        # deviasi gr dan pcs dan kateogri nya ngelink ke deviasi gr dan
+        # pcs"): combobox + ter-link 2-ARAH dgn tab 📦/🧩 lewat
+        # SharedKategori — nilai gabungan default / (Tanpa Kategori) /
+        # nilai master, LINTAS satuan (radar = GR+PCS satu tabel).
+        kf = tk.Frame(head, bg=C_BG)
+        kf.pack(anchor="w", pady=(5, 0))
+        tk.Label(kf, text="KATEGORI", bg=C_BG, fg=C_TEXT_MUTED,
+                 font=font(8, "bold")).pack(side="left")
+        self._kategori_var = tk.StringVar(value="Semua")
+        self._kategori_combo = ttk.Combobox(
+            kf, textvariable=self._kategori_var, state="readonly",
+            width=34, font=font(9))
+        self._kategori_combo.pack(side="left", padx=(6, 0))
+        self._kategori_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self._on_kategori_changed())
+        tk.Label(kf, text="— ter-link dgn tab 📦 Deviasi GR & 🧩 PCS "
+                         "(ganti di salah satu → semua ikut)",
+                 bg=C_BG, fg=C_TEXT_MUTED, font=font(8)).pack(
+            side="left", padx=(10, 0))
+
         # toolbar ⤢ TERPISAH dari target expander (button tetap terlihat)
         toolbar = tk.Frame(self.content, bg=C_BG)
         toolbar.pack(fill="x", padx=12, pady=(2, 0))
@@ -318,6 +361,11 @@ class AnomaliRadarView(tk.Frame):
         self.saldo_sistem_map = saldo_sistem_map or {}
         if self.saldo_sistem_state is not None:
             self.saldo_sistem_mode = self.saldo_sistem_state.mode
+        # v3.18.6 — populasi nilai combobox KATEGORI (LINTAS satuan —
+        # radar GR+PCS satu tabel) + ikut seleksi shared saat ini (bukan
+        # reset: default kategori dipegang tab 📦/🧩 via _reset_kategori
+        # mereka yang men-broadcast lewat SharedKategori).
+        self._repopulate_kategori_combo()
         self._rows_all = []
         self._rows = []
         self._col_sel = {c: None for c, _, _ in COLUMNS if c != "✓"}
@@ -336,6 +384,36 @@ class AnomaliRadarView(tk.Frame):
                 "Belum ada data — 0 baris terbaca dari pipeline "
                 "(cek folder data / RootPath di tab Config).")
             self._notify_count(0)
+
+    # v3.18.6 — nilai combobox KATEGORI radar: entry "Semua" +
+    # gabungan default rekap (bila data memuat) + (Tanpa Kategori) +
+    # nilai KATEGORI master terurut — LINTAS satuan (GR+PCS — mirror
+    # _repopulate_kategori_combo deviasi_view tanpa scoping satuan).
+    def _repopulate_kategori_combo(self):
+        data = self.data
+        if (data is not None and "KATEGORI"
+                in getattr(data, "columns", [])):
+            _kv = (data["KATEGORI"].dropna().astype(str)
+                   .str.strip())
+            kategori_vals = sorted(v for v in _kv.unique() if v)
+        else:
+            kategori_vals = []
+        kv = ["Semua"]
+        if kategori_has_default_values(
+                data.get("KATEGORI") if data is not None else None):
+            kv.append(KATEGORI_DEFAULT_LABEL)
+        kv.append(KATEGORI_BLANK_LABEL)
+        kv += kategori_vals
+        try:
+            self._kategori_combo["values"] = kv
+        except tk.TclError:
+            pass
+        # ikut seleksi shared saat ini (valid ke daftar baru bila ada).
+        if self._kategori_state is not None:
+            cur = self._kategori_state.value
+            if cur in kv:
+                self._kategori_var.set(cur)
+                self._kategori_sel = (None if cur == "Semua" else cur)
 
     def ensure_refreshed(self):
         """Lazy refresh (pola tab lain — dipanggil _on_tabChanged app)."""
@@ -366,6 +444,10 @@ class AnomaliRadarView(tk.Frame):
             # snapshot follow-up baris radar (nilai per tanggal — pola
             # snap deviasi_view; pure, thread-safe).
             so_map, sa_map, dv_map = _pair_series_maps(data, h)
+            # v3.18.6 — peta kategori per pasangan (filter KATEGORI —
+            # linked tab 📦/🧩; kategori = atribut barang, first
+            # non-blank menang).
+            kat_map = _pair_kategori_map(data)
             rows = []
             for rec in anoms.to_dict("records"):
                 harga = None
@@ -374,7 +456,8 @@ class AnomaliRadarView(tk.Frame):
                         harga_map, konversi_map,
                         str(rec.get("barang")), str(rec.get("satuan")))[0]
                 rows.append(self._row_build(rec, harga, h,
-                                             so_map, sa_map, dv_map))
+                                             so_map, sa_map, dv_map,
+                                             kat_map))
             return {"rows": rows}
 
         def done(payload):
@@ -447,13 +530,14 @@ class AnomaliRadarView(tk.Frame):
     def _row_build(self, rec: dict, harga, h,
                    so_map: dict | None = None,
                    sa_map: dict | None = None,
-                   dv_map: dict | None = None) -> dict:
+                   dv_map: dict | None = None,
+                   kat_map: dict | None = None) -> dict:
         """Baris tampil: display strings + raw values (sort/filter) +
         record engine (popup) + snapshot follow-up (v3.18.2 — nilai
         so/sistem/deviasi per tanggal H dari frame, pola snap
         deviasi_view; kosong bila tanggal tak terekam) + v3.18.3
         cause_tag & tooltip (analisa lengkap — bukti yang dulunya
-        kolom)."""
+        kolom) + v3.18.6 kategori pasangan (filter linked 📦/🧩)."""
         in_qty = rec.get("in_qty")
         has_in = in_qty is not None and not (
             isinstance(in_qty, float) and pd.isna(in_qty))
@@ -510,7 +594,11 @@ class AnomaliRadarView(tk.Frame):
         so_map = so_map or {}
         sa_map = sa_map or {}
         dv_map = dv_map or {}
+        kat_map = kat_map or {}
         _val = lambda m, t: m.get(key, {}).get(t, "")
+        # v3.18.6 — kategori pasangan (atribut barang — first non-blank
+        # dari frame; kosong = '(Tanpa Kategori)' jalur filter).
+        kategori = kat_map.get(key, "")
         snap = {
             "asal": "RADAR",
             "resto": str(rec.get("resto") or ""),
@@ -535,7 +623,8 @@ class AnomaliRadarView(tk.Frame):
                 # v3.18.3 — keadaan penyebab (warna baris) + tooltip
                 # analisa lengkap (dihitung pure di worker thread).
                 "cause_tag": cause_tag,
-                "tip": _tooltip_text(rec, harga)}
+                "kategori": kategori,   # v3.18.6 — filter linked 📦/🧩
+                "tip": _tooltip_text(rec, harga, kategori=kategori)}
 
     # ------------------------------------------------------------------
     # FILTER + SORT + RENDER
@@ -552,8 +641,44 @@ class AnomaliRadarView(tk.Frame):
         self._col_sel[col] = sel
         self._apply_filters(render=True)
 
+    # v3.18.6 — combobox KATEGORI radar (linked 2-arah tab 📦/🧩 —
+    # pola _on_kategori_changed deviasi_view): push ke SharedKategori
+    # → tab satuan-saudara ikut memfilter kategori yang sama.
+    def _on_kategori_changed(self):
+        val = self._kategori_var.get()
+        self._kategori_sel = None if (not val or val == "Semua") else val
+        if self._kategori_state is not None:
+            self._kategori_state.set(val)
+        self._apply_filters(render=True)
+
+    # v3.18.6 — listener SharedKategori (kategori diganti di tab 📦/🧩 —
+    # user: "misal di situ buka apa maka di radar anomali juga bakal
+    # memfilter kateogri itu"): sinkron combobox + filter ulang baris
+    # (murah — _rows_all sudah terbangun, tanpa recompute engine).
+    def _on_shared_kategori_changed(self, new_val: str):
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        if self._kategori_var.get() == new_val:
+            return   # sudah sinkron (pemanggil asal)
+        self._kategori_var.set(new_val)
+        self._kategori_sel = None if (not new_val or new_val == "Semua") \
+            else new_val
+        self._apply_filters(render=True)
+
     def _apply_filters(self, render: bool = False):
         rows = self._rows_all
+        # v3.18.6 — filter KATEGORI (linked tab 📦/🧩): mask kanonik
+        # kategori_match_mask (entry gabungan / (Tanpa Kategori) /
+        # passthrough legacy / exact — semantik PERSIS tab 📦/🧩).
+        if self._kategori_sel:
+            _kats = pd.Series([r.get("kategori", "") for r in rows])
+            _m = kategori_match_mask(_kats, self._kategori_sel)
+            if _m is not None:
+                rows = [r for r, keep in zip(rows, _m.tolist())
+                        if bool(keep)]
         for col, sel in self._col_sel.items():
             if not sel:
                 continue
@@ -894,17 +1019,22 @@ class AnomaliRadarView(tk.Frame):
             pass
 
 
-def _tooltip_text(rec: dict, harga=None) -> str:
+def _tooltip_text(rec: dict, harga=None, kategori: str = "") -> str:
     """v3.18.3 — Narasi lengkap utk tooltip hover baris radar: seluruh
     bukti yang DULU-nya kolom tabel (baseline, level, Δ, z, IN + nomor
     IT/RI & PO, BM, est nominal) dilipat ke satu teks — tabel kolom
     inti, analisa tetap lengkap (user: "bisa gak jadi lebih sederhana
     aja tampilan nya" + "perkuat analisa sesuai kebutuhan ku"). Pure —
-    dihitung di worker thread _row_build."""
+    dihitung di worker thread _row_build.
+    v3.18.6 — baris kategori pasangan (transparansi filter linked 📦/🧩)."""
     F = AnomaliRadarView._fmt_num
     lines = [
         (f"{rec.get('resto') or ''} · {rec.get('barang') or ''}"
          f" · {rec.get('satuan') or '-'}"),
+    ]
+    if kategori:
+        lines.append(f"Kategori: {kategori}")
+    lines += [
         (f"Deviasi naik stabil sejak tgl {F(rec.get('tgl_shift'))} — "
          f"{int(rec.get('durasi') or 0)} hari di level baru (naik 1 hari "
          "lalu turun = spike, bukan anomali)"),
@@ -988,4 +1118,31 @@ def _pair_series_maps(df, h) -> tuple[dict, dict, dict]:
                            tnum[m].astype("Int64").tolist(),
                            nilai[m].tolist()):
             target.setdefault(k, {})[int(t)] = float(v)
+    return out
+
+
+def _pair_kategori_map(df) -> dict:
+    """v3.18.6 — Peta {(kb, kr, satn): KATEGORI} dari frame utk filter
+    kategori radar (linked tab 📦/🧩). Kategori = atribut barang
+    (merge master '21. DBS Kategori' + rekap mentah di append1) —
+    first NON-BLANK per pasangan menang (baris blank/'-'/'nan' tak
+    menimpa nilai terisi). Pure pandas — worker-thread-safe."""
+    out: dict = {}
+    if df is None or getattr(df, "empty", True):
+        return out
+    cols = set(df.columns)
+    if "KATEGORI" not in cols or "Nama Barang" not in cols \
+            or "NAMA RESTO" not in cols:
+        return out
+    _sat = (df["SATUAN"].fillna("").astype(str).str.strip().str.upper()
+            if "SATUAN" in cols
+            else pd.Series([""] * len(df), index=df.index))
+    kb_s = df["Nama Barang"].astype(str).map(norm_nama_barang_key)
+    kr_s = df["NAMA RESTO"].astype(str).map(norm_nama_resto_key)
+    _blank = {"", "nan", "none", "-", "—"}
+    for k, kat in zip(zip(kb_s.tolist(), kr_s.tolist(),
+                          _sat.tolist()),
+                      df["KATEGORI"].astype(str).str.strip().tolist()):
+        if k not in out and kat.lower() not in _blank:
+            out[k] = kat
     return out
